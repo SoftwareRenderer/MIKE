@@ -11,7 +11,8 @@
     import { LSPClient, serverCompletion, signatureHelp, serverDiagnostics, formatKeymap, renameKeymap, findReferencesKeymap } from '@codemirror/lsp-client';
     import { lspDefinitionActions } from '$lib/utils/lsp-hover-actions';
     import { isInsideWorkspace, relativeToRoot, type DefinitionTarget } from '$lib/utils/lsp-definition';
-    import { requestLSPChannel, createLSPNotificationHandlers, type VirtualTransport } from '$lib/utils/lsp-connection-manager';
+    import { requestLSPChannel, type VirtualTransport } from '$lib/utils/lsp-connection-manager';
+    import { lspClientConfig } from '$lib/utils/lsp-client-config';
     import { isLSPAvailable } from '$lib/utils/lsp-connection-manager';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
@@ -1213,6 +1214,18 @@
         keymap.of([...formatKeymap, ...renameKeymap, ...findReferencesKeymap]),
     ];
 
+    // The one config for both clients an editor builds (initial connect and reconnect).
+    const lspClientConfigFor = (workspaceRoot: string) =>
+        lspClientConfig({
+            extensions: lspExtensions,
+            rootUri: `file://${workspaceRoot}`,
+            // Read when asked: the client outlives the file it connected for.
+            getFile: () => filePath,
+            onMessage: (msg) => {
+                lspMessages = [...lspMessages.slice(-19), msg]; // keep last 20
+            },
+        });
+
     // Initialize LSP after the file and editor are ready
     // Track extension manager state so this effect re-runs when extensions are loaded
     $effect(() => {
@@ -1272,15 +1285,7 @@
                 });
                 lspTransport = virtTransport;
 
-                lspClient = new LSPClient({
-                    extensions: lspExtensions,
-                    rootUri: `file://${_wsRoot!}`,
-                    notificationHandlers: createLSPNotificationHandlers((msg) => {
-                        lspMessages = [...lspMessages.slice(-19), msg]; // keep last 20
-                    }),
-                    // Gopls can take 10-20s to initialize on large workspaces
-                    timeout: 30000,
-                });
+                lspClient = new LSPClient(lspClientConfigFor(_wsRoot!));
 
                 await lspClient.connect(virtTransport).initializing;
 
@@ -1389,14 +1394,7 @@
                 });
                 lspTransport = virtTransport;
 
-                const newClient = new LSPClient({
-                    extensions: lspExtensions,
-                    rootUri: `file://${_wsRoot!}`,
-                    notificationHandlers: createLSPNotificationHandlers((msg) => {
-                        lspMessages = [...lspMessages.slice(-19), msg]; // keep last 20
-                    }),
-                    timeout: 30000,
-                });
+                const newClient = new LSPClient(lspClientConfigFor(_wsRoot!));
                 lspClient = newClient;
 
                 await newClient.connect(virtTransport).initializing;

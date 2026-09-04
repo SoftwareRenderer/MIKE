@@ -12,6 +12,7 @@ import {
     type HoverEffect,
     type HoverInput,
     type HoverMachineState,
+    type HoverZone,
 } from '../lsp-hover-actions';
 import type { DefinitionTarget } from '../lsp-definition';
 import type { LSPPlugin } from '@codemirror/lsp-client';
@@ -132,6 +133,22 @@ describe('reduceHover — dismissing', () => {
         expect(state.phase).toBe('open');
     });
 
+    it('re-dwells when the pointer comes back to the identifier instead', () => {
+        // The grace is for the trip to the card, not the identifier: back on the symbol, the card has to
+        // be earned again.
+        const { state, effects } = run(
+            [
+                { type: 'pointermove', zone: 'outside', token: null },
+                { type: 'pointermove', zone: 'token', token: TOKEN_A },
+            ],
+            openOnA(),
+        );
+        expect(effects).toContain('close');
+        expect(effects).toContain('cancel-grace');
+        expect(effects.filter(e => e === 'arm')).toHaveLength(1);
+        expect(state).toEqual({ phase: 'arming', token: TOKEN_A, gracePending: false });
+    });
+
     it('does not stack grace timers', () => {
         const { effects } = run(
             [
@@ -157,18 +174,64 @@ describe('reduceHover — dismissing', () => {
 });
 
 describe('reduceHover — moving between identifiers', () => {
-    it('re-targets instead of closing when the pointer reaches another identifier', () => {
+    it('closes the card at once when the pointer reaches another identifier', () => {
         const { state, effects } = run(
             [{ type: 'pointermove', zone: 'other-token', token: TOKEN_B }],
             openOnA(),
         );
-        expect(state.phase).toBe('open');
+        // Close, then dwell. Re-targeting in place (the old contract) made the hover delay something a
+        // session paid once.
+        expect(state.phase).toBe('arming');
         expect(state.token).toEqual(TOKEN_B);
-        expect(effects).toContain('retarget');
-        expect(effects).not.toContain('close');
+        expect(effects).toContain('close');
+        expect(effects).toContain('arm');
+        expect(effects).not.toContain('open');
     });
 
-    it('drops a pending close when it re-targets', () => {
+    it('shows the next identifier only after a dwell of its own', () => {
+        const { effects } = run(
+            [{ type: 'pointermove', zone: 'other-token', token: TOKEN_B }, { type: 'hover-elapsed' }],
+            openOnA(),
+        );
+        expect(effects.filter(e => e === 'open')).toHaveLength(1);
+        expect(effects.filter(e => e === 'close')).toHaveLength(1);
+    });
+
+    it('re-arms for every identifier crossed and opens once, at the last', () => {
+        const TOKEN_C = { from: 30, to: 34 };
+        const { state, effects } = run(
+            [
+                { type: 'pointermove', zone: 'other-token', token: TOKEN_B },
+                { type: 'pointermove', zone: 'other-token', token: TOKEN_C },
+                { type: 'hover-elapsed' },
+            ],
+            openOnA(),
+        );
+        // So a slow sweep across a dense line shows nothing until the pointer stops: one close, one arm
+        // per identifier it rested on, one open.
+        expect(effects.filter(e => e === 'close')).toHaveLength(1);
+        expect(effects.filter(e => e === 'arm')).toHaveLength(2);
+        expect(state.phase).toBe('open');
+        expect(state.token).toEqual(TOKEN_C);
+    });
+
+    it('does not restart the dwell for a wiggle inside the identifier', () => {
+        // mousemove fires for a single pixel; treating that as a new hover would make the dwell
+        // unreachable.
+        const { state, effects } = run(
+            [
+                { type: 'pointermove', zone: 'token', token: TOKEN_A },
+                { type: 'pointermove', zone: 'token', token: TOKEN_A },
+                { type: 'pointermove', zone: 'token', token: TOKEN_A },
+            ],
+            openOnA(),
+        );
+        expect(effects).toEqual([]);
+        expect(state.phase).toBe('open');
+        expect(state.token).toEqual(TOKEN_A);
+    });
+
+    it('drops the pending close as soon as it closes the card itself', () => {
         const { effects } = run(
             [
                 { type: 'pointermove', zone: 'outside', token: null },
@@ -177,8 +240,9 @@ describe('reduceHover — moving between identifiers', () => {
             ],
             openOnA(),
         );
+        // Cancelled, not raced: a grace timer must not fire later and close a card that has not opened.
         expect(effects).toContain('cancel-grace');
-        expect(effects).not.toContain('close');
+        expect(effects.filter(e => e === 'close')).toHaveLength(1);
     });
 
     it('re-arms for the identifier actually under the pointer while arming', () => {
@@ -190,6 +254,40 @@ describe('reduceHover — moving between identifiers', () => {
         expect(state.phase).toBe('open');
         expect(state.token).toEqual(TOKEN_B);
         expect(effects.filter(e => e === 'arm')).toHaveLength(2);
+    });
+
+    it('carries the close-grace only on an open state', () => {
+        // Why `rearm` emits no `cancel-grace` when nothing is open: only an open state can have a grace
+        // timer running. Walked out of every reachable state rather than assumed.
+        const zones: HoverZone[] = ['token', 'tooltip', 'other-token', 'outside'];
+        const tokens = [null, TOKEN_A, TOKEN_B];
+        const seen = new Set<string>();
+        const queue: HoverMachineState[] = [HOVER_IDLE];
+        while (queue.length) {
+            const state = queue.pop()!;
+            const inputs: HoverInput[] = [
+                { type: 'hover-elapsed' },
+                { type: 'grace-elapsed' },
+                { type: 'scroll', zone: 'outside' },
+                { type: 'scroll', zone: 'tooltip' },
+                { type: 'doc-change' },
+                { type: 'dismiss' },
+                ...zones.flatMap((zone) => tokens.map((token) => ({ type: 'pointermove' as const, zone, token }))),
+            ];
+            for (const input of inputs) {
+                const next = reduceHover(state, input).state;
+                expect(
+                    next.phase === 'open' || !next.gracePending,
+                    `${state.phase} --${input.type}--> ${next.phase} with gracePending`,
+                ).toBe(true);
+                const key = `${next.phase}|${next.token?.from ?? 'null'}|${next.gracePending}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    queue.push(next);
+                }
+            }
+        }
+        expect([...seen].filter((k) => k.endsWith('|true')).sort()).toEqual(['open|10|true', 'open|20|true']);
     });
 
     it('knows two ranges are the same token', () => {

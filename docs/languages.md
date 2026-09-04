@@ -64,8 +64,29 @@ viewport, so the bracket scan has its own larger `BRACKET_SCAN_LIMIT` and colour
 
 `buildLanguageSupport(spec, name)` owns everything a declared language does — both arguments, the name
 being `mike-declared` at the one production call site, never a language id. Its consumers are the editor
-(`editor-language.ts`), the outline and the tests; the diff view reads the same specs but feeds
-`bracketLevelsForTree` its parsed `Tree` rather than an editor state, because it has no view.
+(`editor-language.ts`), the outline, the LSP tooltip renderer and the tests; the diff view reads the same
+specs but feeds `bracketLevelsForTree` its parsed `Tree` rather than an editor state, because it has no
+view.
+
+## A code fence in a language server's documentation
+
+A hover card opens with a signature: gopls sends
+`​```go\nfunc Println(a ...any) (n int, err error)\n```​`, and tsserver, rust-analyzer and phpactor send the
+same shape in their own tag. `@codemirror/lsp-client` highlights a fence only when the tag resolves to a
+`Language` — either the tag equals the *editor's* grammar name, or `LSPClientConfig.highlightLanguage(tag)`
+answers it. Every grammar we build is named `mike-declared`, so the first rule matches nothing:
+`lsp-client-config.ts` sets the hook to `getGrammarForFence(tag, filePath)`, which tries in order the
+declaration whose `language_id`, `language` or `extension` equals the tag (**no alias table** — `python`
+and `py` resolve, `golang` does not), the core fallback table (a fence tag and a file suffix name the
+same grammar), and **the grammar of the file the documentation is about** — which is the answer for an
+unlabelled fence, a doc comment's indented block, and for a language nothing installed declares.
+Markdown's `text`/`txt`/`plain`/`plaintext` ask for prose and get no grammar, checked before all of it.
+
+The hook lives on the **client**, so hover, completion documentation and signature help read the same
+way, and both `LSPClient` constructions go through one factory — an option the reconnect drops is a
+feature lost the first time the socket does. `getFile` is a getter because a client outlives the file it
+connected for. Colours come from the editor's mounted `HighlightStyle`, so a tooltip follows the theme
+and no `hl-*` palette is duplicated for it.
 
 A spec-built grammar is named `mike-declared`, deliberately *not* a valid language id, so a call
 site that forgets to pass an explicit id gets a loud "no provider" from the server instead of
@@ -91,8 +112,14 @@ real `EditorView` puts in the DOM),
 neither new key — the state of every install that predates them),
 `frontend/src/lib/__tests__/highlighter.unit.ts` (the same answers in a diff),
 `frontend/src/lib/utils/__tests__/editor-language.unit.svelte.ts` (resolution order: extension →
-fallback → plain text), and the live probe
+fallback → plain text, and a fence tag answered by `language_id`, by `language`, by `extension` or by the
+hovered file), `frontend/src/lib/utils/__tests__/lsp-doc-highlight.unit.svelte.ts` (a real `LSPClient` +
+`EditorView` rendering a gopls hover: the keyword class survives `DOMPurify` and resolves to a colour;
+the same input through a client without the hook yields nothing, which is the bug), and the live probes
 `frontend/tests/declared-languages-check.mjs` (wire ids sniffed off the WebSocket, plus highlight,
 block/region folding, Ctrl-/ in a real editor:
 `MIKE_CHECK_PROJECT=<scratch project> node tests/declared-languages-check.mjs` — it writes fixtures
-into that project, so the name is required).
+into that project, so the name is required) and
+`frontend/tests/lsp-hover-highlight-check.mjs` (hover a real `fmt.Println` and read the computed colours
+off the tooltip, then check a TypeScript file in the same workspace: the grammar follows the open file,
+not the connection).

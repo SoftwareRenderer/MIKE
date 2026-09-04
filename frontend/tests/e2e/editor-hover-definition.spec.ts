@@ -2,7 +2,7 @@ import { test, expect, type Browser, type Page } from '@playwright/test';
 import { writeFileSync, appendFileSync, existsSync, rmSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { csrfFetch, apiGetConfig, createTaskViaApi, hasInstalledLspExtension } from './helpers';
+import { csrfFetch, apiGetConfig, createTaskViaApi } from './helpers';
 
 /**
  * Regression coverage for the editor's go-to-definition UX.
@@ -30,7 +30,6 @@ import { csrfFetch, apiGetConfig, createTaskViaApi, hasInstalledLspExtension } f
  */
 
 const HOVER_REPO = '/tmp/kanban-test-repo-hover';
-const PROJECT_NAME = 'kanban-test-repo-hover';
 const CALLER = 'caller.go';
 const TARGET = 'target.go';
 
@@ -262,7 +261,18 @@ const fakeExtensionBody = () => [
         manifest: {
             name: 'fakegopls',
             version: '0.0.1',
-            capabilities: { lsp: { language: 'Go', extensions: ['go'], editor_enabled: true, tool_calls_enabled: false } },
+            capabilities: {
+                lsp: {
+                    language: 'Go',
+                    // The browser routes `.go` through `file_types` alone: a stub with only the legacy
+                    // `extensions` list builds no LSPClient. The legacy key stays because real manifests
+                    // still carry it (normalized server-side).
+                    extensions: ['go'],
+                    file_types: [{ extension: 'go', language_id: 'go', label: 'Go' }],
+                    editor_enabled: true,
+                    tool_calls_enabled: false,
+                },
+            },
         },
     },
 ];
@@ -318,11 +328,28 @@ async function blankSpot(page: Page) {
     });
 }
 
-/** Wait until the fake server has seen the document open (LSP is live). */
+/**
+ * Wait until the fake server has seen the document open (LSP is live).
+ *
+ * The reported value names the cause, because "no didOpen" is three failures apart: a stub the browser
+ * cannot route, a socket that was never faked, or a channel that opened and stayed silent.
+ */
 async function waitForLSPReady(page: Page) {
     await expect
-        .poll(async () => page.evaluate(() => ((window as any).__fakeLSP?.log ?? []).some(m => m.method === 'textDocument/didOpen')), { timeout: 20000 })
-        .toBe(true);
+        .poll(
+            async () =>
+                page.evaluate(() => {
+                    const log = ((window as any).__fakeLSP?.log ?? []) as { method?: string }[];
+                    if (log.some(m => m.method === 'textDocument/didOpen')) return 'opened';
+                    const seen = log.map(m => m.method).slice(0, 5).join(', ');
+                    return seen
+                        ? `no didOpen; fake LSP saw: ${seen}`
+                        : 'no didOpen and nothing else either: no LSPClient was built, so the '
+                          + '/api/extensions stub is not routing .go (it must declare file_types)';
+                }),
+            { timeout: 20000 },
+        )
+        .toBe('opened');
 }
 
 const CARD = '.cm-lsp-action-card';
@@ -334,14 +361,9 @@ const CARD_BUTTON = '.cm-lsp-action-button';
 test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
     let projectId = '';
 
-    // The host binary is not the prerequisite — the Go extension has to be installed to answer a hover.
-    test.beforeEach(async ({ page }) => {
-        await page.goto('/');
-        await page.waitForSelector('.project-item, .empty-state', { timeout: 10000 });
-        if (!(await hasInstalledLspExtension(page, 'go'))) {
-            test.skip(true, 'no installed LSP extension owns .go — install the gopls extension to run LSP specs');
-        }
-    });
+    // No "is a language server installed?" gate here, unlike lsp-integration.spec.ts: this suite answers
+    // `/api/extensions` itself and fakes the LSP socket, so asking the real server measures a list the
+    // suite replaces — the gate could only ever answer "skip". `waitForLSPReady` is the precondition.
 
     test.beforeAll(async ({ browser }) => {
         rmSync(HOVER_REPO, { recursive: true, force: true });
@@ -406,35 +428,30 @@ test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
         await expect(page.locator('.editor-tab-name', { hasText: TARGET }).first()).toBeVisible({ timeout: 15000 });
     });
 
-    test('the card waits through a detour and closes once the pointer settles away', async ({ page }) => {
+    test('the card needs its dwell again after the pointer leaves and comes back', async ({ page }) => {
         await openCaller(page);
 
-        const hover = await coordsOf(page, 'Alpha()');
-        await page.mouse.move(hover.x, hover.y);
-        await expect(page.locator(CARD_BUTTON)).toBeVisible({ timeout: 10000 });
-
-        // The deliberate reach: leave the identifier, drift away from the card,
-        // then come back to the button. A hover that dismisses the moment the
-        // pointer leaves the symbol (the old behavior) is gone by the next line.
-        const away = (await blankSpot(page))!;
-        const button = page.locator(CARD_BUTTON);
-        const box = (await button.boundingBox())!;
-        // Few, deliberate steps: the trip must stay well inside the grace
-        // window, and every Playwright step costs a CDP round trip.
-        await page.mouse.move(away.x, away.y, { steps: 3 });
-        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 3 });
-        await expect(button).toBeVisible();
-
-        await button.click();
-        await expect(page.locator('.editor-tab-name', { hasText: TARGET }).first()).toBeVisible({ timeout: 15000 });
-
-        // And it does end: parked away from the card, it goes away for good.
-        await openCaller(page);
         const symbol = await coordsOf(page, 'Alpha()');
         await page.mouse.move(symbol.x, symbol.y);
-        await expect(page.locator(CARD)).toBeVisible({ timeout: 10000 });
-        await page.mouse.move(away.x, away.y, { steps: 4 });
+        await expect(page.locator(CARD_BUTTON)).toBeVisible({ timeout: 10000 });
+
+        // Leaving the identifier ends the card: the pointer is no longer asking about `Alpha`. That a
+        // pointer reaching for the button is not punished is the other guarantee — measured by the
+        // 12-step trip in the test above.
+        const away = (await blankSpot(page))!;
+        await page.mouse.move(away.x, away.y, { steps: 3 });
         await expect(page.locator(CARD)).toHaveCount(0);
+
+        // steps: 1 on purpose: a multi-step move classifies every point on the way, and crossing a
+        // neighbour would re-arm the dwell, measuring the route instead of the rule.
+        const arrived = Date.now();
+        await page.mouse.move(symbol.x, symbol.y, { steps: 1 });
+        await expect(page.locator(CARD)).toBeVisible({ timeout: 5000 });
+        const waited = Date.now() - arrived;
+        // A card that came back the moment the pointer touched the identifier is the bug. The floor is
+        // 300ms rather than 500 because a slow round trip can only lengthen the wait: this fails on
+        // behaviour, never on the machine.
+        expect(waited, `card returned after ${waited}ms — the hover dwell was not paid`).toBeGreaterThan(300);
     });
 
     test('a same-file jump moves the caret instead of opening a tab', async ({ page }) => {

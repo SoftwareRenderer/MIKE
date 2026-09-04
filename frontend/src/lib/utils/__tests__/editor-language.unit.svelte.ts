@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
-import { getLanguageSupport, resolveFile } from '$lib/utils/editor-language';
+import { getGrammarForFence, getLanguageSupport, resolveFile } from '$lib/utils/editor-language';
 import { fallbackLanguage } from '$lib/utils/fallback-languages';
 import { extensionManager } from '$lib/services/extension-manager.svelte';
 import type { Extension, LSPConfig, SyntaxSpec } from '$lib/types';
@@ -219,3 +219,104 @@ describe('getLanguageSupport — declared profile first, fallback second', () =>
     expect(getLanguageSupport('data.parquet')).toBeNull();
   });
 });
+
+// ─── getGrammarForFence — the language tag in a language server's markdown ───────────────────
+
+const GO_PROFILE: SyntaxSpec = {
+  line_comment: '//',
+  block_comment: { open: '/*', close: '*/' },
+  strings: [{ quote: '"', escapes: true }, { quote: '`', escapes: false }],
+  pairs: [{ open: '{', close: '}' }, { open: '(', close: ')' }],
+  keywords: ['func', 'package', 'return', 'type', 'chan'],
+  types: ['int', 'string', 'bool'],
+  numbers: true,
+};
+
+function addGoExt(): Extension {
+  return addMockLSPExt('gopls', {
+    command: 'gopls',
+    args: [],
+    language: 'go',
+    file_types: [{ extension: 'go', language_id: 'go', label: 'Go', syntax: 'go' }],
+    syntax: { go: GO_PROFILE },
+  });
+}
+
+describe('getGrammarForFence — which grammar paints a tooltip\'s code block', () => {
+  it('resolves the tag the server actually writes', () => {
+    addGoExt();
+    // Any of the three declared fields answers the tag gopls writes: ```go.
+    expect(getGrammarForFence('go', 'repo/x.go')).toBe(getLanguageSupport('repo/x.go')?.language);
+    addTypeScriptExt();
+    expect(getGrammarForFence('typescript', 'repo/x.go')).toBe(getLanguageSupport('a.ts')?.language);
+    // By `extension`, for the tags that are suffixes rather than ids — and tsserver writes both.
+    expect(getGrammarForFence('tsx', 'repo/x.go')).toBe(getLanguageSupport('a.tsx')?.language);
+    expect(getGrammarForFence('js', 'repo/x.go')).toBe(getLanguageSupport('a.js')?.language);
+  });
+
+  it('ignores the tag\'s case and padding', () => {
+    addGoExt();
+    const go = getLanguageSupport('repo/x.go')?.language;
+    expect(getGrammarForFence('Go', 'repo/x.go')).toBe(go);
+    expect(getGrammarForFence('  GO  ', 'repo/x.go')).toBe(go);
+  });
+
+  it('takes a declared profile over the core fallback for the same tag', () => {
+    addMockLSPExt('json-lsp', {
+      command: 'json-lsp',
+      args: [],
+      language: 'json',
+      file_types: [{ extension: 'json', language_id: 'json', label: 'JSON', syntax: 'json' }],
+      syntax: { json: { line_comment: '//', strings: [{ quote: '"', escapes: true }], numbers: true, pairs: [{ open: '{', close: '}' }] } },
+    });
+    expect(getGrammarForFence('json', 'notes.txt')?.name).toBe('mike-declared');
+  });
+
+  it('falls back to the core grammar for a tag nothing declares but the core knows', () => {
+    // json is structural, so the core table owns it.
+    expect(getGrammarForFence('json', 'repo/x.go')?.name).toBe(fallbackName('x.json'));
+    expect(getGrammarForFence('yaml', 'repo/x.go')?.name).toBe(fallbackName('x.yaml'));
+  });
+
+  it('paints an unlabelled fence as the file the documentation is about', () => {
+    addGoExt();
+    const go = getLanguageSupport('repo/x.go')?.language;
+    // A doc comment's indented block has no fence tag.
+    expect(getGrammarForFence('', 'repo/x.go')).toBe(go);
+    expect(getGrammarForFence('   ', 'repo/x.go')).toBe(go);
+    // A language nothing declares uses the file's grammar: the agreed fallback, not a gap.
+    expect(getGrammarForFence('bash', 'repo/x.go')).toBe(go);
+    expect(getGrammarForFence('golang', 'repo/x.go')).toBe(go);
+  });
+
+  it('leaves a fence that declares itself prose unhighlighted', () => {
+    addGoExt();
+    // Checked before the file's grammar: `text` means do not tokenize.
+    for (const tag of ['text', 'txt', 'plain', 'plaintext']) {
+      expect(getGrammarForFence(tag, 'repo/x.go'), tag).toBeNull();
+    }
+  });
+
+  it('answers null when neither the tag nor the file has a grammar', () => {
+    addGoExt();
+    expect(getGrammarForFence('bash', 'notes.txt')).toBeNull();
+    expect(getGrammarForFence('', 'repo/Makefile')).toBeNull();
+    expect(getGrammarForFence('', 'repo/Dockerfile')).toBeNull();
+  });
+
+  it('tokenizes the signature with the grammar it resolved', () => {
+    addGoExt();
+    const lang = getGrammarForFence('go', 'repo/x.go');
+    expect(lang).not.toBeNull();
+    const state = EditorState.create({ doc: 'func Println(a ...any) (n int, err error)', extensions: [lang!] });
+    ensureSyntaxTree(state, state.doc.length, 50);
+    const keywords: string[] = [];
+    syntaxTree(state).iterate({
+      enter: (node) => {
+        if (node.name === 'keyword') keywords.push(state.sliceDoc(node.from, node.to));
+      },
+    });
+    expect(keywords).toContain('func');
+  });
+});
+

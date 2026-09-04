@@ -1,23 +1,22 @@
 /**
  * LSP hover card with a clickable "Go to Definition" action.
  *
- * Why this exists instead of a `hoverTooltip()` source: CodeMirror's hover
- * plugin dismisses a hover the moment the pointer leaves the hovered position
- * (`posAtCoords(pointer) != pos`, ±4px around the tooltip box), so a tooltip
- * that carries a button closes during the exact motion needed to press it —
- * and a `Promise`-returning source shows nothing until the language server
- * answers, so the card also appears hundreds of milliseconds late, after the
- * pointer has already started moving. Here the open/close decision is ours:
+ * Not a `hoverTooltip()` source: CodeMirror dismisses a hover as soon as the pointer leaves the hovered
+ * position (±4px around the box), so a tooltip carrying a button closes during the motion needed to
+ * press it. A promise-returning source is late too — nothing shows until the server answers, by which
+ * time the pointer has started moving. So open and close are ours:
  *
- *   • the card opens after `hoverTime` (500 ms) of stillness over an identifier;
- *   • it stays open while the pointer is on the identifier or inside the card,
- *     and for `graceMs` after it leaves both;
- *   • it re-targets (no close/re-open flicker) when the pointer moves to
- *     another identifier;
- *   • it closes on a scroll the pointer is not inside, and on any doc change.
+ *   • opens after `hoverTime` (500 ms) of stillness on an identifier. Every card pays it: moving to
+ *     another identifier closes this one and starts a fresh dwell, so a card never appears for a symbol
+ *     the pointer only passed over.
+ *   • stays open while the pointer is on the identifier or inside the card, and for `graceMs` after it
+ *     leaves both — the time needed to cross the gap and press the button. Coming back to the
+ *     identifier inside that window re-arms the dwell, because the card on screen is about a symbol
+ *     that was left. A wiggle inside the identifier is not a new hover: `mousemove` fires for a single
+ *     pixel, and restarting there would make the dwell impossible to reach.
+ *   • closes on a scroll the pointer is not inside, and on any doc change.
  *
- * The open/keep/close logic is the pure `reduceHover` machine below; the
- * CodeMirror value class is only timers, DOM and dispatch.
+ * `reduceHover` below makes these decisions; the view class is timers, DOM and dispatch.
  */
 
 import { EditorView, ViewPlugin, showTooltip, type PluginValue, type Tooltip, type TooltipView, type ViewUpdate } from '@codemirror/view';
@@ -30,9 +29,8 @@ import { identifierRange, pickDefinitionTarget, toLspPosition, type CharRange, t
 // ─── Pure state machine ──────────────────────────────────────────────────────
 
 /**
- * Where the pointer is relative to the card. `'other-token'` is a different
- * identifier than the one the card is about — it drives re-targeting, which a
- * pure geometry check would see as 'outside' and wrongly close on.
+ * Where the pointer is relative to the card. `'other-token'` is an identifier other than the card's, and
+ * it closes the card immediately — which a geometry check cannot tell from a pointer heading for the card.
  */
 export type HoverZone = 'token' | 'tooltip' | 'other-token' | 'outside';
 
@@ -62,7 +60,6 @@ export type HoverEffect =
     | 'cancel-arm'
     | 'open'
     | 'close'
-    | 'retarget'
     | 'grace'
     | 'cancel-grace';
 
@@ -86,10 +83,15 @@ function settle(state: HoverMachineState): HoverDecision {
         : keep(state);
 }
 
-/** (Re)start the hover delay for `token`; nothing is visible yet. */
+/**
+ * Start the dwell for `token`. A card already on screen is about a symbol the pointer left, so it closes
+ * rather than being re-targeted: every card pays `hoverTime`, not just the first of a session.
+ */
 function rearm(state: HoverMachineState, token: CharRange | null): HoverDecision {
     if (sameToken(state.token, token) && state.phase === 'arming') return settle(state);
-    return { state: { phase: 'arming', token, gracePending: false }, effects: ['arm', 'cancel-grace'] };
+    // No grace to cancel unless a card is up: `gracePending` is only ever set on an open state.
+    if (state.phase !== 'open') return { state: { phase: 'arming', token, gracePending: false }, effects: ['arm'] };
+    return { state: { phase: 'arming', token, gracePending: false }, effects: ['close', 'cancel-grace', 'arm'] };
 }
 
 function shutdown(state: HoverMachineState): HoverDecision {
@@ -124,9 +126,10 @@ export function reduceHover(state: HoverMachineState, input: HoverInput): HoverD
             // 'token' | 'other-token' — over an identifier.
             if (state.phase === 'idle') return rearm(HOVER_IDLE, token);
             if (state.phase === 'arming') return rearm(state, token);
-            return sameToken(state.token, token)
-                ? settle(state)
-                : { state: { phase: 'open', token, gracePending: false }, effects: ['retarget', 'cancel-grace'] };
+            // Open, and the pointer is not on the card's identifier: another identifier is a different
+            // question, and this one was already left once. Either way, dwell again.
+            if (!sameToken(state.token, token)) return rearm(state, token);
+            return state.gracePending ? rearm(state, token) : settle(state);
         }
         case 'hover-elapsed':
             if (state.phase !== 'arming' || !state.token) return keep(state);
@@ -534,7 +537,6 @@ class LspHoverValue implements PluginValue {
                 this.clearTimer('grace');
                 return;
             case 'open':
-            case 'retarget':
                 if (this.machine.token) this.open(this.machine.token);
                 return;
             case 'close':
@@ -563,8 +565,8 @@ class LspHoverValue implements PluginValue {
             this.feed({ type: 'dismiss' });
             return;
         }
-        // Replace the previous card in the same transaction: a re-target must not
-        // blank the box first.
+        // Nothing should be on screen when a dwell elapses; anything that is gets destroyed here
+        // rather than left behind as a second tooltip.
         this.card?.destroy();
         const card = new HoverCard(target => this.opts.onJump(target));
         this.card = card;
