@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"kanban/backend/fsutil"
 	"kanban/backend/git"
 	"kanban/backend/httputil"
 	"kanban/backend/store"
@@ -552,9 +553,13 @@ func (asm *AppStreamManager) BroadcastBranch(projectID, branch string) {
 }
 
 // shouldSkipFsEvent reports whether an fs_event for the given path should not be
-// broadcast: internal files (.git, flight recorder) and paths ignored by git.
+// broadcast: internal files (.git, flight recorder), the temporary file an atomic
+// write renames into place, and paths ignored by git.
 func shouldSkipFsEvent(repoRoot, path string) bool {
 	if git.IsInternalFile(path) {
+		return true
+	}
+	if fsutil.IsAtomicTemp(path) {
 		return true
 	}
 	return git.IsGitIgnored(repoRoot, path)
