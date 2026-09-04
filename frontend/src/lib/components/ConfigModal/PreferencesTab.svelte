@@ -1,5 +1,6 @@
 <script lang="ts">
     import { DEFAULT_SHORTCUTS, normalizeKey, normalizeClick, formatShortcut, defaultCreateTaskSubmitKey, defaultStartTaskKey, defaultMultiSelectClick } from '$lib/utils/keyboard';
+    import { t } from '$lib/i18n';
     import ToggleSwitch from '../ToggleSwitch.svelte';
 
     let {
@@ -27,52 +28,53 @@
     } = $props();
 
     // One row per shortcut; the submit and multi-select defaults are platform-aware
-    // (Cmd on Mac, Ctrl elsewhere).
+    // (Cmd on Mac, Ctrl elsewhere). Only `name`/`desc` are copy — `id` is the API field name
+    // and `def` the binding the server stores, so neither is ever translated.
     const rows = $derived([
         {
             id: 'create_task' as const,
-            name: 'Create Task',
-            desc: 'Opens the create-task dialog on the project board',
+            name: t('settings.preferences.shortcut.createTask'),
+            desc: t('settings.preferences.shortcut.createTaskDesc'),
             value: createTaskKey,
             def: DEFAULT_SHORTCUTS.create_task,
             click: false,
         },
         {
             id: 'create_task_submit' as const,
-            name: 'Create Task (submit)',
-            desc: 'Creates the task inside the create-task dialog',
+            name: t('settings.preferences.shortcut.createTaskSubmit'),
+            desc: t('settings.preferences.shortcut.createTaskSubmitDesc'),
             value: createTaskSubmitKey,
             def: defaultCreateTaskSubmitKey(),
             click: false,
         },
         {
             id: 'open_terminal' as const,
-            name: 'Open Terminal',
-            desc: 'Opens the terminal panel on pages with a terminal button',
+            name: t('settings.preferences.shortcut.openTerminal'),
+            desc: t('settings.preferences.shortcut.openTerminalDesc'),
             value: openTerminalKey,
             def: DEFAULT_SHORTCUTS.open_terminal,
             click: false,
         },
         {
             id: 'start_task' as const,
-            name: 'Start Task',
-            desc: 'Starts the task in the task view while the Start Task button is shown',
+            name: t('settings.preferences.shortcut.startTask'),
+            desc: t('settings.preferences.shortcut.startTaskDesc'),
             value: startTaskKey,
             def: defaultStartTaskKey(),
             click: false,
         },
         {
             id: 'toggle_fullscreen' as const,
-            name: 'Toggle Fullscreen',
-            desc: 'Maximizes or minimizes the focused area (chat, diff, editor, terminal)',
+            name: t('settings.preferences.shortcut.toggleFullscreen'),
+            desc: t('settings.preferences.shortcut.toggleFullscreenDesc'),
             value: toggleFullscreenKey,
             def: DEFAULT_SHORTCUTS.toggle_fullscreen,
             click: false,
         },
         {
             id: 'multi_select_click' as const,
-            name: 'Multi-Select Cards',
-            desc: 'Modifier+Click to select multiple task cards',
+            name: t('settings.preferences.shortcut.multiSelect'),
+            desc: t('settings.preferences.shortcut.multiSelectDesc'),
             value: multiSelectClickKey,
             def: defaultMultiSelectClick(),
             click: true,
@@ -160,16 +162,16 @@
 
 <section class="section">
     <div class="section-header">
-        <h3 class="section-label">Keyboard Shortcuts</h3>
+        <h3 class="section-label">{t('settings.preferences.keyboard')}</h3>
     </div>
 
     <div class="shortcut-row">
         <div class="shortcut-info">
-            <span class="shortcut-name">Hide shortcut hints</span>
-            <span id="hide-hints-desc" class="shortcut-desc">Hide the keycaps shown on buttons</span>
+            <span class="shortcut-name">{t('settings.preferences.hideHints')}</span>
+            <span id="hide-hints-desc" class="shortcut-desc">{t('settings.preferences.hideHintsDesc')}</span>
         </div>
         <div class="shortcut-controls">
-            <ToggleSwitch bind:checked={hideHints} ariaLabel="Hide shortcut hints" ariaDescribedby="hide-hints-desc" onChange={() => onDirty?.()} />
+            <ToggleSwitch bind:checked={hideHints} ariaLabel={t('settings.preferences.hideHints')} ariaDescribedby="hide-hints-desc" onChange={() => onDirty?.()} />
         </div>
     </div>
 
@@ -181,10 +183,10 @@
             </div>
             <div class="shortcut-controls">
                 {#if row.value !== undefined && row.value !== row.def}
-                    <button type="button" class="shortcut-action" onclick={() => assign(row.id, undefined)} aria-label="Reset to default" title={`Reset to default (${formatShortcut(row.def)})`}>Reset</button>
+                    <button type="button" class="shortcut-action" onclick={() => assign(row.id, undefined)} aria-label={t('settings.preferences.resetToDefault')} title={t('settings.preferences.resetToDefaultWith', { shortcut: formatShortcut(row.def) })}>{t('settings.preferences.reset')}</button>
                 {/if}
                 {#if row.value ?? row.def}
-                    <button type="button" class="shortcut-action" onclick={() => assign(row.id, '')} aria-label="Clear shortcut" title="Disable this shortcut">Clear</button>
+                    <button type="button" class="shortcut-action" onclick={() => assign(row.id, '')} aria-label={t('settings.preferences.clearShortcut')} title={t('settings.preferences.disableShortcut')}>{t('settings.preferences.clear')}</button>
                 {/if}
                 <button
                     type="button"
@@ -192,42 +194,49 @@
                     class:capturing={capturingId === row.id}
                     class:invalid={invalidFlash}
                     onclick={() => startCapture(row.id)}
-                    aria-label={`${row.name} shortcut: ${capturingId === row.id ? 'capturing' : row.value === '' ? 'disabled' : formatShortcut(row.value ?? row.def)}. Click to reassign.`}
+                    aria-label={t('settings.preferences.shortcutAria', {
+                        name: row.name,
+                        binding: capturingId === row.id
+                            ? t('settings.preferences.capturing')
+                            : row.value === ''
+                                ? t('settings.preferences.disabled')
+                                : formatShortcut(row.value ?? row.def),
+                    })}
                     title={capturingId === row.id
-                        ? (row.click ? 'Click anywhere with a modifier held (Escape to cancel)' : 'Press any key (Escape to cancel)')
-                        : 'Click to reassign'}
+                        ? (row.click ? t('settings.preferences.clickHint') : t('settings.preferences.keyHint'))
+                        : t('settings.preferences.clickToReassign')}
                 >
-                    {capturingId === row.id ? (row.click ? 'Now modifier+click...' : 'Press a key...') : row.value === '' ? 'None' : formatShortcut(row.value ?? row.def)}
+                    {capturingId === row.id ? (row.click ? t('settings.preferences.nowClick') : t('settings.preferences.pressKey')) : row.value === '' ? t('settings.preferences.none') : formatShortcut(row.value ?? row.def)}
                 </button>
             </div>
         </div>
     {/each}
 
     {#if invalidFlash}
-        <p class="invalid-hint" role="alert">{capturingRow?.click ? 'Invalid combo — hold Ctrl, Cmd, Shift or Alt and click.' : 'Invalid key — use a letter or a modifier combo.'}</p>
+        <p class="invalid-hint" role="alert">{capturingRow?.click ? t('settings.preferences.invalidClick') : t('settings.preferences.invalidKey')}</p>
     {/if}
 </section>
 
 <section class="section">
     <div class="section-header">
-        <h3 class="section-label">UI</h3>
+        <h3 class="section-label">{t('settings.preferences.ui')}</h3>
     </div>
     <div class="shortcut-row">
         <div class="shortcut-info">
-            <span class="shortcut-name">Hide model badge</span>
-            <span id="hide-model-badge-desc" class="shortcut-desc">Hide the model badge shown on task cards</span>
+            <span class="shortcut-name">{t('settings.preferences.hideModelBadge')}</span>
+            <span id="hide-model-badge-desc" class="shortcut-desc">{t('settings.preferences.hideModelBadgeDesc')}</span>
         </div>
         <div class="shortcut-controls">
-            <ToggleSwitch bind:checked={hideModelBadge} ariaLabel="Hide model badge" ariaDescribedby="hide-model-badge-desc" onChange={() => onDirty?.()} />
+            <ToggleSwitch bind:checked={hideModelBadge} ariaLabel={t('settings.preferences.hideModelBadge')} ariaDescribedby="hide-model-badge-desc" onChange={() => onDirty?.()} />
         </div>
     </div>
     <div class="shortcut-row">
         <div class="shortcut-info">
-            <span class="shortcut-name">Oldest Task on top</span>
-            <span id="sort-oldest-first-desc" class="shortcut-desc">Put the least recently moved task at the top of each column</span>
+            <span class="shortcut-name">{t('settings.preferences.oldestFirst')}</span>
+            <span id="sort-oldest-first-desc" class="shortcut-desc">{t('settings.preferences.oldestFirstDesc')}</span>
         </div>
         <div class="shortcut-controls">
-            <ToggleSwitch bind:checked={sortOldestFirst} ariaLabel="Oldest Task on top" ariaDescribedby="sort-oldest-first-desc" onChange={() => onDirty?.()} />
+            <ToggleSwitch bind:checked={sortOldestFirst} ariaLabel={t('settings.preferences.oldestFirst')} ariaDescribedby="sort-oldest-first-desc" onChange={() => onDirty?.()} />
         </div>
     </div>
 </section>
