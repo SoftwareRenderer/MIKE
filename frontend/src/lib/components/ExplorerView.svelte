@@ -21,6 +21,7 @@
     import { appStore, dialogStore, uiStore } from '$lib/stores';
     import { isAnyModalOpen } from '$lib/utils/modal-state';
     import { effectiveOpenTerminalKey, effectiveToggleFullscreenKey, formatShortcut, matchShortcut } from '$lib/utils/keyboard';
+    import { EDITOR_SAVE_SETTLED, SAVE_SETTLE_BACKSTOP_MS, SaveRequestGuard } from '$lib/utils/save-state';
 
     // Terminal button tooltip — always shows the effective shortcut (tooltips
     // keep the shortcut text even when keycap hints are hidden).
@@ -173,13 +174,23 @@
     });
     let editorFocused = $state(false);
     let editorSaving = $state(false);
+    const saveGuard = new SaveRequestGuard();
+    let saveBackstop: ReturnType<typeof setTimeout> | null = null;
 
+    /** Ask the active editor to save; EDITOR_SAVE_SETTLED frees the button. */
     function handleEditorSave() {
-        if (editorSaving || !activeFilePath || !unsavedFiles.has(activeFilePath)) return;
+        if (!activeFilePath || !unsavedFiles.has(activeFilePath)) return;
+        if (!saveGuard.request(activeFilePath)) return;
         editorSaving = true;
         window.dispatchEvent(new CustomEvent('editor-save-request'));
-        // Reset after a short delay — FileEditor clears it on save complete
-        setTimeout(() => { editorSaving = false; }, 5000);
+        if (saveBackstop) clearTimeout(saveBackstop);
+        saveBackstop = setTimeout(() => { saveGuard.expire(); editorSaving = false; }, SAVE_SETTLE_BACKSTOP_MS);
+    }
+
+    function handleSaveSettled(e: Event) {
+        if (!saveGuard.settled((e as CustomEvent<{ path?: string }>).detail?.path)) return;
+        if (saveBackstop) { clearTimeout(saveBackstop); saveBackstop = null; }
+        editorSaving = false;
     }
 
     // Persist unsaved files to IndexedDB (convert Set → array for stable JSON format)
@@ -670,6 +681,7 @@
         }
         window.addEventListener('keydown', handleKeydown);
         window.addEventListener('open-file', handleOpenFile);
+        window.addEventListener(EDITOR_SAVE_SETTLED, handleSaveSettled);
     });
 
     // open-file dispatch (go-to-definition / search results)
@@ -682,6 +694,8 @@
     onDestroy(() => {
         window.removeEventListener('keydown', handleKeydown);
         window.removeEventListener('open-file', handleOpenFile);
+        window.removeEventListener(EDITOR_SAVE_SETTLED, handleSaveSettled);
+        if (saveBackstop) { clearTimeout(saveBackstop); saveBackstop = null; }
         // Flush a pending (throttled) tab+scroll save.
         if (tabSaveTimer) {
             clearTimeout(tabSaveTimer);

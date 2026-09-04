@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"kanban/backend/config"
+	"kanban/backend/fsutil"
 	"kanban/backend/store"
 	"kanban/backend/types"
 )
@@ -113,6 +114,10 @@ func ShouldIgnorePath(path string) bool {
 // pattern that should not trigger diff broadcasts.
 func ShouldIgnoreFile(path string) bool {
 	base := filepath.Base(path)
+
+	if fsutil.IsAtomicTemp(base) {
+		return true
+	}
 	// Vim swap/undo files: .file.swp, .file.swo, .file.ssn, .file.uno
 	if strings.HasPrefix(base, ".") && (strings.HasSuffix(base, ".swp") || strings.HasSuffix(base, ".swo") || strings.HasSuffix(base, ".ssn") || strings.HasSuffix(base, ".uno")) {
 		return true
