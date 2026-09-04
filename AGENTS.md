@@ -273,6 +273,28 @@ Agent extensions run AI agents (e.g. Pi) as subprocesses: `Backend (executor) �
 
 ## Common Patterns
 
+### Locale and Formatting (frontend)
+Formatting follows the **active locale** (`$lib/i18n/runtime.svelte` → `activeLocale()`); **sorting never does**.
+
+- `activeLocale()` is what every `Intl.*` / `toLocale*` call passes — `undefined` means "no locale chosen, use the browser's", which is the pre-i18n behaviour, so a user with no language pack installed sees no change. Never pass `undefined`, `[]` or a literal tag at a call site: `grep -nE "new Intl\.[A-Za-z]+Format\(\s*(undefined|\[\])?\s*[,)]|toLocale(A|S|D)[A-Za-z]*\(\s*(undefined|\[\])?\s*[,)]" frontend/src` must stay empty outside `__tests__`.
+- **Never cache anything derived from the locale at module scope.** The `usdSymbol` cache was one `let` computed once from `undefined`, which silently pinned `"$"` for a user who switched language mid-session; locale-dependent values are either computed per call or memoised **keyed by the locale they came from** (`usdSymbolByLocale`).
+- **`document.documentElement.lang` has exactly one writer**: the i18n runtime. `index.html`'s `lang="en"` is the initial value only. It describes the language of the *rendered strings* (the active pack, else `en`), not the browser's language — putting the browser's tag there would restyle English chrome through the `:lang()` rules below.
+- **Sorting is locale-independent on purpose.** Every `localeCompare` keeps its current arguments (`Sidebar`, `BranchFileBrowser`, `BranchSymbols`, `Chat/ModelSelector`, `DiffViewer`, `GitStatusPanel`): file, branch, symbol, session and model lists must stay stably ordered whatever the UI language is. Model *grouping* groups by provider, never by collation.
+- Phrases are catalog KEYS (`$lib/i18n/catalogs/en.ts`), never translated strings in core; relative time uses `Intl.RelativeTimeFormat(locale, { style: 'narrow' })` — `narrow` is what yields `5m ago`/`2mo ago`, and `long` would print `5 minutes ago` and break the shape the chat stats line and the unit tests pin. `formatElapsed`/`formatDuration` stay unlocalised for the same reason.
+
+Tests: `frontend/src/lib/i18n/__tests__/runtime.unit.svelte.ts`, `frontend/src/lib/utils/__tests__/format-time.unit.ts`, `format.unit.ts`.
+
+### CJK Typography
+`--font-sans` has no CJK coverage in its Latin base, so Chinese/Japanese/Korean gets its chain from a `:lang()` block at the end of `frontend/src/app.css` (`zh-Hans`/`zh-Hant`/`ja`/`ko`). Keep it scoped to `:lang()`: a global rule restyles English chrome, and `--font-mono` must stay CJK-free (code must not pick up a CJK face). Three rules about the chains, each one measured rather than assumed:
+
+- **A generic family ends a font list.** `sans-serif` matches every script, so every family written after it is unreachable; `--font-sans-latin` stops before it and each chain carries its own copy last.
+- **CJK faces come FIRST, before the Latin base.** A Latin alias (`Arial`, `Helvetica`) resolves through fontconfig to something that already covers the CJK run, so the platform answers the missing script from its own language fallback and never reads further down the list — a CJK face written after the Latin base is decorative. The accepted cost: Latin in a CJK locale renders with the CJK face's own Latin glyphs, which is what a Chinese or Japanese site does anyway.
+- **`html:lang(…)` selects, and it overrides the `--font-sans` VARIABLE** (not `font-family`), because components read the variable directly (StatsModal, SandboxConfigModal) as well as inheriting from `body`; the higher specificity also stops an installed theme's `:root { --font-sans }` from dropping the chain.
+
+Dense rows truncate: 71 rules pair `white-space: nowrap` with `overflow: hidden; text-overflow: ellipsis`, and a CJK board measured against the rest (36 nowrap rules with no overflow contract — buttons, radio labels, unit labels) produced **zero** overflowing boxes and no row-height change, so the CJK block deliberately adds no `white-space` override. If a translation ever does push a label past its box, give that rule the ellipsis pair rather than a scoped `white-space: normal`, which trades a clip for a ragged row.
+
+**Verifying typography needs pixels.** Glyph advance cannot tell faces apart (CJK glyphs are em-width, so every face measures the same) and `document.fonts.check()` answers `true` for a family that is not installed, because *a* fallback can render the text. Rasterize the same string into a canvas under both stacks and compare the bytes.
+
 ### Client-Side Storage
 All client-side storage goes through `frontend/src/lib/storage.ts` (async functions; single IndexedDB `kanban-storage`). Never access IndexedDB directly in components. `gc()` (stale-entry sweep, incl. offline message/diff caches for a project) is called only from `Board.svelte` after the board loads — components should NOT call it.
 
