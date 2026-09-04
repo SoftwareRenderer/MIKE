@@ -1,14 +1,18 @@
 <script lang="ts">
     import { onDestroy } from 'svelte';
     import { dialogStore } from '$lib/stores';
+    import { t } from '$lib/i18n';
     import BaseModal from './BaseModal.svelte';
 
     let open = $state(false);
     let title = $state('');
     let message = $state('');
     let items = $state<string[]>([]);
-    let confirmText = $state('Confirm');
-    let cancelText = $state('Cancel');
+    // null = the caller supplied no label, so the button renders the catalog
+    // default. Resolving it at render (not into state) is what lets the default
+    // follow a locale change while the dialog stays mounted.
+    let confirmText = $state<string | null>(null);
+    let cancelText = $state<string | null>(null);
     let variant = $state<'default' | 'destructive'>('destructive');
     let resolveFn: ((value: boolean) => void) | null = $state(null);
 
@@ -43,8 +47,8 @@
             title = value.title;
             message = value.message;
             items = value.items ?? [];
-            confirmText = value.confirmText ?? 'Confirm';
-            cancelText = value.cancelText ?? 'Cancel';
+            confirmText = value.confirmText ?? null;
+            cancelText = value.cancelText ?? null;
             variant = value.variant ?? 'destructive';
             resolveFn = value._resolve ?? null;
             open = true;
@@ -63,9 +67,9 @@
     {/snippet}
 
     {#snippet footer()}
-        <button type="button" class="btn-cancel" onclick={handleCancel}>{cancelText}</button>
+        <button type="button" class="btn-cancel" onclick={handleCancel}>{cancelText ?? t('app.cancel')}</button>
         <button type="button" class="btn-confirm" class:destructive={variant === 'destructive'} onclick={handleConfirm}>
-            {confirmText}
+            {confirmText ?? t('app.confirm.confirm')}
         </button>
     {/snippet}
 

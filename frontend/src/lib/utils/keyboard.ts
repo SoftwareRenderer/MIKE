@@ -6,6 +6,7 @@
  * Binding semantics: undefined = default, "" = disabled, non-empty = custom.
  */
 import type { Config } from '$lib/types';
+import { t, type MessageKey } from '$lib/i18n';
 
 /** Default keyboard shortcut bindings. */
 export const DEFAULT_SHORTCUTS: Record<string, string> = {
@@ -24,11 +25,16 @@ type Modifier = (typeof MODIFIERS)[number];
 /** Browser-reserved combos that must not be rebindable. */
 const RESERVED_COMBOS = new Set(['control+w', 'control+q', 'control+n', 'control+t']);
 
-const MODIFIER_LABELS: Record<Modifier, string> = {
-    control: 'Ctrl',
-    meta: 'Cmd',
-    shift: 'Shift',
-    alt: 'Alt',
+/**
+ * The legend a keycap hint shows for a modifier. Catalog keys, never legends —
+ * a key name is copy like any other ('Entrée', 'Rücktaste'), and the binding
+ * itself stays the normalized `control+k` form no matter the locale.
+ */
+const MODIFIER_LABEL_KEYS: Record<Modifier, MessageKey> = {
+    control: 'app.key.control',
+    meta: 'app.key.meta',
+    shift: 'app.key.shift',
+    alt: 'app.key.alt',
 };
 
 /** Modifier key names — pressing one alone is not a binding. */
@@ -40,17 +46,18 @@ const MODIFIER_KEYS = new Set([
 /** Pseudo-key used by mouse bindings (e.g. `meta+click` = Cmd+Click). */
 export const CLICK_KEY = 'click';
 
-const KEY_LABELS: Record<string, string> = {
-    ' ': 'Space',
-    [CLICK_KEY]: 'Click',
-    enter: 'Enter',
-    tab: 'Tab',
-    backspace: 'Backspace',
-    delete: 'Delete',
-    arrowup: 'Up',
-    arrowdown: 'Down',
-    arrowleft: 'Left',
-    arrowright: 'Right',
+/** Legend per named key; anything unlisted is displayed uppercased. */
+const KEY_LABEL_KEYS: Record<string, MessageKey> = {
+    ' ': 'app.key.space',
+    [CLICK_KEY]: 'app.key.click',
+    enter: 'app.key.enter',
+    tab: 'app.key.tab',
+    backspace: 'app.key.backspace',
+    delete: 'app.key.delete',
+    arrowup: 'app.key.up',
+    arrowdown: 'app.key.down',
+    arrowleft: 'app.key.left',
+    arrowright: 'app.key.right',
 };
 
 /** Convert a keydown event to a normalized shortcut string, or null if not a valid binding. */
@@ -84,8 +91,12 @@ function buildCombo(e: KeyboardEvent, key: string): string {
 export function formatShortcut(key: string): string {
     const parts = key.split('+');
     const keyPart = parts.pop() ?? key;
-    const labels = parts.map(m => MODIFIER_LABELS[m as Modifier] ?? m);
-    labels.push(KEY_LABELS[keyPart] ?? keyPart.toUpperCase());
+    const labels = parts.map(m => {
+        const labelKey: MessageKey | undefined = MODIFIER_LABEL_KEYS[m as Modifier];
+        return labelKey ? t(labelKey) : m;
+    });
+    const keyLabel: MessageKey | undefined = KEY_LABEL_KEYS[keyPart];
+    labels.push(keyLabel ? t(keyLabel) : keyPart.toUpperCase());
     return labels.join('+');
 }
 
@@ -180,7 +191,17 @@ export function effectiveToggleFullscreenKey(config: Config | null | undefined):
 /** Tooltip for the fullscreen-toggle buttons: the binding, or plain text when disabled. */
 export function fullscreenToggleTitle(config: Config | null | undefined): string {
     const key = effectiveToggleFullscreenKey(config);
-    return key ? `Toggle fullscreen (${formatShortcut(key)})` : 'Toggle fullscreen';
+    return key
+        ? t('app.shortcut.toggleFullscreenWithKey', { key: formatShortcut(key) })
+        : t('app.shortcut.toggleFullscreen');
+}
+
+/** Tooltip for the open-terminal button: the binding, or plain text when disabled. */
+export function openTerminalTitle(config: Config | null | undefined): string {
+    const key = effectiveOpenTerminalKey(config);
+    return key
+        ? t('app.shortcut.openTerminalWithKey', { key: formatShortcut(key) })
+        : t('app.shortcut.openTerminal');
 }
 
 /** True on Apple platforms (used to pick the platform-appropriate submit key). */

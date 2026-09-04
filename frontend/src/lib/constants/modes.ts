@@ -1,6 +1,15 @@
-/** Descriptions for each operating mode, shown in UI selectors. */
+import { t } from '$lib/i18n';
+
+/**
+ * Descriptions for each operating mode, shown in UI selectors.
+ *
+ * Getters rather than literals: the copy lives in the catalog, so a translation
+ * pack changes it and a read inside a `$derived`/template re-renders when the
+ * locale changes — while the export keeps its exact `Record<string, string>`
+ * shape, so every `MODE_DESCRIPTIONS[mode]` read site stays as it is.
+ */
 export const MODE_DESCRIPTIONS: Record<string, string> = {
-    act: 'AI is required to provide structured responses during review, and has read/write access.',
-    plan: 'AI decomposes work into subtasks on the board, and only has read access.',
-    explore: 'AI has read/write access.',
+    get act() { return t('app.mode.act'); },
+    get plan() { return t('app.mode.plan'); },
+    get explore() { return t('app.mode.explore'); },
 };

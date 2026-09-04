@@ -3,6 +3,7 @@
     import { onMount, onDestroy, tick } from 'svelte';
     import { get } from 'svelte/store';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
+    import { t } from '$lib/i18n';
     import { wsConnection } from '$lib/stores/connection';
     import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
     import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
@@ -78,11 +79,11 @@
 
     function computePageTitle(): string {
         const name = currentProject?.name;
-        if (!name || !currentProject) return 'Kanban Board';
+        if (!name || !currentProject) return t('app.title.default');
         const reviewCount = projectCounts[currentProject.id]?.review ?? 0;
         // If current project has reviews, show it with count
         if (reviewCount > 0) {
-            return `🟡 ${name} - ${reviewCount} task${reviewCount === 1 ? '' : 's'} for review`;
+            return t('app.title.review', { name, count: reviewCount });
         }
         // Check if any other project has reviews
         for (const [pid, counts] of Object.entries(projectCounts)) {
@@ -175,6 +176,14 @@
     function updateStaleTime() {
         staleTimeText = lastSyncedAgo();
     }
+
+    // The reconnect countdown belongs to the sentence, not to the markup: word
+    // order and the unit are the translator's, so the whole line is one message.
+    const reconnectStatus = $derived(
+        countdownSeconds > 0
+            ? t('app.reconnect.statusCountdown', { seconds: countdownSeconds })
+            : t('app.reconnect.status'),
+    );
     function stopStaleTick() {
         if (staleTimer) {
             clearInterval(staleTimer);
@@ -184,8 +193,8 @@
 
     /** Get relative time since last data sync. */
     function lastSyncedAgo(): string {
-        if (lastSyncedAt === Infinity) return 'just now';
-        return timeAgo(lastSyncedAt) || 'just now';
+        if (lastSyncedAt === Infinity) return t('app.time.justNow');
+        return timeAgo(lastSyncedAt) || t('app.time.justNow');
     }
 
     function tryReconnectNow() {
@@ -1179,10 +1188,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     async function removeProject(p: Project) {
         const confirmed = await dialogStore.showConfirm({
-            title: 'Remove Project',
-            message: `Remove "${p.name}" from the board?\n\nThis will delete the project's Kanban board, all tasks, messages, and their worktree directories.\nThe project folder itself will NOT be deleted.`,
-            confirmText: 'Remove',
-            cancelText: 'Cancel',
+            title: t('app.project.removeTitle'),
+            message: t('app.project.removeMessage', { name: p.name }),
+            confirmText: t('app.project.remove'),
+            cancelText: t('app.cancel'),
         });
         if (!confirmed) return;
         try {
@@ -1247,10 +1256,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 {:else if hasLocalCache}
     <div class="offline-screen">
         <img class="offline-icon" src={kanbanIcon} width="96" height="96" alt="Offline" />
-        <p class="offline-text">Server unreachable</p>
+        <p class="offline-text">{t('app.offline.title')}</p>
         <button class="offline-btn" onclick={loadFromCache}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="6,3 20,12 6,21"/></svg>
-            Offline Mode
+            {t('app.offline.button')}
         </button>
     </div>
 {:else if !isAuthenticated}
@@ -1263,21 +1272,21 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 {#if !wsConnected}
     <div class="reconnecting-banner" role="status" aria-live="polite">
         <span class="reconnecting-spinner"></span>
-        Reconnecting {#if countdownSeconds > 0}in {countdownSeconds}s {/if}...
-        {#if staleTimeText}<span class="reconnecting-stale">Data from {staleTimeText}</span>{/if}
-        <button class="reconnecting-btn" onclick={tryReconnectNow} type="button" aria-label="Try connecting now">Connect</button>
+        {reconnectStatus}
+        {#if staleTimeText}<span class="reconnecting-stale">{t('app.reconnect.dataFrom', { time: staleTimeText })}</span>{/if}
+        <button class="reconnecting-btn" onclick={tryReconnectNow} type="button" aria-label="Try connecting now">{t('app.reconnect.connect')}</button>
     </div>
 {/if}
 <!-- Offline cache banner -->
 {#if servingFromCache}
     <div class="cache-banner" role="status" aria-live="polite">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Viewing cached data
+        {t('app.cache.banner')}
     </div>
 {/if}
 <div class="app" class:collapsed class:task-detail={uiStore.showCardDetail && !!appStore.selectedTask} class:ws-disconnected={!wsConnected} class:cache-visible={servingFromCache}>
     <!-- Skip navigation link -->
-    <a href="#main-content" class="skip-link">Skip to main content</a>
+    <a href="#main-content" class="skip-link">{t('app.skipToMain')}</a>
 
     <!-- Mobile sidebar backdrop -->
     {#if isMobileCtx.isMobile && mobileMenuOpen}
@@ -1393,13 +1402,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     </svg>
                 </button>
                 {#if !hasProviders}
-                    <h2>Welcome to Kanban</h2>
-                    <p>Configure an LLM provider to get started. Supports any OpenAI-compatible API.</p>
-                    <button class="btn-primary" onclick={() => uiStore.showConfig = true} title="Configure an LLM provider">Configure Provider</button>
+                    <h2>{t('app.empty.welcomeTitle')}</h2>
+                    <p>{t('app.empty.welcomeBody')}</p>
+                    <button class="btn-primary" onclick={() => uiStore.showConfig = true} title="Configure an LLM provider">{t('app.empty.configureProvider')}</button>
                 {:else}
-                    <h2>No Projects</h2>
-                    <p>Add a project to get started. Projects must be git repositories.</p>
-                    <button class="btn-primary" onclick={openAddProject} title="Add a project">Add Project</button>
+                    <h2>{t('app.empty.noProjectsTitle')}</h2>
+                    <p>{t('app.empty.noProjectsBody')}</p>
+                    <button class="btn-primary" onclick={openAddProject} title="Add a project">{t('app.empty.addProject')}</button>
                 {/if}
             </div>
         {/if}

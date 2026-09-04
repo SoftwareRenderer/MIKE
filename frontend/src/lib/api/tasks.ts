@@ -24,6 +24,7 @@ import {
     deleteTaskMessageRaw,
     updateTaskMessageRaw,
 } from './queue';
+import { t } from '$lib/i18n';
 
 // -- Task CRUD endpoints --
 
@@ -39,7 +40,7 @@ export async function createTask(projectId: string, task: Partial<Task>): Promis
 /** Fetch a single task by ID. */
 export async function getTask(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`);
-    if (!res.ok) throw await apiError(res, 'Task not found');
+    if (!res.ok) throw await apiError(res, t('api.taskNotFound'));
     return res.json();
 }
 
@@ -165,7 +166,7 @@ export async function sendTaskMessage(
 export async function getTaskMessages(projectId: string, taskId: string): Promise<TaskMessage[]> {
     try {
         const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`);
-        if (!res.ok) throw await apiError(res, 'Failed to fetch messages');
+        if (!res.ok) throw await apiError(res, t('api.fetchMessages'));
         const data = await res.json();
         // Cache fire-and-forget
         setBoardCache(messagesCacheKey(projectId, taskId), data).catch(() => {});
@@ -182,7 +183,7 @@ export async function getTaskMessages(projectId: string, taskId: string): Promis
 export async function getTaskMessageFull(projectId: string, taskId: string, messageId: string): Promise<TaskMessage> {
     try {
         const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/${messageId}?full=1`);
-        if (!res.ok) throw await apiError(res, 'Failed to fetch message');
+        if (!res.ok) throw await apiError(res, t('api.fetchMessage'));
         const data = await res.json();
         // Cache fire-and-forget
         setBoardCache(messageFullCacheKey(projectId, taskId, messageId), data).catch(() => {});
@@ -227,7 +228,7 @@ export const regenerateTaskMessages = deleteTaskMessagesAfter;
 /** Check if deleting a message would also delete a fork branch. */
 export async function checkMessageDelete(projectId: string, taskId: string, messageId: string): Promise<{ will_delete_branch: boolean; branch_name: string }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/${messageId}`);
-    if (!res.ok) throw await apiError(res, 'Failed to check message delete');
+    if (!res.ok) throw await apiError(res, t('api.checkMessageDelete'));
     return res.json();
 }
 
@@ -243,13 +244,13 @@ export async function updateTaskMessage(projectId: string, taskId: string, messa
 /** Manually trigger context summarization for a task. Pass an AbortSignal to allow cancellation. */
 export async function summarizeTask(projectId: string, taskId: string, signal?: AbortSignal): Promise<{ summary: string; old_count: number; new_count: number }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/summarize`, { method: 'POST', signal });
-    if (!res.ok) throw await apiError(res, 'Failed to summarize task');
+    if (!res.ok) throw await apiError(res, t('api.summarizeTask'));
     return res.json();
 }
 
 /** Trigger Pi agent context compaction via RPC. Only works for Pi tasks. */
 export async function compactTask(projectId: string, taskId: string): Promise<{ status: string; summary: string }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/compact`, { method: 'POST' });
-    if (!res.ok) throw await apiError(res, 'Failed to compact task');
+    if (!res.ok) throw await apiError(res, t('api.compactTask'));
     return res.json();
 }

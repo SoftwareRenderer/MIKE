@@ -2,6 +2,7 @@
     import { fade } from 'svelte/transition';
     import { sandboxImageStatus } from '$lib/services/sandbox-image-status.svelte';
     import { sandboxImageLabel, sandboxImageVisible } from '$lib/utils/sandbox-image-status';
+    import { t } from '$lib/i18n';
 
     /**
      * Progress for a project's sandbox image being built (from its Dockerfile) or pulled.
@@ -34,9 +35,9 @@
                     type="button"
                     class="sandbox-image-status-dismiss"
                     onclick={() => sandboxImageStatus.clear()}
-                    aria-label="Dismiss sandbox image error"
+                    aria-label={t('sandbox.dismissImageError')}
                 >
-                    Dismiss
+                    {t('sandbox.dismiss')}
                 </button>
             {/if}
         </div>
@@ -44,7 +45,7 @@
             <div class="sandbox-image-status-error">{state.error}</div>
         {/if}
         {#if state.lines.length > 0}
-            <pre class="sandbox-image-status-log" aria-label="Image build output">{state.lines.join('\n')}</pre>
+            <pre class="sandbox-image-status-log" aria-label={t('sandbox.imageBuildOutput')}>{state.lines.join('\n')}</pre>
         {/if}
     </div>
 {/if}

@@ -22,6 +22,8 @@
      * @param text  the tooltip message
      * @param label short field name for the accessible name (e.g. "Concurrency")
      */
+    import { t } from '$lib/i18n';
+
     let { text, label }: { text: string; label: string } = $props();
 
     const TOUCH_QUERY = '(hover: none)';
@@ -115,7 +117,7 @@
 </script>
 
 {#if touch}
-    <button type="button" class="help-icon" bind:this={btnEl} onclick={toggle} aria-label={`${label} help`} aria-expanded={open}>
+    <button type="button" class="help-icon" bind:this={btnEl} onclick={toggle} aria-label={t('settings.help.aria', { label })} aria-expanded={open}>
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
             <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>

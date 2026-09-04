@@ -1,5 +1,6 @@
 <script lang="ts">
     import VirtualList from '$lib/components/VirtualList.svelte';
+    import { t } from '$lib/i18n';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
 
     interface Sym {
@@ -43,7 +44,8 @@
         }
     }
 
-    // Icon mapping for symbol kinds
+    // Icon mapping for symbol kinds — single-glyph badges (ƒ/C/S/…), derived from the
+    // LSP symbol kind rather than from prose, so they are never keyed.
     function getSymbolIcon(kind: string): string {
         switch (kind) {
             case 'function': return 'ƒ';
@@ -171,14 +173,14 @@
 
 <div class="symbol-outline">
     <div class="symbol-header">
-        <span class="symbol-label">{isOutlineMode ? 'Outline' : 'Symbols'}</span>
+        <span class="symbol-label">{isOutlineMode ? t('explorer.symbols.outlineLabel') : t('explorer.shared.symbols')}</span>
         <div class="symbol-header-actions">
             {#if symbols.length > 0 && !isOutlineMode}
                 <button
                     class={`toggle-btn ${sortAlpha ? 'active' : ''}`}
                     onclick={toggleSortAlpha}
-                    title={sortAlpha ? 'Sort by position' : 'Sort alphabetically'}
-                    aria-label={sortAlpha ? 'Switch to position sort' : 'Switch to alphabetical sort'}
+                    title={sortAlpha ? t('explorer.symbols.sortByPosition') : t('explorer.symbols.sortAlphabetically')}
+                    aria-label={sortAlpha ? t('explorer.symbols.switchToPosition') : t('explorer.symbols.switchToAlphabetical')}
                 >
                     {#if sortAlpha}
                         <!-- 1-2-3 icon (click to switch to position sort) -->
@@ -203,8 +205,8 @@
                 <button
                     class="toggle-btn"
                     onclick={toggleTreeView}
-                    title={treeView ? 'Flat list' : 'Tree view'}
-                    aria-label={treeView ? 'Switch to flat list' : 'Switch to tree view'}
+                    title={treeView ? t('explorer.symbols.flatList') : t('explorer.symbols.treeView')}
+                    aria-label={treeView ? t('explorer.symbols.switchToFlat') : t('explorer.symbols.switchToTree')}
                 >
                     {#if treeView}
                         <!-- Flat list icon -->
@@ -236,10 +238,10 @@
 
     {#if symbols.length === 0}
         <div class="symbol-list">
-            <div class="symbol-empty">No {isOutlineMode ? 'headings' : 'symbols'}</div>
+            <div class="symbol-empty">{isOutlineMode ? t('explorer.symbols.noneHeadings') : t('explorer.symbols.noneSymbols')}</div>
         </div>
     {:else if isOutlineMode}
-        <VirtualList items={flatHeadings} itemHeight={22} minThreshold={50} role="tree" aria-label="Document outline">
+        <VirtualList items={flatHeadings} itemHeight={22} minThreshold={50} role="tree" aria-label={t('explorer.symbols.outlineAria')}>
             {#snippet children({ item: h })}
                 <div class={`outline-item depth-${h.depth}`}>
                     <button
@@ -247,7 +249,7 @@
                         onclick={() => onSymbolClick(h.node.symbol.line)}
                         role="treeitem"
                         aria-selected="false"
-                        title={`Line ${h.node.symbol.line}: ${h.node.symbol.name}`}
+                        title={t('explorer.symbols.lineTitle', { line: h.node.symbol.line, name: h.node.symbol.name })}
                     >
                         <span class="outline-number">{h.node.number}</span>
                         <span class="symbol-name">
@@ -260,7 +262,7 @@
         </VirtualList>
     {:else if treeView}
         <!-- Tree view for LSP symbols -->
-        <VirtualList items={flatTree} itemHeight={22} minThreshold={50} role="tree" aria-label="Symbol tree">
+        <VirtualList items={flatTree} itemHeight={22} minThreshold={50} role="tree" aria-label={t('explorer.symbols.treeAria')}>
             {#snippet children({ item })}
                 <div class={`tree-item depth-${item.depth}`}>
                     <button
@@ -269,7 +271,7 @@
                         role="treeitem"
                         aria-selected="false"
                         {...(item.hasChildren ? { 'aria-expanded': !collapsedIds.has(item.id) } : {})}
-                        title={`Line ${item.symbol.line}: ${item.symbol.name}`}
+                        title={t('explorer.symbols.lineTitle', { line: item.symbol.line, name: item.symbol.name })}
                     >
                         {#if item.hasChildren}
                             <span
@@ -278,7 +280,7 @@
                                 onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); toggleCollapse(item.id); } }}
                                 role="button"
                                 tabindex="0"
-                                aria-label={collapsedIds.has(item.id) ? 'Expand' : 'Collapse'}
+                                aria-label={collapsedIds.has(item.id) ? t('explorer.symbols.expand') : t('explorer.symbols.collapse')}
                             >
                                 {#if collapsedIds.has(item.id)}
                                     <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
@@ -307,14 +309,14 @@
         </VirtualList>
     {:else}
         <!-- Flat list for code symbols (top-level only) -->
-        <VirtualList items={flatList} itemHeight={22} minThreshold={50} role="tree" aria-label="Symbol outline">
+        <VirtualList items={flatList} itemHeight={22} minThreshold={50} role="tree" aria-label={t('explorer.symbols.outlineListAria')}>
             {#snippet children({ item: symbol })}
                 <button
                     class="symbol-item"
                     onclick={() => onSymbolClick(symbol.line)}
                     role="treeitem"
                     aria-selected="false"
-                    title={`Line ${symbol.line}: ${symbol.name}`}
+                    title={t('explorer.symbols.lineTitle', { line: symbol.line, name: symbol.name })}
                 >
                     <span
                         class="symbol-icon"

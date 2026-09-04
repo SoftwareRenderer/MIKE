@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { t } from '$lib/i18n';
+
     /** Provider draft with pricing fields (mutated in place via Svelte 5 deep reactivity). */
     let { provider, currencySymbol, index, onDirty }: {
         provider: {
@@ -33,8 +35,8 @@
 <!-- Pricing Section (provider-level defaults) -->
 <div class="pricing-section">
     <button type="button" class="pricing-header" onclick={() => pricingExpanded = !pricingExpanded} aria-expanded={pricingExpanded}>
-        <span class="pricing-label">Pricing Defaults (USD per 1M tokens)</span>
-        <span class="help-icon" title="Provider-wide defaults applied to every model that doesn't set its own pricing. Set per-model prices by expanding a model row above. If Cache Write is set, it replaces Input for non-cached tokens.">
+        <span class="pricing-label">{t('settings.pricing.title')}</span>
+        <span class="help-icon" title={t('settings.pricing.help')}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                 <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
                 <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
@@ -48,28 +50,28 @@
     <div class="pricing-content">
     <div class="currency-grid" style="grid-template-columns: repeat(4, 1fr)">
         <div class="currency-field">
-            <label for={`input-price-${index}`}>Input</label>
+            <label for={`input-price-${index}`}>{t('settings.pricing.input')}</label>
             <div class="currency-input-wrap">
                 <span class="currency-prefix">{currencySymbol}</span>
                 <input id={`input-price-${index}`} type="number" inputmode="decimal" min="0" step="any" value={provider.input_price > 0 ? provider.input_price : ''} oninput={(e) => { provider.input_price = parsePrice(e); onDirty?.(); }} class="currency-input" />
             </div>
         </div>
         <div class="currency-field">
-            <label for={`output-price-${index}`}>Output</label>
+            <label for={`output-price-${index}`}>{t('settings.pricing.output')}</label>
             <div class="currency-input-wrap">
                 <span class="currency-prefix">{currencySymbol}</span>
                 <input id={`output-price-${index}`} type="number" inputmode="decimal" min="0" step="any" value={provider.output_price > 0 ? provider.output_price : ''} oninput={(e) => { provider.output_price = parsePrice(e); onDirty?.(); }} class="currency-input" />
             </div>
         </div>
         <div class="currency-field">
-            <label for={`cache-read-price-${index}`}>Cache Read</label>
+            <label for={`cache-read-price-${index}`}>{t('settings.pricing.cacheRead')}</label>
             <div class="currency-input-wrap">
                 <span class="currency-prefix">{currencySymbol}</span>
                 <input id={`cache-read-price-${index}`} type="number" inputmode="decimal" min="0" step="any" value={provider.cache_read_price > 0 ? provider.cache_read_price : ''} oninput={(e) => { provider.cache_read_price = parsePrice(e); onDirty?.(); }} class="currency-input" />
             </div>
         </div>
         <div class="currency-field">
-            <label for={`cache-write-price-${index}`}>Cache Write</label>
+            <label for={`cache-write-price-${index}`}>{t('settings.pricing.cacheWrite')}</label>
             <div class="currency-input-wrap">
                 <span class="currency-prefix">{currencySymbol}</span>
                 <input id={`cache-write-price-${index}`} type="number" inputmode="decimal" min="0" step="any" value={provider.cache_write_price > 0 ? provider.cache_write_price : ''} oninput={(e) => { provider.cache_write_price = parsePrice(e); onDirty?.(); }} class="currency-input" />
@@ -83,8 +85,8 @@
 <!-- Power & Electricity Section (provider-level defaults) -->
 <div class="currency-section">
     <button type="button" class="currency-header" onclick={() => powerExpanded = !powerExpanded} aria-expanded={powerExpanded}>
-        <span class="currency-label">Power & Electricity Defaults</span>
-        <span class="help-icon" title="Provider-wide defaults. Power (W) × generation time gives kWh; combined with the electricity rate, adds to total cost. A model can override power via its own row; the electricity rate always applies.">
+        <span class="currency-label">{t('settings.pricing.powerTitle')}</span>
+        <span class="help-icon" title={t('settings.pricing.powerHelp')}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                 <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
                 <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
@@ -98,11 +100,11 @@
     <div class="currency-content">
     <div class="currency-grid">
         <div class="currency-field">
-            <label for={`power-w-${index}`}>Power Consumption (W)</label>
+            <label for={`power-w-${index}`}>{t('settings.pricing.power')}</label>
             <input id={`power-w-${index}`} type="number" inputmode="decimal" min="0" step="any" value={provider.power_consumption_w > 0 ? provider.power_consumption_w : ''} oninput={(e) => { provider.power_consumption_w = parsePrice(e); onDirty?.(); }} class="field-input" />
         </div>
         <div class="currency-field">
-            <label for={`elec-cost-${index}`}>Electricity ({currencySymbol}/kWh)</label>
+            <label for={`elec-cost-${index}`}>{t('settings.pricing.electricity', { currency: currencySymbol })}</label>
             <div class="currency-input-wrap">
                 <span class="currency-prefix">{currencySymbol}</span>
                 <input id={`elec-cost-${index}`} type="number" inputmode="decimal" min="0" step="any" value={provider.electricity_cost_per_kwh > 0 ? provider.electricity_cost_per_kwh : ''} oninput={(e) => { provider.electricity_cost_per_kwh = parsePrice(e); onDirty?.(); }} class="currency-input" />

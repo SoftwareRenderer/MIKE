@@ -10,6 +10,7 @@
     import { listSessions, revokeSession, revokeOtherSessions } from '$lib/api';
     import { dialogStore } from '$lib/stores';
     import { formatRelativeTime } from '$lib/utils/format-time';
+    import { t } from '$lib/i18n';
 
     /** Sign-out path owned by the modal (App's logout handler). */
     let { onSignOut }: { onSignOut?: () => void | Promise<void> } = $props();
@@ -32,7 +33,7 @@
 
     /** Absolute timestamp for a row's `title` tooltip. */
     function absolute(iso: string): string {
-        if (!iso) return 'Unknown';
+        if (!iso) return t('settings.sessions.unknownTime');
         const date = new Date(iso);
         return isNaN(date.getTime()) ? iso : date.toLocaleString();
     }
@@ -49,7 +50,7 @@
         try {
             sessions = await listSessions();
         } catch (e: any) {
-            error = e?.message || 'Failed to load sessions';
+            error = e?.message || t('settings.sessions.loadFailed');
             sessions = [];
         } finally {
             loading = false;
@@ -59,12 +60,12 @@
     async function handleRevoke(session: SessionInfo) {
         const isCurrent = session.current;
         const confirmed = await dialogStore.showConfirm({
-            title: isCurrent ? 'Revoke this device?' : 'Revoke this session?',
+            title: isCurrent ? t('settings.sessions.revokeThisDevice') : t('settings.sessions.revokeThisSession'),
             message: isCurrent
-                ? 'You are signed in on this device. Revoking it signs you out now.'
-                : 'The other device will be signed out and must sign in again.',
-            confirmText: isCurrent ? 'Sign out' : 'Revoke',
-            cancelText: 'Cancel',
+                ? t('settings.sessions.revokeThisDeviceMessage')
+                : t('settings.sessions.revokeOtherMessage'),
+            confirmText: isCurrent ? t('settings.signOut') : t('settings.sessions.revoke'),
+            cancelText: t('settings.cancel'),
             variant: 'destructive',
         });
         if (!confirmed) return;
@@ -80,9 +81,9 @@
                 return;
             }
             sessions = sessions.filter(s => s.id !== session.id);
-            dialogStore.showToast('Session revoked', 'success');
+            dialogStore.showToast(t('settings.sessions.revokedToast'), 'success');
         } catch (e: any) {
-            error = e?.message || 'Failed to revoke session';
+            error = e?.message || t('settings.sessions.revokeFailed');
         } finally {
             revokingId = '';
         }
@@ -91,12 +92,10 @@
     async function handleRevokeOthers() {
         const count = otherCount;
         const confirmed = await dialogStore.showConfirm({
-            title: 'Revoke all other sessions?',
-            message: count === 1
-                ? '1 other device will be signed out and must sign in again. This device stays signed in.'
-                : `${count} other devices will be signed out and must sign in again. This device stays signed in.`,
-            confirmText: 'Revoke all',
-            cancelText: 'Cancel',
+            title: t('settings.sessions.revokeAllTitle'),
+            message: t('settings.sessions.revokeAllMessage', { count }),
+            confirmText: t('settings.sessions.revokeAll'),
+            cancelText: t('settings.cancel'),
             variant: 'destructive',
         });
         if (!confirmed) return;
@@ -105,10 +104,10 @@
         error = '';
         try {
             const { revoked } = await revokeOtherSessions();
-            dialogStore.showToast(revoked === 1 ? '1 other session revoked' : `${revoked} sessions revoked`, 'success');
+            dialogStore.showToast(t('settings.sessions.revokedCountToast', { count: revoked }), 'success');
             await loadSessions();
         } catch (e: any) {
-            error = e?.message || 'Failed to revoke other sessions';
+            error = e?.message || t('settings.sessions.revokeAllFailed');
         } finally {
             revokingOthers = false;
         }
@@ -123,7 +122,7 @@
 
 <section class="section sessions-section">
     <div class="section-header">
-        <h3 class="section-label">Sessions</h3>
+        <h3 class="section-label">{t('settings.sessions.title')}</h3>
         <div class="section-actions">
             <button
                 type="button"
@@ -131,16 +130,16 @@
                 onclick={loadSessions}
                 disabled={loading || revokingOthers}
                 aria-label="refresh-sessions"
-                title="Reload the session list"
-            >{loading ? 'Loading...' : 'Refresh'}</button>
+                title={t('settings.sessions.reloadTitle')}
+            >{loading ? t('settings.sessions.loading') : t('settings.sessions.refresh')}</button>
             <button
                 type="button"
                 class="btn-small btn-danger"
                 onclick={handleRevokeOthers}
                 disabled={loading || revokingOthers || otherCount === 0}
                 aria-label="revoke-all-other-sessions"
-                title="Sign out every other device"
-            >{revokingOthers ? 'Revoking...' : 'Revoke all other sessions'}</button>
+                title={t('settings.sessions.revokeAllHint')}
+            >{revokingOthers ? t('settings.sessions.revoking') : t('settings.sessions.revokeAllOther')}</button>
         </div>
     </div>
 
@@ -149,30 +148,30 @@
     {/if}
 
     {#if loading && sessions.length === 0}
-        <div class="sessions-status" role="status">Loading sessions...</div>
+        <div class="sessions-status" role="status">{t('settings.sessions.loadingList')}</div>
     {:else if sessions.length === 0 && !error}
-        <div class="sessions-status" role="status">No other active sessions</div>
+        <div class="sessions-status" role="status">{t('settings.sessions.none')}</div>
     {:else}
         {#each rows as session (session.id)}
             <div class="session-row" class:session-row-current={session.current} data-session-id={session.id}>
                 <div class="session-info">
                     <div class="session-headline">
-                        <span class="session-agent" title={session.user_agent || 'Unknown device'}>
-                            {session.user_agent || 'Unknown device'}
+                        <span class="session-agent" title={session.user_agent || t('settings.sessions.unknownDevice')}>
+                            {session.user_agent || t('settings.sessions.unknownDevice')}
                         </span>
                         {#if session.current}
-                            <span class="session-badge">This device</span>
+                            <span class="session-badge">{t('settings.sessions.thisDevice')}</span>
                         {/if}
                     </div>
                     <div class="session-meta">
-                        <span class="session-meta-item" title="Signed in at {absolute(session.created_at)}">
-                            <span class="session-meta-key">Created</span> {relative(session.created_at)}
+                        <span class="session-meta-item" title={t('settings.sessions.signedInAt', { time: absolute(session.created_at) })}>
+                            <span class="session-meta-key">{t('settings.sessions.created')}</span> {relative(session.created_at)}
                         </span>
-                        <span class="session-meta-item" title="Last seen at {absolute(session.last_seen)}">
-                            <span class="session-meta-key">Last seen</span> {relative(session.last_seen)}
+                        <span class="session-meta-item" title={t('settings.sessions.lastSeenAt', { time: absolute(session.last_seen) })}>
+                            <span class="session-meta-key">{t('settings.sessions.lastSeen')}</span> {relative(session.last_seen)}
                         </span>
                         <span class="session-meta-item">
-                            <span class="session-meta-key">IP</span> {session.ip || '\u2014'}
+                            <span class="session-meta-key">{t('settings.sessions.ip')}</span> {session.ip || '\u2014'}
                         </span>
                     </div>
                 </div>
@@ -182,12 +181,12 @@
                     onclick={() => handleRevoke(session)}
                     disabled={revokingId === session.id || revokingOthers}
                     aria-label={`revoke-session-${session.id}`}
-                    title={session.current ? 'Revoke this device and sign out' : 'Sign out this session'}
-                >{revokingId === session.id ? 'Revoking...' : 'Revoke'}</button>
+                    title={session.current ? t('settings.sessions.revokeDeviceHint') : t('settings.sessions.revokeSessionHint')}
+                >{revokingId === session.id ? t('settings.sessions.revoking') : t('settings.sessions.revoke')}</button>
             </div>
         {/each}
         {#if otherCount === 0}
-            <div class="sessions-status" role="status">No other active sessions</div>
+            <div class="sessions-status" role="status">{t('settings.sessions.none')}</div>
         {/if}
     {/if}
 </section>
