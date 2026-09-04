@@ -30,15 +30,143 @@ export type MessageParams = Record<string, string | number | boolean | null | un
 
 export const en = {
     // ════════════════════════════════════════════════════════════════════════════
-    // ═══ namespace: settings.* — Settings / ConfigModal / Extensions batch      ═══
-    // ═══ (ConfigModal.svelte, ConfigModal/*.svelte, StatsModal.svelte,          ═══
-    // ═══  utils/providers.ts)                                                    ═══
+    // ═══ namespace: explorer.* — explorer / file browsers batch                              ═══
+    // ═══ (ExplorerView.svelte, TaskExplorerView.svelte, FileBrowser.svelte,                  ═══
+    // ═══  TaskFileBrowser.svelte, BranchFileBrowser.svelte,                                  ═══
+    // ═══  BranchSymbols.svelte, PathPicker.svelte)                                           ═══
     // ════════════════════════════════════════════════════════════════════════════
 
     // ── i18n runtime (self-test surface; replaced when T5's catalog lands) ──
     'i18n.test.plain': 'Plain message',
     'i18n.test.files': { one: '{count} file', other: '{count} files' },
 
+    // ── Shared chrome across the explorer components (identical copy in more than
+    //    one of them, so it is one key rather than a per-file duplicate) ──
+    'explorer.shared.loading': 'Loading...',
+    'explorer.shared.cancel': 'Cancel',
+    'explorer.shared.discard': 'Discard',
+    'explorer.shared.unsavedChanges': 'Unsaved changes',
+    'explorer.shared.unsavedDiscardMessage': '"{file}" has unsaved changes. Discard them?',
+    'explorer.shared.openTerminal': 'Open terminal',
+    'explorer.shared.terminalTitle': 'Open terminal ({shortcut})',
+    'explorer.shared.closeEscape': 'Close (Escape)',
+    'explorer.shared.reviewChanges': 'Review Changes',
+    'explorer.shared.fileBrowser': 'File browser',
+    'explorer.shared.editor': 'Editor',
+    'explorer.shared.symbols': 'Symbols',
+    'explorer.shared.selectFileToEdit': 'Select a file to edit',
+    'explorer.shared.resizeSplitAria': 'Resize file browser and git graph panels',
+    'explorer.shared.resizeLeftAria': 'Resize left panel',
+    'explorer.shared.resizeRightAria': 'Resize right panel',
+    'explorer.shared.filesLabel': 'Files',
+    'explorer.shared.goHome': 'Go to home directory',
+    'explorer.shared.pathPlaceholder': 'Enter path or browse...',
+    'explorer.shared.filePathAria': 'File path',
+    'explorer.shared.contentsAria': 'Directory contents',
+    'explorer.shared.findInFiles': 'Find in files',
+    'explorer.shared.findInFilesTitle': 'Find in files (Ctrl+Shift+F)',
+    'explorer.shared.newFileTitle': 'New file',
+    'explorer.shared.createFileAria': 'Create new file',
+    'explorer.shared.newFolder': 'New folder',
+    'explorer.shared.createFolderAria': 'Create new folder',
+    'explorer.shared.newFileNameAria': 'New file name',
+    'explorer.shared.newFolderNameAria': 'New folder name',
+    'explorer.shared.filenamePlaceholder': 'filename',
+    'explorer.shared.folderNameLowerPlaceholder': 'folder name',
+    'explorer.shared.errReadDir': 'Failed to read directory',
+    'explorer.shared.errCreateFile': 'Failed to create file',
+    'explorer.shared.errCreateFolder': 'Failed to create folder',
+    'explorer.shared.errInitGit': 'Failed to initialize git repository',
+    // One directory/file entry label, shared by every browser in this batch.
+    'explorer.shared.entryFolder': 'Folder: {name}',
+    'explorer.shared.entryFile': 'File: {name}',
+    'explorer.shared.openFolder': 'Open folder: {name}',
+
+    // ── ExplorerView.svelte — project explorer shell (branch view) ──
+    'explorer.view.aria': 'Explorer view',
+    'explorer.view.closeAria': 'Close branch view',
+    'explorer.view.switchBranch': 'Switch branch',
+    'explorer.view.noBranches': 'No branches',
+
+    // ── TaskExplorerView.svelte — same shell, scoped to one task's worktree ──
+    'explorer.taskView.aria': 'Task explorer view',
+    'explorer.taskView.closeAria': 'Close task explorer',
+
+    // ── FileBrowser.svelte — the add-project / directory-picker modal ──
+    'explorer.fileBrowser.title': 'Add Project',
+    'explorer.fileBrowser.browse': 'Browse',
+    'explorer.fileBrowser.browseTitle': 'Browse for an existing directory',
+    'explorer.fileBrowser.cloneTab': 'Clone from Git',
+    'explorer.fileBrowser.cloneTitle': 'Clone a git repository',
+    'explorer.fileBrowser.folderNamePlaceholder': 'Folder name',
+    'explorer.fileBrowser.create': 'Create',
+    'explorer.fileBrowser.isGitRepo': '✓ This is a git repository',
+    // Entry labels are whole messages rather than a stem plus a suffix, so a
+    // translator can move the git marker wherever their language puts it.
+    'explorer.fileBrowser.entryFolderGit': 'Folder: {name}, git repository',
+    'explorer.fileBrowser.entryFileGit': 'File: {name}, git repository',
+    'explorer.fileBrowser.openFolderGit': 'Open folder: {name} (git repository)',
+    'explorer.fileBrowser.entryFileGitTitle': 'File: {name} (git repository)',
+    'explorer.fileBrowser.cloneUrl': 'Git repository URL',
+    // The clone help wraps an example URL in <code>, so it is a before/after pair;
+    // the trailing space of the first half is load-bearing (it separates the text
+    // from the <code> element).
+    'explorer.fileBrowser.cloneHelpBefore': 'Supports HTTPS and SSH URLs (e.g. ',
+    'explorer.fileBrowser.cloneHelpAfter': ').',
+    'explorer.fileBrowser.cloneInto': 'Clone into',
+    'explorer.fileBrowser.useSandbox': 'Use Sandbox',
+    'explorer.fileBrowser.select': 'Select',
+    'explorer.fileBrowser.selectTitle': 'Select this directory as project',
+    'explorer.fileBrowser.initGit': 'Initialize Git',
+    'explorer.fileBrowser.initializing': 'Initializing...',
+    'explorer.fileBrowser.initGitTitle': 'Initialize git repository in this directory',
+    'explorer.fileBrowser.clone': 'Clone',
+    'explorer.fileBrowser.cloning': 'Cloning...',
+    'explorer.fileBrowser.cloneIntoDirTitle': 'Clone repository into the current directory',
+    'explorer.fileBrowser.cloneNeedUrl': 'Please enter a git repository URL',
+
+    // ── TaskFileBrowser.svelte — the file tree of one task's worktree ──
+    'explorer.taskFiles.empty': 'Empty folder',
+
+    // ── BranchFileBrowser.svelte — the project explorer's file tree ──
+    'explorer.branchFiles.initSandbox': 'Initializing sandbox...',
+    'explorer.branchFiles.empty': 'Empty directory',
+    'explorer.branchFiles.treeAria': 'File tree',
+    'explorer.branchFiles.gitStatusTitle': 'Git: {status}',
+    'explorer.branchFiles.gitStatusAria': 'Git status: {status}',
+
+    // ── BranchSymbols.svelte — symbol / document-outline panel ──
+    'explorer.symbols.sortByPosition': 'Sort by position',
+    'explorer.symbols.sortAlphabetically': 'Sort alphabetically',
+    'explorer.symbols.switchToPosition': 'Switch to position sort',
+    'explorer.symbols.switchToAlphabetical': 'Switch to alphabetical sort',
+    'explorer.symbols.flatList': 'Flat list',
+    'explorer.symbols.treeView': 'Tree view',
+    'explorer.symbols.switchToFlat': 'Switch to flat list',
+    'explorer.symbols.switchToTree': 'Switch to tree view',
+    'explorer.symbols.outlineLabel': 'Outline',
+    'explorer.symbols.noneHeadings': 'No headings',
+    'explorer.symbols.noneSymbols': 'No symbols',
+    'explorer.symbols.outlineAria': 'Document outline',
+    'explorer.symbols.treeAria': 'Symbol tree',
+    'explorer.symbols.outlineListAria': 'Symbol outline',
+    'explorer.symbols.expand': 'Expand',
+    'explorer.symbols.collapse': 'Collapse',
+    'explorer.symbols.lineTitle': 'Line {line}: {name}',
+
+    // ── PathPicker.svelte — generic directory/file picker modal. Its `title`,
+    //    `emptyLabel` and `selectTitle` arrive as props from the calling screen and
+    //    are that screen's copy to own, so they stay props and are never keyed here. ──
+    'explorer.pathPicker.select': 'Select',
+    'explorer.pathPicker.selectFile': 'Select file: {name}',
+    'explorer.pathPicker.dirPathAria': 'Directory path',
+    'explorer.pathPicker.goParentAria': 'Go to parent directory',
+
+    // ════════════════════════════════════════════════════════════════════════════
+    // ═══ namespace: settings.* — Settings / ConfigModal / Extensions batch                   ═══
+    // ═══ (ConfigModal.svelte, ConfigModal/*.svelte, StatsModal.svelte,                       ═══
+    // ═══  utils/providers.ts)                                                                ═══
+    // ════════════════════════════════════════════════════════════════════════════
     // ── ConfigModal.svelte — shell, tabs, provider pairs, About, footer ──
     'settings.title': 'Settings',
     'settings.close': 'Close',
@@ -472,6 +600,680 @@ export const en = {
     'settings.extensions.loadingRegistry': 'Loading registry...',
     'settings.extensions.needsSetupNote.before': 'Requires additional setup after installation: it reads resolved dependencies from',
     'settings.extensions.needsSetupNote.after': 'inside its sandbox. Point it at a folder of your choosing afterwards — until you do, it resolves only what its own image contains.',
+
+    // ════════════════════════════════════════════════════════════════════════════
+    // ═══ namespace: app.* — app shell + shared primitives batch                              ═══
+    // ═══ (App.svelte, App/Sidebar.svelte, App/TopBar.svelte, LoginModal,                     ═══
+    // ═══  CreateTaskModal, ConfirmationDialog, stores/dialogs.svelte.ts,                     ═══
+    // ═══  constants/modes.ts, utils/keyboard.ts)                                             ═══
+    // ═══                                                                                     ═══
+    // ═══ No key here for `aria-label` / `title` / `placeholder` copy — that                  ═══
+    // ═══ text stays a literal English string in the component (see README.md).               ═══
+    // ════════════════════════════════════════════════════════════════════════════
+
+    // ── shared button / dialog copy ──
+    'app.cancel': 'Cancel',
+    'app.discard': 'Discard',
+    'app.keepEditing': 'Keep editing',
+    'app.confirm.confirm': 'Confirm',
+    'app.dialog.compress': 'Compress',
+    'app.dialog.commitAndDone': 'Commit and move to Done',
+
+    // ── utils/keyboard.ts — keycap legends and shortcut tooltips ──
+    // The legends are what a keycap hint shows (Column, StartPanel, the Create
+    // button); the binding itself stays the normalized `control+k` form.
+    'app.key.control': 'Ctrl',
+    'app.key.meta': 'Cmd',
+    'app.key.shift': 'Shift',
+    'app.key.alt': 'Alt',
+    'app.key.space': 'Space',
+    'app.key.click': 'Click',
+    'app.key.enter': 'Enter',
+    'app.key.tab': 'Tab',
+    'app.key.backspace': 'Backspace',
+    'app.key.delete': 'Delete',
+    'app.key.up': 'Up',
+    'app.key.down': 'Down',
+    'app.key.left': 'Left',
+    'app.key.right': 'Right',
+    'app.shortcut.toggleFullscreen': 'Toggle fullscreen',
+    'app.shortcut.toggleFullscreenWithKey': 'Toggle fullscreen ({key})',
+    'app.shortcut.openTerminal': 'Open terminal',
+    'app.shortcut.openTerminalWithKey': 'Open terminal ({key})',
+
+    // ── constants/modes.ts — operating-mode descriptions ──
+    // Read through `MODE_DESCRIPTIONS`, whose getters keep the export shape (and
+    // therefore the two call sites this batch does not own) unchanged.
+    'app.mode.act': 'AI is required to provide structured responses during review, and has read/write access.',
+    'app.mode.plan': 'AI decomposes work into subtasks on the board, and only has read access.',
+    'app.mode.explore': 'AI has read/write access.',
+
+    // ── App/Sidebar.svelte ──
+    'app.sidebar.projects': 'Projects',
+    'app.sidebar.addProject': '+ Add Project',
+    'app.sidebar.fullScreen': 'Full Screen',
+    'app.sidebar.tokenUsage': 'Token Usage',
+    'app.sidebar.settings': 'Settings',
+
+    // ── LoginModal.svelte ──
+    // Pre-auth: the runtime answers this from the statically bundled `en` catalog,
+    // so the login screen needs no fetch and no extension/config load (see README).
+    'app.login.signIn': 'Sign in',
+    'app.login.signingIn': 'Signing in...',
+    'app.login.failed': 'Login failed',
+    'app.login.networkError': 'Network error',
+
+    // ── CreateTaskModal.svelte ──
+    'app.task.create': 'Create Task',
+    'app.task.createSubtask': 'Create Subtask',
+    'app.task.creating': 'Creating...',
+    'app.task.autoStart': 'Auto start',
+    'app.task.subtaskOf': 'Subtask of:',
+    'app.task.parentFallback': 'Parent task',
+    'app.task.description': 'Description',
+    'app.task.model': 'Model',
+    'app.task.operatingMode': 'Operating mode',
+    'app.task.repository': 'Repository',
+    'app.task.branch': 'Branch',
+    'app.task.branchDesc': "Base branch for this task's changes",
+    'app.task.autoMerge': 'Auto-merge',
+    'app.task.autoMergeParentDesc': 'Merge changes into parent task when complete',
+    // The branch badge is an inline element inside this sentence, so the copy is
+    // two messages — the other order is the translator's to choose.
+    'app.task.autoMergeInto.before': 'Merge changes into',
+    'app.task.autoMergeInto.after': 'when complete',
+    'app.task.subtasksAutoMerge': 'Allow subtasks to auto-merge',
+    'app.task.subtasksAutoMergeDesc': 'Subtasks created under this task will auto-merge into it',
+    'app.task.autoStartFailed': 'Task created, but auto-start failed.',
+    'app.task.queuedOffline': 'Offline — task creation and start are queued; it will run when you are back online.',
+    'app.task.discardTitle': 'Discard task?',
+    'app.task.discardMessage': 'Your task description has not been saved. If you close now, your changes will be lost.',
+
+    // ── App.svelte — page title, banners, offline screen, empty states ──
+    'app.title.default': 'Kanban Board',
+    // The manual `task${n === 1 ? '' : 's'}` this replaces is exactly the shape
+    // `Intl.PluralRules` exists for.
+    'app.title.review': {
+        one: '🟡 {name} - {count} task for review',
+        other: '🟡 {name} - {count} tasks for review',
+    },
+    'app.time.justNow': 'just now',
+    'app.project.removeTitle': 'Remove Project',
+    'app.project.removeMessage': "Remove \"{name}\" from the board?\n\nThis will delete the project's Kanban board, all tasks, messages, and their worktree directories.\nThe project folder itself will NOT be deleted.",
+    'app.project.remove': 'Remove',
+    'app.offline.title': 'Server unreachable',
+    'app.offline.button': 'Offline Mode',
+    'app.reconnect.status': 'Reconnecting ...',
+    'app.reconnect.statusCountdown': 'Reconnecting in {seconds}s ...',
+    'app.reconnect.dataFrom': 'Data from {time}',
+    'app.reconnect.connect': 'Connect',
+    'app.cache.banner': 'Viewing cached data',
+    'app.skipToMain': 'Skip to main content',
+    'app.empty.welcomeTitle': 'Welcome to Kanban',
+    'app.empty.welcomeBody': 'Configure an LLM provider to get started. Supports any OpenAI-compatible API.',
+    'app.empty.configureProvider': 'Configure Provider',
+    'app.empty.noProjectsTitle': 'No Projects',
+    'app.empty.noProjectsBody': 'Add a project to get started. Projects must be git repositories.',
+    'app.empty.addProject': 'Add Project',
+
+    // ↓ keys for each owned file of this batch are appended below this line ↓
+
+    // ════════════════════════════════════════════════════════════════════════════
+    // ═══ namespace: api.* — request-failure fallback text                                    ═══
+    // ═══ (api/*.ts, services/extension-manager.svelte.ts)                                    ═══
+    // ════════════════════════════════════════════════════════════════════════════
+
+    // The server's own `body.error` always wins when present; these are what the browser
+    // shows when the response carried no message. Never wrap server text in `t()`.
+    'api.fetchConfig': 'Failed to fetch config',
+    'api.testConnection': 'Failed to test connection',
+    'api.fetchModels': 'Failed to fetch models',
+    'api.fetchExtensions': 'Failed to fetch extensions',
+    'api.updateExtension': 'Failed to update extension',
+    'api.deleteExtension': 'Failed to delete extension',
+    'api.updateExtensionEnabledState': 'Failed to update extension enabled state',
+    'api.updateDependencyDirectory': 'Failed to update the dependency directory',
+    'api.readHomeDirectory': 'Failed to read the home directory',
+    'api.fetchLocalExtensions': 'Failed to fetch local extensions',
+    'api.fetchRegistry': 'Failed to fetch registry',
+    'api.checkForUpdates': 'Failed to check for updates',
+    'api.operationFailed': 'Operation failed',
+    'api.unexpectedResponse': 'Unexpected response from {path} ({contentType}): {body}',
+    'api.emptyBody': 'empty body',
+    'api.noReader': 'No reader available',
+    'api.operationEndedEarly': 'Operation ended before reporting completion',
+    'api.fetchGitLog': 'Failed to fetch git log',
+    'api.fetchCommitDiff': 'Failed to fetch commit diff',
+    'api.fetchBranches': 'Failed to fetch branches',
+    'api.checkoutBranch': 'Failed to checkout branch',
+    'api.fetchGitStatus': 'Failed to fetch git status',
+    'api.fetchProjectDiff': 'Failed to fetch project diff',
+    'api.fetchFile': 'Failed to fetch file',
+    'api.stageFile': 'Failed to stage file',
+    'api.unstageFile': 'Failed to unstage file',
+    'api.commit': 'Failed to commit',
+    'api.pull': 'Failed to pull',
+    'api.push': 'Failed to push',
+    'api.fetchDiff': 'Failed to fetch diff',
+    'api.fetchCommits': 'Failed to fetch commits',
+    'api.fetchFileContent': 'Failed to fetch file content',
+    'api.fetchTaskGitLog': 'Failed to fetch task git log',
+    'api.fetchTaskCommitDiff': 'Failed to fetch task commit diff',
+    'api.createProject': 'Failed to create project',
+    'api.updateProject': 'Failed to update project',
+    'api.buildSandboxImage': 'Failed to build sandbox image',
+    'api.streamingNotSupported': 'Streaming not supported',
+    'api.buildCompletedWithoutResult': 'Build completed without result',
+    'api.deleteProject': 'Failed to delete project',
+    'api.resetStats': 'Failed to reset stats',
+    'api.createTask': 'Failed to create task',
+    'api.updateTask': 'Failed to update task',
+    'api.deleteTask': 'Failed to delete task',
+    'api.moveTask': 'Failed to move task',
+    'api.commitAndDone': 'Failed to commit and mark as done',
+    'api.clearDoneTasks': 'Failed to clear done tasks',
+    'api.initializeTask': 'Failed to initialize task',
+    'api.startTask': 'Failed to start task',
+    'api.startSubtask': 'Failed to start subtask',
+    'api.stopTask': 'Failed to stop task',
+    'api.retryTask': 'Failed to retry task',
+    'api.resumeTask': 'Failed to resume task',
+    'api.sendMessage': 'Failed to send message',
+    'api.createMessage': 'Failed to create message',
+    'api.deleteMessages': 'Failed to delete messages',
+    'api.deleteMessage': 'Failed to delete message',
+    'api.updateMessage': 'Failed to update message',
+    'api.updateConfig': 'Failed to update config',
+    'api.switchThread': 'Failed to switch thread',
+    'api.forkThread': 'Failed to fork thread',
+    'api.fetchProjects': 'Failed to fetch projects',
+    'api.fetchProject': 'Failed to fetch project',
+    'api.fetchProjectCounts': 'Failed to fetch project counts',
+    'api.fetchProjectStats': 'Failed to fetch project stats',
+    'api.cloneProject': 'Failed to clone project',
+    // The clone stream's `error` event may carry no message; this is what shows then.
+    'api.cloneFailed': 'clone failed',
+    'api.cloneCompletedWithoutResult': 'Clone completed without result',
+    'api.fetchBoard': 'Failed to fetch board',
+    'api.taskNotFound': 'Task not found',
+    'api.fetchMessages': 'Failed to fetch messages',
+    'api.fetchMessage': 'Failed to fetch message',
+    'api.checkMessageDelete': 'Failed to check message delete',
+    'api.summarizeTask': 'Failed to summarize task',
+    'api.compactTask': 'Failed to compact task',
+    'api.fetchSessions': 'Failed to fetch sessions',
+    'api.revokeSession': 'Failed to revoke session',
+    'api.revokeOtherSessions': 'Failed to revoke other sessions',
+    'api.fetchThreads': 'Failed to fetch threads',
+    'api.loadExtensions': 'Failed to load extensions',
+    'api.loadRegistry': 'Failed to load registry',
+    'api.installExtension': 'Failed to install extension',
+    // ════════════════════════════════════════════════════════════════════════════
+    // ═══ namespace: sandbox.* — sandbox surface batch                                        ═══
+    // ═══ (SandboxConfigModal, SandboxPanel, SandboxImageStatusBanner, utils/sandbox-image-status) ═══
+    // ════════════════════════════════════════════════════════════════════════════
+
+    // Load-bearing security copy: "Read-only"/"Read/Write" and the disable-sandbox confirmation. Tests
+    // match the rendered English (/read-only/). Capability NAMES (CAP_*), container/host paths and port
+    // numbers are never catalog entries — only the human description beside a name is. The
+    // "set DANGER_ZONE=1 to allow" refusal is the Go server's own message and stays untranslated.
+    'sandbox.title': 'Sandbox Configuration',
+    'sandbox.lockedNotice': 'Cannot change sandbox settings while tasks are In Progress. The settings below are shown for reference only.',
+    'sandbox.enabled': 'Enabled',
+    'sandbox.disabled': 'Disabled',
+    'sandbox.default': 'Default',
+    'sandbox.empty': '(empty)',
+    'sandbox.isolation': 'Sandbox Isolation',
+    'sandbox.isolationAria': 'Sandbox isolation',
+    'sandbox.isolationDesc': 'Use gVisor to isolate all AI actions within a sandbox',
+    'sandbox.networkIsolation': 'Network Isolation',
+    'sandbox.networkIsolationAria': 'Network isolation',
+    'sandbox.networkIsolationDesc': 'Block all network access',
+    'sandbox.memoryLimit': 'Memory Limit',
+    'sandbox.memoryLimitDesc': 'Max container memory (MB) — blank = no limit',
+    'sandbox.memoryLimitAria': 'Maximum container memory in MB',
+    'sandbox.noLimit': 'No limit',
+    'sandbox.image': 'Image',
+    'sandbox.forwardedPorts': 'Forwarded Ports',
+    'sandbox.activePortMappings': 'Active Port Mappings',
+    'sandbox.customMounts': 'Custom Mounts',
+    'sandbox.environmentVariables': 'Environment Variables',
+    'sandbox.capabilities': 'Capabilities',
+    'sandbox.hostPort': 'Host port',
+    'sandbox.containerPort': 'Container port',
+    'sandbox.hostPath': 'Host path',
+    'sandbox.containerPath': 'Container path',
+    'sandbox.readWrite': 'Read/Write',
+    'sandbox.readOnly': 'Read-only',
+    'sandbox.mountReadWrite': 'Mount Read/Write',
+    'sandbox.mountReadOnly': 'Mount Read-only',
+    'sandbox.remove': 'Remove',
+    'sandbox.cancelEdit': 'Cancel edit',
+    'sandbox.cancel': 'Cancel',
+    'sandbox.save': 'Save',
+    'sandbox.saving': 'Saving...',
+    // Forwarded ports
+    'sandbox.ports': 'Forward Ports',
+    'sandbox.portsAria': 'Toggle port forwarding settings',
+    'sandbox.portsDesc': "Host ports are auto-assigned when tasks run, and visible in the task's Sandbox Info panel.",
+    'sandbox.portsNoActive': 'Host ports assigned when tasks run',
+    'sandbox.addPort': 'Add port forward',
+    'sandbox.savePort': 'Save port',
+    'sandbox.portRangeError': 'Port must be between 1 and 65535',
+    // Custom mounts
+    'sandbox.mountsAria': 'Toggle mount settings',
+    'sandbox.mountsDesc': 'Bind mount host paths into sandbox containers.',
+    'sandbox.addMount': 'Add mount',
+    'sandbox.saveMount': 'Save mount',
+    'sandbox.browseHostDirectory': 'Browse host directory',
+    'sandbox.mountHostPathError': 'Host path is required',
+    'sandbox.mountContainerPathError': 'Container path is required',
+    // Environment variables
+    'sandbox.envsAria': 'Toggle environment variables settings',
+    'sandbox.envsDesc': 'Set environment variables in sandbox containers.',
+    'sandbox.addVariable': 'Add variable',
+    'sandbox.saveVariable': 'Save variable',
+    'sandbox.envNameAria': 'Variable name',
+    'sandbox.envValueAria': 'Variable value',
+    'sandbox.envKeyPlaceholder': 'KEY',
+    'sandbox.envValueInputPlaceholder': 'value',
+    'sandbox.envNameError': 'Environment variable name is required',
+    'sandbox.envDuplicateError': 'Duplicate variable name: {name}',
+    // Capabilities
+    'sandbox.capsAria': 'Toggle capabilities settings',
+    'sandbox.capsDesc': 'Linux capabilities to add to the container. By default, all capabilities are dropped (--cap-drop=ALL).',
+    'sandbox.addCapabilityAria': 'Add capability',
+    'sandbox.capSuggestionPlaceholder': 'Type capability name, e.g. CAP_NET_RAW',
+    'sandbox.capAddMorePlaceholder': 'Add more...',
+    'sandbox.removeCapability': 'Remove {cap}',
+    // Memory / image source
+    'sandbox.imageSource': 'Image Source',
+    'sandbox.imageSourceDesc': 'Container image for sandbox',
+    'sandbox.imagePrebuilt': 'Pre-built',
+    'sandbox.imageName': 'Image Name',
+    'sandbox.imageNameDesc': 'Image for sandbox containers — must name its registry, e.g. docker.io/library/ubuntu:24.04',
+    'sandbox.imageNameAria': 'Sandbox image name',
+    'sandbox.dockerfile': 'Dockerfile',
+    'sandbox.dockerfileDesc': 'Select a Dockerfile on the server',
+    'sandbox.disableCache': 'Disable cache',
+    'sandbox.skipCacheTitle': 'Skip the container build layer cache for the next build',
+    'sandbox.disableCacheAria': 'Disable build cache',
+    'sandbox.buildImage': 'Build image',
+    'sandbox.build': 'Build',
+    'sandbox.building': 'Building...',
+    'sandbox.rebuild': 'Rebuild',
+    'sandbox.rebuildImage': 'Rebuild image',
+    'sandbox.rebuildImageNoCache': 'Rebuild image without cache',
+    'sandbox.noDockerfileSelected': 'No Dockerfile selected',
+    'sandbox.browse': 'Browse',
+    'sandbox.browseDockerfile': 'Browse for Dockerfile',
+    'sandbox.buildNotice': 'Build running in background — you can close this dialog.',
+    'sandbox.buildOutput': 'Build output',
+    'sandbox.imageTagLabel': 'Image tag:',
+    'sandbox.saveWarning': 'You have un-added changes — click + to add them before saving.',
+    'sandbox.dockerfileRequired': 'Please select a Dockerfile before saving.',
+    'sandbox.disableTitle': 'Disable Sandbox',
+    'sandbox.disableConfirm': 'Disable sandbox isolation for "{name}"?\n\nTasks will run without gVisor sandboxing, executing commands directly on the host.',
+    'sandbox.disableConfirmButton': 'Disable',
+    'sandbox.selectDockerfile': 'Select Dockerfile',
+    'sandbox.selectDockerfileTitle': 'Select this Dockerfile',
+    'sandbox.noDockerfilesFound': 'No Dockerfiles found in this directory',
+    'sandbox.selectDirectory': 'Select Directory',
+    'sandbox.selectDirectoryTitle': 'Select this directory',
+    'sandbox.noSubdirectories': 'No subdirectories in this path',
+    // One description per Linux capability name — the NAME is the machine value, never translated.
+    'sandbox.cap.CAP_CHOWN': 'Change file ownership',
+    'sandbox.cap.CAP_DAC_OVERRIDE': 'Bypass file permission checks',
+    'sandbox.cap.CAP_DAC_READ_SEARCH': 'Bypass read permission on files/dirs',
+    'sandbox.cap.CAP_FOWNER': 'Bypass permission checks requiring inode owner',
+    'sandbox.cap.CAP_FSETID': "Don't clear setuid/setgid on file mod",
+    'sandbox.cap.CAP_IPC_LOCK': 'Lock memory',
+    'sandbox.cap.CAP_IPC_OWNER': 'Bypass IPC ownership checks',
+    'sandbox.cap.CAP_KILL': 'Bypass permission checks for signals',
+    'sandbox.cap.CAP_LEASE': 'Lease files',
+    'sandbox.cap.CAP_LINUX_IMMUTABLE': 'Set immutable file attribute',
+    'sandbox.cap.CAP_MKNOD': 'Create special files',
+    'sandbox.cap.CAP_NET_ADMIN': 'Perform network-related operations',
+    'sandbox.cap.CAP_NET_BIND_SERVICE': 'Bind to ports < 1024',
+    'sandbox.cap.CAP_NET_BROADCAST': 'Make socket broadcasts',
+    'sandbox.cap.CAP_NET_RAW': 'Use RAW and PACKET sockets',
+    'sandbox.cap.CAP_SETFCAP': 'Set file capabilities',
+    'sandbox.cap.CAP_SETGID': 'Manipulate process group IDs',
+    'sandbox.cap.CAP_SETPCAP': 'Transfer capabilities',
+    'sandbox.cap.CAP_SETUID': 'Manipulate process user IDs',
+    'sandbox.cap.CAP_SYS_CHROOT': 'Use chroot()',
+    'sandbox.cap.CAP_SYS_PTRACE': 'Trace arbitrary processes',
+    'sandbox.cap.CAP_SYS_ADMIN': 'Perform a wide range of system admin operations',
+    'sandbox.cap.CAP_SYS_BOOT': 'Reboot the system',
+    'sandbox.cap.CAP_SYS_MODULE': 'Load/unload kernel modules',
+    'sandbox.cap.CAP_SYS_NICE': 'Raise process nice priority',
+    'sandbox.cap.CAP_SYS_RAWIO': 'Perform raw I/O ports',
+    'sandbox.cap.CAP_SYS_RESOURCE': 'Override resource limits',
+    'sandbox.cap.CAP_SYS_TIME': 'Set system clock',
+    'sandbox.cap.CAP_SYS_TTY_CONFIG': 'Configure TTY devices',
+    'sandbox.cap.CAP_BPF': 'Use BPF operations',
+    'sandbox.cap.CAP_PERFMON': 'Use performance monitoring',
+    'sandbox.cap.CAP_AUDIT_CONTROL': 'Modify kernel audit configuration',
+    'sandbox.cap.CAP_AUDIT_READ': 'Read kernel audit log',
+    'sandbox.cap.CAP_AUDIT_WRITE': 'Write records to kernel audit log',
+    'sandbox.cap.CAP_BLOCK_SUSPEND': 'Use suspend-to-memory/disk',
+    'sandbox.cap.CAP_CHECKPOINT_RESTORE': 'Checkpoint and restore',
+    'sandbox.cap.CAP_MAC_ADMIN': 'Override MAC configuration',
+    'sandbox.cap.CAP_MAC_OVERRIDE': 'Override MAC enforcement',
+    'sandbox.cap.CAP_WAKE_ALARM': 'Trigger wake alarms',
+    'sandbox.cap.CAP_SYSLOG': 'Perform syslog operations',
+    // Sandbox Info panel + the image-preparation banner
+    'sandbox.infoTitle': 'Sandbox Info',
+    'sandbox.sandboxedTask': 'Sandboxed Task',
+    'sandbox.isolationEnabled': 'Sandbox Isolation is enabled for this project',
+    'sandbox.memoryUsage': 'Memory Usage',
+    'sandbox.peakMemory': 'Peak {mb} MB',
+    // The kill count stays marked up in the panel, so the number is not part of the message —
+    // `count` only selects the form ("1 process" / "3 processes").
+    'sandbox.oomKilled': { one: 'process OOM-killed — memory limit reached', other: 'processes OOM-killed — memory limit reached' },
+    'sandbox.loadingSettings': 'Loading settings...',
+    'sandbox.portsIdle': 'Container has not started due to idle task or terminal',
+    'sandbox.dismiss': 'Dismiss',
+    'sandbox.dismissImageError': 'Dismiss sandbox image error',
+    'sandbox.imageBuildOutput': 'Image build output',
+    'sandbox.imageBuilding': 'Building sandbox image {image}…',
+    'sandbox.imagePulling': 'Pulling {image}…',
+    'sandbox.imageFailed': 'Sandbox image {image} could not be prepared',
+    'sandbox.imagePrepareFailed': 'Sandbox image preparation failed',
+    // ════════════════════════════════════════════════════════════════════════════
+    // ═══ namespace: terminal.* + boardDnd.* + attachments.*                                  ═══
+    // ═══ (TerminalPanel, api/terminal.ts, use-board-dnd, utils/attachments)                  ═══
+    // ════════════════════════════════════════════════════════════════════════════
+
+    // Only what a human reads. ANSI escapes, the `resize`/`input`/`output` frame types and the
+    // key names a hint chip prints stay exactly as written.
+    'terminal.connecting': 'Connecting...',
+    'terminal.title': 'Terminal',
+    'terminal.close': 'Close terminal',
+    // The shortcut hint translates; the element's aria-label stays the plain English name, and the
+    // virtual keyboard's key names (Escape, Arrow up…) are key names, not prose.
+    'terminal.closeWithShortcut': 'Close terminal ({shortcut})',
+    'terminal.activePortMappings': 'Active port mappings (Host : Container)',
+    'terminal.copy': 'Copy',
+    'terminal.paste': 'Paste',
+    'terminal.noProject': 'No project selected',
+    'boardDnd.cannotMoveToBacklog': 'Cannot move to Backlog: parent task is In Progress',
+    // ─── boardDnd/* + attachments/* — drag-to-move toast + the image-picker sentence ───
+    // {error} is whatever the request threw (often the server's own sentence) — never translated.
+    'boardDnd.moveFailed': 'Failed to move task: {error}',
+    'attachments.couldNotRead': 'Could not read {name}',
+    'attachments.tooLarge': { one: '{count} image too large (max {limit} MB)', other: '{count} images too large (max {limit} MB)' },
+    'attachments.onlyN': 'Only {max} images per message',
+
+
+    // ════════════════════════════════════════════════════════════════════════════
+    // ═══ namespace: chat.* — chat surface batch                                 ═══
+    // ═══ (components/Chat/*.svelte, ChangeModelModal.svelte, ModeSelect.svelte,  ═══
+    // ═══  services/stream-handler.ts, utils/chat-entries.ts, utils/toolArgs.ts)  ═══
+    // ════════════════════════════════════════════════════════════════════════════
+
+    // ── utils/toolArgs.ts — the one-line arg summary under a tool-call title ──
+    // `$ ` is a shell prompt marker, deliberately outside the message.
+    'chat.args.bashBuilding': '$ (building command...)',
+    'chat.args.editCount': { one: '{count} edit', other: '{count} edits' },
+    'chat.args.taskComplete': '(task complete)',
+    'chat.args.createTask': '(create task)',
+    'chat.args.editTask': '(edit task)',
+    'chat.args.question': '(question)',
+    'chat.args.viewTasks': '(list backlog tasks)',
+    /** Placeholder for a path the model has not streamed yet. */
+    'chat.args.fileWord': 'file',
+    'chat.args.lspHover': 'hover {sym} in {path}',
+    'chat.args.lspHoverIn': '(hover in {path})',
+    'chat.args.lspReferences': 'references for {sym} in {path}',
+    'chat.args.lspReferencesIn': '(references in {path})',
+    'chat.args.lspDefinition': 'definition of {sym} in {path}',
+    'chat.args.lspDefinitionIn': '(definition in {path})',
+    'chat.args.lspRenameTo': 'rename {sym} to {newName} in {path}',
+    'chat.args.lspRename': 'rename {sym} in {path}',
+    'chat.args.lspRenameIn': '(rename in {path})',
+
+    // ── utils/chat-entries.ts + services/stream-handler.ts ──
+    // Fallback shown when an error event carries no message. `isRepeatError()` compares two
+    // values errorFromEvent() produced, so a translated fallback still dedupes.
+    'chat.error.fallback': 'An error occurred',
+    'chat.merge.failed': 'Merge failed',
+    'chat.merge.conflictsResolved': 'Merge conflicts resolved',
+    'chat.merge.merged': 'Merged',
+    'chat.advisory.diagnostics': 'Workspace diagnostics',
+    'chat.advisory.mergeConflict': 'Merge conflict',
+    'chat.advisory.note': 'Environment note',
+    'chat.stream.sandboxImage': 'sandbox image',
+    'chat.stream.pullingImage': 'Pulling {name}...',
+    'chat.stream.buildingImage': 'Building sandbox image from Dockerfile...',
+    'chat.stream.startingContainer': 'Starting sandbox container...',
+    'chat.stream.summarized': 'Context was summarized to free space',
+
+    // ── shared across the chat surface ──
+    'chat.common.cancel': 'Cancel',
+    'chat.common.save': 'Save',
+    'chat.common.send': 'Send',
+    'chat.common.delete': 'Delete',
+    'chat.common.close': 'Close',
+    'chat.common.remove': 'Remove',
+    'chat.common.attachImage': 'Attach image',
+    'chat.common.attachment': 'Attachment',
+    'chat.common.loading': 'Loading...',
+    'chat.common.newThread': 'New Thread',
+
+    // ── Chat/MessageStats.svelte ──
+    // The row is `{model} · {tokens} · {seconds}` — separators, order and the completion-token
+    // semantics are fixed by the Chat UI rules, so only the labels are keys here. English has
+    // always said "1 tokens", so `one` keeps the plural form: introducing "1 token" would
+    // change the English output every chat-messages locator reads.
+    'chat.stats.tokens': '{count} tokens',
+    'chat.stats.seconds': '{seconds}s',
+    'chat.stats.modelFallback': 'model',
+
+    // ── Chat/MessageActions.svelte (aria-label and title share one message) ──
+    'chat.actions.copy': 'Copy message',
+    'chat.actions.forkAria': 'Start new thread from this message',
+    'chat.actions.forkTitle': 'Edit / new thread',
+    'chat.actions.delete': 'Delete message and all following messages',
+    'chat.actions.regenerate': 'Regenerate response',
+
+    // ── Chat/QueueIndicator.svelte ──
+    'chat.queue.targetAgent': 'agent',
+    'chat.queue.targetLlm': 'LLM provider',
+    'chat.queue.position': 'Awaiting {target} — position {position} in queue, ~{wait}s',
+    'chat.queue.errorParen': ' ({error})',
+    'chat.queue.connectionIssue': 'Connection issue{errPart} — retry {count}',
+    'chat.queue.promptProgress': 'Awaiting {target}... Processing Prompt: {percent}%',
+    'chat.queue.awaiting': 'Awaiting {target}...',
+
+    // ── Chat/ContextUsage.svelte (donut tooltip; the suffix keeps its leading separator) ──
+    'chat.context.usage': '{used} / {limit} tokens · {percent}%',
+    'chat.context.usedTokens': '{used} tokens',
+    'chat.context.clickToSummarize': ' · click to summarize',
+    'chat.context.clickToCancel': ' · click to cancel',
+    'chat.context.sessionCost': 'Session cost',
+
+    // ── Chat/ReasoningBlock.svelte ──
+    // English split this as "{Hide|Show} reasoning" across two text nodes; one message each.
+    'chat.reasoning.hide': 'Hide reasoning',
+    'chat.reasoning.show': 'Show reasoning',
+    'chat.reasoning.loading': 'Loading reasoning...',
+
+    // ── Chat/CheckpointDivider.svelte ──
+    'chat.checkpoint.label': 'Checkpoint',
+    'chat.checkpoint.viewChanges': 'View changes up to this checkpoint',
+
+    // ── Chat/ThreadSelector.svelte ──
+    'chat.thread.switch': 'Switch thread',
+    /** Fallback name of the root thread when it is not (yet) in the thread list. */
+    'chat.thread.main': 'Main',
+
+    // ── ModeSelect.svelte + the mode toggle in ChatForm / StartPanel ──
+    // The `act|plan|explore` values sent to the server are data; these are the labels.
+    'chat.mode.act': 'Act',
+    'chat.mode.plan': 'Plan',
+    'chat.mode.explore': 'Explore',
+    'chat.mode.aria': 'Operating mode',
+    'chat.mode.toggleAria': 'Toggle operating mode',
+    'chat.mode.actTip': 'Act mode: AI is required to provide structured responses during review, and has read/write access. Click to switch.',
+    'chat.mode.planTip': 'Plan mode: AI decomposes work into subtasks on the board, and only has read access. Click to switch.',
+    'chat.mode.exploreTip': 'Explore mode: AI has read/write access. Click to switch.',
+
+    // ── ChangeModelModal.svelte ──
+    'chat.changeModel.title': { one: 'Change Model for {count} task', other: 'Change Model for {count} tasks' },
+    'chat.changeModel.confirm': 'Change Model',
+    'chat.changeModel.confirmTip': 'Change the model',
+    'chat.changeModel.model': 'Model',
+    'chat.changeModel.noProviders': 'No providers configured',
+
+    // ── Chat/StartPanel.svelte ──
+    'chat.start.title': 'Start the AI task',
+    'chat.start.titleWithShortcut': 'Start the AI task ({shortcut})',
+    'chat.start.button': 'Start Task',
+    'chat.start.starting': 'Starting...',
+
+    // ── Chat/EditForm.svelte ──
+    'chat.edit.contentAria': 'Edit message content',
+    'chat.edit.cancelEditing': 'Cancel editing',
+
+    // ── Chat/ChatForm.svelte ──
+    /** Shown only when the caller passes no placeholder. */
+    'chat.form.placeholder': 'Type a message...',
+    /** What the task chat asks for instead. */
+    'chat.form.taskPlaceholder': 'Send a message...',
+    'chat.form.input': 'Message input',
+    'chat.form.removeImage': 'Remove image',
+    'chat.form.stop': 'Stop generation',
+    'chat.form.send': 'Send message',
+    'chat.form.couldNotRead': 'Could not read {name}',
+
+    // ── Chat/ModelSelector.svelte ──
+    // The bare 'Agent' / 'Provider' fallbacks reuse settings.provider.agentFallback /
+    // settings.provider.providerFallback — the settings batch owns those strings, and the two
+    // surfaces share them by key rather than by copy.
+    'chat.model.selectProvider': 'Select provider',
+    'chat.model.selectModel': 'Select model',
+    'chat.model.loadingModels': 'Loading models...',
+    'chat.model.none': 'No models available',
+    'chat.model.count': { one: '{count} model', other: '{count} models' },
+
+    // ── Chat/CompressContextDialog.svelte ──
+    'chat.compress.title': 'Compress Context',
+    'chat.compress.body': 'This will create a summary of the conversation to make more efficient use of context space. You can delete the summary to restore the full context.',
+    'chat.compress.contextUsed': 'Context used',
+    'chat.compress.percentage': 'Percentage',
+    'chat.compress.confirm': 'Compress',
+
+    // ── Chat/ReviewBar.svelte + the commit dialog's confirm button ──
+    // Commit wording is load-bearing: the click means commit + merge + Done and a merge conflict
+    // only interrupts it (docs/commit-and-done.md), so these must keep saying "and move to Done"
+    // and must never read like a cancellation.
+    'chat.review.commitAndDone': 'Commit and move to Done',
+    'chat.review.commitAndDoneTip': 'Commit changes and move task to Done',
+    'chat.review.committing': 'Committing...',
+    'chat.review.inQueue': 'In queue...',
+    'chat.review.resume': 'Resume',
+    'chat.review.resuming': 'Resuming...',
+    'chat.review.resumePausedTip': 'Resume the paused task',
+    'chat.review.resumeFromMessageTip': 'Resume the task from the last user message',
+    'chat.review.restart': 'Restart Task',
+    'chat.review.restarting': 'Restarting...',
+    'chat.review.restartTip': 'Restart the task from the last user message',
+    'chat.review.moveToReview': '→ Review',
+    'chat.review.moveToReviewTip': 'Move task to Review',
+    'chat.review.moveToDone': '→ Done',
+    'chat.review.moveToDoneTip': 'Move task to Done',
+    'chat.review.moveToBacklog': '→ Backlog',
+    'chat.review.moveToBacklogTip': 'Move task to Backlog',
+    'chat.review.moveToDoneButton': 'Move to Done',
+    'chat.review.moving': 'Moving...',
+
+    // ── Chat/CommitDialog.svelte ──
+    // 'Committing as' / 'Merge into' keep their colon: the value is appended by the template,
+    // so the message stays a label rather than a half-sentence.
+    'chat.commit.title': 'Commit changes',
+    'chat.commit.desc': 'Review and edit the commit message, then confirm to commit changes and move the task to Done.',
+    'chat.commit.messageAria': 'Commit message',
+    'chat.commit.placeholder': 'Enter commit message...',
+    'chat.commit.generating': 'Generating commit message...',
+    'chat.commit.generatingShort': 'Generating...',
+    'chat.commit.promptProgress': 'Processing prompt: {percent}%',
+    'chat.commit.committingAs': 'Committing as:',
+    'chat.commit.mergeInto': 'Merge into:',
+
+    // ── Chat/ToolCall.svelte ──
+    // The pending progress line used to be a bare word with `: {path}` / `: {bytes}` bolted on
+    // by the markup. Each shape is its own message so another language can order the clauses.
+    'chat.tool.runningFor': 'Running for {elapsed}',
+    'chat.tool.writingSummary': 'Writing Summary',
+    'chat.tool.writingQuestion': 'Writing Question',
+    'chat.tool.running': 'Running',
+    'chat.tool.runningPath': 'Running: {path}',
+    'chat.tool.preparing': 'Preparing',
+    'chat.tool.preparingPath': 'Preparing: {path}',
+    'chat.tool.editing': 'Editing...',
+    'chat.tool.writingFile': 'Writing...',
+    'chat.tool.writing': 'Writing',
+    'chat.tool.writingPath': 'Writing: {path}',
+    'chat.tool.writingBytes': 'Writing: {bytes}',
+    'chat.tool.writingPathBytes': 'Writing: {path}: {bytes}',
+    'chat.tool.failed': 'Failed',
+    'chat.tool.completed': 'Completed',
+    'chat.tool.sandboxed': 'Sandboxed',
+    'chat.tool.notSandboxed': 'Not sandboxed',
+    'chat.tool.expandArgs': 'Expand arguments',
+    'chat.tool.collapseArgs': 'Collapse arguments',
+    'chat.tool.wroteTo': 'Wrote {bytes} to:',
+    'chat.tool.unknownPath': '(unknown)',
+    'chat.tool.createdTask': 'Created task',
+    'chat.tool.openTask': 'Open task',
+    'chat.tool.editedTask': 'Edited task',
+    'chat.tool.backlogTasks': { one: '{count} backlog task', other: '{count} backlog tasks' },
+    'chat.tool.autoAnswer': 'Automated answer (parent context)',
+    'chat.tool.collapse': 'Collapse',
+    'chat.tool.showAll': 'Show all ({lines} lines, {size})',
+    'chat.tool.timeout': 'Timeout {elapsed}',
+
+    // ── Chat/ChatEntries.svelte ──
+    'chat.entries.region': 'Chat messages',
+    'chat.entries.loading': 'Loading conversation…',
+    'chat.entries.empty': 'No messages yet',
+    'chat.entries.emptyHint': 'Send a message to start the conversation',
+    'chat.entries.scrollToMessage': 'Scroll to message',
+    'chat.entries.scrollToLatest': 'Scroll to latest message',
+    'chat.entries.latest': 'Latest',
+    'chat.entries.toggleFullscreen': 'Toggle fullscreen',
+    'chat.entries.reconnecting': 'Reconnecting...',
+    'chat.entries.dismissError': 'Dismiss error',
+    'chat.entries.retryTip': 'Retry connection',
+    'chat.entries.retryNow': 'Retry now',
+    'chat.entries.summarized': 'Context summarized',
+    'chat.entries.buildDone': 'Done',
+    'chat.entries.buildOutput': 'Build output',
+    'chat.entries.building': 'Building...',
+
+    // ── Chat/ChatMessage.svelte ──
+    'chat.message.editTitle': 'Edit message',
+    'chat.message.queued': 'Queued — will send when ready',
+    // A system line is never dressed up as a user bubble; this is its header.
+    'chat.message.system': 'System',
+    'chat.message.dismiss': 'Dismiss message',
+
+    // ── Chat/TaskChat.svelte ──
+    // Screen-reader live region only.
+    'chat.task.connecting': 'Connecting...',
+    'chat.task.responding': 'Agent is responding...',
+    'chat.task.connected': 'Connected, waiting for messages',
+    /** Client-side notices: never persisted, so both halves are safe to translate. */
+    'chat.task.sendQueued': 'Connection lost — message queued and will be sent when the connection is restored',
+    'chat.task.sendFailed': 'Failed to send message',
+    'chat.task.compressFailed': 'Failed to compress context',
+    'chat.task.regenerateFailed': 'Failed to regenerate',
+    // Reachable counts are always >= 1 (entries.length - index of the clicked message), so the
+    // plural table reproduces the old `count > 1 ? 's' : ''` byte for byte.
+    'chat.task.deleteConfirm': { one: 'This will delete {count} message. This action cannot be undone.', other: 'This will delete {count} messages. This action cannot be undone.' },
+    'chat.task.deleteAlsoBranch': 'This will also delete the git branch "{branch}".',
+    'chat.task.deleteTitle': 'Delete Message',
 
     // ════════════════════════════════════════════════════════════════════════════
     // ═══ namespace: board.* / task.* — board + task view batch                  ═══

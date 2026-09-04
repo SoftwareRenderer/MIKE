@@ -2,6 +2,7 @@
     import type { Provider } from '$lib/types';
     import { AGENT_URL_PREFIX } from '$lib/types';
     import { getModelName, getProviderDisplayName, providerRef, displayModelName } from '$lib/utils/providers';
+    import { t } from '$lib/i18n';
 
     interface Props {
         providers: Provider[];
@@ -341,17 +342,17 @@
             bind:this={providerTriggerEl}
             onclick={toggleProviderDropdown}
             onkeydown={handleProviderKeydown}
-            aria-label="Select provider"
+            aria-label={t('chat.model.selectProvider')}
             aria-haspopup="listbox"
             aria-expanded={providerDropdownOpen}
-            title="Select provider"
+            title={t('chat.model.selectProvider')}
         >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/>
                 <path d="M6 8h4M8 6v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
             <span class="selector-label">
-                {isAgentSelected ? (selectedProvider ? getProviderDisplayName(selectedProvider, providers) : 'Agent') : (selectedProvider ? getProviderDisplayName(selectedProvider, providers) : 'Provider')}
+                {isAgentSelected ? (selectedProvider ? getProviderDisplayName(selectedProvider, providers) : t('settings.provider.agentFallback')) : (selectedProvider ? getProviderDisplayName(selectedProvider, providers) : t('settings.provider.providerFallback'))}
             </span>
             <svg class="chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -368,10 +369,10 @@
             bind:this={modelTriggerEl}
             onclick={toggleModelDropdown}
             onkeydown={handleModelKeydown}
-            aria-label="Select model"
+            aria-label={t('chat.model.selectModel')}
             aria-haspopup="listbox"
             aria-expanded={modelDropdownOpen}
-            title="Select model"
+            title={t('chat.model.selectModel')}
         >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M2 5l6-3 6 3v6l-6 3-6-3V5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
@@ -380,7 +381,7 @@
                 <line x1="14" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
             </svg>
             <span class="selector-label model-name" class:current={!!currentModel}>
-                {isAgentSelected && agentModelsLoading ? 'Loading...' : (currentModel ? displayModelName(currentModel) : 'Select model')}
+                {isAgentSelected && agentModelsLoading ? t('chat.common.loading') : (currentModel ? displayModelName(currentModel) : t('chat.model.selectModel'))}
             </span>
             <svg class="chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -391,7 +392,7 @@
 
 <!-- Provider dropdown (rendered in shadow DOM to escape overflow clipping) -->
 {#if providerDropdownOpen && providerRect}
-    <svelte:element this={"div"} class="portal-provider-dropdown" role="listbox" aria-label="Select provider" style="position:fixed;top:{providerRect.top}px;left:{providerRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+    <svelte:element this={"div"} class="portal-provider-dropdown" role="listbox" aria-label={t('chat.model.selectProvider')} style="position:fixed;top:{providerRect.top}px;left:{providerRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
         {#if hasAgentProvider}
             <button type="button" class="provider-option provider-option-agent" class:active={isAgentSelected} onclick={selectAgent} role="option" aria-selected={isAgentSelected}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -399,7 +400,7 @@
                     <circle cx="6" cy="9" r="1" fill="currentColor"/>
                     <circle cx="10" cy="9" r="1" fill="currentColor"/>
                 </svg>
-                <span class="provider-name">{agentProvider ? getProviderDisplayName(agentProvider, providers) : 'Agent'}</span>
+                <span class="provider-name">{agentProvider ? getProviderDisplayName(agentProvider, providers) : t('settings.provider.agentFallback')}</span>
                 {#if isAgentSelected}
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -410,7 +411,7 @@
         {#each activeProviders as provider}
             <button type="button" class="provider-option" class:active={provider.url === selectedProviderUrl} onclick={() => selectProvider(provider)} role="option" aria-selected={provider.url === selectedProviderUrl}>
                 <span class="provider-name">{getProviderDisplayName(provider, providers)}</span>
-                <span class="model-count">{provider.models.length} model{provider.models.length !== 1 ? 's' : ''}</span>
+                <span class="model-count">{t('chat.model.count', { count: provider.models.length })}</span>
                 {#if provider.url === selectedProviderUrl}
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -423,12 +424,12 @@
 
 <!-- Model dropdown -->
 {#if modelDropdownOpen && modelRect}
-    <svelte:element this={"div"} class="portal-model-dropdown" role="listbox" aria-label="Select model" style="position:fixed;top:{modelRect.top}px;left:{modelRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+    <svelte:element this={"div"} class="portal-model-dropdown" role="listbox" aria-label={t('chat.model.selectModel')} style="position:fixed;top:{modelRect.top}px;left:{modelRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
         {#if isAgentSelected}
             {#if agentModelsLoading}
-                <div class="empty">Loading models...</div>
+                <div class="empty">{t('chat.model.loadingModels')}</div>
             {:else if agentModels.length === 0}
-                <div class="empty">No models available</div>
+                <div class="empty">{t('chat.model.none')}</div>
             {:else}
                 {#each agentModels as m}
                     {@const isActive = m.name === currentModel}
@@ -443,7 +444,7 @@
                 {/each}
             {/if}
         {:else if availableModels.length === 0}
-            <div class="empty">No models available</div>
+            <div class="empty">{t('chat.model.none')}</div>
         {:else}
             {#each availableModels as m}
                 {@const isActive = m.name === currentModel && m.effort === (currentReasoningEffort || 'default')}

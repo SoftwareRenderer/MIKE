@@ -12,6 +12,7 @@ import {
 import { setBoardCache, getBoardCache, boardCacheKey } from '../storage';
 import { markCached } from './cache';
 import { repoNameFromGitUrl } from '../utils/repo-name';
+import { t } from '$lib/i18n';
 
 /** Fetch all projects from the server. Falls back to cached copy on failure.
  * Always tries the network first — the isOffline flag tracks WebSocket state,
@@ -20,7 +21,7 @@ import { repoNameFromGitUrl } from '../utils/repo-name';
 export async function getProjects(): Promise<Project[]> {
     try {
         const res = await apiFetch(`${API_BASE}/projects`);
-        if (!res.ok) throw await apiError(res, 'Failed to fetch projects');
+        if (!res.ok) throw await apiError(res, t('api.fetchProjects'));
         const data = await res.json();
         // Cache fire-and-forget
         setBoardCache('projects', data).catch(() => {});
@@ -35,21 +36,21 @@ export async function getProjects(): Promise<Project[]> {
 /** Fetch a single project by ID. */
 export async function getProject(id: string): Promise<Project> {
     const res = await apiFetch(`${API_BASE}/projects/${id}`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch project');
+    if (!res.ok) throw await apiError(res, t('api.fetchProject'));
     return res.json();
 }
 
 /** Fetch task counts per column for all projects. Returns a map of projectId → counts. */
 export async function getProjectCounts(): Promise<Record<string, ProjectCounts>> {
     const res = await apiFetch(`${API_BASE}/projects/counts`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch project counts');
+    if (!res.ok) throw await apiError(res, t('api.fetchProjectCounts'));
     return res.json();
 }
 
 /** Fetch usage statistics (token counts, costs) for a specific project. */
 export async function getProjectStats(projectId: string): Promise<ProjectStats> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/stats`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch project stats');
+    if (!res.ok) throw await apiError(res, t('api.fetchProjectStats'));
     return res.json();
 }
 
@@ -97,7 +98,7 @@ export function parseCloneEvent(data: string): CloneEvent | null {
             case 'done':
                 return { type: 'done', project: obj.project as Project };
             case 'error':
-                return { type: 'error', message: String(obj.message ?? 'clone failed') };
+                return { type: 'error', message: String(obj.message ?? t('api.cloneFailed')) };
             default:
                 return null;
         }
@@ -151,11 +152,11 @@ async function cloneProjectRaw(
     });
     if (!res.ok) {
         // Early failures (bad body, missing git_url) arrive as plain JSON.
-        throw await apiError(res, 'Failed to clone project');
+        throw await apiError(res, t('api.cloneProject'));
     }
 
     const reader = res.body?.getReader();
-    if (!reader) throw new Error('Streaming not supported');
+    if (!reader) throw new Error(t('api.streamingNotSupported'));
 
     const decoder = new TextDecoder();
     let buffer = '';
@@ -183,7 +184,7 @@ async function cloneProjectRaw(
     }
 
     if (errorMessage) throw new Error(errorMessage);
-    if (!project) throw new Error('Clone completed without result');
+    if (!project) throw new Error(t('api.cloneCompletedWithoutResult'));
     return project;
 }
 
@@ -216,7 +217,7 @@ export async function deleteProject(id: string): Promise<void> {
 export async function getBoard(projectId: string): Promise<Board> {
     try {
         const res = await apiFetch(`${API_BASE}/projects/${projectId}/board`);
-        if (!res.ok) throw await apiError(res, 'Failed to fetch board');
+        if (!res.ok) throw await apiError(res, t('api.fetchBoard'));
         const data = await res.json();
         // Cache fire-and-forget
         setBoardCache(boardCacheKey(projectId), data).catch(() => {});

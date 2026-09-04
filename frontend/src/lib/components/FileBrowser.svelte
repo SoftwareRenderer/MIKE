@@ -10,6 +10,7 @@
         uiInjector.refreshSlot(INJECTION_POINTS.FILE_BROWSER, { component: 'FileBrowser' });
     });
     import homeIcon from '$lib/assets/icons/home.svg?raw';
+    import { t } from '$lib/i18n';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
 
@@ -63,7 +64,7 @@
             const res = await fetch(`/api/fs?path=${encodeURIComponent(path)}`);
             if (!res.ok) {
                 const err = await res.json();
-                throw new Error(err.error || 'Failed to read directory');
+                throw new Error(err.error || t('explorer.shared.errReadDir'));
             }
             const data = await res.json();
             if (seq !== loadSeq) return; // a newer load won — keep its result
@@ -112,7 +113,7 @@
             });
             if (!res.ok) {
                 const err = await res.json();
-                throw new Error(err.error || 'Failed to initialize git repository');
+                throw new Error(err.error || t('explorer.shared.errInitGit'));
             }
             // Refresh directory to confirm git init succeeded, then auto-select
             await loadDir(currentPath);
@@ -151,7 +152,7 @@
             });
             if (!res.ok) {
                 const err = await res.json();
-                throw new Error(err.error || 'Failed to create folder');
+                throw new Error(err.error || t('explorer.shared.errCreateFolder'));
             }
             // Navigate into the new folder
             showNewFolder = false;
@@ -167,7 +168,7 @@
     async function handleClone() {
         const url = cloneUrl.trim();
         if (!url) {
-            cloneError = 'Please enter a git repository URL';
+            cloneError = t('explorer.fileBrowser.cloneNeedUrl');
             return;
         }
         cloneError = '';
@@ -207,30 +208,30 @@
     }
 </script>
 
-<BaseModal title="Add Project" width="560px" zIndex={300} onClose={handleClose}>
+<BaseModal title={t('explorer.fileBrowser.title')} width="560px" zIndex={300} onClose={handleClose}>
         {#snippet toolbar()}
             <div class="tabs">
                 <button
                     type="button"
                     class={`tab${activeTab === 'browse' ? ' active' : ''}`}
                     onclick={() => switchTab('browse')}
-                    title="Browse for an existing directory"
+                    title={t('explorer.fileBrowser.browseTitle')}
                 >
-                    Browse
+                    {t('explorer.fileBrowser.browse')}
                 </button>
                 <button
                     type="button"
                     class={`tab${activeTab === 'clone' ? ' active' : ''}`}
                     onclick={() => switchTab('clone')}
-                    title="Clone a git repository"
+                    title={t('explorer.fileBrowser.cloneTitle')}
                 >
-                    Clone from Git
+                    {t('explorer.fileBrowser.cloneTab')}
                 </button>
             </div>
             {#if activeTab === 'browse'}
                 <div class="path-bar">
                 <div class="path-bar-row">
-                    <button class="home-btn" onclick={() => { fetch('/api/home').then(r => r.json()).then(d => loadDir(d.home)).catch(() => loadDir('/home')); }} aria-label="Go to home directory" title="Go to home directory">
+                    <button class="home-btn" onclick={() => { fetch('/api/home').then(r => r.json()).then(d => loadDir(d.home)).catch(() => loadDir('/home')); }} aria-label={t('explorer.shared.goHome')} title={t('explorer.shared.goHome')}>
                         <Icon src={homeIcon} color="#8B949E" width={18} height={18} />
                     </button>
                     <input
@@ -238,10 +239,10 @@
                         class="path-input"
                         bind:value={currentPath}
                         onkeydown={(e) => { if (e.key === 'Enter') handleInputChange(); }}
-                        placeholder="Enter path or browse..."
-                        aria-label="File path"
+                        placeholder={t('explorer.shared.pathPlaceholder')}
+                        aria-label={t('explorer.shared.filePathAria')}
                     />
-                    <button class="icon-btn-sm" onclick={toggleNewFolder} aria-label="New folder" title="New folder" disabled={loading}>
+                    <button class="icon-btn-sm" onclick={toggleNewFolder} aria-label={t('explorer.shared.newFolder')} title={t('explorer.shared.newFolder')} disabled={loading}>
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
                             <line x1="12" y1="10" x2="12" y2="16"/>
@@ -256,12 +257,12 @@
                             class="folder-name-input"
                             bind:this={newFolderInput}
                             bind:value={newFolderName}
-                            placeholder="Folder name"
+                            placeholder={t('explorer.fileBrowser.folderNamePlaceholder')}
                             onkeydown={(e) => { if (e.key === 'Enter') handleCreateFolder(); if (e.key === 'Escape') showNewFolder = false; }}
-                            aria-label="New folder name"
+                            aria-label={t('explorer.shared.newFolderNameAria')}
                         />
-                        <button class="btn-mini" onclick={handleCreateFolder} disabled={mkdirLoading || !newFolderName.trim()} title="Create">{mkdirLoading ? '...' : 'Create'}</button>
-                        <button class="btn-mini btn-mini-cancel" onclick={() => { showNewFolder = false; newFolderName = ''; }} title="Cancel">✕</button>
+                        <button class="btn-mini" onclick={handleCreateFolder} disabled={mkdirLoading || !newFolderName.trim()} title={t('explorer.fileBrowser.create')}>{mkdirLoading ? '...' : t('explorer.fileBrowser.create')}</button>
+                        <button class="btn-mini btn-mini-cancel" onclick={() => { showNewFolder = false; newFolderName = ''; }} title={t('explorer.shared.cancel')}>✕</button>
                     </div>
                 {/if}
                 </div>
@@ -275,22 +276,34 @@
                 {/if}
 
                 {#if loading}
-                    <div class="loading">Loading...</div>
+                    <div class="loading">{t('explorer.shared.loading')}</div>
                 {:else}
                     <!-- Git indicator -->
                     {#if isGitRepo}
-                        <div class="git-indicator">✓ This is a git repository</div>
+                        <div class="git-indicator">{t('explorer.fileBrowser.isGitRepo')}</div>
                     {/if}
 
                     <!-- File list -->
-                    <div class="file-list" role="list" aria-label="Directory contents">
+                    <div class="file-list" role="list" aria-label={t('explorer.shared.contentsAria')}>
                         {#each entries as entry}
                             <button
                                 type="button"
                                 class={`file-entry${entry.isDir ? ' dir' : ''}${entry.isGitRepo ? ' git-repo' : ''}`}
                                 onclick={() => handleClick(entry)}
-                                aria-label={`${entry.isDir ? 'Folder' : 'File'}: ${entry.name}${entry.isGitRepo ? ', git repository' : ''}`}
-                                title={`${entry.isDir ? 'Open folder' : 'File'}: ${entry.name}${entry.isGitRepo ? ' (git repository)' : ''}`}
+                                aria-label={entry.isDir
+                                    ? (entry.isGitRepo
+                                        ? t('explorer.fileBrowser.entryFolderGit', { name: entry.name })
+                                        : t('explorer.shared.entryFolder', { name: entry.name }))
+                                    : (entry.isGitRepo
+                                        ? t('explorer.fileBrowser.entryFileGit', { name: entry.name })
+                                        : t('explorer.shared.entryFile', { name: entry.name }))}
+                                title={entry.isDir
+                                    ? (entry.isGitRepo
+                                        ? t('explorer.fileBrowser.openFolderGit', { name: entry.name })
+                                        : t('explorer.shared.openFolder', { name: entry.name }))
+                                    : (entry.isGitRepo
+                                        ? t('explorer.fileBrowser.entryFileGitTitle', { name: entry.name })
+                                        : t('explorer.shared.entryFile', { name: entry.name }))}
                             >
                                 <span class="icon" aria-hidden="true">
                                     {#if entry.isDir}
@@ -309,7 +322,7 @@
                 {/if}
             {:else}
                 <div class="clone-form">
-                    <label class="clone-label" for="clone-url">Git repository URL</label>
+                    <label class="clone-label" for="clone-url">{t('explorer.fileBrowser.cloneUrl')}</label>
                     <input
                         id="clone-url"
                         type="text"
@@ -318,12 +331,12 @@
                         bind:value={cloneUrl}
                         placeholder="https://github.com/org/repo.git"
                         onkeydown={(e) => { if (e.key === 'Enter' && !cloneLoading) handleClone(); }}
-                        aria-label="Git repository URL"
+                        aria-label={t('explorer.fileBrowser.cloneUrl')}
                     />
-                    <div class="clone-help">Supports HTTPS and SSH URLs (e.g. <code>git@github.com:org/repo.git</code>).</div>
+                    <div class="clone-help">{t('explorer.fileBrowser.cloneHelpBefore')}<code>git@github.com:org/repo.git</code>{t('explorer.fileBrowser.cloneHelpAfter')}</div>
 
                     <div class="clone-target">
-                        <span class="clone-target-label">Clone into</span>
+                        <span class="clone-target-label">{t('explorer.fileBrowser.cloneInto')}</span>
                         <span class="clone-target-path">{formatPath(currentPath)}</span>
                     </div>
 
@@ -340,22 +353,22 @@
             <div class="footer-actions">
                 <label class="sandbox-toggle">
                     <input type="checkbox" checked={sandboxEnabled} onchange={(e) => sandboxEnabled = e.currentTarget.checked} />
-                    <span>Use Sandbox</span>
+                    <span>{t('explorer.fileBrowser.useSandbox')}</span>
                 </label>
-                <button type="button" class="btn-secondary" onclick={handleClose} title="Cancel">Cancel</button>
+                <button type="button" class="btn-secondary" onclick={handleClose} title={t('explorer.shared.cancel')}>{t('explorer.shared.cancel')}</button>
                 {#if activeTab === 'browse'}
                     {#if isGitRepo}
-                        <button type="button" class="btn-primary" onclick={handleSelect} title="Select this directory as project">
-                            Select
+                        <button type="button" class="btn-primary" onclick={handleSelect} title={t('explorer.fileBrowser.selectTitle')}>
+                            {t('explorer.fileBrowser.select')}
                         </button>
                     {:else}
-                        <button type="button" class="btn-primary" onclick={handleInitGit} disabled={initGitLoading} title="Initialize git repository in this directory">
-                            {initGitLoading ? 'Initializing...' : 'Initialize Git'}
+                        <button type="button" class="btn-primary" onclick={handleInitGit} disabled={initGitLoading} title={t('explorer.fileBrowser.initGitTitle')}>
+                            {initGitLoading ? t('explorer.fileBrowser.initializing') : t('explorer.fileBrowser.initGit')}
                         </button>
                     {/if}
                 {:else}
-                    <button type="button" class="btn-primary" onclick={handleClone} disabled={cloneLoading || !cloneUrl.trim()} title="Clone repository into the current directory">
-                        {cloneLoading ? 'Cloning...' : 'Clone'}
+                    <button type="button" class="btn-primary" onclick={handleClone} disabled={cloneLoading || !cloneUrl.trim()} title={t('explorer.fileBrowser.cloneIntoDirTitle')}>
+                        {cloneLoading ? t('explorer.fileBrowser.cloning') : t('explorer.fileBrowser.clone')}
                     </button>
                 {/if}
                 </div>

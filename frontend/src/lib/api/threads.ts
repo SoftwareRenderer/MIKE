@@ -6,13 +6,14 @@ import {
     switchTaskThreadRaw,
     forkTaskThreadRaw,
 } from './queue';
+import { t } from '$lib/i18n';
 
 // -- Thread endpoints --
 
 /** Fetch all conversation threads for a task. */
 export async function getTaskThreads(projectId: string, taskId: string): Promise<Thread[]> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch threads');
+    if (!res.ok) throw await apiError(res, t('api.fetchThreads'));
     return res.json();
 }
 

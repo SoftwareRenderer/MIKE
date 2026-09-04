@@ -7,6 +7,7 @@ import {
 } from './queue';
 import { setBoardCache, getBoardCache } from '../storage';
 import { markCached } from './cache';
+import { t } from '$lib/i18n';
 
 // -- Configuration endpoints --
 
@@ -17,7 +18,7 @@ import { markCached } from './cache';
 export async function getConfig(): Promise<Config> {
     try {
         const res = await apiFetch(`${API_BASE}/config`);
-        if (!res.ok) throw await apiError(res, 'Failed to fetch config');
+        if (!res.ok) throw await apiError(res, t('api.fetchConfig'));
         const data = await res.json();
         // Cache fire-and-forget
         setBoardCache('config', data).catch(() => {});
@@ -44,7 +45,7 @@ export async function testConnection(llamaServerUrl: string, modelName: string, 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ llama_server_url: llamaServerUrl, model_name: modelName, api_key: apiKey }),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to test connection');
+    if (!res.ok) throw await apiError(res, t('api.testConnection'));
     return res.json();
 }
 
@@ -55,7 +56,7 @@ export async function fetchModels(llamaServerUrl: string, apiKey?: string): Prom
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ llama_server_url: llamaServerUrl, api_key: apiKey }),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to fetch models');
+    if (!res.ok) throw await apiError(res, t('api.fetchModels'));
     return res.json();
 }
 

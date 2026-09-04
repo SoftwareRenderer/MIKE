@@ -2,13 +2,20 @@
     import { onDestroy } from 'svelte';
     import { dialogStore } from '$lib/stores';
     import BaseModal from '../BaseModal.svelte';
+    import { t } from '$lib/i18n';
 
     let open = $state(false);
     let streaming = $state(false);
     let message = $state('');
     let editedMessage = $state('');
-    let confirmText = $state('Commit and move to Done');
-    let cancelText = $state('Cancel');
+    // Caller-provided button labels stay raw: only the absence of one is copy, and resolving
+    // it in a derived is what lets a locale switch re-label an already-open dialog.
+    let confirmOverride = $state<string | null>(null);
+    let cancelOverride = $state<string | null>(null);
+    // The commit click asks for commit + merge + Done and a merge conflict only interrupts it
+    // (docs/commit-and-done.md) — this label must keep saying "and move to Done", never "cancel".
+    let confirmText = $derived(confirmOverride ?? t('chat.review.commitAndDone'));
+    let cancelText = $derived(cancelOverride ?? t('chat.common.cancel'));
     let authorName = $state('');
     let authorEmail = $state('');
     let mergeTarget = $state('');
@@ -178,8 +185,8 @@
             if (streamState.count === 0) {
                 message = value.message || '';
                 editedMessage = value.message || '';
-                confirmText = value.confirmText ?? 'Commit and move to Done';
-                cancelText = value.cancelText ?? 'Cancel';
+                confirmOverride = value.confirmText ?? null;
+                cancelOverride = value.cancelText ?? null;
                 authorName = value.authorName || '';
                 authorEmail = value.authorEmail || '';
                 mergeTarget = value.mergeTarget || '';
@@ -221,7 +228,7 @@
         }
     });
 
-    let placeholderText = $derived(streaming ? 'Generating commit message...' : 'Enter commit message...');
+    let placeholderText = $derived(streaming ? t('chat.commit.generating') : t('chat.commit.placeholder'));
 
     $effect(() => {
         // When streaming finishes and message is populated, focus the textarea.
@@ -246,9 +253,9 @@
         </button>
     {/snippet}
 
-    <BaseModal title="Commit changes" width="560px" zIndex={1000} footer={footer} onClose={handleCancel}>
+    <BaseModal title={t('chat.commit.title')} width="560px" zIndex={1000} footer={footer} onClose={handleCancel}>
         <p id="commit-dialog-desc" class="sr-only">
-            Review and edit the commit message, then confirm to commit changes and move the task to Done.
+            {t('chat.commit.desc')}
         </p>
 
         <textarea
@@ -258,7 +265,7 @@
             class="commit-textarea"
             rows="7"
             placeholder={placeholderText}
-            aria-label="Commit message"
+            aria-label={t('chat.commit.messageAria')}
         ></textarea>
 
         {#if streaming}
@@ -276,21 +283,21 @@
                     <path d="M12 2a10 10 0 0 1 10 10"/>
                 </svg>
                 {#if promptProgress > 0 && promptProgress < 100}
-                    <span class="progress-text">Processing prompt: {promptProgress}%</span>
+                    <span class="progress-text">{t('chat.commit.promptProgress', { percent: promptProgress })}</span>
                 {:else}
-                    <span class="progress-text">Generating...</span>
+                    <span class="progress-text">{t('chat.commit.generatingShort')}</span>
                 {/if}
             </div>
         {/if}
 
         {#if authorName || authorEmail}
             <div class="commit-meta">
-                Committing as: {authorName}{authorEmail ? ` <${authorEmail}>` : ''}
+                {t('chat.commit.committingAs')} {authorName}{authorEmail ? ` <${authorEmail}>` : ''}
             </div>
         {/if}
         {#if mergeTarget}
             <div class="commit-meta">
-                Merge into: <code>{mergeTarget}</code>
+                {t('chat.commit.mergeInto')} <code>{mergeTarget}</code>
             </div>
         {/if}
     </BaseModal>

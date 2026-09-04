@@ -1,6 +1,7 @@
 <script lang="ts">
     import ContextDonut from './ContextDonut.svelte';
     import { formatTokens, formatCost } from '$lib/utils/format';
+    import { t } from '$lib/i18n';
 
     interface Props {
         used?: number;
@@ -19,8 +20,8 @@
 
     let tooltip = $derived(
         limit > 0
-            ? `${formatTokens(used)} / ${formatTokens(limit)} tokens · ${percentage}%`
-            : `${formatTokens(used)} tokens`
+            ? t('chat.context.usage', { used: formatTokens(used), limit: formatTokens(limit), percent: percentage })
+            : t('chat.context.usedTokens', { used: formatTokens(used) })
     );
 
     async function handleClick() {
@@ -51,7 +52,7 @@
             class:clickable={!!onSummarize && !disabled}
             class:summarizing={isSummarizing}
             disabled={disabled}
-            title="{tooltip}{onSummarize && !disabled ? (isSummarizing ? ' · click to cancel' : ' · click to summarize') : ''}"
+            title="{tooltip}{onSummarize && !disabled ? (isSummarizing ? t('chat.context.clickToCancel') : t('chat.context.clickToSummarize')) : ''}"
             onclick={handleClick}
             onkeydown={handleKeyDown}
             aria-label="{tooltip}"
@@ -64,7 +65,7 @@
             {/if}
         </button>
         {#if sessionCost > 0}
-            <span class="cost-badge" title="Session cost">{formatCost(sessionCost)}</span>
+            <span class="cost-badge" title={t('chat.context.sessionCost')}>{formatCost(sessionCost)}</span>
         {/if}
     </div>
 {/if}

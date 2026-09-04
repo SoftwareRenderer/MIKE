@@ -1,10 +1,14 @@
 <script lang="ts">
+    import { t, type MessageKey } from '$lib/i18n';
+
     let { value, onChange }: { value: string; onChange: (mode: string) => void } = $props();
 
-    const modes = [
-        { value: 'act', label: 'Act', icon: 'check' },
-        { value: 'plan', label: 'Plan', icon: 'list' },
-        { value: 'explore', label: 'Explore', icon: 'bulb' },
+    // `value` is the operating_mode the server stores — data, never translated. Only
+    // `labelKey` is copy, resolved in the markup so a locale change re-labels the control.
+    const modes: { value: string; labelKey: MessageKey; icon: string }[] = [
+        { value: 'act', labelKey: 'chat.mode.act', icon: 'check' },
+        { value: 'plan', labelKey: 'chat.mode.plan', icon: 'list' },
+        { value: 'explore', labelKey: 'chat.mode.explore', icon: 'bulb' },
     ];
 
     let open = $state(false);
@@ -45,9 +49,9 @@
 </script>
 
 <div class="mode-select" bind:this={dropdownRef}>
-    <button type="button" class="mode-btn" class:open={open} onclick={toggle} onkeydown={(e) => { if (e.key === 'Escape') open = false; }} aria-label="Operating mode" aria-expanded={open}>
+    <button type="button" class="mode-btn" class:open={open} onclick={toggle} onkeydown={(e) => { if (e.key === 'Escape') open = false; }} aria-label={t('chat.mode.aria')} aria-expanded={open}>
         <span class="mode-icon active" class:act={value === 'act'} class:plan={value === 'plan'} class:explore={value === 'explore'}>{@html renderIcon(selected.icon)}</span>
-        <span class="mode-label">{selected.label}</span>
+        <span class="mode-label">{t(selected.labelKey)}</span>
         <svg class="chevron" width="10" height="10" viewBox="0 0 10 10" fill="none">
             <path d="M2.5 4L5 6.5L7.5 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
@@ -68,7 +72,7 @@
                     onclick={() => select(mode.value)}
                 >
                     <span class="mode-icon" class:active={mode.value === value} class:act={mode.value === 'act'} class:plan={mode.value === 'plan'} class:explore={mode.value === 'explore'}>{@html renderIcon(mode.icon)}</span>
-                    <span>{mode.label}</span>
+                    <span>{t(mode.labelKey)}</span>
                 </button>
             {/each}
         </div>

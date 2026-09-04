@@ -3,6 +3,7 @@
     import { useFileMention } from '$lib/composables/use-file-mention.svelte';
     import { dialogStore } from '$lib/stores';
     import { readImageAttachments, describeRejectedImages, MAX_IMAGES } from '$lib/utils/attachments';
+    import { t } from '$lib/i18n';
 
     interface Props {
         content: string;
@@ -66,10 +67,10 @@
 
     /** Determine the submit button label based on context. */
     let submitLabel = $derived(() => {
-        if (isFirstUserMessage && taskStatus === 'backlog') return 'Save';
-        if (isFirstUserMessage) return 'Send';
-        if (isLastUserMessage) return 'Send';
-        return 'New Thread';
+        if (isFirstUserMessage && taskStatus === 'backlog') return t('chat.common.save');
+        if (isFirstUserMessage) return t('chat.common.send');
+        if (isLastUserMessage) return t('chat.common.send');
+        return t('chat.common.newThread');
     });
 
     let submitIcon = $derived(() => {
@@ -92,8 +93,8 @@
         <div class="edit-attachments">
             {#each editAttachments as att, i}
                 <div class="edit-attachment-chip">
-                    <img src={att.data.startsWith('data:') ? att.data : `data:${att.mimeType};base64,${att.data}`} alt="Attachment" />
-                    <button class="remove-attachment" onclick={() => removeEditAttachment(i)} title="Remove">&times;</button>
+                    <img src={att.data.startsWith('data:') ? att.data : `data:${att.mimeType};base64,${att.data}`} alt={t('chat.common.attachment')} />
+                    <button class="remove-attachment" onclick={() => removeEditAttachment(i)} title={t('chat.common.remove')}>&times;</button>
                 </div>
             {/each}
         </div>
@@ -104,16 +105,16 @@
         onkeydown={handleKeydown}
         oninput={() => mention.handleInput()}
         rows="3"
-        aria-label="Edit message content"
+        aria-label={t('chat.edit.contentAria')}
     ></textarea>
     <div class="edit-actions">
         <input type="file" accept="image/*" multiple bind:this={editFileInput} onchange={handleEditFileSelect} style="display:none" />
-        <button class="btn-edit-attach" onclick={() => editFileInput?.click()} title="Attach image">
+        <button class="btn-edit-attach" onclick={() => editFileInput?.click()} title={t('chat.common.attachImage')}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
             </svg>
         </button>
-        <button class="btn-edit-cancel" onclick={onCancel} title="Cancel editing">Cancel</button>
+        <button class="btn-edit-cancel" onclick={onCancel} title={t('chat.edit.cancelEditing')}>{t('chat.common.cancel')}</button>
         <button class="btn-edit-submit" onclick={() => { if (canSubmit) onSubmit?.(editContent.trim(), editAttachments); }} disabled={isSubmitting || !canSubmit} title={submitLabel()}>
             {#if isSubmitting}
                 <span class="spinner-inline"></span>
@@ -121,13 +122,13 @@
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <polyline points="20 6 9 17 4 12"/>
                 </svg>
-                Save
+                {t('chat.common.save')}
             {:else if submitIcon() === 'send'}
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <line x1="22" y1="2" x2="11" y2="13"/>
                     <polygon points="22 2 15 22 11 13 2 9 22 2"/>
                 </svg>
-                Send
+                {t('chat.common.send')}
             {:else}
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <circle cx="18" cy="18" r="3"/>
@@ -135,7 +136,7 @@
                     <path d="M13 6h3a2 2 0 0 1 2 2v7"/>
                     <line x1="6" y1="9" x2="6" y2="21"/>
                 </svg>
-                New Thread
+                {t('chat.common.newThread')}
             {/if}
         </button>
     </div>
