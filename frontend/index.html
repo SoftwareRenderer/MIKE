@@ -20,6 +20,17 @@
                 document.head.appendChild(_l);
             }
         } catch(e) {}
+        // Which language pack was active last time, so <html lang> is right on the
+        // first frame instead of flipping after the app boots. Only the tag lives
+        // here (the catalog itself is in IndexedDB, applied in main.ts) because
+        // this is the one synchronous step; both are written together by
+        // frontend/src/lib/i18n/cache.ts and cleared together when no pack is
+        // enabled, so a pack that is gone cannot leave the document tagged with
+        // its language. The server's extension list is still the real answer.
+        try {
+            var _g = localStorage.getItem('kanban-i18n-locale');
+            if (_g && /^[A-Za-z0-9-]{2,35}$/.test(_g)) document.documentElement.lang = _g;
+        } catch(e) {}
     </script>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>

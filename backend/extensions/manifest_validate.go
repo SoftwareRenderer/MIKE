@@ -246,3 +246,83 @@ func validatePair(where string, p CommentToken) error {
 	}
 	return nil
 }
+
+// maxPackAssetPathLen bounds a declared pack path. Catalog names and prompt
+// directories are short by nature; the bound only exists so a manifest cannot
+// smuggle a megabyte of path into a log line or an error message.
+const maxPackAssetPathLen = 200
+
+// bcp47ish accepts a language tag of the shape a pack is allowed to declare:
+// a 2-3 letter primary subtag followed by hyphen-separated alphanumeric
+// subtags ("zh", "zh-CN", "pt-BR", "sr-Latn-RS"). Deliberately stricter than
+// RFC 5646 — a tag this loose still cannot smuggle a path or a URL, and a
+// locale nothing can render is not worth the full grammar.
+var bcp47ish = regexp.MustCompile(`^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$`)
+
+// packAssetSchemeRe matches a leading URL scheme ("https:", "data:", "file:").
+// It is the same shape the client's resolveAssetURL fence uses
+// (frontend/src/lib/services/ui-injector.svelte.ts) — the two ends of one rule,
+// kept in step deliberately: the client refuses to resolve an external asset,
+// and the server refuses to store a manifest that declares one. Change the
+// shape in one and the other stops agreeing.
+var packAssetSchemeRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*:`)
+
+// Validate checks a translation pack's declaration. Run on install, update and
+// PUT, so a pack that could not be loaded is never persisted: an i18n pack's
+// whole surface is files inside its own directory, so anything that escapes it
+// (a remote origin, a `..` hop) is a refusal rather than something to survive.
+func (c *I18NConfig) Validate() error {
+	if c == nil {
+		return nil
+	}
+	locale := strings.TrimSpace(c.Locale)
+	switch {
+	case locale == "":
+		return fmt.Errorf("capabilities.i18n.locale is required (a pack with no locale is not a language)")
+	case len(locale) > 35:
+		return fmt.Errorf("capabilities.i18n.locale %q is longer than 35 characters", locale)
+	case !bcp47ish.MatchString(locale):
+		return fmt.Errorf("capabilities.i18n.locale %q is not a language tag (expected e.g. \"zh\", \"zh-CN\", \"sr-Latn-RS\")", locale)
+	}
+
+	if err := validatePackAssetPath("capabilities.i18n.messages_url", c.MessagesURL, true); err != nil {
+		return err
+	}
+	return validatePackAssetPath("capabilities.i18n.prompts_dir", c.PromptsDir, false)
+}
+
+// validatePackAssetPath checks a path a pack declares for a file or directory
+// inside its own served directory. required distinguishes the catalog (must be
+// declared) from the prompt templates (optional).
+func validatePackAssetPath(where, path string, required bool) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		if required {
+			return fmt.Errorf("%s is required (the catalog is loaded from the extension's own directory)", where)
+		}
+		return nil
+	}
+	if len(path) > maxPackAssetPathLen {
+		return fmt.Errorf("%s %q is longer than %d characters", where, path, maxPackAssetPathLen)
+	}
+	// A scheme or a protocol-relative URL would point the app at someone else's
+	// origin. resolveAssetURL already rejects these client-side; refusing them
+	// here is what keeps an un-installable pack from ever being stored.
+	if packAssetSchemeRe.MatchString(path) || strings.HasPrefix(path, "//") {
+		return fmt.Errorf("%s %q must be a file in the extension's own directory — an external URL is not allowed", where, path)
+	}
+	if strings.ContainsAny(path, `\`) {
+		return fmt.Errorf("%s %q must use \"/\" separators", where, path)
+	}
+	for _, seg := range strings.Split(path, "/") {
+		if seg == ".." {
+			return fmt.Errorf("%s %q must stay inside the extension's own directory (\"..\" escapes it)", where, path)
+		}
+	}
+	for _, r := range path {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("%s %q contains a control character", where, path)
+		}
+	}
+	return nil
+}

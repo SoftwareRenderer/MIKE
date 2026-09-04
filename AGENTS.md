@@ -30,6 +30,7 @@ The most common way this repo produces a **false "done"** is an agent believing 
 - **`go build ./...` and `go vet ./...` fail at HEAD** on the installed extensions under `extensions/`, which are pulled artifacts, not this tree. Scope every command: `go build ./backend/... ./pkg/... .`, `go vet ./backend/... ./pkg/... .`, `staticcheck -checks=all ./backend/... ./pkg/... .`. A red `./...` is not your regression until you've seen it survive the scoping.
 - **Most subprocesses are not cancellable.** 83 `exec.Command` calls carry no context; only a handful use `CommandContext`. Don't assume a killed request stops the work it started - and if you add one, use `CommandContext` *plus* `cmd.WaitDelay` (`pkg/sandboxruntime.PodmanWaitDelay`).
 - **`environment` on an LSP extension always answers "healthy"** - declared, validated, documented, and never called (`ExtensionLSPManager.Environment` has no caller). See `docs/extension-dependency-cache.md`.
+- **`prompts_dir` on an `i18n` pack is validated and has no caller** - it is the server-side prompt-locale directory, and the prompt side (T14) must read it through `extensions.ActiveI18N` rather than re-derive the winner. Until then the UI half of the capability is fully live and this one field is what nothing reads. See `docs/i18n.md`.
 - **A green `./backend/exec/` is not proof.** The package's own tests never start a task, so locking bugs in `executionState` only surface under `-race` in `./backend/server/`.
 
 ## Required Dependencies
@@ -212,7 +213,7 @@ Detail and tests: `docs/reconnection.md`.
 
 ## Extensions
 
-Types: `lsp` (language servers in gVisor sandboxes), `ui` (frontend injection), `agent` (AI agents as subprocesses via WASM adapters).
+Types: `lsp` (language servers in gVisor sandboxes), `ui` (frontend injection), `css` (a global stylesheet), `i18n` (translation packs - the enabled pack *is* the active language), `agent` (AI agents as subprocesses via WASM adapters), `llm` (provider request adaptation).
 
 **Key files:**
 - `backend/extensions/` — domain types, `store.go` (SQLite), `registry.go` (FetchIndex/FetchManifest/PullImage/BuildImage), `sandbox.go` (refcount lifecycle), `handler.go` (REST), `changelog.go`, `manifest_validate.go`
@@ -251,6 +252,11 @@ Tests: `backend/extensions/dependency_manifest_test.go`, `dependency_grant_test.
 The core holds **no** language names, keyword lists, comment markers or bracket tables - neither in Go nor in the frontend. `file_types[]` is the routing table *and* the source of the `didOpen` languageId; `language` routes the file to a server and `language_id` is per file type - collapsing them breaks routing or the parse. Both sides read it through exactly one helper (`extensions.LSPConfig.fileTypeFor` in Go, `editor-language.ts::resolveFile` in the browser), **never** a local map. `syntax{}` is a grammar as **data, never code** (a shipped module would run in the app's realm). A bad manifest is **refused, not stored** (`manifest_validate.go`); legacy manifests are normalized at load, not migrated. The one language table left in core is `frontend/src/lib/utils/fallback-languages.ts`, consulted only when no extension declares the type.
 
 Detail and tests: `docs/languages.md`.
+
+### The UI Language Is Derived From the Enabled i18n Extension
+The active language **is** whichever `i18n` extension is enabled - English when none. There is **no** `language` config field, no `PUT /api/config` path for one, and nothing stored: a setting would have to be reconciled with the extension list forever, and the two would disagree. `extensions.ActiveI18N` (Go) and `resolveI18NPack` (TS) apply one rule - skip disabled packs, keep those **declaring `capabilities.i18n`** (the declaration, not the inferred `type`), first by `priority` then `name` - and the prompt locale (T14) must call the Go side rather than re-derive it. A pack is a css pack with different bytes: `resolveAssetURL` gives the catalog URL (`''` for a scheme or `//` is the external-origin fence), the existing `/extensions/<author>/<name>/` tree serves it, and there is **no new route**, no iframe, no channel, no permission. Any load failure means **whole-catalog English plus a report**, never a half-applied catalog or a UI of raw key ids; a key the pack lacks falls back per key to English. Core gains zero translated strings and zero language names (`en.ts` is the record, filled by the string-conversion task; a locale tag is carried through verbatim). The pre-paint cache anticipates the round-trip and never outranks it: the catalog lives in IndexedDB `app-settings` and the tag in `localStorage`, and both are **deleted together** whenever the live list says English - unconditionally, because a guess about what is already cleared left a stale language behind.
+
+Detail and tests: `docs/i18n.md`.
 
 ### UI Extensions
 UI extensions are **plain JavaScript modules, not Svelte components** (external bundles carry their own Svelte runtime -> `effect_orphan`). A module default-exports `init({ component, config, ...scopeContext })` and returns a cleanup function; no Svelte imports, DOM + `createElement('style')` only. **The host CSP blocks inline `<script>`** - load code as external files. **The channel is armed by the document's `exthello` echo**: `origin === 'null'` + `ev.source` identify the *frame*, not the mounted document, so post nothing before arming (except `exthello-request`) and never tear the frame down on a 2nd `load`. A hand-rolled client that doesn't answer `exthello` hangs at `extHost.ready()`.
@@ -338,3 +344,4 @@ Read the file before editing that subsystem — each holds the detail and histor
 | `docs/extension-dependency-cache.md` | the `dependency_cache` grant, `ro` mounts, `environment` check, one derivation |
 | `docs/commit-and-done.md` | what the click does, conflict arming, which files never get committed |
 | `docs/adding-a-preference.md` | the 7-layer recipes for a shortcut or a `*bool` preference |
+| `docs/i18n.md` | the derived-language rule (one rule, two ends), the catalog load + failure policy, the pre-paint cache vs reality |
