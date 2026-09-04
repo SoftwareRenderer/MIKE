@@ -17,6 +17,7 @@
     import { canSwitchDetailColumn, resolveDetailColumn, resolveDiffFileTarget, type DetailColumnId } from '$lib/composables/use-task-detail-column-nav';
     import { effectiveToggleFullscreenKey, isEditableTarget, matchShortcut } from '$lib/utils/keyboard';
     import { DiffCache } from '$lib/services/diff-cache.svelte';
+    import { t, type MessageKey } from '$lib/i18n';
     import TaskChat from './Chat/TaskChat.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
     // Lazy-loaded on first diff view
@@ -58,11 +59,16 @@
 
     let allTasks = $derived(tasks || appStore.board?.tasks || []);
 
-    const overviewSections = [
-        { id: 'backlog', title: 'Backlog' },
-        { id: 'in_progress', title: 'In Progress' },
-        { id: 'review', title: 'Review' },
-        { id: 'done', title: 'Done' },
+    /**
+     * Section `id`s are status data (compared, sent to the API); `title` is the English
+     * name behind the `Expand/Collapse …` tooltip (`title` text is never translated) and
+     * `labelKey` is the visible, translatable section label.
+     */
+    const overviewSections: { id: string; title: string; labelKey: MessageKey }[] = [
+        { id: 'backlog', title: 'Backlog', labelKey: 'board.column.backlog' },
+        { id: 'in_progress', title: 'In Progress', labelKey: 'board.column.inProgress' },
+        { id: 'review', title: 'Review', labelKey: 'board.column.review' },
+        { id: 'done', title: 'Done', labelKey: 'board.column.done' },
     ];
 
     // Collapsible sections
@@ -88,17 +94,17 @@
     async function handleClearDone(count: number) {
         if (!task.project_id) return;
         const confirmed = await dialogStore.showConfirm({
-            title: 'Clear Done Tasks',
-            message: `Permanently delete ${count} done task${count > 1 ? 's' : ''}? This cannot be undone.`,
-            confirmText: 'Delete',
-            cancelText: 'Cancel',
+            title: t('board.clearDone.title'),
+            message: t('board.clearDone.message', { count }),
+            confirmText: t('board.confirm.delete'),
+            cancelText: t('board.confirm.cancel'),
         });
         if (!confirmed) return;
         try {
             await clearDoneTasks(task.project_id);
             // Board stream WebSocket will push the update
         } catch (e) {
-            dialogStore.showToast('Failed to clear done tasks: ' + String(e), 'error');
+            dialogStore.showToast(t('board.clearDone.failed', { error: String(e) }), 'error');
         }
     }
 
@@ -375,12 +381,12 @@
     let badge = $derived.by(() => {
         const streaming = streamingIds.has(task.id);
         const state = appStore.board?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state;
-        if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
-        if (state === 'pulling_image') return { text: 'Pulling image', color: 'var(--color-status-blue)' };
-        if (state === 'paused') return { text: 'Paused', color: 'var(--color-status-yellow)' };
-        if (state === 'idle' && task.status === 'in_progress') return { text: 'Pending', color: 'var(--color-status-orange)' };
-        if (state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
-        return { text: 'Idle', color: 'var(--color-text-tertiary)' };
+        if (streaming || state === 'running') return { text: t('board.badge.running'), color: 'var(--color-status-blue)' };
+        if (state === 'pulling_image') return { text: t('board.badge.pullingImage'), color: 'var(--color-status-blue)' };
+        if (state === 'paused') return { text: t('board.badge.paused'), color: 'var(--color-status-yellow)' };
+        if (state === 'idle' && task.status === 'in_progress') return { text: t('board.badge.pending'), color: 'var(--color-status-orange)' };
+        if (state === 'failed') return { text: t('board.badge.failed'), color: 'var(--color-status-red)' };
+        return { text: t('board.card.idle'), color: 'var(--color-text-tertiary)' };
     });
 
     // Mobile tab — synced with prop from App.svelte
@@ -404,11 +410,11 @@
     let multiSelectActions = useMultiSelectActions({
         async onDelete(taskIds, titles) {
             const confirmed = await dialogStore.showConfirm({
-                title: 'Delete Tasks',
-                message: `Permanently delete ${taskIds.length} task${taskIds.length > 1 ? 's' : ''}? This cannot be undone.`,
+                title: t('board.deleteTasks.title'),
+                message: t('board.deleteTasks.message', { count: taskIds.length }),
                 items: titles,
-                confirmText: 'Delete',
-                cancelText: 'Cancel',
+                confirmText: t('board.confirm.delete'),
+                cancelText: t('board.confirm.cancel'),
             });
             if (!confirmed) return;
             // Only send DELETE for top-level tasks, the server recursively deletes descendants
@@ -418,7 +424,7 @@
                     await import('$lib/api').then(({ deleteTask }) => deleteTask(task.project_id, id));
                     removeTaskFromBoard(appStore, id);
                 } catch (err) {
-                    dialogStore.showToast('Failed to delete task: ' + String(err), 'error');
+                    dialogStore.showToast(t('board.toast.deleteFailed', { error: String(err) }), 'error');
                 }
             }
             onRefreshBoard?.();
@@ -427,9 +433,10 @@
             let started = 0;
             for (const id of taskIds) {
                 try {
-                    const t = allTasks.find(t => t.id === id);
-                    if (!t) continue;
-                    if (t.parent_task_id) {
+                    // (named `selected`, not `t` — `t` is the i18n function here)
+                    const selected = allTasks.find(t => t.id === id);
+                    if (!selected) continue;
+                    if (selected.parent_task_id) {
                         const { startSubtask } = await import('$lib/api');
                         const updated = await startSubtask(task.project_id, id);
                         updateTaskInBoard(appStore, updated.id, updated);
@@ -440,11 +447,11 @@
                     }
                     started++;
                 } catch (err) {
-                    dialogStore.showToast(`Failed to start task: ${String(err)}`, 'error');
+                    dialogStore.showToast(t('board.toast.startFailed', { error: String(err) }), 'error');
                 }
             }
             if (started > 0) {
-                dialogStore.showToast(`${started} task${started > 1 ? 's' : ''} started`, 'success');
+                dialogStore.showToast(t('board.toast.started', { count: started }), 'success');
             }
         },
         async onModelChange(taskIds, providerUrl, modelName, reasoningEffort) {
@@ -461,11 +468,11 @@
                     updateTaskInBoard(appStore, result.id, result);
                     updated++;
                 } catch (err) {
-                    dialogStore.showToast(`Failed to update model: ${String(err)}`, 'error');
+                    dialogStore.showToast(t('board.toast.modelUpdateFailed', { error: String(err) }), 'error');
                 }
             }
             if (updated > 0) {
-                dialogStore.showToast(`Model updated for ${updated} task${updated > 1 ? 's' : ''}`, 'success');
+                dialogStore.showToast(t('board.toast.modelUpdated', { count: updated }), 'success');
             }
         },
     });
@@ -714,17 +721,17 @@
             task = updated;
             updateTaskInBoard(appStore, task!.id, updated);
         } catch (e) {
-            dialogStore.showToast('Failed to move: ' + String(e), 'error');
+            dialogStore.showToast(t('task.toast.moveFailed', { error: String(e) }), 'error');
         }
     }
 
     async function handleDelete() {
         if (!task) return;
         const confirmed = await dialogStore.showConfirm({
-            title: 'Delete Task',
-            message: 'Delete this task? This cannot be undone.',
-            confirmText: 'Delete',
-            cancelText: 'Cancel',
+            title: t('board.deleteTask.title'),
+            message: t('board.deleteTask.message'),
+            confirmText: t('board.confirm.delete'),
+            cancelText: t('board.confirm.cancel'),
         });
         if (!confirmed) return;
         const projectId = task.project_id;
@@ -735,7 +742,7 @@
             onRefreshBoard?.();
             onClose(task.status);
         } catch (e) {
-            dialogStore.showToast('Failed to delete task: ' + String(e), 'error');
+            dialogStore.showToast(t('board.toast.deleteFailed', { error: String(e) }), 'error');
         }
     }
 
@@ -908,7 +915,7 @@
             <!-- Column 1: Board Overview -->
             <div class="column column-context" tabindex="-1" class:hidden={floating || (mobile && activeTab !== 'context')} style:width={boardWidth}>
                 <BoardOverview
-                    sections={overviewSections}
+                    sections={overviewSections.map(section => ({ ...section, label: t(section.labelKey) }))}
                     {allTasks}
                     consolidatedSubtaskIds={hierarchy.consolidatedSubtaskIds}
                     sectionDragState={dnd.sectionDragState}
@@ -1012,7 +1019,7 @@
                                 closeOnEscape={!mobile}
                             />
                         {:else}
-                            <div class="diff-editor-loading">Loading editor...</div>
+                            <div class="diff-editor-loading">{t('task.loadingEditor')}</div>
                         {/if}
                     {:else}
                         {#if !checkpointDiffOpen}
@@ -1032,12 +1039,12 @@
                                 />
                                 {#if DiffViewerComponent}
                                     {@const DiffViewer = DiffViewerComponent}
-                                    <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} loading={diffLoading} mergedLabel={isDoneTask ? 'Merged' : hasMergedSubtasks ? 'Merged from Subtasks' : 'Committed in task'} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
+                                    <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} loading={diffLoading} mergedLabel={isDoneTask ? t('task.diff.merged') : hasMergedSubtasks ? t('task.diff.mergedFromSubtasks') : t('task.diff.committedInTask')} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
                                 {:else}
-                                    <div class="diff-viewer-loading">Loading diff viewer...</div>
+                                    <div class="diff-viewer-loading">{t('task.loadingDiffViewer')}</div>
                                 {/if}
                             {:else}
-                                <div class="diff-viewer-empty">No changes yet</div>
+                                <div class="diff-viewer-empty">{t('task.noChanges')}</div>
                             {/if}
                         {/if}
 

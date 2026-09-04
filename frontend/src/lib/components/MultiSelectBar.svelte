@@ -4,6 +4,7 @@
     import { appStore, dialogStore } from '$lib/stores';
     import { fade } from 'svelte/transition';
     import ChangeModelModal from './ChangeModelModal.svelte';
+    import { t } from '$lib/i18n';
 
     let { multiSelect, tasks, onClear }: {
         multiSelect: MultiSelect;
@@ -22,7 +23,7 @@
     });
 
     // Task titles for the model change modal
-    const selectedTaskTitles = $derived(selectedTasks.map(t => t.title || '(untitled)'));
+    const selectedTaskTitles = $derived(selectedTasks.map(task => task.title || t('board.untitled')));
 
     // Check if all selected tasks are in Backlog
     const allInBacklog = $derived(
@@ -42,13 +43,13 @@
     let providers = $derived(appStore.config?.providers || []);
 
     async function handleStart() {
-        const titles = selectedTasks.map(t => t.title || '(untitled)');
+        const titles = selectedTasks.map(task => task.title || t('board.untitled'));
         const confirmed = await dialogStore.showConfirm({
-            title: 'Start Tasks',
-            message: `Start ${multiSelect.count} task${multiSelect.count > 1 ? 's' : ''}?`,
+            title: t('board.multiSelect.startTitle'),
+            message: t('board.multiSelect.startMessage', { count: multiSelect.count }),
             items: titles,
-            confirmText: 'Start',
-            cancelText: 'Cancel',
+            confirmText: t('board.confirm.start'),
+            cancelText: t('board.confirm.cancel'),
             variant: 'default',
         });
         if (!confirmed) return;
@@ -58,7 +59,7 @@
     }
 
     function handleDelete() {
-        const titles = selectedTasks.map(t => t.title || '(untitled)');
+        const titles = selectedTasks.map(task => task.title || t('board.untitled'));
         window.dispatchEvent(new CustomEvent('multi-select-delete', {
             detail: { taskIds: multiSelect.toArray(), titles }
         }));
@@ -95,7 +96,7 @@
                     <line x1="2" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
                     <line x1="14" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
                 </svg>
-                Model
+                {t('board.multiSelect.model')}
             </button>
             <button
                 type="button"
@@ -106,7 +107,7 @@
                 <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true">
                     <polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/>
                 </svg>
-                Start {multiSelect.count} task{multiSelect.count !== 1 ? 's' : ''}
+                {t('board.multiSelect.startCount', { count: multiSelect.count })}
             </button>
         {/if}
 
@@ -120,7 +121,7 @@
                 <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                 <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
-            Delete {multiSelect.count} task{multiSelect.count !== 1 ? 's' : ''}
+            {t('board.multiSelect.deleteCount', { count: multiSelect.count })}
         </button>
 
         <button

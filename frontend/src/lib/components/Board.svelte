@@ -12,6 +12,7 @@
     import { useMultiSelectActions } from '$lib/composables/use-multi-select-actions.svelte';
     import { useSubtaskHierarchy } from '$lib/composables/use-subtask-hierarchy.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
+    import { t, type MessageKey } from '$lib/i18n';
     // UI extension injection point — re-render when extensions change
     $effect(() => {
         const _v = uiInjector.getPointVersion(INJECTION_POINTS.PROJECT_BOARD);
@@ -25,11 +26,11 @@
     let multiSelectActions = useMultiSelectActions({
         async onDelete(taskIds, titles) {
             const confirmed = await dialogStore.showConfirm({
-                title: 'Delete Tasks',
-                message: `Permanently delete ${taskIds.length} task${taskIds.length > 1 ? 's' : ''}? This cannot be undone.`,
+                title: t('board.deleteTasks.title'),
+                message: t('board.deleteTasks.message', { count: taskIds.length }),
                 items: titles,
-                confirmText: 'Delete',
-                cancelText: 'Cancel',
+                confirmText: t('board.confirm.delete'),
+                cancelText: t('board.confirm.cancel'),
             });
             if (!confirmed) return;
             // Only send DELETE for top-level tasks, server recursively deletes descendants
@@ -39,7 +40,7 @@
                     await deleteTask(projectId, id);
                     removeTaskFromBoard(appStore, id);
                 } catch (err) {
-                    dialogStore.showToast('Failed to delete task: ' + String(err), 'error');
+                    dialogStore.showToast(t('board.toast.deleteFailed', { error: String(err) }), 'error');
                 }
             }
             onRefreshBoard?.();
@@ -60,11 +61,11 @@
                     }
                     started++;
                 } catch (err) {
-                    dialogStore.showToast(`Failed to start task: ${String(err)}`, 'error');
+                    dialogStore.showToast(t('board.toast.startFailed', { error: String(err) }), 'error');
                 }
             }
             if (started > 0) {
-                dialogStore.showToast(`${started} task${started > 1 ? 's' : ''} started`, 'success');
+                dialogStore.showToast(t('board.toast.started', { count: started }), 'success');
             }
         },
         async onModelChange(taskIds, providerUrl, modelName, reasoningEffort) {
@@ -81,11 +82,11 @@
                     updateTaskInBoard(appStore, result.id, result);
                     updated++;
                 } catch (err) {
-                    dialogStore.showToast(`Failed to update model: ${String(err)}`, 'error');
+                    dialogStore.showToast(t('board.toast.modelUpdateFailed', { error: String(err) }), 'error');
                 }
             }
             if (updated > 0) {
-                dialogStore.showToast(`Model updated for ${updated} task${updated > 1 ? 's' : ''}`, 'success');
+                dialogStore.showToast(t('board.toast.modelUpdated', { count: updated }), 'success');
             }
         },
     });
@@ -124,12 +125,26 @@
         uiStore.showCardDetail = true;
     }
 
-    const columns = [
-        { id: 'backlog', title: 'Backlog', color: 'var(--color-column-backlog)' },
-        { id: 'in_progress', title: 'In Progress', color: 'var(--color-column-in-progress)' },
-        { id: 'review', title: 'Review', color: 'var(--color-column-review)' },
-        { id: 'done', title: 'Done', color: 'var(--color-column-done)' },
+    /**
+     * A column is three things at once: `id` is **data** (compared, persisted, sent to the
+     * API — never translated), `title` is the English a11y name behind
+     * `aria-label="… column"` (aria text is never translated in this app, and
+     * {@link getColumnEl} finds a column by it), and `labelKey` is the visible label.
+     */
+    const columns: { id: string; title: string; labelKey: MessageKey; color: string }[] = [
+        { id: 'backlog', title: 'Backlog', labelKey: 'board.column.backlog', color: 'var(--color-column-backlog)' },
+        { id: 'in_progress', title: 'In Progress', labelKey: 'board.column.inProgress', color: 'var(--color-column-in-progress)' },
+        { id: 'review', title: 'Review', labelKey: 'board.column.review', color: 'var(--color-column-review)' },
+        { id: 'done', title: 'Done', labelKey: 'board.column.done', color: 'var(--color-column-done)' },
     ];
+
+    /** Visible label for a status id (ids themselves are data — see {@link columns}). */
+    function statusLabel(status: string): string {
+        const labelKey = columns.find(c => c.id === status)?.labelKey;
+        // An id this board does not know is echoed as-is rather than guessed at:
+        // calling an unknown status "Backlog" would be a lie in every locale.
+        return labelKey ? t(labelKey) : status;
+    }
 
     /** Pre-built task lookup map (shared by hasAncestorInProgress and other functions). */
     const taskMap = $derived(new Map(tasks.map(t => [t.id, t])));
@@ -176,13 +191,18 @@
         if (!task || task.status === targetStatus) return;
         // Block subtasks from moving to Backlog when an ancestor is In Progress.
         if (targetStatus === 'backlog' && task.parent_task_id && hasAncestorInProgress(task)) {
-            dialogStore.showToast('Cannot move to Backlog: parent task is In Progress', 'error');
+            dialogStore.showToast(
+                t('board.toast.cannotMoveToStatus', {
+                    targetStatus: statusLabel(targetStatus),
+                    parentStatus: statusLabel('in_progress'),
+                }),
+                'error',
+            );
             return;
         }
         try {
             const updated = await moveTask(projectId, taskId, targetStatus);
-            const statusLabel = targetStatus === 'backlog' ? 'Backlog' : targetStatus === 'in_progress' ? 'In Progress' : targetStatus === 'review' ? 'Review' : 'Done';
-            announce(`Task moved to ${statusLabel}`);
+            announce(t('board.toast.moved', { status: statusLabel(targetStatus) }));
             // Skip optimistic update if this subtask will be consolidated into its parent.
             // The immediate status change triggers consolidatedSubtaskIds to recalculate,
             // which hides the card mid-drop and makes the drag appear to fail.
@@ -202,7 +222,7 @@
             }
         } catch (e) {
             console.error('Failed to move task:', e);
-            dialogStore.showToast('Failed to move task: ' + String(e), 'error');
+            dialogStore.showToast(t('board.toast.moveFailed', { error: String(e) }), 'error');
         }
     }
 
@@ -210,18 +230,18 @@
         const doneTasks = getTasksForColumn('done');
         if (doneTasks.length === 0) return;
         const confirmed = await dialogStore.showConfirm({
-            title: 'Clear Done Tasks',
-            message: `Permanently delete ${doneTasks.length} done task${doneTasks.length > 1 ? 's' : ''}? This cannot be undone.`,
-            confirmText: 'Delete',
-            cancelText: 'Cancel',
+            title: t('board.clearDone.title'),
+            message: t('board.clearDone.message', { count: doneTasks.length }),
+            confirmText: t('board.confirm.delete'),
+            cancelText: t('board.confirm.cancel'),
         });
         if (!confirmed) return;
         try {
             await clearDoneTasks(projectId);
             // Board stream WebSocket will push the update
-            liveAnnouncement = `${doneTasks.length} done task${doneTasks.length > 1 ? 's' : ''} deleted`;
+            liveAnnouncement = t('board.clearDone.deleted', { count: doneTasks.length });
         } catch (e) {
-            dialogStore.showToast('Failed to clear done tasks: ' + String(e), 'error');
+            dialogStore.showToast(t('board.clearDone.failed', { error: String(e) }), 'error');
         }
     }
 
@@ -288,6 +308,7 @@
         <Column
             columnId={col.id}
             title={col.title}
+            label={t(col.labelKey)}
             color={col.color}
             columnColor={col.color}
             tasks={getTasksForColumn(col.id)}

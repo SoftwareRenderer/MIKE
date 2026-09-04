@@ -8,6 +8,7 @@
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import ModeSelect from '../ModeSelect.svelte';
     import BaseModal from '../BaseModal.svelte';
+    import { t } from '$lib/i18n';
 
     let {
         taskId,
@@ -201,13 +202,13 @@
 </script>
 
 {#snippet footer()}
-            <button type="button" class="btn-secondary" onclick={handleClose}>Cancel</button>
-            <button type="button" class="btn-primary" onclick={handleSave} disabled={!titleDraft.trim()}>Save</button>
+            <button type="button" class="btn-secondary" onclick={handleClose}>{t('board.confirm.cancel')}</button>
+            <button type="button" class="btn-primary" onclick={handleSave} disabled={!titleDraft.trim()}>{t('board.editTask.save')}</button>
         {/snippet}
 
-        <BaseModal title="Edit Task" width="440px" footer={footer} onClose={handleClose} closeOnOverlayClick={false}>
+        <BaseModal title={t('board.editTask.title')} width="440px" footer={footer} onClose={handleClose} closeOnOverlayClick={false}>
             <label for="edit-task-title-input">
-                <span class="field-label">Title</span>
+                <span class="field-label">{t('board.editTask.fieldTitle')}</span>
                 <input
                     id="edit-task-title-input"
                     bind:this={titleInput}
@@ -219,7 +220,7 @@
             </label>
             {#if editProviders.length > 0}
                 <div class="model-select-row">
-                    <span class="field-label">Model</span>
+                    <span class="field-label">{t('board.editTask.fieldModel')}</span>
                     <ModelSelector
                         providers={editProviders}
                         currentModel={modelDraft}
@@ -233,7 +234,7 @@
             <div class="options">
                 <div class="config-row">
                     <div class="config-info">
-                        <span class="config-label">Operating mode</span>
+                        <span class="config-label">{t('board.editTask.operatingMode')}</span>
                         <span class="config-desc">{modeDescription}</span>
                     </div>
                     <ModeSelect value={operatingModeDraft} onChange={(m: string) => operatingModeDraft = m} />
@@ -241,12 +242,12 @@
             </div>
             {/if}
             <div class="options-section">
-                <div class="section-label">Repository</div>
+                <div class="section-label">{t('board.editTask.repository')}</div>
                 {#if !taskHasParent}
                 <div class="config-row">
                     <div class="config-info">
-                        <span class="config-label">Branch</span>
-                        <span class="config-desc">Base branch for this task's changes</span>
+                        <span class="config-label">{t('board.editTask.branch')}</span>
+                        <span class="config-desc">{t('board.editTask.branchDesc')}</span>
                     </div>
                     <div class="branch-input-wrapper">
                         <input
@@ -277,16 +278,16 @@
                 {/if}
                 <div class="config-row">
                     <div class="config-info">
-                        <span class="config-label">Auto-merge</span>
-                        <span class="config-desc">{taskHasParent ? 'Merge changes into parent task when complete' : `Merge changes into ${branchDraft || targetBranch} when complete`}</span>
+                        <span class="config-label">{t('board.editTask.autoMerge')}</span>
+                        <span class="config-desc">{taskHasParent ? t('board.editTask.autoMergeIntoParent') : t('board.editTask.autoMergeInto', { branch: branchDraft || targetBranch })}</span>
                     </div>
                     <ToggleSwitch bind:checked={autoMergeDraft} onChange={() => { userTouchedAutoMerge = true; }} ariaLabel="Auto-merge on completion" />
                 </div>
                 {#if !taskHasParent}
                 <div class="config-row">
                     <div class="config-info">
-                        <span class="config-label">Allow subtasks to auto-merge</span>
-                        <span class="config-desc">Subtasks created under this task will auto-merge into it</span>
+                        <span class="config-label">{t('board.editTask.subtasksAutoMerge')}</span>
+                        <span class="config-desc">{t('board.editTask.subtasksAutoMergeDesc')}</span>
                     </div>
                     <ToggleSwitch bind:checked={subtasksAutoMergeDraft} onChange={() => { userTouchedSubtasksAutoMerge = true; }} ariaLabel="Allow subtasks to auto-merge" />
                 </div>

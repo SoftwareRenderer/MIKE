@@ -7,6 +7,7 @@
     import { countWithDescendants } from '$lib/utils/task-utils';
     import { isFullyVisibleIn, verticalScrollParent } from '$lib/utils/scroll-visibility';
     import type { MultiSelect } from '$lib/composables/use-multi-select.svelte';
+    import { t } from '$lib/i18n';
 
     let {
         sections,
@@ -30,7 +31,12 @@
         getColumnColor,
         multiSelect,
     }: {
-        sections: Array<{ id: string; title: string }>;
+        /**
+         * Section `id`s are status data. `title` is the English name behind the
+         * `Expand/Collapse …` tooltip (never translated); `label` is the visible,
+         * translatable label and falls back to `title`.
+         */
+        sections: Array<{ id: string; title: string; label?: string }>;
         allTasks: Task[];
         consolidatedSubtaskIds: Set<string>;
         sectionDragState: Map<string, { isOver: boolean; isRejected: boolean}>;
@@ -114,7 +120,7 @@
                     {:else if section.id === 'done'}
                         <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
                     {/if}
-                    {section.title}
+                    {section.label ?? section.title}
                 </span>
                 <div class="header-right">
                     <span class="section-count">{sectionCount}</span>
@@ -157,7 +163,7 @@
                     </div>
                 {/each}
                 {#if section.id === 'backlog'}
-                    <button class="task-item-add" onclick={onShowCreateTask} type="button" title="Create a new task">+ Create Task</button>
+                    <button class="task-item-add" onclick={onShowCreateTask} type="button" title="Create a new task">{t('board.column.addTask')}</button>
                 {/if}
             </div>
             {/if}

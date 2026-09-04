@@ -4,6 +4,7 @@
     import { getHistoryDensity, buildCommitTooltip } from '$lib/utils/git-history';
     import type { HistoryDensity } from '$lib/utils/git-history';
     import { timeAgo } from '$lib/utils/format-time';
+    import { t } from '$lib/i18n';
 
     let { currentBranch, commits, originTip, loading, hasMore, onCommitSelected, onLoadMore, selectedCommitHash }: {
         currentBranch: string;
@@ -116,14 +117,14 @@
 
 <div class="git-graph" bind:this={graphEl} data-density={density}>
     <div class="git-graph-header">
-        <span class="git-graph-label">History</span>
+        <span class="git-graph-label">{t('task.graph.history')}</span>
     </div>
 
     <div class="git-graph-list" role="list" aria-label="Commit history">
         {#if loading && commitDisplays.length === 0}
-            <div class="git-graph-loading">Loading commits...</div>
+            <div class="git-graph-loading">{t('task.graph.loading')}</div>
         {:else if commitDisplays.length === 0}
-            <div class="git-graph-empty">No commits</div>
+            <div class="git-graph-empty">{t('task.graph.empty')}</div>
         {:else}
             <VirtualList items={commitDisplays} itemHeight={36} minThreshold={0} onscroll={handleListScroll} onScrollElChange={handleScrollElChange}>
                 {#snippet children({ item: d, index: idx })}

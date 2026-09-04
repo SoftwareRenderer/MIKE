@@ -10,6 +10,7 @@
     import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
     import { isSandboxMemoryWarning, isMemoryLimitReached } from '$lib/utils/memory-stats';
     import { effectiveOpenTerminalKey, formatShortcut } from '$lib/utils/keyboard';
+    import { t } from '$lib/i18n';
 
     let {
         workspaceDir,
@@ -276,13 +277,13 @@
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M3 8.5l3 3 7-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-                <span>Copied</span>
+                <span>{t('task.header.copied')}</span>
             {:else}
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
                     <path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" stroke="currentColor" stroke-width="1.3"/>
                 </svg>
-                <span>Copy</span>
+                <span>{t('task.header.copy')}</span>
             {/if}
         </button>
     </div>

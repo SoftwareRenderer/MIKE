@@ -6,10 +6,14 @@
     import Card from './Card.svelte';
     import { fade } from 'svelte/transition';
     import { countWithDescendants } from '$lib/utils/task-utils';
+    import { t } from '$lib/i18n';
 
-    let { columnId, title, color, columnColor, tasks, childrenMap, expandedTasks, onToggleExpanded, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask, onSelect, canDrop, onRefreshBoard, multiSelect }: {
+    let { columnId, title, label = title, color, columnColor, tasks, childrenMap, expandedTasks, onToggleExpanded, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask, onSelect, canDrop, onRefreshBoard, multiSelect }: {
         columnId: string;
+        /** English a11y name — `aria-label` text is never translated, and Board finds a column by it. */
         title: string;
+        /** Visible (translatable) column label; falls back to the English `title`. */
+        label?: string;
         color: string;
         columnColor: string;
         tasks: Task[];
@@ -94,7 +98,7 @@
             {:else if columnId === 'done'}
                 <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
             {/if}
-            {title}
+            {label}
         </h3>
         <div class="header-right">
             <span class="count">{taskCount}</span>
@@ -115,7 +119,7 @@
     </div>
     <div class="card-list" bind:this={cardListEl} onscroll={handleScroll}>
         {#if onAddTask}
-            <button class="add-task-btn" onclick={onAddTask} title={createTaskShortcutLabel ? `Create a new task (${createTaskShortcutLabel})` : 'Create a new task'}>+ Create Task{#if createTaskShortcutLabel && !hintsHidden}<kbd class="key-hint">{createTaskShortcutLabel}</kbd>{/if}</button>
+            <button class="add-task-btn" onclick={onAddTask} title={createTaskShortcutLabel ? `Create a new task (${createTaskShortcutLabel})` : 'Create a new task'}>{t('board.column.addTask')}{#if createTaskShortcutLabel && !hintsHidden}<kbd class="key-hint">{createTaskShortcutLabel}</kbd>{/if}</button>
         {/if}
         {#each tasks as task (task.id)}
             <div class="task-wrapper" transition:fade={{ duration: 200 }}>

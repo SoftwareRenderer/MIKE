@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { render } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { writable } from 'svelte/store';
+import { t } from '$lib/i18n';
 
 // ============================================================
 // CARD STATUS BADGE — reactive sources
@@ -116,7 +117,7 @@ describe('Card status badge tracks its reactive sources', () => {
         streamingStore.set(new Set(['card-1']));
         try {
             const container = renderCard(makeTask());
-            expect(badgeText(container)).toBe('Running');
+            expect(badgeText(container)).toBe(t('board.badge.running'));
         } finally {
             streamingStore.set(new Set());
         }
@@ -125,20 +126,20 @@ describe('Card status badge tracks its reactive sources', () => {
     it('drops the Running badge when the streaming store is cleared (the $state mirror is live)', async () => {
         streamingStore.set(new Set(['card-1']));
         const container = renderCard(makeTask());
-        expect(badgeText(container)).toBe('Running');
+        expect(badgeText(container)).toBe(t('board.badge.running'));
 
         // This is the whole point: a badge that read the store with get() would
         // keep showing Running after the turn ended.
         streamingStore.set(new Set());
         await tick();
-        expect(badgeText(container)).not.toBe('Running');
+        expect(badgeText(container)).not.toBe(t('board.badge.running'));
     });
 
     it("does not mark a card Running for another task's stream", () => {
         streamingStore.set(new Set(['some-other-task']));
         try {
             const container = renderCard(makeTask({ execution_state: 'paused' }));
-            expect(badgeText(container)).toBe('Paused');
+            expect(badgeText(container)).toBe(t('board.badge.paused'));
         } finally {
             streamingStore.set(new Set());
         }
