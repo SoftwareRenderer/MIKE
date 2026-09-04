@@ -932,12 +932,19 @@
         white-space: nowrap;
     }
 
-    /* Tabs row */
+    /* Tabs row.
+       `flex-wrap` is measured, not decorative: a translation pack's labels are longer
+       than English's, and at 1440px the French set needed 626px of a 473px box, so
+       "Extensions" and "À propos" ran under the close button. Wrapping keeps every tab
+       readable; the alternative (ellipsis on a tab) hides which tab is which, and
+       `overflow-x: auto` hides it until you think to scroll. English still fits on one
+       row, so nothing moves for the language most users see. */
     .header-tabs {
         display: flex;
         gap: 0;
         flex: 1;
         min-width: 0;
+        flex-wrap: wrap;
     }
 
     @media (max-width: 768px) {
