@@ -511,8 +511,10 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 
 	// Start agent in container via podman exec (stdin/stdout protocol)
 	// ignore-cgroups must precede `exec` — it is a podman global option.
-	agentCmd := exec.Command(
-		"podman", "--runtime-flag", "ignore-cgroups=true",
+	// The bridge needs the bound most: its child (an LSP server) inherits the pipes carrying the
+	// connection, so a dead bridge with a live server is a Wait that never returns.
+	agentCmd := podmanCommand(
+		"--runtime-flag", "ignore-cgroups=true",
 		"exec", "-i", "-w", mountPath, containerName,
 		"/sandbox-bridge",
 	)
@@ -587,7 +589,7 @@ func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env
 	// Run sh -c to handle shell features
 	execArgs = append(execArgs, "sh", "-c", command)
 
-	c := exec.Command("podman", execArgs...)
+	c := podmanCommand(execArgs...)
 
 	if stdin != nil {
 		c.Stdin = bytes.NewReader(stdin)
@@ -746,7 +748,7 @@ func (sm *SandboxManager) startShell(taskID, worktreePath string, project *types
 	// Start podman exec with PTY
 	// -i: keep STDIN open
 	// -t: allocate a pseudo-TTY
-	cmd := exec.Command("podman", shellExecArgs(containerName, mountPath, shell)...)
+	cmd := podmanCommand(shellExecArgs(containerName, mountPath, shell)...)
 	// No cmd.Env: podman needs the server's own environment (rootless storage keys
 	// off HOME / XDG_*), and none of it reaches the container — podman exec
 	// inherits the container's environment unless -e says otherwise.
@@ -817,7 +819,8 @@ func (sm *SandboxManager) StartProcess(taskID, command string, args []string) (*
 	}
 	execArgs = append(execArgs, args...)
 
-	cmd := exec.Command("podman", execArgs...)
+	// Same reason as the bridge: this is a long-lived connection, and its wait must be bounded.
+	cmd := podmanCommand(execArgs...)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -1043,7 +1046,7 @@ func (sm *SandboxManager) PullImageWithProgress(image string, onProgress func(li
 	image = sm.rt.ResolveImageRef(image)
 	log.Printf("[sandbox] pulling image %s", image)
 
-	if err := sm.streamPodman(exec.Command("podman", "pull", image), "pull", image, "pull", onProgress); err != nil {
+	if err := sm.streamPodman(podmanCommand("pull", image), "pull", image, "pull", onProgress); err != nil {
 		return err
 	}
 	log.Printf("[sandbox] image %s pulled", image)
@@ -1056,6 +1059,14 @@ func (sm *SandboxManager) PullImageWithProgress(image string, onProgress func(li
 //
 // onProgress may be nil; every line is logged under logTag either way. The error names op
 // and image so a caller can show it as-is.
+// podmanCommand is how this package starts podman, so every call carries WaitDelay: cmd.Wait waits
+// for the output pipes, not just the process, and a wedged container holds them open.
+func podmanCommand(args ...string) *exec.Cmd {
+	c := exec.Command("podman", args...)
+	c.WaitDelay = sandboxruntime.PodmanWaitDelay
+	return c
+}
+
 func (sm *SandboxManager) streamPodman(cmd *exec.Cmd, op, image, logTag string, onProgress func(line string)) error {
 	pr, pw := io.Pipe()
 	cmd.Stdout = pw
@@ -1175,7 +1186,7 @@ func (sm *SandboxManager) BuildImageWithOptions(projectName, dockerfilePath stri
 
 	// Build the image with streaming output
 	log.Printf("[sandbox] project=%s building image %s from %s (no_cache=%v)", projectName, imageName, dockerfilePath, opts.NoCache)
-	if err := sm.streamPodman(exec.Command("podman", buildPodmanBuildArgs(imageName, tmpDir, opts.NoCache)...), "build", imageName, "build", onProgress); err != nil {
+	if err := sm.streamPodman(podmanCommand(buildPodmanBuildArgs(imageName, tmpDir, opts.NoCache)...), "build", imageName, "build", onProgress); err != nil {
 		return err
 	}
 	log.Printf("[sandbox] project=%s image %s built successfully", projectName, imageName)

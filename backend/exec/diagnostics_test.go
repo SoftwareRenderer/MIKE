@@ -422,8 +422,8 @@ func (m *wedgedLSPManager) GetOrCreate(ctx context.Context, _, _ string, _ *lsp.
 	return nil, ctx.Err()
 }
 
-// installTsLSPExtension makes the pass chase app.ts instead of filtering it out.
-func installTsLSPExtension(t *testing.T, s *store.Store) *lsp.ExtensionRegistry {
+// installTSLSPExtension makes the pass chase app.ts instead of filtering it out.
+func installTSLSPExtension(t *testing.T, s *store.Store) *lsp.ExtensionRegistry {
 	t.Helper()
 	es := extensions.NewExtensionStore(s)
 	if err := es.InitSchema(); err != nil {
@@ -454,7 +454,7 @@ func installTsLSPExtension(t *testing.T, s *store.Store) *lsp.ExtensionRegistry 
 // goroutine, so it must bound the context it hands down and end when the task stops.
 func TestCollectTurnDiagnostics_BoundedAndCancellable(t *testing.T) {
 	s := testStore(t)
-	reg := installTsLSPExtension(t, s)
+	reg := installTSLSPExtension(t, s)
 
 	// WorktreePath looks the task up in the store, so everything here shares s.
 	cs := config.NewConfigStore(s, "", "test")

@@ -988,8 +988,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Propagate resolved identity to git package so gitAuthorFlagCmd() includes -c flags
-		git.GitAuthorName = name
-		git.GitAuthorEmail = email
+		git.SetAuthorIdentity(name, email)
 
 		// git init + create README + add + commit in single command
 		flagCmd := gitAuthorFlagCmd()

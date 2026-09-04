@@ -409,14 +409,14 @@ func (p *diagnosticsPass) awaitPublishDiagnostics(ctx context.Context, srv *turn
 			var envelope struct {
 				Method string `json:"method"`
 				Params struct {
-					Uri         string          `json:"uri"`
+					URI         string          `json:"uri"`
 					Diagnostics []LSPDiagnostic `json:"diagnostics"`
 				} `json:"params"`
 			}
 			if err := json.Unmarshal(raw, &envelope); err != nil {
 				continue
 			}
-			if envelope.Method != "textDocument/publishDiagnostics" || envelope.Params.Uri != uri {
+			if envelope.Method != "textDocument/publishDiagnostics" || envelope.Params.URI != uri {
 				continue
 			}
 

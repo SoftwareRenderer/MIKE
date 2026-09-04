@@ -217,7 +217,7 @@ func watchDiagnostics(client *bridge.Client) *diagnosticsWatch {
 			var msg struct {
 				Method string `json:"method"`
 				Params struct {
-					Uri         string `json:"uri"`
+					URI         string `json:"uri"`
 					Diagnostics []struct {
 						Severity int `json:"severity"`
 					} `json:"diagnostics"`
@@ -233,10 +233,10 @@ func watchDiagnostics(client *bridge.Client) *diagnosticsWatch {
 				}
 			}
 			w.mu.Lock()
-			w.published[msg.Params.Uri]++
-			w.counts[msg.Params.Uri] = errors
-			if errors > w.worst[msg.Params.Uri] {
-				w.worst[msg.Params.Uri] = errors
+			w.published[msg.Params.URI]++
+			w.counts[msg.Params.URI] = errors
+			if errors > w.worst[msg.Params.URI] {
+				w.worst[msg.Params.URI] = errors
 			}
 			w.mu.Unlock()
 			select {

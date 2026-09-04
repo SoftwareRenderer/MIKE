@@ -1853,12 +1853,12 @@ func contains(slice []string, s string) bool {
 
 func TestGitAuthorFlags_NoEnvVars(t *testing.T) {
 	// Save and restore package-level vars
-	origName, origEmail := GitAuthorName, GitAuthorEmail
+	origName, origEmail := AuthorIdentity()
 	defer func() {
-		GitAuthorName, GitAuthorEmail = origName, origEmail
+		SetAuthorIdentity(origName, origEmail)
 	}()
 
-	GitAuthorName, GitAuthorEmail = "", ""
+	SetAuthorIdentity("", "")
 	flags := GitAuthorFlags()
 	if flags != nil {
 		t.Errorf("expected nil flags when no env vars set, got %v", flags)
@@ -1866,12 +1866,12 @@ func TestGitAuthorFlags_NoEnvVars(t *testing.T) {
 }
 
 func TestGitAuthorFlags_NameOnly(t *testing.T) {
-	origName, origEmail := GitAuthorName, GitAuthorEmail
+	origName, origEmail := AuthorIdentity()
 	defer func() {
-		GitAuthorName, GitAuthorEmail = origName, origEmail
+		SetAuthorIdentity(origName, origEmail)
 	}()
 
-	GitAuthorName, GitAuthorEmail = "Custom Name", ""
+	SetAuthorIdentity("Custom Name", "")
 	flags := GitAuthorFlags()
 	if len(flags) != 2 {
 		t.Fatalf("expected 2 flags, got %d: %v", len(flags), flags)
@@ -1882,12 +1882,12 @@ func TestGitAuthorFlags_NameOnly(t *testing.T) {
 }
 
 func TestGitAuthorFlags_EmailOnly(t *testing.T) {
-	origName, origEmail := GitAuthorName, GitAuthorEmail
+	origName, origEmail := AuthorIdentity()
 	defer func() {
-		GitAuthorName, GitAuthorEmail = origName, origEmail
+		SetAuthorIdentity(origName, origEmail)
 	}()
 
-	GitAuthorName, GitAuthorEmail = "", "user@example.com"
+	SetAuthorIdentity("", "user@example.com")
 	flags := GitAuthorFlags()
 	if len(flags) != 2 {
 		t.Fatalf("expected 2 flags, got %d: %v", len(flags), flags)
@@ -1898,12 +1898,12 @@ func TestGitAuthorFlags_EmailOnly(t *testing.T) {
 }
 
 func TestGitAuthorFlags_BothSet(t *testing.T) {
-	origName, origEmail := GitAuthorName, GitAuthorEmail
+	origName, origEmail := AuthorIdentity()
 	defer func() {
-		GitAuthorName, GitAuthorEmail = origName, origEmail
+		SetAuthorIdentity(origName, origEmail)
 	}()
 
-	GitAuthorName, GitAuthorEmail = "Custom Name", "user@example.com"
+	SetAuthorIdentity("Custom Name", "user@example.com")
 	flags := GitAuthorFlags()
 	if len(flags) != 4 {
 		t.Fatalf("expected 4 flags, got %d: %v", len(flags), flags)

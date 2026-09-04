@@ -102,11 +102,13 @@ type Server struct {
 	lspHandler          *lsp.LSPHandler
 	loginLimiter        *RateLimiter
 	previewStore        *previewStore
-	mux                 *http.ServeMux
-	addr                string
-	frontendDist        string
-	tlsConfig           *tls.Config
-	allowedHosts        string // extra accepted Host values (--allowed-hosts, else MIKE_ALLOWED_HOSTS)
+	// cookieSecure is the SESSION cookie's Secure flag, set once in NewServer.
+	cookieSecure bool
+	mux          *http.ServeMux
+	addr         string
+	frontendDist string
+	tlsConfig    *tls.Config
+	allowedHosts string // extra accepted Host values (--allowed-hosts, else MIKE_ALLOWED_HOSTS)
 
 	// worktreeMux serializes git operations per task.
 
@@ -181,7 +183,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 
 	// Configure cookie Secure flag.
 	// Auto-enable when TLS is active; also respect explicit env var for reverse proxy setups.
-	sessionCookieSecure = tlsCfg != nil || os.Getenv("MIKE_SECURE_COOKIES") == "1"
+	s.cookieSecure = tlsCfg != nil || os.Getenv("MIKE_SECURE_COOKIES") == "1"
 
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.appStreamMgr = stream.NewAppStreamManager(store, worktreeMgr)
@@ -484,7 +486,7 @@ const tlsRecordTypeHandshake = 0x16
 // hybridListener handles both TLS and plain HTTP on the same port.
 type hybridListener struct {
 	net.Listener
-	stdTlsConfig *stdtls.Config
+	stdTLSConfig *stdtls.Config
 	// sniffTimeout bounds the first-byte read. Zero means defaultSniffTimeout.
 	sniffTimeout time.Duration
 	drops        *sniffDropLogger
@@ -569,7 +571,7 @@ func (l *hybridListener) identify(raw net.Conn) {
 	}
 
 	if buf[0] == tlsRecordTypeHandshake {
-		conn = stdtls.Server(newPeekConn(conn, buf), l.stdTlsConfig)
+		conn = stdtls.Server(newPeekConn(conn, buf), l.stdTLSConfig)
 	} else {
 		conn = newPeekConn(conn, buf)
 	}
@@ -760,7 +762,7 @@ func (s *Server) Serve() error {
 func newHybridListener(l net.Listener, stdCfg *stdtls.Config, sniffTimeout time.Duration) *hybridListener {
 	h := &hybridListener{
 		Listener:     l,
-		stdTlsConfig: stdCfg,
+		stdTLSConfig: stdCfg,
 		sniffTimeout: sniffTimeout, // zero means defaultSniffTimeout
 		drops:        &sniffDropLogger{},
 		ready:        make(chan net.Conn, readyQueue),
@@ -788,6 +790,20 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	shutdownStep("preview sweeper", func() {
 		if s.previewStore != nil {
 			s.previewStore.stopSweeper()
+		}
+	})
+	// First, because they run git and container work on their own goroutines and everything they
+	// can reach is torn down below.
+	shutdownStep("websocket watchers", func() {
+		if s.appStreamMgr != nil {
+			s.appStreamMgr.Close()
+		}
+	})
+	// Before "sandbox containers": killing a session's shell after its container is gone leaves the
+	// shell running.
+	shutdownStep("terminal sessions", func() {
+		if s.terminalMgr != nil {
+			s.terminalMgr.Close()
 		}
 	})
 	// Stop all LSP connections and sandbox containers

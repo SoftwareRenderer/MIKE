@@ -17,6 +17,8 @@ import (
 
 	"kanban/backend/git"
 	"kanban/pkg/sandboxruntime"
+
+	"kanban/backend/httputil"
 )
 
 // RegistryClient fetches extension metadata and manages container images.
@@ -31,13 +33,10 @@ type RegistryClient struct {
 func NewRegistryClient() *RegistryClient {
 	return &RegistryClient{
 		rt: sandboxruntime.NewRuntime(),
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-			// Do not follow redirects
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
+		// A registry URL can come from MIKE_REGISTRY_URL, and a manifest's asset URLs are relative
+		// to whatever it resolved against: no redirect is followed, so nothing reaches a host the
+		// operator did not name.
+		httpClient: httputil.NewSingleAttemptClient(30 * time.Second),
 	}
 }
 

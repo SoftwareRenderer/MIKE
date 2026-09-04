@@ -206,7 +206,7 @@ func (f *streamFlusher) flush() {
 				data["raw_args_delta"] = d.args[d.startArgLen:d.currentArgLen]
 			}
 			// Include edit line counts in the tool_call event so they're available immediately.
-			if d.toolName == "edit_file" {
+			if d.toolName == llama.ToolEditFile {
 				added, removed := countEditLines(d.args)
 				data["lines_added"] = added
 				data["lines_removed"] = removed
@@ -277,7 +277,7 @@ func askQuestionResults(pending []types.ChatToolCall, results []toolResult) map[
 		}
 		// ri < len(results): a call can have no result row, and callers index
 		// results with the mapped value.
-		if tc.Function.Name == "ask_question" && ri < len(results) && results[ri].success {
+		if tc.Function.Name == llama.ToolAskQuestion && ri < len(results) && results[ri].success {
 			m[i] = ri
 		}
 		ri++
@@ -381,12 +381,10 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			te.failTask(setup.task, setup.projectID, err.Error(), "sandbox_setup_failed")
 			return
 		}
-		state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite, state.sandboxEdit = makeSandboxCallbacks(agentClient)
-		state.sandboxOperatingMode = setup.task.OperatingMode
-		state.agentSandboxHash = agentSandboxHash(te.agentRegistry.GetAnyAgentSandbox())
-
+		sb := sandboxState{operatingMode: setup.task.OperatingMode, agentConfigHash: agentSandboxHash(te.agentRegistry.GetAnyAgentSandbox())}
+		sb.exec, sb.execStream, sb.read, sb.write, sb.edit = makeSandboxCallbacks(agentClient)
 		// Wire up bridge recovery — reconnects client or (re)creates sandbox.
-		state.recoverBridge = func() bool {
+		sb.recoverBridge = func() bool {
 			return te.recoverBridgeForTask(te.sandboxMgr, setup, state, imageToUse, func() {
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{
 					Type: types.WSTypeStatus,
@@ -394,6 +392,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 				})
 			})
 		}
+		state.setSandbox(func(dst *sandboxState) { *dst = sb })
 	} else {
 		// Non-sandbox: use os.Root only for write isolation.
 		// Read uses plain os.ReadFile (no isolation).
@@ -403,7 +402,8 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			return
 		}
 		state.root = root
-		_, state.sandboxWrite = makeRootCallbacks(root, setup.worktreePath)
+		_, write := makeRootCallbacks(root, setup.worktreePath)
+		state.setSandbox(func(sb *sandboxState) { sb.write = write })
 	}
 
 	// Check if this setup.task uses an agent provider
@@ -524,9 +524,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 
 			// Check for operating mode change — recreate sandbox with correct mount mode
 			if setup.sandboxEnabled && te.sandboxMgr != nil && te.sandboxMgr.ContainerIsRunning(setup.task.ID) {
-				te.taskMu.Lock()
-				currentOperatingMode := state.sandboxOperatingMode
-				te.taskMu.Unlock()
+				currentOperatingMode := state.sandbox().operatingMode
 				newOperatingMode := updatedTask.OperatingMode
 				if newOperatingMode != currentOperatingMode {
 					log.Printf("[mode-switch] setup.task=%s operating mode changed (%s → %s), recreating sandbox", setup.task.ID, currentOperatingMode, newOperatingMode)
@@ -535,7 +533,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 						reason:      "mode change",
 						connErrCode: "agent_connection_failed",
 						opts:        te.sandboxCreateOpts(setup, imageToUse, updatedTask.IsPlanMode()),
-						underLock:   func(state *executionState) { state.sandboxOperatingMode = newOperatingMode },
+						underLock:   func(sb *sandboxState) { sb.operatingMode = newOperatingMode },
 					}); err != nil {
 						return
 					}
@@ -560,10 +558,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 
 		// Check for agent sandbox config change — recreate sandbox with updated mounts/envs
 		if setup.sandboxEnabled && te.sandboxMgr != nil && te.sandboxMgr.ContainerIsRunning(setup.task.ID) {
-			currentHash := ""
-			te.taskMu.Lock()
-			currentHash = state.agentSandboxHash
-			te.taskMu.Unlock()
+			currentHash := state.sandbox().agentConfigHash
 			newHash := agentSandboxHash(te.agentRegistry.GetAnyAgentSandbox())
 			if newHash != "" && newHash != currentHash {
 				log.Printf("[sandbox-config] setup.task=%s agent sandbox config changed, recreating sandbox", setup.task.ID)
@@ -572,7 +567,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 					reason:      "config change",
 					connErrCode: "agent_config_failed",
 					opts:        te.sandboxCreateOpts(setup, imageToUse, setup.task.IsPlanMode()),
-					underLock:   func(state *executionState) { state.agentSandboxHash = newHash },
+					underLock:   func(sb *sandboxState) { sb.agentConfigHash = newHash },
 				}); err != nil {
 					return
 				}
@@ -722,7 +717,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			// Throttled progress updates for write_file (1 per 2 seconds)
 			if time.Since(lastProgressSend) > 2*time.Second {
 				for _, tc := range lc.pendingToolCalls {
-					if tc.Function.Name == "write_file" && tc.Function.Arguments != "" {
+					if tc.Function.Name == llama.ToolWriteFile && tc.Function.Arguments != "" {
 						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]any{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments), "path": extractPathFromArgs(tc.Function.Arguments)}})
 						lastProgressSend = time.Now()
 					}
@@ -961,7 +956,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 				}
 				args := parseToolArgs(tc.Function.Arguments)
 				// Send final path update before execution (full args now available)
-				if tc.Function.Name == "write_file" {
+				if tc.Function.Name == llama.ToolWriteFile {
 					path := extractPathFromArgs(tc.Function.Arguments)
 					if path == "" {
 						if p, ok := args["path"].(string); ok && p != "" {
@@ -1019,11 +1014,11 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 					// mutex, where a language server round trip would serialise the rest of
 					// the turn and report a state the turn's later edits may already fix.
 					switch tc.Function.Name {
-					case "write_file", "edit_file":
+					case llama.ToolWriteFile, llama.ToolEditFile:
 						if path, ok := args["path"].(string); ok && path != "" {
 							lc.noteTouchedFile(path)
 						}
-					case "bash":
+					case llama.ToolBash:
 						lc.noteShellMayHaveChangedFiles()
 					}
 					return result, success
@@ -1050,13 +1045,13 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 				})
 
 				// Detect git commands in bash tool calls
-				if tc.Function.Name == "bash" {
+				if tc.Function.Name == llama.ToolBash {
 					if cmd, ok := args["command"].(string); ok && strings.Contains(cmd, "git ") {
 						hadGitCmd = true
 					}
 				}
 
-				if tc.Function.Name == "request_review" {
+				if tc.Function.Name == llama.ToolRequestReview {
 					hadRequestReview = true
 				}
 			}
@@ -1098,7 +1093,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 							resultJSON, _ := json.Marshal(map[string]any{"output": tr.output, "success": tr.success, "duration": tr.duration})
 							_ = te.store.UpdateTaskMessageToolResult(tr.messageID, string(resultJSON))
 							// Re-broadcast so the UI shows the answer in place.
-							te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: buildToolResultEvent(tr.toolCallID, "ask_question", tr.output, tr.success, tr.duration, tr.args, tr.rawArgs, "", false, false, tr.messageID)})
+							te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: buildToolResultEvent(tr.toolCallID, llama.ToolAskQuestion, tr.output, tr.success, tr.duration, tr.args, tr.rawArgs, "", false, false, tr.messageID)})
 						}
 						autoAnswered = true
 						log.Printf("[ask_question] setup.task=%s auto-answered %d question(s) from parent context", setup.task.ID, len(answers))
@@ -1736,7 +1731,7 @@ func buildToolResultEvent(toolID, toolName, result string, success bool, duratio
 		"sandbox":  sandbox,
 	}
 
-	if toolName == "bash" || toolName == "read_file" {
+	if toolName == llama.ToolBash || toolName == llama.ToolReadFile {
 		preview, originalLines, originalBytes, truncated := toolresult.Truncate(result)
 		data["output"] = preview
 		data["result_truncated"] = truncated

@@ -19,6 +19,8 @@ import (
 
 	"kanban/backend/llmadapter"
 	"kanban/backend/types"
+
+	"kanban/backend/httputil"
 )
 
 // LlamaError is a structured error returned by the llama.cpp-compatible server
@@ -132,7 +134,7 @@ func NewLlamaClient(baseURL, modelName, reasoningEffort, apiKey string) *LlamaCl
 		modelName:       modelName,
 		reasoningEffort: reasoningEffort,
 		apiKey:          apiKey,
-		httpClient:      &http.Client{Timeout: 0},
+		httpClient:      httputil.NewClient(0), // 0: a streaming completion is not bounded by a wall-clock timeout
 		readIdleTimeout: 30 * time.Second,
 	}
 }

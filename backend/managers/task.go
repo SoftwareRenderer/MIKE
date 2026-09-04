@@ -70,12 +70,6 @@ type taskSandboxOps interface {
 	GetContainerPorts(taskID string) ([]types.AssignedPort, error)
 }
 
-// hasField checks if a key exists in a map[string]any.
-func hasField(m map[string]any, key string) bool {
-	_, ok := m[key]
-	return ok
-}
-
 // NewTaskHandler creates a new TaskHandler.
 func NewTaskHandler(store *store.Store, boardStreamMgr *stream.AppStreamManager, configStore *config.ConfigStore, terminalMgr *term.TerminalManager, executor *exec.TaskExecutor, worktreeMgr *git.WorktreeManager, commitQueue *exec.CommitQueue, sandboxMgr taskSandboxOps) *TaskHandler {
 	return &TaskHandler{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore, terminalMgr: terminalMgr, executor: executor, worktreeMgr: worktreeMgr, commitQueue: commitQueue, sandboxMgr: sandboxMgr}
@@ -132,16 +126,29 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		body, _ := io.ReadAll(r.Body)
 		var task types.Task
-		var attachments string
-		// Parse attachments separately (not a field on Task type)
-		var rawBody map[string]any
-		if err := json.Unmarshal(body, &rawBody); err == nil {
-			if att, ok := rawBody["attachments"]; ok {
-				attachments = att.(string)
-			}
+		// The body is decoded twice, on purpose: into types.Task for the values, and into the
+		// still-encoded fields to answer "did the client send this key at all", which no struct
+		// can tell (an omitted field and a zero one look the same once decoded).
+		var rawBody fieldsPresent
+		if err := json.Unmarshal(body, &rawBody); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, "invalid JSON")
+			return
 		}
 		if err := json.Unmarshal(body, &task); err != nil {
 			httputil.JSONError(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		// attachments is not a field on Task, so it is the one value read back out of the raw
+		// fields - decoded rather than asserted, because `att.(string)` panicked on a number.
+		var attachments string
+		if _, err := rawBody.decode("attachments", &attachments); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// A mode nothing dispatches on must not reach the row: the tool-set switch falls through
+		// to act, so the task would be offered write tools while reading as something else.
+		if _, valid := types.ParseOperatingMode(string(task.OperatingMode)); task.OperatingMode != "" && !valid {
+			httputil.JSONError(w, http.StatusBadRequest, "unknown operating mode")
 			return
 		}
 		task.ID = types.GenerateTaskID()
@@ -167,7 +174,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 				// Build skip set for fields explicitly sent by the client
 				skipFields := make(map[string]struct{})
 				for _, k := range []string{"auto_commit", "auto_merge", "subtasks_auto_merge"} {
-					if hasField(rawBody, k) {
+					if rawBody.has(k) {
 						skipFields[k] = struct{}{}
 					}
 				}
@@ -178,22 +185,27 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 				}
 				types.ApplyTaskCreationDefaults(&task, cfg, parentTask, skipFields)
 
-				if !hasField(rawBody, "operating_mode") && !hasField(rawBody, "plan_mode") {
+				if !rawBody.has("operating_mode") && !rawBody.has("plan_mode") {
 					if cfg.DefaultOperatingMode != nil {
 						task.OperatingMode = *cfg.DefaultOperatingMode
 					}
 				}
 				// Backward compat: if client sends plan_mode (bool), convert to operating_mode
-				if pm, ok := rawBody["plan_mode"]; ok {
-					if v, ok := pm.(bool); ok && v {
-						task.OperatingMode = "plan"
-					}
+				var planMode bool
+				if _, err := rawBody.decode("plan_mode", &planMode); err != nil {
+					httputil.JSONError(w, http.StatusBadRequest, err.Error())
+					return
 				}
-				// Default to "act" if not set
+				if planMode {
+					task.OperatingMode = types.ModePlan
+				}
+				// Default to act if nothing set it: the zero OperatingMode is "", which is
+				// not a mode, and an empty mode gets the act tool set by fall-through while
+				// reading as "unset" everywhere else.
 				if task.OperatingMode == "" {
-					task.OperatingMode = "act"
+					task.OperatingMode = types.ModeAct
 				}
-				if cfg.DefaultMaxFailedTurns != nil && !hasField(rawBody, "max_consecutive_failed_turns") {
+				if cfg.DefaultMaxFailedTurns != nil && !rawBody.has("max_consecutive_failed_turns") {
 					task.MaxConsecutiveFailedTurns = *cfg.DefaultMaxFailedTurns
 				}
 			}
@@ -304,120 +316,33 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		// Capture original values before partial update
+		var req *taskUpdateRequest
+		if !httputil.DecodeJSON(w, r, &req) {
+			return
+		}
+		if req == nil {
+			httputil.JSONError(w, http.StatusBadRequest, "request body required")
+			return
+		}
+		// Captured before any field moves: both are compared against the stored row
+		// afterwards to decide what else has to change.
 		originalSubtasksAutoMerge := task.SubtasksAutoMerge
 		originalParentTaskID := task.ParentTaskID
-		body, _ := io.ReadAll(r.Body)
-		var rawBody map[string]any
-		json.Unmarshal(body, &rawBody)
-		// Apply partial update: only modify fields present in the request body
-		if v, ok := rawBody["title"]; ok {
-			task.Title = v.(string)
+
+		modeChanged, applyErr := req.apply(task)
+		if applyErr != nil {
+			httputil.JSONError(w, http.StatusBadRequest, applyErr.Error())
+			return
 		}
-		if v, ok := rawBody["prompt"]; ok {
-			task.Prompt = v.(string)
+		// Remount container if not currently running to apply new mount mode (ro vs rw)
+		if modeChanged && task.ExecutionState != types.ExecStateRunning && h.executor != nil {
+			h.executor.StopSandbox(task.ID)
 		}
-		if v, ok := rawBody["status"]; ok {
-			// As in HandleMove: validate the column before it reaches the row.
-			newStatus, valid := types.ParseStatus(v.(string))
-			if !valid {
-				httputil.JSONError(w, http.StatusBadRequest, "unknown status")
-				return
-			}
-			task.Status = newStatus
-		}
-		if v, ok := rawBody["session_id"]; ok {
-			task.SessionID = v.(string)
-		}
-		if v, ok := rawBody["branch"]; ok {
-			branch := v.(string)
-			if err := types.ValidateBranchName(branch); err != nil {
-				httputil.JSONError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-			task.Branch = branch
-		}
-		if v, ok := rawBody["base_ref"]; ok {
-			baseRef := v.(string)
-			if err := types.ValidateBranchName(baseRef); err != nil {
-				httputil.JSONError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-			task.BaseRef = baseRef
-		}
-		if v, ok := rawBody["branch_tip"]; ok {
-			branchTip := v.(string)
-			if err := types.ValidateBranchName(branchTip); err != nil {
-				httputil.JSONError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-			task.BranchTip = branchTip
-		}
-		if v, ok := rawBody["output"]; ok {
-			task.Output = v.(string)
-		}
-		if v, ok := rawBody["execution_state"]; ok {
-			// An unrecognised execution_state would leave a card with no spinner, no badge
-			// and no transition that could move it out again.
-			newState, valid := types.ParseExecutionState(v.(string))
-			if !valid {
-				httputil.JSONError(w, http.StatusBadRequest, "unknown execution state")
-				return
-			}
-			task.ExecutionState = newState
-		}
-		if v, ok := rawBody["has_merge_conflict"]; ok {
-			task.HasMergeConflict = v.(bool)
-		}
-		if v, ok := rawBody["llama_server_url"]; ok {
-			task.LlamaServerURL = v.(string)
-		}
-		if v, ok := rawBody["model_name"]; ok {
-			task.ModelName = v.(string)
-		}
-		if v, ok := rawBody["reasoning_effort"]; ok {
-			task.ReasoningEffort = v.(string)
-		}
-		if v, ok := rawBody["max_consecutive_failed_turns"]; ok {
-			task.MaxConsecutiveFailedTurns = int(v.(float64))
-		}
-		if v, ok := rawBody["auto_commit"]; ok {
-			task.AutoCommit = v.(bool)
-		}
-		if v, ok := rawBody["auto_merge"]; ok {
-			task.AutoMerge = v.(bool)
-		}
-		if v, ok := rawBody["subtasks_auto_merge"]; ok {
-			task.SubtasksAutoMerge = v.(bool)
-		}
-		if v, ok := rawBody["operating_mode"]; ok {
-			newMode := v.(string)
-			if newMode != task.OperatingMode {
-				task.OperatingMode = newMode
-				// Remount container if not currently running to apply new mount mode (ro vs rw)
-				if task.ExecutionState != types.ExecStateRunning && h.executor != nil {
-					h.executor.StopSandbox(task.ID)
-				}
-			}
-		}
-		if v, ok := rawBody["parent_task_id"]; ok {
-			task.ParentTaskID = v.(string)
-		}
-		if v, ok := rawBody["title_generating"]; ok {
-			task.TitleGenerating = v.(bool)
-		}
-		if v, ok := rawBody["current_thread_id"]; ok {
-			task.CurrentThreadID = v.(string)
-		}
+
 		// When parent_task_id changes, re-derive auto_merge/auto_commit to respect
 		// the new parent's "allow subtask to auto merge" preference
-		if hasField(rawBody, "parent_task_id") && task.ParentTaskID != originalParentTaskID {
-			skipFields := make(map[string]struct{})
-			for _, k := range []string{"auto_commit", "auto_merge", "subtasks_auto_merge"} {
-				if hasField(rawBody, k) {
-					skipFields[k] = struct{}{}
-				}
-			}
+		if req.ParentTaskID != nil && task.ParentTaskID != originalParentTaskID {
+			skipFields := req.autoMergeFieldsSent()
 			var parentTask *types.Task
 			if task.ParentTaskID != "" {
 				parent, err := h.store.GetTask(projectID, task.ParentTaskID)
@@ -806,8 +731,7 @@ func (h *TaskHandler) propagateSubtasksAutoMerge(projectID, taskID string, enabl
 func resolveGitAuthor(projectID string, s interface {
 	GetProject(id string) (*types.Project, error)
 }) (string, string) {
-	name := git.GitAuthorName
-	email := git.GitAuthorEmail
+	name, email := git.AuthorIdentity()
 
 	// If env vars are set, they take priority
 	nameSet := name != ""
@@ -1199,6 +1123,14 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+
+		// A handler can exist without an executor, as guarded everywhere else in this file.
+		// finishTitleGeneration still has to run, or the task shows "title coming" forever.
+		if h.executor == nil {
+			log.Printf("[title-gen] task=%s skipping: no executor configured", taskID)
+			h.finishTitleGeneration(projectID, taskID, true)
+			return
+		}
 
 		// Resolve the LLM config for title generation through the configured
 		// Utility provider/model, falling back to the task's own values when

@@ -258,3 +258,91 @@ func TestMigration_IdempotentAcrossRestarts(t *testing.T) {
 		t.Errorf("name = %q, want %q", name, "proj")
 	}
 }
+
+// TestSchemaVersionStamped checks that a migrated database carries the stamp, so the next start
+// skips the probe chain. The stamp is read from the file, not through the Store, because what is
+// under test is what the Store wrote.
+func TestSchemaVersionStamped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kanban.db")
+	s, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var v int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if v != schemaVersion {
+		t.Errorf("user_version = %d after a fresh initSchema, want %d", v, schemaVersion)
+	}
+
+	// Reopening must not re-run the chain or change the stamp.
+	s2, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if got := s2.userVersion(); got != schemaVersion {
+		t.Errorf("user_version after reopen = %d, want %d", got, schemaVersion)
+	}
+	if err := s2.Close(); err != nil {
+		t.Fatalf("close reopened: %v", err)
+	}
+}
+
+// TestNewerSchemaVersionIsLeftAlone covers the guard that makes the stamp worth having: a database
+// written by a newer MIKE is not edited by this one. Dropping a column and stamping ahead of this
+// build is how a downgrade looks; running the probe chain there would ALTER a schema we do not own.
+func TestNewerSchemaVersionIsLeftAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kanban.db")
+	s, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE tasks DROP COLUMN session_cost`); err != nil {
+		t.Fatalf("drop column to simulate a newer schema: %v", err)
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 99`); err != nil {
+		t.Fatalf("stamp newer version: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close fixture: %v", err)
+	}
+
+	var logs bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(previous)
+
+	s2, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("open a newer database: %v", err)
+	}
+	defer func() { _ = s2.Close() }()
+
+	if cols := columnsOf(t, path, "tasks"); cols["session_cost"] {
+		t.Error("a database stamped newer than this build was migrated anyway — the guard did not hold")
+	}
+	if !strings.Contains(logs.String(), "newer than this build") {
+		t.Errorf("expected a log line naming the newer schema version, got:\n%s", logs.String())
+	}
+	if v := s2.userVersion(); v != 99 {
+		t.Errorf("user_version = %d, want 99 — this build must not rewrite a newer stamp", v)
+	}
+}

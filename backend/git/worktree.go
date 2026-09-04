@@ -30,22 +30,39 @@ const EmptyTreeHash = "4b825dc642cb6eb9a060e54bf899d69f826635b6"
 // hexRe matches a string of exactly 40 hex characters (a git SHA-1).
 var hexRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
-// Git author identity.
-// When unset, Git uses its configured defaults (from .gitconfig / system config).
+// Git author identity, process-wide: unset means git uses its own configured default. The
+// add-project flow sets it once and every later commit uses it, so it is written while other
+// goroutines read it - use SetAuthorIdentity / AuthorIdentity, never the variables below.
 var (
-	GitAuthorName  = ""
-	GitAuthorEmail = ""
+	authorMu    sync.RWMutex
+	authorName  string
+	authorEmail string
 )
+
+// SetAuthorIdentity sets the identity commits are signed with. An empty half means "git's default".
+func SetAuthorIdentity(name, email string) {
+	authorMu.Lock()
+	authorName, authorEmail = name, email
+	authorMu.Unlock()
+}
+
+// AuthorIdentity returns the configured overrides.
+func AuthorIdentity() (name, email string) {
+	authorMu.RLock()
+	defer authorMu.RUnlock()
+	return authorName, authorEmail
+}
 
 // GitAuthorFlags returns -c flags to override the commit author identity.
 // When neither is set, returns nil so Git uses its configured defaults.
 func GitAuthorFlags() []string {
+	name, email := AuthorIdentity()
 	var flags []string
-	if GitAuthorName != "" {
-		flags = append(flags, "-c", "user.name="+GitAuthorName)
+	if name != "" {
+		flags = append(flags, "-c", "user.name="+name)
 	}
-	if GitAuthorEmail != "" {
-		flags = append(flags, "-c", "user.email="+GitAuthorEmail)
+	if email != "" {
+		flags = append(flags, "-c", "user.email="+email)
 	}
 	return flags
 }
@@ -653,15 +670,15 @@ func (wm *WorktreeManager) ResolveMainBranch(projectID, taskID, title, canonical
 	}
 	// Multiple slug matches (e.g. re-created tasks): pick the most recent commit.
 	best := matches[0]
-	var bestTs int64 = -1
+	var bestTS int64 = -1
 	for _, b := range matches {
 		tsOut, err := wm.GitRunInProjectOutput(projectID, "log", "-1", "--format=%ct", b)
 		if err != nil {
 			continue
 		}
 		var ts int64
-		if _, err := fmt.Sscanf(strings.TrimSpace(tsOut), "%d", &ts); err == nil && ts > bestTs {
-			bestTs = ts
+		if _, err := fmt.Sscanf(strings.TrimSpace(tsOut), "%d", &ts); err == nil && ts > bestTS {
+			bestTS = ts
 			best = b
 		}
 	}

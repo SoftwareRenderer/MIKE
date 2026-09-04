@@ -252,7 +252,7 @@ export function Widget({ name }: Props) {
 			var msg struct {
 				Method string `json:"method"`
 				Params struct {
-					Uri         string `json:"uri"`
+					URI         string `json:"uri"`
 					Diagnostics []struct {
 						Code    any    `json:"code"`
 						Message string `json:"message"`
@@ -267,7 +267,7 @@ export function Widget({ name }: Props) {
 				msgs = append(msgs, fmt.Sprintf("[%v] %s", d.Code, d.Message))
 			}
 			mu.Lock()
-			reports[msg.Params.Uri] = msgs
+			reports[msg.Params.URI] = msgs
 			mu.Unlock()
 		}
 	}()
