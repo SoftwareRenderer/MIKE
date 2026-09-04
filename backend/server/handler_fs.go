@@ -303,7 +303,8 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusInternalServerError, "create directory failed")
 		return
 	}
-	if err := os.WriteFile(req.Path, []byte(req.Content), 0644); err != nil {
+	// Not a plain write: a save that dies halfway must not leave a truncated file.
+	if err := fsutil.WriteFileAtomic(req.Path, []byte(req.Content)); err != nil {
 		log.Printf("fs write failed: %v", err)
 		JSONError(w, http.StatusInternalServerError, "write file failed")
 		return

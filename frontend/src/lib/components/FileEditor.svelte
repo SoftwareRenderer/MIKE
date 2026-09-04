@@ -15,6 +15,7 @@
     import { requestLSPChannel, type VirtualTransport } from '$lib/utils/lsp-connection-manager';
     import { lspClientConfig } from '$lib/utils/lsp-client-config';
     import { isLSPAvailable } from '$lib/utils/lsp-connection-manager';
+    import { SaveController, EDITOR_SAVE_SETTLED } from '$lib/utils/save-state';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     import { isExtensionContentSet } from '$lib/extensions/handlers/editor';
@@ -104,6 +105,7 @@
     let content = $state('');
     let loading = $state(false);
     let saving = $state(false);
+    const saveController = new SaveController();
     let error = $state('');
     let fileTooLarge = $state(false);
     let fileNotFound = $state(false);
@@ -789,9 +791,32 @@
         }));
     }
 
+    /**
+     * Whether this editor has something to write. `fileNotFound` refuses, though
+     * the keydown handler below tries to allow it — left as it behaves today.
+     */
+    function saveIsNeeded(): boolean {
+        return hasChanges && !fileTooLarge && !fileNotFound;
+    }
+
+    /**
+     * Tell the explorer no save for this file is running, so its Save button comes
+     * back now. Never sent while a save is still running.
+     */
+    function announceSaveSettled(ok: boolean) {
+        if (!filePath) return;
+        window.dispatchEvent(new CustomEvent(EDITOR_SAVE_SETTLED, { detail: { path: filePath, ok } }));
+    }
+
     async function handleSave() {
-        if (saving || !hasChanges || fileTooLarge || fileNotFound || !filePath) return;
+        if (!filePath) return;
+        if (!saveController.begin(saveIsNeeded())) {
+            // Refused with nothing running: there is no save to wait for.
+            if (!saveController.busy) announceSaveSettled(false);
+            return;
+        }
         saving = true;
+        let ok = false;
         try {
             const csrfToken = await ensureCsrfToken();
             const taskParam = taskId ? `&task=${encodeURIComponent(taskId)}` : '';
@@ -810,6 +835,7 @@
             }
             savedContent = content;
             hasChanges = false;
+            ok = true;
             // File changed on disk — re-extract outline symbols and
             // sticky-scroll headers (line numbers may have shifted).
             extractSymbols();
@@ -828,13 +854,17 @@
                     gutterMarkers = newMarkers;
                     baselineContent = content;
                 }
-                await clearEditorDraft(filePath);
+                // The bytes are on disk; clearing the draft must not hold the button.
+                clearEditorDraft(filePath).catch(() => {});
             }
         } catch (e) {
             error = String(e);
         } finally {
             saving = false;
+            announceSaveSettled(ok);
         }
+        // A save asked for during that write runs now if anything is still unsaved.
+        if (saveController.settle(saveIsNeeded())) await handleSave();
     }
 
     /** Position cursor on a specific line and scroll it into view. */
