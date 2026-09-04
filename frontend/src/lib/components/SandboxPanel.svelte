@@ -6,6 +6,7 @@
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
     import { isNearMemoryLimit, formatSandboxMemory, formatMemoryLimitMB } from '$lib/utils/memory-stats';
 import BaseModal from './BaseModal.svelte';
+import { t } from '$lib/i18n/index.svelte';
 
     let { task, stats, onClose }: {
         task: Task;
@@ -42,24 +43,24 @@ import BaseModal from './BaseModal.svelte';
     });
 </script>
 
-<BaseModal title="Sandbox Info" width="480px" onClose={onClose}>
+<BaseModal title={t('sandbox.infoTitle')} width="480px" onClose={onClose}>
         {#snippet header({ title })}
             <div class="panel-title">
                 <Icon src={shieldIcon} width={16} height={16} />
-                <span>Sandboxed Task</span>
+                <span>{t('sandbox.sandboxedTask')}</span>
             </div>
         {/snippet}
 
         <div class="panel-body">
             <div class="status-notice">
-Sandbox Isolation is enabled for this project
+{t('sandbox.isolationEnabled')}
             </div>
 
             <!-- Live memory usage (WS-pushed; most recent value persists while idle) -->
             {#if stats}
                 <div class="memory-section">
                     <div class="memory-row">
-                        <span class="memory-label">Memory Usage</span>
+                        <span class="memory-label">{t('sandbox.memoryUsage')}</span>
                         <span class="memory-value">{formatSandboxMemory(stats)}</span>
                     </div>
                     {#if stats.memory_limit_mb > 0}
@@ -67,69 +68,69 @@ Sandbox Isolation is enabled for this project
                         <div class="memory-bar">
                             <div class="memory-bar-fill" class:warn={isNearMemoryLimit(stats)} style="width: {memoryPct(stats)}%"></div>
                             {#if stats.memory_peak_mb > 0}
-                                <div class="memory-bar-peak" style="left: {peakPct(stats)}%" title={`Peak ${stats.memory_peak_mb} MB`}></div>
+                                <div class="memory-bar-peak" style="left: {peakPct(stats)}%" title={t('sandbox.peakMemory', { mb: stats.memory_peak_mb })}></div>
                             {/if}
                         </div>
                     {/if}
                     {#if stats.memory_peak_mb > 0}
-                        <div class="memory-peak">Peak {stats.memory_peak_mb} MB</div>
+                        <div class="memory-peak">{t('sandbox.peakMemory', { mb: stats.memory_peak_mb })}</div>
                     {/if}
                     {#if stats.oom_kills > 0}
                         <div class="oom-warning" role="alert">
-                            <span class="oom-warning-count">{stats.oom_kills}</span> process{stats.oom_kills > 1 ? 'es' : ''} OOM-killed — memory limit reached
+                            <span class="oom-warning-count">{stats.oom_kills}</span> {t('sandbox.oomKilled', { count: stats.oom_kills })}
                         </div>
                     {/if}
                 </div>
             {/if}
 
             {#if loading}
-                <div class="loading">Loading settings...</div>
+                <div class="loading">{t('sandbox.loadingSettings')}</div>
             {:else if error}
                 <div class="error">{error}</div>
             {:else if project}
                 <div class="settings-list">
                     <!-- Network isolation -->
                     <div class="setting-row">
-                        <span class="setting-label">Network Isolation</span>
-                        <span class="setting-value">{project.sandbox_network_isolation ? 'Enabled' : 'Disabled'}</span>
+                        <span class="setting-label">{t('sandbox.networkIsolation')}</span>
+                        <span class="setting-value">{project.sandbox_network_isolation ? t('sandbox.enabled') : t('sandbox.disabled')}</span>
                     </div>
 
                     <!-- Memory limit -->
                     <div class="setting-row">
-                        <span class="setting-label">Memory Limit</span>
+                        <span class="setting-label">{t('sandbox.memoryLimit')}</span>
                         <span class="setting-value">{formatMemoryLimitMB(project.sandbox_memory_limit ?? 1024)}</span>
                     </div>
 
                     <!-- Image -->
                     <div class="setting-row">
-                        <span class="setting-label">Image</span>
-                        <span class="setting-value setting-value-mono">{project.sandbox_dockerfile_path || project.sandbox_image || 'Default'}</span>
+                        <span class="setting-label">{t('sandbox.image')}</span>
+                        <span class="setting-value setting-value-mono">{project.sandbox_dockerfile_path || project.sandbox_image || t('sandbox.default')}</span>
                     </div>
 
                     <!-- Forward ports -->
                     {#if project.forward_ports && project.forward_ports.length > 0}
                     <div class="setting-row setting-row-no-border">
-                        <span class="setting-label">Forwarded Ports</span>
+                        <span class="setting-label">{t('sandbox.forwardedPorts')}</span>
                         <span class="setting-value">{project.forward_ports.map(p => p.container_port).join(', ')}</span>
                     </div>
 
                     <!-- Assigned ports (task-level) -->
                     <div class="assigned-section">
-                        <span class="section-label">Active Port Mappings</span>
+                        <span class="section-label">{t('sandbox.activePortMappings')}</span>
                         {#if task.assigned_ports && task.assigned_ports.length > 0}
                         <div class="assigned-list">
                             {#each task.assigned_ports as port}
                             <div class="assigned-item">
-                                <span class="assigned-host" title="Host port">{port.host_port}</span>
+                                <span class="assigned-host" title={t('sandbox.hostPort')}>{port.host_port}</span>
                                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                                     <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                                 </svg>
-                                <span class="assigned-container" title="Container port">{port.container_port}</span>
+                                <span class="assigned-container" title={t('sandbox.containerPort')}>{port.container_port}</span>
                             </div>
                             {/each}
                         </div>
                         {:else}
-                        <div class="assigned-empty">Container has not started due to idle task or terminal</div>
+                        <div class="assigned-empty">{t('sandbox.portsIdle')}</div>
                         {/if}
                     </div>
                     {/if}
@@ -137,7 +138,7 @@ Sandbox Isolation is enabled for this project
                     <!-- Custom mounts -->
                     {#if project.sandbox_mounts && project.sandbox_mounts.length > 0}
                     <div class="mounts-section">
-                        <span class="section-label">Custom Mounts</span>
+                        <span class="section-label">{t('sandbox.customMounts')}</span>
                         <div class="mounts-list">
                             {#each project.sandbox_mounts as mount}
                             <div class="mount-item">
@@ -146,7 +147,7 @@ Sandbox Isolation is enabled for this project
                                     <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                                 </svg>
                                 <span class="mount-container" title={mount.container_path}>{mount.container_path}</span>
-                                <span class="mount-mode" class:mode-rw={mount.mode === 'rw'} class:mode-ro={mount.mode === 'ro'} title={mount.mode === 'rw' ? 'Read/Write' : 'Read-only'}>{mount.mode}</span>
+                                <span class="mount-mode" class:mode-rw={mount.mode === 'rw'} class:mode-ro={mount.mode === 'ro'} title={mount.mode === 'rw' ? t('sandbox.readWrite') : t('sandbox.readOnly')}>{mount.mode}</span>
                             </div>
                             {/each}
                         </div>
@@ -156,13 +157,13 @@ Sandbox Isolation is enabled for this project
                     <!-- Environment variables -->
                     {#if project.sandbox_envs && project.sandbox_envs.length > 0}
                     <div class="envs-section">
-                        <span class="section-label">Environment Variables</span>
+                        <span class="section-label">{t('sandbox.environmentVariables')}</span>
                         <div class="envs-list">
                             {#each project.sandbox_envs as env}
                             <div class="env-item">
                                 <span class="env-key" title={env.key}>{env.key}</span>
                                 <span class="env-equals">=</span>
-                                <span class="env-value" title={env.value}>{env.value || '(empty)'}</span>
+                                <span class="env-value" title={env.value}>{env.value || t('sandbox.empty')}</span>
                             </div>
                             {/each}
                         </div>
@@ -172,7 +173,7 @@ Sandbox Isolation is enabled for this project
                     <!-- Capabilities -->
                     {#if project.sandbox_capabilities && project.sandbox_capabilities.length > 0}
                     <div class="caps-section">
-                        <span class="section-label">Capabilities</span>
+                        <span class="section-label">{t('sandbox.capabilities')}</span>
                         <div class="caps-list">
                             {#each project.sandbox_capabilities as cap}
                             <span class="caps-pill" title={cap}>{cap}</span>

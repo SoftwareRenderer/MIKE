@@ -1,10 +1,11 @@
 import type { Extension, RegistryEntry, ExtensionUpdate } from '../types';
 import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
+import { t } from '$lib/i18n/index.svelte';
 
 /** Fetch all installed extensions with runtime status. */
 export async function listExtensions(): Promise<Extension[]> {
     const res = await apiFetch(`${API_BASE}/extensions`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch extensions');
+    if (!res.ok) throw await apiError(res, t('api.fetchExtensions'));
     return res.json();
 }
 
@@ -21,7 +22,7 @@ export async function updateExtension(id: string, data: {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to update extension');
+    if (!res.ok) throw await apiError(res, t('api.updateExtension'));
     return res.json();
 }
 
@@ -30,7 +31,7 @@ export async function deleteExtension(id: string): Promise<DeleteExtensionResult
     const res = await apiFetch(`${API_BASE}/extensions/${id}`, {
         method: 'DELETE',
     });
-    if (!res.ok) throw await apiError(res, 'Failed to delete extension');
+    if (!res.ok) throw await apiError(res, t('api.deleteExtension'));
     return (await res.json().catch(() => ({}))) as DeleteExtensionResult;
 }
 
@@ -48,7 +49,7 @@ export async function setExtensionEnabled(id: string, enabled: boolean): Promise
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled }),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to update extension enabled state');
+    if (!res.ok) throw await apiError(res, t('api.updateExtensionEnabledState'));
     return res.json();
 }
 
@@ -63,14 +64,14 @@ export async function setDependencyCache(id: string, hostPath: string): Promise<
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ host_path: hostPath }),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to update the dependency directory');
+    if (!res.ok) throw await apiError(res, t('api.updateDependencyDirectory'));
     return res.json();
 }
 
 /** The server's own home directory, for suggesting where a dependency directory should live. */
 export async function getHomeDirectory(): Promise<string> {
     const res = await apiFetch(`${API_BASE}/home`);
-    if (!res.ok) throw await apiError(res, 'Failed to read the home directory');
+    if (!res.ok) throw await apiError(res, t('api.readHomeDirectory'));
     const data = await res.json();
     return typeof data?.home === 'string' ? data.home : '';
 }
@@ -78,14 +79,14 @@ export async function getHomeDirectory(): Promise<string> {
 /** Fetch extensions present in the local extensions directory (filesystem). */
 export async function listLocalExtensions(): Promise<RegistryEntry[]> {
     const res = await apiFetch(`${API_BASE}/extensions/local`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch local extensions');
+    if (!res.ok) throw await apiError(res, t('api.fetchLocalExtensions'));
     return res.json();
 }
 
 /** Fetch the registry index. */
 export async function getRegistryIndex(): Promise<RegistryEntry[]> {
     const res = await apiFetch(`${API_BASE}/extensions/registry`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch registry');
+    if (!res.ok) throw await apiError(res, t('api.fetchRegistry'));
     return res.json();
 }
 
@@ -102,7 +103,7 @@ export function installLocalExtension(author: string, name: string): AsyncIterab
 /** Check for available updates. */
 export async function checkUpdates(): Promise<ExtensionUpdate[]> {
     const res = await apiFetch(`${API_BASE}/extensions/check-updates`);
-    if (!res.ok) throw await apiError(res, 'Failed to check for updates');
+    if (!res.ok) throw await apiError(res, t('api.checkForUpdates'));
     return res.json();
 }
 
@@ -137,7 +138,7 @@ function streamOperation(path: string, body: Record<string, any>): AsyncIterable
             headers,
             body: JSON.stringify(body),
         });
-        if (!res.ok) throw await apiError(res, 'Operation failed');
+        if (!res.ok) throw await apiError(res, t('api.operationFailed'));
 
         // The server streams SSE; surface a clear error if it returns a plain body instead.
         const contentType = res.headers?.get('content-type') ?? '';
@@ -145,13 +146,13 @@ function streamOperation(path: string, body: Record<string, any>): AsyncIterable
         if (contentType && !contentType.toLowerCase().includes('text/event-stream')) {
             const text = await res.text();
             throw new Error(
-                `Unexpected response from ${path} (${contentType}): ${text.slice(0, 200) || 'empty body'}`
+                t('api.unexpectedResponse', { path, contentType, body: text.slice(0, 200) || t('api.emptyBody') })
             );
         }
 
         const reader = res.body?.getReader();
         if (!reader) {
-            throw new Error('No reader available');
+            throw new Error(t('api.noReader'));
         }
 
         const decoder = new TextDecoder();
@@ -184,7 +185,7 @@ function streamOperation(path: string, body: Record<string, any>): AsyncIterable
 
             // A healthy SSE stream always ends with a `done` event.
             if (!sawDone) {
-                throw new Error('Operation ended before reporting completion');
+                throw new Error(t('api.operationEndedEarly'));
             }
         } finally {
             reader.releaseLock();

@@ -1,5 +1,6 @@
 import type { SessionInfo } from '../types';
 import { API_BASE, apiFetch, apiError } from './helpers';
+import { t } from '$lib/i18n/index.svelte';
 
 /**
  * List every live login session, newest first; the caller's own is flagged
@@ -7,7 +8,7 @@ import { API_BASE, apiFetch, apiError } from './helpers';
  */
 export async function listSessions(): Promise<SessionInfo[]> {
     const res = await apiFetch(`${API_BASE}/sessions`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch sessions');
+    if (!res.ok) throw await apiError(res, t('api.fetchSessions'));
     return res.json();
 }
 
@@ -19,7 +20,7 @@ export async function revokeSession(id: string): Promise<void> {
     const res = await apiFetch(`${API_BASE}/sessions/${encodeURIComponent(id)}`, {
         method: 'DELETE',
     });
-    if (!res.ok) throw await apiError(res, 'Failed to revoke session');
+    if (!res.ok) throw await apiError(res, t('api.revokeSession'));
 }
 
 /** Revoke every session except the caller's. Returns how many were revoked. */
@@ -27,6 +28,6 @@ export async function revokeOtherSessions(): Promise<{ revoked: number }> {
     const res = await apiFetch(`${API_BASE}/sessions/revoke-others`, {
         method: 'POST',
     });
-    if (!res.ok) throw await apiError(res, 'Failed to revoke other sessions');
+    if (!res.ok) throw await apiError(res, t('api.revokeOtherSessions'));
     return res.json();
 }

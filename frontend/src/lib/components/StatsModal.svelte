@@ -7,6 +7,7 @@
     import { getProviderDisplayName } from '$lib/utils/providers';
     import { formatCost } from '$lib/utils/format';
     import BaseModal from './BaseModal.svelte';
+    import { t } from '$lib/i18n/index.svelte';
 
     let { projectId, onClose }: { projectId: string; onClose: () => void } = $props();
 
@@ -78,7 +79,7 @@
     });
 
     async function resetModel(model: ModelStats) {
-        if (!confirm(`Reset token stats for ${getTokenLabel(model)}?`)) return;
+        if (!confirm(t('stats.resetConfirm', { name: getTokenLabel(model) }))) return;
         try {
             await resetProjectStats(projectId, model.model_name, model.provider_name || undefined);
             loading = true;
@@ -93,50 +94,50 @@
     }
 </script>
 
-<BaseModal title="Token Usage" width="90vw" zIndex={300} onClose={handleClose}>
+<BaseModal title={t('stats.title')} width="90vw" zIndex={300} onClose={handleClose}>
             {#if loading}
-                <div class="loading">Loading stats...</div>
+                <div class="loading">{t('stats.loading')}</div>
             {:else if error}
                 <div class="error">{error}</div>
             {:else if !stats || sortedModels.length === 0}
-                <div class="empty">No token usage data yet. Run a task to see stats here.</div>
+                <div class="empty">{t('stats.empty')}</div>
             {:else}
                 <!-- Overall summary -->
                 <div class="summary-card">
                     <div class="summary-row">
                         <div class="summary-item">
                             <span class="summary-value">{stats.total_tasks}</span>
-                            <span class="summary-label">Tasks</span>
+                            <span class="summary-label">{t('stats.tasks')}</span>
                         </div>
                         <div class="summary-item">
                             <span class="summary-value">{formatNumber(stats.total_cache_tokens)}</span>
-                            <span class="summary-label">Cached</span>
+                            <span class="summary-label">{t('stats.cached')}</span>
                         </div>
                         <div class="summary-item">
                             <span class="summary-value">{formatNumber(stats.total_processed_tokens)}</span>
-                            <span class="summary-label">Prompt</span>
+                            <span class="summary-label">{t('stats.prompt')}</span>
                         </div>
                         <div class="summary-item">
                             <span class="summary-value">{formatNumber(stats.total_generated_tokens)}</span>
-                            <span class="summary-label">Generated</span>
+                            <span class="summary-label">{t('stats.generated')}</span>
                         </div>
                     </div>
                     <div class="summary-row timings">
                         <div class="summary-item">
                             <span class="summary-value">{formatTps(stats.avg_prompt_tps)}</span>
-                            <span class="summary-label">Prompt Speed</span>
+                            <span class="summary-label">{t('stats.promptSpeed')}</span>
                         </div>
                         <div class="summary-item">
                             <span class="summary-value">{formatTps(stats.avg_generation_tps)}</span>
-                            <span class="summary-label">Gen Speed</span>
+                            <span class="summary-label">{t('stats.genSpeed')}</span>
                         </div>
                         <div class="summary-item">
                             <span class="summary-value">{formatKwh(stats.total_power_kwh)}</span>
-                            <span class="summary-label">Power</span>
+                            <span class="summary-label">{t('stats.power')}</span>
                         </div>
                         <div class="summary-item">
                             <span class="summary-value">{formatCost(stats.total_cost, '-')}</span>
-                            <span class="summary-label" title="Includes API pricing and electricity cost (when configured)">Est. Total Cost</span>
+                            <span class="summary-label" title={t('stats.costTitle')}>{t('stats.estTotalCost')}</span>
                         </div>
                     </div>
                 </div>
@@ -145,15 +146,15 @@
                 <table class="model-table">
                     <thead>
                         <tr>
-                            <th class="col-model">Model</th>
-                            <th class="col-num">Tasks</th>
-                            <th class="col-num">Cached</th>
-                            <th class="col-num">Prompt</th>
-                            <th class="col-num">Generated</th>
-                            <th class="col-num">Prompt Speed</th>
-                            <th class="col-num">Gen Speed</th>
-                            <th class="col-num">Power</th>
-                            <th class="col-num" title="Includes API pricing and electricity cost (when configured)">Est. Total Cost</th>
+                            <th class="col-model">{t('stats.model')}</th>
+                            <th class="col-num">{t('stats.tasks')}</th>
+                            <th class="col-num">{t('stats.cached')}</th>
+                            <th class="col-num">{t('stats.prompt')}</th>
+                            <th class="col-num">{t('stats.generated')}</th>
+                            <th class="col-num">{t('stats.promptSpeed')}</th>
+                            <th class="col-num">{t('stats.genSpeed')}</th>
+                            <th class="col-num">{t('stats.power')}</th>
+                            <th class="col-num" title={t('stats.costTitle')}>{t('stats.estTotalCost')}</th>
                             <th class="col-action"></th>
                         </tr>
                     </thead>
@@ -172,14 +173,14 @@
                                 <td class="col-num">{formatKwh(model.power_kwh)}</td>
                                 <td class="col-num">{formatCost(model.cost, '-')}</td>
                                 <td class="col-action">
-                                    <button class="btn-reset" onclick={() => resetModel(model)} title="Reset stats for this model" aria-label={`Reset stats for ${getTokenLabel(model)}`}>
+                                    <button class="btn-reset" onclick={() => resetModel(model)} title={t('stats.resetTitle')} aria-label={t('stats.resetModelAria', { name: getTokenLabel(model) })}>
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                             <path d="M21 2v6h-6"/>
                                             <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
                                             <path d="M3 22v-6h6"/>
                                             <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
                                         </svg>
-                                        Reset
+                                        {t('stats.reset')}
                                     </button>
                                 </td>
                             </tr>

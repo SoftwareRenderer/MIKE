@@ -1,6 +1,7 @@
 import { API_BASE, apiFetch, apiError, ensureCsrfToken, generateId, registerSetOffline } from './helpers';
 import { loadQueue as loadQueueFromStorage, saveQueue as saveQueueToStorage, type QueuedAction as StoredQueuedAction } from '../storage';
 import type { Config, Project, Task, TaskMessage, Thread } from '../types';
+import { t } from '$lib/i18n/index.svelte';
 
 // Re-export helpers for direct imports
 export { generateId };
@@ -492,7 +493,7 @@ async function createProjectRaw(path: string, sandboxEnabled = false, gitUrl?: s
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to create project');
+    if (!res.ok) throw await apiError(res, t('api.createProject'));
     return res.json();
 }
 
@@ -502,7 +503,7 @@ async function updateProjectRaw(id: string, updates: { name?: string; sandbox_en
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to update project');
+    if (!res.ok) throw await apiError(res, t('api.updateProject'));
     return res.json();
 }
 
@@ -525,11 +526,11 @@ export async function buildSandboxImageStream(
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Failed to build sandbox image');
+        throw new Error(err.error || t('api.buildSandboxImage'));
     }
 
     const reader = res.body?.getReader();
-    if (!reader) throw new Error('Streaming not supported');
+    if (!reader) throw new Error(t('api.streamingNotSupported'));
 
     const decoder = new TextDecoder();
     let buffer = '';
@@ -561,20 +562,20 @@ export async function buildSandboxImageStream(
         }
     }
 
-    if (!result) throw new Error('Build completed without result');
+    if (!result) throw new Error(t('api.buildCompletedWithoutResult'));
     return result;
 }
 
 async function deleteProjectRaw(id: string): Promise<void> {
     const res = await apiFetch(`${API_BASE}/projects/${id}`, { method: 'DELETE' });
-    if (!res.ok) throw await apiError(res, 'Failed to delete project');
+    if (!res.ok) throw await apiError(res, t('api.deleteProject'));
 }
 
 export async function resetProjectStatsRaw(projectId: string, modelName: string, providerName?: string): Promise<void> {
     const params = new URLSearchParams({ model_name: modelName });
     if (providerName) params.set('provider_name', providerName);
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/stats?${params}`, { method: 'DELETE' });
-    if (!res.ok) throw await apiError(res, 'Failed to reset stats');
+    if (!res.ok) throw await apiError(res, t('api.resetStats'));
 }
 
 // -- Task CRUD endpoints --
@@ -584,7 +585,7 @@ async function createTaskRaw(projectId: string, task: Partial<Task>): Promise<Ta
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(task),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to create task');
+    if (!res.ok) throw await apiError(res, t('api.createTask'));
     return res.json();
 }
 
@@ -594,13 +595,13 @@ async function updateTaskRaw(projectId: string, taskId: string, task: Partial<Ta
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(task),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to update task');
+    if (!res.ok) throw await apiError(res, t('api.updateTask'));
     return res.json();
 }
 
 async function deleteTaskRaw(projectId: string, taskId: string): Promise<void> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`, { method: 'DELETE' });
-    if (!res.ok) throw await apiError(res, 'Failed to delete task');
+    if (!res.ok) throw await apiError(res, t('api.deleteTask'));
 }
 
 async function moveTaskRaw(projectId: string, taskId: string, status: string): Promise<Task> {
@@ -609,7 +610,7 @@ async function moveTaskRaw(projectId: string, taskId: string, status: string): P
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to move task');
+    if (!res.ok) throw await apiError(res, t('api.moveTask'));
     return res.json();
 }
 
@@ -621,50 +622,50 @@ async function commitAndDoneRaw(projectId: string, taskId: string, commitMessage
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to commit and mark as done');
+    if (!res.ok) throw await apiError(res, t('api.commitAndDone'));
     return res.json();
 }
 
 async function clearDoneTasksRaw(projectId: string): Promise<{ deleted: number }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/done`, { method: 'DELETE' });
-    if (!res.ok) throw await apiError(res, 'Failed to clear done tasks');
+    if (!res.ok) throw await apiError(res, t('api.clearDoneTasks'));
     return res.json();
 }
 
 // -- Task execution endpoints --
 async function initTaskRaw(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/init`, { method: 'POST' });
-    if (!res.ok) throw await apiError(res, 'Failed to initialize task');
+    if (!res.ok) throw await apiError(res, t('api.initializeTask'));
     return res.json();
 }
 
 async function startTaskRaw(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/start`, { method: 'POST' });
-    if (!res.ok) throw await apiError(res, 'Failed to start task');
+    if (!res.ok) throw await apiError(res, t('api.startTask'));
     return res.json();
 }
 
 async function startSubtaskRaw(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/start-subtask`, { method: 'POST' });
-    if (!res.ok) throw await apiError(res, 'Failed to start subtask');
+    if (!res.ok) throw await apiError(res, t('api.startSubtask'));
     return res.json();
 }
 
 async function stopTaskRaw(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/stop`, { method: 'POST' });
-    if (!res.ok) throw await apiError(res, 'Failed to stop task');
+    if (!res.ok) throw await apiError(res, t('api.stopTask'));
     return res.json();
 }
 
 async function retryTaskRaw(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/retry`, { method: 'POST' });
-    if (!res.ok) throw await apiError(res, 'Failed to retry task');
+    if (!res.ok) throw await apiError(res, t('api.retryTask'));
     return res.json();
 }
 
 async function resumeTaskRaw(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/resume`, { method: 'POST' });
-    if (!res.ok) throw await apiError(res, 'Failed to resume task');
+    if (!res.ok) throw await apiError(res, t('api.resumeTask'));
     return res.json();
 }
 
@@ -692,7 +693,7 @@ async function sendTaskMessageRaw(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to send message');
+    if (!res.ok) throw await apiError(res, t('api.sendMessage'));
     return res.json();
 }
 
@@ -702,7 +703,7 @@ async function createTaskMessageRaw(projectId: string, taskId: string, role: str
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role, content }),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to create message');
+    if (!res.ok) throw await apiError(res, t('api.createMessage'));
     return res.json();
 }
 
@@ -712,7 +713,7 @@ async function deleteTaskMessagesAfterRaw(projectId: string, taskId: string, mes
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message_id: messageId, regenerate }),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to delete messages');
+    if (!res.ok) throw await apiError(res, t('api.deleteMessages'));
 }
 
 /** Delete a single message by ID (e.g., dismissing an error). Does not delete messages after it. */
@@ -722,7 +723,7 @@ async function deleteTaskMessageRaw(projectId: string, taskId: string, messageId
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message_id: messageId, delete_single: true }),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to delete message');
+    if (!res.ok) throw await apiError(res, t('api.deleteMessage'));
 }
 
 async function updateTaskMessageRaw(projectId: string, taskId: string, messageId: string, content: string): Promise<void> {
@@ -731,7 +732,7 @@ async function updateTaskMessageRaw(projectId: string, taskId: string, messageId
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to update message');
+    if (!res.ok) throw await apiError(res, t('api.updateMessage'));
 }
 
 // -- Configuration endpoints --
@@ -741,7 +742,7 @@ async function updateConfigRaw(config: Config): Promise<Config> {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to update config');
+    if (!res.ok) throw await apiError(res, t('api.updateConfig'));
     return res.json();
 }
 
@@ -752,7 +753,7 @@ async function switchTaskThreadRaw(projectId: string, taskId: string, threadId: 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ thread_id: threadId }),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to switch thread');
+    if (!res.ok) throw await apiError(res, t('api.switchThread'));
     return res.json();
 }
 
@@ -764,7 +765,7 @@ async function forkTaskThreadRaw(projectId: string, taskId: string, fromThreadId
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to fork thread');
+    if (!res.ok) throw await apiError(res, t('api.forkThread'));
     return res.json();
 }
 

@@ -2,6 +2,7 @@ import type { GitLogResponse, TaskCommit } from '../types';
 import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
 import { setBoardCache, getBoardCache, diffCacheKey, doneDiffCacheKey } from '../storage';
 import { markCached } from './cache';
+import { t } from '$lib/i18n/index.svelte';
 
 // -- Git endpoints --
 
@@ -14,7 +15,7 @@ export async function getGitLogFull(projectId: string, options?: { branch?: stri
     if (options?.offset != null) params.set('offset', String(options.offset));
     if (options?.path) params.set('path', options.path);
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/log?${params}`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch git log');
+    if (!res.ok) throw await apiError(res, t('api.fetchGitLog'));
     return res.json();
 }
 
@@ -22,14 +23,14 @@ export async function getGitLogFull(projectId: string, options?: { branch?: stri
 export async function getCommitDiff(projectId: string, baseHash: string, headHash: string): Promise<string> {
     const params = new URLSearchParams({ base: baseHash, head: headHash });
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/diff?${params}`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch commit diff');
+    if (!res.ok) throw await apiError(res, t('api.fetchCommitDiff'));
     return res.text();
 }
 
 /** List all branches for a project. */
 export async function getGitBranches(projectId: string): Promise<string[]> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/branches`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch branches');
+    if (!res.ok) throw await apiError(res, t('api.fetchBranches'));
     return res.json();
 }
 
@@ -41,7 +42,7 @@ export async function checkoutBranch(projectId: string, branch: string): Promise
         headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
         body: JSON.stringify({ branch }),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to checkout branch');
+    if (!res.ok) throw await apiError(res, t('api.checkoutBranch'));
     return res.json();
 }
 
@@ -50,7 +51,7 @@ export async function checkoutBranch(projectId: string, branch: string): Promise
  * Status is the raw `git status --porcelain` output. Author fields are from project git config. */
 export async function getGitStatus(projectId: string): Promise<{ clean: boolean; status: string; head: string; authorName: string; authorEmail: string }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/status`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch git status');
+    if (!res.ok) throw await apiError(res, t('api.fetchGitStatus'));
     return res.json();
 }
 
@@ -64,7 +65,7 @@ export async function getProjectDiff(projectId: string, options?: { base?: strin
     if (options?.cached) params.set('cached', '1');
     const url = params.toString() ? `${API_BASE}/projects/${projectId}/git/diff?${params}` : `${API_BASE}/projects/${projectId}/git/diff`;
     const res = await apiFetch(url);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch project diff');
+    if (!res.ok) throw await apiError(res, t('api.fetchProjectDiff'));
     return res.text();
 }
 
@@ -77,7 +78,7 @@ export async function getProjectDiffFile(projectId: string, path: string, option
     if (options?.meta) params.set('meta', '1');
     if (options?.staged) params.set('staged', 'true');
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/diff/file?${params}`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch file');
+    if (!res.ok) throw await apiError(res, t('api.fetchFile'));
     return res.json();
 }
 
@@ -89,7 +90,7 @@ export async function stageProjectFile(projectId: string, path: string, stage: b
         headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
         body: JSON.stringify({ path, stage }),
     });
-    if (!res.ok) throw await apiError(res, stage ? 'Failed to stage file' : 'Failed to unstage file');
+    if (!res.ok) throw await apiError(res, stage ? t('api.stageFile') : t('api.unstageFile'));
     return res.json();
 }
 
@@ -101,7 +102,7 @@ export async function commitProject(projectId: string, message: string): Promise
         headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
         body: JSON.stringify({ message }),
     });
-    if (!res.ok) throw await apiError(res, 'Failed to commit');
+    if (!res.ok) throw await apiError(res, t('api.commit'));
     return res.json();
 }
 
@@ -112,7 +113,7 @@ export async function pullProject(projectId: string): Promise<{ status: string }
         method: 'POST',
         headers: { ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
     });
-    if (!res.ok) throw await apiError(res, 'Failed to pull');
+    if (!res.ok) throw await apiError(res, t('api.pull'));
     return res.json();
 }
 
@@ -123,7 +124,7 @@ export async function pushProject(projectId: string): Promise<{ status: string }
         method: 'POST',
         headers: { ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
     });
-    if (!res.ok) throw await apiError(res, 'Failed to push');
+    if (!res.ok) throw await apiError(res, t('api.push'));
     return res.json();
 }
 
@@ -162,7 +163,7 @@ export async function getTaskDiff(projectId: string, taskId: string, options?: {
     }
     try {
         const res = await apiFetch(url);
-        if (!res.ok) throw await apiError(res, 'Failed to fetch diff');
+        if (!res.ok) throw await apiError(res, t('api.fetchDiff'));
         const data = await res.json();
         // Cache only the current worktree diff (fire-and-forget)
         if (isCurrentDiff) {
@@ -190,7 +191,7 @@ export async function getTaskDiff(projectId: string, taskId: string, options?: {
 /** Fetch commit history for a task, including the base commit and all task commits. */
 export async function getTaskCommits(projectId: string, taskId: string): Promise<{ base_commit?: TaskCommit; commits: TaskCommit[] }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/commits`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch commits');
+    if (!res.ok) throw await apiError(res, t('api.fetchCommits'));
     return res.json();
 }
 
@@ -199,7 +200,7 @@ export async function getDiffFile(projectId: string, taskId: string, path: strin
     const params = new URLSearchParams({ path });
     if (options?.full) params.set('full', '1');
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/diff/file?${params}`, { signal: options?.signal });
-    if (!res.ok) throw await apiError(res, 'Failed to fetch file content');
+    if (!res.ok) throw await apiError(res, t('api.fetchFileContent'));
     return res.json();
 }
 
@@ -211,7 +212,7 @@ export async function stageFile(projectId: string, taskId: string, path: string,
         headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
         body: JSON.stringify({ path, stage }),
     });
-    if (!res.ok) throw await apiError(res, stage ? 'Failed to stage file' : 'Failed to unstage file');
+    if (!res.ok) throw await apiError(res, stage ? t('api.stageFile') : t('api.unstageFile'));
     return res.json();
 }
 
@@ -225,7 +226,7 @@ export async function getTaskGitLog(projectId: string, taskId: string, options?:
     if (options?.limit != null) params.set('limit', String(options.limit));
     if (options?.offset != null) params.set('offset', String(options.offset));
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/git/log?${params}`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch task git log');
+    if (!res.ok) throw await apiError(res, t('api.fetchTaskGitLog'));
     return res.json();
 }
 
@@ -233,6 +234,6 @@ export async function getTaskGitLog(projectId: string, taskId: string, options?:
 export async function getTaskCommitDiff(projectId: string, taskId: string, baseHash: string, headHash: string): Promise<string> {
     const params = new URLSearchParams({ base: baseHash, head: headHash });
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/diff?${params}`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch task commit diff');
+    if (!res.ok) throw await apiError(res, t('api.fetchTaskCommitDiff'));
     return res.text();
 }

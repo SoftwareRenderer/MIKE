@@ -1,5 +1,6 @@
 import { API_BASE } from './helpers';
 import { STALE_THRESHOLD_MS } from '$lib/constants';
+import { t } from '$lib/i18n/index.svelte';
 
 // Track last activity per terminal WebSocket for stale connection detection
 const terminalActivity = new WeakMap<WebSocket, number>();
@@ -40,7 +41,7 @@ function isTerminalQuery(data: string): boolean {
 // Returns the WebSocket and sets ws.onClose handler to call onClosed callback.
 function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal, onClosed?: () => void, transformInput?: (data: string) => string): WebSocket {
     // Show status immediately — backend will send its own messages when ready
-    term.write('\x1b[2mConnecting...\x1b[0m');
+    term.write(`\x1b[2m${t('terminal.connecting')}\x1b[0m`);
     const ws = new WebSocket(url);
     terminalActivity.set(ws, Date.now());
     ws.onopen = () => {
