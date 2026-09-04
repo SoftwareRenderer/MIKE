@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { setCsrfToken } from '$lib/api';
+    import { t } from '$lib/i18n';
     import BaseModal from './BaseModal.svelte';
 
     let { onClose }: { onClose: () => void | Promise<void> } = $props();
@@ -23,7 +24,7 @@
             });
             if (!res.ok) {
                 const body = await res.json().catch(() => ({}));
-                error = body.error || 'Login failed';
+                error = body.error || t('app.login.failed');
                 return;
             }
             // Extract CSRF token from response header
@@ -31,7 +32,7 @@
             if (token) setCsrfToken(token);
             await onClose();
         } catch (e) {
-            error = 'Network error';
+            error = t('app.login.networkError');
         } finally {
             loading = false;
         }
@@ -45,7 +46,7 @@
 
 {#snippet footer()}
     <button type="button" class="login-btn" disabled={loading || !password.trim()} onclick={handleSubmit}>
-        {loading ? 'Signing in...' : 'Sign in'}
+        {loading ? t('app.login.signingIn') : t('app.login.signIn')}
     </button>
 {/snippet}
 
@@ -68,7 +69,7 @@
 
 {#snippet header({ title: _title }: { title: string })}
     <div class="login-header">
-        <h2>Sign in</h2>
+        <h2>{t('app.login.signIn')}</h2>
     </div>
 {/snippet}
 

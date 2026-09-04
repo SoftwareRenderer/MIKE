@@ -6,7 +6,7 @@
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
     import { isNearMemoryLimit, formatSandboxMemory, formatMemoryLimitMB } from '$lib/utils/memory-stats';
 import BaseModal from './BaseModal.svelte';
-import { t } from '$lib/i18n/index.svelte';
+import { t } from '$lib/i18n';
 
     let { task, stats, onClose }: {
         task: Task;

@@ -1,6 +1,6 @@
 import type { Extension, RegistryEntry, ExtensionUpdate } from '../types';
 import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
-import { t } from '$lib/i18n/index.svelte';
+import { t } from '$lib/i18n';
 
 /** Fetch all installed extensions with runtime status. */
 export async function listExtensions(): Promise<Extension[]> {

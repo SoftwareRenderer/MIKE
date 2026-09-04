@@ -12,8 +12,8 @@
     import BaseModal from './BaseModal.svelte';
 import ToggleSwitch from './ToggleSwitch.svelte';
     import PathPicker from './PathPicker.svelte';
-    import { t } from '$lib/i18n/index.svelte';
-    import type { MessageKey } from '$lib/i18n/en';
+    import { t } from '$lib/i18n';
+    import type { MessageKey } from '$lib/i18n';
 
     /** Files the Dockerfile picker lists and accepts. */
     function isDockerfile(name: string): boolean {

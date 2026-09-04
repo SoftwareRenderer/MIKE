@@ -2,7 +2,7 @@ import type { GitLogResponse, TaskCommit } from '../types';
 import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
 import { setBoardCache, getBoardCache, diffCacheKey, doneDiffCacheKey } from '../storage';
 import { markCached } from './cache';
-import { t } from '$lib/i18n/index.svelte';
+import { t } from '$lib/i18n';
 
 // -- Git endpoints --
 

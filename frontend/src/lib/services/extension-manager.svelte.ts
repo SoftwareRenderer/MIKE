@@ -1,7 +1,7 @@
 import type { Extension, RegistryEntry, ExtensionUpdate } from '$lib/types';
 import { listExtensions, getRegistryIndex, installExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension } from '$lib/api';
 import { uiInjector } from './ui-injector.svelte';
-import { t } from '$lib/i18n/index.svelte';
+import { t } from '$lib/i18n';
 
 /** Runtime status of an extension sandbox. */
 export type ExtensionStatus = 'running' | 'stopped' | 'error' | 'unknown';

@@ -20,6 +20,7 @@ import {
     effectiveMultiSelectClick,
     effectiveToggleFullscreenKey,
     fullscreenToggleTitle,
+    openTerminalTitle,
     shortcutHintsHidden,
 } from '$lib/utils/keyboard';
 import type { Config } from '$lib/types';
@@ -427,6 +428,23 @@ describe('fullscreenToggleTitle', () => {
 
     it('shows plain text when disabled', () => {
         expect(fullscreenToggleTitle({ keyboard_shortcuts: { toggle_fullscreen: '' } } as Config)).toBe('Toggle fullscreen');
+    });
+});
+
+describe('openTerminalTitle', () => {
+    it('shows the default binding', () => {
+        expect(openTerminalTitle(null)).toBe('Open terminal (Ctrl+`)');
+        expect(openTerminalTitle({} as Config)).toBe('Open terminal (Ctrl+`)');
+    });
+
+    it('shows a custom binding formatted', () => {
+        expect(openTerminalTitle({ keyboard_shortcuts: { open_terminal: 'alt+shift+t' } } as Config))
+            .toBe('Open terminal (Alt+Shift+T)');
+    });
+
+    it('shows plain text when disabled', () => {
+        expect(openTerminalTitle({ keyboard_shortcuts: { open_terminal: '' } } as Config))
+            .toBe('Open terminal');
     });
 });
 

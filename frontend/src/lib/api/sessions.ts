@@ -1,6 +1,6 @@
 import type { SessionInfo } from '../types';
 import { API_BASE, apiFetch, apiError } from './helpers';
-import { t } from '$lib/i18n/index.svelte';
+import { t } from '$lib/i18n';
 
 /**
  * List every live login session, newest first; the caller's own is flagged

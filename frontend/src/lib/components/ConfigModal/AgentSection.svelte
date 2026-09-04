@@ -2,6 +2,7 @@
     import { marked } from 'marked';
     import DOMPurify from 'dompurify';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
+    import { t } from '$lib/i18n';
 
     let { agentName = '' } = $props();
 
@@ -38,13 +39,12 @@
         {/if}
         {#if setupInfo}
             <div class="agent-info-box">
-                <h4 class="agent-info-box-title">Setup</h4>
+                <h4 class="agent-info-box-title">{t('settings.agent.setup')}</h4>
                 {@html setupHtml}
             </div>
         {/if}
         <p class="agent-managed-note">
-            This provider is supplied by the <strong>{agentDisplayName || agentName}</strong> extension. To remove it,
-            disable or uninstall the extension in Settings → Extensions.
+            {t('settings.agent.managedBefore')} <strong>{agentDisplayName || agentName}</strong> {t('settings.agent.managedAfter')}
         </p>
     </div>
 {:else}
@@ -53,7 +53,7 @@
             <path d="M8 1L15 14H1L8 1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
             <path d="M8 6v4M8 11.5v.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
         </svg>
-        Extension is not installed
+        {t('settings.agent.notInstalled')}
     </div>
 {/if}
 

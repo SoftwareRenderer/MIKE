@@ -1,7 +1,7 @@
 import { API_BASE, apiFetch, apiError, ensureCsrfToken, generateId, registerSetOffline } from './helpers';
 import { loadQueue as loadQueueFromStorage, saveQueue as saveQueueToStorage, type QueuedAction as StoredQueuedAction } from '../storage';
 import type { Config, Project, Task, TaskMessage, Thread } from '../types';
-import { t } from '$lib/i18n/index.svelte';
+import { t } from '$lib/i18n';
 
 // Re-export helpers for direct imports
 export { generateId };
