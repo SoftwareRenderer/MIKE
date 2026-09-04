@@ -196,7 +196,7 @@ var toolAskQuestion = types.ChatTool{
 	Function: &types.ToolDef{
 		Name:        ToolAskQuestion,
 		DisplayName: "Question",
-		Description: "Ask the user a clarifying question when you need more information to proceed. Use this instead of making assumptions when requirements are unclear.",
+		Description: "Ask the user a question. Use this when clarification is needed or when asking for approval.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": askQuestionProps{
