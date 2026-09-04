@@ -4,10 +4,15 @@
     import BaseModal from '../BaseModal.svelte';
     import ContextDonut from './ContextDonut.svelte';
     import { formatTokens, formatCost } from '$lib/utils/format';
+    import { t } from '$lib/i18n';
 
     let open = $state(false);
-    let confirmText = $state('Compress');
-    let cancelText = $state('Cancel');
+    // Caller-provided labels stay raw: only the *absence* of one is copy, and resolving it in
+    // a derived is what lets a locale switch re-label an already-open dialog.
+    let confirmOverride = $state<string | null>(null);
+    let cancelOverride = $state<string | null>(null);
+    let confirmText = $derived(confirmOverride ?? t('chat.compress.confirm'));
+    let cancelText = $derived(cancelOverride ?? t('chat.common.cancel'));
     let resolveFn: ((value: boolean) => void) | null = $state(null);
 
     /** Resolve a stat that may be a snapshot number or a live getter. */
@@ -52,8 +57,8 @@
     $effect(() => {
         const value = dialogStore.compressContextDialog;
         if (value) {
-            confirmText = value.confirmText ?? 'Compress';
-            cancelText = value.cancelText ?? 'Cancel';
+            confirmOverride = value.confirmText ?? null;
+            cancelOverride = value.cancelText ?? null;
             resolveFn = value._resolve ?? null;
             open = true;
         }
@@ -84,7 +89,7 @@
     {/snippet}
 
     <BaseModal
-        title="Compress Context"
+        title={t('chat.compress.title')}
         width="340px"
         zIndex={1000}
         header={header}
@@ -95,8 +100,7 @@
         footerStyle="margin-top: 12px; padding: 12px 16px; gap: 6px;"
     >
         <p class="dialog-message">
-            This will create a summary of the conversation to make more efficient use of context
-            space. You can delete the summary to restore the full context.
+            {t('chat.compress.body')}
         </p>
 
         <div class="dialog-stats">
@@ -104,16 +108,16 @@
 
             <div class="stats-values">
                 <div class="stat-row">
-                    <span class="stat-label">Context used</span>
+                    <span class="stat-label">{t('chat.compress.contextUsed')}</span>
                     <span class="stat-value">{formatTokens(used)} / {formatTokens(limit)}</span>
                 </div>
                 <div class="stat-row">
-                    <span class="stat-label">Percentage</span>
+                    <span class="stat-label">{t('chat.compress.percentage')}</span>
                     <span class="stat-value">{percentage}%</span>
                 </div>
                 {#if sessionCost > 0}
                     <div class="stat-row">
-                        <span class="stat-label">Session cost</span>
+                        <span class="stat-label">{t('chat.context.sessionCost')}</span>
                         <span class="stat-value">{formatCost(sessionCost)}</span>
                     </div>
                 {/if}

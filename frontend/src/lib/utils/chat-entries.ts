@@ -1,4 +1,5 @@
 import type { ChatEntry, Thread } from '$lib/types';
+import { t } from '$lib/i18n';
 
 /** Checkpoint state for a single entry. */
 interface CheckpointState {
@@ -141,7 +142,9 @@ export interface ErrorEventData {
 
 /** Normalize an error event payload for display. */
 export function errorFromEvent(data: ErrorEventData): { code: string; message: string } {
-    return { code: data.code || 'error', message: data.message || 'An error occurred' };
+    // `code` is a protocol value and stays as-is; only the missing-message fallback is copy.
+    // Safe to translate: isRepeatError() compares two values this same function produced.
+    return { code: data.code || 'error', message: data.message || t('chat.error.fallback') };
 }
 
 /**
@@ -260,8 +263,9 @@ export function buildEntriesFromMessages(
         };
 
         if (m.role === 'merge_resolution') {
+            // The probes below read the server's own row text — they must stay English.
             const isErr = m.content?.includes('Merge failed');
-            (entry as ChatEntry).mergeLabel = isErr ? 'Merge failed' : (m.content?.includes('conflict') ? 'Merge conflicts resolved' : 'Merged');
+            (entry as ChatEntry).mergeLabel = isErr ? t('chat.merge.failed') : (m.content?.includes('conflict') ? t('chat.merge.conflictsResolved') : t('chat.merge.merged'));
             (entry as ChatEntry).isError = isErr || false;
         }
 
@@ -385,8 +389,8 @@ export function buildCheckpointStateMap(
  */
 export function advisoryLabel(kind?: string): string {
     switch (kind) {
-        case 'diagnostics': return 'Workspace diagnostics';
-        case 'merge_conflict': return 'Merge conflict';
-        default: return 'Environment note';
+        case 'diagnostics': return t('chat.advisory.diagnostics');
+        case 'merge_conflict': return t('chat.advisory.mergeConflict');
+        default: return t('chat.advisory.note');
     }
 }

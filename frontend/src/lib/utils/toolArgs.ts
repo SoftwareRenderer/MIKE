@@ -1,4 +1,5 @@
 /** Shared tool args formatting for chat messages */
+import { t } from '$lib/i18n';
 
 /** A renderable edit_file edit pair — both sides guaranteed to be strings. */
 export interface EditDiffEntry {
@@ -47,7 +48,8 @@ export function formatToolArgs(toolName: string, args: Record<string, unknown> |
                     if (m) cmd = m[1].replace(/\\"/g, '"');
                 }
             }
-            return cmd ? `$ ${cmd}` : '$ (building command...)';
+            // `$ ` is the shell prompt marker shared with the command branch, not copy.
+            return cmd ? `$ ${cmd}` : t('chat.args.bashBuilding');
         }
         case 'read_file': {
             const p = args.path as string;
@@ -89,46 +91,46 @@ export function formatToolArgs(toolName: string, args: Record<string, unknown> |
             const editCount = normalizeEdits(edits).length;
             const pathDisplay = p.startsWith('./') ? p : `./${p}`;
             if (editCount <= 0) return pathDisplay;
-            const suffix = editCount === 1 ? '1 edit' : `${editCount} edits`;
-            return `${pathDisplay} (${suffix})`;
+            // The path is data; only the parenthetical is copy, so it is translated whole.
+            return `${pathDisplay} (${t('chat.args.editCount', { count: editCount })})`;
         }
         case 'request_review':
-            return args.summary as string || '(task complete)';
+            return args.summary as string || t('chat.args.taskComplete');
         case 'create_task': {
             const title = args.title as string;
-            return title || '(create task)';
+            return title || t('chat.args.createTask');
         }
         case 'edit_task': {
             const title = args.title as string;
             const task_id = args.task_id as string;
             if (title) return title;
-            return task_id || '(edit task)';
+            return task_id || t('chat.args.editTask');
         }
         case 'ask_question':
-            return args.question as string || '(question)';
+            return args.question as string || t('chat.args.question');
         case 'view_tasks':
-            return '(list backlog tasks)';
+            return t('chat.args.viewTasks');
         case 'lsp_hover': {
             const sym = args.symbol as string;
-            const path = args.path as string;
-            return sym ? `hover ${sym} in ${path || 'file'}` : `(hover in ${path || 'file'})`;
+            const path = args.path as string || t('chat.args.fileWord');
+            return sym ? t('chat.args.lspHover', { sym, path }) : t('chat.args.lspHoverIn', { path });
         }
         case 'lsp_references': {
             const sym = args.symbol as string;
-            const path = args.path as string;
-            return sym ? `references for ${sym} in ${path || 'file'}` : `(references in ${path || 'file'})`;
+            const path = args.path as string || t('chat.args.fileWord');
+            return sym ? t('chat.args.lspReferences', { sym, path }) : t('chat.args.lspReferencesIn', { path });
         }
         case 'lsp_definition': {
             const sym = args.symbol as string;
-            const path = args.path as string;
-            return sym ? `definition of ${sym} in ${path || 'file'}` : `(definition in ${path || 'file'})`;
+            const path = args.path as string || t('chat.args.fileWord');
+            return sym ? t('chat.args.lspDefinition', { sym, path }) : t('chat.args.lspDefinitionIn', { path });
         }
         case 'lsp_rename': {
             const sym = args.symbol as string;
             const newName = (args as Record<string, unknown>).new_name as string;
-            const path = args.path as string;
-            if (sym && newName) return `rename ${sym} to ${newName} in ${path || 'file'}`;
-            return sym ? `rename ${sym} in ${path || 'file'}` : `(rename in ${path || 'file'})`;
+            const path = args.path as string || t('chat.args.fileWord');
+            if (sym && newName) return t('chat.args.lspRenameTo', { sym, newName, path });
+            return sym ? t('chat.args.lspRename', { sym, path }) : t('chat.args.lspRenameIn', { path });
         }
         default:
             return JSON.stringify(args, null, 2);

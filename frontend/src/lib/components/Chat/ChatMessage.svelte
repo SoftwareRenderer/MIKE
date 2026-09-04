@@ -11,6 +11,7 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { dialogStore } from '$lib/stores';
     import { readImageAttachments, describeRejectedImages, MAX_IMAGES } from '$lib/utils/attachments';
+    import { t } from '$lib/i18n';
 
     interface ToolCallInfo {
         toolId: string;
@@ -239,39 +240,39 @@
     <dialog class="edit-dialog" bind:this={mobileEditDialog} onclick={(e) => { if (e.target === mobileEditDialog) cancelEdit(); }}>
         <div class="edit-modal">
             <div class="edit-modal-header">
-                <h3>Edit message</h3>
-                <button class="close-btn" onclick={cancelEdit} aria-label="Close">✕</button>
+                <h3>{t('chat.message.editTitle')}</h3>
+                <button class="close-btn" onclick={cancelEdit} aria-label={t('chat.common.close')}>✕</button>
             </div>
             <textarea
                 bind:this={mobileEditTextarea}
                 bind:value={mobileEditContent}
                 onkeydown={handleMobileKeydown}
                 rows="8"
-                aria-label="Edit message content"
+                aria-label={t('chat.edit.contentAria')}
             ></textarea>
             {#if mobileEditAttachments.length > 0}
                 <div class="edit-attachments-preview">
                     {#each mobileEditAttachments as att, i}
                         <div class="edit-attachment-chip">
-                            <img src={att.data.startsWith('data:') ? att.data : `data:${att.mimeType};base64,${att.data}`} alt="Attachment" />
-                            <button type="button" class="remove-attachment" onclick={() => removeMobileAttachment(i)} title="Remove">&times;</button>
+                            <img src={att.data.startsWith('data:') ? att.data : `data:${att.mimeType};base64,${att.data}`} alt={t('chat.common.attachment')} />
+                            <button type="button" class="remove-attachment" onclick={() => removeMobileAttachment(i)} title={t('chat.common.remove')}>&times;</button>
                         </div>
                     {/each}
                 </div>
             {/if}
             <div class="edit-modal-footer">
                 <input type="file" accept="image/*" multiple bind:this={mobileFileInput} onchange={handleMobileFileSelect} style="display:none" />
-                <button type="button" class="edit-attach-btn" onclick={() => mobileFileInput?.click()} title="Attach image" aria-label="Attach image">
+                <button type="button" class="edit-attach-btn" onclick={() => mobileFileInput?.click()} title={t('chat.common.attachImage')} aria-label={t('chat.common.attachImage')}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
                     </svg>
                 </button>
-                <button type="button" class="edit-cancel-btn" onclick={cancelEdit}>Cancel</button>
+                <button type="button" class="edit-cancel-btn" onclick={cancelEdit}>{t('chat.common.cancel')}</button>
                 <button type="button" class="edit-save-btn" onclick={() => submitEdit(mobileEditContent, mobileEditAttachments.length > 0 ? mobileEditAttachments : undefined)} disabled={isSubmitting}>
                     {#if isSubmitting}
                         <span class="spinner-inline"></span>
                     {:else}
-                        Save
+                        {t('chat.common.save')}
                     {/if}
                 </button>
             </div>
@@ -315,7 +316,7 @@
             {/if}
             <div class="message-row">
                 {#if queued}
-                    <span class="queued-indicator" title="Queued — will send when ready">
+                    <span class="queued-indicator" title={t('chat.message.queued')}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <circle cx="12" cy="12" r="10"/>
                             <polyline points="12 6 12 12 16 14"/>
@@ -473,9 +474,9 @@
                         <line x1="12" y1="17" x2="12.01" y2="17"/>
                     </svg>
                 {/if}
-                <span class="system-code">System</span>
+                <span class="system-code">{t('chat.message.system')}</span>
                 {#if onDelete}
-                    <button class="btn-dismiss" onclick={onDelete} title="Dismiss message" aria-label="Dismiss message">
+                    <button class="btn-dismiss" onclick={onDelete} title={t('chat.message.dismiss')} aria-label={t('chat.message.dismiss')}>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <line x1="18" y1="6" x2="6" y2="18"/>
                             <line x1="6" y1="6" x2="18" y2="18"/>

@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { Thread } from '$lib/types';
+    import { t } from '$lib/i18n';
 
     interface Props {
         threads: Thread[];
@@ -40,11 +41,11 @@
         return () => document.removeEventListener('click', handleClickOutside);
     });
 
-    let activeThreadName = $derived(threads.find(t => t.id === activeThreadId)?.name || 'Main');
+    let activeThreadName = $derived(threads.find(t2 => t2.id === activeThreadId)?.name || t('chat.thread.main'));
 </script>
 
 <div class="thread-selector" bind:this={menuRef}>
-    <button class="thread-btn" onclick={toggleMenu} aria-label="Switch thread" aria-expanded={showMenu} title="Switch thread">
+    <button class="thread-btn" onclick={toggleMenu} aria-label={t('chat.thread.switch')} aria-expanded={showMenu} title={t('chat.thread.switch')}>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="12" cy="12" r="10"/>
             <path d="M2 12h20"/>

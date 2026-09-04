@@ -8,6 +8,7 @@
     import QueueIndicator from './QueueIndicator.svelte';
     import { appStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
+    import { t } from '$lib/i18n';
 
     let {
         entries,
@@ -210,9 +211,9 @@
 <div class="chat-messages-wrapper" style={!follow.ready ? 'opacity: 0;' : ''}>
     {#if entries.length > 0 && computedShowHeader}
         <div class="chat-sticky-header" role="status" aria-live="polite">
-            <button class="chat-sticky-bubble" onclick={handleStickyClickInternal} title="Scroll to message" aria-label="Scroll to message">{computedStickyMessage}</button>
+            <button class="chat-sticky-bubble" onclick={handleStickyClickInternal} title={t('chat.entries.scrollToMessage')} aria-label={t('chat.entries.scrollToMessage')}>{computedStickyMessage}</button>
             {#if onToggleFullscreen}
-                <button type="button" class="chat-sticky-fullscreen" onclick={onToggleFullscreen} title={fullscreenTitle} aria-label="Toggle fullscreen">
+                <button type="button" class="chat-sticky-fullscreen" onclick={onToggleFullscreen} title={fullscreenTitle} aria-label={t('chat.entries.toggleFullscreen')}>
                     {#if isChatFullscreen}
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     {:else}
@@ -224,24 +225,24 @@
     {/if}
 
     {#if entries.length === 0}
-        <div class="chat-messages" bind:this={chatScrollEl} role="region" aria-label="Chat messages" tabindex="-1">
+        <div class="chat-messages" bind:this={chatScrollEl} role="region" aria-label={t('chat.entries.region')} tabindex="-1">
             {#if historyLoading}
                 <div class="chat-loading">
                     <span class="spinner"></span>
-                    <p>Loading conversation…</p>
+                    <p>{t('chat.entries.loading')}</p>
                 </div>
             {:else}
                 <div class="chat-empty">
                     <svg width="32" height="32" viewBox="0 0 16 16" fill="none">
                         <path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1" stroke-linejoin="round" opacity="0.3"/>
                     </svg>
-                    <p>No messages yet</p>
-                    <span class="hint">Send a message to start the conversation</span>
+                    <p>{t('chat.entries.empty')}</p>
+                    <span class="hint">{t('chat.entries.emptyHint')}</span>
                 </div>
             {/if}
         </div>
     {:else}
-        <div class="chat-messages" bind:this={chatScrollEl} role="region" aria-label="Chat messages" tabindex="-1" onscroll={handleCombinedScroll}>
+        <div class="chat-messages" bind:this={chatScrollEl} role="region" aria-label={t('chat.entries.region')} tabindex="-1" onscroll={handleCombinedScroll}>
           <div class="chat-content" bind:this={chatContentEl}>
             {#each entries as entry, entryIdx (entry.id)}
                 {@const meta = entryMetas[entryIdx] as EntryMeta}
@@ -276,9 +277,9 @@
                                 </svg>
                                 <span class="error-code">{entry.error?.code || 'error'}</span>
                                 {#if entry.error?.code === 'ws_disconnected'}
-                                    <span class="error-reconnecting"><span class="spinner"></span> Reconnecting...</span>
+                                    <span class="error-reconnecting"><span class="spinner"></span> {t('chat.entries.reconnecting')}</span>
                                 {/if}
-                                <button class="btn-dismiss" onclick={() => onDismissError(entry.id)} title="Dismiss error" aria-label="Dismiss error">
+                                <button class="btn-dismiss" onclick={() => onDismissError(entry.id)} title={t('chat.entries.dismissError')} aria-label={t('chat.entries.dismissError')}>
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                         <line x1="18" y1="6" x2="6" y2="18"/>
                                         <line x1="6" y1="6" x2="18" y2="18"/>
@@ -287,12 +288,12 @@
                             </div>
                             <div class="error-message">{entry.content}</div>
                             {#if entry.error?.code === 'ws_disconnected'}
-                                <button class="btn-retry" onclick={onRetryConnect} title="Retry connection">
+                                <button class="btn-retry" onclick={onRetryConnect} title={t('chat.entries.retryTip')}>
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                         <polyline points="23 4 23 10 17 10"/>
                                         <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
                                     </svg>
-                                    Retry now
+                                    {t('chat.entries.retryNow')}
                                 </button>
                             {/if}
                         </div>
@@ -305,7 +306,7 @@
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
                                 </svg>
-                                <span class="summarization-label">Context summarized</span>
+                                <span class="summarization-label">{t('chat.entries.summarized')}</span>
                             </div>
                             <div class="divider-line"></div>
                         </div>
@@ -341,7 +342,7 @@
                                         <line x1="6" y1="9" x2="6" y2="21"/>
                                     </svg>
                                 {/if}
-                                <span class="merge-resolution-label">{entry.mergeLabel || 'Merge conflicts resolved'}</span>
+                                <span class="merge-resolution-label">{entry.mergeLabel || t('chat.merge.conflictsResolved')}</span>
                             </div>
                             <div class="merge-resolution-content">{entry.content}</div>
                         </div>
@@ -365,13 +366,13 @@
                             {/if}
                             <span class="build-box-title">{entry.buildLog.title}</span>
                             {#if entry.buildLog.done}
-                                <span class="build-box-status">Done</span>
+                                <span class="build-box-status">{t('chat.entries.buildDone')}</span>
                             {/if}
                         </div>
                         <div
                             class="build-box-log"
                             role="log"
-                            aria-label="Build output"
+                            aria-label={t('chat.entries.buildOutput')}
                             bind:this={buildLogEls[entry.id]}
                             onscroll={() => onBuildLogScroll(entry.id)}
                         >
@@ -379,7 +380,7 @@
                                 <div class="build-box-line">{line}</div>
                             {/each}
                             {#if entry.buildLog.lines.length === 0 && !entry.buildLog.done}
-                                <div class="build-box-pending">Building...</div>
+                                <div class="build-box-pending">{t('chat.entries.building')}</div>
                             {/if}
                         </div>
                     </div>
@@ -397,13 +398,13 @@
             <button
                 class="chat-jump-latest"
                 onclick={handleJumpLatest}
-                title="Scroll to latest message"
-                aria-label="Scroll to latest message"
+                title={t('chat.entries.scrollToLatest')}
+                aria-label={t('chat.entries.scrollToLatest')}
             >
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-                <span class="chat-jump-latest-label">Latest</span>
+                <span class="chat-jump-latest-label">{t('chat.entries.latest')}</span>
             </button>
         {/if}
 
