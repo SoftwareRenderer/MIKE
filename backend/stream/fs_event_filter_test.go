@@ -7,8 +7,8 @@ import (
 )
 
 // TestShouldSkipFsEvent verifies fs_event filtering: internal files (.git,
-// flight recorder) and paths ignored by .gitignore are skipped, everything
-// else is broadcast.
+// flight recorder), the server's own atomic-write temporary files, and paths
+// ignored by .gitignore are skipped, everything else is broadcast.
 func TestShouldSkipFsEvent(t *testing.T) {
 	dir := t.TempDir()
 	repo := filepath.Join(dir, "repo")
@@ -35,6 +35,12 @@ func TestShouldSkipFsEvent(t *testing.T) {
 		{"internal .git file", repo, ".git/index", true},
 		{"internal kanban.trace", repo, "kanban.trace", true},
 		{"internal nested trace", repo, "data/kanban.trace", true},
+		// The temporary file an atomic write renames into place.
+		{"atomic-write temp file", repo, ".mike-tmp-main.go-4028137", true},
+		{"atomic-write temp nested", repo, "src/.mike-tmp-main.go-4028137", true},
+		// Lookalikes a project could contain stay reportable.
+		{"file merely mentioning the prefix", repo, "mike-tmp-notes.md", false},
+		{"file ending in the prefix", repo, "notes.mike-tmp", false},
 		{"non-repo root", dir, "main.go", false}, // not a git repo → not skipped
 	}
 
