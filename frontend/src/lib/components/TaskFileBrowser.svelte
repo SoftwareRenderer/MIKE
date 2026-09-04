@@ -4,6 +4,7 @@
     import Icon from '$lib/components/Icon.svelte';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
+    import { t } from '$lib/i18n';
 
     let { projectId, projectName, taskId, taskPath, sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange, onToggleFind }: {
         projectId: string;
@@ -59,7 +60,7 @@
             });
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || 'Failed to create file');
+                throw new Error(err.error || t('explorer.shared.errCreateFile'));
             }
             showNewFile = false;
             newFileName = '';
@@ -96,7 +97,7 @@
             });
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || 'Failed to create folder');
+                throw new Error(err.error || t('explorer.shared.errCreateFolder'));
             }
             showNewFolder = false;
             newFolderName = '';
@@ -164,7 +165,9 @@
             const res = await fetch(`/api/fs?path=${encodeURIComponent(path)}&files=1&project=${encodeURIComponent(projectId)}&task=${encodeURIComponent(taskId)}`);
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                const msg = err.error || 'Failed to read directory';
+                const msg = err.error || t('explorer.shared.errReadDir');
+                // 'directory not found' is the server's own error string — a wire value
+                // this retry guard compares against, never display copy, so it is not a key.
                 if (msg === 'directory not found' && dirNotFoundRetries < 20) {
                     dirNotFoundRetries++;
                     setTimeout(() => loadDir(path), 250);
@@ -288,24 +291,24 @@
 <div class="task-file-browser">
     <!-- Header -->
     <div class="file-browser-header">
-        <span class="file-browser-label">Files</span>
+        <span class="file-browser-label">{t('explorer.shared.filesLabel')}</span>
         {#if !showNewFile && !showNewFolder}
             <div class="file-actions">
                 {#if onToggleFind}
-                    <button class="new-file-btn" onclick={onToggleFind} title="Find in files (Ctrl+Shift+F)" aria-label="Find in files">
+                    <button class="new-file-btn" onclick={onToggleFind} title={t('explorer.shared.findInFilesTitle')} aria-label={t('explorer.shared.findInFiles')}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <circle cx="11" cy="11" r="8"/>
                             <line x1="21" y1="21" x2="16.65" y2="16.65"/>
                         </svg>
                     </button>
                 {/if}
-                <button class="new-file-btn" onclick={toggleNewFile} title="New file" aria-label="Create new file">
+                <button class="new-file-btn" onclick={toggleNewFile} title={t('explorer.shared.newFileTitle')} aria-label={t('explorer.shared.createFileAria')}>
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
                         <line x1="8" y1="3" x2="8" y2="13"/>
                         <line x1="3" y1="8" x2="13" y2="8"/>
                     </svg>
                 </button>
-                <button class="new-file-btn" onclick={toggleNewFolder} title="New folder" aria-label="Create new folder">
+                <button class="new-file-btn" onclick={toggleNewFolder} title={t('explorer.shared.newFolder')} aria-label={t('explorer.shared.createFolderAria')}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
                         <line x1="12" y1="10" x2="12" y2="16"/>
@@ -319,12 +322,12 @@
                     type="text"
                     class="new-file-input"
                     bind:this={newFileInput}
-                    placeholder="filename"
+                    placeholder={t('explorer.shared.filenamePlaceholder')}
                     value={newFileName}
                     oninput={(e) => newFileName = (e.target as HTMLInputElement).value}
                     onkeydown={(e) => { if (e.key === 'Enter') handleCreateFile(); if (e.key === 'Escape') { showNewFile = false; newFileName = ''; } }}
                     onblur={() => { showNewFile = false; newFileName = ''; }}
-                    aria-label="New file name"
+                    aria-label={t('explorer.shared.newFileNameAria')}
                 />
             </div>
         {:else}
@@ -333,12 +336,12 @@
                     type="text"
                     class="new-file-input"
                     bind:this={newFolderInput}
-                    placeholder="folder name"
+                    placeholder={t('explorer.shared.folderNameLowerPlaceholder')}
                     value={newFolderName}
                     oninput={(e) => newFolderName = (e.target as HTMLInputElement).value}
                     onkeydown={(e) => { if (e.key === 'Enter') handleCreateFolder(); if (e.key === 'Escape') { showNewFolder = false; newFolderName = ''; } }}
                     onblur={() => { showNewFolder = false; newFolderName = ''; }}
-                    aria-label="New folder name"
+                    aria-label={t('explorer.shared.newFolderNameAria')}
                 />
             </div>
         {/if}
@@ -362,7 +365,7 @@
     <!-- File list -->
     <div class="file-list" role="tree">
         {#if loading && !firstLoadComplete}
-            <div class="loading">Loading...</div>
+            <div class="loading">{t('explorer.shared.loading')}</div>
         {:else if error}
             <div class="error">{error}</div>
         {:else}
@@ -388,7 +391,7 @@
                     {/if}
                     <span class="file-name">{entry.name}</span>
                     {#if (!entry.isDir && unsavedPaths.has(entry.path)) || (entry.isDir && unsavedDirPrefixes.has(entry.path))}
-                        <span class="unsaved-dot" title="Unsaved changes">
+                        <span class="unsaved-dot" title={t('explorer.shared.unsavedChanges')}>
                             <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
                                 <circle cx="4" cy="4" r="3.5" fill="currentColor"/>
                             </svg>
@@ -397,7 +400,7 @@
                 </button>
             {/each}
             {#if entries.length === 0 && firstLoadComplete}
-                <div class="empty">Empty folder</div>
+                <div class="empty">{t('explorer.taskFiles.empty')}</div>
             {/if}
         {/if}
     </div>

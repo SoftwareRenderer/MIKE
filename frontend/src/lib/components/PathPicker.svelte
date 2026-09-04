@@ -4,6 +4,7 @@
     import homeIcon from '$lib/assets/icons/home.svg?raw';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
+    import { t } from '$lib/i18n';
 
     interface Entry { name: string; isDir: boolean; path: string }
 
@@ -52,7 +53,7 @@
             const res = await fetch(`/api/fs?path=${encodeURIComponent(path)}${fileMode ? '&files=1' : ''}`);
             if (!res.ok) {
                 const err = await res.json();
-                throw new Error(err.error || 'Failed to read directory');
+                throw new Error(err.error || t('explorer.shared.errReadDir'));
             }
             const data = await res.json();
             entries = (data.entries || []).filter((e: Entry) =>
@@ -100,9 +101,9 @@
 {#snippet footer()}
     <span class="current-path">{formatPath(selected ?? currentPath)}</span>
     <div class="footer-actions">
-        <button type="button" class="btn-secondary" onclick={onClose} title="Cancel">Cancel</button>
+        <button type="button" class="btn-secondary" onclick={onClose} title={t('explorer.shared.cancel')}>{t('explorer.shared.cancel')}</button>
         <button type="button" class="btn-primary" onclick={handleSelect} disabled={!selected} title={selectTitle}>
-            Select
+            {t('explorer.pathPicker.select')}
         </button>
     </div>
 {/snippet}
@@ -111,7 +112,7 @@
     <!-- Path bar -->
     <div class="path-bar">
         <div class="path-bar-row">
-            <button type="button" class="home-btn" onclick={() => loadDir('/home')} aria-label="Go to home directory" title="Go to home directory">
+            <button type="button" class="home-btn" onclick={() => loadDir('/home')} aria-label={t('explorer.shared.goHome')} title={t('explorer.shared.goHome')}>
                 <Icon src={homeIcon} color="#8B949E" width={18} height={18} />
             </button>
             <input
@@ -119,14 +120,14 @@
                 class="path-input"
                 bind:value={currentPath}
                 onkeydown={(e) => { if (e.key === 'Enter') handleInputChange(); }}
-                placeholder="Enter path or browse..."
-                aria-label={fileMode ? 'File path' : 'Directory path'}
+                placeholder={t('explorer.shared.pathPlaceholder')}
+                aria-label={fileMode ? t('explorer.shared.filePathAria') : t('explorer.pathPicker.dirPathAria')}
             />
         </div>
     </div>
 
     {#if loading}
-        <div class="loading">Loading...</div>
+        <div class="loading">{t('explorer.shared.loading')}</div>
     {:else}
         {#if error}
             <div class="error">{error}</div>
@@ -135,8 +136,8 @@
                     type="button"
                     class="file-entry dir parent-entry"
                     onclick={() => loadDir(parentPath)}
-                    aria-label="Go to parent directory"
-                    title="Go to parent directory"
+                    aria-label={t('explorer.pathPicker.goParentAria')}
+                    title={t('explorer.pathPicker.goParentAria')}
                 >
                     <span class="icon" aria-hidden="true">
                         <Icon src={folderIcon} color="#6E7681" width={16} height={16} />
@@ -147,7 +148,7 @@
         {:else if entries.length === 0}
             <div class="empty">{emptyLabel}</div>
         {:else}
-            <div class="file-list" role="list" aria-label="Directory contents">
+            <div class="file-list" role="list" aria-label={t('explorer.shared.contentsAria')}>
                 {#each entries as entry}
                     <button
                         type="button"
@@ -155,8 +156,12 @@
                         class:dir={entry.isDir}
                         class:selected={selected === entry.path && fileMode}
                         onclick={() => handleClick(entry)}
-                        aria-label={`${entry.isDir ? 'Folder' : 'File'}: ${entry.name}`}
-                        title={`${entry.isDir ? 'Open folder' : 'Select file'}: ${entry.name}`}
+                        aria-label={entry.isDir
+                            ? t('explorer.shared.entryFolder', { name: entry.name })
+                            : t('explorer.shared.entryFile', { name: entry.name })}
+                        title={entry.isDir
+                            ? t('explorer.shared.openFolder', { name: entry.name })
+                            : t('explorer.pathPicker.selectFile', { name: entry.name })}
                     >
                         <span class="icon" aria-hidden="true">
                             {#if entry.isDir}
