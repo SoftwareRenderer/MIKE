@@ -209,15 +209,15 @@ describe('active locale', () => {
         expect(activeLocale()).toBe('ja');
     });
 
-    it('accepts exactly the tag shape the server validated at install time', () => {
-        // `bcp47ish` (backend/extensions/manifest_validate.go) is the rule that let a pack
-        // in, and `setCatalog` reads a tag it cannot parse as "no pack" — a stricter rule
-        // here would keep a perfectly valid pack silently in English. Single-character
-        // subtags are legal BCP 47, private-use tags included.
-        setLocale('sr-Latn-RS');
-        expect(activeLocale()).toBe('sr-Latn-RS');
-        setLocale('de-x-y');
-        expect(activeLocale()).toBe('de-x-y');
+    it('renders a regional tag even though the server no longer installs one', () => {
+        // A pack's declared locale is held to one bare subtag (`validateLocale` refuses
+        // "zh-CN"), but a catalog that arrived before that rule — or a tag a test hands
+        // the runtime — must still render. Refusing to parse a tag reads as "no pack",
+        // which is a reader silently losing their language.
+        i18n.setCatalog('zh-Hans-CN', { 'time.justNow': '刚刚' });
+        expect(t('time.justNow')).toBe('刚刚');
+        expect(activeLocale()).toBe('zh-Hans-CN');
+        expect(documentLanguage()).toBe('zh-Hans-CN');
     });
 
     it('separates "what Intl should use" from "what the strings are"', () => {

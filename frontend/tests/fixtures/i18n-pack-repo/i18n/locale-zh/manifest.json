@@ -7,7 +7,7 @@
     "version": "1.0.0",
     "capabilities": {
         "i18n": {
-            "locale": "zh-CN",
+            "locale": "zh",
             "messages_url": "messages.json"
         }
     }

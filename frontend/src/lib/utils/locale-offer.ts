@@ -19,7 +19,9 @@ import { identityKey } from './extension-identity';
  *     already means the user has a language and made their choice;
  *  2. the browser's primary language subtag is not the fallback locale;
  *  3. the registry index carries a pack whose declared `capabilities.i18n.locale`
- *     answers that subtag — no match, no word, ever;
+ *     answers that subtag — the pack's locale is one bare subtag ("zh"), which is
+ *     why one browser language can only ever name one language to offer;
+ *     no match, no word, ever;
  *  4. nothing has been asked before: a dismissed, installed *or failed* record
  *     ends the conversation. The failure case matters most: a registry that is
  *     unreachable, or a pack that will not install, must not nag on every boot.
@@ -88,11 +90,6 @@ export function primarySubtag(tag: unknown): string {
     return /^[a-z]{2,8}$/.test(first) ? first : '';
 }
 
-/** A whole tag, normalised for comparison: case-folded, `_` → `-`, trimmed. */
-function normalizeTag(tag: string): string {
-    return tag.trim().toLowerCase().replace(/_/g, '-');
-}
-
 /**
  * The locale a registry entry offers, or `''` when the entry is not an offerable
  * translation pack.
@@ -140,19 +137,23 @@ export function resolveLocaleOffer(input: LocaleOfferInput): LocaleOfferDecision
     // locale is what the app already renders, so there is nothing to offer it.
     const want = primarySubtag(input.browserLanguage);
     if (!want || want === DEFAULT_LOCALE) return { offer: false, reason: 'english-browser' };
-    const wantFull = normalizeTag(String(input.browserLanguage));
 
     // Rule 3. A missing or unreachable registry is the normal state in tests and
     // a common one offline; it is silence, never an error.
     const installed = new Set(input.extensions.map((e) => identityKey(e.author, e.name)));
-    const wantExact = (entry: RegistryEntry): boolean => normalizeTag(offeredLocale(entry)) === wantFull;
+    // One comparison, and it is the primary subtag on both sides: a pack may only
+    // declare a bare subtag (`validateLocale` refuses a region, because "zh-CN" and
+    // "zh-TW" are not the same language and one pack is one language), and a
+    // `zh-Hans-CN` browser reduces to the same thing. Reading the entry through the
+    // same function is deliberate tolerance — the index is a published file, not a
+    // validated one, so an entry generated before that rule still reaches the reader
+    // it was written for rather than making the offer go quiet.
     const matches = (entry: RegistryEntry): boolean => {
         const locale = offeredLocale(entry);
-        return !!locale && (wantExact(entry) || primarySubtag(locale) === want);
+        return !!locale && primarySubtag(locale) === want;
     };
 
     let best: RegistryEntry | null = null;
-    let bestExact = false;
     /** The language has a pack, but the user already has it installed. */
     let matchedInstalled = false;
 
@@ -165,16 +166,10 @@ export function resolveLocaleOffer(input: LocaleOfferInput): LocaleOfferDecision
             matchedInstalled = true;
             continue;
         }
-        const exact = wantExact(entry);
-        // An exact tag match (`zh-CN` browser, `zh-CN` pack) beats a primary-subtag
-        // one (`zh`), because the closer pack is the one that was written for the
-        // browser's region. Ties break on name so the offer never depends on the
+        // Two entries answering one language is a registry with a duplicate in it, not
+        // a choice to make: take the first by name so the offer cannot depend on the
         // order the index happened to arrive in.
-        const better = !best || (exact && !bestExact) || (exact === bestExact && entry.name < best.name);
-        if (better) {
-            best = entry;
-            bestExact = exact;
-        }
+        if (!best || entry.name < best.name) best = entry;
     }
 
     if (!best) {
