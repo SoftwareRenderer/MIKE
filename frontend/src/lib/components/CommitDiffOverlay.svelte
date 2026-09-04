@@ -5,6 +5,7 @@
     import type { SideBySideRow } from '$lib/utils/diff-parser';
     import { highlightLinesAsync } from '$lib/highlighter';
     import { escapeHtml } from '$lib/utils/format';
+    import { activeLocale } from '$lib/i18n/runtime.svelte';
 import { slide } from 'svelte/transition';
 
     interface Props {
@@ -163,7 +164,7 @@ import { slide } from 'svelte/transition';
     function formatDate(dateStr: string): string {
         if (!dateStr) return '';
         try {
-            return new Date(dateStr).toLocaleDateString();
+            return new Date(dateStr).toLocaleDateString(activeLocale());
         } catch {
             return dateStr;
         }
@@ -172,7 +173,7 @@ import { slide } from 'svelte/transition';
     function formatDateTime(dateStr: string): string {
         if (!dateStr) return '';
         try {
-            return new Date(dateStr).toLocaleString();
+            return new Date(dateStr).toLocaleString(activeLocale());
         } catch {
             return dateStr;
         }

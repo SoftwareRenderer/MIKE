@@ -167,8 +167,17 @@ input[type="number"] {
     --color-terminal-cursor: #0084FF;
     --color-terminal-selection: #3e464e;
 
-    /* Fonts */
-    --font-sans: "Noto Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+    /* Fonts. `--font-sans-latin` is the base; `--font-sans` is what every consumer
+       reads, and the CJK block at the bottom of this file re-derives it for a CJK
+       UI. Consumers must use `--font-sans` (never the Latin base) or inherit from
+       `body` — that is what makes the CJK chains apply to them for free.
+
+       `sans-serif` is NOT part of the base on purpose: a generic family MATCHES
+       every script, so wherever it appears it ends the list and every family after
+       it is unreachable. It belongs last, and each chain that appends to the base
+       carries its own copy. */
+    --font-sans-latin: "Noto Sans", "Segoe UI", Helvetica, Arial;
+    --font-sans: var(--font-sans-latin), sans-serif;
     --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
     /* Radii */
@@ -276,3 +285,101 @@ a:hover {
 .cm-editor.cm-focused .cm-selectionBackground {
     background-color: var(--color-selection-bg) !important;
 }
+/* ==========================================================================
+   CJK typography
+   ==========================================================================
+   Everything in this block is dead code for a Latin UI: the selectors are all
+   :lang()-scoped, and <html lang> is written by exactly one place — the i18n
+   runtime ($lib/i18n/runtime.svelte), which sets it to the ACTIVE pack's tag.
+   Keep it that way. A global rule here would restyle English chrome, and English
+   is what every user without a pack sees regardless of what their browser speaks.
+   -------------------------------------------------------------------------- */
+
+/* -- Font fallback chains -------------------------------------------------
+   The Latin stack has no CJK coverage, so Chinese/Japanese/Korean currently gets
+   whatever face the OS guesses glyph by glyph — the same 汉 rendered in three
+   different regional forms on one screen.
+
+   The CJK faces come FIRST, then the Latin base, then the generic — and that order is
+   load-bearing, measured, not style. Probed in Chromium with a family that rasterizes
+   unmistakably in the CJK slot: with `"Arial", <CJK face>` the CJK run never reached
+   the CJK face at all, because fontconfig substitutes a Latin alias (Arial →
+   Liberation Sans here) and the platform then resolves the missing script from its own
+   language fallback before reading the rest of the list. `"Noto Sans", <CJK face>`
+   does reach it. Latin-first therefore renders CJK in whichever face the OS guessed —
+   which is the exact bug this block is here to fix — while CJK-first costs Latin text
+   only the CJK face's own Latin glyphs, which is what a Chinese or Japanese site does
+   anyway.
+
+   The override is `--font-sans`, not `font-family`: components read the variable
+   directly (StatsModal, SandboxConfigModal) as well as inheriting from `body`, and
+   the variable is the only thing that reaches both. `html:lang(..)` is deliberate —
+   it outranks a theme stylesheet's `:root { --font-sans }` on specificity, so an
+   installed theme cannot silently drop the CJK chain.
+
+   Order within each CJK group is macOS → Windows → Linux, then the cross-platform
+   Noto/Source Han names. */
+
+/* Default `zh` = the Simplified chain, overridden below for an explicit zh-Hant. */
+html:lang(zh),
+html:lang(zh-Hans) {
+    --font-sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "WenQuanYi Zen Hei", var(--font-sans-latin), sans-serif;
+}
+
+html:lang(zh-Hant) {
+    --font-sans: "PingFang TC", "Hiragino Sans", "Microsoft JhengHei", "Noto Sans CJK TC", "Noto Sans TC", "Source Han Sans TC", var(--font-sans-latin), sans-serif;
+}
+
+html:lang(ja) {
+    --font-sans: "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, "Noto Sans CJK JP", "Noto Sans JP", "Source Han Sans JP", var(--font-sans-latin), sans-serif;
+}
+
+html:lang(ko) {
+    --font-sans: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", "Noto Sans KR", "Source Han Sans KR", var(--font-sans-latin), sans-serif;
+}
+
+/* -- Line breaking --------------------------------------------------------
+   CJK breaks between characters, Latin breaks at spaces, and UI text is usually
+   both at once. `word-break: normal` is the setting that respects each script in
+   mixed runs; `overflow-wrap: break-word` then lets a long unbreakable run (a file
+   path, a URL, a token count) split rather than push a dense row apart — which CJK
+   cannot avoid on its own, because it has no spaces to break at. `line-break:
+   strict` is the kinsoku rule: no 。、）」 at the start of a line, no （「 at the end. */
+:lang(zh),
+:lang(ja),
+:lang(ko) {
+    word-break: normal;
+    overflow-wrap: break-word;
+    line-break: strict;
+    hyphens: none;
+}
+
+/* Korean words are space-separated like English, so breaking between Hangul
+   syllables is breaking mid-word. `keep-all` forbids it; `overflow-wrap` above is
+   still the last resort for a run with no spaces at all. */
+:lang(ko) {
+    word-break: keep-all;
+}
+
+/* The editor and the terminal own their own text metrics: soft-wrap points inside
+   a buffer, and a PTY's grid, must not move because the UI language is CJK. */
+:lang(zh) :is(.cm-content, .cm-line, .xterm),
+:lang(ja) :is(.cm-content, .cm-line, .xterm),
+:lang(ko) :is(.cm-content, .cm-line, .xterm) {
+    line-break: auto;
+    overflow-wrap: normal;
+    word-break: normal;
+    hyphens: manual;
+}
+
+/* -- Dense rows: deliberately nothing here --------------------------------
+   36 rules across the app say `white-space: nowrap` with no overflow contract of
+   their own (buttons, radio labels, unit labels), and 71 more pair nowrap with
+   `overflow: hidden; text-overflow: ellipsis`. A CJK board was measured against both
+   shapes — with a `white-space: normal` allowance on button/label/legend/th/td and
+   with it forced back to nowrap — and NEITHER produced a single overflowing box, and
+   no row height moved: the ellipsis rules already carry the truncation, and CJK
+   needs no space to truncate at. So no allowance ships. If a translation ever does
+   push a label past its box, give THAT rule the `overflow: hidden; text-overflow:
+   ellipsis` pair (the contract every dense row already uses) rather than re-adding a
+   scoped `white-space` override, which would trade a clip for a ragged row. */

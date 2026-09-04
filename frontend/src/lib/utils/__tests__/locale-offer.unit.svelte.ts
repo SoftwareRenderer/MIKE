@@ -6,6 +6,7 @@ import {
     primarySubtag,
     resolveLocaleOffer,
     type LocaleOfferOutcome,
+    type LocaleOfferReason,
     type LocaleOfferRecord,
 } from '../locale-offer';
 
@@ -165,6 +166,18 @@ describe('resolveLocaleOffer — when it says nothing', () => {
             ...over,
         });
 
+    /**
+     * Why a case was refused. `LocaleOfferDecision` is a discriminated union, and
+     * `.reason` on the union is not something TypeScript narrows through an
+     * expectation — so the narrowing happens here, where an offer that should not
+     * have happened fails loudly instead of reading as `undefined`.
+     */
+    const whyNot = (over: Parameters<typeof ask>[0] = {}): LocaleOfferReason => {
+        const decision = ask(over);
+        if (decision.offer) throw new Error(`expected silence, got an offer of ${decision.displayName}`);
+        return decision.reason;
+    };
+
     it('says nothing to a browser already reading the fallback locale', () => {
         for (const language of ['en', 'en-US', 'en-GB']) {
             expect(ask({ browserLanguage: language })).toEqual({ offer: false, reason: 'english-browser' });
@@ -172,29 +185,29 @@ describe('resolveLocaleOffer — when it says nothing', () => {
     });
 
     it('says nothing when the browser language is missing or unreadable', () => {
-        expect(ask({ browserLanguage: '' }).reason).toBe('english-browser');
-        expect(ask({ browserLanguage: undefined }).reason).toBe('english-browser');
-        expect(ask({ browserLanguage: '*' }).reason).toBe('english-browser');
+        expect(whyNot({ browserLanguage: '' })).toBe('english-browser');
+        expect(whyNot({ browserLanguage: undefined })).toBe('english-browser');
+        expect(whyNot({ browserLanguage: '*' })).toBe('english-browser');
     });
 
     it('says nothing when no registry entry speaks that language', () => {
         // A browser whose language has no pack is silent, whatever else the index
         // contains — and a *language* with no translation pack is not a pack either.
         expect(
-            ask({
+            whyNot({
                 browserLanguage: 'fr',
                 registry: [makeEntry({ name: 'locale-ja', locale: 'ja' }), makeEntry({ name: 'locale-ko', locale: 'ko' })],
-            }).reason,
+            }),
         ).toBe('no-matching-pack');
         expect(
-            ask({ browserLanguage: 'fr', registry: [makeEntry({ name: 'gopls', locale: undefined, type: 'lsp' })] }).reason,
+            whyNot({ browserLanguage: 'fr', registry: [makeEntry({ name: 'gopls', locale: undefined, type: 'lsp' })] }),
         ).toBe('no-matching-pack');
     });
 
     it('says nothing when the registry itself is missing — silence, never an error', () => {
-        expect(ask({ registry: null }).reason).toBe('no-matching-pack');
-        expect(ask({ registry: undefined }).reason).toBe('no-matching-pack');
-        expect(ask({ registry: [] }).reason).toBe('no-matching-pack');
+        expect(whyNot({ registry: null })).toBe('no-matching-pack');
+        expect(whyNot({ registry: undefined })).toBe('no-matching-pack');
+        expect(whyNot({ registry: [] })).toBe('no-matching-pack');
     });
 
     it('says nothing while any pack is enabled — the language is already chosen', () => {
@@ -204,10 +217,10 @@ describe('resolveLocaleOffer — when it says nothing', () => {
         });
         // Even a pack for a different language: two enabled packs is a resolved
         // ordering, not a reason to offer a third.
-        expect(ask({ extensions: [makePack({ name: 'locale-ko', locale: 'ko' })] }).reason).toBe('pack-enabled');
+        expect(whyNot({ extensions: [makePack({ name: 'locale-ko', locale: 'ko' })] })).toBe('pack-enabled');
         // A pack of any type that *declares* the capability counts, exactly as the
         // loader resolves it.
-        expect(ask({ extensions: [makePack({ name: 'heavy', locale: 'ja', type: 'ui', declare: true })] }).reason).toBe(
+        expect(whyNot({ extensions: [makePack({ name: 'heavy', locale: 'ja', type: 'ui', declare: true })] })).toBe(
             'pack-enabled',
         );
     });
@@ -217,7 +230,7 @@ describe('resolveLocaleOffer — when it says nothing', () => {
         // 'pack-enabled' — it stops at 'installed-entry', because installing it
         // again would 409 and a pack the user switched off was their decision.
         const disabled = makePack({ name: 'locale-ja', locale: 'ja', enabled: false });
-        expect(ask({ extensions: [disabled] }).reason).toBe('installed-entry');
+        expect(whyNot({ extensions: [disabled] })).toBe('installed-entry');
     });
 
     it('says nothing once the user has been asked — dismissed, installed or failed', () => {
@@ -226,16 +239,16 @@ describe('resolveLocaleOffer — when it says nothing', () => {
         }
         // The failure case is the one that matters: a broken registry must not
         // turn into an offer on every boot.
-        expect(ask({ record: record('failed'), registry: matching }).reason).toBe('already-asked');
+        expect(whyNot({ record: record('failed'), registry: matching })).toBe('already-asked');
     });
 
     it('does not offer a pack the registry install path could not install', () => {
         // `POST /extensions/install` is git-pinned: an entry with no repo/commit
         // can only fail, so it is not an offer.
-        expect(ask({ registry: [makeEntry({ name: 'locale-ja', locale: 'ja', repo: '' })] }).reason).toBe(
+        expect(whyNot({ registry: [makeEntry({ name: 'locale-ja', locale: 'ja', repo: '' })] })).toBe(
             'no-matching-pack',
         );
-        expect(ask({ registry: [makeEntry({ name: 'locale-ja', locale: 'ja', commit: '' })] }).reason).toBe(
+        expect(whyNot({ registry: [makeEntry({ name: 'locale-ja', locale: 'ja', commit: '' })] })).toBe(
             'no-matching-pack',
         );
     });
@@ -245,7 +258,7 @@ describe('resolveLocaleOffer — when it says nothing', () => {
         // installed extension with author "Tester" and name `locale-ja` are the
         // same pack, and installing it again answers 409.
         const installed = makePack({ name: 'locale-ja', author: 'Tester', enabled: false });
-        expect(ask({ extensions: [installed] }).reason).toBe('installed-entry');
+        expect(whyNot({ extensions: [installed] })).toBe('installed-entry');
     });
 });
 
