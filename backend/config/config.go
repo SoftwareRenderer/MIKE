@@ -6,6 +6,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -298,11 +299,15 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 		cfg.DefaultSubtasksAutoMerge = v
 	}
 	if defaultOperatingModeRaw != "" {
-		mode := defaultOperatingModeRaw
-		if mode != "act" && mode != "plan" && mode != "explore" {
-			mode = "act"
+		// A stored value is coerced rather than rejected: reading a row written by an older
+		// build must not fail the read, and the only thing that can be done with a mode nothing
+		// dispatches on is fall back. Writing one is a different story - see HandleConfig.
+		if mode, valid := types.ParseOperatingMode(defaultOperatingModeRaw); valid {
+			cfg.DefaultOperatingMode = &mode
+		} else {
+			act := types.ModeAct
+			cfg.DefaultOperatingMode = &act
 		}
-		cfg.DefaultOperatingMode = &mode
 	}
 	if v, err := parseIntPtr(defaultMaxFailedTurnsRaw); err == nil && v != nil {
 		cfg.DefaultMaxFailedTurns = v
@@ -400,7 +405,7 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 		}
 	}
 	if c.DefaultOperatingMode != nil {
-		if err := cs.db.SetConfigValue("default_operating_mode", *c.DefaultOperatingMode); err != nil {
+		if err := cs.db.SetConfigValue("default_operating_mode", string(*c.DefaultOperatingMode)); err != nil {
 			return err
 		}
 	}
@@ -531,7 +536,7 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		DefaultAutoCommit:             cfg.DefaultAutoCommit,
 		DefaultAutoMerge:              cfg.DefaultAutoMerge,
 		DefaultSubtasksAutoMerge:      cfg.DefaultSubtasksAutoMerge,
-		DefaultOperatingMode:          cfg.DefaultOperatingMode,
+		DefaultOperatingMode:          operatingModePtr(cfg.DefaultOperatingMode),
 		DefaultMaxFailedTurns:         cfg.DefaultMaxFailedTurns,
 		DefaultAutoSummarizeThreshold: cfg.DefaultAutoSummarizeThreshold,
 		HideModelBadge:                cfg.HideModelBadge,
@@ -555,9 +560,14 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		resp := cs.buildConfigResponse(cfg)
 		httputil.JSONResponse(w, http.StatusOK, resp)
 	case http.MethodPut:
-		// Partial update: only update fields that are provided
-		var updates map[string]any
-		if !httputil.DecodeJSON(w, r, &updates) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, "could not read request body")
+			return
+		}
+		updates, err := newConfigUpdates(body)
+		if err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
 		current, err := cs.GetConfig()
@@ -565,103 +575,38 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to get current config")
 			return
 		}
-		if providers, ok := updates["providers"]; ok {
-			if providers != nil {
-				providersJSON, _ := json.Marshal(providers)
-				var incoming []types.Provider
-				if err := json.Unmarshal(providersJSON, &incoming); err == nil {
-					// Merge: preserve API keys from existing providers when not provided in update
-					// nil = not provided (preserve), "" = explicitly clear, non-empty = new value.
-					existingByKey := make(map[string]string)
-					for _, p := range current.Providers {
-						if p.APIKey != nil && p.ID != 0 {
-							existingByKey[strconv.Itoa(p.ID)] = *p.APIKey
-						}
-					}
-					for i := range incoming {
-						if incoming[i].APIKey == nil && existingByKey[strconv.Itoa(incoming[i].ID)] != "" {
-							key := existingByKey[strconv.Itoa(incoming[i].ID)]
-							incoming[i].APIKey = &key
-						}
-					}
-					// agent:// rows in the payload are dropped by UpdateConfig (agent providers
-					// are registry-derived); registry agents are merged in buildConfigResponse.
-					current.Providers = incoming
-				}
-			}
+		// Providers and keyboard shortcuts carry their own shape, so they decode straight into
+		// their types; every other field is one of the three scalars this endpoint accepts.
+		var incoming []types.Provider
+		if updates.field("providers", &incoming) {
+			// agent:// rows in the payload are dropped by UpdateConfig (agent providers
+			// are registry-derived); registry agents are merged in buildConfigResponse.
+			current.Providers = mergeProviderKeys(incoming, current.Providers)
 		}
-		if wp, ok := updates["worker_provider"]; ok {
-			current.WorkerProvider = wp.(string)
+		current.WorkerProvider = updates.strOr("worker_provider", current.WorkerProvider)
+		current.WorkerModel = updates.strOr("worker_model", current.WorkerModel)
+		current.UtilityProvider = updates.strOr("utility_provider", current.UtilityProvider)
+		current.UtilityModel = updates.strOr("utility_model", current.UtilityModel)
+		current.DefaultAutoCommit = updates.boolPtrOr("default_auto_commit", current.DefaultAutoCommit)
+		current.DefaultAutoMerge = updates.boolPtrOr("default_auto_merge", current.DefaultAutoMerge)
+		current.DefaultSubtasksAutoMerge = updates.boolPtrOr("default_subtasks_auto_merge", current.DefaultSubtasksAutoMerge)
+		current.HideModelBadge = updates.boolPtrOr("hide_model_badge", current.HideModelBadge)
+		current.RunSiblingsParallel = updates.boolPtrOr("run_siblings_parallel", current.RunSiblingsParallel)
+		current.SortOldestFirst = updates.boolPtrOr("sort_oldest_first", current.SortOldestFirst)
+		current.DefaultMaxFailedTurns = updates.intPtrOr("default_max_failed_turns", current.DefaultMaxFailedTurns)
+		current.DefaultAutoSummarizeThreshold = updates.intPtrOr("default_auto_summarize_threshold", current.DefaultAutoSummarizeThreshold)
+		if threshold := current.DefaultAutoSummarizeThreshold; threshold != nil {
+			clamped := clamp(*threshold, 1, 100)
+			current.DefaultAutoSummarizeThreshold = &clamped
 		}
-		if wm, ok := updates["worker_model"]; ok {
-			current.WorkerModel = wm.(string)
+		current.DefaultOperatingMode = updates.modeOr("default_operating_mode", current.DefaultOperatingMode)
+		var ks types.KeyboardShortcuts
+		if updates.field("keyboard_shortcuts", &ks) {
+			current.KeyboardShortcuts = &ks
 		}
-		if up, ok := updates["utility_provider"]; ok {
-			current.UtilityProvider = up.(string)
-		}
-		if um, ok := updates["utility_model"]; ok {
-			current.UtilityModel = um.(string)
-		}
-		if dac, ok := updates["default_auto_commit"]; ok {
-			if v, ok := dac.(bool); ok {
-				current.DefaultAutoCommit = &v
-			}
-		}
-		if dam, ok := updates["default_auto_merge"]; ok {
-			if v, ok := dam.(bool); ok {
-				current.DefaultAutoMerge = &v
-			}
-		}
-		if dsam, ok := updates["default_subtasks_auto_merge"]; ok {
-			if v, ok := dsam.(bool); ok {
-				current.DefaultSubtasksAutoMerge = &v
-			}
-		}
-		if dom, ok := updates["default_operating_mode"]; ok {
-			if v, ok := dom.(string); ok && (v == "act" || v == "plan" || v == "explore") {
-				current.DefaultOperatingMode = &v
-			}
-		}
-		if dmft, ok := updates["default_max_failed_turns"]; ok {
-			if f, ok := dmft.(float64); ok {
-				v := int(f)
-				current.DefaultMaxFailedTurns = &v
-			}
-		}
-		if dast, ok := updates["default_auto_summarize_threshold"]; ok {
-			if f, ok := dast.(float64); ok {
-				v := int(f)
-				if v < 1 {
-					v = 1
-				}
-				if v > 100 {
-					v = 100
-				}
-				current.DefaultAutoSummarizeThreshold = &v
-			}
-		}
-		if hmb, ok := updates["hide_model_badge"]; ok {
-			if v, ok := hmb.(bool); ok {
-				current.HideModelBadge = &v
-			}
-		}
-		if rps, ok := updates["run_siblings_parallel"]; ok {
-			if v, ok := rps.(bool); ok {
-				current.RunSiblingsParallel = &v
-			}
-		}
-		if sof, ok := updates["sort_oldest_first"]; ok {
-			if v, ok := sof.(bool); ok {
-				current.SortOldestFirst = &v
-			}
-		}
-		if ksRaw, ok := updates["keyboard_shortcuts"]; ok {
-			if ksJSON, err := json.Marshal(ksRaw); err == nil {
-				ks := &types.KeyboardShortcuts{}
-				if err := json.Unmarshal(ksJSON, ks); err == nil {
-					current.KeyboardShortcuts = ks
-				}
-			}
+		if updates.err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, updates.err.Error())
+			return
 		}
 		if err := cs.UpdateConfig(current); err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to update config")

@@ -471,7 +471,7 @@ func TestParsePublishDiagnostics(t *testing.T) {
 	var envelope struct {
 		Method string `json:"method"`
 		Params struct {
-			Uri         string `json:"uri"`
+			URI         string `json:"uri"`
 			Diagnostics []struct {
 				Range struct {
 					Start struct {
@@ -490,8 +490,8 @@ func TestParsePublishDiagnostics(t *testing.T) {
 	if envelope.Method != "textDocument/publishDiagnostics" {
 		t.Errorf("method = %q, want %q", envelope.Method, "textDocument/publishDiagnostics")
 	}
-	if envelope.Params.Uri != "file:///tmp/main.go" {
-		t.Errorf("uri = %q, want %q", envelope.Params.Uri, "file:///tmp/main.go")
+	if envelope.Params.URI != "file:///tmp/main.go" {
+		t.Errorf("uri = %q, want %q", envelope.Params.URI, "file:///tmp/main.go")
 	}
 
 	// Filter for errors (severity <= 1)

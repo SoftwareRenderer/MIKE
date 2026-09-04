@@ -49,7 +49,7 @@ type Frame struct {
 	Payload []byte
 }
 
-// Header size: MsgID (4) + Type (1) + Length (4) = 9 bytes.
+// HeaderSize is the fixed frame header: MsgID (4) + Type (1) + Length (4) = 9 bytes.
 const HeaderSize = 9
 
 // ReadFrame reads a single frame from r.

@@ -99,7 +99,7 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 
 	// If git_url is provided, clone the repo into <path>/<repo-name> first,
 	// then proceed with normal project creation from the cloned directory.
-	if req.GitUrl != "" {
+	if req.GitURL != "" {
 		targetPath, err := prepareCloneTarget(req)
 		if err != nil {
 			httputil.JSONError(w, http.StatusBadRequest, err.Error())
@@ -107,7 +107,7 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		// Same restricted argv/env as the SSE clone (transport allowlist,
 		// no interactive credential prompt).
-		cmd := osexec.Command("git", git.CloneArgs(req.GitUrl, targetPath)...)
+		cmd := osexec.Command("git", git.CloneArgs(req.GitURL, targetPath)...)
 		cmd.Env = git.CloneEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
 			httputil.JSONError(w, http.StatusBadRequest, "git clone failed: "+strings.TrimSpace(string(out)))
@@ -128,10 +128,10 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 // target directory (<path>/<repo-name>) inside the existing parent dir
 // req.Path. Returns the target path, or an error describing what is wrong.
 func prepareCloneTarget(req types.CreateProjectRequest) (string, error) {
-	if err := validateGitCloneURL(req.GitUrl); err != nil {
+	if err := validateGitCloneURL(req.GitURL); err != nil {
 		return "", err
 	}
-	repoName, err := repoNameFromGitURL(req.GitUrl)
+	repoName, err := repoNameFromGitURL(req.GitURL)
 	if err != nil {
 		return "", err
 	}
@@ -234,7 +234,7 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 
 // HandleClone streams a git clone with live progress over SSE, then creates the project from
 // the cloned directory. Body: CreateProjectRequest with Path = the clone-into parent directory
-// and GitUrl = the repository to clone (both required).
+// and GitURL = the repository to clone (both required).
 //
 // Each "data:" frame is one JSON object:
 //
@@ -252,7 +252,7 @@ func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 		httputil.JSONError(w, http.StatusBadRequest, "path is required")
 		return
 	}
-	if req.GitUrl == "" {
+	if req.GitURL == "" {
 		httputil.JSONError(w, http.StatusBadRequest, "git_url is required")
 		return
 	}
@@ -280,9 +280,9 @@ func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sendEvent(map[string]any{"type": "status", "message": "Cloning " + req.GitUrl + " into " + targetPath + "..."})
+	sendEvent(map[string]any{"type": "status", "message": "Cloning " + req.GitURL + " into " + targetPath + "..."})
 
-	out, err := git.Clone(req.GitUrl, targetPath, func(percent int) {
+	out, err := git.Clone(req.GitURL, targetPath, func(percent int) {
 		sendEvent(map[string]any{"type": "progress", "percent": percent})
 	})
 	if err != nil {

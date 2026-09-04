@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"kanban/backend/llama"
 	"kanban/backend/types"
 )
 
@@ -289,15 +290,15 @@ func shellTokens(cmd string) []string {
 // or writing in order to provide hints.
 func isReadOnlyCall(toolName, rawArgs string) bool {
 	switch toolName {
-	case "read_file":
+	case llama.ToolReadFile:
 		return true
-	case "lsp_references", "lsp_definition", "lsp_hover":
+	case llama.ToolLSPReferences, llama.ToolLSPDefinition, llama.ToolLSPHover:
 		return true
-	case "write_file", "edit_file", "lsp_rename":
+	case llama.ToolWriteFile, llama.ToolEditFile, llama.ToolLSPRename:
 		return false
-	case "ask_question", "request_review":
+	case llama.ToolAskQuestion, llama.ToolRequestReview:
 		return false
-	case "bash":
+	case llama.ToolBash:
 		var args map[string]any
 		if err := json.Unmarshal([]byte(rawArgs), &args); err == nil {
 			if cmd, ok := args["command"].(string); ok {

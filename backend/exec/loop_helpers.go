@@ -27,9 +27,10 @@ type sandboxRecreate struct {
 	// It differs per caller because the two causes read differently in a message.
 	connErrCode string
 	opts        kanban_sandbox.SandboxOpts
-	// underLock applies the caller's own state beside the new callbacks, in the same
-	// critical section, so the two are never visible apart.
-	underLock func(*executionState)
+	// underLock applies the caller's own sandbox state inside the same write as the new callbacks,
+	// so the two are never visible apart. It takes the sandboxState being written, not the
+	// executionState: sandboxMu is already held here and is not reentrant.
+	underLock func(*sandboxState)
 }
 
 // recreateTaskSandbox stops a running task container, creates it again with the given
@@ -65,12 +66,14 @@ func (te *TaskExecutor) recreateTaskSandbox(setup *taskExecSetup, state *executi
 		return clientErr
 	}
 
-	te.taskMu.Lock()
-	state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite, state.sandboxEdit = makeSandboxCallbacks(newAgentClient)
-	if r.underLock != nil {
-		r.underLock(state)
-	}
-	te.taskMu.Unlock()
+	// Callbacks and the caller's change go in one write: new callbacks beside a stale operating mode
+	// would mean writing through a container mounted for the old mode.
+	state.setSandbox(func(sb *sandboxState) {
+		sb.exec, sb.execStream, sb.read, sb.write, sb.edit = makeSandboxCallbacks(newAgentClient)
+		if r.underLock != nil {
+			r.underLock(sb)
+		}
+	})
 
 	// Persist and broadcast assigned ports if the recreation changed any.
 	if len(assignedPorts) > 0 {

@@ -8,6 +8,37 @@ import (
 // SQLite has no "ALTER TABLE … ADD COLUMN IF NOT EXISTS", so startup used to fire ~50
 // unconditional ALTERs and discard their errors - 34 of which can do nothing except fail
 // with "duplicate column name". Asking first makes a logged failure a real failure.
+//
+// The cost is a probe per column, 53 per start, each one a no-op on a current database.
+// schemaVersion is what lets a database that has been through the chain skip it.
+
+// schemaVersion is the value PRAGMA user_version carries once initSchema has brought a database up
+// to date, and the number a new migration bumps.
+//
+// To add a migration: extend initSchema's probe chain and raise this constant, leaving the earlier
+// steps in place. A database stamped N has been through 1..N; an older one reads 0 and runs the
+// whole chain. So the steps must stay idempotent, and one that must run exactly once needs its own
+// marker (see the config-row guard on the backfill) rather than trusting this number.
+const schemaVersion = 1
+
+// userVersion reads PRAGMA user_version. A read failure answers 0, which reruns the probe chain:
+// slow, but it cannot leave a column missing. The caller holds s.mu.
+func (s *Store) userVersion() int {
+	var v int
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		log.Printf("[store] reading user_version failed, re-running schema probes: %v", err)
+		return 0
+	}
+	return v
+}
+
+// setUserVersion stamps the schema version. A failed stamp only costs a rerun of the chain on the
+// next start, so it is logged rather than fatal; refusing to open the database would be worse.
+func (s *Store) setUserVersion(v int) {
+	if _, err := s.db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, v)); err != nil {
+		log.Printf("[store] stamping schema version %d failed: %v", v, err)
+	}
+}
 
 // hasColumn reports whether an existing table carries the named column. A missing table
 // reads as "no such column", which is honest: the ALTER would have failed on it anyway.

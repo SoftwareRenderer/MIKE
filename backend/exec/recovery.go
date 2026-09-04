@@ -50,10 +50,10 @@ func (te *TaskExecutor) recoverBridgeForTask(mgr bridgeSandboxManager, setup *ta
 		probeErr := newClient.Ping(setup.ctx)
 		if probeErr == nil {
 			log.Printf("[bridge-recovery] task=%s client reconnect successful", setup.task.ID)
-			te.taskMu.Lock()
-			state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite, state.sandboxEdit = makeSandboxCallbacks(newClient)
-			state.bridgeRecoveryAttempts = 0 // reset on success
-			te.taskMu.Unlock()
+			state.setSandbox(func(sb *sandboxState) {
+				sb.exec, sb.execStream, sb.read, sb.write, sb.edit = makeSandboxCallbacks(newClient)
+			})
+			te.resetBridgeRecoveryAttempts(state)
 			return true
 		}
 		log.Printf("[bridge-recovery] task=%s client probe failed: %v, escalating to sandbox recreation", setup.task.ID, probeErr)
@@ -84,10 +84,10 @@ func (te *TaskExecutor) recoverBridgeForTask(mgr bridgeSandboxManager, setup *ta
 	}
 
 	log.Printf("[bridge-recovery] task=%s sandbox recreated successfully", setup.task.ID)
-	te.taskMu.Lock()
-	state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite, state.sandboxEdit = makeSandboxCallbacks(newClient)
-	state.bridgeRecoveryAttempts = 0 // reset on success
-	te.taskMu.Unlock()
+	state.setSandbox(func(sb *sandboxState) {
+		sb.exec, sb.execStream, sb.read, sb.write, sb.edit = makeSandboxCallbacks(newClient)
+	})
+	te.resetBridgeRecoveryAttempts(state)
 	if onRecovered != nil {
 		onRecovered()
 	}
