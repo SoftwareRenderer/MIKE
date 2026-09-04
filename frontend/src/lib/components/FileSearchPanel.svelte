@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onDestroy } from 'svelte';
+    import { t } from '$lib/i18n';
     import { escapeHtml } from '$lib/utils/format';
 
     interface SearchResult {
@@ -91,7 +92,7 @@
             const res = await fetch(`/api/fs/search?${params}`);
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || `Search failed (${res.status})`);
+                throw new Error(err.error || t('editor.searchFailed', { status: res.status }));
             }
             const data = await res.json();
             rootPath = data.root || '';
@@ -177,9 +178,9 @@
 
     function getMatchCount(): string {
         if (!searched || !query.trim()) return '';
-        if (loading) return 'Searching...';
-        if (results.length === 0) return 'No results';
-        return `${results.length} result${results.length !== 1 ? 's' : ''}`;
+        if (loading) return t('editor.searching');
+        if (results.length === 0) return t('editor.noResults');
+        return t('editor.results', { count: results.length });
     }
 
     // Focus input on mount
@@ -282,9 +283,9 @@
     {#if error}
         <div class="search-error">{error}</div>
     {:else if loading}
-        <div class="search-loading">Searching...</div>
+        <div class="search-loading">{t('editor.searching')}</div>
     {:else if searched && results.length === 0}
-        <div class="search-empty">No results found</div>
+        <div class="search-empty">{t('editor.noResultsFound')}</div>
     {:else if results.length > 0}
         <div class="search-results" role="list" aria-label="Search results">
             {#each groupedResults as group}
@@ -295,7 +296,7 @@
                         <polyline points="14,2 14,8 20,8"/>
                     </svg>
                     <span class="file-path">{group.path}</span>
-                    <span class="file-match-count">{group.results.length} match{group.results.length !== 1 ? 'es' : ''}</span>
+                    <span class="file-match-count">{t('editor.matches', { count: group.results.length })}</span>
                 </div>
                 <!-- Results for this file -->
                 {#each group.results as result}
@@ -330,7 +331,7 @@
                 <circle cx="11" cy="11" r="8"/>
                 <line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
-            <p>Search in project</p>
+            <p>{t('editor.searchInProject')}</p>
         </div>
     {/if}
 

@@ -14,6 +14,8 @@
  * `await showExtensionModal(…)` as "the user acknowledged".
  */
 
+import { t } from '$lib/i18n';
+
 export interface ExtensionModalOptions {
     /** Dialog heading. Omitted → no header title (message only). */
     title?: string;
@@ -46,7 +48,7 @@ export function showExtensionModal(opts: ExtensionModalOptions): Promise<void> {
     }
     const message = String(opts.message || '');
     const title = String(opts.title || '');
-    const confirmLabel = String(opts.confirmLabel || 'OK');
+    const confirmLabel = String(opts.confirmLabel || t('host.ok'));
     const extensionName = String(opts.extensionName || '');
 
     const z = OVERLAY_Z_BASE + ++zCounter;
@@ -98,7 +100,7 @@ export function showExtensionModal(opts: ExtensionModalOptions): Promise<void> {
         'padding:12px 20px;border-top:1px solid var(--color-border);flex-shrink:0;';
     if (extensionName) {
         const by = document.createElement('span');
-        by.textContent = `Shown by ${extensionName}`;
+        by.textContent = t('host.shownBy', { name: extensionName });
         by.style.cssText = 'font-size:0.75rem;color:var(--color-text-tertiary);';
         footer.appendChild(by);
     }

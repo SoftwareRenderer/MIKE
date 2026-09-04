@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { REASONING_EFFORT_OPTIONS } from '$lib/types';
+    import { reasoningEffortOptions } from '$lib/types';
     import { t } from '$lib/i18n';
 
     interface ModelEntry {
@@ -48,8 +48,9 @@
     // Suggestion options filtered by the typed text (empty = all).
     function visibleEffortOptions(): Array<{ value: string; label: string }> {
         const q = effortQuery.trim().toLowerCase();
-        if (!q) return REASONING_EFFORT_OPTIONS;
-        return REASONING_EFFORT_OPTIONS.filter(o => o.value.toLowerCase().includes(q));
+        const all = reasoningEffortOptions();
+        if (!q) return all;
+        return all.filter(o => o.value.toLowerCase().includes(q));
     }
 
     function selectEffort(mi: number, value: string) {

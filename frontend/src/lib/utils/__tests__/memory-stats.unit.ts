@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MEMORY_WARNING_RATIO, isNearMemoryLimit, isMemoryLimitReached, isSandboxMemoryWarning, formatSandboxMemory, parseMemoryLimitMB, memoryLimitToInput, formatMemoryLimitMB, NO_MEMORY_LIMIT_LABEL } from '$lib/utils/memory-stats';
+import { MEMORY_WARNING_RATIO, isNearMemoryLimit, isMemoryLimitReached, isSandboxMemoryWarning, formatSandboxMemory, parseMemoryLimitMB, memoryLimitToInput, formatMemoryLimitMB, noMemoryLimitLabel } from '$lib/utils/memory-stats';
 import type { SandboxMemoryStats } from '$lib/types';
 
 function stats(overrides: Partial<SandboxMemoryStats> = {}): SandboxMemoryStats {
@@ -158,11 +158,19 @@ describe('memoryLimitToInput', () => {
 });
 
 describe('formatMemoryLimitMB', () => {
+    // Pinned to the English bytes rather than to the constant they came from: the
+    // assertions used to compare the output against `NO_MEMORY_LIMIT_LABEL` itself,
+    // so they could not fail however wrong the words were. Tests run in the no-pack
+    // state, so English is what renders here.
     it('renders "No limit" for unlimited and missing values', () => {
-        expect(formatMemoryLimitMB(0)).toBe(NO_MEMORY_LIMIT_LABEL);
-        expect(formatMemoryLimitMB(-512)).toBe(NO_MEMORY_LIMIT_LABEL);
-        expect(formatMemoryLimitMB(null)).toBe(NO_MEMORY_LIMIT_LABEL);
-        expect(formatMemoryLimitMB(undefined)).toBe(NO_MEMORY_LIMIT_LABEL);
+        expect(formatMemoryLimitMB(0)).toBe('No limit');
+        expect(formatMemoryLimitMB(-512)).toBe('No limit');
+        expect(formatMemoryLimitMB(null)).toBe('No limit');
+        expect(formatMemoryLimitMB(undefined)).toBe('No limit');
+    });
+
+    it('answers "No limit" from the same words the read-only label uses', () => {
+        expect(formatMemoryLimitMB(0)).toBe(noMemoryLimitLabel());
     });
 
     it('renders MB for an enforced limit', () => {

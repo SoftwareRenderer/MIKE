@@ -6,6 +6,7 @@
     import { highlightLinesAsync } from '$lib/highlighter';
     import { escapeHtml } from '$lib/utils/format';
     import { activeLocale } from '$lib/i18n/runtime.svelte';
+    import { t } from '$lib/i18n';
 import { slide } from 'svelte/transition';
 
     interface Props {
@@ -346,7 +347,7 @@ import { slide } from 'svelte/transition';
                     {#if totalRemoved > 0}
                         <span class="diff-stat-removed">-{totalRemoved}</span>
                     {/if}
-                    <span class="diff-file-count">{diffFiles.length} file{diffFiles.length !== 1 ? 's' : ''}</span>
+                    <span class="diff-file-count">{t('diff.shared.file', { count: diffFiles.length })}</span>
                 </div>
             {/if}
         </div>
@@ -371,9 +372,9 @@ import { slide } from 'svelte/transition';
     <!-- Content area -->
     <div class="diff-body">
         {#if loading}
-            <div class="diff-loading-center">Loading diff...</div>
+            <div class="diff-loading-center">{t('diff.loadingDiff')}</div>
         {:else if !hasContent}
-            <div class="diff-empty-center">No changes in this commit</div>
+            <div class="diff-empty-center">{t('diff.noChangesInCommit')}</div>
         {:else}
             <div class="diff-files-scroll">
                 {#each diffFiles as file}
@@ -406,13 +407,13 @@ import { slide } from 'svelte/transition';
                             <div class="diff-file-slide" transition:slide={{ duration: 200 }}>
                                 {#if file.rows.length === 0}
                                 {#if file.isBinary}
-                                    <div class="diff-binary-notice">Binary file</div>
+                                    <div class="diff-binary-notice">{t('diff.binaryFile')}</div>
                                 {:else if file.isDeleted}
-                                    <div class="diff-deleted-notice">Deleted file</div>
+                                    <div class="diff-deleted-notice">{t('diff.deletedFile')}</div>
                                 {:else if file.isNewFile}
-                                    <div class="diff-empty-file-notice">Empty file</div>
+                                    <div class="diff-empty-file-notice">{t('diff.emptyFile')}</div>
                                 {:else}
-                                    <div class="diff-binary-notice">Binary file</div>
+                                    <div class="diff-binary-notice">{t('diff.binaryFile')}</div>
                                 {/if}
                             {:else if useUnifiedView}
                                 <!-- Unified diff view (mobile) -->
@@ -442,7 +443,7 @@ import { slide } from 'svelte/transition';
                                 </div>
                                 {#if isTruncated(file.rows) && !isExpanded(file.path)}
                                     <button type="button" class="diff-expand-btn" onclick={(e) => { e.stopPropagation(); toggleExpand(file.path); }}>
-                                        Show all changes
+                                        {t('diff.showAllChanges')}
                                     </button>
                                 {/if}
                             {:else}
@@ -452,10 +453,10 @@ import { slide } from 'svelte/transition';
                                     <!-- Column headers -->
                                     <div class="diff-sbs-header-row">
                                         <div class="diff-sbs-col-header">
-                                            <span class="diff-sbs-label">Old</span>
+                                            <span class="diff-sbs-label">{t('diff.oldSide')}</span>
                                         </div>
                                         <div class="diff-sbs-col-header">
-                                            <span class="diff-sbs-label">New</span>
+                                            <span class="diff-sbs-label">{t('diff.newSide')}</span>
                                         </div>
                                     </div>
                                     <!-- Scrollable columns -->
@@ -490,7 +491,7 @@ import { slide } from 'svelte/transition';
                                 </div>
                                 {#if isTruncated(file.rows) && !isExpanded(file.path)}
                                     <button type="button" class="diff-expand-btn" onclick={(e) => { e.stopPropagation(); toggleExpand(file.path); }}>
-                                        Show all changes
+                                        {t('diff.showAllChanges')}
                                     </button>
                                 {/if}
                             {/if}

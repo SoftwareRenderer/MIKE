@@ -1,5 +1,6 @@
 <script lang="ts">
     import FileEditor from './FileEditor.svelte';
+    import { t } from '$lib/i18n';
     import type { LSPSymbol } from '$lib/utils/lsp-symbols';
     import { appStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
@@ -144,7 +145,7 @@
                         onclick={onSave}
                         title="Save (Ctrl+S)"
                     >
-                        {saving ? 'Saving...' : 'Save'}
+                        {saving ? t('editor.saving') : t('editor.save')}
                     </button>
                 {/if}
             </div>
@@ -154,7 +155,7 @@
     <!-- Editor panels -->
     <div class="editor-panels">
         {#if fileEditorLoading}
-            <div class="file-editor-loading">Loading editor...</div>
+            <div class="file-editor-loading">{t('editor.loadingEditor')}</div>
         {:else if FileEditorComponent}
             {@const FileEditor = FileEditorComponent}
             {#each openFiles as file (file.path)}

@@ -1,5 +1,6 @@
 <script lang="ts">
     import { fade } from 'svelte/transition';
+    import { t } from '$lib/i18n';
     import { SwUpdateDetector } from '$lib/composables/use-sw-update.svelte';
 
     let { detector: detectorProp }: { detector?: SwUpdateDetector } = $props();
@@ -18,7 +19,7 @@
                 <path d="M13 11.5v-1a6 6 0 10-1.7 4.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
                 <polyline points="11.3,11.5 13.7,11.5 13.7,9.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
-            New version available
+            {t('swUpdate.available')}
         </span>
         <button
             type="button"
@@ -26,7 +27,7 @@
             onclick={detector.reload}
             aria-label="Reload page to load new version"
         >
-            Reload
+            {t('swUpdate.reload')}
         </button>
     </div>
 {/if}

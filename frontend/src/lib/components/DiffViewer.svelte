@@ -4,12 +4,13 @@
     import { buildDisplayItems, truncatePath, getStatusBadge } from '$lib/utils/diff-parser';
     import { highlightLinesAsync } from '$lib/highlighter';
     import { formatBytes } from '$lib/utils/format';
+    import { t } from '$lib/i18n';
     import { loadCollapsedDiffFiles, saveCollapsedDiffFiles } from '$lib/storage';
 import { slide } from 'svelte/transition';
     import '$lib/styles/diff-viewer.css';
 
 
-    let { committedFiles = [], stagedFiles = [], unstagedFiles = [], stagedUntracked = [], unstagedUntracked = [], loading = false, onExpandFile, onExpandUntracked, onLineClick, onStageFile, onStageAll, onUnstageAll, selectedPath, mergedLabel = 'Merged from Subtasks' }: { committedFiles?: DiffFile[]; stagedFiles: DiffFile[]; unstagedFiles: DiffFile[]; stagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; unstagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; loading?: boolean; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void; onStageFile?: (path: string, stage: boolean) => void; onStageAll?: () => void; onUnstageAll?: () => void; selectedPath?: string; mergedLabel?: string } = $props();
+    let { committedFiles = [], stagedFiles = [], unstagedFiles = [], stagedUntracked = [], unstagedUntracked = [], loading = false, onExpandFile, onExpandUntracked, onLineClick, onStageFile, onStageAll, onUnstageAll, selectedPath, mergedLabel = t('task.diff.mergedFromSubtasks') }: { committedFiles?: DiffFile[]; stagedFiles: DiffFile[]; unstagedFiles: DiffFile[]; stagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; unstagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; loading?: boolean; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void; onStageFile?: (path: string, stage: boolean) => void; onStageAll?: () => void; onUnstageAll?: () => void; selectedPath?: string; mergedLabel?: string } = $props();
     let hasContent = $derived(committedFiles.length > 0 || stagedFiles.length > 0 || unstagedFiles.length > 0 || stagedUntracked.length > 0 || unstagedUntracked.length > 0);
 
     // Sort files: directories first (by path), then root files
@@ -357,7 +358,7 @@ import { slide } from 'svelte/transition';
                                     <path d="M4 2h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z" stroke="currentColor" stroke-width="1.2"/>
                                     <path d="M6 6l4 4M10 6l-4 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                                 </svg>
-                                <span>Binary file — {formatBytes(file.fileSize)}</span>
+                                <span>{t('diff.binaryWithSize', { size: formatBytes(file.fileSize) })}</span>
                             </div>
                             {:else}
                             <div class="diff-large-file-notice">
@@ -365,7 +366,7 @@ import { slide } from 'svelte/transition';
                                     <path d="M3 2h10l1 1v11a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.5"/>
                                     <path d="M6 6h4M6 8h4M6 10h2" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
                                 </svg>
-                                <span>Large file — {formatBytes(file.fileSize)} (+{file.origAdded ?? file.added}/-{file.origRemoved ?? file.removed})</span>
+                                <span>{t('diff.largeWithSize', { size: formatBytes(file.fileSize), added: file.origAdded ?? file.added, removed: file.origRemoved ?? file.removed })}</span>
                             </div>
                             {/if}
                         </div>
@@ -380,7 +381,7 @@ import { slide } from 'svelte/transition';
                                     <path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
                                     <path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
                                 </svg>
-                                <span>Empty file</span>
+                                <span>{t('diff.emptyFile')}</span>
                             </div>
                         </div>
                     </div>
@@ -459,12 +460,12 @@ import { slide } from 'svelte/transition';
                                                 <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
                                                     <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                                                 </svg>
-                                                Hide {item.block.count} unmodified lines
+                                                {t('diff.hideLines', { count: item.block.count })}
                                             {:else}
                                                 <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
                                                     <path d="M4 4h8M4 8h8M4 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                                                 </svg>
-                                                Show {item.block.count} unmodified lines
+                                                {t('diff.showLines', { count: item.block.count })}
                                             {/if}
                                         </button>
                                         {#if expandedBlocks[item.block.id]}
@@ -511,7 +512,7 @@ import { slide } from 'svelte/transition';
                             <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                                 <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
-                            Show full diff
+                            {t('diff.showFull')}
                         </button>
                     {/if}
                 </div>
@@ -548,8 +549,8 @@ import { slide } from 'svelte/transition';
                     </span>
                 {/if}
             </button>
-            <span class="diff-untracked-badge">untracked</span>
-            <span class="diff-status-badge diff-status-added" title="Added">A</span>
+            <span class="diff-untracked-badge">{t('diff.untracked')}</span>
+            <span class="diff-status-badge diff-status-added" title="Added">{t('diff.badgeAdded')}</span>
             {#if onStageFile}
                 <button type="button" class="diff-stage-btn" onclick={() => onStageFile(entry.path, !isStaged)} title={isStaged ? 'Unstage file' : 'Stage file'}>
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d={isStaged ? "M4 8h8" : "M8 4v8M4 8h8"} stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -571,7 +572,7 @@ import { slide } from 'svelte/transition';
                                     <path d="M4 2h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z" stroke="currentColor" stroke-width="1.2"/>
                                     <path d="M6 6l4 4M10 6l-4 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                                 </svg>
-                                <span>Binary file — {formatBytes(entry.fileSize ?? 0)}</span>
+                                <span>{t('diff.binaryWithSize', { size: formatBytes(entry.fileSize ?? 0) })}</span>
                             </div>
                             {:else}
                             <div class="diff-large-file-notice">
@@ -579,7 +580,7 @@ import { slide } from 'svelte/transition';
                                     <path d="M3 2h10l1 1v11a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.5"/>
                                     <path d="M6 6h4M6 8h4M6 10h2" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
                                 </svg>
-                                <span>Large file — {formatBytes(entry.fileSize ?? 0)}</span>
+                                <span>{t('diff.largeFile', { size: formatBytes(entry.fileSize ?? 0) })}</span>
                             </div>
                             {/if}
                         </div>
@@ -659,12 +660,12 @@ import { slide } from 'svelte/transition';
                                                 <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
                                                     <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                                                 </svg>
-                                                Hide {item.block.count} unmodified lines
+                                                {t('diff.hideLines', { count: item.block.count })}
                                             {:else}
                                                 <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
                                                     <path d="M4 4h8M4 8h8M4 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                                                 </svg>
-                                                Show {item.block.count} unmodified lines
+                                                {t('diff.showLines', { count: item.block.count })}
                                             {/if}
                                         </button>
                                         {#if expandedBlocks[item.block.id]}
@@ -711,7 +712,7 @@ import { slide } from 'svelte/transition';
                             <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                                 <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
-                            Show full diff
+                            {t('diff.showFull')}
                         </button>
                     {/if}
                 </div>
@@ -720,7 +721,7 @@ import { slide } from 'svelte/transition';
                     <div class="diff-line-scroll">
                         <div class="diff-line-content-wrapper">
                             <button type="button" class="diff-expand-btn diff-expand-center" onclick={() => onExpandUntracked?.(entry.path)}>
-                                Load {ufile.added} line{ufile.added !== 1 ? 's' : ''}
+                                {t('diff.loadLines', { count: ufile.added })}
                             </button>
                         </div>
                     </div>
@@ -731,7 +732,7 @@ import { slide } from 'svelte/transition';
                         <div class="diff-line-content-wrapper">
                             <div class="diff-loading">
                                 <div class="diff-loading-spinner"></div>
-                                <span>Loading...</span>
+                                <span>{t('diff.shared.loading')}</span>
                             </div>
                         </div>
                     </div>
@@ -745,7 +746,7 @@ import { slide } from 'svelte/transition';
                                     <path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
                                     <path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
                                 </svg>
-                                <span>Empty file</span>
+                                <span>{t('diff.emptyFile')}</span>
                             </div>
                         </div>
                     </div>
@@ -762,14 +763,14 @@ import { slide } from 'svelte/transition';
         {#if loading}
             <div class="diff-loading diff-loading-center">
                 <div class="diff-loading-spinner"></div>
-                <span>Loading changes...</span>
+                <span>{t('diff.loadingChanges')}</span>
             </div>
         {:else}
             <svg width="24" height="24" viewBox="0 0 16 16" fill="none">
                 <path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
                 <path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
             </svg>
-            <p>No changes since last commit</p>
+            <p>{t('diff.noChanges')}</p>
         {/if}
     </div>
 {:else}
@@ -780,7 +781,7 @@ import { slide } from 'svelte/transition';
         {#if loading}
         <div class="diff-loading-banner">
             <div class="diff-loading-spinner"></div>
-            <span>Loading changes...</span>
+            <span>{t('diff.loadingChanges')}</span>
         </div>
         {/if}
 
@@ -791,12 +792,12 @@ import { slide } from 'svelte/transition';
                 <svg class="diff-section-chevron" class:expanded={!isSectionCollapsed('staged')} width="12" height="12" viewBox="0 0 16 16" fill="none">
                     <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-                <span class="diff-section-title">Staged</span>
+                <span class="diff-section-title">{t('diff.staged')}</span>
                 <span class="diff-section-stats">
                     <span class="diff-added">+{stagedAdditions}</span>
                     <span class="diff-removed">-{stagedDeletions}</span>
                 </span>
-                <span class="diff-section-count">{stagedCount} file{stagedCount !== 1 ? 's' : ''}</span>
+                <span class="diff-section-count">{t('diff.shared.file', { count: stagedCount })}</span>
                 {#if onUnstageAll}
                 <span class="diff-section-action" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); onUnstageAll(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onUnstageAll(); } }} title="Unstage all changes" aria-label="Unstage all changes">
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -819,12 +820,12 @@ import { slide } from 'svelte/transition';
                 <svg class="diff-section-chevron" class:expanded={!isSectionCollapsed('unstaged')} width="12" height="12" viewBox="0 0 16 16" fill="none">
                     <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-                <span class="diff-section-title">Unstaged</span>
+                <span class="diff-section-title">{t('diff.unstaged')}</span>
                 <span class="diff-section-stats">
                     <span class="diff-added">+{unstagedAdditions}</span>
                     <span class="diff-removed">-{unstagedDeletions}</span>
                 </span>
-                <span class="diff-section-count">{unstagedCount} file{unstagedCount !== 1 ? 's' : ''}</span>
+                <span class="diff-section-count">{t('diff.shared.file', { count: unstagedCount })}</span>
                 {#if onStageAll}
                 <span class="diff-section-action" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); onStageAll(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onStageAll(); } }} title="Stage all changes" aria-label="Stage all changes">
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -857,7 +858,7 @@ import { slide } from 'svelte/transition';
                     <span class="diff-added">+{sortedCommittedFiles.reduce((s, f) => s + (f.origAdded ?? f.added ?? 0), 0)}</span>
                     <span class="diff-removed">-{sortedCommittedFiles.reduce((s, f) => s + (f.origRemoved ?? f.removed ?? 0), 0)}</span>
                 </span>
-                <span class="diff-section-count">{sortedCommittedFiles.length} file{sortedCommittedFiles.length !== 1 ? "s" : ""}</span>
+                <span class="diff-section-count">{t('diff.shared.file', { count: sortedCommittedFiles.length })}</span>
             </button>
             <div class="diff-section-body">
                 {#each sortedCommittedFiles as file (file.path)}

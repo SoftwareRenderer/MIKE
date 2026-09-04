@@ -1,5 +1,6 @@
 import type { LSPClient } from '@codemirror/lsp-client';
 
+import { t } from '$lib/i18n';
 /** Symbol format used by the symbols panel and sticky scroll. */
 export interface LSPSymbol {
     name: string;
@@ -140,7 +141,7 @@ export async function requestLSPSymbols(
                 textDocument: { uri },
             }),
             new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('LSP symbol request timeout')), timeoutMs),
+                setTimeout(() => reject(new Error(t('lsp.symbolTimeout'))), timeoutMs),
             ),
         ]);
 

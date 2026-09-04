@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
+    import { t } from '$lib/i18n';
     import { ensureCsrfToken } from '$lib/api';
     import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { EditorView } from 'codemirror';
@@ -185,7 +186,7 @@
             if (result.kind === 'no-op') return;
             if (result.kind === 'conflict') {
                 dialogStore.showToast(
-                    `"${(filePath.split('/').pop() || filePath)}" was changed externally and overlaps your unsaved edits. Your edits were kept.`,
+                    t('editor.externalConflict', { name: filePath.split('/').pop() || filePath }),
                     'error',
                 );
                 return;
@@ -414,7 +415,7 @@
         const initialDoc = historyBase || content;
         // Hover tooltip on the gutter rows
         const gutterTitle = mode === 'explorer' && onLinesSelected
-            ? (taskId ? 'Create a subtask from selected lines' : 'Create a task from selected lines')
+            ? (taskId ? t('editor.createSubtaskFromLines') : t('editor.createTaskFromLines'))
             : undefined;
         const gitGutterExt = gitGutter(gutterTitle ? { title: gutterTitle } : undefined);
         gitGutterState = gitGutterExt.state;
@@ -648,8 +649,8 @@
                     fileNotFound = true;
                     return;
                 }
-                const err = await res.json().catch(() => ({ error: 'Failed to read file' }));
-                throw new Error(err.error || 'Failed to read file');
+                const err = await res.json().catch(() => ({ error: t('editor.readFailed') }));
+                throw new Error(err.error || t('editor.readFailed'));
             }
             const data = await res.json();
             const fileContent = data.content || '';
@@ -780,7 +781,7 @@
             return;
         }
         if (!canJumpTo(target)) {
-            dialogStore.showToast(`Definition is outside this ${taskId ? 'task' : 'project'} workspace`, 'error');
+            dialogStore.showToast(taskId ? t('lsp.definitionOutsideTask') : t('lsp.definitionOutsideProject'), 'error');
             return;
         }
         window.dispatchEvent(new CustomEvent('open-file', {
@@ -804,8 +805,8 @@
                 credentials: 'include',
             });
             if (!res.ok) {
-                const err = await res.json().catch(() => ({ error: 'Failed to save' }));
-                throw new Error(err.error || 'Failed to save');
+                const err = await res.json().catch(() => ({ error: t('editor.saveFailed') }));
+                throw new Error(err.error || t('editor.saveFailed'));
             }
             savedContent = content;
             hasChanges = false;
@@ -1491,9 +1492,9 @@
                     <svg class="save-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                         <path d="M12 2a10 10 0 0 1 10 10"/>
                     </svg>
-                    Saving...
+                    {t('editor.saving')}
                 {:else}
-                    Save
+                    {t('editor.save')}
                 {/if}
                 </button>
             </div>
@@ -1503,16 +1504,16 @@
         <!-- Editor content area -->
         <div class="editor-content">
             {#if loading}
-                <div class="editor-placeholder">Loading file...</div>
+                <div class="editor-placeholder">{t('editor.loadingFile')}</div>
             {:else if error}
                 <div class="editor-error">{error}</div>
             {:else if fileNotFound}
                 <div class="editor-placeholder">
-                    <p style="margin:0 0 8px">File not found</p>
+                    <p style="margin:0 0 8px">{t('editor.fileNotFound')}</p>
                     <p style="margin:0;font-size:0.75rem;color:var(--color-text-tertiary)">{filePath}</p>
                 </div>
             {:else if fileTooLarge}
-                <div class="editor-placeholder">File too large to edit (max 1MB)</div>
+                <div class="editor-placeholder">{t('editor.fileTooLarge')}</div>
             {:else}
                 <div class="editor-wrapper" bind:this={editorEl}></div>
                 <div class="ext-anchor" bind:this={extAnchorEl}></div>
@@ -1545,11 +1546,11 @@
     {#if mode === 'diff' && showConfirm}
         <div class="confirm-overlay" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-desc">
             <div class="confirm-dialog" onclick={(e) => e.stopPropagation()} role="presentation">
-                <h3 id="confirm-title">Unsaved Changes</h3>
-                <p id="confirm-desc">You have unsaved changes. Discard them?</p>
+                <h3 id="confirm-title">{t('editor.unsavedTitle')}</h3>
+                <p id="confirm-desc">{t('editor.unsavedMessage')}</p>
                 <div class="confirm-actions">
-                    <button class="btn-confirm-cancel" onclick={() => confirmClose(false)}>Keep Editing</button>
-                    <button class="btn-confirm-discard" onclick={() => confirmClose(true)}>Discard &amp; Close</button>
+                    <button class="btn-confirm-cancel" onclick={() => confirmClose(false)}>{t('editor.keepEditing')}</button>
+                    <button class="btn-confirm-discard" onclick={() => confirmClose(true)}>{t('editor.discardAndClose')}</button>
                 </div>
             </div>
         </div>

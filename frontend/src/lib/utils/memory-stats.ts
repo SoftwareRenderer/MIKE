@@ -1,10 +1,19 @@
+import { t } from '$lib/i18n';
 import type { SandboxMemoryStats } from '$lib/types';
 
 /** Fraction of the memory limit at which the sandbox is considered "close". */
 export const MEMORY_WARNING_RATIO = 0.8;
 
-/** Text used wherever a memory limit is shown read-only but none is enforced. */
-export const NO_MEMORY_LIMIT_LABEL = 'No limit';
+/**
+ * Text used wherever a memory limit is shown read-only but none is enforced.
+ *
+ * A function rather than the exported constant it was: the words come from the
+ * active catalog, and a module-scope value would freeze whatever language the
+ * page booted in — the same trap as the old `usdSymbol` cache.
+ */
+export function noMemoryLimitLabel(): string {
+    return t('memory.noLimit');
+}
 
 /**
  * Normalizes a memory-limit input (MB) to the canonical form used across the
@@ -37,7 +46,7 @@ export function memoryLimitToInput(mb: number | null | undefined): number | null
 /** Read-only rendering of a memory limit: "1024 MB", or "No limit". */
 export function formatMemoryLimitMB(mb: number | null | undefined): string {
     const parsed = parseMemoryLimitMB(mb);
-    return parsed > 0 ? `${parsed} MB` : NO_MEMORY_LIMIT_LABEL;
+    return parsed > 0 ? `${parsed} MB` : noMemoryLimitLabel();
 }
 
 /**
@@ -82,9 +91,9 @@ export function isSandboxMemoryWarning(stats: SandboxMemoryStats | null | undefi
  */
 export function formatSandboxMemory(stats: SandboxMemoryStats | null | undefined): string {
     if (!stats) return '—';
-    if (!stats.running) return 'Not running';
+    if (!stats.running) return t('memory.notRunning');
     if (stats.memory_limit_mb > 0) {
         return `${stats.memory_current_mb} / ${stats.memory_limit_mb} MB`;
     }
-    return `${stats.memory_current_mb} MB (no limit)`;
+    return t('memory.currentNoLimit', { mb: stats.memory_current_mb });
 }

@@ -29,6 +29,13 @@
 //   If `allProjectPaths` is provided, also cleans stale branch editor drafts.
 // =============================================================================
 
+// `$lib/i18n` is cycle-free from here: the import surface is `index.ts` →
+// `runtime.svelte.ts` → `en.ts`, and none of those reach this module. The pack
+// *cache* (`i18n/cache.ts`) does import `$lib/storage`, and it is deliberately not
+// part of what `import { t }` pulls in — routing this import through `cache.ts` or
+// `boot.ts` would close the loop.
+import { t } from '$lib/i18n';
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const DB_NAME = 'kanban-storage';
@@ -96,7 +103,7 @@ function openDB(): Promise<IDBDatabase> {
 
     dbPromise = new Promise((resolve, reject) => {
         if (typeof indexedDB === 'undefined') {
-            reject(new Error('IndexedDB not available'));
+            reject(new Error(t('storage.unavailable')));
             return;
         }
 

@@ -3,7 +3,6 @@
 package prompts
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +18,14 @@ type PromptData struct {
 	AgentsMd     string  // contents of AGENTS.md from worktree root, empty if not found
 	Skills       []Skill // discovered skills with name, description, and location
 	Summary      string  // prior conversation summary
+	// Locale is the language the active translation pack asked the answer to be
+	// written in — a BCP-47 tag carried through verbatim, never a language name.
+	// Empty renders no directive, which is what English is.
+	//
+	// Callers leave it alone: RenderSystemPrompt fills it from the active overlay, so no
+	// call site has to know a pack exists. Set it directly only to render one specific
+	// language (tests).
+	Locale string `json:"-"`
 }
 
 // ToolInfo holds the name and description of a tool for rendering in prompts.
@@ -205,31 +212,21 @@ func stripQuotes(s string) string {
 }
 
 // RenderSystemPrompt renders the system prompt from templates loaded from disk.
+//
+// Every core template is parsed, because base.tmpl calls {{template "plan-mode" .}}; the
+// active translation pack's templates are then laid over them by name (see overlay.go), so
+// a pack can redefine any of them and core still answers for the ones it left alone.
 func RenderSystemPrompt(data PromptData) (string, error) {
-	dir := promptDir()
-	pattern := filepath.Join(dir, "*.tmpl")
-
-	matches, err := filepath.Glob(pattern)
+	if data.Locale == "" {
+		data.Locale = ActiveLocale()
+	}
+	files, err := coreGlob()
 	if err != nil {
 		return "", err
 	}
-	if len(matches) == 0 {
-		return "", os.ErrNotExist
-	}
-
-	tmpl, err := template.New("prompts").Funcs(funcs).ParseFiles(matches...)
-	if err != nil {
-		return "", err
-	}
-
-	var buf bytes.Buffer
 	// Render by name: Execute() would render the alphabetically-first file, so
 	// a new template could hijack the system prompt.
-	if err := tmpl.ExecuteTemplate(&buf, "base.tmpl", data); err != nil {
-		return "", err
-	}
-
-	return buf.String(), nil
+	return render(files, "base.tmpl", data)
 }
 
 // MergeConflictData holds the variables for the merge conflict resolution prompt.
@@ -242,21 +239,11 @@ type MergeConflictData struct {
 }
 
 // RenderMergeConflictPrompt renders the merge conflict resolution prompt.
+//
+// Parsed with FuncMap like every other entry point: a pack template using `inc` is accepted
+// at install (validateI18N parses with FuncMap) and would otherwise fail here at render.
 func RenderMergeConflictPrompt(data MergeConflictData) (string, error) {
-	dir := promptDir()
-	path := filepath.Join(dir, "merge_conflict.tmpl")
-
-	tmpl, err := template.ParseFiles(path)
-	if err != nil {
-		return "", err
-	}
-
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", err
-	}
-
-	return buf.String(), nil
+	return render(coreFile("merge_conflict.tmpl"), "merge_conflict.tmpl", data)
 }
 
 // SummarizeData holds the variables for the context summarization prompt.
@@ -269,25 +256,15 @@ type SummarizeData struct {
 // system prompt (summarization instructions) and the user message (previous
 // summary + chat history).
 func RenderSummarizePrompt(data SummarizeData) (string, string, error) {
-	dir := promptDir()
-	systemTmpl, err := template.ParseFiles(filepath.Join(dir, "summarize.tmpl"))
+	system, err := render(coreFile("summarize.tmpl"), "summarize.tmpl", data)
 	if err != nil {
 		return "", "", err
 	}
-	userTmpl, err := template.ParseFiles(filepath.Join(dir, "summarize_user.tmpl"))
+	user, err := render(coreFile("summarize_user.tmpl"), "summarize_user.tmpl", data)
 	if err != nil {
 		return "", "", err
 	}
-
-	var systemBuf, userBuf bytes.Buffer
-	if err := systemTmpl.Execute(&systemBuf, data); err != nil {
-		return "", "", err
-	}
-	if err := userTmpl.Execute(&userBuf, data); err != nil {
-		return "", "", err
-	}
-
-	return systemBuf.String(), userBuf.String(), nil
+	return system, user, nil
 }
 
 // AnswerQuestionData is the input for the automated answer prompt.
@@ -303,23 +280,13 @@ type AnswerQuestionData struct {
 // numbered questions). The questions live in the user message because some
 // chat templates reject system-only requests.
 func RenderAnswerQuestionPrompt(data AnswerQuestionData) (string, string, error) {
-	dir := promptDir()
-	systemTmpl, err := template.New("answer_question.tmpl").Funcs(funcs).ParseFiles(filepath.Join(dir, "answer_question.tmpl"))
+	system, err := render(coreFile("answer_question.tmpl"), "answer_question.tmpl", data)
 	if err != nil {
 		return "", "", err
 	}
-	userTmpl, err := template.New("answer_question_user.tmpl").Funcs(funcs).ParseFiles(filepath.Join(dir, "answer_question_user.tmpl"))
+	user, err := render(coreFile("answer_question_user.tmpl"), "answer_question_user.tmpl", data)
 	if err != nil {
 		return "", "", err
 	}
-
-	var systemBuf, userBuf bytes.Buffer
-	if err := systemTmpl.Execute(&systemBuf, data); err != nil {
-		return "", "", err
-	}
-	if err := userTmpl.Execute(&userBuf, data); err != nil {
-		return "", "", err
-	}
-
-	return systemBuf.String(), userBuf.String(), nil
+	return system, user, nil
 }

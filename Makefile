@@ -65,8 +65,12 @@ test-go-race: ## Run Go unit tests under the race detector (~4min)
 	go test -race ./backend/... ./pkg/... -count=1 -parallel 4
 
 .PHONY: test-frontend
-test-frontend: ## Run frontend unit tests + the i18n no-language gate (vitest, ~10s)
-	cd frontend && npm test && npm run check:i18n
+test-frontend: ## Run frontend unit tests + the i18n gates (vitest, ~10s)
+	cd frontend && npm test && npm run check:i18n && npm run check:i18n-surface-test && npm run check:i18n-surface
+
+.PHONY: test-i18n-surface
+test-i18n-surface: ## Fail if any user-facing string is still a core literal (~5s)
+	cd frontend && npm run check:i18n-surface
 
 .PHONY: test-e2e
 test-e2e: ## Run e2e tests (Playwright, manages its own server)

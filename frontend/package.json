@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "check:i18n": "python3 i18n-gate.py",
+    "check:i18n-surface": "python3 i18n-count.py",
+    "check:i18n-surface-test": "python3 i18n-count_test.py",
     "test": "vitest run",
     "test:watch": "vitest"
   },

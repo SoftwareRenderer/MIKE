@@ -15,7 +15,7 @@
     import { fade, slide } from 'svelte/transition';
     import { onMount, onDestroy } from 'svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
-    import { t } from '$lib/i18n';
+    import { t, type MessageKey } from '$lib/i18n';
 
     // UI extension injection point — re-render when extensions change
     $effect(() => {
@@ -173,16 +173,23 @@
 
     const statuses = ['backlog', 'in_progress', 'review', 'done'] as const;
     /**
-     * English status names for this card's `aria-label`/`title` only — the ids above are
-     * the data, and `aria-label` text is never translated in this app. The visible column
-     * label is `board.column.*` (Board/Column).
+     * The status word is the column heading the board prints above this card, so it
+     * resolves through the *same* `board.column.*` keys (Board/Column) instead of a
+     * second table of the same four words: the card's `aria-label` and the heading
+     * cannot drift, and a pack that translates the heading translates this with it.
+     * Values are keys, typed as `MessageKey`, so a typo is a build error.
      */
-    const statusLabels: Record<string, string> = {
-        backlog: 'Backlog',
-        in_progress: 'In Progress',
-        review: 'Review',
-        done: 'Done',
+    const statusLabelKey: Record<string, MessageKey> = {
+        backlog: 'board.column.backlog',
+        in_progress: 'board.column.inProgress',
+        review: 'board.column.review',
+        done: 'board.column.done',
     };
+
+    /** The status word, in the active language. An unrecognised status reads "Done". */
+    function statusWord(status: string): string {
+        return t(statusLabelKey[status] ?? 'board.column.done');
+    }
 
     let mouseDownPos = $state<{ x: number; y: number } | null>(null);
 
@@ -709,7 +716,7 @@
     ontouchmove={handleTouchMove}
     role="button"
     tabindex="0"
-    aria-label={`Open task: ${task.title || '(untitled)'}, Status: ${task.status === 'backlog' ? 'Backlog' : task.status === 'in_progress' ? 'In Progress' : task.status === 'review' ? 'Review' : 'Done'}`}
+    aria-label={`Open task: ${task.title || '(untitled)'}, Status: ${statusWord(task.status)}`}
     aria-keyshortcuts="Alt+ArrowLeft, Alt+ArrowRight"
     aria-current={isSelected ? 'page' : undefined}
     style={`--actions: ${actionCount}; --idle-px: ${thirdAction === 'idle' ? '10px' : '0px'}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}${parentSelected && inline && task.parent_task_id ? `; border-left: 3px solid ${statusColor}` : ""}`}
@@ -801,8 +808,8 @@
                             type="button"
                             class="action-icon action-move"
                             onclick={cycleStatus}
-                            aria-label={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusLabels[nextStatus]}`) : `Move to ${statusLabels[nextStatus]}`}
-                            title={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusLabels[nextStatus]}`) : `Move to ${statusLabels[nextStatus]}`}
+                            aria-label={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusWord(nextStatus)}`) : `Move to ${statusWord(nextStatus)}`}
+                            title={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusWord(nextStatus)}`) : `Move to ${statusWord(nextStatus)}`}
                             style="color: {nextStatus === 'done' && hasChanges ? '#EAB308' : statusColors[nextStatus]}"
                         >
                             {#if nextStatus === 'backlog'}
