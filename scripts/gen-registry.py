@@ -106,12 +106,21 @@ def simplify_capabilities(manifest_caps):
              resolve a workspace") and dependency_cache (where it reads resolved
              dependencies from, and whether it would write there)
       - css/agent: no detail rows, so an empty config is enough
+      - i18n:  locale, messages_url and has_prompts ("which language is this, and does it
+             translate the prompts too")
     Everything else (command, args, headers, wasm_module, ...) lives in the
     manifest and is intentionally omitted here. The lsp additions are the exception
     because consent has to be visible *before* the manifest is fetched: which
     machine-level directory an install is going to want, and what the server will
     say when it cannot do its job, are both things you would want before agreeing
     to run someone's container.
+
+    i18n is the second exception, and its reason is the same: the first-run offer
+    matches the browser's language against the *index* — there is nothing installed
+    to read yet — so a pack's locale has to be visible in its entry or the offer can
+    only ever list every pack on the machine and let the user guess which one is
+    French. Only the locale and the two facts about its files are projected; the
+    catalog itself and every translated string stay in the pack.
     """
     if not isinstance(manifest_caps, dict):
         return {}
@@ -163,6 +172,19 @@ def simplify_capabilities(manifest_caps):
                 result['lsp'] = kept
         elif key in ('css', 'agent'):
             result[key] = {}
+        elif key == 'i18n':
+            kept = {}
+            # The locale is the whole reason this block is projected: it is matched against a
+            # browser language before the pack is fetched, so it cannot live only in the manifest.
+            if value.get('locale'):
+                kept['locale'] = value['locale']
+            if value.get('messages_url'):
+                kept['messages_url'] = value['messages_url']
+            if kept:
+                # Whether the pack also overrides the prompt templates — a translated interface with
+                # English prompts is a different offer, and the user should see which one they get.
+                kept['has_prompts'] = bool(value.get('prompts_dir'))
+                result['i18n'] = kept
     return result
 
 
