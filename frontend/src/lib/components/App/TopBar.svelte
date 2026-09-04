@@ -5,7 +5,7 @@
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
     import { toHomeRelative } from '$lib/utils/path';
     import { appStore } from '$lib/stores';
-    import { effectiveOpenTerminalKey, formatShortcut } from '$lib/utils/keyboard';
+    import { openTerminalTitle } from '$lib/utils/keyboard';
 
     let {
         currentProject,
@@ -33,10 +33,7 @@
 
     // Terminal button tooltip — always shows the effective shortcut (tooltips
     // keep the shortcut text even when keycap hints are hidden).
-    const terminalButtonTitle = $derived.by(() => {
-        const key = effectiveOpenTerminalKey(appStore.config);
-        return key ? `Open terminal (${formatShortcut(key)})` : 'Open terminal';
-    });
+    const terminalButtonTitle = $derived(openTerminalTitle(appStore.config));
 </script>
 
 <header class="top-bar">

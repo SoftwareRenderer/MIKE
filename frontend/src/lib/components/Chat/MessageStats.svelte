@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { t } from '$lib/i18n';
+
     interface Props {
         stats: {
             model_name: string;
@@ -16,14 +18,14 @@
 </script>
 
 <div class="message-stats">
-    <span class="stats-model-name">{stats.model_name || 'model'}</span>
+    <span class="stats-model-name">{stats.model_name || t('chat.stats.modelFallback')}</span>
     {#if genTokens > 0}
         <span class="stat-separator" aria-hidden="true">·</span>
-        <span class="stat-item">{genTokens} tokens</span>
+        <span class="stat-item">{t('chat.stats.tokens', { count: genTokens })}</span>
     {/if}
     {#if stats.duration > 0}
         <span class="stat-separator" aria-hidden="true">·</span>
-        <span class="stat-item">{(stats.duration / 1000).toFixed(1)}s</span>
+        <span class="stat-item">{t('chat.stats.seconds', { seconds: (stats.duration / 1000).toFixed(1) })}</span>
     {/if}
 </div>
 

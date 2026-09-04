@@ -22,6 +22,7 @@
     import { wsConnection } from '$lib/stores/connection';
     import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
+    import { t } from '$lib/i18n';
     import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
     import ChatForm from './ChatForm.svelte';
     import ChatEntries from './ChatEntries.svelte';
@@ -357,7 +358,7 @@
             ? stream.state.entries.find(e => e.id === entryId)
             : [...stream.state.entries].reverse().find(e => e.role === 'user' && e.content === content);
         if (entry) entry.queued = true;
-        appendErrorEntry('send_queued', 'Connection lost — message queued and will be sent when the connection is restored');
+        appendErrorEntry('send_queued', t('chat.task.sendQueued'));
     }
 
     function markStreaming() {
@@ -664,7 +665,7 @@
         if (result === null) {
             // Permanent failure (e.g. server error) — remove the optimistic message and show an error.
             stream.state.entries = stream.state.entries.filter(e => !(e.role === 'user' && e.content === msg));
-            appendErrorEntry('send_failed', 'Failed to send message');
+            appendErrorEntry('send_failed', t('chat.task.sendFailed'));
             return;
         }
         if (result.queued) {
@@ -739,8 +740,8 @@
             used: () => stream.state.contextState.used,
             limit: () => stream.state.contextState.limit,
             sessionCost: () => stream.state.sessionCost,
-            confirmText: 'Compress',
-            cancelText: 'Cancel',
+            confirmText: t('chat.compress.confirm'),
+            cancelText: t('chat.common.cancel'),
         });
         if (!confirmed) return;
         try {
@@ -751,7 +752,7 @@
                 stream.state.entries = [...stream.state.entries, {
                     id: genId(),
                     role: 'summarization',
-                    content: result.summary || 'Context was summarized to free space',
+                    content: result.summary || t('chat.stream.summarized'),
                     isStreaming: false,
                     createdAt: new Date().toISOString(),
                     stats: { model_name: selectedModel || 'Pi', prompt_tokens: 0, predicted_tokens: 0, prompt_ms: 0, predicted_ms: 0, duration: 0 },
@@ -764,7 +765,7 @@
         } catch (e: any) {
             if (e?.name === 'AbortError') return;
             console.error('Failed to compress context:', e);
-            dialogStore.showToast(e?.message || 'Failed to compress context', 'error');
+            dialogStore.showToast(e?.message || t('chat.task.compressFailed'), 'error');
         } finally {
             summarizeController = null;
         }
@@ -803,7 +804,7 @@
         isRegenerating = true;
         const result = await sendWithTracking(lastUser.content, undefined, true);
         if (result === null) {
-            dialogStore.showToast('Failed to regenerate');
+            dialogStore.showToast(t('chat.task.regenerateFailed'));
             isRegenerating = false;
             return;
         }
@@ -926,8 +927,8 @@
                 dialogStore.commitDialog = {
                     streaming: true,
                     message: '',
-                    confirmText: 'Commit and move to Done',
-                    cancelText: 'Cancel',
+                    confirmText: t('chat.review.commitAndDone'),
+                    cancelText: t('chat.common.cancel'),
                     projectId,
                     taskId,
                     _resolve: resolve,
@@ -985,16 +986,19 @@
             // If check fails, proceed without branch warning
         }
 
-        let message = `This will delete ${count} message${count > 1 ? 's' : ''}. This action cannot be undone.`;
+        // Two whole messages joined by a blank line — the branch warning is optional, so it
+        // stays its own message rather than a placeholder inside the first one.
+        const base = t('chat.task.deleteConfirm', { count });
+        let message = base;
         if (willDeleteBranch && branchName) {
-            message += `\n\nThis will also delete the git branch "${branchName}".`;
+            message = `${base}\n\n${t('chat.task.deleteAlsoBranch', { branch: branchName })}`;
         }
 
         const confirmed = await dialogStore.showConfirm({
-            title: 'Delete Message',
+            title: t('chat.task.deleteTitle'),
             message,
-            confirmText: 'Delete',
-            cancelText: 'Cancel',
+            confirmText: t('chat.common.delete'),
+            cancelText: t('chat.common.cancel'),
         });
         if (!confirmed) return;
 
@@ -1398,7 +1402,7 @@
 <div class="task-chat">
     <!-- Live region for screen reader announcements -->
     <div class="sr-only" aria-live="polite" aria-atomic="true">
-        {#if isLoading && !connected}Connecting...{:else if isLoading}Agent is responding...{:else if connected}Connected, waiting for messages{/if}
+        {#if isLoading && !connected}{t('chat.task.connecting')}{:else if isLoading}{t('chat.task.responding')}{:else if connected}{t('chat.task.connected')}{/if}
     </div>
     <ChatEntries
         {entries}
@@ -1476,7 +1480,7 @@
             bind:attachments={draftAttachments}
             disabled={disabled}
             isLoading={isLoading}
-            placeholder="Send a message..."
+            placeholder={t('chat.form.taskPlaceholder')}
             providers={providers}
             selectedModel={selectedModel}
             selectedUrl={selectedUrl}

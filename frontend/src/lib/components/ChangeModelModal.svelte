@@ -4,6 +4,7 @@
     import BaseModal from './BaseModal.svelte';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import { resolveWorker, getModelName } from '$lib/utils/providers';
+    import { t } from '$lib/i18n';
 
     let {
         providers,
@@ -29,7 +30,7 @@
         const p = providers.find(p => p.url === selectedUrl);
         return p ? isAgentProvider(p) : false;
     });
-    let modalTitle = $derived(`Change Model for ${taskCount} task${taskCount !== 1 ? 's' : ''}`);
+    let modalTitle = $derived(t('chat.changeModel.title', { count: taskCount }));
 
     // Pre-select the configured Worker provider/model
     $effect(() => {
@@ -69,15 +70,15 @@
 </script>
 
 {#snippet footer()}
-    <button type="button" class="btn-secondary" onclick={handleClose} title="Cancel">Cancel</button>
-    <button type="button" class="btn-primary" disabled={!selectedModel} onclick={handleChange} title="Change the model">
-        Change Model
+    <button type="button" class="btn-secondary" onclick={handleClose} title={t('chat.common.cancel')}>{t('chat.common.cancel')}</button>
+    <button type="button" class="btn-primary" disabled={!selectedModel} onclick={handleChange} title={t('chat.changeModel.confirmTip')}>
+        {t('chat.changeModel.confirm')}
     </button>
 {/snippet}
 
 <BaseModal title={modalTitle} width="420px" footer={footer} onClose={handleClose} closeOnOverlayClick={true}>
     <div class="model-select-row">
-        <span id="model-label" class="model-label">Model</span>
+        <span id="model-label" class="model-label">{t('chat.changeModel.model')}</span>
         {#if hasProviders}
             <ModelSelector
                 providers={providers}
@@ -87,7 +88,7 @@
                 onSelect={handleModelSelect}
             />
         {:else}
-            <span class="no-providers">No providers configured</span>
+            <span class="no-providers">{t('chat.changeModel.noProviders')}</span>
         {/if}
     </div>
     <ul class="task-list">

@@ -12,6 +12,8 @@
     import BaseModal from './BaseModal.svelte';
 import ToggleSwitch from './ToggleSwitch.svelte';
     import PathPicker from './PathPicker.svelte';
+    import { t } from '$lib/i18n';
+    import type { MessageKey } from '$lib/i18n';
 
     /** Files the Dockerfile picker lists and accepts. */
     function isDockerfile(name: string): boolean {
@@ -87,55 +89,60 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     $effect(() => { sandboxCapabilities = project.sandbox_capabilities ?? []; });
     $effect(() => { capsExpanded = !!project.sandbox_capabilities && project.sandbox_capabilities.length > 0; });
     // Known capabilities for autocomplete suggestions
-    const KNOWN_CAPABILITIES: Array<{ value: string; desc: string }> = [
-        { value: 'CAP_CHOWN', desc: 'Change file ownership' },
-        { value: 'CAP_DAC_OVERRIDE', desc: 'Bypass file permission checks' },
-        { value: 'CAP_DAC_READ_SEARCH', desc: 'Bypass read permission on files/dirs' },
-        { value: 'CAP_FOWNER', desc: 'Bypass permission checks requiring inode owner' },
-        { value: 'CAP_FSETID', desc: "Don't clear setuid/setgid on file mod" },
-        { value: 'CAP_IPC_LOCK', desc: 'Lock memory' },
-        { value: 'CAP_IPC_OWNER', desc: 'Bypass IPC ownership checks' },
-        { value: 'CAP_KILL', desc: 'Bypass permission checks for signals' },
-        { value: 'CAP_LEASE', desc: 'Lease files' },
-        { value: 'CAP_LINUX_IMMUTABLE', desc: 'Set immutable file attribute' },
-        { value: 'CAP_MKNOD', desc: 'Create special files' },
-        { value: 'CAP_NET_ADMIN', desc: 'Perform network-related operations' },
-        { value: 'CAP_NET_BIND_SERVICE', desc: 'Bind to ports < 1024' },
-        { value: 'CAP_NET_BROADCAST', desc: 'Make socket broadcasts' },
-        { value: 'CAP_NET_RAW', desc: 'Use RAW and PACKET sockets' },
-        { value: 'CAP_SETFCAP', desc: 'Set file capabilities' },
-        { value: 'CAP_SETGID', desc: 'Manipulate process group IDs' },
-        { value: 'CAP_SETPCAP', desc: 'Transfer capabilities' },
-        { value: 'CAP_SETUID', desc: 'Manipulate process user IDs' },
-        { value: 'CAP_SYS_CHROOT', desc: 'Use chroot()' },
-        { value: 'CAP_SYS_PTRACE', desc: 'Trace arbitrary processes' },
-        { value: 'CAP_SYS_ADMIN', desc: 'Perform a wide range of system admin operations' },
-        { value: 'CAP_SYS_BOOT', desc: 'Reboot the system' },
-        { value: 'CAP_SYS_MODULE', desc: 'Load/unload kernel modules' },
-        { value: 'CAP_SYS_NICE', desc: 'Raise process nice priority' },
-        { value: 'CAP_SYS_RAWIO', desc: 'Perform raw I/O ports' },
-        { value: 'CAP_SYS_RESOURCE', desc: 'Override resource limits' },
-        { value: 'CAP_SYS_TIME', desc: 'Set system clock' },
-        { value: 'CAP_SYS_TTY_CONFIG', desc: 'Configure TTY devices' },
-        { value: 'CAP_BPF', desc: 'Use BPF operations' },
-        { value: 'CAP_PERFMON', desc: 'Use performance monitoring' },
-        { value: 'CAP_AUDIT_CONTROL', desc: 'Modify kernel audit configuration' },
-        { value: 'CAP_AUDIT_READ', desc: 'Read kernel audit log' },
-        { value: 'CAP_AUDIT_WRITE', desc: 'Write records to kernel audit log' },
-        { value: 'CAP_BLOCK_SUSPEND', desc: 'Use suspend-to-memory/disk' },
-        { value: 'CAP_CHECKPOINT_RESTORE', desc: 'Checkpoint and restore' },
-        { value: 'CAP_MAC_ADMIN', desc: 'Override MAC configuration' },
-        { value: 'CAP_MAC_OVERRIDE', desc: 'Override MAC enforcement' },
-        { value: 'CAP_WAKE_ALARM', desc: 'Trigger wake alarms' },
-        { value: 'CAP_SYSLOG', desc: 'Perform syslog operations' },
+    const KNOWN_CAPABILITIES: string[] = [
+        'CAP_CHOWN',
+        'CAP_DAC_OVERRIDE',
+        'CAP_DAC_READ_SEARCH',
+        'CAP_FOWNER',
+        'CAP_FSETID',
+        'CAP_IPC_LOCK',
+        'CAP_IPC_OWNER',
+        'CAP_KILL',
+        'CAP_LEASE',
+        'CAP_LINUX_IMMUTABLE',
+        'CAP_MKNOD',
+        'CAP_NET_ADMIN',
+        'CAP_NET_BIND_SERVICE',
+        'CAP_NET_BROADCAST',
+        'CAP_NET_RAW',
+        'CAP_SETFCAP',
+        'CAP_SETGID',
+        'CAP_SETPCAP',
+        'CAP_SETUID',
+        'CAP_SYS_CHROOT',
+        'CAP_SYS_PTRACE',
+        'CAP_SYS_ADMIN',
+        'CAP_SYS_BOOT',
+        'CAP_SYS_MODULE',
+        'CAP_SYS_NICE',
+        'CAP_SYS_RAWIO',
+        'CAP_SYS_RESOURCE',
+        'CAP_SYS_TIME',
+        'CAP_SYS_TTY_CONFIG',
+        'CAP_BPF',
+        'CAP_PERFMON',
+        'CAP_AUDIT_CONTROL',
+        'CAP_AUDIT_READ',
+        'CAP_AUDIT_WRITE',
+        'CAP_BLOCK_SUSPEND',
+        'CAP_CHECKPOINT_RESTORE',
+        'CAP_MAC_ADMIN',
+        'CAP_MAC_OVERRIDE',
+        'CAP_WAKE_ALARM',
+        'CAP_SYSLOG',
     ];
+    /** The one description per capability name — the NAME is the machine value and never translates. */
+    function capDesc(value: string): string {
+        return t(`sandbox.cap.${value}` as MessageKey);
+    }
+
     // Filtered suggestions based on input
     let capSuggestions = $derived.by(() => {
         const query = capInputValue.trim().toUpperCase();
         if (!query) return [];
         return KNOWN_CAPABILITIES.filter(c =>
-            !sandboxCapabilities.includes(c.value) &&
-            c.value.toUpperCase().includes(query)
+            !sandboxCapabilities.includes(c) &&
+            c.toUpperCase().includes(query)
         ).slice(0, 8);
     });
     // Save warning for un-added changes
@@ -270,7 +277,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         saveWarning = '';
         const container = parseInt(newContainerPort, 10);
         if (isNaN(container) || container < 1 || container > 65535) {
-            portError = 'Port must be between 1 and 65535';
+            portError = t('sandbox.portRangeError');
             return;
         }
         if (editingPortIndex !== null) {
@@ -309,11 +316,11 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         mountError = '';
         saveWarning = '';
         if (!newMountHostPath.trim()) {
-            mountError = 'Host path is required';
+            mountError = t('sandbox.mountHostPathError');
             return;
         }
         if (!newMountContainerPath.trim()) {
-            mountError = 'Container path is required';
+            mountError = t('sandbox.mountContainerPathError');
             return;
         }
         const mount = {
@@ -357,7 +364,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         envError = '';
         saveWarning = '';
         if (!newEnvKey.trim()) {
-            envError = 'Environment variable name is required';
+            envError = t('sandbox.envNameError');
             return;
         }
         // Check for duplicate keys
@@ -365,7 +372,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             i !== editingEnvIndex && e.key === newEnvKey.trim()
         );
         if (isDuplicate) {
-            envError = 'Duplicate variable name: ' + newEnvKey.trim();
+            envError = t('sandbox.envDuplicateError', { name: newEnvKey.trim() });
             return;
         }
         const env = {
@@ -414,24 +421,24 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         ? (capSelectedIndex - 1 + capSuggestions.length) % capSuggestions.length
                         : (capSelectedIndex + 1) % capSuggestions.length;
                 }
-                capInputValue = capSuggestions[capSelectedIndex].value;
+                capInputValue = capSuggestions[capSelectedIndex];
             }
         } else if (e.key === 'Enter' && capInputValue.trim()) {
             e.preventDefault();
             // If a suggestion is selected, use it; otherwise add the raw input
             if (capSelectedIndex >= 0 && capSuggestions[capSelectedIndex]) {
-                addCapability(capSuggestions[capSelectedIndex].value);
+                addCapability(capSuggestions[capSelectedIndex]);
             } else {
                 addCapability(capInputValue);
             }
         } else if (e.key === 'ArrowDown' && capSuggestions.length > 0) {
             e.preventDefault();
             capSelectedIndex = capSelectedIndex < 0 ? 0 : (capSelectedIndex + 1) % capSuggestions.length;
-            capInputValue = capSuggestions[capSelectedIndex].value;
+            capInputValue = capSuggestions[capSelectedIndex];
         } else if (e.key === 'ArrowUp' && capSuggestions.length > 0) {
             e.preventDefault();
             capSelectedIndex = capSelectedIndex < 0 ? capSuggestions.length - 1 : (capSelectedIndex - 1 + capSuggestions.length) % capSuggestions.length;
-            capInputValue = capSuggestions[capSelectedIndex].value;
+            capInputValue = capSuggestions[capSelectedIndex];
         } else if (e.key === 'Backspace' && !capInputValue && sandboxCapabilities.length > 0) {
             // Remove last capability on backspace when input is empty
             removeCapability(sandboxCapabilities[sandboxCapabilities.length - 1]);
@@ -489,7 +496,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         if (isLocked || saving) return;
         // Warn if user typed something in add fields but hasn't added them
         if (hasPendingPort || hasPendingMount || hasPendingEnv) {
-            saveWarning = 'You have un-added changes — click + to add them before saving.';
+            saveWarning = t('sandbox.saveWarning');
             return;
         }
         saving = true;
@@ -584,7 +591,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
         // Validate: dockerfile mode requires a path
         if (imageSource === 'dockerfile' && !sandboxDockerfilePath) {
-            error = 'Please select a Dockerfile before saving.';
+            error = t('sandbox.dockerfileRequired');
             saving = false;
             return;
         }
@@ -598,10 +605,10 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
         if (needsConfirmation) {
             const confirmed = await dialogStore.showConfirm({
-                title: 'Disable Sandbox',
-                message: `Disable sandbox isolation for "${project.name}"?\n\nTasks will run without gVisor sandboxing, executing commands directly on the host.`,
-                confirmText: 'Disable',
-                cancelText: 'Cancel',
+                title: t('sandbox.disableTitle'),
+                message: t('sandbox.disableConfirm', { name: project.name }),
+                confirmText: t('sandbox.disableConfirmButton'),
+                cancelText: t('sandbox.cancel'),
             });
             if (!confirmed) {
                 // Revert sandboxEnabled to original value
@@ -627,7 +634,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     }
 </script>
 
-<BaseModal title="Sandbox Configuration" width={isLocked ? '480px' : '560px'} footer={isLocked ? undefined : footer} onClose={onClose}>
+<BaseModal title={t('sandbox.title')} width={isLocked ? '480px' : '560px'} footer={isLocked ? undefined : footer} onClose={onClose}>
     {#if isLocked}
         <!-- Read-only view shown when tasks are in progress -->
         <div class="locked-view">
@@ -636,57 +643,57 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                     <rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
                     <path d="M5.5 7V5a2.5 2.5 0 015 0v2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
                 </svg>
-                <p>Cannot change sandbox settings while tasks are In Progress. The settings below are shown for reference only.</p>
+                <p>{t('sandbox.lockedNotice')}</p>
             </div>
 
             <div class="settings-list">
                 <!-- Sandbox enabled -->
                 <div class="setting-row">
                     <div class="setting-label-group">
-                        <span class="setting-label">Sandbox Isolation</span>
+                        <span class="setting-label">{t('sandbox.isolation')}</span>
                     </div>
-                    <span class="setting-value">{sandboxEnabled ? 'Enabled' : 'Disabled'}</span>
+                    <span class="setting-value">{sandboxEnabled ? t('sandbox.enabled') : t('sandbox.disabled')}</span>
                 </div>
 
                 {#if sandboxEnabled}
                 <!-- Network isolation -->
                 <div class="setting-row">
-                    <span class="setting-label">Network Isolation</span>
-                    <span class="setting-value">{networkIsolation ? 'Enabled' : 'Disabled'}</span>
+                    <span class="setting-label">{t('sandbox.networkIsolation')}</span>
+                    <span class="setting-value">{networkIsolation ? t('sandbox.enabled') : t('sandbox.disabled')}</span>
                 </div>
 
                 <!-- Memory limit -->
                 <div class="setting-row">
-                    <span class="setting-label">Memory Limit</span>
+                    <span class="setting-label">{t('sandbox.memoryLimit')}</span>
                     <span class="setting-value">{formatMemoryLimitMB(sandboxMemoryLimit)}</span>
                 </div>
 
                 <!-- Image -->
                 <div class="setting-row">
-                    <span class="setting-label">Image</span>
-                    <span class="setting-value setting-value-mono">{sandboxDockerfilePath || sandboxImage || 'Default'}</span>
+                    <span class="setting-label">{t('sandbox.image')}</span>
+                    <span class="setting-value setting-value-mono">{sandboxDockerfilePath || sandboxImage || t('sandbox.default')}</span>
                 </div>
 
                 <!-- Forward ports -->
                 {#if forwardPorts.length > 0}
                 <div class="setting-row">
-                    <span class="setting-label">Forwarded Ports</span>
+                    <span class="setting-label">{t('sandbox.forwardedPorts')}</span>
                     <span class="setting-value">{forwardPorts.map(p => p.container_port).join(', ')}</span>
                 </div>
 
                 <!-- Active port mappings -->
                 {#if hasActivePorts}
                 <div class="active-ports-section">
-                    <span class="section-label">Active Port Mappings</span>
+                    <span class="section-label">{t('sandbox.activePortMappings')}</span>
                     <div class="active-ports-list">
                         {#each forwardPorts as port}
                         {#if activeHostPorts.has(port.container_port)}
                         <div class="active-port-item">
-                            <span class="active-port-host" title="Host port">{activeHostPorts.get(port.container_port)}</span>
+                            <span class="active-port-host" title={t('sandbox.hostPort')}>{activeHostPorts.get(port.container_port)}</span>
                             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                                 <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
-                            <span class="active-port-container" title="Container port">{port.container_port}</span>
+                            <span class="active-port-container" title={t('sandbox.containerPort')}>{port.container_port}</span>
                         </div>
                         {/if}
                         {/each}
@@ -698,7 +705,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 <!-- Custom mounts -->
                 {#if sandboxMounts.length > 0}
                 <div class="locked-mounts-section">
-                    <span class="section-label">Custom Mounts</span>
+                    <span class="section-label">{t('sandbox.customMounts')}</span>
                     <div class="locked-mounts-list">
                         {#each sandboxMounts as mount}
                         <div class="locked-mount-item">
@@ -707,7 +714,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                                 <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
                             <span class="locked-mount-container" title={mount.container_path}>{mount.container_path}</span>
-                            <span class="locked-mount-mode" class:mode-rw={mount.mode === 'rw'} class:mode-ro={mount.mode === 'ro'} title={mount.mode === 'rw' ? 'Read/Write' : 'Read-only'}>{mount.mode}</span>
+                            <span class="locked-mount-mode" class:mode-rw={mount.mode === 'rw'} class:mode-ro={mount.mode === 'ro'} title={mount.mode === 'rw' ? t('sandbox.readWrite') : t('sandbox.readOnly')}>{mount.mode}</span>
                         </div>
                         {/each}
                     </div>
@@ -717,13 +724,13 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 <!-- Environment variables -->
                 {#if sandboxEnvs.length > 0}
                 <div class="locked-envs-section">
-                    <span class="section-label">Environment Variables</span>
+                    <span class="section-label">{t('sandbox.environmentVariables')}</span>
                     <div class="locked-envs-list">
                         {#each sandboxEnvs as env}
                         <div class="locked-env-item">
                             <span class="locked-env-key" title={env.key}>{env.key}</span>
                             <span class="locked-env-equals">=</span>
-                            <span class="locked-env-value" title={env.value}>{env.value || '(empty)'}</span>
+                            <span class="locked-env-value" title={env.value}>{env.value || t('sandbox.empty')}</span>
                         </div>
                         {/each}
                     </div>
@@ -733,7 +740,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 <!-- Capabilities -->
                 {#if sandboxCapabilities.length > 0}
                 <div class="locked-caps-section">
-                    <span class="section-label">Capabilities</span>
+                    <span class="section-label">{t('sandbox.capabilities')}</span>
                     <div class="locked-caps-list">
                         {#each sandboxCapabilities as cap}
                         <div class="locked-cap-item">
@@ -760,11 +767,11 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         {/if}
                     </div>
                     <div class="config-text">
-                        <span class="config-label">Sandbox Isolation</span>
-                        <span class="config-desc">Use gVisor to isolate all AI actions within a sandbox</span>
+                        <span class="config-label">{t('sandbox.isolation')}</span>
+                        <span class="config-desc">{t('sandbox.isolationDesc')}</span>
                     </div>
                 </div>
-                <ToggleSwitch bind:checked={sandboxEnabled} disabled={isLocked} ariaLabel="Sandbox isolation" />
+                <ToggleSwitch bind:checked={sandboxEnabled} disabled={isLocked} ariaLabel={t('sandbox.isolationAria')} />
             </div>
 
             <!-- Options visible when sandbox is enabled -->
@@ -787,17 +794,17 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         {/if}
                     </div>
                     <div class="config-text">
-                        <span class="config-label">Network Isolation</span>
-                        <span class="config-desc">Block all network access</span>
+                        <span class="config-label">{t('sandbox.networkIsolation')}</span>
+                        <span class="config-desc">{t('sandbox.networkIsolationDesc')}</span>
                     </div>
                 </div>
-                <ToggleSwitch bind:checked={networkIsolation} disabled={isLocked} ariaLabel="Network isolation" />
+                <ToggleSwitch bind:checked={networkIsolation} disabled={isLocked} ariaLabel={t('sandbox.networkIsolationAria')} />
             </div>
 
             <!-- Port forwarding subsection (nested under network isolation, only when isolation is off) -->
             {#if !networkIsolation}
             <div class="config-row-group" class:expanded={portsExpanded}>
-            <button type="button" class="config-row config-row-subsection" onclick={() => { portsExpanded = !portsExpanded; }} aria-expanded={portsExpanded} aria-label="Toggle port forwarding settings">
+            <button type="button" class="config-row config-row-subsection" onclick={() => { portsExpanded = !portsExpanded; }} aria-expanded={portsExpanded} aria-label={t('sandbox.portsAria')}>
                 <div class="config-info">
                     <div class="config-icon">
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -807,9 +814,9 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         </svg>
                     </div>
                     <div class="config-text">
-                        <span class="config-label" class:collapsed={!portsExpanded}>Forward Ports</span>
+                        <span class="config-label" class:collapsed={!portsExpanded}>{t('sandbox.ports')}</span>
                         {#if portsExpanded}
-                        <span class="config-desc">Host ports are auto-assigned when tasks run, and visible in the task's Sandbox Info panel.</span>
+                        <span class="config-desc">{t('sandbox.portsDesc')}</span>
                         {/if}
                     </div>
                 </div>
@@ -827,14 +834,14 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 <div class="port-item" class:editing={editingPortIndex === i} onclick={() => editPort(i)} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && editPort(i)}>
                     <span class="port-mapping">
                         {#if activeHostPorts.has(port.container_port)}
-                        <span class="port-host" title="Host port">{activeHostPorts.get(port.container_port)}</span>
+                        <span class="port-host" title={t('sandbox.hostPort')}>{activeHostPorts.get(port.container_port)}</span>
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                             <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                         {/if}
-                        <span class="port-container" title="Container port">{port.container_port}</span>
+                        <span class="port-container" title={t('sandbox.containerPort')}>{port.container_port}</span>
                     </span>
-                    <button type="button" class="btn-remove-port" onclick={(e) => { e.stopPropagation(); removePortForward(i); }} disabled={isLocked} title="Remove">
+                    <button type="button" class="btn-remove-port" onclick={(e) => { e.stopPropagation(); removePortForward(i); }} disabled={isLocked} title={t('sandbox.remove')}>
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                             <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
                         </svg>
@@ -846,20 +853,20 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
             <!-- No active host ports notice -->
             {#if forwardPorts.length > 0 && !hasActivePorts}
-            <div class="port-no-active">Host ports assigned when tasks run</div>
+            <div class="port-no-active">{t('sandbox.portsNoActive')}</div>
             {/if}
 
             <!-- Add new port forward -->
             <div class="port-add-row">
                 {#if editingPortIndex !== null}
-                    <button type="button" class="btn-cancel-edit" onclick={cancelPortEdit} title="Cancel edit">
+                    <button type="button" class="btn-cancel-edit" onclick={cancelPortEdit} title={t('sandbox.cancelEdit')}>
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                             <path d="M2 2L10 10M10 2L2 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
                         </svg>
                     </button>
                 {/if}
-                <input type="number" class="port-input" bind:value={newContainerPort} placeholder="Container port" min="1" max="65535" disabled={isLocked} aria-label="Container port" />
-                <button type="button" class="btn-add-port" class:pending={hasPendingPort} onclick={addPortForward} disabled={isLocked} title={editingPortIndex !== null ? 'Save port' : 'Add port forward'}>
+                <input type="number" class="port-input" bind:value={newContainerPort} placeholder={t('sandbox.containerPort')} min="1" max="65535" disabled={isLocked} aria-label={t('sandbox.containerPort')} />
+                <button type="button" class="btn-add-port" class:pending={hasPendingPort} onclick={addPortForward} disabled={isLocked} title={editingPortIndex !== null ? t('sandbox.savePort') : t('sandbox.addPort')}>
                     {#if editingPortIndex !== null}
                         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                             <path d="M3 8L6 11L11 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -882,7 +889,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
             <!-- Custom mounts (collapsible) -->
             <div class="config-row-group" class:expanded={mountsExpanded}>
-            <button type="button" class="config-row config-row-expandable" onclick={() => { mountsExpanded = !mountsExpanded; }} aria-expanded={mountsExpanded} aria-label="Toggle mount settings">
+            <button type="button" class="config-row config-row-expandable" onclick={() => { mountsExpanded = !mountsExpanded; }} aria-expanded={mountsExpanded} aria-label={t('sandbox.mountsAria')}>
                 <div class="config-info">
                     <div class="config-icon">
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -891,9 +898,9 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         </svg>
                     </div>
                     <div class="config-text">
-                        <span class="config-label" class:collapsed={!mountsExpanded}>Custom Mounts</span>
+                        <span class="config-label" class:collapsed={!mountsExpanded}>{t('sandbox.customMounts')}</span>
                         {#if mountsExpanded}
-                        <span class="config-desc">Bind mount host paths into sandbox containers.</span>
+                        <span class="config-desc">{t('sandbox.mountsDesc')}</span>
                         {/if}
                     </div>
                 </div>
@@ -917,8 +924,8 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         <span class="mount-container" title={mount.container_path}>{mount.container_path}</span>
                     </div>
                     <div class="mount-actions">
-                        <span class="mount-mode" class:mode-rw={mount.mode === 'rw'} class:mode-ro={mount.mode === 'ro'} title={mount.mode === 'rw' ? 'Mount Read/Write' : 'Mount Read-only'}>{mount.mode}</span>
-                        <button type="button" class="btn-remove-mount" onclick={(e) => { e.stopPropagation(); removeMount(i); }} disabled={isLocked} title="Remove">
+                        <span class="mount-mode" class:mode-rw={mount.mode === 'rw'} class:mode-ro={mount.mode === 'ro'} title={mount.mode === 'rw' ? t('sandbox.mountReadWrite') : t('sandbox.mountReadOnly')}>{mount.mode}</span>
+                        <button type="button" class="btn-remove-mount" onclick={(e) => { e.stopPropagation(); removeMount(i); }} disabled={isLocked} title={t('sandbox.remove')}>
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                             <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
                         </svg>
@@ -932,14 +939,14 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             <!-- Add new mount -->
             <div class="mount-add-row">
                 {#if editingMountIndex !== null}
-                    <button type="button" class="btn-cancel-edit" onclick={cancelMountEdit} title="Cancel edit">
+                    <button type="button" class="btn-cancel-edit" onclick={cancelMountEdit} title={t('sandbox.cancelEdit')}>
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                             <path d="M2 2L10 10M10 2L2 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
                         </svg>
                     </button>
                 {/if}
-                <input type="text" class="mount-input mount-input-host" bind:value={newMountHostPath} placeholder="/host/path" disabled={isLocked} aria-label="Host path" />
-                <button type="button" class="btn-browse-mount" onclick={() => showDirectoryPicker = true} disabled={isLocked} title="Browse host directory">
+                <input type="text" class="mount-input mount-input-host" bind:value={newMountHostPath} placeholder="/host/path" disabled={isLocked} aria-label={t('sandbox.hostPath')} />
+                <button type="button" class="btn-browse-mount" onclick={() => showDirectoryPicker = true} disabled={isLocked} title={t('sandbox.browseHostDirectory')}>
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                         <path d="M2 4h4l1.5 1.5H12V12H2V4z" stroke="currentColor" stroke-width="1.2" fill="none"/>
                     </svg>
@@ -947,18 +954,18 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true" class="mount-arrow">
                     <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-                <input type="text" class="mount-input" bind:value={newMountContainerPath} placeholder="/container/path" disabled={isLocked} aria-label="Container path" />
+                <input type="text" class="mount-input" bind:value={newMountContainerPath} placeholder="/container/path" disabled={isLocked} aria-label={t('sandbox.containerPath')} />
                 <div class="radio-group radio-group-small">
-                    <label class="radio-label" class:active={newMountMode === 'rw'} title="Mount Read/Write">
+                    <label class="radio-label" class:active={newMountMode === 'rw'} title={t('sandbox.mountReadWrite')}>
                         <input type="radio" name="mount-mode" value="rw" checked={newMountMode === 'rw'} onchange={() => newMountMode = 'rw'} disabled={isLocked} />
                         <span class="radio-text">rw</span>
                     </label>
-                    <label class="radio-label" class:active={newMountMode === 'ro'} title="Mount Read-only">
+                    <label class="radio-label" class:active={newMountMode === 'ro'} title={t('sandbox.mountReadOnly')}>
                         <input type="radio" name="mount-mode" value="ro" checked={newMountMode === 'ro'} onchange={() => newMountMode = 'ro'} disabled={isLocked} />
                         <span class="radio-text">ro</span>
                     </label>
                 </div>
-                <button type="button" class="btn-add-mount" class:pending={hasPendingMount} onclick={addMount} disabled={isLocked} title={editingMountIndex !== null ? 'Save mount' : 'Add mount'}>
+                <button type="button" class="btn-add-mount" class:pending={hasPendingMount} onclick={addMount} disabled={isLocked} title={editingMountIndex !== null ? t('sandbox.saveMount') : t('sandbox.addMount')}>
                     {#if editingMountIndex !== null}
                         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                             <path d="M3 8L6 11L11 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -980,7 +987,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
             <!-- Environment variables (collapsible) -->
             <div class="config-row-group" class:expanded={envsExpanded}>
-            <button type="button" class="config-row config-row-expandable" onclick={() => { envsExpanded = !envsExpanded; }} aria-expanded={envsExpanded} aria-label="Toggle environment variables settings">
+            <button type="button" class="config-row config-row-expandable" onclick={() => { envsExpanded = !envsExpanded; }} aria-expanded={envsExpanded} aria-label={t('sandbox.envsAria')}>
                 <div class="config-info">
                     <div class="config-icon">
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -988,9 +995,9 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         </svg>
                     </div>
                     <div class="config-text">
-                        <span class="config-label" class:collapsed={!envsExpanded}>Environment Variables</span>
+                        <span class="config-label" class:collapsed={!envsExpanded}>{t('sandbox.environmentVariables')}</span>
                         {#if envsExpanded}
-                        <span class="config-desc">Set environment variables in sandbox containers.</span>
+                        <span class="config-desc">{t('sandbox.envsDesc')}</span>
                         {/if}
                     </div>
                 </div>
@@ -1009,9 +1016,9 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                     <div class="env-info">
                         <span class="env-key" title={env.key}>{env.key}</span>
                         <span class="env-equals">=</span>
-                        <span class="env-value" title={env.value}>{env.value || '(empty)'}</span>
+                        <span class="env-value" title={env.value}>{env.value || t('sandbox.empty')}</span>
                     </div>
-                    <button type="button" class="btn-remove-env" onclick={(e) => { e.stopPropagation(); removeEnv(i); }} disabled={isLocked} title="Remove">
+                    <button type="button" class="btn-remove-env" onclick={(e) => { e.stopPropagation(); removeEnv(i); }} disabled={isLocked} title={t('sandbox.remove')}>
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                             <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
                         </svg>
@@ -1024,16 +1031,16 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             <!-- Add new env var -->
             <div class="env-add-row">
                 {#if editingEnvIndex !== null}
-                    <button type="button" class="btn-cancel-edit" onclick={cancelEnvEdit} title="Cancel edit">
+                    <button type="button" class="btn-cancel-edit" onclick={cancelEnvEdit} title={t('sandbox.cancelEdit')}>
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                             <path d="M2 2L10 10M10 2L2 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
                         </svg>
                     </button>
                 {/if}
-                <input type="text" class="env-input env-input-key" bind:value={newEnvKey} placeholder="KEY" disabled={isLocked} aria-label="Variable name" />
+                <input type="text" class="env-input env-input-key" bind:value={newEnvKey} placeholder={t('sandbox.envKeyPlaceholder')} disabled={isLocked} aria-label={t('sandbox.envNameAria')} />
                 <span class="env-equals-sign">=</span>
-                <input type="text" class="env-input" bind:value={newEnvValue} placeholder="value" disabled={isLocked} aria-label="Variable value" />
-                <button type="button" class="btn-add-env" class:pending={hasPendingEnv} onclick={addEnv} disabled={isLocked} title={editingEnvIndex !== null ? 'Save variable' : 'Add variable'}>
+                <input type="text" class="env-input" bind:value={newEnvValue} placeholder={t('sandbox.envValueInputPlaceholder')} disabled={isLocked} aria-label={t('sandbox.envValueAria')} />
+                <button type="button" class="btn-add-env" class:pending={hasPendingEnv} onclick={addEnv} disabled={isLocked} title={editingEnvIndex !== null ? t('sandbox.saveVariable') : t('sandbox.addVariable')}>
                     {#if editingEnvIndex !== null}
                         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                             <path d="M3 8L6 11L11 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1055,7 +1062,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
             <!-- Capabilities (collapsible) -->
             <div class="config-row-group" class:expanded={capsExpanded}>
-            <button type="button" class="config-row config-row-expandable" onclick={() => { capsExpanded = !capsExpanded; }} aria-expanded={capsExpanded} aria-label="Toggle capabilities settings">
+            <button type="button" class="config-row config-row-expandable" onclick={() => { capsExpanded = !capsExpanded; }} aria-expanded={capsExpanded} aria-label={t('sandbox.capsAria')}>
                 <div class="config-info">
                     <div class="config-icon">
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -1063,9 +1070,9 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         </svg>
                     </div>
                     <div class="config-text">
-                        <span class="config-label" class:collapsed={!capsExpanded}>Capabilities</span>
+                        <span class="config-label" class:collapsed={!capsExpanded}>{t('sandbox.capabilities')}</span>
                         {#if capsExpanded}
-                        <span class="config-desc">Linux capabilities to add to the container. By default, all capabilities are dropped (--cap-drop=ALL).</span>
+                        <span class="config-desc">{t('sandbox.capsDesc')}</span>
                         {/if}
                     </div>
                 </div>
@@ -1085,7 +1092,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                     <span class="caps-tag" title={cap}>
                         <span class="caps-tag-text">{cap}</span>
                         {#if !isLocked}
-                        <button type="button" class="caps-tag-remove" onclick={() => removeCapability(cap)} title="Remove {cap}" aria-label="Remove {cap}">
+                        <button type="button" class="caps-tag-remove" onclick={() => removeCapability(cap)} title={t('sandbox.removeCapability', { cap })} aria-label={t('sandbox.removeCapability', { cap })}>
                             <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
                                 <path d="M2 2L8 8M8 2L2 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
                             </svg>
@@ -1107,11 +1114,11 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         onblur={handleCapInputBlur}
                         onclick={handleCapInputClick}
                         bind:this={capInputEl}
-                        placeholder={sandboxCapabilities.length === 0 ? 'Type capability name, e.g. CAP_NET_RAW' : 'Add more...'}
+                        placeholder={sandboxCapabilities.length === 0 ? t('sandbox.capSuggestionPlaceholder') : t('sandbox.capAddMorePlaceholder')}
                         disabled={isLocked}
                         autocomplete="off"
                         spellcheck="false"
-                        aria-label="Add capability"
+                        aria-label={t('sandbox.addCapabilityAria')}
                         role="combobox"
                         aria-expanded={capDropdownOpen}
                         aria-controls="caps-dropdown-list"
@@ -1120,9 +1127,9 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                     {#if capDropdownOpen && capSuggestions.length > 0}
                     <div id="caps-dropdown-list" class="caps-dropdown" role="listbox">
                         {#each capSuggestions as suggestion, i}
-                        <button type="button" class="caps-dropdown-item" class:selected={i === capSelectedIndex} role="option" aria-selected={i === capSelectedIndex} onclick={() => addCapability(suggestion.value)}>
-                            <span class="caps-dropdown-name">{suggestion.value}</span>
-                            <span class="caps-dropdown-desc">{suggestion.desc}</span>
+                        <button type="button" class="caps-dropdown-item" class:selected={i === capSelectedIndex} role="option" aria-selected={i === capSelectedIndex} onclick={() => addCapability(suggestion)}>
+                            <span class="caps-dropdown-name">{suggestion}</span>
+                            <span class="caps-dropdown-desc">{capDesc(suggestion)}</span>
                         </button>
                         {/each}
                     </div>
@@ -1145,12 +1152,12 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         </svg>
                     </div>
                     <div class="config-text">
-                        <span class="config-label">Memory Limit</span>
-                        <span class="config-desc">Max container memory (MB) — blank = no limit</span>
+                        <span class="config-label">{t('sandbox.memoryLimit')}</span>
+                        <span class="config-desc">{t('sandbox.memoryLimitDesc')}</span>
                     </div>
                 </div>
                 <div class="memory-input-group">
-                    <input type="number" class="memory-input" bind:value={sandboxMemoryLimit} min="0" step="256" placeholder="No limit" disabled={isLocked} aria-label="Maximum container memory in MB" />
+                    <input type="number" class="memory-input" bind:value={sandboxMemoryLimit} min="0" step="256" placeholder={t('sandbox.noLimit')} disabled={isLocked} aria-label={t('sandbox.memoryLimitAria')} />
                     <span class="memory-unit">MB</span>
                 </div>
             </div>
@@ -1166,18 +1173,18 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         </svg>
                     </div>
                     <div class="config-text">
-                        <span class="config-label">Image Source</span>
-                        <span class="config-desc">Container image for sandbox</span>
+                        <span class="config-label">{t('sandbox.imageSource')}</span>
+                        <span class="config-desc">{t('sandbox.imageSourceDesc')}</span>
                     </div>
                 </div>
                 <div class="radio-group">
                     <label class="radio-label" class:active={imageSource === 'image'}>
                         <input type="radio" name="image-source" value="image" checked={imageSource === 'image'} onchange={() => handleImageSourceChange('image')} disabled={isLocked} />
-                        <span class="radio-text">Pre-built</span>
+                        <span class="radio-text">{t('sandbox.imagePrebuilt')}</span>
                     </label>
                     <label class="radio-label" class:active={imageSource === 'dockerfile'}>
                         <input type="radio" name="image-source" value="dockerfile" checked={imageSource === 'dockerfile'} onchange={() => handleImageSourceChange('dockerfile')} disabled={isLocked} />
-                        <span class="radio-text">Dockerfile</span>
+                        <span class="radio-text">{t('sandbox.dockerfile')}</span>
                     </label>
                 </div>
             </div>
@@ -1187,30 +1194,30 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             <div class="config-row config-row-input">
                 <div class="config-info">
                     <div class="config-text">
-                        <span class="config-label">Image Name</span>
-                        <span class="config-desc">Image for sandbox containers — must name its registry, e.g. docker.io/library/ubuntu:24.04</span>
+                        <span class="config-label">{t('sandbox.imageName')}</span>
+                        <span class="config-desc">{t('sandbox.imageNameDesc')}</span>
                     </div>
                 </div>
-                <input type="text" class="image-input" bind:value={sandboxImage} placeholder="docker.io/ubuntu:latest" disabled={isLocked} aria-label="Sandbox image name" />
+                <input type="text" class="image-input" bind:value={sandboxImage} placeholder="docker.io/ubuntu:latest" disabled={isLocked} aria-label={t('sandbox.imageNameAria')} />
             </div>
             {:else}
             <!-- Dockerfile section -->
             <div class="dockerfile-section">
                 <div class="dockerfile-header">
                     <div class="config-text">
-                        <span class="config-label">Dockerfile</span>
-                        <span class="config-desc">Select a Dockerfile on the server</span>
+                        <span class="config-label">{t('sandbox.dockerfile')}</span>
+                        <span class="config-desc">{t('sandbox.dockerfileDesc')}</span>
                     </div>
                     {#if sandboxDockerfilePath}
                     <div class="build-actions">
                         <!-- Applies to the next build started here, not a saved setting -->
                         <label class="cache-toggle" class:disabled={isLocked || building}
-                               title="Skip the container build layer cache for the next build">
-                            <input type="checkbox" aria-label="Disable build cache" bind:checked={buildNoCache} disabled={isLocked || building} />
-                            <span class="cache-toggle-text">Disable cache</span>
+                               title={t('sandbox.skipCacheTitle')}>
+                            <input type="checkbox" aria-label={t('sandbox.disableCacheAria')} bind:checked={buildNoCache} disabled={isLocked || building} />
+                            <span class="cache-toggle-text">{t('sandbox.disableCache')}</span>
                         </label>
                         {#if dockerfileChanged}
-                        <button type="button" class="btn-build" onclick={handleRebuild} disabled={isLocked || building} title="Build image">
+                        <button type="button" class="btn-build" onclick={handleRebuild} disabled={isLocked || building} title={t('sandbox.buildImage')}>
                             {#if building}
                                 <svg class="spin" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                                     <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="20 10" stroke-linecap="round"/>
@@ -1220,10 +1227,10 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                                     <path d="M7 2L2 12h10L7 2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/>
                                 </svg>
                             {/if}
-                            {building ? 'Building...' : 'Build'}
+                            {building ? t('sandbox.building') : t('sandbox.build')}
                         </button>
                         {:else}
-                        <button type="button" class="btn-rebuild" onclick={handleRebuild} disabled={isLocked || building} title={buildNoCache ? 'Rebuild image without cache' : 'Rebuild image'}>
+                        <button type="button" class="btn-rebuild" onclick={handleRebuild} disabled={isLocked || building} title={buildNoCache ? t('sandbox.rebuildImageNoCache') : t('sandbox.rebuildImage')}>
                             {#if building}
                                 <svg class="spin" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                                     <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="20 10" stroke-linecap="round"/>
@@ -1234,7 +1241,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                                     <path d="M11.5 1.5v3h-3M2.5 12.5v-3h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
                                 </svg>
                             {/if}
-                            {building ? 'Building...' : 'Rebuild'}
+                            {building ? t('sandbox.building') : t('sandbox.rebuild')}
                         </button>
                         {/if}
                     </div>
@@ -1251,28 +1258,28 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                             <span class="dockerfile-path-text">{sandboxDockerfilePath}</span>
                         </span>
                     {:else}
-                        <span class="dockerfile-path-placeholder">No Dockerfile selected</span>
+                        <span class="dockerfile-path-placeholder">{t('sandbox.noDockerfileSelected')}</span>
                     {/if}
-                    <button type="button" class="btn-browse" onclick={handleBrowseDockerfile} disabled={isLocked} title="Browse for Dockerfile">
+                    <button type="button" class="btn-browse" onclick={handleBrowseDockerfile} disabled={isLocked} title={t('sandbox.browseDockerfile')}>
                         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                             <path d="M2 4h10v7a1 1 0 01-1 1H3a1 1 0 01-1-1V4z" stroke="currentColor" stroke-width="1.2" fill="none"/>
                             <path d="M4 4V2.5A1.5 1.5 0 015.5 1h3A1.5 1.5 0 0110 2.5V4" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/>
                         </svg>
-                        Browse
+                        {t('sandbox.browse')}
                     </button>
                 </div>
 
                 {#if building}
-                <div class="build-notice">Build running in background — you can close this dialog.</div>
+                <div class="build-notice">{t('sandbox.buildNotice')}</div>
                 {/if}
 
                 {#if building || buildLog.length > 0}
-                <div class="build-log" bind:this={buildLogEl} role="log" aria-label="Build output" onscroll={onBuildLogScroll}>
+                <div class="build-log" bind:this={buildLogEl} role="log" aria-label={t('sandbox.buildOutput')} onscroll={onBuildLogScroll}>
                     {#each buildLog as line}
                         <div class="build-log-line">{line}</div>
                     {/each}
                     {#if buildLog.length === 0}
-                        <div class="build-log-line build-log-pending">Building...</div>
+                        <div class="build-log-line build-log-pending">{t('sandbox.building')}</div>
                     {/if}
                 </div>
                 {/if}
@@ -1286,7 +1293,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         <circle cx="6" cy="6" r="5" stroke="currentColor" stroke-width="1"/>
                         <path d="M6 3.5v0M6 5.5v3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                     </svg>
-                    <span>Image tag: <code>{imageTag}</code></span>
+                    <span>{t('sandbox.imageTagLabel')} <code>{imageTag}</code></span>
                 </div>
             </div>
             {/if}
@@ -1304,19 +1311,19 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
 {#snippet footer()}
     <div class="footer-wrapper">
-        <button type="button" class="btn-secondary" onclick={onClose} disabled={saving}>Cancel</button>
+        <button type="button" class="btn-secondary" onclick={onClose} disabled={saving}>{t('sandbox.cancel')}</button>
         <button type="button" class="btn-primary" onclick={handleSave} disabled={saving || isLocked}>
-            {saving ? 'Saving...' : 'Save'}
+            {saving ? t('sandbox.saving') : t('sandbox.save')}
         </button>
     </div>
 {/snippet}
 
 {#if showDockerfilePicker}
-    <PathPicker title="Select Dockerfile" initialPath={project.path} emptyLabel="No Dockerfiles found in this directory" selectTitle="Select this Dockerfile" fileFilter={isDockerfile} onClose={handleDockerfilePickerClose} onSelect={handleDockerfileSelected} />
+    <PathPicker title={t('sandbox.selectDockerfile')} initialPath={project.path} emptyLabel={t('sandbox.noDockerfilesFound')} selectTitle={t('sandbox.selectDockerfileTitle')} fileFilter={isDockerfile} onClose={handleDockerfilePickerClose} onSelect={handleDockerfileSelected} />
 {/if}
 
 {#if showDirectoryPicker}
-    <PathPicker title="Select Directory" initialPath="/home" emptyLabel="No subdirectories in this path" selectTitle="Select this directory" onClose={() => showDirectoryPicker = false} onSelect={(path: string) => { newMountHostPath = path; showDirectoryPicker = false; }} />
+    <PathPicker title={t('sandbox.selectDirectory')} initialPath="/home" emptyLabel={t('sandbox.noSubdirectories')} selectTitle={t('sandbox.selectDirectoryTitle')} onClose={() => showDirectoryPicker = false} onSelect={(path: string) => { newMountHostPath = path; showDirectoryPicker = false; }} />
 {/if}
 
 <style>

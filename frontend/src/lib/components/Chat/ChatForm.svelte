@@ -7,6 +7,7 @@
     import { useFileMention } from '$lib/composables/use-file-mention.svelte';
     import { dialogStore } from '$lib/stores';
     import { classifyImages, describeRejectedImages, readImageDataUrl, MAX_IMAGES } from '$lib/utils/attachments';
+    import { t } from '$lib/i18n';
 
     interface ImageAttachment {
         file: File;
@@ -46,7 +47,7 @@
         value = $bindable(''),
         disabled = false,
         isLoading = false,
-        placeholder = 'Type a message...',
+        placeholder = '',
         providers = [],
         selectedModel = '',
         selectedUrl = '',
@@ -72,6 +73,15 @@
     let isAgent = $derived(selectedUrl.startsWith(AGENT_URL_PREFIX));
     let showModelSelector = $derived(providers.length > 0 || isAgent);
     let contextDisplay = $derived({ used: contextUsed, limit: contextLimit });
+
+    // The placeholder default is copy, so it cannot live in the prop default (a default is
+    // evaluated with the props, not with the locale): an empty prop means "use the catalog".
+    const effectivePlaceholder = $derived(placeholder || t('chat.form.placeholder'));
+
+    /** Tooltip for the mode toggle; the mode value itself is data, this is copy. */
+    function modeTip(mode: string): string {
+        return mode === 'act' ? t('chat.mode.actTip') : mode === 'plan' ? t('chat.mode.planTip') : t('chat.mode.exploreTip');
+    }
 
     let textareaEl: HTMLTextAreaElement | undefined;
     let fileInputEl: HTMLInputElement | undefined;
@@ -164,7 +174,7 @@
             autoResize();
         } catch (err) {
             console.error('FileReader error:', err);
-            dialogStore.showToast(`Could not read ${file.name}`, 'error');
+            dialogStore.showToast(t('chat.form.couldNotRead', { name: file.name }), 'error');
         }
     }
 
@@ -225,8 +235,8 @@
                     class:active={operatingMode === 'plan'}
                     class:explore={operatingMode === 'explore'}
                     onclick={onOperatingModeToggle}
-                    title={operatingMode === 'act' ? 'Act mode: AI is required to provide structured responses during review, and has read/write access. Click to switch.' : operatingMode === 'plan' ? 'Plan mode: AI decomposes work into subtasks on the board, and only has read access. Click to switch.' : 'Explore mode: AI has read/write access. Click to switch.'}
-                    aria-label="Toggle operating mode"
+                    title={modeTip(operatingMode)}
+                    aria-label={t('chat.mode.toggleAria')}
                     style="margin-left: auto"
                 >
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -240,7 +250,7 @@
                             <path d="M3 8l4 4L13 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                         {/if}
                     </svg>
-                    <span>{operatingMode === 'plan' ? 'Plan' : operatingMode === 'explore' ? 'Explore' : 'Act'}</span>
+                    <span>{operatingMode === 'plan' ? t('chat.mode.plan') : operatingMode === 'explore' ? t('chat.mode.explore') : t('chat.mode.act')}</span>
                 </button>
             {/if}
         </div>
@@ -251,7 +261,7 @@
             {#each attachments as att, i}
                 <div class="attachment-thumb">
                     <img src={att.preview} alt="" />
-                    <button type="button" class="attachment-remove" onclick={() => removeAttachment(i)} aria-label="Remove image" title="Remove">
+                    <button type="button" class="attachment-remove" onclick={() => removeAttachment(i)} aria-label={t('chat.form.removeImage')} title={t('chat.common.remove')}>
                         <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                     </button>
                 </div>
@@ -259,33 +269,33 @@
         </div>
     {/if}
     <div class="chat-form-inner">
-        <label for="chat-message-input" class="sr-only">Message input</label>
+        <label for="chat-message-input" class="sr-only">{t('chat.form.input')}</label>
         <textarea
             id="chat-message-input"
             bind:this={textareaEl}
             bind:value
             {disabled}
-            {placeholder}
-            aria-label="Message input"
+            placeholder={effectivePlaceholder}
+            aria-label={t('chat.form.input')}
             rows="1"
             onkeydown={handleKeydown}
             oninput={(e) => { autoResize(); mention.handleInput(); }}
             onfocus={handleFocus}
         ></textarea>
-        <button type="button" class="btn-attach" onclick={() => fileInputEl?.click()} aria-label="Attach image" title="Attach image" disabled={disabled || isLoading}>
+        <button type="button" class="btn-attach" onclick={() => fileInputEl?.click()} aria-label={t('chat.common.attachImage')} title={t('chat.common.attachImage')} disabled={disabled || isLoading}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
             </svg>
         </button>
         <input type="file" bind:this={fileInputEl} class="file-input-hidden" accept="image/png,image/jpeg,image/gif,image/webp" multiple onchange={handleFileSelect} />
         {#if isLoading && (!value.trim() && attachments.length === 0)}
-            <button type="button" class="btn-stop" onclick={handleStop} aria-label="Stop generation" title="Stop generation">
+            <button type="button" class="btn-stop" onclick={handleStop} aria-label={t('chat.form.stop')} title={t('chat.form.stop')}>
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/>
                 </svg>
             </button>
         {:else}
-            <button type="submit" class="btn-send" disabled={!canSend} aria-label="Send message" title="Send message">
+            <button type="submit" class="btn-send" disabled={!canSend} aria-label={t('chat.form.send')} title={t('chat.form.send')}>
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M2 2l12 6-12 6V9l6-1-6-1V2z" fill="currentColor"/>
                 </svg>

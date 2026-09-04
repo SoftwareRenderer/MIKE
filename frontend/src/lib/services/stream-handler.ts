@@ -4,6 +4,7 @@ import type { ToolCallInfo } from './stream-state.svelte';
 import { StreamState } from './stream-state.svelte';
 import { resolveLiveToolCall, type LiveToolCall } from '$lib/utils/tool-call-lookup';
 import { errorFromEvent, isRepeatError, type ErrorEventData } from '$lib/utils/chat-entries';
+import { t } from '$lib/i18n';
 
 /** Update context usage from accumulated token counts. */
 function updateContextUsed(s: typeof StreamState.prototype.state) {
@@ -305,12 +306,14 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
             case 'status': {
                 const data = event.data as { state: string; activity?: string };
                 if (data.state === 'pulling_image') {
-                    const imgName = data.activity?.replace('Pulling ', '') || 'sandbox image';
-                    ensureBuildLogEntry(`Pulling ${imgName}...`);
+                    // `activity` is the server's own status line: the 'Pulling ' prefix it is
+                    // stripped with is a protocol string, not copy, and stays English.
+                    const imgName = data.activity?.replace('Pulling ', '') || t('chat.stream.sandboxImage');
+                    ensureBuildLogEntry(t('chat.stream.pullingImage', { name: imgName }));
                 } else if (data.state === 'building_image') {
-                    ensureBuildLogEntry('Building sandbox image from Dockerfile...');
+                    ensureBuildLogEntry(t('chat.stream.buildingImage'));
                 } else if (data.state === 'starting_container') {
-                    s.entries = [...s.entries, { id: genId(), role: 'system', content: 'Starting sandbox container...', isStreaming: false, createdAt: new Date().toISOString() }];
+                    s.entries = [...s.entries, { id: genId(), role: 'system', content: t('chat.stream.startingContainer'), isStreaming: false, createdAt: new Date().toISOString() }];
                 } else if (data.state === 'running') {
                     const wasInFlight = s.currentAssistantId !== null || s.activeToolCalls.size > 0;
                     // The sandbox container started — any build/pull box is complete.
@@ -367,7 +370,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
             case 'build_progress': {
                 const data = event.data as { line: string };
                 if (data.line) {
-                    const entry = ensureBuildLogEntry('Building sandbox image from Dockerfile...');
+                    const entry = ensureBuildLogEntry(t('chat.stream.buildingImage'));
                     const log = entry.buildLog!;
                     log.lines.push(data.line);
                     if (log.lines.length > MAX_BUILD_LOG_LINES) {
@@ -470,7 +473,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 const data = event.data as { id?: string; summary: string; created_at?: string; prompt_tokens?: number; predicted_tokens?: number; prompt_ms?: number; predicted_ms?: number; model_name?: string };
                 if (data.id && s.entries.some(e => e.id === data.id)) break;
                 const summaryEntry = {
-                    id: data.id || genId(), role: 'summarization' as const, content: data.summary || 'Context was summarized to free space',
+                    id: data.id || genId(), role: 'summarization' as const, content: data.summary || t('chat.stream.summarized'),
                     isStreaming: false, createdAt: data.created_at || new Date().toISOString(),
                     stats: data.model_name ? { model_name: data.model_name, prompt_tokens: data.prompt_tokens ?? 0, predicted_tokens: data.predicted_tokens ?? 0, prompt_ms: data.prompt_ms ?? 0, predicted_ms: data.predicted_ms ?? 0, duration: (data.prompt_ms ?? 0) + (data.predicted_ms ?? 0) } : undefined,
                 };
@@ -485,8 +488,9 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
             }
             case 'merge_resolution': {
                 const data = event.data as { id: string; conflicted_files?: string[]; summary?: string; content: string; created_at: string; label?: string; is_error?: boolean };
-                const content = data.content || 'Merged';
-                const label = data.label || (content.includes('conflict') ? 'Merge conflicts resolved' : 'Merged');
+                const content = data.content || t('chat.merge.merged');
+                // `includes('conflict')` reads the server's row text, so it stays English.
+                const label = data.label || (content.includes('conflict') ? t('chat.merge.conflictsResolved') : t('chat.merge.merged'));
                 s.entries = [...s.entries, { id: data.id || genId(), role: 'merge_resolution', content, mergeLabel: label, isError: data.is_error || false, isStreaming: false, createdAt: data.created_at || new Date().toISOString() }];
                 break;
             }

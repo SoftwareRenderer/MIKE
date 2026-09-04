@@ -10,6 +10,7 @@
     import { createFocusTrap } from '$lib/a11y';
     import { effectiveOpenTerminalKey, effectiveToggleFullscreenKey, fullscreenToggleTitle, formatShortcut, matchShortcut } from '$lib/utils/keyboard';
     import ResizeHandle from './ResizeHandle.svelte';
+    import { t } from '$lib/i18n';
     import '@xterm/xterm/css/xterm.css';
 
     const HEIGHT_KEY = 'kanban:terminal:height';
@@ -112,7 +113,7 @@
     // Close button tooltip — the shortcut toggles the panel, so it also closes.
     const closeButtonTitle = $derived.by(() => {
         const key = effectiveOpenTerminalKey(appStore.config);
-        return key ? `Close terminal (${formatShortcut(key)})` : 'Close terminal';
+        return key ? t('terminal.closeWithShortcut', { shortcut: formatShortcut(key) }) : t('terminal.close');
     });
 
     const fullscreenTitle = $derived(fullscreenToggleTitle(appStore.config));
@@ -177,7 +178,7 @@
             ws = createProjectTerminal(proj.id, term!, close, transformInput);
             ws.onerror = (e) => console.error('Terminal WebSocket error:', e);
         } else {
-            term?.writeln('No project selected');
+            term?.writeln(t('terminal.noProject'));
         }
     }
 
@@ -547,14 +548,14 @@
             btnBarEl.style.cssText = 'position:fixed;z-index:10001;display:flex;align-items:center;background:#0084FF;border-radius:18px;box-shadow:0 2px 12px rgba(0,0,0,0.4);overflow:hidden;';
 
             copyBtnEl = document.createElement('button');
-            copyBtnEl.textContent = 'Copy';
+            copyBtnEl.textContent = t('terminal.copy');
             copyBtnEl.style.cssText = 'padding:7px 16px;border:none;background:transparent;color:#fff;font-size:14px;font-weight:600;font-family:system-ui,sans-serif;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
 
             const divider = document.createElement('div');
             divider.style.cssText = 'width:1px;height:20px;background:rgba(255,255,255,0.3);';
 
             pasteBtnEl = document.createElement('button');
-            pasteBtnEl.textContent = 'Paste';
+            pasteBtnEl.textContent = t('terminal.paste');
             pasteBtnEl.style.cssText = 'padding:7px 16px;border:none;background:transparent;color:#fff;font-size:14px;font-weight:600;font-family:system-ui,sans-serif;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
             pasteBtnEl.addEventListener('mousedown', (e) => {
                 e.preventDefault();
@@ -831,9 +832,9 @@
             onDragEnd={onTerminalResizeEnd}
         />
         <div class="header-left">
-            <span class="title">Terminal</span>
+            <span class="title">{t('terminal.title')}</span>
             {#if activePorts.length > 0}
-            <span class="port-badge" title="Active port mappings (Host : Container)">
+            <span class="port-badge" title={t('terminal.activePortMappings')}>
                 <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                     <path d="M4 7H16M4 13H16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                     <path d="M12 4.5L16 7L12 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>

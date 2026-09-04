@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { t } from '$lib/i18n';
+
     interface Props {
         queuePosition: number;
         queueEstimatedWait: number;
@@ -11,18 +13,18 @@
     let { queuePosition, queueEstimatedWait, promptProgress, retryCount, retryError, isAgentSelected }: Props = $props();
 
     let label = $derived(() => {
-        const target = isAgentSelected() ? 'agent' : 'LLM provider';
+        const target = isAgentSelected() ? t('chat.queue.targetAgent') : t('chat.queue.targetLlm');
         if (queuePosition > 0) {
-            return `Awaiting ${target} — position ${queuePosition} in queue, ~${queueEstimatedWait}s`;
+            return t('chat.queue.position', { target, position: queuePosition, wait: queueEstimatedWait });
         }
         if (retryCount > 0) {
-            const errPart = retryError ? ` (${retryError})` : '';
-            return `Connection issue${errPart} — retry ${retryCount}`;
+            const errPart = retryError ? t('chat.queue.errorParen', { error: retryError }) : '';
+            return t('chat.queue.connectionIssue', { errPart, count: retryCount });
         }
         if (promptProgress > 0) {
-            return `Awaiting ${target}... Processing Prompt: ${promptProgress}%`;
+            return t('chat.queue.promptProgress', { target, percent: promptProgress });
         }
-        return `Awaiting ${target}...`;
+        return t('chat.queue.awaiting', { target });
     });
 
     let variant = $derived(() => {

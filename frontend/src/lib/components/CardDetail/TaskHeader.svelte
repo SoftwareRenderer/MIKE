@@ -9,7 +9,7 @@
     import { appStore } from '$lib/stores';
     import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
     import { isSandboxMemoryWarning, isMemoryLimitReached } from '$lib/utils/memory-stats';
-    import { effectiveOpenTerminalKey, formatShortcut } from '$lib/utils/keyboard';
+    import { openTerminalTitle } from '$lib/utils/keyboard';
     import { t } from '$lib/i18n';
 
     let {
@@ -66,11 +66,9 @@
     });
 
     // Terminal button tooltip — always shows the effective shortcut (tooltips
-    // keep the shortcut text even when keycap hints are hidden).
-    const terminalButtonTitle = $derived.by(() => {
-        const key = effectiveOpenTerminalKey(appStore.config);
-        return key ? `Open terminal (${formatShortcut(key)})` : 'Open terminal';
-    });
+    // keep the shortcut text even when keycap hints are hidden). Same helper the
+    // top bar uses, so the shortcut sentence lives in exactly one place.
+    const terminalButtonTitle = $derived(openTerminalTitle(appStore.config));
 
     // Full worktree display path shown in the header (CSS-ellipsized when it
     // doesn't fit; the native `title` below only appears on hover).

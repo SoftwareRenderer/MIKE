@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { t } from '$lib/i18n';
+
     interface Props {
         variant: 'user' | 'assistant';
         timestampTooltip?: string;
@@ -22,7 +24,7 @@
     {/if}
 
     {#if variant === 'user'}
-        <button class="action-btn" class:copied={copied} onclick={onCopy} aria-label="Copy message" title="Copy message">
+        <button class="action-btn" class:copied={copied} onclick={onCopy} aria-label={t('chat.actions.copy')} title={t('chat.actions.copy')}>
             <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
@@ -30,7 +32,7 @@
             <span class="check">✓</span>
         </button>
         {#if onFork}
-            <button class="action-btn" onclick={onFork} aria-label="Start new thread from this message" title="Edit / new thread">
+            <button class="action-btn" onclick={onFork} aria-label={t('chat.actions.forkAria')} title={t('chat.actions.forkTitle')}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
@@ -38,7 +40,7 @@
             </button>
         {/if}
         {#if onDelete}
-            <button class="action-btn" onclick={onDelete} aria-label="Delete message and all following messages" title="Delete message and all following messages">
+            <button class="action-btn" onclick={onDelete} aria-label={t('chat.actions.delete')} title={t('chat.actions.delete')}>
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                     <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -47,7 +49,7 @@
         {/if}
     {:else}
         {#if hasContent}
-            <button class="action-btn" class:copied={copied} onclick={onCopy} aria-label="Copy message" title="Copy message">
+            <button class="action-btn" class:copied={copied} onclick={onCopy} aria-label={t('chat.actions.copy')} title={t('chat.actions.copy')}>
                 <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
@@ -56,7 +58,7 @@
             </button>
         {/if}
         {#if onRegenerate && !isStreaming && !isOptimistic}
-            <button class="action-btn" onclick={onRegenerate} aria-label="Regenerate response" title="Regenerate response">
+            <button class="action-btn" onclick={onRegenerate} aria-label={t('chat.actions.regenerate')} title={t('chat.actions.regenerate')}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M21 2v6h-6"/>
                     <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
@@ -66,7 +68,7 @@
             </button>
         {/if}
         {#if onDelete && !isStreaming && !isOptimistic}
-            <button class="action-btn" onclick={onDelete} aria-label="Delete message and all following messages" title="Delete message and all following messages">
+            <button class="action-btn" onclick={onDelete} aria-label={t('chat.actions.delete')} title={t('chat.actions.delete')}>
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                     <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
