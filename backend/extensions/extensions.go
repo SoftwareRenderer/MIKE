@@ -22,6 +22,10 @@ const (
 	ExtensionTypeCSS   = "css"
 	ExtensionTypeAgent = "agent"
 	ExtensionTypeLLM   = "llm"
+	// ExtensionTypeI18N is a translation pack: a catalog file the frontend loads
+	// to render the UI in the pack's locale. It executes nothing — its whole
+	// surface is static files served from its own directory.
+	ExtensionTypeI18N = "i18n"
 )
 
 // maxExtensionValueBytes caps the size of a single storage value (KiB).
@@ -78,6 +82,7 @@ type Capabilities struct {
 	Agent   *AgentConfig   `json:"agent,omitempty"`
 	Network *NetworkConfig `json:"network,omitempty"` // server-side network capability
 	LLM     *LLMConfig     `json:"llm,omitempty"`     // provider request adaptation
+	I18N    *I18NConfig    `json:"i18n,omitempty"`    // translation pack (UI catalog + prompt locale)
 }
 
 // GetLSP returns the LSP capability, or nil if not present.
@@ -110,6 +115,33 @@ func (c *Capabilities) GetLLM() *LLMConfig {
 		return nil
 	}
 	return c.LLM
+}
+
+// GetI18N returns the i18n (translation pack) capability, or nil if not present.
+func (c *Capabilities) GetI18N() *I18NConfig {
+	if c == nil {
+		return nil
+	}
+	return c.I18N
+}
+
+// I18NConfig defines a translation pack. A pack is the language: the active
+// locale *is* whichever enabled pack wins the ordering rule (English when none),
+// so nothing here is ever stored as a setting — it is read from the manifest and
+// derived at request/render time. See ActiveI18N for the one derivation.
+type I18NConfig struct {
+	// Locale is the BCP 47 tag this pack translates to (e.g. "zh-CN"). Core
+	// holds no language names; this value is carried through verbatim.
+	Locale string `json:"locale"`
+	// MessagesURL is the catalog file inside the extension's own directory
+	// (e.g. "messages.json"), resolved against /extensions/<author>/<name>/ by
+	// the frontend. A scheme or protocol-relative URL is refused by Validate —
+	// a pack must not point the app at a remote origin.
+	MessagesURL string `json:"messages_url"`
+	// PromptsDir is the directory of locale-substituted prompt templates this
+	// pack supplies, relative to the extension directory. Consumed by the
+	// server-side prompt locale derivation (T14), not by the UI.
+	PromptsDir string `json:"prompts_dir,omitempty"`
 }
 
 // LLMConfig defines the request-adaptation capability: the extension ships

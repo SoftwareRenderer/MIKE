@@ -436,7 +436,7 @@ export type TaskEventData = { task_id: string; type: string; data: any };
 
 // ─── Extension types ───
 
-export type ExtensionType = 'lsp' | 'ui' | 'css' | 'agent' | 'llm';
+export type ExtensionType = 'lsp' | 'ui' | 'css' | 'agent' | 'llm' | 'i18n';
 
 export interface ExtensionManifest {
     display_name: string;
@@ -457,6 +457,7 @@ export interface ExtensionCapabilities {
     agent?: AgentExtensionConfig;
     network?: NetworkExtensionConfig;
     llm?: LLMExtensionConfig;
+    i18n?: I18NExtensionConfig;
 }
 
 export interface LLMExtensionConfig {
@@ -563,6 +564,20 @@ export interface UIExtensionConfig {
 
 export interface CSSExtensionConfig {
     css_url: string; // global stylesheet path (resolved against the extension's own served directory; external URLs are rejected)
+}
+
+/**
+ * A translation pack (mirrors backend `I18NConfig`). The enabled pack *is* the
+ * active language — there is no `language` setting anywhere, on either side.
+ *
+ * `messages_url` is a file inside the extension's own served directory; it is
+ * resolved with `resolveAssetURL`, which rejects an external URL, and the
+ * backend refuses to store one (`I18NConfig.Validate`).
+ */
+export interface I18NExtensionConfig {
+    locale: string; // BCP 47 tag, carried through verbatim — core holds no language names
+    messages_url: string; // catalog file, relative to /extensions/<author>/<name>/
+    prompts_dir?: string; // locale-substituted prompt templates (server-side prompt locale, T14)
 }
 
 export interface ConfigSchema {

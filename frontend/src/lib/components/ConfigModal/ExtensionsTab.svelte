@@ -104,6 +104,10 @@
             label: 'LLM',
             description: 'Modifies the OpenAI-compatible LLM request format to fit provider-specific structure, depending on the provider URL.',
         },
+        i18n: {
+            label: 'Translation',
+            description: 'Replaces the interface text with its own translations. The enabled translation pack IS the active language — there is no language setting to change. Its files are static text served from the pack directory; nothing a pack declares executes.',
+        },
     };
 
     // Human-readable explanations for sandboxed UI extension permissions.
@@ -195,6 +199,7 @@
         if (caps.agent) keys.push('agent');
         if (caps.network) keys.push('network');
         if (caps.llm) keys.push('llm');
+        if (caps.i18n) keys.push('i18n');
         return keys;
     }
 
@@ -205,7 +210,7 @@
         if (entry.capabilities && Object.keys(entry.capabilities).length > 0) {
             return Object.keys(entry.capabilities).filter(k => !!CAPABILITY_DESCRIPTIONS[k]);
         }
-        const capMap: Record<string, string> = { lsp: 'lsp', ui: 'ui', css: 'css', agent: 'agent', llm: 'llm' };
+        const capMap: Record<string, string> = { lsp: 'lsp', ui: 'ui', css: 'css', agent: 'agent', llm: 'llm', i18n: 'i18n' };
         const k = capMap[entry.type];
         return k ? [k] : [];
     }
@@ -220,6 +225,21 @@
         const caps: Record<string, any> = {};
         for (const k of getRegistryCapabilityKeys(entry)) caps[k] = {};
         return caps;
+    }
+
+    // Badge text for an extension type. An unrecognized type still renders UI
+    // because that is what a manifest the host does not know most likely is —
+    // but a translation pack must not wear that label, or the row the user came
+    // to Settings to toggle is indistinguishable from an iframe extension.
+    function typeBadge(type: string): string {
+        switch (type) {
+            case 'lsp': return 'LSP';
+            case 'css': return 'CSS';
+            case 'agent': return 'AGENT';
+            case 'llm': return 'LLM';
+            case 'i18n': return 'I18N';
+            default: return 'UI';
+        }
     }
 
     // Load extensions on mount
@@ -758,8 +778,8 @@
                         {@const isLocal = ext.install_source === 'local'}
                         <div class="extension-card" class:disabled={!ext.enabled} class:unpublished-card={isLocal}>
                             <div class="card-header">
-                                <div class="ext-icon" class:ext-lsp={ext.type === 'lsp'} class:ext-ui={ext.type === 'ui'} class:ext-css={ext.type === 'css'} class:ext-agent={ext.type === 'agent'} class:ext-llm={ext.type === 'llm'}>
-                                    {ext.type === 'lsp' ? 'LSP' : ext.type === 'css' ? 'CSS' : ext.type === 'agent' ? 'AGENT' : ext.type === 'llm' ? 'LLM' : 'UI'}
+                                <div class="ext-icon" class:ext-lsp={ext.type === 'lsp'} class:ext-ui={ext.type === 'ui'} class:ext-css={ext.type === 'css'} class:ext-agent={ext.type === 'agent'} class:ext-llm={ext.type === 'llm'} class:ext-i18n={ext.type === 'i18n'}>
+                                    {typeBadge(ext.type)}
                                 </div>
                                 <div class="ext-info">
                                     <div class="ext-name-row">
@@ -787,7 +807,7 @@
                                         {#if getCapabilityKeys(ext).length > 0}
                                             <div class="capability-badges" role="group" aria-label="Capabilities">
                                                 {#each getCapabilityKeys(ext) as capKey}
-                                                    <button class="cap-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-network={capKey === 'network'} class:cap-llm={capKey === 'llm'} aria-label="{CAPABILITY_DESCRIPTIONS[capKey]?.label || capKey} capability for {ext.manifest.display_name || ext.name}. Click to learn more" onclick={() => { selectedExtension = ext; showCapabilitiesModal = true; }}>
+                                                    <button class="cap-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-network={capKey === 'network'} class:cap-llm={capKey === 'llm'} class:cap-i18n={capKey === 'i18n'} aria-label="{CAPABILITY_DESCRIPTIONS[capKey]?.label || capKey} capability for {ext.manifest.display_name || ext.name}. Click to learn more" onclick={() => { selectedExtension = ext; showCapabilitiesModal = true; }}>
                                                         {CAPABILITY_DESCRIPTIONS[capKey]?.label || capKey}
                                                     </button>
                                                 {/each}
@@ -1093,8 +1113,8 @@
         <BaseModal title="Extension Capabilities" width="520px" footer={capsFooter} onClose={() => { showCapabilitiesModal = false; selectedExtension = null; }}>
             <div class="caps-modal-body">
                 <div class="caps-ext-header">
-                    <div class="caps-ext-icon" class:ext-lsp={selectedExtension.type === 'lsp'} class:ext-ui={selectedExtension.type === 'ui'} class:ext-css={selectedExtension.type === 'css'} class:ext-agent={selectedExtension.type === 'agent'} class:ext-llm={selectedExtension.type === 'llm'} aria-hidden="true">
-                        {selectedExtension.type === 'lsp' ? 'LSP' : selectedExtension.type === 'css' ? 'CSS' : selectedExtension.type === 'agent' ? 'AGENT' : selectedExtension.type === 'llm' ? 'LLM' : 'UI'}
+                    <div class="caps-ext-icon" class:ext-lsp={selectedExtension.type === 'lsp'} class:ext-ui={selectedExtension.type === 'ui'} class:ext-css={selectedExtension.type === 'css'} class:ext-agent={selectedExtension.type === 'agent'} class:ext-llm={selectedExtension.type === 'llm'} class:ext-i18n={selectedExtension.type === 'i18n'} aria-hidden="true">
+                        {typeBadge(selectedExtension.type)}
                     </div>
                     <div class="caps-ext-info">
                         <h3 class="caps-ext-name">{selectedExtension.manifest.display_name || selectedExtension.name}</h3>
@@ -1111,7 +1131,7 @@
                         {#if info}
                             <div class="cap-detail" role="listitem">
                                 <div class="cap-detail-header">
-                                    <span class="cap-detail-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-network={capKey === 'network'} class:cap-llm={capKey === 'llm'}>
+                                    <span class="cap-detail-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-network={capKey === 'network'} class:cap-llm={capKey === 'llm'} class:cap-i18n={capKey === 'i18n'}>
                                         {info.label}
                                     </span>
                                 </div>
@@ -1189,6 +1209,14 @@
                                     <div class="cap-detail-extra">
                                         <span class="cap-detail-label">Stylesheet:</span>
                                         <code class="cap-detail-value">{caps.css.css_url}</code>
+                                    </div>
+                                {/if}
+                                <!-- Translation pack: show the locale tag it declares,
+                                     verbatim — core holds no language names to render. -->
+                                {#if capKey === 'i18n' && caps?.i18n?.locale}
+                                    <div class="cap-detail-extra">
+                                        <span class="cap-detail-label">Language:</span>
+                                        <code class="cap-detail-value">{caps.i18n.locale}</code>
                                     </div>
                                 {/if}
                             </div>
@@ -1294,8 +1322,8 @@
                         {@const setupDep = dependencyCacheDeclaration(entry.capabilities)}
                         <div class="extension-card registry-card" class:unpublished-card={isUnpublished}>
                             <div class="card-header">
-                                <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'} class:ext-agent={entry.type === 'agent'} class:ext-llm={entry.type === 'llm'}>
-                                    {entry.type === 'lsp' ? 'LSP' : entry.type === 'css' ? 'CSS' : entry.type === 'agent' ? 'AGENT' : entry.type === 'llm' ? 'LLM' : 'UI'}
+                                <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'} class:ext-agent={entry.type === 'agent'} class:ext-llm={entry.type === 'llm'} class:ext-i18n={entry.type === 'i18n'}>
+                                    {typeBadge(entry.type)}
                                 </div>
                                 <div class="ext-info">
                                     <div class="ext-name-row">
@@ -1323,7 +1351,7 @@
                                             <div class="capability-badges" role="group" aria-label="Capabilities">
                                                 {#each regCapKeys as regCapKey}
                                                     {@const regCapInfo = CAPABILITY_DESCRIPTIONS[regCapKey]}
-                                                    <button class="cap-badge" class:cap-lsp={regCapKey === 'lsp'} class:cap-ui={regCapKey === 'ui'} class:cap-css={regCapKey === 'css'} class:cap-agent={regCapKey === 'agent'} class:cap-network={regCapKey === 'network'} class:cap-llm={regCapKey === 'llm'} aria-label="{regCapInfo.label} capability for {entry.display_name || entry.name}. {regCapInfo.description}" onclick={() => { selectedExtension = { name: entry.name, manifest: { display_name: entry.display_name, description: entry.description, capabilities: getRegistryCapabilities(entry) }, type: entry.type } as Extension; showCapabilitiesModal = true; }}>
+                                                    <button class="cap-badge" class:cap-lsp={regCapKey === 'lsp'} class:cap-ui={regCapKey === 'ui'} class:cap-css={regCapKey === 'css'} class:cap-agent={regCapKey === 'agent'} class:cap-network={regCapKey === 'network'} class:cap-llm={regCapKey === 'llm'} class:cap-i18n={regCapKey === 'i18n'} aria-label="{regCapInfo.label} capability for {entry.display_name || entry.name}. {regCapInfo.description}" onclick={() => { selectedExtension = { name: entry.name, manifest: { display_name: entry.display_name, description: entry.description, capabilities: getRegistryCapabilities(entry) }, type: entry.type } as Extension; showCapabilitiesModal = true; }}>
                                                         {regCapInfo.label}
                                                     </button>
                                                 {/each}
@@ -1978,6 +2006,11 @@
         color: var(--color-text-secondary);
     }
 
+    .ext-i18n {
+        background: rgba(210, 153, 34, 0.15);
+        color: var(--color-status-orange);
+    }
+
     .ext-info {
         flex: 1;
         min-width: 0;
@@ -2139,6 +2172,12 @@
         background: var(--color-text-inverse);
         color: var(--color-text-secondary);
         border-color: rgba(222, 222, 222, 0.3);
+    }
+
+    .cap-i18n {
+        background: rgba(210, 153, 34, 0.15);
+        color: var(--color-status-orange);
+        border-color: rgba(210, 153, 34, 0.3);
     }
 
     /* Capabilities modal */
