@@ -52,7 +52,7 @@ func (cs *ConfigStore) TestConnection(req TestConnectionRequest) TestConnectionR
 		return TestConnectionResponse{Success: false, Message: fmt.Sprintf("Failed to build request: %v", err)}
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := httputil.NewClient(15 * time.Second)
 	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(payload))
 	if err != nil {
 		return TestConnectionResponse{Success: false, Message: fmt.Sprintf("Failed to build request: %v", err)}
@@ -150,7 +150,7 @@ func (cs *ConfigStore) FetchModels(req FetchModelsRequest) FetchModelsResponse {
 	baseURL := strings.TrimRight(req.LlamaServerURL, "/")
 	url := baseURL + "/models"
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := httputil.NewClient(60 * time.Second)
 	httpReq, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return FetchModelsResponse{Models: nil, Error: fmt.Sprintf("Failed to build request: %v", err)}
@@ -214,7 +214,7 @@ func (cs *ConfigStore) DiscoverContextWindow(modelName, providerURL string) *int
 	baseURL := strings.TrimRight(providerURL, "/")
 	modelsURL := baseURL + "/models"
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := httputil.NewClient(5 * time.Second)
 	resp, err := client.Get(modelsURL)
 	if err != nil {
 		return nil

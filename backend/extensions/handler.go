@@ -1431,8 +1431,8 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 		headers[k] = resolved
 	}
 
-	// Create proxy request
-	proxyReq, err := http.NewRequest(req.Method, req.URL, strings.NewReader(req.Body))
+	// Bound to the inbound request's context, so a closed tab also stops the outbound call.
+	proxyReq, err := http.NewRequestWithContext(r.Context(), req.Method, req.URL, strings.NewReader(req.Body))
 	if err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, "failed to create proxy request: "+err.Error())
 		return
@@ -1449,12 +1449,7 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 	// Execute proxy request. Redirects are NOT followed: the allowlist only
 	// validates the original URL's hostname, so following a redirect could
 	// otherwise reach an arbitrary internal host (SSRF via redirect).
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	client := httputil.NewSingleAttemptClient(30 * time.Second)
 	resp, err := client.Do(proxyReq)
 	if err != nil {
 		httputil.JSONError(w, http.StatusBadGateway, "proxy request failed: "+err.Error())

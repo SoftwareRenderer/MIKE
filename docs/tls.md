@@ -60,3 +60,6 @@ Loopback + weak stays allowed so `make run` (password `test`) keeps working.
 CA/leaf reuse, `CertPEM` serves a certificate and nothing else), `backend/server/handler_tls_test.go`
 (the download: needs a session, 404 without a local CA, GET-only, and `tls_ca_available` tracks it),
 `backend/server/listener_test.go`.
+
+## The listener (moved from AGENTS.md)
+- **The TLS-vs-plain first-byte sniff must not run inside `hybridListener.Accept()`** (`backend/server/server.go`): `net/http` accepts **serially**, so one peer that connects and sends nothing stalls every later handshake, and returning its EOF/reset reads as a dead listener, ends `Serve` and kills the process. `Accept()` waits on a queue that a per-connection sniff goroutine fills — no worker pool, since N workers still block everyone at N silent peers. Sniffed-out peers are closed and logged per host, never handed to `net/http`; only the listener's own accept error may end `Serve`. Tests: `backend/server/listener_test.go`.

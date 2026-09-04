@@ -30,7 +30,7 @@ type Task struct {
 	AutoCommit                bool           `json:"auto_commit"`
 	AutoMerge                 bool           `json:"auto_merge"`
 	SubtasksAutoMerge         bool           `json:"subtasks_auto_merge"` // parent-only: children inherit this as auto_merge
-	OperatingMode             string         `json:"operating_mode"`      // "act" (default), "plan", or "explore"
+	OperatingMode             OperatingMode  `json:"operating_mode"`      // "act" (default), "plan", or "explore"
 	ParentTaskID              string         `json:"parent_task_id,omitempty"`
 	TitleGenerating           bool           `json:"title_generating"`
 	Summarizing               bool           `json:"summarizing"`
@@ -48,12 +48,12 @@ type Task struct {
 
 // IsPlanMode returns true if the task is in plan mode.
 func (t *Task) IsPlanMode() bool {
-	return t.OperatingMode == "plan"
+	return t.OperatingMode == ModePlan
 }
 
 // IsExploreMode returns true if the task is in exploration mode.
 func (t *Task) IsExploreMode() bool {
-	return t.OperatingMode == "explore"
+	return t.OperatingMode == ModeExplore
 }
 
 // Board represents the collection of tasks for a project.
@@ -78,20 +78,20 @@ type TaskThread struct {
 
 // Config represents global server configuration.
 type Config struct {
-	WorkspaceDir                  string     `json:"workspace_dir"`
-	DatabasePath                  string     `json:"database_path"`
-	RegistryURL                   string     `json:"registry_url"`
-	Providers                     []Provider `json:"providers"`
-	WorkerProvider                string     `json:"worker_provider"`
-	WorkerModel                   string     `json:"worker_model"`
-	UtilityProvider               string     `json:"utility_provider"`
-	UtilityModel                  string     `json:"utility_model"`
-	DefaultAutoCommit             *bool      `json:"default_auto_commit"`
-	DefaultAutoMerge              *bool      `json:"default_auto_merge"`
-	DefaultSubtasksAutoMerge      *bool      `json:"default_subtasks_auto_merge"`
-	DefaultOperatingMode          *string    `json:"default_operating_mode"`
-	DefaultMaxFailedTurns         *int       `json:"default_max_failed_turns,omitempty"`
-	DefaultAutoSummarizeThreshold *int       `json:"default_auto_summarize_threshold,omitempty"`
+	WorkspaceDir                  string         `json:"workspace_dir"`
+	DatabasePath                  string         `json:"database_path"`
+	RegistryURL                   string         `json:"registry_url"`
+	Providers                     []Provider     `json:"providers"`
+	WorkerProvider                string         `json:"worker_provider"`
+	WorkerModel                   string         `json:"worker_model"`
+	UtilityProvider               string         `json:"utility_provider"`
+	UtilityModel                  string         `json:"utility_model"`
+	DefaultAutoCommit             *bool          `json:"default_auto_commit"`
+	DefaultAutoMerge              *bool          `json:"default_auto_merge"`
+	DefaultSubtasksAutoMerge      *bool          `json:"default_subtasks_auto_merge"`
+	DefaultOperatingMode          *OperatingMode `json:"default_operating_mode"`
+	DefaultMaxFailedTurns         *int           `json:"default_max_failed_turns,omitempty"`
+	DefaultAutoSummarizeThreshold *int           `json:"default_auto_summarize_threshold,omitempty"`
 	// HideModelBadge hides the model badge on board task cards. Nil = visible (default).
 	HideModelBadge *bool `json:"hide_model_badge,omitempty"`
 	// RunSiblingsParallel starts all of a parent's startable subtasks at once

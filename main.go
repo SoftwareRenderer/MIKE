@@ -46,47 +46,24 @@ func main() {
 	allowedHosts := flag.String("allowed-hosts", "", "Hostnames accepted in the Host header, comma-separated (default: $MIKE_ALLOWED_HOSTS; required behind a reverse proxy that forwards a public domain)")
 	flag.Parse()
 
-	// Resolve effective values: flag > env var > default
-	// Port
-	effectivePort := *port
-	if effectivePort == 0 {
-		if v := os.Getenv("MIKE_PORT"); v != "" {
-			fmt.Sscanf(v, "%d", &effectivePort)
-		}
-		if effectivePort == 0 {
-			effectivePort = 3000
-		}
+	// Resolve effective values: flag > env var > default. See startup_config.go.
+	effectivePort, err := resolvePort(*port, "port", "MIKE_PORT", 3000)
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
 	}
 
-	// Data directory
-	effectiveDataDir := *dataDir
-	if effectiveDataDir == "" {
-		effectiveDataDir = os.Getenv("MIKE_DATA_DIR")
-	}
-	if effectiveDataDir == "" {
-		effectiveDataDir = "./data"
-	}
-
-	worktreesOverride := *worktreesDir
-	if worktreesOverride == "" {
-		worktreesOverride = os.Getenv("MIKE_WORKTREES_DIR")
-	}
+	effectiveDataDir := resolveString(*dataDir, "MIKE_DATA_DIR", "./data")
+	worktreesOverride := resolveString(*worktreesDir, "MIKE_WORKTREES_DIR", "")
 
 	// Extra accepted Host values (DNS-rebinding pinning). A reverse proxy that
 	// forwards the public domain needs it listed here, or every request is
 	// rejected with HTTP 421 by HostPinMiddleware.
-	allowedHostsOverride := *allowedHosts
-	if allowedHostsOverride == "" {
-		allowedHostsOverride = os.Getenv("MIKE_ALLOWED_HOSTS")
-	}
+	allowedHostsOverride := resolveString(*allowedHosts, "MIKE_ALLOWED_HOSTS", "")
 
 	// Database path (derived from data-dir)
 	dbPath := filepath.Join(effectiveDataDir, "kanban.db")
 
-	frontendDist := os.Getenv("MIKE_FRONTEND_DIST")
-	if frontendDist == "" {
-		frontendDist = "./frontend/dist"
-	}
+	frontendDist := resolveString("", "MIKE_FRONTEND_DIST", "./frontend/dist")
 
 	// Ensure data directory exists. It holds the database (session hashes,
 	// encrypted secrets) and the TLS key material, so it is owner-only.
@@ -107,13 +84,7 @@ func main() {
 	// is RCE-complete (terminal WebSocket, git operations, file writes) and must
 	// never land on a public interface by accident; an explicit 0.0.0.0 / :: is the
 	// deliberate escape hatch for containers and reverse proxies.
-	effectiveListen := *listen
-	if effectiveListen == "" {
-		effectiveListen = os.Getenv("MIKE_LISTEN")
-	}
-	if effectiveListen == "" {
-		effectiveListen = defaultListenAddr
-	}
+	effectiveListen := resolveString(*listen, "MIKE_LISTEN", defaultListenAddr)
 	addr := listenAddr(effectiveListen, effectivePort)
 	if _, err := net.ResolveTCPAddr("tcp", addr); err != nil {
 		log.Fatalf("Invalid listen address %q (from --listen / MIKE_LISTEN): %v", addr, err)

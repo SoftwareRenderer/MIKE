@@ -27,8 +27,13 @@ func TestCommitAndDoneIntent_ArmPeekConsume(t *testing.T) {
 		t.Error("arming one task armed another")
 	}
 
-	if !te.CommitAndDonePending(taskID) || !te.CommitAndDonePending(taskID) {
+	// Two separate statements on purpose: `||` short-circuits, so the same call
+	// written as `!f(x) || !f(x)` runs once and proves nothing about a second peek.
+	if !te.CommitAndDonePending(taskID) {
 		t.Fatal("peeking consumed the click")
+	}
+	if !te.CommitAndDonePending(taskID) {
+		t.Fatal("a second peek consumed the click")
 	}
 
 	if !te.takeCommitAndDone(taskID, true) {

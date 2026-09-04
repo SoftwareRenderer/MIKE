@@ -97,3 +97,13 @@ still blocked in flight; permissive posture opted into open network).
 Probes in `frontend/tests/e2e/html-preview.spec.ts` (egress listener + scripts-off/scripts-on mode
 tests, incl. meta-refresh and in-tree navigation probes) and the extension's colocated iframe harness
 (`MIKE-extensions/ui/html-preview/tests/`).
+
+## Rules the host keeps (moved from AGENTS.md)
+### Preview capability
+Host support for UI extensions that render the open file (`html-preview`: overlay + live refresh, root-relative refs rewritten server-side to the token's worktree root). Full mechanism, CSP tiers and nav-record semantics: `docs/preview.md`.
+
+- **The token is the credential** — 128-bit from `crypto/rand`, and `newPreviewToken` is **fail-hard**: a serve request is rejected on error rather than falling back, because a guessable token is an unauthenticated read of the document plus every sibling under its asset root. Limits: 10-min idle TTL, 32 docs, 10 MB/doc.
+- **`project`/`path`/`task` come from the host's own injection context** (FileEditor passes `filePath`/`projectId`/`taskId`), **never** from extension arguments — an extension cannot point the server at arbitrary directories.
+- **`GET /api/preview/{token}/…` is public**; the doc carries its OWN CSP that `CORSMiddleware` skips — strict zero-egress by default, permissive only when the serve request sets `allow_network`.
+- **The doc stays in a nested bare `<iframe sandbox>`** inside the extension's sandboxed iframe (scripts on only via the extension's `allow_scripts`); no `frame-ancestors` (it must be frameable).
+- **In-tree allow-list:** the extension can't read the nested frame's URL, so a pending-load counter consults `GET /api/preview/{token}/nav` — a *fresh* `ok` record (`seq > lastNavSeq`) means the server served an in-tree file → allowed; stale record, error or host-call failure → **contained** (frame reset, token released, warning modal).

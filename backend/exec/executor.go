@@ -139,6 +139,20 @@ type CompactResult struct {
 	Error   error
 }
 
+// executionState is everything one running task holds between an executor taking it and its
+// defer releasing it.
+//
+// Locking, because these fields are read from the executor loop, HTTP handlers and tool calls:
+//
+//   - sandboxMu guards the sandboxExec/sandboxExecStream/sandboxRead/sandboxWrite/sandboxEdit/
+//     sandboxOperatingMode/agentSandboxHash/recoverBridge group. Use sandbox() and setSandbox();
+//     never read those fields directly. sandboxMu is never held while taking taskMu, so the two
+//     cannot deadlock.
+//   - activeSummarize has its own mutex, for the same one-field-one-lock reason.
+//   - taskMu (on TaskExecutor) guards everything else here together with the tasks map:
+//     runnerClosed, taskStatus, lastDiffHash, bridgeRecoveryAttempts, root. A method that reached
+//     this state through the map already holds it.
+//   - ctx, cancel and the channels are set once at construction, so they need no lock.
 type executionState struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
@@ -158,21 +172,25 @@ type executionState struct {
 	// lastDiffHash tracks the last broadcast diff hash to avoid duplicate broadcasts
 	// when fsnotify already caught the same change.
 	lastDiffHash string
-	// Sandbox I/O callbacks — nil means use os.Root fallback inside executeTool.
+	// Sandbox I/O callbacks — nil means use os.Root fallback inside executeTool. These six fields
+	// plus recoverBridge are guarded by sandboxMu; see the type comment.
+	sandboxMu         sync.Mutex
 	sandboxExec       execFunc
 	sandboxExecStream execStreamFunc
 	sandboxRead       readFunc
 	sandboxWrite      writeFunc
 	sandboxEdit       editFunc
-	// Sandbox operating mode (ro vs rw) at container creation time.
-	sandboxOperatingMode string
-	// Agent sandbox config hash at container creation time.
-	agentSandboxHash string
-	// os.Root handle for non-sandbox write isolation.
+	// sandboxOperatingMode (ro vs rw) and agentSandboxHash record what the container was created
+	// with; each turn compares them against the live config to decide whether to recreate it.
+	sandboxOperatingMode types.OperatingMode
+	agentSandboxHash     string
+	// recoverBridge attempts to reconnect the sandbox bridge (client reconnect or full sandbox
+	// recreation). Returns true if success. Only non-nil when sandbox is enabled.
+	recoverBridge func() bool
+	// os.Root handle for non-sandbox write isolation. Guarded by taskMu: the write path creates it
+	// lazily while the loop may be tearing the run down.
 	root *os.Root
-	// recoverBridge attempts to reconnect the sandbox bridge (client reconnect or
-	// full sandbox recreation). Returns true if success. Only non-nil when sandbox is enabled.
-	recoverBridge          func() bool
+	// bridgeRecoveryAttempts counts bridge-recovery tries against maxAttempts. Guarded by taskMu.
 	bridgeRecoveryAttempts int
 	// Closed by executor defer so ForwardUserMessage type-switch can wait for clean exit.
 	done chan struct{}
@@ -180,17 +198,84 @@ type executionState struct {
 	finished chan struct{}
 }
 
-// modelConfig holds mutable model/provider settings for an executor.
+// sandboxState is a consistent snapshot of the sandbox fields of an executionState. Setup,
+// an operating-mode change, an agent-config change and bridge recovery each replace the whole set
+// at once, and a tool call that saw half the old callbacks and half the new ones would read a
+// stopped container through a live client — which looks like a broken pipe and gets retried forever.
+type sandboxState struct {
+	exec            execFunc
+	execStream      execStreamFunc
+	read            readFunc
+	write           writeFunc
+	edit            editFunc
+	operatingMode   types.OperatingMode
+	agentConfigHash string
+	recoverBridge   func() bool
+}
+
+// sandbox returns a copy of the sandbox fields. Hold the copy rather than re-reading per statement:
+// a tool call then runs against one set of callbacks even if the bridge is swapped out mid-call.
+func (st *executionState) sandbox() sandboxState {
+	st.sandboxMu.Lock()
+	defer st.sandboxMu.Unlock()
+	return st.sandboxLocked()
+}
+
+// resetBridgeRecoveryAttempts clears the bridge-recovery failure latch. It takes the state pointer,
+// not a task ID: the pointer stays valid for the task's lifetime, and a state that is not in the
+// map still has a latch that must clear. taskMu is taken because it guards these fields.
+func (te *TaskExecutor) resetBridgeRecoveryAttempts(state *executionState) {
+	te.taskMu.Lock()
+	state.bridgeRecoveryAttempts = 0
+	te.taskMu.Unlock()
+}
+
+// setSandbox writes the sandbox fields through change, all under sandboxMu, so a caller cannot
+// publish a new set of callbacks without also publishing the mode and hash that go with them.
+func (st *executionState) setSandbox(change func(sb *sandboxState)) {
+	st.sandboxMu.Lock()
+	defer st.sandboxMu.Unlock()
+	sb := st.sandboxLocked()
+	change(&sb)
+	st.sandboxExec = sb.exec
+	st.sandboxExecStream = sb.execStream
+	st.sandboxRead = sb.read
+	st.sandboxWrite = sb.write
+	st.sandboxEdit = sb.edit
+	st.sandboxOperatingMode = sb.operatingMode
+	st.agentSandboxHash = sb.agentConfigHash
+	st.recoverBridge = sb.recoverBridge
+}
+
+// sandboxLocked builds the snapshot. Callers hold sandboxMu. Shared by sandbox() and setSandbox()
+// so the field list exists once.
+func (st *executionState) sandboxLocked() sandboxState {
+	return sandboxState{
+		exec:            st.sandboxExec,
+		execStream:      st.sandboxExecStream,
+		read:            st.sandboxRead,
+		write:           st.sandboxWrite,
+		edit:            st.sandboxEdit,
+		operatingMode:   st.sandboxOperatingMode,
+		agentConfigHash: st.agentSandboxHash,
+		recoverBridge:   st.recoverBridge,
+	}
+}
+
+// LSPDiagnosticPosition is one point of a diagnostic's range, in the LSP wire
+// shape (line and character, both 0-based) the language server publishes.
 type LSPDiagnosticPosition struct {
 	Line      int `json:"line"`
 	Character int `json:"character"`
 }
 
+// LSPDiagnosticRange is the span a diagnostic covers, in the same wire shape.
 type LSPDiagnosticRange struct {
 	Start LSPDiagnosticPosition `json:"start"`
 	End   LSPDiagnosticPosition `json:"end"`
 }
 
+// LSPRelatedInformation is one related location attached to a diagnostic.
 type LSPRelatedInformation struct {
 	Location struct {
 		URI   string             `json:"uri"`
@@ -208,6 +293,7 @@ type LSPDiagnostic struct {
 	RelatedInformation []LSPRelatedInformation `json:"relatedInformation"`
 }
 
+// modelConfig holds mutable model/provider settings for an executor.
 type modelConfig struct {
 	mu        sync.Mutex
 	serverURL string
@@ -1858,7 +1944,7 @@ func (te *TaskExecutor) ResolveMergeTarget(projectID string, task *types.Task) s
 	return project.OriginBranch
 }
 
-// mergeBranch merges the task's branch into the target branch: a child task merges into its
+// MergeBranch merges the task's branch into the target branch: a child task merges into its
 // parent's branch, a root task into origin. It returns nil on success or when a merge does
 // not apply. When the target is checked out in another worktree (a parent created by
 // EnsureParentBranch, say) the merge runs inside that worktree, since git refuses to check

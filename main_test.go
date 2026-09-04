@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -113,5 +114,77 @@ func TestOpenTraceFileIsOwnerOnly(t *testing.T) {
 	}
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Errorf("trace file mode = %#o, want 0600", perm)
+	}
+}
+
+func TestResolveStringPrecedence(t *testing.T) {
+	const env = "MIKE_RESOLVE_STRING_TEST"
+	t.Cleanup(func() { os.Unsetenv(env) })
+
+	// Nothing set: the fallback.
+	os.Unsetenv(env)
+	if got := resolveString("", env, "fallback"); got != "fallback" {
+		t.Errorf("unset env = %q, want fallback", got)
+	}
+	// A set-but-empty env var means unset, so an accidental MIKE_LISTEN= cannot
+	// silently become "all interfaces".
+	os.Setenv(env, "")
+	if got := resolveString("", env, "fallback"); got != "fallback" {
+		t.Errorf("empty env = %q, want fallback", got)
+	}
+	os.Setenv(env, "from-env")
+	if got := resolveString("", env, "fallback"); got != "from-env" {
+		t.Errorf("env = %q, want from-env", got)
+	}
+	if got := resolveString("from-flag", env, "fallback"); got != "from-flag" {
+		t.Errorf("flag = %q, want from-flag (flag must beat env)", got)
+	}
+}
+
+func TestResolvePort(t *testing.T) {
+	const env = "MIKE_RESOLVE_PORT_TEST"
+	t.Cleanup(func() { os.Unsetenv(env) })
+
+	tests := []struct {
+		name      string
+		flagValue int
+		envValue  string
+		want      string // "" means the resolved number, otherwise a substring of the error
+		port      int
+	}{
+		{name: "nothing set falls back", envValue: "", port: 3000},
+		{name: "flag wins", flagValue: 8080, envValue: "9090", port: 8080},
+		{name: "env is parsed", envValue: "9090", port: 9090},
+		// The bug this exists for: fmt.Sscanf accepted this and left the port at 3000.
+		{name: "non-numeric env is refused", envValue: "tcp3000", port: 0},
+		{name: "zero env is refused", envValue: "0", port: 0},
+		{name: "negative env is refused", envValue: "-1", port: 0},
+		{name: "above range env is refused", envValue: "70000", port: 0},
+		{name: "above range flag is refused", flagValue: 70000, port: 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.envValue == "" {
+				os.Unsetenv(env)
+			} else {
+				os.Setenv(env, tc.envValue)
+			}
+			got, err := resolvePort(tc.flagValue, "port", env, 3000)
+			if tc.port == 0 {
+				if err == nil {
+					t.Fatalf("resolvePort(%d, %q) = %d, want an error", tc.flagValue, tc.envValue, got)
+				}
+				if !strings.Contains(err.Error(), env) && !strings.Contains(err.Error(), "--port") {
+					t.Errorf("error %q must name the source it came from", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolvePort(%d, %q): %v", tc.flagValue, tc.envValue, err)
+			}
+			if got != tc.port {
+				t.Errorf("resolvePort(%d, %q) = %d, want %d", tc.flagValue, tc.envValue, got, tc.port)
+			}
+		})
 	}
 }

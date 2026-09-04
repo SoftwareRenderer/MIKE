@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"kanban/backend/git"
+	"kanban/backend/llama"
 	kanban_sandbox "kanban/backend/sandbox"
 	"kanban/backend/types"
 	sandbox "kanban/pkg/bridge"
@@ -163,20 +164,21 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 	result, ok := te.executeToolInner(ctx, name, args, worktreePath, task, state, outputCallback)
 	// A successful tool call proves the sandbox bridge is healthy (or unused),
 	// so clear the bridge-recovery failure latch.
-	if ok && state != nil && state.recoverBridge != nil {
-		te.taskMu.Lock()
-		state.bridgeRecoveryAttempts = 0
-		te.taskMu.Unlock()
+	if ok && state != nil && state.sandbox().recoverBridge != nil {
+		te.resetBridgeRecoveryAttempts(state)
 	}
 	return result, ok
 }
 
 func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args map[string]any, worktreePath string, task *types.Task, state *executionState, outputCallback func(toolID string, text string)) (string, bool) {
-	sandboxExec := state.sandboxExec
-	sandboxExecStream := state.sandboxExecStream
-	sandboxRead := state.sandboxRead
-	sandboxWrite := state.sandboxWrite
-	sandboxEdit := state.sandboxEdit
+	// One snapshot for the whole call: a recreate swaps the callbacks mid-run, and mixing the old
+	// container's reader with the new one's writer looks like a broken pipe and gets retried.
+	sb := state.sandbox()
+	sandboxExec := sb.exec
+	sandboxExecStream := sb.execStream
+	sandboxRead := sb.read
+	sandboxWrite := sb.write
+	sandboxEdit := sb.edit
 
 	// recoverBridge detects bridge errors and attempts automatic recovery.
 	// Returns true if recovery succeeded and callbacks were refreshed.
@@ -187,10 +189,13 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 			!strings.Contains(errStr, "connection closed") {
 			return false
 		}
-		if state.recoverBridge == nil {
+		// Read the current callback, not the snapshot above: recovery is where the snapshot is
+		// known to be stale.
+		recover := state.sandbox().recoverBridge
+		if recover == nil {
 			return false
 		}
-		return state.recoverBridge()
+		return recover()
 	}
 
 	// Lazy os.Root fallback (only used when sandbox callbacks are nil).
@@ -247,7 +252,7 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 	}
 
 	switch name {
-	case "read_file":
+	case llama.ToolReadFile:
 		path, _ := args["path"].(string)
 		read := sandboxRead
 		if read == nil {
@@ -256,7 +261,7 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 		data, err := read(ctx, path)
 		if err != nil {
 			if recoverBridge(err.Error()) {
-				read = state.sandboxRead
+				read = sb.read
 				if read == nil {
 					read = makeRead()
 				}
@@ -300,7 +305,7 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 			content = content[:maxReadSize] + "\n\n... (file truncated at 50KB, use offset/limit parameters to read remaining lines) ..."
 		}
 		return content, true
-	case "write_file":
+	case llama.ToolWriteFile:
 		path, _ := args["path"].(string)
 		content, _ := args["content"].(string)
 		write := sandboxWrite
@@ -310,7 +315,7 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 		err := write(ctx, path, content)
 		if err != nil {
 			if recoverBridge(err.Error()) {
-				write = state.sandboxWrite
+				write = sb.write
 				if write == nil {
 					write = makeWrite()
 				}
@@ -323,7 +328,7 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 			}
 		}
 		return fmt.Sprintf("Wrote %d bytes to %s", len(content), path), true
-	case "edit_file":
+	case llama.ToolEditFile:
 		path, _ := args["path"].(string)
 		read := sandboxRead
 		write := sandboxWrite
@@ -359,10 +364,10 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 				editsProto[i] = protocol.Edit{OldText: e.OldText, NewText: e.NewText}
 			}
 			apply := func() error {
-				if state.sandboxEdit == nil {
+				if sb.edit == nil {
 					return errors.New("sandbox edit callback unavailable")
 				}
-				return state.sandboxEdit(ctx, path, editsProto)
+				return sb.edit(ctx, path, editsProto)
 			}
 			if err := apply(); err != nil {
 				if recoverBridge(err.Error()) {
@@ -380,7 +385,7 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 		data, err := read(ctx, path)
 		if err != nil {
 			if recoverBridge(err.Error()) {
-				read = state.sandboxRead
+				read = sb.read
 				if read == nil {
 					read = makeRead()
 				}
@@ -447,7 +452,7 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 
 		if err := write(ctx, path, result); err != nil {
 			if recoverBridge(err.Error()) {
-				write = state.sandboxWrite
+				write = sb.write
 				if write == nil {
 					write = makeWrite()
 				}
@@ -459,7 +464,7 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 			}
 		}
 		return fmt.Sprintf("Edited %s (%d edit(s) applied)", path, len(edits)), true
-	case "bash":
+	case llama.ToolBash:
 		cmd, _ := args["command"].(string)
 		timeout := int64(5)
 		if t, ok := args["timeout"].(float64); ok {
@@ -497,8 +502,9 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 		out, err = runBash()
 		if err != nil && recoverBridge(err.Error()) {
 			// Bridge recovered — refresh callbacks and retry
-			sandboxExec = state.sandboxExec
-			sandboxExecStream = state.sandboxExecStream
+			refreshed := state.sandbox()
+			sandboxExec = refreshed.exec
+			sandboxExecStream = refreshed.execStream
 			out, err = runBash()
 		}
 
@@ -516,13 +522,13 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 			out = out[:maxOutputSize] + "\n\n... (output truncated at 50KB) ..."
 		}
 		return out, true
-	case "ask_question":
+	case llama.ToolAskQuestion:
 		question, _ := args["question"].(string)
 		if question == "" {
 			return "Error: question is required", false
 		}
 		return question, true
-	case "request_review":
+	case llama.ToolRequestReview:
 		// In plan mode, require at least one task created via create_task
 		if task.IsPlanMode() {
 			createdIDs := te.planCreatedTaskIDs(task, state)
@@ -558,43 +564,43 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 			log.Printf("[request_review] plan mode: %s", summary)
 		}
 		return "Task complete", true
-	case "create_task":
+	case llama.ToolCreateTask:
 		result, err := te.handleCreateTask(args, task, state)
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
 		return result, true
-	case "view_tasks":
+	case llama.ToolViewTasks:
 		result, err := te.handleViewTasks(task)
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
 		return result, true
-	case "edit_task":
+	case llama.ToolEditTask:
 		result, err := te.handleEditTask(args, task)
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
 		return result, true
-	case "lsp_references":
+	case llama.ToolLSPReferences:
 		result, err := te.handleLSPSymbolRequest(ctx, args, worktreePath, "textDocument/references", map[string]any{"includeDeclaration": true})
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
 		return result, true
-	case "lsp_definition":
+	case llama.ToolLSPDefinition:
 		result, err := te.handleLSPSymbolRequest(ctx, args, worktreePath, "textDocument/definition", nil)
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
 		return result, true
-	case "lsp_hover":
+	case llama.ToolLSPHover:
 		result, err := te.handleLSPHover(ctx, args, worktreePath)
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
 		return result, true
-	case "lsp_rename":
+	case llama.ToolLSPRename:
 		read := sandboxRead
 		if read == nil {
 			read = makeRead()
@@ -705,7 +711,7 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 		ModelName:                 parent.ModelName,
 		ReasoningEffort:           parent.ReasoningEffort,
 		MaxConsecutiveFailedTurns: parent.MaxConsecutiveFailedTurns,
-		OperatingMode:             "act",
+		OperatingMode:             types.ModeAct,
 		ParentTaskID:              actualParentID,
 		CreatedAt:                 now,
 		UpdatedAt:                 now,
@@ -803,7 +809,7 @@ func (te *TaskExecutor) planCreatedTaskIDs(task *types.Task, state *executionSta
 		var tc struct {
 			ToolName string `json:"tool_name"`
 		}
-		if err := json.Unmarshal([]byte(m.ToolCalls), &tc); err != nil || tc.ToolName != "create_task" {
+		if err := json.Unmarshal([]byte(m.ToolCalls), &tc); err != nil || tc.ToolName != llama.ToolCreateTask {
 			continue
 		}
 		var res struct {

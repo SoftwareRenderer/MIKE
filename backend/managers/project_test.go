@@ -76,7 +76,7 @@ func TestHandleCreateClone(t *testing.T) {
 
 	body, _ := json.Marshal(types.CreateProjectRequest{
 		Path:   workspace,
-		GitUrl: remote,
+		GitURL: remote,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/projects", strings.NewReader(string(body)))
 	rr := httptest.NewRecorder()
@@ -166,7 +166,7 @@ func TestHandleCloneStreamsProgress(t *testing.T) {
 		t.Fatalf("mkdir workspace: %v", err)
 	}
 
-	body, _ := json.Marshal(types.CreateProjectRequest{Path: workspace, GitUrl: src})
+	body, _ := json.Marshal(types.CreateProjectRequest{Path: workspace, GitURL: src})
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/clone", strings.NewReader(string(body)))
 	rr := httptest.NewRecorder()
 	h.HandleClone(rr, req)
@@ -246,7 +246,7 @@ func TestHandleCloneTargetExists(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	body, _ := json.Marshal(types.CreateProjectRequest{Path: workspace, GitUrl: src})
+	body, _ := json.Marshal(types.CreateProjectRequest{Path: workspace, GitURL: src})
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/clone", strings.NewReader(string(body)))
 	rr := httptest.NewRecorder()
 	h.HandleClone(rr, req)
@@ -276,7 +276,7 @@ func TestHandleCloneBadURL(t *testing.T) {
 	h, _ := testProjectHandler(t)
 	tmp := t.TempDir()
 
-	body, _ := json.Marshal(types.CreateProjectRequest{Path: tmp, GitUrl: "-evil-flag"})
+	body, _ := json.Marshal(types.CreateProjectRequest{Path: tmp, GitURL: "-evil-flag"})
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/clone", strings.NewReader(string(body)))
 	rr := httptest.NewRecorder()
 	h.HandleClone(rr, req)
@@ -1004,7 +1004,7 @@ func TestHandleCreateCloneRejectsHelperTransport(t *testing.T) {
 
 	body, _ := json.Marshal(types.CreateProjectRequest{
 		Path:   workspace,
-		GitUrl: "ext::sh -c 'touch " + canary + "'",
+		GitURL: "ext::sh -c 'touch " + canary + "'",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/projects", strings.NewReader(string(body)))
 	rr := httptest.NewRecorder()

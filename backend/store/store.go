@@ -285,8 +285,18 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	if err != nil {
 		return err
 	}
+	// A database already at this build's schema version does not need 53 column probes, and one
+	// stamped newer than this build must not be edited by it. See schemaVersion in migrations.go.
+	if stored := s.userVersion(); stored >= schemaVersion {
+		if stored > schemaVersion {
+			log.Printf("[store] database schema version %d is newer than this build's %d — leaving the schema alone", stored, schemaVersion)
+		}
+		return nil
+	}
+
 	// Migrations for existing databases. Each is probed first (migrations.go), so a
-	// logged failure is a real one; the CREATE TABLE above covers a fresh database.
+	// logged failure is a real one; the CREATE TABLE above covers a fresh database. The stamp at the
+	// end of this function makes the chain run once per database rather than once per process.
 	//
 	// plan_mode is absent on purpose: plan mode is task.OperatingMode == "plan", and the
 	// column was neither written nor read. Databases that have it keep it.
@@ -431,6 +441,8 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 		`)
 		_, _ = s.db.Exec(`INSERT OR IGNORE INTO config (key, value) VALUES ('migration_cumulative_stats', '1')`)
 	}
+
+	s.setUserVersion(schemaVersion)
 	return nil
 }
 

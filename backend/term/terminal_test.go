@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -690,4 +691,59 @@ func TestTerminalShellOptsCarryTheProjectConfiguration(t *testing.T) {
 	if len(got.SandboxMounts) != 1 || got.SandboxMounts[0].ContainerPath != "/data" {
 		t.Errorf("SandboxMounts = %+v, want the project's mounts", got.SandboxMounts)
 	}
+}
+
+// TestTerminalManagerClose is the regression for "shutdown leaves shells running": two real host
+// PTY sessions, and after Close both the registry and the child processes must be gone.
+func TestTerminalManagerClose(t *testing.T) {
+	dir := t.TempDir()
+	s, cs := newTestConfigStore(t)
+	tm := NewTerminalManager(s, cs, newMockSandbox(t), nil)
+	projID := "close-proj"
+	if err := s.CreateProject(&types.Project{ID: projID, Name: "Close Project", Path: dir}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	pids := make([]int, 0, 2)
+	for _, taskID := range []string{"close-task-1", "close-task-2"} {
+		sess, err := tm.getOrCreate(taskID, taskID, dir, projID)
+		if err != nil {
+			t.Fatalf("getOrCreate %s: %v", taskID, err)
+		}
+		if sess.cmd == nil || sess.cmd.Process == nil {
+			t.Fatalf("session %s has no host process to kill", taskID)
+		}
+		pids = append(pids, sess.cmd.Process.Pid)
+	}
+	if got := tm.activeSessionCount(); got != 2 {
+		t.Fatalf("sessions before Close = %d, want 2", got)
+	}
+
+	tm.Close()
+
+	if got := tm.activeSessionCount(); got != 0 {
+		t.Errorf("sessions after Close = %d, want 0", got)
+	}
+	// A killed-but-unwaited process is still a live process to anything that looks, and readLoop is
+	// what reaps it — so poll for a moment rather than asserting immediately.
+	deadline := time.Now().Add(3 * time.Second)
+	for _, pid := range pids {
+		for {
+			proc, err := os.FindProcess(pid)
+			if err != nil {
+				break // reaped
+			}
+			if err := proc.Signal(syscall.Signal(0)); err != nil { // signal 0 probes, it does not kill
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Errorf("pid %d is still alive after Close — the shell outlived the shutdown", pid)
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+
+	// Shutdown may call Close twice (SIGTERM, then deferred cleanup).
+	tm.Close()
 }

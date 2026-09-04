@@ -66,3 +66,11 @@ The core `frontend/` workspace must NOT gain an extension's runtime dependencies
 **Extension tests:** colocated under the extension dir's `tests/` (loading Playwright from the
 frontend workspace), not in `frontend/tests/`. Shared extension logic is a plain script loaded by
 both the extension and its tests — never copy it.
+
+## Module shape and channel handshake (moved from AGENTS.md)
+### UI Extensions
+UI extensions are **plain JavaScript modules — not Svelte components** (external bundles carry their own Svelte runtime → `effect_orphan`). A module default-exports `init({ component, config, ...scopeContext })` and returns a cleanup `() => void`; no Svelte imports, DOM + `createElement('style')` only. Serving, CSP, listing, install model, bundling and tests: `docs/ui-extensions.md`.
+
+- **Source lives in `../MIKE-extensions/<type>/<name>/`;** `registry.json` is **generated** — `python3 scripts/gen-registry.py` after editing a manifest or bumping a commit (`--check` in CI).
+- **The host CSP blocks inline `<script>`** in an extension's HTML — load code as external files.
+- **Channel handshake (document identity):** the host mints a per-mount token, passes it as `?extch=`, and arms the channel only on the document's `exthello` echo — `origin === 'null'` + `ev.source` identify the *frame*, not the mounted document. Post nothing before arming (except `exthello-request`); a `call` from an un-armed frame is refused **without a response**; a 2nd+ `load` **disarms** and re-requests hello (never tears the frame down); **nested** iframe loads never count. `frontend/public/host-client.js` answers `exthello` on every load — a hand-rolled client that doesn't hangs at `extHost.ready()`. Test: e2e `extension-frame-channel.spec.ts` (isolated; fixture must use external scripts).

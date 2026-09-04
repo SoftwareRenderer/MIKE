@@ -53,3 +53,16 @@ Example in-repo: `hide_model_badge` gates `.model-badge` in `Card.svelte`
 **Tests to add/update:** `backend/config/config_test.go` (round-trip + omitted-when-nil),
 `preferences-tab.unit.svelte.ts`, a component test for the gated widget (e.g.
 `card-model-badge.unit.svelte.ts`), e2e `preferences-hide-model-badge.spec.ts` (isolated).
+
+## Full layer lists (moved from AGENTS.md)
+### Keyboard Shortcuts (Settings → Preferences)
+Persisted as `keyboard_shortcuts` JSON in the `config` table through the shared Settings Save/Cancel flow. Adding one is a 7-layer change — recipe: **`docs/adding-a-preference.md`**.
+
+- Defaults + helpers in `$lib/utils/keyboard.ts`: `create_task` `C`, `create_task_submit`/`start_task` platform Ctrl/Cmd+Enter, `open_terminal` Ctrl+`, `toggle_fullscreen` Ctrl+Up, `multi_select_click` platform Ctrl/Cmd+Click. Platform-aware defaults are `default*()` functions, **not** `DEFAULT_SHORTCUTS` entries.
+- **Format:** normalized `control`+`meta`+`shift`+`alt`+key; absent = default, `""` = disabled. The key may be the pseudo-key `click` for a **mouse binding** (`"shift+click"`; `normalizeClick` / `matchesClickBinding` / `effectiveMultiSelectClick` / `isBrowserLinkClick`) — only the primary button is bindable and an unmodified click is never a binding.
+- `PUT /api/config` **replaces the whole object** — always send **all** bindings; omitting one resets it to default.
+- **Capture** (`normalizeKey`) rejects modifier-only presses, Escape, unmodified named keys and browser-reserved `Ctrl+W/Q/N/T`. **Activation:** global in `use-keyboard-shortcuts.svelte.ts` (wired in `App.svelte`), dialog/panel-scoped in the owning component.
+- **Tests:** `backend/config/config_test.go`, `utils/__tests__/keyboard.unit.ts`, `preferences-tab.unit.svelte.ts`, e2e `preferences-keyboard.spec.ts` (isolated).
+
+### UI Preferences (Settings → Preferences → UI)
+Top-level `*bool` config fields (`parseBoolPtr` in `GetConfig`, `omitempty` in `configResponse`) with the same Save/Cancel plumbing as shortcuts. Example: `hide_model_badge` gates `.model-badge` in `Card.svelte`. Full recipe + tests: **`docs/adding-a-preference.md`**.

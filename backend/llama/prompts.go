@@ -13,13 +13,14 @@ import (
 // BuildSystemPrompt creates the system prompt for task execution. worktreePath is where AGENTS.md
 // is read from and cwd the working directory; summary is injected into the prompt; skillsMount is
 // the container path for skills (e.g. "/mnt/skills") in sandbox mode, empty otherwise;
-// operatingMode is "act" (default), "plan", or "explore".
-func BuildSystemPrompt(worktreePath, cwd, summary, skillsMount, operatingMode string) string {
+// operatingMode decides which tool set the prompt describes; an OperatingMode cannot hold
+// anything else, so the switch below has no default case to fall through to by accident.
+func BuildSystemPrompt(worktreePath, cwd, summary, skillsMount string, operatingMode types.OperatingMode) string {
 	var tools []types.ChatTool
 	switch operatingMode {
-	case "plan":
+	case types.ModePlan:
 		tools = GetPlanModeToolDefinitions()
-	case "explore":
+	case types.ModeExplore:
 		tools = GetExploreModeToolDefinitions()
 	default:
 		tools = GetToolDefinitions()
@@ -41,7 +42,7 @@ func BuildSystemPrompt(worktreePath, cwd, summary, skillsMount, operatingMode st
 	data := prompts.PromptData{
 		WorktreePath: cwd,
 		CurrentDate:  time.Now().UTC().Format("2006-01-02"),
-		PlanMode:     operatingMode == "plan",
+		PlanMode:     operatingMode == types.ModePlan,
 		Tools:        toolInfos,
 		Skills:       prompts.DiscoverSkills(skillsMount),
 		AgentsMd:     agentsMd,

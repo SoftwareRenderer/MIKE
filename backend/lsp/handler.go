@@ -852,11 +852,12 @@ func mergeInitParams(msg json.RawMessage, cfg *ServerConfig) json.RawMessage {
 		return msg // unexpected type, forward as-is
 	}
 
-	// Ensure workspaceFolders is set from rootUri (required by gopls v0.23+)
-	if rootUri, ok := params["rootUri"]; ok && rootUri != nil && rootUri != "" {
+	// Ensure workspaceFolders is set from rootUri (required by gopls v0.23+).
+	// The key is the LSP wire name, spelled rootUri; only the Go local is rootURI.
+	if rootURI, ok := params["rootUri"]; ok && rootURI != nil && rootURI != "" {
 		if _, hasFolders := params["workspaceFolders"]; !hasFolders {
 			params["workspaceFolders"] = []map[string]any{
-				{"uri": rootUri, "name": "workspace"},
+				{"uri": rootURI, "name": "workspace"},
 			}
 		}
 		// Also ensure the workspaceFolders capability is advertised

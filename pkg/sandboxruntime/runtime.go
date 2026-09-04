@@ -104,9 +104,17 @@ func NewRuntime() *Runtime {
 	return &Runtime{}
 }
 
+// PodmanWaitDelay bounds how long a podman subprocess may hold its output pipes after it exits or
+// its context is cancelled. cmd.Wait waits for the pipes, not just the process, so a container that
+// stops answering hangs it forever - and a cancelled context does not help, because Wait keeps
+// waiting on the pipes after the kill. Ten seconds is well past any healthy drain and well inside
+// the 15 s shutdown budget.
+const PodmanWaitDelay = 10 * time.Second
+
 // PodmanExec runs a podman command and returns the combined output.
 func (r *Runtime) PodmanExec(args ...string) ([]byte, error) {
 	c := exec.Command("podman", args...)
+	c.WaitDelay = PodmanWaitDelay
 	return c.CombinedOutput()
 }
 
@@ -115,6 +123,7 @@ func (r *Runtime) PodmanExec(args ...string) ([]byte, error) {
 // podman must not block the caller indefinitely.
 func (r *Runtime) PodmanExecContext(ctx context.Context, args ...string) ([]byte, error) {
 	c := exec.CommandContext(ctx, "podman", args...)
+	c.WaitDelay = PodmanWaitDelay
 	return c.CombinedOutput()
 }
 

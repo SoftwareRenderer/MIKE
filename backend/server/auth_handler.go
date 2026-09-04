@@ -13,9 +13,8 @@ const (
 	sessionMaxAge     = 30 * 24 * 3600 // 30 days in seconds
 )
 
-// sessionCookieSecure is set at server startup based on whether TLS is active
-// (or MIKE_SECURE_COOKIES=1 behind a TLS-terminating proxy) — see NewServer.
-var sessionCookieSecure bool
+// The SESSION cookie's Secure flag comes from Server.cookieSecure, set in NewServer: TLS is active,
+// or MIKE_SECURE_COOKIES=1 behind a TLS-terminating proxy.
 
 // handleAuthLogin handles POST /api/auth/login.
 // Accepts {"password": "..."}, validates against MIKE_LOGIN_PASSWORD,
@@ -44,7 +43,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setSessionCookie(w, token, sessionMaxAge)
+	s.setSessionCookie(w, token, sessionMaxAge)
 	w.Header().Set("X-CSRF-Token", csrfToken)
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -69,7 +68,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = s.sessionMgr.Logout(cookie.Value)
-	clearSessionCookie(w)
+	s.clearSessionCookie(w)
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -93,7 +92,7 @@ func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // setSessionCookie sets the SESSION cookie with secure flags.
-func setSessionCookie(w http.ResponseWriter, token string, maxAge int) {
+func (s *Server) setSessionCookie(w http.ResponseWriter, token string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    token,
@@ -101,12 +100,12 @@ func setSessionCookie(w http.ResponseWriter, token string, maxAge int) {
 		MaxAge:   maxAge,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   sessionCookieSecure,
+		Secure:   s.cookieSecure,
 	})
 }
 
 // clearSessionCookie removes the SESSION cookie.
-func clearSessionCookie(w http.ResponseWriter) {
+func (s *Server) clearSessionCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
@@ -114,6 +113,6 @@ func clearSessionCookie(w http.ResponseWriter) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   sessionCookieSecure,
+		Secure:   s.cookieSecure,
 	})
 }

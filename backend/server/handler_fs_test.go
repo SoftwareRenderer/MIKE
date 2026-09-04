@@ -58,9 +58,9 @@ func TestGitAuthorFlagCmd(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			origName, origEmail := git.GitAuthorName, git.GitAuthorEmail
-			t.Cleanup(func() { git.GitAuthorName, git.GitAuthorEmail = origName, origEmail })
-			git.GitAuthorName, git.GitAuthorEmail = tc.who, tc.email
+			origName, origEmail := git.AuthorIdentity()
+			t.Cleanup(func() { git.SetAuthorIdentity(origName, origEmail) })
+			git.SetAuthorIdentity(tc.who, tc.email)
 
 			if got := gitAuthorFlagCmd(); got != tc.want {
 				t.Fatalf("gitAuthorFlagCmd() = %q, want %q", got, tc.want)
@@ -87,16 +87,15 @@ func TestGitAuthorFlagCmd_ShellSafety(t *testing.T) {
 		"'; touch " + canaryPath + " ; ' -c user.name=evil",
 	}
 
-	origName, origEmail := git.GitAuthorName, git.GitAuthorEmail
-	defer func() { git.GitAuthorName, git.GitAuthorEmail = origName, origEmail }()
+	origName, origEmail := git.AuthorIdentity()
+	defer func() { git.SetAuthorIdentity(origName, origEmail) }()
 
 	for _, payload := range payloads {
 		t.Run(payload, func(t *testing.T) {
 			cleanCanary()
 			// Inject the payload into both name and email so every component
 			// produced by GitAuthorFlags() / shellQuote is exercised.
-			git.GitAuthorName = payload
-			git.GitAuthorEmail = payload + "@x.com"
+			git.SetAuthorIdentity(payload, payload+"@x.com")
 
 			flagCmd := gitAuthorFlagCmd()
 
@@ -144,8 +143,8 @@ func TestFSMkdirNoProject(t *testing.T) {
 // parsed back by a POSIX shell, reconstructs the original author identity value
 // as a single argument.
 func TestGitAuthorFlagCmd_RoundTrip(t *testing.T) {
-	origName, origEmail := git.GitAuthorName, git.GitAuthorEmail
-	defer func() { git.GitAuthorName, git.GitAuthorEmail = origName, origEmail }()
+	origName, origEmail := git.AuthorIdentity()
+	defer func() { git.SetAuthorIdentity(origName, origEmail) }()
 
 	cases := []struct {
 		name  string
@@ -161,8 +160,7 @@ func TestGitAuthorFlagCmd_RoundTrip(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			git.GitAuthorName = c.name
-			git.GitAuthorEmail = c.email
+			git.SetAuthorIdentity(c.name, c.email)
 
 			flagCmd := gitAuthorFlagCmd()
 

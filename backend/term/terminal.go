@@ -392,6 +392,36 @@ func (tm *TerminalManager) RemoveSession(taskID string) {
 	}
 }
 
+// activeSessionCount reports how many terminal sessions are registered.
+func (tm *TerminalManager) activeSessionCount() int {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	return len(tm.sessions)
+}
+
+// Close terminates every live terminal session. Each holds a PTY and a child shell, which would
+// otherwise outlive shutdown; Server.Shutdown calls this before sandbox cleanup so the kill lands
+// while the container is still there to receive it.
+//
+// Detach under the lock, close outside it: taskTerminal.close waits on the read loop, and the read
+// loop calls back into RemoveSession, which takes this same lock.
+func (tm *TerminalManager) Close() {
+	tm.mu.Lock()
+	sessions := make([]*taskTerminal, 0, len(tm.sessions))
+	for key, session := range tm.sessions {
+		sessions = append(sessions, session)
+		delete(tm.sessions, key)
+	}
+	tm.mu.Unlock()
+
+	for _, session := range sessions {
+		session.close()
+	}
+	if len(sessions) > 0 {
+		log.Printf("terminal: closed %d session(s) on shutdown", len(sessions))
+	}
+}
+
 // RemoveProjectSessions closes all terminal sessions for every task in a project.
 // Called when project sandbox settings change. Container cleanup is handled
 // separately by the caller (StopProjectContainers) to ensure all containers

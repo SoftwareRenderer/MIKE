@@ -8,7 +8,7 @@ type MoveTaskRequest struct {
 // CreateProjectRequest is the request body for creating a project.
 type CreateProjectRequest struct {
 	Path                    string         `json:"path"`
-	GitUrl                  string         `json:"git_url,omitempty"`
+	GitURL                  string         `json:"git_url,omitempty"`
 	Name                    string         `json:"name,omitempty"`
 	SandboxEnabled          bool           `json:"sandbox_enabled"`
 	SandboxNetworkIsolation *bool          `json:"sandbox_network_isolation"`
