@@ -130,18 +130,22 @@ describe('resolveLocaleOffer — when it offers', () => {
         expect(decision.offer).toBe(true);
     });
 
-    it('prefers the exact tag over a primary-subtag match', () => {
+    it('reads the entry by primary subtag too, so a pre-rule index does not go silent', () => {
+        // A pack may only declare a bare subtag (`validateLocale` refuses "zh-CN"), but the
+        // registry index is a published file, not a validated one: an entry generated before
+        // that rule still has to reach the reader it was written for. Both spellings are the
+        // same language here, so the choice between them is the name tie-break, not a guess
+        // about which region the reader wanted.
         const base = makeEntry({ name: 'locale-zh', locale: 'zh', display_name: '中文' });
-        const exact = makeEntry({ name: 'locale-zh-cn', locale: 'zh-CN', display_name: '简体中文' });
-        const decision = resolveLocaleOffer({
-            browserLanguage: 'zh-CN',
-            registry: [base, exact],
-            extensions: [],
-            record: null,
-        });
-        if (!decision.offer) throw new Error('expected an offer');
-        expect(decision.entry).toBe(exact);
-        expect(decision.locale).toBe('zh-CN');
+        const legacy = makeEntry({ name: 'locale-zh-cn', locale: 'zh-CN', display_name: '简体中文' });
+        const both = resolveLocaleOffer({ browserLanguage: 'zh-CN', registry: [legacy, base], extensions: [], record: null });
+        if (!both.offer) throw new Error('expected an offer');
+        expect(both.entry).toBe(base);
+
+        const onlyLegacy = resolveLocaleOffer({ browserLanguage: 'zh-CN', registry: [legacy], extensions: [], record: null });
+        if (!onlyLegacy.offer) throw new Error('expected an offer');
+        expect(onlyLegacy.entry).toBe(legacy);
+        expect(onlyLegacy.locale).toBe('zh-CN');
     });
 
     it('breaks ties on the name, not on the order the registry answered in', () => {

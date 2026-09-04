@@ -95,7 +95,9 @@ test.describe.serial('First-run language offer', () => {
             const entry = await registryPack(page);
             expect(entry, 'global-setup did not resolve the i18n pack commit').toBeTruthy();
             expect(entry.commit).toMatch(/^[0-9a-f]{40}$/);
-            expect(entry.capabilities?.i18n?.locale).toBe('zh-CN');
+            // The pack declares the bare subtag the validator installs (`zh`), not the
+            // browser's regional tag — a `zh-CN` browser is matched to it by primary subtag.
+            expect(entry.capabilities?.i18n?.locale).toBe('zh');
             expect(await installedPack(page)).toBeFalsy();
 
             // --- the offer ---
@@ -119,7 +121,7 @@ test.describe.serial('First-run language offer', () => {
             expect(await catalog, `the pack catalog was not served at ${CATALOG_PATH}`).not.toBeNull();
             await expect
                 .poll(() => page.evaluate(() => document.documentElement.lang), { timeout: 20000 })
-                .toBe('zh-CN');
+                .toBe('zh');
 
             const ext = await installedPack(page);
             expect(ext, 'the pack was not installed').toBeTruthy();
@@ -131,7 +133,7 @@ test.describe.serial('First-run language offer', () => {
             await page.waitForSelector('.project-item', { timeout: 10000 });
             await expect(offer).toHaveCount(0);
             // The pre-paint cache is what keeps the reload from flashing English.
-            expect(await page.evaluate(() => document.documentElement.lang)).toBe('zh-CN');
+            expect(await page.evaluate(() => document.documentElement.lang)).toBe('zh');
         });
     });
 

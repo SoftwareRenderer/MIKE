@@ -98,29 +98,29 @@ describe('loadI18NFromExtensions', () => {
 
     it('applies the enabled pack, resolved against its own served directory', async () => {
         const fetchMock = mockCatalogFetch(JSON.stringify(zh));
-        const res = await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh-CN' })]);
+        const res = await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh' })]);
 
-        expect(res).toEqual({ locale: 'zh-CN', source: '/extensions/tester/pack-zh' });
+        expect(res).toEqual({ locale: 'zh', source: '/extensions/tester/pack-zh' });
         // The URL is resolveAssetURL's answer — the pack's own directory, no new route.
         expect(fetchMock).toHaveBeenCalledWith('/extensions/tester/pack-zh/messages.json', expect.anything());
-        expect(i18n.locale).toBe('zh-CN');
+        expect(i18n.locale).toBe('zh');
         expect(i18n.t('nav.board')).toBe('看板');
-        expect(document.documentElement.lang).toBe('zh-CN');
+        expect(document.documentElement.lang).toBe('zh');
     });
 
     it('stores the applied catalog in the app-settings cache', async () => {
         mockCatalogFetch(JSON.stringify(zh));
-        await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh-CN' })]);
+        await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh' })]);
         expect(store.db.get(CACHE_KEY)).toEqual({
             source: '/extensions/tester/pack-zh',
-            locale: 'zh-CN',
+            locale: 'zh',
             messages: zh,
         });
     });
 
     it('stays in English on malformed JSON and reports it', async () => {
         mockCatalogFetch('{"nav.board": ');
-        const res = await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh-CN' })]);
+        const res = await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh' })]);
 
         expect(res.locale).toBe(DEFAULT_LOCALE);
         expect(i18n.catalog).toBe(null);
@@ -134,7 +134,7 @@ describe('loadI18NFromExtensions', () => {
 
     it('stays in English when the catalog is not an object of strings', async () => {
         mockCatalogFetch(JSON.stringify({ nav: { board: '看板' } }));
-        const res = await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh-CN' })]);
+        const res = await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh' })]);
         expect(res.locale).toBe(DEFAULT_LOCALE);
         expect(i18n.catalog).toBe(null);
     });
@@ -153,7 +153,7 @@ describe('loadI18NFromExtensions', () => {
         en['common.save'] = 'Save';
         try {
             mockCatalogFetch(JSON.stringify({ 'nav.board': '看板' }));
-            await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh-CN' })]);
+            await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh' })]);
 
             expect(i18n.t('nav.board')).toBe('看板');
             expect(i18n.t('common.save')).toBe('Save'); // per-key, not wholesale
@@ -167,7 +167,7 @@ describe('loadI18NFromExtensions', () => {
     it('ignores a disabled pack entirely — no fetch, no text', async () => {
         const fetchMock = mockCatalogFetch(JSON.stringify(zh));
         const res = await loadI18NFromExtensions([
-            makePack({ name: 'pack-zh', locale: 'zh-CN', enabled: false }),
+            makePack({ name: 'pack-zh', locale: 'zh', enabled: false }),
         ]);
 
         expect(res).toEqual({ locale: DEFAULT_LOCALE, source: null });
@@ -177,9 +177,9 @@ describe('loadI18NFromExtensions', () => {
 
     it('drops back to English when the pack goes away (uninstalled, or disabled after applying)', async () => {
         mockCatalogFetch(JSON.stringify(zh));
-        const pack = makePack({ name: 'pack-zh', locale: 'zh-CN' });
+        const pack = makePack({ name: 'pack-zh', locale: 'zh' });
         await loadI18NFromExtensions([pack]);
-        expect(i18n.locale).toBe('zh-CN');
+        expect(i18n.locale).toBe('zh');
 
         // Uninstalled: the row is gone from the list the server just sent.
         const res = await loadI18NFromExtensions([]);
@@ -193,7 +193,7 @@ describe('loadI18NFromExtensions', () => {
     it('refuses an external messages_url and fetches nothing', async () => {
         const fetchMock = mockCatalogFetch(JSON.stringify(zh));
         const res = await loadI18NFromExtensions([
-            makePack({ name: 'pack-zh', locale: 'zh-CN', messagesUrl: 'https://evil.test/zh.json' }),
+            makePack({ name: 'pack-zh', locale: 'zh', messagesUrl: 'https://evil.test/zh.json' }),
         ]);
 
         expect(res.locale).toBe(DEFAULT_LOCALE);
@@ -203,7 +203,7 @@ describe('loadI18NFromExtensions', () => {
 
     it('slugifies the author into the catalog URL, like a css pack', async () => {
         const fetchMock = mockCatalogFetch(JSON.stringify(zh));
-        await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh-CN', author: 'Test Vendor' })]);
+        await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh', author: 'Test Vendor' })]);
         expect(fetchMock.mock.calls[0][0]).toBe('/extensions/test-vendor/pack-zh/messages.json');
     });
 
@@ -214,7 +214,7 @@ describe('loadI18NFromExtensions', () => {
     // prompt locale derivation (T14) will use, because both apply this rule and
     // nothing stores the result.
     describe('two enabled packs', () => {
-        const packZh = makePack({ name: 'pack-zh', locale: 'zh-CN', priority: 1 });
+        const packZh = makePack({ name: 'pack-zh', locale: 'zh', priority: 1 });
         const packJa = makePack({ name: 'pack-ja', locale: 'ja', priority: 1 });
         const packFr = makePack({ name: 'pack-fr', locale: 'fr', priority: 10 });
 
@@ -254,15 +254,15 @@ describe('loadI18NFromExtensions', () => {
     describe('failure policy', () => {
         it('keeps the working catalog when the same pack merely fails to refresh', async () => {
             mockCatalogFetch(JSON.stringify(zh));
-            await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh-CN' })]);
+            await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh' })]);
             err.mockClear();
 
             mockCatalogFetch('nope', false, 500);
-            const res = await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh-CN' })]);
+            const res = await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh' })]);
 
             // Still Chinese — a transient blip must not throw a working UI back
             // to English — and the failure is still reported.
-            expect(res).toMatchObject({ locale: 'zh-CN', kept: true });
+            expect(res).toMatchObject({ locale: 'zh', kept: true });
             expect(i18n.t('nav.board')).toBe('看板');
             expect(err).toHaveBeenCalled();
             expect(String(err.mock.calls[0][0])).toContain('keeping the catalog already in use');
@@ -270,7 +270,7 @@ describe('loadI18NFromExtensions', () => {
 
         it('falls to English when a *different* winner fails to load', async () => {
             mockCatalogFetch(JSON.stringify(zh));
-            await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh-CN' })]);
+            await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh' })]);
 
             mockCatalogFetch('nope', false, 500);
             const res = await loadI18NFromExtensions([makePack({ name: 'pack-fr', locale: 'fr' })]);
@@ -296,7 +296,7 @@ describe('loadI18NFromExtensions', () => {
             }),
         );
 
-        const slow = loadI18NFromExtensions([makePack({ name: 'pack-slow', locale: 'zh-CN' })]);
+        const slow = loadI18NFromExtensions([makePack({ name: 'pack-slow', locale: 'zh' })]);
         const fast = loadI18NFromExtensions([makePack({ name: 'pack-fast', locale: 'ja' })]);
         await fast;
         release();
@@ -311,7 +311,7 @@ describe('loadI18NFromExtensions', () => {
     describe('cache vs reality', () => {
         it('a cached pack that is no longer in the list leaves no cache behind', async () => {
             // Simulate a previous session's cache for a pack that is gone.
-            store.db.set(CACHE_KEY, { source: '/extensions/tester/pack-zh', locale: 'zh-CN', messages: zh });
+            store.db.set(CACHE_KEY, { source: '/extensions/tester/pack-zh', locale: 'zh', messages: zh });
 
             await loadI18NFromExtensions([]); // the live list: no packs
 
@@ -321,7 +321,7 @@ describe('loadI18NFromExtensions', () => {
 
         it('rewrites the cache when the winner changes packs', async () => {
             mockCatalogFetch(JSON.stringify(zh));
-            await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh-CN' })]);
+            await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh' })]);
             mockCatalogFetch(JSON.stringify({ 'nav.board': 'ボード' }));
             await loadI18NFromExtensions([makePack({ name: 'pack-ja', locale: 'ja' })]);
 
@@ -332,8 +332,8 @@ describe('loadI18NFromExtensions', () => {
 
         it('uses the mocked storage helpers rather than IndexedDB directly', async () => {
             mockCatalogFetch(JSON.stringify(zh));
-            await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh-CN' })]);
-            expect(saveAppSetting).toHaveBeenCalledWith(CACHE_KEY, expect.objectContaining({ locale: 'zh-CN' }));
+            await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh' })]);
+            expect(saveAppSetting).toHaveBeenCalledWith(CACHE_KEY, expect.objectContaining({ locale: 'zh' }));
 
             await loadI18NFromExtensions([]);
             expect(deleteAppSetting).toHaveBeenCalledWith(CACHE_KEY);

@@ -464,6 +464,22 @@ export interface LLMExtensionConfig {
     mappings_file?: string; // provider mappings file in the extension dir (default "mappings.json")
 }
 
+// A data-only translation pack: a message catalog and an optional prompt-template overlay,
+// both inside the extension's own directory (no sandbox, mounts, network or permissions).
+// A bare BCP-47 language subtag — "ja", not "ja-JP"; the active language is derived from
+// which pack is enabled, so there is no separate language setting to agree with, and core
+// holds no language names — the tag is carried through verbatim.
+export interface I18NExtensionConfig {
+    locale: string;
+    // Catalog file, relative to /extensions/<author>/<name>/. Resolved with resolveAssetURL,
+    // which rejects an external URL — and the backend refuses to store one, so the two ends
+    // of that fence agree.
+    messages_url: string;
+    // Locale-substituted prompt templates in the same directory (server-side prompt locale,
+    // T14); every *.tmpl there is parse-checked at install.
+    prompts_dir?: string;
+}
+
 export interface NetworkExtensionConfig {
     allowed_domains: string[];
     headers?: Record<string, string>;
@@ -564,20 +580,6 @@ export interface UIExtensionConfig {
 
 export interface CSSExtensionConfig {
     css_url: string; // global stylesheet path (resolved against the extension's own served directory; external URLs are rejected)
-}
-
-/**
- * A translation pack (mirrors backend `I18NConfig`). The enabled pack *is* the
- * active language — there is no `language` setting anywhere, on either side.
- *
- * `messages_url` is a file inside the extension's own served directory; it is
- * resolved with `resolveAssetURL`, which rejects an external URL, and the
- * backend refuses to store one (`I18NConfig.Validate`).
- */
-export interface I18NExtensionConfig {
-    locale: string; // BCP 47 tag, carried through verbatim — core holds no language names
-    messages_url: string; // catalog file, relative to /extensions/<author>/<name>/
-    prompts_dir?: string; // locale-substituted prompt templates (server-side prompt locale, T14)
 }
 
 export interface ConfigSchema {

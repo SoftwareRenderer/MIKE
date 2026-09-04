@@ -57,7 +57,9 @@
         "subdir": "i18n/locale-zh",
         "capabilities": {
             "i18n": {
-                "locale": "zh-CN"
+                "locale": "zh",
+                "messages_url": "messages.json",
+                "has_prompts": false
             }
         }
     }

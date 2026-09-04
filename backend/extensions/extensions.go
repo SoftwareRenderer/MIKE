@@ -23,8 +23,10 @@ const (
 	ExtensionTypeAgent = "agent"
 	ExtensionTypeLLM   = "llm"
 	// ExtensionTypeI18N is a translation pack: a catalog file the frontend loads
-	// to render the UI in the pack's locale. It executes nothing — its whole
-	// surface is static files served from its own directory.
+	// to render the UI in the pack's locale, plus optionally translated prompt
+	// templates. It executes nothing — its whole surface is static files served
+	// from its own directory, which is why it gets no sandbox, no mounts, no
+	// network and no permissions.
 	ExtensionTypeI18N = "i18n"
 )
 
@@ -82,7 +84,7 @@ type Capabilities struct {
 	Agent   *AgentConfig   `json:"agent,omitempty"`
 	Network *NetworkConfig `json:"network,omitempty"` // server-side network capability
 	LLM     *LLMConfig     `json:"llm,omitempty"`     // provider request adaptation
-	I18N    *I18NConfig    `json:"i18n,omitempty"`    // translation pack (UI catalog + prompt locale)
+	I18N    *I18NConfig    `json:"i18n,omitempty"`    // data-only translation pack (UI catalog + prompt templates)
 }
 
 // GetLSP returns the LSP capability, or nil if not present.
@@ -117,7 +119,7 @@ func (c *Capabilities) GetLLM() *LLMConfig {
 	return c.LLM
 }
 
-// GetI18N returns the i18n (translation pack) capability, or nil if not present.
+// GetI18N returns the translation-pack capability, or nil if not present.
 func (c *Capabilities) GetI18N() *I18NConfig {
 	if c == nil {
 		return nil
@@ -125,22 +127,32 @@ func (c *Capabilities) GetI18N() *I18NConfig {
 	return c.I18N
 }
 
-// I18NConfig defines a translation pack. A pack is the language: the active
-// locale *is* whichever enabled pack wins the ordering rule (English when none),
-// so nothing here is ever stored as a setting — it is read from the manifest and
-// derived at request/render time. See ActiveI18N for the one derivation.
+// I18NConfig declares a translation pack: translated strings for the interface, plus an
+// optional overlay of translated prompt templates. Both live inside the extension's own
+// directory, which is the whole security argument — a pack is read as data by the host and
+// therefore gets **no sandbox, no mounts, no network and no permissions**. It declares no
+// executable of any kind, so a manifest that pairs `i18n` with any other capability is
+// refused (validateI18N in manifest_validate.go) rather than installed as a pack that also
+// runs something.
+//
+// Which language is active is not a setting: it is derived from which pack is enabled —
+// ActiveI18N here, resolveI18NPack in the browser — so there is no `language` field to keep
+// in sync with this one, and nothing here is stored as a preference.
 type I18NConfig struct {
-	// Locale is the BCP 47 tag this pack translates to (e.g. "zh-CN"). Core
-	// holds no language names; this value is carried through verbatim.
+	// Locale is a bare BCP-47 language subtag — "zh", "fr", "ko". Not a full locale tag: a
+	// pack is one language, and the spelling of that one language is what the registry index
+	// and a browser's `navigator.language` have to agree on (validateLocale refuses "zh-CN"
+	// rather than guessing which of zh-CN and zh-TW a reader wants). Core holds no language
+	// names; this value is carried through verbatim.
 	Locale string `json:"locale"`
-	// MessagesURL is the catalog file inside the extension's own directory
-	// (e.g. "messages.json"), resolved against /extensions/<author>/<name>/ by
-	// the frontend. A scheme or protocol-relative URL is refused by Validate —
-	// a pack must not point the app at a remote origin.
+	// MessagesURL is the message catalog, relative to the extension's own directory. Required:
+	// the catalog is the pack. A URL with a scheme is refused — a translation file is the one
+	// piece of the interface that reaches every screen, so it is not fetched from a host the
+	// user never chose. The frontend resolves it the same way a css pack's `css_url` is.
 	MessagesURL string `json:"messages_url"`
-	// PromptsDir is the directory of locale-substituted prompt templates this
-	// pack supplies, relative to the extension directory. Consumed by the
-	// server-side prompt locale derivation (T14), not by the UI.
+	// PromptsDir optionally names a directory of translated prompt templates inside the pack,
+	// same containment rules as the catalog. Checked at install, read by ActiveI18N's consumer
+	// (the server-side prompt locale), not by the UI.
 	PromptsDir string `json:"prompts_dir,omitempty"`
 }
 

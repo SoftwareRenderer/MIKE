@@ -49,13 +49,14 @@ export type LocaleKey = MessageKey | (string & {});
 export type MessageParams = Record<string, string | number>;
 
 /**
- * `zh-Hans`, `zh-Hant`, `ja`, `ko`, `fr-FR`… Anything looser is not a tag.
+ * `zh`, `fr`, `zh-Hans-CN`… Anything looser is not a tag.
  *
- * Deliberately the same shape as `bcp47ish` (`backend/extensions/manifest_validate.go`),
- * which is what accepted the locale when the pack was installed: a stricter rule here
- * would silently keep a valid pack in English (`setCatalog` reads an unmatched tag as
- * "no pack"), and a looser one would accept a tag the server refuses to store. The
- * server's 35-char cap is enforced there at install/PUT time, so nothing here repeats it.
+ * Deliberately a **superset** of the rule a pack is installed under:
+ * `validateLocale` (`backend/extensions/manifest_validate.go`) holds a pack's declared
+ * locale to one bare subtag ("zh", never "zh-CN"), but this runtime also renders tags
+ * that predate that rule and any tag `setLocale` is handed in a test. Rejecting them
+ * here would be the worse failure — `setCatalog` reads an unparseable tag as "no pack",
+ * so a reader with a perfectly good catalog would silently lose their language.
  */
 const TAG_RE = /^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/;
 
