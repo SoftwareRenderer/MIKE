@@ -1,4 +1,5 @@
 import type { Transport } from '@codemirror/lsp-client';
+import { t } from '$lib/i18n';
 import { resolveFile } from './editor-language';
 
 /**
@@ -97,7 +98,7 @@ class SharedLSPConnection {
         const onErr = () => {
           w.removeEventListener('open', onOpen);
           w.removeEventListener('error', onErr);
-          reject(new Error('LSP WebSocket failed'));
+          reject(new Error(t('lsp.websocketFailed')));
         };
         w.addEventListener('open', onOpen);
         w.addEventListener('error', onErr);
@@ -131,7 +132,7 @@ class SharedLSPConnection {
         if (this.ws === ws) {
           this.connectPromise = null;
         }
-        reject(new Error('LSP WebSocket error'));
+        reject(new Error(t('lsp.websocketError')));
       });
 
       ws.addEventListener('close', () => {

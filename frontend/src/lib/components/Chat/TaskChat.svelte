@@ -16,7 +16,7 @@
     import { DRAFT_SAVE_DEBOUNCE_MS } from '$lib/constants';
     import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     import { effectiveStartTaskKey, matchShortcut } from '$lib/utils/keyboard';
-    import { reselectProvider } from '$lib/utils/providers';
+    import { reselectProvider, getProviderDisplayName } from '$lib/utils/providers';
     import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { wsConnection } from '$lib/stores/connection';
@@ -105,6 +105,18 @@
         if (selectedUrl.startsWith(AGENT_URL_PREFIX)) return true;
         const p = providers.find(p => p.url === selectedUrl);
         return p ? isAgentProvider(p) : false;
+    });
+
+    /**
+     * The selected provider's own name — for an agent that is its manifest's
+     * `display_name`, which is the only place an agent's name comes from. This replaced a
+     * literal `'Pi'` that printed one agent's name whatever the user had installed; core
+     * names no agent. Empty when nothing is selected, which lets `MessageStats` answer
+     * with its own `chat.stats.modelFallback`.
+     */
+    let selectedProviderName = $derived.by(() => {
+        const p = providers.find(p => p.url === selectedUrl);
+        return p ? getProviderDisplayName(p, providers) : '';
     });
 
     // Stream state — managed by StreamState service (reactive via $state())
@@ -755,7 +767,7 @@
                     content: result.summary || t('chat.stream.summarized'),
                     isStreaming: false,
                     createdAt: new Date().toISOString(),
-                    stats: { model_name: selectedModel || 'Pi', prompt_tokens: 0, predicted_tokens: 0, prompt_ms: 0, predicted_ms: 0, duration: 0 },
+                    stats: { model_name: selectedModel || selectedProviderName, prompt_tokens: 0, predicted_tokens: 0, prompt_ms: 0, predicted_ms: 0, duration: 0 },
                 }];
             } else {
                 // LLM mode: summarize via backend (runs in background, result arrives via WebSocket).

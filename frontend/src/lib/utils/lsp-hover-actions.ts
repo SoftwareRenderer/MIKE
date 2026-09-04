@@ -20,6 +20,7 @@
  */
 
 import { EditorView, ViewPlugin, showTooltip, type PluginValue, type Tooltip, type TooltipView, type ViewUpdate } from '@codemirror/view';
+import { t } from '$lib/i18n';
 import { StateEffect, StateField, type Extension, type Text } from '@codemirror/state';
 import DOMPurify from 'dompurify';
 import { LSPPlugin } from '@codemirror/lsp-client';
@@ -225,7 +226,7 @@ export class HoverCard {
         this.button = document.createElement('button');
         this.button.type = 'button';
         this.button.className = 'cm-lsp-action-button';
-        this.button.textContent = 'Go to Definition';
+        this.button.textContent = t('lsp.goToDefinition');
         this.button.addEventListener('click', e => {
             e.preventDefault();
             e.stopPropagation();

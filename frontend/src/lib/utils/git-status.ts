@@ -8,16 +8,26 @@
  * GitStatusPanel.svelte), and diff-file badges come from `getStatusBadge` in diff-parser.
  */
 
-/** Human-readable name for a status letter, used in `title`/`aria-label` text. */
+import { t } from '$lib/i18n';
+
+/**
+ * Human-readable name for a status letter.
+ *
+ * It answers in the active language, because it is asked in two places and only one of
+ * them is a bare tooltip: the changes panel passes it to a `title`, and BranchFileBrowser
+ * passes it as the status word *inside* a translated `aria-label`
+ * (`explorer.branchFiles.gitStatusAria`) — where an English word in a Japanese sentence is
+ * the half-translation this file exists to avoid. English renders byte-identical either way.
+ */
 export function gitStatusLabel(char: string): string {
     switch (char) {
-        case 'M': return 'Modified';
-        case 'A': return 'Added';
-        case 'D': return 'Deleted';
-        case '?': return 'Untracked';
-        case 'R': return 'Renamed';
-        case 'U': return 'Unmerged';
-        case 'C': return 'Copied';
+        case 'M': return t('git.status.modified');
+        case 'A': return t('git.status.added');
+        case 'D': return t('git.status.deleted');
+        case '?': return t('git.status.untracked');
+        case 'R': return t('git.status.renamed');
+        case 'U': return t('git.status.unmerged');
+        case 'C': return t('git.status.copied');
         default: return char;
     }
 }

@@ -1,19 +1,24 @@
 // TypeScript interfaces matching backend Go types
 
-/** Maps raw tool names to their UI display names (fallback for old persisted messages). */
-const TOOL_DISPLAY_NAMES: Record<string, string> = {
-    read_file: 'Read',
-    write_file: 'Write',
-    edit_file: 'Edit',
-    bash: 'Execute',
-    ask_question: 'Question',
-    request_review: 'Done',
+import { t, type MessageKey } from '$lib/i18n';
+
+/** Raw tool name → the catalog key naming it (the fallback for old persisted messages).
+ *  Keys, not translated strings: a `t()` evaluated here would freeze whatever locale the
+ *  module happened to load in, and a language switch must re-render a tool badge. */
+const TOOL_DISPLAY_KEYS: Record<string, MessageKey> = {
+    read_file: 'tool.read',
+    write_file: 'tool.write',
+    edit_file: 'tool.edit',
+    bash: 'tool.execute',
+    ask_question: 'tool.question',
+    request_review: 'tool.done',
 };
 
 /** Returns the display name for a tool, falling back to the raw name. */
 export function getToolDisplayName(displayName: string | undefined, toolName: string): string {
     if (displayName) return displayName;
-    return TOOL_DISPLAY_NAMES[toolName] || toolName;
+    const key = TOOL_DISPLAY_KEYS[toolName];
+    return key ? t(key) : toolName;
 }
 
 export interface PortForward {
@@ -265,14 +270,22 @@ export interface ProviderModel {
     power_consumption_w?: number;
 }
 
-/** Known reasoning effort levels offered as suggestions; any other value is a custom effort passed through verbatim to the server. */
-export const REASONING_EFFORT_OPTIONS: Array<{ value: string; label: string }> = [
-    { value: 'default', label: 'Default' },
-    { value: 'none', label: 'None' },
-    { value: 'low', label: 'Low' },
-    { value: 'medium', label: 'Medium' },
-    { value: 'high', label: 'High' },
-];
+/**
+ * Known reasoning effort levels offered as suggestions; any other value is a custom effort
+ * passed through verbatim to the server.
+ *
+ * A function, not a const array: its labels are locale-derived, and a module-scope `t()`
+ * answer is computed once and then outlives every language switch (the `usdSymbol` bug).
+ */
+export function reasoningEffortOptions(): Array<{ value: string; label: string }> {
+    return [
+        { value: 'default', label: t('effort.default') },
+        { value: 'none', label: t('effort.none') },
+        { value: 'low', label: t('effort.low') },
+        { value: 'medium', label: t('effort.medium') },
+        { value: 'high', label: t('effort.high') },
+    ];
+}
 
 export interface Provider {
     id?: number;               // stable identifier for LLM providers; URL stays editable

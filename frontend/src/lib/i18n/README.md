@@ -65,14 +65,16 @@ picker, because the enabled pack *is* the language (`docs/i18n.md`).
 ## Namespaces
 
 Keys are grouped by area, one flat dotted namespace per area, declared in a `═══ namespace
-═══` banner in `en.ts`. Landed so far:
+═══` banner in `en.ts`. Every batch has landed, so this is the whole list:
 
-`app.*` · `board.*` · `task.*` · `chat.*` · `explorer.*` · `settings.*` · `sandbox.*` ·
-`terminal.*` · `api.*` · `attachments.*`
+`app.*` · `board.*` / `boardDnd.*` · `task.*` · `chat.*` · `explorer.*` · `settings.*` ·
+`sandbox.*` · `terminal.*` · `api.*` · `attachments.*` · `editor.*` / `lsp.*` ·
+`diff.*` / `git.*` · `time.*` · `host.*` · `memory.*` · `storage.*` · `swUpdate.*` ·
+`tool.*` · `effort.*` · `i18n.offer.*`
 
-Reserved for the batches that have not landed: `card.*`, `editor.*`, `diff.*`, `git.*`,
-`time.*`, `format.*`, and `common.*` for the shared verbs (Cancel / Confirm / Save / Delete /
-Close / Retry …).
+`common.*` (shared verbs) stayed reserved: each area kept its own copy of Cancel / Save /
+Close, and renaming landed keys to share them costs more than the duplication — see the
+stability rule above.
 
 - A new string goes in **its area's** namespace, named for what it says, not for the component
   that renders it (`chat.args.lspRenameTo`, not `chat.message.line12`).
@@ -185,6 +187,15 @@ The same argument covers the 48 e2e locators of the shape
 `getByRole('button', { name })`: the accessible name is the `aria-label`, so those locators
 never move.
 
+**One exception, and it is a different kind of string.** When a labelling attribute prints a
+word that is *already* a visible label elsewhere, it resolves through that key rather than
+carrying a second table of the same words: a card's `Move to {status}` names the status with
+the `board.column.*` keys the column header above it uses (`Card.svelte`). Duplicating that
+vocabulary is how a translation ends up with two names for one state, and a pack that
+translates the heading then leaves the card's copy behind. The safety argument is
+unaffected — the key is typed (`MessageKey`), so it cannot be missing, and English renders
+byte-identical, so no locator moves.
+
 Consequences, accepted deliberately:
 
 - A tooltip (`title`) can be a different language from the sentence next to it.
@@ -200,20 +211,32 @@ Consequences, accepted deliberately:
   error: it half-converts a component. Copying the `…Aria` key style from the settings/explorer
   batches into them is the same mistake — pick one shape per component, not one per repository.
 
-## Measuring a batch: `i18n-count.py`
+## Measuring the tree: `i18n-count.py`
 
-`cd frontend && python3 i18n-count.py [-v]` counts candidate strings per file — template text
-nodes, plus quoted literals in `<script>`, in `.ts` modules, and inside template mustache
-expressions. It excludes by **context, never by string identity** (so a real hole still
-measures): the labelling attributes above, comments, `<style>`, `console.*` arguments,
-property-key position, key-comparison context (`e.key === 'ArrowDown'`), technical APIs
-(`addEventListener`, `querySelector<T>(`, IndexedDB key helpers) and non-prose tokens
-(identifiers, paths, selectors, dotted message keys, `clone-pending-${ts}`, `&times;`, and
-interpolated literals with no prose of their own — `modal ${cls}`,
-`/api/projects/${id}/git/branches`).
+`cd frontend && python3 i18n-count.py [-v]` counts candidate strings per file over **all of
+`src/`** — template text nodes, plus quoted literals in `<script>`, in `.ts` modules, and
+inside template mustache expressions. It excludes by **context, never by string identity**
+(so a real hole still measures): the labelling attributes above, comments, `<style>`,
+`console.*` arguments, property-key position, key-comparison context
+(`e.key === 'ArrowDown'`), technical APIs (`addEventListener`, `querySelector<T>(`,
+IndexedDB key helpers), non-prose tokens (identifiers, paths, selectors, dotted message
+keys, `clone-pending-${ts}`, `&times;`, interpolated literals with no prose of their own —
+`modal ${cls}`, `/api/projects/${id}/git/branches`), embedded source code, CSS declaration
+values, terminal keycaps and syntax keyword tables.
 
-A batch is done when its own list reaches `0`. The number a batch reports must be its own file
-list measured with the same script before and after — e.g. the app-shell batch measured
-`85 → 0` (the `85` re-measured on pristine `HEAD` copies of those 23 files, so rule changes
-cannot move the baseline). Known limit: a prose word inside an identifier, a CSS file or a
-server response is not counted — the `-v` listing is the thing to read, not just the total.
+**It is a gate, not a report: any candidate exits non-zero.** `npm run check:i18n-surface`
+is it, and `make test-frontend` runs it beside `npm test`, `i18n-gate.py` and the counter's
+own self-test — so a new literal in a component cannot land on a green suite. The tree is at
+**0 across 190 files**; keep it there.
+
+Passing file or directory arguments measures a subset, which is how a change to one area
+checks itself before running the whole gate.
+
+`i18n-count_test.py` is what makes the exclusions trustworthy: every rule is pinned **in both
+directions** — real copy in a lookalike position still measures, the lookalike does not.
+That is the only defence against the gate lying by going blind, which has already happened
+once (a `x || 'Loading…'` was swallowed by the union-type rule). Run it after touching any
+exclusion.
+
+Known limit: a prose word inside an identifier, a CSS file or a server response is not
+counted — the `-v` listing is the thing to read, not just the total.

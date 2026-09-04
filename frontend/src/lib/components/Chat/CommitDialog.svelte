@@ -91,7 +91,7 @@
 
             const reader = res.body?.getReader();
             if (!reader) {
-                throw new Error('No response body');
+                throw new Error(t('git.noResponseBody'));
             }
 
             const decoder = new TextDecoder();

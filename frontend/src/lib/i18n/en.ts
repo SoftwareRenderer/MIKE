@@ -1434,6 +1434,185 @@ const catalog = {
     'i18n.offer.never': "Don't ask again",
     'i18n.offer.failed': 'Could not install the {language} language pack',
 
+    // ════════════════════════════════════════════════════════════════════════════
+    // ═══ namespace: diff.* / git.* — diff + git surface batch                     ═══
+    // ═══ (DiffViewer.svelte, CommitDiffOverlay.svelte, GitStatusPanel.svelte,     ═══
+    // ═══  Chat/CommitDialog.svelte, BranchGitGraph.svelte,                        ═══
+    // ═══  utils/diff-parser.ts, utils/git-status.ts, utils/git-gutter.ts)         ═══
+    // ═══                                                                          ═══
+    // ═══ Like every batch: a `title` / `aria-label` written at the tag stays a     ═══
+    // ═══ literal here too, so no e2e `getByRole(name)` locator can move.           ═══
+    // ════════════════════════════════════════════════════════════════════════════
+
+    // --- Shared across the three diff surfaces ---------------------------------
+    'diff.shared.loading': 'Loading...',
+    'diff.shared.file': { one: '{count} file', other: '{count} files' },
+
+    // --- DiffViewer -----------------------------------------------------------
+    'diff.binaryWithSize': 'Binary file — {size}',
+    'diff.largeWithSize': 'Large file — {size} (+{added}/-{removed})',
+    'diff.largeFile': 'Large file — {size}',
+    'diff.emptyFile': 'Empty file',
+    // The collapsed-run control: the count is in the sentence, so the plural lives
+    // with it rather than in a hand-rolled `count !== 1 ? 's' : ''`.
+    'diff.hideLines': { one: 'Hide {count} unmodified line', other: 'Hide {count} unmodified lines' },
+    'diff.showLines': { one: 'Show {count} unmodified line', other: 'Show {count} unmodified lines' },
+    'diff.showFull': 'Show full diff',
+    'diff.untracked': 'untracked',
+    // The porcelain status letter. A pack that keeps git's own letters answers 'A';
+    // the key exists so that is a choice it makes rather than a hole it inherits.
+    'diff.badgeAdded': 'A',
+    'diff.loadLines': { one: 'Load {count} line', other: 'Load {count} lines' },
+    'diff.loadingChanges': 'Loading changes...',
+    'diff.noChanges': 'No changes since last commit',
+    'diff.staged': 'Staged',
+    'diff.unstaged': 'Unstaged',
+
+    // --- CommitDiffOverlay ----------------------------------------------------
+    'diff.loadingDiff': 'Loading diff...',
+    'diff.noChangesInCommit': 'No changes in this commit',
+    'diff.binaryFile': 'Binary file',
+    'diff.deletedFile': 'Deleted file',
+    'diff.showAllChanges': 'Show all changes',
+    'diff.oldSide': 'Old',
+    'diff.newSide': 'New',
+
+    // --- GitStatusPanel -------------------------------------------------------
+    'git.fetchDiffFailed': 'Failed to fetch diff',
+    'git.current': 'Current',
+    'git.pulledFromRemote': 'Pulled from remote',
+    'git.pullFailed': 'Pull failed',
+    'git.pushedToRemote': 'Pushed to remote',
+    'git.pushFailed': 'Push failed',
+    'git.repoChangedTitle': 'Repository has changed',
+    'git.repoChangedMessage':
+        'The repository has been modified since you opened this panel (e.g., a merge or checkout). Refresh before committing?',
+    'git.refreshAndCommit': 'Refresh and commit',
+    'git.commitAnyway': 'Commit anyway',
+    'git.commit': 'Commit',
+    'git.cancel': 'Cancel',
+    'git.commitFailed': 'Commit failed',
+    'git.changes': 'Changes',
+    'git.noMatchingCommits': 'No matching commits',
+    // The `sr-only` live region: announced text is as user-facing as visible text.
+    'git.loadingCommitDiff': 'Loading commit diff',
+    'git.diffError': 'Diff error:',
+    'git.showingDiffWith': 'Showing diff with',
+    'git.loadingDiffViewer': 'Loading diff viewer...',
+    'git.noResponseBody': 'No response body',
+    // git's default remote is named `origin`; a pack keeps the word (a reader types it
+    // into git), and the key is what makes "keep it" sayable instead of "nothing shipped".
+    'git.remoteOrigin': 'origin',
+    // Status letters are `M`/`A`/`D`/`?`/`R`/`U`/`C`; these are the words behind them.
+    // `gitStatusLabel` answers for both a `title` (GitStatusPanel) and the status word
+    // inside a translated `aria-label` (BranchFileBrowser), so it is copy, not a token.
+    'git.status.modified': 'Modified',
+    'git.status.added': 'Added',
+    'git.status.deleted': 'Deleted',
+    'git.status.untracked': 'Untracked',
+    'git.status.renamed': 'Renamed',
+    'git.status.unmerged': 'Unmerged',
+    'git.status.copied': 'Copied',
+
+    // ════════════════════════════════════════════════════════════════════════════
+    // ═══ namespace: editor.* / lsp.* — editor + terminal batch                   ═══
+    // ═══ (FileEditor.svelte, EditorFooter.svelte, EditorTabs.svelte,              ═══
+    // ═══  FileSearchPanel.svelte, CustomSearchPanel.svelte, TerminalPanel.svelte, ═══
+    // ═══  BranchSymbols.svelte, CardDetail/TaskHeader.svelte,                     ═══
+    // ═══  utils/lsp-hover-actions.ts, utils/lsp-symbols.ts,                       ═══
+    // ═══  utils/lsp-connection-manager.ts)                                        ═══
+    // ═══                                                                          ═══
+    // ═══ The terminal's on-screen keyboard (`esc`, `pgup`, `ctrl`) is not here:   ═══
+    // ═══ those are key names printed on a keyboard, the same class as the `/` and ═══
+    // ═══ `-` keys beside them, and a pack has no better answer for them.          ═══
+    // ════════════════════════════════════════════════════════════════════════════
+    'editor.save': 'Save',
+    'editor.saving': 'Saving...',
+    'editor.loadingFile': 'Loading file...',
+    'editor.loadingEditor': 'Loading editor...',
+    'editor.fileNotFound': 'File not found',
+    'editor.fileTooLarge': 'File too large to edit (max 1MB)',
+    'editor.readFailed': 'Failed to read file',
+    'editor.saveFailed': 'Failed to save',
+    'editor.unsavedTitle': 'Unsaved Changes',
+    'editor.unsavedMessage': 'You have unsaved changes. Discard them?',
+    'editor.keepEditing': 'Keep Editing',
+    // The template wrote this as `Discard &amp; Close`; a catalog value is the
+    // character, and Svelte re-escapes it on the way out — same pixels.
+    'editor.discardAndClose': 'Discard & Close',
+    'editor.externalConflict':
+        '"{name}" was changed externally and overlaps your unsaved edits. Your edits were kept.',
+    'editor.createSubtaskFromLines': 'Create a subtask from selected lines',
+    'editor.createTaskFromLines': 'Create a task from selected lines',
+    // Both halves of the status bar were assembled from fragments (`Ln {n},` + ` Col {m}`),
+    // which fixes the word order English wants; one key each lets a pack choose its own.
+    'editor.fileStats': '{lines} lines · {chars} chars',
+    'editor.cursorPosition': 'Ln {line}, Col {col}',
+    'editor.wrap': 'Wrap',
+    'editor.find': 'Find',
+    'editor.searching': 'Searching...',
+    'editor.noResults': 'No results',
+    'editor.noResultsFound': 'No results found',
+    'editor.searchFailed': 'Search failed ({status})',
+    'editor.matches': { one: '{count} match', other: '{count} matches' },
+    'editor.results': { one: '{count} result', other: '{count} results' },
+    'editor.searchInProject': 'Search in project',
+    'editor.replace': 'Replace',
+    'editor.replaceAll': 'All',
+
+    'lsp.provider': 'LSP Provider',
+    'lsp.status': 'Status',
+    'lsp.connected': 'Connected',
+    'lsp.connecting': 'Connecting...',
+    'lsp.sandboxMemory': 'Sandbox Memory',
+    'lsp.log': 'LSP Log',
+    // These three reach the footer's error cell (`{lspError}`), so a rejected Error here
+    // is rendered text, exactly like the `t()` inside `throw new Error(...)` under api/.
+    'lsp.websocketFailed': 'LSP WebSocket failed',
+    'lsp.websocketError': 'LSP WebSocket error',
+    'lsp.symbolTimeout': 'LSP symbol request timeout',
+    'lsp.goToDefinition': 'Go to Definition',
+    'lsp.definitionOutsideTask': 'Definition is outside this task workspace',
+    'lsp.definitionOutsideProject': 'Definition is outside this project workspace',
+
+    // The sandbox-memory tooltip the task header builds for its own title attribute.
+    'task.sandboxTip.oomKills': { one: ' · {count} OOM kill', other: ' · {count} OOM kills' },
+    'task.sandboxTip.peakReachedLimit': ' · peak reached limit',
+    'task.sandboxTip.clickForDetails': '{title} (click for details)',
+
+    // --- the leftovers this batch also owns ---------------------------------
+    'storage.unavailable': 'IndexedDB not available',
+    // Tool badges on a persisted message. The ids above them stay the wire names; these
+    // are the words under them, resolved per call so a language switch re-renders them
+    // (a module-scope `t()` would freeze whatever locale booted).
+    'tool.read': 'Read',
+    'tool.write': 'Write',
+    'tool.edit': 'Edit',
+    'tool.execute': 'Execute',
+    'tool.question': 'Question',
+    'tool.done': 'Done',
+    'effort.default': 'Default',
+    'effort.none': 'None',
+    'effort.low': 'Low',
+    'effort.medium': 'Medium',
+    'effort.high': 'High',
+    // Settings → About. The year and the name are data, so they are parameters rather
+    // than a string that quietly goes stale.
+    'app.copyright': '© {year} {name}',
+    'memory.noLimit': 'No limit',
+    'memory.notRunning': 'Not running',
+    'memory.currentNoLimit': '{mb} MB (no limit)',
+    'swUpdate.available': 'New version available',
+    'swUpdate.reload': 'Reload',
+    // The extension host's own status line — the two strings core renders itself, as
+    // opposed to the ones an extension supplies through `host.setError`.
+    'host.loading': 'Loading…',
+    'host.error': 'Extension error',
+    'host.shownBy': 'Shown by {name}',
+    // The confirm button's label when the extension did not supply one — core's own
+    // default, not the extension's text, so it is core's to translate.
+    'host.ok': 'OK',
+
     // ↓ keys from the other owned files of this batch are appended below this line ↓
 } satisfies Record<string, MessageValue>;
 

@@ -57,12 +57,12 @@
                 : ` · ${stats.memory_current_mb} MB`;
         }
         if (stats && stats.oom_kills > 0) {
-            title += ` · ${stats.oom_kills} OOM kill${stats.oom_kills > 1 ? 's' : ''}`;
+            title += t('task.sandboxTip.oomKills', { count: stats.oom_kills });
         }
         if (isMemoryLimitReached(stats)) {
-            title += ' · peak reached limit';
+            title += t('task.sandboxTip.peakReachedLimit');
         }
-        return `${title} (click for details)`;
+        return t('task.sandboxTip.clickForDetails', { title });
     });
 
     // Terminal button tooltip — always shows the effective shortcut (tooltips

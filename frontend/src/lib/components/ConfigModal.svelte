@@ -10,7 +10,6 @@
     import { appStore, uiStore, dialogStore } from '$lib/stores';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import BaseModal from './BaseModal.svelte';
-    import { REASONING_EFFORT_OPTIONS } from '$lib/types';
     import ToggleSwitch from './ToggleSwitch.svelte';
     import TaskDefaults from './ConfigModal/TaskDefaults.svelte';
     import PreferencesTab from './ConfigModal/PreferencesTab.svelte';
@@ -830,7 +829,7 @@
                     <div class="about-icon">{@html pwaIcon}</div>
                     <div>
                         <h3 class="section-label">{t('settings.aboutTitle')} <span class="about-version">{config?.version || 'dev'}</span></h3>
-                        <p class="about-description">© 2026 Mike Wren</p>
+                        <p class="about-description">{t('app.copyright', { year: 2026, name: 'Mike Wren' })}</p>
                         <p class="about-description">
                             <a href="https://github.com/SoftwareRenderer" target="_blank" rel="noopener noreferrer">
                                 <span>github.com/SoftwareRenderer</span>

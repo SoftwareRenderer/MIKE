@@ -3,6 +3,7 @@
     import type { DiffFile } from '$lib/types/diff';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
     import { gitStatusLabel } from '$lib/utils/git-status';
+    import { t } from '$lib/i18n';
     import { getGitStatus, getProjectDiff, getProjectDiffFile, stageProjectFile, commitProject, pullProject, pushProject, getGitLogFull, getCommitDiff } from '$lib/api/git';
     import type { GitCommit } from '$lib/types';
     import { dialogStore } from '$lib/stores';
@@ -345,7 +346,7 @@
             const diffText = await getCommitDiff(projectId, fromCommit, toCommit);
             compareDiff = parseUnifiedDiff(diffText);
         } catch (e: any) {
-            compareError = e.message || 'Failed to fetch diff';
+            compareError = e.message || t('git.fetchDiffFailed');
             compareDiff = [];
         } finally {
             compareLoading = false;
@@ -367,7 +368,7 @@
         fromCommit;
         if (!fromInputFocused) {
             if (fromCommit === CURRENT_TREE) {
-                fromInputValue = 'Current';
+                fromInputValue = t('git.current');
             } else {
                 const commit = commits.find(c => c.hash === fromCommit);
                 fromInputValue = commit ? commit.short : fromCommit.substring(0, 7);
@@ -537,7 +538,7 @@
         if (hasChanges) {
             // Default to "Current" (working tree) when there are changes
             fromCommit = CURRENT_TREE;
-            fromInputValue = 'Current';
+            fromInputValue = t('git.current');
         } else {
             // Default to HEAD~1 → HEAD when clean
             if (fromCommit === CURRENT_TREE || !fromCommit) {
@@ -656,12 +657,12 @@
         pulling = true;
         try {
             await pullProject(projectId);
-            dialogStore.showToast('Pulled from remote', 'success');
+            dialogStore.showToast(t('git.pulledFromRemote'), 'success');
             const hasChanges = await loadData(true);
             await updateCompareMode(hasChanges);
             onUpdated?.();
         } catch (e: any) {
-            dialogStore.showToast(e.message || 'Pull failed', 'error');
+            dialogStore.showToast(e.message || t('git.pullFailed'), 'error');
         } finally {
             pulling = false;
         }
@@ -673,12 +674,12 @@
         pushing = true;
         try {
             await pushProject(projectId);
-            dialogStore.showToast('Pushed to remote', 'success');
+            dialogStore.showToast(t('git.pushedToRemote'), 'success');
             const hasChanges = await loadData(true);
             await updateCompareMode(hasChanges);
             onUpdated?.();
         } catch (e: any) {
-            dialogStore.showToast(e.message || 'Push failed', 'error');
+            dialogStore.showToast(e.message || t('git.pushFailed'), 'error');
         } finally {
             pushing = false;
         }
@@ -692,10 +693,10 @@
                 const { head: currentHead } = await getGitStatus(projectId);
                 if (currentHead !== headHash) {
                     const proceed = await dialogStore.showConfirm({
-                        title: 'Repository has changed',
-                        message: 'The repository has been modified since you opened this panel (e.g., a merge or checkout). Refresh before committing?',
-                        confirmText: 'Refresh and commit',
-                        cancelText: 'Commit anyway',
+                        title: t('git.repoChangedTitle'),
+                        message: t('git.repoChangedMessage'),
+                        confirmText: t('git.refreshAndCommit'),
+                        cancelText: t('git.commitAnyway'),
                     });
                     if (proceed) {
                         const hasChanges = await loadData();
@@ -708,8 +709,8 @@
         }
         const message = await dialogStore.showCommitDialog({
             message: '',
-            confirmText: 'Commit',
-            cancelText: 'Cancel',
+            confirmText: t('git.commit'),
+            cancelText: t('git.cancel'),
             authorName: authorName,
             authorEmail: authorEmail,
         });
@@ -719,7 +720,7 @@
             onCommitted?.();
             onClose();
         } catch (e: any) {
-            dialogStore.showToast(e.message || 'Commit failed', 'error');
+            dialogStore.showToast(e.message || t('git.commitFailed'), 'error');
         }
     }
 
@@ -754,7 +755,7 @@
                 <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
         </button>
-        <span class="panel-title">Changes</span>
+        <span class="panel-title">{t('git.changes')}</span>
         <!-- Commit comparison dropdowns -->
         <div class="commit-selectors" role="group" aria-label="Compare commits">
             <div class="commit-selector" class:open={showFromDropdown} bind:this={fromDropdownEl}>
@@ -798,7 +799,7 @@
                             id="compare-from-item-current"
                             class="commit-dropdown-item"
                             class:active={fromCommit === CURRENT_TREE}
-                            onclick={() => { fromCommit = CURRENT_TREE; fromInputValue = 'Current'; showFromDropdown = false; fromInputEl?.blur(); }}
+                            onclick={() => { fromCommit = CURRENT_TREE; fromInputValue = t('git.current'); showFromDropdown = false; fromInputEl?.blur(); }}
                             onkeydown={handleFromKeydown}
                             onfocus={() => handleListItemFocus(-1, 'from')}
                             role="option"
@@ -812,7 +813,7 @@
                                 <span class="commit-check-empty"></span>
                             {/if}
                             <span class="commit-dropdown-hash" style="color: var(--color-status-green)">●</span>
-                            <span class="commit-dropdown-subject">Current</span>
+                            <span class="commit-dropdown-subject">{t('git.current')}</span>
                         </button>
                         {#each filteredFromCommits as commit, i}
                             <button
@@ -837,7 +838,7 @@
                             </button>
                         {/each}
                         {#if filteredFromCommits.length === 0 && fromInputValue.trim()}
-                            <div class="commit-dropdown-empty">No matching commits</div>
+                            <div class="commit-dropdown-empty">{t('git.noMatchingCommits')}</div>
                         {/if}
                     </div>
                 {/if}
@@ -907,7 +908,7 @@
                             </button>
                         {/each}
                         {#if filteredToCommits.length === 0 && toInputValue.trim()}
-                            <div class="commit-dropdown-empty">No matching commits</div>
+                            <div class="commit-dropdown-empty">{t('git.noMatchingCommits')}</div>
                         {/if}
                     </div>
                 {/if}
@@ -916,7 +917,7 @@
 
         <!-- Live region for diff updates (screen reader announcements) -->
         <div class="sr-only" aria-live="polite" aria-atomic="true">
-            {#if compareLoading}Loading commit diff{:else if compareError}Diff error: {compareError}{:else if compareDiff.length > 0}Showing diff with {compareDiff.length} file{compareDiff.length !== 1 ? 's' : ''}{/if}
+            {#if compareLoading}{t('git.loadingCommitDiff')}{:else if compareError}{t('git.diffError')} {compareError}{:else if compareDiff.length > 0}{t('git.showingDiffWith')} {t('diff.shared.file', { count: compareDiff.length })}{/if}
         </div>
 
         <!-- Pull / Push / Commit — pinned to the right edge of the header -->
@@ -952,7 +953,7 @@
                     <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2"/>
                     <path d="M5.5 8l2 2 3.5-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-                <span>Commit</span>
+                <span>{t('git.commit')}</span>
             </button>
         </div>
     </div>
@@ -960,7 +961,7 @@
     {#if loading}
         <div class="panel-loading">
             <span class="spinner"></span>
-            <span>Loading changes...</span>
+            <span>{t('diff.loadingChanges')}</span>
         </div>
     {:else if !hasContent}
         <div class="panel-empty">
@@ -968,7 +969,7 @@
                 <path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
                 <path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
             </svg>
-            <p>No changes since last commit</p>
+            <p>{t('diff.noChanges')}</p>
         </div>
     {:else}
         <div class="panel-body">
@@ -982,7 +983,7 @@
                             <svg class="changes-chevron" class:expanded={!collapsedSections.has('staged-files')} width="10" height="10" viewBox="0 0 16 16" fill="none">
                                 <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
-                            <span>Staged</span>
+                            <span>{t('diff.staged')}</span>
                             <span class="changes-section-count">{sortedStagedEntries.length}</span>
                             <span class="changes-section-action" onclick={(e) => { e.stopPropagation(); handleUnstageAll(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleUnstageAll(); } }} title="Unstage all" role="button" tabindex="0" aria-label="Unstage all">
                                 <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -1028,7 +1029,7 @@
                             <svg class="changes-chevron" class:expanded={!collapsedSections.has('unstaged-files')} width="10" height="10" viewBox="0 0 16 16" fill="none">
                                 <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
-                            <span>Unstaged</span>
+                            <span>{t('diff.unstaged')}</span>
                             <span class="changes-section-count">{sortedUnstagedEntries.length}</span>
                             <span class="changes-section-action" onclick={(e) => { e.stopPropagation(); handleStageAll(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleStageAll(); } }} title="Stage all" role="button" tabindex="0" aria-label="Stage all">
                                 <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -1092,7 +1093,7 @@
                             loading={compareLoading}
                         />
                     {:else}
-                        <div class="diff-viewer-loading">Loading diff viewer...</div>
+                        <div class="diff-viewer-loading">{t('git.loadingDiffViewer')}</div>
                     {/if}
                     {#if compareError}
                         <div class="compare-error" role="alert">{compareError}</div>
@@ -1112,7 +1113,7 @@
                             onLineClick={handleLineClick}
                         />
                     {:else}
-                        <div class="diff-viewer-loading">Loading diff viewer...</div>
+                        <div class="diff-viewer-loading">{t('git.loadingDiffViewer')}</div>
                     {/if}
                 {/if}
             </div>

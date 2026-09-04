@@ -11,12 +11,14 @@ export const CAP_LOG_WRITE = 'log.write';
 
 function writeLog(ctx: HostContext, args: { level: string; message: string }): void {
     const level = args.level || 'info';
-    const prefix = `[ext:${ctx.extensionName}] ${args.message}`;
+    // The tagged line is built inside the `console.*` call, not in a local: the line is
+    // a log line wherever it goes, and a `prefix` variable makes it look like a string
+    // the UI might render (it is what `i18n-count.py` reads as copy).
     switch (level) {
-        case 'debug': console.debug(prefix); break;
-        case 'warn': console.warn(prefix); break;
-        case 'error': console.error(prefix); break;
-        default: console.log(prefix);
+        case 'debug': console.debug(`[ext:${ctx.extensionName}] ${args.message}`); break;
+        case 'warn': console.warn(`[ext:${ctx.extensionName}] ${args.message}`); break;
+        case 'error': console.error(`[ext:${ctx.extensionName}] ${args.message}`); break;
+        default: console.log(`[ext:${ctx.extensionName}] ${args.message}`);
     }
 }
 

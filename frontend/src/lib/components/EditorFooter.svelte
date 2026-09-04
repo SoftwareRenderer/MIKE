@@ -1,5 +1,6 @@
 <script lang="ts">
     import { fetchLSPSandboxMemory } from '$lib/api/lsp';
+    import { t } from '$lib/i18n';
     import { formatSandboxMemory, isSandboxMemoryWarning } from '$lib/utils/memory-stats';
     import type { SandboxMemoryStats } from '$lib/types';
 
@@ -83,18 +84,18 @@
                 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                 <div class="lsp-tooltip" role="tooltip" onclick={(e) => e.stopPropagation()}>
                     <div class="lsp-tooltip-row">
-                        <span class="lsp-tooltip-label">LSP Provider</span>
+                        <span class="lsp-tooltip-label">{t('lsp.provider')}</span>
                         <span class="lsp-tooltip-value">{lspServerName || '—'}{lspServerVersion ? ` ${lspServerVersion}` : ''}</span>
                     </div>
                     <div class="lsp-tooltip-row">
-                        <span class="lsp-tooltip-label">Status</span>
+                        <span class="lsp-tooltip-label">{t('lsp.status')}</span>
                         <span class="lsp-tooltip-value" class:lsp-ready={lspReady} class:lsp-error={!!lspError}>
-                            {#if lspError}{lspError}{:else if lspReady}Connected{:else}Connecting...{/if}
+                            {#if lspError}{lspError}{:else if lspReady}{t('lsp.connected')}{:else}{t('lsp.connecting')}{/if}
                         </span>
                     </div>
                     {#if lspMemoryRowVisible}
                         <div class="lsp-tooltip-row">
-                            <span class="lsp-tooltip-label">Sandbox Memory</span>
+                            <span class="lsp-tooltip-label">{t('lsp.sandboxMemory')}</span>
                             <span class="lsp-tooltip-value" class:lsp-error={isSandboxMemoryWarning(lspSandboxStats)}>
                                 {lspMemoryLoading ? '…' : formatSandboxMemory(lspSandboxStats)}
                             </span>
@@ -102,7 +103,7 @@
                     {/if}
                     {#if lspMessage}
                         <div class="lsp-tooltip-row">
-                            <span class="lsp-tooltip-label">LSP Log</span>
+                            <span class="lsp-tooltip-label">{t('lsp.log')}</span>
                             <div class="lsp-tooltip-log">{lspMessage}</div>
                         </div>
                     {/if}
@@ -111,9 +112,9 @@
         {/if}
         <button type="button" class="footer-btn" onclick={() => { showFileStats = !showFileStats }}>
             {#if showFileStats}
-                {lineCount} lines · {charCount} chars
+                {t('editor.fileStats', { lines: lineCount, chars: charCount })}
             {:else}
-                Ln {cursorLine}, Col {cursorCol}
+                {t('editor.cursorPosition', { line: cursorLine, col: cursorCol })}
             {/if}
         </button>
         <button type="button" class="footer-btn footer-toggle" class:active={wordWrap} title="Toggle word wrap" onclick={toggleWordWrap}>
@@ -123,7 +124,7 @@
                 <polyline points="15 10 18 10 18 13"/>
                 <path d="M15 13h3"/>
             </svg>
-            Wrap
+            {t('editor.wrap')}
         </button>
     </div>
     <div class="footer-right">
@@ -132,7 +133,7 @@
                 <circle cx="11" cy="11" r="8"/>
                 <line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
-            Find
+            {t('editor.find')}
         </button>
     </div>
 </div>

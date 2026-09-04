@@ -27,6 +27,7 @@ import {
     CAP_PREVIEW_NAV_STATE,
 } from './capabilities';
 import { cleanupFooterButtons } from './handlers/editor';
+import { t } from '$lib/i18n';
 
 export interface ExtensionHostOptions {
     extensionId: string;
@@ -271,7 +272,7 @@ export class ExtensionHostChannel {
             const spin = document.createElement('span');
             spin.style.cssText = 'width:12px;height:12px;flex:none;border:2px solid rgba(0,173,216,.25);border-top-color:var(--color-accent,#00add8);border-radius:50%;animation:ext-spin 1s linear infinite;';
             const txt = document.createElement('span');
-            txt.textContent = message || 'Loading…';
+            txt.textContent = message || t('host.loading');
             el.appendChild(spin);
             el.appendChild(txt);
             ensureSpinKeyframes();
@@ -279,7 +280,7 @@ export class ExtensionHostChannel {
             el.style.background = 'transparent';
             el.style.color = 'var(--color-status-red, #f85149)';
             const txt = document.createElement('span');
-            txt.textContent = message || 'Extension error';
+            txt.textContent = message || t('host.error');
             el.appendChild(txt);
         }
     }

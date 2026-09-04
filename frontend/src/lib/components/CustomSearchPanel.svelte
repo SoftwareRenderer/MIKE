@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
+    import { t } from '$lib/i18n';
     import type { EditorView } from 'codemirror';
     import { SelectionRange } from '@codemirror/state';
 
@@ -26,9 +27,16 @@
     let wholeWord = $state(false);
     let regex = $state(false);
     let showReplace = $state(false);
-    let matchCount = $state('');
+    let query = $state('');
     let currentMatchIndex = $state(0);
     let matches = $state<Array<{ from: number; to: number }>>([]);
+    /**
+     * Read on every render rather than stored, so switching language re-labels a
+     * panel that is already open (a string cached in `$state` would keep the
+     * language it was computed in). Empty until the user has typed anything, which
+     * is what the stored string did — it was only ever written from `onInput`.
+     */
+    let matchCount = $derived(query ? t('editor.matches', { count: matches.length }) : '');
 
     function toggleReplace() {
         showReplace = !showReplace;
@@ -79,9 +87,9 @@
     }
 
     function onInput() {
+        query = inputEl?.value ?? '';
         matches = findMatches();
         currentMatchIndex = 0;
-        matchCount = `${matches.length} match${matches.length !== 1 ? 'es' : ''}`;
         if (matches.length > 0) {
             selectMatch(0);
         }
@@ -312,8 +320,8 @@
                     />
                 </div>
                 <div class="replace-actions">
-                    <button class="action-btn" title="Replace" onclick={doReplace}>Replace</button>
-                    <button class="action-btn" title="Replace All (Ctrl+Enter)" onclick={doReplaceAll}>All</button>
+                    <button class="action-btn" title="Replace" onclick={doReplace}>{t('editor.replace')}</button>
+                    <button class="action-btn" title="Replace All (Ctrl+Enter)" onclick={doReplaceAll}>{t('editor.replaceAll')}</button>
                 </div>
             </div>
         {:else}
@@ -321,7 +329,7 @@
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
                 </svg>
-                Replace
+                {t('editor.replace')}
             </button>
         {/if}
     </div>

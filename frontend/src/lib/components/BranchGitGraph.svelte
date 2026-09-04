@@ -167,7 +167,7 @@
                                             <line x1="6" y1="4" x2="6" y2="2"/>
                                             <line x1="10" y1="12" x2="10" y2="14"/>
                                         </svg>
-                                        <span class="git-badge-label">origin</span>
+                                        <span class="git-badge-label">{t('git.remoteOrigin')}</span>
                                     </span>
                                 {/if}
 

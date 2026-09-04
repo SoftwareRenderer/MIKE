@@ -29,6 +29,7 @@ import (
 	"kanban/backend/llmadapter"
 	"kanban/backend/lsp"
 	"kanban/backend/managers"
+	"kanban/backend/prompts"
 	"kanban/backend/sandbox"
 	"kanban/backend/store"
 	"kanban/backend/stream"
@@ -95,6 +96,7 @@ type Server struct {
 	sandboxStatsSampler *stream.SandboxStatsSampler
 	agentRegistry       *agent.AgentRegistry
 	extStore            *extensions.ExtensionStore
+	extensionsDir       string              // where extension files live on disk (prompt overlay, llm mappings)
 	llmAdapter          *llmadapter.Adapter // provider request adaptation (llm extensions)
 	extSandboxMgr       *extensions.ExtensionSandboxManager
 	extHandler          *extensions.ExtensionHandler
@@ -237,6 +239,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	// to provider-specific formats. Mappings come from each extension's
 	// mappings file and are re-collected on every extension change below.
 	extCfg := &extensions.ExtensionConfig{RegistryURL: cfg.RegistryURL}
+	s.extensionsDir = extCfg.ExtensionsDirOrDefault()
 	// Extension sandbox host mounts are restricted to an allowlist; teach it the
 	// effective workspace dir and the directory extension files live in.
 	s.extSandboxMgr.SetWorkspaceDir(cfg.WorkspaceDir)
@@ -252,6 +255,8 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	}
 	refreshLLMAdapters()
 	cfgStore.SetLLMAdapter(s.llmAdapter)
+
+	s.refreshPromptLocale()
 
 	s.executor = kanbanexec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr, agentRegistry, s.extLSPMgr, commitQueue)
 	s.executor.SetLLMAdapter(s.llmAdapter)
@@ -311,6 +316,9 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	s.extHandler.SetOnExtensionChanged(func() {
 		agentRegistry.Reload()
 		refreshLLMAdapters()
+		// Enabling or disabling a pack is a language change; the prompts follow it live,
+		// the same as the UI's catalog does on the same broadcast.
+		s.refreshPromptLocale()
 		s.appStreamMgr.BroadcastExtensionChange()
 	})
 	// Wire extension update callback → broadcast LSP reset to frontend
@@ -347,6 +355,33 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 // Serve starts the HTTP server.
 // handleFetchModels handles POST /api/config/fetch-models.
 // It supports both standard OpenAI-compatible LLM servers and Pi agent extensions.
+// refreshPromptLocale derives the prompt language from the enabled `i18n` pack and
+// installs it as the template overlay. It is called at startup and on every extension
+// change, so enabling a pack changes the language of the next turn with no restart —
+// and there is no setting to reconcile with the extension list, because the enabled
+// pack *is* the language (extensions.ActiveI18N is the one rule; the browser applies
+// the same one).
+//
+// A list that cannot be read leaves the current language in place rather than
+// resetting to English: a database that had a bad moment is not a reason to start
+// answering somebody in a language they did not choose.
+func (s *Server) refreshPromptLocale() {
+	ov, err := extensions.ActivePromptOverlay(s.extStore, s.extensionsDir)
+	if err != nil {
+		log.Printf("[prompts] cannot read the active pack: %v — keeping the current prompt language", err)
+		return
+	}
+	prompts.SetOverlay(ov.Dir, ov.Locale)
+	switch {
+	case ov.Locale == "":
+		log.Printf("[prompts] locale=en (no translation pack enabled)")
+	case ov.Dir == "":
+		log.Printf("[prompts] locale=%s (pack ships no prompt templates — core English renders, the answer is asked for in %s)", ov.Locale, ov.Locale)
+	default:
+		log.Printf("[prompts] locale=%s templates=%s", ov.Locale, ov.Dir)
+	}
+}
+
 func (s *Server) handleFetchModels(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		httputil.MethodNotAllowed(w)
