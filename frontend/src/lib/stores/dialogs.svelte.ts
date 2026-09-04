@@ -1,5 +1,6 @@
 // ─── Toast ───
 import { TOAST_DURATION_MS } from '$lib/constants';
+import { t } from '$lib/i18n';
 
 export class DialogStore {
     public toast = $state<{ message: string; type: 'error' | 'success' } | null>(null);
@@ -69,8 +70,8 @@ export class DialogStore {
                 title: options.title,
                 message: options.message,
                 items: options.items,
-                confirmText: options.confirmText ?? 'Confirm',
-                cancelText: options.cancelText ?? 'Cancel',
+                confirmText: options.confirmText ?? t('app.confirm.confirm'),
+                cancelText: options.cancelText ?? t('app.cancel'),
                 variant: options.variant ?? 'destructive',
                 _resolve: resolve,
             };
@@ -98,8 +99,8 @@ export class DialogStore {
                 used: options.used,
                 limit: options.limit,
                 sessionCost: options.sessionCost,
-                confirmText: options.confirmText ?? 'Compress',
-                cancelText: options.cancelText ?? 'Cancel',
+                confirmText: options.confirmText ?? t('app.dialog.compress'),
+                cancelText: options.cancelText ?? t('app.cancel'),
                 _resolve: resolve,
             };
         });
@@ -120,8 +121,8 @@ export class DialogStore {
         return new Promise((resolve) => {
             this.commitDialog = {
                 message: options.message,
-                confirmText: options.confirmText ?? 'Commit and move to Done',
-                cancelText: options.cancelText ?? 'Cancel',
+                confirmText: options.confirmText ?? t('app.dialog.commitAndDone'),
+                cancelText: options.cancelText ?? t('app.cancel'),
                 authorName: options.authorName,
                 authorEmail: options.authorEmail,
                 mergeTarget: options.mergeTarget,
