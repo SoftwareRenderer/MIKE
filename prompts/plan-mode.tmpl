@@ -39,14 +39,14 @@ Wait for the user's response before proceeding.
 ## Phase 3: Propose Tasks
 Using the analysis and the user's answers, propose the tasks and request approval to create them. State dependencies in the proposal if any.
 
-Nested Tasks (Dependencies): A task that depends on other tasks is their **parent**; each task it depends on is nested directly under it as a **child**. A parent can't start until all its children are done.
+Nested Tasks (Dependent): A task that depends on other tasks is their **parent**; each task it depends on is nested directly under it as a **child**. A parent can't start until all its children are done.
 - If A depends on B: B is nested under A (B is A's child, A is B's parent).
 - If B depends on C: C is nested under B. Result: A → B → C, top to bottom.
 - If a task depends on several tasks, it is the parent of **all** of them (a task has one parent; state every dependency in its prompt).
-- A plain feature umbrella is allowed at the top only when it has no deliverable of its own; the topmost task with a deliverable is the ultimate deliverable.
+- The topmost task is the final deliverable.
 - Self-check before creating: for each task, "what must be done before this can start?" = its **children**; "what uses this task's output?" = its **parent**.
 
-Sibling Tasks (Parallel): Sibling tasks may be completed in parallel, so they must be completely independent of one another.
+Sibling Tasks (Parallel): Sibling tasks must not contain interdependencies.
 
 Example proposal:
 ```markdown
@@ -63,7 +63,7 @@ One sentence describing what will be built or fixed.
 List of constraints, decisions, or known risks.
 ```
 
-Example request for approval, use `ask_question`:
+Example request for approval:
 ```
 I've created a plan. Does this look correct?
 Reply Approve to create tasks, or tell me what to change.
