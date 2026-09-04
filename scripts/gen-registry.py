@@ -105,6 +105,12 @@ def simplify_capabilities(manifest_caps):
              and environment_note ("the one sentence shown when the server cannot
              resolve a workspace") and dependency_cache (where it reads resolved
              dependencies from, and whether it would write there)
+      - i18n:  locale ("Language"), messages_url and has_prompts ("does it translate the
+             prompt templates too") — the locale is the bare language subtag the pack
+             renders the UI in, and it is the field read before the manifest is fetched:
+             the first-run offer matches a non-English browser against it
+             (frontend `lib/utils/locale-offer.ts`). It doubles as the pack's identity in
+             the Browse list.
       - css/agent: no detail rows, so an empty config is enough
     Everything else (command, args, headers, wasm_module, ...) lives in the
     manifest and is intentionally omitted here. The lsp additions are the exception
@@ -112,6 +118,13 @@ def simplify_capabilities(manifest_caps):
     machine-level directory an install is going to want, and what the server will
     say when it cannot do its job, are both things you would want before agreeing
     to run someone's container.
+
+    i18n is the second exception, and its reason is the same: the first-run offer
+    matches the browser's language against the *index* — there is nothing installed
+    to read yet — so a pack's locale has to be visible in its entry or the offer can
+    only ever list every pack on the machine and let the user guess which one is
+    French. Only the locale and the two facts about its files are projected; the
+    catalog itself and every translated string stay in the pack.
     """
     if not isinstance(manifest_caps, dict):
         return {}
@@ -163,6 +176,22 @@ def simplify_capabilities(manifest_caps):
                 result['lsp'] = kept
         elif key in ('css', 'agent'):
             result[key] = {}
+        elif key == 'i18n':
+            # A translation pack is a css pack with different bytes: it runs nothing, so what is
+            # worth publishing is which language it is and what it covers. The locale is the whole
+            # reason this block is projected at all — it is matched against a browser language
+            # before the pack is fetched, so it cannot live only in the manifest. `has_prompts`
+            # joins it because a translated interface with English prompts is a different offer,
+            # and the user should see which one they get before clicking.
+            locale = (value.get('locale') or '').strip()
+            kept = {}
+            if locale:
+                kept['locale'] = locale
+            if value.get('messages_url'):
+                kept['messages_url'] = value['messages_url']
+            if kept:
+                kept['has_prompts'] = bool(value.get('prompts_dir'))
+                result['i18n'] = kept
     return result
 
 

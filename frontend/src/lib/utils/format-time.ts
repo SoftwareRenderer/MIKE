@@ -1,11 +1,21 @@
 /**
  * Shared time formatting utilities.
  * Replaces duplicated formatTime/formatTimestamp implementations across components.
+ *
+ * Everything user-facing here is locale-driven: phrases come from the i18n catalog
+ * (or `Intl.RelativeTimeFormat` when the active pack has no key for a rung), and
+ * dates/times go through `Intl.DateTimeFormat` on the **active locale** — never the
+ * browser default, never a hardcoded English string. See `$lib/i18n/runtime.svelte`.
  */
+import { activeLocale, packText, t, type LocaleKey } from '$lib/i18n/runtime.svelte';
+import type { MessageKey } from '$lib/i18n/en';
 
 /**
  * Format elapsed milliseconds into a human-readable string (e.g. "6s", "1m 30s").
  * Used by ToolCall for pending tool duration display.
+ *
+ * Not localized on purpose: "6s"/"1m 30s" are unit abbreviations, not phrases, and
+ * the chat stats line (`X tokens · Ys · Z tok/s`) is pinned to this shape.
  */
 export function formatElapsed(ms: number): string {
     const totalSec = Math.floor(ms / 1000);
@@ -18,6 +28,8 @@ export function formatElapsed(ms: number): string {
 /**
  * Format a tool call duration in ms, using seconds when >= 1000ms.
  * Returns e.g. "342ms", "1.2s", "15s".
+ *
+ * Same reasoning as `formatElapsed`: abbreviations, not phrases.
  */
 export function formatDuration(ms: number): string {
     if (ms >= 1000) {
@@ -44,43 +56,76 @@ export function formatDuration(ms: number): string {
  */
 export type RelativeTimeScale = 'compact' | 'calendar';
 
+/** Units `Intl.RelativeTimeFormat` knows, i.e. the rungs `timeAgo` can count in. */
+type RelativeUnit = 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year';
+
+/**
+ * "N units ago", in the active locale.
+ *
+ * Two sources, in this order:
+ *
+ * 1. The active pack's `time.<unit>Ago` key. It wins because ICU is not always
+ *    usable — French narrow renders "-5 min", which is a diff, not a label — so a
+ *    pack has to be able to overrule it.
+ * 2. `Intl.RelativeTimeFormat(locale, { style: 'narrow' })` otherwise. Narrow is the
+ *    style that matches what this file used to hardcode: in `en` it yields exactly
+ *    "5m ago" / "3w ago" / "2mo ago". `style: 'long'` would give "5 minutes ago" and
+ *    break every pinned assertion — do not "fix" it to long.
+ *
+ * With no locale chosen the `en` catalog answers (1), so a user with no pack installed
+ * sees exactly what they saw before i18n existed.
+ */
+function relativePhrase(unit: RelativeUnit, n: number): string {
+    const fromPack = packText(`time.${unit}Ago`, { n });
+    if (fromPack !== undefined) return fromPack;
+    return new Intl.RelativeTimeFormat(activeLocale(), { style: 'narrow' }).format(-n, unit);
+}
+
 /**
  * "How long ago" for anything that can be read as a moment: an ISO string, an epoch
  * millisecond number, or a Date. Returns '' when the input is not a moment at all.
  *
- * `prefix` is prepended to every phrase ("Built ", "Saved ") so callers never have to
- * string-join around it and get a doubled space on the "just now" rung.
+ * `template` is a **core** catalog key wrapping the phrase around a `{when}` token
+ * (`time.built` = "Built {when}") — `MessageKey`-typed, because a template is chosen
+ * by the caller in code, never supplied by a pack. A template rather than the old
+ * `prefix` string because "Built " is not a PREFIX in every language — the wording
+ * and its position belong to the catalog. An unreadable date still answers '' before
+ * anything is wrapped, which is what lets callers write
+ * `timeAgo(x, { template }) || fallback` without ever rendering a dangling "Built ".
  */
-export function timeAgo(when: string | number | Date, options: { scale?: RelativeTimeScale; prefix?: string } = {}): string {
-    const { scale = 'compact', prefix = '' } = options;
+export function timeAgo(
+    when: string | number | Date,
+    options: { scale?: RelativeTimeScale; template?: MessageKey } = {}
+): string {
+    const { scale = 'compact', template } = options;
     const date = when instanceof Date ? when : new Date(when);
     if (isNaN(date.getTime())) return '';
 
-    const p = (phrase: string) => prefix + phrase;
+    const p = (phrase: string) => (template === undefined ? phrase : t(template, { when: phrase }));
     const diffMs = Date.now() - date.getTime();
     const diffMin = Math.floor(diffMs / 60_000);
-    if (diffMin < 1) return p('just now');
-    if (diffMin < 60) return p(`${diffMin}m ago`);
+    if (diffMin < 1) return p(t('time.justNow'));
+    if (diffMin < 60) return p(relativePhrase('minute', diffMin));
 
     const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return p(`${diffHr}h ago`);
+    if (diffHr < 24) return p(relativePhrase('hour', diffHr));
 
     const diffDay = Math.floor(diffHr / 24);
-    if (diffDay < 7) return p(`${diffDay}d ago`);
+    if (diffDay < 7) return p(relativePhrase('day', diffDay));
 
     if (scale === 'calendar') {
         // The year only earns its place when the date is not in the current one.
         const sameYear = date.getFullYear() === new Date().getFullYear();
-        return p(date.toLocaleDateString([], sameYear
+        return p(new Intl.DateTimeFormat(activeLocale(), sameYear
             ? { month: 'short', day: 'numeric' }
-            : { month: 'short', day: 'numeric', year: 'numeric' }));
+            : { month: 'short', day: 'numeric', year: 'numeric' }).format(date));
     }
 
     const diffWeek = Math.floor(diffDay / 7);
-    if (diffWeek < 5) return p(`${diffWeek}w ago`);
+    if (diffWeek < 5) return p(relativePhrase('week', diffWeek));
     const diffMonth = Math.floor(diffDay / 30);
-    if (diffMonth < 12) return p(`${diffMonth}mo ago`);
-    return p(`${Math.floor(diffDay / 365)}y ago`);
+    if (diffMonth < 12) return p(relativePhrase('month', diffMonth));
+    return p(relativePhrase('year', Math.floor(diffDay / 365)));
 }
 
 /**
@@ -107,20 +152,19 @@ export function formatTimestamp(isoStr: string): { display: string; tooltip: str
     const diffMs = todayStart.getTime() - msgStart.getTime();
     const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
 
-    const timeStr = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    const fullDate = date.toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' });
+    const locale = activeLocale();
+    const timeStr = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(date);
+    const fullDate = new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', year: 'numeric' }).format(date);
 
     if (diffDays === 0) {
         return { display: timeStr, tooltip: '' };
     } else if (diffDays === 1) {
-        return { display: `Yesterday at ${timeStr}`, tooltip: fullDate };
+        return { display: t('time.yesterdayAt', { time: timeStr }), tooltip: fullDate };
     } else if (diffDays >= 2 && diffDays <= 7) {
-        const weekday = date.toLocaleDateString([], { weekday: 'long' });
-        return { display: `Last ${weekday} at ${timeStr}`, tooltip: fullDate };
+        const weekday = new Intl.DateTimeFormat(locale, { weekday: 'long' }).format(date);
+        return { display: t('time.lastWeekdayAt', { weekday, time: timeStr }), tooltip: fullDate };
     } else {
-        const shortDate = date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-        return { display: `${shortDate} at ${timeStr}`, tooltip: fullDate };
+        const shortDate = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', year: 'numeric' }).format(date);
+        return { display: t('time.onDateAt', { date: shortDate, time: timeStr }), tooltip: fullDate };
     }
 }
-
-

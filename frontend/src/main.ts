@@ -2,6 +2,7 @@ import './app.css';
 import { mount } from 'svelte';
 import App from './lib/components/App.svelte';
 import { appStore } from './lib/stores';
+import { applyCachedCatalog } from './lib/i18n/boot';
 
 // Centralized unhandled promise rejection handler
 // Catches errors from fire-and-forget async operations (storage init, etc.)
@@ -29,6 +30,21 @@ window.addEventListener('appinstalled', () => {
     appStore.pwaInstallPrompt = null;
 });
 
-mount(App, {
-    target: document.getElementById('app')!,
-});
+/**
+ * Mount after the last resolved language has been applied.
+ *
+ * Which i18n pack is active is a server round-trip away, so without this the
+ * first frame is English and then switches. `applyCachedCatalog` applies what the
+ * live extension list said last time (bounded, and never throws), and the first
+ * `loadExtensions()` corrects it — including back to English. Mirrors the
+ * `kanban-theme-css` pre-paint step in index.html, which exists for the same
+ * reason; see frontend/src/lib/i18n/boot.ts.
+ */
+async function boot(): Promise<void> {
+    await applyCachedCatalog();
+    mount(App, {
+        target: document.getElementById('app')!,
+    });
+}
+
+void boot();

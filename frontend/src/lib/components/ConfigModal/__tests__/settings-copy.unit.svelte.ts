@@ -12,7 +12,9 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
  * is the part a naive conversion loses.
  */
 const mq = { matches: false, media: '', addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, onchange: null, dispatchEvent: () => false };
-// @ts-expect-error jsdom has no matchMedia
+// jsdom has no matchMedia; this stub is what the preferences tab reads. (No
+// `@ts-expect-error` here: the assignment typechecks, and a directive that
+// suppresses nothing is itself an error under `npm run check`.)
 window.matchMedia = () => mq;
 
 function fetchOk(payload: unknown) {

@@ -439,6 +439,17 @@ export async function saveAppSetting<T>(key: string, value: T): Promise<void> {
     return dbPut(STORE_APP_SETTINGS, key, value);
 }
 
+/**
+ * Remove an app setting by key.
+ *
+ * Deleting is not the same as saving `null`: a cache that must stop being
+ * readable (a language pack that is no longer enabled) has to leave no entry
+ * behind, or the next boot can read what the user already turned off.
+ */
+export async function deleteAppSetting(key: string): Promise<void> {
+    return dbDelete(STORE_APP_SETTINGS, key);
+}
+
 // ─── Collapsed diff files (IndexedDB: collapsed-diff-files store) ────────────
 
 /** Load collapsed diff file paths. */

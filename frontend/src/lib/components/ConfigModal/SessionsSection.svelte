@@ -11,6 +11,7 @@
     import { dialogStore } from '$lib/stores';
     import { formatRelativeTime } from '$lib/utils/format-time';
     import { t } from '$lib/i18n';
+    import { activeLocale } from '$lib/i18n/runtime.svelte';
 
     /** Sign-out path owned by the modal (App's logout handler). */
     let { onSignOut }: { onSignOut?: () => void | Promise<void> } = $props();
@@ -35,7 +36,7 @@
     function absolute(iso: string): string {
         if (!iso) return t('settings.sessions.unknownTime');
         const date = new Date(iso);
-        return isNaN(date.getTime()) ? iso : date.toLocaleString();
+        return isNaN(date.getTime()) ? iso : date.toLocaleString(activeLocale());
     }
 
     /** Relative display text; empty timestamps render as an em dash. */

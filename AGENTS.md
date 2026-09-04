@@ -30,6 +30,7 @@ The most common way this repo produces a **false "done"** is an agent believing 
 - **`go build ./...` and `go vet ./...` fail at HEAD** on the installed extensions under `extensions/`, which are pulled artifacts, not this tree. Scope every command: `go build ./backend/... ./pkg/... .`, `go vet ./backend/... ./pkg/... .`, `staticcheck -checks=all ./backend/... ./pkg/... .`. A red `./...` is not your regression until you've seen it survive the scoping.
 - **Most subprocesses are not cancellable.** 83 `exec.Command` calls carry no context; only a handful use `CommandContext`. Don't assume a killed request stops the work it started - and if you add one, use `CommandContext` *plus* `cmd.WaitDelay` (`pkg/sandboxruntime.PodmanWaitDelay`).
 - **`environment` on an LSP extension always answers "healthy"** - declared, validated, documented, and never called (`ExtensionLSPManager.Environment` has no caller). See `docs/extension-dependency-cache.md`.
+- **`prompts_dir` on an `i18n` pack is validated and has no caller** - it is the server-side prompt-locale directory, and the prompt side (T14) must read it through `extensions.ActiveI18N` rather than re-derive the winner. Until then the UI half of the capability is fully live and this one field is what nothing reads. See `docs/i18n.md`.
 - **A green `./backend/exec/` is not proof.** The package's own tests never start a task, so locking bugs in `executionState` only surface under `-race` in `./backend/server/`.
 
 ## Required Dependencies
@@ -102,7 +103,7 @@ Every `MIKE_*` below also has a `--flag` twin named after it (`--port`/`MIKE_POR
 cd frontend && npx playwright test                       # e2e (auto-starts test servers + mock LLM)
 npx playwright test task-message-actions                 # one spec file
 npx playwright test --grep "should edit message"         # one test by name
-cd frontend && npm test                                  # frontend unit (vitest, ~10s)
+cd frontend && npm test                                  # frontend unit (vitest, ~10s); `make test-frontend` also runs the i18n no-language gate
 go test ./backend/... ./pkg/... -count=1 -parallel 8     # Go unit (~60s)
 make test | make test-go | make test-frontend | make test-e2e
 ```
@@ -116,7 +117,7 @@ Two dedicated test servers with isolated databases plus one shared mock LLM, ful
 | Isolated | 3001 | `/tmp/kanban-test-data-isolated` | `isolated` project (serialized, 1 worker) — config-modifying suites; see `ISOLATED_SPECS` in `frontend/playwright.config.ts` |
 | Mock LLM | 9999 | — | shared; `frontend/tests/mock-llm.js` |
 
-Test repos live at `/tmp/kanban-test-repo` (+ `-2`), worktrees at `/tmp/kanban-test-worktrees/`. The registry is pinned to a local fixture (`frontend/tests/registry-fixture.json`) so registry e2e never hits the hosted registry.
+Test repos live at `/tmp/kanban-test-repo` (+ `-2`), worktrees at `/tmp/kanban-test-worktrees/`. The registry is pinned to a local fixture (`frontend/tests/registry-fixture.json`) so registry e2e never hits the hosted registry - but the servers read `/tmp/kanban-test-registry.json`, which setup writes from that fixture with the i18n pack's `__I18N_PACK_COMMIT__` placeholder resolved to the HEAD of the local git repo it builds from `tests/fixtures/i18n-pack-repo`, because a git-pinned install needs a commit that exists.
 
 Test servers are spawned via `go run .` and **inherit your shell environment** — export `MIKE_ENCRYPTION_KEY` before running e2e, or global-setup fails with "Server on port 3000 did not start within 15000ms".
 
@@ -212,7 +213,7 @@ Detail and tests: `docs/reconnection.md`.
 
 ## Extensions
 
-Types: `lsp` (language servers in gVisor sandboxes), `ui` (frontend injection), `agent` (AI agents as subprocesses via WASM adapters).
+Types: `lsp` (language servers in gVisor sandboxes), `ui` (frontend injection), `css` (a global stylesheet), `i18n` (translation packs - the enabled pack *is* the active language), `agent` (AI agents as subprocesses via WASM adapters), `llm` (provider request adaptation).
 
 **Key files:**
 - `backend/extensions/` — domain types, `store.go` (SQLite), `registry.go` (FetchIndex/FetchManifest/PullImage/BuildImage), `sandbox.go` (refcount lifecycle), `handler.go` (REST), `changelog.go`, `manifest_validate.go`
@@ -252,6 +253,11 @@ The core holds **no** language names, keyword lists, comment markers or bracket 
 
 Detail and tests: `docs/languages.md`.
 
+### The UI Language Is Derived From the Enabled i18n Extension
+The active language **is** whichever `i18n` extension is enabled - English when none. There is **no** `language` config field, no `PUT /api/config` path for one, and nothing stored: a setting would have to be reconciled with the extension list forever, and the two would disagree. `extensions.ActiveI18N` (Go) and `resolveI18NPack` (TS) apply one rule - skip disabled packs, keep those **declaring `capabilities.i18n`** (the declaration, not the inferred `type`), first by `priority` then `name` - and the prompt locale (T14) must call the Go side rather than re-derive it. A pack is a css pack with different bytes: `resolveAssetURL` gives the catalog URL (`''` for a scheme or `//` is the external-origin fence), the existing `/extensions/<author>/<name>/` tree serves it, and there is **no new route**, no iframe, no channel, no permission. Any load failure means **whole-catalog English plus a report**, never a half-applied catalog or a UI of raw key ids; a key the pack lacks falls back per key to English. Core gains zero translated strings and zero language names - measured by `cd frontend && python3 i18n-gate.py`, which fails on a locale tag, a non-Latin codepoint, an `Intl.DisplayNames` call or a `locale === 'xx'` branch anywhere in `src/` outside a test fixture (the `:lang(…)` typography selectors in `app.css` are the one allowance, because a selector targets a language without naming one) (`en.ts` holds the English of every key the UI renders - the conversion batches' namespaces (`settings.*`, `chat.*`, `explorer.*`, `board.*`, `app.*`, `sandbox.*`, `api.*`, `task.*`, `terminal.*`, `attachments.*`) beside `i18n.offer.*` and the `time.*` phrases `format-time` renders; a locale tag is carried through verbatim, and a pack's display name is the pack's own `display_name`, never a core-derived endonym). A catalog value is a translated **string or a plural table** (`{"one": …, "other": …}`, `other` required), and **both halves validate that shape** - `parseCatalog` (TS) and `validateCatalogValue` (`manifest_validate.go`) - because refusing a pack for a form the runtime would render, or accepting one for a form it would silently drop, is the same bug facing the other way. The pre-paint cache anticipates the round-trip and never outranks it: the catalog lives in IndexedDB `app-settings` and the tag in `localStorage`, and both are **deleted together** whenever the live list says English - unconditionally, because a guess about what is already cleared left a stale language behind. A non-English browser with no pack enabled is **offered** the registry pack whose projected `capabilities.i18n.locale` matches it (`lib/utils/locale-offer.ts` decides, `services/locale-offer.svelte.ts` installs over the existing git-pinned SSE path): four conditions must hold, a `dismissed`/`installed`/`failed` record in `app-settings` ends it, and **no match is silence, never an error** - so a registry that will not answer says nothing.
+
+Detail and tests: `docs/i18n.md`.
+
 ### UI Extensions
 UI extensions are **plain JavaScript modules, not Svelte components** (external bundles carry their own Svelte runtime -> `effect_orphan`). A module default-exports `init({ component, config, ...scopeContext })` and returns a cleanup function; no Svelte imports, DOM + `createElement('style')` only. **The host CSP blocks inline `<script>`** - load code as external files. **The channel is armed by the document's `exthello` echo**: `origin === 'null'` + `ev.source` identify the *frame*, not the mounted document, so post nothing before arming (except `exthello-request`) and never tear the frame down on a 2nd `load`. A hand-rolled client that doesn't answer `exthello` hangs at `extHost.ready()`.
 
@@ -272,6 +278,29 @@ Agent extensions run AI agents (e.g. Pi) as subprocesses: `Backend (executor) �
 - **URL scheme** `agent://<name>`, and an enabled agent extension **is a provider** with that URL — `GET /api/config` merges it per request and never persists it — so the client re-reads the config on the `extension_change` broadcast (`appStore.refreshConfig()`): an agent that only shows up after a browser refresh is a bug. Key files: `backend/agent/` (interface, runner, wazero loader with `WithStartFunctions("_initialize")`, registry), `backend/exec/loop_agent.go`, `frontend/src/lib/stores/app.svelte.ts`.
 
 ## Common Patterns
+
+### Locale and Formatting (frontend)
+Formatting follows the **active locale** (`$lib/i18n/runtime.svelte` → `activeLocale()`); **sorting never does**.
+
+- `activeLocale()` is what every `Intl.*` / `toLocale*` call passes — `undefined` means "no locale chosen, use the browser's", which is the pre-i18n behaviour, so a user with no language pack installed sees no change. Never pass `undefined`, `[]` or a literal tag at a call site: `grep -nE "new Intl\.[A-Za-z]+Format\(\s*(undefined|\[\])?\s*[,)]|toLocale(A|S|D)[A-Za-z]*\(\s*(undefined|\[\])?\s*[,)]" frontend/src` must stay empty outside `__tests__`.
+- **Never cache anything derived from the locale at module scope.** The `usdSymbol` cache was one `let` computed once from `undefined`, which silently pinned `"$"` for a user who switched language mid-session; locale-dependent values are either computed per call or memoised **keyed by the locale they came from** (`usdSymbolByLocale`).
+- **`document.documentElement.lang` has exactly one writer**: the i18n runtime. `index.html`'s `lang="en"` is the initial value only. It describes the language of the *rendered strings* (the active pack, else `en`), not the browser's language — putting the browser's tag there would restyle English chrome through the `:lang()` rules below.
+- **Sorting is locale-independent on purpose.** Every `localeCompare` keeps its current arguments (`Sidebar`, `BranchFileBrowser`, `BranchSymbols`, `Chat/ModelSelector`, `DiffViewer`, `GitStatusPanel`): file, branch, symbol, session and model lists must stay stably ordered whatever the UI language is. Model *grouping* groups by provider, never by collation.
+- Phrases are catalog KEYS (`$lib/i18n/en.ts` - the English catalog of record, and the only place core holds UI text), never translated strings in core; relative time uses `Intl.RelativeTimeFormat(locale, { style: 'narrow' })` — `narrow` is what yields `5m ago`/`2mo ago`, and `long` would print `5 minutes ago` and break the shape the chat stats line and the unit tests pin. `formatElapsed`/`formatDuration` stay unlocalised for the same reason.
+- **`packText()` answers nothing for a chosen locale that has no pack - and that is not English.** The gap is what lets `Intl` render the number in the locale the user is in instead of an English phrase in the wrong language; `t()` keeps the English fallback because a caller with no better answer must still print something. Both read the same runtime as the packs, which stays the only writer of the active locale: `setLocale()` is an in-memory test/preview seam and persists nothing.
+
+Tests: `frontend/src/lib/i18n/__tests__/runtime.unit.ts` (resolution: interpolation, per-locale plurals, the fallback ladder and its warnings, `<html lang>`), `runtime.unit.svelte.ts` (reactivity and the runtime contract), `frontend/src/lib/utils/__tests__/format-time.unit.ts`, `format.unit.ts`; the no-language-in-core rule is its own command - `python3 i18n-gate.py` in `frontend/`.
+
+### CJK Typography
+`--font-sans` has no CJK coverage in its Latin base, so Chinese/Japanese/Korean gets its chain from a `:lang()` block at the end of `frontend/src/app.css` (`zh-Hans`/`zh-Hant`/`ja`/`ko`). Keep it scoped to `:lang()`: a global rule restyles English chrome, and `--font-mono` must stay CJK-free (code must not pick up a CJK face). Three rules about the chains, each one measured rather than assumed:
+
+- **A generic family ends a font list.** `sans-serif` matches every script, so every family written after it is unreachable; `--font-sans-latin` stops before it and each chain carries its own copy last.
+- **CJK faces come FIRST, before the Latin base.** A Latin alias (`Arial`, `Helvetica`) resolves through fontconfig to something that already covers the CJK run, so the platform answers the missing script from its own language fallback and never reads further down the list — a CJK face written after the Latin base is decorative. The accepted cost: Latin in a CJK locale renders with the CJK face's own Latin glyphs, which is what a Chinese or Japanese site does anyway.
+- **`html:lang(…)` selects, and it overrides the `--font-sans` VARIABLE** (not `font-family`), because components read the variable directly (StatsModal, SandboxConfigModal) as well as inheriting from `body`; the higher specificity also stops an installed theme's `:root { --font-sans }` from dropping the chain.
+
+Dense rows truncate: 71 rules pair `white-space: nowrap` with `overflow: hidden; text-overflow: ellipsis`, and a CJK board measured against the rest (36 nowrap rules with no overflow contract — buttons, radio labels, unit labels) produced **zero** overflowing boxes and no row-height change, so the CJK block deliberately adds no `white-space` override. If a translation ever does push a label past its box, give that rule the ellipsis pair rather than a scoped `white-space: normal`, which trades a clip for a ragged row.
+
+**Verifying typography needs pixels.** Glyph advance cannot tell faces apart (CJK glyphs are em-width, so every face measures the same) and `document.fonts.check()` answers `true` for a family that is not installed, because *a* fallback can render the text. Rasterize the same string into a canvas under both stacks and compare the bytes.
 
 ### Client-Side Storage
 All client-side storage goes through `frontend/src/lib/storage.ts` (async functions; single IndexedDB `kanban-storage`). Never access IndexedDB directly in components. `gc()` (stale-entry sweep, incl. offline message/diff caches for a project) is called only from `Board.svelte` after the board loads — components should NOT call it.
@@ -338,3 +367,4 @@ Read the file before editing that subsystem — each holds the detail and histor
 | `docs/extension-dependency-cache.md` | the `dependency_cache` grant, `ro` mounts, `environment` check, one derivation |
 | `docs/commit-and-done.md` | what the click does, conflict arming, which files never get committed |
 | `docs/adding-a-preference.md` | the 7-layer recipes for a shortcut or a `*bool` preference |
+| `docs/i18n.md` | the derived-language rule (one rule, two ends), the catalog load + failure policy, the pre-paint cache vs reality, the first-run offer's four conditions |

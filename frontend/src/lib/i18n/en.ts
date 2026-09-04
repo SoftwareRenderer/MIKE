@@ -11,6 +11,15 @@
  *    selected from a `count` param. `other` is required: every locale has it.
  *  - English values are the copy that shipped in the components, byte-identical. A
  *    translated catalog changes nothing here.
+ *  - `{placeholder}` token NAMES are part of a key's contract (a pack that drops
+ *    `{time}` loses the time), so they stay English even in a translated catalog.
+ *  - **Core ships zero translated strings and zero language names.** Translations live
+ *    in i18n extension packs; a locale tag is carried through verbatim and never mapped
+ *    to a display name. `cd frontend && npm run check:i18n` is that rule as a command
+ *    (see `i18n/README.md` for what it checks and its two documented allowances).
+ *  - The `i18n.offer.*` block is English-only by nature: the first-run language offer is
+ *    shown precisely to a browser that has **no pack installed**, so a translated copy of
+ *    these strings is the thing the user does not have yet.
  *  - **Never** a key for text this app does not own: extension `display_name`,
  *    `description`, `config_schema` titles/descriptions, changelog entries, log lines,
  *    or anything a manifest or an API response supplies at runtime. That text is the
@@ -28,7 +37,7 @@ export type MessageValue = string | PluralTable;
 /** Interpolation params. `count` additionally selects the plural form. */
 export type MessageParams = Record<string, string | number | boolean | null | undefined>;
 
-export const en = {
+const catalog = {
     // ════════════════════════════════════════════════════════════════════════════
     // ═══ namespace: explorer.* — explorer / file browsers batch                              ═══
     // ═══ (ExplorerView.svelte, TaskExplorerView.svelte, FileBrowser.svelte,                  ═══
@@ -36,7 +45,9 @@ export const en = {
     // ═══  BranchSymbols.svelte, PathPicker.svelte)                                           ═══
     // ════════════════════════════════════════════════════════════════════════════
 
-    // ── i18n runtime (self-test surface; replaced when T5's catalog lands) ──
+    // ── i18n runtime (the self-test surface `__tests__/runtime.unit*.ts` exercises:
+    //    one plain message and one plural table, which is all the resolution ladder
+    //    needs. Permanent — nothing renders them, do not reuse them for UI copy.) ──
     'i18n.test.plain': 'Plain message',
     'i18n.test.files': { one: '{count} file', other: '{count} files' },
 
@@ -483,8 +494,10 @@ export const en = {
     'settings.extensions.perm.previewServeScripts.description': 'Can run scripts in the preview',
     'settings.extensions.perm.previewServeNetwork.label': 'Send/receive data in the preview',
     'settings.extensions.perm.previewServeNetwork.description': 'Can use commands such as fetch() to send/receive data across the network.',
-    'settings.extensions.cap.i18n.label': 'I18N',
-    'settings.extensions.cap.i18n.description': 'Installs translated interface text and agent prompt templates for one language',
+    // The capability's own words, not the `I18N` badge text: this row is where a reader
+    // looks for a language switch, and there is deliberately none to switch.
+    'settings.extensions.cap.i18n.label': 'Translation',
+    'settings.extensions.cap.i18n.description': 'Replaces the interface text with its own translations. The enabled translation pack IS the active language — there is no language setting to change. Its files are static text served from the pack directory; nothing a pack declares executes.',
 
     // ── ConfigModal/ExtensionsTab.svelte — chrome, dialogs, browse + installed cards ──
     // Build progress, install/update streams and `environment.note` are server- and
@@ -507,8 +520,6 @@ export const en = {
     'settings.extensions.updateImageMessage': 'Fetch the latest image for {name}? The sandbox will be restarted.',
     'settings.extensions.update': 'Update',
     'settings.extensions.notBuilt': 'Not built',
-    'settings.extensions.builtPrefix': 'Built ',
-    'settings.extensions.builtAt': 'Built {date}',
     'settings.extensions.dismiss': 'Dismiss',
     'settings.extensions.installedCount': 'Installed ({count})',
     'settings.extensions.browse': 'Browse',
@@ -697,7 +708,6 @@ export const en = {
         one: '🟡 {name} - {count} task for review',
         other: '🟡 {name} - {count} tasks for review',
     },
-    'app.time.justNow': 'just now',
     'app.project.removeTitle': 'Remove Project',
     'app.project.removeMessage': "Remove \"{name}\" from the board?\n\nThis will delete the project's Kanban board, all tasks, messages, and their worktree directories.\nThe project folder itself will NOT be deleted.",
     'app.project.remove': 'Remove',
@@ -1384,7 +1394,66 @@ export const en = {
     'task.graph.loading': 'Loading commits...',
     'task.graph.empty': 'No commits',
 
+    // ── namespace: time.* — the formatting task (utils/format.ts, utils/format-time.ts) ──
+    // Appended by the merge with the formatting task: `time.justNow` is the key App.svelte's
+    // sidebar timestamp uses, which is why the batch's own `app.time.justNow` is gone rather
+    // than kept as a second identical string a pack would have to translate twice.
+
+    // --- Relative time -----------------------------------------------------
+    // The `{n} ago` rungs are here for completeness (and as an escape hatch: a
+    // language ICU renders badly in — French narrow is "-5 min" — overrides them).
+    // `format-time` prefers Intl.RelativeTimeFormat over these for any locale that
+    // does NOT ship the key, which is why they read as abbreviations, not words.
+    'time.justNow': 'just now',
+    'time.secondAgo': '{n}s ago',
+    'time.minuteAgo': '{n}m ago',
+    'time.hourAgo': '{n}h ago',
+    'time.dayAgo': '{n}d ago',
+    'time.weekAgo': '{n}w ago',
+    'time.monthAgo': '{n}mo ago',
+    'time.yearAgo': '{n}y ago',
+
+    // --- Timestamps (chat) --------------------------------------------------
+    'time.yesterdayAt': 'Yesterday at {time}',
+    'time.lastWeekdayAt': 'Last {weekday} at {time}',
+    'time.onDateAt': '{date} at {time}',
+
+    // --- Wrapped phrases ----------------------------------------------------
+    // Templates rather than a `prefix` string, because "Built " is not a prefix in
+    // every language — the position belongs to the catalog, not the caller.
+    'time.built': 'Built {when}',
+    'time.saved': 'Saved {when}',
+
+    // --- The first-run language offer (T15b) --------------------------------
+    'i18n.offer.question': 'Read MIKE in {language}?',
+    'i18n.offer.detail':
+        'Your browser is set to {language}. Installing the language pack switches the interface right away — '
+        + 'turn it back any time in Settings → Extensions.',
+    'i18n.offer.install': 'Install {language}',
+    'i18n.offer.installing': 'Installing {language}…',
+    'i18n.offer.never': "Don't ask again",
+    'i18n.offer.failed': 'Could not install the {language} language pack',
+
     // ↓ keys from the other owned files of this batch are appended below this line ↓
 } satisfies Record<string, MessageValue>;
 
-export type MessageKey = keyof typeof en;
+/**
+ * The same map, typed as an indexable catalog.
+
+ * The literal type above is what `MessageKey` reads, so `t('settins.save')` is a type
+ * error; this is what `t()` indexes at runtime, and what a test seeds a key into. One
+ * object, two views — an `en: Record<string, MessageValue>` annotation on the literal
+ * would throw the keys away, and `satisfies` alone would make `en[key] = …` an
+ * excess-property error.
+ */
+export const en: Record<string, MessageValue> = catalog;
+
+/** Every key the core knows about. A typo in `t('settins.save')` is a type error. */
+export type MessageKey = keyof typeof catalog;
+
+/**
+ * The locale this app falls back to — what `<html lang>` says when no pack is active,
+ * and the tag that is never a pack (a pack declaring `en` cannot shadow this file).
+ * A tag, not a name: nothing here knows that "en" is called English.
+ */
+export const DEFAULT_LOCALE = 'en';
