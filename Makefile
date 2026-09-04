@@ -76,6 +76,18 @@ test-i18n-surface: ## Fail if any user-facing string is still a core literal (~5
 test-e2e: ## Run e2e tests (Playwright, manages its own server)
 	cd frontend && npx playwright test
 
+# A locale pack fails silently in both directions, so neither failure shows up in the UI: a
+# missing message key falls back to English per key (a pack missing 300 keys still looks
+# translated), and a prompt overlay that renames a placeholder or drops a {{if}} only fails when
+# the executor renders that prompt inside a task. Both are measured instead.
+.PHONY: i18n-parity
+i18n-parity: ## Check a locale pack against the English contract (make i18n-parity PACK=../MIKE-extensions/i18n/fr)
+	go run ./scripts/i18nparity $(if $(PACK),--pack $(PACK),) $(if $(STRICT),--strict,)
+
+.PHONY: test-i18n-parity
+test-i18n-parity: ## Run the i18n parity checker's own tests (~0.2s)
+	go test ./scripts/i18nparity/ -count=1
+
 # ---------------------------------------------------------------------------
 # Dev
 # ---------------------------------------------------------------------------
