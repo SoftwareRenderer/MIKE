@@ -19,6 +19,7 @@
     import CardDetail from './CardDetail.svelte';
     import { setAppStreamRef } from '$lib/stream-ref';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
+    import { localeOffer } from '$lib/services/locale-offer.svelte';
     import { sandboxImageStatus } from '$lib/services/sandbox-image-status.svelte';
     let TerminalPanelComponent: typeof import('./TerminalPanel.svelte').default | null = $state(null);
     let terminalLoading = $state(false);
@@ -39,6 +40,7 @@
     import Sidebar from './App/Sidebar.svelte';
     import TopBar from './App/TopBar.svelte';
     import SWUpdateBanner from './SWUpdateBanner.svelte';
+    import LocaleOffer from './LocaleOffer.svelte';
 
     function loadTerminalPanel(): void {
         if (TerminalPanelComponent || terminalLoading) return;
@@ -564,7 +566,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         setAppStreamRef(appStream);
         applyUrlView(new URLSearchParams(location.search).get('view'));
         await loadAppData();
-        extensionManager.loadExtensions().catch(() => {});
+        // The language offer runs **after** the extension list resolves: its first
+        // rule is "no i18n pack is enabled", and before this resolves that answer
+        // is the previous session's, which offers a pack that is already on.
+        extensionManager.loadExtensions()
+            .then(() => localeOffer.detect())
+            .catch(() => {});
     }
 
     async function loadAppData() {
@@ -790,8 +797,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         await loadAppData(); // sets initialLoadComplete on completion
         isLoadingAuth = false; // hide loading screen after data is loaded
 
-        // Load installed extensions for LSP discovery
-        extensionManager.loadExtensions().catch(() => {});
+        // Load installed extensions for LSP discovery, then ask (once, silently if
+        // the answer is no) whether this browser wants a translation pack.
+        extensionManager.loadExtensions()
+            .then(() => localeOffer.detect())
+            .catch(() => {});
     }
 
     // Detect external URL changes (e.g., page.goto() in Playwright, direct URL navigation).
@@ -1553,6 +1563,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     <CommitDialog />
     <CompressContextDialog />
     <SWUpdateBanner />
+    <LocaleOffer />
 </div>
 {/if}
 
