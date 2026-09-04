@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { DiffFile } from '$lib/types/diff';
+    import { t } from '$lib/i18n';
 
     // DiffViewer is lazy-loaded by CardDetail — use dynamic import here too
     let DiffViewerComponent: typeof import('../DiffViewer.svelte').default | null = $state(null);
@@ -33,7 +34,7 @@
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
             </svg>
-            <span>Changes before this checkpoint</span>
+            <span>{t('task.checkpoint.title')}</span>
         </div>
         <button class="btn-close-checkpoint" onclick={onClose} title="Close (Esc)" aria-label="Close">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">

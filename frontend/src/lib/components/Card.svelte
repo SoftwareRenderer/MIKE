@@ -15,6 +15,7 @@
     import { fade, slide } from 'svelte/transition';
     import { onMount, onDestroy } from 'svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
+    import { t } from '$lib/i18n';
 
     // UI extension injection point — re-render when extensions change
     $effect(() => {
@@ -171,6 +172,11 @@
     );
 
     const statuses = ['backlog', 'in_progress', 'review', 'done'] as const;
+    /**
+     * English status names for this card's `aria-label`/`title` only — the ids above are
+     * the data, and `aria-label` text is never translated in this app. The visible column
+     * label is `board.column.*` (Board/Column).
+     */
     const statusLabels: Record<string, string> = {
         backlog: 'Backlog',
         in_progress: 'In Progress',
@@ -326,18 +332,18 @@
         const items: Array<{ icon: string; label: string; action: (e: MouseEvent) => void; danger?: boolean }> = [];
 
         if (!inline || !task.parent_task_id || hasChildren || showSubtaskBorder) {
-            items.push({ icon: '<path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>', label: 'Create subtask', action: handleCreateChild });
+            items.push({ icon: '<path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>', label: t('board.card.createSubtask'), action: handleCreateChild });
         }
         if (!isDoneSubtask) {
-            items.push({ icon: '<path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>', label: 'Edit', action: startEdit });
+            items.push({ icon: '<path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>', label: t('board.card.edit'), action: startEdit });
         }
         if (isPausable) {
-            items.push({ icon: '<rect x="2.5" y="1.5" width="1.5" height="7" fill="currentColor"/><rect x="6" y="1.5" width="1.5" height="7" fill="currentColor"/>', label: 'Pause', action: handlePause });
+            items.push({ icon: '<rect x="2.5" y="1.5" width="1.5" height="7" fill="currentColor"/><rect x="6" y="1.5" width="1.5" height="7" fill="currentColor"/>', label: t('board.card.pause'), action: handlePause });
         } else if (isResumable) {
-            items.push({ icon: '<polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/>', label: 'Resume', action: handleResume });
+            items.push({ icon: '<polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/>', label: t('board.card.resume'), action: handleResume });
         }
         if ((columnId === 'done' || isDoneSubtask) && !(multiSelect?.isSelected(task.id) ?? false)) {
-            items.push({ icon: '<path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>', label: 'Delete', action: handleDelete, danger: true });
+            items.push({ icon: '<path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>', label: t('board.card.delete'), action: handleDelete, danger: true });
         }
 
         for (const item of items) {
@@ -405,12 +411,12 @@
         const streaming = streamingIds.has(task.id);
         const state = appStore.board?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state;
         const hasConflict = (appStore.board?.tasks.find(t => t.id === task.id)?.has_merge_conflict ?? task.has_merge_conflict) ?? false;
-        if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
-        if (state === 'pulling_image') return { text: 'Pulling image', color: 'var(--color-status-blue)' };
-        if (hasConflict) return { text: 'Resolving conflict', color: 'var(--color-status-orange)' };
-        if (state === 'paused') return { text: 'Paused', color: 'var(--color-status-yellow)' };
-        if (state === 'idle' && task.status === 'in_progress') return { text: 'Pending', color: 'var(--color-status-orange)' };
-        if (state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
+        if (streaming || state === 'running') return { text: t('board.badge.running'), color: 'var(--color-status-blue)' };
+        if (state === 'pulling_image') return { text: t('board.badge.pullingImage'), color: 'var(--color-status-blue)' };
+        if (hasConflict) return { text: t('board.badge.resolvingConflict'), color: 'var(--color-status-orange)' };
+        if (state === 'paused') return { text: t('board.badge.paused'), color: 'var(--color-status-yellow)' };
+        if (state === 'idle' && task.status === 'in_progress') return { text: t('board.badge.pending'), color: 'var(--color-status-orange)' };
+        if (state === 'failed') return { text: t('board.badge.failed'), color: 'var(--color-status-red)' };
         return null;
     });
 
@@ -439,7 +445,7 @@
         if (task.llama_server_url?.startsWith(AGENT_URL_PREFIX)) {
             // Look up the agent provider's display name from the config
             const agentProvider = providers.find(p => p.url === task.llama_server_url);
-            const agentText = agentProvider ? getProviderDisplayName(agentProvider, providers) : 'Coding Agent';
+            const agentText = agentProvider ? getProviderDisplayName(agentProvider, providers) : t('board.card.codingAgent');
             return { text: agentText, provider: null, model: null, color: '#A371F7', isAgent: true };
         }
         // Use task model if set, otherwise fall back to the configured Worker model
@@ -452,7 +458,7 @@
         const showProvider = providers.length > 1;
         const provName = showProvider && provider ? getProviderDisplayName(provider, providers) : null;
         const displayModel = displayModelName(activeModel);
-        const text = provName ? `${provName} · ${displayModel}` : displayModel;
+        const text = provName ? t('board.card.modelWithProvider', { provider: provName, model: displayModel }) : displayModel;
         return { text, provider: provName, model: displayModel, color: getModelColor(activeModel), isAgent: false };
     });
 
@@ -618,8 +624,8 @@
                     dialogStore.commitDialog = {
                         streaming: true,
                         message: '',
-                        confirmText: 'Commit and move to Done',
-                        cancelText: 'Cancel',
+                        confirmText: t('board.card.commitAndDone'),
+                        cancelText: t('board.confirm.cancel'),
                         projectId: projectId!,
                         taskId: task.id,
                         _resolve: resolve,
@@ -645,10 +651,10 @@
         e.stopPropagation();
         if (!projectId) return;
         const confirmed = await dialogStore.showConfirm({
-            title: 'Delete Task',
-            message: 'Delete this task? This cannot be undone.',
-            confirmText: 'Delete',
-            cancelText: 'Cancel',
+            title: t('board.deleteTask.title'),
+            message: t('board.deleteTask.message'),
+            confirmText: t('board.confirm.delete'),
+            cancelText: t('board.confirm.cancel'),
         });
         if (!confirmed) return;
         try {
@@ -662,7 +668,7 @@
                 removeTaskFromBoard(appStore, task.id);
                 onRefreshBoard?.();
             } else {
-                dialogStore.showToast('Failed to delete task: ' + String(err), 'error');
+                dialogStore.showToast(t('board.toast.deleteFailed', { error: String(err) }), 'error');
             }
         }
     }
@@ -730,7 +736,7 @@
                         <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><circle cx="4" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="12" cy="8" r="1.5"/></svg>
                     </button>
                     {#if isIdle}
-                        <span class="action-idle" aria-label="Idle" title="Idle">Idle</span>
+                        <span class="action-idle" aria-label="Idle" title="Idle">{t('board.card.idle')}</span>
                     {/if}
                 {:else}
                     {#if !inline || !task.parent_task_id || hasChildren || showSubtaskBorder}
@@ -776,7 +782,7 @@
                             <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
                         </button>
                     {:else if thirdAction === 'idle'}
-                        <span class="action-idle" aria-label="Idle" title="Idle">Idle</span>
+                        <span class="action-idle" aria-label="Idle" title="Idle">{t('board.card.idle')}</span>
                     {:else if thirdAction === 'delete'}
                         <button
                             type="button"
@@ -857,7 +863,7 @@
     {#if diffStats}
         <div class="diff-stats-row">
             <span class="diff-stats">
-                {#if diffStats.files > 0}<span class="diff-files">{diffStats.files} file{diffStats.files !== 1 ? 's' : ''}</span>{/if}
+                {#if diffStats.files > 0}<span class="diff-files">{t('board.card.fileCount', { count: diffStats.files })}</span>{/if}
                 {#if diffStats.files > 0 && (diffStats.additions > 0 || diffStats.deletions > 0)}<span class="diff-sep"> · </span>{/if}
                 {#if diffStats.additions > 0}<span class="diff-add">+{diffStats.additions}</span>{/if}
                 {#if diffStats.deletions > 0}<span class="diff-del">-{diffStats.deletions}</span>{/if}
@@ -874,7 +880,7 @@
             aria-expanded={expanded}
         >
             <span class="subtask-progress-fill" style="width: {subtaskProgress.pct * 100}%"></span>
-            <span class="subtask-progress-count">{subtaskProgress.total} subtask{subtaskProgress.total !== 1 ? 's' : ''}</span>
+            <span class="subtask-progress-count">{t('board.card.subtaskCount', { count: subtaskProgress.total })}</span>
             <svg class="subtask-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
     {/if}

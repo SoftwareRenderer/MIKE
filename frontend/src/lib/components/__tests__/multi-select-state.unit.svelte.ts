@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { render } from '@testing-library/svelte';
+import { t } from '$lib/i18n';
 
 // Mock svelte transitions
 vi.mock('svelte/transition', () => ({
@@ -112,7 +113,7 @@ describe('MultiSelectBar', () => {
 
         const startBtn = container.querySelector('.bar-btn-start');
         expect(startBtn).toBeTruthy();
-        expect(startBtn?.textContent).toContain('Start 2 tasks');
+        expect(startBtn?.textContent).toContain(t('board.multiSelect.startCount', { count: 2 }));
     });
 
     it('should have clear selection button in action bar', () => {
@@ -167,7 +168,7 @@ describe('MultiSelectBar', () => {
 
         const modelBtn = container.querySelector('.bar-btn-model');
         expect(modelBtn).toBeTruthy();
-        expect(modelBtn?.textContent).toContain('Model');
+        expect(modelBtn?.textContent).toContain(t('board.multiSelect.model'));
     });
 
     it('should not show Model button when selected tasks are not all in Backlog', () => {

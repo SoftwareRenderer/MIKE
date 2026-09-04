@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, fireEvent } from '@testing-library/svelte';
+import { t } from '$lib/i18n';
 
 // Mock raw asset imports and the icon component (not available in jsdom)
 vi.mock('$lib/assets/icons/shield.svg?raw', () => ({ default: '' }));
@@ -108,12 +109,12 @@ describe('TaskHeader path tooltip (mobile)', () => {
         await tap(label);
         const copyBtn = container.querySelector('.path-tooltip-copy') as HTMLButtonElement;
         expect(copyBtn).toBeTruthy();
-        expect(copyBtn.textContent).toContain('Copy');
+        expect(copyBtn.textContent).toContain(t('task.header.copy'));
 
         await fireEvent.click(copyBtn);
         await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(FULL_PATH));
         // Confirmation swaps in, tooltip stays open.
-        await vi.waitFor(() => expect(copyBtn.textContent).toContain('Copied'));
+        await vi.waitFor(() => expect(copyBtn.textContent).toContain(t('task.header.copied')));
         expect(container.querySelector('.path-tooltip')).toBeTruthy();
     });
 
@@ -146,7 +147,7 @@ describe('TaskHeader path tooltip (mobile)', () => {
             const copyBtn = container.querySelector('.path-tooltip-copy') as HTMLButtonElement;
             await fireEvent.click(copyBtn);
             await vi.waitFor(() => expect(execCommand).toHaveBeenCalledWith('copy'));
-            await vi.waitFor(() => expect(copyBtn.textContent).toContain('Copied'));
+            await vi.waitFor(() => expect(copyBtn.textContent).toContain(t('task.header.copied')));
         } finally {
             document.execCommand = originalExec;
         }
@@ -163,7 +164,7 @@ describe('TaskHeader path tooltip (mobile)', () => {
         await fireEvent.click(copyBtn);
         // Let the rejected promise settle.
         await new Promise((r) => setTimeout(r, 0));
-        expect(copyBtn.textContent).toContain('Copy');
+        expect(copyBtn.textContent).toContain(t('task.header.copy'));
         expect(container.querySelector('.path-tooltip')).toBeTruthy();
     });
 

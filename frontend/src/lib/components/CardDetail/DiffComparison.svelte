@@ -4,6 +4,7 @@
     import { appStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
     import DiffSelect from '../DiffSelect.svelte';
+    import { t } from '$lib/i18n';
 
     let { commits, baseCommit, diffFrom, diffTo, onFromChange, onToChange, onToggleFullscreen, isFullscreen, isDone, branchTip, branchName }: {
         commits: TaskCommit[];
@@ -26,7 +27,7 @@
     }
 
     function getBaseCommitLabel(): string {
-        if (!baseCommit) return 'Original branch';
+        if (!baseCommit) return t('task.diff.originalBranch');
         const subject = getCommitSubject(baseCommit);
         const truncated = subject.length > 20 ? subject.slice(0, 20) + '…' : subject;
         return truncated;
@@ -51,10 +52,10 @@
             opts.push({
                 value: '',
                 label: getBaseCommitLabel(),
-                meta: `${baseCommit.short.slice(0, 7)} (Origin)`,
+                meta: t('task.diff.originMeta', { hash: baseCommit.short.slice(0, 7) }),
             });
         } else {
-            opts.push({ value: '', label: 'Original branch' });
+            opts.push({ value: '', label: t('task.diff.originalBranch') });
         }
         return opts;
     });
@@ -63,7 +64,7 @@
     // For done tasks, 'working' still matches but the backend returns the committed
     // diff (BaseCommit..BranchTip). Label shows the commit hash or branch name.
     let toOptions = $derived.by(() => {
-        let toLabel = 'Working tree';
+        let toLabel = t('task.diff.workingTree');
         if (isDone) {
             toLabel = branchTip || sortedCommits[0]?.hash || branchName || '';
         }

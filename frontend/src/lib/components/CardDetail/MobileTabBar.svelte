@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { t } from '$lib/i18n';
+
     let { activeTab, onTabChange, showCheckpointTab = false }: { activeTab: string; onTabChange: (tab: 'context' | 'chat' | 'diff' | 'checkpoint') => void; showCheckpointTab?: boolean } = $props();
 </script>
 
@@ -28,7 +30,7 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
             </svg>
-            Checkpoint
+            {t('task.tabs.checkpoint')}
         </button>
     {/if}
     <button
