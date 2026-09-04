@@ -4,6 +4,7 @@
     import type { Config, Provider } from '$lib/types';
     import { isAgentProvider } from '$lib/types';
     import { getModelName, getProviderDisplayName } from '$lib/utils/providers';
+    import { t } from '$lib/i18n';
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
     import { appStore, uiStore, dialogStore } from '$lib/stores';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
@@ -256,7 +257,7 @@
         try {
             if (p.kind === 'agent') {
                 // Agent providers don't have a testable connection (binary is checked at runtime)
-                p.testResult = { success: true, message: 'Agent provider — binary checked at runtime' };
+                p.testResult = { success: true, message: t('settings.agentConnectionTest') };
             } else {
                 if (!p.url.trim()) { p.testingConnection = false; return; }
 
@@ -511,10 +512,10 @@
             return !!model && prov.models.some(m => m.name.trim() === model);
         };
         if (!workerProvider || !workerModel || !modelValid(workerProv, workerModel)) {
-            return 'Please select a Worker provider and model.';
+            return t('settings.validateWorker');
         }
         if (!utilityProvider || !utilityModel || !modelValid(utilityProv, utilityModel)) {
-            return 'Please select a Utility provider and model.';
+            return t('settings.validateUtility');
         }
         return '';
     }
@@ -601,10 +602,10 @@
     async function handleClose() {
         if (hasChanges) {
             const confirmed = await dialogStore.showConfirm({
-                title: 'Discard changes?',
-                message: 'You have unsaved changes. Discard them?',
-                confirmText: 'Discard',
-                cancelText: 'Keep editing',
+                title: t('settings.discardTitle'),
+                message: t('settings.discardMessage'),
+                confirmText: t('settings.discard'),
+                cancelText: t('settings.keepEditing'),
                 variant: 'destructive',
             });
             if (!confirmed) return;
@@ -615,9 +616,9 @@
 
     async function handleSignOut() {
         const confirmed = await dialogStore.showConfirm({
-            title: 'Sign out',
-            message: 'Are you sure you want to sign out?',
-            confirmText: 'Sign out',
+            title: t('settings.signOut'),
+            message: t('settings.signOutConfirm'),
+            confirmText: t('settings.signOut'),
             variant: 'destructive',
         });
         if (confirmed && onSignOut) {
@@ -651,15 +652,15 @@
     <div class="header-wrap">
         <h2 id="modal-title">{title}</h2>
         <div class="header-tabs">
-            <button type="button" class="tab-btn" class:active={activeTab === 'providers'} onclick={() => activeTab = 'providers'}>Providers</button>
-            <button type="button" class="tab-btn" class:active={activeTab === 'task-defaults'} onclick={() => activeTab = 'task-defaults'}>Task Defaults</button>
-            <button type="button" class="tab-btn" class:active={activeTab === 'preferences'} onclick={() => activeTab = 'preferences'}>Preferences</button>
-            <button type="button" class="tab-btn" class:active={activeTab === 'extensions'} onclick={() => activeTab = 'extensions'}>Extensions</button>
-            <button type="button" class="tab-btn" class:active={activeTab === 'about'} onclick={() => activeTab = 'about'}>About</button>
+            <button type="button" class="tab-btn" class:active={activeTab === 'providers'} onclick={() => activeTab = 'providers'}>{t('settings.tab.providers')}</button>
+            <button type="button" class="tab-btn" class:active={activeTab === 'task-defaults'} onclick={() => activeTab = 'task-defaults'}>{t('settings.tab.taskDefaults')}</button>
+            <button type="button" class="tab-btn" class:active={activeTab === 'preferences'} onclick={() => activeTab = 'preferences'}>{t('settings.tab.preferences')}</button>
+            <button type="button" class="tab-btn" class:active={activeTab === 'extensions'} onclick={() => activeTab = 'extensions'}>{t('settings.tab.extensions')}</button>
+            <button type="button" class="tab-btn" class:active={activeTab === 'about'} onclick={() => activeTab = 'about'}>{t('settings.tab.about')}</button>
         </div>
         <div class="header-actions">
             {#if !isMobileCtx.isMobile}
-                <button type="button" class="icon-btn" onclick={toggleModalFullscreen} title="Toggle fullscreen" aria-label="Toggle fullscreen">
+                <button type="button" class="icon-btn" onclick={toggleModalFullscreen} title={t('settings.toggleFullscreen')} aria-label={t('settings.toggleFullscreen')}>
                     {#if modalFullscreen}
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     {:else}
@@ -667,12 +668,12 @@
                     {/if}
                 </button>
             {/if}
-            <button class="close-btn" onclick={handleClose} aria-label="Close" title="Close">✕</button>
+            <button class="close-btn" onclick={handleClose} aria-label={t('settings.close')} title={t('settings.close')}>✕</button>
         </div>
     </div>
 {/snippet}
 
-<BaseModal title="Settings" width={modalFullscreen ? '100vw' : '720px'} footer={footer} onClose={handleClose} modalClass={modalFullscreen ? 'config-modal fullscreen-modal' : 'config-modal'} bodyStyle={activeTab === 'extensions' ? 'padding-top: 0;' : undefined} header={customHeader}>
+<BaseModal title={t('settings.title')} width={modalFullscreen ? '100vw' : '720px'} footer={footer} onClose={handleClose} modalClass={modalFullscreen ? 'config-modal fullscreen-modal' : 'config-modal'} bodyStyle={activeTab === 'extensions' ? 'padding-top: 0;' : undefined} header={customHeader}>
     <!-- Tab Content -->
     <div class="tab-content">
 
@@ -680,8 +681,8 @@
         {#if activeTab === 'providers'}
             <div class="section">
                 <div class="section-header">
-                    <h3 class="section-label">Primary Providers</h3>
-                    <span class="field-help">Select default provider/model for each task type.</span>
+                    <h3 class="section-label">{t('settings.primaryProviders')}</h3>
+                    <span class="field-help">{t('settings.primaryProvidersHelp')}</span>
                 </div>
                 <div class="primary-providers-list">
                     {#snippet pairRow(title: string, hint: string, kind: 'worker' | 'utility')}
@@ -702,9 +703,9 @@
                                     else { utilityProvider = val; utilityModel = ''; }
                                     markDirty();
                                 }}
-                                aria-label="{title} provider"
+                                aria-label={t('settings.pair.providerAria', { title })}
                             >
-                                <option value="">Select provider</option>
+                                <option value="">{t('settings.selectProvider')}</option>
                                 {#each providers as p}
                                     <option value={providerRef(p)}>{getProviderDisplayName(p, providers)}</option>
                                 {/each}
@@ -719,15 +720,15 @@
                                     markDirty();
                                 }}
                                 disabled={!selProv || (selProv && !isAgentProvider(selProv) && !selProv.models.length)}
-                                aria-label="{title} model"
+                                aria-label={t('settings.pair.modelAria', { title })}
                             >
-                                <option value="">Select model</option>
+                                <option value="">{t('settings.selectModel')}</option>
                                 {#if selProv}
                                     {#if isAgentProvider(selProv)}
                                         {@const agentModels = kind === 'worker' ? workerAgentModels : utilityAgentModels}
                                         {@const agentLoading = kind === 'worker' ? workerAgentModelsLoading : utilityAgentModelsLoading}
                                         {#if agentLoading}
-                                            <option value="" disabled>Loading models...</option>
+                                            <option value="" disabled>{t('settings.loadingModels')}</option>
                                         {:else if agentModels.length > 0}
                                             {#each agentModels as m}
                                                 <option value={m.name} selected={selModel === m.name}>{m.name}</option>
@@ -744,16 +745,16 @@
                             </select>
                         </div>
                     {/snippet}
-                    {@render pairRow('Worker', 'Model used for chat responses', 'worker')}
-                    {@render pairRow('Utility', 'Model for summaries, commit messages, labels', 'utility')}
+                    {@render pairRow(t('settings.pair.worker'), t('settings.pair.workerHint'), 'worker')}
+                    {@render pairRow(t('settings.pair.utility'), t('settings.pair.utilityHint'), 'utility')}
                 </div>
             </div>
 
             <div class="section">
                 <div class="section-header">
-                    <h3 class="section-label">Providers</h3>
+                    <h3 class="section-label">{t('settings.providers')}</h3>
                     <div class="section-actions">
-                        <button type="button" class="btn-small" onclick={addProvider} title="Add a new LLM provider">+ Add Provider</button>
+                        <button type="button" class="btn-small" onclick={addProvider} title={t('settings.addProviderHint')}>{t('settings.addProvider')}</button>
                     </div>
                 </div>
                 <div class="providers-list">
@@ -780,7 +781,7 @@
                             <path d="M8 1L1 14h14L8 1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
                             <path d="M8 6v4M8 11.5v.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
                         </svg>
-                        <span>No LLM provider configured. An LLM provider is required for <strong>commit label generation</strong> and <strong>automatic merge conflict resolution</strong>.</span>
+                        <span>{t('settings.noLlmWarning.before')} <strong>{t('settings.noLlmWarning.labels')}</strong> {t('settings.noLlmWarning.between')} <strong>{t('settings.noLlmWarning.resolution')}</strong>.</span>
                     </div>
                 {/if}
                 {#if providers.length === 0}
@@ -792,8 +793,8 @@
                             <circle cx="15" cy="12" r="1" fill="currentColor"/>
                             <circle cx="20" cy="12" r="1" fill="currentColor"/>
                         </svg>
-                        <p>No providers configured</p>
-                        <span>Add an LLM provider to get started. Supports any OpenAI-compatible API.</span>
+                        <p>{t('settings.noProviders')}</p>
+                        <span>{t('settings.providersEmptyHint')}</span>
                     </div>
                 {/if}
             </div>
@@ -829,7 +830,7 @@
                 <div class="about-header">
                     <div class="about-icon">{@html pwaIcon}</div>
                     <div>
-                        <h3 class="section-label">MIKE: Integrated Kanban Environment <span class="about-version">{config?.version || 'dev'}</span></h3>
+                        <h3 class="section-label">{t('settings.aboutTitle')} <span class="about-version">{config?.version || 'dev'}</span></h3>
                         <p class="about-description">© 2026 Mike Wren</p>
                         <p class="about-description">
                             <a href="https://github.com/SoftwareRenderer" target="_blank" rel="noopener noreferrer">
@@ -842,44 +843,44 @@
 
             {#if appStore.pwaInstallPrompt}
             <div class="section">
-                <h3 class="section-label">Progress Web App</h3>
-                <button type="button" class="btn-pwa-install" onclick={handlePwaInstall} title="Install as a Progressive Web App">
+                <h3 class="section-label">{t('settings.pwa')}</h3>
+                <button type="button" class="btn-pwa-install" onclick={handlePwaInstall} title={t('settings.pwaInstallHint')}>
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                         <path d="M8 2v9M5 8l3 3 3-3M3 12v2h10v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
-                    Install as PWA
+                    {t('settings.pwaInstall')}
                 </button>
             </div>
             {/if}
 
             <div class="section">
-                <h3 class="section-label">System Info</h3>
+                <h3 class="section-label">{t('settings.systemInfo')}</h3>
                 <div class="field-label">
-                    <span class="field-label-inline">Directory for Worktrees</span>
+                    <span class="field-label-inline">{t('settings.worktreesDir')}</span>
                     <div class="readonly-value">{config?.workspace_dir || '\u2014'}</div>
-                    <span class="field-help">Directory where task worktrees are created</span>
+                    <span class="field-help">{t('settings.worktreesDirHelp')}</span>
                 </div>
                 <div class="field-label">
-                    <span class="field-label-inline">Database</span>
+                    <span class="field-label-inline">{t('settings.database')}</span>
                     <div class="readonly-value">{config?.database_path || '\u2014'}</div>
-                    <span class="field-help">Path to the server's SQLite database</span>
+                    <span class="field-help">{t('settings.databaseHelp')}</span>
                 </div>
                 {#if config?.tls_ca_available}
                     <!-- Only when the server signed its own certificate. A plain link,
                          not apiFetch: the route is a session-authed GET, so the
                          browser's own download UI handles the file. -->
                     <div class="field-label">
-                        <span class="field-label-inline">CA Certificate</span>
+                        <span class="field-label-inline">{t('settings.caCert')}</span>
                         <div>
                             <a class="btn-ca-download" href="/api/tls/ca" download="mike-ca.crt"
-                               title="Download the CA certificate that signed this server's certificate">
+                               title={t('settings.caCertHint')}>
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                                     <path d="M8 2v9M5 8l3 3 3-3M3 12v2h10v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                                 </svg>
-                                Download CA Certificate
+                                {t('settings.caCertDownload')}
                             </a>
                         </div>
-                        <span class="field-help">This server's certificate is signed by its own certificate authority. Import this file into another device's trust store to trust the connection there.</span>
+                        <span class="field-help">{t('settings.caCertHelp')}</span>
                     </div>
                 {/if}
             </div>
@@ -897,13 +898,13 @@
 
 {#snippet footer()}
     {#if onSignOut}
-        <button type="button" class="btn-signout" onclick={handleSignOut} title="Sign out of Kanban">Sign out</button>
+        <button type="button" class="btn-signout" onclick={handleSignOut} title={t('settings.signOutHint')}>{t('settings.signOut')}</button>
     {/if}
     <div class="modal-footer-right">
         {#if activeTab !== 'extensions'}
-            <button type="button" class="btn-secondary" onclick={handleClose} title="Cancel and discard changes">Cancel</button>
-            <button type="button" class="btn-primary" disabled={loading} onclick={handleSave} title="Save settings">
-                {loading ? 'Saving...' : 'Save'}
+            <button type="button" class="btn-secondary" onclick={handleClose} title={t('settings.cancelHint')}>{t('settings.cancel')}</button>
+            <button type="button" class="btn-primary" disabled={loading} onclick={handleSave} title={t('settings.saveHint')}>
+                {loading ? t('settings.saving') : t('settings.save')}
             </button>
         {/if}
     </div>

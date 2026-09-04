@@ -1,6 +1,7 @@
 import type { Task } from '$lib/types';
 import { appStore, dialogStore, updateTaskInBoard } from '$lib/stores';
 import { moveTask } from '$lib/api';
+import { t } from '$lib/i18n';
 
 /** Reactive state for board section drag-and-drop. */
 export interface SectionDragState {
@@ -67,7 +68,7 @@ export function useBoardDnd(getAllTasks: () => Task[], getProjectId: () => strin
             const task = getAllTasks().find(t => t.id === taskId);
             if (!task || task.status === targetStatus) continue;
             if (!canDrop(taskId, targetStatus)) {
-                dialogStore.showToast('Cannot move to Backlog: parent task is In Progress', 'error');
+                dialogStore.showToast(t('boardDnd.cannotMoveToBacklog'), 'error');
                 continue;
             }
             try {
@@ -79,7 +80,7 @@ export function useBoardDnd(getAllTasks: () => Task[], getProjectId: () => strin
                 }
             } catch (err) {
                 console.error('Failed to move task:', err);
-                dialogStore.showToast('Failed to move task: ' + String(err), 'error');
+                dialogStore.showToast(t('boardDnd.moveFailed', { error: String(err) }), 'error');
             }
         }
     }

@@ -4,8 +4,11 @@
  * Opening a project's explorer can be the first thing that touches its image, and the request that
  * triggered it waits for the image to exist — so progress arrives over the WebSocket instead of an
  * unexplained spinner. Pure (no Svelte, no store) so the transitions are testable; the reactive
- * wrapper is $lib/services/sandbox-image-status.svelte.ts.
+ * wrapper is $lib/services/sandbox-image-status.svelte.ts. Only `sandboxImageLabel` reads the catalog —
+ * the state machine below never does, so a frame folds the same whatever language is on screen.
  */
+
+import { t } from '$lib/i18n';
 
 /** A frame from the server (`sandbox_image_status`). Mirrors types.SandboxImageStatus. */
 export interface SandboxImageStatusEvent {
@@ -76,7 +79,7 @@ export function applySandboxImageStatus(
                 building: state.building,
                 image,
                 lines: state.lines,
-                error: event.error || 'Sandbox image preparation failed',
+                error: event.error || t('sandbox.imagePrepareFailed'),
             };
     }
     return state;
@@ -87,9 +90,11 @@ export function sandboxImageLabel(state: SandboxImageState): string {
     if (!state.image) return '';
     switch (state.phase) {
         case 'working':
-            return state.building ? `Building sandbox image ${state.image}…` : `Pulling ${state.image}…`;
+            return state.building
+                ? t('sandbox.imageBuilding', { image: state.image })
+                : t('sandbox.imagePulling', { image: state.image });
         case 'failed':
-            return `Sandbox image ${state.image} could not be prepared`;
+            return t('sandbox.imageFailed', { image: state.image });
         default:
             return '';
     }

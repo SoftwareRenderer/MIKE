@@ -1,5 +1,6 @@
 import type { Config, Provider } from '$lib/types';
 import { isAgentProvider, AGENT_URL_PREFIX } from '$lib/types';
+import { t } from '$lib/i18n';
 
 /** A resolved provider/model pair: the provider, the selected model name, and its URL. */
 export interface ResolvedPair {
@@ -122,10 +123,10 @@ export function extractDomain(host: string): string {
  */
 export function getProviderDisplayName(provider: DisplayableProvider, allProviders: DisplayableProvider[]): string {
     if (isAgentProvider(provider)) {
-        return provider.display_name || provider.name || 'Agent';
+        return provider.display_name || provider.name || t('settings.provider.agentFallback');
     }
     const url = (provider.url || '').trim();
-    if (!url) return provider.name || 'Provider';
+    if (!url) return provider.name || t('settings.provider.providerFallback');
     try {
         const u = new URL(url);
         const host = u.hostname;
@@ -140,6 +141,6 @@ export function getProviderDisplayName(provider: DisplayableProvider, allProvide
         // Omit the default port (e.g. 443 for https, 80 for http) from the heading.
         return port === defaultPort ? displayHost : `${displayHost}:${port}`;
     } catch {
-        return provider.name || 'Provider';
+        return provider.name || t('settings.provider.providerFallback');
     }
 }

@@ -9,6 +9,7 @@
  * answers the same way.
  */
 import type { DraftAttachment } from '$lib/storage';
+import { t } from '$lib/i18n';
 
 /** Largest image we accept, in bytes. */
 export const MAX_IMAGE_SIZE = 4 * 1024 * 1024;
@@ -56,7 +57,7 @@ export function readImageDataUrl(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(reader.error ?? new Error(`Could not read ${file.name}`));
+        reader.onerror = () => reject(reader.error ?? new Error(t('attachments.couldNotRead', { name: file.name })));
         reader.readAsDataURL(file);
     });
 }
@@ -89,8 +90,8 @@ export function describeRejectedImages(rejected: { oversize: File[]; overflow: F
     if (rejected.oversize.length > 0) {
         const n = rejected.oversize.length;
         const limit = Math.round(MAX_IMAGE_SIZE / (1024 * 1024));
-        return `${n} image${n === 1 ? '' : 's'} too large (max ${limit} MB)`;
+        return t('attachments.tooLarge', { count: n, limit });
     }
-    if (rejected.overflow.length > 0) return `Only ${MAX_IMAGES} images per message`;
+    if (rejected.overflow.length > 0) return t('attachments.onlyN', { max: MAX_IMAGES });
     return null;
 }
