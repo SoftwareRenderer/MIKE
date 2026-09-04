@@ -10,6 +10,7 @@
     import { timeAgo } from '$lib/utils/format-time';
     import { orderBrowseEntries } from '$lib/composables/use-browse-order';
     import { identityKey } from '$lib/utils/extension-identity';
+    import { t } from '$lib/i18n';
 
     let { onExtensionsChanged }: { onExtensionsChanged?: () => void } = $props();
 
@@ -68,43 +69,43 @@
     let pendingInstall = $state<{ entry: RegistryEntry; isLocal: boolean } | null>(null);
 
     // Human-readable labels for UI injection points
-    const INJECTION_POINT_LABELS: Record<string, string> = {
-        'taskCard': 'Task Cards',
-        'fileEditor': 'File Editor',
-        'projectBoard': 'Project Board',
-        'taskChat': 'Task Chat',
-        'projectSidebar': 'Project Sidebar',
-        'fileBrowser': 'File Browser',
-        'createTask': 'Create Task',
-    };
+    const INJECTION_POINT_LABELS = $derived<Record<string, string>>({
+        'taskCard': t('settings.extensions.point.taskCard'),
+        'fileEditor': t('settings.extensions.point.fileEditor'),
+        'projectBoard': t('settings.extensions.point.projectBoard'),
+        'taskChat': t('settings.extensions.point.taskChat'),
+        'projectSidebar': t('settings.extensions.point.projectSidebar'),
+        'fileBrowser': t('settings.extensions.point.fileBrowser'),
+        'createTask': t('settings.extensions.point.createTask'),
+    });
 
     // Capability descriptions
-    const CAPABILITY_DESCRIPTIONS: Record<string, { label: string; description: string }> = {
+    const CAPABILITY_DESCRIPTIONS = $derived<Record<string, { label: string; description: string }>>({
         network: {
-            label: 'Network',
-            description: 'Enables external API access for specific domains, within the boundaries of declared capabilities.',
+            label: t('settings.extensions.cap.network.label'),
+            description: t('settings.extensions.cap.network.description'),
         },
         lsp: {
-            label: 'LSP',
-            description: 'Provides a Language Server Protocol server for code intelligence — completions, diagnostics, go-to-definition, and more. Runs in an isolated gVisor sandbox.',
+            label: t('settings.extensions.cap.lsp.label'),
+            description: t('settings.extensions.cap.lsp.description'),
         },
         ui: {
-            label: 'UI',
-            description: 'Customizes interactive elements. The component runs within a sandboxed iframe.',
+            label: t('settings.extensions.cap.ui.label'),
+            description: t('settings.extensions.cap.ui.description'),
         },
         css: {
-            label: 'CSS',
-            description: 'Loads a global stylesheet that applies custom styling across the entire application. Used for themes and visual customizations.',
+            label: t('settings.extensions.cap.css.label'),
+            description: t('settings.extensions.cap.css.description'),
         },
         agent: {
-            label: 'Agent',
-            description: 'Adds an AI coding agent as a provider option.',
+            label: t('settings.extensions.cap.agent.label'),
+            description: t('settings.extensions.cap.agent.description'),
         },
         llm: {
-            label: 'LLM',
-            description: 'Modifies the OpenAI-compatible LLM request format to fit provider-specific structure, depending on the provider URL.',
+            label: t('settings.extensions.cap.llm.label'),
+            description: t('settings.extensions.cap.llm.description'),
         },
-    };
+    });
 
     // Human-readable explanations for sandboxed UI extension permissions.
     // Non-technical, user-facing wording. Only permissions an extension
@@ -113,76 +114,76 @@
     // editor.removeFooterButton, editor.contentChange, preview.serve,
     // preview.release, preview.navState) have no entry. Unknown/legacy names
     // fall back to the raw name in the UI.
-    const PERMISSION_DESCRIPTIONS: Record<string, { label: string; description: string }> = {
+    const PERMISSION_DESCRIPTIONS = $derived<Record<string, { label: string; description: string }>>({
         'createTask.description.insertText': {
-            label: 'Edit the task description',
-            description: 'Can insert text into the task description field.',
+            label: t('settings.extensions.perm.createTaskDescriptionInsertText.label'),
+            description: t('settings.extensions.perm.createTaskDescriptionInsertText.description'),
         },
         'createTask.events.paste': {
-            label: 'See what you paste',
-            description: 'Can see text pasted into the task description so it can act on it.',
+            label: t('settings.extensions.perm.createTaskEventsPaste.label'),
+            description: t('settings.extensions.perm.createTaskEventsPaste.description'),
         },
         'network.proxy': {
-            label: 'Reach external services',
-            description: 'Can make requests to external services through the server, limited to the allowed domains of its Network capability.',
+            label: t('settings.extensions.perm.networkProxy.label'),
+            description: t('settings.extensions.perm.networkProxy.description'),
         },
         'ui.setSize': {
-            label: 'Resize its own panel',
-            description: 'Can change the height of the space it occupies on the page.',
+            label: t('settings.extensions.perm.uiSetSize.label'),
+            description: t('settings.extensions.perm.uiSetSize.description'),
         },
         'ui.modal': {
-            label: 'Show a modal',
-            description: 'Can display a popup modal.',
+            label: t('settings.extensions.perm.uiModal.label'),
+            description: t('settings.extensions.perm.uiModal.description'),
         },
         'storage.get': {
-            label: 'Read its saved data',
-            description: 'Can read data it previously saved for the current task or project.',
+            label: t('settings.extensions.perm.storageGet.label'),
+            description: t('settings.extensions.perm.storageGet.description'),
         },
         'storage.set': {
-            label: 'Save its own data',
-            description: 'Can save small amounts of data for the current task or project.',
+            label: t('settings.extensions.perm.storageSet.label'),
+            description: t('settings.extensions.perm.storageSet.description'),
         },
         'storage.delete': {
-            label: 'Delete its saved data',
-            description: 'Can remove data it previously saved.',
+            label: t('settings.extensions.perm.storageDelete.label'),
+            description: t('settings.extensions.perm.storageDelete.description'),
         },
         'storage.list': {
-            label: 'List its saved data',
-            description: 'Can list the data it saved for the current task or project.',
+            label: t('settings.extensions.perm.storageList.label'),
+            description: t('settings.extensions.perm.storageList.description'),
         },
         'editor.addFooterButton': {
-            label: 'Add a button to the editor',
-            description: 'Can add a button to the bottom toolbar of the code editor.',
+            label: t('settings.extensions.perm.editorAddFooterButton.label'),
+            description: t('settings.extensions.perm.editorAddFooterButton.description'),
         },
         'editor.getContent': {
-            label: 'Read the open file',
-            description: 'Can read the full contents of the file currently open in the editor, and keep seeing it as the file is edited.',
+            label: t('settings.extensions.perm.editorGetContent.label'),
+            description: t('settings.extensions.perm.editorGetContent.description'),
         },
         'editor.setContent': {
-            label: 'Write to the open file',
-            description: 'Can write the full contents of the file currently open in the editor.',
+            label: t('settings.extensions.perm.editorSetContent.label'),
+            description: t('settings.extensions.perm.editorSetContent.description'),
         },
         'editor.setOverlay': {
-            label: 'Replace the editor view',
-            description: 'Can hide the code editor, show its own view in its place, and restore the editor.',
+            label: t('settings.extensions.perm.editorSetOverlay.label'),
+            description: t('settings.extensions.perm.editorSetOverlay.description'),
         },
         'editor.jumpToLine': {
-            label: 'Jump to a line in the file',
-            description: 'Can scroll the editor to a specific line.',
+            label: t('settings.extensions.perm.editorJumpToLine.label'),
+            description: t('settings.extensions.perm.editorJumpToLine.description'),
         },
         'editor.save': {
-            label: 'Save the open file',
-            description: 'Can save the file currently open in the editor.',
+            label: t('settings.extensions.perm.editorSave.label'),
+            description: t('settings.extensions.perm.editorSave.description'),
         },
         'preview.serveScripts': {
-            label: 'Run scripts in the preview',
-            description: `Can run scripts in the preview`,
+            label: t('settings.extensions.perm.previewServeScripts.label'),
+            description: t('settings.extensions.perm.previewServeScripts.description'),
         },
         'preview.serveNetwork': {
-            label: 'Send/receive data in the preview',
-            description: `Can use commands such as fetch() to send/receive data across the network.`,
+            label: t('settings.extensions.perm.previewServeNetwork.label'),
+            description: t('settings.extensions.perm.previewServeNetwork.description'),
         },
-    };
+    });
 
     // Get list of capability keys for an installed extension
     function getCapabilityKeys(ext: Extension): string[] {
@@ -195,7 +196,31 @@
         if (caps.agent) keys.push('agent');
         if (caps.network) keys.push('network');
         if (caps.llm) keys.push('llm');
+        if (caps.i18n) keys.push('i18n');
         return keys;
+    }
+
+    /**
+     * The locale an `i18n` pack declares. It is manifest data, so it is read through an
+     * untyped accessor rather than the capability struct: the pack names its own language.
+     */
+    function packLocale(capabilities: unknown): string {
+        const code = (capabilities as { i18n?: { locale?: unknown } } | undefined)?.i18n?.locale;
+        return typeof code === 'string' ? code : '';
+    }
+
+    /**
+     * A language's own name for itself — `zh` renders as 简体中文, `fr` as français. Taken from
+     * `Intl.DisplayNames` built on the code itself (never on the UI locale), so a pack's name
+     * never gets translated into the language you are reading the settings in.
+     */
+    function localeName(code: string): string {
+        if (!code) return '';
+        try {
+            return new Intl.DisplayNames([code], { type: 'language' }).of(code) || code;
+        } catch {
+            return code;
+        }
     }
 
     // Get capability keys for a registry entry.
@@ -205,7 +230,7 @@
         if (entry.capabilities && Object.keys(entry.capabilities).length > 0) {
             return Object.keys(entry.capabilities).filter(k => !!CAPABILITY_DESCRIPTIONS[k]);
         }
-        const capMap: Record<string, string> = { lsp: 'lsp', ui: 'ui', css: 'css', agent: 'agent', llm: 'llm' };
+        const capMap: Record<string, string> = { lsp: 'lsp', ui: 'ui', css: 'css', agent: 'agent', llm: 'llm', i18n: 'i18n' };
         const k = capMap[entry.type];
         return k ? [k] : [];
     }
@@ -230,7 +255,7 @@
             extensions = await listExtensions();
             onExtensionsChanged?.();
         } catch (e: any) {
-            error = e.message || 'Failed to load extensions';
+            error = e.message || t('settings.extensions.loadFailed');
         } finally {
             loading = false;
         }
@@ -253,7 +278,7 @@
         try {
             registryEntries = await getRegistryIndex();
         } catch (e: any) {
-            error = e.message || 'Failed to load registry';
+            error = e.message || t('settings.extensions.registryLoadFailed');
         } finally {
             loadingRegistry = false;
         }
@@ -312,7 +337,7 @@
             }
             await loadExtensions();
         } catch (e: any) {
-            error = e.message || 'Failed to install extension';
+            error = e.message || t('settings.extensions.installFailed');
         } finally {
             const next = new Set(installing);
             next.delete(name);
@@ -323,10 +348,10 @@
     // Delete extension
     async function handleDelete(id: string, name: string) {
         const confirmed = await dialogStore.showConfirm({
-            title: `Delete "${name}"?`,
-            message: `This will stop its sandbox and delete the extension, including its files under the extensions directory. This cannot be undone.`,
-            confirmText: 'Delete',
-            cancelText: 'Cancel',
+            title: t('settings.extensions.deleteTitle', { name }),
+            message: t('settings.extensions.deleteMessage'),
+            confirmText: t('settings.extensions.delete'),
+            cancelText: t('settings.cancel'),
         });
         if (!confirmed) return;
 
@@ -335,10 +360,10 @@
             const result = await deleteExtension(id);
             await loadExtensions();
             if (result.leftover) {
-                error = `Deleted, but its files could not be removed and are still on disk: ${result.leftover}`;
+                error = t('settings.extensions.deleteLeftoverError', { files: result.leftover });
             }
         } catch (e: any) {
-            error = e.message || 'Failed to delete extension';
+            error = e.message || t('settings.extensions.deleteFailed');
         }
     }
 
@@ -349,7 +374,7 @@
             await setExtensionEnabled(id, enabled);
             await loadExtensions();
         } catch (e: any) {
-            error = e.message || 'Failed to update extension';
+            error = e.message || t('settings.extensions.updateFailed');
         }
     }
 
@@ -411,7 +436,7 @@
             updates = await checkUpdates();
             hasCheckedUpdates = true;
         } catch (e: any) {
-            error = e.message || 'Failed to check for updates';
+            error = e.message || t('settings.extensions.checkUpdatesFailed');
         } finally {
             loadingUpdates = false;
         }
@@ -436,7 +461,7 @@
                 }
             }
         } catch (e: any) {
-            error = e.message || 'Failed to update extension';
+            error = e.message || t('settings.extensions.updateFailed');
             ok = false;
         } finally {
             const next = new Set(updating);
@@ -477,9 +502,9 @@
     // Update extension image from registry (rebuild or pull)
     async function handleUpdateImage(id: string, name: string) {
         const confirmed = await dialogStore.showConfirm({
-            title: 'Update Image',
-            message: `Fetch the latest image for ${name}? The sandbox will be restarted.`,
-            confirmText: 'Update',
+            title: t('settings.extensions.updateImageTitle'),
+            message: t('settings.extensions.updateImageMessage', { name }),
+            confirmText: t('settings.extensions.update'),
         });
         if (!confirmed) return;
 
@@ -550,7 +575,7 @@
                     // grant the same path twice, and the card's dot is right when the modal closes.
                     if (editingExtension.sandbox_config) editingExtension.sandbox_config.dependency_host_path = grant;
                 } catch (e: any) {
-                    editDepError = e.message || 'That directory cannot be used';
+                    editDepError = e.message || t('settings.extensions.depRejected');
                     return;
                 }
             }
@@ -570,7 +595,7 @@
             closeEdit();
             await loadExtensions();
         } catch (e: any) {
-            error = e.message || 'Failed to save extension';
+            error = e.message || t('settings.extensions.saveFailed');
         } finally {
             saving = false;
         }
@@ -578,9 +603,10 @@
 
     // Format built_at timestamp as a readable relative time
     function formatBuiltAt(builtAt: string): string {
-        if (!builtAt) return 'Not built';
+        if (!builtAt) return t('settings.extensions.notBuilt');
         // 'calendar': a build from last March is a date, not an age.
-        return timeAgo(builtAt, { scale: 'calendar', prefix: 'Built ' }) || `Built ${builtAt}`;
+        return timeAgo(builtAt, { scale: 'calendar', prefix: t('settings.extensions.builtPrefix') })
+            || t('settings.extensions.builtAt', { date: builtAt });
     }
 
     // Filter extensions by search, with local (unpublished) extensions first
@@ -636,7 +662,7 @@
     {#if error}
         <div class="error-banner" role="button" tabindex="0" onclick={() => error = ''} onkeydown={(e) => e.key === 'Enter' && (error = '')}>
             {error}
-            <button class="dismiss" aria-label="Dismiss">&#x2715;</button>
+            <button class="dismiss" aria-label={t('settings.extensions.dismiss')}>&#x2715;</button>
         </div>
     {/if}
 
@@ -650,19 +676,19 @@
                     class:active={activeView === 'installed'}
                     onclick={() => activeView = 'installed'}
                 >
-                    Installed ({extensions.length})
+                    {t('settings.extensions.installedCount', { count: extensions.length })}
                 </button>
                 <button
                     class="view-tab"
                     class:active={activeView === 'browse'}
                     onclick={() => { activeView = 'browse'; loadLocalExtensions(); if (registryEntries.length === 0) loadRegistry(); }}
                 >
-                    Browse
+                    {t('settings.extensions.browse')}
                 </button>
             </div>
             <div class="view-tabs-right">
                 <button class="btn btn-secondary" onclick={handleCheckUpdates} disabled={loadingUpdates}>
-                    {loadingUpdates ? 'Checking...' : 'Check for Updates'}
+                    {loadingUpdates ? t('settings.extensions.checking') : t('settings.extensions.checkUpdates')}
                 </button>
             </div>
         </div>
@@ -671,7 +697,7 @@
         <div class="search-row">
             <input
                 type="search"
-                placeholder="Search extensions..."
+                placeholder={t('settings.extensions.searchPlaceholder')}
                 value={searchQuery}
                 oninput={(e) => searchQuery = (e.target as HTMLInputElement).value}
                 class="search-input"
@@ -685,15 +711,15 @@
             <!-- Updates Available -->
             {#if hasCheckedUpdates && updates.length === 0}
                 <div class="updates-section updates-none">
-                    <h3>No Updates Available</h3>
-                    <p class="updates-no-result">All installed extensions are up to date.</p>
+                    <h3>{t('settings.extensions.noUpdates')}</h3>
+                    <p class="updates-no-result">{t('settings.extensions.upToDate')}</p>
                 </div>
             {:else if updates.length > 0}
                 <div class="updates-section">
                     <div class="updates-header">
-                        <h3>Updates Available</h3>
+                        <h3>{t('settings.extensions.updatesAvailable')}</h3>
                         <button class="btn btn-primary btn-small" onclick={handleUpdateAll} disabled={updatingAll}>
-                            {updatingAll ? 'Updating...' : 'Update All'}
+                            {updatingAll ? t('settings.extensions.updating') : t('settings.extensions.updateAll')}
                         </button>
                     </div>
                     {#each updates as update}
@@ -705,7 +731,7 @@
                             </div>
                             {#if (update.changelog ?? []).length > 0}
                                 <div class="update-changelog">
-                                    <div class="update-changelog-title">Changes since {update.current_version}:</div>
+                                    <div class="update-changelog-title">{t('settings.extensions.changesSince', { version: update.current_version })}</div>
                                     <ul class="update-changelog-list">
                                         {#each update.changelog as change}
                                             <li class="update-changelog-item">
@@ -718,7 +744,7 @@
                             {/if}
                             {#if newPerms.length > 0}
                                 <div class="update-new-perms">
-                                    <div class="update-new-perms-title">This update requests new permissions:</div>
+                                    <div class="update-new-perms-title">{t('settings.extensions.newPermsTitle')}</div>
                                     <ul class="update-new-perms-list">
                                         {#each sortPermissions(newPerms) as perm}
                                             {@const info = PERMISSION_DESCRIPTIONS[perm]}
@@ -726,7 +752,7 @@
                                                 <span class="update-new-perm-name">
                                                     {info?.label || perm}
                                                     {#if isDangerousPermission(perm)}
-                                                        <svg class="perm-danger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Potentially dangerous: can escape the sandbox"><title>Potentially dangerous: can escape the sandbox</title><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                                                        <svg class="perm-danger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label={t('settings.extensions.permDanger')}><title>{t('settings.extensions.permDanger')}</title><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
                                                     {/if}
                                                 </span>
                                                 {#if info?.description}<span class="update-new-perm-desc">{info.description}</span>{/if}
@@ -735,7 +761,7 @@
                                     </ul>
                                 </div>
                             {/if}
-                            <button class="btn btn-primary btn-small" onclick={() => handleUpdate(update)}>Update</button>
+                            <button class="btn btn-primary btn-small" onclick={() => handleUpdate(update)}>{t('settings.extensions.update')}</button>
                         </div>
                     {/each}
                 </div>
@@ -743,13 +769,13 @@
 
             <!-- Extension List -->
             {#if loading}
-                <div class="loading">Loading extensions...</div>
+                <div class="loading">{t('settings.extensions.loadingExtensions')}</div>
             {:else if filteredExtensions.length === 0}
                 <div class="empty-state">
-                    <p>No extensions installed</p>
-                    <p class="help">Install extensions from the registry to add LSP servers and UI plugins.</p>
+                    <p>{t('settings.extensions.noneInstalled')}</p>
+                    <p class="help">{t('settings.extensions.noneInstalledHelp')}</p>
                     <button class="btn btn-primary" onclick={() => { activeView = 'browse'; loadLocalExtensions(); loadRegistry(); }}>
-                        Browse
+                        {t('settings.extensions.browse')}
                     </button>
                 </div>
             {:else}
@@ -758,8 +784,8 @@
                         {@const isLocal = ext.install_source === 'local'}
                         <div class="extension-card" class:disabled={!ext.enabled} class:unpublished-card={isLocal}>
                             <div class="card-header">
-                                <div class="ext-icon" class:ext-lsp={ext.type === 'lsp'} class:ext-ui={ext.type === 'ui'} class:ext-css={ext.type === 'css'} class:ext-agent={ext.type === 'agent'} class:ext-llm={ext.type === 'llm'}>
-                                    {ext.type === 'lsp' ? 'LSP' : ext.type === 'css' ? 'CSS' : ext.type === 'agent' ? 'AGENT' : ext.type === 'llm' ? 'LLM' : 'UI'}
+                                <div class="ext-icon" class:ext-lsp={ext.type === 'lsp'} class:ext-ui={ext.type === 'ui'} class:ext-css={ext.type === 'css'} class:ext-agent={ext.type === 'agent'} class:ext-llm={ext.type === 'llm'} class:ext-i18n={ext.type === 'i18n'}>
+                                    {ext.type === 'lsp' ? 'LSP' : ext.type === 'css' ? 'CSS' : ext.type === 'agent' ? 'AGENT' : ext.type === 'llm' ? 'LLM' : ext.type === 'i18n' ? 'I18N' : 'UI'}
                                 </div>
                                 <div class="ext-info">
                                     <div class="ext-name-row">
@@ -768,10 +794,10 @@
                                             <button
                                                 class="unpublished-badge"
                                                 type="button"
-                                                title="Installed from the local extensions directory. Click to show its path."
+                                                title={t('settings.extensions.localInstalledTitle')}
                                                 aria-expanded={revealedLocalPath === ext.id}
                                                 onclick={(e) => { e.stopPropagation(); revealedLocalPath = revealedLocalPath === ext.id ? null : ext.id; }}
-                                            >Local</button>
+                                            >{t('settings.extensions.local')}</button>
                                         {/if}
                                         {#if needsDependencyGrant(ext)}
                                             <!-- Same attention color as the dot on the Edit button, and it opens
@@ -780,14 +806,14 @@
                                             <button
                                                 class="needs-setup-badge"
                                                 type="button"
-                                                title="Its dependencies directory is not configured — click to choose one"
+                                                title={t('settings.extensions.needsSetupTitle')}
                                                 onclick={(e) => { e.stopPropagation(); openEdit(ext); }}
-                                            >Needs setup</button>
+                                            >{t('settings.extensions.needsSetup')}</button>
                                         {/if}
                                         {#if getCapabilityKeys(ext).length > 0}
-                                            <div class="capability-badges" role="group" aria-label="Capabilities">
+                                            <div class="capability-badges" role="group" aria-label={t('settings.extensions.capabilitiesGroup')}>
                                                 {#each getCapabilityKeys(ext) as capKey}
-                                                    <button class="cap-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-network={capKey === 'network'} class:cap-llm={capKey === 'llm'} aria-label="{CAPABILITY_DESCRIPTIONS[capKey]?.label || capKey} capability for {ext.manifest.display_name || ext.name}. Click to learn more" onclick={() => { selectedExtension = ext; showCapabilitiesModal = true; }}>
+                                                    <button class="cap-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-network={capKey === 'network'} class:cap-llm={capKey === 'llm'} class:cap-i18n={capKey === 'i18n'} aria-label={t('settings.extensions.capAria', { label: CAPABILITY_DESCRIPTIONS[capKey]?.label || capKey, name: ext.manifest.display_name || ext.name })} onclick={() => { selectedExtension = ext; showCapabilitiesModal = true; }}>
                                                         {CAPABILITY_DESCRIPTIONS[capKey]?.label || capKey}
                                                     </button>
                                                 {/each}
@@ -803,19 +829,20 @@
                                         {#if ext.manifest.author}
                                             · {ext.manifest.author}
                                         {/if}
-                                        {#if ext.manifest.license_url} · <a href={safeUrl(ext.manifest.license_url)} target="_blank" rel="noopener noreferrer" class="ext-link">License</a>{/if}
-                                        {#if ext.manifest.homepage} · <a href={safeUrl(ext.manifest.homepage)} target="_blank" rel="noopener noreferrer" class="ext-link">Website</a>{/if}
+                                        {#if ext.manifest.license_url} · <a href={safeUrl(ext.manifest.license_url)} target="_blank" rel="noopener noreferrer" class="ext-link">{t('settings.extensions.license')}</a>{/if}
+                                        {#if ext.manifest.homepage} · <a href={safeUrl(ext.manifest.homepage)} target="_blank" rel="noopener noreferrer" class="ext-link">{t('settings.extensions.website')}</a>{/if}
+                                        {#if ext.type === 'i18n' && packLocale(ext.manifest.capabilities)} · <span class="ext-locale" title={t('settings.extensions.localeHint')}>{localeName(packLocale(ext.manifest.capabilities))}</span>{/if}
                                     </span>
                                 </div>
                                 <div class="card-actions">
-                                    <button class="btn btn-icon btn-danger" title="Delete" onclick={() => handleDelete(ext.id, ext.name)}>
+                                    <button class="btn btn-icon btn-danger" title={t('settings.extensions.delete')} onclick={() => handleDelete(ext.id, ext.name)}>
                                         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                             <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                                             <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                                         </svg>
                                     </button>
                                     {#if ext.type === 'lsp'}
-                                    <button class="btn btn-icon" title="Update Image" onclick={() => handleUpdateImage(ext.id, ext.name)} disabled={updating.has(ext.name)}>
+                                    <button class="btn btn-icon" title={t('settings.extensions.updateImageTitle')} onclick={() => handleUpdateImage(ext.id, ext.name)} disabled={updating.has(ext.name)}>
                                         {#if updating.has(ext.name)}
                                             <span class="spinner"></span>
                                         {:else}
@@ -832,8 +859,8 @@
                                     {@const needsDep = needsDependencyGrant(ext)}
                                     <button
                                         class="btn btn-icon"
-                                        title={needsDep ? 'Edit — its dependencies directory is not configured' : 'Edit'}
-                                        aria-label={needsDep ? 'Edit — its dependencies directory is not configured' : 'Edit'}
+                                        title={needsDep ? t('settings.extensions.editNeedsSetup') : t('settings.extensions.edit')}
+                                        aria-label={needsDep ? t('settings.extensions.editNeedsSetup') : t('settings.extensions.edit')}
                                         onclick={() => openEdit(ext)}
                                     >
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -853,7 +880,7 @@
                                      withheld: the server could not resolve this project, so its
                                      "package not found" answers were never facts about the code. -->
                                 <div class="ext-env-note" role="status">
-                                    <span class="ext-env-note-text">{ext.environment.note || 'This language server cannot resolve the project it is serving, so its unresolved-import diagnostics are being withheld.'}</span>
+                                    <span class="ext-env-note-text">{ext.environment.note || t('settings.extensions.envNote')}</span>
                                 </div>
                             {/if}
                             <!-- The dependency directory is configured in the Edit dialog, not on the card:
@@ -870,11 +897,11 @@
                             {#if isLocal && revealedLocalPath === ext.id}
                                 {@const p = ext.local_path}
                                 <div class="local-path">
-                                    <span class="local-path-label">Path</span>
+                                    <span class="local-path-label">{t('settings.extensions.path')}</span>
                                     {#if p}
                                         <code class="local-path-code" title={p}>{p}</code>
                                     {:else}
-                                        <span class="local-path-unknown">Path unavailable</span>
+                                        <span class="local-path-unknown">{t('settings.extensions.pathUnavailable')}</span>
                                     {/if}
                                 </div>
                             {/if}
@@ -883,7 +910,7 @@
                             {/if}
                             {#if ext.manifest.capabilities?.network?.allowed_domains?.length}
                                 <div class="ext-proxy-domains">
-                                    <span class="ext-proxy-label">Connects to:</span>
+                                    <span class="ext-proxy-label">{t('settings.extensions.connectsTo')}</span>
                                     <div class="cap-detail-tags">
                                         {#each ext.manifest.capabilities.network.allowed_domains as domain}
                                             <button class="cap-detail-tag" onclick={() => { selectedExtension = ext; showCapabilitiesModal = true; }}>{domain}</button>
@@ -894,7 +921,7 @@
                             {#if ext.type === 'agent'}
                                 <p class="ext-note">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                                    This will add {ext.manifest.display_name} as an option in <code>Providers</code>
+                                    {t('settings.extensions.agentNote.before')} {ext.manifest.display_name} {t('settings.extensions.agentNote.after')} <code>{t('settings.tab.providers')}</code>
                                 </p>
                             {/if}
                         </div>
@@ -907,13 +934,13 @@
     <!-- Edit Extension Modal -->
     {#if editingExtension}
         {#snippet editFooter()}
-            <button type="button" class="btn-secondary" onclick={closeEdit}>Cancel</button>
+            <button type="button" class="btn-secondary" onclick={closeEdit}>{t('settings.cancel')}</button>
             <button type="button" class="btn-primary" onclick={handleSave} disabled={saving}>
-                {saving ? 'Saving...' : 'Save'}
+                {saving ? t('settings.saving') : t('settings.save')}
             </button>
         {/snippet}
 
-        <BaseModal title={`Edit: ${editingExtension.manifest.display_name || editingExtension.name}`} width="480px" footer={editFooter} onClose={closeEdit}>
+        <BaseModal title={t('settings.extensions.editTitle', { name: editingExtension.manifest.display_name || editingExtension.name })} width="480px" footer={editFooter} onClose={closeEdit}>
             <!-- Dependencies first: it is the one field that decides whether this server can resolve
                  anything. It rides this dialog's Save rather than carrying its own Apply, so Cancel means
                  nothing changed — the grant lands here, and applying it stops the running sandbox. -->
@@ -922,33 +949,32 @@
                 {@const stored = editingExtension.sandbox_config.dependency_host_path || ''}
                 {@const draft = editDepDraft.trim()}
                 <div class="config-fields">
-                    <h4>Dependencies</h4>
+                    <h4>{t('settings.extensions.dependencies')}</h4>
                     <div class="config-field">
-                        <label class="field-label" for="edit-dep-path">Dependencies directory</label>
+                        <label class="field-label" for="edit-dep-path">{t('settings.extensions.depDirLabel')}</label>
                         <p class="field-desc">
-                            This LSP reads resolved dependencies from <code class="ext-dep-env">{dep.env}={dep.container_path}</code>
-                            inside its sandbox. To allow tasks to update dependencies, the project's Sandbox Configuration should be updated with the same folder mounted with read-write permissions.
+                            {t('settings.extensions.depDirDesc.before')} <code class="ext-dep-env">{dep.env}={dep.container_path}</code> {t('settings.extensions.depDirDesc.after')}
                         </p>
                         <input
                             id="edit-dep-path"
                             type="text"
                             class="config-input ext-dep-input"
-                            aria-label={`Host directory holding ${editingExtension.name} resolved dependencies`}
+                            aria-label={t('settings.extensions.depAria', { name: editingExtension.name })}
                             placeholder="/path/to/dependency/directory"
                             bind:value={editDepDraft}
                             disabled={saving}
                         />
                         <div class="ext-dep-state">
                             {#if stored}
-                                <span class="ext-dep-state-label">Mounted Read-only</span>
-                                <code class="ext-dep-path" title={`${stored} → ${dep.container_path} in this server’s sandbox, read-only`}>{stored}</code>
+                                <span class="ext-dep-state-label">{t('settings.extensions.depMounted')}</span>
+                                <code class="ext-dep-path" title={t('settings.extensions.depMountedTitle', { host: stored, container: dep.container_path })}>{stored}</code>
                                 <button type="button" class="btn-secondary btn-small" onclick={() => { editDepDraft = ''; }} disabled={saving}
-                                    title="Unmount the folder when you click save">Unmount</button>
+                                    title={t('settings.extensions.depUnmountHint')}>{t('settings.extensions.depUnmount')}</button>
                             {:else}
-                                <span class="ext-dep-none">Nothing mounted yet.</span>
+                                <span class="ext-dep-none">{t('settings.extensions.depNone')}</span>
                             {/if}
                             {#if draft !== stored}
-                                <span class="ext-dep-pending">{draft === '' ? 'Unmounts this folder' : stored ? 'Replaces the host directory' : 'Mounts this directory'} when you save</span>
+                                <span class="ext-dep-pending">{t('settings.extensions.depPending', { action: draft === '' ? t('settings.extensions.depPendingUnmount') : stored ? t('settings.extensions.depPendingReplace') : t('settings.extensions.depPendingMount') })}</span>
                             {/if}
                         </div>
                         {#if editDepError}
@@ -960,7 +986,7 @@
             <!-- Config Schema Fields -->
             {#if effectiveConfigFields(editingExtension).length > 0}
                 <div class="config-fields">
-                    <h4>Configuration</h4>
+                    <h4>{t('settings.extensions.configuration')}</h4>
                     {#each effectiveConfigFields(editingExtension) as field}
                         <div class="config-field">
                             <label class="field-label" for="edit-config-{field.key}">{field.title}</label>
@@ -981,12 +1007,12 @@
                                                         <label class="radio-label" class:active={mount.mode === 'rw'}><input type="radio" name={`mount-mode-${i}`} value="rw" checked={mount.mode === 'rw'} onchange={() => { const updated = [...mounts]; updated[i] = { ...mount, mode: 'rw' }; editConfig[field.key] = updated; }}/><span class="radio-text">rw</span></label>
                                                         <label class="radio-label" class:active={mount.mode === 'ro'}><input type="radio" name={`mount-mode-${i}`} value="ro" checked={mount.mode === 'ro'} onchange={() => { const updated = [...mounts]; updated[i] = { ...mount, mode: 'ro' }; editConfig[field.key] = updated; }}/><span class="radio-text">ro</span></label>
                                                     </div>
-                                                    <button type="button" class="btn-remove" onclick={() => { editConfig[field.key] = mounts.filter((_, j) => j !== i); }} title="Remove"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
+                                                    <button type="button" class="btn-remove" onclick={() => { editConfig[field.key] = mounts.filter((_, j) => j !== i); }} title={t('settings.extensions.remove')}><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
                                                 </div>
                                             {/each}
                                         </div>
                                     {/if}
-                                    <button type="button" class="btn-add" onclick={() => { editConfig[field.key] = [...mounts, { host_path: '', container_path: '', mode: 'rw' as const }]; }} title="Add mount"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+                                    <button type="button" class="btn-add" onclick={() => { editConfig[field.key] = [...mounts, { host_path: '', container_path: '', mode: 'rw' as const }]; }} title={t('settings.extensions.addMount')}><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
                                 </div>
                             {:else if field.type === 'env'}
                                 {@const envs = (editConfig[field.key] ?? field.default ?? []) as SandboxEnv[]}
@@ -998,19 +1024,19 @@
                                                     <input type="text" class="env-input env-input-key" value={env.key} placeholder="KEY" oninput={(e) => { const updated = [...envs]; updated[i] = { ...env, key: (e.target as HTMLInputElement).value }; editConfig[field.key] = updated; }} />
                                                     <span class="env-equals">=</span>
                                                     <input type="text" class="env-input" value={env.value ?? ''} placeholder="value" oninput={(e) => { const updated = [...envs]; updated[i] = { ...env, value: (e.target as HTMLInputElement).value }; editConfig[field.key] = updated; }} />
-                                                    <button type="button" class="btn-remove" onclick={() => { editConfig[field.key] = envs.filter((_, j) => j !== i); }} title="Remove"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
+                                                    <button type="button" class="btn-remove" onclick={() => { editConfig[field.key] = envs.filter((_, j) => j !== i); }} title={t('settings.extensions.remove')}><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
                                                 </div>
                                             {/each}
                                         </div>
                                     {/if}
-                                    <button type="button" class="btn-add" onclick={() => { editConfig[field.key] = [...envs, { key: '', value: '' }]; }} title="Add variable"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+                                    <button type="button" class="btn-add" onclick={() => { editConfig[field.key] = [...envs, { key: '', value: '' }]; }} title={t('settings.extensions.addVariable')}><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
                                 </div>
                             {:else if field.type === 'number'}
                                 <input
                                     id="edit-config-{field.key}"
                                     type="number"
                                     value={numberFieldValue(field)}
-                                    placeholder={field.key === HOST_OWNED_LSP_CONFIG_KEY ? 'No limit' : undefined}
+                                    placeholder={field.key === HOST_OWNED_LSP_CONFIG_KEY ? t('settings.extensions.noLimit') : undefined}
                                     oninput={(e) => editConfig[field.key] = numberFieldInput(field.key, (e.target as HTMLInputElement).value)}
                                     class="config-input"
                                 />
@@ -1034,22 +1060,22 @@
                     {/each}
                 </div>
             {:else if editingExtension.type !== 'lsp'}
-                <p class="no-schema">No configurable fields for this extension.</p>
+                <p class="no-schema">{t('settings.extensions.noSchema')}</p>
             {/if}
             <!-- Sandbox (host-owned) — every LSP extension runs in a sandbox, so
                  the memory limit is always available, declared or not. -->
             {#if editingExtension?.type === 'lsp'}
                 <div class="config-fields">
-                    <h4>Sandbox</h4>
+                    <h4>{t('settings.extensions.sandbox')}</h4>
                     <div class="config-field">
-                        <label class="field-label" for="edit-config-memory_limit">Memory Limit (MB)</label>
-                        <p class="field-desc">Maximum memory for the language server sandbox. Blank = no limit. Applied immediately on save.</p>
+                        <label class="field-label" for="edit-config-memory_limit">{t('settings.extensions.memoryLimit')}</label>
+                        <p class="field-desc">{t('settings.extensions.memoryLimitDesc')}</p>
                         <input
                             id="edit-config-memory_limit"
                             type="number"
                             min="0"
                             step="1"
-                            placeholder="No limit"
+                            placeholder={t('settings.extensions.noLimit')}
                             value={memoryLimitToInput(editConfig.memory_limit)}
                             oninput={(e) => editConfig.memory_limit = parseMemoryLimitMB((e.target as HTMLInputElement).value)}
                             class="config-input"
@@ -1060,23 +1086,23 @@
             <!-- LSP Settings -->
             {#if editingExtension?.type === 'lsp'}
                 <div class="config-fields">
-                    <h4>LSP Features</h4>
+                    <h4>{t('settings.extensions.lspFeatures')}</h4>
                     <div class="config-field">
-                        <span class="field-label">Editor Features</span>
-                        <p class="field-desc">Enable LSP in the editor: diagnostics, completions, go-to-definition, and hover.</p>
+                        <span class="field-label">{t('settings.extensions.editorFeatures')}</span>
+                        <p class="field-desc">{t('settings.extensions.editorFeaturesDesc')}</p>
                         <ToggleSwitch
                             checked={editLspSettings.editor_enabled}
                             onChange={() => editLspSettings.editor_enabled = !editLspSettings.editor_enabled}
-                            ariaLabel="Enable LSP features in editor"
+                            ariaLabel={t('settings.extensions.editorFeaturesAria')}
                         />
                     </div>
                     <div class="config-field">
-                        <span class="field-label">Tool Calls</span>
-                        <p class="field-desc">Enable LSP tool support: references, definition, rename, and hover.</p>
+                        <span class="field-label">{t('settings.extensions.toolCalls')}</span>
+                        <p class="field-desc">{t('settings.extensions.toolCallsDesc')}</p>
                         <ToggleSwitch
                             checked={editLspSettings.tool_calls_enabled}
                             onChange={() => editLspSettings.tool_calls_enabled = !editLspSettings.tool_calls_enabled}
-                            ariaLabel="Enable LSP tool calls for agent"
+                            ariaLabel={t('settings.extensions.toolCallsAria')}
                         />
                     </div>
                 </div>
@@ -1087,14 +1113,14 @@
     <!-- Capabilities Modal -->
     {#if showCapabilitiesModal && selectedExtension}
         {#snippet capsFooter()}
-            <button type="button" class="btn-secondary" onclick={() => { showCapabilitiesModal = false; selectedExtension = null; }}>Close</button>
+            <button type="button" class="btn-secondary" onclick={() => { showCapabilitiesModal = false; selectedExtension = null; }}>{t('settings.close')}</button>
         {/snippet}
 
-        <BaseModal title="Extension Capabilities" width="520px" footer={capsFooter} onClose={() => { showCapabilitiesModal = false; selectedExtension = null; }}>
+        <BaseModal title={t('settings.extensions.capsTitle')} width="520px" footer={capsFooter} onClose={() => { showCapabilitiesModal = false; selectedExtension = null; }}>
             <div class="caps-modal-body">
                 <div class="caps-ext-header">
-                    <div class="caps-ext-icon" class:ext-lsp={selectedExtension.type === 'lsp'} class:ext-ui={selectedExtension.type === 'ui'} class:ext-css={selectedExtension.type === 'css'} class:ext-agent={selectedExtension.type === 'agent'} class:ext-llm={selectedExtension.type === 'llm'} aria-hidden="true">
-                        {selectedExtension.type === 'lsp' ? 'LSP' : selectedExtension.type === 'css' ? 'CSS' : selectedExtension.type === 'agent' ? 'AGENT' : selectedExtension.type === 'llm' ? 'LLM' : 'UI'}
+                    <div class="caps-ext-icon" class:ext-lsp={selectedExtension.type === 'lsp'} class:ext-ui={selectedExtension.type === 'ui'} class:ext-css={selectedExtension.type === 'css'} class:ext-agent={selectedExtension.type === 'agent'} class:ext-llm={selectedExtension.type === 'llm'} class:ext-i18n={selectedExtension.type === 'i18n'} aria-hidden="true">
+                        {selectedExtension.type === 'lsp' ? 'LSP' : selectedExtension.type === 'css' ? 'CSS' : selectedExtension.type === 'agent' ? 'AGENT' : selectedExtension.type === 'llm' ? 'LLM' : selectedExtension.type === 'i18n' ? 'I18N' : 'UI'}
                     </div>
                     <div class="caps-ext-info">
                         <h3 class="caps-ext-name">{selectedExtension.manifest.display_name || selectedExtension.name}</h3>
@@ -1104,14 +1130,14 @@
                     </div>
                 </div>
 
-                <div class="caps-list" role="list" aria-label="Capability details">
+                <div class="caps-list" role="list" aria-label={t('settings.extensions.capsDetailsAria')}>
                     {#each getCapabilityKeys(selectedExtension) as capKey}
                         {@const info = CAPABILITY_DESCRIPTIONS[capKey]}
                         {@const caps = selectedExtension.manifest.capabilities}
                         {#if info}
                             <div class="cap-detail" role="listitem">
                                 <div class="cap-detail-header">
-                                    <span class="cap-detail-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-network={capKey === 'network'} class:cap-llm={capKey === 'llm'}>
+                                    <span class="cap-detail-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-network={capKey === 'network'} class:cap-llm={capKey === 'llm'} class:cap-i18n={capKey === 'i18n'}>
                                         {info.label}
                                     </span>
                                 </div>
@@ -1119,7 +1145,7 @@
                                 <!-- Network: show allowed domains -->
                                 {#if capKey === 'network' && caps?.network?.allowed_domains?.length}
                                     <div class="cap-detail-extra">
-                                        <span class="cap-detail-label">Allowed domains:</span>
+                                        <span class="cap-detail-label">{t('settings.extensions.allowedDomains')}</span>
                                         <div class="cap-detail-tags">
                                             {#each caps.network.allowed_domains as domain}
                                                 <span class="cap-detail-tag">{domain}</span>
@@ -1130,7 +1156,7 @@
                                 <!-- UI: show injection points -->
                                 {#if capKey === 'ui' && caps?.ui?.injection_points?.length}
                                     <div class="cap-detail-extra">
-                                        <span class="cap-detail-label">Modifies:</span>
+                                        <span class="cap-detail-label">{t('settings.extensions.modifies')}</span>
                                         <div class="cap-detail-tags">
                                             {#each caps.ui.injection_points as point}
                                                 <span class="cap-detail-tag">{INJECTION_POINT_LABELS[point] || point}</span>
@@ -1141,7 +1167,7 @@
                                 <!-- UI: show declared permissions -->
                                 {#if capKey === 'ui' && caps?.ui?.permissions?.length}
                                     <div class="cap-detail-extra cap-detail-extra-block">
-                                        <span class="cap-detail-label">Permissions:</span>
+                                        <span class="cap-detail-label">{t('settings.extensions.permissions')}</span>
                                         <div class="cap-permission-list">
                                             {#each sortPermissions(caps.ui.permissions) as perm}
                                                 {@const info = PERMISSION_DESCRIPTIONS[perm]}
@@ -1149,13 +1175,13 @@
                                                     <span class="cap-permission-name">
                                                         {info?.label || perm}
                                                         {#if isDangerousPermission(perm)}
-                                                            <svg class="perm-danger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Potentially dangerous: can escape the sandbox"><title>Potentially dangerous: can escape the sandbox</title><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                                                            <svg class="perm-danger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label={t('settings.extensions.permDanger')}><title>{t('settings.extensions.permDanger')}</title><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
                                                         {/if}
                                                     </span>
                                                     {#if info?.description}
                                                         <span class="cap-permission-desc">{info.description}</span>
                                                     {:else}
-                                                        <span class="cap-permission-desc">Requested a permission this version does not document.</span>
+                                                        <span class="cap-permission-desc">{t('settings.extensions.permUndocumented')}</span>
                                                     {/if}
                                                 </div>
                                             {/each}
@@ -1166,13 +1192,13 @@
                                 {#if capKey === 'lsp' && caps?.lsp}
                                     <div class="cap-detail-extra">
                                         {#if caps.lsp.language}
-                                            <span class="cap-detail-label">Language:</span>
+                                            <span class="cap-detail-label">{t('settings.extensions.language')}</span>
                                             <span class="cap-detail-tags">
                                                 <span class="cap-detail-tag">{caps.lsp.language}</span>
                                             </span>
                                         {/if}
                                         {#if caps.lsp.file_types?.length}
-                                            <span class="cap-detail-label">File types:</span>
+                                            <span class="cap-detail-label">{t('settings.extensions.fileTypes')}</span>
                                             <div class="cap-detail-tags">
                                                 {#each caps.lsp.file_types as ft (ft.extension)}
                                                     <!-- The tooltip names the language the server is told about this file type. -->
@@ -1187,8 +1213,17 @@
                                 <!-- CSS: show stylesheet URL -->
                                 {#if capKey === 'css' && caps?.css?.css_url}
                                     <div class="cap-detail-extra">
-                                        <span class="cap-detail-label">Stylesheet:</span>
+                                        <span class="cap-detail-label">{t('settings.extensions.stylesheet')}</span>
                                         <code class="cap-detail-value">{caps.css.css_url}</code>
+                                    </div>
+                                {/if}
+                                <!-- i18n: show the language the pack translates to, in its own script -->
+                                {#if capKey === 'i18n' && packLocale(caps)}
+                                    <div class="cap-detail-extra">
+                                        <span class="cap-detail-label">{t('settings.extensions.language')}</span>
+                                        <span class="cap-detail-tags">
+                                            <span class="cap-detail-tag">{localeName(packLocale(caps))}</span>
+                                        </span>
                                     </div>
                                 {/if}
                             </div>
@@ -1205,27 +1240,27 @@
          permission list before the install starts. -->
     {#if pendingInstall}
         {#snippet installConfirmFooter()}
-            <button type="button" class="btn-secondary" onclick={() => pendingInstall = null}>Cancel</button>
-            <button type="button" class="btn-primary" onclick={confirmPendingInstall}>Install</button>
+            <button type="button" class="btn-secondary" onclick={() => pendingInstall = null}>{t('settings.cancel')}</button>
+            <button type="button" class="btn-primary" onclick={confirmPendingInstall}>{t('settings.extensions.install')}</button>
         {/snippet}
 
         {@const pendingPerms = sortPermissions((pendingInstall.entry.capabilities?.ui?.permissions ?? []) as string[])}
         {@const pendingNetwork = pendingInstall.entry.capabilities?.network}
         {@const pendingDep = dependencyCacheDeclaration(pendingInstall.entry.capabilities)}
         <BaseModal
-            title={`Install "${pendingInstall.entry.display_name || pendingInstall.entry.name}"?`}
+            title={t('settings.extensions.installTitle', { name: pendingInstall.entry.display_name || pendingInstall.entry.name })}
             width="480px"
             modalClass="install-confirm-modal"
             footer={installConfirmFooter}
             onClose={() => { pendingInstall = null; }}
         >
-            <p class="install-confirm-intro">This extension requests the following permissions:</p>
+            <p class="install-confirm-intro">{t('settings.extensions.installIntro')}</p>
             <div class="cap-permission-list">
                 {#if pendingNetwork}
                     <div class="cap-permission">
                         <span class="cap-permission-name">
                             {CAPABILITY_DESCRIPTIONS.network.label}
-                            <svg class="perm-danger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Potentially dangerous: can escape the sandbox"><title>Potentially dangerous: can escape the sandbox</title><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                            <svg class="perm-danger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label={t('settings.extensions.permDanger')}><title>{t('settings.extensions.permDanger')}</title><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
                         </span>
                         <span class="cap-permission-desc">{CAPABILITY_DESCRIPTIONS.network.description}</span>
                         {#if pendingNetwork.allowed_domains?.length}
@@ -1242,13 +1277,9 @@
                          What it does is mean a folder on this machine gets asked about afterwards,
                          which is the part worth saying before anyone clicks Install. -->
                     <div class="cap-permission">
-                        <span class="cap-permission-name">A dependencies folder on this machine</span>
+                        <span class="cap-permission-name">{t('settings.extensions.depPermission')}</span>
                         <span class="cap-permission-desc">
-                            This language server reads already-downloaded dependencies from
-                            <code>{pendingDep.env}={pendingDep.container_path}</code> inside its sandbox. Installing it grants
-                            nothing by itself: afterwards you can point it at a folder of your choosing, and until you do it
-                            resolves only what its own image contains. That folder is then read by this extension and
-                            mounted nowhere else — you fill it, on the host or from a project whose own mounts name it.
+                            {t('settings.extensions.depPermissionDesc.before')} <code>{pendingDep.env}={pendingDep.container_path}</code> {t('settings.extensions.depPermissionDesc.after')}
                         </span>
                     </div>
                 {/if}
@@ -1258,13 +1289,13 @@
                         <span class="cap-permission-name">
                             {info?.label || perm}
                             {#if isDangerousPermission(perm)}
-                                <svg class="perm-danger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Potentially dangerous: can escape the sandbox"><title>Potentially dangerous: can escape the sandbox</title><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                                <svg class="perm-danger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label={t('settings.extensions.permDanger')}><title>{t('settings.extensions.permDanger')}</title><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
                             {/if}
                         </span>
                         {#if info?.description}
                             <span class="cap-permission-desc">{info.description}</span>
                         {:else}
-                            <span class="cap-permission-desc">Requested a permission this version does not document.</span>
+                            <span class="cap-permission-desc">{t('settings.extensions.permUndocumented')}</span>
                         {/if}
                     </div>
                 {/each}
@@ -1278,11 +1309,11 @@
 
             <!-- Registry List -->
             {#if loadingRegistry}
-                <div class="loading">Loading registry...</div>
+                <div class="loading">{t('settings.extensions.loadingRegistry')}</div>
             {:else if browseList.length === 0}
                 <div class="empty-state">
-                    <p>No extensions in registry</p>
-                    <p class="help">Check the registry URL or try a different source.</p>
+                    <p>{t('settings.extensions.registryEmpty')}</p>
+                    <p class="help">{t('settings.extensions.registryEmptyHelp')}</p>
                 </div>
             {:else}
                 <div class="extension-list">
@@ -1294,36 +1325,36 @@
                         {@const setupDep = dependencyCacheDeclaration(entry.capabilities)}
                         <div class="extension-card registry-card" class:unpublished-card={isUnpublished}>
                             <div class="card-header">
-                                <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'} class:ext-agent={entry.type === 'agent'} class:ext-llm={entry.type === 'llm'}>
-                                    {entry.type === 'lsp' ? 'LSP' : entry.type === 'css' ? 'CSS' : entry.type === 'agent' ? 'AGENT' : entry.type === 'llm' ? 'LLM' : 'UI'}
+                                <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'} class:ext-agent={entry.type === 'agent'} class:ext-llm={entry.type === 'llm'} class:ext-i18n={entry.type === 'i18n'}>
+                                    {entry.type === 'lsp' ? 'LSP' : entry.type === 'css' ? 'CSS' : entry.type === 'agent' ? 'AGENT' : entry.type === 'llm' ? 'LLM' : entry.type === 'i18n' ? 'I18N' : 'UI'}
                                 </div>
                                 <div class="ext-info">
                                     <div class="ext-name-row">
                                         <span class="ext-name">{entry.display_name || entry.name}</span>
                                         {#if entry.featured}
-                                            <span class="featured-badge">Featured</span>
+                                            <span class="featured-badge">{t('settings.extensions.featured')}</span>
                                         {/if}
                                         {#if isUnpublished}
                                             <button
                                                 class="unpublished-badge"
                                                 type="button"
-                                                title="Present in the local extensions directory but not published in the registry. Click to show its path."
+                                                title={t('settings.extensions.localUnpublishedTitle')}
                                                 aria-expanded={revealedLocalPath === identityKey(entry.author, entry.name)}
                                                 onclick={(e) => { e.stopPropagation(); const k = identityKey(entry.author, entry.name); revealedLocalPath = revealedLocalPath === k ? null : k; }}
-                                            >Local</button>
+                                            >{t('settings.extensions.local')}</button>
                                         {/if}
                                         {#if needsSetup}
                                             <!-- A plain label, not a button: nothing is installed yet, so there is no record to open. -->
                                             <span
                                                 class="needs-setup-badge"
-                                                title="Needs setup after installation — it reads resolved dependencies from {setupDep?.env}={setupDep?.container_path} inside its sandbox"
-                                            >Needs setup</span>
+                                                title={t('settings.extensions.needsSetupRegistryTitle', { env: setupDep?.env, container: setupDep?.container_path })}
+                                            >{t('settings.extensions.needsSetup')}</span>
                                         {/if}
                                         {#if regCapKeys.length > 0}
-                                            <div class="capability-badges" role="group" aria-label="Capabilities">
+                                            <div class="capability-badges" role="group" aria-label={t('settings.extensions.capabilitiesGroup')}>
                                                 {#each regCapKeys as regCapKey}
                                                     {@const regCapInfo = CAPABILITY_DESCRIPTIONS[regCapKey]}
-                                                    <button class="cap-badge" class:cap-lsp={regCapKey === 'lsp'} class:cap-ui={regCapKey === 'ui'} class:cap-css={regCapKey === 'css'} class:cap-agent={regCapKey === 'agent'} class:cap-network={regCapKey === 'network'} class:cap-llm={regCapKey === 'llm'} aria-label="{regCapInfo.label} capability for {entry.display_name || entry.name}. {regCapInfo.description}" onclick={() => { selectedExtension = { name: entry.name, manifest: { display_name: entry.display_name, description: entry.description, capabilities: getRegistryCapabilities(entry) }, type: entry.type } as Extension; showCapabilitiesModal = true; }}>
+                                                    <button class="cap-badge" class:cap-lsp={regCapKey === 'lsp'} class:cap-ui={regCapKey === 'ui'} class:cap-css={regCapKey === 'css'} class:cap-agent={regCapKey === 'agent'} class:cap-network={regCapKey === 'network'} class:cap-llm={regCapKey === 'llm'} class:cap-i18n={regCapKey === 'i18n'} aria-label={t('settings.extensions.capAriaFull', { label: regCapInfo.label, name: entry.display_name || entry.name, description: regCapInfo.description })} onclick={() => { selectedExtension = { name: entry.name, manifest: { display_name: entry.display_name, description: entry.description, capabilities: getRegistryCapabilities(entry) }, type: entry.type } as Extension; showCapabilitiesModal = true; }}>
                                                         {regCapInfo.label}
                                                     </button>
                                                 {/each}
@@ -1335,20 +1366,23 @@
                                         {#if entry.author}
                                             · {entry.author}
                                         {/if}
-                                        {#if entry.license_url} · <a href={safeUrl(entry.license_url)} target="_blank" rel="noopener noreferrer" class="ext-link">License</a>{/if}
-                                        {#if entry.homepage} · <a href={safeUrl(entry.homepage)} target="_blank" rel="noopener noreferrer" class="ext-link">Website</a>{/if}
+                                        {#if entry.license_url} · <a href={safeUrl(entry.license_url)} target="_blank" rel="noopener noreferrer" class="ext-link">{t('settings.extensions.license')}</a>{/if}
+                                        {#if entry.homepage} · <a href={safeUrl(entry.homepage)} target="_blank" rel="noopener noreferrer" class="ext-link">{t('settings.extensions.website')}</a>{/if}
+                                        <!-- The locale an i18n pack declares, shown in its own language: the one thing a
+                                             person needs to pick the right pack out of the list. -->
+                                        {#if entry.type === 'i18n' && packLocale(entry.capabilities)} · <span class="ext-locale" title={t('settings.extensions.localeHint')}>{localeName(packLocale(entry.capabilities))}</span>{/if}
                                     </span>
                                 </div>
                                 <div class="ext-action">
                                     {#if isInstalled}
-                                        <span class="installed-badge">Installed</span>
+                                        <span class="installed-badge">{t('settings.extensions.installed')}</span>
                                     {:else}
                                         <button class="btn btn-primary btn-small" onclick={() => handleInstall(entry, isUnpublished)} disabled={installing.has(entry.name)}>
                                             {#if installing.has(entry.name)}
                                                 <span class="spinner"></span>
-                                                Installing...
+                                                {t('settings.extensions.installingNow')}
                                             {:else}
-                                                Install
+                                                {t('settings.extensions.install')}
                                             {/if}
                                         </button>
                                     {/if}
@@ -1364,11 +1398,11 @@
                             {#if isUnpublished && revealedLocalPath === identityKey(entry.author, entry.name)}
                                 {@const p = entry.local_path}
                                 <div class="local-path">
-                                    <span class="local-path-label">Path</span>
+                                    <span class="local-path-label">{t('settings.extensions.path')}</span>
                                     {#if p}
                                         <code class="local-path-code" title={p}>{p}</code>
                                     {:else}
-                                        <span class="local-path-unknown">Path unavailable</span>
+                                        <span class="local-path-unknown">{t('settings.extensions.pathUnavailable')}</span>
                                     {/if}
                                 </div>
                             {/if}
@@ -1379,14 +1413,12 @@
                                 <!-- Not a permission warning: installing grants nothing. The step is a folder to pick. -->
                                 <p class="ext-note ext-needs-setup-note">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                                    <span>Requires additional setup after installation: it reads resolved dependencies from
-                                        <code>{setupDep?.env}={setupDep?.container_path}</code> inside its sandbox. Point it at a folder
-                                        of your choosing afterwards — until you do, it resolves only what its own image contains.</span>
+                                    <span>{t('settings.extensions.needsSetupNote.before')} <code>{setupDep?.env}={setupDep?.container_path}</code> {t('settings.extensions.needsSetupNote.after')}</span>
                                 </p>
                             {/if}
                             {#if entry.capabilities?.network?.allowed_domains?.length}
                                 <div class="ext-proxy-domains">
-                                    <span class="ext-proxy-label">Connects to:</span>
+                                    <span class="ext-proxy-label">{t('settings.extensions.connectsTo')}</span>
                                     <div class="cap-detail-tags">
                                         {#each entry.capabilities.network.allowed_domains as domain}
                                             <button class="cap-detail-tag" onclick={() => { selectedExtension = { name: entry.name, manifest: { display_name: entry.display_name, description: entry.description, capabilities: getRegistryCapabilities(entry) }, type: entry.type } as Extension; showCapabilitiesModal = true; }}>{domain}</button>
@@ -1397,7 +1429,7 @@
                             {#if entry.type === 'agent'}
                                 <p class="ext-note">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                                    This will add {entry.display_name} as an option in <code>Providers</code>
+                                    {t('settings.extensions.agentNote.before')} {entry.display_name} {t('settings.extensions.agentNote.after')} <code>{t('settings.tab.providers')}</code>
                                 </p>
                             {/if}
                         </div>
@@ -1978,6 +2010,12 @@
         color: var(--color-text-secondary);
     }
 
+    /* A translation pack: its own accent, so an installed pack is not mistaken for a UI plugin. */
+    .ext-i18n {
+        background: rgba(9, 187, 181, 0.15);
+        color: #00bcc3;
+    }
+
     .ext-info {
         flex: 1;
         min-width: 0;
@@ -2139,6 +2177,12 @@
         background: var(--color-text-inverse);
         color: var(--color-text-secondary);
         border-color: rgba(222, 222, 222, 0.3);
+    }
+
+    .cap-i18n {
+        background: rgba(9, 187, 181, 0.15);
+        color: #00bcc3;
+        border-color: rgba(0, 188, 195, 0.3);
     }
 
     /* Capabilities modal */

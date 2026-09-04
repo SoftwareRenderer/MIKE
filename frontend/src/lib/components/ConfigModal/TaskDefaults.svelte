@@ -2,6 +2,7 @@
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import ModeSelect from '../ModeSelect.svelte';
     import { MODE_DESCRIPTIONS } from '$lib/constants/modes';
+    import { t } from '$lib/i18n';
 
     let {
         defaultOperatingMode = $bindable('act'),
@@ -27,12 +28,12 @@
 </script>
 
 <fieldset class="section">
-    <h3 class="section-label">Task Defaults</h3>
-    <p class="section-description">These settings apply to newly created tasks</p>
+    <h3 class="section-label">{t('settings.tab.taskDefaults')}</h3>
+    <p class="section-description">{t('settings.defaults.description')}</p>
 
     <div class="toggle-field">
         <div class="toggle-label-group">
-            <span id="toggle-mode-label" class="toggle-label">Operating mode</span>
+            <span id="toggle-mode-label" class="toggle-label">{t('settings.defaults.operatingMode')}</span>
             <span id="toggle-mode-desc" class="toggle-desc">{modeDescription}</span>
         </div>
         <ModeSelect value={defaultOperatingMode} onChange={(m: string) => { defaultOperatingMode = m; onDirty?.(); }} />
@@ -40,24 +41,24 @@
 
     <div class="toggle-field">
         <div class="toggle-label-group">
-            <span id="toggle-mergeoncommit-label" class="toggle-label">Auto-merge</span>
-            <span id="toggle-mergeoncommit-desc" class="toggle-desc">Merge changes into <span class="branch-badge" title={`Branch: ${originBranch}`}><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="10" cy="10" r="2.5"/><line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/><line x1="6" y1="3.5" x2="6" y2="2"/><line x1="10" y1="12.5" x2="10" y2="14"/></svg>{originBranch}</span> when complete</span>
+            <span id="toggle-mergeoncommit-label" class="toggle-label">{t('settings.defaults.autoMerge')}</span>
+            <span id="toggle-mergeoncommit-desc" class="toggle-desc">{t('settings.defaults.autoMergeDesc.before')} <span class="branch-badge" title={t('settings.defaults.branchTitle', { branch: originBranch })}><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="10" cy="10" r="2.5"/><line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/><line x1="6" y1="3.5" x2="6" y2="2"/><line x1="10" y1="12.5" x2="10" y2="14"/></svg>{originBranch}</span> {t('settings.defaults.autoMergeDesc.after')}</span>
         </div>
-        <ToggleSwitch bind:checked={defaultAutoMerge} ariaLabel="Auto-merge into main" ariaDescribedby="toggle-mergeoncommit-desc" onChange={() => onDirty?.()} />
+        <ToggleSwitch bind:checked={defaultAutoMerge} ariaLabel={t('settings.defaults.autoMergeAria')} ariaDescribedby="toggle-mergeoncommit-desc" onChange={() => onDirty?.()} />
     </div>
 
     <div class="toggle-field">
         <div class="toggle-label-group">
-            <span id="toggle-mergechildren-label" class="toggle-label">Allow subtasks to auto-merge</span>
-            <span id="toggle-mergechildren-desc" class="toggle-desc">Subtasks created under a task will auto-merge into it</span>
+            <span id="toggle-mergechildren-label" class="toggle-label">{t('settings.defaults.subtasksAutoMerge')}</span>
+            <span id="toggle-mergechildren-desc" class="toggle-desc">{t('settings.defaults.subtasksAutoMergeDesc')}</span>
         </div>
-        <ToggleSwitch bind:checked={defaultSubtasksAutoMerge} ariaLabel="Allow subtasks to auto-merge" ariaDescribedby="toggle-mergechildren-desc" onChange={() => onDirty?.()} />
+        <ToggleSwitch bind:checked={defaultSubtasksAutoMerge} ariaLabel={t('settings.defaults.subtasksAutoMerge')} ariaDescribedby="toggle-mergechildren-desc" onChange={() => onDirty?.()} />
     </div>
 
     <div class="toggle-field">
         <div class="toggle-label-group">
-            <label class="toggle-label" for="default-summarize-threshold">Auto-summarize threshold</label>
-            <span class="toggle-desc">Summarize context when it reaches this % of the model's context window</span>
+            <label class="toggle-label" for="default-summarize-threshold">{t('settings.defaults.autoSummarize')}</label>
+            <span class="toggle-desc">{t('settings.defaults.autoSummarizeDesc')}</span>
         </div>
         <div class="percent-input-wrap">
             <input id="default-summarize-threshold" type="number" bind:value={defaultAutoSummarizeThreshold} min="1" max="100" class="option-input" onchange={() => onDirty?.()} />
@@ -67,16 +68,16 @@
 
     <div class="toggle-field">
         <div class="toggle-label-group">
-            <span id="toggle-run-parallel-label" class="toggle-label">Run siblings in parallel</span>
-            <span id="toggle-run-parallel-desc" class="toggle-desc">Start all of a parent's subtasks at once instead of one at a time</span>
+            <span id="toggle-run-parallel-label" class="toggle-label">{t('settings.defaults.runParallel')}</span>
+            <span id="toggle-run-parallel-desc" class="toggle-desc">{t('settings.defaults.runParallelDesc')}</span>
         </div>
-        <ToggleSwitch bind:checked={runSiblingsParallel} ariaLabel="Run siblings in parallel" ariaDescribedby="toggle-run-parallel-desc" onChange={() => onDirty?.()} />
+        <ToggleSwitch bind:checked={runSiblingsParallel} ariaLabel={t('settings.defaults.runParallel')} ariaDescribedby="toggle-run-parallel-desc" onChange={() => onDirty?.()} />
     </div>
 
     <div class="toggle-field">
         <div class="toggle-label-group">
-            <label class="toggle-label" for="default-max-failed">Max failed turns</label>
-            <span class="toggle-desc">Stop task after this many consecutive LLM failures</span>
+            <label class="toggle-label" for="default-max-failed">{t('settings.defaults.maxFailed')}</label>
+            <span class="toggle-desc">{t('settings.defaults.maxFailedDesc')}</span>
         </div>
         <input id="default-max-failed" type="number" bind:value={defaultMaxFailedTurns} min="1" max="20" class="option-input" onchange={() => onDirty?.()} />
     </div>
