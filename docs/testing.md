@@ -10,6 +10,14 @@ stale-state cleanup stay in `AGENTS.md → Testing`.
   headless is slow).
 - **Mock LLM is default** — tests use pre-recorded fixtures, never the real endpoint. Fail gracefully
   when the LLM is slow/unavailable.
+- **LSP specs come in two kinds, and only one may gate on the server.**
+  `editor-hover-definition.spec.ts` answers `/api/extensions` itself and fakes the `/api/lsp` socket, so
+  it needs nothing installed — gating it on `hasInstalledLspExtension()` measures a list the suite
+  replaces, and since `global-setup` wipes the per-run database it always answered "skip": all nine
+  tests silently stopped covering anything, which is also how a stale stub and a wrong assertion stayed
+  hidden. `lsp-integration.spec.ts` keeps the gate because it really does talk to a language server, but
+  a wall of `skipped` is not coverage: before believing an LSP change is tested, run it against a server
+  that has the language server installed (they never run by default).
 - **Config-modifying tests** (settings, models, shortcuts, mode select, …) must run in the `isolated`
   project — add the spec name to `ISOLATED_SPECS` in `frontend/playwright.config.ts` (one array; the
   chromium lane's `testMatch` is derived from it, so the two lanes cannot drift apart).
