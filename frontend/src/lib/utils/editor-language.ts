@@ -1,12 +1,13 @@
 /**
  * What the installed extensions declare about a file: its grammar, its `didOpen` languageId and its
  * status-bar label. The three must agree, because the id decides how the server parses the buffer.
+ * Also answers what grammar a code fence in a language server's documentation gets.
  * See "Language Knowledge Lives in Extensions" in AGENTS.md.
  */
-import type { LanguageSupport } from '@codemirror/language';
+import type { Language, LanguageSupport } from '@codemirror/language';
 import { buildLanguageSupport, specHasContent } from '$lib/syntax/spec-language';
 import type { LSPConfig, LSPFileType, SyntaxSpec } from '$lib/types';
-import { fallbackLanguage } from './fallback-languages';
+import { fallbackLanguage, fallbackLanguageForTag } from './fallback-languages';
 import { fileBase, fileSuffix } from './file-suffix';
 import { extensionManager } from '$lib/services/extension-manager.svelte';
 
@@ -66,18 +67,62 @@ export function resolveFile(filePath: string): ResolvedFile {
 /** One grammar built per declared spec, since specs are shared across the manifest's file types. */
 const builtLanguages = new WeakMap<SyntaxSpec, LanguageSupport>();
 
+/** The grammar for a declared profile, built once per profile; null when it declares none. */
+function grammarForSpec(spec: SyntaxSpec | null | undefined): LanguageSupport | null {
+  if (!specHasContent(spec)) return null;
+  const cached = builtLanguages.get(spec);
+  if (cached) return cached;
+  const built = buildLanguageSupport(spec, DECLARED_GRAMMAR_NAME);
+  builtLanguages.set(spec, built);
+  return built;
+}
+
 /**
  * The grammar for a file: its extension's declared profile, else the core fallback for languages
  * nothing covers, else plain text. A declared type with no profile opens as the fallback or plain text.
  */
 export function getLanguageSupport(filePath: string): LanguageSupport | null {
-  const { spec } = resolveFile(filePath);
-  if (specHasContent(spec)) {
-    const cached = builtLanguages.get(spec);
-    if (cached) return cached;
-    const built = buildLanguageSupport(spec, DECLARED_GRAMMAR_NAME);
-    builtLanguages.set(spec, built);
-    return built;
+  return grammarForSpec(resolveFile(filePath).spec) ?? fallbackLanguage(filePath);
+}
+
+/** Markdown's own way of saying "this block is prose, not code". */
+const PLAIN_FENCE_TAGS = new Set(['text', 'txt', 'plain', 'plaintext']);
+
+/**
+ * The declaration that owns a fence tag, matched on the names a language server tags its own blocks
+ * with: `extension`, `language_id`, `language`. No alias table — an undeclared tag (`golang`, `bash`)
+ * resolves to nothing here and falls through to the file's own grammar.
+ */
+function declaredForTag(tag: string): { lsp: LSPConfig; fileType: LSPFileType } | null {
+  for (const ext of extensionManager.getEditorLSPExtensions()) {
+    const lsp = ext.manifest.capabilities?.lsp;
+    if (!lsp?.file_types?.length) continue;
+    const language = (lsp.language || '').toLowerCase();
+    const fileType = lsp.file_types.find(
+      (ft) =>
+        ft.extension?.toLowerCase() === tag ||
+        ft.language_id?.toLowerCase() === tag ||
+        (!!language && language === tag),
+    );
+    if (fileType) return { lsp, fileType };
   }
-  return fallbackLanguage(filePath);
+  return null;
+}
+
+/**
+ * The grammar for a code fence in a language server's documentation (hover, completion, signature
+ * help). `filePath` is the file the documentation is about, and it covers the two cases a tag cannot:
+ * an unlabelled fence, and a language no installed extension declares. Both are highlighted as the
+ * file they came from. An explicit `text` fence asks for prose and gets no grammar.
+ */
+export function getGrammarForFence(tag: string, filePath: string): Language | null {
+  const name = (tag || '').trim().toLowerCase();
+  if (PLAIN_FENCE_TAGS.has(name)) return null;
+  if (name) {
+    const declared = declaredForTag(name);
+    const spec = declared ? declared.lsp.syntax?.[declared.fileType.syntax ?? ''] ?? null : null;
+    const grammar = grammarForSpec(spec) ?? fallbackLanguageForTag(name);
+    if (grammar) return grammar.language;
+  }
+  return getLanguageSupport(filePath)?.language ?? null;
 }

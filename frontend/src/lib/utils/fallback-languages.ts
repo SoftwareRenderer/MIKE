@@ -32,8 +32,16 @@ const GRAMMARS: Record<string, () => LanguageSupport> = {
   gohtml: goTemplate,
 };
 
+/**
+ * The core fallback grammar for a bare lowercase suffix, or null for plain text. A markdown fence tag
+ * names the same grammars as a file suffix, so one table answers both.
+ */
+export function fallbackLanguageForTag(tag: string): LanguageSupport | null {
+  const grammar = GRAMMARS[tag];
+  return grammar ? grammar() : null;
+}
+
 /** The core fallback grammar for a path, or null for plain text. */
 export function fallbackLanguage(filePath: string): LanguageSupport | null {
-  const grammar = GRAMMARS[fileSuffix(filePath)];
-  return grammar ? grammar() : null;
+  return fallbackLanguageForTag(fileSuffix(filePath));
 }
