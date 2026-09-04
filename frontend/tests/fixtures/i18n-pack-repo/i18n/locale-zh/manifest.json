@@ -1,0 +1,14 @@
+{
+    "display_name": "简体中文",
+    "description": "Simplified Chinese translation pack used by the e2e first-run offer spec. Data only: one message catalog, no UI injection, no network, no sandbox, no permissions. Installed from the registry fixture like any published pack — global-setup commits this directory into a local git repo and pins the registry entry to it.",
+    "author": "TestDev",
+    "homepage": "https://example.test/e2e-fixtures",
+    "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
+    "version": "1.0.0",
+    "capabilities": {
+        "i18n": {
+            "locale": "zh-CN",
+            "messages_url": "messages.json"
+        }
+    }
+}

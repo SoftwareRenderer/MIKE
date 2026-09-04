@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -34,7 +34,27 @@ const KANBAN_RUN_ARGS = ['run', '.'];
 const TEST_PASSWORD = 'test-password-1234';
 // Point the test servers at a local registry fixture so e2e registry tests are
 // deterministic and never depend on the hosted online registry.
-const TEST_REGISTRY_URL = 'file://' + path.join(__dirname, 'registry-fixture.json');
+//
+// The servers do not read `registry-fixture.json` directly: one entry (the i18n
+// pack) is pinned to a git commit that only exists once setup has built the repo
+// it points at, so the fixture is copied to GENERATE_REGISTRY_FILE with that
+// placeholder resolved. Content is otherwise byte-identical, and a registry fetch
+// is a per-request file read (`HandleRegistryIndex` caches nothing), so both lanes
+// see the same index.
+const REGISTRY_FIXTURE_FILE = path.join(__dirname, 'registry-fixture.json');
+const GENERATED_REGISTRY_FILE = '/tmp/kanban-test-registry.json';
+const TEST_REGISTRY_URL = 'file://' + GENERATED_REGISTRY_FILE;
+// The i18n pack the registry fixture offers: sources committed under
+// tests/fixtures/i18n-pack-repo, committed into a throwaway local git repo so the
+// registry's git-pinned install path (`repo` + `commit` + `subdir`, cloned and
+// commit-verified server-side) has something real to install. The commit is
+// rebuilt from the fixture on every run with a fixed identity and a fixed commit
+// date, so identical content always produces the same hash — a stale generated
+// registry stays correct, and an edited fixture is picked up without a hardcoded
+// hash anyone could forget to bump.
+const I18N_PACK_REPO = '/tmp/kanban-test-i18n-pack-repo';
+const I18N_PACK_FIXTURE_DIR = path.join(__dirname, 'fixtures', 'i18n-pack-repo');
+const I18N_PACK_COMMIT_PLACEHOLDER = '__I18N_PACK_COMMIT__';
 // Local (unpublished) extension fixtures seeded into the repo extensions dir
 // for the Browse e2e specs. In a fresh checkout `extensions/` is empty, so
 // specs that need local extensions would fail; seeding from committed fixtures
@@ -52,6 +72,7 @@ let kanbanServerIsolated: ReturnType<typeof spawn> | null = null;
 async function setup(): Promise<void> {
     ensureTestRepo();
     seedLocalExtensions();
+    prepareRegistryIndex();
     await killKanbanServer();
 
     console.log('[global-setup] Starting test kanban server...');
@@ -264,6 +285,10 @@ export async function teardown(): Promise<void> {
     // Delete the per-worker project repos (helpers.ts isolatedProject)
     try { fs.rmSync(TEST_OWN_REPOS, { recursive: true, force: true }); } catch { /* ignore */ }
 
+    // Delete the generated registry index and the i18n pack repo setup built
+    try { fs.rmSync(GENERATED_REGISTRY_FILE, { force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(I18N_PACK_REPO, { recursive: true, force: true }); } catch { /* ignore */ }
+
     // Clean up lock and auth files
     try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
     try { fs.unlinkSync(STORAGE_STATE_FILE); } catch { /* ignore */ }
@@ -326,6 +351,85 @@ function removeSeededLocalExtensions(): void {
     try {
         fs.unlinkSync(SEEDED_EXTENSIONS_FILE);
     } catch { /* ignore */ }
+}
+
+// --- Registry index ---
+
+/**
+ * Build the i18n pack repo and write the registry index the servers read.
+ *
+ * The registry fixture pins its translation pack to a commit, and a pin has to be
+ * a commit that exists — the server clones `repo`, checks out `commit`, and
+ * verifies `rev-parse HEAD` before it installs anything. So the hash cannot live
+ * in the fixture: it is a property of the content, and a hardcoded one goes stale
+ * the moment anyone edits the pack. Setup builds the repo and substitutes its
+ * HEAD.
+ *
+ * When the repo cannot be built (no git, no identity, a read-only /tmp) the
+ * placeholder is left in place rather than replaced with a plausible-looking fake:
+ * the one spec that installs this entry asserts its commit resolved, so a broken
+ * setup reads as "setup did not build the pack repo" instead of a checkout error
+ * naming a hash that was never a commit.
+ */
+function prepareRegistryIndex(): void {
+    const commit = buildI18nPackRepo();
+    let fixture: string;
+    try {
+        fixture = fs.readFileSync(REGISTRY_FIXTURE_FILE, 'utf-8');
+    } catch (e) {
+        console.error(`[global-setup] cannot read ${REGISTRY_FIXTURE_FILE}: ${e}`);
+        return;
+    }
+    const index = commit
+        ? fixture.split(I18N_PACK_COMMIT_PLACEHOLDER).join(commit)
+        : fixture;
+    try {
+        fs.writeFileSync(GENERATED_REGISTRY_FILE, index);
+        console.log(
+            commit
+                ? `[global-setup] Registry index written with the i18n pack pinned to ${commit.slice(0, 12)}`
+                : '[global-setup] Registry index written WITHOUT a resolved i18n pack commit — '
+                  + 'e2e/i18n-first-run-offer will fail; see the git error above',
+        );
+    } catch (e) {
+        console.error(`[global-setup] cannot write ${GENERATED_REGISTRY_FILE}: ${e}`);
+    }
+}
+
+/**
+ * Commit `tests/fixtures/i18n-pack-repo` into a throwaway repo and return its
+ * HEAD, or null when git could not do it.
+ *
+ * The identity and both commit dates are fixed, so the hash is a function of the
+ * pack's content alone: the repo is rebuilt from scratch every run (an edited
+ * fixture is picked up, never inherited from a previous run), while an untouched
+ * one yields the same commit as the last run's.
+ */
+function buildI18nPackRepo(): string | null {
+    const gitEnv = {
+        ...process.env,
+        GIT_AUTHOR_DATE: '2020-01-01T00:00:00Z',
+        GIT_COMMITTER_DATE: '2020-01-01T00:00:00Z',
+    };
+    // An explicit identity: this must work on a machine with no global git config,
+    // and must not depend on the one global-setup sets for the task repos.
+    const identity = ['-c', 'user.name=MIKE e2e', '-c', 'user.email=e2e@localhost.test',
+        '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false'];
+    const git = (args: string[]) =>
+        execFileSync('git', ['-C', I18N_PACK_REPO, ...args], { stdio: 'pipe', env: gitEnv }).toString().trim();
+    try {
+        fs.rmSync(I18N_PACK_REPO, { recursive: true, force: true });
+        fs.cpSync(I18N_PACK_FIXTURE_DIR, I18N_PACK_REPO, { recursive: true });
+        execFileSync('git', ['init', '-q', I18N_PACK_REPO], { stdio: 'pipe', env: gitEnv });
+        git([...identity, 'add', '-A']);
+        git([...identity, 'commit', '-q', '-m', 'fixture: i18n translation pack']);
+        const head = git(['rev-parse', 'HEAD']);
+        if (!/^[0-9a-f]{40}$/i.test(head)) throw new Error(`unexpected HEAD: ${head}`);
+        return head;
+    } catch (e) {
+        console.error(`[global-setup] could not build the i18n pack repo: ${e}`);
+        return null;
+    }
 }
 
 // --- Helpers ---

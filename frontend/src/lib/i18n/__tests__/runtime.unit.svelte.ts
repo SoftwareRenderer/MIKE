@@ -89,8 +89,9 @@ describe('i18n runtime', () => {
     });
 
     it('does not warn while no pack is active (English is the baseline, not a miss)', () => {
-        // `en` is deliberately empty until the UI-string conversion task; an id
-        // with no entry here is that task's to-do list, not a runtime fault.
+        // `en` holds only the keys the UI renders today (the first-run language
+        // offer); an id with no entry here is the conversion task's to-do list,
+        // not a runtime fault.
         expect(t('some.key')).toBe('some.key');
         expect(warn).not.toHaveBeenCalled();
     });
