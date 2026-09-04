@@ -9,6 +9,7 @@
     import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask } from '$lib/api';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
     import { timeAgo } from '$lib/utils/format-time';
+    import { t } from '$lib/i18n/runtime.svelte';
     import { resolveBoardLandingColumn } from '$lib/utils/task-utils';
     import { getBoardCache, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
@@ -184,8 +185,8 @@
 
     /** Get relative time since last data sync. */
     function lastSyncedAgo(): string {
-        if (lastSyncedAt === Infinity) return 'just now';
-        return timeAgo(lastSyncedAt) || 'just now';
+        if (lastSyncedAt === Infinity) return t('time.justNow');
+        return timeAgo(lastSyncedAt) || t('time.justNow');
     }
 
     function tryReconnectNow() {
