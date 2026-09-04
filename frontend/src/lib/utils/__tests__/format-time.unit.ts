@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { formatRelativeTime, formatTimestamp, formatElapsed, formatDuration, timeAgo } from '$lib/utils/format-time';
+import { registerCatalog, setLocale } from '$lib/i18n/runtime.svelte';
 
 const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
 const WEEK = 7 * DAY, MONTH = 30 * DAY, YEAR = 365 * DAY;
@@ -42,9 +43,16 @@ describe('timeAgo', () => {
             .toMatch(/\d{4}$/);
     });
 
-    it('prefixes every rung, including "just now"', () => {
-        expect(timeAgo(ago(30_000), { prefix: 'Built ' })).toBe('Built just now');
-        expect(timeAgo(ago(5 * MIN), { prefix: 'Built ' })).toBe('Built 5m ago');
+    it('wraps every rung in the template, including "just now"', () => {
+        expect(timeAgo(ago(30_000), { template: 'time.built' })).toBe('Built just now');
+        expect(timeAgo(ago(5 * MIN), { template: 'time.built' })).toBe('Built 5m ago');
+    });
+
+    it('answers "" for a bad moment even with a template, so `|| fallback` still works', () => {
+        // A caller renders `timeAgo(x, { template }) || t('time.built', { when: raw })`;
+        // a dangling "Built " with no date behind it would be non-falsy and win.
+        expect(timeAgo('not-a-date', { template: 'time.built' })).toBe('');
+        expect(timeAgo(NaN, { template: 'time.saved' })).toBe('');
     });
 
     it('returns an empty string for something that is not a moment', () => {
@@ -184,3 +192,73 @@ describe('formatElapsed', () => {
     });
 });
 
+
+// ---------------------------------------------------------------------------
+// The active locale, not the browser, drives every phrase above. `en` output is
+// pinned by the tests at the top of this file; these pin that CHANGING the locale
+// changes the output — which is what "follows the active locale" has to mean.
+// Test catalogs are installed through registerCatalog(), the same call an installed
+// language pack goes through.
+// ---------------------------------------------------------------------------
+describe('active locale', () => {
+    afterEach(() => setLocale(null));
+
+    it('keeps the pinned English shape when en is the active locale', () => {
+        setLocale('en');
+        expect(timeAgo(ago(5 * MIN))).toBe('5m ago');
+        expect(timeAgo(ago(3 * HOUR))).toBe('3h ago');
+        expect(timeAgo(ago(3 * WEEK), { scale: 'compact' })).toBe('3w ago');
+        expect(timeAgo(ago(3 * MONTH), { scale: 'compact' })).toBe('3mo ago');
+        expect(timeAgo(ago(2 * YEAR), { scale: 'compact' })).toBe('2y ago');
+    });
+
+    it('counts in the active locale (narrow ICU phrases, not the English rungs)', () => {
+        setLocale('ja');
+        expect(timeAgo(ago(5 * MIN))).toBe('5分前');
+        expect(timeAgo(ago(3 * MONTH), { scale: 'compact' })).toBe('3か月前');
+        setLocale('zh-Hans');
+        expect(timeAgo(ago(5 * MIN))).toBe('5分钟前');
+        expect(timeAgo(ago(3 * WEEK), { scale: 'compact' })).toBe('3周前');
+    });
+
+    it('prefers a pack phrase over ICU, and ICU over English for the rungs it omits', () => {
+        // ICU's narrow French is "-5 min" — a diff, not a label — which is exactly why
+        // a pack has to be able to overrule it.
+        registerCatalog('fr', { 'time.minuteAgo': 'il y a {n} min' });
+        setLocale('fr');
+        expect(timeAgo(ago(5 * MIN))).toBe('il y a 5 min');
+        // The pack has no hour key: ICU French answers, NOT the English "3h ago".
+        expect(timeAgo(ago(3 * HOUR))).toBe(
+            new Intl.RelativeTimeFormat('fr', { style: 'narrow' }).format(-3, 'hour')
+        );
+    });
+
+    it('takes "just now" and the chat phrases from the pack — ICU cannot say them', () => {
+        registerCatalog('ja', {
+            'time.justNow': 'たった今',
+            'time.yesterdayAt': '昨日 {time}',
+            'time.lastWeekdayAt': '先週{weekday} {time}',
+        });
+        setLocale('ja');
+        expect(timeAgo(ago(30_000))).toBe('たった今');
+        const yesterday = formatTimestamp(new Date(Date.now() - DAY).toISOString());
+        // 24-hour clock with no AM/PM: the TIME is localized too, not just the words.
+        expect(yesterday.display).toMatch(/^昨日 \d{1,2}:\d{2}$/);
+        expect(yesterday.display).not.toMatch(/AM|PM/);
+        expect(formatTimestamp(new Date(Date.now() - 3 * DAY).toISOString()).display).toMatch(/^先週.+ \d{1,2}:\d{2}$/);
+    });
+
+    it('still prints the year only when it is not the current year, in any locale', () => {
+        setLocale('ja');
+        const year = new Date().getFullYear();
+        expect(timeAgo(new Date(year, 2, 4), { scale: 'calendar' })).not.toContain(String(year));
+        const other = new Date(year - 2, 2, 4);
+        expect(timeAgo(other, { scale: 'calendar' })).toContain(String(other.getFullYear()));
+    });
+
+    it('leaves the unit-abbreviation durations alone — the chat stats line is pinned', () => {
+        setLocale('ja');
+        expect(formatElapsed(65_000)).toBe('1m 5s');
+        expect(formatDuration(1200)).toBe('1.2s');
+    });
+});

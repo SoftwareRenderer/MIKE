@@ -6,6 +6,7 @@
     import { uiStore, appStore } from '$lib/stores';
     import { getProviderDisplayName } from '$lib/utils/providers';
     import { formatCost } from '$lib/utils/format';
+    import { activeLocale } from '$lib/i18n/runtime.svelte';
     import BaseModal from './BaseModal.svelte';
 
     let { projectId, onClose }: { projectId: string; onClose: () => void } = $props();
@@ -34,7 +35,7 @@
     }
 
     function formatNumber(n: number): string {
-        return n.toLocaleString();
+        return n.toLocaleString(activeLocale());
     }
 
     function formatTps(tps: number): string {
