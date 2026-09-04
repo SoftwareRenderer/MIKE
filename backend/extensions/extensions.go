@@ -22,6 +22,7 @@ const (
 	ExtensionTypeCSS   = "css"
 	ExtensionTypeAgent = "agent"
 	ExtensionTypeLLM   = "llm"
+	ExtensionTypeI18N  = "i18n"
 )
 
 // maxExtensionValueBytes caps the size of a single storage value (KiB).
@@ -78,6 +79,7 @@ type Capabilities struct {
 	Agent   *AgentConfig   `json:"agent,omitempty"`
 	Network *NetworkConfig `json:"network,omitempty"` // server-side network capability
 	LLM     *LLMConfig     `json:"llm,omitempty"`     // provider request adaptation
+	I18N    *I18NConfig    `json:"i18n,omitempty"`    // data-only translation pack
 }
 
 // GetLSP returns the LSP capability, or nil if not present.
@@ -110,6 +112,38 @@ func (c *Capabilities) GetLLM() *LLMConfig {
 		return nil
 	}
 	return c.LLM
+}
+
+// GetI18N returns the translation-pack capability, or nil if not present.
+func (c *Capabilities) GetI18N() *I18NConfig {
+	if c == nil {
+		return nil
+	}
+	return c.I18N
+}
+
+// I18NConfig declares a translation pack: translated strings for the interface, plus an
+// optional overlay of translated prompt templates. Both live inside the extension's own
+// directory, which is the whole security argument — a pack is read as data by the host and
+// therefore gets **no sandbox, no mounts, no network and no permissions**. It declares no
+// executable of any kind, so a manifest that pairs `i18n` with any other capability is
+// refused (manifest_validate.go) rather than installed as a pack that also runs something.
+//
+// Which language is active is not a setting: it is derived from which pack is enabled, so
+// there is no `language` field to keep in sync with this one.
+type I18NConfig struct {
+	// Locale is a bare BCP-47 language subtag — "zh", "fr", "ko". Not a full locale tag: a
+	// pack is one language, and the spelling of that one language is what the registry index
+	// and a browser's `navigator.language` have to agree on.
+	Locale string `json:"locale"`
+	// MessagesURL is the message catalog, relative to the extension's own directory. Required:
+	// the catalog is the pack. A URL with a scheme is refused — a translation file is the one
+	// piece of the interface that reaches every screen, so it is not fetched from a host the
+	// user never chose.
+	MessagesURL string `json:"messages_url"`
+	// PromptsDir optionally names a directory of translated prompt templates inside the pack,
+	// same containment rules as the catalog. Checked at install, not at the next executor turn.
+	PromptsDir string `json:"prompts_dir,omitempty"`
 }
 
 // LLMConfig defines the request-adaptation capability: the extension ships

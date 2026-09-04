@@ -39,6 +39,21 @@ var funcs = template.FuncMap{
 	"inc": func(i int) int { return i + 1 },
 }
 
+// FuncMap returns a copy of the helper functions every prompt template is parsed with.
+//
+// It is exported for one reason: an unregistered function is a *parse* error in text/template,
+// so anything that checks a template before the renderer runs has to know these names or it
+// refuses a program the renderer accepts. A translation pack ships exactly such templates
+// (capabilities.i18n.prompts_dir), and its install-time check parses with this map — see
+// validateI18N in backend/extensions. Callers must not execute the results they parse with it.
+func FuncMap() template.FuncMap {
+	fm := make(template.FuncMap, len(funcs))
+	for name, fn := range funcs {
+		fm[name] = fn
+	}
+	return fm
+}
+
 // promptDir is a function variable that returns the absolute path to the prompts directory.
 // It can be overridden in tests. By default it tries the executable directory first,
 // then falls back to the current working directory.

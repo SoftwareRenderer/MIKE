@@ -436,7 +436,7 @@ export type TaskEventData = { task_id: string; type: string; data: any };
 
 // ─── Extension types ───
 
-export type ExtensionType = 'lsp' | 'ui' | 'css' | 'agent' | 'llm';
+export type ExtensionType = 'lsp' | 'ui' | 'css' | 'agent' | 'llm' | 'i18n';
 
 export interface ExtensionManifest {
     display_name: string;
@@ -457,10 +457,21 @@ export interface ExtensionCapabilities {
     agent?: AgentExtensionConfig;
     network?: NetworkExtensionConfig;
     llm?: LLMExtensionConfig;
+    i18n?: I18NExtensionConfig;
 }
 
 export interface LLMExtensionConfig {
     mappings_file?: string; // provider mappings file in the extension dir (default "mappings.json")
+}
+
+// A data-only translation pack: a message catalog and an optional prompt-template overlay,
+// both inside the extension's own directory (no sandbox, mounts, network or permissions).
+// A bare BCP-47 language subtag — "ja", not "ja-JP"; the active language is derived from
+// which pack is enabled, so there is no separate language setting to agree with.
+export interface I18NExtensionConfig {
+    locale: string;
+    messages_url: string; // relative to the extension's own directory; external URLs are rejected
+    prompts_dir?: string; // relative to the same directory; every *.tmpl there is translated
 }
 
 export interface NetworkExtensionConfig {
