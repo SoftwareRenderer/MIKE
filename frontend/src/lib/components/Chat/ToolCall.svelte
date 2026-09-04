@@ -18,6 +18,7 @@
     import { formatElapsed, formatDuration } from '$lib/utils/format-time';
     import { formatBytes } from '$lib/utils/format';
     import { getTaskMessageFull } from '$lib/api';
+    import { t } from '$lib/i18n';
 
     interface Props {
         toolCall: {
@@ -93,9 +94,32 @@
 
     let elapsedText = $derived(
         tc.isPending && tc.startedAt && elapsedMs > 5000
-            ? `Running for ${formatElapsed(elapsedMs)}`
+            ? t('chat.tool.runningFor', { elapsed: formatElapsed(elapsedMs) })
             : ''
     );
+
+    // Pending-tool-call progress line. Every variant is one message: the `: {path}` / `: {bytes}`
+    // clauses the markup used to bolt onto a bare word are part of the copy now, so a language
+    // that puts them elsewhere can say so. `bash` before its command is complete deliberately
+    // falls through to the generic "Writing" branch, exactly as the original condition chain did.
+    let progressText = $derived.by(() => {
+        if (elapsedText) return elapsedText;
+        if (tc.toolName === 'request_review') return t('chat.tool.writingSummary');
+        if (tc.toolName === 'ask_question') return t('chat.tool.writingQuestion');
+        if (tc.toolName === 'edit_file') return t('chat.tool.editing');
+        if (tc.toolName === 'write_file') return t('chat.tool.writingFile');
+        if (tc.toolName === 'bash' && isBashExecuting) {
+            return tc.path ? t('chat.tool.runningPath', { path: tc.path }) : t('chat.tool.running');
+        }
+        if (tc.toolName === 'read_file') {
+            return tc.path ? t('chat.tool.preparingPath', { path: tc.path }) : t('chat.tool.preparing');
+        }
+        const bytes = tc.bytesWritten !== undefined ? formatBytes(tc.bytesWritten) : undefined;
+        if (tc.path && bytes !== undefined) return t('chat.tool.writingPathBytes', { path: tc.path, bytes });
+        if (tc.path) return t('chat.tool.writingPath', { path: tc.path });
+        if (bytes !== undefined) return t('chat.tool.writingBytes', { bytes });
+        return t('chat.tool.writing');
+    });
 
     function truncateArgs(display: string): { text: string; truncated: boolean } {
         if (display.length <= ARGS_MAX_LEN) return { text: display, truncated: false };
@@ -395,16 +419,16 @@
         tc.raw_args ? (() => { const m = tc.raw_args!.match(/"timeout"\s*:\s*(\d+)/); return m ? parseInt(m[1], 10) : undefined; })() :
         undefined
     );
-    let timeoutBadge = $derived(bashTimeout !== undefined ? `Timeout ${formatElapsed(bashTimeout * 1000)}` : '');
+    let timeoutBadge = $derived(bashTimeout !== undefined ? t('chat.tool.timeout', { elapsed: formatElapsed(bashTimeout * 1000) }) : '');
 </script>
 
 <div class="tool-call-entry">
     <div class="tool-call-card" style="border-left-color: {tc.isPending ? 'var(--color-accent)' : (tc.success ? 'var(--color-status-green)' : 'var(--color-status-red)')}">
         <div class="tool-call-header">
             {#if tc.sandbox}
-                <Icon class="tool-sandbox-icon" src={shieldGreenIcon} color="var(--color-status-green)" width={14} height={14} title="Sandboxed" />
+                <Icon class="tool-sandbox-icon" src={shieldGreenIcon} color="var(--color-status-green)" width={14} height={14} title={t('chat.tool.sandboxed')} />
             {:else if SANDBOXABLE_TOOLS.has(tc.toolName)}
-                <Icon class="tool-sandbox-icon" src={shieldOffIcon} color="var(--color-status-red)" width={14} height={14} title="Not sandboxed" />
+                <Icon class="tool-sandbox-icon" src={shieldOffIcon} color="var(--color-status-red)" width={14} height={14} title={t('chat.tool.notSandboxed')} />
             {/if}
             {#if tc.toolName === 'create_task' || tc.toolName === 'edit_task'}
                 <svg class="tool-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -424,12 +448,12 @@
             <span class="tool-name" title={tc.toolName}>{getToolDisplayName(tc.displayName, tc.toolName)}</span>
             {#if showArgs}
                 {#if expandedArgs.has(tc.toolId)}
-                    <button class="tool-args-link" onclick={handleArgsClick} onmousedown={handleArgsMouseDown} onmouseup={handleArgsMouseUp} aria-label="Collapse arguments">
+                    <button class="tool-args-link" onclick={handleArgsClick} onmousedown={handleArgsMouseDown} onmouseup={handleArgsMouseUp} aria-label={t('chat.tool.collapseArgs')}>
                         <pre class="tool-args tool-args-expanded">{argsDisplay}</pre>
                     </button>
                 {:else}
                     {#if truncated.truncated}
-                        <button class="tool-args-link" onclick={() => onToggleArgs(tc.toolId)} aria-label="Expand arguments">
+                        <button class="tool-args-link" onclick={() => onToggleArgs(tc.toolId)} aria-label={t('chat.tool.expandArgs')}>
                             <pre class="tool-args tool-args-collapsed">{truncated.text}</pre>
                         </button>
                     {:else}
@@ -438,11 +462,11 @@
                 {/if}
             {/if}
             {#if tc.isPending}
-                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{#if elapsedText}{elapsedText}{:else}{#if tc.toolName === 'request_review'}Writing Summary{:else if tc.toolName === 'ask_question'}Writing Question{:else if tc.toolName === 'bash' && isBashExecuting}Running{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'read_file'}Preparing{#if tc.path}: {tc.path}{/if}{:else if tc.toolName === 'edit_file'}Editing...{:else if tc.toolName === 'write_file'}Writing...{:else}Writing{#if tc.path}: {tc.path}{/if}{#if tc.bytesWritten !== undefined}: {formatBytes(tc.bytesWritten)}{/if}{/if}{/if}</span></span>
+                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{progressText}</span></span>
             {:else if !tc.success}
-                <span class="tool-status error">Failed</span>
+                <span class="tool-status error">{t('chat.tool.failed')}</span>
             {:else}
-                <span class="tool-status success">Completed</span>
+                <span class="tool-status success">{t('chat.tool.completed')}</span>
             {/if}
         </div>
         {#if timeoutBadge && tc.isPending}
@@ -487,14 +511,14 @@
             {/if}
         {:else if tc.toolName === 'write_file' && !tc.isPending}
             <div class="tool-result tool-write-result">
-                <span class="write-result-text">Wrote {formatBytes(tc.bytesWritten ?? 0)} to:</span>
-                <span class="write-result-path">{tc.path || tc.args?.path || '(unknown)'}</span>
+                <span class="write-result-text">{t('chat.tool.wroteTo', { bytes: formatBytes(tc.bytesWritten ?? 0) })}</span>
+                <span class="write-result-path">{tc.path || tc.args?.path || t('chat.tool.unknownPath')}</span>
             </div>
         {:else if tc.toolName === 'create_task' && tc.result && tc.success}
             {#if createResult && createResult.task_id}
                 <div class="tool-result tool-create-task">
-                    <span class="create-task-text">Created task</span>
-                    <button class="btn-open-task" onclick={() => onNavigateTask?.(createResult.task_id as string)} title="Open task">
+                    <span class="create-task-text">{t('chat.tool.createdTask')}</span>
+                    <button class="btn-open-task" onclick={() => onNavigateTask?.(createResult.task_id as string)} title={t('chat.tool.openTask')}>
                         <span class="btn-open-task-text">{createResult.title as string}</span>
                     </button>
                 </div>
@@ -504,7 +528,7 @@
         {:else if tc.toolName === 'edit_task' && tc.result}
             {#if editResult && editResult.task_id && editResult.title}
                 <div class="tool-result tool-edit-task">
-                    <span class="edit-task-text">Edited task</span>
+                    <span class="edit-task-text">{t('chat.tool.editedTask')}</span>
                     <span class="edit-task-title">{editResult.title as string}</span>
                 </div>
             {:else}
@@ -513,7 +537,7 @@
         {:else if tc.toolName === 'view_tasks' && tc.result}
             {#if viewTasksResult !== null}
                 <div class="tool-result tool-view-tasks">
-                    <div class="view-tasks-header">{viewTasksResult.length} backlog task{viewTasksResult.length === 1 ? '' : 's'}</div>
+                    <div class="view-tasks-header">{t('chat.tool.backlogTasks', { count: viewTasksResult.length })}</div>
                     {#each viewTasksResult as task}
                         <div class="view-task-item">
                             <span class="view-task-id">{task.id}</span>
@@ -531,7 +555,7 @@
             <div class="tool-result tool-result-question">{@html renderedQuestionHtml}</div>
             {#if isAutoAnswered}
                 <div class="tool-result tool-result-auto-answer">
-                    <div class="auto-answer-label">Automated answer (parent context)</div>
+                    <div class="auto-answer-label">{t('chat.tool.autoAnswer')}</div>
                     <div class="auto-answer-body">{@html renderedAutoAnswerHtml}</div>
                 </div>
             {/if}
@@ -540,9 +564,9 @@
         {:else if tc.result && tc.result.trim()}
             {#if resultNeedsTruncation}
                 <div class="tool-result-wrapper">
-                    <pre class="tool-result" class:tool-result-error={!tc.isPending && !tc.success} class:tool-result-expanded={resultExpanded} bind:this={scrollEl} onscroll={handleResultScroll}>{#if resultLoading}Loading...{:else}{resultExpanded ? effectiveResult : getTruncatedResult(effectiveResult)}{/if}</pre>
+                    <pre class="tool-result" class:tool-result-error={!tc.isPending && !tc.success} class:tool-result-expanded={resultExpanded} bind:this={scrollEl} onscroll={handleResultScroll}>{#if resultLoading}{t('chat.common.loading')}{:else}{resultExpanded ? effectiveResult : getTruncatedResult(effectiveResult)}{/if}</pre>
                     <button class="tool-result-expand" onclick={() => handleResultToggle()} aria-expanded={resultExpanded} disabled={resultLoading}>
-                        {resultLoading ? 'Loading...' : (resultExpanded ? 'Collapse' : `Show all (${bashResultStats.lineCount} lines, ${bashResultStats.fullLength > 1024 ? (bashResultStats.fullLength / 1024).toFixed(1) + 'KB' : bashResultStats.fullLength + 'B'})`)}
+                        {resultLoading ? t('chat.common.loading') : (resultExpanded ? t('chat.tool.collapse') : t('chat.tool.showAll', { lines: bashResultStats.lineCount, size: bashResultStats.fullLength > 1024 ? (bashResultStats.fullLength / 1024).toFixed(1) + 'KB' : bashResultStats.fullLength + 'B' }))}
                     </button>
                 </div>
             {:else}
@@ -554,7 +578,7 @@
                 {formatDuration(tc.duration)}
                 {#if bashTimeout !== undefined}
                     <span class="tool-duration-sep">·</span>
-                    <span class="tool-timeout">Timeout {formatElapsed(bashTimeout * 1000)}</span>
+                    <span class="tool-timeout">{t('chat.tool.timeout', { elapsed: formatElapsed(bashTimeout * 1000) })}</span>
                 {/if}
             </span>
         {/if}

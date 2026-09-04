@@ -3,6 +3,12 @@
     import { appStore } from '$lib/stores';
     import { effectiveStartTaskKey, formatShortcut, shortcutHintsHidden } from '$lib/utils/keyboard';
     import ModelSelector from './ModelSelector.svelte';
+    import { t } from '$lib/i18n';
+
+    /** Tooltip for the mode toggle; the mode value itself is data, this is copy. */
+    function modeTip(mode: string): string {
+        return mode === 'act' ? t('chat.mode.actTip') : mode === 'plan' ? t('chat.mode.planTip') : t('chat.mode.exploreTip');
+    }
 
     // Start Task shortcut hint (empty = disabled).
     const startShortcutLabel = $derived.by(() => {
@@ -56,8 +62,8 @@
             class:active={operatingMode === 'plan'}
             class:explore={operatingMode === 'explore'}
             onclick={onOperatingModeToggle}
-            title={operatingMode === 'act' ? 'Act mode: AI is required to provide structured responses during review, and has read/write access. Click to switch.' : operatingMode === 'plan' ? 'Plan mode: AI decomposes work into subtasks on the board, and only has read access. Click to switch.' : 'Explore mode: AI has read/write access. Click to switch.'}
-            aria-label="Toggle operating mode"
+            title={modeTip(operatingMode)}
+            aria-label={t('chat.mode.toggleAria')}
         >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 {#if operatingMode === 'plan'}
@@ -70,18 +76,18 @@
                     <path d="M3 8l4 4L13 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 {/if}
             </svg>
-            <span>{operatingMode === 'plan' ? 'Plan' : operatingMode === 'explore' ? 'Explore' : 'Act'}</span>
+            <span>{operatingMode === 'plan' ? t('chat.mode.plan') : operatingMode === 'explore' ? t('chat.mode.explore') : t('chat.mode.act')}</span>
         </button>
         {/if}
     </div>
-    <button class="btn-start-task" onclick={onStartTask} disabled={isStarting || disabled || (providers.length > 0 && !selectedModel)} title={startShortcutLabel ? `Start the AI task (${startShortcutLabel})` : 'Start the AI task'}>
+    <button class="btn-start-task" onclick={onStartTask} disabled={isStarting || disabled || (providers.length > 0 && !selectedModel)} title={startShortcutLabel ? t('chat.start.titleWithShortcut', { shortcut: startShortcutLabel }) : t('chat.start.title')}>
         {#if isStarting}
-            <span class="spinner-inline"></span> Starting...
+            <span class="spinner-inline"></span> {t('chat.start.starting')}
         {:else}
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                 <path d="M4 2l10 6-10 6V2z" fill="currentColor"/>
             </svg>
-            Start Task{#if startShortcutLabel && !hintsHidden}<kbd class="key-hint">{startShortcutLabel}</kbd>{/if}
+            {t('chat.start.button')}{#if startShortcutLabel && !hintsHidden}<kbd class="key-hint">{startShortcutLabel}</kbd>{/if}
         {/if}
     </button>
 </div>

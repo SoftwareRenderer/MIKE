@@ -1,5 +1,6 @@
 <script lang="ts">
     import { getTaskMessageFull } from '$lib/api';
+    import { t } from '$lib/i18n';
 
     interface Props {
         reasoningContent?: string;
@@ -56,15 +57,15 @@
 
 {#if showReasoningToggle}
     <div class="reasoning-block" class:expanded={reasoningExpanded}>
-        <button class="reasoning-toggle" onclick={handleReasoningToggle} aria-expanded={reasoningExpanded} title={reasoningExpanded ? 'Hide reasoning' : 'Show reasoning'} disabled={reasoningLoading}>
+        <button class="reasoning-toggle" onclick={handleReasoningToggle} aria-expanded={reasoningExpanded} title={reasoningExpanded ? t('chat.reasoning.hide') : t('chat.reasoning.show')} disabled={reasoningLoading}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>
             </svg>
-            {reasoningExpanded ? 'Hide' : 'Show'} reasoning
+            {reasoningExpanded ? t('chat.reasoning.hide') : t('chat.reasoning.show')}
         </button>
         {#if reasoningExpanded}
             {#if reasoningLoading}
-                <div class="reasoning-content reasoning-loading">Loading reasoning...</div>
+                <div class="reasoning-content reasoning-loading">{t('chat.reasoning.loading')}</div>
             {:else if effectiveReasoning && effectiveReasoning !== '[HIDDEN]'}
                 <div class="reasoning-content">{effectiveReasoning}</div>
             {/if}

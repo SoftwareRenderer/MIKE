@@ -3,6 +3,7 @@
     import Icon from '$lib/components/Icon.svelte';
     import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
     import ModelSelector from './ModelSelector.svelte';
+    import { t } from '$lib/i18n';
 
     let {
         taskStatus,
@@ -52,23 +53,23 @@
 
 {#if isPaused}
     <div class="chat-review-bar">
-        <button class="btn-commit-done" onclick={onStartTask} disabled={isStarting || disabled} title="Resume the paused task">
+        <button class="btn-commit-done" onclick={onStartTask} disabled={isStarting || disabled} title={t('chat.review.resumePausedTip')}>
             {#if isStarting}
-                <span class="spinner-inline"></span> Resuming...
+                <span class="spinner-inline"></span> {t('chat.review.resuming')}
             {:else}
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 2l10 6-10 6V2z" fill="currentColor"/></svg>
-                Resume
+                {t('chat.review.resume')}
             {/if}
         </button>
     </div>
 {/if}
 {#if taskStatus === 'done' && onMoveTask}
     <div class="chat-review-bar">
-        <button class="btn-move" onclick={() => onMoveTask('review')} title="Move task to Review">
-            → Review
+        <button class="btn-move" onclick={() => onMoveTask('review')} title={t('chat.review.moveToReviewTip')}>
+            {t('chat.review.moveToReview')}
         </button>
-        <button class="btn-move" onclick={() => onMoveTask('backlog')} title="Move task to Backlog">
-            → Backlog
+        <button class="btn-move" onclick={() => onMoveTask('backlog')} title={t('chat.review.moveToBacklogTip')}>
+            {t('chat.review.moveToBacklog')}
         </button>
     </div>
 {/if}
@@ -76,41 +77,41 @@
     <div class="chat-review-bar">
         {#if onMoveTask}
             <div class="move-buttons">
-                <button class="btn-move" onclick={() => onMoveTask('done')} title="Move task to Done">
-                    → Done
+                <button class="btn-move" onclick={() => onMoveTask('done')} title={t('chat.review.moveToDoneTip')}>
+                    {t('chat.review.moveToDone')}
                 </button>
-                <button class="btn-move" onclick={() => onMoveTask('backlog')} title="Move task to Backlog">
-                    → Backlog
+                <button class="btn-move" onclick={() => onMoveTask('backlog')} title={t('chat.review.moveToBacklogTip')}>
+                    {t('chat.review.moveToBacklog')}
                 </button>
             </div>
         {/if}
         {#if showResumeButton}
-            <button class="btn-commit-done" onclick={onStartTask} disabled={isStarting || disabled} title="Resume the task from the last user message">
+            <button class="btn-commit-done" onclick={onStartTask} disabled={isStarting || disabled} title={t('chat.review.resumeFromMessageTip')}>
                 {#if isStarting}
-                    <span class="spinner-inline"></span> Resuming...
+                    <span class="spinner-inline"></span> {t('chat.review.resuming')}
                 {:else}
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 2l10 6-10 6V2z" fill="currentColor"/></svg>
-                    Resume
+                    {t('chat.review.resume')}
                 {/if}
             </button>
         {:else if hasStagedChanges}
-            <button class="btn-commit-done btn-commit-and-done" onclick={onCommitAndDone} disabled={isCommitting || disabled} title="Commit changes and move task to Done">
+            <button class="btn-commit-done btn-commit-and-done" onclick={onCommitAndDone} disabled={isCommitting || disabled} title={t('chat.review.commitAndDoneTip')}>
                 {#if queueStatus === 'queued'}
-                    <span class="spinner-inline"></span> In queue...
+                    <span class="spinner-inline"></span> {t('chat.review.inQueue')}
                 {:else if queueStatus === 'processing' || isCommitting}
-                    <span class="spinner-inline"></span> Committing...
+                    <span class="spinner-inline"></span> {t('chat.review.committing')}
                 {:else}
                     <Icon src={commitPushIcon} color="currentColor" width={14} height={14} />
-                    Commit and move to Done
+                    {t('chat.review.commitAndDone')}
                 {/if}
             </button>
         {:else}
-            <button class="btn-commit-done" onclick={onMoveToDone} disabled={isCommitting || disabled} title="Move task to Done">
+            <button class="btn-commit-done" onclick={onMoveToDone} disabled={isCommitting || disabled} title={t('chat.review.moveToDoneTip')}>
                 {#if isCommitting}
-                    <span class="spinner-inline"></span> Moving...
+                    <span class="spinner-inline"></span> {t('chat.review.moving')}
                 {:else}
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    Move to Done
+                    {t('chat.review.moveToDoneButton')}
                 {/if}
             </button>
         {/if}
@@ -129,15 +130,15 @@
                 />
             </div>
         {/if}
-        <button class="btn-restart-task" onclick={onStartTask} disabled={isStarting || disabled || (providers.length > 0 && !selectedModel)} title="Restart the task from the last user message">
+        <button class="btn-restart-task" onclick={onStartTask} disabled={isStarting || disabled || (providers.length > 0 && !selectedModel)} title={t('chat.review.restartTip')}>
             {#if isStarting}
-                <span class="spinner-inline"></span> Restarting...
+                <span class="spinner-inline"></span> {t('chat.review.restarting')}
             {:else}
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M2 8a6 6 0 0 1 10.47-4M14 8a6 6 0 0 1-10.47 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                     <path d="M12 1v3h-3M4 15v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-                Restart Task
+                {t('chat.review.restart')}
             {/if}
         </button>
     </div>
