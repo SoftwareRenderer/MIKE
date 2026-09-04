@@ -46,6 +46,47 @@ func TestExtension_IsLSP(t *testing.T) {
 	}
 }
 
+// TestInferExtensionType pins the whole priority chain, including where the translation pack
+// sits: last, because a pack is the only capability that is pure data. A manifest that declares a
+// pack beside anything else never reaches an installed row (validateI18N refuses it), so the mixed
+// cases here are what a rejected manifest is called in the log — and they still have an answer.
+func TestInferExtensionType(t *testing.T) {
+	pack := func() *I18NConfig { return &I18NConfig{Locale: "ja", MessagesURL: "messages.json"} }
+
+	tests := []struct {
+		name string
+		caps *Capabilities
+		want string
+	}{
+		{"no capabilities at all", nil, ""},
+		{"capabilities that declare nothing", &Capabilities{}, ""},
+		{"lsp", &Capabilities{LSP: &LSPConfig{Language: "go"}}, ExtensionTypeLSP},
+		{"ui", &Capabilities{UI: &UIConfig{InjectionPoints: []string{"taskCard"}}}, ExtensionTypeUI},
+		{"css", &Capabilities{CSS: &CSSConfig{CSSURL: "theme.css"}}, ExtensionTypeCSS},
+		{"agent", &Capabilities{Agent: &AgentConfig{WasmModule: "adapter.wasm"}}, ExtensionTypeAgent},
+		{"llm", &Capabilities{LLM: &LLMConfig{}}, ExtensionTypeLLM},
+		{"a translation pack on its own", &Capabilities{I18N: pack()}, ExtensionTypeI18N},
+		// A pack plus a sibling: refused on install, but the chain still resolves to the sibling.
+		{"a pack beside ui yields the capability that runs", &Capabilities{I18N: pack(), UI: &UIConfig{}}, ExtensionTypeUI},
+		{"a pack beside llm yields the capability that runs", &Capabilities{I18N: pack(), LLM: &LLMConfig{}}, ExtensionTypeLLM},
+		{"lsp outranks every other declaration", &Capabilities{LSP: &LSPConfig{}, UI: &UIConfig{}, CSS: &CSSConfig{}, Agent: &AgentConfig{}, LLM: &LLMConfig{}, I18N: pack()}, ExtensionTypeLSP},
+		{"network is a modifier, not a type", &Capabilities{Network: &NetworkConfig{AllowedDomains: []string{"api.example.com"}}}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := inferExtensionType(tt.caps); got != tt.want {
+				t.Errorf("inferExtensionType() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	// The constant and the directory name in the registry source are the same string: a published
+	// pack lives at <type>/<name>, and gen-registry derives the entry's type from that folder.
+	if ExtensionTypeI18N != "i18n" {
+		t.Errorf("ExtensionTypeI18N = %q, want \"i18n\" — the registry's folder name", ExtensionTypeI18N)
+	}
+}
+
 func TestExtension_InstallSourceChecks(t *testing.T) {
 	tests := []struct {
 		source    string

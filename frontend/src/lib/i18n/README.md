@@ -15,9 +15,12 @@ and everything a pack has not translated falls back to English **per key, never 
 ```
 
 `runtime.svelte.ts` holds the runes (locale + catalogs in `$state`), `index.ts` is the import
-surface, `en.ts` is the catalog. There is no loader and no language picker here: fetching a
-pack, persisting the choice and applying it at startup are a different task — this directory is
-the runtime and the English catalog only, and `t()` never fetches anything.
+surface, `en.ts` is the catalog. The pack-loading half lives here too now — `catalog.ts` (the
+wire shape and its validation), `load-pack.ts` (resolve the winning pack, fetch it, install it),
+`cache.ts` (the IndexedDB copy that paints before the extension list arrives) and `boot.ts` (the
+pre-paint apply) — but **`t()` itself never fetches anything**: it reads whatever is installed,
+and loading is `load-pack.ts`'s job, called from the extension list. There is still no language
+picker, because the enabled pack *is* the language (`docs/i18n.md`).
 
 ## Adding or changing a key
 
@@ -107,19 +110,53 @@ the locale cannot disagree. `frontend/index.html`'s hardcoded `lang="en"` is the
 the bytes the server sends before any script runs, not the mechanism — nothing may read the
 attribute or write it from elsewhere. There is no `language` config field.
 
-## Core names no language
+## Core names no language — and `i18n-gate.py` measures it
 
 Core contains **zero translated strings and zero language names**: no endonym in a code
-comment, no language name in a menu, no branch of any kind keyed on a locale. One is known to
-have landed already — a comment in `ConfigModal/ExtensionsTab.svelte` naming two locale codes
-and one endonym — and it is a hole to fix, not a precedent to copy.
+comment, no language name in a menu, no branch of any kind keyed on a locale. That used to be a
+sentence a reviewer had to remember, and one had already landed (a comment in `ExtensionsTab`
+naming two locale codes and an endonym). It is now a command:
 
-- A locale's display name is `Intl.DisplayNames([code], { type: 'language' })` built on the
-  code itself — never the UI locale, so a pack's name is not translated into the language you
-  are reading the settings in.
+```bash
+cd frontend && npm run check:i18n       # = python3 i18n-gate.py; exit 0 = core names no language
+```
+
+Four rules over `src/` (**`__tests__/` dirs and `*.unit.*` files are out of scope** — a pack
+test cannot prove a pack applied without bytes that differ from English):
+
+| # | Rule | Why |
+|---|---|---|
+| 1 | no locale tag (`zh`/`fr`/`ja`/`ko`, region forms included) | core that knows a tag knows a language |
+| 2 | no CJK/hangul/kana codepoint | how "no endonym, no translated sample value" is checked without listing every language |
+| 3 | no `Intl.DisplayNames` | a pack's name is the pack's own (below) |
+| 4 | no `locale === 'xx'` / `switch (locale)` | the same knowledge as control flow |
+
+Rule 1 is a **tripwire**, not a proof: it lists the tags this product's packs ship, because a
+new language arrives through a manifest rather than through core. Its job is to catch core
+re-learning a language it had forgotten.
+
+Two things still contain a tag or a translated value, and neither is an exception to the rule:
+
+- **`src/app.css`'s CJK typography block** — `:lang(zh) { --font-sans: … }`. AGENTS.md requires
+  that block (and *why* those chains are ordered as they are), and a selector **targets** a
+  language without naming one to a reader, so the gate allows a tag there only inside a
+  `:lang(…)` selector. Prose in that block says "the Simplified chain", never the tag.
+- **`__tests__/` fixtures** carry real tags and real translated values
+  (`setCatalog('zh-CN', { 'nav.board': '看板' })`), because the assertion is "a *different
+  language* arrived", which a synthetic marker cannot make. Where the assertion is about
+  *plurals* instead, the fixture is synthetic (`'[few:{count}]'`) and the locale is named for
+  the categories it answers with (`ru`, `ar`, and a single-form locale) — see `runtime.unit.ts`.
+
+Related facts the gate keeps honest:
+
+- **A locale's display name is the pack's own**: `display_name` from the manifest/registry
+  entry, verbatim (`entryDisplayName`, `utils/locale-offer.ts`). Core derives none —
+  `Intl.DisplayNames` was tried here and deleted, because the endonym it produced was core's
+  opinion about a language rather than the author's. Settings shows the **tag** (`.ext-locale`
+  in `ExtensionsTab`), the first-run offer shows the pack's own name.
 - The runtime hands a locale code to `Intl` and believes the answer; it never branches on one.
-- The locale codes in `__tests__/` are fixtures named for the plural *categories* they answer
-  with, and the test packs hold synthetic markers (`[few:{count}]`) rather than translations.
+- Nothing in core spells the fallback locale: the runtime compares against `DEFAULT_LOCALE`
+  (imported from `en.ts`), so rule 4 flags even `=== 'en'`.
 
 ## `aria-label` / `title` / `placeholder`: this batch keeps them literal
 

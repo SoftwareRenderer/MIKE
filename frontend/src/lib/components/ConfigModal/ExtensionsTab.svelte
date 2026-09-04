@@ -105,8 +105,11 @@
             label: t('settings.extensions.cap.llm.label'),
             description: t('settings.extensions.cap.llm.description'),
         },
+        i18n: {
+            label: t('settings.extensions.cap.i18n.label'),
+            description: t('settings.extensions.cap.i18n.description'),
+        },
     });
-
     // Human-readable explanations for sandboxed UI extension permissions.
     // Non-technical, user-facing wording. Only permissions an extension
     // actually DECLARES are listed — always-granted ones (config.get,
@@ -209,20 +212,6 @@
         return typeof code === 'string' ? code : '';
     }
 
-    /**
-     * A language's own name for itself — `zh` renders as 简体中文, `fr` as français. Taken from
-     * `Intl.DisplayNames` built on the code itself (never on the UI locale), so a pack's name
-     * never gets translated into the language you are reading the settings in.
-     */
-    function localeName(code: string): string {
-        if (!code) return '';
-        try {
-            return new Intl.DisplayNames([code], { type: 'language' }).of(code) || code;
-        } catch {
-            return code;
-        }
-    }
-
     // Get capability keys for a registry entry.
     // Prefers the entry's declared capabilities (which may include e.g. network
     // alongside ui), falling back to the capability implied by its type.
@@ -245,6 +234,21 @@
         const caps: Record<string, any> = {};
         for (const k of getRegistryCapabilityKeys(entry)) caps[k] = {};
         return caps;
+    }
+
+    // Badge text for an extension type. An unrecognized type still renders UI
+    // because that is what a manifest the host does not know most likely is —
+    // but a translation pack must not wear that label, or the row the user came
+    // to Settings to toggle is indistinguishable from an iframe extension.
+    function typeBadge(type: string): string {
+        switch (type) {
+            case 'lsp': return 'LSP';
+            case 'css': return 'CSS';
+            case 'agent': return 'AGENT';
+            case 'llm': return 'LLM';
+            case 'i18n': return 'I18N';
+            default: return 'UI';
+        }
     }
 
     // Load extensions on mount
@@ -605,8 +609,7 @@
     function formatBuiltAt(builtAt: string): string {
         if (!builtAt) return t('settings.extensions.notBuilt');
         // 'calendar': a build from last March is a date, not an age.
-        return timeAgo(builtAt, { scale: 'calendar', prefix: t('settings.extensions.builtPrefix') })
-            || t('settings.extensions.builtAt', { date: builtAt });
+        return timeAgo(builtAt, { scale: 'calendar', template: 'time.built' }) || t('time.built', { when: builtAt });
     }
 
     // Filter extensions by search, with local (unpublished) extensions first
@@ -785,7 +788,7 @@
                         <div class="extension-card" class:disabled={!ext.enabled} class:unpublished-card={isLocal}>
                             <div class="card-header">
                                 <div class="ext-icon" class:ext-lsp={ext.type === 'lsp'} class:ext-ui={ext.type === 'ui'} class:ext-css={ext.type === 'css'} class:ext-agent={ext.type === 'agent'} class:ext-llm={ext.type === 'llm'} class:ext-i18n={ext.type === 'i18n'}>
-                                    {ext.type === 'lsp' ? 'LSP' : ext.type === 'css' ? 'CSS' : ext.type === 'agent' ? 'AGENT' : ext.type === 'llm' ? 'LLM' : ext.type === 'i18n' ? 'I18N' : 'UI'}
+                                    {typeBadge(ext.type)}
                                 </div>
                                 <div class="ext-info">
                                     <div class="ext-name-row">
@@ -831,7 +834,7 @@
                                         {/if}
                                         {#if ext.manifest.license_url} · <a href={safeUrl(ext.manifest.license_url)} target="_blank" rel="noopener noreferrer" class="ext-link">{t('settings.extensions.license')}</a>{/if}
                                         {#if ext.manifest.homepage} · <a href={safeUrl(ext.manifest.homepage)} target="_blank" rel="noopener noreferrer" class="ext-link">{t('settings.extensions.website')}</a>{/if}
-                                        {#if ext.type === 'i18n' && packLocale(ext.manifest.capabilities)} · <span class="ext-locale" title={t('settings.extensions.localeHint')}>{localeName(packLocale(ext.manifest.capabilities))}</span>{/if}
+                                        {#if ext.type === 'i18n' && packLocale(ext.manifest.capabilities)} · <span class="ext-locale" title={t('settings.extensions.localeHint')}>{packLocale(ext.manifest.capabilities)}</span>{/if}
                                     </span>
                                 </div>
                                 <div class="card-actions">
@@ -1120,7 +1123,7 @@
             <div class="caps-modal-body">
                 <div class="caps-ext-header">
                     <div class="caps-ext-icon" class:ext-lsp={selectedExtension.type === 'lsp'} class:ext-ui={selectedExtension.type === 'ui'} class:ext-css={selectedExtension.type === 'css'} class:ext-agent={selectedExtension.type === 'agent'} class:ext-llm={selectedExtension.type === 'llm'} class:ext-i18n={selectedExtension.type === 'i18n'} aria-hidden="true">
-                        {selectedExtension.type === 'lsp' ? 'LSP' : selectedExtension.type === 'css' ? 'CSS' : selectedExtension.type === 'agent' ? 'AGENT' : selectedExtension.type === 'llm' ? 'LLM' : selectedExtension.type === 'i18n' ? 'I18N' : 'UI'}
+                        {typeBadge(selectedExtension.type)}
                     </div>
                     <div class="caps-ext-info">
                         <h3 class="caps-ext-name">{selectedExtension.manifest.display_name || selectedExtension.name}</h3>
@@ -1217,14 +1220,12 @@
                                         <code class="cap-detail-value">{caps.css.css_url}</code>
                                     </div>
                                 {/if}
-                                <!-- i18n: show the language the pack translates to, in its own script -->
+                                <!-- Translation pack: the locale tag it declares, verbatim —
+                                     core holds no language names to render. -->
                                 {#if capKey === 'i18n' && packLocale(caps)}
                                     <div class="cap-detail-extra">
                                         <span class="cap-detail-label">{t('settings.extensions.language')}</span>
-                                        <span class="cap-detail-tags">
-                                            <span class="cap-detail-tag">{localeName(packLocale(caps))}</span>
-                                        </span>
-                                    </div>
+                                        <code class="cap-detail-value">{packLocale(caps)}</code>                                    </div>
                                 {/if}
                             </div>
                         {/if}
@@ -1326,7 +1327,7 @@
                         <div class="extension-card registry-card" class:unpublished-card={isUnpublished}>
                             <div class="card-header">
                                 <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'} class:ext-agent={entry.type === 'agent'} class:ext-llm={entry.type === 'llm'} class:ext-i18n={entry.type === 'i18n'}>
-                                    {entry.type === 'lsp' ? 'LSP' : entry.type === 'css' ? 'CSS' : entry.type === 'agent' ? 'AGENT' : entry.type === 'llm' ? 'LLM' : entry.type === 'i18n' ? 'I18N' : 'UI'}
+                                    {typeBadge(entry.type)}
                                 </div>
                                 <div class="ext-info">
                                     <div class="ext-name-row">
@@ -1370,7 +1371,7 @@
                                         {#if entry.homepage} · <a href={safeUrl(entry.homepage)} target="_blank" rel="noopener noreferrer" class="ext-link">{t('settings.extensions.website')}</a>{/if}
                                         <!-- The locale an i18n pack declares, shown in its own language: the one thing a
                                              person needs to pick the right pack out of the list. -->
-                                        {#if entry.type === 'i18n' && packLocale(entry.capabilities)} · <span class="ext-locale" title={t('settings.extensions.localeHint')}>{localeName(packLocale(entry.capabilities))}</span>{/if}
+                                        {#if entry.type === 'i18n' && packLocale(entry.capabilities)} · <span class="ext-locale" title={t('settings.extensions.localeHint')}>{packLocale(entry.capabilities)}</span>{/if}
                                     </span>
                                 </div>
                                 <div class="ext-action">
@@ -2010,11 +2011,11 @@
         color: var(--color-text-secondary);
     }
 
-    /* A translation pack: its own accent, so an installed pack is not mistaken for a UI plugin. */
-    .ext-i18n {
-        background: rgba(9, 187, 181, 0.15);
-        color: #00bcc3;
-    }
+        /* A translation pack: its own accent, so an installed pack is not mistaken
+           for a UI plugin. */
+        .ext-i18n {
+            background: rgba(210, 153, 34, 0.15);
+            color: var(--color-status-orange);    }
 
     .ext-info {
         flex: 1;
@@ -2180,10 +2181,9 @@
     }
 
     .cap-i18n {
-        background: rgba(9, 187, 181, 0.15);
-        color: #00bcc3;
-        border-color: rgba(0, 188, 195, 0.3);
-    }
+            background: rgba(210, 153, 34, 0.15);
+            color: var(--color-status-orange);
+            border-color: rgba(210, 153, 34, 0.3);    }
 
     /* Capabilities modal */
     .caps-modal-body {

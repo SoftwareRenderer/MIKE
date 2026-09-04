@@ -2,6 +2,7 @@ import type { Extension, RegistryEntry, ExtensionUpdate } from '$lib/types';
 import { listExtensions, getRegistryIndex, installExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension } from '$lib/api';
 import { uiInjector } from './ui-injector.svelte';
 import { t } from '$lib/i18n';
+import { loadI18NFromExtensions } from '$lib/i18n/load-pack';
 
 /** Runtime status of an extension sandbox. */
 export type ExtensionStatus = 'running' | 'stopped' | 'error' | 'unknown';
@@ -25,6 +26,18 @@ export class ExtensionManager {
         try {
             this.state.extensions = await listExtensions();
             uiInjector.registerFromExtensions(this.state.extensions);
+            // The active language is whichever i18n pack is enabled, derived from
+            // this same list — so this one call is the live switch in both
+            // directions, driven by the `extension_change` broadcast that already
+            // lands here. It is app-global like the css pack's stylesheet: no
+            // iframe, no channel, no permission. A catalog that will not load is
+            // reported under its own prefix and must never surface as an
+            // extension-list error (which would blame the wrong thing).
+            try {
+                await loadI18NFromExtensions(this.state.extensions);
+            } catch (e) {
+                console.error('[i18n] could not reconcile the active language:', e);
+            }
         } catch (e: any) {
             this.state.error = e.message || t('api.loadExtensions');
         } finally {

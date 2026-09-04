@@ -5,6 +5,7 @@
     import { isAgentProvider } from '$lib/types';
     import { getModelName, getProviderDisplayName } from '$lib/utils/providers';
     import { t } from '$lib/i18n';
+    import { usdSymbol } from '$lib/utils/format';
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
     import { appStore, uiStore, dialogStore } from '$lib/stores';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
@@ -59,12 +60,10 @@
         hasChanges = true;
     }
 
-    // Locale-aware currency formatting for pricing inputs
-    const currencySymbol = (() => {
-        const parts = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).formatToParts(0);
-        const currencyPart = parts.find(p => p.type === 'currency');
-        return currencyPart ? currencyPart.value : '$';
-    })();
+    // Currency symbol for the pricing inputs, in the ACTIVE locale ("$", "US$", "$US").
+    // A $derived, not a once-at-init IIFE: the locale can change while this modal is
+    // open, and a snapshot would keep showing the symbol of the language the user left.
+    const currencySymbol = $derived(usdSymbol());
 
     // -- Provider management --
     interface ModelEntry {

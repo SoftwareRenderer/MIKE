@@ -65,8 +65,8 @@ test-go-race: ## Run Go unit tests under the race detector (~4min)
 	go test -race ./backend/... ./pkg/... -count=1 -parallel 4
 
 .PHONY: test-frontend
-test-frontend: ## Run frontend unit tests (vitest, ~10s)
-	cd frontend && npm test
+test-frontend: ## Run frontend unit tests + the i18n no-language gate (vitest, ~10s)
+	cd frontend && npm test && npm run check:i18n
 
 .PHONY: test-e2e
 test-e2e: ## Run e2e tests (Playwright, manages its own server)

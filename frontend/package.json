@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
+    "check:i18n": "python3 i18n-gate.py",
     "test": "vitest run",
     "test:watch": "vitest"
   },

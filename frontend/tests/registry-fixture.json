@@ -44,5 +44,23 @@
                 ]
             }
         }
+    },
+    {
+        "name": "locale-zh",
+        "version": "1.0.0",
+        "type": "i18n",
+        "display_name": "简体中文",
+        "description": "Simplified Chinese translation pack, committed by global-setup into a local git repo (file:///tmp/kanban-test-i18n-pack-repo) built from tests/fixtures/i18n-pack-repo. `commit` is a placeholder that setup replaces with that repo's HEAD in the generated registry it points the test servers at — an installable git pin without hardcoding a hash that changes whenever the fixture does. Used by e2e/i18n-first-run-offer.spec.ts.",
+        "author": "TestDev",
+        "repo": "file:///tmp/kanban-test-i18n-pack-repo",
+        "commit": "__I18N_PACK_COMMIT__",
+        "subdir": "i18n/locale-zh",
+        "capabilities": {
+            "i18n": {
+                "locale": "zh",
+                "messages_url": "messages.json",
+                "has_prompts": false
+            }
+        }
     }
 ]

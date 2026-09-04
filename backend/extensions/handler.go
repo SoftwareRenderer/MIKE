@@ -423,6 +423,16 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 
+	// A translation pack has no user-editable field — its locale and catalog are
+	// what the manifest declared — so the stored declaration is re-checked on
+	// every save rather than merged. Checked after the merges above, because that
+	// is the shape that gets stored: an extension must not be able to rewrite its
+	// own way out of validation.
+	if err := ext.Manifest.Capabilities.GetI18N().Validate(); err != nil {
+		http.Error(w, "extension declares an unusable translation pack: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	if err := h.store.Update(id, ext); err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, "failed to update extension: "+err.Error())
 		return
@@ -607,8 +617,13 @@ func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *ht
 }
 
 // inferExtensionType returns the extension type implied by its capabilities,
-// in priority order (lsp > ui > css > agent > llm). Returns "" when no capability
+// in priority order (lsp > ui > css > agent > llm > i18n). Returns "" when no capability
 // maps to a type.
+//
+// i18n is last because a pack is the only capability that is pure data: anything else in the same
+// manifest would mean an extension that also runs something. That case is unreachable through a
+// valid install — validateI18N refuses a pack that declares a sibling capability — so the order
+// here only decides what a rejected manifest is called in the log.
 func inferExtensionType(caps *Capabilities) string {
 	if caps == nil {
 		return ""
@@ -624,6 +639,8 @@ func inferExtensionType(caps *Capabilities) string {
 		return ExtensionTypeAgent
 	case caps.LLM != nil:
 		return ExtensionTypeLLM
+	case caps.I18N != nil:
+		return ExtensionTypeI18N
 	}
 	return ""
 }
@@ -947,6 +964,16 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 	manifest.Capabilities.GetLSP().NormalizeFileTypes()
 	if err := manifest.Capabilities.GetLSP().Validate(); err != nil {
 		fail(fmt.Errorf("extension %s declares an unusable language configuration: %w", entry.Name, err))
+		return
+	}
+	// A translation pack is checked here on the fetched manifest (the shape that gets stored — a
+	// registry entry carries only the projection the UI renders) *and* against the files it actually
+	// shipped with, in the directory they were materialized into: a locale that is not a language
+	// subtag, a catalog pointing at another origin, a catalog that will not parse or a prompt
+	// overlay that will not compile is refused now rather than stored and then discovered in the
+	// browser, in a later turn, or never.
+	if err := validateI18N(manifest.Capabilities, targetDir); err != nil {
+		fail(fmt.Errorf("extension %s declares an unusable translation pack: %w", entry.Name, err))
 		return
 	}
 	// An image that names no registry cannot be pulled headless, so reject the entry here rather
@@ -1279,6 +1306,13 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 				m.Capabilities.GetLSP().NormalizeFileTypes()
 				if err := m.Capabilities.GetLSP().Validate(); err != nil {
 					fail(fmt.Errorf("extension %s declares an unusable language configuration: %w", entry.Name, err))
+					return
+				}
+				// Same rule for a translation pack: the new commit's declaration is vetted and its
+				// catalog and templates are read from the checkout already on disk, before the stored
+				// manifest is replaced.
+				if err := validateI18N(m.Capabilities, targetDir); err != nil {
+					fail(fmt.Errorf("extension %s declares an unusable translation pack: %w", entry.Name, err))
 					return
 				}
 				if len(merged.Envs) > len(before.Envs) || len(merged.Mounts) > len(before.Mounts) ||
