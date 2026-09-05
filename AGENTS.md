@@ -11,6 +11,7 @@ Design narratives and mechanism walkthroughs live in `docs/` — read the pointe
 - `scripts/gen-registry.py` — regenerates `../MIKE-extensions/registry.json` from extension manifests (`--check` verifies).
 - `docs/` — subsystem detail extracted from this file (see the index at the bottom).
 - `Makefile` — build/run/test entry points. `data/` — SQLite DB, TLS certs, trace files. `prompts/` — LLM prompt templates.
+- `Dockerfile` + `compose.yaml` + `.env.example` — deployment. The app image carries podman and `runsc` and drives them **nested** (`privileged`), so neither is a host prerequisite there; `README.md → Quick Start` owns the run/deploy story and `.env` is the only source of the master password, encryption key and `MIKE_ALLOWED_HOSTS`.
 
 ## Non-Negotiables
 - **NEVER commit.** The user will commit manually.

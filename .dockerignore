@@ -1,0 +1,56 @@
+# Build context for the MIKE app image (see Dockerfile, compose.yaml).
+#
+# Two rules drive this file:
+#   1. The image is BUILT from source here — anything the tree already holds as a build
+#      output (frontend/dist, the kanban and sandbox-bridge binaries, node_modules) is
+#      either rebuilt in a stage or would silently ship stale bytes.
+#   2. data/ holds kanban.db (encrypted secrets, session hashes) and data/tls/ (the local
+#      CA private key). It is 0700 for a reason and must never become an image layer that
+#      gets pushed and read by someone else.
+
+# ── Secrets and runtime state ────────────────────────────────────────────────
+data/
+.env
+*.trace
+*.trace.old
+
+# ── VCS / local working state ───────────────────────────────────────────────
+.git
+.gitignore
+.worktrees
+worktrees
+extensions/
+prompts/skills/
+TODO.md
+docs/
+test-results
+test-results2
+frontend/test-results
+frontend/test-results-json
+
+# ── Rebuilt inside the image ─────────────────────────────────────────────────
+node_modules
+**/node_modules
+frontend/dist
+frontend/stats.html
+frontend/stats.json
+kanban
+backend/kanban_binary
+# The committed bridge artifact is deliberately excluded: the image builds it from
+# ./pkg/bridge/agent so a sandbox can never run an older bridge than this tree's source.
+# `make bridge-check` remains the gate for the committed copy.
+sandbox/sandbox-bridge
+sandbox/sandbox-bridge.srcs
+
+# ── Not needed by either build stage ─────────────────────────────────────────
+**/__pycache__
+LICENSE
+NOTICE
+THIRD_PARTY_NOTICES.md
+README.md
+AGENTS.md
+Makefile
+compose.yaml
+frontend/playwright.config.ts
+frontend/vitest.config.ts
+frontend/tests

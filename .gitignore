@@ -1,5 +1,7 @@
 node_modules
 data/
+.env
+/projects/
 /extensions/
 frontend/dist
 frontend/stats.html
