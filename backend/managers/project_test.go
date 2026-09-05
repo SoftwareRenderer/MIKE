@@ -534,6 +534,93 @@ func TestUpdateProjectRejectsUnqualifiedSandboxImage(t *testing.T) {
 	}
 }
 
+// A forwarded port's bind address is checked only for shape and stored canonicalized:
+// 0.0.0.0 is stored as "", because that is what "every interface" means everywhere else.
+func TestCreateProjectNormalizesForwardPorts(t *testing.T) {
+	h, _ := testProjectHandler(t)
+	isolation := false
+
+	tests := []struct {
+		name  string
+		ports []types.PortForward
+		want  []types.PortForward
+	}{
+		{"container port only", []types.PortForward{{ContainerPort: 3000}}, []types.PortForward{{ContainerPort: 3000}}},
+		{"explicit wildcard stored as empty", []types.PortForward{{ContainerPort: 3000, HostIP: "0.0.0.0"}}, []types.PortForward{{ContainerPort: 3000}}},
+		{"IPv6 wildcard stored as empty", []types.PortForward{{ContainerPort: 3000, HostIP: "::"}}, []types.PortForward{{ContainerPort: 3000}}},
+		{"LAN address kept", []types.PortForward{{ContainerPort: 80, HostIP: "192.168.1.100"}}, []types.PortForward{{ContainerPort: 80, HostIP: "192.168.1.100"}}},
+		{"loopback is the user's choice", []types.PortForward{{ContainerPort: 3000, HostIP: "127.0.0.1"}}, []types.PortForward{{ContainerPort: 3000, HostIP: "127.0.0.1"}}},
+	}
+
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			createBareRepo(t, repo)
+			proj, code, msg := h.createProjectFromRequest(types.CreateProjectRequest{
+				Path:                    repo,
+				Name:                    fmt.Sprintf("fwd-%d", i),
+				SandboxEnabled:          true,
+				SandboxNetworkIsolation: &isolation,
+				SandboxForwardPorts:     tc.ports,
+			})
+			if code != http.StatusCreated {
+				t.Fatalf("status = %d (%s), want %d", code, msg, http.StatusCreated)
+			}
+			if got := fmt.Sprintf("%+v", proj.ForwardPorts); got != fmt.Sprintf("%+v", tc.want) {
+				t.Fatalf("stored ports = %s, want %s", got, fmt.Sprintf("%+v", tc.want))
+			}
+		})
+	}
+}
+
+// A bind address that is not an IP address, or a container port out of range, is refused
+// before anything is written - a rejected PUT must not half-update the settings.
+func TestUpdateProjectValidatesForwardPorts(t *testing.T) {
+	h, projID := testProjectHandler(t)
+	seeded := []types.PortForward{{ContainerPort: 3000}}
+	if err := h.store.UpdateProjectSandboxForwardPorts(projID, seeded); err != nil {
+		t.Fatalf("seed forward ports: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/projects/{projectID}", h.HandleByID)
+	stored := func() string {
+		t.Helper()
+		p, err := h.store.GetProject(projID)
+		if err != nil {
+			t.Fatalf("get project: %v", err)
+		}
+		return fmt.Sprintf("%+v", p.ForwardPorts)
+	}
+
+	for _, body := range []string{
+		`{"sandbox_forward_ports":[{"container_port":3000,"host_ip":"saturn.lan"}]}`,
+		`{"sandbox_forward_ports":[{"container_port":3000,"host_ip":"192.168.1.100:8080"}]}`,
+		`{"sandbox_forward_ports":[{"container_port":0}]}`,
+		`{"sandbox_forward_ports":[{"container_port":70000}]}`,
+	} {
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPut, "/api/projects/"+projID, strings.NewReader(body)))
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("PUT %s: status = %d, want %d (%s)", body, rr.Code, http.StatusBadRequest, rr.Body.String())
+		}
+		if got := stored(); got != fmt.Sprintf("%+v", seeded) {
+			t.Fatalf("rejected %s wrote %s", body, got)
+		}
+	}
+
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPut, "/api/projects/"+projID,
+		strings.NewReader(`{"sandbox_forward_ports":[{"container_port":8080,"host_ip":"192.168.1.100"},{"container_port":9000,"host_ip":"0.0.0.0"}]}`)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (%s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	want := []types.PortForward{{ContainerPort: 8080, HostIP: "192.168.1.100"}, {ContainerPort: 9000}}
+	if got := stored(); got != fmt.Sprintf("%+v", want) {
+		t.Fatalf("stored ports = %s, want %s", got, fmt.Sprintf("%+v", want))
+	}
+}
+
 func TestApplyPricingBasic(t *testing.T) {
 	h, projID, s := testProjectHandlerWithStore(t)
 
