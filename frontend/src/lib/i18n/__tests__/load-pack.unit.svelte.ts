@@ -190,6 +190,23 @@ describe('loadI18NFromExtensions', () => {
         expect(store.db.has(CACHE_KEY)).toBe(false);
     });
 
+    it('clears a tag the pre-paint step adopted when no pack is enabled', async () => {
+        // The document can arrive already tagged from the cached hint, with no
+        // catalog applied yet. Reconciling against a list with no pack must take
+        // that tag back — not skip the reset because nothing had been "applied".
+        // The tag is one no other test in this file registers a catalog for, so
+        // `catalog` is genuinely empty here: that is the state the guard missed.
+        i18n.setLocale('sv');
+        const before = { tag: i18n.tag, catalog: i18n.catalog, lang: document.documentElement.lang };
+
+        const res = await loadI18NFromExtensions([]);
+
+        expect(before).toEqual({ tag: 'sv', catalog: null, lang: 'sv' });
+        expect(res.locale).toBe(DEFAULT_LOCALE);
+        expect(i18n.tag).toBe(null);
+        expect(document.documentElement.lang).toBe(DEFAULT_LOCALE);
+    });
+
     it('refuses an external messages_url and fetches nothing', async () => {
         const fetchMock = mockCatalogFetch(JSON.stringify(zh));
         const res = await loadI18NFromExtensions([

@@ -51,6 +51,51 @@ describe('extBaseURL', () => {
     });
 });
 
+describe('extBaseURL — the served directory the server reported', () => {
+    const withServed = (name: string, author: string, served: unknown): Extension =>
+        ({ ...makeExt(name, author), served_url: served } as Extension);
+
+    it('uses served_url for the author-namespaced layout', () => {
+        expect(extBaseURL(withServed('zh', 'SoftwareRenderer', '/extensions/softwarerenderer/zh')))
+            .toBe('/extensions/softwarerenderer/zh');
+    });
+
+    it('fetches a flat-installed extension from where its files actually are', () => {
+        // The regression: an unpublished pack placed at extensions/<name> was
+        // fetched from /extensions/<manifest author>/<name>, which does not exist,
+        // so the pack — installed and enabled — left the UI in English.
+        const ext = withServed('probe-pack', 'Probe Author', '/extensions/probe-pack');
+        expect(extBaseURL(ext)).toBe('/extensions/probe-pack');
+        expect(resolveAssetURL(ext, 'messages.json')).toBe('/extensions/probe-pack/messages.json');
+    });
+
+    it('keeps a reported path that only needed encoding', () => {
+        expect(extBaseURL(withServed('my theme', 'acme', '/extensions/acme/my%20theme')))
+            .toBe('/extensions/acme/my%20theme');
+    });
+
+    it('falls back to the derivation for a reported path that is not an extension directory', () => {
+        const fallback = '/extensions/acme/pack';
+        const notAnExtensionDir = [
+            '/etc/passwd',            // outside the tree entirely
+            'https://evil.example/x', // a different origin
+            '//evil.example/x',       // protocol-relative
+            '/extensions/../etc',     // climbs out
+            '/extensions/%2e%2e/etc', // …after decoding
+            '/extensions/a/b/c',      // deeper than <author>/<name>
+            '/extensions/',           // the root itself
+            '/extensions/bad%zz',     // not a valid escape
+            '/extensions/a\\b',       // a Windows separator is not a path separator here
+        ];
+        for (const served of notAnExtensionDir) {
+            expect(extBaseURL(withServed('pack', 'acme', served)), served).toBe(fallback);
+        }
+        // Absent, or the wrong type, is not a path either.
+        expect(extBaseURL(withServed('pack', 'acme', undefined))).toBe(fallback);
+        expect(extBaseURL(withServed('pack', 'acme', 42))).toBe(fallback);
+    });
+});
+
 describe('resolveAssetURL', () => {
     it('resolves relative assets against the extension base', () => {
         const ext = makeExt('html-preview', 'test');

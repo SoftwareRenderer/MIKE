@@ -79,7 +79,7 @@ describe('app shell copy', () => {
             const message = t('app.project.removeMessage', { name: 'my repo' });
             expect(message).toBe(
                 'Remove "my repo" from the board?\n\n' +
-                "This will delete the project's Kanban board, all tasks, messages, and their worktree directories.\n" +
+                'This will delete all tasks, messages, and their worktree directories.\n' +
                 'The project folder itself will NOT be deleted.',
             );
         });

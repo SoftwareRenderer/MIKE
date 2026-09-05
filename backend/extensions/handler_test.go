@@ -1006,6 +1006,83 @@ func TestHandleInstallLocal(t *testing.T) {
 	}
 }
 
+// A local install is materialized in place, so the folder the human chose *is* the
+// install — while every later reader derives the path from the slugged author. A
+// folder whose name is not that slug used to install "successfully" and then 404
+// every asset it serves (a translation catalog among them), so the install now
+// refuses it and names the folder to rename.
+func TestHandleInstallLocal_RefusesAFolderNothingCanReadBack(t *testing.T) {
+	h := testHandler(t)
+	extDir := t.TempDir()
+	h.config.ExtensionsDir = extDir
+
+	// Author folder with a capital: the scan records it as-is, the record slugifies it.
+	writeManifest(t, extDir, "TestVendor", "theme",
+		`{"display_name":"Theme","description":"d","author":"Test Vendor","version":"1.0.0",`+
+			`"capabilities":{"css":{"css_url":"theme.css"}}}`)
+
+	bodyBytes, _ := json.Marshal(map[string]any{"author": "TestVendor", "name": "theme"})
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install-local", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleInstallLocal(w, req)
+
+	events := readSSEEvents(t, w.Body.Bytes())
+	if len(events) == 0 {
+		t.Fatal("expected a done SSE event")
+	}
+	last := events[len(events)-1]
+	if last.Error == "" {
+		t.Fatalf("install was accepted; want a refusal naming the folder to rename (result %+v)", last.Result)
+	}
+	if !strings.Contains(last.Error, "TestVendor") || !strings.Contains(last.Error, "testvendor") {
+		t.Errorf("error does not name both the folder and the slug: %q", last.Error)
+	}
+	// And nothing was stored: a refused install leaves no row to repair or delete.
+	if stored, _ := h.store.GetByAuthorName("testvendor", "theme"); stored != nil {
+		t.Errorf("refused install left a row behind: %s", stored.ID)
+	}
+}
+
+// The other shape of "the folder is not the slug": no author folder at all. A
+// manifest directly under the extensions root is scanned as author `local` and is
+// legitimately served from `<extensions>/<name>` — the case a client-side guess
+// from the manifest author cannot know, and so must still install.
+func TestHandleInstallLocal_AcceptsAFlatPackAndReportsWhereItIsServed(t *testing.T) {
+	h := testHandler(t)
+	extDir := t.TempDir()
+	h.config.ExtensionsDir = extDir
+
+	packDir := writeManifest(t, extDir, "", "pack-flat",
+		`{"display_name":"Flat Pack","description":"d","author":"Some Vendor","version":"1.0.0",`+
+			`"capabilities":{"i18n":{"locale":"fr","messages_url":"messages.json"}}}`)
+	if err := os.WriteFile(filepath.Join(packDir, "messages.json"), []byte(`{"a":"b"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile catalog: %v", err)
+	}
+
+	bodyBytes, _ := json.Marshal(map[string]any{"author": "local", "name": "pack-flat"})
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install-local", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleInstallLocal(w, req)
+
+	events := readSSEEvents(t, w.Body.Bytes())
+	last := events[len(events)-1]
+	if last.Error != "" {
+		t.Fatalf("flat install failed: %s", last.Error)
+	}
+	if last.Result == nil {
+		t.Fatal("expected a result")
+	}
+	if last.Result.ServedURL != "/extensions/pack-flat" {
+		t.Errorf("served_url = %q, want /extensions/pack-flat", last.Result.ServedURL)
+	}
+	// The manifest's own author says otherwise; the served path is the truth.
+	if got := last.Result.Manifest.Author; got == "local" {
+		t.Errorf("manifest author should stay the author's own string, got %q", got)
+	}
+}
+
 func TestHandleInstallLocal_NotFound(t *testing.T) {
 	// No local extension with this name => 404, regardless of registry.
 	h := testHandler(t)
