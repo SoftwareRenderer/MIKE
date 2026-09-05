@@ -349,6 +349,40 @@ describe('<html lang>', () => {
         expect(documentLanguage()).toBe('en');
         globalThis.localStorage?.removeItem('kanban-i18n-locale');
     });
+
+    it('adopts the tag the pre-paint script painted instead of stamping English back over it', async () => {
+        // index.html sets <html lang> from the cached tag so the first frame is
+        // not English. A module-scope sync of the fallback here would undo that
+        // one frame later, so a reload would flash back through English between
+        // two frames of the pack's own language.
+        document.documentElement.lang = 'zh-Hans';
+        try {
+            vi.resetModules();
+            const fresh = await import('$lib/i18n/runtime.svelte');
+            expect(fresh.documentLanguage()).toBe('zh-Hans');
+            expect(document.documentElement.lang).toBe('zh-Hans');
+            // A tag with no catalog is not a translation: text stays English
+            // until the loader supplies one, and the loader can still take the
+            // tag back.
+            expect(fresh.i18n.catalog).toBe(null);
+            fresh.i18n.setCatalog(DEFAULT_LOCALE, null);
+            expect(document.documentElement.lang).toBe('en');
+        } finally {
+            document.documentElement.lang = 'en';
+            vi.resetModules();
+        }
+    });
+
+    it('starts in English when the document carries the fallback tag', async () => {
+        // The markup's own value is `en`, so a first run (or a cleared hint)
+        // must not adopt anything.
+        document.documentElement.lang = 'en';
+        vi.resetModules();
+        const fresh = await import('$lib/i18n/runtime.svelte');
+        expect(fresh.activeLocale()).toBeUndefined();
+        expect(fresh.documentLanguage()).toBe('en');
+        vi.resetModules();
+    });
 });
 
 describe('onLocaleChange()', () => {

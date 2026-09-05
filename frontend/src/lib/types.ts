@@ -484,7 +484,9 @@ export interface LLMExtensionConfig {
 // holds no language names — the tag is carried through verbatim.
 export interface I18NExtensionConfig {
     locale: string;
-    // Catalog file, relative to /extensions/<author>/<name>/. Resolved with resolveAssetURL,
+    // Catalog file, relative to the directory the installed record is served from
+    // (`served_url` — /extensions/<author>/<name>/, or /extensions/<name>/ when it
+    // sits flat under the extensions root). Resolved with resolveAssetURL,
     // which rejects an external URL — and the backend refuses to store one, so the two ends
     // of that fence agree.
     messages_url: string;
@@ -660,6 +662,15 @@ export interface Extension {
     enabled: boolean;
     /** Absolute filesystem path of the extension (only for local installs). */
     local_path?: string;
+    /**
+     * Where the server actually serves this extension's files from
+     * (`/extensions/<author>/<name>`, or `/extensions/<name>` when the extension
+     * is placed flat under the extensions root). Every asset URL — a translation
+     * catalog, a stylesheet, a UI module — is built from this rather than guessed
+     * from the manifest's author, because the author string is not what the
+     * install laid down on disk.
+     */
+    served_url?: string;
     running: boolean;
     ports?: AssignedPort[];
     installed_at: string;

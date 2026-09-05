@@ -1,29 +1,19 @@
 /**
- * `en.ts` — the English catalog of record.
+ * `en.ts` — the English catalog: one flat object of dotted keys, grouped into
+ * `═══ namespace ═══` sections. A new key goes into the section that owns it.
  *
- * One flat object of dotted keys → message values. Every i18n batch appends **its own
- * section** to this file, delimited by a `═══ namespace ═══` banner, so the boundary
- * between batches stays obvious and two batches cannot overwrite each other.
- *
- * House rules (they are what keeps a translation honest, not decoration):
- *  - A value is either a `string` with **named** `{placeholders}` — never positional —
- *    or a plural table `{ one, other, … }` keyed by `Intl.PluralRules` categories,
- *    selected from a `count` param. `other` is required: every locale has it.
- *  - English values are the copy that shipped in the components, byte-identical. A
- *    translated catalog changes nothing here.
- *  - `{placeholder}` token NAMES are part of a key's contract (a pack that drops
- *    `{time}` loses the time), so they stay English even in a translated catalog.
- *  - **Core ships zero translated strings and zero language names.** Translations live
- *    in i18n extension packs; a locale tag is carried through verbatim and never mapped
- *    to a display name. `cd frontend && npm run check:i18n` is that rule as a command
- *    (see `i18n/README.md` for what it checks and its two documented allowances).
- *  - The `i18n.offer.*` block is English-only by nature: the first-run language offer is
- *    shown precisely to a browser that has **no pack installed**, so a translated copy of
- *    these strings is the thing the user does not have yet.
- *  - **Never** a key for text this app does not own: extension `display_name`,
- *    `description`, `config_schema` titles/descriptions, changelog entries, log lines,
- *    or anything a manifest or an API response supplies at runtime. That text is the
- *    extension's, and translating it silently would put words in its author's mouth.
+ * Rules:
+ *  - A value is a string with named `{placeholders}`, or a plural table
+ *    `{ one, other, ... }` selected by `count`. `other` is required.
+ *  - Placeholder names stay English in every translation: a pack that renames
+ *    `{time}` loses the time.
+ *  - Core holds no translated strings and no language names. Translations live in
+ *    i18n extension packs (`../MIKE-extensions/i18n/`); `npm run check:i18n`
+ *    enforces that.
+ *  - `i18n.offer.*` renders only when no pack is installed and `i18n.test.*`
+ *    renders nowhere, so both stay English.
+ *  - Never key text the app does not own: extension names and descriptions,
+ *    changelog entries, log lines, or anything a manifest or API response gives.
  */
 
 /** The categories `Intl.PluralRules` can answer with. */
@@ -38,21 +28,14 @@ export type MessageValue = string | PluralTable;
 export type MessageParams = Record<string, string | number | boolean | null | undefined>;
 
 const catalog = {
-    // ════════════════════════════════════════════════════════════════════════════
-    // ═══ namespace: explorer.* — explorer / file browsers batch                              ═══
-    // ═══ (ExplorerView.svelte, TaskExplorerView.svelte, FileBrowser.svelte,                  ═══
-    // ═══  TaskFileBrowser.svelte, BranchFileBrowser.svelte,                                  ═══
-    // ═══  BranchSymbols.svelte, PathPicker.svelte)                                           ═══
-    // ════════════════════════════════════════════════════════════════════════════
 
-    // ── i18n runtime (the self-test surface `__tests__/runtime.unit*.ts` exercises:
-    //    one plain message and one plural table, which is all the resolution ladder
-    //    needs. Permanent — nothing renders them, do not reuse them for UI copy.) ──
+    // ═══ explorer.* — explorer and file browsers ═══
+
+    // Runtime self-test keys — nothing renders them, so do not reuse them.
     'i18n.test.plain': 'Plain message',
     'i18n.test.files': { one: '{count} file', other: '{count} files' },
 
-    // ── Shared chrome across the explorer components (identical copy in more than
-    //    one of them, so it is one key rather than a per-file duplicate) ──
+    // Shared by more than one explorer component
     'explorer.shared.loading': 'Loading...',
     'explorer.shared.cancel': 'Cancel',
     'explorer.shared.discard': 'Discard',
@@ -88,7 +71,7 @@ const catalog = {
     'explorer.shared.errCreateFile': 'Failed to create file',
     'explorer.shared.errCreateFolder': 'Failed to create folder',
     'explorer.shared.errInitGit': 'Failed to initialize git repository',
-    // One directory/file entry label, shared by every browser in this batch.
+    // One entry label, shared by every browser in this namespace
     'explorer.shared.entryFolder': 'Folder: {name}',
     'explorer.shared.entryFile': 'File: {name}',
     'explorer.shared.openFolder': 'Open folder: {name}',
@@ -112,16 +95,13 @@ const catalog = {
     'explorer.fileBrowser.folderNamePlaceholder': 'Folder name',
     'explorer.fileBrowser.create': 'Create',
     'explorer.fileBrowser.isGitRepo': '✓ This is a git repository',
-    // Entry labels are whole messages rather than a stem plus a suffix, so a
-    // translator can move the git marker wherever their language puts it.
+    // Whole messages, not stem + suffix, so a translator can place the git marker
     'explorer.fileBrowser.entryFolderGit': 'Folder: {name}, git repository',
     'explorer.fileBrowser.entryFileGit': 'File: {name}, git repository',
     'explorer.fileBrowser.openFolderGit': 'Open folder: {name} (git repository)',
     'explorer.fileBrowser.entryFileGitTitle': 'File: {name} (git repository)',
     'explorer.fileBrowser.cloneUrl': 'Git repository URL',
-    // The clone help wraps an example URL in <code>, so it is a before/after pair;
-    // the trailing space of the first half is load-bearing (it separates the text
-    // from the <code> element).
+    // A pair split around an inline <code>; the first half keeps its trailing space
     'explorer.fileBrowser.cloneHelpBefore': 'Supports HTTPS and SSH URLs (e.g. ',
     'explorer.fileBrowser.cloneHelpAfter': ').',
     'explorer.fileBrowser.cloneInto': 'Clone into',
@@ -165,19 +145,14 @@ const catalog = {
     'explorer.symbols.collapse': 'Collapse',
     'explorer.symbols.lineTitle': 'Line {line}: {name}',
 
-    // ── PathPicker.svelte — generic directory/file picker modal. Its `title`,
-    //    `emptyLabel` and `selectTitle` arrive as props from the calling screen and
-    //    are that screen's copy to own, so they stay props and are never keyed here. ──
+    // ── PathPicker.svelte — generic directory/file picker modal ──
+    // title, emptyLabel and selectTitle arrive as props: the calling screen owns that text.
     'explorer.pathPicker.select': 'Select',
     'explorer.pathPicker.selectFile': 'Select file: {name}',
     'explorer.pathPicker.dirPathAria': 'Directory path',
     'explorer.pathPicker.goParentAria': 'Go to parent directory',
 
-    // ════════════════════════════════════════════════════════════════════════════
-    // ═══ namespace: settings.* — Settings / ConfigModal / Extensions batch                   ═══
-    // ═══ (ConfigModal.svelte, ConfigModal/*.svelte, StatsModal.svelte,                       ═══
-    // ═══  utils/providers.ts)                                                                ═══
-    // ════════════════════════════════════════════════════════════════════════════
+    // ═══ settings.* — Settings, ConfigModal and Extensions ═══
     // ── ConfigModal.svelte — shell, tabs, provider pairs, About, footer ──
     'settings.title': 'Settings',
     'settings.close': 'Close',
@@ -216,7 +191,7 @@ const catalog = {
     'settings.keepEditing': 'Keep editing',
     'settings.signOut': 'Sign out',
     'settings.signOutConfirm': 'Are you sure you want to sign out?',
-    'settings.signOutHint': 'Sign out of Kanban',
+    'settings.signOutHint': 'Sign out',
     'settings.cancel': 'Cancel',
     'settings.cancelHint': 'Cancel and discard changes',
     'settings.save': 'Save',
@@ -237,8 +212,7 @@ const catalog = {
     'settings.caCertHelp': "This server's certificate is signed by its own certificate authority. Import this file into another device's trust store to trust the connection there.",
 
     // ── ConfigModal/PreferencesTab.svelte — shortcut rows + UI preferences ──
-    // Only labels and hints are copy: the row `id`s are the `keyboard_shortcuts` field names
-    // and `formatShortcut()` output is a binding, so the save payload never sees a translation.
+    // Only labels and hints are copy: row ids and formatShortcut() output are data.
     'settings.preferences.keyboard': 'Keyboard Shortcuts',
     'settings.preferences.hideHints': 'Hide shortcut hints',
     'settings.preferences.hideHintsDesc': 'Hide the keycaps shown on buttons',
@@ -278,8 +252,7 @@ const catalog = {
     'settings.preferences.oldestFirstDesc': 'Put the least recently moved task at the top of each column',
 
     // ── ConfigModal/TaskDefaults.svelte ──
-    // `autoMergeDesc` is split around the inline branch badge; the two halves carry the
-    // surrounding spaces exactly as the markup did, so the rendered sentence is unchanged.
+    // autoMergeDesc is split around the inline branch badge; the halves keep their spaces.
     'settings.defaults.description': 'These settings apply to newly created tasks',
     'settings.defaults.operatingMode': 'Operating mode',
     'settings.defaults.autoMerge': 'Auto-merge',
@@ -296,8 +269,8 @@ const catalog = {
     'settings.defaults.maxFailed': 'Max failed turns',
     'settings.defaults.maxFailedDesc': 'Stop task after this many consecutive LLM failures',
 
-    // ── ConfigModal/AgentSection.svelte — the manifest's own description/setup_info is
-    //    extension text and is never a key; only the chrome around it is. ──
+    // ── ConfigModal/AgentSection.svelte ──
+    // The manifest's own description and setup_info are extension text: never keyed.
     'settings.agent.setup': 'Setup',
     'settings.agent.managedBefore': 'This provider is supplied by the',
     'settings.agent.managedAfter': 'extension. To remove it, disable or uninstall the extension in Settings → Extensions.',
@@ -343,9 +316,8 @@ const catalog = {
     'settings.models.empty': 'No models added. Use "Fetch Models" or add manually.',
 
     // ── ConfigModal/SessionsSection.svelte ──
-    // The `refresh-sessions` / `revoke-all-other-sessions` / `revoke-session-<id>` aria-labels
-    // are identifiers the e2e suite selects on, not prose — they stay out of the catalog.
-    // Destructive copy is deliberately literal, one key per decision the user makes.
+    // refresh-sessions / revoke-* aria-labels are e2e selectors, not prose, so they
+    // stay literals. Destructive copy is one key per decision the user makes.
     'settings.sessions.title': 'Sessions',
     'settings.sessions.reloadTitle': 'Reload the session list',
     'settings.sessions.loading': 'Loading...',
@@ -385,8 +357,8 @@ const catalog = {
     'settings.sessions.revokeFailed': 'Failed to revoke session',
     'settings.sessions.revokeAllFailed': 'Failed to revoke other sessions',
 
-    // ── ConfigModal/ProviderCard.svelte (+ the two display fallbacks in utils/providers.ts) ──
-    // `fetchError` / `testResult.message` are server answers and stay untranslated.
+    // ── ConfigModal/ProviderCard.svelte (+ the display fallbacks in utils/providers.ts) ──
+    // fetchError and testResult.message are server answers: not translated.
     'settings.provider.removeTitle': 'Remove Provider',
     'settings.provider.removeMessage': 'Remove this provider? This cannot be undone.',
     'settings.provider.remove': 'Remove',
@@ -437,10 +409,9 @@ const catalog = {
     'settings.stats.reset': 'Reset',
 
     // ── ConfigModal/ExtensionsTab.svelte — the three label dictionaries ──
-    // Injection points, capabilities and permission explanations. The **permission ids
-    // themselves** (ui.modal, editor.save, …) stay in the component as data — they are the
-    // names the manifest declares and the host enforces; only their explanations are copy.
-    // The `i18n` capability below is new copy from the i18n-extension-type task.
+    // Injection points, capabilities and permissions. The ids (lsp, ui.modal) are what
+    // a manifest declares and the host enforces, so they stay in the component as
+    // data; only the words beside them are copy.
     'settings.extensions.point.taskCard': 'Task Cards',
     'settings.extensions.point.fileEditor': 'File Editor',
     'settings.extensions.point.projectBoard': 'Project Board',
@@ -494,16 +465,15 @@ const catalog = {
     'settings.extensions.perm.previewServeScripts.description': 'Can run scripts in the preview',
     'settings.extensions.perm.previewServeNetwork.label': 'Send/receive data in the preview',
     'settings.extensions.perm.previewServeNetwork.description': 'Can use commands such as fetch() to send/receive data across the network.',
-    // The capability's own words, not the `I18N` badge text: this row is where a reader
-    // looks for a language switch, and there is deliberately none to switch.
-    'settings.extensions.cap.i18n.label': 'Translation',
-    'settings.extensions.cap.i18n.description': 'Replaces the interface text with its own translations. The enabled translation pack IS the active language — there is no language setting to change. Its files are static text served from the pack directory; nothing a pack declares executes.',
+    // Words for the capability row, not the I18N badge. The language comes from the
+    // enabled pack, so this row offers no switch of its own.
+    'settings.extensions.cap.i18n.label': 'Language',
+    'settings.extensions.cap.i18n.description': 'Use a different language',
 
     // ── ConfigModal/ExtensionsTab.svelte — chrome, dialogs, browse + installed cards ──
-    // Build progress, install/update streams and `environment.note` are server- and
-    // manifest-supplied text and stay out of the catalog. The type badges (`LSP`, `CSS`,
-    // `AGENT`, `LLM`, `I18N`, `UI`) are acronyms, rendered identically to the five that
-    // already shipped as literals. `localeHint` labels the pack's own declared locale.
+    // Build progress, install/update output and environment.note come from the server
+    // or the manifest. The type badges are acronyms; localeHint labels the pack's own
+    // declared locale.
     'settings.extensions.loadFailed': 'Failed to load extensions',
     'settings.extensions.registryLoadFailed': 'Failed to load registry',
     'settings.extensions.installFailed': 'Failed to install extension',
@@ -612,15 +582,9 @@ const catalog = {
     'settings.extensions.needsSetupNote.before': 'Requires additional setup after installation: it reads resolved dependencies from',
     'settings.extensions.needsSetupNote.after': 'inside its sandbox. Point it at a folder of your choosing afterwards — until you do, it resolves only what its own image contains.',
 
-    // ════════════════════════════════════════════════════════════════════════════
-    // ═══ namespace: app.* — app shell + shared primitives batch                              ═══
-    // ═══ (App.svelte, App/Sidebar.svelte, App/TopBar.svelte, LoginModal,                     ═══
-    // ═══  CreateTaskModal, ConfirmationDialog, stores/dialogs.svelte.ts,                     ═══
-    // ═══  constants/modes.ts, utils/keyboard.ts)                                             ═══
-    // ═══                                                                                     ═══
-    // ═══ No key here for `aria-label` / `title` / `placeholder` copy — that                  ═══
-    // ═══ text stays a literal English string in the component (see README.md).               ═══
-    // ════════════════════════════════════════════════════════════════════════════
+    // ═══ app.* — app shell and shared primitives ═══
+    // aria-label / title / placeholder copy here stays a literal in the component:
+    // components/__tests__/accessibility.unit.svelte.ts compares it against rendered text.
 
     // ── shared button / dialog copy ──
     'app.cancel': 'Cancel',
@@ -631,8 +595,7 @@ const catalog = {
     'app.dialog.commitAndDone': 'Commit and move to Done',
 
     // ── utils/keyboard.ts — keycap legends and shortcut tooltips ──
-    // The legends are what a keycap hint shows (Column, StartPanel, the Create
-    // button); the binding itself stays the normalized `control+k` form.
+    // Only what a keycap hint shows; the binding stays the normalized control+k form.
     'app.key.control': 'Ctrl',
     'app.key.meta': 'Cmd',
     'app.key.shift': 'Shift',
@@ -652,9 +615,7 @@ const catalog = {
     'app.shortcut.openTerminal': 'Open terminal',
     'app.shortcut.openTerminalWithKey': 'Open terminal ({key})',
 
-    // ── constants/modes.ts — operating-mode descriptions ──
-    // Read through `MODE_DESCRIPTIONS`, whose getters keep the export shape (and
-    // therefore the two call sites this batch does not own) unchanged.
+    // ── constants/modes.ts — operating-mode descriptions (read through MODE_DESCRIPTIONS) ──
     'app.mode.act': 'AI is required to provide structured responses during review, and has read/write access.',
     'app.mode.plan': 'AI decomposes work into subtasks on the board, and only has read access.',
     'app.mode.explore': 'AI has read/write access.',
@@ -667,8 +628,7 @@ const catalog = {
     'app.sidebar.settings': 'Settings',
 
     // ── LoginModal.svelte ──
-    // Pre-auth: the runtime answers this from the statically bundled `en` catalog,
-    // so the login screen needs no fetch and no extension/config load (see README).
+    // Pre-auth, so this comes from the bundled en catalog: no fetch, no extension load.
     'app.login.signIn': 'Sign in',
     'app.login.signingIn': 'Signing in...',
     'app.login.failed': 'Login failed',
@@ -689,8 +649,8 @@ const catalog = {
     'app.task.branchDesc': "Base branch for this task's changes",
     'app.task.autoMerge': 'Auto-merge',
     'app.task.autoMergeParentDesc': 'Merge changes into parent task when complete',
-    // The branch badge is an inline element inside this sentence, so the copy is
-    // two messages — the other order is the translator's to choose.
+    // Two messages because the branch badge sits inside the sentence; a pack is free
+    // to put the badge anywhere in it.
     'app.task.autoMergeInto.before': 'Merge changes into',
     'app.task.autoMergeInto.after': 'when complete',
     'app.task.subtasksAutoMerge': 'Allow subtasks to auto-merge',
@@ -701,15 +661,13 @@ const catalog = {
     'app.task.discardMessage': 'Your task description has not been saved. If you close now, your changes will be lost.',
 
     // ── App.svelte — page title, banners, offline screen, empty states ──
-    'app.title.default': 'Kanban Board',
-    // The manual `task${n === 1 ? '' : 's'}` this replaces is exactly the shape
-    // `Intl.PluralRules` exists for.
+    'app.title.default': 'Board',
     'app.title.review': {
         one: '🟡 {name} - {count} task for review',
         other: '🟡 {name} - {count} tasks for review',
     },
     'app.project.removeTitle': 'Remove Project',
-    'app.project.removeMessage': "Remove \"{name}\" from the board?\n\nThis will delete the project's Kanban board, all tasks, messages, and their worktree directories.\nThe project folder itself will NOT be deleted.",
+    'app.project.removeMessage': "Remove \"{name}\" from the board?\n\nThis will delete all tasks, messages, and their worktree directories.\nThe project folder itself will NOT be deleted.",
     'app.project.remove': 'Remove',
     'app.offline.title': 'Server unreachable',
     'app.offline.button': 'Offline Mode',
@@ -719,22 +677,17 @@ const catalog = {
     'app.reconnect.connect': 'Connect',
     'app.cache.banner': 'Viewing cached data',
     'app.skipToMain': 'Skip to main content',
-    'app.empty.welcomeTitle': 'Welcome to Kanban',
-    'app.empty.welcomeBody': 'Configure an LLM provider to get started. Supports any OpenAI-compatible API.',
+    'app.empty.welcomeTitle': 'Welcome to MIKE',
+    'app.empty.welcomeBody': 'Configure an LLM provider to get started.',
     'app.empty.configureProvider': 'Configure Provider',
     'app.empty.noProjectsTitle': 'No Projects',
     'app.empty.noProjectsBody': 'Add a project to get started. Projects must be git repositories.',
     'app.empty.addProject': 'Add Project',
 
-    // ↓ keys for each owned file of this batch are appended below this line ↓
 
-    // ════════════════════════════════════════════════════════════════════════════
-    // ═══ namespace: api.* — request-failure fallback text                                    ═══
-    // ═══ (api/*.ts, services/extension-manager.svelte.ts)                                    ═══
-    // ════════════════════════════════════════════════════════════════════════════
+    // ═══ api.* — request-failure fallback text ═══
 
-    // The server's own `body.error` always wins when present; these are what the browser
-    // shows when the response carried no message. Never wrap server text in `t()`.
+    // What shows when a response carried no message. Never wrap server text in t().
     'api.fetchConfig': 'Failed to fetch config',
     'api.testConnection': 'Failed to test connection',
     'api.fetchModels': 'Failed to fetch models',
@@ -801,7 +754,7 @@ const catalog = {
     'api.fetchProjectCounts': 'Failed to fetch project counts',
     'api.fetchProjectStats': 'Failed to fetch project stats',
     'api.cloneProject': 'Failed to clone project',
-    // The clone stream's `error` event may carry no message; this is what shows then.
+    // What shows when the clone stream reports an error with no message.
     'api.cloneFailed': 'clone failed',
     'api.cloneCompletedWithoutResult': 'Clone completed without result',
     'api.fetchBoard': 'Failed to fetch board',
@@ -818,15 +771,12 @@ const catalog = {
     'api.loadExtensions': 'Failed to load extensions',
     'api.loadRegistry': 'Failed to load registry',
     'api.installExtension': 'Failed to install extension',
-    // ════════════════════════════════════════════════════════════════════════════
-    // ═══ namespace: sandbox.* — sandbox surface batch                                        ═══
-    // ═══ (SandboxConfigModal, SandboxPanel, SandboxImageStatusBanner, utils/sandbox-image-status) ═══
-    // ════════════════════════════════════════════════════════════════════════════
 
-    // Load-bearing security copy: "Read-only"/"Read/Write" and the disable-sandbox confirmation. Tests
-    // match the rendered English (/read-only/). Capability NAMES (CAP_*), container/host paths and port
-    // numbers are never catalog entries — only the human description beside a name is. The
-    // "set DANGER_ZONE=1 to allow" refusal is the Go server's own message and stays untranslated.
+    // ═══ sandbox.* — sandbox surface ═══
+
+    // The read-only / read-write labels and the disable-sandbox confirmation are
+    // security copy — say exactly what happens. Capability names (CAP_*), paths and
+    // port numbers are data, and the DANGER_ZONE refusal is the server's own message.
     'sandbox.title': 'Sandbox Configuration',
     'sandbox.lockedNotice': 'Cannot change sandbox settings while tasks are In Progress. The settings below are shown for reference only.',
     'sandbox.enabled': 'Enabled',
@@ -862,7 +812,6 @@ const catalog = {
     'sandbox.cancel': 'Cancel',
     'sandbox.save': 'Save',
     'sandbox.saving': 'Saving...',
-    // Forwarded ports
     'sandbox.ports': 'Forward Ports',
     'sandbox.portsAria': 'Toggle port forwarding settings',
     'sandbox.portsDesc': "Host ports are auto-assigned when tasks run, and visible in the task's Sandbox Info panel.",
@@ -870,7 +819,6 @@ const catalog = {
     'sandbox.addPort': 'Add port forward',
     'sandbox.savePort': 'Save port',
     'sandbox.portRangeError': 'Port must be between 1 and 65535',
-    // Custom mounts
     'sandbox.mountsAria': 'Toggle mount settings',
     'sandbox.mountsDesc': 'Bind mount host paths into sandbox containers.',
     'sandbox.addMount': 'Add mount',
@@ -878,7 +826,6 @@ const catalog = {
     'sandbox.browseHostDirectory': 'Browse host directory',
     'sandbox.mountHostPathError': 'Host path is required',
     'sandbox.mountContainerPathError': 'Container path is required',
-    // Environment variables
     'sandbox.envsAria': 'Toggle environment variables settings',
     'sandbox.envsDesc': 'Set environment variables in sandbox containers.',
     'sandbox.addVariable': 'Add variable',
@@ -889,14 +836,12 @@ const catalog = {
     'sandbox.envValueInputPlaceholder': 'value',
     'sandbox.envNameError': 'Environment variable name is required',
     'sandbox.envDuplicateError': 'Duplicate variable name: {name}',
-    // Capabilities
     'sandbox.capsAria': 'Toggle capabilities settings',
     'sandbox.capsDesc': 'Linux capabilities to add to the container. By default, all capabilities are dropped (--cap-drop=ALL).',
     'sandbox.addCapabilityAria': 'Add capability',
     'sandbox.capSuggestionPlaceholder': 'Type capability name, e.g. CAP_NET_RAW',
     'sandbox.capAddMorePlaceholder': 'Add more...',
     'sandbox.removeCapability': 'Remove {cap}',
-    // Memory / image source
     'sandbox.imageSource': 'Image Source',
     'sandbox.imageSourceDesc': 'Container image for sandbox',
     'sandbox.imagePrebuilt': 'Pre-built',
@@ -931,7 +876,7 @@ const catalog = {
     'sandbox.selectDirectory': 'Select Directory',
     'sandbox.selectDirectoryTitle': 'Select this directory',
     'sandbox.noSubdirectories': 'No subdirectories in this path',
-    // One description per Linux capability name — the NAME is the machine value, never translated.
+    // One description per capability name; the name itself is never translated
     'sandbox.cap.CAP_CHOWN': 'Change file ownership',
     'sandbox.cap.CAP_DAC_OVERRIDE': 'Bypass file permission checks',
     'sandbox.cap.CAP_DAC_READ_SEARCH': 'Bypass read permission on files/dirs',
@@ -972,14 +917,13 @@ const catalog = {
     'sandbox.cap.CAP_MAC_OVERRIDE': 'Override MAC enforcement',
     'sandbox.cap.CAP_WAKE_ALARM': 'Trigger wake alarms',
     'sandbox.cap.CAP_SYSLOG': 'Perform syslog operations',
-    // Sandbox Info panel + the image-preparation banner
+    // ── Sandbox Info panel + the image-preparation banner ──
     'sandbox.infoTitle': 'Sandbox Info',
     'sandbox.sandboxedTask': 'Sandboxed Task',
     'sandbox.isolationEnabled': 'Sandbox Isolation is enabled for this project',
     'sandbox.memoryUsage': 'Memory Usage',
     'sandbox.peakMemory': 'Peak {mb} MB',
-    // The kill count stays marked up in the panel, so the number is not part of the message —
-    // `count` only selects the form ("1 process" / "3 processes").
+    // The count is marked up in the panel, so it only selects the plural form
     'sandbox.oomKilled': { one: 'process OOM-killed — memory limit reached', other: 'processes OOM-killed — memory limit reached' },
     'sandbox.loadingSettings': 'Loading settings...',
     'sandbox.portsIdle': 'Container has not started due to idle task or terminal',
@@ -990,18 +934,15 @@ const catalog = {
     'sandbox.imagePulling': 'Pulling {image}…',
     'sandbox.imageFailed': 'Sandbox image {image} could not be prepared',
     'sandbox.imagePrepareFailed': 'Sandbox image preparation failed',
-    // ════════════════════════════════════════════════════════════════════════════
-    // ═══ namespace: terminal.* + boardDnd.* + attachments.*                                  ═══
-    // ═══ (TerminalPanel, api/terminal.ts, use-board-dnd, utils/attachments)                  ═══
-    // ════════════════════════════════════════════════════════════════════════════
 
-    // Only what a human reads. ANSI escapes, the `resize`/`input`/`output` frame types and the
-    // key names a hint chip prints stay exactly as written.
+    // ═══ terminal.* + boardDnd.* + attachments.* ═══
+
+    // Only what a human reads: ANSI escapes and the resize/input/output frame types
+    // stay exactly as written.
     'terminal.connecting': 'Connecting...',
     'terminal.title': 'Terminal',
     'terminal.close': 'Close terminal',
-    // The shortcut hint translates; the element's aria-label stays the plain English name, and the
-    // virtual keyboard's key names (Escape, Arrow up…) are key names, not prose.
+    // The hint translates; the aria-label and the on-screen key names do not.
     'terminal.closeWithShortcut': 'Close terminal ({shortcut})',
     'terminal.activePortMappings': 'Active port mappings (Host : Container)',
     'terminal.copy': 'Copy',
@@ -1009,21 +950,16 @@ const catalog = {
     'terminal.noProject': 'No project selected',
     'boardDnd.cannotMoveToBacklog': 'Cannot move to Backlog: parent task is In Progress',
     // ─── boardDnd/* + attachments/* — drag-to-move toast + the image-picker sentence ───
-    // {error} is whatever the request threw (often the server's own sentence) — never translated.
+    // {error} is whatever the request threw, often the server's own sentence.
     'boardDnd.moveFailed': 'Failed to move task: {error}',
     'attachments.couldNotRead': 'Could not read {name}',
     'attachments.tooLarge': { one: '{count} image too large (max {limit} MB)', other: '{count} images too large (max {limit} MB)' },
     'attachments.onlyN': 'Only {max} images per message',
 
 
-    // ════════════════════════════════════════════════════════════════════════════
-    // ═══ namespace: chat.* — chat surface batch                                 ═══
-    // ═══ (components/Chat/*.svelte, ChangeModelModal.svelte, ModeSelect.svelte,  ═══
-    // ═══  services/stream-handler.ts, utils/chat-entries.ts, utils/toolArgs.ts)  ═══
-    // ════════════════════════════════════════════════════════════════════════════
+    // ═══ chat.* — chat surface ═══
 
     // ── utils/toolArgs.ts — the one-line arg summary under a tool-call title ──
-    // `$ ` is a shell prompt marker, deliberately outside the message.
     'chat.args.bashBuilding': '$ (building command...)',
     'chat.args.editCount': { one: '{count} edit', other: '{count} edits' },
     'chat.args.taskComplete': '(task complete)',
@@ -1044,8 +980,8 @@ const catalog = {
     'chat.args.lspRenameIn': '(rename in {path})',
 
     // ── utils/chat-entries.ts + services/stream-handler.ts ──
-    // Fallback shown when an error event carries no message. `isRepeatError()` compares two
-    // values errorFromEvent() produced, so a translated fallback still dedupes.
+    // Fallback for an error event with no message. isRepeatError() compares the
+    // rendered value, so a translated fallback still dedupes.
     'chat.error.fallback': 'An error occurred',
     'chat.merge.failed': 'Merge failed',
     'chat.merge.conflictsResolved': 'Merge conflicts resolved',
@@ -1072,10 +1008,8 @@ const catalog = {
     'chat.common.newThread': 'New Thread',
 
     // ── Chat/MessageStats.svelte ──
-    // The row is `{model} · {tokens} · {seconds}` — separators, order and the completion-token
-    // semantics are fixed by the Chat UI rules, so only the labels are keys here. English has
-    // always said "1 tokens", so `one` keeps the plural form: introducing "1 token" would
-    // change the English output every chat-messages locator reads.
+    // The stats row separates and orders its parts in the component, so only the
+    // labels are keys. The token count is completion tokens, not total.
     'chat.stats.tokens': '{count} tokens',
     'chat.stats.seconds': '{seconds}s',
     'chat.stats.modelFallback': 'model',
@@ -1103,8 +1037,7 @@ const catalog = {
     'chat.context.clickToCancel': ' · click to cancel',
     'chat.context.sessionCost': 'Session cost',
 
-    // ── Chat/ReasoningBlock.svelte ──
-    // English split this as "{Hide|Show} reasoning" across two text nodes; one message each.
+    // ── Chat/ReasoningBlock.svelte — one message per state, not a split ──
     'chat.reasoning.hide': 'Hide reasoning',
     'chat.reasoning.show': 'Show reasoning',
     'chat.reasoning.loading': 'Loading reasoning...',
@@ -1119,7 +1052,7 @@ const catalog = {
     'chat.thread.main': 'Main',
 
     // ── ModeSelect.svelte + the mode toggle in ChatForm / StartPanel ──
-    // The `act|plan|explore` values sent to the server are data; these are the labels.
+    // act / plan / explore are what the server receives; these are the labels.
     'chat.mode.act': 'Act',
     'chat.mode.plan': 'Plan',
     'chat.mode.explore': 'Explore',
@@ -1158,9 +1091,8 @@ const catalog = {
     'chat.form.couldNotRead': 'Could not read {name}',
 
     // ── Chat/ModelSelector.svelte ──
-    // The bare 'Agent' / 'Provider' fallbacks reuse settings.provider.agentFallback /
-    // settings.provider.providerFallback — the settings batch owns those strings, and the two
-    // surfaces share them by key rather than by copy.
+    // The Agent / Provider fallbacks reuse settings.provider.*Fallback — one key
+    // shared by both surfaces rather than the same sentence twice.
     'chat.model.selectProvider': 'Select provider',
     'chat.model.selectModel': 'Select model',
     'chat.model.loadingModels': 'Loading models...',
@@ -1175,9 +1107,8 @@ const catalog = {
     'chat.compress.confirm': 'Compress',
 
     // ── Chat/ReviewBar.svelte + the commit dialog's confirm button ──
-    // Commit wording is load-bearing: the click means commit + merge + Done and a merge conflict
-    // only interrupts it (docs/commit-and-done.md), so these must keep saying "and move to Done"
-    // and must never read like a cancellation.
+    // This wording matters: the click means commit, merge and Done, and a conflict only
+    // interrupts it (docs/commit-and-done.md). Never word these as a cancellation.
     'chat.review.commitAndDone': 'Commit and move to Done',
     'chat.review.commitAndDoneTip': 'Commit changes and move task to Done',
     'chat.review.committing': 'Committing...',
@@ -1199,8 +1130,7 @@ const catalog = {
     'chat.review.moving': 'Moving...',
 
     // ── Chat/CommitDialog.svelte ──
-    // 'Committing as' / 'Merge into' keep their colon: the value is appended by the template,
-    // so the message stays a label rather than a half-sentence.
+    // "Committing as" / "Merge into" keep their colon: the value is appended by the markup.
     'chat.commit.title': 'Commit changes',
     'chat.commit.desc': 'Review and edit the commit message, then confirm to commit changes and move the task to Done.',
     'chat.commit.messageAria': 'Commit message',
@@ -1212,8 +1142,8 @@ const catalog = {
     'chat.commit.mergeInto': 'Merge into:',
 
     // ── Chat/ToolCall.svelte ──
-    // The pending progress line used to be a bare word with `: {path}` / `: {bytes}` bolted on
-    // by the markup. Each shape is its own message so another language can order the clauses.
+    // One message per shape instead of a word plus ": {path}" in the markup, so a
+    // pack can order the clauses itself.
     'chat.tool.runningFor': 'Running for {elapsed}',
     'chat.tool.writingSummary': 'Writing Summary',
     'chat.tool.writingQuestion': 'Writing Question',
@@ -1279,22 +1209,13 @@ const catalog = {
     'chat.task.sendFailed': 'Failed to send message',
     'chat.task.compressFailed': 'Failed to compress context',
     'chat.task.regenerateFailed': 'Failed to regenerate',
-    // Reachable counts are always >= 1 (entries.length - index of the clicked message), so the
-    // plural table reproduces the old `count > 1 ? 's' : ''` byte for byte.
     'chat.task.deleteConfirm': { one: 'This will delete {count} message. This action cannot be undone.', other: 'This will delete {count} messages. This action cannot be undone.' },
     'chat.task.deleteAlsoBranch': 'This will also delete the git branch "{branch}".',
     'chat.task.deleteTitle': 'Delete Message',
 
-    // ════════════════════════════════════════════════════════════════════════════
-    // ═══ namespace: board.* / task.* — board + task view batch                  ═══
-    // ═══ (Board.svelte, Column.svelte, Card.svelte, Card/EditTaskModal.svelte,   ═══
-    // ═══  CardDetail.svelte, CardDetail/*.svelte, MultiSelectBar.svelte,          ═══
-    // ═══  BranchGitGraph.svelte, their composables and utils)                     ═══
-    // ════════════════════════════════════════════════════════════════════════════
-    //
-    // Column/status **ids** (`backlog`, `in_progress`, `review`, `done`) are data —
-    // compared, persisted and sent to the API in English. Only their labels are here.
-    // `aria-label`/`title` text is deliberately absent: it is never translated.
+    // ═══ board.* / task.* — board and task view ═══
+    // Column ids (backlog, in_progress, review, done) are data — compared, stored and
+    // sent to the API in English. Only their labels are here.
 
     // ── shared by the board and the task view (the same strings ship in both) ──
     'board.confirm.delete': 'Delete',
@@ -1302,7 +1223,7 @@ const catalog = {
     'board.confirm.start': 'Start',
     'board.untitled': '(untitled)',
 
-    // ── column labels (ids stay English data) ──
+    // ── column labels ──
     'board.column.backlog': 'Backlog',
     'board.column.inProgress': 'In Progress',
     'board.column.review': 'Review',
@@ -1359,8 +1280,8 @@ const catalog = {
     'board.deleteTask.title': 'Delete Task',
     'board.deleteTask.message': 'Delete this task? This cannot be undone.',
 
-    // ── Card/EditTaskModal.svelte — the edit dialog (mode descriptions come from
-    //    constants/modes.ts, which this batch does not own) ──
+    // ── Card/EditTaskModal.svelte — the edit dialog ──
+    // Mode descriptions come from constants/modes.ts, not from here.
     'board.editTask.title': 'Edit Task',
     'board.editTask.save': 'Save',
     'board.editTask.fieldTitle': 'Title',
@@ -1393,17 +1314,12 @@ const catalog = {
     'task.graph.history': 'History',
     'task.graph.loading': 'Loading commits...',
     'task.graph.empty': 'No commits',
+    // ═══ time.* — relative time and timestamps ═══
 
-    // ── namespace: time.* — the formatting task (utils/format.ts, utils/format-time.ts) ──
-    // Appended by the merge with the formatting task: `time.justNow` is the key App.svelte's
-    // sidebar timestamp uses, which is why the batch's own `app.time.justNow` is gone rather
-    // than kept as a second identical string a pack would have to translate twice.
-
-    // --- Relative time -----------------------------------------------------
-    // The `{n} ago` rungs are here for completeness (and as an escape hatch: a
-    // language ICU renders badly in — French narrow is "-5 min" — overrides them).
-    // `format-time` prefers Intl.RelativeTimeFormat over these for any locale that
-    // does NOT ship the key, which is why they read as abbreviations, not words.
+    // ── Relative time ──
+    // format-time prefers Intl.RelativeTimeFormat and falls back to these keys, which
+    // is why they read as abbreviations. A pack can override them for a locale whose
+    // narrow style reads badly (French narrow gives "-5 min").
     'time.justNow': 'just now',
     'time.secondAgo': '{n}s ago',
     'time.minuteAgo': '{n}m ago',
@@ -1413,18 +1329,17 @@ const catalog = {
     'time.monthAgo': '{n}mo ago',
     'time.yearAgo': '{n}y ago',
 
-    // --- Timestamps (chat) --------------------------------------------------
+    // ── Timestamps (chat) ──
     'time.yesterdayAt': 'Yesterday at {time}',
     'time.lastWeekdayAt': 'Last {weekday} at {time}',
     'time.onDateAt': '{date} at {time}',
 
-    // --- Wrapped phrases ----------------------------------------------------
-    // Templates rather than a `prefix` string, because "Built " is not a prefix in
-    // every language — the position belongs to the catalog, not the caller.
+    // ── Wrapped phrases ──
+    // Templates, not a "Built " prefix: the position of the date belongs to the pack.
     'time.built': 'Built {when}',
     'time.saved': 'Saved {when}',
 
-    // --- The first-run language offer (T15b) --------------------------------
+    // ── The first-run language offer ──
     'i18n.offer.question': 'Read MIKE in {language}?',
     'i18n.offer.detail':
         'Your browser is set to {language}. Installing the language pack switches the interface right away — '
@@ -1434,33 +1349,26 @@ const catalog = {
     'i18n.offer.never': "Don't ask again",
     'i18n.offer.failed': 'Could not install the {language} language pack',
 
-    // ════════════════════════════════════════════════════════════════════════════
-    // ═══ namespace: diff.* / git.* — diff + git surface batch                     ═══
-    // ═══ (DiffViewer.svelte, CommitDiffOverlay.svelte, GitStatusPanel.svelte,     ═══
-    // ═══  Chat/CommitDialog.svelte, BranchGitGraph.svelte,                        ═══
-    // ═══  utils/diff-parser.ts, utils/git-status.ts, utils/git-gutter.ts)         ═══
-    // ═══                                                                          ═══
-    // ═══ Like every batch: a `title` / `aria-label` written at the tag stays a     ═══
-    // ═══ literal here too, so no e2e `getByRole(name)` locator can move.           ═══
-    // ════════════════════════════════════════════════════════════════════════════
+    // ═══ diff.* / git.* — diff and git surface ═══
+    // A title or aria-label written at the tag stays a literal there, so no e2e
+    // getByRole(name) locator can move.
 
-    // --- Shared across the three diff surfaces ---------------------------------
+    // ── Shared across the three diff surfaces ──
     'diff.shared.loading': 'Loading...',
     'diff.shared.file': { one: '{count} file', other: '{count} files' },
 
-    // --- DiffViewer -----------------------------------------------------------
+    // ── DiffViewer ──
     'diff.binaryWithSize': 'Binary file — {size}',
     'diff.largeWithSize': 'Large file — {size} (+{added}/-{removed})',
     'diff.largeFile': 'Large file — {size}',
     'diff.emptyFile': 'Empty file',
-    // The collapsed-run control: the count is in the sentence, so the plural lives
-    // with it rather than in a hand-rolled `count !== 1 ? 's' : ''`.
+    // The count is inside the sentence, so the plural table lives with it
     'diff.hideLines': { one: 'Hide {count} unmodified line', other: 'Hide {count} unmodified lines' },
     'diff.showLines': { one: 'Show {count} unmodified line', other: 'Show {count} unmodified lines' },
     'diff.showFull': 'Show full diff',
     'diff.untracked': 'untracked',
-    // The porcelain status letter. A pack that keeps git's own letters answers 'A';
-    // the key exists so that is a choice it makes rather than a hole it inherits.
+    // git's status letter, for example 'A'. Keyed so that keeping git's own letter is a
+    // decision a pack makes, not something it inherits by accident.
     'diff.badgeAdded': 'A',
     'diff.loadLines': { one: 'Load {count} line', other: 'Load {count} lines' },
     'diff.loadingChanges': 'Loading changes...',
@@ -1468,7 +1376,7 @@ const catalog = {
     'diff.staged': 'Staged',
     'diff.unstaged': 'Unstaged',
 
-    // --- CommitDiffOverlay ----------------------------------------------------
+    // ── CommitDiffOverlay ──
     'diff.loadingDiff': 'Loading diff...',
     'diff.noChangesInCommit': 'No changes in this commit',
     'diff.binaryFile': 'Binary file',
@@ -1477,7 +1385,7 @@ const catalog = {
     'diff.oldSide': 'Old',
     'diff.newSide': 'New',
 
-    // --- GitStatusPanel -------------------------------------------------------
+    // ── GitStatusPanel ──
     'git.fetchDiffFailed': 'Failed to fetch diff',
     'git.current': 'Current',
     'git.pulledFromRemote': 'Pulled from remote',
@@ -1494,18 +1402,17 @@ const catalog = {
     'git.commitFailed': 'Commit failed',
     'git.changes': 'Changes',
     'git.noMatchingCommits': 'No matching commits',
-    // The `sr-only` live region: announced text is as user-facing as visible text.
+    // An sr-only live region: announced text is user-facing text
     'git.loadingCommitDiff': 'Loading commit diff',
     'git.diffError': 'Diff error:',
     'git.showingDiffWith': 'Showing diff with',
     'git.loadingDiffViewer': 'Loading diff viewer...',
     'git.noResponseBody': 'No response body',
-    // git's default remote is named `origin`; a pack keeps the word (a reader types it
-    // into git), and the key is what makes "keep it" sayable instead of "nothing shipped".
+    // "origin" is what a reader types into git, so a pack keeps the word; the key is
+    // what makes keeping it a choice.
     'git.remoteOrigin': 'origin',
-    // Status letters are `M`/`A`/`D`/`?`/`R`/`U`/`C`; these are the words behind them.
-    // `gitStatusLabel` answers for both a `title` (GitStatusPanel) and the status word
-    // inside a translated `aria-label` (BranchFileBrowser), so it is copy, not a token.
+    // The words behind the status letters (M/A/D/?/R/U/C). gitStatusLabel answers for a
+    // title and for the status word inside a translated aria-label, so it is copy.
     'git.status.modified': 'Modified',
     'git.status.added': 'Added',
     'git.status.deleted': 'Deleted',
@@ -1514,18 +1421,9 @@ const catalog = {
     'git.status.unmerged': 'Unmerged',
     'git.status.copied': 'Copied',
 
-    // ════════════════════════════════════════════════════════════════════════════
-    // ═══ namespace: editor.* / lsp.* — editor + terminal batch                   ═══
-    // ═══ (FileEditor.svelte, EditorFooter.svelte, EditorTabs.svelte,              ═══
-    // ═══  FileSearchPanel.svelte, CustomSearchPanel.svelte, TerminalPanel.svelte, ═══
-    // ═══  BranchSymbols.svelte, CardDetail/TaskHeader.svelte,                     ═══
-    // ═══  utils/lsp-hover-actions.ts, utils/lsp-symbols.ts,                       ═══
-    // ═══  utils/lsp-connection-manager.ts)                                        ═══
-    // ═══                                                                          ═══
-    // ═══ The terminal's on-screen keyboard (`esc`, `pgup`, `ctrl`) is not here:   ═══
-    // ═══ those are key names printed on a keyboard, the same class as the `/` and ═══
-    // ═══ `-` keys beside them, and a pack has no better answer for them.          ═══
-    // ════════════════════════════════════════════════════════════════════════════
+    // ═══ editor.* / lsp.* — editor, search and terminal ═══
+    // The on-screen keyboard (esc, pgup, ctrl) is not here: those are key names, like
+    // the "/" and "-" keys beside them.
     'editor.save': 'Save',
     'editor.saving': 'Saving...',
     'editor.loadingFile': 'Loading file...',
@@ -1537,15 +1435,13 @@ const catalog = {
     'editor.unsavedTitle': 'Unsaved Changes',
     'editor.unsavedMessage': 'You have unsaved changes. Discard them?',
     'editor.keepEditing': 'Keep Editing',
-    // The template wrote this as `Discard &amp; Close`; a catalog value is the
-    // character, and Svelte re-escapes it on the way out — same pixels.
+    // A catalog value holds the plain '&'; Svelte escapes it when it renders.
     'editor.discardAndClose': 'Discard & Close',
     'editor.externalConflict':
         '"{name}" was changed externally and overlaps your unsaved edits. Your edits were kept.',
     'editor.createSubtaskFromLines': 'Create a subtask from selected lines',
     'editor.createTaskFromLines': 'Create a task from selected lines',
-    // Both halves of the status bar were assembled from fragments (`Ln {n},` + ` Col {m}`),
-    // which fixes the word order English wants; one key each lets a pack choose its own.
+    // Each part of the status bar is one whole message, so a pack sets its own word order.
     'editor.fileStats': '{lines} lines · {chars} chars',
     'editor.cursorPosition': 'Ln {line}, Col {col}',
     'editor.wrap': 'Wrap',
@@ -1566,8 +1462,8 @@ const catalog = {
     'lsp.connecting': 'Connecting...',
     'lsp.sandboxMemory': 'Sandbox Memory',
     'lsp.log': 'LSP Log',
-    // These three reach the footer's error cell (`{lspError}`), so a rejected Error here
-    // is rendered text, exactly like the `t()` inside `throw new Error(...)` under api/.
+    // These three reach the footer's error cell, so they are rendered text — like the
+    // t() inside `throw new Error(...)` under api/.
     'lsp.websocketFailed': 'LSP WebSocket failed',
     'lsp.websocketError': 'LSP WebSocket error',
     'lsp.symbolTimeout': 'LSP symbol request timeout',
@@ -1580,11 +1476,12 @@ const catalog = {
     'task.sandboxTip.peakReachedLimit': ' · peak reached limit',
     'task.sandboxTip.clickForDetails': '{title} (click for details)',
 
-    // --- the leftovers this batch also owns ---------------------------------
+    // ── the small namespaces filed here: storage, tool, effort, memory, swUpdate,
+    //    host, and app.copyright ──
     'storage.unavailable': 'IndexedDB not available',
-    // Tool badges on a persisted message. The ids above them stay the wire names; these
-    // are the words under them, resolved per call so a language switch re-renders them
-    // (a module-scope `t()` would freeze whatever locale booted).
+    // Tool badges on a persisted message: the ids above them are wire names, these are
+    // the words under them. Resolved per call — a module-scope t() would freeze the
+    // locale the module happened to load in.
     'tool.read': 'Read',
     'tool.write': 'Write',
     'tool.edit': 'Edit',
@@ -1596,34 +1493,27 @@ const catalog = {
     'effort.low': 'Low',
     'effort.medium': 'Medium',
     'effort.high': 'High',
-    // Settings → About. The year and the name are data, so they are parameters rather
-    // than a string that quietly goes stale.
+    // Settings → About. The year and the app name are parameters so the string
+    // cannot quietly go stale.
     'app.copyright': '© {year} {name}',
     'memory.noLimit': 'No limit',
     'memory.notRunning': 'Not running',
     'memory.currentNoLimit': '{mb} MB (no limit)',
     'swUpdate.available': 'New version available',
     'swUpdate.reload': 'Reload',
-    // The extension host's own status line — the two strings core renders itself, as
-    // opposed to the ones an extension supplies through `host.setError`.
+    // The two status strings core renders itself, not the ones an extension passes
+    // to host.setError.
     'host.loading': 'Loading…',
     'host.error': 'Extension error',
     'host.shownBy': 'Shown by {name}',
-    // The confirm button's label when the extension did not supply one — core's own
-    // default, not the extension's text, so it is core's to translate.
+    // Core's own default confirm label, used when the extension supplies none.
     'host.ok': 'OK',
 
-    // ↓ keys from the other owned files of this batch are appended below this line ↓
 } satisfies Record<string, MessageValue>;
 
 /**
- * The same map, typed as an indexable catalog.
-
- * The literal type above is what `MessageKey` reads, so `t('settins.save')` is a type
- * error; this is what `t()` indexes at runtime, and what a test seeds a key into. One
- * object, two views — an `en: Record<string, MessageValue>` annotation on the literal
- * would throw the keys away, and `satisfies` alone would make `en[key] = …` an
- * excess-property error.
+ * The same object, typed so `t()` can index it and a test can seed a key into it.
+ * The literal above is what `MessageKey` reads, so a typo in `t()` is a type error.
  */
 export const en: Record<string, MessageValue> = catalog;
 
@@ -1631,8 +1521,7 @@ export const en: Record<string, MessageValue> = catalog;
 export type MessageKey = keyof typeof catalog;
 
 /**
- * The locale this app falls back to — what `<html lang>` says when no pack is active,
- * and the tag that is never a pack (a pack declaring `en` cannot shadow this file).
- * A tag, not a name: nothing here knows that "en" is called English.
+ * The fallback locale: what `<html lang>` says with no pack active, and the tag no
+ * pack may declare. A tag, not a name — nothing here knows what "en" is called.
  */
 export const DEFAULT_LOCALE = 'en';

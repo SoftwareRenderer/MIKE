@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -226,8 +227,28 @@ func TestCheckPackFilesRequiresLicenseTrio(t *testing.T) {
 	}
 }
 
+// The trio is what a directory OWES. REVIEW.md is not in it on purpose: no pack ships one yet, so
+// making its absence an error would fail every build in the repo and teach everyone to ignore the
+// build. It is a warning that names the file, which is the only way the "unreviewed wording"
+// residual stays visible. (It used to print `%!s(MISSING)` — the name was missing from the call.)
+func TestCheckPackFilesWarnsAboutMissingReviewNote(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range requiredPackFiles {
+		write(t, dir, name, "x")
+	}
+	f := &Findings{}
+	CheckPackFiles(dir, f)
+	requireNoErrors(t, f)
+	if !strings.Contains(warnText(f), "pack has no "+reviewedNote) {
+		t.Fatalf("expected a warning naming %s, got:\n%s", reviewedNote, warnText(f))
+	}
+	if strings.Contains(warnText(f), "%!s(MISSING)") {
+		t.Fatalf("the warning lost its format argument:\n%s", warnText(f))
+	}
+}
+
 func missingFileMessage(name string) string {
-	return "pack is missing " + name + " (every extension directory ships LICENSE, NOTICE and THIRD_PARTY_NOTICES.md; a machine-translated pack also ships REVIEW.md)"
+	return "pack is missing " + name + " (every extension directory ships LICENSE, NOTICE and THIRD_PARTY_NOTICES.md)"
 }
 
 func TestCheckSelfContainedRefusesSymlinkEscape(t *testing.T) {

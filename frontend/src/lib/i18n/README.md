@@ -15,7 +15,8 @@ and everything a pack has not translated falls back to English **per key, never 
 ```
 
 `runtime.svelte.ts` holds the runes (locale + catalogs in `$state`), `index.ts` is the import
-surface, `en.ts` is the catalog. The pack-loading half lives here too now — `catalog.ts` (the
+surface components need (`t`, `locale`, `setCatalog`, `resetToEnglish` and the message types —
+anything else is imported from the module that owns it), `en.ts` is the catalog. The pack-loading half lives here too now — `catalog.ts` (the
 wire shape and its validation), `load-pack.ts` (resolve the winning pack, fetch it, install it),
 `cache.ts` (the IndexedDB copy that paints before the extension list arrives) and `boot.ts` (the
 pre-paint apply) — but **`t()` itself never fetches anything**: it reads whatever is installed,

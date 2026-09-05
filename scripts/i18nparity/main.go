@@ -56,19 +56,27 @@ func (f *Findings) Warnf(format string, a ...any) {
 }
 
 // CatalogStats is the coverage numbers, which is what gets reported at the end: the two key counts
-// must be equal, and that claim should come from a measurement.
+// must be equal, and that claim should come from a measurement. Key counts are base keys — one
+// entry per message, a counted message counted once however many forms it ships.
 type CatalogStats struct {
-	ENKeys   int
-	ZHKeys   int
-	Compared int
+	Locale string
+	ENKeys int
+	// PackKeys counts every key the pack declares, including any it invented: `ENKeys` is the
+	// contract's total, so the two differ by what is missing *and* by what is extra, and the
+	// findings name which.
+	PackKeys  int
+	Compared  int
+	Counted   int // messages the pack ships as plural tables
+	Collapsed int // English forms the pack folded into another form (correct for fewer-form languages)
 }
 
 // PromptStats counts the overlay's files and define names.
 type PromptStats struct {
-	ENFiles   int
-	ZHFiles   int
-	Endefines int
-	ZHDefines int
+	Locale      string
+	ENFiles     int
+	PackFiles   int
+	ENDefines   int
+	PackDefines int
 }
 
 // Run performs every check and reports findings into f. inputsMissing is true when an input does
@@ -117,17 +125,22 @@ func Run(o Options, f *Findings) (inputsMissing bool, cs CatalogStats, ps Prompt
 	if i18nCap != nil && i18nCap.MessagesURL != "" {
 		messagesPath = filepath.Join(o.Pack, filepath.FromSlash(i18nCap.MessagesURL))
 	}
-	zhPrompts := filepath.Join(o.Pack, "prompts")
+	packPrompts := filepath.Join(o.Pack, "prompts")
 	if i18nCap != nil && i18nCap.PromptsDir != "" {
-		zhPrompts = filepath.Join(o.Pack, filepath.FromSlash(i18nCap.PromptsDir))
+		packPrompts = filepath.Join(o.Pack, filepath.FromSlash(i18nCap.PromptsDir))
 	}
 
+	// The locale is what the plural rules are read against, and what the report calls this pack.
+	// The manifest's declaration wins; the directory name is the answer when there is no readable
+	// manifest, and the mismatch between the two is reported above.
+	locale := filepath.Base(filepath.Clean(o.Pack))
 	if i18nCap != nil {
 		// The directory name and the declared locale are the same decision written twice; the
 		// registry's subdir and the runtime lookup both have to agree with it.
 		if base := filepath.Base(filepath.Clean(o.Pack)); base != i18nCap.Locale {
 			f.Warnf(`capabilities.i18n.locale %q differs from the pack directory name %q`, i18nCap.Locale, base)
 		}
+		locale = i18nCap.Locale
 	}
 
 	if !o.SkipMessages {
@@ -135,37 +148,37 @@ func Run(o Options, f *Findings) (inputsMissing bool, cs CatalogStats, ps Prompt
 			f.Errf("messages catalogue %s does not exist", messagesPath)
 		} else {
 			enCat, enErr := LoadCatalog(o.EN)
-			zhCat, zhErr := LoadCatalog(messagesPath)
+			packCat, packErr := LoadCatalog(messagesPath)
 			if enErr != nil {
 				f.Errf("English catalogue: %v", enErr)
 			}
-			if zhErr != nil {
-				f.Errf("locale catalogue: %v", zhErr)
+			if packErr != nil {
+				f.Errf("locale catalogue: %v", packErr)
 			}
-			if enCat != nil && zhCat != nil {
+			if enCat != nil && packCat != nil {
 				if len(enCat.Values) == 0 {
 					f.Errf("English catalogue %s declares no keys — there is no contract to mirror", o.EN)
 				} else {
-					cs = CompareCatalogs(enCat, zhCat, f, o.MaxList)
+					cs = CompareCatalogs(enCat, packCat, locale, f, o.MaxList)
 				}
 			}
 		}
 	}
 
 	if !o.SkipPrompts {
-		if !exists(zhPrompts) {
-			f.Errf("prompt overlay %s does not exist", zhPrompts)
+		if !exists(packPrompts) {
+			f.Errf("prompt overlay %s does not exist", packPrompts)
 		} else {
 			enSet, enErr := LoadTmplSet(o.ENPrompts)
 			if enErr != nil {
 				f.Errf("English prompts: %v", enErr)
 			}
-			zhSet, zhErr := LoadTmplSet(zhPrompts)
-			if zhErr != nil {
-				f.Errf("locale prompts: %v", zhErr)
+			packSet, packErr := LoadTmplSet(packPrompts)
+			if packErr != nil {
+				f.Errf("locale prompts: %v", packErr)
 			}
-			if enSet != nil && zhSet != nil {
-				ps = ComparePromptSets(enSet, zhSet, f, o.MaxList)
+			if enSet != nil && packSet != nil {
+				ps = ComparePromptSets(enSet, packSet, f, o.MaxList)
 			}
 		}
 	}
@@ -209,38 +222,139 @@ func main() {
 		os.Exit(2)
 	}
 
-	fmt.Printf("messages: en=%d zh=%d compared=%d\n", cs.ENKeys, cs.ZHKeys, cs.Compared)
-	fmt.Printf("prompts:  en=%d zh=%d defines(en/zh)=%d/%d\n", ps.ENFiles, ps.ZHFiles, ps.Endefines, ps.ZHDefines)
+	fmt.Printf("messages: en=%d %s=%d compared=%d counted=%d collapsed=%d\n",
+		cs.ENKeys, cs.Locale, cs.PackKeys, cs.Compared, cs.Counted, cs.Collapsed)
+	fmt.Printf("prompts:  en=%d %s=%d defines(en/pack)=%d/%d\n",
+		ps.ENFiles, ps.Locale, ps.PackFiles, ps.ENDefines, ps.PackDefines)
 	report(f, o.Strict)
 }
 
-// CompareCatalogs enforces one-for-one key coverage and byte-identical placeholders.
-func CompareCatalogs(en, zh *Catalog, f *Findings, maxList int) CatalogStats {
+// CompareCatalogs enforces that the pack mirrors the contract: the same messages, the same shape
+// per message, every placeholder, and only the plural forms its own language can answer with.
+//
+// `locale` is what makes the plural rules expressible — without it there is no way to tell a
+// Russian pack that `few` is required reading from a Turkish one that `one` is dead text.
+func CompareCatalogs(en, pack *Catalog, locale string, f *Findings, maxList int) CatalogStats {
 	for _, k := range en.Duplicates {
 		f.Errf("English catalogue declares %s twice — the later value silently wins", k)
 	}
-	for _, k := range zh.Duplicates {
+	for _, k := range pack.Duplicates {
 		f.Errf("locale catalogue declares %s twice — the later value silently wins", k)
 	}
-	for _, n := range zh.Notes {
+	for _, n := range pack.Notes {
 		f.Warnf("locale catalogue: %s", n)
 	}
 
-	onlyEN, onlyZH := keyDiff(en.Values, zh.Values)
-	if len(onlyEN) > 0 {
-		// The finding that matters most: fallback is per key, so this pack still looks translated.
-		f.Errf("%d key(s) exist in English but not in the locale pack (each one silently falls back to English):\n  %s",
-			len(onlyEN), strings.Join(capList(onlyEN, maxList), "\n  "))
+	// The keys a pack owes. Compared on base keys, not flattened ones: `board.card.fileCount.one`
+	// is not a message, it is one form of `board.card.fileCount`, and a language with two forms
+	// legitimately has no `one`.
+	var owed []string
+	heldEnglish := 0
+	for _, k := range en.baseKeys() {
+		if isEnglishOnly(k) {
+			heldEnglish++
+			continue
+		}
+		owed = append(owed, k)
 	}
-	if len(onlyZH) > 0 {
-		f.Errf("%d key(s) exist only in the locale pack — an invented key is never looked up:\n  %s",
-			len(onlyZH), strings.Join(capList(onlyZH, maxList), "\n  "))
+	if heldEnglish > 0 && heldEnglish != englishOnlyExpected {
+		// Silent when the contract has no such key at all — a test fixture's six-key catalogue is
+		// not a missing rule. Loud when one is *added*: someone has to decide it stays English too.
+		f.Warnf("the contract holds %d key(s) English (%s); this checker's rule expects %d — decide "+
+			"whether the new ones stay English and update the rule, rather than let every pack read as short",
+			heldEnglish, strings.Join(englishOnlyNamespaces, ", "), englishOnlyExpected)
 	}
 
-	stats := CatalogStats{ENKeys: len(en.Values), ZHKeys: len(zh.Values)}
+	packBase := keySet(pack.baseKeys())
+	var missing, carried []string
+	for _, k := range owed {
+		if !packBase[k] {
+			missing = append(missing, k)
+		}
+	}
+	for _, k := range pack.baseKeys() {
+		if isEnglishOnly(k) {
+			carried = append(carried, k)
+		}
+	}
+	_, extra := keyDiff(keySet(owed), packBase)
+
+	if len(missing) > 0 {
+		// The finding that matters most: fallback is per key, so this pack still looks translated.
+		f.Errf("%d key(s) exist in English but not in the locale pack (each one silently falls back to English):\n  %s",
+			len(missing), strings.Join(capList(missing, maxList), "\n  "))
+	}
+	if len(extra) > 0 {
+		f.Errf("%d key(s) exist only in the locale pack — an invented key is never looked up:\n  %s",
+			len(extra), strings.Join(capList(extra, maxList), "\n  "))
+	}
+	if len(carried) > 0 {
+		f.Errf("%d key(s) the pack cannot use: %s stay English by design (the offer renders only with "+
+			"no pack installed, and i18n.test.* renders nowhere but the runtime's tests) — shipping "+
+			"them is dead weight, not coverage:\n  %s",
+			len(carried), strings.Join(englishOnlyNamespaces, " and "), strings.Join(capList(carried, maxList), "\n  "))
+	}
+
+	stats := CatalogStats{Locale: locale, ENKeys: len(owed) + heldEnglish, PackKeys: len(pack.baseKeys())}
+	shapeBad, noOther, deadForm := []string{}, []string{}, []string{}
+	// Placeholder findings are collected by two comparisons — form-by-form below, and the folded
+	// forms above — and reported as one list, because a pack with three lost tokens should say so
+	// once.
 	var placeholderBad, untranslatedBad []string
+	reachable, known := reachableForms(locale)
+	for _, key := range owed {
+		if !packBase[key] {
+			continue
+		}
+		enForms, enCounted := en.Tables[key]
+		packForms, packCounted := pack.Tables[key]
+		switch {
+		case enCounted && !packCounted:
+			shapeBad = append(shapeBad, fmt.Sprintf("%s — English counts it, the pack ships one plain string", key))
+		case !enCounted && packCounted:
+			shapeBad = append(shapeBad, fmt.Sprintf("%s — English is one string, the pack ships a plural table", key))
+		case enCounted && packCounted:
+			stats.Counted++
+			if _, ok := packForms["other"]; !ok {
+				// `other` is the form the runtime falls back to when it has no name for the count,
+				// which every language has: without it a counted message has no answer at all.
+				noOther = append(noOther, key)
+			}
+			for form := range packForms {
+				if known && !reachable[form] {
+					deadForm = append(deadForm, fmt.Sprintf("%s.%s", key, form))
+				}
+				if _, ok := enForms[form]; !ok {
+					continue // a form English does not need and this language does: correct, not extra
+				}
+			}
+			for form, text := range enForms {
+				if _, shipped := packForms[form]; shipped {
+					continue
+				}
+				// The form was folded into `other`. That is legal, but it is invisible to the
+				// form-by-form placeholder comparison below, so its placeholders are checked here
+				// against everything the pack does ship for this message.
+				stats.Collapsed++
+				for _, tok := range ExtractPlaceholders(text) {
+					found := false
+					for _, shipped := range packForms {
+						for _, have := range ExtractPlaceholders(shipped) {
+							if have.Text == tok.Text {
+								found = true
+							}
+						}
+					}
+					if !found {
+						placeholderBad = append(placeholderBad, fmt.Sprintf("%s: folded form %q lost %s", key, form, tok.Text))
+					}
+				}
+			}
+		}
+	}
+
 	for _, key := range sortedStringKeys(en.Values) {
-		zhText, ok := zh.Values[key]
+		packText, ok := pack.Values[key]
 		if !ok {
 			continue
 		}
@@ -248,9 +362,9 @@ func CompareCatalogs(en, zh *Catalog, f *Findings, maxList int) CatalogStats {
 		enText := en.Values[key]
 
 		enTok := ExtractPlaceholders(enText)
-		zhTok := ExtractPlaceholders(zhText)
+		packTok := ExtractPlaceholders(packText)
 
-		for _, t := range zhTok {
+		for _, t := range packTok {
 			if t.Kind != "named" {
 				f.Errf("%s: locale value has a %s token %q — not a single-brace {name} placeholder", key, t.Kind, t.Text)
 			}
@@ -261,7 +375,7 @@ func CompareCatalogs(en, zh *Catalog, f *Findings, maxList int) CatalogStats {
 			}
 		}
 
-		missing, extra := diffCounts(countPlaceholders(enTok), countPlaceholders(zhTok))
+		missing, extra := diffCounts(countPlaceholders(enTok), countPlaceholders(packTok), locale)
 		for _, m := range missing {
 			placeholderBad = append(placeholderBad, fmt.Sprintf("%s: lost %s", key, m))
 		}
@@ -269,17 +383,35 @@ func CompareCatalogs(en, zh *Catalog, f *Findings, maxList int) CatalogStats {
 			placeholderBad = append(placeholderBad, fmt.Sprintf("%s: added %s", key, e))
 		}
 
-		if zhText == enText && looksLikeUntranslated(enText) {
+		if packText == enText && looksLikeUntranslated(enText) {
 			untranslatedBad = append(untranslatedBad, key)
 		}
-		if zhText == key {
+		if packText == key {
 			untranslatedBad = append(untranslatedBad, key+" (value is the key id itself, which would render as a raw key)")
 		}
 	}
-
 	if len(placeholderBad) > 0 {
 		f.Errf("%d key(s) changed their placeholders (a placeholder is part of the interface: the formatter looks it up by name):\n  %s",
 			len(placeholderBad), strings.Join(capList(placeholderBad, maxList), "\n  "))
+	}
+	if len(shapeBad) > 0 {
+		f.Errf("%d key(s) changed shape from the contract (a counted message and a plain string are "+
+			"different things to the runtime):\n  %s",
+			len(shapeBad), strings.Join(capList(shapeBad, maxList), "\n  "))
+	}
+	if len(noOther) > 0 {
+		f.Errf("%d counted key(s) ship no \"other\" form, which is the one form guaranteed to be "+
+			"selectable in every language:\n  %s",
+			len(noOther), strings.Join(capList(noOther, maxList), "\n  "))
+	}
+	if len(deadForm) > 0 {
+		f.Errf("%d plural form(s) \"%s\" can never be selected — the language has no name for that "+
+			"count, so the text is unreachable:\n  %s",
+			len(deadForm), locale, strings.Join(capList(deadForm, maxList), "\n  "))
+	}
+	if !known && stats.Counted > 0 {
+		f.Warnf("no plural form set is known for %q: \"other\" was required and no form was refused as "+
+			"unreachable — add the language to pluralFormsByLocale to check it properly", locale)
 	}
 	if len(untranslatedBad) > 0 {
 		f.Warnf("%d value(s) are byte-identical to English and look like untranslated prose rather than a shared token:\n  %s",
@@ -297,25 +429,36 @@ func looksLikeUntranslated(s string) bool {
 	return len(strings.Fields(s)) >= 2 && len(s) >= 8
 }
 
+// keySet turns a sorted key list into a membership set.
+func keySet(keys []string) map[string]bool {
+	set := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		set[k] = true
+	}
+	return set
+}
+
 // keyDiff returns keys only in a and keys only in b.
-func keyDiff(a, b map[string]string) (onlyA, onlyB []string) {
-	for _, k := range sortedStringKeys(a) {
-		if _, ok := b[k]; !ok {
+func keyDiff(a, b map[string]bool) (onlyA, onlyB []string) {
+	for k := range a {
+		if !b[k] {
 			onlyA = append(onlyA, k)
 		}
 	}
-	for _, k := range sortedStringKeys(b) {
-		if _, ok := a[k]; !ok {
+	for k := range b {
+		if !a[k] {
 			onlyB = append(onlyB, k)
 		}
 	}
+	sort.Strings(onlyA)
+	sort.Strings(onlyB)
 	return onlyA, onlyB
 }
 
 // ComparePromptSets enforces that the overlay changed prose and nothing else.
-func ComparePromptSets(en, zh *TmplSet, f *Findings, maxList int) PromptStats {
+func ComparePromptSets(en, pack *TmplSet, f *Findings, maxList int) PromptStats {
 	enFiles := toSet(en.Files)
-	zhFiles := toSet(zh.Files)
+	packFiles := toSet(pack.Files)
 
 	// The English set is the contract. If it no longer matches the list this checker was written
 	// against, the checker is stale and must say so rather than quietly check six files.
@@ -327,11 +470,11 @@ func ComparePromptSets(en, zh *TmplSet, f *Findings, maxList int) PromptStats {
 
 	var missing, extra []string
 	for _, n := range en.Files {
-		if !zhFiles[n] {
+		if !packFiles[n] {
 			missing = append(missing, n)
 		}
 	}
-	for _, n := range zh.Files {
+	for _, n := range pack.Files {
 		if !enFiles[n] {
 			extra = append(extra, n)
 		}
@@ -349,28 +492,28 @@ func ComparePromptSets(en, zh *TmplSet, f *Findings, maxList int) PromptStats {
 	}
 
 	for _, name := range en.Files {
-		if !zhFiles[name] {
+		if !packFiles[name] {
 			continue
 		}
-		enSkel, zhSkel := en.Skeletons[name], zh.Skeletons[name]
-		if i, ok := firstDiff(enSkel, zhSkel); ok {
+		enSkel, packSkel := en.Skeletons[name], pack.Skeletons[name]
+		if i, ok := firstDiff(enSkel, packSkel); ok {
 			f.Errf("%s: template logic differs at directive %d (count %d vs %d)\n  en: %s\n  zh: %s",
-				name, i, len(enSkel), len(zhSkel), skelAt(enSkel, i), skelAt(zhSkel, i))
+				name, i, len(enSkel), len(packSkel), skelAt(enSkel, i), skelAt(packSkel, i))
 		}
 
 		// A file identical to English means the overlay was copied, not translated: the executor
 		// would then answer in English while the UI is Chinese.
 		enBytes, err1 := en.ReadFile(name)
-		zhBytes, err2 := zh.ReadFile(name)
-		if err1 == nil && err2 == nil && string(enBytes) == string(zhBytes) {
+		packBytes, err2 := pack.ReadFile(name)
+		if err1 == nil && err2 == nil && string(enBytes) == string(packBytes) {
 			f.Warnf("%s is byte-identical to the English template — it was copied, not translated", name)
 		}
 	}
 
 	// Defines are global to the parsed set, so a rename in a define-only file is caught by the
 	// name set, not by per-file position.
-	enDefs, zhDefs := en.DefineNames(), zh.DefineNames()
-	defMissing, defExtra := stringSetDiff(enDefs, zhDefs)
+	enDefs, packDefs := en.DefineNames(), pack.DefineNames()
+	defMissing, defExtra := stringSetDiff(enDefs, packDefs)
 	for _, d := range defMissing {
 		f.Errf("prompt overlay lost define %q — every `{{template %q}}` naming it fails at render time, not at parse time", d, d)
 	}
@@ -380,9 +523,9 @@ func ComparePromptSets(en, zh *TmplSet, f *Findings, maxList int) PromptStats {
 
 	// Name resolution is deferred to execution, so every invoked name must resolve inside the
 	// overlay's own set: a renamed define leaves a template that parses and then fails to render.
-	for _, name := range sortedMapKeys(zh.Skeletons) {
-		for _, invoked := range zh.Invoked[name] {
-			if !zh.Declared[invoked] {
+	for _, name := range sortedMapKeys(pack.Skeletons) {
+		for _, invoked := range pack.Invoked[name] {
+			if !pack.Declared[invoked] {
 				f.Errf("%s calls {{template %q}}, which the overlay never declares — this parses and fails when the prompt renders", name, invoked)
 			}
 		}
@@ -390,19 +533,19 @@ func ComparePromptSets(en, zh *TmplSet, f *Findings, maxList int) PromptStats {
 
 	// base.tmpl's plan-mode call is the one cross-file reference in the set. If it goes missing,
 	// plan mode renders without its instructions and nothing else complains.
-	if contains(en.Invoked["base.tmpl"], "plan-mode") && !contains(zh.Invoked["base.tmpl"], "plan-mode") {
+	if contains(en.Invoked["base.tmpl"], "plan-mode") && !contains(pack.Invoked["base.tmpl"], "plan-mode") {
 		f.Errf(`base.tmpl no longer invokes {{template "plan-mode" .}}: plan mode's instructions are prompt text the executor's behaviour depends on`)
 	}
 
-	for _, name := range sortedMapKeys(zh.Skeletons) {
-		for _, entry := range zh.Skeletons[name] {
+	for _, name := range sortedMapKeys(pack.Skeletons) {
+		for _, entry := range pack.Skeletons[name] {
 			if strings.HasPrefix(entry, "unsupported:") {
 				f.Warnf("%s contains %s — this checker does not model that node kind", name, entry)
 			}
 		}
 	}
 
-	return PromptStats{ENFiles: len(en.Files), ZHFiles: len(zh.Files), Endefines: len(enDefs), ZHDefines: len(zhDefs)}
+	return PromptStats{ENFiles: len(en.Files), PackFiles: len(pack.Files), ENDefines: len(enDefs), PackDefines: len(packDefs)}
 }
 
 // CheckRegistry confirms the pack is published through the generated registry instead of being

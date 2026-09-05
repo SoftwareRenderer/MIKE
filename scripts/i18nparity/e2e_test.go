@@ -151,10 +151,10 @@ func TestRunCleanPackPasses(t *testing.T) {
 	if len(f.Warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", f.Warnings)
 	}
-	if cs.ENKeys != cs.ZHKeys || cs.Compared != cs.ENKeys {
+	if cs.ENKeys != cs.PackKeys || cs.Compared != cs.ENKeys {
 		t.Fatalf("key counts must be equal: %+v", cs)
 	}
-	if ps.ENFiles != 7 || ps.ZHFiles != 7 || ps.ZHDefines != 1 {
+	if ps.ENFiles != 7 || ps.PackFiles != 7 || ps.PackDefines != 1 {
 		t.Fatalf("prompt stats = %+v", ps)
 	}
 }
@@ -186,7 +186,7 @@ func TestRunInventedKeyIsCaught(t *testing.T) {
 
 	f, cs, _ := fx.run(t)
 	requireErrorContaining(t, f, "invented key")
-	if cs.ENKeys == cs.ZHKeys {
+	if cs.ENKeys == cs.PackKeys {
 		t.Fatalf("counts should differ: %+v", cs)
 	}
 }
@@ -307,7 +307,7 @@ func TestRunManifestAssetPathsLocateTheFiles(t *testing.T) {
 	}
 	f, cs, ps := fx.run(t)
 	requireNoErrors(t, f)
-	if cs.Compared != len(fixtureEN) || ps.ZHFiles != 7 {
+	if cs.Compared != len(fixtureEN) || ps.PackFiles != 7 {
 		t.Fatalf("manifest asset paths not followed: %+v %+v", cs, ps)
 	}
 }

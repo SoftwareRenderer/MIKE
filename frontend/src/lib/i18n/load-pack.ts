@@ -11,10 +11,11 @@ import { clearCachedCatalog, writeCachedCatalog } from './cache';
  * This is the whole language mechanism: the active language *is* the enabled pack
  * that wins the ordering rule, English when there is none. Nothing is stored,
  * there is no setting to keep in sync, and no new server route — the catalog is a
- * file in the pack's own directory, served by the existing
- * `/extensions/<author>/<name>/` tree, resolved exactly the way a `css` pack's
- * `css_url` is: manifest asset against the extension's own base, applied
- * app-globally, with no iframe, no channel and no permission.
+ * file in the pack's own directory, served by the existing `/extensions/…` static
+ * tree at the directory the installed record is served from (`ext.served_url`),
+ * resolved exactly the way a `css` pack's `css_url` is: manifest asset against the
+ * extension's own base, applied app-globally, with no iframe, no channel and no
+ * permission.
  *
  * The mirror of `resolveI18NPack` on the server is `extensions.ActiveI18N`
  * (backend/extensions/i18n.go). Both read the *capability declaration* rather
@@ -27,7 +28,7 @@ import { clearCachedCatalog, writeCachedCatalog } from './cache';
 export interface I18NLoadResult {
     /** The locale now on screen — the fallback tag when no pack is active. */
     locale: string;
-    /** Served directory of the pack in use (`/extensions/<author>/<name>`), null for English. */
+    /** Served directory of the pack in use (its `served_url`, `/extensions/…`), null for English. */
     source: string | null;
     /** Why a pack did not make it. Present whenever the answer is not what the list asked for. */
     reason?: string;
@@ -95,10 +96,13 @@ export async function loadI18NFromExtensions(extensions: Extension[]): Promise<I
         // is not.
         await clearCachedCatalog();
         if (me !== reconcileSeq) return result();
-        if (applied.source !== null || i18n.catalog !== null) {
-            i18n.setCatalog(DEFAULT_LOCALE, null);
-            applied = { source: null, locale: DEFAULT_LOCALE };
-        }
+        // Answer English unconditionally. `applied` tracks only what *this*
+        // reconcile cycle put on screen, and the tag can be set without a
+        // catalog: `runtime.svelte.ts` adopts the pre-paint tag from
+        // `index.html`, so a pack deleted while the server was down leaves a
+        // document tagged with its language and nothing else to clear it.
+        i18n.setCatalog(DEFAULT_LOCALE, null);
+        applied = { source: null, locale: DEFAULT_LOCALE };
         return result();
     }
 

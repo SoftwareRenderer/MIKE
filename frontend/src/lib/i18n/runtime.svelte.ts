@@ -62,7 +62,11 @@ export type { Catalog, MessageKey, MessageParams, MessageValue };
  * have fixed it), and a production build does not pay for them at all.
  *
  * This file is the only writer of `document.documentElement.lang`, and the only
- * place a locale is ever computed — no consumer may derive one of its own.
+ * place a locale is ever computed — no consumer may derive one of its own. The
+ * pre-paint script in `index.html` may have tagged the document before this
+ * module runs; boot *adopts* that tag (see `prePaintTag`) rather than painting
+ * over it, because stamping the fallback back is the flash the script exists to
+ * prevent.
  */
 
 /**
@@ -280,7 +284,11 @@ export class I18nRuntime {
         return value === undefined ? undefined : this.render(value, params);
     }
 
-    /** Whether the PACK in use answers `key` — English does not count here. */
+    /**
+     * Whether the PACK in use answers `key` — English does not count here.
+     * `packText`/`hasKey` read the catalog in use (English included); this answers
+     * only for what the enabled pack itself translated.
+     */
     has(key: LocaleKey): boolean {
         return this.packCatalog()?.[key] !== undefined;
     }
@@ -399,8 +407,32 @@ type LocaleListener = (locale: string | undefined) => void;
 /** The app-wide runtime. */
 export const i18n = new I18nRuntime();
 
+/**
+ * The tag the document was painted with, if it is not the fallback.
+ *
+ * Nothing but the pre-paint script in `index.html` can put a non-`en` tag here
+ * before this module runs — it reads the tag `i18n/cache.ts` mirrors into
+ * `localStorage`, so the first frame is already in the last known language.
+ * Adopting it is what makes that step real: syncing `en` over it here (which is
+ * what this file used to do) undid the hint one frame after the script set it,
+ * and a reload flashed back through English between two Chinese frames.
+ *
+ * The document is the only input — nothing is read from storage here — so a
+ * first run, or a run with the hint cleared, still starts in English. And it is
+ * a tag with no catalog behind it yet: `boot.ts` gives it text from the cached
+ * catalog, and the first `loadI18NFromExtensions` either confirms it or takes it
+ * back.
+ */
+function prePaintTag(): string | null {
+    if (typeof document === 'undefined') return null;
+    const tag = normalizeTag(document.documentElement.lang);
+    return tag && tag.toLowerCase() !== DEFAULT_LOCALE ? tag : null;
+}
+
 // `<html lang>` is this module's from the first frame, before any pack resolves.
-i18n.syncDocumentLanguage();
+const paintedTag = prePaintTag();
+if (paintedTag) i18n.setLocale(paintedTag);
+else i18n.syncDocumentLanguage();
 
 /**
  * Translate a message id against the active pack (falling back to English, then to
@@ -434,11 +466,6 @@ export function resetToEnglish(): void {
 /** The value of `key` in the catalog in use, or `undefined` when it is not there. */
 export function packText(key: LocaleKey, params?: MessageParams): string | undefined {
     return i18n.packText(key, params);
-}
-
-/** Whether the PACK in use answers `key` (English does not count). */
-export function has(key: LocaleKey): boolean {
-    return i18n.has(key);
 }
 
 /** Whether the catalog in use answers `key`, English included. */

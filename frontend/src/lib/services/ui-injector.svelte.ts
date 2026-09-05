@@ -13,6 +13,8 @@ export type { InjectionPoint, InjectionContext };
 
 const THEME_CSS_KEY = 'kanban-theme-css';
 const THEME_LINK_ID = 'kanban-theme-stylesheet';
+// The static prefix every extension asset is served under.
+const EXTENSIONS_PREFIX = '/extensions/';
 
 // authorDir turns a registry author into a safe, single-segment directory name
 // (mirrors backend authorDir). Installed extensions live at
@@ -43,18 +45,59 @@ function authorDir(author?: string): string {
 
 // extBaseURL returns the served base URL for an installed extension directory.
 //
+// The server's own answer (`served_url`) is used when it is present and safe,
+// because it is derived from the installed record — the same path the server
+// reads, deletes and repairs the extension through. The author/name derivation
+// below is the fallback for a response that carries no `served_url`, and it is a
+// guess: it is only right when the install really did land under
+// `<slug(manifest.author)>/<name>`.
+//
 // `ext.name` is percent-encoded so a name can never reshape the same-origin
 // path (a raw `../` would otherwise climb out of /extensions/<author>/ before
 // the browser normalises it). The Go static handler decodes the path again, so
 // an encoded name still resolves to the same on-disk directory. Exported for
 // tests.
 export function extBaseURL(ext: Extension): string {
-    return `/extensions/${authorDir(ext.manifest.author)}/${encodeURIComponent(ext.name)}`;
+    return (
+        servedBaseURL(ext.served_url) ??
+        `${EXTENSIONS_PREFIX}${authorDir(ext.manifest.author)}/${encodeURIComponent(ext.name)}`
+    );
+}
+
+/**
+ * The served directory the server reported, or null to fall back to the guess.
+ *
+ * Still validated rather than trusted: the value comes off the wire, and a base
+ * that leaves `/extensions/` is a request for something else. Each segment is
+ * decoded, refused when it is empty, a dot, a traversal, or carries a separator
+ * or control character, then re-encoded — so a reported path can neither climb
+ * out of the installed-extension tree nor smuggle an origin into a URL the app
+ * will later hand to `fetch`.
+ */
+function servedBaseURL(served: unknown): string | null {
+    if (typeof served !== 'string' || !served.startsWith(EXTENSIONS_PREFIX)) return null;
+    const parts = served.slice(EXTENSIONS_PREFIX.length).split('/');
+    if (parts.length > 2) return null; // deeper than <author>/<name>: not an extension directory
+    const encoded: string[] = [];
+    for (const part of parts) {
+        let segment: string;
+        try {
+            segment = decodeURIComponent(part);
+        } catch {
+            return null; // a broken escape sequence is not a path
+        }
+        if (segment === '' || segment === '.' || segment === '..') return null;
+        if (/[\\/\u0000-\u001f\u007f]/.test(segment)) return null;
+        encoded.push(encodeURIComponent(segment));
+    }
+    return EXTENSIONS_PREFIX + encoded.join('/');
 }
 
 // resolveAssetURL resolves a manifest asset path (e.g. a css_url) against the
-// extension's served base, so a relative path like "./styles.css" or
-// "styles.css" resolves to /extensions/<author>/<name>/styles.css.
+// extension's served base (extBaseURL), so a relative path like "./styles.css" or
+// "styles.css" resolves to that directory plus the asset —
+// /extensions/<author>/<name>/styles.css for a registry install, /extensions/<name>/…
+// for one placed flat under the extensions root.
 // Only same-origin assets are allowed: URLs with a scheme (http:, https:,
 // data:, …) or protocol-relative URLs (//host/…) are rejected ('') — a CSS
 // extension must not load its global stylesheet from an external origin.

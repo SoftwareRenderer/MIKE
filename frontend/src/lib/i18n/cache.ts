@@ -34,7 +34,12 @@ export const LOCALE_HINT_KEY = 'kanban-i18n-locale';
 
 /** What a cache entry has to say about itself, so a stale entry is detectable. */
 export interface CachedCatalog {
-    /** `author/name` of the pack this came from. */
+    /**
+     * The directory the pack's catalog was fetched from — `extBaseURL`, i.e. its
+     * `served_url` (`/extensions/<author>/<name>`, or `/extensions/<name>` for a
+     * flat install). Namespaced vs flat is exactly what a client cannot infer from
+     * a manifest author, so the answer is recorded rather than re-derived.
+     */
     source: string;
     locale: string;
     messages: Catalog;

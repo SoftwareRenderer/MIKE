@@ -903,9 +903,20 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 	// manifest in place rather than fetching from a registry or git repo.
 	gitPinned := entry.Repo != "" && entry.Commit != ""
 	var manifest ExtensionManifest
-	targetDir := filepath.Join(h.config.ExtensionsDirOrDefault(), authorDir(entry.Author), entry.Name)
+	root := h.config.ExtensionsDirOrDefault()
+	targetDir := filepath.Join(root, authorDir(entry.Author), entry.Name)
 	if entry.localDir != "" {
 		targetDir = entry.localDir
+
+		readable := extensionDir(root, entry.Author, entry.Name)
+		if filepath.Clean(readable) != filepath.Clean(targetDir) {
+			fail(fmt.Errorf(
+				"local extension folder %q is not the author folder the installed record reads it from — rename it to %q and install again",
+				filepath.Base(filepath.Dir(targetDir)),
+				filepath.Base(filepath.Dir(readable)),
+			))
+			return
+		}
 		manifestData, err := os.ReadFile(filepath.Join(targetDir, "manifest.json"))
 		if err != nil {
 			fail(fmt.Errorf("local extension has no manifest.json: %w", err))
@@ -1590,6 +1601,22 @@ func resolveProxyTemplate(template string, config map[string]any) string {
 	return template
 }
 
+// servedURLFromDir is the URL prefix an extension's own files are served under
+//
+// Returns "" when the directory is not under the extensions root
+func servedURLFromDir(extensionsDir, dir string) string {
+	extensionsDir = filepath.Clean(extensionsDir)
+	rel, err := filepath.Rel(extensionsDir, dir)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	segments := strings.Split(rel, string(filepath.Separator))
+	for i, seg := range segments {
+		segments[i] = url.PathEscape(seg)
+	}
+	return "/extensions/" + strings.Join(segments, "/")
+}
+
 // --- Request/Response types ---
 
 // UpdateExtensionRequest is the request body for updating an extension.
@@ -1609,25 +1636,26 @@ type InstallExtensionRequest struct {
 
 // ExtensionResponse is the API response for an extension.
 type ExtensionResponse struct {
-	ID              string               `json:"id"`
-	Name            string               `json:"name"`
-	Version         string               `json:"version"`
-	Type            string               `json:"type"`
-	Manifest        ExtensionManifest    `json:"manifest"`
-	Config          map[string]any       `json:"config"`
-	ContainerConfig ContainerConfig      `json:"container_config"`
-	SandboxConfig   SandboxConfig        `json:"sandbox_config"`
-	InstallSource   string               `json:"install_source"`
-	ImageRef        string               `json:"image_ref,omitempty"`
-	Enabled         bool                 `json:"enabled"`
-	Running         bool                 `json:"running"`
-	LocalPath       string               `json:"local_path,omitempty"`
-	Ports           []types.AssignedPort `json:"ports,omitempty"`
-	InstalledAt     string               `json:"installed_at"`
-	BuiltAt         string               `json:"built_at"`
-	Repo            string               `json:"repo,omitempty"`
-	Commit          string               `json:"commit,omitempty"`
-	Author          string               `json:"author,omitempty"`
+	ID              string            `json:"id"`
+	Name            string            `json:"name"`
+	Version         string            `json:"version"`
+	Type            string            `json:"type"`
+	Manifest        ExtensionManifest `json:"manifest"`
+	Config          map[string]any    `json:"config"`
+	ContainerConfig ContainerConfig   `json:"container_config"`
+	SandboxConfig   SandboxConfig     `json:"sandbox_config"`
+	InstallSource   string            `json:"install_source"`
+	ImageRef        string            `json:"image_ref,omitempty"`
+	Enabled         bool              `json:"enabled"`
+	Running         bool              `json:"running"`
+	LocalPath       string            `json:"local_path,omitempty"`
+	ServedURL   string               `json:"served_url,omitempty"`
+	Ports       []types.AssignedPort `json:"ports,omitempty"`
+	InstalledAt string               `json:"installed_at"`
+	BuiltAt     string               `json:"built_at"`
+	Repo        string               `json:"repo,omitempty"`
+	Commit      string               `json:"commit,omitempty"`
+	Author      string               `json:"author,omitempty"`
 	// Environment is the runtime "can this extension resolve the workspace it is
 	// serving" report, present for a language-server extension that declares an
 	// environment check. When it says unhealthy, core is withholding that
@@ -1693,17 +1721,19 @@ func (h *ExtensionHandler) toResponse(ext *Extension, statuses map[string]Extens
 	if h.environmentStatus != nil {
 		resp.Environment = h.environmentStatus(ext.ID)
 	}
-	// Local (filesystem) extensions have a concrete on-disk path. For an
-	// author-namespaced extension that is <extensions>/<author>/<name>; an
-	// extension not organized under an author folder (author "local") lives
-	// directly at <extensions>/<name>.
+	// One directory, two readers. `extensionDir` is what every other consumer
+	// resolves an extension through (and it stats the disk for a `local` record,
+	// so asking it twice per row would be two stats for one answer); the on-disk
+	// path is what the Settings row shows, and the served URL is what the browser
+	// fetches assets from — see servedURLFromDir for why that has to be the server's
+	// answer and not something the client guesses from a manifest author.
+	root := h.config.ExtensionsDirOrDefault()
+	extDir := extensionDir(root, ext.Author, ext.Name)
+	resp.ServedURL = servedURLFromDir(root, extDir)
+	// Local (filesystem) extensions have a concrete on-disk path; files stay where
+	// a human put them, which is why the path comes from the same derivation.
 	if ext.InstallSource == "local" {
-		root := h.config.ExtensionsDirOrDefault()
-		if ext.Author != "" && ext.Author != "local" {
-			resp.LocalPath = filepath.Join(root, ext.Author, ext.Name)
-		} else {
-			resp.LocalPath = extensionDir(root, ext.Author, ext.Name)
-		}
+		resp.LocalPath = extDir
 	}
 	return resp
 }

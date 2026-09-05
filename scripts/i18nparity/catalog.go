@@ -24,12 +24,61 @@ import (
 type Catalog struct {
 	Path   string
 	Values map[string]string
+	// Tables maps a counted key to the plural forms its value declared. A message whose value is
+	// an object of plural categories (`{one, other}`) flattens to `key.one`, `key.other`, which is
+	// right for comparing placeholders and wrong for asking "does the pack have this message": the
+	// pack of a language with two forms legitimately has no `key.one`. Shape is recorded here at
+	// load time rather than inferred from a key's last segment, so a message legitimately named
+	// `…other` cannot be mistaken for a plural form.
+	Tables map[string]map[string]string
 	// Duplicates are keys declared more than once. The last declaration wins in both JS and Go,
 	// so a duplicate silently discards a message instead of failing a build.
 	Duplicates []string
 	// Notes are load-time problems worth reporting (a non-string value, a TS expression we could
 	// not fold into a string). They are not parity failures on their own.
 	Notes []string
+}
+
+// recordTable notes that the object value at `key` was a counted message, reading its forms back
+// out of the flattened values the loader has already stored.
+func (c *Catalog) recordTable(key string, members map[string]string) {
+	forms := make(map[string]string, len(members))
+	for form := range members {
+		forms[form] = c.Values[key+"."+form]
+	}
+	if c.Tables == nil {
+		c.Tables = map[string]map[string]string{}
+	}
+	c.Tables[key] = forms
+}
+
+// baseKeys returns every message with its plural forms collapsed back into the one key the UI
+// looks up. This is the set a pack and the contract are compared on: comparing flattened keys
+// instead demands that every language spell every English form, which is false for a fifth of
+// the world's languages and made every real pack fail.
+func (c *Catalog) baseKeys() []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(c.Values))
+	for k := range c.Values {
+		base := c.baseOf(k)
+		if !seen[base] {
+			seen[base] = true
+			out = append(out, base)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// baseOf maps a flattened key to the message it belongs to: `board.card.fileCount.one` is the
+// `one` form of `board.card.fileCount`, and every other key is its own message.
+func (c *Catalog) baseOf(key string) string {
+	if i := strings.LastIndex(key, "."); i > 0 {
+		if _, isForm := c.Tables[key[:i]]; isForm {
+			return key[:i]
+		}
+	}
+	return key
 }
 
 // placeholder is one `{name}` token, kept as its exact source bytes: "byte-identical" is a
@@ -59,12 +108,14 @@ func LoadCatalog(path string) (*Catalog, error) {
 func loadJSONCatalog(path string, raw []byte) (*Catalog, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
-	c := &Catalog{Path: path, Values: map[string]string{}}
+	c := &Catalog{Path: path, Values: map[string]string{}, Tables: map[string]map[string]string{}}
 
 	// decodeObject reads the members of an object whose '{' has already been consumed.
 	var decodeObject func(prefix string) error
 	decodeObject = func(prefix string) error {
 		seen := map[string]bool{}
+		members := map[string]string{} // member name -> value, for the string members only
+		notATable := false             // a member that is not a plain string value
 		for dec.More() {
 			kt, err := dec.Token()
 			if err != nil {
@@ -88,12 +139,16 @@ func loadJSONCatalog(path string, raw []byte) (*Catalog, error) {
 				return err
 			}
 			if d, isDelim := nt.(json.Delim); isDelim && d == '{' {
+				members[key] = ""
+				notATable = true
 				if err := decodeObject(full); err != nil {
 					return err
 				}
 				continue
 			}
 			if d, isDelim := nt.(json.Delim); isDelim && d == '[' {
+				members[key] = ""
+				notATable = true
 				c.Notes = append(c.Notes, fmt.Sprintf("%s: value is an array, which cannot be a message", full))
 				if err := skipValue(dec); err != nil {
 					return err
@@ -102,8 +157,11 @@ func loadJSONCatalog(path string, raw []byte) (*Catalog, error) {
 			}
 			switch v := nt.(type) {
 			case string:
+				members[key] = v
 				c.set(full, v)
 			case json.Number, bool, nil:
+				members[key] = ""
+				notATable = true
 				c.Values[full] = fmt.Sprint(v)
 				c.Notes = append(c.Notes, fmt.Sprintf("%s: value is %v, not a string — message values must be quoted", full, v))
 			default:
@@ -111,6 +169,9 @@ func loadJSONCatalog(path string, raw []byte) (*Catalog, error) {
 			}
 		}
 		_, err := dec.Token() // consume '}'
+		if prefix != "" && !notATable && isPluralTable(members, false) {
+			c.recordTable(prefix, members)
+		}
 		return err
 	}
 
@@ -186,6 +247,27 @@ func (c *Catalog) Keys() []string {
 	return out
 }
 
+// englishOnlyNamespaces are keys a pack must NOT carry, for the reason en.ts states: the
+// first-run offer (`i18n.offer.*`) renders only while no pack is installed — a Chinese UI does
+// not offer to install Chinese — and `i18n.test.*` renders nowhere but the runtime's own tests.
+// A pack carrying them is not more complete, it is carrying strings no code path looks up.
+var englishOnlyNamespaces = []string{"i18n.offer.", "i18n.test."}
+
+// englishOnlyExpected is how many keys the contract currently holds English. It is a tripwire on
+// this checker, not a rule about packs: when a new offer string lands, someone has to decide it
+// is English-only too, rather than have the checker quietly start calling every pack one short.
+const englishOnlyExpected = 8
+
+// isEnglishOnly reports whether the contract keeps this key English by design.
+func isEnglishOnly(key string) bool {
+	for _, prefix := range englishOnlyNamespaces {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // ---------------------------------------------------------------- TypeScript reader
 
 // loadTSCatalog reads a TS module exporting a single object literal and flattens it to dotted
@@ -194,7 +276,7 @@ func (c *Catalog) Keys() []string {
 // spelled both ways is a duplicate and reported as one.
 func loadTSCatalog(path string, raw []byte) (*Catalog, error) {
 	r := &tsReader{src: []rune(string(raw))}
-	c := &Catalog{Path: path, Values: map[string]string{}}
+	c := &Catalog{Path: path, Values: map[string]string{}, Tables: map[string]map[string]string{}}
 
 	start, err := r.findObjectStart()
 	if err != nil {
@@ -310,6 +392,15 @@ func (r *tsReader) readObjectInto(c *Catalog, prefix string) error {
 	}
 	r.pos++
 	seen := map[string]bool{}
+	members := map[string]string{} // member name -> value, for the string members only
+	notATable := false             // a member that is not a plain string value
+	// A nested object is a counted message when its members are plural categories; the root object
+	// never is, whatever it contains.
+	record := func() {
+		if prefix != "" && !notATable && isPluralTable(members, false) {
+			c.recordTable(prefix, members)
+		}
+	}
 	for {
 		r.skipTrivia()
 		if r.eof() {
@@ -317,6 +408,7 @@ func (r *tsReader) readObjectInto(c *Catalog, prefix string) error {
 		}
 		if r.cur() == '}' {
 			r.pos++
+			record()
 			return nil
 		}
 		key, err := r.readKey()
@@ -342,8 +434,15 @@ func (r *tsReader) readObjectInto(c *Catalog, prefix string) error {
 		if err != nil {
 			return err
 		}
-		if kind == "string" {
+		switch kind {
+		case "string":
+			members[key] = value
 			c.set(full, value)
+		default:
+			// A nested namespace or a folded expression: either way this object is not a table of
+			// plural forms, so its members are ordinary dotted keys.
+			members[key] = ""
+			notATable = true
 		}
 
 		r.skipTrivia()
@@ -353,6 +452,7 @@ func (r *tsReader) readObjectInto(c *Catalog, prefix string) error {
 		}
 		if r.cur() == '}' {
 			r.pos++
+			record()
 			return nil
 		}
 		return fmt.Errorf("expected ',' or '}' after %q at offset %d, found %q", full, r.pos, string(r.cur()))
@@ -617,15 +717,17 @@ func countPlaceholders(tokens []placeholder) map[string]int {
 	return m
 }
 
-func diffCounts(en, zh map[string]int) (missing, extra []string) {
+// diffCounts names the counts that moved. `locale` labels the pack side so a German pack is
+// reported as "de×1", not as "zh×1" — the finding is read by a person deciding what to fix.
+func diffCounts(en, pack map[string]int, locale string) (missing, extra []string) {
 	for _, tok := range sortedKeys(en) {
-		if zh[tok] < en[tok] {
-			missing = append(missing, fmt.Sprintf("%s (en×%d, zh×%d)", tok, en[tok], zh[tok]))
+		if pack[tok] < en[tok] {
+			missing = append(missing, fmt.Sprintf("%s (en×%d, %s×%d)", tok, en[tok], locale, pack[tok]))
 		}
 	}
-	for _, tok := range sortedKeys(zh) {
-		if zh[tok] > en[tok] {
-			extra = append(extra, fmt.Sprintf("%s (en×%d, zh×%d)", tok, en[tok], zh[tok]))
+	for _, tok := range sortedKeys(pack) {
+		if pack[tok] > en[tok] {
+			extra = append(extra, fmt.Sprintf("%s (en×%d, %s×%d)", tok, en[tok], locale, pack[tok]))
 		}
 	}
 	return missing, extra
