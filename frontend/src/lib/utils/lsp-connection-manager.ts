@@ -33,9 +33,14 @@ function routingLanguage(filePath: string): string {
   return resolveFile(filePath).language;
 }
 
-/** Whether an installed extension serves this file, so whether an LSP channel is possible. */
+/**
+ * Whether an LSP channel may open for this file: an enabled extension owns it *and* the user left that
+ * extension's editor features on. The gate stops here — the same manifest also declares the file's
+ * grammar, and those colors survive the switch (see `ResolvedFile.editorLSP`).
+ */
 export function isLSPAvailable(filePath: string): boolean {
-  return resolveFile(filePath).languageId !== '';
+  const resolved = resolveFile(filePath);
+  return resolved.languageId !== '' && resolved.editorLSP;
 }
 
 export interface LSPTransportOptions {

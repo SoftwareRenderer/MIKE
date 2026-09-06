@@ -527,7 +527,7 @@ export interface LSPConfig {
     syntax?: Record<string, SyntaxSpec>;
     language: string;
     initParamsOverride?: Record<string, any>;
-    editor_enabled?: boolean;  // LSP features in editor (diagnostics, completions, etc.)
+    editor_enabled?: boolean;  // LSP features in the editor (diagnostics, completions, hover) — NOT syntax highlighting, which reads the manifest either way
     tool_calls_enabled?: boolean;  // LSP tools for agent (references, definition, etc.)
 }
 
@@ -580,12 +580,12 @@ export interface SyntaxSpec {
     /** Optional region markers ("#region" / "#endregion"), matched inside comment tokens. */
     region?: DelimiterPair;
     /**
-     * Colour a name whose first letter is upper-case as a type name (Go's exported `ChatMessage`, a
+     * Color a name whose first letter is upper-case as a type name (Go's exported `ChatMessage`, a
      * JS class). Default true — declare false where the convention does not hold.
      */
     capitalized_types?: boolean;
     /**
-     * Colour a name applied to arguments (`name(`) as a function name. Default true; the declared
+     * Color a name applied to arguments (`name(`) as a function name. Default true; the declared
      * word lists still win, so a keyword before a bracket stays a keyword.
      */
     call_as_function?: boolean;

@@ -93,7 +93,7 @@ describe('declared syntax: tokenizing', () => {
     expect(tokens(state).some(([text, name]) => (text === 'true' && name === 'constant') || (text === 'true' && name === 'atom'))).toBe(true);
   });
 
-  it('colours a called name and an upper-case name, which is what the word lists cannot know', () => {
+  it('colors a called name and an upper-case name, which is what the word lists cannot know', () => {
     // The reported line, verbatim: before these rules it produced three styled ranges in all.
     const state = stateWith(
       'func formatChatHistory(messages []types.ChatMessage, skipSummaryMsg bool) string {',
@@ -176,7 +176,7 @@ describe('declared syntax: tokenizing', () => {
     expect(comments).toEqual(['// slash', '# hash']);
   });
 
-  it('does not let an unterminated single-line quote colour the rest of the file', () => {
+  it('does not let an unterminated single-line quote color the rest of the file', () => {
     const state = stateWith('const s = "oops\nconst done = 1;');
     // The string dies at the newline, so the next line is tokenized as code again.
     expect(tokens(state).filter(([text, name]) => text === 'const' && name === 'keyword').length).toBe(2);

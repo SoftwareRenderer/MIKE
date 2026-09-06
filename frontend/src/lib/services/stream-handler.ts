@@ -446,7 +446,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 // An environment note (LSP diagnostics, merge-conflict instructions): the
                 // model had to see it, the user never said it. Rendered as a note, never as
                 // a user bubble. `kind` is what the card is titled with; `severity` only
-                // decides whether it is drawn in the warning colour.
+                // decides whether it is drawn in the warning color.
                 const data = event.data as { id?: string; kind?: string; severity?: string; text?: string; created_at?: string };
                 if (data.id && s.entries.some(e => e.id === data.id)) break;
                 stream.closeCurrentAssistant();

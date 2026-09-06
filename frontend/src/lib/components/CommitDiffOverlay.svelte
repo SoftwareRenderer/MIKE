@@ -4,6 +4,10 @@
     import { parseUnifiedDiff, buildSideBySideRows, truncatePath } from '$lib/utils/diff-parser';
     import type { SideBySideRow } from '$lib/utils/diff-parser';
     import { highlightLinesAsync } from '$lib/highlighter';
+    // Token colors for the highlighted spans below. This overlay's side-by-side columns put that HTML
+    // straight in .diff-line-content (no .diff-text wrapper), so it reads the shared table rather than
+    // carrying a copy of its own — the copy it did carry was already missing a token.
+    import '$lib/styles/token-colors.css';
     import { escapeHtml } from '$lib/utils/format';
     import { activeLocale } from '$lib/i18n/runtime.svelte';
     import { t } from '$lib/i18n';
@@ -1055,29 +1059,6 @@
     .diff-segment-removed {
         background: rgba(248, 81, 73, 0.4);
     }
-
-    /* Syntax highlighting — uses CSS vars from app.css (--cm-*) */
-    :global(.diff-line-content .hl-keyword) { color: var(--cm-keyword); }
-    :global(.diff-line-content .hl-constantkeyword) { color: var(--cm-keyword-const); }
-    :global(.diff-line-content .hl-definitionvariable),
-    :global(.diff-line-content .hl-variable),
-    :global(.diff-line-content .hl-classname),
-    :global(.diff-line-content .hl-typename) { color: var(--cm-class); }
-    :global(.diff-line-content .hl-function) { color: var(--cm-function); }
-    :global(.diff-line-content .hl-property),
-    :global(.diff-line-content .hl-attribute) { color: var(--cm-attr-name); }
-    :global(.diff-line-content .hl-string),
-    :global(.diff-line-content .hl-attributevalue),
-    :global(.diff-line-content .hl-regexp) { color: var(--cm-string); }
-    :global(.diff-line-content .hl-number) { color: var(--cm-number); }
-    :global(.diff-line-content .hl-comment) { color: var(--cm-comment); font-style: italic; }
-    :global(.diff-line-content .hl-operator) { color: var(--cm-variable); }
-    :global(.diff-line-content .hl-punctuation) { color: var(--cm-punctuation); }
-    /* Bracket pair colorization — same levels and colours as the editor. */
-    :global(.diff-line-content .hl-bracket-l0) { color: var(--cm-bracket-0); }
-    :global(.diff-line-content .hl-bracket-l1) { color: var(--cm-bracket-1); }
-    :global(.diff-line-content .hl-bracket-l2) { color: var(--cm-bracket-2); }
-    :global(.diff-line-content .hl-tagname) { color: var(--cm-tag); }
-    :global(.diff-line-content .hl-meta) { color: var(--cm-variable); }
-    :global(.diff-line-content .hl-invalid) { color: var(--color-status-red); }
+    /* Token and bracket-pair colors: styles/token-colors.css, imported above — the same table the
+       diff viewer paints from. */
 </style>

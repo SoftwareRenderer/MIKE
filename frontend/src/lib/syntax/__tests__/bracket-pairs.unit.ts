@@ -1,6 +1,6 @@
 /**
  * Bracket pair colorization: which bracket is at which nesting level, and which brackets are not
- * brackets at all. The colours themselves belong to the theme; this is the answer it styles.
+ * brackets at all. The colors themselves belong to the theme; this is the answer it styles.
  */
 import { describe, it, expect } from 'vitest';
 import { EditorState } from '@codemirror/state';
@@ -54,11 +54,11 @@ describe('bracket pair levels', () => {
       1, //   }
       0, // }
     ]);
-    // The closer that ends the function is the same colour as the brace that started it.
+    // The closer that ends the function is the same color as the brace that started it.
     expect(brackets(doc).slice(-1)).toEqual([['}', 0]]);
   });
 
-  it('cycles over the theme slots rather than running out of colours', () => {
+  it('cycles over the theme slots rather than running out of colors', () => {
     expect(levels('(((((((')).toEqual([0, 1, 2, 0, 1, 2, 0]);
     expect(levels('(((())))')).toEqual([0, 1, 2, 0, 0, 2, 1, 0]);
     expect(BRACKET_LEVELS).toBe(3);
@@ -72,7 +72,7 @@ describe('bracket pair levels', () => {
     expect(chars('t = `{\n}`;\nz()')).toBe('()');
   });
 
-  it('leaves a closer that opens nothing uncoloured, and keeps the level an opener took', () => {
+  it('leaves a closer that opens nothing uncolored, and keeps the level an opener took', () => {
     expect(brackets('a)')).toEqual([]); // nothing was opened
     expect(brackets('f(a]')).toEqual([['(', 0]]); // the ] closes something that is not there
     expect(brackets('f(a')).toEqual([['(', 0]]); // the outer one never met its closer, and keeps the level it opened at

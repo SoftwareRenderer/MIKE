@@ -238,12 +238,12 @@ type SyntaxSpec struct {
 	Builtins  []string       `json:"builtins,omitempty"`
 	Numbers   bool           `json:"numbers,omitempty"`
 	Region    *CommentToken  `json:"region,omitempty"`
-	// CapitalizedTypes colours an identifier whose first letter is upper-case as a type name — Go's
+	// CapitalizedTypes colors an identifier whose first letter is upper-case as a type name — Go's
 	// exported `ChatMessage`, a JS class. Pointer because the answer defaults to true when the manifest
 	// says nothing, and a plain bool with omitempty would drop an author's explicit false on the way
 	// back out and hand the browser the default instead of the refusal.
 	CapitalizedTypes *bool `json:"capitalized_types,omitempty"`
-	// CallAsFunction colours a name applied to arguments (`name(`) as a function name. Same default.
+	// CallAsFunction colors a name applied to arguments (`name(`) as a function name. Same default.
 	CallAsFunction *bool `json:"call_as_function,omitempty"`
 }
 

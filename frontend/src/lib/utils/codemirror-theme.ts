@@ -1,29 +1,9 @@
 import { EditorView } from '@codemirror/view';
-import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
-import { tags } from '@lezer/highlight';
+import { syntaxHighlighting } from '@codemirror/language';
+import { buildHighlightStyle } from '$lib/syntax/token-style';
 
-const darkHighlight = HighlightStyle.define([
-    { tag: tags.keyword, color: '#F97583' },
-    { tag: tags.constant(tags.keyword), color: '#79C0FF' },
-    { tag: tags.function(tags.variableName), color: '#D2A8FF' },
-    { tag: tags.function(tags.definition(tags.variableName)), color: '#D2A8FF' },
-    { tag: tags.definition(tags.variableName), color: '#C9D1D9' },
-    { tag: tags.variableName, color: '#C9D1D9' },
-    { tag: tags.propertyName, color: '#D2A8FF' },
-    { tag: tags.string, color: '#A5D6FF' },
-    { tag: tags.number, color: '#79C0FF' },
-    { tag: tags.comment, color: '#8B949E', fontStyle: 'italic' },
-    { tag: tags.operator, color: '#FF7B72' },
-    { tag: tags.punctuation, color: '#C9D1D9' },
-    { tag: tags.className, color: '#FFA657' },
-    { tag: tags.typeName, color: '#39D2C0' },
-    { tag: tags.tagName, color: '#7EE787' },
-    { tag: tags.attributeName, color: '#79C0FF' },
-    { tag: tags.attributeValue, color: '#A5D6FF' },
-    { tag: tags.regexp, color: '#A5D6FF' },
-    { tag: tags.meta, color: '#C9D1D9' },
-    { tag: tags.invalid, color: '#f97583', textDecoration: 'underline wavy #f97583' },
-]);
+/** The editor's token colors, straight off the one table (`syntax/token-style.ts`). */
+const darkHighlight = buildHighlightStyle('dark');
 
 export const darkTheme = EditorView.theme({
     '&': { backgroundColor: 'transparent', color: '#C9D1D9', height: '100%' },
@@ -73,7 +53,7 @@ export const darkTheme = EditorView.theme({
     },
     '.cm-lineSel': { backgroundColor: 'rgba(88,166,255,0.14)' },
     '.cm-matchingBracket': { backgroundColor: 'rgba(88,166,255,0.3)' },
-    // Bracket pair colorization (syntax/bracket-pairs.ts): a pair's colour is its nesting level, so an
+    // Bracket pair colorization (syntax/bracket-pairs.ts): a pair's color is its nesting level, so an
     // opener always matches the closer it opened. VS Code's defaults, cycled over three slots.
     '.cm-bracket-l0': { color: '#FFD700' },
     '.cm-bracket-l1': { color: '#DA70D6' },
@@ -183,28 +163,7 @@ export const darkSyntax = syntaxHighlighting(darkHighlight);
 
 // --- Light theme ---
 
-const lightHighlight = HighlightStyle.define([
-    { tag: tags.keyword, color: '#CF222E' },
-    { tag: tags.constant(tags.keyword), color: '#0550AE' },
-    { tag: tags.function(tags.variableName), color: '#8250DF' },
-    { tag: tags.function(tags.definition(tags.variableName)), color: '#8250DF' },
-    { tag: tags.definition(tags.variableName), color: '#24292F' },
-    { tag: tags.variableName, color: '#24292F' },
-    { tag: tags.propertyName, color: '#8250DF' },
-    { tag: tags.string, color:'#0A3069' },
-    { tag: tags.number, color: '#0550AE' },
-    { tag: tags.comment, color: '#6E7781', fontStyle: 'italic' },
-    { tag: tags.operator, color: '#CF222E' },
-    { tag: tags.punctuation, color: '#24292F' },
-    { tag: tags.className, color: '#953800' },
-    { tag: tags.typeName, color: '#0550AE' },
-    { tag: tags.tagName, color: '#116329' },
-    { tag: tags.attributeName, color: '#0550AE' },
-    { tag: tags.attributeValue, color: '#0A3069' },
-    { tag: tags.regexp, color: '#0A3069' },
-    { tag: tags.meta, color: '#24292F' },
-    { tag: tags.invalid, color: '#CF222E', textDecoration: 'underline wavy #CF222E' },
-]);
+const lightHighlight = buildHighlightStyle('light');
 
 export const lightTheme = EditorView.theme({
     '&': { backgroundColor: 'transparent', color: '#24292F', height: '100%' },

@@ -180,7 +180,7 @@ describe('a hover card signature is painted like the code it shows', () => {
   });
 
   it('paints the block, rather than only labelling it', () => {
-    // A class in an attribute is not a colour: these are the editor's own HighlightStyle rules.
+    // A class in an attribute is not a color: these are the editor's own HighlightStyle rules.
     const view = editorFor('/repo/x.go', 'go');
     const html = hoverDocsHTML(pluginFor(view), { contents: { kind: 'markdown', value: GOPLS_HOVER } });
     const host = mountedBlock(html);
@@ -189,7 +189,7 @@ describe('a hover card signature is painted like the code it shows', () => {
     host.appendChild(reference);
     const painted = colorOf(host, 'pre span'); // the `func` of the signature
     const expected = getComputedStyle(reference).color; // what the theme says a keyword looks like
-    const prose = colorOf(host, 'pre'); // the block's own colour, with no span under it
+    const prose = colorOf(host, 'pre'); // the block's own color, with no span under it
     expect(painted).toBe(expected);
     expect(painted).not.toBe(prose);
   });

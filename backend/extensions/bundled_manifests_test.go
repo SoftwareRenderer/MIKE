@@ -135,7 +135,7 @@ func TestBundledLSPManifests_DeclareWhatTheGrammarEngineNeeds(t *testing.T) {
 			where := fmt.Sprintf("%s: capabilities.lsp.syntax.%s", name, profile)
 			declared++
 			if len(spec.Pairs) == 0 {
-				t.Errorf("%s declares no pairs — nothing to fold, match or colour in a language with brackets", where)
+				t.Errorf("%s declares no pairs — nothing to fold, match or color in a language with brackets", where)
 			}
 			if spec.CapitalizedTypes == nil {
 				t.Errorf("%s leaves capitalized_types undeclared — an upper-case name is a type in this language because the engine guessed, not because the extension said so", where)

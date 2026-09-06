@@ -2,8 +2,8 @@
  * The vocabulary of git's one-letter status codes (`M`, `A`, `D`, `?`, `R`, `U`, `C`).
  *
  * Both file trees surface the same letter — a badge in the tree, a badge in the changes
- * panel — so the letter's *meaning* lives here once. Their colours deliberately do not:
- * the tree colours itself through CSS classes (see `gitStatusClass`), while the changes
+ * panel — so the letter's *meaning* lives here once. Their colors deliberately do not:
+ * the tree colors itself through CSS classes (see `gitStatusClass`), while the changes
  * panel paints inline hex values for its own badge design (see `getStatusBadge` in
  * GitStatusPanel.svelte), and diff-file badges come from `getStatusBadge` in diff-parser.
  */
@@ -32,7 +32,7 @@ export function gitStatusLabel(char: string): string {
     }
 }
 
-/** CSS class that colours a status badge, or '' for a letter we don't style. */
+/** CSS class that colors a status badge, or '' for a letter we don't style. */
 export function gitStatusClass(char: string): string {
     switch (char) {
         case 'M': return 'git-status-modified';

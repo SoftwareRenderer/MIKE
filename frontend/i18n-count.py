@@ -207,7 +207,7 @@ CSS_STYLE_KEY_RE = re.compile(r'(?:style|cssText|setAttribute)\s*(?:[:=(]\s*[\'"
 
 
 def css_value_is_css(value):
-    """Every token is a length, colour, var()/rgba() call, quoted family name or keyword.
+    """Every token is a length, color, var()/rgba() call, quoted family name or keyword.
     Commas separate shorthands outside brackets and arguments inside them, and a quoted
     family name is one token even though it contains spaces — so only separators at depth 0
     and outside quotes split. `rgba(30, 30, 46, 0.95)` and `"Noto Sans Mono"` each stay one."""
@@ -287,7 +287,7 @@ CODE_BODY_RE = re.compile(
     r'|=>|\bnew\s+[A-Z]|\bconsole\.\w|\brequire\(|\bimport\(')
 
 
-# A value built only of functions, lengths, colours and var() — `translateY(2px)
+# A value built only of functions, lengths, colors and var() — `translateY(2px)
 # rotate(-90deg)` — is a CSS fragment even with no `property:` before it, because a
 # sentence always contains a bare word and this contains none.
 CSS_VALUE_ONLY_RE = re.compile(r'^[\s,()/]*$')

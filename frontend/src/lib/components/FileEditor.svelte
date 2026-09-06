@@ -44,7 +44,8 @@
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
     import { reconcileExternalChange } from '$lib/utils/editor-merge';
     import { getLanguageSupport, resolveFile } from '$lib/utils/editor-language';
-    import { getLanguageTreeFromView } from '$lib/highlighter';
+    import { fileSuffix } from '$lib/utils/file-suffix';
+    import { getOutline } from '$lib/utils/editor-outline';
 
     let {
         projectId,
@@ -274,7 +275,7 @@
         let symbols = lspSymbols;
         if (!symbols || symbols.length === 0) {
             const visibleKinds = new Set(['function', 'method', 'class', 'struct', 'enum', 'interface', 'type', 'namespace', 'package', 'module', 'file', 'property', 'field', 'constructor', 'constant', 'event', 'heading']);
-            symbols = getLanguageTreeFromView(view, filePath).filter(s => visibleKinds.has(s.kind));
+            symbols = getOutline(filePath, view.state.doc).filter(s => visibleKinds.has(s.kind));
         }
         onSymbolsUpdate(symbols);
         if (lspSymbols === null && lspClient) {
@@ -1341,9 +1342,11 @@
                 } catch {
                     /* server may not have the document */
                 }
-                // Display name only — the protocol id is passed explicitly below.
-                const ext = filePath.split('.').pop()?.toLowerCase() || '';
-                lspLanguage = resolveFile(filePath).label || ext.toUpperCase();
+                // Display name only — the protocol id is passed explicitly below. A manifest that
+                // declares no label for the file type falls back to its suffix, upper-cased; a file
+                // with no suffix has nothing to show, which is the honest answer (and the reason this
+                // uses fileSuffix rather than splitting on '.': a dotfile's last segment is its name).
+                lspLanguage = resolveFile(filePath).label || fileSuffix(filePath).toUpperCase();
                 // Fallback: some LSP servers (e.g., typescript-language-server) don't
                 // include serverInfo in the initialize response. Use language name.
                 if (!lspServerName) {

@@ -3,6 +3,7 @@ import { EditorState } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { getGrammarForFence, getLanguageSupport, resolveFile } from '$lib/utils/editor-language';
+import { isLSPAvailable } from '$lib/utils/lsp-connection-manager';
 import { fallbackLanguage } from '$lib/utils/fallback-languages';
 import { extensionManager } from '$lib/services/extension-manager.svelte';
 import type { Extension, LSPConfig, SyntaxSpec } from '$lib/types';
@@ -101,6 +102,7 @@ describe('resolveFile — the wire id and the label', () => {
       label: 'TypeScript',
       spec: TS_PROFILE,
       language: 'typescript',
+      editorLSP: true,
     });
     expect(resolveFile('src/App.tsx').languageId).toBe('typescriptreact');
     expect(resolveFile('src/App.tsx').label).toBe('TypeScript JSX');
@@ -124,16 +126,38 @@ describe('resolveFile — the wire id and the label', () => {
     expect(resolved.spec).toBeNull();
     // Nothing owns the file, so nothing claims a language for it.
     expect(resolved.language).toBe('');
+    expect(resolved.editorLSP).toBe(false);
   });
 
-  it('ignores an extension whose editor features are off', () => {
+  it('keeps the grammar when the extension editor features are off', () => {
     addMockLSPExt('typescript-language-server', {
       ...addTypeScriptConfigOnly(),
       editor_enabled: false,
     });
-    // Not owned for editing: no grammar of its own, no wire id offered.
-    expect(resolveFile('a.ts').languageId).toBe('');
-    expect(resolveFile('a.ts').spec).toBeNull();
+    // The switch is sold as "diagnostics, completions, go-to-definition, and hover", and all of those
+    // need a server. The grammar is declared data the manifest already shipped, so the file keeps its
+    // colors and its wire id; only the channel is refused, which is isLSPAvailable's job (and its
+    // test). Answering `spec: null` here is the bug that read as "highlighting is broken for .ts".
+    const resolved = resolveFile('a.ts');
+    expect(resolved.spec).toStrictEqual(TS_PROFILE);
+    // A grammar out of the declared profile, not the plain-text fallthrough: `interface` is a keyword
+    // because the manifest said so.
+    expect(getLanguageSupport('a.ts')?.language.name).toBe('mike-declared');
+    expect(resolved.label).toBe('TypeScript');
+    expect(resolved.languageId).toBe('typescript');
+    // …and this is the one answer that changes: nothing may open a channel for it.
+    expect(resolved.editorLSP).toBe(false);
+    expect(isLSPAvailable('a.ts')).toBe(false);
+  });
+
+  it('answers nothing for a file whose extension is switched off', () => {
+    // Disable is not the editor gate: the extension is off, so its manifest claims nothing at all.
+    addMockLSPExt('typescript-language-server', addTypeScriptConfigOnly(), false);
+    const resolved = resolveFile('a.ts');
+    expect(resolved.languageId).toBe('');
+    expect(resolved.spec).toBeNull();
+    expect(resolved.editorLSP).toBe(false);
+    expect(getLanguageSupport('a.ts')).toBeNull();
   });
 
   it('matches a suffixless file named after the language', () => {

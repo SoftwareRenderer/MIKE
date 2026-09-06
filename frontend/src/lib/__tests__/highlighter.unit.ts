@@ -1,74 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { clearHighlightCache, getLanguageTreeFromView, highlightLinesAsync } from '$lib/highlighter';
+import { clearHighlightCache, highlightLinesAsync } from '$lib/highlighter';
 import { escapeHtml } from '$lib/utils/format';
 import { extensionManager } from '$lib/services/extension-manager.svelte';
 import type { Extension, SyntaxSpec } from '$lib/types';
-
-// Mock a CodeMirror EditorView enough for the markdown fallback path,
-// which only needs state.doc.toString() and state.doc.lineAt().
-function mockView(source: string): any {
-    const lines = source.split('\n');
-    const lineStarts: number[] = [];
-    let pos = 0;
-    for (const l of lines) {
-        lineStarts.push(pos);
-        pos += l.length + 1;
-    }
-    return {
-        state: {
-            doc: {
-                toString: () => source,
-                lineAt: (p: number) => {
-                    let number = 1;
-                    for (let i = 0; i < lineStarts.length; i++) {
-                        if (p >= lineStarts[i]) number = i + 1;
-                        else break;
-                    }
-                    return { number };
-                },
-            },
-        },
-    };
-}
-
-describe('getLanguageTreeFromView markdown outline', () => {
-    it('extracts ATX headings as outline entries', () => {
-        const source = '# Title\n\n## Section\n\n### Subsection\n\nSome body text\n';
-        const symbols = getLanguageTreeFromView(mockView(source), 'README.md');
-        expect(symbols.map((s) => ({ name: s.name, kind: s.kind, line: s.line, indent: s.indent }))).toEqual([
-            { name: 'Title', kind: 'heading', line: 1, indent: 0 },
-            { name: 'Section', kind: 'heading', line: 3, indent: 1 },
-            { name: 'Subsection', kind: 'heading', line: 5, indent: 2 },
-        ]);
-    });
-
-    it('ignores bash comments inside a fenced code block', () => {
-        const source = [
-            '# Real Heading',
-            '',
-            '```bash',
-            '# Build for Linux (CGO_ENABLED=0 for static build)',
-            'CGO_ENABLED=0 go build',
-            '```',
-            '',
-            '## Another Real Heading',
-        ].join('\n');
-        const symbols = getLanguageTreeFromView(mockView(source), 'AGENTS.md');
-        expect(symbols.map((s) => s.name)).toEqual(['Real Heading', 'Another Real Heading']);
-    });
-
-    it('ignores comments inside tilde-fenced code blocks', () => {
-        const source = ['# Top', '', '~~~bash', '# not a heading', 'echo hi', '~~~', '', '## Real'].join('\n');
-        const symbols = getLanguageTreeFromView(mockView(source), 'doc.md');
-        expect(symbols.map((s) => s.name)).toEqual(['Top', 'Real']);
-    });
-
-    it('detects headings again after a code block closes', () => {
-        const source = ['# A', '', '```', '# comment', '```', '', '# B'].join('\n');
-        const symbols = getLanguageTreeFromView(mockView(source), 'doc.md');
-        expect(symbols.map((s) => s.name)).toEqual(['A', 'B']);
-    });
-});
 
 describe('escapeHtml', () => {
     it('escapes every character that can break out of a text node or attribute', () => {
@@ -85,7 +19,7 @@ describe('escapeHtml', () => {
 
 /**
  * What a declared syntax profile paints in a diff. The editor and the diff read the same manifest, so
- * a name and a bracket must come back the same colour in both — this is the diff half of that promise.
+ * a name and a bracket must come back the same color in both — this is the diff half of that promise.
  */
 const GO_PROFILE: SyntaxSpec = {
     line_comment: '//',
@@ -96,7 +30,7 @@ const GO_PROFILE: SyntaxSpec = {
     types: ['int', 'bool', 'string'],
 };
 
-function addGoExt(): void {
+function addGoExt(opts: { editorEnabled?: boolean; enabled?: boolean } = {}): void {
     const ext = {
         id: 'gopls-1',
         name: 'gopls',
@@ -114,6 +48,8 @@ function addGoExt(): void {
                     language: 'go',
                     file_types: [{ extension: 'go', language_id: 'go', label: 'Go', syntax: 'go' }],
                     syntax: { go: GO_PROFILE },
+                    // undefined = the manifest default (on); false is the Settings checkbox.
+                    editor_enabled: opts.editorEnabled,
                 },
             },
         },
@@ -121,7 +57,7 @@ function addGoExt(): void {
         container_config: {},
         sandbox_config: { network_isolation: true, memory_limit: 256 },
         install_source: 'manual',
-        enabled: true,
+        enabled: opts.enabled !== false,
         running: false,
         installed_at: new Date().toISOString(),
         built_at: new Date().toISOString(),
@@ -142,7 +78,7 @@ describe('diff highlighting from a declared profile', () => {
         addGoExt();
     });
 
-    it('colours a called name and an upper-case name, not only the declared word lists', async () => {
+    it('colors a called name and an upper-case name, not only the declared word lists', async () => {
         const html = await highlighted('func formatChatHistory(messages []types.ChatMessage) string {');
         expect(html).toContain('<span class="hl-keyword">func</span>');
         expect(html).toContain('<span class="hl-function">formatChatHistory</span>');
@@ -156,9 +92,31 @@ describe('diff highlighting from a declared profile', () => {
         expect(html.match(/hl-bracket-l1/g)?.length).toBe(2);
     });
 
-    it('does not colour a bracket that lives in a string or a comment', async () => {
+    it('does not color a bracket that lives in a string or a comment', async () => {
         const html = await highlighted('s := f("[") // } ] (');
         // Only the call's own two brackets are brackets; the [, }, ] and ( are text.
         expect(html.match(/hl-bracket-l\d/g)?.length).toBe(2);
+    });
+});
+
+describe('a diff is not gated by the editor-features switch', () => {
+    // The reported bug, on the path that has no LSP client at all: a language whose grammar comes only
+    // from an extension (there is no core fallback for Go, Python or the JS family) opened as plain
+    // text the moment its extension's "Editor Features" box was unticked, because the same filter that
+    // decides whether a channel may open was also answering the grammar.
+    it('still colors the file when editor features are off', async () => {
+        extensionManager.state.extensions = [];
+        addGoExt({ editorEnabled: false });
+        const html = await highlighted('func main() { return }');
+        expect(html).toContain('<span class="hl-keyword">func</span>');
+        expect(html).toContain('<span class="hl-function">main</span>');
+    });
+
+    it('colors nothing when the extension itself is switched off', async () => {
+        // Disabling an extension is a different thing from its editor gate: the manifest claims nothing.
+        extensionManager.state.extensions = [];
+        addGoExt({ enabled: false });
+        const html = await highlighted('func main() { return }');
+        expect(html).not.toContain('hl-keyword');
     });
 });

@@ -41,7 +41,7 @@ function parserFor(spec: SyntaxSpec) {
     .filter((m): m is string => Boolean(m))
     .sort((a, b) => b.length - a.length);
   const strings = [...(spec.strings || [])].sort((a, b) => b.quote.length - a.quote.length);
-  // The word lists above are a language's vocabulary. What is left gets its colour from the shape of
+  // The word lists above are a language's vocabulary. What is left gets its color from the shape of
   // the name, and an author may turn either shape rule off — hence defaults, not requirements.
   const callAsFunction = spec.call_as_function !== false;
   const capitalizedTypes = spec.capitalized_types !== false;
@@ -102,7 +102,7 @@ function parserFor(spec: SyntaxSpec) {
         if (builtins.has(word)) return TOK.builtin;
         // A stream grammar has no parse tree to ask, so the two conventions most of these languages
         // share answer instead: a name applied to arguments is a function, a name that starts
-        // upper-case names a type. Everything else keeps the theme's default colour.
+        // upper-case names a type. Everything else keeps the theme's default color.
         if (callAsFunction && appliedToArguments(stream)) return TOK.func;
         if (capitalizedTypes && UPPER_FIRST.test(word)) return TOK.type;
         return null;
@@ -147,7 +147,7 @@ function readStringBody(stream: StringStream, state: SpecState, delim: StringDel
   const escapes = delim?.escapes ?? false;
   for (;;) {
     if (stream.eol()) {
-      // Only a declared multiline delimiter stays open, so one stray quote cannot recolour the file.
+      // Only a declared multiline delimiter stays open, so one stray quote cannot recolor the file.
       state.string = delim?.multiline ? quote : null;
       return;
     }

@@ -27,40 +27,67 @@ export interface ResolvedFile {
   spec: SyntaxSpec | null;
   /** The manifest `language` the backend routes the file to, or `''` when unrouted. */
   language: string;
+  /**
+   * Whether the extension that owns this file has its editor LSP features on — the gate that decides
+   * whether a channel may open for it. Separate from everything above: a grammar is data the manifest
+   * declares, and the toggle is sold as "diagnostics, completions, go-to-definition, and hover", not
+   * as colors. Only `lsp-connection-manager.isLSPAvailable` acts on it.
+   */
+  editorLSP: boolean;
 }
 
-/** The extension (and the file type within it) that owns `filePath`, per the editor's grants. */
-function declaredFor(filePath: string): { lsp: LSPConfig; fileType: LSPFileType } | null {
-  const base = fileBase(filePath);
-  const suffix = fileSuffix(filePath);
+/** One declaration an enabled extension makes about one of its file types. */
+interface Declaration {
+  lsp: LSPConfig;
+  fileType: LSPFileType;
+}
 
-  for (const ext of extensionManager.getEditorLSPExtensions()) {
+/**
+ * The first enabled extension whose declaration matches, with the file type within it.
+ *
+ * "First owner wins" is one rule and lives in one place: a file resolved by one loop and a fence tag
+ * by another is two rules that can drift apart, which is what these two used to be.
+ */
+function findDeclaration(matches: (lsp: LSPConfig, fileType: LSPFileType) => boolean): Declaration | null {
+  for (const ext of extensionManager.getEnabledLSPExtensions()) {
     const lsp = ext.manifest.capabilities?.lsp;
     if (!lsp?.file_types?.length) continue;
-    const fileType =
-      (suffix && lsp.file_types.find((ft) => ft.extension === suffix)) ||
-      // A file named after the language ("go") reaches its server, as it does on the Go side.
-      (!suffix && lsp.language && base === lsp.language.toLowerCase()
-        ? lsp.file_types.find((ft) => ft.language_id === lsp.language)
-        : undefined);
+    const fileType = lsp.file_types.find((ft) => matches(lsp, ft));
     if (fileType) return { lsp, fileType };
   }
   return null;
+}
+
+/** The extension (and the file type within it) that owns `filePath`, among the enabled extensions. */
+function declaredFor(filePath: string): (Declaration & { editorLSP: boolean }) | null {
+  const base = fileBase(filePath);
+  const suffix = fileSuffix(filePath);
+  // A file named after the language ("go") reaches its server, as it does on the Go side.
+  const namedAfterLanguage = (lsp: LSPConfig) =>
+    !suffix && !!lsp.language && base === lsp.language.toLowerCase();
+
+  const found = findDeclaration(
+    (lsp, ft) =>
+      (!!suffix && ft.extension === suffix) ||
+      (namedAfterLanguage(lsp) && ft.language_id === lsp.language),
+  );
+  return found ? { ...found, editorLSP: found.lsp.editor_enabled !== false } : null;
 }
 
 /** Everything the editor needs to know about one file's language; undeclared files get no id. */
 export function resolveFile(filePath: string): ResolvedFile {
   const declared = declaredFor(filePath);
   if (!declared) {
-    return { languageId: '', label: '', spec: null, language: '' };
+    return { languageId: '', label: '', spec: null, language: '', editorLSP: false };
   }
-  const { lsp, fileType } = declared;
+  const { lsp, fileType, editorLSP } = declared;
   const spec = fileType.syntax ? lsp.syntax?.[fileType.syntax] ?? null : null;
   return {
     languageId: fileType.language_id || lsp.language,
     label: fileType.label || '',
     spec,
     language: lsp.language || fileType.language_id,
+    editorLSP,
   };
 }
 
@@ -80,6 +107,8 @@ function grammarForSpec(spec: SyntaxSpec | null | undefined): LanguageSupport | 
 /**
  * The grammar for a file: its extension's declared profile, else the core fallback for languages
  * nothing covers, else plain text. A declared type with no profile opens as the fallback or plain text.
+ * No LSP gate applies here — this reads the manifest, it does not talk to a server, so a file keeps
+ * its colors when the user switches that extension's editor features off.
  */
 export function getLanguageSupport(filePath: string): LanguageSupport | null {
   return grammarForSpec(resolveFile(filePath).spec) ?? fallbackLanguage(filePath);
@@ -91,22 +120,16 @@ const PLAIN_FENCE_TAGS = new Set(['text', 'txt', 'plain', 'plaintext']);
 /**
  * The declaration that owns a fence tag, matched on the names a language server tags its own blocks
  * with: `extension`, `language_id`, `language`. No alias table — an undeclared tag (`golang`, `bash`)
- * resolves to nothing here and falls through to the file's own grammar.
+ * resolves to nothing here and falls through to the file's own grammar. Every enabled extension
+ * answers, gate or no gate: painting a code block is the same data read it is anywhere else.
  */
-function declaredForTag(tag: string): { lsp: LSPConfig; fileType: LSPFileType } | null {
-  for (const ext of extensionManager.getEditorLSPExtensions()) {
-    const lsp = ext.manifest.capabilities?.lsp;
-    if (!lsp?.file_types?.length) continue;
-    const language = (lsp.language || '').toLowerCase();
-    const fileType = lsp.file_types.find(
-      (ft) =>
-        ft.extension?.toLowerCase() === tag ||
-        ft.language_id?.toLowerCase() === tag ||
-        (!!language && language === tag),
-    );
-    if (fileType) return { lsp, fileType };
-  }
-  return null;
+function declaredForTag(tag: string): Declaration | null {
+  return findDeclaration(
+    (lsp, ft) =>
+      ft.extension?.toLowerCase() === tag ||
+      ft.language_id?.toLowerCase() === tag ||
+      (!!lsp.language && lsp.language.toLowerCase() === tag),
+  );
 }
 
 /**

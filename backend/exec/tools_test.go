@@ -1106,8 +1106,8 @@ func TestExecuteTool_Bash_FailedWithANSI(t *testing.T) {
 // --- stripANSI Tests ---
 
 // TestStripANSI is one table over every escape shape a real terminal emits, because the
-// function is a single pure scanner and each shape is one more branch of it: SGR colours
-// (including 256-colour and 24-bit), cursor movement, erase-line, OSC window titles with
+// function is a single pure scanner and each shape is one more branch of it: SGR colors
+// (including 256-color and 24-bit), cursor movement, erase-line, OSC window titles with
 // both terminators, single-byte escapes, truncated sequences at end of string, and the
 // things that must SURVIVE — tabs, CRs, newlines and non-ASCII text. Progress bars and
 // test-runner output are the real inputs, so both the noise and the payload come from there.
@@ -1120,7 +1120,7 @@ func TestStripANSI(t *testing.T) {
 		{name: "empty", in: "", want: ""},
 		{name: "no ANSI", in: "hello world\nline two", want: "hello world\nline two"},
 		{
-			name: "bold and colour", // \x1b[1m bold, \x1b[31m red, \x1b[0m reset
+			name: "bold and color", // \x1b[1m bold, \x1b[31m red, \x1b[0m reset
 			in:   "\x1b[1m\x1b[31mERROR\x1b[0m", want: "ERROR",
 		},
 		{
@@ -1154,9 +1154,9 @@ func TestStripANSI(t *testing.T) {
 			in:   "tab\there\nnewline\r\r\nunicode: \u00e9\u00e8\u00ea",
 			want: "tab\there\nnewline\r\r\nunicode: \u00e9\u00e8\u00ea",
 		},
-		{name: "256-colour CSI", in: "\x1b[38;5;196mred\x1b[0m", want: "red"},
-		{name: "24-bit colour CSI", in: "\x1b[38;2;255;128;0morange\x1b[0m", want: "orange"},
-		{name: "256-colour background", in: "\x1b[48;5;27mhighlighted\x1b[0m", want: "highlighted"},
+		{name: "256-color CSI", in: "\x1b[38;5;196mred\x1b[0m", want: "red"},
+		{name: "24-bit color CSI", in: "\x1b[38;2;255;128;0morange\x1b[0m", want: "orange"},
+		{name: "256-color background", in: "\x1b[48;5;27mhighlighted\x1b[0m", want: "highlighted"},
 		{name: "erase line", in: "\x1b[2Kprogress: 50%", want: "progress: 50%"},
 		{
 			name: "progress bar keeps its carriage return",

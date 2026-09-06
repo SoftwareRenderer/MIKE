@@ -30,7 +30,7 @@ describe('gitStatusClass', () => {
         expect(gitStatusClass('C')).toBe('git-status-copied');
     });
 
-    it('returns no class for an unknown letter so the badge keeps its default colour', () => {
+    it('returns no class for an unknown letter so the badge keeps its default color', () => {
         expect(gitStatusClass('T')).toBe('');
     });
 

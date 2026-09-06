@@ -45,10 +45,23 @@ export class ExtensionManager {
         }
     }
 
-    /** Get enabled LSP extensions with editor features enabled. */
+    /**
+     * Enabled LSP extensions, whatever their editor gate says.
+     *
+     * Their manifests are what tells the editor what a file is: the file types it owns, the wire id
+     * each one is opened as, and the syntax profile that colors it. Reading that is a data read — it
+     * starts no server and opens no channel — so it must not wait for `editor_enabled`, which the
+     * Settings row sells as "diagnostics, completions, go-to-definition, and hover". Answering "no
+     * grammar" for that switch is how turning off LSP features quietly turned off highlighting too.
+     */
+    getEnabledLSPExtensions(): Extension[] {
+        return this.state.extensions.filter(ext => ext.type === 'lsp' && ext.enabled);
+    }
+
+    /** Enabled LSP extensions whose editor LSP features are on — the ones a channel may open for. */
     getEditorLSPExtensions(): Extension[] {
-        return this.state.extensions.filter(
-            ext => ext.type === 'lsp' && ext.enabled && ext.manifest.capabilities?.lsp?.editor_enabled !== false
+        return this.getEnabledLSPExtensions().filter(
+            ext => ext.manifest.capabilities?.lsp?.editor_enabled !== false
         );
     }
 

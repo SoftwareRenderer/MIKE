@@ -1,0 +1,77 @@
+/**
+ * The diff view's token colors — one rule per row of `syntax/token-style.ts`.
+ *
+ * A diff renders HTML strings (`highlighter.ts`), so its colors cannot come from a CodeMirror
+ * `HighlightStyle`: the token table hands each token a class and this file paints it, off the same
+ * `--cm-*` variables the editor chrome uses, so a diff follows an installed theme for free.
+ *
+ * Both diff renderers are covered — `.diff-text` (the file rows of `DiffViewer` and the unified rows of
+ * `CommitDiffOverlay`) and `.diff-line-content` (that overlay's side-by-side columns, which have no
+ * `.diff-text` wrapper). `:is()` rather than `:where()` so the specificity stays what the old
+ * per-component blocks had. Imported by both components; Vite emits it once.
+ *
+ * `__tests__/token-style.unit.ts` checks both directions: a row in the table with no rule here paints
+ * nothing, and a rule here with no row is CSS nothing can emit.
+ */
+
+:is(.diff-text, .diff-line-content) .hl-keyword {
+    color: var(--cm-keyword);
+}
+/* Constants — a declared profile's True/False/None, true/false/null, true/false/nil, and JSON's own
+   bool/null literals — and CSS's keyword values (`auto`, `bold`). */
+:is(.diff-text, .diff-line-content) .hl-atom {
+    color: var(--cm-keyword-const);
+}
+:is(.diff-text, .diff-line-content) .hl-definitionvariable,
+:is(.diff-text, .diff-line-content) .hl-variable,
+:is(.diff-text, .diff-line-content) .hl-classname,
+:is(.diff-text, .diff-line-content) .hl-typename {
+    color: var(--cm-class);
+}
+:is(.diff-text, .diff-line-content) .hl-function {
+    color: var(--cm-function);
+}
+:is(.diff-text, .diff-line-content) .hl-property,
+:is(.diff-text, .diff-line-content) .hl-attribute {
+    color: var(--cm-attr-name);
+}
+:is(.diff-text, .diff-line-content) .hl-string,
+:is(.diff-text, .diff-line-content) .hl-attributevalue,
+:is(.diff-text, .diff-line-content) .hl-regexp {
+    color: var(--cm-string);
+}
+:is(.diff-text, .diff-line-content) .hl-number {
+    color: var(--cm-number);
+}
+:is(.diff-text, .diff-line-content) .hl-comment {
+    color: var(--cm-comment);
+    font-style: italic;
+}
+:is(.diff-text, .diff-line-content) .hl-operator {
+    color: var(--cm-operator);
+}
+:is(.diff-text, .diff-line-content) .hl-punctuation {
+    color: var(--cm-punctuation);
+}
+:is(.diff-text, .diff-line-content) .hl-tagname {
+    color: var(--cm-tag);
+}
+:is(.diff-text, .diff-line-content) .hl-meta {
+    color: var(--cm-variable);
+}
+:is(.diff-text, .diff-line-content) .hl-invalid {
+    color: var(--cm-keyword);
+    text-decoration: underline wavy var(--cm-keyword);
+}
+
+/* Bracket pair colorization: a pair's color is its nesting level, so which } belongs to which { is
+   visible. Shared with the editor (syntax/bracket-pairs.ts) — same levels, same three colors. */
+:is(.diff-text, .diff-line-content) .hl-bracket-l0 {
+    color: var(--cm-bracket-0);
+}
+:is(.diff-text, .diff-line-content) .hl-bracket-l1 {
+    color: var(--cm-bracket-1);
+}
+:is(.diff-text, .diff-line-content) .hl-bracket-l2 {
+    color: var(--cm-bracket-2);
+}

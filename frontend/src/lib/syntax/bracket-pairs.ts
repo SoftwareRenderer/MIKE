@@ -1,8 +1,8 @@
 /**
- * Bracket pair colorization from a declared spec, following the rule VS Code uses: a pair's colour is
+ * Bracket pair colorization from a declared spec, following the rule VS Code uses: a pair's color is
  * its nesting level, so an opener always matches the closer it opened and a reader can see which
  * `}` belongs to which `{`. Nothing here knows a language — the brackets come from the manifest's
- * `pairs`, and the colours from the theme, so light and dark differ the way VS Code's do.
+ * `pairs`, and the colors from the theme, so light and dark differ the way VS Code's do.
  */
 import { Decoration, ViewPlugin } from '@codemirror/view';
 import type { DecorationSet, EditorView, PluginValue, ViewUpdate } from '@codemirror/view';
@@ -12,10 +12,10 @@ import type { EditorState, Text } from '@codemirror/state';
 import type { DelimiterPair, SyntaxSpec } from '$lib/types';
 import { TokenWalker, opaqueTokens } from './stream-tokens';
 
-/** How many colours the cycle holds — VS Code's `editorBracketPairColorization` uses three. */
+/** How many colors the cycle holds — VS Code's `editorBracketPairColorization` uses three. */
 export const BRACKET_LEVELS = 3;
 
-/** The class for one level. The theme owns the colour; this only says which slot of the cycle. */
+/** The class for one level. The theme owns the color; this only says which slot of the cycle. */
 export const bracketClass = (level: number): string => `cm-bracket-l${level}`;
 
 /**
@@ -24,7 +24,7 @@ export const bracketClass = (level: number): string => `cm-bracket-l${level}`;
  * A pair's level is the depth of everything opened above it, so answering that for the visible window
  * means reading the document above it. There is no incremental bracket model here (VS Code keeps one;
  * we have a syntax tree, not a bracket index), so past this much text the scan costs more per keystroke
- * than the colour is worth and nothing is colored — which is also what VS Code does with a document it
+ * than the color is worth and nothing is colored — which is also what VS Code does with a document it
  * considers too large. Deliberately larger than the fold scan's window: a fold only needs its own line
  * and body, while a level needs the file.
  */
@@ -90,7 +90,7 @@ export function scanBracketLevels(
  * Every bracket in `[from, to)` with its level, in document order.
  *
  * Brackets inside a comment or a string are not brackets and get nothing, a closer that opens nothing
- * (or closes the wrong thing) gets nothing rather than a borrowed colour, and an opener never closed
+ * (or closes the wrong thing) gets nothing rather than a borrowed color, and an opener never closed
  * keeps the level it opened at — that is the answer the file gave before it ran out of text.
  */
 export function bracketPairLevels(
@@ -176,7 +176,7 @@ export function specBracketPairColorization(spec: SyntaxSpec) {
             levels: bracketPairLevels(state, spec, 0, scanTo),
           };
         }
-        // Only what is on screen gets a decoration: a document a scroll away keeps its colour the
+        // Only what is on screen gets a decoration: a document a scroll away keeps its color the
         // moment it comes into view, and pays nothing for the part that is not.
         const marks = [];
         for (const range of visibleRanges) {

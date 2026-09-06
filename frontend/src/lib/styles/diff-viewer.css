@@ -261,6 +261,8 @@
     white-space: pre;
     tab-size: 4;
 }
+/* The token colors for the spans inside it live in styles/token-colors.css — shared with
+   CommitDiffOverlay, whose side-by-side columns are not wrapped in .diff-text. */
 /* Ensure syntax-highlighted spans render correctly */
 .diff-text > span {
     font-family: inherit;
@@ -279,66 +281,6 @@
 }
 .diff-segment-removed {
     background: rgba(248,81,73,0.4);
-}
-
-/* Lezer token highlighting — uses CSS vars from app.css (--cm-*) */
-.diff-text .hl-keyword {
-    color: var(--cm-keyword);
-}
-.diff-text .hl-constantkeyword {
-    color: var(--cm-keyword-const);
-}
-.diff-text .hl-definitionvariable,
-.diff-text .hl-variable,
-.diff-text .hl-classname,
-.diff-text .hl-typename {
-    color: var(--cm-class);
-}
-.diff-text .hl-function {
-    color: var(--cm-function);
-}
-.diff-text .hl-property,
-.diff-text .hl-attribute {
-    color: var(--cm-attr-name);
-}
-.diff-text .hl-string,
-.diff-text .hl-attributevalue,
-.diff-text .hl-regexp {
-    color: var(--cm-string);
-}
-.diff-text .hl-number {
-    color: var(--cm-number);
-}
-.diff-text .hl-comment {
-    color: var(--cm-comment);
-    font-style: italic;
-}
-.diff-text .hl-operator {
-    color: var(--cm-operator);
-}
-.diff-text .hl-punctuation {
-    color: var(--cm-punctuation);
-}
-/* Bracket pair colorization: a pair's colour is its nesting level, so which } belongs to which {
-   is visible. Shared with the editor (syntax/bracket-pairs.ts) — same levels, same three colours. */
-.diff-text .hl-bracket-l0 {
-    color: var(--cm-bracket-0);
-}
-.diff-text .hl-bracket-l1 {
-    color: var(--cm-bracket-1);
-}
-.diff-text .hl-bracket-l2 {
-    color: var(--cm-bracket-2);
-}
-.diff-text .hl-tagname {
-    color: var(--cm-tag);
-}
-.diff-text .hl-meta {
-    color: var(--cm-variable);
-}
-.diff-text .hl-invalid {
-    color: var(--cm-keyword);
-    text-decoration: underline wavy var(--cm-keyword);
 }
 
 /* Row variants */
