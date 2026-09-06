@@ -902,6 +902,13 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 	// Local (filesystem) extension: files are already materialized, so load the
 	// manifest in place rather than fetching from a registry or git repo.
 	gitPinned := entry.Repo != "" && entry.Commit != ""
+
+	var materialized, committed bool
+	defer func() {
+		if materialized && !committed {
+			h.rollbackFailedInstall(entry, gitPinned)
+		}
+	}()
 	var manifest ExtensionManifest
 	root := h.config.ExtensionsDirOrDefault()
 	targetDir := filepath.Join(root, authorDir(entry.Author), entry.Name)
@@ -932,6 +939,7 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 			fail(fmt.Errorf("failed to fetch extension (commit %s): %w", entry.Commit, err))
 			return
 		}
+		materialized = true
 		manifestData, err := os.ReadFile(filepath.Join(targetDir, "manifest.json"))
 		if err != nil {
 			fail(fmt.Errorf("checked-out extension has no manifest.json: %w", err))
@@ -993,6 +1001,17 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 		fail(fmt.Errorf("extension %s declares an unusable image: %w", entry.Name, err))
 		return
 	}
+
+	imageRef, err := h.acquireInstallImage(entry, url, targetDir, gitPinned, emit)
+	if err != nil {
+		fail(err)
+		return
+	}
+	if imageRef == "" && installNeedsImage(entry) {
+		fail(fmt.Errorf("extension %s is a language server but ships no image and no Dockerfile to build one from, so it has nothing to run in a sandbox", entry.Name))
+		return
+	}
+
 	ext := &Extension{
 		ID:       id,
 		Name:     entry.Name,
@@ -1002,12 +1021,12 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 		Manifest: manifest,
 		Config:   map[string]any{},
 		ContainerConfig: ContainerConfig{
-			Image: entry.Image,
+			Image: imageRef,
 		},
 		SandboxConfig: sandboxCfg,
 		InstallSource: installSource,
 
-		ImageRef: entry.Image,
+		ImageRef: imageRef,
 		Enabled:  true,
 		Repo:     entry.Repo,
 		Commit:   entry.Commit,
@@ -1017,48 +1036,7 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 		fail(fmt.Errorf("failed to create extension: %w", err))
 		return
 	}
-
-	// Build/pull image if none is provided pre-built.
-	imageRef := entry.Image
-	if imageRef == "" {
-		var dockerfile string
-		switch {
-		case entry.localDir != "":
-			// Build from the local extension's Dockerfile.
-			emit(20, "Reading Dockerfile...")
-			if data, err := os.ReadFile(filepath.Join(entry.localDir, "Dockerfile")); err == nil {
-				dockerfile = string(data)
-			}
-		case gitPinned:
-			// Build from the verified checkout's Dockerfile.
-			dfPath := filepath.Join(targetDir, "Dockerfile")
-			if data, err := os.ReadFile(dfPath); err == nil {
-				dockerfile = string(data)
-			}
-		case entry.DockerfileURL != "":
-			emit(20, "Fetching Dockerfile...")
-			df, fetchErr := h.registry.FetchDockerfile(ResolveURL(url, entry.DockerfileURL))
-			if fetchErr != nil {
-				fail(fmt.Errorf("failed to fetch dockerfile: %w", fetchErr))
-				return
-			}
-			dockerfile = df
-		}
-		if dockerfile != "" {
-			emit(30, "Building image...")
-			imageRef = ExtensionImageRef(entry.Name, entry.Version)
-			if err := h.registry.BuildImageFromReader(dockerfile, imageRef); err != nil {
-				fail(fmt.Errorf("failed to build image: %w", err))
-				return
-			}
-			ext.ContainerConfig.Image = imageRef
-			ext.ImageRef = imageRef
-			if err := h.store.Update(ext.ID, ext); err != nil {
-				fail(fmt.Errorf("failed to update extension: %w", err))
-				return
-			}
-		}
-	}
+	committed = true
 
 	statuses := h.sandbox.ListRunning()
 	result := h.toResponse(ext, statuses)
@@ -1067,6 +1045,91 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 	// Notify frontend to refresh UI injection slots
 	if h.onExtensionChanged != nil {
 		h.onExtensionChanged()
+	}
+}
+
+// acquireInstallImage returns the image an installing extension will run, or "" if it ships neither a
+// pre-built image nor a Dockerfile. It is the install-side twin of extensionImageSource: the same answer
+// whether asked at install or at first start.
+//
+// A declared image is not pulled here. It was validated by ValidateImage, and the sandbox pulls it on
+// first use, so installing never downloads an image the user may never start.
+func (h *ExtensionHandler) acquireInstallImage(entry *RegistryEntry, registryURL, targetDir string, gitPinned bool, emit func(float64, string)) (string, error) {
+	if entry.Image != "" {
+		return entry.Image, nil
+	}
+	dockerfile, source, err := h.installDockerfile(entry, registryURL, targetDir, gitPinned, emit)
+	if err != nil {
+		return "", err
+	}
+	if dockerfile == "" {
+		return "", nil
+	}
+	imageRef := ExtensionImageRef(entry.Name, entry.Version)
+	emit(30, "Building image...")
+	if err := h.registry.BuildExtensionImage(dockerfile, imageRef); err != nil {
+		return "", fmt.Errorf("failed to build image from %s: %w", source, err)
+	}
+	return imageRef, nil
+}
+
+// installDockerfile reads the Dockerfile to build from, wherever the package lives: the extension's own
+// folder (local install), the checkout (git-pinned), or the registry's URL. ("", "", nil) means it
+// shipped no Dockerfile.
+//
+// A read failure is an error, not "no Dockerfile": present-but-unreadable used to look absent, and the
+// install went on to record an extension whose image would never exist.
+func (h *ExtensionHandler) installDockerfile(entry *RegistryEntry, registryURL, targetDir string, gitPinned bool, emit func(float64, string)) (content, source string, err error) {
+	var path string
+	switch {
+	case entry.localDir != "":
+		emit(20, "Reading Dockerfile...")
+		path = filepath.Join(entry.localDir, "Dockerfile")
+	case gitPinned:
+		emit(20, "Reading Dockerfile...")
+		path = filepath.Join(targetDir, "Dockerfile")
+	case entry.DockerfileURL != "":
+		emit(20, "Fetching Dockerfile...")
+		df, fetchErr := h.registry.FetchDockerfile(ResolveURL(registryURL, entry.DockerfileURL))
+		if fetchErr != nil {
+			return "", "", fmt.Errorf("failed to fetch dockerfile: %w", fetchErr)
+		}
+		return df, entry.DockerfileURL, nil
+	default:
+		return "", "", nil
+	}
+
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("failed to read %s: %w", path, err)
+	}
+	return string(data), path, nil
+}
+
+// installNeedsImage reports whether an extension cannot be installed without an image. That is the type
+// that gets a container: sandboxes are created for rows of type lsp (GetByType); every other type is
+// just files.
+func installNeedsImage(entry *RegistryEntry) bool {
+	if entry.Type == ExtensionTypeLSP {
+		return true
+	}
+	// Registry entries are not normalized, so an index may omit the type; infer it the same way the
+	// local scan does.
+	return entry.Type == "" && inferExtensionType(entry.Capabilities) == ExtensionTypeLSP
+}
+
+// rollbackFailedInstall deletes the files an install checked out before failing. It never touches a
+// local install's folder: that belongs to whoever put it there, and install-local refuses a folder it
+// cannot read back as its own.
+func (h *ExtensionHandler) rollbackFailedInstall(entry *RegistryEntry, gitPinned bool) {
+	if !gitPinned || entry.localDir != "" {
+		return
+	}
+	if warning := h.removeMaterializedDir(entry.Name, entry.Author, entry.Name); warning != "" {
+		log.Printf("[extensions] %s/%s install failed and left files behind: %s", entry.Author, entry.Name, warning)
 	}
 }
 
@@ -1338,15 +1401,29 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 		ext.Repo = entry.Repo
 		ext.Commit = entry.Commit
 		ext.Subdir = entry.Subdir
-		if data, err := os.ReadFile(filepath.Join(targetDir, "Dockerfile")); err == nil {
+		dockerfile, source, dfErr := h.installDockerfile(entry, url, targetDir, true, emit)
+		if dfErr != nil {
+			fail(dfErr)
+			return
+		}
+		switch {
+		case dockerfile != "":
 			emit(30, "Building image...")
-			if err := h.registry.BuildImageFromReader(string(data), imageRef); err != nil {
-				fail(fmt.Errorf("failed to build image: %w", err))
+			if err := h.registry.BuildExtensionImage(dockerfile, imageRef); err != nil {
+				fail(fmt.Errorf("failed to build image from %s: %w", source, err))
 				return
 			}
-		} else {
-			// No Dockerfile (UI/CSS/agent extension) — nothing to build.
+		case entry.Image != "":
+			// The new commit ships no Dockerfile but the registry names a pre-built image.
+			imageRef = entry.Image
+		default:
+			// Neither. Fine for a UI pack or a translation pack, fatal for a language server: keeping the
+			// previous commit's image would run new code against a server that is not in it.
 			imageRef = ""
+			if installNeedsImage(entry) || ext.IsLSP() {
+				fail(fmt.Errorf("extension %s %s ships no image and no Dockerfile to build one from, so this update has nothing to run in a sandbox", entry.Name, entry.Version))
+				return
+			}
 		}
 	} else {
 		// Rebuild from Dockerfile if available, otherwise pull image
@@ -1359,7 +1436,7 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 				return
 			}
 			emit(30, "Building image...")
-			if err := h.registry.BuildImageFromReader(dockerfile, imageRef); err != nil {
+			if err := h.registry.BuildExtensionImage(dockerfile, imageRef); err != nil {
 				fail(fmt.Errorf("failed to build image: %w", err))
 				return
 			}

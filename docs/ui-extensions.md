@@ -50,6 +50,13 @@ exactly `commit` (full SHA-1/SHA-256), verifies `git rev-parse HEAD` matches, th
 subdir into `./extensions/<author>/<name>`. Deploy via Settings → Extensions → "Install from
 Registry".
 
+**An install that cannot produce its image installs nothing.** The image is built before the row is
+written, in a temp context of the server's own making (see `AGENTS.md → Extensions`), and a
+language-server entry with neither an image nor a Dockerfile is refused rather than recorded. A failure
+after the checkout deletes that checkout too: a directory with no row is offered by
+`GET /api/extensions/local` as installable, under the manifest it shipped with. Only a checkout the
+install made is removed — a local install's folder belongs to whoever put it there.
+
 **A missing install is re-materialized at startup.** That directory *is* the extension —
 `/extensions/<author>/<name>/index.html` is what gets framed — so a wiped `extensions/` tree leaves every
 UI extension enabled and inert with nothing to see: the frame 404s, the document never boots, so there is

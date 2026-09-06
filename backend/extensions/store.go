@@ -404,6 +404,31 @@ func (es *ExtensionStore) SetEnabled(id string, enabled bool) error {
 	return nil
 }
 
+// SetImageRef records the image an extension's sandbox runs, in both places it is kept: image_ref (the
+// UI and the delete path) and container_config.image (the container create). Only those two columns -
+// the caller's copy of the manifest or config may predate another writer.
+func (es *ExtensionStore) SetImageRef(id, imageRef string, containerConfig ContainerConfig) error {
+	containerConfigJSON, err := json.Marshal(containerConfig)
+	if err != nil {
+		return fmt.Errorf("marshal container config: %w", err)
+	}
+	if containerConfigJSON == nil {
+		containerConfigJSON = []byte("{}")
+	}
+	result, err := es.db.Exec(
+		`UPDATE extensions SET image_ref = ?, container_config = ? WHERE id = ?`,
+		imageRef, string(containerConfigJSON), id,
+	)
+	if err != nil {
+		return fmt.Errorf("set image_ref: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("extension not found: %s", id)
+	}
+	return nil
+}
+
 // SetBuiltAt updates the built_at timestamp for an extension.
 func (es *ExtensionStore) SetBuiltAt(id string) error {
 	now := time.Now().UTC().Format(time.RFC3339)

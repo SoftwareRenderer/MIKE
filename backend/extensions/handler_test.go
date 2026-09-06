@@ -886,6 +886,9 @@ func TestHandleInstall_Success(t *testing.T) {
 			DisplayName: "Go Language Server",
 			Description: "Go language server",
 			Author:      "Go Team",
+			// An lsp entry with no image and no Dockerfile is refused (its own test); this one declares
+			// a pre-built image so it can reach the SSE result.
+			Image: "docker.io/library/gopls:1.5.0",
 		},
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -932,6 +935,9 @@ func TestHandleInstall_Success(t *testing.T) {
 	if result.InstallSource != "registry" {
 		t.Errorf("InstallSource = %q, want registry", result.InstallSource)
 	}
+	if result.ImageRef != "docker.io/library/gopls:1.5.0" {
+		t.Errorf("ImageRef = %q, want the image the entry declared", result.ImageRef)
+	}
 }
 
 func TestHandleInstallLocal(t *testing.T) {
@@ -939,8 +945,8 @@ func TestHandleInstallLocal(t *testing.T) {
 	extDir := t.TempDir()
 	h.config.ExtensionsDir = extDir
 
-	// A local extension with a manifest but no Dockerfile, so the test does not
-	// attempt an actual container image build.
+	// A local language server: manifest plus the Dockerfile its image builds from. Podman is stood in
+	// for; this test is about the record the install leaves behind.
 	extPath := filepath.Join(extDir, "sveltejs", "svelte-language-server")
 	if err := os.MkdirAll(extPath, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -955,6 +961,12 @@ func TestHandleInstallLocal(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(extPath, "manifest.json"), []byte(manifest), 0o644); err != nil {
 		t.Fatalf("WriteFile manifest: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(extPath, "Dockerfile"),
+		[]byte("FROM alpine:latest\nCOPY sandbox/sandbox-bridge /usr/local/bin/sandbox-bridge\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile Dockerfile: %v", err)
+	}
+	fake := fakePodmanOK(t)
+	setBridgeEnv(t)
 
 	body := map[string]any{"author": "sveltejs", "name": "svelte-language-server"}
 	bodyBytes, _ := json.Marshal(body)
@@ -1003,6 +1015,17 @@ func TestHandleInstallLocal(t *testing.T) {
 	}
 	if stored.InstallSource != "local" {
 		t.Errorf("stored InstallSource = %q, want local", stored.InstallSource)
+	}
+	// The record carries the local build of that Dockerfile, not an empty image.
+	wantImage := ExtensionImageRef("svelte-language-server", "1.0.0")
+	if stored.ImageRef != wantImage {
+		t.Errorf("stored ImageRef = %q, want %q", stored.ImageRef, wantImage)
+	}
+	if stored.ContainerConfig.Image != wantImage {
+		t.Errorf("stored ContainerConfig.Image = %q, want %q", stored.ContainerConfig.Image, wantImage)
+	}
+	if calls := fake.calls(t); len(calls) != 1 || calls[0][0] != "build" {
+		t.Errorf("podman calls = %v, want one build", calls)
 	}
 }
 
@@ -1550,6 +1573,7 @@ func TestHandleInstall_FallbackCopiesLicenseURL(t *testing.T) {
 			Description: "Go language server",
 			Author:      "Go Team",
 			LicenseURL:  "https://github.com/golang/tools/blob/master/LICENSE",
+			Image:       "docker.io/library/gopls:1.5.0",
 		},
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1696,7 +1720,7 @@ func TestHandleInstall_DuplicateInFlight(t *testing.T) {
 
 func TestHandleInstall_CompletesAfterClientDisconnect(t *testing.T) {
 	index := RegistryIndex{
-		{Name: "gopls", Version: "1.0.0", Type: ExtensionTypeLSP, DisplayName: "Go Language Server"},
+		{Name: "gopls", Version: "1.0.0", Type: ExtensionTypeLSP, DisplayName: "Go Language Server", Image: "docker.io/library/gopls:1.5.0"},
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -2281,5 +2305,104 @@ func TestHandleUpdate_AcceptsAllowedSandboxAdditions(t *testing.T) {
 	}
 	if len(got.SandboxConfig.Capabilities) != 1 || got.SandboxConfig.Capabilities[0] != "NET_BIND_SERVICE" {
 		t.Errorf("capabilities = %v, want NET_BIND_SERVICE stored", got.SandboxConfig.Capabilities)
+	}
+}
+
+// A language server with no image and no Dockerfile has nothing to run in a sandbox. This installed
+// successfully before, and the sandbox then started a default image with no server in it.
+func TestHandleInstall_RefusesALanguageServerWithNoImage(t *testing.T) {
+	index := RegistryIndex{
+		{Name: "gopls", Version: "1.0.0", Type: ExtensionTypeLSP, DisplayName: "Go Language Server"},
+	}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(index)
+	}))
+	defer mockServer.Close()
+
+	h := testHandler(t)
+	h.config.RegistryURL = mockServer.URL
+
+	body, _ := json.Marshal(map[string]any{"name": "gopls"})
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleInstall(w, req)
+
+	events := readSSEEvents(t, w.Body.Bytes())
+	if len(events) == 0 || !events[len(events)-1].Done {
+		t.Fatalf("expected a final done SSE event, got %d", len(events))
+	}
+	last := events[len(events)-1]
+	if last.Error == "" {
+		t.Fatal("install of a language server with no image reported success")
+	}
+	for _, want := range []string{"language server", "image", "Dockerfile"} {
+		if !strings.Contains(last.Error, want) {
+			t.Errorf("install error %q does not name %q", last.Error, want)
+		}
+	}
+	if last.Result != nil {
+		t.Errorf("a refused install returned a result: %+v", last.Result)
+	}
+	exts, err := h.store.List()
+	if err != nil {
+		t.Fatalf("store list: %v", err)
+	}
+	if len(exts) != 0 {
+		t.Errorf("%d extensions stored after a refused install, want 0", len(exts))
+	}
+}
+
+// A failed build installs nothing: no row, and no checked-out directory left behind for
+// GET /api/extensions/local to offer as installable under the manifest it shipped with.
+func TestHandleInstall_BuildFailureLeavesNoRowAndNoFiles(t *testing.T) {
+	repo, commit := makeGitRepo(t, map[string]string{
+		"lsp/gopls/manifest.json": `{"display_name":"Go","description":"d","author":"Go Team","version":"0.7.0",` +
+			`"capabilities":{"lsp":{"command":"gopls","args":["serve"],"extensions":["go"],"language":"go"}}}`,
+		"lsp/gopls/Dockerfile": "FROM golang:1-alpine\nCOPY sandbox/sandbox-bridge /usr/local/bin/sandbox-bridge\n",
+	})
+	index := RegistryIndex{{
+		Name: "gopls", Version: "0.7.0", Type: ExtensionTypeLSP, DisplayName: "Go Language Server",
+		Author: "Go Team", Repo: repo, Commit: commit, Subdir: "lsp/gopls",
+	}}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(index)
+	}))
+	defer mockServer.Close()
+
+	h := testHandler(t)
+	h.config.RegistryURL = mockServer.URL
+	extDir := t.TempDir()
+	h.config.ExtensionsDir = extDir
+
+	fake := fakePodmanFails(t, 1, `Error: building at STEP "COPY": no items matching glob`)
+	setBridgeEnv(t)
+
+	body, _ := json.Marshal(map[string]any{"name": "gopls"})
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleInstall(w, req)
+
+	events := readSSEEvents(t, w.Body.Bytes())
+	if len(events) == 0 || !events[len(events)-1].Done {
+		t.Fatalf("expected a final done SSE event, got %d", len(events))
+	}
+	if msg := events[len(events)-1].Error; !strings.Contains(msg, "failed to build") {
+		t.Errorf("install error = %q, want it to report the failed build", msg)
+	}
+	if calls := fake.calls(t); len(calls) != 1 || calls[0][0] != "build" {
+		t.Errorf("podman calls = %v, want one build", calls)
+	}
+	if exts, err := h.store.List(); err != nil || len(exts) != 0 {
+		t.Errorf("stored extensions after a failed build = %v (%v), want none", exts, err)
+	}
+	if _, err := os.Stat(filepath.Join(extDir, "go-team", "gopls")); !os.IsNotExist(err) {
+		t.Errorf("the checkout survived the failed install (stat err = %v)", err)
+	}
+	if _, err := os.Stat(filepath.Join(extDir, "go-team")); !os.IsNotExist(err) {
+		t.Errorf("the emptied author folder was left behind (stat err = %v)", err)
 	}
 }

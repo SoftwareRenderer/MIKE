@@ -18,16 +18,20 @@ import (
 
 // removeExtensionFiles deletes a deleted extension's materialized directory and returns a sentence
 // naming the path when it could not. It returns "" when the files are gone, including "there were none".
-//
-// The path comes from the stored record through extensionDir (`{root}/{author}/{name}`, or the older
-// flat `{root}/{name}`), never from a request field. The containment checks are what make it safe to
-// hand this a recursive delete: author and name originate in a manifest, which is third-party content.
 func (h *ExtensionHandler) removeExtensionFiles(ext *Extension) string {
 	if ext == nil {
 		return "the extension record is missing, so no files could be located"
 	}
-	if reason := unsafeDirName(ext.Name); reason != "" {
-		return fmt.Sprintf("refused to remove files for %s: %s", ext.ID, reason)
+	return h.removeMaterializedDir(ext.ID, ext.Author, ext.Name)
+}
+
+// removeMaterializedDir deletes one extension's directory under the extensions root, deriving the path
+// through extensionDir from author and name - the only derivation every reader uses, and both names come
+// from a third-party manifest. Used by the delete endpoint (a row exists) and by a failed install (none
+// was written, and the files must not outlive the attempt).
+func (h *ExtensionHandler) removeMaterializedDir(extID, author, name string) string {
+	if reason := unsafeDirName(name); reason != "" {
+		return fmt.Sprintf("refused to remove files for %s: %s", extID, reason)
 	}
 	root := h.config.ExtensionsDirOrDefault()
 	if root == "" {
@@ -37,8 +41,11 @@ func (h *ExtensionHandler) removeExtensionFiles(ext *Extension) string {
 	if err != nil {
 		return fmt.Sprintf("the extensions directory %q could not be resolved: %v", root, err)
 	}
-	dir := extensionDir(absRoot, ext.Author, ext.Name)
+	return removeInstalledDir(extID, absRoot, extensionDir(absRoot, author, name))
+}
 
+// removeInstalledDir removes one derived directory, and the author folder once it is empty.
+func removeInstalledDir(extID, absRoot, dir string) string {
 	// Never the root, never outside it: checked lexically and again with symlinks resolved, because a
 	// symlinked extensions/<author> would otherwise delete whatever it points at.
 	if !insideDir(absRoot, dir) {
@@ -53,7 +60,7 @@ func (h *ExtensionHandler) removeExtensionFiles(ext *Extension) string {
 	if err := os.RemoveAll(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		// The row is already gone, so nothing in the UI can point at this any more. What remains is
 		// executable content nobody owns — say so loudly.
-		log.Printf("[extensions] ext=%s LEFTOVER FILES: %s could not be removed: %v", ext.ID, dir, err)
+		log.Printf("[extensions] ext=%s LEFTOVER FILES: %s could not be removed: %v", extID, dir, err)
 		return fmt.Sprintf("%s could not be removed: %v", dir, err)
 	}
 
@@ -63,7 +70,7 @@ func (h *ExtensionHandler) removeExtensionFiles(ext *Extension) string {
 			_ = os.Remove(parent)
 		}
 	}
-	log.Printf("[extensions] ext=%s removed its files: %s", ext.ID, dir)
+	log.Printf("[extensions] ext=%s removed its files: %s", extID, dir)
 	return ""
 }
 

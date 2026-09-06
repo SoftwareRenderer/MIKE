@@ -18,6 +18,24 @@ Interactive terminals do **not** go through the bridge: `sandbox.SandboxManager.
 `podman exec -it <container> <shell>` with a host-side PTY (`backend/term/terminal.go`), which is
 why the bridge protocol has no shell methods.
 
+## How the bridge gets into a container
+
+Three routes, and knowing all three is the point: a container can hold a bridge while the image build
+that was supposed to provide one failed, which is exactly how a two-day build breakage looked like a
+running sandbox.
+
+1. **Baked at image build** — extension Dockerfiles `COPY sandbox/sandbox-bridge`, from a staged build
+   context (`BuildExtensionImage`, `backend/extensions/image_build.go`).
+2. **Copied at create** — `ExtensionSandboxManager.Create` and `SandboxManager` both `podman cp` the
+   host's bridge to `/sandbox-bridge`, so a container never runs a bridge older than the server that
+   started it, whatever the image held.
+3. **Built into the app image** — `Dockerfile` compiles `./pkg/bridge/agent` and copies it beside the
+   server binary (that is why the committed `sandbox/sandbox-bridge` is excluded from the app build
+   context: the image must not carry a second, staler copy).
+
+`make bridge-check` is the gate on route 3's committed twin: an edit under `pkg/` that was not rebuilt
+is an edit that never runs.
+
 ## Why an LSP session is bound to its connection
 
 A language server is initialized with one workspace root and answers about the documents opened on

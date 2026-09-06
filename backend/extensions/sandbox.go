@@ -434,20 +434,17 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 		return nil, fmt.Errorf("resolve agent path: %w", err)
 	}
 
-	// Determine image
-	image := ext.ContainerConfig.Image
-	if image == "" {
-		image = "docker.io/library/ubuntu:latest"
-	}
-	if err := sm.rt.ValidateImageRef(image); err != nil {
-		return nil, fmt.Errorf("invalid extension image: %w", err)
-	}
-	// Extensions installed before image names were qualified carry a short ref
-	// ("kanban-ext-gopls:1.0.0"); resolve it to the local build it means.
-	image = sm.rt.ResolveImageRef(image)
-
-	if err := sm.ensureExtensionImage(ext, image); err != nil {
+	// Which image this container runs is a precondition, never a default (see extensionImageSource).
+	image, dockerfilePath, err := sm.extensionImageSource(ext)
+	if err != nil {
 		return nil, err
+	}
+
+	if err := sm.ensureExtensionImage(ext, image, dockerfilePath); err != nil {
+		return nil, err
+	}
+	if ext.ContainerConfig.Image == "" {
+		sm.persistDerivedImage(ext, image)
 	}
 
 	// Per-extension on purpose: this is the one place a granted dependency directory becomes a root,
@@ -891,38 +888,85 @@ func pullsMissingRemoteImage(image string) bool {
 	return image != "" && !strings.HasPrefix(image, sandboxruntime.LocalImageRegistry+"/")
 }
 
-// ensureExtensionImage verifies the extension's container image exists locally,
-// rebuilding it from the extension's Dockerfile if it has gone missing
-func (sm *ExtensionSandboxManager) ensureExtensionImage(ext *Extension, image string) error {
+// extensionImageSource answers two questions together because they must agree: which image an
+// extension's sandbox runs, and what builds it when the host lacks it.
+//
+// There is no default image. There used to be (docker.io/library/ubuntu:latest when the record's image
+// was empty), and it failed in the worst way for a language server: the container started, reported
+// running, and held no server, so the editor's LSP never resolved and nothing said why. Now an
+// extension that cannot name an image is an error, and no container is created.
+//
+// A record with no image but a Dockerfile on disk is repaired here, so an extension broken by the old
+// default heals on its next start instead of needing a reinstall.
+func (sm *ExtensionSandboxManager) extensionImageSource(ext *Extension) (image, dockerfilePath string, err error) {
+	dockerfilePath, dfErr := sm.findLocalDockerfile(ext.Name)
+	if dfErr != nil {
+		// An unreadable extensions dir does not disqualify an extension that declares its image; it
+		// only means a missing local build cannot be rebuilt.
+		log.Printf("[ext-sandbox] ext=%s Dockerfile lookup failed: %v", ext.ID, dfErr)
+		dockerfilePath = ""
+	}
+
+	if declared := ext.ContainerConfig.Image; declared != "" {
+		if err := sm.rt.ValidateImageRef(declared); err != nil {
+			return "", "", fmt.Errorf("extension %s declares an unusable image: %w", ext.ID, err)
+		}
+		// Old records carry a short ref ("kanban-ext-gopls:1.0.0"); resolve it to the local build.
+		return sm.rt.ResolveImageRef(declared), dockerfilePath, nil
+	}
+	if dockerfilePath == "" {
+		return "", "", fmt.Errorf("extension %s (%s) has no container image and no Dockerfile to build one from, so its sandbox cannot start", ext.ID, ext.Name)
+	}
+	return ExtensionImageRef(ext.Name, ext.Version), dockerfilePath, nil
+}
+
+// persistDerivedImage saves an image the sandbox had to derive, so it is derived once. Best effort: the
+// container is already built, so a failed write means the next start re-derives the same ref and builds
+// nothing. The caller's copy is the LSP manager's own and is never written back wholesale.
+func (sm *ExtensionSandboxManager) persistDerivedImage(ext *Extension, image string) {
+	if sm.store == nil {
+		log.Printf("[ext-sandbox] ext=%s image %s derived at start, but with no store it will be derived again next time", ext.ID, image)
+		return
+	}
+	cc := ext.ContainerConfig
+	cc.Image = image
+	if err := sm.store.SetImageRef(ext.ID, image, cc); err != nil {
+		log.Printf("[ext-sandbox] ext=%s WARNING: derived image %s could not be recorded: %v", ext.ID, image, err)
+		return
+	}
+	ext.ContainerConfig.Image = image
+	ext.ImageRef = image
+	log.Printf("[ext-sandbox] ext=%s had no image on record; built %s and recorded it", ext.ID, image)
+}
+
+// ensureExtensionImage makes the image exist locally: rebuild it from the extension's Dockerfile, pull
+// it if it is a remote ref, or fail. The create uses --pull never, so an image that is not here has to
+// be settled now or it fails later with a worse message.
+func (sm *ExtensionSandboxManager) ensureExtensionImage(ext *Extension, image, dockerfilePath string) error {
 	if sm.registry.ImageExists(image) {
 		return nil
 	}
-
-	dfPath, err := sm.findLocalDockerfile(ext.Name)
-	if err != nil {
-		return fmt.Errorf("locate Dockerfile for extension %s: %w", ext.Name, err)
-	}
-	if dfPath == "" {
-		// Nothing to rebuild from, so the image is genuinely remote — and with --pull=never on the
-		// create, pulling it here is the only way it arrives.
-		if pullsMissingRemoteImage(image) {
-			log.Printf("[ext-sandbox] ext=%s image %s missing; pulling", ext.ID, image)
-			if err := sm.registry.PullImage(image); err != nil {
-				return fmt.Errorf("pull image %s: %w", image, err)
-			}
+	if dockerfilePath != "" {
+		data, err := os.ReadFile(dockerfilePath)
+		if err != nil {
+			return fmt.Errorf("read Dockerfile %s: %w", dockerfilePath, err)
+		}
+		log.Printf("[ext-sandbox] ext=%s image %s missing; rebuilding from %s", ext.ID, image, dockerfilePath)
+		if err := sm.registry.BuildExtensionImage(string(data), image); err != nil {
+			return fmt.Errorf("rebuild image %s from %s: %w", image, dockerfilePath, err)
 		}
 		return nil
 	}
-
-	data, err := os.ReadFile(dfPath)
-	if err != nil {
-		return fmt.Errorf("read Dockerfile %s: %w", dfPath, err)
+	// Nothing to rebuild from, so the image is remote, and with --pull never on the create this is the
+	// only way it arrives.
+	if pullsMissingRemoteImage(image) {
+		log.Printf("[ext-sandbox] ext=%s image %s missing; pulling", ext.ID, image)
+		if err := sm.registry.PullImage(image); err != nil {
+			return fmt.Errorf("pull image %s: %w", image, err)
+		}
+		return nil
 	}
-	log.Printf("[ext-sandbox] ext=%s image %s missing; rebuilding from %s", ext.ID, image, dfPath)
-	if err := sm.registry.BuildImageFromReader(string(data), image); err != nil {
-		return fmt.Errorf("rebuild image %s from %s: %w", image, dfPath, err)
-	}
-	return nil
+	return fmt.Errorf("extension %s image %s is not on this host and there is no Dockerfile to build it from", ext.ID, image)
 }
 
 // findLocalDockerfile walks the extensions directory for a subdirectory named after the

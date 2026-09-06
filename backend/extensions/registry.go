@@ -179,22 +179,6 @@ func (rc *RegistryClient) PullImage(imageRef string) error {
 	return nil
 }
 
-// BuildImageFromReader builds an image from a Dockerfile content via podman.
-func (rc *RegistryClient) BuildImageFromReader(dockerfileContent, imageRef string) error {
-	if err := sandboxruntime.ValidateImageRef(imageRef); err != nil {
-		return err
-	}
-	imageRef = rc.rt.ResolveImageRef(imageRef)
-	// Write Dockerfile to temp dir and build from it
-	cmd := exec.Command("podman", "build", "-t", imageRef, "-f", "-", ".")
-	cmd.Stdin = strings.NewReader(dockerfileContent)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("build image %s: %w (output: %s)", imageRef, err, string(output))
-	}
-	return nil
-}
-
 // ImageExists checks if an image is available locally via podman.
 func (rc *RegistryClient) ImageExists(imageRef string) bool {
 	return rc.rt.ImageExists(imageRef)

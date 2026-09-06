@@ -366,8 +366,12 @@ func TestCreate_RejectsLeadingDashImage(t *testing.T) {
 	if err == nil {
 		t.Fatal("Create() with leading-dash image should return error")
 	}
-	if !strings.Contains(err.Error(), "invalid extension image") {
-		t.Errorf("Create() error = %v, want error containing 'invalid extension image'", err)
+	if !strings.Contains(err.Error(), "unusable image") {
+		t.Errorf("Create() error = %v, want error containing 'unusable image'", err)
+	}
+	// Refused before the container exists, not after.
+	if exists, _ := sm.rt.ContainerExists(ExtensionContainerPrefix + "-test-dash-image"); exists {
+		t.Error("Create() created a container for a rejected image")
 	}
 }
 
@@ -397,36 +401,34 @@ func TestCreate_AcceptsValidImage(t *testing.T) {
 		},
 	}
 	_, err := sm.Create(ext, nil)
-	if err != nil && strings.Contains(err.Error(), "invalid extension image") {
+	if err != nil && strings.Contains(err.Error(), "unusable image") {
 		t.Errorf("Create() with valid image should not fail at image validation, got: %v", err)
 	}
 }
 
-func TestCreate_DefaultImagePassesValidation(t *testing.T) {
+// No default image: an extension that names none and ships no Dockerfile is refused by name, and no
+// container is created. It used to get ubuntu:latest - running, and holding no language server.
+func TestCreate_RefusesExtensionWithNoImageAndNoDockerfile(t *testing.T) {
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil)
 	sm.available = true
+	sm.extensionsDir = filepath.Join(t.TempDir(), "extensions") // installed, but no Dockerfile in it
 	_, filename, _, _ := runtime.Caller(0)
 	projectRoot := filepath.Join(filepath.Dir(filename), "..", "..")
-	bridgePath := filepath.Join(projectRoot, "sandbox", "sandbox-bridge")
-	t.Setenv("MIKE_AGENT_PATH", bridgePath)
+	t.Setenv("MIKE_AGENT_PATH", filepath.Join(projectRoot, "sandbox", "sandbox-bridge"))
 
-	// Create really creates the container when the image validates, and this test only cares
-	// that validation passed — so the container is the test's to remove. Through the runtime,
-	// not Destroy: this manager has no store to look the record up in.
-	t.Cleanup(func() {
-		safeID, err := sm.rt.SanitizeID("test-default-image")
-		if err == nil {
-			_ = sm.rt.RemoveContainer(ExtensionContainerPrefix + "-" + safeID)
-		}
-	})
-
-	ext := &Extension{
-		ID: "test-default-image",
-	}
+	ext := &Extension{ID: "test-no-image", Name: "no-such-language-server", Version: "1.0.0"}
 	_, err := sm.Create(ext, nil)
-	if err != nil && strings.Contains(err.Error(), "invalid extension image") {
-		t.Errorf("Create() with empty (defaulted) image should not fail at image validation, got: %v", err)
+	if err == nil {
+		t.Fatal("Create() with no image and no Dockerfile = nil, want an error naming what the extension lacks")
+	}
+	for _, want := range []string{"test-no-image", "no container image", "Dockerfile"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Create() error = %v, want it to name %q", err, want)
+		}
+	}
+	if exists, _ := sm.rt.ContainerExists(ExtensionContainerPrefix + "-test-no-image"); exists {
+		t.Error("Create() created a container for an extension with no image")
 	}
 }
 
@@ -462,8 +464,11 @@ func TestCreate_RejectsShellInjectionImage(t *testing.T) {
 			if err == nil {
 				t.Fatalf("Create() with image %q should return error", tt.image)
 			}
-			if !strings.Contains(err.Error(), "invalid extension image") {
-				t.Errorf("Create() error = %v, want error containing 'invalid extension image'", err)
+			if !strings.Contains(err.Error(), "unusable image") {
+				t.Errorf("Create() error = %v, want error containing 'unusable image'", err)
+			}
+			if exists, _ := sm.rt.ContainerExists(ExtensionContainerPrefix + "-test-injection-image"); exists {
+				t.Errorf("Create() created a container for the rejected image %q", tt.image)
 			}
 		})
 	}
@@ -699,8 +704,9 @@ func TestPullsMissingRemoteImage(t *testing.T) {
 	}
 }
 
-// A local-build ref that has gone missing (pruned image, no Dockerfile) must not be pulled: the
-// caller reports "image is not available locally" instead of podman retrying a registry.
+// A missing local-build ref must not be pulled (podman would retry a registry on this machine) and must
+// not pass silently: with no Dockerfile there is nothing to rebuild, so the create would fail later with
+// a worse message. It used to return nil and let Create start a default container.
 func TestEnsureExtensionImage_LocalBuildIsNeverPulled(t *testing.T) {
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil)
@@ -708,8 +714,12 @@ func TestEnsureExtensionImage_LocalBuildIsNeverPulled(t *testing.T) {
 
 	ext := &Extension{ID: "ext-no-df", Name: "some-local-build"}
 	missing := ExtensionImageRef("some-local-build", "9.9.9")
-	if err := sm.ensureExtensionImage(ext, missing); err != nil {
-		t.Errorf("ensureExtensionImage(%s) = %v, want nil — a local build is never pulled", missing, err)
+	err := sm.ensureExtensionImage(ext, missing, "")
+	if err == nil {
+		t.Fatalf("ensureExtensionImage(%s) = nil, want an error: the image is not there and nothing can build it", missing)
+	}
+	if strings.Contains(err.Error(), "pull") {
+		t.Errorf("ensureExtensionImage(%s) = %v, want no pull attempt — a local build is never pulled", missing, err)
 	}
 }
 
@@ -1093,4 +1103,154 @@ func TestBuildExtensionCreateArgs_ProjectConfiguredMountIsAlwaysReadOnly(t *test
 	if mounts := mountArgs(skipped); len(mounts) != 0 {
 		t.Errorf("a nil policy must mount nothing, got %v", mounts)
 	}
+}
+
+// writeInstalledDockerfile puts a Dockerfile where an installed extension's would be, so the sandbox
+// can build the image a record is missing.
+func writeInstalledDockerfile(t *testing.T, root, author, name string) string {
+	t.Helper()
+	dir := filepath.Join(root, author, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	path := filepath.Join(dir, "Dockerfile")
+	if err := os.WriteFile(path, []byte("FROM alpine:latest\nCOPY sandbox/sandbox-bridge /usr/local/bin/sandbox-bridge\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return path
+}
+
+func TestExtensionImageSource(t *testing.T) {
+	extDir := t.TempDir()
+	writeInstalledDockerfile(t, extDir, "go-team", "gopls")
+	sm := NewExtensionSandboxManager(NewRegistryClient(), nil)
+	sm.extensionsDir = extDir
+
+	tests := []struct {
+		name      string
+		ext       *Extension
+		wantImage string
+		wantErr   bool
+	}{
+		{
+			name:      "declared image",
+			ext:       &Extension{ID: "e1", Name: "gopls", Version: "0.7.0", ContainerConfig: ContainerConfig{Image: "docker.io/library/gopls:1.5.0"}},
+			wantImage: "docker.io/library/gopls:1.5.0",
+		},
+		{
+			name:      "short ref resolved to the local build",
+			ext:       &Extension{ID: "e2", Name: "gopls", Version: "0.7.0", ContainerConfig: ContainerConfig{Image: "kanban-ext-gopls:1.0.0"}},
+			wantImage: "localhost/kanban-ext-gopls:1.0.0",
+		},
+		{
+			name:      "no image, Dockerfile installed: derived",
+			ext:       &Extension{ID: "e3", Name: "gopls", Version: "0.7.0"},
+			wantImage: ExtensionImageRef("gopls", "0.7.0"),
+		},
+		{
+			name:    "no image, no Dockerfile",
+			ext:     &Extension{ID: "e4", Name: "no-such-server", Version: "1.0.0"},
+			wantErr: true,
+		},
+		{
+			name:    "declared image is not a valid ref",
+			ext:     &Extension{ID: "e5", Name: "gopls", Version: "0.7.0", ContainerConfig: ContainerConfig{Image: "-v /etc:/x"}},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			image, dockerfilePath, err := sm.extensionImageSource(tc.ext)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("extensionImageSource() = (%q, %q, nil), want an error", image, dockerfilePath)
+				}
+				if !strings.Contains(err.Error(), tc.ext.ID) {
+					t.Errorf("error %q does not name the extension %q", err, tc.ext.ID)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("extensionImageSource(): %v", err)
+			}
+			if image != tc.wantImage {
+				t.Errorf("image = %q, want %q", image, tc.wantImage)
+			}
+			// A derived ref has to say what builds it, or ensureExtensionImage cannot rebuild it.
+			if tc.ext.ContainerConfig.Image == "" && dockerfilePath == "" {
+				t.Error("a derived image came with no Dockerfile path to build it from")
+			}
+		})
+	}
+}
+
+// A row with no image - the shape the removed default let through - is repaired at create: the ref it
+// should have had is derived, the image is built from the installed Dockerfile, and the record is
+// updated so the build happens once.
+func TestCreate_DerivesAndRecordsTheImageForARowWithNoImage(t *testing.T) {
+	extStore := testStore(t)
+	installed := &Extension{
+		ID: "go-team-gopls-1", Name: "gopls", Author: "go-team", Version: "0.7.0",
+		Type: ExtensionTypeLSP, Config: map[string]any{},
+	}
+	if err := extStore.Create(installed); err != nil {
+		t.Fatalf("store Create: %v", err)
+	}
+
+	fake := fakePodmanOK(t)
+	setBridgeEnv(t)
+	sm := NewExtensionSandboxManager(NewRegistryClient(), extStore)
+	sm.available = true
+	sm.extensionsDir = t.TempDir()
+	writeInstalledDockerfile(t, sm.extensionsDir, "go-team", "gopls")
+	t.Cleanup(func() { _ = sm.rt.RemoveContainer(ExtensionContainerPrefix + "-" + installed.ID) })
+
+	ext, err := extStore.GetByID(installed.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if _, err := sm.Create(ext, nil); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	ref := ExtensionImageRef("gopls", "0.7.0")
+	var built, created bool
+	for _, call := range fake.calls(t) {
+		switch {
+		case len(call) > 0 && call[0] == "build":
+			built = true
+			for i, a := range call {
+				if a == "-t" && i+1 < len(call) && call[i+1] != ref {
+					t.Errorf("build tagged %q, want %q", call[i+1], ref)
+				}
+			}
+		case containsArg(call, "create"):
+			created = containsArg(call, ref)
+		}
+	}
+	if !built {
+		t.Errorf("no build was run for the derived image %q", ref)
+	}
+	if !created {
+		t.Errorf("the container was not created from %q", ref)
+	}
+
+	stored, err := extStore.GetByID(installed.ID)
+	if err != nil {
+		t.Fatalf("GetByID after create: %v", err)
+	}
+	if stored.ImageRef != ref || stored.ContainerConfig.Image != ref {
+		t.Errorf("record after repair: image_ref=%q container_config.image=%q, want %q in both",
+			stored.ImageRef, stored.ContainerConfig.Image, ref)
+	}
+}
+
+func containsArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
 }
