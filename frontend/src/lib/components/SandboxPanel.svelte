@@ -4,7 +4,7 @@
     import { getProject } from '$lib/api';
     import Icon from '$lib/components/Icon.svelte';
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
-    import { isNearMemoryLimit, formatSandboxMemory, formatMemoryLimitMB } from '$lib/utils/memory-stats';
+    import { isNearMemoryLimit, isMemoryLimitReached, formatSandboxMemory, formatMemoryLimitMB } from '$lib/utils/memory-stats';
     import { formatAssignedHost } from '$lib/utils/sandbox-ports';
 import BaseModal from './BaseModal.svelte';
 import { t } from '$lib/i18n';
@@ -74,7 +74,7 @@ import { t } from '$lib/i18n';
                         </div>
                     {/if}
                     {#if stats.memory_peak_mb > 0}
-                        <div class="memory-peak">{t('sandbox.peakMemory', { mb: stats.memory_peak_mb })}</div>
+                        <div class="memory-peak" class:reached={isMemoryLimitReached(stats)}>{t('sandbox.peakMemory', { mb: stats.memory_peak_mb })}</div>
                     {/if}
                     {#if stats.oom_kills > 0}
                         <div class="oom-warning" role="alert">
@@ -275,6 +275,10 @@ import { t } from '$lib/i18n';
     .memory-peak {
         font-size: 0.75rem;
         color: var(--color-text-tertiary);
+    }
+
+    .memory-peak.reached {
+        color: var(--color-status-red);
     }
 
     .oom-warning {

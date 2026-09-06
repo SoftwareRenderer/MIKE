@@ -66,7 +66,7 @@
             </svg>
             <span class="project-path">{toHomeRelative(currentProject.path)}</span>
             {#if currentBranch}
-                <span class="branch-badge" class:main={isMainBranch}>
+                <span class="branch-badge" class:main={isMainBranch} title={currentBranch}>
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <circle cx="6" cy="6" r="2.5"/>
                         <circle cx="10" cy="10" r="2.5"/>
@@ -74,7 +74,7 @@
                         <line x1="6" y1="3.5" x2="6" y2="2"/>
                         <line x1="10" y1="12.5" x2="10" y2="14"/>
                     </svg>
-                    {currentBranch}
+                    <span class="branch-badge-label">{currentBranch}</span>
                 </span>
             {/if}
         </button>
@@ -158,6 +158,15 @@
         border-color: var(--color-branch-main-border);
         background: var(--color-branch-main-bg);
         color: var(--color-branch-main-text);
+    }
+    .branch-badge svg {
+        flex-shrink: 0;
+    }
+    .branch-badge-label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     .actions {
         display: flex;

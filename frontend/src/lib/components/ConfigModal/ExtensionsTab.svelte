@@ -729,7 +729,7 @@
                         {@const newPerms = update.new_permissions ?? []}
                         <div class="update-item" class:has-new-perms={newPerms.length > 0}>
                             <div class="update-info">
-                                <span class="update-name">{update.name}</span>
+                                <span class="update-name" title={update.name}>{update.name}</span>
                                 <span class="update-versions">{update.current_version} → {update.available_version}</span>
                             </div>
                             {#if (update.changelog ?? []).length > 0}
@@ -764,7 +764,7 @@
                                     </ul>
                                 </div>
                             {/if}
-                            <button class="btn btn-primary btn-small" onclick={() => handleUpdate(update)}>{t('settings.extensions.update')}</button>
+                            <button class="btn btn-primary btn-small update-action" onclick={() => handleUpdate(update)}>{t('settings.extensions.update')}</button>
                         </div>
                     {/each}
                 </div>
@@ -1730,15 +1730,32 @@
         border-radius: 8px;
     }
 
+    .update-info {
+        display: flex;
+        align-items: baseline;
+        flex: 1 1 0;
+        min-width: 0;
+    }
+
     .update-name {
         font-weight: 600;
         color: var(--color-text-primary);
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .update-versions {
         font-size: 0.8rem;
         color: var(--color-text-tertiary);
         margin-left: 0.5rem;
+        flex-shrink: 0;
+    }
+
+    .update-action {
+        margin-left: auto;
+        flex-shrink: 0;
     }
 
     .update-new-perms {

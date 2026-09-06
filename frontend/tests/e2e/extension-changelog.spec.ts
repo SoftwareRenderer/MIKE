@@ -13,6 +13,10 @@ test.describe.configure({ mode: 'parallel' });
 // the real UI contract: updates with a changelog render the entries inline,
 // updates without one do not.
 
+// Long enough that the name cannot fit beside the Update button at the default
+// 1280px viewport — the row used to wrap and drop the button to the LEFT edge.
+const LONG_NAME = 'a-very-long-extension-name-for-layout-regressions-that-keeps-going-and-going-and-going-and-going';
+
 const COMMIT_A = 'a'.repeat(64);
 const COMMIT_B = 'b'.repeat(64);
 const COMMIT_C = 'c'.repeat(64);
@@ -38,25 +42,33 @@ const CHECK_UPDATES_FIXTURE = [
   },
 ];
 
+async function mockCheckUpdates(page: import('@playwright/test').Page, updates: unknown[]) {
+  await page.route('**/api/extensions/check-updates', (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(updates),
+    })
+  );
+}
+
+async function openExtensionsTab(page: import('@playwright/test').Page) {
+  // Open Settings → Extensions.
+  await page.click('.icon-btn[aria-label="Settings"]');
+  await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+  await page.click('text=Extensions');
+  await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+}
+
 test.describe('Extension update changelogs', () => {
   test.beforeEach(async ({ page }) => {
-    await page.route('**/api/extensions/check-updates', (route) =>
-      route.fulfill({
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(CHECK_UPDATES_FIXTURE),
-      })
-    );
+    await mockCheckUpdates(page, CHECK_UPDATES_FIXTURE);
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
   test('should show changelog entries inline in the Updates Available section', async ({ page }) => {
-    // Open Settings → Extensions.
-    await page.click('.icon-btn[aria-label="Settings"]');
-    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
-    await page.click('text=Extensions');
-    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+    await openExtensionsTab(page);
 
     // Check for updates (response is the intercepted fixture).
     await page.click('button:has-text("Check for Updates")');
@@ -84,5 +96,48 @@ test.describe('Extension update changelogs', () => {
     // The update WITHOUT a changelog renders no changelog block.
     const plain = updateItems.filter({ hasText: 'plain-ext' });
     await expect(plain.locator('.update-changelog')).toHaveCount(0);
+  });
+});
+
+test.describe('Extension update row layout', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockCheckUpdates(page, [
+      {
+        id: 'long-name-ext',
+        name: LONG_NAME,
+        current_version: '1.0.0',
+        available_version: '2.0.0',
+      },
+    ]);
+    await page.goto('/');
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+    await openExtensionsTab(page);
+    await page.click('button:has-text("Check for Updates")');
+    await expect(page.locator('.update-item')).toHaveCount(1, { timeout: 10000 });
+  });
+
+  // The button is pinned to the right edge of the row whatever the name is: the
+  // name truncates instead of pushing the button onto a wrapped, left-aligned line.
+  test('keeps the update button on the right for a long extension name', async ({ page }) => {
+    const item = page.locator('.update-item');
+    const button = item.locator('button.update-action');
+    const name = item.locator('.update-name');
+
+    await expect(button).toBeVisible();
+    // The full name is still reachable once truncated.
+    await expect(name).toHaveAttribute('title', LONG_NAME);
+
+    const [itemBox, buttonBox, nameBox] = [await item.boundingBox(), await button.boundingBox(), await name.boundingBox()];
+    if (!itemBox || !buttonBox || !nameBox) throw new Error('update row has no layout boxes');
+
+    // Right-hand side: the button's right edge sits on the row's right edge.
+    expect(itemBox.x + itemBox.width - (buttonBox.x + buttonBox.width)).toBeLessThan(2);
+    // Not wrapped below the name and left-aligned: the two share the same row.
+    expect(buttonBox.y).toBeLessThan(nameBox.y + nameBox.height);
+    expect(nameBox.y).toBeLessThan(buttonBox.y + buttonBox.height);
+    expect(buttonBox.x).toBeGreaterThan(nameBox.x);
+
+    // The name is what gives: it is clipped, not the layout broken.
+    expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
   });
 });
