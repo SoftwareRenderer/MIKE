@@ -306,8 +306,7 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 		"--network", "none",
 	}
 
-	// Add back explicitly requested capabilities, except the ones that reach past
-	// the container.
+	// Add back explicitly requested capabilities
 	for _, cap := range ext.SandboxConfig.Capabilities {
 		if err := ValidateCapability(cap); err != nil {
 			log.Printf("[ext-sandbox] ext=%s SKIPPED capability %q: %v", ext.ID, cap, err)
@@ -682,7 +681,11 @@ func (sm *ExtensionSandboxManager) Destroy(extID string) error {
 		}
 	}
 
-	// Remove image if it was built locally
+	// Remove image if it was built locally. A manager built without a store has no record
+	// to look up; the container above is what Destroy owns either way.
+	if sm.store == nil {
+		return nil
+	}
 	if ext, err := sm.store.GetByID(extID); err == nil && ext.IsLocalInstalled() && ext.ImageRef != "" {
 		if !strings.HasPrefix(ext.ImageRef, "-") {
 			_, _ = sm.rt.PodmanExec("rmi", ext.ImageRef)

@@ -2180,19 +2180,10 @@ func TestHandleUpdate_RejectsSandboxWidening(t *testing.T) {
 		{"container path with ':' (spec rewrite)", mountsBody("/tmp/whatever", "/workspace:rw", "ro"), "/workspace:rw"},
 		{"container path with ',' (options rewrite)", mountsBody("/tmp/whatever", "/workspace,rw", "ro"), "/workspace,rw"},
 		{"container path traversal", mountsBody("/tmp/whatever", "/mnt/../../etc", "ro"), "'..'"},
-		{"SYS_ADMIN", capsBody("SYS_ADMIN"), "SYS_ADMIN"},
-		{"SYS_PTRACE", capsBody("SYS_PTRACE"), "SYS_PTRACE"},
-		{"SYS_MODULE", capsBody("SYS_MODULE"), "SYS_MODULE"},
-		{"SYS_RAWIO", capsBody("SYS_RAWIO"), "SYS_RAWIO"},
-		{"DAC_OVERRIDE", capsBody("DAC_OVERRIDE"), "DAC_OVERRIDE"},
-		{"DAC_READ_SEARCH", capsBody("DAC_READ_SEARCH"), "DAC_READ_SEARCH"},
-		{"NET_ADMIN", capsBody("NET_ADMIN"), "NET_ADMIN"},
-		{"MKNOD", capsBody("MKNOD"), "MKNOD"},
-		{"SETUID", capsBody("SETUID"), "SETUID"},
-		{"SETGID", capsBody("SETGID"), "SETGID"},
-		{"SYS_BOOT", capsBody("SYS_BOOT"), "SYS_BOOT"},
-		{"LINUX_IMMUTABLE", capsBody("LINUX_IMMUTABLE"), "LINUX_IMMUTABLE"},
-		{"CAP_ prefix does not smuggle it in", capsBody("CAP_SYS_ADMIN"), "SYS_ADMIN"},
+		{"capability shaped like a flag", capsBody("--privileged"), "invalid"},
+		{"two capabilities in one value", capsBody("SYS_ADMIN ALL"), "invalid"},
+		{"capability with a separator", capsBody("SYS_ADMIN,ALL"), "invalid"},
+		{"empty capability", capsBody(""), "empty"},
 	}
 
 	for _, tc := range cases {
@@ -2231,6 +2222,29 @@ func TestHandleUpdate_RejectsSandboxWidening(t *testing.T) {
 			}
 		})
 	}
+
+	// A capability *name* is not what this refuses: the grant lands in a gVisor guest
+	// that started from --cap-drop ALL, so SYS_ADMIN is stored like CHOWN. What is stored
+	// with it is checked by the container's own posture test
+	// (TestBuildExtensionCreateArgs_CapabilityPosture), which pins the runtime pairing the
+	// grant assumes.
+	t.Run("a plain capability name is accepted and stored", func(t *testing.T) {
+		h := testHandler(t)
+		if err := h.store.Create(makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		w := putUpdate(t, h, "test-ext", capsBody("SYS_ADMIN", "SYS_PTRACE", "CHOWN"))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (%s)", w.Code, w.Body.String())
+		}
+		got, err := h.store.GetByID("test-ext")
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		if len(got.SandboxConfig.Capabilities) != 3 || got.SandboxConfig.Capabilities[0] != "SYS_ADMIN" {
+			t.Errorf("capabilities = %v, want the three requested names as given", got.SandboxConfig.Capabilities)
+		}
+	})
 }
 
 // TestHandleUpdate_AcceptsAllowedSandboxAdditions keeps the legitimate case

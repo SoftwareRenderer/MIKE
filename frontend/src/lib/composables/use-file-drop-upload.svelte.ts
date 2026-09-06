@@ -98,6 +98,19 @@ export function useFileDropUpload(options: FileDropUploadOptions) {
         void run(collectPickedFiles(files)).catch(reportUnexpected).finally(endRun);
     }
 
+    /**
+     * The `<input type="file">` answer: the same run a drop starts, from a control a
+     * keyboard or a phone can reach. The input is cleared before the run — a value left
+     * behind means picking the same file twice fires change once, and the second drop
+     * looks like one the app ignored.
+     */
+    function handlePicked(e: Event) {
+        const el = e.target as HTMLInputElement;
+        const files = Array.from(el.files || []);
+        el.value = '';
+        uploadFiles(files);
+    }
+
     /** One run at a time — a second drop or pick would race the same progress state. */
     function begin(): boolean {
         if (uploading) return false;
@@ -187,7 +200,8 @@ export function useFileDropUpload(options: FileDropUploadOptions) {
         }
         if (selection.truncated) {
             notes.push(t('explorer.shared.dropTruncated', { max: MAX_DROP_FILES }));
-        }        if (selection.files.length === 0) {
+        }
+        if (selection.files.length === 0) {
             if (notes.length) dialogStore.showToast(notes.join(' · '), 'error');
             return;
         }
@@ -270,6 +284,14 @@ export function useFileDropUpload(options: FileDropUploadOptions) {
         handleDragLeave,
         handleDrop,
         uploadFiles,
+        handlePicked,
         cancel,
     };
 }
+
+/**
+ * What `useFileDropUpload` hands a listing, named so the components that render a drop
+ * zone (FileDropProgress, FileUploadButton) can say what they take. Read through the
+ * getters, never destructured: a destructured value is a snapshot of one render.
+ */
+export type FileDropUpload = ReturnType<typeof useFileDropUpload>;

@@ -1,12 +1,17 @@
 package sandboxruntime
 
 // The parts of a `podman create` command line that arrive from outside this process: a
-// Linux capability someone asked for, and the in-container path of a bind mount. Both
-// are interpolated into the command, and either can undo the sandbox on its own: one
-// mount of "/" or one CAP_SYS_ADMIN makes the gVisor boundary meaningless, and a ":" or
-// "," inside a container path rewrites the mount's options — an "ro" becomes "rw"
-// without anyone asking. The rule lives here, once, for every caller that builds
-// container arguments: a task sandbox (backend/sandbox), an extension sandbox
+// Linux capability someone asked for, and the in-container path of a bind mount. Both are
+// interpolated into the command. The mount rules carry the real security weight: one mount
+// of "/" hands the sandbox the host tree, and a ":" or "," inside a container path
+// rewrites the mount's options — an "ro" becomes "rw" without anyone asking. A capability
+// does not: every container MIKE creates runs under gVisor with `--cap-drop ALL`, so a
+// granted capability is a privilege inside the guest kernel, and the guest cannot reach
+// through the gofer to write a read-only bind mount, see a host PID, or mount its way onto
+// a host path (see GVisorIsolationForCaps for what was measured). What is checked here is
+// therefore the *shape* of a capability plus, at the call site that grants one, the runtime
+// that makes granting it safe. The rule lives in this package once, for every caller that
+// builds container arguments: a task sandbox (backend/sandbox), an extension sandbox
 // (backend/extensions), and the API that stores both settings.
 
 import (
@@ -21,26 +26,10 @@ import (
 var containerPathPattern = regexp.MustCompile(`^/[A-Za-z0-9._/-]+$`)
 
 // capabilityPattern accepts plain capability names only, so a value cannot smuggle a
-// flag, whitespace or a separator into the podman arguments.
+// flag, whitespace or a separator into the podman arguments. This is the part of the old
+// capability denylist that was never about the capability: "--privileged" and
+// "SYS_ADMIN ALL" reach `--cap-add` as *arguments*, and no runtime makes that safe.
 var capabilityPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
-
-// DeniedCapabilities are never re-added, no matter who asked: a sandbox already starts
-// with `--cap-drop ALL` and no-new-privileges, and these reach past the container into
-// the host kernel, other processes, devices or the network.
-var DeniedCapabilities = map[string]string{
-	"SYS_ADMIN":       "grants near-root control of the container's namespaces and the host kernel interface",
-	"SYS_PTRACE":      "ptraces other processes",
-	"SYS_MODULE":      "loads kernel modules",
-	"SYS_RAWIO":       "raw I/O port access (iopl/ioperm)",
-	"DAC_OVERRIDE":    "bypasses file read/write/execute permission checks",
-	"DAC_READ_SEARCH": "bypasses file read permission checks and directory traversal",
-	"NET_ADMIN":       "reconfigures network interfaces and tables, defeating network isolation",
-	"MKNOD":           "creates device nodes",
-	"SETUID":          "changes the process UID",
-	"SETGID":          "changes the process GID",
-	"SYS_BOOT":        "reboots the host",
-	"LINUX_IMMUTABLE": "mounts read-only bind mounts read-write",
-}
 
 // HasDotDotSegment reports whether p contains a ".." path segment.
 func HasDotDotSegment(p string) bool {
@@ -77,15 +66,9 @@ func ValidateContainerPath(containerPath string) error {
 	return nil
 }
 
-// normalizeCapability uppercases and strips the optional "CAP_" prefix so
-// "cap_sys_admin" and "SYS_ADMIN" are the same request.
-func normalizeCapability(cap string) string {
-	c := strings.ToUpper(strings.TrimSpace(cap))
-	return strings.TrimPrefix(c, "CAP_")
-}
-
-// ValidateCapability rejects malformed capability strings and every entry on
-// DeniedCapabilities, naming the capability in the message.
+// ValidateCapability rejects a capability string that is not a plain capability name.
+// The name itself is not judged: a grant lands in a gVisor guest that started from
+// `--cap-drop ALL`, and GVisorIsolationForCaps is what holds the caller to that.
 func ValidateCapability(cap string) error {
 	if strings.TrimSpace(cap) == "" {
 		return fmt.Errorf("capability is empty")
@@ -93,11 +76,39 @@ func ValidateCapability(cap string) error {
 	if !capabilityPattern.MatchString(cap) {
 		return fmt.Errorf("capability %q is invalid: only letters, digits and '_' are allowed", cap)
 	}
-	name := normalizeCapability(cap)
-	if reason, denied := DeniedCapabilities[name]; denied {
-		return fmt.Errorf("capability %s is not allowed in sandboxes: %s", name, reason)
+	return nil
+}
+
+// GVisorIsolationForCaps reports whether a `podman create` argument list isolates the
+// container the way granting a capability assumes it is isolated: gVisor as the runtime,
+// and every capability dropped before the grant. Anywhere else, `--cap-add` is a
+// privilege on the host kernel, so a caller that is about to add one and fails this check
+// must not add it.
+//
+// This replaced a denylist of capability *names*, on the measurement that under runsc the
+// names were not the boundary: a guest holding SYS_ADMIN could not write through a
+// read-only bind mount (the guest remounts it "rw" in its own mount table and the gofer
+// still refuses), saw only its own four PIDs, and its `mount --bind / x` exposed the
+// guest's own overlay rather than the host tree. The runtime is what that safety rests
+// on, so the runtime is what gets checked.
+func GVisorIsolationForCaps(args []string) error {
+	if !hasArgPair(args, "--runtime", "runsc") {
+		return fmt.Errorf("capabilities may only be granted to a gVisor (runsc) container; this command line does not select that runtime")
+	}
+	if !hasArgPair(args, "--cap-drop", "ALL") {
+		return fmt.Errorf("capabilities may only be granted on top of a full `--cap-drop ALL`; this command line does not drop the default set first")
 	}
 	return nil
+}
+
+// hasArgPair reports whether flag appears immediately followed by value.
+func hasArgPair(args []string, flag, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateCapabilities validates a capability list, naming the first offender.

@@ -14,10 +14,11 @@ import (
 	"strings"
 )
 
-// Inside reports whether p is one of roots or below it. Empty roots are
-// skipped. Lexical only — resolve with ResolveSymlinks first when this is a
-// security check.
-func Inside(p string, roots []string) bool {
+// inside reports whether p is one of roots or below it. Empty roots are skipped. It is
+// unexported because it is lexical only: the answer this package gives to "is this path
+// inside that root" is Contained, which requires that too *and* the symlink-resolved
+// path, so there is no way to reach the weak half from outside.
+func inside(p string, roots []string) bool {
 	for _, root := range roots {
 		if root == "" {
 			continue
@@ -41,7 +42,7 @@ var ErrOutside = errors.New("path is outside the allowed directory")
 // planted in a worktree a task can write to.
 func Contained(path string, roots []string) (string, error) {
 	clean := filepath.Clean(path)
-	if !Inside(clean, roots) {
+	if !inside(clean, roots) {
 		return "", fmt.Errorf("%w: %q", ErrOutside, clean)
 	}
 	resolved, err := ResolveSymlinks(clean)
@@ -55,7 +56,7 @@ func Contained(path string, roots []string) (string, error) {
 			check = append(check, filepath.Clean(rr))
 		}
 	}
-	if !Inside(resolved, check) {
+	if !inside(resolved, check) {
 		return "", fmt.Errorf("%w: %q resolves to %q", ErrOutside, clean, resolved)
 	}
 	return resolved, nil

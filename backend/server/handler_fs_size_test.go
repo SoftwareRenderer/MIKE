@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -154,4 +155,30 @@ func projectDirOf(t *testing.T, s *Server, projectID string) string {
 		t.Fatal(err)
 	}
 	return filepath.Clean(p.Path)
+}
+
+// TestTooLargeMessagesNameTheirCaps is the drift gate: every cap that answers 413 has
+// a sentence saying how big it is, and a raised cap left behind its sentence would
+// refuse a file for a size the user was told they could send. The rule is the one the
+// strings were written with — the printed figure is the cap's decimal megabytes.
+func TestTooLargeMessagesNameTheirCaps(t *testing.T) {
+	cases := []struct {
+		name    string
+		message string
+		bytes   int64
+	}{
+		{"fs read", fsTooLargeMessage, maxFSReadBytes},
+		{"fs write", fsTooLargeMessage, maxFSWriteBytes},
+		{"upload", uploadTooLargeMessage, MaxUploadSize},
+	}
+	for _, tc := range cases {
+		var stated int
+		if _, err := fmt.Sscanf(tc.message, "file too large (max %dMB)", &stated); err != nil {
+			t.Errorf("%s: %q does not read as \"file too large (max NMB)\": %v", tc.name, tc.message, err)
+			continue
+		}
+		if want := int(tc.bytes / 1_000_000); stated != want {
+			t.Errorf("%s cap is %d bytes (%dMB) but the message says %dMB", tc.name, tc.bytes, want, stated)
+		}
+	}
 }

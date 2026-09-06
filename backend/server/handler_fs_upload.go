@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"kanban/backend/fsutil"
-	"kanban/backend/sandbox"
 )
 
 // Uploads are the only fs write whose body is not JSON: /api/fs/write's `content`
@@ -19,6 +18,10 @@ import (
 const (
 	// MaxUploadSize bounds one uploaded file.
 	MaxUploadSize = 20 << 20
+	// uploadTooLargeMessage is the answer both upload size checks give. Written by
+	// hand beside the constant it describes and pinned to it by a test, because a
+	// cap raised without its sentence tells the user a lie about the cap.
+	uploadTooLargeMessage = "file too large (max 20MB)"
 	// uploadBoundaryOverhead is the multipart framing around a file at the cap.
 	// MaxBytesReader counts the whole body, so it gets the cap plus this.
 	uploadBoundaryOverhead = 8 << 10
@@ -57,7 +60,7 @@ func (s *Server) handleFSUpload(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(uploadFormMemory); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			JSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 20MB)")
+			JSONError(w, http.StatusRequestEntityTooLarge, uploadTooLargeMessage)
 			return
 		}
 		JSONError(w, http.StatusBadRequest, "multipart form with a file part is required")
@@ -89,24 +92,11 @@ func (s *Server) handleFSUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	overwrite := r.FormValue("overwrite") == "1"
 
-	worktreePath, ok := s.fsWorktreeRoot(w, r, project)
+	// Containment before anything else: nothing below writes until the joined path has
+	// been translated to a host path, tied to the task the request named, and checked
+	// against the project.
+	target, ok := s.fsWriteTarget(w, r, project, filepath.Join(dir, filepath.ToSlash(relPath)))
 	if !ok {
-		return
-	}
-	if !s.requireSandboxAvailable(w, project) {
-		return
-	}
-	if project.SandboxEnabled {
-		// The container path names the bind-mounted host file, as in /api/fs/write.
-		if host, ok := sandbox.ContainerToHost(worktreePath, project.Name, dir); ok {
-			dir = host
-		}
-	}
-	// Containment before anything else: nothing below writes until the joined path
-	// has been resolved and checked against the project.
-	target, err := s.validateFSPath(project, filepath.Join(dir, filepath.ToSlash(relPath)))
-	if err != nil {
-		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -129,21 +119,11 @@ func (s *Server) handleFSUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(content) > MaxUploadSize {
-		JSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 20MB)")
+		JSONError(w, http.StatusRequestEntityTooLarge, uploadTooLargeMessage)
 		return
 	}
 
-	// A folder drop creates its parent directories. The target is contained
-	// already, so this cannot reach outside the project.
-	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-		log.Printf("fs upload mkdir failed: %v", err)
-		JSONError(w, http.StatusInternalServerError, "create directory failed")
-		return
-	}
-	// Atomic like a save: a partial file never replaces the old one.
-	if err := fsutil.WriteFileAtomic(target, content); err != nil {
-		log.Printf("fs upload write failed: %v", err)
-		JSONError(w, http.StatusInternalServerError, "write file failed")
+	if !s.writeContainedFile(w, target, content) {
 		return
 	}
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "written", "path": target})

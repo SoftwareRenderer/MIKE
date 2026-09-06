@@ -17,7 +17,8 @@ export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
  */
 export const MAX_DROP_FILES = 1000;
 
-/** One file of a drop, named relative to the directory it was dropped into. */export interface DroppedFile {
+/** One file of a drop, named relative to the directory it was dropped into. */
+export interface DroppedFile {
     file: File;
     /** '/'-separated path inside the target directory, e.g. `assets/img/logo.png`. */
     relPath: string;

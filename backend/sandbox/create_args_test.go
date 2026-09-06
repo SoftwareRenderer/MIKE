@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"kanban/backend/types"
+	"kanban/pkg/sandboxruntime"
 )
 
 // TestCreateRefusesUnsafeSandboxAdditions is the second line of the rule the project
@@ -27,14 +28,9 @@ func TestCreateRefusesUnsafeSandboxAdditions(t *testing.T) {
 		comment string
 	}{
 		{
-			name: "capability that reaches the host kernel", want: "capability",
-			opts:    SandboxOpts{Capabilities: []string{"SYS_ADMIN"}},
-			comment: "an extension asking for this is refused; a task sandbox must not accept it",
-		},
-		{
-			name: "the same capability with its CAP_ prefix", want: "capability",
-			opts:    SandboxOpts{Capabilities: []string{"cap_sys_ptrace"}},
-			comment: "normalization must not be a way around the denylist",
+			name: "capability shaped like a flag", want: "capability",
+			opts:    SandboxOpts{Capabilities: []string{"--privileged"}},
+			comment: "a capability is judged by its shape, not its name: an option-shaped value reaches podman as an argument",
 		},
 		{
 			name: "container path that rewrites the mount spec", want: "mount",
@@ -60,5 +56,34 @@ func TestCreateRefusesUnsafeSandboxAdditions(t *testing.T) {
 				t.Errorf("the check ran after the availability probe, so it is unenforceable on a host without runsc: %v", err)
 			}
 		})
+	}
+}
+
+// TestTaskSandboxIsolatesWhatACapabilityGrantAssumes pins what the removal of the
+// capability denylist rests on: the container MIKE creates runs under gVisor and starts
+// from a full --cap-drop ALL, so a re-added capability is a privilege in the guest rather
+// than on the host kernel. Create checks the pairing itself before it appends a single
+// --cap-add, so a future change to createContainerArgs that drops either half turns into a
+// refused task instead of a wider sandbox.
+func TestTaskSandboxIsolatesWhatACapabilityGrantAssumes(t *testing.T) {
+	args := createContainerArgs("kanban-sandbox-task-args", "/home/sandbox/args-proj")
+	if err := sandboxruntime.GVisorIsolationForCaps(args); err != nil {
+		t.Fatalf("a task sandbox no longer isolates what a capability grant assumes: %v\nargs = %v", err, args)
+	}
+
+	// The shape rule still refuses, and still refuses before the availability probe, so a
+	// host without runsc reports the configuration error instead of hiding it under
+	// "gVisor not available".
+	sm := NewSandboxManager()
+	project := &types.Project{ID: "p-caps", Name: "caps-proj", Path: t.TempDir()}
+	_, err := sm.Create("task-caps", t.TempDir(), project, SandboxOpts{Capabilities: []string{"--privileged"}})
+	if err == nil {
+		t.Fatal("Create accepted an option-shaped capability")
+	}
+	if !strings.Contains(err.Error(), "capability") {
+		t.Errorf("error = %v, want it to name the capability", err)
+	}
+	if strings.Contains(err.Error(), "gVisor not available") {
+		t.Errorf("the shape check ran after the availability probe: %v", err)
 	}
 }

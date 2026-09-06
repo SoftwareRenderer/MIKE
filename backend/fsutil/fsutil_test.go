@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestInside(t *testing.T) {
+func TestInsideLexicalOnly(t *testing.T) {
 	cases := []struct {
 		p     string
 		roots []string
@@ -23,8 +23,8 @@ func TestInside(t *testing.T) {
 		{"/work/x", []string{"", "/work"}, true},
 	}
 	for _, tc := range cases {
-		if got := Inside(tc.p, tc.roots); got != tc.want {
-			t.Errorf("Inside(%q, %v) = %v, want %v", tc.p, tc.roots, got, tc.want)
+		if got := inside(tc.p, tc.roots); got != tc.want {
+			t.Errorf("inside(%q, %v) = %v, want %v", tc.p, tc.roots, got, tc.want)
 		}
 	}
 }
@@ -51,7 +51,7 @@ func TestResolveSymlinks_ExistingFile(t *testing.T) {
 	if got != secret {
 		t.Errorf("link resolved to %q, want %q", got, secret)
 	}
-	// A caller checking Inside(root=outside, resolved) still sees it as inside,
+	// A caller checking inside(root=outside, resolved) still sees it as inside,
 	// but a caller whose root is a sibling directory now has the resolved form
 	// needed to reject it.
 }
@@ -76,7 +76,7 @@ func TestResolveSymlinks_IntermediateEscapeIsVisible(t *testing.T) {
 	if want := filepath.Join(outside, "new.txt"); got != want {
 		t.Errorf("missing tail re-joined wrongly: got %q, want %q", got, want)
 	}
-	if Inside(got, []string{proj}) {
+	if inside(got, []string{proj}) {
 		t.Error("resolved path still reports as inside the project root")
 	}
 }
@@ -87,7 +87,7 @@ func TestResolveSymlinks_MissingTailUnderRealDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a not-yet-existing write target must resolve, not fail: %v", err)
 	}
-	if !Inside(got, []string{base}) {
+	if !inside(got, []string{base}) {
 		t.Errorf("resolved target %q no longer inside %q", got, base)
 	}
 }

@@ -380,6 +380,16 @@ func TestCreate_AcceptsValidImage(t *testing.T) {
 	bridgePath := filepath.Join(projectRoot, "sandbox", "sandbox-bridge")
 	t.Setenv("MIKE_AGENT_PATH", bridgePath)
 
+	// Create really creates the container when the image validates, and this test only cares
+	// that validation passed — so the container is the test's to remove. Through the runtime,
+	// not Destroy: this manager has no store to look the record up in.
+	t.Cleanup(func() {
+		safeID, err := sm.rt.SanitizeID("test-valid-image")
+		if err == nil {
+			_ = sm.rt.RemoveContainer(ExtensionContainerPrefix + "-" + safeID)
+		}
+	})
+
 	ext := &Extension{
 		ID: "test-valid-image",
 		ContainerConfig: ContainerConfig{
@@ -400,6 +410,16 @@ func TestCreate_DefaultImagePassesValidation(t *testing.T) {
 	projectRoot := filepath.Join(filepath.Dir(filename), "..", "..")
 	bridgePath := filepath.Join(projectRoot, "sandbox", "sandbox-bridge")
 	t.Setenv("MIKE_AGENT_PATH", bridgePath)
+
+	// Create really creates the container when the image validates, and this test only cares
+	// that validation passed — so the container is the test's to remove. Through the runtime,
+	// not Destroy: this manager has no store to look the record up in.
+	t.Cleanup(func() {
+		safeID, err := sm.rt.SanitizeID("test-default-image")
+		if err == nil {
+			_ = sm.rt.RemoveContainer(ExtensionContainerPrefix + "-" + safeID)
+		}
+	})
 
 	ext := &Extension{
 		ID: "test-default-image",
@@ -975,34 +995,49 @@ func TestBuildExtensionCreateArgs_RejectedMountsNeverReachPodman(t *testing.T) {
 	})
 }
 
-// TestBuildExtensionCreateArgs_DeniedCapabilitiesAreSkipped asserts the
-// `--cap-drop ALL` posture survives: denied (or malformed) capabilities are
-// never re-added, requested-but-harmless ones still are.
-func TestBuildExtensionCreateArgs_DeniedCapabilitiesAreSkipped(t *testing.T) {
-	for cap := range deniedCapabilities {
-		ext := &Extension{ID: "ext-cap-reject", SandboxConfig: SandboxConfig{Capabilities: []string{"CHOWN", cap}}}
-		args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-cap-reject", "ubuntu:latest", nil, nil)
+// TestBuildExtensionCreateArgs_CapabilityPosture is the test that stands where the
+// capability denylist used to be. Names are no longer refused, so what this pins is the
+// pairing the removal rests on: whatever a manifest asks for is added to a command line
+// that runs the container under gVisor from a full --cap-drop ALL, and only a value that
+// would arrive as an *argument* is skipped.
+func TestBuildExtensionCreateArgs_CapabilityPosture(t *testing.T) {
+	requested := []string{
+		"CHOWN", "NET_RAW", "SYS_ADMIN", "SYS_PTRACE", "DAC_OVERRIDE",
+		"MKNOD", "SETUID", "LINUX_IMMUTABLE", "cap_sys_nice", "fowner",
+	}
+	ext := &Extension{ID: "ext-cap-posture", SandboxConfig: SandboxConfig{Capabilities: requested}}
+	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-cap-posture", "ubuntu:latest", nil, nil)
 
-		if !hasArgPair(args, "--cap-drop", "ALL") {
-			t.Errorf("args lost --cap-drop ALL: %v", args)
+	// The safety of granting any of those is the runtime's, not the name's.
+	if err := sandboxruntime.GVisorIsolationForCaps(args); err != nil {
+		t.Errorf("capabilities are being granted to a container that is not isolated as they assume: %v\nargs = %v", err, args)
+	}
+	// And the grant must land after the drop, or it re-adds onto itself.
+	added, dropped := -1, -1
+	for i, a := range args {
+		if a == "--cap-add" && added < 0 {
+			added = i
 		}
-		added := capAdds(args)
-		if hasElem(added, cap) {
-			t.Errorf("--cap-add %s reached the argument list", cap)
-		}
-		if !hasElem(added, "CHOWN") {
-			t.Errorf("harmless capability CHOWN was dropped: %v", added)
-		}
-		if len(added) != 1 {
-			t.Errorf("cap-add list = %v, want only CHOWN", added)
+		if a == "--cap-drop" {
+			dropped = i
 		}
 	}
+	if added < dropped {
+		t.Errorf("--cap-add (idx %d) must follow --cap-drop ALL (idx %d): %v", added, dropped, args)
+	}
+	if got := capAdds(args); len(got) != len(requested) {
+		t.Errorf("cap-add list = %v, want every requested name %v", got, requested)
+	}
 
-	// The CAP_ prefix and lowercase spellings are the same capability.
-	ext := &Extension{ID: "ext-cap-reject", SandboxConfig: SandboxConfig{Capabilities: []string{"cap_sys_admin", "sys_ptrace", "-v"}}}
-	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-cap-reject", "ubuntu:latest", nil, nil)
-	if added := capAdds(args); len(added) != 0 {
-		t.Errorf("denied/malformed capabilities reached the argument list: %v", added)
+	// What is still refused, runtime aside: anything that is not one plain name. A
+	// "--privileged" or a second word reaches podman as an argument, and no runtime
+	// makes that safe.
+	for _, bad := range []string{"-v", "--privileged", "SYS_ADMIN ALL", "SYS_ADMIN,ALL", "SYS;ADMIN", ""} {
+		ext := &Extension{ID: "ext-cap-posture", SandboxConfig: SandboxConfig{Capabilities: []string{"CHOWN", bad}}}
+		args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-cap-posture", "ubuntu:latest", nil, nil)
+		if got := capAdds(args); len(got) != 1 || got[0] != "CHOWN" {
+			t.Errorf("capability %q reached the argument list: %v", bad, got)
+		}
 	}
 }
 

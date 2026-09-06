@@ -229,38 +229,25 @@ func TestValidateMount(t *testing.T) {
 	}
 }
 
+// TestValidateCapability pins the shape rule. Which capability is asked for is no longer
+// judged here — a grant lands in a gVisor guest that started from --cap-drop ALL, so
+// SYS_ADMIN is as acceptable a name as CHOWN, and the pairing that makes that true is
+// pinned by TestBuildExtensionCreateArgs_CapabilityPosture. What stays refused is a value
+// that would reach `--cap-add` as an argument rather than a name.
 func TestValidateCapability(t *testing.T) {
-	denied := []string{
-		"SYS_ADMIN", "SYS_PTRACE", "SYS_MODULE", "SYS_RAWIO",
-		"DAC_OVERRIDE", "DAC_READ_SEARCH", "NET_ADMIN", "MKNOD",
-		"SETUID", "SETGID", "SYS_BOOT", "LINUX_IMMUTABLE",
+	allowed := []string{
+		"NET_BIND_SERVICE", "CHOWN", "SETPCAP", "SYS_TIME", "fowner", "CAP_SYS_NICE",
+		"SYS_ADMIN", "SYS_PTRACE", "SYS_MODULE", "SYS_RAWIO", "DAC_OVERRIDE",
+		"DAC_READ_SEARCH", "NET_ADMIN", "MKNOD", "SETUID", "SETGID", "SYS_BOOT",
+		"LINUX_IMMUTABLE", "cap_sys_admin", "CAP_LINUX_IMMUTABLE",
 	}
-	for _, cap := range denied {
-		err := ValidateCapability(cap)
-		if err == nil {
-			t.Errorf("ValidateCapability(%q) = nil, want error", cap)
-			continue
-		}
-		if !strings.Contains(err.Error(), cap) {
-			t.Errorf("error %q must name the capability %q", err.Error(), cap)
-		}
-	}
-
-	// Case and the optional CAP_ prefix do not smuggle a denied capability in.
-	for _, variant := range []string{"sys_admin", "Sys_Admin", "CAP_SYS_ADMIN", "cap_net_admin", " CAP_SYS_PTRACE "} {
-		if err := ValidateCapability(variant); err == nil {
-			t.Errorf("ValidateCapability(%q) = nil, want error", variant)
-		}
-	}
-
-	allowed := []string{"NET_BIND_SERVICE", "CHOWN", "SETPCAP", "SYS_TIME", "fowner", "CAP_SYS_NICE"}
 	for _, cap := range allowed {
 		if err := ValidateCapability(cap); err != nil {
 			t.Errorf("ValidateCapability(%q) = %v, want nil", cap, err)
 		}
 	}
 
-	malformed := []string{"", "   ", "-v", "--cap-add", "SYS ADMIN", "SYS;REBOOT", "SYS\nADMIN", "1SYS", "SYS-ADMIN"}
+	malformed := []string{"", "   ", "-v", "--cap-add", "--privileged", "SYS ADMIN", "SYS;REBOOT", "SYS\nADMIN", "1SYS", "SYS-ADMIN", "SYS_ADMIN,ALL"}
 	for _, cap := range malformed {
 		if err := ValidateCapability(cap); err == nil {
 			t.Errorf("ValidateCapability(%q) = nil, want error", cap)
@@ -275,12 +262,12 @@ func TestValidateCapabilities(t *testing.T) {
 	if err := ValidateCapabilities([]string{"CHOWN", "NET_BIND_SERVICE"}); err != nil {
 		t.Errorf("ValidateCapabilities(valid) = %v, want nil", err)
 	}
-	err := ValidateCapabilities([]string{"CHOWN", "SYS_ADMIN"})
+	err := ValidateCapabilities([]string{"CHOWN", "--privileged"})
 	if err == nil {
-		t.Fatal("ValidateCapabilities with a denied cap = nil, want error")
+		t.Fatal("ValidateCapabilities with an option-shaped capability = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "SYS_ADMIN") {
-		t.Errorf("error %q must name SYS_ADMIN", err.Error())
+	if !strings.Contains(err.Error(), "--privileged") {
+		t.Errorf("error %q must name the entry it refused", err.Error())
 	}
 }
 
@@ -302,11 +289,18 @@ func TestValidateSandboxAdditions(t *testing.T) {
 		t.Errorf("error %q must name the offending host path", err.Error())
 	}
 
+	// A mount inside the allowlist is fine; a capability that is not a plain name is not.
 	err = policy.ValidateSandboxAdditions([]types.SandboxMount{
 		{HostPath: filepath.Join(root, "d"), ContainerPath: "/d"},
-	}, []string{"SYS_PTRACE"})
-	if err == nil || !strings.Contains(err.Error(), "SYS_PTRACE") {
-		t.Errorf("ValidateSandboxAdditions = %v, want error naming SYS_PTRACE", err)
+	}, []string{"--privileged"})
+	if err == nil || !strings.Contains(err.Error(), "--privileged") {
+		t.Errorf("ValidateSandboxAdditions = %v, want an error naming --privileged", err)
+	}
+	// And the names themselves are not judged — the container is a gVisor guest.
+	if err := policy.ValidateSandboxAdditions([]types.SandboxMount{
+		{HostPath: filepath.Join(root, "d"), ContainerPath: "/d"},
+	}, []string{"SYS_ADMIN", "SYS_PTRACE"}); err != nil {
+		t.Errorf("ValidateSandboxAdditions(plain names) = %v, want nil", err)
 	}
 }
 
@@ -368,19 +362,6 @@ func TestNewMountPolicyNormalization(t *testing.T) {
 	// The original policy is untouched.
 	if len(policy.Roots()) != 1 {
 		t.Errorf("withExtraRoots mutated the receiver: %v", policy.Roots())
-	}
-}
-
-func TestHasDotDotSegment(t *testing.T) {
-	for _, p := range []string{"/a/../b", "..", "/../a", "a/..", "/a/.."} {
-		if !hasDotDotSegment(p) {
-			t.Errorf("hasDotDotSegment(%q) = false, want true", p)
-		}
-	}
-	for _, p := range []string{"/a/..b", "/a/b..", "/..hidden/a", "/a"} {
-		if hasDotDotSegment(p) {
-			t.Errorf("hasDotDotSegment(%q) = true, want false", p)
-		}
 	}
 }
 

@@ -11,21 +11,20 @@ import (
 	"kanban/pkg/sandboxruntime"
 )
 
-// Extension sandboxes start with `--cap-drop ALL` and no host filesystem access
-// beyond the mounts the app adds itself. This file checks what a caller can add
-// on top: mounts and capabilities from `PUT /api/extensions/{id}`, or from a
-// manifest at install time. One mount of "/" or one CAP_SYS_ADMIN would
-// otherwise make the gVisor boundary meaningless.
+// Extension sandboxes start with `--cap-drop ALL` and no host filesystem access beyond
+// the mounts the app adds itself. This file checks what a caller can add on top: mounts
+// and capabilities from `PUT /api/extensions/{id}`, or from a manifest at install time.
+// The mounts are what can undo the sandbox — one mount of "/" hands over the host tree,
+// and a ":" inside a container path turns an "ro" into an "rw". A capability cannot: it
+// lands in a gVisor guest, so what is checked about one is its shape (see
+// sandboxruntime.ValidateCapability) and, where it is granted, the runtime pairing
+// sandboxruntime.GVisorIsolationForCaps describes.
 
 // EnvMountRoots lists extra host roots an extension sandbox may mount from,
 // separated by os.PathListSeparator (':' on Linux). The implicit roots are the
 // workspace dir, registered project paths, the extensions dir and the system
 // temp dir; this is for deployments that keep extension data elsewhere.
 const EnvMountRoots = "MIKE_EXT_MOUNT_ROOTS"
-
-// The podman-argument rules live in pkg/sandboxruntime, so a task sandbox is measured
-// exactly the way an extension sandbox is. These are its names, kept under the old one.
-var deniedCapabilities = sandboxruntime.DeniedCapabilities
 
 // MountPolicy is an allowlist of host roots an extension sandbox may
 // bind-mount from. A nil policy is valid and fails closed: nothing is inside an
@@ -128,9 +127,6 @@ func mountRoots(extensionsDir, workspaceDir string, projectPaths []string) []str
 	return append(roots, envMountRoots()...)
 }
 
-// hasDotDotSegment reports whether p contains a ".." path segment.
-func hasDotDotSegment(p string) bool { return sandboxruntime.HasDotDotSegment(p) }
-
 // ValidateContainerPath checks a mount's in-container path: absolute, free of ".."
 // segments, and limited to the charset that cannot rewrite the podman mount spec — a
 // ":" or "," there turns "ro" into "rw". The rule is sandboxruntime's.
@@ -184,7 +180,7 @@ func (p *MountPolicy) ValidateHostPath(hostPath string) (string, error) {
 	if !filepath.IsAbs(hostPath) {
 		return "", fmt.Errorf("mount host path %q is not absolute", hostPath)
 	}
-	if hasDotDotSegment(hostPath) {
+	if sandboxruntime.HasDotDotSegment(hostPath) {
 		return "", fmt.Errorf("mount host path %q must not contain '..'", hostPath)
 	}
 	resolved, err := resolvePath(hostPath)
@@ -288,7 +284,7 @@ func ValidateDependencyGrant(hostPath string) (string, error) {
 	if !strings.HasPrefix(trimmed, "/") {
 		return "", fmt.Errorf("%q is not an absolute path — give the full path to the directory", trimmed)
 	}
-	if hasDotDotSegment(trimmed) {
+	if sandboxruntime.HasDotDotSegment(trimmed) {
 		return "", fmt.Errorf("%q must not contain '..'", trimmed)
 	}
 	resolved, err := resolvePath(trimmed)

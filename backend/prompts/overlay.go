@@ -81,7 +81,10 @@ func SetOverlay(dir, locale string) {
 func ActiveLocale() string { return overlay.Load().locale }
 
 // ActiveOverlay reports the installed overlay: the pack's template directory
-// ("" when it ships none) and its locale tag. For logging and tests.
+// ("" when it ships none) and its locale tag. It is the read side of SetOverlay —
+// nothing in the server reads it, because the caller that installs an overlay keeps
+// its own copy, so its callers are the cross-package tests that assert what the
+// setter actually installed.
 func ActiveOverlay() (dir, locale string) {
 	s := overlay.Load()
 	return s.dir, s.locale

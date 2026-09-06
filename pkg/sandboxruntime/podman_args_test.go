@@ -32,49 +32,79 @@ func TestValidateContainerPathSharedRule(t *testing.T) {
 	}
 }
 
-// TestValidateCapabilitySharedRule covers the denylist that used to be an
-// extension-only rule: a project asking for SYS_ADMIN was never refused, so the
-// sandbox around a task was only as strong as the extension policy it did not share.
-func TestValidateCapabilitySharedRule(t *testing.T) {
-	for _, ok := range []string{"NET_RAW", "CHOWN", "SETFCAP", "cap_net_raw"} {
+// TestHasDotDotSegment is the near-miss half of the rule: a segment that merely
+// contains ".." is a legal file name, and refusing one would refuse real mounts.
+func TestHasDotDotSegment(t *testing.T) {
+	for _, p := range []string{"/a/../b", "..", "/../a", "a/..", "/a/.."} {
+		if !HasDotDotSegment(p) {
+			t.Errorf("HasDotDotSegment(%q) = false, want true", p)
+		}
+	}
+	for _, p := range []string{"/a/..b", "/a/b..", "/..hidden/a", "/a"} {
+		if HasDotDotSegment(p) {
+			t.Errorf("HasDotDotSegment(%q) = true, want false", p)
+		}
+	}
+}
+
+// TestValidateCapabilityRule pins what the capability rule is now: the *shape* of the
+// value, never its name. A capability granted to a gVisor container is a guest privilege
+// (see GVisorIsolationForCaps), so SYS_ADMIN is accepted here and the runtime check at the
+// call site is what keeps that true. What stays refused is anything that would arrive at
+// `--cap-add` as something other than one name — that is argument injection, and no
+// runtime makes it safe.
+func TestValidateCapabilityRule(t *testing.T) {
+	for _, ok := range []string{
+		"NET_RAW", "CHOWN", "SETFCAP", "cap_net_raw", "SYS_TIME", "fowner",
+		// Every name the denylist used to refuse: allowed now, because the container
+		// they land in is a gVisor guest that started from --cap-drop ALL.
+		"SYS_ADMIN", "SYS_PTRACE", "SYS_MODULE", "SYS_RAWIO", "DAC_OVERRIDE",
+		"DAC_READ_SEARCH", "NET_ADMIN", "MKNOD", "SETUID", "SETGID", "SYS_BOOT",
+		"LINUX_IMMUTABLE",
+	} {
 		if err := ValidateCapability(ok); err != nil {
 			t.Errorf("ValidateCapability(%q) = %v, want nil", ok, err)
 		}
 	}
-	for _, denied := range []string{"SYS_ADMIN", "cap_sys_admin", "DAC_OVERRIDE", "SYS_PTRACE", "LINUX_IMMUTABLE"} {
-		err := ValidateCapability(denied)
-		if err == nil {
-			t.Errorf("ValidateCapability(%q) = nil, want a denial", denied)
-			continue
-		}
-		if !strings.Contains(err.Error(), "not allowed") {
-			t.Errorf("ValidateCapability(%q) should deny by name: %v", denied, err)
-		}
-	}
-	// Everything else is rejected as malformed: a value that reaches `--cap-add`
-	// must never look like another flag or carry a separator.
-	for _, bad := range []string{"", "   ", "--privileged", "SYS_ADMIN ALL", "SYS_ADMIN,ALL", "SYS-ADMIN", "0SYS", "SYS.ADMIN"} {
+	for _, bad := range []string{
+		"", "   ", "--privileged", "--cap-add", "-v", "SYS_ADMIN ALL", "SYS_ADMIN,ALL",
+		"SYS-ADMIN", "SYS.ADMIN", "0SYS", "SYS;REBOOT", "SYS\nADMIN",
+	} {
 		if err := ValidateCapability(bad); err == nil {
 			t.Errorf("ValidateCapability(%q) = nil, want error", bad)
 		}
 	}
-	if err := ValidateCapabilities([]string{"CHOWN", "SYS_ADMIN"}); err == nil {
-		t.Error("ValidateCapabilities accepted a list containing a denied capability")
+	// The list form names the first offender, because it answers a 400.
+	if err := ValidateCapabilities([]string{"CHOWN", "--privileged"}); err == nil {
+		t.Error("ValidateCapabilities accepted a list holding an option-shaped value")
+	} else if !strings.Contains(err.Error(), "--privileged") {
+		t.Errorf("error %q should name the offending entry", err.Error())
+	}
+	if err := ValidateCapabilities([]string{"CHOWN", "SYS_ADMIN"}); err != nil {
+		t.Errorf("ValidateCapabilities(valid names) = %v, want nil", err)
 	}
 }
 
-// TestDeniedCapabilitiesAreNamed asserts the table is self-explanatory, because every
-// entry shows up in an error message a user has to act on.
-func TestDeniedCapabilitiesAreNamed(t *testing.T) {
-	if len(DeniedCapabilities) == 0 {
-		t.Fatal("the capability denylist is empty")
+// TestGVisorIsolationForCaps pins the pairing a capability grant now relies on. The
+// denylist used to be the defence; it is gone, and what is left is the fact that the
+// container is runsc-isolated and started with every capability dropped. A command line
+// missing either turns `--cap-add SYS_ADMIN` into a host-kernel privilege, which is
+// exactly the regression this refuses.
+func TestGVisorIsolationForCaps(t *testing.T) {
+	isolated := []string{"create", "--runtime", "runsc", "--cap-drop", "ALL"}
+	if err := GVisorIsolationForCaps(isolated); err != nil {
+		t.Errorf("GVisorIsolationForCaps(%v) = %v, want nil", isolated, err)
 	}
-	for cap, reason := range DeniedCapabilities {
-		if cap != normalizeCapability(cap) {
-			t.Errorf("DeniedCapabilities key %q is not in its normalized form", cap)
-		}
-		if reason == "" {
-			t.Errorf("denied capability %q has no reason to show the user", cap)
+
+	cases := map[string][]string{
+		"no runtime selected":    {"create", "--cap-drop", "ALL"},
+		"a different runtime":    {"create", "--runtime", "crun", "--cap-drop", "ALL"},
+		"caps not dropped":       {"create", "--runtime", "runsc"},
+		"caps partially dropped": {"create", "--runtime", "runsc", "--cap-drop", "SYS_ADMIN"},
+	}
+	for name, args := range cases {
+		if err := GVisorIsolationForCaps(args); err == nil {
+			t.Errorf("%s: GVisorIsolationForCaps(%v) = nil, want a refusal", name, args)
 		}
 	}
 }

@@ -27,8 +27,11 @@ type PromptOverlay struct {
 	Locale string
 }
 
-// None reports whether this overlay means plain English: no templates and no locale.
-func (o PromptOverlay) None() bool { return o.Dir == "" && o.Locale == "" }
+// none reports whether this overlay means plain English: no templates and no locale.
+// Unexported on purpose — the server that consumes an overlay needs its two fields
+// apart (they log different sentences), so the only caller is a test asserting the
+// zero value.
+func (o PromptOverlay) none() bool { return o.Dir == "" && o.Locale == "" }
 
 // ActivePromptOverlay reads the extension list and resolves the active pack's
 // prompt side. It is called at startup and on every extension change, so enabling

@@ -2,7 +2,13 @@
  *
  * Both file browsers (BranchFileBrowser's .file-browser-list and TaskFileBrowser's
  * .file-list) accept files dragged in from the desktop and render the same markup
- * while doing it, so the rules live once, as :global() instead of a scoped copy each. */
+ * while doing it, so the rules live once, as :global() instead of a scoped copy each.
+ *
+ * That is also why the overlay markup can be one component (FileDropProgress) while the
+ * Upload button cannot: a parent's scoped rule does not reach an element a child
+ * renders — svelte-check calls such a selector unused — so a component holding the
+ * button would arrive unstyled, since .new-file-btn is styled from each browser's own
+ * stylesheet. */
 
 /* The ring is inset because the panels' ancestors clip an outline. */
 :global(.file-browser-list.is-drop-target),

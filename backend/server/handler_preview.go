@@ -522,22 +522,16 @@ func (s *Server) resolvePreviewAsset(baseDir, rel string) (string, error) {
 	if rel == "" || strings.ContainsRune(rel, 0) {
 		return "", errors.New("invalid path")
 	}
-	// Collapse ".." segments.
-	cleaned := filepath.Clean("/" + filepath.ToSlash(rel))
-	candidate := filepath.Join(baseDir, cleaned)
-
-	base, err := fsutil.ResolveSymlinks(baseDir)
-	if err != nil {
-		return "", err
-	}
-	target, err := fsutil.ResolveSymlinks(candidate)
-	if err != nil {
-		return "", err
-	}
-	if !fsutil.Inside(target, []string{base}) {
-		return "", errors.New("path escapes preview directory")
-	}
-	return target, nil
+	// Collapse ".." segments before joining, so every path left to judge is one the
+	// containment check can take at face value.
+	candidate := filepath.Join(baseDir, filepath.Clean("/"+filepath.ToSlash(rel)))
+	// The jail every host file the server hands to a browser goes through: the lexical
+	// path and the symlink-resolved path must both sit inside the root. Resolving both
+	// sides by hand here was a second spelling of that rule, and one the fs handlers had
+	// already stopped carrying. The answer differs only in a case the caller answers the
+	// same way: a missing base directory now resolves to its nearest existing ancestor
+	// instead of erroring, and the os.Stat that follows still says "not found".
+	return fsutil.Contained(candidate, []string{baseDir})
 }
 
 // previewAssetContentType: extension-based type, defaulting to octet-stream.

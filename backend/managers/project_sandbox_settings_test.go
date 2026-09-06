@@ -25,8 +25,6 @@ func TestCreateProjectRefusesWideningSandboxSettings(t *testing.T) {
 		mounts  []types.SandboxMount
 		wantSub string
 	}{
-		{name: "capability that reaches the host kernel", caps: []string{"SYS_ADMIN"}, wantSub: "SYS_ADMIN"},
-		{name: "same capability, CAP_ prefix", caps: []string{"cap_dac_override"}, wantSub: "DAC_OVERRIDE"},
 		{name: "capability shaped like a flag", caps: []string{"--privileged"}, wantSub: "invalid"},
 		{name: "two capabilities in one value", caps: []string{"CHOWN ALL"}, wantSub: "invalid"},
 		{name: "empty capability", caps: []string{""}, wantSub: "empty"},
@@ -61,9 +59,12 @@ func TestCreateProjectRefusesWideningSandboxSettings(t *testing.T) {
 	}
 
 	// What the rule is not: the operator picks which host directories a sandbox sees,
-	// including ones that hold real secrets, and may ask for a capability that cannot
-	// reach past the container. "Mount a directory" is the feature; "mount the host
-	// filesystem root" and "hand me CAP_SYS_ADMIN" are not uses of it.
+	// including ones that hold real secrets, and asks for the privileges its workload
+	// needs. "Mount a directory" and "hand me SYS_ADMIN" are uses of the feature; "mount
+	// the host filesystem root" and "--privileged" are not. A capability is judged by its
+	// shape, because it lands in a gVisor guest that started from --cap-drop ALL — see
+	// sandboxruntime.GVisorIsolationForCaps for what that buys and the sandbox package's
+	// tests for the pairing that keeps it true.
 	repo := t.TempDir()
 	createBareRepo(t, repo)
 	proj, code, msg := h.createProjectFromRequest(types.CreateProjectRequest{
@@ -72,12 +73,12 @@ func TestCreateProjectRefusesWideningSandboxSettings(t *testing.T) {
 		SandboxEnabled:          true,
 		SandboxNetworkIsolation: &isolation,
 		SandboxMounts:           []types.SandboxMount{{HostPath: "/go", ContainerPath: "/go", Mode: "ro"}, {HostPath: "/etc", ContainerPath: "/etc"}},
-		SandboxCapabilities:     []string{"NET_RAW"},
+		SandboxCapabilities:     []string{"NET_RAW", "SYS_ADMIN", "cap_sys_ptrace"},
 	})
 	if code != http.StatusCreated {
 		t.Fatalf("a legitimate sandbox configuration was refused: %d (%s)", code, msg)
 	}
-	if len(proj.SandboxMounts) != 2 || proj.SandboxCapabilities[0] != "NET_RAW" {
+	if len(proj.SandboxMounts) != 2 || proj.SandboxCapabilities[0] != "NET_RAW" || proj.SandboxCapabilities[1] != "SYS_ADMIN" {
 		t.Fatalf("settings were not stored as given: %+v %+v", proj.SandboxMounts, proj.SandboxCapabilities)
 	}
 }
@@ -91,7 +92,6 @@ func TestUpdateProjectRefusesWideningSandboxSettings(t *testing.T) {
 	mux.HandleFunc("/api/projects/{projectID}", h.HandleByID)
 
 	for _, body := range []string{
-		`{"sandbox_capabilities":["SYS_ADMIN"]}`,
 		`{"sandbox_capabilities":["--privileged"]}`,
 		`{"sandbox_mounts":[{"host_path":"/","container_path":"/host","mode":"rw"}]}`,
 		`{"sandbox_mounts":[{"host_path":"/tmp/cache","container_path":"/cache:rw"}]}`,

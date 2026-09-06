@@ -159,7 +159,14 @@ type fsReadResponse struct {
 // `cat-file -s` instead of 4 GB of memory.
 const maxFSReadBytes int64 = 1_000_000
 
-// fsTooLargeMessage is the answer both size checks give.
+// maxFSWriteBytes is what POST /api/fs/write accepts as `content`. It is the same
+// number as the read cap because it is the same reason — the size an editor shows —
+// but it is its own constant because the two are free to move apart, and a shared
+// name would make one cap's change silently move the other.
+const maxFSWriteBytes = 1_000_000
+
+// fsTooLargeMessage is the answer both size checks give. A test pins it to the caps it
+// describes, because a cap raised without its sentence tells the user a lie.
 const fsTooLargeMessage = "file too large (max 1MB)"
 
 // gitInContext answers how to run git for a file request: in the task's worktree when
@@ -316,8 +323,8 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "path is required")
 		return
 	}
-	if len(req.Content) > 1_000_000 {
-		JSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 1MB)")
+	if len(req.Content) > maxFSWriteBytes {
+		JSONError(w, http.StatusRequestEntityTooLarge, fsTooLargeMessage)
 		return
 	}
 	project, err := s.optionalProject(r)
@@ -329,41 +336,14 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "project parameter is required")
 		return
 	}
-	worktreePath, ok := s.fsWorktreeRoot(w, r, project)
+	target, ok := s.fsWriteTarget(w, r, project, req.Path)
 	if !ok {
 		return
 	}
-	if !s.requireSandboxAvailable(w, project) {
+	if !s.writeContainedFile(w, target, []byte(req.Content)) {
 		return
 	}
-	if project.SandboxEnabled {
-		// Translate sandbox path to host path
-		if host, ok := sandbox.ContainerToHost(worktreePath, project.Name, req.Path); ok {
-			req.Path = host
-		}
-	}
-	// Operate on the symlink-resolved path validateFSPath returns; writing through
-	// a link planted in the project would land wherever it points.
-	resolvedPath, err := s.validateFSPath(project, worktreePath, req.Path)
-	if err != nil {
-		JSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	req.Path = resolvedPath
-	// Host filesystem (worktree is bind-mounted into sandbox)
-	dir := filepath.Dir(req.Path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		log.Printf("fs mkdir failed: %v", err)
-		JSONError(w, http.StatusInternalServerError, "create directory failed")
-		return
-	}
-	// Not a plain write: a save that dies halfway must not leave a truncated file.
-	if err := fsutil.WriteFileAtomic(req.Path, []byte(req.Content)); err != nil {
-		log.Printf("fs write failed: %v", err)
-		JSONError(w, http.StatusInternalServerError, "write file failed")
-		return
-	}
-	JSONResponse(w, http.StatusOK, map[string]string{"status": "written", "path": req.Path})
+	JSONResponse(w, http.StatusOK, map[string]string{"status": "written", "path": target})
 }
 
 func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
@@ -948,6 +928,59 @@ func (s *Server) validateFSPath(project *types.Project, worktreeRoot, path strin
 		roots = append(roots, filepath.Clean(worktreeRoot))
 	}
 	return fsutil.Contained(cleanPath, roots)
+}
+
+// fsWriteTarget answers, in the one order that is safe, the four questions every write
+// into a project asks: which tree the request names (?task=, bound to ?project=), whether
+// the host can run the sandbox that tree lives in, which host file a container path names,
+// and whether the result is inside the project once symlinks are followed.
+//
+// A handler calls this rather than repeating the steps. Each one is the jail for the next,
+// so a caller that drops one — or passes "" where the worktree root belongs — writes
+// outside the project, and the omission still compiles. This is the shape of the bug that
+// the upload endpoint arrived with. ok is false after writing the response.
+func (s *Server) fsWriteTarget(w http.ResponseWriter, r *http.Request, project *types.Project, path string) (string, bool) {
+	worktreePath, ok := s.fsWorktreeRoot(w, r, project)
+	if !ok {
+		return "", false
+	}
+	if !s.requireSandboxAvailable(w, project) {
+		return "", false
+	}
+	if project.SandboxEnabled {
+		// The container path names the bind-mounted host file.
+		if host, ok := sandbox.ContainerToHost(worktreePath, project.Name, path); ok {
+			path = host
+		}
+	}
+	// Open the symlink-resolved path validateFSPath returns; writing through a link
+	// planted in the project would land wherever it points.
+	resolved, err := s.validateFSPath(project, worktreePath, path)
+	if err != nil {
+		JSONError(w, http.StatusBadRequest, err.Error())
+		return "", false
+	}
+	return resolved, true
+}
+
+// writeContainedFile writes content to a target that fsWriteTarget already contained,
+// creating its parent directories on the way. The target must come from fsWriteTarget:
+// the parent-directory creation is the part that resolves ".." on the host, so it is only
+// safe behind that check. ok is false after writing the response.
+func (s *Server) writeContainedFile(w http.ResponseWriter, target string, content []byte) bool {
+	// Host filesystem (the worktree is bind-mounted into the sandbox).
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		log.Printf("fs mkdir failed: %v", err)
+		JSONError(w, http.StatusInternalServerError, "create directory failed")
+		return false
+	}
+	// Not a plain write: a save that dies halfway must not leave a truncated file.
+	if err := fsutil.WriteFileAtomic(target, content); err != nil {
+		log.Printf("fs write failed: %v", err)
+		JSONError(w, http.StatusInternalServerError, "write file failed")
+		return false
+	}
+	return true
 }
 
 // resolveGitIdentity reads the commit identity from git's environment

@@ -377,8 +377,13 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	// Create container with gVisor runtime
 	createArgs := createContainerArgs(containerName, mountPath)
 	// Add back any explicitly requested capabilities
-	for _, cap := range opts.Capabilities {
-		createArgs = append(createArgs, "--cap-add", cap)
+	if len(opts.Capabilities) > 0 {
+		if err := sandboxruntime.GVisorIsolationForCaps(createArgs); err != nil {
+			return nil, fmt.Errorf("cannot grant sandbox capabilities to project %s: %w", projectName, err)
+		}
+		for _, cap := range opts.Capabilities {
+			createArgs = append(createArgs, "--cap-add", cap)
+		}
 	}
 	worktreeMode := "rw"
 	if opts.PlanMode {

@@ -3,6 +3,7 @@
     import { ensureCsrfToken, getGitStatus } from '$lib/api';
     import { gitStatusLabel, gitStatusClass, gitStatusPriority } from '$lib/utils/git-status';
     import { useFileDropUpload } from '$lib/composables/use-file-drop-upload.svelte';
+    import FileDropProgress from '$lib/components/FileDropProgress.svelte';
     import Icon from '$lib/components/Icon.svelte';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
@@ -340,15 +341,10 @@
         },
     });
 
+    // The pointer-free half of the upload: a phone's file sheet or a keyboard, neither
+    // of which can start the file drag the zone waits for. Same run, same progress —
+    // only the button and the input live here, the run itself is dropUpload's.
     let uploadInput: HTMLInputElement | null = $state(null);
-
-    function handleUploadPicked(e: Event) {
-        const input = e.target as HTMLInputElement;
-        const files = Array.from(input.files || []);
-        // Cleared before the run: picking the same file again must fire change once more.
-        input.value = '';
-        dropUpload.uploadFiles(files);
-    }
 </script>
 
 <div class="file-browser">
@@ -413,12 +409,15 @@
             </div>
         {/if}
     </div>
+    <!-- The picker a keyboard or a phone file sheet uses; the header's upload button
+         opens it. Why this stays here rather than becoming a component: see the note in
+         $lib/styles/file-drop.css. -->
     <input
         type="file"
         multiple
         class="upload-input"
         bind:this={uploadInput}
-        onchange={handleUploadPicked}
+        onchange={dropUpload.handlePicked}
         aria-label={t('explorer.shared.uploadAria')}
     />
     {#if createError}
@@ -458,22 +457,7 @@
             ondrop={dropUpload.handleDrop}
         >
             <!-- The listing is the drop zone, so it renders even when the folder is empty. -->
-            {#if dropUpload.uploading}
-                <div class="drop-progress" role="status">
-                    <div class="drop-progress-row">
-                        <span class="drop-progress-label">{t('explorer.shared.dropUploading', { done: dropUpload.filesDone, total: dropUpload.filesTotal })}</span>
-                        <button class="drop-cancel-btn" onclick={dropUpload.cancel}>{t('explorer.shared.dropCancelUpload')}</button>
-                    </div>
-                    <div class="drop-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={dropUpload.percent}>
-                        <div class="drop-bar-fill" style="width: {dropUpload.percent}%"></div>
-                    </div>
-                    {#if dropUpload.currentFile}
-                        <span class="drop-progress-file">{dropUpload.currentFile}</span>
-                    {/if}
-                </div>
-            {:else if dropUpload.isOver}
-                <div class="drop-hint">{t('explorer.shared.dropHint')}</div>
-            {/if}
+            <FileDropProgress drop={dropUpload} />
             {#if entries.length === 0 && !loading}
                 <div class="file-browser-empty">{t('explorer.branchFiles.empty')}</div>
             {/if}

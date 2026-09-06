@@ -297,10 +297,16 @@ describe('useFileDropUpload', () => {
         const onUploaded = vi.fn();
         const drop = useFileDropUpload({ projectId: () => 'proj-1', dir: () => DIR, onUploaded });
         const picked = [pickedFile('notes.txt', 10), pickedFile('img.png', 20)];
-        drop.uploadFiles(picked);
+        // Through the change handler an <input> actually calls, not uploadFiles directly:
+        // clearing the input is half of what a picker has to get right.
+        const input = { files: picked, value: 'notes.txt' };
+        drop.handlePicked({ target: input } as unknown as Event);
 
         await vi.waitFor(() => expect(FakeXHR.sent).toHaveLength(2));
         await vi.waitFor(() => expect(drop.uploading).toBe(false));
+        // A value left in the input means picking the same file twice fires change once,
+        // and the second pick looks like one the app ignored.
+        expect(input.value).toBe('');
         expect(FakeXHR.sent.map((xhr) => xhr.form?.get('relpath')).sort()).toEqual(['img.png', 'notes.txt']);
         // A picker names files, not folders, and the browser has already stripped any
         // path from File.name — so these land in the directory the list shows.
