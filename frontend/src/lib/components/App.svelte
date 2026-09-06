@@ -9,6 +9,7 @@
     import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
     import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, clearQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask } from '$lib/api';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
+    import { dragCarriesFiles } from '$lib/utils/file-drop';
     import { timeAgo } from '$lib/utils/format-time';
     import { resolveBoardLandingColumn } from '$lib/utils/task-utils';
     import { getBoardCache, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, clearAll } from '$lib/storage';
@@ -740,6 +741,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     window.addEventListener('online', handleBrowserOnline);
     window.addEventListener('offline', handleBrowserOffline);
 
+    function rejectStrayFileDrop(e: DragEvent) {
+        if (!dragCarriesFiles(e.dataTransfer)) return;
+        e.preventDefault();
+    }
+    window.addEventListener('dragover', rejectStrayFileDrop);
+    window.addEventListener('drop', rejectStrayFileDrop);
+
     onDestroy(() => {
         stopCountdown();
         if (visibilityRetryTimer) {
@@ -749,6 +757,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         window.removeEventListener('visibilitychange', handleVisibilityChange);
         window.removeEventListener('online', handleBrowserOnline);
         window.removeEventListener('offline', handleBrowserOffline);
+        window.removeEventListener('dragover', rejectStrayFileDrop);
+        window.removeEventListener('drop', rejectStrayFileDrop);
         disconnectBoardStream();
         if (appStream) {
             appStream.close();

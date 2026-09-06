@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import { ensureCsrfToken } from '$lib/api';
+    import { useFileDropUpload } from '$lib/composables/use-file-drop-upload.svelte';
     import Icon from '$lib/components/Icon.svelte';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
@@ -286,6 +287,27 @@
     onMount(() => {
         loadDir(sandboxEnabled ? mountPath : taskPath);
     });
+
+    // Dropping files onto the listing uploads them into the task's worktree — the
+    // `task` parameter is what /api/fs/upload resolves the target through.
+    const dropUpload = useFileDropUpload({
+        projectId: () => projectId,
+        taskId: () => taskId,
+        dir: () => currentPath,
+        onUploaded: () => loadDir(currentPath),
+    });
+
+    // The pointer-free half of the upload: a phone's file sheet or a keyboard, neither
+    // of which can start the file drag the zone waits for. Same run, same progress.
+    let uploadInput: HTMLInputElement | null = $state(null);
+
+    function handleUploadPicked(e: Event) {
+        const input = e.target as HTMLInputElement;
+        const files = Array.from(input.files || []);
+        // Cleared before the run: picking the same file again must fire change once more.
+        input.value = '';
+        dropUpload.uploadFiles(files);
+    }
 </script>
 
 <div class="task-file-browser">
@@ -302,6 +324,13 @@
                         </svg>
                     </button>
                 {/if}
+                <button class="new-file-btn upload-btn" onclick={() => uploadInput?.click()} title={t('explorer.shared.uploadTitle')} aria-label={t('explorer.shared.uploadAria')}>
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M8 10.5V2.5"/>
+                        <path d="M4.75 5.75 8 2.5l3.25 3.25"/>
+                        <path d="M2.5 13.5h11"/>
+                    </svg>
+                </button>
                 <button class="new-file-btn" onclick={toggleNewFile} title={t('explorer.shared.newFileTitle')} aria-label={t('explorer.shared.createFileAria')}>
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
                         <line x1="8" y1="3" x2="8" y2="13"/>
@@ -346,6 +375,14 @@
             </div>
         {/if}
     </div>
+    <input
+        type="file"
+        multiple
+        class="upload-input"
+        bind:this={uploadInput}
+        onchange={handleUploadPicked}
+        aria-label={t('explorer.shared.uploadAria')}
+    />
 
     <!-- Breadcrumb -->
     {#if getBreadcrumbParts().length > 0}
@@ -362,8 +399,34 @@
         </div>
     {/if}
 
-    <!-- File list -->
-    <div class="file-list" role="tree">
+    <!-- File list — also the drop zone for files dragged in from the desktop -->
+    <!-- svelte-ignore a11y_interactive_supports_focus — a drop target is not an activation
+         target; its treeitems are what a keyboard reaches. -->
+    <div
+        class="file-list"
+        role="tree"
+        class:is-drop-target={dropUpload.isOver}
+        ondragenter={dropUpload.handleDragEnter}
+        ondragover={dropUpload.handleDragOver}
+        ondragleave={dropUpload.handleDragLeave}
+        ondrop={dropUpload.handleDrop}
+    >
+        {#if dropUpload.uploading}
+            <div class="drop-progress" role="status">
+                <div class="drop-progress-row">
+                    <span class="drop-progress-label">{t('explorer.shared.dropUploading', { done: dropUpload.filesDone, total: dropUpload.filesTotal })}</span>
+                    <button class="drop-cancel-btn" onclick={dropUpload.cancel}>{t('explorer.shared.dropCancelUpload')}</button>
+                </div>
+                <div class="drop-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={dropUpload.percent}>
+                    <div class="drop-bar-fill" style="width: {dropUpload.percent}%"></div>
+                </div>
+                {#if dropUpload.currentFile}
+                    <span class="drop-progress-file">{dropUpload.currentFile}</span>
+                {/if}
+            </div>
+        {:else if dropUpload.isOver}
+            <div class="drop-hint">{t('explorer.shared.dropHint')}</div>
+        {/if}
         {#if loading && !firstLoadComplete}
             <div class="loading">{t('explorer.shared.loading')}</div>
         {:else if error}
@@ -408,6 +471,7 @@
 
 <style>
     @import '$lib/styles/shared.css';
+    @import '$lib/styles/file-drop.css';
 
     .task-file-browser {
         display: flex;
