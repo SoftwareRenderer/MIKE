@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"net"
 	"strings"
 )
 
@@ -115,4 +116,56 @@ func ValidateTaskID(id string) error {
 		return fmt.Errorf("task ID must not start with a hyphen")
 	}
 	return nil
+}
+
+// NormalizeSandboxHostIP canonicalizes the host address a port is published on. "" means
+// every interface, and so do 0.0.0.0 and ::. Anything that is not an IP address is an error.
+func NormalizeSandboxHostIP(ip string) (string, error) {
+	trimmed := strings.TrimSpace(ip)
+	if trimmed == "" {
+		return "", nil
+	}
+	parsed := net.ParseIP(trimmed)
+	if parsed == nil {
+		return "", fmt.Errorf("host address %q is not an IP address", trimmed)
+	}
+	if v4 := parsed.To4(); v4 != nil {
+		if v4.Equal(net.IPv4zero) {
+			return "", nil
+		}
+		return v4.String(), nil
+	}
+	if parsed.Equal(net.IPv6zero) {
+		return "", nil
+	}
+	return parsed.String(), nil
+}
+
+// ValidateSandboxForwardPorts checks what a project asks to publish: a container port in
+// range, and a bind address that is an IP address. Nothing else is judged - the address
+// reaches podman as written.
+func ValidateSandboxForwardPorts(ports []PortForward) error {
+	for _, pf := range ports {
+		if pf.ContainerPort < 1 || pf.ContainerPort > 65535 {
+			return fmt.Errorf("forward port: container port %d is out of range 1-65535", pf.ContainerPort)
+		}
+		if _, err := NormalizeSandboxHostIP(pf.HostIP); err != nil {
+			return fmt.Errorf("forward port %d: %w", pf.ContainerPort, err)
+		}
+	}
+	return nil
+}
+
+// NormalizeSandboxForwardPorts validates a forwarded-port list and returns it with each bind
+// address canonicalized, so "0.0.0.0" is never stored where "" says the same thing.
+func NormalizeSandboxForwardPorts(ports []PortForward) ([]PortForward, error) {
+	if err := ValidateSandboxForwardPorts(ports); err != nil {
+		return nil, err
+	}
+	out := make([]PortForward, len(ports))
+	for i, pf := range ports {
+		ip, _ := NormalizeSandboxHostIP(pf.HostIP)
+		out[i] = PortForward{ContainerPort: pf.ContainerPort, HostIP: ip}
+	}
+	return out, nil
 }

@@ -185,6 +185,12 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 		return nil, http.StatusBadRequest, err.Error()
 	}
 
+	// Forwarded ports reach podman as configured; only their shape is checked here.
+	forwardPorts, err := types.NormalizeSandboxForwardPorts(req.SandboxForwardPorts)
+	if err != nil {
+		return nil, http.StatusBadRequest, err.Error()
+	}
+
 	// Collect existing project IDs to avoid collisions
 	existingIDs := []string{}
 	projects, _ := h.store.ListProjects()
@@ -218,7 +224,7 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 		SandboxImage:            req.SandboxImage,
 		SandboxDockerfilePath:   req.SandboxDockerfilePath,
 		SandboxMemoryLimit:      memoryLimit,
-		ForwardPorts:            req.SandboxForwardPorts,
+		ForwardPorts:            forwardPorts,
 		SandboxMounts:           req.SandboxMounts,
 		SandboxEnvs:             req.SandboxEnvs,
 		SandboxCapabilities:     req.SandboxCapabilities,
@@ -539,6 +545,15 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		var forwardPorts []types.PortForward
+		if req.SandboxForwardPorts != nil {
+			normalized, err := types.NormalizeSandboxForwardPorts(req.SandboxForwardPorts)
+			if err != nil {
+				httputil.JSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			forwardPorts = normalized
+		}
 		// Block sandbox setting changes while tasks are running in the project.
 		// Modifying sandbox settings during execution would kill bridge processes
 		// mid-tool-call, causing "broken pipe" errors.
@@ -601,7 +616,7 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if req.SandboxForwardPorts != nil {
-			if updateErr := h.store.UpdateProjectSandboxForwardPorts(id, req.SandboxForwardPorts); updateErr != nil {
+			if updateErr := h.store.UpdateProjectSandboxForwardPorts(id, forwardPorts); updateErr != nil {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox forward ports setting")
 				return
 			}

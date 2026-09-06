@@ -39,9 +39,18 @@ code problem.
 ## Why the bridge never gets a port
 
 The only `-p` publishing on a sandbox container is for **user-configured** forwarded ports
-(`project.ForwardPorts` / an extension's `forward_ports`), never for the bridge; `forwardPortSpec`
-binds the host side to `127.0.0.1` so a container's listener is never exposed on the LAN. Container
-ports outside 1-65535 are skipped.
+(`project.ForwardPorts`), never for the bridge. An extension's declared `forward_ports` are validated
+and stored but never published - the extension sandbox builds its own create args, and its containers
+show `9999/tcp` exposed with no host binding.
+
+`forwardPortSpec` passes the entry's bind address to podman unchanged, and empty - which is also what
+`0.0.0.0` and `::` normalize to - means no bind address at all. The address matters more than it looks:
+pasta derives the forward *target* from it, and a gVisor container owns only the namespace's public
+(mirrored host) address, so a loopback bind publishes a port podman reports as mapped while every
+connection gets an RST. Accepted as the user's choice; `--no-splice` is what would make it work.
+Practical consequence: the URL for a forwarded port is the **machine address, not `localhost`** - and a
+sandboxed server that pins its own Host must list that address, since a wildcard listen host names no
+host. Container ports outside 1-65535 are skipped.
 
 ## Open work: the extension sandbox is still per *extension*
 
@@ -62,5 +71,5 @@ Invariants to preserve (the why, and the open work, are in `docs/sandbox-bridge.
 - **A client request is always answered:** `forwardRequest` (`backend/lsp/handler.go`) reports a failed send *and* answers the browser with a JSON-RPC error; a failed first `initialize` clears the workspace's pending marker and answers everyone queued behind it.
 - Absent diagnostics while a file is unloaded are **unknown, not clean**: `backend/exec/diagnostics.go` refuses to read loader-state entries as findings and counts the file `unloaded`.
 - Wire method IDs `0x05`-`0x08` are retired (they were `shell_open`/`shell_io`/`shell_resize`/`shell_close`) and **must not be reused** — a stale bridge binary must get a clean "unknown method" error, not a wrong handler.
-- The only `-p` publishing on a sandbox container is **user-configured** forwarded ports (`forwardPortSpec` binds `127.0.0.1`), never the bridge; container ports outside 1-65535 are skipped.
+- The only `-p` publishing on a sandbox container is **user-configured** forwarded ports (`forwardPortSpec` passes the entry's bind address through; see "Why the bridge never gets a port"), never the bridge; container ports outside 1-65535 are skipped.
 - **Build:** `make bridge` — `CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o sandbox/sandbox-bridge ./pkg/bridge/agent`. The artifact is **committed**, and it is what a source checkout hands to a container, so an edit under `pkg/` that is not re-built is an edit that never runs: `make bridge-check` fails when the committed binary is not a build of this tree. **Discovery** (`pkg/sandboxruntime/runtime.go`): `MIKE_AGENT_PATH`, then `sandbox-bridge` / `sandbox/sandbox-bridge` next to the executable, then the same paths in the CWD; container creation fails if not found. **Protocol:** binary framing — 9-byte header (MsgID + Type + Length) + typed payload, Chunk frames stream before the final Result/Error, `MethodLSP` (0x0A) is the JSON-RPC passthrough.

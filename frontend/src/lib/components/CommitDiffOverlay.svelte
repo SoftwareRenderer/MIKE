@@ -7,7 +7,7 @@
     import { escapeHtml } from '$lib/utils/format';
     import { activeLocale } from '$lib/i18n/runtime.svelte';
     import { t } from '$lib/i18n';
-import { slide } from 'svelte/transition';
+    import { slide } from 'svelte/transition';
 
     interface Props {
         commit: GitCommit;

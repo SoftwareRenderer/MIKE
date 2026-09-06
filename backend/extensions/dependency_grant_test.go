@@ -230,7 +230,7 @@ func TestManifestMayNotSupplyTheHostPath(t *testing.T) {
 	c := &LSPConfig{FileTypes: []LSPFileType{{Extension: "go", LanguageID: "go"}}}
 	c.Sandbox = &SandboxConfig{
 		Dependency:         &DependencyCache{ContainerPath: "/go/pkg/mod", Env: "GOMODCACHE"},
-		DependencyHostPath: "/home/user/go/pkg/mod",
+		DependencyHostPath: "/home/sandbox/go/pkg/mod",
 	}
 	err := c.Validate()
 	if err == nil {

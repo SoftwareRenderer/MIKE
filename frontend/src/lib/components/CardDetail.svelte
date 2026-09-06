@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import type { Task, TaskCommit } from '$lib/types';
-    import type { DiffFile, DiffRow } from '$lib/types/diff';
+    import type { DiffFile } from '$lib/types/diff';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext, getExpandedTasksContext } from '$lib/context';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile } from '$lib/api';
@@ -838,12 +838,7 @@
     async function expandTruncatedFile(path: string) {
         if (!task) return;
         try {
-            const data = await getDiffFile(task.project_id, task.id, path, { full: true });
-            if (data.rows) {
-                const added = data.rows.filter((r: any) => r.variant === 'added').length;
-                const removed = data.rows.filter((r: any) => r.variant === 'removed').length;
-                diffCache.setFile(path, { path, rows: data.rows as DiffRow[], added, removed, truncated: false, origAdded: data.origAdded, origRemoved: data.origRemoved });
-            }
+            await diffCache.expandFile(path);
         } catch (e) {
             // Silently fail
         }
@@ -861,8 +856,7 @@
         try {
             const data = await getDiffFile(task.project_id, task.id, path, { full: !!isTruncated });
             if (data.lines) {
-                diffCache.setFile(path, {
-                    path,
+                diffCache.patchFile(path, {
                     rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })),
                     added: data.lines.length,
                     removed: 0,
@@ -870,8 +864,7 @@
                     origAdded: data.origAdded,
                 });
             } else if (data.isBinary || data.fileSize) {
-                diffCache.setFile(path, {
-                    path,
+                diffCache.patchFile(path, {
                     rows: [],
                     added: 0,
                     removed: 0,

@@ -1636,26 +1636,26 @@ type InstallExtensionRequest struct {
 
 // ExtensionResponse is the API response for an extension.
 type ExtensionResponse struct {
-	ID              string            `json:"id"`
-	Name            string            `json:"name"`
-	Version         string            `json:"version"`
-	Type            string            `json:"type"`
-	Manifest        ExtensionManifest `json:"manifest"`
-	Config          map[string]any    `json:"config"`
-	ContainerConfig ContainerConfig   `json:"container_config"`
-	SandboxConfig   SandboxConfig     `json:"sandbox_config"`
-	InstallSource   string            `json:"install_source"`
-	ImageRef        string            `json:"image_ref,omitempty"`
-	Enabled         bool              `json:"enabled"`
-	Running         bool              `json:"running"`
-	LocalPath       string            `json:"local_path,omitempty"`
-	ServedURL   string               `json:"served_url,omitempty"`
-	Ports       []types.AssignedPort `json:"ports,omitempty"`
-	InstalledAt string               `json:"installed_at"`
-	BuiltAt     string               `json:"built_at"`
-	Repo        string               `json:"repo,omitempty"`
-	Commit      string               `json:"commit,omitempty"`
-	Author      string               `json:"author,omitempty"`
+	ID              string               `json:"id"`
+	Name            string               `json:"name"`
+	Version         string               `json:"version"`
+	Type            string               `json:"type"`
+	Manifest        ExtensionManifest    `json:"manifest"`
+	Config          map[string]any       `json:"config"`
+	ContainerConfig ContainerConfig      `json:"container_config"`
+	SandboxConfig   SandboxConfig        `json:"sandbox_config"`
+	InstallSource   string               `json:"install_source"`
+	ImageRef        string               `json:"image_ref,omitempty"`
+	Enabled         bool                 `json:"enabled"`
+	Running         bool                 `json:"running"`
+	LocalPath       string               `json:"local_path,omitempty"`
+	ServedURL       string               `json:"served_url,omitempty"`
+	Ports           []types.AssignedPort `json:"ports,omitempty"`
+	InstalledAt     string               `json:"installed_at"`
+	BuiltAt         string               `json:"built_at"`
+	Repo            string               `json:"repo,omitempty"`
+	Commit          string               `json:"commit,omitempty"`
+	Author          string               `json:"author,omitempty"`
 	// Environment is the runtime "can this extension resolve the workspace it is
 	// serving" report, present for a language-server extension that declares an
 	// environment check. When it says unhealthy, core is withholding that

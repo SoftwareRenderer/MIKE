@@ -1,0 +1,105 @@
+# MIKE in production-ish deployment: one service, because the server IS the thing that runs
+# containers. It execs `podman --runtime runsc create/start/exec` per task and bind-mounts
+# each task's git worktree into that gVisor container, so podman and runsc live inside this
+# image (see Dockerfile) and the container must be able to drive a NESTED runtime.
+#
+#   cp .env.example .env   # then fill in the three required values
+#   docker compose up -d --build
+#   open https://localhost:3000
+#
+# WHAT --PRIVILEGED BUYS AND COSTS. The nested runtime needs netlink, cgroup and device
+# access that no capability subset reliably covers, so this service is privileged: it can
+# reach host devices. That is why the published port defaults to 127.0.0.1 below, why TLS is
+# never disabled here, and why MIKE_ALLOWED_HOSTS is mandatory rather than defaulted. Run it
+# on a machine you control. Task work does NOT run in this container — it runs in the gVisor
+# container per task, with --cap-drop ALL and --security-opt no-new-privileges.
+#
+# Volumes are named rather than bind-mounted on purpose: podman's storage must not sit on the
+# engine's own overlayfs (native overlay refuses overlay-on-overlay, which is the one
+# environment-dependent failure this file can prevent).
+
+name: mike
+
+services:
+  mike:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${MIKE_VERSION:-compose}
+        GVIZOR_RELEASE: ${GVIZOR_RELEASE:-latest}
+    image: getmike/mike:${MIKE_IMAGE_TAG:-local}
+    restart: unless-stopped
+    # The server's own shutdown budget is 15s (backend/server/shutdown.go) and it then waits
+    # on container teardown; SIGKILL at 10s would orphan sandbox containers.
+    stop_grace_period: 40s
+
+    privileged: true
+    # runsc and a nested podman need syscall surface (clone/unshare/mount/ptrace-adjacent)
+    # that docker's default seccomp profile blocks. Not a convenience: with it on, runsc fails
+    # in a way that looks like a broken gVisor install.
+    security_opt:
+      - seccomp=unconfined
+    # Sandbox containers get their /dev/shm from this one; the 64MB default is small for
+    # builds and language servers.
+    shm_size: 256m
+    # Scratch out of the storage layer. os.TempDir() is also an allowed extension-sandbox
+    # mount root, so this is a mount source, not just /tmp.
+    tmpfs:
+      - /tmp
+
+    # The in-container port and the published one are separate variables: the server binds
+    # MIKE_PORT inside its own network namespace, and the host side is what a reverse proxy
+    # or an exposed interface would talk to. Loopback unless the operator says otherwise —
+    # publishing 0.0.0.0 is a deliberate edit, and the Host allowlist still has to name the
+    # hostname the browser uses or every request is HTTP 421.
+    ports:
+      - "${MIKE_PUBLISH_ADDRESS:-127.0.0.1}:${MIKE_PUBLISH_PORT:-3000}:${MIKE_PORT:-3000}"
+
+    environment:
+      # 0.0.0.0 inside the container is not 0.0.0.0 on the host: the published address above
+      # stays the gate. Loopback here would make the published port connect-refuse.
+      MIKE_LISTEN: 0.0.0.0
+      MIKE_PORT: ${MIKE_PORT:-3000}
+      MIKE_DATA_DIR: /mike/data
+      MIKE_WORKTREES_DIR: /mike/worktrees
+
+      # Required, no defaults, and the refusal happens at `compose up` rather than as a
+      # half-booted server: an empty encryption key would still boot (it does not), an empty
+      # Host allowlist would silently 421 every request, and a defaulted master password is
+      # the one thing this file must not do.
+      MIKE_ENCRYPTION_KEY: '${MIKE_ENCRYPTION_KEY:?MIKE_ENCRYPTION_KEY is required - generate one with: openssl rand -hex 32}'
+      MIKE_LOGIN_PASSWORD: '${MIKE_LOGIN_PASSWORD:?MIKE_LOGIN_PASSWORD is required - at least 8 characters, e.g. openssl rand -base64 24}'
+      MIKE_ALLOWED_HOSTS: '${MIKE_ALLOWED_HOSTS:?MIKE_ALLOWED_HOSTS is required - comma-separated Host values to accept, e.g. localhost,kanban.example.com}'
+
+      # Optional passthroughs; the server treats an empty value as unset.
+      MIKE_TRUST_PROXY: ${MIKE_TRUST_PROXY:-}
+      MIKE_REGISTRY_URL: ${MIKE_REGISTRY_URL:-}
+      MIKE_LOGIN_RATE_LIMIT: ${MIKE_LOGIN_RATE_LIMIT:-}
+      # Pull the default sandbox base image at boot instead of on the first task.
+      MIKE_PREPULL_IMAGE: ${MIKE_PREPULL_IMAGE:-}
+
+    volumes:
+      # kanban.db (encrypted provider keys, session hashes), the local CA + server cert, and
+      # the flight recorder. Owner-only inside; the CA never rotates, so keep the volume.
+      - mike-data:/mike/data
+      # One git worktree per task — the thing the sandboxes bind-mount.
+      - mike-worktrees:/mike/worktrees
+      # Installed extension code (UI modules, agent adapters, LSP manifests). Deleting an
+      # extension deletes its directory, so this is state, not a cache.
+      - mike-extensions:/mike/extensions
+      # podman image + container storage, off the engine's overlayfs. Losing it means every
+      # per-project sandbox image has to be rebuilt.
+      - mike-containers:/var/lib/containers
+      # The ONE bind mount: the projects you add have to exist as paths this container can
+      # read, and each project's .git is bind-mounted into its sandboxes at the same path.
+      # Default is a dedicated ./projects directory next to this file. Point it somewhere else
+      # only at the tree you actually intend this server to be able to edit and commit to —
+      # an agent with a shell in a sandbox can reach everything under here.
+      - ${MIKE_WORKSPACE_DIR:-./projects}:/mike/projects
+
+volumes:
+  mike-data:
+  mike-worktrees:
+  mike-extensions:
+  mike-containers:

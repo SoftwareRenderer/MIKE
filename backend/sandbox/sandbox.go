@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -258,12 +259,16 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 	return client, nil
 }
 
-// forwardPortSpec renders the podman `-p` value publishing hostPort →
-// containerPort. The host side is pinned to loopback: only this machine's server
-// reads a sandbox's forwarded port (the bridge, LSP, terminal port checks), so
-// binding every interface would expose a container's listener on the LAN.
-func forwardPortSpec(hostPort, containerPort int) string {
-	return fmt.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort)
+// forwardPortSpec renders the podman `-p` value publishing hostPort on hostIP as a
+// container port. Empty hostIP binds every interface, which podman spells as no address.
+// The bind address also sets where pasta sends the connection, and a gVisor container owns
+// only the namespace's public address: a loopback bind maps a port nothing answers.
+func forwardPortSpec(hostIP string, hostPort, containerPort int) string {
+	if hostIP == "" {
+		return fmt.Sprintf("%d:%d", hostPort, containerPort)
+	}
+	// podman needs an IPv6 address bracketed.
+	return net.JoinHostPort(hostIP, strconv.Itoa(hostPort)) + ":" + strconv.Itoa(containerPort)
 }
 
 func createContainerArgs(containerName, mountPath string) []string {
@@ -297,8 +302,9 @@ func createContainerArgs(containerName, mountPath string) []string {
 // --memory=<limit>M when memoryLimit > 0; environment limited to what was configured (see
 // containerEnvArgs) — PATH and the rest stay as the image sets them.
 //
-// Each opts.ForwardPorts entry gets an ephemeral host port (net.Listen ":0") mapped to the
-// container port and bound to loopback; the returned slice lists those mappings, nil on failure.
+// Each opts.ForwardPorts entry gets an ephemeral host port (net.Listen ":0" on the entry's
+// bind address) mapped to the container port; the returned slice lists those mappings, nil
+// on failure.
 func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Project, opts SandboxOpts) ([]types.AssignedPort, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -377,16 +383,24 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 			log.Printf("[sandbox] task=%s skipping invalid container port: %d", taskID, pf.ContainerPort)
 			continue
 		}
-		ln, err := net.Listen("tcp", ":0")
+		hostIP, err := types.NormalizeSandboxHostIP(pf.HostIP)
 		if err != nil {
-			log.Printf("[sandbox] task=%s failed to assign host port for container port %d: %v", taskID, pf.ContainerPort, err)
+			log.Printf("[sandbox] task=%s skipping port %d: %v", taskID, pf.ContainerPort, err)
+			continue
+		}
+		// Binding the probe to hostIP reports a missing interface here, against the port we
+		// were asked for, instead of later as a podman failure.
+		ln, err := net.Listen("tcp", net.JoinHostPort(hostIP, "0"))
+		if err != nil {
+			log.Printf("[sandbox] task=%s failed to assign host port on %q for container port %d: %v", taskID, hostIP, pf.ContainerPort, err)
 			continue
 		}
 		hostPort := ln.Addr().(*net.TCPAddr).Port
 		_ = ln.Close()
-		createArgs = append(createArgs, "-p", forwardPortSpec(hostPort, pf.ContainerPort))
-		assignedPorts = append(assignedPorts, types.AssignedPort{HostPort: hostPort, ContainerPort: pf.ContainerPort})
-		log.Printf("[sandbox] task=%s forwarding port %d -> %d", taskID, hostPort, pf.ContainerPort)
+		binding := forwardPortSpec(hostIP, hostPort, pf.ContainerPort)
+		createArgs = append(createArgs, "-p", binding)
+		assignedPorts = append(assignedPorts, types.AssignedPort{HostPort: hostPort, ContainerPort: pf.ContainerPort, HostIP: hostIP})
+		log.Printf("[sandbox] task=%s publishing %s for container port %d", taskID, binding, pf.ContainerPort)
 	}
 	if opts.MemoryLimit > 0 {
 		createArgs = append(createArgs, "--memory", fmt.Sprintf("%dM", opts.MemoryLimit))
@@ -953,6 +967,33 @@ func (sm *SandboxManager) ContainerIsRunning(taskID string) bool {
 	return running
 }
 
+// parsePortBinding reads one `podman port` line. IPv6 addresses are printed unbracketed
+// ("fd00::5:18121"), so the host port is whatever follows the last colon.
+func parsePortBinding(line string) (types.AssignedPort, bool) {
+	left, right, ok := strings.Cut(line, " -> ")
+	if !ok {
+		return types.AssignedPort{}, false
+	}
+	containerPort, err := strconv.Atoi(strings.Split(left, "/")[0])
+	if err != nil {
+		return types.AssignedPort{}, false
+	}
+	i := strings.LastIndex(right, ":")
+	if i < 0 {
+		return types.AssignedPort{}, false
+	}
+	hostPort, err := strconv.Atoi(right[i+1:])
+	if err != nil {
+		return types.AssignedPort{}, false
+	}
+	// A wildcard address, and "*" where podman prints it, mean every interface: "".
+	host, err := types.NormalizeSandboxHostIP(right[:i])
+	if err != nil {
+		host = ""
+	}
+	return types.AssignedPort{HostPort: hostPort, ContainerPort: containerPort, HostIP: host}, true
+}
+
 // GetContainerPorts queries podman for the live port mappings of a container.
 // Returns an empty slice if the container is not tracked or has no port mappings.
 func (sm *SandboxManager) GetContainerPorts(taskID string) ([]types.AssignedPort, error) {
@@ -967,26 +1008,23 @@ func (sm *SandboxManager) GetContainerPorts(taskID string) ([]types.AssignedPort
 		return nil, fmt.Errorf("podman port: %w", err)
 	}
 	var ports []types.AssignedPort
+	seen := make(map[types.AssignedPort]bool)
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		// Format: "8080/tcp -> 0.0.0.0:12345"
-		parts := strings.Split(line, " -> ")
-		if len(parts) != 2 {
+		port, ok := parsePortBinding(line)
+		if !ok {
+			log.Printf("[sandbox] task=%s ignoring unreadable port line %q", taskID, line)
 			continue
 		}
-		containerPart := strings.Split(parts[0], "/")[0] // "8080/tcp" -> "8080"
-		hostPart := strings.Split(parts[1], ":")[1]      // "0.0.0.0:12345" -> "12345"
-		var containerPort, hostPort int
-		if _, err := fmt.Sscanf(containerPart, "%d", &containerPort); err != nil {
+		// One container port bound on both families reads as the same mapping twice.
+		if seen[port] {
 			continue
 		}
-		if _, err := fmt.Sscanf(hostPart, "%d", &hostPort); err != nil {
-			continue
-		}
-		ports = append(ports, types.AssignedPort{HostPort: hostPort, ContainerPort: containerPort})
+		seen[port] = true
+		ports = append(ports, port)
 	}
 	return ports, nil
 }

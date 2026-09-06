@@ -28,8 +28,10 @@ describe('computeStickyHeader', () => {
     it('follows the newest user message as it crosses the viewport top', () => {
         expect(computeStickyHeader([A, B, C], 450).firstLine).toBe('Second message');
         expect(computeStickyHeader([A, B, C], 450).entryIdx).toBe(2);
-        // top exactly at scrollTop counts as scrolled above the viewport
-        expect(computeStickyHeader([A, B, C], 900).entryIdx).toBe(4);
+        // A message resting exactly on the line is the one AT the top, so the header
+        // already holds the next one back instead of naming it again.
+        expect(computeStickyHeader([A, B, C], 900).entryIdx).toBe(2);
+        // Past it, it becomes the message the header offers to jump back to.
         expect(computeStickyHeader([A, B, C], 950).firstLine).toBe('Third message');
     });
 
@@ -54,5 +56,43 @@ describe('computeStickyHeader', () => {
         expect(r.show).toBe(true);
         expect(r.firstLine).toBe('First message');
         expect(r.entryIdx).toBe(0);
+    });
+
+    // The sticky line is the overlay's bottom edge (46px here): a tapped message
+    // lands on it and the header selects against it.
+    const INSET = 46;
+    /** scrollTop that rests a message with the given content top on the line. */
+    const landedAt = (top: number) => top - INSET;
+
+    it('hands the header to the message before the one it just landed', () => {
+        // B is on the line, so B is the message at the top and the header shows A.
+        const r = computeStickyHeader([A, B, C], landedAt(B.top), INSET);
+        expect(r.show).toBe(true);
+        expect(r.entryIdx).toBe(0);
+        expect(r.firstLine).toBe('First message');
+    });
+
+    it('still names a message the user has scrolled past, to jump back to it', () => {
+        // B's top is 50px above the line, so its own first line is off screen.
+        expect(computeStickyHeader([A, B, C], 450, INSET).entryIdx).toBe(2);
+    });
+
+    it('treats a landing the browser nudged as resting on the line', () => {
+        // 8px is the measured scroll-anchoring shift after the settle loop returns;
+        // naming B here would make the next tap land B again.
+        expect(computeStickyHeader([A, B, C], landedAt(B.top) + 8, INSET).entryIdx).toBe(0);
+        expect(computeStickyHeader([A, B, C], landedAt(B.top) + 20, INSET).entryIdx).toBe(2);
+    });
+
+    it('never names a message still below the line', () => {
+        // B (top 400) is on screen at both positions, so the header holds A.
+        expect(computeStickyHeader([A, B, C], 350, INSET).entryIdx).toBe(0);
+        expect(computeStickyHeader([A, B, C], 300, INSET).entryIdx).toBe(0);
+    });
+
+    it('keeps the header hidden at the top of the conversation even with a line', () => {
+        // Jumping to the first message clamps to scrollTop 0.
+        const r = computeStickyHeader([A, B, C], 0, INSET);
+        expect(r.show).toBe(false);
     });
 });

@@ -1029,6 +1029,53 @@ test.describe.serial('Diff panel real-time file updates', () => {
 
         execSync(`rm -f ${join(worktreeDir, testFile)}`);
     });
+
+    test('expanding a truncated staged file keeps it in the Staged section', async ({ page }) => {
+        const result = await sharedTask(page);
+        if (!result) {
+            await expect(page.locator('.board')).toBeVisible();
+            return;
+        }
+        const { taskInfo, worktreeDir } = result;
+
+        const testFile = `truncated-staged-${Date.now()}.txt`;
+        // More change lines than defaultMaxChangeLines (60) so the panel truncates the
+        // file and offers "Show full diff".
+        writeFileSync(join(worktreeDir, testFile), Array.from({ length: 120 }, (_v, i) => `line ${i}`).join('\n') + '\n');
+        await gitWithRetry(worktreeDir, `git add -- ${testFile}`);
+
+        await navigateToTask(page, taskInfo.taskId, taskInfo.projectId);
+        await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+        const diffColumn = page.locator('.column-diff');
+        if (!await diffColumn.isVisible().catch(() => false)) {
+            const changesTab = page.locator('.tab-btn:has-text("Changes")');
+            if (await changesTab.isVisible().catch(() => false)) {
+                await changesTab.click();
+            }
+        }
+        await expect(page.locator('.diff-content')).toBeVisible({ timeout: 10000 });
+
+        const stagedSection = page.locator('.diff-section').filter({ has: page.locator('.diff-section-header.diff-section-staged') });
+        const unstagedSection = page.locator('.diff-section').filter({ has: page.locator('.diff-section-header.diff-section-unstaged') });
+        const stagedFile = stagedSection.locator('.diff-file-section', { hasText: testFile });
+        await expect(stagedFile).toHaveCount(1, { timeout: 20000 });
+
+        const expandBtn = stagedFile.locator('.diff-expand-btn');
+        await expect(expandBtn).toBeVisible({ timeout: 10000 });
+        const badgeBefore = (await stagedFile.locator('.diff-status-badge').textContent())?.trim();
+        await expandBtn.click();
+
+        // Regression: the expansion response knows nothing about the git index or the
+        // file's status, and the panel used to rebuild the cache entry from it alone —
+        // which dropped `staged` (file jumped Staged → Unstaged) and the A/D/R badge.
+        await expect(expandBtn).toHaveCount(0, { timeout: 20000 });
+        await expect(stagedFile).toHaveCount(1);
+        await expect(unstagedSection.locator('.diff-file-section', { hasText: testFile })).toHaveCount(0);
+        await expect(stagedFile.locator('.diff-status-badge')).toHaveText(badgeBefore || 'A');
+
+        execSync(`rm -f ${join(worktreeDir, testFile)}`);
+        execSync(`cd ${worktreeDir} && git reset -q -- ${testFile}`);
+    });
 });
 
 // --- Tests: done-task diff (BaseCommit..BranchTip) ---

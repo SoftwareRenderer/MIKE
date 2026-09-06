@@ -4,6 +4,7 @@
     import type { Project, Task } from '$lib/types';
     import { updateProject, buildSandboxImageStream, getBoard, getProject } from '$lib/api';
     import { formatMemoryLimitMB, memoryLimitToInput, parseMemoryLimitMB } from '$lib/utils/memory-stats';
+    import { bindForInput, formatAssignedHost, formatForwardPort, formatForwardPorts, normalizeBind, portRowError } from '$lib/utils/sandbox-ports';
     import { dialogStore } from '$lib/stores';
     import type { PortForward, AssignedPort, SandboxMount, SandboxEnv } from '$lib/types';
     import Icon from '$lib/components/Icon.svelte';
@@ -43,6 +44,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     let forwardPorts = $state<PortForward[]>([]);
     let editingPortIndex = $state<number | null>(null);
     let newContainerPort = $state('');
+    let newHostIP = $state('');
     let portError = $state('');
     let portsExpanded = $state(false);
     let hasPendingPort = $derived(String(newContainerPort).trim() !== '');
@@ -263,32 +265,38 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     function editPort(index: number) {
         editingPortIndex = index;
         newContainerPort = String(forwardPorts[index].container_port);
+        newHostIP = bindForInput(forwardPorts[index].host_ip);
         portError = '';
     }
 
     function cancelPortEdit() {
         editingPortIndex = null;
         newContainerPort = '';
+        newHostIP = '';
         portError = '';
     }
 
     function addPortForward() {
         portError = '';
         saveWarning = '';
-        const container = parseInt(newContainerPort, 10);
-        if (isNaN(container) || container < 1 || container > 65535) {
-            portError = t('sandbox.portRangeError');
+        const message = portRowError(newContainerPort, newHostIP);
+        if (message) {
+            portError = message;
             return;
         }
+        const container = Number(newContainerPort);
+        const hostIP = normalizeBind(newHostIP) ?? '';
+        const entry: PortForward = hostIP ? { container_port: container, host_ip: hostIP } : { container_port: container };
         if (editingPortIndex !== null) {
             const updated = [...forwardPorts];
-            updated[editingPortIndex] = { container_port: container };
+            updated[editingPortIndex] = entry;
             forwardPorts = updated;
             editingPortIndex = null;
         } else {
-            forwardPorts = [...forwardPorts, { container_port: container }];
+            forwardPorts = [...forwardPorts, entry];
         }
         newContainerPort = '';
+        newHostIP = '';
     }
 
     function removePortForward(index: number) {
@@ -557,7 +565,8 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         // Port forwarding changes
         const originalPorts = project.forward_ports ?? [];
         const portsChanged = forwardPorts.length !== originalPorts.length ||
-            forwardPorts.some((p, i) => p.container_port !== originalPorts[i]?.container_port);
+            forwardPorts.some((p, i) => p.container_port !== originalPorts[i]?.container_port ||
+                (p.host_ip ?? '') !== (originalPorts[i]?.host_ip ?? ''));
         if (portsChanged) {
             changes.sandbox_forward_ports = forwardPorts;
         }
@@ -678,7 +687,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 {#if forwardPorts.length > 0}
                 <div class="setting-row">
                     <span class="setting-label">{t('sandbox.forwardedPorts')}</span>
-                    <span class="setting-value">{forwardPorts.map(p => p.container_port).join(', ')}</span>
+                    <span class="setting-value">{formatForwardPorts(forwardPorts)}</span>
                 </div>
 
                 <!-- Active port mappings -->
@@ -689,7 +698,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         {#each forwardPorts as port}
                         {#if activeHostPorts.has(port.container_port)}
                         <div class="active-port-item">
-                            <span class="active-port-host" title={t('sandbox.hostPort')}>{activeHostPorts.get(port.container_port)}</span>
+                            <span class="active-port-host" title={t('sandbox.hostPort')}>{formatAssignedHost(activeHostPorts.get(port.container_port) ?? 0, port.host_ip)}</span>
                             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                                 <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
@@ -839,7 +848,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                             <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                         {/if}
-                        <span class="port-container" title={t('sandbox.containerPort')}>{port.container_port}</span>
+                        <span class="port-container" title={t('sandbox.containerPort')}>{formatForwardPort(port)}</span>
                     </span>
                     <button type="button" class="btn-remove-port" onclick={(e) => { e.stopPropagation(); removePortForward(i); }} disabled={isLocked} title={t('sandbox.remove')}>
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
@@ -865,6 +874,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         </svg>
                     </button>
                 {/if}
+                <input type="text" class="port-input port-input-bind" bind:value={newHostIP} placeholder={t('sandbox.hostInterface')} spellcheck="false" autocomplete="off" disabled={isLocked} aria-label={t('sandbox.hostInterfaceAria')} />
                 <input type="number" class="port-input" bind:value={newContainerPort} placeholder={t('sandbox.containerPort')} min="1" max="65535" disabled={isLocked} aria-label={t('sandbox.containerPort')} />
                 <button type="button" class="btn-add-port" class:pending={hasPendingPort} onclick={addPortForward} disabled={isLocked} title={editingPortIndex !== null ? t('sandbox.savePort') : t('sandbox.addPort')}>
                     {#if editingPortIndex !== null}
@@ -881,6 +891,8 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
             {#if portError}
             <div class="port-error">{portError}</div>
+            {:else}
+            <div class="port-hint">{t('sandbox.hostInterfaceHint')}</div>
             {/if}
             </div>
             {/if}
@@ -2209,6 +2221,16 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
     .port-input:disabled {
         opacity: 0.5;
+    }
+
+    .port-input-bind {
+        max-width: 170px;
+    }
+
+    .port-hint {
+        padding: 2px 0 0 36px;
+        font-size: 0.6875rem;
+        color: var(--color-text-muted);
     }
 
     /* Add buttons (ports + mounts) */

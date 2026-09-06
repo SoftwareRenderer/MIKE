@@ -11,7 +11,7 @@ const COMMIT: GitCommit = {
     hash: 'abcdef1234567890abcdef1234567890abcdef12',
     short: 'abcdef1',
     subject: 'Add the thing',
-    author: '/Sandbox',
+    author: 'Sandbox',
     date: '2024-05-04T14:30:00Z',
     parents: [],
     branches: ['feature/thing'],
@@ -59,7 +59,7 @@ describe('buildCommitTooltip', () => {
         const lines = tip!.split('\n');
         expect(lines).toEqual([
             'Add the thing',
-            '/Sandbox · 2024-05-04 14:30:00',
+            'Sandbox · 2024-05-04 14:30:00',
             'feature/thing · origin',
             'abcdef1',
         ]);
@@ -67,12 +67,12 @@ describe('buildCommitTooltip', () => {
 
     it('carries the hidden date for tight density', () => {
         const tip = buildCommitTooltip(COMMIT, 'tight', CTX);
-        expect(tip).toContain('/Sandbox · 2024-05-04 14:30:00');
+        expect(tip).toContain('Sandbox · 2024-05-04 14:30:00');
     });
 
     it('carries the hidden author for tighest density', () => {
         const tip = buildCommitTooltip(COMMIT, 'tighest', CTX);
-        expect(tip).toContain('/Sandbox · 2024-05-04 14:30:00');
+        expect(tip).toContain('Sandbox · 2024-05-04 14:30:00');
     });
 
     it('omits the branch/origin line when the commit has neither', () => {
@@ -81,14 +81,14 @@ describe('buildCommitTooltip', () => {
         const tip = buildCommitTooltip(bare, 'compact', ctx);
         expect(tip!.split('\n')).toEqual([
             'Add the thing',
-            '/Sandbox · 2024-05-04 14:30:00',
+            'Sandbox · 2024-05-04 14:30:00',
             'abcdef1',
         ]);
     });
 
     it('falls back to the raw date when no formatted date is available', () => {
         const tip = buildCommitTooltip(COMMIT, 'compact', { ...CTX, dateFormatted: '' });
-        expect(tip).toContain('/Sandbox · 2024-05-04T14:30:00Z');
+        expect(tip).toContain('Sandbox · 2024-05-04T14:30:00Z');
     });
 
     it('omits the who/when line when both author and date are empty', () => {

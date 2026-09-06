@@ -5,6 +5,7 @@
     import Icon from '$lib/components/Icon.svelte';
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
     import { isNearMemoryLimit, formatSandboxMemory, formatMemoryLimitMB } from '$lib/utils/memory-stats';
+    import { formatAssignedHost } from '$lib/utils/sandbox-ports';
 import BaseModal from './BaseModal.svelte';
 import { t } from '$lib/i18n';
 
@@ -121,7 +122,7 @@ import { t } from '$lib/i18n';
                         <div class="assigned-list">
                             {#each task.assigned_ports as port}
                             <div class="assigned-item">
-                                <span class="assigned-host" title={t('sandbox.hostPort')}>{port.host_port}</span>
+                                 <span class="assigned-host" title={t('sandbox.hostAddress')}>{formatAssignedHost(port.host_port, port.host_ip)}</span>
                                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                                     <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                                 </svg>
@@ -375,6 +376,7 @@ import { t } from '$lib/i18n';
     .assigned-host {
         font-weight: 600;
         color: var(--color-accent-light);
+        overflow-wrap: anywhere;
     }
 
     .assigned-container {

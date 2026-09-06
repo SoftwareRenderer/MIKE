@@ -392,4 +392,70 @@ describe('DiffCache', () => {
         cache.stageFile('b.ts', true, () => {});
         expect(apis.stageFile).toHaveBeenCalledWith('proj-2', 'task-2', 'b.ts', true);
     });
+
+    // --- "Show full diff" must not re-derive what the per-file endpoint never answered ---
+
+    it('patchFile merges into the cached entry instead of replacing it', () => {
+        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
+        cache.state.files = {
+            'a.ts': { path: 'a.ts', rows: [{ lineNumber: 1, variant: 'added', text: 'x' }], added: 1, removed: 0, staged: true, isNewFile: true },
+        };
+        cache.patchFile('a.ts', { rows: [], added: 0, removed: 0, truncated: false });
+        expect(cache.state.files['a.ts'].staged).toBe(true);
+        expect(cache.state.files['a.ts'].isNewFile).toBe(true);
+        expect(cache.state.files['a.ts'].rows).toEqual([]);
+        expect(cache.state.files['a.ts'].truncated).toBe(false);
+    });
+
+    it('patchFile creates the entry when the path is not cached', () => {
+        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
+        cache.patchFile('new.ts', { added: 2 });
+        expect(cache.state.files['new.ts'].path).toBe('new.ts');
+        expect(cache.state.files['new.ts'].added).toBe(2);
+    });
+
+    it('expandFile keeps a staged file staged and its status badge intact', async () => {
+        const fullRows = Array.from({ length: 5 }, (_v, i) => ({ lineNumber: i + 1, variant: 'added', text: `line ${i}` }));
+        const getDiffFile = vi.fn(async () => ({ rows: fullRows, truncated: false }));
+        const cache = new DiffCache(makeApis({ getDiffFile }), () => 'proj-1', () => 'task-1');
+        cache.state.files = {
+            'a.ts': {
+                path: 'a.ts', rows: [{ lineNumber: 1, variant: 'added', text: 'line 0' }], added: 1, removed: 0,
+                truncated: true, origAdded: 120, origRemoved: 3, staged: true, isNewFile: true,
+            },
+        };
+        expect(await cache.expandFile('a.ts')).toBe(true);
+        const file = cache.state.files['a.ts'];
+        // Regression: the entry was rebuilt from the response alone, so `staged` became
+        // undefined and the panel rendered the file under Unstaged (badge A -> M too).
+        expect(file.staged).toBe(true);
+        expect(file.isNewFile).toBe(true);
+        expect(file.rows.length).toBe(5);
+        expect(file.added).toBe(5);
+        expect(file.removed).toBe(0);
+        expect(file.truncated).toBe(false);
+        expect(getDiffFile).toHaveBeenCalledWith('proj-1', 'task-1', 'a.ts', { full: true });
+    });
+
+    it('expandFile takes committedRows from the response, not from the cache', async () => {
+        const getDiffFile = vi.fn(async () => ({ rows: [{ lineNumber: 1, variant: 'added', text: 'x' }], truncated: false }));
+        const cache = new DiffCache(makeApis({ getDiffFile }), () => 'proj-1', () => 'task-1');
+        cache.state.files = {
+            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, truncated: true, staged: true, committedRows: [{ lineNumber: 1, variant: 'added', text: 'old' }] },
+        };
+        await cache.expandFile('a.ts');
+        expect(cache.state.files['a.ts'].committedRows).toEqual([]);
+        expect(cache.state.files['a.ts'].staged).toBe(true);
+    });
+
+    it('expandFile is a no-op for an uncached path or a rowless response', async () => {
+        const getDiffFile = vi.fn(async () => ({ rows: undefined, lines: ['a'] }));
+        const cache = new DiffCache(makeApis({ getDiffFile }), () => 'proj-1', () => 'task-1');
+        expect(await cache.expandFile('missing.ts')).toBe(false);
+        expect(getDiffFile).not.toHaveBeenCalled();
+
+        cache.state.files = { 'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: true } };
+        expect(await cache.expandFile('a.ts')).toBe(false);
+        expect(cache.state.files['a.ts'].staged).toBe(true);
+    });
 });
