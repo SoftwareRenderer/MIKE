@@ -59,6 +59,10 @@ case('plural-ish sentence', 1, '<script>const t = `Show all changes`;</script>')
 case('a single capitalised word is still copy', 1, '<button>Save</button>')
 case('copy after an icon', 1, '<svg width="12" height="12"></svg><p>Save changes</p>')
 case('error shown to the user', 1, '<script>throw new Error("Failed to save");</script>')
+case('a key that merely ends in d is not SVG geometry', 1,
+     "<script>const m = { thread: 'Open the newest thread' };</script>")
+case('path data quoted as copy is still copy', 1,
+     "<script>const tip = 'M8 3v10M3 8h10 draws a plus sign';</script>")
 
 # --- the lookalikes that must not -------------------------------------------
 case('literal aria-label', 0, '<button aria-label="Save">{icon}</button>')
@@ -76,6 +80,10 @@ case('log line continued on its own line', 0,
      '<script>console.warn(prefix,\n    `channel disarmed until it re-handshakes.`);</script>')
 case('quote inside a regex', 0, "<script>const re = /'/; // and a comment mentioning 'quoted' text here</script>")
 case('CSS declaration value', 0, "<script>const t = { padding: '0 6px', borderRight: '1px solid var(--color-border)' };</script>")
+case('SVG shape data built with DOM APIs', 0,
+     "<script>const icon = { tag: 'path', attrs: { d: 'M8 3v10M3 8h10', stroke: 'currentColor' } };</script>")
+case('SVG points and viewBox', 0,
+     "<script>const s = { points: '3.5,1.5 3.5,8.5 8.5,5', viewBox: '0 0 16 16' };</script>")
 case('inline style block', 0, "<script>el.cssText = 'position:fixed;z-index:10000;width:28px;';</script>")
 case('keyframes text', 0, "<script>s.textContent = '@keyframes spin{from{transform:rotate(0deg)}}';</script>")
 case('class list', 0, "<script>btn.className = 'ext-footer-btn footer-toggle';</script>")

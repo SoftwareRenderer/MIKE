@@ -104,7 +104,7 @@ Every `MIKE_*` below also has a `--flag` twin named after it (`--port`/`MIKE_POR
 cd frontend && npx playwright test                       # e2e (auto-starts test servers + mock LLM)
 npx playwright test task-message-actions                 # one spec file
 npx playwright test --grep "should edit message"         # one test by name
-cd frontend && npm test                                  # frontend unit (vitest, ~10s); `make test-frontend` also runs the i18n no-language gate
+cd frontend && npm test                                  # frontend unit (vitest, ~10s); `make test-frontend` also runs the gates: i18n no-language, the literal count, and `frontend/html-sinks.py` (lists every `{@html}`/`innerHTML` sink in core; none may render a translation)
 go test ./backend/... ./pkg/... -count=1 -parallel 8     # Go unit (~60s)
 make test | make test-go | make test-frontend | make test-e2e
 make i18n-parity PACK=../MIKE-extensions/i18n/fr         # one pack against the English contract: keys, plurals, placeholders, prompt templates, registry pin
@@ -210,7 +210,7 @@ Sidebar project rows and task cards are **real links**, so the browser's own lin
 Detail and tests: `docs/link-rows.md`.
 
 ### Reconnection & Offline
-`onConnected(true)` in `App.svelte` runs `silentRefresh()` once `initialLoadComplete`; `TaskChat` reloads history from the DB on reconnect because **turns completed while offline are never replayed** (buffer cleared at turn end). `offline` queues writes immediately; `online` flushes the queue and calls `reconnectNow()` to skip backoff.
+`onConnected(true)` in `App.svelte` runs `silentRefresh()` once `initialLoadComplete`; `TaskChat` reloads history from the DB on reconnect because **turns completed while offline are never replayed** (buffer cleared at turn end). `offline` queues writes immediately — except `updateConfig` carrying a provider key that is not the server's masked placeholder, which is **refused** rather than queued: the queue is persisted, so a queued key is a plaintext secret in IndexedDB outliving the tab, and refusing (not stripping) keeps the user's typed key from vanishing quietly (`carriesPlaintextAPIKey`, `api/config.ts`); `online` flushes the queue and calls `reconnectNow()` to skip backoff.
 
 Detail and tests: `docs/reconnection.md`.
 
@@ -307,6 +307,7 @@ Dense rows truncate: 71 rules pair `white-space: nowrap` with `overflow: hidden;
 
 ### Client-Side Storage
 All client-side storage goes through `frontend/src/lib/storage.ts` (async functions; single IndexedDB `kanban-storage`). Never access IndexedDB directly in components. `gc()` (stale-entry sweep, incl. offline message/diff caches for a project) is called only from `Board.svelte` after the board loads — components should NOT call it.
+- **Sign-out erases everything**: `handleLogout` calls `clearQueue()` then `clearAll()` — every store plus the `kanban-*` `localStorage` hints. The in-memory queue must go with the stores, or the next `enqueue` writes the old array back into the emptied database. `gc()` is not a substitute: it prunes only entries whose task no longer exists, so without the sweep the next person to open the browser inherits this user's messages, diffs, drafts and queued writes. Tests: `src/lib/__tests__/storage-clear-all.unit.ts`.
 
 ### Svelte 5 Reactivity
 - `$state()` (deep reactive), `$derived()` / `$derived.by()`, `$props()`; Svelte 4 stores via `get` from `svelte/store`.

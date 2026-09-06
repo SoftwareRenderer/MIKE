@@ -14,6 +14,7 @@ export {
     onQueueChanged,
     onQueueFlushed,
     loadQueue,
+    clearQueue,
     enqueueAction,
     getQueuedTaskIds,
     getQueuedDeleteTaskIds,

@@ -11,7 +11,7 @@ import {
 export { INJECTION_POINTS };
 export type { InjectionPoint, InjectionContext };
 
-const THEME_CSS_KEY = 'kanban-theme-css';
+export const THEME_CSS_KEY = 'kanban-theme-css';
 const THEME_LINK_ID = 'kanban-theme-stylesheet';
 // The static prefix every extension asset is served under.
 const EXTENSIONS_PREFIX = '/extensions/';
@@ -109,6 +109,16 @@ export function resolveAssetURL(ext: Extension, asset: string): string {
     return `${extBaseURL(ext)}/${asset.replace(/^\.?\//, '')}`;
 }
 
+/**
+ * Whether a stored theme URL may be pre-painted as a stylesheet: a same-origin
+ * path inside the extension tree, the shape resolveAssetURL produces. The inline
+ * script in index.html repeats this test by hand (it runs before any module can
+ * be imported) — change both.
+ */
+export function isPrepaintableThemeURL(url: string): boolean {
+    return /^\/extensions\/[^/\\]/.test(url);
+}
+
 export interface InjectionRegistration {
     extensionId: string;
     extensionName: string;
@@ -203,7 +213,12 @@ export class UIInjector {
         link.addEventListener('load', () => this.broadcastTheme());
         document.head.appendChild(link);
 
-        try { localStorage.setItem(THEME_CSS_KEY, url); } catch {}
+        // Cache it for the pre-paint step, and clear the hint when we would not
+        // load it ourselves: index.html trusts whatever is in there.
+        try {
+            if (isPrepaintableThemeURL(url)) localStorage.setItem(THEME_CSS_KEY, url);
+            else localStorage.removeItem(THEME_CSS_KEY);
+        } catch {}
 
         this.activeCSSUrl = url;
     }

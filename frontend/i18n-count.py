@@ -26,7 +26,8 @@ Excluded, by CONTEXT (never by string identity, so a real bug still measures):
   - arguments of console.* / logger.* calls (log lines are never translated) — the
     whole enclosing call, so a message continued on its own line is still a log
   - literals in property-KEY position (`{ 'X-CSRF-Token': v }`) and values of
-    technical keys (`component:`, `type:`, `event:`, ...)
+    technical keys (`component:`, `type:`, `event:`, ...), SVG shape data (`d:`,
+    `points:`) included
   - key-comparison context (`e.key === 'ArrowDown'`, `.has(`, `case `, `.get(`)
   - arguments of technical APIs (addEventListener, querySelector<T>(, CustomEvent,
     IndexedDB cache-key helpers, ...)
@@ -83,6 +84,9 @@ TECH_KEY_VALUE_RE = re.compile(
     r'(?:component|type|kind|event|action|slot|channel|scope|role|format|variant|'
     r'mimeType|op|origin|source|target|view|mode|status|state|tab|provider|lang|'
     r'id|key|name|url|path|version|hash|axis|behavior)\s*:\s*$', re.IGNORECASE)
+# SVG shape data is geometry, like the `<path d="…"/>` markup the embedded-source rule
+# already excludes. Word-boundary anchored so `grid:` cannot borrow the single-letter `d`.
+SVG_GEOMETRY_KEY_RE = re.compile(r'\b(?:d|points|viewBox|cx|cy|rx|ry)\s*:\s*$')
 LOG_RE = re.compile(r'(?:console\.\w+|\blogger?\.\w+)\s*(?:\(\s*)?$', re.IGNORECASE)
 IMPORT_RE = re.compile(r'(?:import|require|from)\s*\(?\s*$', re.IGNORECASE)
 COMPARE_RE = re.compile(r'(?:===|!==|==|!=|\bcase|\.has|\.get|\.set|\.delete|\bin)\s*\(?\s*[\[{(]?\s*$')
@@ -543,6 +547,8 @@ def script_literal_items(src, start, end, channel_errors=False):
         if not is_prose(val):
             continue
         if A11Y_KEY_RE.search(pre) or TECH_KEY_VALUE_RE.search(pre) or TITLE_ATTR_RE.search(pre):
+            continue
+        if SVG_GEOMETRY_KEY_RE.search(pre):
             continue
         if TITLE_KEY_RE.search(pre) and title_is_a_tooltip(chunk, m.start()):
             continue
