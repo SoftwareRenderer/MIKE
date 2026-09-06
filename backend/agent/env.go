@@ -64,9 +64,10 @@ func isAgentSafeEnv(name string) bool {
 // shells and Node treat `VAR=` and unset differently.
 //
 // Do not use this elsewhere. These os.Environ() sites are intentional: backend/sandbox (rootless
-// podman needs XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS), backend/term (the user's own
-// interactive shell), backend/git (its configuration and credentials), and pkg/bridge/agent/shell.go
-// (already inside the sandbox container). Everything else that spawns a process the LLM can steer —
+// podman needs XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS), backend/git (its configuration and
+// credentials), and pkg/bridge/agent/shell.go (already inside the sandbox container). The host
+// terminal in backend/term is conditional: os.Environ() only under DANGER_ZONE=1, this allowlist
+// without it (term.hostShellEnv). Everything else that spawns a process the LLM can steer —
 // including the host bash tool — gets SafeAgentEnv.
 func SafeAgentEnv(extras ...string) []string {
 	env := make([]string, 0, len(agentEnvNames)+len(extras)+2)

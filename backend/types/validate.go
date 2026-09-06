@@ -3,7 +3,10 @@ package types
 import (
 	"fmt"
 	"net"
+	"path/filepath"
 	"strings"
+
+	"kanban/pkg/sandboxruntime"
 )
 
 // allowedBranchChars is a lookup table for characters permitted in git branch
@@ -106,6 +109,33 @@ func ValidateGitRef(ref string) error {
 	return nil
 }
 
+// ValidateCommitHash requires a git object id: hexadecimal, and a length git will
+// resolve. Abbreviated ids are accepted (git resolves them from 4 characters up).
+//
+// The value reaches git as an argument — `rev-parse --verify <hash>^{tree}`,
+// `read-tree --reset -u <hash>` — so a value that is not a hash is not a late-arriving
+// commit, it is a forged argument: an option-shaped one is a flag, and a rev like HEAD
+// discards the task's work to restore a different commit.
+func ValidateCommitHash(hash string) error {
+	if hash == "" {
+		return fmt.Errorf("commit hash is empty")
+	}
+	if len(hash) < 4 || len(hash) > 64 {
+		return fmt.Errorf("commit hash %q must be 4 to 64 hexadecimal characters", hash)
+	}
+	for i := 0; i < len(hash); i++ {
+		c := hash[i]
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'f':
+		case c >= 'A' && c <= 'F':
+		default:
+			return fmt.Errorf("commit hash %q is not a git object id", hash)
+		}
+	}
+	return nil
+}
+
 // ValidateTaskID ensures a task ID does not start with a hyphen,
 // which would allow Git argument injection when the ID is used in branch names.
 func ValidateTaskID(id string) error {
@@ -168,4 +198,54 @@ func NormalizeSandboxForwardPorts(ports []PortForward) ([]PortForward, error) {
 		out[i] = PortForward{ContainerPort: pf.ContainerPort, HostIP: ip}
 	}
 	return out, nil
+}
+
+// ValidateSandboxMount checks one project Sandbox Configuration mount before it can
+// reach podman.
+//
+// The host path is deliberately not restricted to an allowlist — "mount this host
+// directory into the project's sandbox" is the feature, and a human picks it. What is
+// checked are the two ways a mount silently becomes something else: a container path
+// carrying ":" or ",", which rewrites the mount spec and turns "ro" into "rw", and a
+// host path that is relative (podman resolves it against the server's working
+// directory) or walks up.
+func ValidateSandboxMount(m SandboxMount) error {
+	if err := sandboxruntime.ValidateContainerPath(m.ContainerPath); err != nil {
+		return err
+	}
+	if m.HostPath == "" {
+		return fmt.Errorf("mount host path is empty")
+	}
+	if !filepath.IsAbs(m.HostPath) {
+		return fmt.Errorf("mount host path %q is not absolute", m.HostPath)
+	}
+	if sandboxruntime.HasDotDotSegment(m.HostPath) {
+		return fmt.Errorf("mount host path %q must not contain '..'", m.HostPath)
+	}
+	// The host root is refused for the same reason a container path may not be "/": the
+	// operator picks which directories the sandbox sees, and "the whole filesystem,
+	// read-write" is not a directory choice.
+	if cleaned := filepath.Clean(m.HostPath); cleaned == string(filepath.Separator) {
+		return fmt.Errorf("mount host path %q must not be the host filesystem root", m.HostPath)
+	}
+	if m.Mode != "" && m.Mode != "ro" && m.Mode != "rw" {
+		return fmt.Errorf("mount mode %q is invalid: must be \"ro\" or \"rw\"", m.Mode)
+	}
+	return nil
+}
+
+// ValidateSandboxAdditions checks the two project settings that widen its container:
+// the mounts above, and the capabilities re-added after `--cap-drop ALL`. The
+// capability rules are sandboxruntime's, the same ones an extension manifest is
+// measured against.
+func ValidateSandboxAdditions(mounts []SandboxMount, capabilities []string) error {
+	for i, m := range mounts {
+		if err := ValidateSandboxMount(m); err != nil {
+			return fmt.Errorf("mount %d: %w", i, err)
+		}
+	}
+	if err := sandboxruntime.ValidateCapabilities(capabilities); err != nil {
+		return fmt.Errorf("capabilities: %w", err)
+	}
+	return nil
 }

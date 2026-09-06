@@ -324,6 +324,21 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	// See pkg/sandboxruntime/image_ref.go for why podman must never see a short name.
 	image = sm.rt.ResolveImageRef(image)
 
+	// Capabilities and mounts reach podman as written, so they are checked here as well
+	// as by the API that stores them: a project row can predate the rule. These are the
+	// rules in pkg/sandboxruntime, the same ones an extension sandbox is refused under.
+	//
+	// Before the availability check: an unsafe configuration is a configuration error,
+	// and reporting "runsc is missing" instead would hide it.
+	if err := sandboxruntime.ValidateCapabilities(opts.Capabilities); err != nil {
+		return nil, fmt.Errorf("sandbox capability for project %s: %w", projectName, err)
+	}
+	for i, m := range opts.SandboxMounts {
+		if err := types.ValidateSandboxMount(m); err != nil {
+			return nil, fmt.Errorf("sandbox mount %d for project %s: %w", i, projectName, err)
+		}
+	}
+
 	if !sm.available {
 		return nil, fmt.Errorf("gVisor not available (runsc not installed)")
 	}

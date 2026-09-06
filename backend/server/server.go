@@ -721,6 +721,26 @@ func AddMiddleware(h http.Handler, middleware ...Middleware) http.Handler {
 	return h
 }
 
+// middlewareChain is the middleware Serve installs, in order. It is a method so a test
+// can drive the chain that actually runs — an entry missing here protects nothing.
+func (s *Server) middlewareChain(h http.Handler) http.Handler {
+	return AddMiddleware(h,
+		// Outermost: every request — including the /api/stream, /api/lsp and
+		// terminal WebSocket upgrades and the HTTPS redirect — is origin-checked
+		// before it reaches a route.
+		s.HostPinMiddleware,
+		s.RedirectHTTPSMiddleware,
+		PanicRecoveryMiddleware,
+		// Before anything that reads a body.
+		MaxBodyMiddleware(httputil.MaxRequestBodyBytes),
+		NonceMiddleware,
+		s.CORSMiddleware,
+		s.CSRFMiddleware,
+		s.SessionMiddleware,
+		CompressMiddleware,
+	)
+}
+
 func (s *Server) tlsConfigToStd() *stdtls.Config {
 	cert, err := stdtls.LoadX509KeyPair(s.tlsConfig.CertFile, s.tlsConfig.KeyFile)
 	if err != nil {
@@ -754,20 +774,8 @@ func (s *Server) Serve() error {
 		Addr: s.addr,
 		// Silences repeated "client does not trust the local CA" handshake noise;
 		// see tls_error_log.go.
-		ErrorLog: httpErrorLog(caFile),
-		Handler: AddMiddleware(s.mux,
-			// Outermost: every request — including the /api/stream, /api/lsp and
-			// terminal WebSocket upgrades and the HTTPS redirect — is origin-checked
-			// before it reaches a route.
-			s.HostPinMiddleware,
-			s.RedirectHTTPSMiddleware,
-			PanicRecoveryMiddleware,
-			NonceMiddleware,
-			s.CORSMiddleware,
-			s.CSRFMiddleware,
-			s.SessionMiddleware,
-			CompressMiddleware,
-		),
+		ErrorLog:          httpErrorLog(caFile),
+		Handler:           s.middlewareChain(s.mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}

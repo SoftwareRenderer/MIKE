@@ -1406,6 +1406,11 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 	events <- sseEvent{Extension: name, Progress: 100, Message: "Updated", Done: true, Result: &result}
 }
 
+// maxProxyResponseBytes bounds one proxied extension response. The upstream is chosen
+// by a third-party manifest and the body is buffered in full, so without a bound one
+// API can make the server allocate whatever it likes to answer one tool call.
+const maxProxyResponseBytes = 8 << 20
+
 // HandleProxy proxies requests to external APIs on behalf of an extension.
 // The extension must declare a `network` capability in its manifest with
 // allowed_domains and optional header templates.
@@ -1502,9 +1507,15 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxProxyResponseBytes+1))
 	if err != nil {
 		httputil.JSONError(w, http.StatusBadGateway, "failed to read proxy response: "+err.Error())
+		return
+	}
+	// The upstream is only named by a domain in the manifest; cap what it can send back.
+	if int64(len(body)) > maxProxyResponseBytes {
+		log.Printf("[proxy] extension=%s url=%s response exceeded %d bytes", ext.Name, req.URL, maxProxyResponseBytes)
+		httputil.JSONError(w, http.StatusBadGateway, "proxy response too large")
 		return
 	}
 

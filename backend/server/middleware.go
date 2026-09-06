@@ -250,6 +250,32 @@ func (s *Server) SessionMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// MaxBodyMiddleware bounds the body of every request that may carry one. Handlers
+// that decode r.Body directly (git, fs, task, thread) are not covered by
+// httputil.DecodeJSON's own limit, so the bound goes on the reader here.
+//
+// A declared Content-Length over the cap is refused before a byte is read; a chunked
+// body has no length to trust, so the wrapped reader refuses it once past the cap.
+func MaxBodyMiddleware(limit int64) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// WebSocket upgrades are GETs; bounding them would have nothing to bound.
+			switch r.Method {
+			case http.MethodGet, http.MethodHead, http.MethodOptions:
+				next.ServeHTTP(w, r)
+				return
+			}
+			// ContentLength is -1 for a chunked body, which is the reader's case.
+			if r.ContentLength > limit {
+				JSONError(w, http.StatusRequestEntityTooLarge, "request body too large")
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // PanicRecoveryMiddleware recovers from panics and returns a JSON error.
 func PanicRecoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

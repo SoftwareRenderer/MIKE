@@ -549,8 +549,12 @@ func previewAssetContentType(path string) string {
 }
 
 // resolveWorktreeForFile: host worktree for project/task (task worktree or
-// project root) + /home/sandbox/<name>/… → host path translation.
+// project root) + /home/sandbox/<name>/… → host path translation. The task is
+// honoured only when it belongs to the project — see requireTaskOwnership.
 func (s *Server) resolveWorktreeForFile(project *types.Project, taskID, path string) (string, string, error) {
+	if err := s.requireTaskOwnership(project, taskID); err != nil {
+		return "", "", err
+	}
 	var worktreePath string
 	if taskID != "" {
 		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
@@ -597,16 +601,19 @@ func (s *Server) resolveFSFilePath(projectID, taskID, filePath string) (worktree
 		hostPath = filepath.Join(worktreePath, hostPath)
 	}
 
-	// Only the workspace dir is needed here; GetConfig would read the whole
-	// config row (a dozen-plus SQLite reads) to produce it.
-	workspaceDir := filepath.Clean(s.configStore.WorkspaceDir())
 	cleanPath := filepath.Clean(hostPath)
 	cleanRoot := filepath.Clean(project.Path)
 	cleanWorktree := filepath.Clean(worktreePath)
-	inProject := cleanPath == cleanRoot || strings.HasPrefix(cleanPath, cleanRoot+string(os.PathSeparator))
-	inWorkspace := workspaceDir != "" && (cleanPath == workspaceDir || strings.HasPrefix(cleanPath, workspaceDir+string(os.PathSeparator)))
-	if !inProject && !inWorkspace {
-		return "", "", "", errors.New("path outside allowed project directory")
+
+	// The preview serves a document's siblings, so this root is what a token exposes:
+	// the project checkout plus the worktree of the task the request named, never the
+	// workspace dir (it holds every project's task worktrees).
+	roots := []string{cleanRoot}
+	if cleanWorktree != cleanRoot {
+		roots = append(roots, cleanWorktree)
+	}
+	if _, err := fsutil.Contained(cleanPath, roots); err != nil {
+		return "", "", "", err
 	}
 	return cleanWorktree, filepath.Dir(cleanPath), cleanPath, nil
 }

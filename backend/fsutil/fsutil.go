@@ -29,6 +29,38 @@ func Inside(p string, roots []string) bool {
 	return false
 }
 
+// ErrOutside says a path is not under any of the roots it was jailed to.
+var ErrOutside = errors.New("path is outside the allowed directory")
+
+// Contained returns the form of path that is safe to open, after requiring both the
+// lexical path and the symlink-resolved path to sit inside one of roots. Roots are
+// compared lexically and resolved, so a root behind a link still works.
+//
+// The resolution is the part that matters: a symlink inside a project resolves
+// against the host, so a string comparison alone reads through a `link -> /etc`
+// planted in a worktree a task can write to.
+func Contained(path string, roots []string) (string, error) {
+	clean := filepath.Clean(path)
+	if !Inside(clean, roots) {
+		return "", fmt.Errorf("%w: %q", ErrOutside, clean)
+	}
+	resolved, err := ResolveSymlinks(clean)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve %q: %w", clean, err)
+	}
+	check := make([]string, 0, 2*len(roots))
+	check = append(check, roots...)
+	for _, root := range roots {
+		if rr, err := filepath.EvalSymlinks(root); err == nil {
+			check = append(check, filepath.Clean(rr))
+		}
+	}
+	if !Inside(resolved, check) {
+		return "", fmt.Errorf("%w: %q resolves to %q", ErrOutside, clean, resolved)
+	}
+	return resolved, nil
+}
+
 // ResolveSymlinks resolves every symlink in p. A path that does not exist yet (a
 // write target, a mount not yet created) has its nearest existing ancestor
 // resolved and the missing tail re-joined, so a link on the existing part is

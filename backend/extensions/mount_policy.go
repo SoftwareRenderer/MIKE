@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"kanban/backend/fsutil"
 	"kanban/backend/types"
+	"kanban/pkg/sandboxruntime"
 )
 
 // Extension sandboxes start with `--cap-drop ALL` and no host filesystem access
@@ -23,33 +23,9 @@ import (
 // temp dir; this is for deployments that keep extension data elsewhere.
 const EnvMountRoots = "MIKE_EXT_MOUNT_ROOTS"
 
-// containerPathPattern is the only shape accepted for a mount's container path.
-// It excludes ':' and ',' on purpose: the podman mount spec is
-// "<host>:<container>:rprivate,<mode>", so a ":rw" or ",rw" inside a
-// user-supplied path would rewrite the options and make a read-only mount writable.
-var containerPathPattern = regexp.MustCompile(`^/[A-Za-z0-9._/-]+$`)
-
-// capabilityPattern accepts plain capability names only, so a value cannot
-// smuggle a flag, whitespace or a separator into the podman arguments.
-var capabilityPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
-
-// deniedCapabilities are never re-added, no matter who asked. The sandbox is
-// already `--cap-drop ALL` + `no-new-privileges`; these are the ones that reach
-// past the container (host kernel, other processes, devices, network).
-var deniedCapabilities = map[string]string{
-	"SYS_ADMIN":       "grants near-root control of the container's namespaces and the host kernel interface",
-	"SYS_PTRACE":      "ptraces other processes",
-	"SYS_MODULE":      "loads kernel modules",
-	"SYS_RAWIO":       "raw I/O port access (iopl/ioperm)",
-	"DAC_OVERRIDE":    "bypasses file read/write/execute permission checks",
-	"DAC_READ_SEARCH": "bypasses file read permission checks and directory traversal",
-	"NET_ADMIN":       "reconfigures network interfaces and tables, defeating network isolation",
-	"MKNOD":           "creates device nodes",
-	"SETUID":          "changes the process UID",
-	"SETGID":          "changes the process GID",
-	"SYS_BOOT":        "reboots the host",
-	"LINUX_IMMUTABLE": "mounts read-only bind mounts read-write",
-}
+// The podman-argument rules live in pkg/sandboxruntime, so a task sandbox is measured
+// exactly the way an extension sandbox is. These are its names, kept under the old one.
+var deniedCapabilities = sandboxruntime.DeniedCapabilities
 
 // MountPolicy is an allowlist of host roots an extension sandbox may
 // bind-mount from. A nil policy is valid and fails closed: nothing is inside an
@@ -153,37 +129,13 @@ func mountRoots(extensionsDir, workspaceDir string, projectPaths []string) []str
 }
 
 // hasDotDotSegment reports whether p contains a ".." path segment.
-func hasDotDotSegment(p string) bool {
-	for _, seg := range strings.FieldsFunc(p, func(r rune) bool {
-		return r == '/' || r == filepath.Separator
-	}) {
-		if seg == ".." {
-			return true
-		}
-	}
-	return false
-}
+func hasDotDotSegment(p string) bool { return sandboxruntime.HasDotDotSegment(p) }
 
-// ValidateContainerPath checks a mount's in-container path: absolute, free of
-// ".." segments and limited to the charset that cannot rewrite the podman
-// mount spec (see containerPathPattern).
+// ValidateContainerPath checks a mount's in-container path: absolute, free of ".."
+// segments, and limited to the charset that cannot rewrite the podman mount spec — a
+// ":" or "," there turns "ro" into "rw". The rule is sandboxruntime's.
 func ValidateContainerPath(containerPath string) error {
-	if containerPath == "" {
-		return fmt.Errorf("mount container path is empty")
-	}
-	if !strings.HasPrefix(containerPath, "/") {
-		return fmt.Errorf("mount container path %q is not absolute", containerPath)
-	}
-	if !containerPathPattern.MatchString(containerPath) {
-		return fmt.Errorf("mount container path %q is invalid: only '/', letters, digits, '.', '_' and '-' are allowed (':' and ',' would rewrite the podman mount spec)", containerPath)
-	}
-	if containerPath == "/" || filepath.Clean(containerPath) == "/" {
-		return fmt.Errorf("mount container path %q must not be the container root", containerPath)
-	}
-	if hasDotDotSegment(containerPath) {
-		return fmt.Errorf("mount container path %q must not contain '..'", containerPath)
-	}
-	return nil
+	return sandboxruntime.ValidateContainerPath(containerPath)
 }
 
 // resolvePath resolves a mount's host path with the shared fsutil rule, which —
@@ -275,38 +227,12 @@ func (p *MountPolicy) ValidateMounts(mounts []types.SandboxMount) error {
 	return nil
 }
 
-// normalizeCapability uppercases and strips the optional "CAP_" prefix so
-// "cap_sys_admin" and "SYS_ADMIN" are the same request.
-func normalizeCapability(cap string) string {
-	c := strings.ToUpper(strings.TrimSpace(cap))
-	return strings.TrimPrefix(c, "CAP_")
-}
-
-// ValidateCapability rejects malformed capability strings and every entry on
-// the denylist, naming the capability in the message.
-func ValidateCapability(cap string) error {
-	if strings.TrimSpace(cap) == "" {
-		return fmt.Errorf("capability is empty")
-	}
-	if !capabilityPattern.MatchString(cap) {
-		return fmt.Errorf("capability %q is invalid: only letters, digits and '_' are allowed", cap)
-	}
-	name := normalizeCapability(cap)
-	if reason, denied := deniedCapabilities[name]; denied {
-		return fmt.Errorf("capability %s is not allowed in extension sandboxes: %s", name, reason)
-	}
-	return nil
-}
+// ValidateCapability rejects malformed capability strings and every entry on the
+// shared denylist, naming the capability in the message.
+func ValidateCapability(cap string) error { return sandboxruntime.ValidateCapability(cap) }
 
 // ValidateCapabilities validates a capability list, naming the first offender.
-func ValidateCapabilities(caps []string) error {
-	for _, cap := range caps {
-		if err := ValidateCapability(cap); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+func ValidateCapabilities(caps []string) error { return sandboxruntime.ValidateCapabilities(caps) }
 
 // ValidateSandboxAdditions checks the two fields that can widen a sandbox: host
 // mounts and Linux capabilities.

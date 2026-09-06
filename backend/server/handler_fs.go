@@ -14,8 +14,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
+	"kanban/backend/errs"
 	"kanban/backend/fsutil"
 	"kanban/backend/git"
 	"kanban/backend/prompts"
@@ -57,7 +59,7 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 	// Validate against the project root. The returned path is symlink-resolved and
 	// is the one to open; the git-ref read below keeps the lexical path, which is
 	// safe because `git show ref:relpath` reads the object database, never a link.
-	hostPath, err := s.validateFSPath(project, path)
+	hostPath, err := s.validateFSPath(project, worktreePath, path)
 	if err != nil {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
@@ -74,27 +76,29 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var content []byte
-	var readErr error
 	if ref != "" {
 		// --end-of-options (git >= 2.24) is a second line of defence: everything after
 		// it is parsed as a revision, never as an option.
 		const endOfOptions = "--end-of-options"
-		var output string
+		relBase := project.Path
 		if taskID != "" {
-			relPath, relErr := filepath.Rel(worktreePath, path)
-			if relErr != nil {
-				JSONError(w, http.StatusBadRequest, relErr.Error())
-				return
-			}
-			output, readErr = s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "show", endOfOptions, ref+":"+relPath)
-		} else {
-			relPath, relErr := filepath.Rel(project.Path, path)
-			if relErr != nil {
-				JSONError(w, http.StatusBadRequest, relErr.Error())
-				return
-			}
-			output, readErr = s.executor.WorktreeMgr().GitRunInDirOutput(worktreePath, "show", endOfOptions, ref+":"+relPath)
+			// resolveWorktreeForFile resolved this to project.Path when no task was named.
+			relBase = worktreePath
 		}
+		relPath, relErr := filepath.Rel(relBase, path)
+		if relErr != nil {
+			JSONError(w, http.StatusBadRequest, relErr.Error())
+			return
+		}
+		spec := ref + ":" + relPath
+		runGit := s.gitInContext(taskID, worktreePath)
+		// Ask git how big the object is before asking it for the object; a cap applied
+		// afterwards just reports the size of the allocation it already made.
+		if size, ok := gitBlobSize(runGit, spec); ok && size > maxFSReadBytes {
+			JSONError(w, http.StatusRequestEntityTooLarge, fsTooLargeMessage)
+			return
+		}
+		output, readErr := runGit("show", endOfOptions, spec)
 		if readErr != nil {
 			JSONError(w, http.StatusNotFound, "file not found at ref "+ref)
 			return
@@ -102,7 +106,6 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 		content = []byte(output)
 	} else {
 		// Host filesystem (worktree is bind-mounted into sandbox)
-		// Check if path exists and is a regular file
 		info, statErr := os.Stat(hostPath)
 		if statErr != nil {
 			if os.IsNotExist(statErr) {
@@ -116,15 +119,21 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 			JSONError(w, http.StatusBadRequest, "path is a directory")
 			return
 		}
-		content, readErr = os.ReadFile(hostPath)
+		// Same rule as the ref branch: refuse on the size stat reports, not the read one.
+		if info.Size() > maxFSReadBytes {
+			JSONError(w, http.StatusRequestEntityTooLarge, fsTooLargeMessage)
+			return
+		}
+		data, readErr := os.ReadFile(hostPath)
 		if readErr != nil {
 			log.Printf("fs read failed: %v", readErr)
 			JSONError(w, http.StatusInternalServerError, "failed to read file")
 			return
 		}
+		content = data
 	}
-	if len(content) > 1_000_000 {
-		JSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 1MB)")
+	if int64(len(content)) > maxFSReadBytes {
+		JSONError(w, http.StatusRequestEntityTooLarge, fsTooLargeMessage)
 		return
 	}
 	// Compute gutter markers (diff vs HEAD) for non-ref reads
@@ -142,6 +151,51 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 type fsReadResponse struct {
 	Content       string           `json:"content"`
 	GutterMarkers map[int][]string `json:"gutter_markers,omitempty"`
+}
+
+// maxFSReadBytes is what GET /api/fs/read returns at most — the size an editor can
+// show, not a security boundary. Checking it before the read is the point: one request
+// for a 4 GB file, in the working tree or in any commit, then costs one stat or one
+// `cat-file -s` instead of 4 GB of memory.
+const maxFSReadBytes int64 = 1_000_000
+
+// fsTooLargeMessage is the answer both size checks give.
+const fsTooLargeMessage = "file too large (max 1MB)"
+
+// gitInContext answers how to run git for a file request: in the task's worktree when
+// the request named one, in the resolved checkout otherwise. The size probe and the
+// read that follows must ask the same repository, so they share this rather than each
+// picking a GitRunIn* variant.
+func (s *Server) gitInContext(taskID, worktreePath string) func(args ...string) (string, error) {
+	var wm *git.WorktreeManager
+	if s.executor != nil {
+		wm = s.executor.WorktreeMgr()
+	}
+	if wm == nil {
+		return func(args ...string) (string, error) {
+			return "", fmt.Errorf("worktree manager unavailable")
+		}
+	}
+	if taskID != "" {
+		return func(args ...string) (string, error) { return wm.GitRunInWorktreeOutput(taskID, args...) }
+	}
+	return func(args ...string) (string, error) { return wm.GitRunInDirOutput(worktreePath, args...) }
+}
+
+// gitBlobSize asks git for the size of the object a "<ref>:<path>" spec names, which is
+// the only way to cap a historical read before performing it. ok is false when git
+// cannot answer, and the caller then reads and caps the result: the probe is the
+// optimisation, the length check is the guarantee.
+func gitBlobSize(runGit func(args ...string) (string, error), spec string) (int64, bool) {
+	out, err := runGit("cat-file", "-s", "--end-of-options", spec)
+	if err != nil {
+		return 0, false
+	}
+	size, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+	if err != nil || size < 0 {
+		return 0, false
+	}
+	return size, true
 }
 
 // computeGutterMarkers runs `git diff HEAD -- <path>` and parses the unified diff
@@ -290,7 +344,7 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	// Operate on the symlink-resolved path validateFSPath returns; writing through
 	// a link planted in the project would land wherever it points.
-	resolvedPath, err := s.validateFSPath(project, req.Path)
+	resolvedPath, err := s.validateFSPath(project, worktreePath, req.Path)
 	if err != nil {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
@@ -332,7 +386,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	// Use the form validateFSPath returns for the host listing below, so a
 	// symlinked directory cannot expose anything outside the root.
 	if worktreePath != "" {
-		resolved, err := s.validateFSPath(project, path)
+		resolved, err := s.validateFSPath(project, worktreePath, path)
 		if err != nil {
 			JSONError(w, http.StatusBadRequest, err.Error())
 			return
@@ -537,7 +591,7 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		searchRoot = project.Path
 		searchRoot = filepath.Clean(searchRoot)
-		resolved, err := s.validateFSPath(project, searchRoot)
+		resolved, err := s.validateFSPath(project, "", searchRoot)
 		if err != nil {
 			JSONError(w, http.StatusForbidden, err.Error())
 			return
@@ -798,21 +852,47 @@ func (s *Server) optionalProject(r *http.Request) (*types.Project, error) {
 
 // fsWorktreeRoot answers which host directory a file request operates on: the task's
 // worktree when ?task names one, otherwise the project checkout. An empty root means
-// neither was supplied, which /api/fs allows for a bare browse.
-// ok is false after writing the response, when the task has no worktree.
+// neither was supplied, which /api/fs allows for a bare browse. ok is false after
+// writing the response.
 func (s *Server) fsWorktreeRoot(w http.ResponseWriter, r *http.Request, project *types.Project) (root string, ok bool) {
-	if taskID := r.URL.Query().Get("task"); taskID != "" {
-		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
-		if err != nil {
-			Fail(w, err, "resolve worktree", "task worktree not found")
+	taskID := r.URL.Query().Get("task")
+	if taskID == "" {
+		if project != nil {
+			return project.Path, true
+		}
+		return "", true
+	}
+	if err := s.requireTaskOwnership(project, taskID); err != nil {
+		if errs.IsNotFound(err) {
+			Fail(w, err, "get task", "task not found in project")
 			return "", false
 		}
-		return wtPath, true
+		JSONError(w, http.StatusBadRequest, err.Error())
+		return "", false
 	}
-	if project != nil {
-		return project.Path, true
+	wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
+	if err != nil {
+		Fail(w, err, "resolve worktree", "task worktree not found")
+		return "", false
 	}
-	return "", true
+	return wtPath, true
+}
+
+// requireTaskOwnership ties the two independent query parameters of an fs request
+// together: ?project and ?task arrive uncorrelated, so without this a request could
+// name one of its projects and another project's task, aiming every file operation —
+// and, for a sandboxed project, every command — at that task's worktree and container.
+func (s *Server) requireTaskOwnership(project *types.Project, taskID string) error {
+	if taskID == "" {
+		return nil
+	}
+	if project == nil {
+		return fmt.Errorf("the task parameter requires a project")
+	}
+	if _, err := s.store.GetTask(project.ID, taskID); err != nil {
+		return fmt.Errorf("task %q not found in project %q: %w", taskID, project.ID, err)
+	}
+	return nil
 }
 
 // requireSandboxAvailable refuses a request whose project wants a sandbox the server
@@ -840,21 +920,18 @@ func fsSandboxPath(worktreePath string, project *types.Project, p string) string
 	return sandbox.HostToContainer(worktreePath, project.Name, clean)
 }
 
-// validateFSPath checks a path against the project root (or the workspace dir)
-// and returns the form that is safe to open. The caller passes the project the
-// handler already loaded. Callers MUST open the returned path, not the one they
-// passed in.
+// validateFSPath returns the form of path that is safe to open, jailed to the project
+// checkout plus, when the request names a task, that task's worktree. Callers MUST
+// open the returned path, not the one they passed in.
 //
-// The lexical prefix check alone is not containment: a symlink inside the project
-// resolves against the host, and a sandboxed task writes through an rw bind mount,
-// so it can plant `link -> /etc` in the worktree. The path is therefore resolved
-// and containment re-checked against the resolved roots.
-func (s *Server) validateFSPath(project *types.Project, path string) (string, error) {
+// The workspace directory is deliberately not a root: it holds every project's task
+// worktrees, so allowing it let one project-scoped read or write reach any task on the
+// host.
+func (s *Server) validateFSPath(project *types.Project, worktreeRoot, path string) (string, error) {
 	if project == nil {
 		return path, nil // no project constraint
 	}
 	cleanPath := filepath.Clean(path)
-	cleanRoot := filepath.Clean(project.Path)
 
 	// A container path is accepted only inside this project's mount.
 	if strings.HasPrefix(cleanPath, sandbox.MountRoot+string(filepath.Separator)) {
@@ -866,33 +943,11 @@ func (s *Server) validateFSPath(project *types.Project, path string) (string, er
 		return "", fmt.Errorf("path outside allowed project directory")
 	}
 
-	// WorkspaceDir() avoids the config-row reads GetConfig would do for one path.
-	workspaceDir := s.configStore.WorkspaceDir()
-
-	// Host path: allow if within project root or workspace directory…
-	roots := []string{cleanRoot}
-	if workspaceDir != "" {
-		roots = append(roots, workspaceDir)
+	roots := []string{filepath.Clean(project.Path)}
+	if worktreeRoot != "" {
+		roots = append(roots, filepath.Clean(worktreeRoot))
 	}
-	if !fsutil.Inside(cleanPath, roots) {
-		return "", fmt.Errorf("path outside allowed project directory")
-	}
-	// …then again for the resolved form, against the resolved roots. The lexical
-	// roots stay in the list so a root that itself sits behind a link still works.
-	resolved, err := fsutil.ResolveSymlinks(cleanPath)
-	if err != nil {
-		return "", fmt.Errorf("cannot resolve path: %w", err)
-	}
-	check := append([]string{}, roots...)
-	for _, root := range roots {
-		if rr, err := filepath.EvalSymlinks(root); err == nil {
-			check = append(check, filepath.Clean(rr))
-		}
-	}
-	if !fsutil.Inside(resolved, check) {
-		return "", fmt.Errorf("path resolves outside allowed project directory")
-	}
-	return resolved, nil
+	return fsutil.Contained(cleanPath, roots)
 }
 
 // resolveGitIdentity reads the commit identity from git's environment
@@ -947,11 +1002,10 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// With a project context the path is jailed to it (or the workspace dir) like every
-	// other fs endpoint. The no-project directory-picker flow stays unconstrained, as in
-	// handleFSMkdir.
+	// With a project context the path is jailed to it like every other fs endpoint.
+	// The no-project directory-picker flow stays unconstrained, as in handleFSMkdir.
 	if project != nil {
-		resolved, err := s.validateFSPath(project, req.Path)
+		resolved, err := s.validateFSPath(project, "", req.Path)
 		if err != nil {
 			JSONError(w, http.StatusBadRequest, err.Error())
 			return
@@ -1145,10 +1199,10 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Host filesystem (no project or sandbox disabled)
-	// Project-scoped mkdir must stay within the project (or workspace); the
+	// Project-scoped mkdir must stay within the project and its task worktree; the
 	// no-project directory-picker flow intentionally has no constraint.
 	if project != nil {
-		resolved, err := s.validateFSPath(project, req.Path)
+		resolved, err := s.validateFSPath(project, worktreePath, req.Path)
 		if err != nil {
 			JSONError(w, http.StatusBadRequest, err.Error())
 			return

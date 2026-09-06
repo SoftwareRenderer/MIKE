@@ -191,6 +191,13 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 		return nil, http.StatusBadRequest, err.Error()
 	}
 
+	// One mount of "/" or one CAP_SYS_ADMIN would undo the gVisor boundary around every
+	// task in the project, so a project is measured by the rules an extension manifest
+	// already has to meet.
+	if err := types.ValidateSandboxAdditions(req.SandboxMounts, req.SandboxCapabilities); err != nil {
+		return nil, http.StatusBadRequest, err.Error()
+	}
+
 	// Collect existing project IDs to avoid collisions
 	existingIDs := []string{}
 	projects, _ := h.store.ListProjects()
@@ -553,6 +560,14 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			forwardPorts = normalized
+		}
+		// Validate before anything is written or any task is stopped: a refused request
+		// must leave the project as it was.
+		if req.SandboxMounts != nil || req.SandboxCapabilities != nil {
+			if err := types.ValidateSandboxAdditions(req.SandboxMounts, req.SandboxCapabilities); err != nil {
+				httputil.JSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
 		}
 		// Block sandbox setting changes while tasks are running in the project.
 		// Modifying sandbox settings during execution would kill bridge processes

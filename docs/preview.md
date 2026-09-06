@@ -24,8 +24,11 @@ In-memory; 10-min idle TTL (refreshed per read); 32-doc cap (oldest evicted); 10
 `POST /api/preview` (session+CSRF) stores the doc: it generates the token FIRST, rewrites
 root-relative refs (`src/href/action="..."`) for HTML-family content to `/api/preview/<token>/...`
 (RE2 — no backrefs; patterns never consume the closing quote/paren; unquoted `url(...)` supported),
-re-checks the size cap post-rewrite, and resolves the doc's **worktree root** + `dirRel`
-(workspace-only paths fall back to the file's own dir).
+re-checks the size cap post-rewrite, and resolves the doc's **worktree root** + `dirRel`.
+That root is the jail the token exposes, so it is the project checkout plus the worktree of the
+task the request named — never the workspace dir, which holds every project's task worktrees, and
+a path inside neither is a 400 rather than a self-contained doc (`resolveFSFilePath`, which also
+resolves symlinks — a link in the checkout used to point the asset root at the rest of the host).
 
 The doc serves at its own directory: `GET /api/preview/{token}/[dirRel]/` (bare token 301s there;
 the token root is the worktree root, no listing; a link to the doc's own file name — the

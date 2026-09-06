@@ -110,6 +110,21 @@ func (t *taskTerminal) applySize(rows, cols uint16) {
 	}
 }
 
+// hostShellEnv is the environment of a host terminal — the one terminal that runs
+// outside a container, for a project with sandboxing disabled.
+//
+// Under DANGER_ZONE=1, the flag that allows such a project, the terminal is the
+// operator's own shell and gets its environment, credentials included: a scrubbed one
+// cannot run the ssh-agent or registry logins the flag was set up for. Without the
+// flag the shell gets SafeAgentEnv instead, because a project restored from an old
+// database must not be handed MIKE_LOGIN_PASSWORD or MIKE_ENCRYPTION_KEY.
+func hostShellEnv() []string {
+	if os.Getenv("DANGER_ZONE") == "1" {
+		return append(os.Environ(), "TERM=xterm-256color")
+	}
+	return agent.SafeAgentEnv("TERM=xterm-256color")
+}
+
 // handleResize records a client's size and applies the smallest rows/cols
 // across all connected clients, so narrow devices dictate the PTY size.
 func (t *taskTerminal) handleResize(conn *websocket.Conn, rows, cols uint16) {
@@ -347,7 +362,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 
 		cmd := exec.Command(shell)
 		cmd.Dir = worktreePath
-		cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+		cmd.Env = hostShellEnv()
 
 		ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
 		if err != nil {

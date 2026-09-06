@@ -359,7 +359,12 @@
             btn.className = 'overflow-item' + (item.danger ? ' overflow-delete' : '');
             btn.setAttribute('role', 'menuitem');
             btn.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:none;border-radius:var(--radius-sm,6px);background:transparent;color:var(--color-text-primary,#ccc);font-size:0.875rem;font-family:inherit;font-weight:500;cursor:pointer;text-align:left;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
-            btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0">${item.icon}</svg>${item.label}`;
+            // The icon is a literal of this file, so it may be markup. The label is a
+            // catalog string, and a translation pack is an installed extension — it gets
+            // to choose the words, not to write into this document. textContent is the
+            // fence, and it renders the same button.
+            btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0">${item.icon}</svg>`;
+            btn.appendChild(document.createTextNode(item.label));
             btn.addEventListener('click', (e: MouseEvent) => { closeOverflow(); item.action(e); });
             menu.appendChild(btn);
         }

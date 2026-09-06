@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"kanban/backend/fsutil"
 	"kanban/backend/git"
 	"kanban/backend/httputil"
 	"kanban/backend/store"
@@ -447,6 +448,14 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 		httputil.JSONError(w, http.StatusBadRequest, "path is required")
 		return
 	}
+	// The diff below is contained by git (a pathspec outside the repository is an
+	// error), but the working-tree read is ours, so jail it here and open only what the
+	// jail returned.
+	worktreeFile, err := repoFilePath(project.Path, filePath)
+	if err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	staged := r.URL.Query().Get("staged") == "true"
 	metaOnly := r.URL.Query().Get("meta") == "1"
 
@@ -485,8 +494,7 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 		}
 	} else {
 		// Read from working tree
-		fullPath := filepath.Join(project.Path, filePath)
-		contentOut, contentErr := os.ReadFile(fullPath)
+		contentOut, contentErr := os.ReadFile(worktreeFile)
 		if contentErr == nil {
 			fileContent = string(contentOut)
 			lineCount = strings.Count(fileContent, "\n")
@@ -508,7 +516,7 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 
 	// File size from disk (used for metadata and binary detection)
 	var fileSize int64
-	if st, err := os.Stat(filepath.Join(project.Path, filePath)); err == nil {
+	if st, err := os.Stat(worktreeFile); err == nil {
 		fileSize = st.Size()
 	}
 
@@ -548,6 +556,25 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 		resp["file_size"] = fileSize
 	}
 	httputil.JSONResponse(w, http.StatusOK, resp)
+}
+
+// repoFilePath jails a repository-relative path to the checkout in dir and returns the
+// host file it names, symlink-resolved. An absolute path or one that walks out of the
+// repository is a forged request, not a filename.
+//
+// The symlink check is the point: git answers a pathspec from the object database, but
+// the working-tree read follows links, so a committed `key.pem -> ../../.ssh/id_rsa`
+// would read any file the server user can open. `..` alone already fails by accident
+// (git rejects a pathspec outside the repository); a link inside it fails nothing until
+// it is read.
+func repoFilePath(dir, rel string) (string, error) {
+	if rel == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	if filepath.IsAbs(rel) {
+		return "", fmt.Errorf("path %q must be relative to the repository", rel)
+	}
+	return fsutil.Contained(filepath.Join(dir, rel), []string{filepath.Clean(dir)})
 }
 
 // HandleCheckout checks out a branch in the project's own checkout.
@@ -1142,6 +1169,12 @@ func (h *GitHandler) HandleResetWorktree(w http.ResponseWriter, r *http.Request)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.CommitHash == "" {
 		httputil.JSONError(w, http.StatusBadRequest, "commit_hash required")
+		return
+	}
+	// The one client-supplied ref that reaches git with no name in front of it: this
+	// hash becomes `rev-parse --verify <hash>^{tree}` and `read-tree --reset -u <hash>`.
+	if err := types.ValidateCommitHash(req.CommitHash); err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	task, ok := resolveTask(w, r, h.store)

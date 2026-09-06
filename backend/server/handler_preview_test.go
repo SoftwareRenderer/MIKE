@@ -677,10 +677,16 @@ func TestPreviewServe_URLReflectsDocDirectory(t *testing.T) {
 	}
 }
 
-// A file that is only inside the workspace dir (not under the worktree root)
-// keeps the old self-contained behavior: asset root = the file's own dir, doc
-// url at the token root.
-func TestPreviewServe_WorkspaceOnlyPathFallsBackToFileDir(t *testing.T) {
+// A path that is inside the workspace dir but inside neither the project nor the
+// named task's worktree is refused — it used to be served with the file's own
+// directory as the asset root.
+//
+// The workspace dir holds every project's task worktrees, so that fallback made one
+// preview token read the siblings of any task on the host: the document itself is
+// unauthenticated by design (an iframe cannot carry a session), so the asset root is
+// the whole reach of the token. The project checkout plus the request's own worktree
+// is the jail now.
+func TestPreviewServe_WorkspaceOnlyPathIsRefused(t *testing.T) {
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	projectID, _ := previewTestProject(t, s)
@@ -697,21 +703,25 @@ func TestPreviewServe_WorkspaceOnlyPathFallsBackToFileDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	token, url := servePreview(t, s, cookie, csrfToken, map[string]any{
+	req := testRequest("POST", "/api/preview", map[string]any{
 		"content": "<html></html>", "project": projectID, "path": filepath.Join(strayDir, "page.html"),
 	})
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code == http.StatusOK {
+		t.Fatalf("a path outside the project and its worktree was served: %s", rr.Body.String())
+	}
+
+	// The project's own checkout still serves, so this is the jail and not a broken
+	// resolver.
+	if err := os.WriteFile(filepath.Join(strayDir, "x"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	token, url := servePreview(t, s, cookie, csrfToken, map[string]any{
+		"content": "<html></html>", "project": projectID, "path": "index.html",
+	})
 	if url != "/api/preview/"+token+"/" {
-		t.Fatalf("fallback url = %q, want the token root", url)
-	}
-	doc := s.previewStore.get(token)
-	if doc == nil {
-		t.Fatal("doc not in store")
-	}
-	if doc.baseDir != filepath.Clean(strayDir) {
-		t.Fatalf("fallback baseDir = %q, want %q", doc.baseDir, strayDir)
-	}
-	if doc.dirRel != "" {
-		t.Fatalf("fallback dirRel = %q, want empty", doc.dirRel)
+		t.Fatalf("project-root preview url = %q, want the token root", url)
 	}
 }
 

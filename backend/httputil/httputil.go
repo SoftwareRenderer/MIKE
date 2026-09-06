@@ -5,6 +5,7 @@ package httputil
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 
@@ -32,9 +33,16 @@ func MethodNotAllowed(w http.ResponseWriter) {
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 }
 
-// DecodeJSON decodes the JSON request body into v. On failure it writes the
-// standard 400 "invalid request body" response and returns false, so handlers
-// read as a linear happy path:
+// MaxRequestBodyBytes bounds one request body. The largest thing the API legitimately
+// sends is a user message with four inline images (~21 MB base64), so this leaves room
+// and nothing more: without a bound any client with a session can make the server read
+// JSON into memory until it dies.
+const MaxRequestBodyBytes int64 = 32 << 20
+
+// DecodeJSON decodes the JSON request body into v, bounded by MaxRequestBodyBytes. On
+// failure it writes 400 "invalid request body", or 413 when the body was simply too big
+// — not a malformed request, and one the client cannot fix by resending it — and
+// returns false, so handlers read as a linear happy path:
 //
 //	var req FooRequest
 //	if !httputil.DecodeJSON(w, r, &req) {
@@ -44,7 +52,19 @@ func MethodNotAllowed(w http.ResponseWriter) {
 // It checks nothing else on purpose — method and required fields stay with the
 // handler, which is where the domain rules for them live.
 func DecodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+	return decodeJSON(w, r, v, MaxRequestBodyBytes)
+}
+
+// decodeJSON is DecodeJSON with the limit injected, so the 413 path is testable
+// without building a 32 MB body.
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
+	if err := dec.Decode(v); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			JSONError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return false
+		}
 		JSONError(w, http.StatusBadRequest, "invalid request body")
 		return false
 	}

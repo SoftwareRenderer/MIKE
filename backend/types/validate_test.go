@@ -205,3 +205,37 @@ func TestValidateSandboxForwardPortsNamesThePort(t *testing.T) {
 		t.Errorf("error %q does not name the port and the value", err.Error())
 	}
 }
+
+// TestValidateCommitHash is the shape rule behind "restore to this". The value reaches
+// git as an argument, so a hash-shaped string is the only safe form: an option-shaped
+// one is a flag to `read-tree`, and a rev (`HEAD`, `main~1`) is a different commit than
+// the one the user clicked, which discards work rather than restoring it.
+func TestValidateCommitHash(t *testing.T) {
+	tests := []struct {
+		name    string
+		hash    string
+		wantErr bool
+	}{
+		{"full sha-1", "0123456789abcdef0123456789abcdef01234567", false},
+		{"upper case is what git accepts", "0123456789ABCDEF0123456789ABCDEF01234567", false},
+		{"sha-256 repository", strings.Repeat("a", 64), false},
+		{"abbreviated to 4", "dead", false},
+		{"empty", "", true},
+		{"too short to resolve", "abc", true},
+		{"longer than any object id", strings.Repeat("a", 65), true},
+		{"an option", "--output=/tmp/pwn", true},
+		{"a rev, not an id", "HEAD", true},
+		{"rev syntax", "main~1", true},
+		{"a range", "HEAD@{0}", true},
+		{"whitespace splits into arguments", "dead beef", true},
+		{"a path", "../../etc/passwd", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateCommitHash(tt.hash)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateCommitHash(%q) error = %v, wantErr %v", tt.hash, err, tt.wantErr)
+			}
+		})
+	}
+}

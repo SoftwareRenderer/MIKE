@@ -78,7 +78,7 @@ func TestValidateFSPathSandboxMountScoping(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := s.validateFSPath(fsProject(t, s, tt.projectID), tt.path)
+			_, err := s.validateFSPath(fsProject(t, s, tt.projectID), "", tt.path)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateFSPath(%q, project=%q) error = %v, wantErr %v", tt.path, tt.projectID, err, tt.wantErr)
 			}
@@ -86,13 +86,18 @@ func TestValidateFSPathSandboxMountScoping(t *testing.T) {
 	}
 }
 
-// TestValidateFSPathWorkspaceDir verifies that files under the configured
-// (absolute) workspace dir remain allowed for project-scoped requests.
-func TestValidateFSPathWorkspaceDir(t *testing.T) {
+// TestValidateFSPathWorktreeRoot is the other half of the jail: the worktree of the
+// task the request named is allowed, and the workspace directory that holds it is
+// not.
+//
+// The workspace dir used to be a root of every project-scoped request, so one
+// project's file request reached every task worktree of every other project on the
+// host — reads, writes and mkdir.
+func TestValidateFSPathWorktreeRoot(t *testing.T) {
 	s := testServer(t)
 	cfg, err := s.configStore.GetConfig()
 	if err != nil {
-		t.Fatalf("get config: %v", err)
+		t.Fatal(err)
 	}
 	if cfg.WorkspaceDir == "" {
 		t.Skip("workspace dir not set")
@@ -100,8 +105,72 @@ func TestValidateFSPathWorkspaceDir(t *testing.T) {
 	dir := t.TempDir()
 	plain := sandboxFSProject(t, s, "plain", "plainproj", filepath.Join(dir, "repo-plain"), false)
 
-	if _, err := s.validateFSPath(plain, filepath.Join(cfg.WorkspaceDir, "projid", "taskid", "f.go")); err != nil {
-		t.Errorf("workspace worktree path rejected: %v", err)
+	own := filepath.Join(cfg.WorkspaceDir, "plain", "task-a")
+	if err := os.MkdirAll(own, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The named task's own worktree is the point of the extra root.
+	if _, err := s.validateFSPath(plain, own, filepath.Join(own, "f.go")); err != nil {
+		t.Errorf("the request's own worktree was rejected: %v", err)
+	}
+	// Another task of the same project, and another project entirely, are not.
+	if _, err := s.validateFSPath(plain, own, filepath.Join(cfg.WorkspaceDir, "plain", "task-b", "f.go")); err == nil {
+		t.Error("a sibling task worktree was accepted")
+	}
+	if _, err := s.validateFSPath(plain, own, filepath.Join(cfg.WorkspaceDir, "other", "task-c", "f.go")); err == nil {
+		t.Error("another project's task worktree was accepted")
+	}
+	// Without a task there is no worktree root at all: the project checkout only.
+	if _, err := s.validateFSPath(plain, "", filepath.Join(cfg.WorkspaceDir, "plain", "task-a", "f.go")); err == nil {
+		t.Error("the workspace dir is still a root when no task was named")
+	}
+	// The project checkout stays allowed.
+	if _, err := s.validateFSPath(plain, own, filepath.Join(dir, "repo-plain", "a.go")); err != nil {
+		t.Errorf("the project root was rejected: %v", err)
+	}
+}
+
+// TestFSForeignTaskIsRejected is the ownership rule: ?project and ?task are separate
+// query parameters, and a task of another project used to be honoured silently, which
+// aimed the whole request — the worktree, and for a sandboxed project the container —
+// at someone else's task.
+func TestFSForeignTaskIsRejected(t *testing.T) {
+	s := testServer(t)
+	cookie, csrf := loginTestCSRF(t, s)
+
+	a := sandboxFSProject(t, s, "own", "ownproj", t.TempDir(), false)
+	b := sandboxFSProject(t, s, "other", "otherproj", t.TempDir(), false)
+	foreign := createTestTask(t, s, b.ID, "a task of the other project")
+
+	// The foreign task id alone reaches nothing, whichever fs endpoint asks.
+	for _, target := range []string{
+		"/api/fs?" + url.Values{"path": {b.Path}, "project": {a.ID}, "task": {foreign}}.Encode(),
+		"/api/fs/read?" + url.Values{"path": {filepath.Join(b.Path, "x.go")}, "project": {a.ID}, "task": {foreign}}.Encode(),
+	} {
+		req := testRequest(http.MethodGet, target, nil)
+		withAuthCSRF(req, cookie, csrf)
+		if rr := testResponse(t, s, req); rr.Code == http.StatusOK {
+			t.Errorf("%s: a task of another project was honoured (%s)", target, rr.Body.String())
+		}
+	}
+
+	// mkdir is the one with a side effect: it must not run in the foreign task's tree.
+	marker := filepath.Join(s.configStore.WorkspaceDir(), "other", foreign, "pwned")
+	req := testRequest(http.MethodPost, "/api/fs/mkdir?"+url.Values{"project": {a.ID}, "task": {foreign}}.Encode(),
+		map[string]string{"path": marker})
+	withAuthCSRF(req, cookie, csrf)
+	if rr := testResponse(t, s, req); rr.Code == http.StatusOK {
+		t.Errorf("mkdir accepted a foreign task: %s", rr.Body.String())
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Errorf("mkdir created %s under a task of another project", marker)
+	}
+
+	// A task parameter with no project to own it is a client error, not a bare browse.
+	req = testRequest(http.MethodGet, "/api/fs?"+url.Values{"task": {foreign}}.Encode(), nil)
+	withAuthCSRF(req, cookie, csrf)
+	if rr := testResponse(t, s, req); rr.Code != http.StatusBadRequest {
+		t.Errorf("task without project: got %d, want 400: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -114,10 +183,10 @@ func TestValidateFSPathCraftedProjectName(t *testing.T) {
 
 	// MountPath cleans, so the mount is /home/b — neither the cleaned path it
 	// implies nor a lookalike under the mount root may be accepted.
-	if _, err := s.validateFSPath(evil, "/home/sandbox/b/x"); err == nil {
+	if _, err := s.validateFSPath(evil, "", "/home/sandbox/b/x"); err == nil {
 		t.Error("crafted project name widened the allow-set: /home/sandbox/b/x was accepted")
 	}
-	if _, err := s.validateFSPath(evil, "/home/sandbox/a/../../b/x"); err == nil {
+	if _, err := s.validateFSPath(evil, "", "/home/sandbox/a/../../b/x"); err == nil {
 		// Cleaned to /home/b/x — not under /home/sandbox, so it must fail
 		// the project-root/workspace checks.
 		t.Error("crafted project name widened the allow-set: dotdot mount path was accepted")

@@ -223,6 +223,12 @@ func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if req.CommitHash != "" {
+			// This hash is later handed to reset-worktree, so a forged one stored here
+			// reaches git just as surely as one sent to that route.
+			if err := types.ValidateCommitHash(req.CommitHash); err != nil {
+				JSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
 			if err := s.store.UpdateTaskMessageCommitHash(messageID, req.CommitHash); err != nil {
 				JSONError(w, http.StatusInternalServerError, err.Error())
 				return
