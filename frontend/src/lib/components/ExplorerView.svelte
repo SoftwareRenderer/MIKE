@@ -719,7 +719,7 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="explorer-view-icon">
             <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
         </svg>
-        <span class="project-path">{toHomeRelative(projectPath)}</span>
+        <span class="project-path" title={toHomeRelative(projectPath)}>{toHomeRelative(projectPath)}</span>
 
         <!-- Branch selector: badge when changes panel open, dropdown otherwise -->
         {#if showChanges}
@@ -731,7 +731,7 @@
                     <line x1="6" y1="3.5" x2="6" y2="2"/>
                     <line x1="10" y1="12.5" x2="10" y2="14"/>
                 </svg>
-                {selectedBranch}
+                <span class="branch-badge-label">{selectedBranch}</span>
             </span>
         {:else}
             <div class="explorer-selector" class:open={showDropdown} bind:this={dropdownEl}>
@@ -1053,6 +1053,10 @@
         color: var(--color-text-primary);
         line-height: 1;
         align-self: center;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .explorer-header-spacer {
@@ -1110,14 +1114,22 @@
         font-weight: 500;
         max-width: 160px;
         overflow: hidden;
+        min-width: 0;
+    }
+    .explorer-branch-badge svg {
+        flex-shrink: 0;
+    }
+    .branch-badge-label {
+        min-width: 0;
+        overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        flex-shrink: 0;
     }
 
     /* Branch selector */
     .explorer-selector {
         position: relative;
+        min-width: 0;
     }
 
     .explorer-dropdown-btn {
@@ -1132,6 +1144,10 @@
         font-family: var(--font-mono);
         cursor: pointer;
         border: none;
+        min-width: 0;
+    }
+    .explorer-dropdown-btn svg {
+        flex-shrink: 0;
     }
     .explorer-dropdown-btn:hover {
         background: var(--color-surface-4);
@@ -1145,6 +1161,7 @@
 
     .explorer-name {
         max-width: 120px;
+        min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
