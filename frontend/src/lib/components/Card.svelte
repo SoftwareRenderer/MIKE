@@ -329,6 +329,48 @@
     let overflowRef: HTMLButtonElement | null = $state(null);
     let overflowMenuEl: HTMLDivElement | null = null;
 
+    // Built by hand and appended to document.body, so nothing here may be parsed as
+    // markup: the labels are t() results from the active translation pack. The
+    // icons are descriptors for the same reason (see frontend/html-sinks.py).
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+
+    type IconShape = { tag: 'path' | 'rect' | 'polygon'; attrs: Record<string, string> };
+
+    const OVERFLOW_ICONS: Record<'subtask' | 'edit' | 'pause' | 'resume' | 'delete', readonly IconShape[]> = {
+        subtask: [
+            { tag: 'path', attrs: { d: 'M8 3v10M3 8h10', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round' } },
+        ],
+        edit: [
+            { tag: 'path', attrs: { d: 'M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z', stroke: 'currentColor', 'stroke-width': '1.3', 'stroke-linejoin': 'round' } },
+        ],
+        pause: [
+            { tag: 'rect', attrs: { x: '2.5', y: '1.5', width: '1.5', height: '7', fill: 'currentColor' } },
+            { tag: 'rect', attrs: { x: '6', y: '1.5', width: '1.5', height: '7', fill: 'currentColor' } },
+        ],
+        resume: [
+            { tag: 'polygon', attrs: { points: '3.5,1.5 3.5,8.5 8.5,5', fill: 'currentColor' } },
+        ],
+        delete: [
+            { tag: 'path', attrs: { d: 'M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5', stroke: 'currentColor', 'stroke-width': '1.3', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } },
+            { tag: 'path', attrs: { d: 'M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9', stroke: 'currentColor', 'stroke-width': '1.3', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' } },
+        ],
+    };
+
+    function iconSvg(shapes: readonly IconShape[]): SVGSVGElement {
+        const svg = document.createElementNS(SVG_NS, 'svg');
+        svg.setAttribute('width', '16');
+        svg.setAttribute('height', '16');
+        svg.setAttribute('viewBox', '0 0 16 16');
+        svg.setAttribute('fill', 'none');
+        svg.style.flexShrink = '0';
+        for (const shape of shapes) {
+            const el = document.createElementNS(SVG_NS, shape.tag);
+            for (const [name, value] of Object.entries(shape.attrs)) el.setAttribute(name, value);
+            svg.appendChild(el);
+        }
+        return svg;
+    }
+
     function buildOverflowMenu(): HTMLDivElement {
         const menu = document.createElement('div');
         menu.className = 'card-overflow-menu';
@@ -336,21 +378,21 @@
         // Inline styles to escape Svelte scoping (element is on document.body)
         menu.style.cssText = 'position:fixed;z-index:10000;background:var(--color-surface-3,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);padding:4px;width:140px;box-shadow:0 8px 24px rgba(0,0,0,0.3);display:flex;flex-direction:column;gap:2px;';
 
-        const items: Array<{ icon: string; label: string; action: (e: MouseEvent) => void; danger?: boolean }> = [];
+        const items: Array<{ icon: readonly IconShape[]; label: string; action: (e: MouseEvent) => void; danger?: boolean }> = [];
 
         if (!inline || !task.parent_task_id || hasChildren || showSubtaskBorder) {
-            items.push({ icon: '<path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>', label: t('board.card.createSubtask'), action: handleCreateChild });
+            items.push({ icon: OVERFLOW_ICONS.subtask, label: t('board.card.createSubtask'), action: handleCreateChild });
         }
         if (!isDoneSubtask) {
-            items.push({ icon: '<path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>', label: t('board.card.edit'), action: startEdit });
+            items.push({ icon: OVERFLOW_ICONS.edit, label: t('board.card.edit'), action: startEdit });
         }
         if (isPausable) {
-            items.push({ icon: '<rect x="2.5" y="1.5" width="1.5" height="7" fill="currentColor"/><rect x="6" y="1.5" width="1.5" height="7" fill="currentColor"/>', label: t('board.card.pause'), action: handlePause });
+            items.push({ icon: OVERFLOW_ICONS.pause, label: t('board.card.pause'), action: handlePause });
         } else if (isResumable) {
-            items.push({ icon: '<polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/>', label: t('board.card.resume'), action: handleResume });
+            items.push({ icon: OVERFLOW_ICONS.resume, label: t('board.card.resume'), action: handleResume });
         }
         if ((columnId === 'done' || isDoneSubtask) && !(multiSelect?.isSelected(task.id) ?? false)) {
-            items.push({ icon: '<path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>', label: t('board.card.delete'), action: handleDelete, danger: true });
+            items.push({ icon: OVERFLOW_ICONS.delete, label: t('board.card.delete'), action: handleDelete, danger: true });
         }
 
         for (const item of items) {
@@ -359,11 +401,7 @@
             btn.className = 'overflow-item' + (item.danger ? ' overflow-delete' : '');
             btn.setAttribute('role', 'menuitem');
             btn.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:none;border-radius:var(--radius-sm,6px);background:transparent;color:var(--color-text-primary,#ccc);font-size:0.875rem;font-family:inherit;font-weight:500;cursor:pointer;text-align:left;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
-            // The icon is a literal of this file, so it may be markup. The label is a
-            // catalog string, and a translation pack is an installed extension — it gets
-            // to choose the words, not to write into this document. textContent is the
-            // fence, and it renders the same button.
-            btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0">${item.icon}</svg>`;
+            btn.appendChild(iconSvg(item.icon));
             btn.appendChild(document.createTextNode(item.label));
             btn.addEventListener('click', (e: MouseEvent) => { closeOverflow(); item.action(e); });
             menu.appendChild(btn);

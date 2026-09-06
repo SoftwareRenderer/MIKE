@@ -12,7 +12,10 @@
     <script nonce="{{.Nonce}}">
         try {
             var _t = localStorage.getItem('kanban-theme-css');
-            if (_t) {
+            // Same-origin, extension tree only: this value comes from storage, not
+            // from us. ui-injector.isPrepaintableThemeURL applies the same test on
+            // the way in and cannot be imported here — change both.
+            if (_t && /^\/extensions\/[^/\\]/.test(_t)) {
                 var _l = document.createElement('link');
                 _l.rel = 'stylesheet';
                 _l.href = _t;
