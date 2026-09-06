@@ -2,6 +2,7 @@
     import { onMount, tick } from 'svelte';
     import { ensureCsrfToken, getGitStatus } from '$lib/api';
     import { gitStatusLabel, gitStatusClass, gitStatusPriority } from '$lib/utils/git-status';
+    import { useFileDropUpload } from '$lib/composables/use-file-drop-upload.svelte';
     import Icon from '$lib/components/Icon.svelte';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
@@ -327,6 +328,27 @@
         loadDir(currentPath);
         loadGitStatus();
     });
+
+    // Dropping files onto the listing uploads them into the directory it shows.
+    // `currentPath` is read at drop time, so the file lands where the user is looking.
+    const dropUpload = useFileDropUpload({
+        projectId: () => projectId,
+        dir: () => currentPath,
+        onUploaded: () => {
+            loadDir(currentPath);
+            loadGitStatus();
+        },
+    });
+
+    let uploadInput: HTMLInputElement | null = $state(null);
+
+    function handleUploadPicked(e: Event) {
+        const input = e.target as HTMLInputElement;
+        const files = Array.from(input.files || []);
+        // Cleared before the run: picking the same file again must fire change once more.
+        input.value = '';
+        dropUpload.uploadFiles(files);
+    }
 </script>
 
 <div class="file-browser">
@@ -338,6 +360,13 @@
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <circle cx="11" cy="11" r="8"/>
                         <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    </svg>
+                </button>
+                <button class="new-file-btn upload-btn" onclick={() => uploadInput?.click()} title={t('explorer.shared.uploadTitle')} aria-label={t('explorer.shared.uploadAria')}>
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M8 10.5V2.5"/>
+                        <path d="M4.75 5.75 8 2.5l3.25 3.25"/>
+                        <path d="M2.5 13.5h11"/>
                     </svg>
                 </button>
                 <button class="new-file-btn" onclick={toggleNewFile} title={t('explorer.shared.newFileTitle')} aria-label={t('explorer.shared.createFileAria')}>
@@ -384,6 +413,14 @@
             </div>
         {/if}
     </div>
+    <input
+        type="file"
+        multiple
+        class="upload-input"
+        bind:this={uploadInput}
+        onchange={handleUploadPicked}
+        aria-label={t('explorer.shared.uploadAria')}
+    />
     {#if createError}
         <div class="file-browser-error">{createError}</div>
     {/if}
@@ -408,46 +445,75 @@
                 title={currentPath}
             />
         </div>
-        {#if entries.length === 0 && !loading}
-            <div class="file-browser-empty">{t('explorer.branchFiles.empty')}</div>
-        {:else}
-            <div class="file-browser-list" role="tree" aria-label={t('explorer.branchFiles.treeAria')}>
-                {#each entries as entry}
-                    <button
-                        class="file-browser-item"
-                        class:dir={entry.isDir}
-                        onclick={() => handleClick(entry)}
-                        ondblclick={() => handleClick(entry, true)}
-                        role="treeitem"
-                        aria-selected="false"
-                        title={entry.path}
-                    >
-                        {#if entry.isDir}
-                            <Icon src={folderIcon} color="currentColor" width={14} height={14} class="file-icon folder-icon" />
-                        {:else}
-                            <Icon src={fileIcon} color="#6E7681" width={14} height={14} class="file-icon" />
-                        {/if}
-                        <span class="file-name">{entry.name}</span>
-                        {#if getGitStatusChar(entry.path)}
-                            <span class="git-status-badge {gitStatusClass(getGitStatusChar(entry.path))}" title={t('explorer.branchFiles.gitStatusTitle', { status: getGitStatusChar(entry.path) })} aria-label={t('explorer.branchFiles.gitStatusAria', { status: gitStatusLabel(getGitStatusChar(entry.path)) })}>
-                                {getGitStatusChar(entry.path)}
-                            </span>
-                        {/if}
-                        {#if (!entry.isDir && unsavedPaths.has(entry.path)) || (entry.isDir && unsavedDirPrefixes.has(entry.path))}
-                            <span class="unsaved-dot" title={t('explorer.shared.unsavedChanges')}>
-                                <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
-                                    <circle cx="4" cy="4" r="3.5" fill="currentColor"/>
-                                </svg>
-                            </span>
-                        {/if}
-                    </button>
-                {/each}
-            </div>
-        {/if}
+        <!-- svelte-ignore a11y_interactive_supports_focus — the listing is a drop target,
+             not an activation target: its treeitems are what a keyboard reaches. -->
+        <div
+            class="file-browser-list"
+            role="tree"
+            aria-label={t('explorer.branchFiles.treeAria')}
+            class:is-drop-target={dropUpload.isOver}
+            ondragenter={dropUpload.handleDragEnter}
+            ondragover={dropUpload.handleDragOver}
+            ondragleave={dropUpload.handleDragLeave}
+            ondrop={dropUpload.handleDrop}
+        >
+            <!-- The listing is the drop zone, so it renders even when the folder is empty. -->
+            {#if dropUpload.uploading}
+                <div class="drop-progress" role="status">
+                    <div class="drop-progress-row">
+                        <span class="drop-progress-label">{t('explorer.shared.dropUploading', { done: dropUpload.filesDone, total: dropUpload.filesTotal })}</span>
+                        <button class="drop-cancel-btn" onclick={dropUpload.cancel}>{t('explorer.shared.dropCancelUpload')}</button>
+                    </div>
+                    <div class="drop-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={dropUpload.percent}>
+                        <div class="drop-bar-fill" style="width: {dropUpload.percent}%"></div>
+                    </div>
+                    {#if dropUpload.currentFile}
+                        <span class="drop-progress-file">{dropUpload.currentFile}</span>
+                    {/if}
+                </div>
+            {:else if dropUpload.isOver}
+                <div class="drop-hint">{t('explorer.shared.dropHint')}</div>
+            {/if}
+            {#if entries.length === 0 && !loading}
+                <div class="file-browser-empty">{t('explorer.branchFiles.empty')}</div>
+            {/if}
+            {#each entries as entry}
+                <button
+                    class="file-browser-item"
+                    class:dir={entry.isDir}
+                    onclick={() => handleClick(entry)}
+                    ondblclick={() => handleClick(entry, true)}
+                    role="treeitem"
+                    aria-selected="false"
+                    title={entry.path}
+                >
+                    {#if entry.isDir}
+                        <Icon src={folderIcon} color="currentColor" width={14} height={14} class="file-icon folder-icon" />
+                    {:else}
+                        <Icon src={fileIcon} color="#6E7681" width={14} height={14} class="file-icon" />
+                    {/if}
+                    <span class="file-name">{entry.name}</span>
+                    {#if getGitStatusChar(entry.path)}
+                        <span class="git-status-badge {gitStatusClass(getGitStatusChar(entry.path))}" title={t('explorer.branchFiles.gitStatusTitle', { status: getGitStatusChar(entry.path) })} aria-label={t('explorer.branchFiles.gitStatusAria', { status: gitStatusLabel(getGitStatusChar(entry.path)) })}>
+                            {getGitStatusChar(entry.path)}
+                        </span>
+                    {/if}
+                    {#if (!entry.isDir && unsavedPaths.has(entry.path)) || (entry.isDir && unsavedDirPrefixes.has(entry.path))}
+                        <span class="unsaved-dot" title={t('explorer.shared.unsavedChanges')}>
+                            <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
+                                <circle cx="4" cy="4" r="3.5" fill="currentColor"/>
+                            </svg>
+                        </span>
+                    {/if}
+                </button>
+            {/each}
+        </div>
     {/if}
 </div>
 
 <style>
+    @import '$lib/styles/file-drop.css';
+
     .file-browser {
         display: flex;
         flex-direction: column;

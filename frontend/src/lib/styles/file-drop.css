@@ -1,0 +1,127 @@
+/* Drop-zone styles for the file listings.
+ *
+ * Both file browsers (BranchFileBrowser's .file-browser-list and TaskFileBrowser's
+ * .file-list) accept files dragged in from the desktop and render the same markup
+ * while doing it, so the rules live once, as :global() instead of a scoped copy each. */
+
+/* The ring is inset because the panels' ancestors clip an outline. */
+:global(.file-browser-list.is-drop-target),
+:global(.file-list.is-drop-target) {
+    background: var(--color-surface-2);
+    box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+/* Sticky, not absolute: a box absolutely positioned inside a scroller scrolls away with
+   the content, so the hint would be off-screen while the pointer is over the listing. */
+:global(.drop-hint),
+:global(.drop-progress) {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    margin: 2px 6px 4px;
+    padding: 8px 10px;
+    border: 1px dashed var(--color-accent);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-1);
+    color: var(--color-text-primary);
+    font-size: 0.75rem;
+}
+
+:global(.drop-hint) {
+    text-align: center;
+    color: var(--color-text-secondary);
+}
+
+:global(.drop-progress-row) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+:global(.drop-progress-label) {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+:global(.drop-cancel-btn) {
+    flex-shrink: 0;
+    padding: 2px 6px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-size: 0.6875rem;
+    cursor: pointer;
+}
+:global(.drop-cancel-btn:hover) {
+    background: var(--color-surface-3);
+    color: var(--color-text-primary);
+}
+
+:global(.drop-bar) {
+    margin-top: 6px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--color-surface-3);
+    overflow: hidden;
+}
+
+:global(.drop-bar-fill) {
+    height: 100%;
+    background: var(--color-accent);
+    transition: width 120ms linear;
+}
+
+:global(.drop-progress-file) {
+    display: block;
+    margin-top: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The picker that stands in for a drag (a phone's file sheet, a keyboard); the button
+   next to it is the visible control. */
+:global(.upload-input) {
+    display: none;
+}
+
+/* Tap targets. The file browsers widen their own header buttons to 32x32 and their text
+   a step up below 768px; this overlay is markup those media blocks never saw, so it takes
+   the same treatment here.
+
+   The parent list is part of every selector on purpose. This file is @imported by both
+   browsers, and the bundler (measured on the built CSS) dedupes the base rules into one
+   copy but duplicates this media block per importer — one copy landed before the base
+   rules, one after. With equal specificity the override would depend on which copy lands
+   last; carrying the list class makes it win on specificity instead. */
+@media (max-width: 768px) {
+    :global(:is(.file-browser-list, .file-list) .drop-hint),
+    :global(:is(.file-browser-list, .file-list) .drop-progress) {
+        margin: 4px 10px 8px;
+        padding: 12px;
+        font-size: 0.875rem;
+    }
+
+    :global(:is(.file-browser-list, .file-list) .drop-cancel-btn) {
+        min-height: 32px;
+        padding: 6px 10px;
+        font-size: 0.8125rem;
+    }
+
+    :global(:is(.file-browser-list, .file-list) .drop-bar) {
+        margin-top: 10px;
+        height: 4px;
+    }
+
+    :global(:is(.file-browser-list, .file-list) .drop-progress-file) {
+        margin-top: 6px;
+        font-size: 0.75rem;
+    }
+}

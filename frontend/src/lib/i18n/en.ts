@@ -76,6 +76,44 @@ const catalog = {
     'explorer.shared.entryFile': 'File: {name}',
     'explorer.shared.openFolder': 'Open folder: {name}',
 
+    // ── Dropping files onto a file list uploads them (both browsers) ──
+    // The picker is the same upload without a drag: a touch device has no file drag
+    // source and a keyboard has no pointer, so both need this way in.
+    'explorer.shared.uploadTitle': 'Upload files',
+    'explorer.shared.uploadAria': 'Upload files to this folder',
+    'explorer.shared.dropHint': 'Drop files to upload them here',
+    'explorer.shared.dropUploading': 'Uploading {done} of {total}',
+    'explorer.shared.dropCancelUpload': 'Cancel upload',
+    'explorer.shared.dropOverwriteTitle': 'Replace existing files?',
+    'explorer.shared.dropOverwriteMessage': {
+        one: '{count} file is already here. Replace it?',
+        other: '{count} files are already here. Replace them?',
+    },
+    'explorer.shared.dropOverwriteConfirm': 'Replace',
+    'explorer.shared.dropUploaded': { one: 'Uploaded {count} file', other: 'Uploaded {count} files' },
+    'explorer.shared.dropFailed': {
+        one: '{count} file was not uploaded: {error}',
+        other: '{count} files were not uploaded: {error}',
+    },
+    'explorer.shared.dropCancelled': {
+        one: 'Upload cancelled — {count} file uploaded',
+        other: 'Upload cancelled — {count} files uploaded',
+    },
+    'explorer.shared.dropTooBig': {
+        one: '{count} file is over {max} MB and was skipped',
+        other: '{count} files are over {max} MB and were skipped',
+    },
+    'explorer.shared.dropUnreadable': {
+        one: '{count} item could not be read',
+        other: '{count} items could not be read',
+    },
+    'explorer.shared.dropTruncated': 'Only the first {max} files of this drop were uploaded',
+    // Transport-level failures: the server's own refusal is shown as it wrote it,
+    // these are what the browser knows when nothing answered.
+    'explorer.shared.dropErrHttp': 'upload failed ({status})',
+    'explorer.shared.dropErrNetwork': 'upload failed after {loaded} of {total} bytes',
+    'explorer.shared.dropError': 'Upload failed: {error}',
+
     // ── ExplorerView.svelte — project explorer shell (branch view) ──
     'explorer.view.aria': 'Explorer view',
     'explorer.view.closeAria': 'Close branch view',
