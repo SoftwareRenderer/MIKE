@@ -1,5 +1,8 @@
 node_modules
 data/
+.env
+/projects/
+__pycache__/
 /extensions/
 frontend/dist
 frontend/stats.html

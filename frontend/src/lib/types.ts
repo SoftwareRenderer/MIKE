@@ -23,6 +23,8 @@ export function getToolDisplayName(displayName: string | undefined, toolName: st
 
 export interface PortForward {
     container_port: number;
+    /** Host address to publish on; empty means every interface. */
+    host_ip?: string;
 }
 
 export interface SandboxMount {
@@ -39,6 +41,8 @@ export interface SandboxEnv {
 export interface AssignedPort {
     host_port: number;
     container_port: number;
+    /** Bound address; empty means every interface. */
+    host_ip?: string;
 }
 
 // Live memory usage of a task's sandbox container, pushed as the

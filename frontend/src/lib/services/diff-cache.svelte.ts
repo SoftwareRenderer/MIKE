@@ -120,6 +120,30 @@ export class DiffCache {
         this.state.files = { ...this.state.files, [path]: file };
     }
 
+    // Merge a partial update into the cached entry for a path
+    patchFile(path: string, patch: Partial<DiffFile>) {
+        this.setFile(path, { ...(this.state.files[path] || { path }), ...patch });
+    }
+
+    // Fetch the full (un-truncated) diff for one cached file
+    async expandFile(path: string): Promise<boolean> {
+        const existing = this.state.files[path];
+        if (!existing) return false;
+        const data = await this._apis.getDiffFile(this._getProjectId(), this._getTaskId(), path, { full: true });
+        if (!data.rows) return false;
+        const rows = this._apis.enrichRows(data.rows);
+        this.patchFile(path, {
+            rows,
+            added: rows.filter((r: DiffRow) => r.variant === 'added').length,
+            removed: rows.filter((r: DiffRow) => r.variant === 'removed').length,
+            committedRows: data.committedRows ? this._apis.enrichRows(data.committedRows) : [],
+            truncated: !!data.truncated,
+            origAdded: data.origAdded ?? existing.origAdded,
+            origRemoved: data.origRemoved ?? existing.origRemoved,
+        });
+        return true;
+    }
+
     /** Update metadata for an untracked file. */
     setUntrackedMeta(path: string, meta: UntrackedMeta) {
         this.state.untracked = { ...this.state.untracked, [path]: meta };

@@ -22,6 +22,16 @@ Four rules, each one a sentence in the docs:
                               and a selector targets a language without naming one to a
                               reader. (`src/lib/types.ts`'s `i18n.locale` field and the
                               runtime's `LocaleTag` are the *shape* of a tag, never a tag.)
+                              A PACK'S TAG IS CHECKED TEXTUALLY ONLY WHILE THE TAG CANNOT BE
+                              AN ORDINARY WORD. The Latin-script pack tags (`es`, `de`, `pt`,
+                              `it`, `nl`, `ru`, `pl`, `tr`) are not in the tripwire because
+                              they are not parseable as tags by a line scanner: `tr` is a
+                              table row and a CodeMirror transaction, `it` is English, and
+                              stripping comments still leaves 43 lines of real code matching
+                              (measured on this tree). Those languages are carried by rule 4,
+                              which catches the thing core must never do — branch on one —
+                              for a tag of ANY script, because that check reads the shape of
+                              the comparison instead of the alphabet of the tag.
   2. no translated text     — no CJK/hangul/kana codepoint in core. That is how "no endonym
                               in a comment" and "no translated sample value" are checked
                               without listing every language on earth.
@@ -42,9 +52,12 @@ from pathlib import Path
 
 SRC = Path(__file__).parent / "src"
 
-# Rule 1's tripwire. It is deliberately a short list — the tags the packs this product ships
-# and their region forms — standing in for the general rule ("core knows no locale") that the
-# per-file review and rule 4's structural check carry. New pack, new tag: add it here.
+# Rule 1's tripwire. It is deliberately a short list — the tags whose spelling no English
+# sentence contains — standing in for the general rule ("core knows no locale") that the
+# per-file review and rule 4's structural check carry. Adding a Latin-script pack tag here is
+# NOT the move: see rule 1 in the module docstring for the measurement (`tr`, `it`) that rules
+# it out. A new Latin-script pack is covered by rule 4 the day it lands, and by nothing else.
+# So when a pack is added, ask what this list would miss, not whether the tag is missing here.
 TAG_TRIPWIRE = ("zh", "fr", "ja", "ko")
 TAG_RE = re.compile(
     r"(?<![A-Za-z0-9])(?:%s)(?:-[A-Za-z0-9]{1,8})*(?![A-Za-z0-9])" % "|".join(TAG_TRIPWIRE)

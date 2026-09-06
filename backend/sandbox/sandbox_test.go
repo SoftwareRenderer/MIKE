@@ -1426,33 +1426,148 @@ func TestCreate_PlanModeReadonlyMount(t *testing.T) {
 	}
 }
 
-// TestForwardPortSpecIsLoopbackOnly: a forwarded container port is published on
-// loopback only. An unprefixed "<hostPort>:<containerPort>" spec binds every
-// interface, exposing the sandbox's listener on the LAN.
-func TestForwardPortSpecIsLoopbackOnly(t *testing.T) {
-	for _, tc := range []struct{ hostPort, containerPort int }{
-		{41234, 9999},
-		{1, 65535},
-	} {
-		spec := forwardPortSpec(tc.hostPort, tc.containerPort)
+// The bind address reaches podman as given, since podman derives the forward target from
+// it. Every-interface is spelled with no address at all, and a loopback address maps a port
+// a gVisor guest cannot answer - both are the user's choice, not ours to rewrite.
+func TestForwardPortSpec(t *testing.T) {
+	tests := []struct {
+		name          string
+		hostIP        string
+		hostPort      int
+		containerPort int
+		want          string
+	}{
+		{"no address", "", 41234, 3000, "41234:3000"},
+		{"LAN address", "192.168.1.100", 41234, 80, "192.168.1.100:41234:80"},
+		{"loopback passed through", "127.0.0.1", 41234, 80, "127.0.0.1:41234:80"},
+		{"IPv6 is bracketed", "fd00::5", 41234, 80, "[fd00::5]:41234:80"},
+		{"port range edges", "", 1, 65535, "1:65535"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := forwardPortSpec(tt.hostIP, tt.hostPort, tt.containerPort)
+			if got != tt.want {
+				t.Errorf("forwardPortSpec(%q, %d, %d) = %q, want %q", tt.hostIP, tt.hostPort, tt.containerPort, got, tt.want)
+			}
+		})
+	}
+}
 
-		want := fmt.Sprintf("127.0.0.1:%d:%d", tc.hostPort, tc.containerPort)
-		if spec != want {
-			t.Errorf("forwardPortSpec(%d, %d) = %q, want %q", tc.hostPort, tc.containerPort, spec, want)
+// firstGlobalIPv4 returns an address of this machine to bind a forwarded port to, or skips
+// the test when the machine has none. Loopback is not usable: it publishes a port that no
+// connection can reach on a gVisor guest.
+func firstGlobalIPv4(t *testing.T) string {
+	t.Helper()
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		t.Skipf("enumerate interfaces: %v", err)
+	}
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil && !ipnet.IP.IsLoopback() {
+			return ipnet.IP.String()
 		}
+	}
+	t.Skip("no non-loopback IPv4 address on this machine")
+	return ""
+}
 
-		// podman parses "[ip:]hostPort:containerPort": without the IP the bind is
-		// 0.0.0.0, so the first field must always be a loopback address.
-		parts := strings.Split(spec, ":")
-		if len(parts) != 3 {
-			t.Fatalf("spec %q is not <ip>:<hostPort>:<containerPort>", spec)
+// The interface a forward is configured with is what podman publishes on and what the UI
+// has to show, since it is also where the port answers. A stored 0.0.0.0 means the same
+// thing as no address and must not read back as an address.
+func TestCreate_PublishesOnConfiguredInterface(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
+
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+	hostIP := firstGlobalIPv4(t)
+
+	taskID := "test-sandbox-iface"
+	dir := t.TempDir()
+	assigned, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{
+		ForwardPorts: []types.PortForward{
+			{ContainerPort: 8080},
+			{ContainerPort: 8081, HostIP: hostIP},
+			{ContainerPort: 8082, HostIP: "0.0.0.0"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create sandbox: %v", err)
+	}
+	t.Cleanup(func() { _ = sm.Stop(taskID) })
+
+	want := map[int]string{8080: "", 8081: hostIP, 8082: ""}
+	got := map[int]string{}
+	for _, p := range assigned {
+		got[p.ContainerPort] = p.HostIP
+		if p.HostPort < 1 || p.HostPort > 65535 {
+			t.Errorf("container port %d got host port %d", p.ContainerPort, p.HostPort)
 		}
-		ip := net.ParseIP(parts[0])
-		if ip == nil {
-			t.Fatalf("spec %q does not start with an IP address", spec)
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("assigned ports = %v, want %v", got, want)
+	}
+
+	live, err := sm.GetContainerPorts(taskID)
+	if err != nil {
+		t.Fatalf("read back ports: %v", err)
+	}
+	liveByContainer := map[int]string{}
+	for _, p := range live {
+		liveByContainer[p.ContainerPort] = p.HostIP
+	}
+	if fmt.Sprint(liveByContainer) != fmt.Sprint(want) {
+		t.Errorf("podman reports %v for the same container, want %v", liveByContainer, want)
+	}
+}
+
+// Lines as printed by `podman port` on this host, including the unbracketed IPv6 form that
+// the old colon-split silently dropped.
+func TestParsePortBinding(t *testing.T) {
+	tests := []struct {
+		name  string
+		line  string
+		want  types.AssignedPort
+		valid bool
+	}{
+		{"wildcard IPv4", "8080/tcp -> 0.0.0.0:18120", types.AssignedPort{HostPort: 18120, ContainerPort: 8080}, true},
+		{"star", "3000/tcp -> *:41305", types.AssignedPort{HostPort: 41305, ContainerPort: 3000}, true},
+		{"loopback bind", "3000/tcp -> 127.0.0.1:42585", types.AssignedPort{HostPort: 42585, ContainerPort: 3000, HostIP: "127.0.0.1"}, true},
+		{"LAN bind", "8080/tcp -> 192.168.1.100:41234", types.AssignedPort{HostPort: 41234, ContainerPort: 8080, HostIP: "192.168.1.100"}, true},
+		{"IPv6 bind, unbracketed", "8080/tcp -> fdd4:9b13:e8c4:62bc:6f03:7d15:4b28:c062:18121", types.AssignedPort{HostPort: 18121, ContainerPort: 8080, HostIP: "fdd4:9b13:e8c4:62bc:6f03:7d15:4b28:c062"}, true},
+		{"bracketed IPv6 wildcard", "8080/tcp -> [::]:18121", types.AssignedPort{HostPort: 18121, ContainerPort: 8080}, true},
+		{"no arrow", "8080/tcp", types.AssignedPort{}, false},
+		{"no host port", "8080/tcp -> 192.168.1.100", types.AssignedPort{}, false},
+		{"port is not a number", "8080/tcp -> 192.168.1.100:http", types.AssignedPort{}, false},
+		{"container port is not a number", "http/tcp -> 0.0.0.0:8080", types.AssignedPort{}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := parsePortBinding(tt.line)
+			if ok != tt.valid {
+				t.Fatalf("parsePortBinding(%q) ok = %v, want %v", tt.line, ok, tt.valid)
+			}
+			if ok && got != tt.want {
+				t.Errorf("parsePortBinding(%q) = %+v, want %+v", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
+// Every-interface spellings must never reach podman as an address: an explicit 0.0.0.0 is
+// the same publish as no address, and anything prefixed changes the forward target.
+func TestForwardPortSpecDefaultStaysUnprefixed(t *testing.T) {
+	for _, in := range []string{"", "0.0.0.0", "::", " 0.0.0.0 "} {
+		hostIP, err := types.NormalizeSandboxHostIP(in)
+		if err != nil {
+			t.Fatalf("NormalizeSandboxHostIP(%q): %v", in, err)
 		}
-		if !ip.IsLoopback() {
-			t.Errorf("spec %q binds %s, which is not loopback", spec, ip)
+		if got := forwardPortSpec(hostIP, 41234, 80); got != "41234:80" {
+			t.Errorf("%q normalized to %q, publishing %q; want \"41234:80\"", in, hostIP, got)
 		}
 	}
 }

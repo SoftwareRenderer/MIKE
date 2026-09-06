@@ -1,7 +1,8 @@
 <script lang="ts">
     import type { Thread, ChatEntry } from '$lib/types';
     import { advisoryLabel, type EntryMeta } from '$lib/utils/chat-entries';
-    import { computeStickyHeader, type StickyUserMessage } from '$lib/utils/chat-sticky-header';
+    import { computeStickyHeader, STICKY_LINE_FALLBACK, type StickyUserMessage } from '$lib/utils/chat-sticky-header';
+    import { scrollToLine } from '$lib/utils/settle-scroll';
     import { distanceFromBottom, type ChatFollow } from '$lib/composables/use-chat-follow.svelte';
     import ChatMessage from './ChatMessage.svelte';
     import CheckpointDivider from './CheckpointDivider.svelte';
@@ -94,13 +95,6 @@
         follow.attach(chatScrollEl, chatContentEl);
     });
 
-    // Scroll a specific entry index into view.
-    function scrollToItem(index: number, behavior: ScrollBehavior = 'auto') {
-        if (!chatScrollEl) return;
-        const el = chatScrollEl.querySelectorAll('.chat-entry')[index];
-        el?.scrollIntoView({ behavior, block: 'start' });
-    }
-
     // Edit diff expand/collapse overrides — lives here so the state survives
     // entry re-renders (and off-screen content-visibility skips).
     // Keyed by toolId; undefined = use default (auto-expand for trivial diffs).
@@ -152,6 +146,23 @@
     let computedStickyMessage = $state('');
     let computedShowHeader = $state(false);
     let stickyEntryIdx = $state(-1);
+    // The overlay hangs over the top of the scroller, so it decides where a message
+    // has to land to be readable rather than behind it.
+    let stickyHeaderEl: HTMLElement | null = $state(null);
+
+    /**
+     * The sticky line: the overlay's bottom edge, measured. A tapped message lands on
+     * it and the header selects against it, so tapping the same spot walks back one
+     * message at a time.
+     */
+    function stickyLineOffset(): number {
+        const scroller = chatScrollEl;
+        const header = stickyHeaderEl;
+        if (!scroller || !header) return STICKY_LINE_FALLBACK;
+        const line = header.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top;
+        // 0 everywhere there is no layout (jsdom) and while the overlay has no box.
+        return line > 0 ? line : STICKY_LINE_FALLBACK;
+    }
 
     function computeStickyFromScroll() {
         const el = chatScrollEl;
@@ -176,16 +187,24 @@
                 bottom: rect.bottom - containerTop + scrollTop,
             });
         }
-        const sticky = computeStickyHeader(userMessages, scrollTop);
+        const sticky = computeStickyHeader(userMessages, scrollTop, stickyLineOffset());
         computedStickyMessage = sticky.firstLine;
         stickyEntryIdx = sticky.entryIdx;
         computedShowHeader = sticky.show;
     }
 
-    /** Scroll to the exact user message shown in the sticky header. */
+    /** Land the message the header names on the sticky line, under the overlay. */
     function handleStickyClickInternal() {
-        if (stickyEntryIdx < 0 || !chatScrollEl) return;
-        scrollToItem(stickyEntryIdx, 'smooth');
+        const scroller = chatScrollEl;
+        if (stickyEntryIdx < 0 || !scroller) return;
+        // The message, not its `.chat-entry`: a checkpoint divider above the message
+        // lives in the entry, so the entry starts a divider-height too early.
+        const target = scroller.querySelector<HTMLElement>(`.sticky-user-message[data-entry-idx="${stickyEntryIdx}"]`);
+        if (!target) return;
+        // Declare the takeover, or the follow tracker's pin loop writes scrollTop
+        // against us.
+        follow.noteUserIntent();
+        scrollToLine(scroller, target, stickyLineOffset());
     }
 
     /** One scroll listener for both jobs: shared follow state + sticky header. */
@@ -210,7 +229,7 @@
 
 <div class="chat-messages-wrapper" style={!follow.ready ? 'opacity: 0;' : ''}>
     {#if entries.length > 0 && computedShowHeader}
-        <div class="chat-sticky-header" role="status" aria-live="polite">
+        <div class="chat-sticky-header" bind:this={stickyHeaderEl} role="status" aria-live="polite">
             <button class="chat-sticky-bubble" onclick={handleStickyClickInternal} title={t('chat.entries.scrollToMessage')} aria-label={t('chat.entries.scrollToMessage')}>{computedStickyMessage}</button>
             {#if onToggleFullscreen}
                 <button type="button" class="chat-sticky-fullscreen" onclick={onToggleFullscreen} title={fullscreenTitle} aria-label={t('chat.entries.toggleFullscreen')}>

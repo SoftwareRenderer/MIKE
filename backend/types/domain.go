@@ -196,12 +196,16 @@ func (p *Provider) APIKeyValue() string {
 // PortForward specifies a container port to forward. Host port is auto-assigned at runtime.
 type PortForward struct {
 	ContainerPort int `json:"container_port"`
+	// HostIP is the host address to bind. Empty means every interface.
+	HostIP string `json:"host_ip,omitempty"`
 }
 
 // AssignedPort is a runtime host→container port mapping assigned during sandbox creation.
 type AssignedPort struct {
 	HostPort      int `json:"host_port"`
 	ContainerPort int `json:"container_port"`
+	// HostIP is the bound address. Empty means every interface.
+	HostIP string `json:"host_ip,omitempty"`
 }
 
 // SandboxMemoryStats is the live memory usage of a task's sandbox container.
