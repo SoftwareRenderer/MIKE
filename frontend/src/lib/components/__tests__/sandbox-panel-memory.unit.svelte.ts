@@ -135,6 +135,36 @@ describe('SandboxPanel memory section', () => {
         expect(container.querySelector('.memory-peak')?.textContent).toContain('Peak 500 MB');
     });
 
+    it('marks the peak red when it reached the limit', () => {
+        const { container } = renderPanel(stats({ memory_current_mb: 412, memory_peak_mb: 1024, memory_limit_mb: 1024 }));
+        const peak = container.querySelector('.memory-peak') as HTMLElement;
+        expect(peak.textContent).toContain('Peak 1024 MB');
+        expect(peak.classList.contains('reached')).toBe(true);
+    });
+
+    it('marks the peak red when it overshot the limit', () => {
+        const { container } = renderPanel(stats({ memory_peak_mb: 2048, memory_limit_mb: 1024 }));
+        expect(container.querySelector('.memory-peak')?.classList.contains('reached')).toBe(true);
+    });
+
+    it('keeps the peak neutral just below the limit', () => {
+        const { container } = renderPanel(stats({ memory_peak_mb: 1023, memory_limit_mb: 1024 }));
+        expect(container.querySelector('.memory-peak')?.classList.contains('reached')).toBe(false);
+    });
+
+    it('keeps the peak neutral when no limit is enforced', () => {
+        // Nothing was ever hit: with no --memory set there is no limit to reach.
+        const { container } = renderPanel(stats({ memory_current_mb: 999, memory_peak_mb: 999, memory_limit_mb: 0 }));
+        expect(container.querySelector('.memory-peak')?.classList.contains('reached')).toBe(false);
+    });
+
+    it('keeps the peak red while idle after usage dropped', () => {
+        // memory.peak is a high-water mark for the container's lifetime, so the
+        // signal outlives the usage that caused it.
+        const { container } = renderPanel(stats({ running: false, memory_current_mb: 0, memory_peak_mb: 1024, memory_limit_mb: 1024 }));
+        expect(container.querySelector('.memory-peak')?.classList.contains('reached')).toBe(true);
+    });
+
     it('shows the OOM warning with the kill count', () => {
         const { container } = renderPanel(stats({ oom_kills: 1 }));
         const warn = container.querySelector('.oom-warning');
