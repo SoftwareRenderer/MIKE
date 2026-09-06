@@ -30,9 +30,30 @@ export async function getConfig(): Promise<Config> {
     }
 }
 
+/**
+ * The placeholder the server answers in place of a stored provider key
+ * (maskedAPIKey, backend/config/config.go). Sending it back means "keep the stored
+ * key", so it is the only api_key value that is not a secret. Written as escapes:
+ * it is compared, never displayed.
+ */
+const MASKED_API_KEY = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
+
+/** Whether this payload carries a provider key that is an actual secret. */
+function carriesPlaintextAPIKey(config: Config): boolean {
+    return (config.providers ?? []).some(
+        (p) => typeof p.api_key === 'string' && p.api_key.trim() !== '' && p.api_key !== MASKED_API_KEY,
+    );
+}
+
 /** Update server configuration. Sends partial updates — only changed fields are required. Queued when offline. */
 export async function updateConfig(config: Config): Promise<Config> {
     if (getOfflineStatus()) {
+        // The queue is persisted, so a key queued here outlives the tab and the
+        // session. Everything else about the save still queues; stripping the key
+        // from the queued body instead would quietly lose what the user typed.
+        if (carriesPlaintextAPIKey(config)) {
+            throw new Error(t('api.updateConfigOfflineKey'));
+        }
         return await queueWrite('updateConfig', { config }, config);
     }
     return updateConfigRaw(config);

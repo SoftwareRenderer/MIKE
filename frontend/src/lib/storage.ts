@@ -27,6 +27,10 @@
 //   Call `gc(allTaskIds, allProjectPaths?)` after the board is loaded. It removes all stale
 //   entries for task IDs that no longer exist (deleted tasks, etc.).
 //   If `allProjectPaths` is provided, also cleans stale branch editor drafts.
+//
+// Sign-out:
+//   `clearAll()` erases every store and the pre-paint `localStorage` hints. `gc()`
+//   is not a substitute for it: it prunes only entries whose task no longer exists.
 // =============================================================================
 
 // `$lib/i18n` is cycle-free from here: the import surface is `index.ts` →
@@ -720,4 +724,24 @@ export async function saveEditorTabs(projectId: string, state: EditorTabState): 
     return dbPut(STORE_EDITOR_TABS, projectId, state);
 }
 
+// ─── Sign-out ────────────────────────────────────────────────────────────────
 
+/**
+ * Erase every store and the `kanban-*` localStorage hints, so a signed-out browser
+ * keeps nothing: each store holds this session's work product — messages, diffs,
+ * unsaved files, drafts, queued writes.
+ *
+ * The hints go by prefix, not by name, because this module must not import their
+ * owners: `i18n/cache.ts` imports this one, and the loop would close.
+ */
+export async function clearAll(): Promise<void> {
+    for (const store of ALL_STORES) {
+        const keys = await dbGetAllKeys(store);
+        if (keys.length > 0) await dbDeleteKeys(store, keys);
+    }
+    try {
+        for (const key of Object.keys(localStorage)) {
+            if (key.startsWith('kanban-')) localStorage.removeItem(key);
+        }
+    } catch { /* storage unavailable */ }
+}

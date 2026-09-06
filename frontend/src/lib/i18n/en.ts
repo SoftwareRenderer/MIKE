@@ -785,6 +785,7 @@ const catalog = {
     'api.deleteMessage': 'Failed to delete message',
     'api.updateMessage': 'Failed to update message',
     'api.updateConfig': 'Failed to update config',
+    'api.updateConfigOfflineKey': 'Provider API keys are not saved while offline — reconnect and save again.',
     'api.switchThread': 'Failed to switch thread',
     'api.forkThread': 'Failed to fork thread',
     'api.fetchProjects': 'Failed to fetch projects',

@@ -110,6 +110,16 @@ async function saveQueue() {
     notifyQueueChanged();
 }
 
+/**
+ * Drop the in-memory queue without touching storage. Sign-out pairs it with
+ * clearAll(): a leftover array would be written back into the emptied database by
+ * the next enqueue.
+ */
+export function clearQueue(): void {
+    actionQueue = [];
+    notifyQueueChanged();
+}
+
 /** Add an action to the queue and persist. */
 export async function enqueueAction(action: { type: ActionType; params: Record<string, any> }): Promise<QueuedAction> {
     const item: QueuedAction = {

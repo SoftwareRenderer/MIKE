@@ -7,12 +7,12 @@
     import { wsConnection } from '$lib/stores/connection';
     import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
     import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
-    import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask } from '$lib/api';
+    import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, clearQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask } from '$lib/api';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
     import { dragCarriesFiles } from '$lib/utils/file-drop';
     import { timeAgo } from '$lib/utils/format-time';
     import { resolveBoardLandingColumn } from '$lib/utils/task-utils';
-    import { getBoardCache, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache } from '$lib/storage';
+    import { getBoardCache, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, clearAll } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
     import { useBoardArrowNav } from '$lib/composables/use-board-arrow-nav';
@@ -1088,6 +1088,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             headers: csrfToken ? { 'X-CSRF-Token': csrfToken } : {},
         });
         clearCsrfToken();
+        // Signing out means this browser keeps nothing: the stores hold this user's
+        // messages, diffs, drafts and queued writes, and gc() only prunes tasks
+        // that no longer exist. The in-memory queue goes with them.
+        clearQueue();
+        await clearAll();
         isAuthenticated = false;
     }
 
