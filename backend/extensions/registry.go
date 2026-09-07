@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -19,6 +17,7 @@ import (
 	"kanban/pkg/sandboxruntime"
 
 	"kanban/backend/httputil"
+	"kanban/pkg/logging"
 )
 
 // RegistryClient fetches extension metadata and manages container images.
@@ -171,7 +170,10 @@ func (rc *RegistryClient) PullImage(imageRef string) error {
 		return err
 	}
 	imageRef = rc.rt.ResolveImageRef(imageRef)
-	cmd := exec.Command("podman", "pull", imageRef)
+	// PodmanCommand, not exec.Command: this is the site that had no WaitDelay at all, so a pull that
+	// wedged on a registry that accepts the connection but never answers held cmd.Wait open
+	// indefinitely — and it inherited the server's whole environment.
+	cmd := sandboxruntime.PodmanCommand("pull", imageRef)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("pull image %s: %w (output: %s)", imageRef, err, string(output))
@@ -337,23 +339,23 @@ func (rc *RegistryClient) CheckoutExtensionContext(ctx context.Context, repo, co
 	// branch or tag is present. The pinned commit must therefore be on a
 	// permanent ref.
 	srcDir := filepath.Join(tmp, "src")
-	cloneCmd := exec.CommandContext(ctx, "git", extCloneArgs(repo, srcDir)...)
+	cloneCmd := git.CommandContext(ctx, "", extCloneArgs(repo, srcDir)...)
 	// The fence in the argv is half of it: GIT_ALLOW_PROTOCOL is enforced by git
 	// itself whatever the host's git config says, and GIT_TERMINAL_PROMPT=0 stops
 	// a credential prompt hanging the install request. See git.CloneEnv.
 	cloneCmd.Env = git.CloneEnv()
 	if out, err := cloneCmd.CombinedOutput(); err != nil {
-		log.Printf("[extensions] clone %s failed: %v: %s", repo, err, out)
+		logging.For(logging.Extensions).Warnf("clone %s failed: %v: %s", repo, err, out)
 		return fmt.Errorf("clone %s: %w (output: %s)", repo, err, gitErrorOutput(out))
 	}
 
-	checkoutCmd := exec.CommandContext(ctx, "git", "-C", srcDir, "checkout", "-q", commit)
+	checkoutCmd := git.CommandContext(ctx, "", "-C", srcDir, "checkout", "-q", commit)
 	if out, err := checkoutCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("checkout pinned commit %s: %w (output: %s)", commit, err, strings.TrimSpace(string(out)))
 	}
 
 	// Verify the checked-out commit is exactly the pinned one before copying.
-	out, err := exec.CommandContext(ctx, "git", "-C", srcDir, "rev-parse", "HEAD").Output()
+	out, err := git.CommandContext(ctx, "", "-C", srcDir, "rev-parse", "HEAD").Output()
 	if err != nil {
 		return fmt.Errorf("verify checkout: %w", err)
 	}

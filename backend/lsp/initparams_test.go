@@ -9,7 +9,7 @@ import (
 
 	"kanban/backend/extensions"
 
-	sandbox "kanban/pkg/bridge"
+	"kanban/pkg/bridge"
 	"kanban/pkg/bridge/protocol"
 )
 
@@ -50,11 +50,11 @@ func (c *captureBridge) snapshot() (map[string]any, int) {
 
 const okInitializeReply = `{"jsonrpc":"2.0","id":1,"result":{}}`
 
-func capturingClient(t *testing.T, captured *captureBridge, reply string) *sandbox.Client {
+func capturingClient(t *testing.T, captured *captureBridge, reply string) *bridge.Client {
 	t.Helper()
 	bridgeRead, hostWrite := io.Pipe()
 	hostRead, bridgeWrite := io.Pipe()
-	cl := sandbox.NewClient(hostWrite, hostRead)
+	cl := bridge.NewClient(hostWrite, hostRead)
 
 	go func() {
 		for {

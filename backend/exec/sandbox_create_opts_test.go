@@ -3,7 +3,7 @@ package exec
 import (
 	"testing"
 
-	kanban_sandbox "kanban/backend/sandbox"
+	"kanban/backend/sandbox"
 	"kanban/backend/types"
 )
 
@@ -19,7 +19,7 @@ func TestSandboxCreateOpts_CarriesEveryConfiguredField(t *testing.T) {
 	setup := &taskExecSetup{
 		task:    &types.Task{ID: "brave-amber-quartz"},
 		project: &types.Project{ID: "proj-1", Name: "example.com"},
-		sandboxOpts: kanban_sandbox.SandboxOpts{
+		sandboxOpts: sandbox.SandboxOpts{
 			NetworkIsolation: true,
 			MemoryLimit:      2048,
 			ForwardPorts:     []types.PortForward{{ContainerPort: 3000}},

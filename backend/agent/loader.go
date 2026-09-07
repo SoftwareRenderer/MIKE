@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +17,7 @@ import (
 
 	"kanban/backend/extensions"
 	"kanban/pkg/agent"
+	"kanban/pkg/logging"
 )
 
 // adapterRegistry holds registered adapter factories. Production loads WASM; tests
@@ -322,12 +322,12 @@ func (a *wasmAdapter) Init(ctx context.Context, config []byte) error {
 func (a *wasmAdapter) SubprocessConfig(ctx context.Context) agent.SubprocessConfig {
 	data, err := a.callFnStrings(ctx, agent.WasmFnSubprocessConfig)
 	if err != nil || len(data) == 0 {
-		log.Printf("[wasm-adapter] SubprocessConfig failed: %v", err)
+		logging.For(logging.Agent).Warnf("SubprocessConfig failed: %v", err)
 		return agent.SubprocessConfig{}
 	}
 	var cfg agent.SubprocessConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		log.Printf("[wasm-adapter] SubprocessConfig unmarshal failed: %v", err)
+		logging.For(logging.Agent).Warnf("SubprocessConfig unmarshal failed: %v", err)
 		return agent.SubprocessConfig{}
 	}
 	return cfg
@@ -340,7 +340,7 @@ func (a *wasmAdapter) SubprocessConfig(ctx context.Context) agent.SubprocessConf
 func (a *wasmAdapter) EncodeCommand(ctx context.Context, cmd string, data []byte) []byte {
 	result, err := a.callFnStrings(ctx, agent.WasmFnEncodeCommand, cmd, string(data))
 	if err != nil {
-		log.Printf("[wasm-adapter] EncodeCommand(%q) failed: %v", cmd, err)
+		logging.For(logging.Agent).Warnf("EncodeCommand(%q) failed: %v", cmd, err)
 		return nil
 	}
 	return result
@@ -351,12 +351,12 @@ func (a *wasmAdapter) EncodeCommand(ctx context.Context, cmd string, data []byte
 func (a *wasmAdapter) ParseOutput(ctx context.Context, data []byte) []agent.Event {
 	result, err := a.callFnStrings(ctx, agent.WasmFnParseOutput, string(data))
 	if err != nil || len(result) == 0 {
-		log.Printf("[wasm-adapter] ParseOutput failed: %v", err)
+		logging.For(logging.Agent).Warnf("ParseOutput failed: %v", err)
 		return nil
 	}
 	var events []agent.Event
 	if err := json.Unmarshal(result, &events); err != nil {
-		log.Printf("[wasm-adapter] ParseOutput unmarshal failed: %v", err)
+		logging.For(logging.Agent).Warnf("ParseOutput unmarshal failed: %v", err)
 		return nil
 	}
 	return events
@@ -369,7 +369,7 @@ func (a *wasmAdapter) ParseOutput(ctx context.Context, data []byte) []agent.Even
 func (a *wasmAdapter) HandleUIRequest(ctx context.Context, id, method string) []byte {
 	result, err := a.callFnStrings(ctx, agent.WasmFnHandleUIRequest, id, method)
 	if err != nil {
-		log.Printf("[wasm-adapter] HandleUIRequest(%q, %q) failed: %v", id, method, err)
+		logging.For(logging.Agent).Warnf("HandleUIRequest(%q, %q) failed: %v", id, method, err)
 		return nil
 	}
 	return result
@@ -399,7 +399,7 @@ func (a *wasmAdapter) Close() {
 func (a *wasmAdapter) ListModels(ctx context.Context) []agent.AgentModel {
 	cfg := a.SubprocessConfig(ctx)
 	if cfg.Binary == "" {
-		log.Printf("[wasm-adapter] ListModels: no binary configured")
+		logging.For(logging.Agent).Infof("ListModels: no binary configured")
 		return nil
 	}
 
@@ -408,7 +408,7 @@ func (a *wasmAdapter) ListModels(ctx context.Context) []agent.AgentModel {
 	cmd.Env = SafeAgentEnv(cfg.Env...)
 	output, err := cmd.Output()
 	if err != nil {
-		log.Printf("[wasm-adapter] ListModels: failed to run %s --list-models: %v", cfg.Binary, err)
+		logging.For(logging.Agent).Warnf("ListModels: failed to run %s --list-models: %v", cfg.Binary, err)
 		return nil
 	}
 

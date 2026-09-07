@@ -3,13 +3,13 @@ package main
 import (
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os/exec"
 	"sync"
 	"sync/atomic"
 
 	"kanban/pkg/bridge/protocol"
+	"kanban/pkg/logging"
 	"kanban/pkg/procterm"
 )
 
@@ -85,7 +85,7 @@ func newHandler() *handler {
 // recoverPanic is a deferred recovery for handler goroutines
 func (h *handler) recoverPanic(conn net.Conn, msgID uint32) {
 	if r := recover(); r != nil {
-		log.Printf("agent: recovered panic (MsgID=%d): %v", msgID, r)
+		logging.For(logging.Bridge).Warnf("agent: recovered panic (MsgID=%d): %v", msgID, r)
 		// Best-effort: report the error to the host so the pending request resolves
 		// instead of hanging until a timeout. Notifications (msgID 0) have no
 		// pending request to resolve.
@@ -95,10 +95,10 @@ func (h *handler) recoverPanic(conn net.Conn, msgID uint32) {
 	}
 }
 
-// writeFrame sends a frame to conn under the write lock.
-// Returns ErrClosed if the handler has been closed.
+// errHandlerClosed is returned once the handler has been closed.
 var errHandlerClosed = fmt.Errorf("handler closed")
 
+// writeFrame sends a frame to conn under the write lock.
 func (h *handler) writeFrame(conn net.Conn, frame *protocol.Frame) error {
 	h.writeMu.Lock()
 	defer h.writeMu.Unlock()
@@ -158,7 +158,7 @@ func (h *handler) handleConn(conn net.Conn) error {
 			case protocol.MethodLSP:
 				req, err := protocol.ParseRequest(frame)
 				if err != nil {
-					log.Printf("agent: parse request MsgID %d: %v", frame.MsgID, err)
+					logging.For(logging.Bridge).Infof("agent: parse request MsgID %d: %v", frame.MsgID, err)
 					_ = h.writeFrame(conn, protocol.NewError(frame.MsgID, err.Error()))
 					continue
 				}
@@ -172,7 +172,7 @@ func (h *handler) handleConn(conn net.Conn) error {
 			// JSON-based methods — parse into Request
 			req, err := protocol.ParseRequest(frame)
 			if err != nil {
-				log.Printf("agent: parse request MsgID %d: %v", frame.MsgID, err)
+				logging.For(logging.Bridge).Infof("agent: parse request MsgID %d: %v", frame.MsgID, err)
 				_ = h.writeFrame(conn, protocol.NewError(frame.MsgID, err.Error()))
 				continue
 			}
@@ -201,7 +201,7 @@ func (h *handler) dispatch(conn net.Conn, req *protocol.Request) {
 	}
 
 	if err != nil {
-		log.Printf("agent: MsgID %d method %s error: %v", req.MsgID, req.MethodString(), err)
+		logging.For(logging.Bridge).Warnf("agent: MsgID %d method %s error: %v", req.MsgID, req.MethodString(), err)
 		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, err.Error()))
 	}
 }
@@ -211,7 +211,7 @@ func (h *handler) dispatch(conn net.Conn, req *protocol.Request) {
 func (h *handler) handleBashCancel(frame *protocol.Frame) {
 	params, err := protocol.ParseBashCancelParams(frame)
 	if err != nil {
-		log.Printf("agent: bash_cancel parse error: %v", err)
+		logging.For(logging.Bridge).Warnf("agent: bash_cancel parse error: %v", err)
 		return
 	}
 
@@ -223,12 +223,12 @@ func (h *handler) handleBashCancel(frame *protocol.Frame) {
 	h.mu.Unlock()
 
 	if !ok {
-		log.Printf("agent: bash_cancel MsgID=%d not found (already completed)", params.TargetMsgID)
+		logging.For(logging.Bridge).Infof("agent: bash_cancel MsgID=%d not found (already completed)", params.TargetMsgID)
 		return
 	}
 
 	if pid := bp.pid(); pid > 0 {
-		log.Printf("agent: bash_cancel MsgID=%d killing process group pgid=%d", params.TargetMsgID, pid)
+		logging.For(logging.Bridge).Infof("agent: bash_cancel MsgID=%d killing process group pgid=%d", params.TargetMsgID, pid)
 	}
 	bp.kill()
 	// Signal the done channel so the handleBash goroutine unblocks

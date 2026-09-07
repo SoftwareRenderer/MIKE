@@ -5,6 +5,8 @@ import (
 	"net"
 	"strings"
 	"sync"
+
+	"kanban/pkg/logging"
 )
 
 // net/http logs its own errors through Server.ErrorLog; with none it writes to the standard
@@ -78,7 +80,7 @@ func (f *tlsTrustNoiseFilter) Write(p []byte) (int, error) {
 
 	host, reason, noise := classifyTrustFailure(msg)
 	if !noise {
-		log.Print(msg)
+		logging.For(logging.HTTP).Info(msg)
 		return len(p), nil
 	}
 
@@ -87,8 +89,7 @@ func (f *tlsTrustNoiseFilter) Write(p []byte) (int, error) {
 		if f.caFile != "" {
 			hint = "the client does not trust this certificate; import " + f.caFile + " on that device"
 		}
-		log.Printf("TLS: %s from %s (%s) — further such handshake errors from this host are suppressed",
-			strings.TrimPrefix(reason, "remote error: tls: "), host, hint)
+		logging.For(logging.HTTP).Infof("TLS: %s from %s (%s) — further such handshake errors from this host are suppressed", strings.TrimPrefix(reason, "remote error: tls: "), host, hint)
 	}
 	return len(p), nil
 }

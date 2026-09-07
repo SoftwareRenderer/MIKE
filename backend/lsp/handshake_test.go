@@ -12,19 +12,19 @@ import (
 
 	"kanban/backend/extensions"
 
-	sandbox "kanban/pkg/bridge"
+	"kanban/pkg/bridge"
 	"kanban/pkg/bridge/protocol"
 )
 
 // bridgePair hands back a bridge client wired to a stand-in bridge that reads every frame and
 // answers each request with an empty LSP result. Notifications are counted rather than
 // answered, which is the only distinction the code under test makes.
-func bridgePair(t *testing.T) (*sandbox.Client, *atomic.Int32, *atomic.Int32) {
+func bridgePair(t *testing.T) (*bridge.Client, *atomic.Int32, *atomic.Int32) {
 	t.Helper()
 	bridgeRead, hostWrite := io.Pipe() // the client writes, the stand-in bridge reads
 	hostRead, bridgeWrite := io.Pipe() // the stand-in bridge writes, the client reads
 
-	cl := sandbox.NewClient(hostWrite, hostRead)
+	cl := bridge.NewClient(hostWrite, hostRead)
 	var requests, notifications atomic.Int32
 
 	go func() {

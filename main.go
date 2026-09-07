@@ -20,6 +20,7 @@ import (
 	"kanban/backend/server"
 	"kanban/backend/tls"
 
+	"kanban/pkg/logging"
 	"net/http"
 	_ "net/http/pprof"
 )
@@ -30,8 +31,8 @@ func main() {
 	// (API keys, passwords, etc.) in memory snapshots.
 	if os.Getenv("MIKE_PPROF") == "1" {
 		go func() {
-			log.Println("pprof server starting on localhost:6060")
-			log.Println(http.ListenAndServe("localhost:6060", nil))
+			logging.For(logging.Main).Info("pprof server starting on localhost:6060")
+			logging.For(logging.Main).Errorf("pprof server stopped: %v", http.ListenAndServe("localhost:6060", nil))
 		}()
 	}
 
@@ -44,6 +45,7 @@ func main() {
 	tlsCert := flag.String("tls-cert", "", "Path to TLS certificate file (default: auto-generated self-signed)")
 	tlsKey := flag.String("tls-key", "", "Path to TLS private key file")
 	allowedHosts := flag.String("allowed-hosts", "", "Hostnames accepted in the Host header, comma-separated (default: $MIKE_ALLOWED_HOSTS; required behind a reverse proxy that forwards a public domain)")
+	logLevel := flag.String("log-level", "", "Log verbosity: debug, info, warn or error (default: $MIKE_LOG_LEVEL or info)")
 	flag.Parse()
 
 	// Resolve effective values: flag > env var > default. See startup_config.go.
@@ -77,13 +79,20 @@ func main() {
 	}
 
 	for _, name := range crypto.WarnWeakSecrets() {
-		log.Printf("⚠ WARNING: %s is less than 8 characters. A stronger secret is recommended for production use.", name)
+		logging.For(logging.Main).Infof("⚠ WARNING: %s is less than 8 characters. A stronger secret is recommended for production use.", name)
 	}
 
-	// Listen address: flag > env var > loopback. Loopback by default because the API
-	// is RCE-complete (terminal WebSocket, git operations, file writes) and must
-	// never land on a public interface by accident; an explicit 0.0.0.0 / :: is the
-	// deliberate escape hatch for containers and reverse proxies.
+	// The log level rides the same flag -> env -> default ladder, and a value that is not a level refuses
+	// the boot: a typo that silences the log is discovered only when there was something to see.
+	effectiveLogLevel := resolveString(*logLevel, "MIKE_LOG_LEVEL", "info")
+	if _, err := logging.ParseLevel(effectiveLogLevel); err != nil {
+		log.Fatalf("Configuration error: MIKE_LOG_LEVEL / --log-level: %v", err)
+	}
+	logging.SetLevel(effectiveLogLevel)
+
+	// Listen address: flag > env var > loopback. Loopback by default because the API is RCE-complete
+	// (terminal WebSocket, git operations, file writes) and must never land on a public interface by
+	// accident; an explicit 0.0.0.0 / :: is the deliberate escape hatch for containers and reverse proxies.
 	effectiveListen := resolveString(*listen, "MIKE_LISTEN", defaultListenAddr)
 	addr := listenAddr(effectiveListen, effectivePort)
 	if _, err := net.ResolveTCPAddr("tcp", addr); err != nil {
@@ -111,7 +120,7 @@ func main() {
 		traceFile.Close()
 		log.Fatalf("Failed to start flight recorder: %v", err)
 	}
-	log.Printf("Flight recorder started -> %s", tracePath)
+	logging.For(logging.Main).Infof("Flight recorder started -> %s", tracePath)
 
 	// Rotate trace file every 30s so only recent data is kept at crash time
 	rotationDone := make(chan struct{})
@@ -129,13 +138,13 @@ func main() {
 				// Start fresh trace
 				f, err := openTraceFile(tracePath)
 				if err != nil {
-					log.Printf("[trace] rotate: failed to create new trace: %v", err)
+					logging.For(logging.Trace).Warnf("rotate: failed to create new trace: %v", err)
 					continue
 				}
 				traceFile = f
 				if err := trace.Start(f); err != nil {
 					f.Close()
-					log.Printf("[trace] rotate: failed to restart trace: %v", err)
+					logging.For(logging.Trace).Warnf("rotate: failed to restart trace: %v", err)
 					continue
 				}
 			case <-rotationDone:
@@ -180,13 +189,13 @@ func main() {
 	exitCode := 0
 	select {
 	case <-sigCh:
-		log.Println("Shutting down...")
+		logging.For(logging.Main).Info("Shutting down...")
 	case err := <-serveErr:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("Server error: %v", err)
+			logging.For(logging.Main).Warnf("Server error: %v", err)
 			exitCode = 1
 		} else {
-			log.Println("Shutting down...")
+			logging.For(logging.Main).Info("Shutting down...")
 		}
 	}
 
@@ -196,7 +205,7 @@ func main() {
 	traceFile.Close()
 	// Bounded, so a blocked cleanup step cannot leave the process holding the data directory.
 	if err := server.RunShutdownWithDeadline(srv.Shutdown); err != nil {
-		log.Printf("Shutdown: %v", err)
+		logging.For(logging.Main).Infof("Shutdown: %v", err)
 		if errors.Is(err, server.ErrShutdownDeadline) && exitCode == 0 {
 			// A wedged subsystem is worth a non-zero exit: the process left work behind.
 			exitCode = 1

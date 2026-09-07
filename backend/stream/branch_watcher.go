@@ -1,13 +1,14 @@
 package stream
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
+
+	"kanban/pkg/logging"
 )
 
 // branchProject tracks state for a watched project.
@@ -70,7 +71,7 @@ func (bw *BranchWatcher) Watch(projectID, path string) error {
 		return err
 	}
 
-	log.Printf("[branch-watcher] project=%s watching %s (initial branch: %s)", projectID, path, branch)
+	logging.For(logging.Watcher).With(logging.ProjectID, projectID).Infof("watching %s (initial branch: %s)", path, branch)
 	return nil
 }
 
@@ -88,7 +89,7 @@ func (bw *BranchWatcher) Unwatch(projectID string) {
 	_ = bw.watcher.Remove(filepath.Join(info.path, ".git"))
 	delete(bw.projects, projectID)
 
-	log.Printf("[branch-watcher] project=%s stopped watching", projectID)
+	logging.For(logging.Watcher).With(logging.ProjectID, projectID).Infof("stopped watching")
 }
 
 // Close stops the watcher and releases resources.
@@ -97,7 +98,7 @@ func (bw *BranchWatcher) Close() {
 	defer bw.mu.Unlock()
 
 	_ = bw.watcher.Close()
-	log.Println("[branch-watcher] closed")
+	logging.For(logging.Watcher).Info("closed")
 }
 
 // StartEventLoop runs the fsnotify event loop. Call in a goroutine.
@@ -137,7 +138,7 @@ func (bw *BranchWatcher) handleEvent(event fsnotify.Event) {
 	bw.projects[projectID] = info
 	bw.mu.Unlock()
 
-	log.Printf("[branch-watcher] project=%s branch changed: %s", projectID, branch)
+	logging.For(logging.Watcher).With(logging.ProjectID, projectID).Infof("branch changed: %s", branch)
 	bw.broadcast(projectID, branch)
 }
 

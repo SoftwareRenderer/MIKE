@@ -100,29 +100,52 @@ func TestCommitQueue_MultipleSequential(t *testing.T) {
 	}
 }
 
-func TestGetWorktreeMu_SameTaskReturnsSameMutex(t *testing.T) {
+// worktreeLockFor reaches the task's mutex directly, for tests that must observe lock identity or that a
+// lock was released. Production has no such accessor on purpose (see LockWorktree).
+func worktreeLockFor(te *TaskExecutor, taskID string) *sync.Mutex {
+	mu, _ := te.worktreeMu.LoadOrStore(taskID, &sync.Mutex{})
+	return mu.(*sync.Mutex)
+}
+
+func TestWorktreeLockFor_SameTaskReturnsSameMutex(t *testing.T) {
 	te := &TaskExecutor{}
 
-	mu1 := te.GetWorktreeMu("task-1")
-	mu2 := te.GetWorktreeMu("task-1")
+	mu1 := worktreeLockFor(te, "task-1")
+	mu2 := worktreeLockFor(te, "task-1")
 
 	if mu1 != mu2 {
 		t.Fatal("expected same mutex for same task ID")
 	}
 }
 
-func TestGetWorktreeMu_DifferentTasksReturnDifferentMutexes(t *testing.T) {
+func TestWorktreeLockFor_DifferentTasksReturnDifferentMutexes(t *testing.T) {
 	te := &TaskExecutor{}
 
-	mu1 := te.GetWorktreeMu("task-1")
-	mu2 := te.GetWorktreeMu("task-2")
+	mu1 := worktreeLockFor(te, "task-1")
+	mu2 := worktreeLockFor(te, "task-2")
 
 	if mu1 == mu2 {
 		t.Fatal("expected different mutexes for different task IDs")
 	}
 }
 
-func TestGetWorktreeMu_ConcurrentAccess(t *testing.T) {
+// TestLockWorktreeSerializesSameTask is the same property reached the way production reaches it.
+func TestLockWorktreeSerializesSameTask(t *testing.T) {
+	te := &TaskExecutor{}
+
+	release := te.LockWorktree("task-1")
+	if worktreeLockFor(te, "task-1").TryLock() {
+		release()
+		t.Fatal("LockWorktree returned without holding the task's mutex")
+	}
+	release()
+	if !worktreeLockFor(te, "task-1").TryLock() {
+		t.Fatal("the release function did not release the mutex")
+	}
+	worktreeLockFor(te, "task-1").Unlock()
+}
+
+func TestWorktreeLockFor_ConcurrentAccess(t *testing.T) {
 	te := &TaskExecutor{}
 
 	var observed int
@@ -131,12 +154,12 @@ func TestGetWorktreeMu_ConcurrentAccess(t *testing.T) {
 
 	// G1: holds task-1 mutex
 	go func() {
-		te.GetWorktreeMu("task-1").Lock()
+		release := te.LockWorktree("task-1")
 		mu.Lock()
 		observed++
 		mu.Unlock()
 		<-done
-		te.GetWorktreeMu("task-1").Unlock()
+		release()
 	}()
 
 	time.Sleep(50 * time.Millisecond)
@@ -144,21 +167,21 @@ func TestGetWorktreeMu_ConcurrentAccess(t *testing.T) {
 	// G2: blocks on task-1 mutex
 	gotSecond := make(chan struct{})
 	go func() {
-		te.GetWorktreeMu("task-1").Lock()
+		release := te.LockWorktree("task-1")
 		mu.Lock()
 		observed++
 		mu.Unlock()
-		te.GetWorktreeMu("task-1").Unlock()
+		release()
 		close(gotSecond)
 	}()
 
 	// G3: different task, should not block
 	go func() {
-		te.GetWorktreeMu("task-2").Lock()
+		release := te.LockWorktree("task-2")
 		mu.Lock()
 		observed++
 		mu.Unlock()
-		te.GetWorktreeMu("task-2").Unlock()
+		release()
 	}()
 
 	// G3 should complete quickly

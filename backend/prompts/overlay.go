@@ -19,13 +19,14 @@ package prompts
 
 import (
 	"bytes"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"text/template"
+
+	"kanban/pkg/logging"
 )
 
 // overlayState is one immutable answer to "whose templates are active". It is
@@ -104,8 +105,7 @@ func report(kind, dir, name string, err error) {
 	if seen {
 		return
 	}
-	log.Printf("[prompts] translation pack %s: %s template %s: %v — core English answers for it",
-		dir, kind, name, err)
+	logging.For(logging.Prompts).Infof("translation pack %s: %s template %s: %v — core English answers for it", dir, kind, name, err)
 }
 
 // parseCore builds a template set from core's files. An empty file list is

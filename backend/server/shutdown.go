@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"time"
+
+	"kanban/pkg/logging"
 )
 
 // ErrShutdownDeadline is returned when the shutdown sequence did not finish inside its budget.
@@ -38,7 +39,7 @@ func runShutdownWithDeadline(timeout time.Duration, fn func(ctx context.Context)
 	case <-ctx.Done():
 		// Logged, not swallowed: this is the evidence of which subsystem wedged (the last
 		// "shutdown:" line above it) and the process is exiting with it still running.
-		log.Printf("shutdown: no step completed past %s — exiting anyway; the line above names what was still running", timeout)
+		logging.For(logging.HTTP).Infof("shutdown: no step completed past %s — exiting anyway; the line above names what was still running", timeout)
 		return fmt.Errorf("%w after %s", ErrShutdownDeadline, timeout)
 	}
 }

@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +19,7 @@ import (
 	"kanban/backend/store"
 	"kanban/backend/stream"
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 )
 
 // gitStore is what the git endpoints read before shelling out to git.
@@ -39,12 +40,16 @@ type GitHandler struct {
 	diffs       stream.DiffStore
 	worktreeMgr *git.WorktreeManager
 	diffCache   sync.Map // taskID -> *git.TaskDiff (full result including untracked file content)
-	// getWorktreeMutex returns a per-task mutex for serializing git operations.
+	// getWorktreeMutex locks the per-task worktree and returns the function that releases it.
 	// Set by the server to prevent concurrent worktree mutations.
-	getWorktreeMutex func(taskID string) *sync.Mutex
-	// getProjectMutex returns a per-project mutex for serializing project-level
-	// git operations (checkout, pull, push) that touch shared state.
-	getProjectMutex func(projectID string) *sync.Mutex
+	//
+	// It hands back a release function rather than a *sync.Mutex for the reason given on
+	// git.WorktreeManager.LockProjectStash: a mutex that crosses a package boundary can be stored and
+	// copied, and two holders of copies serialize nothing.
+	getWorktreeMutex func(taskID string) func()
+	// getProjectMutex locks the per-project git operations (checkout, pull, push) that touch shared
+	// state, and returns the function that releases it.
+	getProjectMutex func(projectID string) func()
 }
 
 // NewGitHandler creates a new GitHandler.
@@ -54,13 +59,13 @@ func NewGitHandler(store *store.Store, worktreeMgr *git.WorktreeManager) *GitHan
 
 // SetWorktreeMutex sets the callback for acquiring per-task worktree mutexes.
 // Called by the server to wire up the shared mutex map.
-func (h *GitHandler) SetWorktreeMutex(fn func(taskID string) *sync.Mutex) {
+func (h *GitHandler) SetWorktreeMutex(fn func(taskID string) func()) {
 	h.getWorktreeMutex = fn
 }
 
 // SetProjectMutex sets the callback for acquiring per-project mutexes.
 // Called by the server to wire up the shared project mutex map.
-func (h *GitHandler) SetProjectMutex(fn func(projectID string) *sync.Mutex) {
+func (h *GitHandler) SetProjectMutex(fn func(projectID string) func()) {
 	h.getProjectMutex = fn
 }
 
@@ -113,7 +118,7 @@ func (h *GitHandler) writeFullGitLog(w http.ResponseWriter, dir, branch, path st
 	if path != "" {
 		args = append(args, "--", path)
 	}
-	out, err := exec.Command("git", args...).CombinedOutput()
+	out, err := git.Command("", args...).CombinedOutput()
 	if err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
 		return
@@ -233,7 +238,7 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 	if path != "" {
 		args = append(args, "--", path)
 	}
-	c := exec.Command("git", args...)
+	c := git.Command("", args...)
 	out, err := c.CombinedOutput()
 	if err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
@@ -254,7 +259,7 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 
 // getCurrentBranch returns the name of the currently checked-out branch.
 func (h *GitHandler) getCurrentBranch(path string) string {
-	c := exec.Command("git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD")
+	c := git.Command("", "-C", path, "rev-parse", "--abbrev-ref", "HEAD")
 	out, err := c.CombinedOutput()
 	if err != nil {
 		return ""
@@ -264,7 +269,7 @@ func (h *GitHandler) getCurrentBranch(path string) string {
 
 // getBranchMap returns a map of commit hash -> branch names for all local branches.
 func (h *GitHandler) getBranchMap(path string) map[string][]string {
-	c := exec.Command("git", "-C", path, "for-each-ref", "--format=%(objectname)|%(refname:short)", "refs/heads/")
+	c := git.Command("", "-C", path, "for-each-ref", "--format=%(objectname)|%(refname:short)", "refs/heads/")
 	out, err := c.CombinedOutput()
 	if err != nil {
 		return nil
@@ -284,7 +289,7 @@ func (h *GitHandler) getBranchMap(path string) map[string][]string {
 
 // getOriginTip returns the commit hash where origin/<branch> points, or empty string if no remote.
 func (h *GitHandler) getOriginTip(path, branch string) string {
-	c := exec.Command("git", "-C", path, "rev-parse", "origin/"+branch)
+	c := git.Command("", "-C", path, "rev-parse", "origin/"+branch)
 	out, err := c.CombinedOutput()
 	if err != nil {
 		return ""
@@ -297,7 +302,7 @@ func (h *GitHandler) getOriginTip(path, branch string) string {
 // branch endpoints share this; they differ only in the subcommand — a project
 // lists remote refs too (-a), a task worktree only its local branches.
 func gitBranchNames(dir string, args ...string) ([]string, error) {
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	out, err := git.Command("", append([]string{"-C", dir}, args...)...).CombinedOutput()
 	if err != nil {
 		return nil, err
 	}
@@ -360,21 +365,21 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 	var c *exec.Cmd
 	if cached {
 		// Staged changes only
-		c = exec.Command("git", "-C", project.Path, "diff", "--cached")
+		c = git.Command("", "-C", project.Path, "diff", "--cached")
 	} else if base != "" && head != "" {
 		// Commit-to-commit comparison
 		// Special case: empty tree hash is a virtual constant, not a real git object.
 		// git diff EMPTY_TREE..HEAD fails with "Invalid revision range".
 		// Use git diff-tree --root instead to show the root commit's changes.
 		if base == git.EmptyTreeHash {
-			c = exec.Command("git", "-C", project.Path, "diff-tree", "--root", "--format=", "-p", head)
+			c = git.Command("", "-C", project.Path, "diff-tree", "--root", "--format=", "-p", head)
 		} else {
-			c = exec.Command("git", "-C", project.Path, "diff", base+".."+head)
+			c = git.Command("", "-C", project.Path, "diff", base+".."+head)
 		}
 	} else {
 		// Unstaged changes: working tree vs index (git diff with no args)
 		// This excludes staged changes, which are shown separately via cached=1
-		c = exec.Command("git", "-C", project.Path, "diff")
+		c = git.Command("", "-C", project.Path, "diff")
 	}
 
 	out, err := c.CombinedOutput()
@@ -386,6 +391,22 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git diff failed: %v", err))
 			return
 		}
+	}
+	// ?parsed=1 returns the parser's output instead of the patch text.
+	//
+	// This is where the product's second diff grammar used to live: the browser fetched this text and
+	// ran its own parseUnifiedDiff over it, so the same patch was parsed twice and the two grammars
+	// drifted (see backend/git/diff_parse_parity_test.go). Go already has to parse a diff for its own
+	// work — per-file hashes for the diff cache, change detection, truncation — so it is the single
+	// grammar and the wire carries its structure. The raw form stays the default because
+	// `?cached=1`/base/head consumers and any external caller still read text.
+	if r.URL.Query().Get("parsed") == "1" {
+		files := git.ParseUnifiedDiff(string(out))
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(files); err != nil {
+			logging.For(logging.Git).Infof("encoding parsed diff for project %s: %v", projectID, err)
+		}
+		return
 	}
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write(out)
@@ -399,7 +420,7 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		httputil.Fail(w, err, "get project", "project not found")
 		return
 	}
-	c := exec.Command("git", "-C", project.Path, "status", "--porcelain")
+	c := git.Command("", "-C", project.Path, "status", "--porcelain")
 	out, err := c.CombinedOutput()
 	if err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git status failed: %v", err))
@@ -408,15 +429,15 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	clean := len(strings.TrimSpace(string(out))) == 0
 	// Fetch HEAD hash for staleness detection
 	var headHash string
-	if headOut, err := exec.Command("git", "-C", project.Path, "rev-parse", "HEAD").CombinedOutput(); err == nil {
+	if headOut, err := git.Command("", "-C", project.Path, "rev-parse", "HEAD").CombinedOutput(); err == nil {
 		headHash = strings.TrimSpace(string(headOut))
 	}
 	// Fetch git author identity for commit dialog
 	var authorName, authorEmail string
-	if nameOut, err := exec.Command("git", "-C", project.Path, "config", "user.name").CombinedOutput(); err == nil {
+	if nameOut, err := git.Command("", "-C", project.Path, "config", "user.name").CombinedOutput(); err == nil {
 		authorName = strings.TrimSpace(string(nameOut))
 	}
-	if emailOut, err := exec.Command("git", "-C", project.Path, "config", "user.email").CombinedOutput(); err == nil {
+	if emailOut, err := git.Command("", "-C", project.Path, "config", "user.email").CombinedOutput(); err == nil {
 		authorEmail = strings.TrimSpace(string(emailOut))
 	}
 	httputil.JSONResponse(w, http.StatusOK, map[string]any{
@@ -462,9 +483,9 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 	// Get the diff for this file
 	var c *exec.Cmd
 	if staged {
-		c = exec.Command("git", "-C", project.Path, "diff", "--cached", "--", filePath)
+		c = git.Command("", "-C", project.Path, "diff", "--cached", "--", filePath)
 	} else {
-		c = exec.Command("git", "-C", project.Path, "diff", "--", filePath)
+		c = git.Command("", "-C", project.Path, "diff", "--", filePath)
 	}
 	out, err := c.CombinedOutput()
 	if err != nil {
@@ -483,7 +504,7 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 	var isBinary bool
 	if staged {
 		// Read from index (staged version)
-		c = exec.Command("git", "-C", project.Path, "show", ":"+filePath)
+		c = git.Command("", "-C", project.Path, "show", ":"+filePath)
 		contentOut, contentErr := c.CombinedOutput()
 		if contentErr == nil {
 			fileContent = string(contentOut)
@@ -591,9 +612,7 @@ func (h *GitHandler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 	// Acquire per-project mutex to serialize project-level git operations.
 	if h.getProjectMutex != nil {
-		mu := h.getProjectMutex(projectID)
-		mu.Lock()
-		defer mu.Unlock()
+		defer h.getProjectMutex(projectID)()
 	}
 	if !runCheckout(w, project.Path, branch) {
 		return
@@ -623,9 +642,9 @@ func checkoutBranchFrom(w http.ResponseWriter, r *http.Request) (string, bool) {
 // answer the user needs, while git's full output is pages of paths on the server's
 // filesystem. The unsanitised output always goes to the log.
 func runCheckout(w http.ResponseWriter, dir, branch string) bool {
-	out, err := exec.Command("git", "-C", dir, "checkout", branch).CombinedOutput()
+	out, err := git.Command("", "-C", dir, "checkout", branch).CombinedOutput()
 	if err != nil {
-		log.Printf("git checkout failed in %s: %v: %s", dir, err, out)
+		logging.For(logging.Managers).Errorf("git checkout failed in %s: %v: %s", dir, err, out)
 		httputil.JSONError(w, http.StatusInternalServerError, "git checkout failed: "+gitErrorSummary(out))
 		return false
 	}
@@ -657,15 +676,20 @@ func (h *GitHandler) handleGitRemote(w http.ResponseWriter, r *http.Request, op 
 	}
 	// Acquire per-project mutex to serialize project-level git operations.
 	if h.getProjectMutex != nil {
-		mu := h.getProjectMutex(projectID)
-		mu.Lock()
-		defer mu.Unlock()
+		defer h.getProjectMutex(projectID)()
 	}
-	c := exec.Command("git", "-C", project.Path, op)
-	// Never block on an interactive credential prompt.
-	c.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	// Bounded to the request: a push or a pull is the other thing this server does over a network,
+	// and an unreachable remote used to hold a per-project mutex — and a server-side git process — for
+	// the full ssh/TCP timeout, with every other git operation on that project queued behind it.
+	c := git.CommandContext(r.Context(), "", "-C", project.Path, op)
+	// No c.Env here on purpose: assigning a bare extra list would replace the environment git.Command sets,
+	// and this used to be append(os.Environ(), "GIT_TERMINAL_PROMPT=0"). Both prompt refusal and the hook
+	// fence now come from git.Env.
+	//
+	// The fence means a pre-push hook will not run when the user clicks Push. That is the accepted
+	// consequence of never executing repository content.
 	if out, err := c.CombinedOutput(); err != nil {
-		log.Printf("git %s failed: %v: %s", op, err, out)
+		logging.For(logging.Managers).Errorf("git %s failed: %v: %s", op, err, out)
 		httputil.JSONError(w, http.StatusInternalServerError, "git "+op+" failed: "+gitErrorSummary(out))
 		return
 	}
@@ -755,7 +779,7 @@ func (h *GitHandler) getTaskCommitsFromProject(projectID string, task *types.Tas
 	result, err := git.TaskCommitsIn(project.Path, baseRef, target)
 	if err != nil {
 		// Branch may not exist (orphaned worktree): answer with no commits.
-		log.Printf("[git] task=%s branch %s not found in project, returning empty commits: %v", task.ID, target, err)
+		logging.For(logging.Git).With(logging.TaskID, task.ID).Infof("branch %s not found in project, returning empty commits: %v", target, err)
 		return &git.TaskCommitsResult{Commits: []git.TaskCommit{}}, nil
 	}
 	return result, nil
@@ -886,7 +910,27 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 
 	// Strip Lines from untracked files for the response
 	taskDiff = stripUntrackedLines(taskDiff)
+	// ?parsed=1 attaches the per-file structure to the ref-comparison response. Without it a
+	// headRef diff ships as patch TEXT and the browser re-parses it with a second grammar; Go has
+	// already parsed this diff to compute hashes and truncation, so the work is done. The manifest
+	// branch above already returns per-file data and needs nothing.
+	if r.URL.Query().Get("parsed") == "1" {
+		taskDiff.ParsedFiles = sortedTrackedFiles(taskDiff.Tracked)
+	}
 	httputil.JSONResponse(w, http.StatusOK, taskDiff)
+}
+
+// sortedTrackedFiles flattens the parsed map into path order, so a response never inherits Go's map
+// iteration order.
+func sortedTrackedFiles(tracked map[string]*git.TrackedDiffFile) []git.TrackedDiffFile {
+	out := make([]git.TrackedDiffFile, 0, len(tracked))
+	for _, f := range tracked {
+		if f != nil {
+			out = append(out, *f)
+		}
+	}
+	slices.SortFunc(out, func(a, b git.TrackedDiffFile) int { return strings.Compare(a.Path, b.Path) })
+	return out
 }
 
 // stripUntrackedLines creates a copy of TaskDiff with Lines removed from untracked entries.
@@ -942,7 +986,7 @@ func getStagedPaths(wm *git.WorktreeManager, taskID, baseRef string) map[string]
 	if err != nil {
 		return nil
 	}
-	cmd := exec.Command("git", "-C", worktreePath, "diff", "--staged", "--name-only", "HEAD")
+	cmd := git.Command("", "-C", worktreePath, "diff", "--staged", "--name-only", "HEAD")
 	out, err := cmd.CombinedOutput()
 	// git diff exits 0 = no changes, 1 = changes found (output is valid).
 	// Only treat non-1 exit codes as real errors.
@@ -1141,13 +1185,13 @@ func (h *GitHandler) getTaskDiffFromProject(projectID, taskID string, task *type
 		refSpec = fmt.Sprintf("%s..%s", baseRef, target)
 	}
 
-	c := exec.Command("git", "-C", project.Path, "diff", refSpec)
+	c := git.Command("", "-C", project.Path, "diff", refSpec)
 	out, err := c.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("git diff from project: %s: %w", string(out), err)
 	}
 
-	shortStatOut, _ := exec.Command("git", "-C", project.Path, "diff", "--shortstat", refSpec).CombinedOutput()
+	shortStatOut, _ := git.Command("", "-C", project.Path, "diff", "--shortstat", refSpec).CombinedOutput()
 
 	return &git.TaskDiff{
 		Diff:      string(out),
@@ -1191,9 +1235,7 @@ func (h *GitHandler) HandleResetWorktree(w http.ResponseWriter, r *http.Request)
 	}
 	// Acquire per-task mutex to serialize git operations on this worktree.
 	if h.getWorktreeMutex != nil {
-		mu := h.getWorktreeMutex(taskID)
-		mu.Lock()
-		defer mu.Unlock()
+		defer h.getWorktreeMutex(taskID)()
 	}
 	// Reset worktree to the checkpoint (commit hash or stash hash)
 	if err := h.worktreeMgr.ResetWorktreeTo(taskID, req.CommitHash); err != nil {
@@ -1211,9 +1253,9 @@ func (h *GitHandler) HandleResetWorktree(w http.ResponseWriter, r *http.Request)
 func (h *GitHandler) stageOrUnstage(w http.ResponseWriter, dir, path string, stage bool) bool {
 	if stage {
 		// git add records a deletion too, so a staged delete survives the round trip.
-		out, err := exec.Command("git", "-C", dir, "add", "--", path).CombinedOutput()
+		out, err := git.Command("", "-C", dir, "add", "--", path).CombinedOutput()
 		if err != nil {
-			log.Printf("git add failed: %v: %s", err, out)
+			logging.For(logging.Managers).Errorf("git add failed: %v: %s", err, out)
 			httputil.JSONError(w, http.StatusInternalServerError, "git add failed")
 			return false
 		}
@@ -1221,9 +1263,9 @@ func (h *GitHandler) stageOrUnstage(w http.ResponseWriter, dir, path string, sta
 	}
 
 	// git reset HEAD -- <path> makes the index match HEAD again.
-	out, err := exec.Command("git", "-C", dir, "reset", "HEAD", "--", path).CombinedOutput()
+	out, err := git.Command("", "-C", dir, "reset", "HEAD", "--", path).CombinedOutput()
 	if err != nil {
-		log.Printf("git reset failed: %v: %s", err, out)
+		logging.For(logging.Managers).Errorf("git reset failed: %v: %s", err, out)
 		httputil.JSONError(w, http.StatusInternalServerError, "git reset failed")
 		return false
 	}
@@ -1231,7 +1273,7 @@ func (h *GitHandler) stageOrUnstage(w http.ResponseWriter, dir, path string, sta
 	// that was staged and then deleted exists in no commit, so git fails here —
 	// that is the expected outcome and the error is deliberately ignored.
 	if _, statErr := os.Stat(filepath.Join(dir, path)); os.IsNotExist(statErr) {
-		_, _ = exec.Command("git", "-C", dir, "checkout", "HEAD", "--", path).CombinedOutput()
+		_, _ = git.Command("", "-C", dir, "checkout", "HEAD", "--", path).CombinedOutput()
 	}
 	return true
 }
@@ -1274,9 +1316,7 @@ func (h *GitHandler) HandleStageFile(w http.ResponseWriter, r *http.Request) {
 	}
 	// Acquire per-task mutex to serialize git operations on this worktree.
 	if h.getWorktreeMutex != nil {
-		mu := h.getWorktreeMutex(taskID)
-		mu.Lock()
-		defer mu.Unlock()
+		defer h.getWorktreeMutex(taskID)()
 	}
 	worktreePath, ok := resolveWorktree(w, r, h.worktreeMgr)
 	if !ok {
@@ -1308,9 +1348,7 @@ func (h *GitHandler) HandleProjectStageFile(w http.ResponseWriter, r *http.Reque
 	}
 	// Acquire per-project mutex to serialize index-modifying operations.
 	if h.getProjectMutex != nil {
-		mu := h.getProjectMutex(projectID)
-		mu.Lock()
-		defer mu.Unlock()
+		defer h.getProjectMutex(projectID)()
 	}
 	if !h.stageOrUnstage(w, project.Path, req.Path, req.Stage) {
 		return
@@ -1337,20 +1375,18 @@ func (h *GitHandler) HandleProjectCommit(w http.ResponseWriter, r *http.Request)
 	}
 	// Acquire per-project mutex to serialize project-level git operations.
 	if h.getProjectMutex != nil {
-		mu := h.getProjectMutex(projectID)
-		mu.Lock()
-		defer mu.Unlock()
+		defer h.getProjectMutex(projectID)()
 	}
 	// Check if there are staged changes
-	cmd := exec.Command("git", "-C", project.Path, "diff", "--cached", "--quiet")
+	cmd := git.Command("", "-C", project.Path, "diff", "--cached", "--quiet")
 	if err := cmd.Run(); err == nil {
 		// Exit code 0 means no staged changes
 		httputil.JSONError(w, http.StatusBadRequest, "no staged changes to commit")
 		return
 	}
-	cmd = exec.Command("git", "-C", project.Path, "commit", "-m", req.Message)
+	cmd = git.Command("", "-C", project.Path, "commit", "-m", req.Message)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		log.Printf("git commit failed: %v: %s", err, out)
+		logging.For(logging.Managers).Errorf("git commit failed: %v: %s", err, out)
 		httputil.JSONError(w, http.StatusInternalServerError, "git commit failed")
 		return
 	}
@@ -1399,7 +1435,7 @@ func (h *GitHandler) HandleTaskLog(w http.ResponseWriter, r *http.Request) {
 		args = append(args, "-n", strconv.Itoa(limit))
 	}
 	args = append(args, "--format=%H|%h|%s", branch)
-	c := exec.Command("git", args...)
+	c := git.Command("", args...)
 	out, err := c.CombinedOutput()
 	if err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
@@ -1461,9 +1497,7 @@ func (h *GitHandler) HandleTaskCheckout(w http.ResponseWriter, r *http.Request) 
 	// A checkout rewrites the whole worktree, so it takes the same per-task mutex as
 	// every other worktree mutation (reset, stage).
 	if h.getWorktreeMutex != nil {
-		mu := h.getWorktreeMutex(taskID)
-		mu.Lock()
-		defer mu.Unlock()
+		defer h.getWorktreeMutex(taskID)()
 	}
 	if !runCheckout(w, worktreePath, branch) {
 		return

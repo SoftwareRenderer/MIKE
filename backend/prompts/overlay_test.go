@@ -8,13 +8,14 @@ package prompts
 
 import (
 	"bytes"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"text/template"
+
+	"kanban/pkg/logging"
 )
 
 // resetOverlay returns the package to the no-pack state after a test, so overlay
@@ -46,14 +47,8 @@ func writePack(t *testing.T, files map[string]string) string {
 // and the only way to test the first half of that sentence is to read it.
 func captureLog(t *testing.T, fn func()) string {
 	t.Helper()
-	var buf bytes.Buffer
-	prevOut, prevFlags := log.Writer(), log.Flags()
-	log.SetOutput(&buf)
-	log.SetFlags(0)
-	defer func() {
-		log.SetOutput(prevOut)
-		log.SetFlags(prevFlags)
-	}()
+	buf, restore := logging.TestSink()
+	defer restore()
 	fn()
 	return buf.String()
 }
@@ -286,9 +281,9 @@ func TestPackBaseTemplateResolvesCoreSubTemplates(t *testing.T) {
 	}
 }
 
-// TestPackTemplateThatCannotParsesFallsBackToCoreAndLogsOnce is the failure policy
-// for a broken translation: core's English answers for *that template*, the pack's
-// other templates still win, and the report is printed once rather than per turn.
+// TestPackTemplateThatCannotParseFallsBackToCoreAndLogsOnce is the failure policy for a broken
+// translation: core's English answers for that template, the pack's other templates still win, and the
+// report is printed once rather than per turn.
 func TestPackTemplateThatCannotParseFallsBackToCoreAndLogsOnce(t *testing.T) {
 	withRealTemplates(t)
 	resetOverlay(t)

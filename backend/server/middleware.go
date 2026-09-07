@@ -6,7 +6,6 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"strings"
 
 	"kanban/backend/httputil"
+	"kanban/pkg/logging"
 )
 
 // Re-export JSON helpers from httputil.
@@ -194,7 +194,7 @@ func (s *Server) HostPinMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		log.Printf("[host] rejected request for Host %q (allow it with --allowed-hosts or %s)", r.Host, allowedHostsEnv)
+		logging.For(logging.Host).Infof("rejected request for Host %q (allow it with --allowed-hosts or %s)", r.Host, allowedHostsEnv)
 		JSONError(w, http.StatusMisdirectedRequest, "invalid Host header")
 	})
 }
@@ -281,7 +281,7 @@ func PanicRecoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("[PANIC] %s %s: %v\n%s", r.Method, r.URL.Path, err, debug.Stack())
+				logging.For(logging.Recovery).Infof("%s %s: %v\n%s", r.Method, r.URL.Path, err, debug.Stack())
 				JSONError(w, http.StatusInternalServerError, "internal server error")
 			}
 		}()

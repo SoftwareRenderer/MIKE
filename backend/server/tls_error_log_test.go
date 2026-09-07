@@ -2,24 +2,20 @@ package server
 
 import (
 	"fmt"
-	"log"
+	"strconv"
 	"strings"
 	"testing"
+
+	"kanban/pkg/logging"
 )
 
-// captureLog redirects the standard logger for the duration of the test and
-// returns a reader of everything written to it.
-func captureLog(t *testing.T) *strings.Builder {
+// captureLog redirects the logging package for the duration of the test and returns a buffer of
+// everything written to it. It replaced log.SetOutput, which no longer sees these lines.
+func captureLog(t *testing.T) *logging.SafeBuffer {
 	t.Helper()
-	var buf strings.Builder
-	w, flags := log.Writer(), log.Flags()
-	log.SetFlags(0)
-	log.SetOutput(&buf)
-	t.Cleanup(func() {
-		log.SetOutput(w)
-		log.SetFlags(flags)
-	})
-	return &buf
+	buf, restore := logging.TestSink()
+	t.Cleanup(restore)
+	return buf
 }
 
 func TestClassifyTrustFailure(t *testing.T) {
@@ -138,8 +134,11 @@ func TestTLSTrustNoiseFilterReportsOncePerHost(t *testing.T) {
 	}
 }
 
-// Everything that is not client-side certificate noise must reach the standard
-// logger byte-for-byte, including multi-line messages (panic traces).
+// Everything that is not client-side certificate noise must reach the log, and its message must
+// survive UNMODIFIED - not dropped, not truncated, not rewritten. The line as a whole is no longer
+// the input (the handler adds time/level/component), so the comparison is against the msg attribute
+// exactly, which is where "byte-for-byte" still means something. Multi-line panic traces matter
+// here: the handler quotes them, so an unquoted Contains would pass on mangled text.
 func TestTLSTrustNoiseFilterPassesThrough(t *testing.T) {
 	buf := captureLog(t)
 	f := &tlsTrustNoiseFilter{caFile: "/data/tls/mike-ca.crt", seen: map[string]bool{}}
@@ -154,8 +153,13 @@ func TestTLSTrustNoiseFilterPassesThrough(t *testing.T) {
 		if _, err := f.Write([]byte(msg + "\n")); err != nil {
 			t.Fatalf("Write: %v", err)
 		}
-		if got := buf.String(); got != msg+"\n" {
-			t.Errorf("after %q\ngot:\n%s\nwant:\n%s", msg, got, msg+"\n")
+		got := buf.String()
+		if want := "msg=" + strconv.Quote(msg); !strings.Contains(got, want) {
+			t.Errorf("after %q\ngot:\n%s\nwant a line carrying %s", msg, got, want)
+		}
+		// It must be the http component, not the old [tag]-free standard log.
+		if !strings.Contains(got, "component=http") {
+			t.Errorf("after %q: no component on the line, so it bypassed the logger: %s", msg, got)
 		}
 		buf.Reset()
 	}

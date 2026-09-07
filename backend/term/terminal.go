@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -27,6 +26,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/creack/pty"
+	"kanban/pkg/logging"
 )
 
 const (
@@ -99,14 +99,14 @@ func clampDim(v int) uint16 {
 func (t *taskTerminal) applySize(rows, cols uint16) {
 	curRows, curCols, err := pty.Getsize(t.ptmx)
 	if err != nil {
-		log.Printf("terminal getsz error: %v", err)
+		logging.For(logging.Terminal).Warnf("terminal getsz error: %v", err)
 		return
 	}
 	if uint16(curRows) == rows && uint16(curCols) == cols {
 		return
 	}
 	if err := pty.Setsize(t.ptmx, &pty.Winsize{Rows: rows, Cols: cols}); err != nil {
-		log.Printf("terminal resize error: %v", err)
+		logging.For(logging.Terminal).Warnf("terminal resize error: %v", err)
 	}
 }
 
@@ -329,7 +329,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		}
 		shell, assignedPorts, err := tm.sandboxMgr.StartShell(taskID, worktreePath, shellProject, tm.shellSandboxOpts(imageToUse, proj, agentSandbox))
 		if err != nil {
-			log.Printf("[terminal] %s sandbox shell start failed: %v", sessionKey, err)
+			logging.For(logging.Terminal).Warnf("%s sandbox shell start failed: %v", sessionKey, err)
 			return nil, fmt.Errorf("sandbox not available: %w", err)
 		}
 		// Notify caller of assigned ports
@@ -350,7 +350,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 			connSizes:  make(map[*websocket.Conn]connSize),
 			lastActive: time.Now(),
 		}
-		log.Printf("[terminal] %s started sandbox shell with image %s", sessionKey, imageToUse)
+		logging.For(logging.Terminal).Infof("%s started sandbox shell with image %s", sessionKey, imageToUse)
 	}
 
 	if sess == nil {
@@ -382,7 +382,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		tm.mu.Lock()
 		delete(tm.sessions, sessionKey)
 		tm.mu.Unlock()
-		log.Printf("[terminal] removed session %s after shell exit", sessionKey)
+		logging.For(logging.Terminal).Infof("removed session %s after shell exit", sessionKey)
 		// For project-level sandbox terminals, stop the container when the shell exits.
 		// Task-level containers are managed by the task executor lifecycle.
 		if strings.HasPrefix(sessionKey, "proj:") && sandboxEnabled && tm.sandboxMgr != nil {
@@ -403,7 +403,7 @@ func (tm *TerminalManager) RemoveSession(taskID string) {
 	tm.mu.Unlock()
 	if ok {
 		session.close()
-		log.Printf("terminal: removed session for task %s", taskID)
+		logging.For(logging.Terminal).Infof("terminal: removed session for task %s", taskID)
 	}
 }
 
@@ -433,7 +433,7 @@ func (tm *TerminalManager) Close() {
 		session.close()
 	}
 	if len(sessions) > 0 {
-		log.Printf("terminal: closed %d session(s) on shutdown", len(sessions))
+		logging.For(logging.Terminal).Infof("terminal: closed %d session(s) on shutdown", len(sessions))
 	}
 }
 
@@ -471,7 +471,7 @@ func (t *taskTerminal) readLoop() {
 				_ = c.Write(ctx, websocket.MessageText, closedMsg)
 				c.Close(websocket.StatusNormalClosure, "shell exited")
 			}
-			log.Printf("[terminal] shell exited, notified %d client(s)", len(conns))
+			logging.For(logging.Terminal).Infof("shell exited, notified %d client(s)", len(conns))
 			if t.onExit != nil {
 				t.onExit()
 			}
@@ -611,7 +611,7 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 
 	session, err := tm.getOrCreate(sessionKey, taskID, worktreePath, projectID)
 	if err != nil {
-		log.Printf("terminal pty error for %s: %v", sessionKey, err)
+		logging.For(logging.Terminal).Warnf("terminal pty error for %s: %v", sessionKey, err)
 		errMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Failed to start terminal: " + err.Error() + "\n"})
 		_ = conn.Write(ctx, websocket.MessageText, errMsg)
 		closeMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})

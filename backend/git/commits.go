@@ -2,7 +2,6 @@ package git
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
@@ -86,7 +85,7 @@ func TaskCommitsIn(dir, baseRef, headRef string) (*TaskCommitsResult, error) {
 
 // runGitInDir runs git in dir and returns what it printed.
 func runGitInDir(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := Command("", append([]string{"-C", dir}, args...)...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

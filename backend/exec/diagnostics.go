@@ -9,12 +9,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
 	"kanban/backend/git"
 	"kanban/backend/lsp"
+	"kanban/pkg/logging"
 )
 
 // maxDiagnosticFilesPerPass bounds one pass: every file costs a language-server round trip,
@@ -73,7 +73,7 @@ func (te *TaskExecutor) turnDiagnosticFiles(setup *taskExecSetup, lc *loopContex
 		if err != nil {
 			// The command line is not a reliable substitute for asking the worktree, but
 			// the paths the tools named directly still are.
-			log.Printf("[lsp-diag] task=%s git status failed, using tool paths: %v", setup.task.ID, err)
+			logging.For(logging.LSP).With(logging.TaskID, setup.task.ID).Warnf("git status failed, using tool paths: %v", err)
 		} else {
 			candidates = append(changed, candidates...)
 		}
@@ -268,8 +268,7 @@ func (p *diagnosticsPass) run(registry *lsp.ExtensionRegistry, files []string) (
 		if err != nil {
 			// Nothing this language's files can be asked about. Other languages still get
 			// their own server, their own handshake and their own chance.
-			log.Printf("[lsp-diag] task=%s WARNING: no usable %s language server for %d file(s): %v",
-				p.taskID, group.language, len(group.files), err)
+			logging.For(logging.LSP).With(logging.TaskID, p.taskID).Infof("WARNING: no usable %s language server for %d file(s): %v", group.language, len(group.files), err)
 			report.failed += len(group.files)
 			continue
 		}
@@ -339,7 +338,7 @@ func (p *diagnosticsPass) diagnoseFile(srv *turnLanguageServer, relPath string) 
 		if p.stopped() {
 			return "", fileStopped
 		}
-		log.Printf("[lsp-diag] task=%s %s: document sync failed: %v", p.taskID, relPath, err)
+		logging.For(logging.LSP).With(logging.TaskID, p.taskID).Warnf("%s: document sync failed: %v", relPath, err)
 		return "", fileFailed
 	}
 	if !synced {
@@ -462,7 +461,7 @@ func (te *TaskExecutor) collectTurnDiagnostics(setup *taskExecSetup, lc *loopCon
 	}
 	worktreePath, err := te.worktreeMgr.WorktreePath(setup.task.ID)
 	if err != nil {
-		log.Printf("[lsp-diag] task=%s worktree path error: %v", setup.task.ID, err)
+		logging.For(logging.LSP).With(logging.TaskID, setup.task.ID).Warnf("worktree path error: %v", err)
 		return
 	}
 	// A dependency manifest that changed mid-turn is not visible to a language
@@ -471,7 +470,7 @@ func (te *TaskExecutor) collectTurnDiagnostics(setup *taskExecSetup, lc *loopCon
 	// changed list to the manager — it knows which files mean "re-read the project"
 	// for each installed extension, and restarts only the affected session.
 	if recycled := te.lspMgr.FilesChanged(worktreePath, files); recycled {
-		log.Printf("[lsp-diag] task=%s reloaded the language server after a manifest change", setup.task.ID)
+		logging.For(logging.LSP).With(logging.TaskID, setup.task.ID).Infof("reloaded the language server after a manifest change")
 	}
 	// One budget for the pass, so eight slow files cannot add up to a stalled turn.
 	passCtx, cancel := context.WithTimeout(setup.ctx, lspDiagnosticsPassBudget)
@@ -490,11 +489,9 @@ func (te *TaskExecutor) collectTurnDiagnostics(setup *taskExecSetup, lc *loopCon
 	// exactly like a pass that never ran, and "the model got no hint" is otherwise
 	// indistinguishable from "there was nothing to say" — which is the difference between a
 	// clean file and a language server nobody is listening to.
-	log.Printf("[lsp-diag] task=%s pass: asked=%d servers=%d reported=%d clean=%d unchanged=%d failed=%d silent=%d unloaded=%d unasked=%d",
-		setup.task.ID, report.asked, report.servers, report.reported, report.clean, report.unchanged,
-		report.failed, len(report.silent), report.unloaded, report.unasked)
+	logging.For(logging.LSP).With(logging.TaskID, setup.task.ID).Warnf("pass: asked=%d servers=%d reported=%d clean=%d unchanged=%d failed=%d silent=%d unloaded=%d unasked=%d", report.asked, report.servers, report.reported, report.clean, report.unchanged, report.failed, len(report.silent), report.unloaded, report.unasked)
 	if w := report.warning(); w != "" {
-		log.Printf("[lsp-diag] task=%s WARNING: %s", setup.task.ID, w)
+		logging.For(logging.LSP).With(logging.TaskID, setup.task.ID).Infof("WARNING: %s", w)
 	}
 
 	a, ok := composeDiagnosticsAdvisory(report.reported, blocks)
@@ -504,7 +501,7 @@ func (te *TaskExecutor) collectTurnDiagnostics(setup *taskExecSetup, lc *loopCon
 	if !diagnosticsChanged(lc, a.text) {
 		// Same findings as the previous turn — re-sending them only teaches the model to
 		// skim the channel.
-		log.Printf("[lsp-diag] task=%s diagnostics unchanged, not re-injecting", setup.task.ID)
+		logging.For(logging.LSP).With(logging.TaskID, setup.task.ID).Infof("diagnostics unchanged, not re-injecting")
 		return
 	}
 	queueAdvisory(lc, a)

@@ -3,9 +3,7 @@ package exec
 import (
 	"errors"
 	"fmt"
-	"log"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -14,18 +12,22 @@ import (
 
 	"kanban/backend/git"
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 )
 
 // ErrNotAMergeConflict means git merge failed with no merge in progress (no MERGE_HEAD): a
-// hook error, a missing branch, a lock — not a conflict. Its message is empty because callers
-// detect it with errors.Is and show the underlying git error instead.
-var ErrNotAMergeConflict = errors.New("")
+// hook error, a missing branch, a lock — not a conflict. Callers detect it with errors.Is and show
+// the underlying git error instead.
+//
+// It carries text because an error that prints as nothing is a bug waiting for the one path that
+// surfaces it alone; being wrapped with %w is not the only way an error reaches a log.
+var ErrNotAMergeConflict = errors.New("not a merge conflict")
 
 // isMergeInProgress checks whether a git merge is currently in progress in the given directory.
 // Uses `git rev-parse --git-dir` to correctly resolve the git directory in both
 // regular repos and worktrees (where .git is a file, not a directory).
 func isMergeInProgress(dir string) bool {
-	cmd := osexec.Command("git", "rev-parse", "--git-dir")
+	cmd := git.Command("", "rev-parse", "--git-dir")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -48,7 +50,7 @@ func GetConflictedFiles(dir string) []string {
 	var files []string
 
 	// Primary: git status --porcelain
-	cmd := osexec.Command("git", "status", "--porcelain")
+	cmd := git.Command("", "status", "--porcelain")
 	cmd.Dir = dir
 	if out, err := cmd.Output(); err == nil {
 		for line := range strings.SplitSeq(string(out), "\n") {
@@ -63,7 +65,7 @@ func GetConflictedFiles(dir string) []string {
 
 	// Fallback: git diff --diff-filter=U (binary conflicts, renames)
 	if len(files) == 0 {
-		cmd = osexec.Command("git", "diff", "--name-only", "--diff-filter=U")
+		cmd = git.Command("", "diff", "--name-only", "--diff-filter=U")
 		cmd.Dir = dir
 		if out, err := cmd.Output(); err == nil {
 			for line := range strings.SplitSeq(string(out), "\n") {
@@ -99,14 +101,14 @@ func GetAllConflictsResolved(dir string) bool {
 
 	// Check MERGE_HEAD exists (we should be in a merge state).
 	// If not, fall back to file-content scan.
-	mergeHeadCmd := osexec.Command("git", "rev-parse", "--verify", "--quiet", "MERGE_HEAD")
+	mergeHeadCmd := git.Command("", "rev-parse", "--verify", "--quiet", "MERGE_HEAD")
 	mergeHeadCmd.Dir = dir
 	if mergeHeadCmd.Run() == nil {
 		// Use git diff --check to detect conflict markers.
 		// Compares working tree against MERGE_HEAD; any markers in the
 		// diff are reported as warnings and cause a non-zero exit code.
 		args := append([]string{"diff", "--check", "MERGE_HEAD", "--"}, conflictedFiles...)
-		cmd := osexec.Command("git", args...)
+		cmd := git.Command("", args...)
 		cmd.Dir = dir
 		return cmd.Run() == nil
 	}
@@ -148,7 +150,7 @@ func GetResolvedConflictedFiles(dir string) []string {
 
 // getMergeStatusOutput returns the raw git status --porcelain output for diagnostics.
 func getMergeStatusOutput(dir string) string {
-	cmd := osexec.Command("git", "status", "--porcelain")
+	cmd := git.Command("", "status", "--porcelain")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -176,22 +178,21 @@ func (te *TaskExecutor) tryResolveMergeConflicts(dir, taskID, targetBranch, task
 
 	// No conflicted files found — try git merge --continue (git may have auto-resolved)
 	if len(conflictedFiles) == 0 {
-		log.Printf("[merge] task=%s no conflicted files found, trying merge --continue", taskID)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("no conflicted files found, trying merge --continue")
 		continueErr := te.gitRun(dir, append(git.GitAuthorFlags(), "merge", "--continue")...)
 		if continueErr == nil {
-			log.Printf("[merge] task=%s merge auto-resolved via --continue", taskID)
+			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("merge auto-resolved via --continue")
 			te.logMergeComplete(taskID, task.CurrentThreadID, taskBranch, targetBranch)
 			return nil
 		}
 		// --continue also failed — include diagnostics in error
 		statusOutput := getMergeStatusOutput(dir)
-		log.Printf("[merge] task=%s merge --continue failed: %v. Status: %s", taskID, continueErr, statusOutput)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("merge --continue failed: %v. Status: %s", continueErr, statusOutput)
 		_ = te.gitRun(dir, "merge", "--abort")
 		return fmt.Errorf("merge conflict but no conflicted files found (status: %s)", statusOutput)
 	}
 
-	log.Printf("[merge] task=%s conflict in %d file(s): %s",
-		taskID, len(conflictedFiles), strings.Join(conflictedFiles, ", "))
+	logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("conflict in %d file(s): %s", len(conflictedFiles), strings.Join(conflictedFiles, ", "))
 
 	// Log conflict detection as system message
 	te.logSystemMessage(taskID, task.CurrentThreadID, "error",
@@ -217,7 +218,7 @@ func (te *TaskExecutor) logSystemMessage(taskID, threadID, severity, content str
 		Content:   content,
 		CreatedAt: time.Now().UTC(),
 	}); err != nil {
-		log.Printf("[system-msg] task=%s failed to log message: %v", taskID, err)
+		logging.For(logging.Exec).With(logging.TaskID, taskID).Warnf("failed to log message: %v", err)
 	}
 }
 
@@ -244,7 +245,7 @@ func (te *TaskExecutor) logMergeFailed(taskID, threadID, errorMsg string) {
 		Content:   errorMsg,
 		CreatedAt: time.Now().UTC(),
 	}); err != nil {
-		log.Printf("[merge-msg] task=%s failed to log message: %v", taskID, err)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to log message: %v", err)
 		return
 	}
 	task, _ := te.store.GetTaskByID(taskID)
@@ -270,7 +271,7 @@ func (te *TaskExecutor) persistAndBroadcastMergeMessage(taskID, threadID, conten
 		Content:   content,
 		CreatedAt: time.Now().UTC(),
 	}); err != nil {
-		log.Printf("[merge-msg] task=%s failed to log message: %v", taskID, err)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to log message: %v", err)
 		return
 	}
 	// Broadcast to task stream clients for real-time display
@@ -296,7 +297,7 @@ func (te *TaskExecutor) stageResolvedConflicts(taskID, worktreePath string) bool
 	}
 	addArgs := append([]string{"add"}, conflictedFiles...)
 	if err := te.gitRun(worktreePath, addArgs...); err != nil {
-		log.Printf("[merge] task=%s git add failed: %v", taskID, err)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("git add failed: %v", err)
 		return false
 	}
 	return true
@@ -307,7 +308,7 @@ func (te *TaskExecutor) stageResolvedConflicts(taskID, worktreePath string) bool
 // message and author stay identical.
 func (te *TaskExecutor) commitMergeConflictResolution(taskID, worktreePath string) bool {
 	if err := te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
-		log.Printf("[merge] task=%s git commit failed: %v", taskID, err)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("git commit failed: %v", err)
 		return false
 	}
 	return true
@@ -357,16 +358,16 @@ func (te *TaskExecutor) commitConflictResolution(projectID, taskID, worktreePath
 		commitOK = te.stageResolvedConflicts(taskID, worktreePath)
 	} else {
 		// Final-merge conflict: worktree has no MERGE_HEAD.
-		checkCmd := osexec.Command("git", "diff", "--quiet")
+		checkCmd := git.Command("", "diff", "--quiet")
 		checkCmd.Dir = worktreePath
 		if checkCmd.Run() == nil {
-			log.Printf("[merge] task=%s no changes to commit for conflict resolution", taskID)
+			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("no changes to commit for conflict resolution")
 			commitOK = false
 		}
 		if commitOK {
 			// `add -u` stages only tracked changes — never sweeps untracked files.
 			if err := te.gitRun(worktreePath, "add", "-u"); err != nil {
-				log.Printf("[merge] task=%s git add -u failed: %v", taskID, err)
+				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("git add -u failed: %v", err)
 				commitOK = false
 			}
 		}
@@ -377,12 +378,17 @@ func (te *TaskExecutor) commitConflictResolution(projectID, taskID, worktreePath
 	}
 
 	if commitOK {
-		log.Printf("[merge] task=%s conflict resolution committed", taskID)
-		// Drop stale stash (contains LLM's pre-sync edits, already committed).
-		// Do NOT pop — that would re-apply old edits as unstaged changes.
-		te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-		_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "drop")
-		te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("conflict resolution committed")
+		// Drop this task's stale stash (its pre-sync edits are committed by now). Popping would re-apply them
+		// as unstaged changes, and a bare drop would take stash@{0} - see DropStashForTask.
+		//
+		// Released explicitly rather than deferred: MergeBranch runs later in this function and takes the merge
+		// lock, which must come before the stash lock, never after.
+		unlockStash := te.worktreeMgr.LockProjectStash(projectID)
+		if _, err := te.worktreeMgr.DropStashForTask(worktreePath, git.StashMessageForSyncMerge(taskID)); err != nil {
+			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("discarding the sync-merge stash: %v", err)
+		}
+		unlockStash()
 	}
 
 	_ = te.store.SetTaskMergeConflict(taskID, projectID, false)
@@ -392,16 +398,16 @@ func (te *TaskExecutor) commitConflictResolution(projectID, taskID, worktreePath
 	if commitOK && (task.AutoMerge || commitDone) {
 		mergeErr = te.MergeBranch(projectID, taskID, task)
 		if mergeErr != nil {
-			log.Printf("[merge] task=%s final merge failed: %v", taskID, mergeErr)
+			logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("final merge failed: %v", mergeErr)
 		}
 	} else if commitOK {
-		log.Printf("[merge] task=%s merge skipped (auto_merge=false, no commit-and-done click)", taskID)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("merge skipped (auto_merge=false, no commit-and-done click)")
 	}
 
 	updatedTask, err := te.store.GetTaskByID(taskID)
 	if err != nil || updatedTask == nil {
 		// Callers overwrite their own task with this, so a store hiccup must not hand them a nil.
-		log.Printf("[merge] task=%s refresh after conflict resolution failed: %v", taskID, err)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("refresh after conflict resolution failed: %v", err)
 		updatedTask = task
 	}
 

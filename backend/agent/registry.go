@@ -2,13 +2,13 @@ package agent
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"sync"
 
 	ext "kanban/backend/extensions"
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 )
 
 // ConfigStore is the interface the registry needs for user-configured agent settings.
@@ -266,7 +266,7 @@ func (r *AgentRegistry) reload() {
 	// Must be called with r.mu held (write lock)
 	extList, err := r.store.GetByType(ext.ExtensionTypeAgent)
 	if err != nil {
-		log.Printf("[agent-registry] failed to query agent extensions: %v", err)
+		logging.For(logging.Agent).Warnf("failed to query agent extensions: %v", err)
 		return
 	}
 

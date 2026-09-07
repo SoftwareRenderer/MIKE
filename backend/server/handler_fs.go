@@ -7,10 +7,8 @@ import (
 	"fmt"
 	"io"
 	"kanban/backend/httputil"
-	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -23,6 +21,7 @@ import (
 	"kanban/backend/prompts"
 	"kanban/backend/sandbox"
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 )
 
 func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +125,7 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 		}
 		data, readErr := os.ReadFile(hostPath)
 		if readErr != nil {
-			log.Printf("fs read failed: %v", readErr)
+			logging.For(logging.HTTP).Errorf("fs read failed: %v", readErr)
 			JSONError(w, http.StatusInternalServerError, "failed to read file")
 			return
 		}
@@ -446,7 +445,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	// Host filesystem (no project or sandbox disabled)
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		log.Printf("fs readdir failed: %v", err)
+		logging.For(logging.HTTP).Errorf("fs readdir failed: %v", err)
 		JSONError(w, http.StatusNotFound, "directory not found")
 		return
 	}
@@ -551,7 +550,7 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 		_ = task // task exists and belongs to project
 		searchRoot, err = s.executor.WorktreeMgr().WorktreePath(taskID)
 		if err != nil {
-			log.Printf("fs resolve worktree failed: %v", err)
+			logging.For(logging.HTTP).Warnf("fs resolve worktree failed: %v", err)
 			Fail(w, err, "resolve worktree", "failed to resolve worktree path")
 			return
 		}
@@ -598,7 +597,7 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 	var results []searchResult
 
 	if _, statErr := os.Stat(searchRoot); statErr != nil {
-		log.Printf("fs search root stat failed: %v", statErr)
+		logging.For(logging.HTTP).Errorf("fs search root stat failed: %v", statErr)
 		JSONError(w, http.StatusNotFound, "search root does not exist")
 		return
 	}
@@ -970,13 +969,13 @@ func (s *Server) fsWriteTarget(w http.ResponseWriter, r *http.Request, project *
 func (s *Server) writeContainedFile(w http.ResponseWriter, target string, content []byte) bool {
 	// Host filesystem (the worktree is bind-mounted into the sandbox).
 	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-		log.Printf("fs mkdir failed: %v", err)
+		logging.For(logging.HTTP).Errorf("fs mkdir failed: %v", err)
 		JSONError(w, http.StatusInternalServerError, "create directory failed")
 		return false
 	}
 	// Not a plain write: a save that dies halfway must not leave a truncated file.
 	if err := fsutil.WriteFileAtomic(target, content); err != nil {
-		log.Printf("fs write failed: %v", err)
+		logging.For(logging.HTTP).Errorf("fs write failed: %v", err)
 		JSONError(w, http.StatusInternalServerError, "write file failed")
 		return false
 	}
@@ -1004,12 +1003,12 @@ func resolveGitIdentity() (name, email string) {
 	}
 
 	if name == "" {
-		if out, err := exec.Command("git", "config", "--global", "user.name").CombinedOutput(); err == nil {
+		if out, err := git.Command("", "config", "--global", "user.name").CombinedOutput(); err == nil {
 			name = strings.TrimSpace(string(out))
 		}
 	}
 	if email == "" {
-		if out, err := exec.Command("git", "config", "--global", "user.email").CombinedOutput(); err == nil {
+		if out, err := git.Command("", "config", "--global", "user.email").CombinedOutput(); err == nil {
 			email = strings.TrimSpace(string(out))
 		}
 	}
@@ -1118,7 +1117,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cmd := exec.Command("git", "-C", req.Path, "init")
+	cmd := git.Command("", "-C", req.Path, "init")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git init failed: %s", out))
 		return
@@ -1130,13 +1129,13 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cmd = exec.Command("git", "-C", req.Path, "add", "README.md")
+	cmd = git.Command("", "-C", req.Path, "add", "README.md")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git add failed: %s", out))
 		return
 	}
 	commitArgs := []string{"-C", req.Path, "-c", "user.name=" + name, "-c", "user.email=" + email, "commit", "-m", "Initial commit"}
-	cmd = exec.Command("git", commitArgs...)
+	cmd = git.Command("", commitArgs...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git commit failed: %s", out))
 		return
@@ -1224,7 +1223,7 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 				// Directory exists despite weird output — treat as success
 				break
 			}
-			log.Printf("mkdir unexpected output for %s: %q (check: %q)", sandboxPath, output, checkOut)
+			logging.For(logging.HTTP).Infof("mkdir unexpected output for %s: %q (check: %q)", sandboxPath, output, checkOut)
 			JSONError(w, http.StatusInternalServerError, "unexpected response from mkdir")
 			return
 		}

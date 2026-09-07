@@ -20,6 +20,28 @@ describe('DiffCache', () => {
         expect(cache.state.loading).toBe(false);
     });
 
+    it('loads a headRef diff from the server-parsed files, not the patch text', async () => {
+        // The commit-to-commit branch consumes parsed_files, so the shape the server sends is what lands in
+        // state, including the isNew -> isNewFile rename. The hidden-swap-file skip is updateDiffFromFiles' own,
+        // not this caller's.
+        const apis = makeApis({
+            getTaskDiff: vi.fn(async () => ({
+                diff: 'diff --git a/a.ts b/a.ts\nnew file mode 100644\n+one\n',
+                parsed_files: [
+                    { path: 'a.ts', rows: [{ lineNumber: 1, variant: 'added', text: 'one' }], added: 1, removed: 0, isNew: true },
+                    { path: 'dir/.notes.txt.swp', rows: [{ lineNumber: 1, variant: 'added', text: 'x' }], added: 1, removed: 0 },
+                    { path: 'mode-only.txt', rows: [], added: 0, removed: 0 },
+                ],
+            })),
+        });
+        const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
+        await cache.loadDiff(() => {}, { headRef: 'a'.repeat(40) });
+
+        expect(Object.keys(cache.state.files).sort()).toEqual(['a.ts']);
+        expect(cache.state.files['a.ts'].added).toBe(1);
+        expect(cache.state.files['a.ts'].isNewFile).toBe(true);
+    });
+
     it('updateDiff populates files from manifest', () => {
         const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.updateDiff({
@@ -383,8 +405,9 @@ describe('DiffCache', () => {
         // Resolve the original diff
         resolveDiff!({ files: { 'a.ts': { hash: 'h1', type: 'tracked', added: 1, removed: 0, staged: false } } });
         await loadPromise;
-        // Original call used old IDs (captured at call time)
-        expect(apis.getTaskDiff).toHaveBeenNthCalledWith(1, 'proj-1', 'task-1', undefined);
+        // Original call used old IDs (captured at call time). The third argument carries parsed:true —
+        // the diff grammar lives in backend/git now, so the cache always asks for the structured form.
+        expect(apis.getTaskDiff).toHaveBeenNthCalledWith(1, 'proj-1', 'task-1', { parsed: true });
         // Subsequent calls use new IDs
         cache.state.files = {
             'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: false },

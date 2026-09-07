@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseUnifiedDiff, enrichRowsWithInlineSegments, buildDisplayItems, truncatePath, buildSideBySideRows, buildModifiedSegments, getStatusBadge } from '$lib/utils/diff-parser';
-import type { DiffFile } from '$lib/types/diff';
+import { enrichRowsWithInlineSegments, buildDisplayItems, truncatePath, buildSideBySideRows, buildModifiedSegments, getStatusBadge } from '$lib/utils/diff-parser';
+import type { DiffFile, DiffRow } from '$lib/types/diff';
 
 function makeDiffFile(overrides: Partial<DiffFile> = {}): DiffFile {
     return {
@@ -11,179 +11,6 @@ function makeDiffFile(overrides: Partial<DiffFile> = {}): DiffFile {
         ...overrides,
     };
 }
-
-describe('parseUnifiedDiff', () => {
-    it('returns empty array for empty input', () => {
-        expect(parseUnifiedDiff('')).toEqual([]);
-        expect(parseUnifiedDiff('   ')).toEqual([]);
-        expect(parseUnifiedDiff(null as any)).toEqual([]);
-    });
-
-    it('parses a simple single-file diff', () => {
-        const patch = `diff --git a/src/main.ts b/src/main.ts
-index abc1234..def5678 100644
---- a/src/main.ts
-+++ b/src/main.ts
-@@ -1,3 +1,4 @@
- const x = 1;
--const y = 2;
-+const y = 3;
-+const z = 4;
- const w = 5;`;
-
-        const files = parseUnifiedDiff(patch);
-        expect(files).toHaveLength(1);
-        expect(files[0].path).toBe('src/main.ts');
-        expect(files[0].added).toBe(2);
-        expect(files[0].removed).toBe(1);
-        // 5 rows: context(x), removed(y=2), added(y=3), added(z=4), context(w)
-        expect(files[0].rows).toHaveLength(5);
-        expect(files[0].rows[0].variant).toBe('context');
-        expect(files[0].rows[1].variant).toBe('removed');
-        expect(files[0].rows[2].variant).toBe('added');
-        expect(files[0].rows[3].variant).toBe('added');
-        expect(files[0].rows[4].variant).toBe('context');
-    });
-
-    it('parses multi-file diffs', () => {
-        const patch = `diff --git a/file1.ts b/file1.ts
-index 111..222 100644
---- a/file1.ts
-+++ b/file1.ts
-@@ -1,2 +1,3 @@
- line1
-+added1
- line2
-diff --git a/file2.ts b/file2.ts
-index 333..444 100644
---- a/file2.ts
-+++ b/file2.ts
-@@ -1,2 +1,2 @@
--old
-+new`;
-
-        const files = parseUnifiedDiff(patch);
-        expect(files).toHaveLength(2);
-        expect(files[0].path).toBe('file1.ts');
-        expect(files[1].path).toBe('file2.ts');
-        expect(files[0].added).toBe(1);
-        expect(files[1].removed).toBe(1);
-    });
-
-    it('detects new files', () => {
-        const patch = `diff --git a/newfile.ts b/newfile.ts
-new file mode 100644
-index 0000000..abc1234
---- /dev/null
-+++ a/newfile.ts
-@@ -0,0 +1,2 @@
-+line1
-+line2`;
-
-        const files = parseUnifiedDiff(patch);
-        expect(files[0].isNewFile).toBe(true);
-        expect(files[0].added).toBe(2);
-    });
-
-    it('detects deleted files', () => {
-        const patch = `diff --git a/deleted.ts b/deleted.ts
-deleted file mode 100644
-index abc1234..0000000
---- a/deleted.ts
-+++ /dev/null
-@@ -1,2 +0,0 @@
--line1
--line2`;
-
-        const files = parseUnifiedDiff(patch);
-        expect(files[0].isDeleted).toBe(true);
-        expect(files[0].removed).toBe(2);
-    });
-
-    it('handles binary file markers', () => {
-        const patch = `diff --git a/image.png b/image.png
-Binary files a/image.png and b/image.png differ`;
-
-        const files = parseUnifiedDiff(patch);
-        expect(files).toHaveLength(1);
-        expect(files[0].path).toBe('image.png');
-        expect(files[0].rows).toHaveLength(1);
-        expect(files[0].rows[0].text).toBe('Binary files a/image.png and b/image.png differ');
-    });
-
-    it('handles backend binary-file annotation', () => {
-        const patch = `diff --git a/large.bin b/large.bin
-# binary-file: 5242880
-Binary files a/large.bin and b/large.bin differ`;
-
-        const files = parseUnifiedDiff(patch);
-        expect(files[0].fileSize).toBe(5242880);
-        expect(files[0].isBinary).toBe(true);
-    });
-
-    it('handles backend large-file annotation', () => {
-        const patch = `diff --git a/big.txt b/big.txt
-# large-file: 1048576`;
-
-        const files = parseUnifiedDiff(patch);
-        expect(files).toHaveLength(1);
-        expect(files[0].fileSize).toBe(1048576);
-        expect(files[0].isBinary).toBeUndefined();
-    });
-
-    it('skips "No newline at end of file" markers', () => {
-        const patch = `diff --git a/file.txt b/file.txt
---- a/file.txt
-+++ b/file.txt
-@@ -1 +1 @@
--old line
-\\ No newline at end of file
-+new line
-\\ No newline at end of file`;
-
-        const files = parseUnifiedDiff(patch);
-        expect(files[0].rows).toHaveLength(2);
-        expect(files[0].rows[0].variant).toBe('removed');
-        expect(files[0].rows[1].variant).toBe('added');
-    });
-
-    it('line numbers track correctly through hunks', () => {
-        const patch = `diff --git a/file.ts b/file.ts
---- a/file.ts
-+++ b/file.ts
-@@ -5,3 +5,4 @@
- context1
--removed1
-+added1
-+added2
- context2`;
-
-        const files = parseUnifiedDiff(patch);
-        const rows = files[0].rows;
-        expect(rows[0].lineNumber).toBe(5); // context1 at new line 5
-        expect(rows[1].lineNumber).toBe(6); // removed1 at old line 6
-        expect(rows[2].lineNumber).toBe(6); // added1 at new line 6
-        expect(rows[3].lineNumber).toBe(7); // added2 at new line 7
-        expect(rows[4].lineNumber).toBe(8); // context2 at new line 8
-    });
-
-    it('keeps files with only context lines (rows.length > 0)', () => {
-        const patch = `diff --git a/nochange.ts b/nochange.ts
-index abc..abc 100644
---- a/nochange.ts
-+++ b/nochange.ts
-@@ -1 +1 @@
- same line`;
-
-        // Files with rows (even just context) are kept by the filter
-        const files = parseUnifiedDiff(patch);
-        expect(files).toHaveLength(1);
-        expect(files[0].path).toBe('nochange.ts');
-        expect(files[0].rows).toHaveLength(1);
-        expect(files[0].added).toBe(0);
-        expect(files[0].removed).toBe(0);
-    });
-});
 
 describe('enrichRowsWithInlineSegments', () => {
     function row(variant: 'context' | 'added' | 'removed', text: string) {
@@ -320,7 +147,7 @@ describe('buildModifiedSegments', () => {
 });
 
 describe('buildDisplayItems', () => {
-    function row(variant: 'context' | 'added' | 'removed', text = 'line'): ReturnType<typeof parseUnifiedDiff>[number]['rows'][number] {
+    function row(variant: 'context' | 'added' | 'removed', text = 'line'): DiffRow {
         return { lineNumber: 1, variant, text };
     }
 

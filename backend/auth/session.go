@@ -12,11 +12,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"time"
 
 	"kanban/backend/store"
+	"kanban/pkg/logging"
 )
 
 const (
@@ -65,7 +65,7 @@ func NewSessionManager(s *store.Store) (*SessionManager, error) {
 	if n, err := s.DeleteExpiredSessions(ctx); err != nil {
 		return nil, fmt.Errorf("cleanup expired sessions: %w", err)
 	} else if n > 0 {
-		log.Printf("[auth] cleaned up %d expired session(s)", n)
+		logging.For(logging.Auth).Infof("cleaned up %d expired session(s)", n)
 	}
 	// One-time migration for sessions created before tokens were hashed. Safe to run
 	// every startup: rows that already carry a hash are skipped and no live session
@@ -73,7 +73,7 @@ func NewSessionManager(s *store.Store) (*SessionManager, error) {
 	if n, err := s.BackfillSessionTokens(ctx); err != nil {
 		return nil, fmt.Errorf("backfill session token hashes: %w", err)
 	} else if n > 0 {
-		log.Printf("[auth] hashed %d legacy session token(s); plaintext tokens removed from the database", n)
+		logging.For(logging.Auth).Infof("hashed %d legacy session token(s); plaintext tokens removed from the database", n)
 	}
 	return &SessionManager{store: s, passwordHash: sha256.Sum256([]byte(password))}, nil
 }

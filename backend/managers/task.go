@@ -9,10 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -28,6 +26,7 @@ import (
 	"kanban/backend/stream"
 	"kanban/backend/term"
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 )
 
 // taskStore is the task lifecycle the API drives. It has no execution-state methods
@@ -480,7 +479,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		if task.BranchTip == "" && task.Branch != "" {
 			project, pErr := h.store.GetProject(projectID)
 			if pErr == nil {
-				c := osexec.Command("git", "-C", project.Path, "rev-parse", task.Branch)
+				c := git.Command("", "-C", project.Path, "rev-parse", task.Branch)
 				if out, err := c.CombinedOutput(); err == nil {
 					task.BranchTip = strings.TrimSpace(string(out))
 				}
@@ -499,7 +498,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 			// An unreadable child list is not "no children". Starting here could run this
 			// task next to its own subtasks, so the move stands and the auto-start does
 			// not — the user starts it once the read works again.
-			log.Printf("[move] task=%s children unreadable — not auto-starting: %v", taskID, childErr)
+			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("children unreadable — not auto-starting: %v", childErr)
 		} else if len(children) > 0 {
 			// Task with subtasks: start the deepest startable one; this task
 			// stays started-but-pending until all children are done.
@@ -510,7 +509,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 			toStart := h.subtasksToStart(task, children)
 			if len(toStart) > 0 {
 				if _, anyStarted, err := h.startSubtaskIDs(projectID, taskID, "[move]", toStart); anyStarted {
-					log.Printf("[move] task=%s started %d subtask(s): %v", taskID, len(toStart), toStart)
+					logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("started %d subtask(s): %v", len(toStart), toStart)
 					started = true
 				} else if err != nil {
 					// All subtask starts failed — keep task in_progress (user's
@@ -527,7 +526,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 					err = h.executor.StartTask(projectID, taskID, false)
 				}
 				if err != nil {
-					log.Printf("[move] task=%s start failed: %v", taskID, err)
+					logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("start failed: %v", err)
 					task.ExecutionState = types.ExecStateIdle
 					task.Status = originalStatus
 					task.Output = err.Error()
@@ -540,7 +539,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		} else if task.ParentTaskID != "" {
 			// Leaf subtask: subtask-aware start (branch from parent, inherit model config)
 			if err := h.StartSubtask(projectID, taskID, false); err != nil {
-				log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
+				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("subtask start failed: %v", err)
 				task.ExecutionState = types.ExecStateIdle
 				task.Status = originalStatus
 				task.Output = err.Error()
@@ -549,7 +548,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			if err := h.executor.StartTask(projectID, taskID, false); err != nil {
-				log.Printf("[move] task=%s auto-start failed: %v", taskID, err)
+				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("auto-start failed: %v", err)
 				task.ExecutionState = types.ExecStateIdle
 				task.Status = originalStatus
 				task.Output = err.Error()
@@ -608,7 +607,7 @@ func (h *TaskHandler) autoStartNextSibling(projectID, finishedTaskID, parentTask
 func (h *TaskHandler) moveAllDescendantsToInProgress(taskID string) {
 	descendants, err := h.store.GetAllDescendants(taskID)
 	if err != nil {
-		log.Printf("[move-descendants] failed to get descendants of %s: %v", taskID, err)
+		logging.For(logging.Merge).Warnf("failed to get descendants of %s: %v", taskID, err)
 		return
 	}
 	for i := range descendants {
@@ -618,7 +617,7 @@ func (h *TaskHandler) moveAllDescendantsToInProgress(taskID string) {
 			d.ExecutionState = types.ExecStateIdle
 			d.UpdatedAt = time.Now().UTC()
 			if err := h.store.UpdateTask(d); err != nil {
-				log.Printf("[move-descendants] failed to update descendant %s: %v", d.ID, err)
+				logging.For(logging.Merge).Warnf("failed to update descendant %s: %v", d.ID, err)
 			} else {
 				h.boardStreamMgr.BroadcastTaskUpdated(d.ProjectID, d)
 			}
@@ -632,7 +631,7 @@ func (h *TaskHandler) moveAllDescendantsToInProgress(taskID string) {
 func (h *TaskHandler) moveAllDescendants(projectID, taskID string, targetStatus types.Status) {
 	descendants, err := h.store.GetAllDescendants(taskID)
 	if err != nil {
-		log.Printf("[move-descendants] failed to get descendants of %s: %v", taskID, err)
+		logging.For(logging.Merge).Warnf("failed to get descendants of %s: %v", taskID, err)
 		return
 	}
 	// Process in reverse order (leaves first) so children are moved before their parents
@@ -669,7 +668,7 @@ func (h *TaskHandler) moveAllDescendants(projectID, taskID string, targetStatus 
 			// Keep existing state (failed, stopped, idle) if not overridden above
 		}
 		if err := h.store.UpdateTask(d); err != nil {
-			log.Printf("[move-descendants] failed to update descendant %s: %v", d.ID, err)
+			logging.For(logging.Merge).Warnf("failed to update descendant %s: %v", d.ID, err)
 		} else {
 			h.boardStreamMgr.BroadcastTaskUpdated(projectID, d)
 		}
@@ -703,7 +702,7 @@ func (h *TaskHandler) checkAncestorInProgress(task *types.Task) error {
 func (h *TaskHandler) propagateSubtasksAutoMerge(projectID, taskID string, enabled bool) {
 	descendants, err := h.store.GetAllDescendants(taskID)
 	if err != nil {
-		log.Printf("[propagate-subtasks-auto-merge] failed to get descendants of %s: %v", taskID, err)
+		logging.For(logging.Merge).Warnf("failed to get descendants of %s: %v", taskID, err)
 		return
 	}
 	for i := range descendants {
@@ -717,7 +716,7 @@ func (h *TaskHandler) propagateSubtasksAutoMerge(projectID, taskID string, enabl
 		}
 		d.UpdatedAt = time.Now().UTC()
 		if err := h.store.UpdateTask(d); err != nil {
-			log.Printf("[propagate-subtasks-auto-merge] failed to update descendant %s: %v", d.ID, err)
+			logging.For(logging.Merge).Warnf("failed to update descendant %s: %v", d.ID, err)
 		} else {
 			h.boardStreamMgr.BroadcastTaskUpdated(projectID, d)
 		}
@@ -740,12 +739,12 @@ func resolveGitAuthor(projectID string, s interface {
 	// Try to get values from project's git config
 	if proj, err := s.GetProject(projectID); err == nil && proj.Path != "" {
 		if !nameSet {
-			if out, err := osexec.Command("git", "-C", proj.Path, "config", "user.name").CombinedOutput(); err == nil {
+			if out, err := git.Command("", "-C", proj.Path, "config", "user.name").CombinedOutput(); err == nil {
 				name = strings.TrimSpace(string(out))
 			}
 		}
 		if !emailSet {
-			if out, err := osexec.Command("git", "-C", proj.Path, "config", "user.email").CombinedOutput(); err == nil {
+			if out, err := git.Command("", "-C", proj.Path, "config", "user.email").CombinedOutput(); err == nil {
 				email = strings.TrimSpace(string(out))
 			}
 		}
@@ -863,11 +862,11 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	h.boardStreamMgr.BroadcastCommitStatus(projectID, taskID, "processing")
 
 	// Commit worktree changes, serialized against tool execution.
-	h.executor.GetWorktreeMu(taskID).Lock()
+	unlockWorktree := h.executor.LockWorktree(taskID)
 	_, wtErr := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat")
 	worktreeExists := wtErr == nil
 	if !worktreeExists {
-		log.Printf("[commit-and-done] task=%s worktree does not exist, skipping commit", taskID)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("worktree does not exist, skipping commit")
 	}
 	if worktreeExists {
 		commitMsg := body.CommitMessage
@@ -879,13 +878,13 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		h.worktreeMgr.StageIndexedFiles(taskID)
 		_ = h.worktreeMgr.GitRunInWorktree(taskID, append(git.GitAuthorFlags(), "commit", "-m", commitMsg, "--allow-empty")...)
 	}
-	h.executor.GetWorktreeMu(taskID).Unlock()
+	unlockWorktree()
 
 	// Capture branch tip before merge (for post-commit diff comparison)
 	if task.Branch != "" {
 		project, pErr := h.store.GetProject(projectID)
 		if pErr == nil {
-			c := osexec.Command("git", "-C", project.Path, "rev-parse", task.Branch)
+			c := git.Command("", "-C", project.Path, "rev-parse", task.Branch)
 			if out, err := c.CombinedOutput(); err == nil {
 				task.BranchTip = strings.TrimSpace(string(out))
 			}
@@ -898,9 +897,9 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	if task.ParentTaskID != "" {
 		parent, pErr := h.store.GetTaskByID(task.ParentTaskID)
 		if pErr == nil && parent.Branch == "" {
-			log.Printf("[commit-and-done] task=%s parent %s has no branch, creating it", taskID, task.ParentTaskID)
+			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("parent %s has no branch, creating it", task.ParentTaskID)
 			if err := h.executor.EnsureParentBranch(projectID, parent); err != nil {
-				log.Printf("[commit-and-done] task=%s failed to ensure parent branch: %v", taskID, err)
+				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to ensure parent branch: %v", err)
 			} else {
 				// Reload task with updated parent info
 				task, _ = h.store.GetTask(projectID, taskID)
@@ -909,7 +908,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	}
 
 	if mergeErr := h.executor.MergeBranch(projectID, taskID, task); mergeErr != nil {
-		log.Printf("[commit-and-done] task=%s merge failed: %v", taskID, mergeErr)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("merge failed: %v", mergeErr)
 		// Reload to check for merge conflict flag set by MergeBranch
 		task, _ = h.store.GetTask(projectID, taskID)
 		if !task.HasMergeConflict {
@@ -930,13 +929,13 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		}
 		// Already resolving a merge conflict — don't add duplicate messages
 		if task.ExecutionState == types.ExecStateRunning {
-			log.Printf("[commit-and-done] task=%s already resolving merge conflict, skipping", taskID)
+			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("already resolving merge conflict, skipping")
 			h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 			httputil.JSONResponse(w, http.StatusOK, task)
 			return
 		}
 		// Merge conflict — trigger LLM to resolve via user message (handleLazyStart)
-		log.Printf("[commit-and-done] task=%s merge conflict detected, triggering LLM resolution", taskID)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("merge conflict detected, triggering LLM resolution")
 
 		// Get conflicted files for the prompt
 		worktreePath, _ := h.worktreeMgr.WorktreePath(taskID)
@@ -951,7 +950,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 			ConflictedFiles: conflictedFiles,
 		})
 		if pErr != nil {
-			log.Printf("[commit-and-done] task=%s failed to render merge conflict prompt: %v", taskID, pErr)
+			logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to render merge conflict prompt: %v", pErr)
 			userContent = "Resolve the merge conflicts and complete the task"
 		}
 
@@ -1058,7 +1057,7 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 		if task.Branch != "" {
 			h.boardStreamMgr.UnwatchWorktree(taskID)
 			if err := h.worktreeMgr.RemoveWorktree(task.ProjectID, taskID, task.Branch); err != nil {
-				log.Printf("task delete: worktree cleanup failed for %s: %v", taskID, err)
+				logging.For(logging.Managers).Warnf("task delete: worktree cleanup failed for %s: %v", taskID, err)
 			}
 		}
 		// Clean up fork thread branches (thread/<threadID>) before DB CASCADE deletes thread rows.
@@ -1092,9 +1091,9 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 		// Unpin this task's snapshots so git can reclaim their objects. These refs are MIKE's own
 		// namespace; the stash sweep below still serves repos written before snapshots were refs.
 		if n, err := h.worktreeMgr.DeleteTaskSnapshots(projectID, taskID); err != nil {
-			log.Printf("task delete: snapshot cleanup failed for %s: %v", taskID, err)
+			logging.For(logging.Managers).Warnf("task delete: snapshot cleanup failed for %s: %v", taskID, err)
 		} else if n > 0 {
-			log.Printf("task delete: unpinned %d snapshot(s) for %s", n, taskID)
+			logging.For(logging.Managers).Infof("task delete: unpinned %d snapshot(s) for %s", n, taskID)
 		}
 		_ = h.worktreeMgr.DropStashEntriesForTask(projectID, taskID)
 		// Also clean branch-labeled stashes (non-kanban stashes from agent operations).
@@ -1127,7 +1126,7 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 		// A handler can exist without an executor, as guarded everywhere else in this file.
 		// finishTitleGeneration still has to run, or the task shows "title coming" forever.
 		if h.executor == nil {
-			log.Printf("[title-gen] task=%s skipping: no executor configured", taskID)
+			logging.For(logging.Generate).With(logging.TaskID, taskID).Infof("skipping: no executor configured")
 			h.finishTitleGeneration(projectID, taskID, true)
 			return
 		}
@@ -1138,13 +1137,13 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 		// and summarization).
 		task, err := h.store.GetTask(projectID, taskID)
 		if err != nil {
-			log.Printf("[title-gen] task=%s skipping: %v", taskID, err)
+			logging.For(logging.Generate).With(logging.TaskID, taskID).Infof("skipping: %v", err)
 			h.finishTitleGeneration(projectID, taskID, true)
 			return
 		}
 		serverURL, modelName := h.executor.ResolveUtilityTarget(task)
 		if serverURL == "" || modelName == "" {
-			log.Printf("[title-gen] task=%s skipping: no LLM config on task", taskID)
+			logging.For(logging.Generate).With(logging.TaskID, taskID).Infof("skipping: no LLM config on task")
 			h.finishTitleGeneration(projectID, taskID, true)
 			return
 		}
@@ -1157,13 +1156,13 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 		maxTokens := 50
 		usage, title, err := h.executor.ChatCompletion(ctx, serverURL, modelName, messages, &exec.ChatCompletionOpts{MaxTokens: &maxTokens, ReasoningEffort: "off"})
 		if err != nil {
-			log.Printf("[title-gen] task=%s LLM call failed: %v", taskID, err)
+			logging.For(logging.Generate).With(logging.TaskID, taskID).Warnf("LLM call failed: %v", err)
 			h.finishTitleGeneration(projectID, taskID, true)
 			return
 		}
 
 		if title == "" {
-			log.Printf("[title-gen] task=%s empty title from LLM", taskID)
+			logging.For(logging.Generate).With(logging.TaskID, taskID).Infof("empty title from LLM")
 			h.finishTitleGeneration(projectID, taskID, true)
 			return
 		}
@@ -1187,7 +1186,7 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 				PredictedMs:     int(usage.PredictedMs),
 				CreatedAt:       time.Now().UTC(),
 			}); err != nil {
-				log.Printf("[title-gen] task=%s failed to store usage message: %v", taskID, err)
+				logging.For(logging.Generate).With(logging.TaskID, taskID).Warnf("failed to store usage message: %v", err)
 			}
 		}
 
@@ -1196,11 +1195,11 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 		// (e.g. status: backlog → in_progress when the task was started
 		// while the title call was still queued on the provider gate).
 		if err := h.store.SetTaskTitle(projectID, taskID, title); err != nil {
-			log.Printf("[title-gen] task=%s update failed: %v", taskID, err)
+			logging.For(logging.Generate).With(logging.TaskID, taskID).Warnf("update failed: %v", err)
 			return
 		}
 
-		log.Printf("[title-gen] task=%s title updated to: %q", taskID, title)
+		logging.For(logging.Generate).With(logging.TaskID, taskID).Infof("title updated to: %q", title)
 		if updated, err := h.store.GetTask(projectID, taskID); err == nil {
 			h.boardStreamMgr.BroadcastTaskUpdated(projectID, *updated)
 		}
@@ -1217,7 +1216,7 @@ func (h *TaskHandler) finishTitleGeneration(projectID, taskID string, broadcast 
 		return // already finished
 	}
 	if err := h.store.ClearTitleGenerating(projectID, taskID); err != nil {
-		log.Printf("[title-gen] task=%s finish update failed: %v", taskID, err)
+		logging.For(logging.Generate).With(logging.TaskID, taskID).Warnf("finish update failed: %v", err)
 		return
 	}
 	if broadcast {
@@ -1242,11 +1241,11 @@ func (h *TaskHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
 	}
 	task, err := h.executor.InitTask(projectID, taskID)
 	if err != nil {
-		log.Printf("[init] task=%s error: %v", taskID, err)
+		logging.For(logging.Startup).With(logging.TaskID, taskID).Errorf("error: %v", err)
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	log.Printf("[init] task=%s worktree ready", taskID)
+	logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("worktree ready")
 	// Enrich with worktree existence so the frontend knows the terminal is available
 	if h.worktreeMgr != nil {
 		cfg, _ := h.configStore.GetConfig()
@@ -1305,7 +1304,7 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 				httputil.JSONError(w, http.StatusInternalServerError, firstErr.Error())
 				return
 			}
-			log.Printf("[start-parent] task=%s started %d subtask(s): %v", taskID, len(toStart), toStart)
+			logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("started %d subtask(s): %v", len(toStart), toStart)
 			h.respondWithStartedTask(w, projectID, lastID)
 			return
 		}
@@ -1313,7 +1312,7 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 		// are done, else stay started-but-pending.
 		if exec.ChildrenAllDone(children) {
 			if err := h.executor.StartTask(projectID, taskID, false); err != nil {
-				log.Printf("[start-parent] task=%s all subtasks done, start failed: %v", taskID, err)
+				logging.For(logging.Startup).With(logging.TaskID, taskID).Errorf("all subtasks done, start failed: %v", err)
 				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
@@ -1327,7 +1326,7 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 
 	// No subtasks — start normally
 	if err := h.executor.StartTask(projectID, taskID, false); err != nil {
-		log.Printf("[start] task=%s error: %v", taskID, err)
+		logging.For(logging.Startup).With(logging.TaskID, taskID).Errorf("error: %v", err)
 		if errors.Is(err, exec.ErrTaskAlreadyRunning) {
 			httputil.JSONError(w, http.StatusConflict, err.Error())
 		} else {
@@ -1335,7 +1334,7 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	log.Printf("[start] task=%s started", taskID)
+	logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("started")
 	task, _ = h.store.GetTask(projectID, taskID)
 	h.refreshTaskPorts(task)
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -1413,7 +1412,7 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 				httputil.JSONError(w, http.StatusInternalServerError, firstErr.Error())
 				return
 			}
-			log.Printf("[start-subtask] task=%s has subtasks, started %d: %v", taskID, len(toStart), toStart)
+			logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("has subtasks, started %d: %v", len(toStart), toStart)
 			h.respondWithStartedTask(w, projectID, lastID)
 			return
 		}
@@ -1429,7 +1428,7 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := h.executor.StartTask(projectID, taskID, false); err != nil {
-		log.Printf("[start-subtask] task=%s error: %v", taskID, err)
+		logging.For(logging.Startup).With(logging.TaskID, taskID).Errorf("error: %v", err)
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1469,7 +1468,7 @@ func (h *TaskHandler) startSubtaskIDs(projectID, taskID, logPrefix string, ids [
 			if firstErr == nil {
 				firstErr = err
 			}
-			log.Printf("%s task=%s error starting %s: %v", logPrefix, taskID, id, err)
+			logging.For(logging.Managers).Warnf("%s task=%s error starting %s: %v", logPrefix, taskID, id, err)
 		} else {
 			anyStarted = true
 		}
@@ -1517,7 +1516,7 @@ func (h *TaskHandler) StartSubtask(projectID, subtaskID string, autostarted bool
 func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
 	descendants, err := h.store.GetAllDescendants(taskID)
 	if err != nil {
-		log.Printf("[stop-cascade] failed to get descendants of %s: %v", taskID, err)
+		logging.For(logging.Exec).Warnf("failed to get descendants of %s: %v", taskID, err)
 	}
 
 	// Stop all in-flight descendants (leaf-first order: reverse the list)
@@ -1525,7 +1524,7 @@ func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
 		d := descendants[i]
 		if d.ExecutionState == types.ExecStateRunning || d.ExecutionState == types.ExecStatePullingImage {
 			if err := h.executor.StopTask(d.ID); err != nil {
-				log.Printf("[stop-cascade] failed to stop descendant %s: %v", d.ID, err)
+				logging.For(logging.Exec).Warnf("failed to stop descendant %s: %v", d.ID, err)
 			}
 		}
 	}

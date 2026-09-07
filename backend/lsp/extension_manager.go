@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,9 +13,10 @@ import (
 	"time"
 
 	"kanban/backend/extensions"
-	kanban_sandbox "kanban/backend/sandbox"
+	"kanban/backend/sandbox"
 	"kanban/backend/types"
-	sandbox "kanban/pkg/bridge"
+	"kanban/pkg/bridge"
+	"kanban/pkg/logging"
 )
 
 // errStaleClient marks a sandbox bridge connection that has outlived its process. The
@@ -87,7 +87,7 @@ type ExtensionLSPManager struct {
 
 // sandboxClient tracks the state of a single LSP connection in a sandbox.
 type sandboxClient struct {
-	bridgeClient *sandbox.Client
+	bridgeClient *bridge.Client
 	workspace    string // host workspace path
 	language     string
 	extensionID  string
@@ -137,7 +137,7 @@ func (sc *sandboxClient) usable() bool {
 // newSandboxClient builds a sandboxClient with its document-sync maps ready to write —
 // ensureDocSync writes them unconditionally, so a struct literal panics on the first tool call.
 // A new client has no holders; see sandboxClient.refs.
-func newSandboxClient(bridgeClient *sandbox.Client, workspace, language, extensionID string, projectMounts map[string]string) *sandboxClient {
+func newSandboxClient(bridgeClient *bridge.Client, workspace, language, extensionID string, projectMounts map[string]string) *sandboxClient {
 	return &sandboxClient{
 		bridgeClient:       bridgeClient,
 		workspace:          workspace,
@@ -372,7 +372,7 @@ func (m *ExtensionLSPManager) startSession(ctx context.Context, ext *extensions.
 			select {
 			case m.serverCh <- translated:
 			default:
-				log.Printf("[lsp] server channel full, dropping notification")
+				logging.For(logging.LSP).Infof("server channel full, dropping notification")
 			}
 			m.broadcastToSubscribers(translated)
 		}
@@ -391,7 +391,7 @@ func (m *ExtensionLSPManager) startSession(ctx context.Context, ext *extensions.
 			installed.refs++
 		}
 		m.mu.Unlock()
-		log.Printf("[lsp] workspace=%s lang=%s: another attach won the race, joining its connection", workspacePath, language)
+		logging.For(logging.LSP).Infof("workspace=%s lang=%s: another attach won the race, joining its connection", workspacePath, language)
 		return installed, nil
 	}
 	if client.dead.Load() {
@@ -404,7 +404,7 @@ func (m *ExtensionLSPManager) startSession(ctx context.Context, ext *extensions.
 	m.mu.Unlock()
 	adopted = true
 
-	log.Printf("[lsp] started extension %s (lang=%s) in sandbox for workspace %s", ext.Name, language, workspacePath)
+	logging.For(logging.LSP).Infof("started extension %s (lang=%s) in sandbox for workspace %s", ext.Name, language, workspacePath)
 	return client, nil
 }
 
@@ -423,7 +423,7 @@ func (m *ExtensionLSPManager) liveClient(workspaceKey string, hold bool) *sandbo
 		return sc
 	}
 	if sc != nil {
-		log.Printf("[lsp] workspace=%s: connection is dead, reconnecting", workspaceKey)
+		logging.For(logging.LSP).Infof("workspace=%s: connection is dead, reconnecting", workspaceKey)
 		m.retire(workspaceKey, sc)
 	}
 	return nil
@@ -455,10 +455,10 @@ func (m *ExtensionLSPManager) retire(workspaceKey string, sc *sandboxClient) {
 // ExtensionSandboxManager.ReleaseSession.
 func (m *ExtensionLSPManager) closeConnection(workspaceKey string, sc *sandboxClient) {
 	if m.extSandbox == nil || !m.extSandbox.ReleaseSession(sc.extensionID, sc.bridgeClient) {
-		log.Printf("[lsp] retired dead connection for %s (its sandbox is already gone)", workspaceKey)
+		logging.For(logging.LSP).Infof("retired dead connection for %s (its sandbox is already gone)", workspaceKey)
 		return
 	}
-	log.Printf("[lsp] retired connection for %s and handed back sandbox %s", workspaceKey, sc.extensionID)
+	logging.For(logging.LSP).Infof("retired connection for %s and handed back sandbox %s", workspaceKey, sc.extensionID)
 }
 
 // reloadNeeded reports whether a changed file means the language server has to re-read the
@@ -523,8 +523,7 @@ func (m *ExtensionLSPManager) FilesChanged(workspacePath string, changed []strin
 		// connection unusable and re-attach, rather than write into a bridge on its way out.
 		v.sc.dead.Store(true)
 		m.retire(v.key, v.sc)
-		log.Printf("[lsp] recycled the language server for workspace=%s lang=%s (re-reads the project)",
-			v.sc.workspace, v.sc.language)
+		logging.For(logging.LSP).Infof("recycled the language server for workspace=%s lang=%s (re-reads the project)", v.sc.workspace, v.sc.language)
 	}
 	return len(targets) > 0
 }
@@ -543,7 +542,7 @@ func (m *ExtensionLSPManager) Release(workspacePath, language string) {
 	if sc.refs > 1 {
 		sc.refs--
 		m.mu.Unlock()
-		log.Printf("[lsp] released one holder of workspace=%s lang=%s (%d still using it)", workspacePath, language, sc.refs)
+		logging.For(logging.LSP).Infof("released one holder of workspace=%s lang=%s (%d still using it)", workspacePath, language, sc.refs)
 		return
 	}
 	m.mu.Unlock()
@@ -566,10 +565,10 @@ func (m *ExtensionLSPManager) ensureSandbox(ext *extensions.Extension, workspace
 		// because three different causes share this one decision (project set, mounts, the
 		// extension's own envs) and a log line that does not say which is a wasted morning.
 		if ok, why := m.extSandbox.MountsCompatible(ext.ID, projectMounts, compareMounts, compareEnvs); ok {
-			log.Printf("[lsp] reusing existing sandbox for extension %s", ext.ID)
+			logging.For(logging.LSP).Infof("reusing existing sandbox for extension %s", ext.ID)
 			return nil
 		} else {
-			log.Printf("[lsp] sandbox %s: %s — recreating", ext.ID, why)
+			logging.For(logging.LSP).Infof("sandbox %s: %s — recreating", ext.ID, why)
 			_ = m.extSandbox.Stop(ext.ID)
 		}
 		_ = m.extSandbox.Stop(ext.ID)
@@ -578,7 +577,7 @@ func (m *ExtensionLSPManager) ensureSandbox(ext *extensions.Extension, workspace
 	// Resolve {workspace} in the user's Sandbox Configuration mounts, and adapt a node_modules
 	// mount for the LSP sandbox if the project configures one, so the server can resolve
 	// dependencies. Applied to a copy so the shared extension record isn't mutated.
-	log.Printf("[lsp] creating sandbox for extension %s", ext.ID)
+	logging.For(logging.LSP).Infof("creating sandbox for extension %s", ext.ID)
 	extCopy := *ext
 	extCopy.SandboxConfig.Mounts = createMounts
 	if _, err := m.extSandbox.Create(&extCopy, projectMounts); err != nil {
@@ -607,7 +606,7 @@ func (m *ExtensionLSPManager) sandboxMountPlan(ext *extensions.Extension, worksp
 	if bind.OK {
 		reserved = append(reserved, bind.Mount)
 	} else if bind.Reason != "" {
-		log.Printf("[lsp] ext=%s no dependency directory will be bound: %s", ext.ID, bind.Reason)
+		logging.For(logging.LSP).Infof("ext=%s no dependency directory will be bound: %s", ext.ID, bind.Reason)
 	}
 
 	// A borrowed project mount that wants the dependency directory's container path gives way: core's
@@ -660,7 +659,7 @@ func (m *ExtensionLSPManager) SendToServer(ctx context.Context, process *LSPProc
 	select {
 	case m.serverCh <- response:
 	default:
-		log.Printf("[lsp] server channel full, dropping message")
+		logging.For(logging.LSP).Infof("server channel full, dropping message")
 	}
 
 	// Broadcast to subscribers (e.g., triggerLSPDiagnostics)
@@ -689,8 +688,8 @@ func (m *ExtensionLSPManager) LSPNotify(ctx context.Context, process *LSPProcess
 		m.retire(workspaceKey, sc)
 		// A stalled write means the bridge stopped reading. Closing it makes the next
 		// GetOrCreate start a fresh bridge: extension sandboxes get new pipes.
-		if errors.Is(err, sandbox.ErrWriteStalled) {
-			log.Printf("[lsp] bridge write stalled for workspace=%s lang=%s, retiring client", process.Workspace, process.Language)
+		if errors.Is(err, bridge.ErrWriteStalled) {
+			logging.For(logging.LSP).Infof("bridge write stalled for workspace=%s lang=%s, retiring client", process.Workspace, process.Language)
 			_ = sc.bridgeClient.Close()
 		}
 		return fmt.Errorf("notify LSP server: %w", err)
@@ -748,7 +747,7 @@ func (m *ExtensionLSPManager) collectProjectMounts(workspacePath string) map[str
 	}
 	projects, err := m.projects.ListProjects()
 	if err != nil {
-		log.Printf("[lsp] failed to list projects for mount setup: %v", err)
+		logging.For(logging.LSP).Warnf("failed to list projects for mount setup: %v", err)
 		return mounts
 	}
 	for _, p := range projects {
@@ -808,13 +807,13 @@ func (m *ExtensionLSPManager) findProjectForWorkspace(workspacePath string) (*ty
 func (m *ExtensionLSPManager) adaptProjectMounts(workspacePath, wsContainerPath string, reserved []types.SandboxMount) []types.SandboxMount {
 	project, err := m.findProjectForWorkspace(workspacePath)
 	if err != nil {
-		log.Printf("[lsp] adaptProjectMounts: %v", err)
+		logging.For(logging.LSP).Infof("adaptProjectMounts: %v", err)
 		return nil
 	}
 	if len(project.SandboxMounts) == 0 {
 		return nil
 	}
-	taskRoot := kanban_sandbox.MountPath(project.Name)
+	taskRoot := sandbox.MountPath(project.Name)
 	var adapted []types.SandboxMount
 	for _, mo := range project.SandboxMounts {
 		cp := mo.ContainerPath
@@ -825,13 +824,11 @@ func (m *ExtensionLSPManager) adaptProjectMounts(workspacePath, wsContainerPath 
 			cp = filepath.Join(wsContainerPath, rel)
 		}
 		if shadowsToolState(cp) {
-			log.Printf("[lsp] not borrowing project mount %s -> %s: the language server needs to write there",
-				mo.HostPath, cp)
+			logging.For(logging.LSP).Infof("not borrowing project mount %s -> %s: the language server needs to write there", mo.HostPath, cp)
 			continue
 		}
 		if isReservedContainerPath(cp, reserved) {
-			log.Printf("[lsp] not borrowing project mount %s -> %s: core mounts the extension's dependency directory there",
-				mo.HostPath, cp)
+			logging.For(logging.LSP).Infof("not borrowing project mount %s -> %s: core mounts the extension's dependency directory there", mo.HostPath, cp)
 			continue
 		}
 		lspMount := types.SandboxMount{
@@ -839,7 +836,7 @@ func (m *ExtensionLSPManager) adaptProjectMounts(workspacePath, wsContainerPath 
 			ContainerPath: cp,
 			Mode:          "ro",
 		}
-		log.Printf("[lsp] adapted project mount: %s -> %s (ro)", lspMount.HostPath, lspMount.ContainerPath)
+		logging.For(logging.LSP).Debugf("adapted project mount: %s -> %s (ro)", lspMount.HostPath, lspMount.ContainerPath)
 		adapted = append(adapted, lspMount)
 	}
 	return adapted
@@ -894,7 +891,7 @@ func (m *ExtensionLSPManager) LSPRequest(ctx context.Context, workspacePath, fil
 		if td, ok := paramsMap["textDocument"].(map[string]any); ok {
 			if uri, ok := td["uri"].(string); ok {
 				if _, err := m.ensureDocSync(ctx, sc, uri, workspacePath, filePath, cfg); err != nil {
-					log.Printf("[lsp] doc sync failed for %s: %v", filePath, err)
+					logging.For(logging.LSP).Warnf("doc sync failed for %s: %v", filePath, err)
 					// Continue anyway — the server may still have the file
 				}
 			}

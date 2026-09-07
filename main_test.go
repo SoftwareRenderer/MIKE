@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"kanban/pkg/logging"
 )
 
 func TestListenAddr(t *testing.T) {
@@ -184,6 +186,48 @@ func TestResolvePort(t *testing.T) {
 			}
 			if got != tc.port {
 				t.Errorf("resolvePort(%d, %q) = %d, want %d", tc.flagValue, tc.envValue, got, tc.port)
+			}
+		})
+	}
+}
+
+// TestLogLevelResolution pins the --log-level / MIKE_LOG_LEVEL ladder and that a non-level value is
+// REFUSED rather than guessed at - a typo must not silently cost the operator the log.
+func TestLogLevelResolution(t *testing.T) {
+	tests := []struct {
+		name      string
+		flagValue string
+		envValue  string
+		envSet    bool
+		want      string // effective name after the ladder
+		wantErr   bool
+	}{
+		{name: "nothing set defaults to info", want: "info"},
+		{name: "env wins over default", envValue: "debug", envSet: true, want: "debug"},
+		{name: "flag wins over env", flagValue: "warn", envValue: "debug", envSet: true, want: "warn"},
+		{name: "set-but-empty env means unset", envValue: "", envSet: true, want: "info"},
+		{name: "typo is refused, not defaulted", envValue: "verbose", envSet: true, want: "verbose", wantErr: true},
+		{name: "numeric level is refused", envValue: "0", envSet: true, want: "0", wantErr: true},
+		{name: "flag typo is refused too", flagValue: "notice", want: "notice", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("MIKE_LOG_LEVEL", "")
+			if !tt.envSet {
+				os.Unsetenv("MIKE_LOG_LEVEL")
+			} else {
+				t.Setenv("MIKE_LOG_LEVEL", tt.envValue)
+			}
+			got := resolveString(tt.flagValue, "MIKE_LOG_LEVEL", "info")
+			if got != tt.want {
+				t.Fatalf("resolveString = %q, want %q", got, tt.want)
+			}
+			_, err := logging.ParseLevel(got)
+			if tt.wantErr && err == nil {
+				t.Errorf("ParseLevel(%q) accepted a value that is not a level; startup must refuse", got)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("ParseLevel(%q) rejected a valid level: %v", got, err)
 			}
 		})
 	}

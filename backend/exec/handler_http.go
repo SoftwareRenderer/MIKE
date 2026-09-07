@@ -3,7 +3,6 @@ package exec
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"net/http"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"kanban/backend/types"
 
 	"github.com/google/uuid"
+	"kanban/pkg/logging"
 )
 
 func (te *TaskExecutor) HandleRetry(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +133,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 
 	// Forward to executor or lazy-start. Skip when the message was deduped
 	if isDuplicate {
-		log.Printf("[send] task=%s duplicate user message (%q) not persisted, skipping executor trigger", taskID, req.Content)
+		logging.For(logging.Exec).With(logging.TaskID, taskID).Infof("duplicate user message (%q) not persisted, skipping executor trigger", req.Content)
 		te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "idle", "activity": "Duplicate message ignored"}})
 	} else {
 		te.ForwardUserMessage(projectID, taskID, stream.UserMessage{
@@ -203,7 +203,7 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 
 	// If already summarizing, cancel it (acts as the cancel endpoint).
 	if task.Summarizing {
-		log.Printf("[summarize] task=%s cancelling in-progress summarization", taskID)
+		logging.For(logging.Summarize).With(logging.TaskID, taskID).Infof("cancelling in-progress summarization")
 		te.cancelSummarize(taskID, projectID)
 		task.Summarizing = false
 		_ = te.store.SetTaskSummarizing(taskID, false)
@@ -325,7 +325,7 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 		serverURL, modelName, _ := te.utilityTarget(task)
 		sumResult, err := te.summarizeContext(ctx, messages, serverURL, modelName, previousSummary)
 		if err != nil {
-			log.Printf("[summarize] task=%s manual summarization failed: %v", taskID, err)
+			logging.For(logging.Summarize).With(logging.TaskID, taskID).Warnf("manual summarization failed: %v", err)
 			clearFlag()
 			return
 		}
@@ -366,7 +366,7 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 			"model_name":       task.ModelName,
 		}})
 
-		log.Printf("[summarize] task=%s manual summarization complete (messages preserved, LLM context compressed)", taskID)
+		logging.For(logging.Summarize).With(logging.TaskID, taskID).Infof("manual summarization complete (messages preserved, LLM context compressed)")
 
 		// Fix timestamps of messages sent during the summarization window
 		// so they sort after the summary in the database.

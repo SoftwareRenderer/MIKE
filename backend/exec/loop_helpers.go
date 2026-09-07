@@ -3,30 +3,29 @@ package exec
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
 	"kanban/backend/llama"
 	"kanban/backend/prompts"
-	kanban_sandbox "kanban/backend/sandbox"
+	"kanban/backend/sandbox"
 	"kanban/backend/stream"
 	"kanban/backend/types"
 
-	sandbox "kanban/pkg/bridge"
+	"kanban/pkg/bridge"
 
 	"github.com/google/uuid"
+	"kanban/pkg/logging"
 )
 
 // sandboxRecreate describes a mid-turn rebuild of a running task's container: the task
 // changed in a way the container was created around, so it has to be built again.
 type sandboxRecreate struct {
-	logPrefix string // tags the log lines, e.g. "mode-switch"
-	reason    string // the change in user-facing text, e.g. "mode change"
+	reason string // the change in user-facing text, e.g. "mode change"
 	// connErrCode is stored when the new container is up but its bridge will not answer.
 	// It differs per caller because the two causes read differently in a message.
 	connErrCode string
-	opts        kanban_sandbox.SandboxOpts
+	opts        sandbox.SandboxOpts
 	// underLock applies the caller's own sandbox state inside the same write as the new callbacks,
 	// so the two are never visible apart. It takes the sandboxState being written, not the
 	// executionState: sandboxMu is already held here and is not reentrant.
@@ -40,15 +39,17 @@ type sandboxRecreate struct {
 // the reason in its Output and the browser gets a persisted error — and callers end the turn
 // when an error comes back. Changed assigned ports are persisted.
 func (te *TaskExecutor) recreateTaskSandbox(setup *taskExecSetup, state *executionState, r sandboxRecreate) error {
-	tag := fmt.Sprintf("[%s] setup.task=%s ", r.logPrefix, setup.task.ID)
+	// The old code built "[%s] setup.task=%s " as TEXT here and concatenated it onto every
+	// message; subsystem and task id are attributes now, so the message is just the message.
+	lg := logging.For(logging.Sandbox).With(logging.TaskID, setup.task.ID)
 
 	if err := te.sandboxMgr.Stop(setup.task.ID); err != nil {
-		log.Printf(tag+"failed to stop old sandbox: %v", err)
+		lg.Infof("%s: failed to stop old sandbox: %v", r.reason, err)
 	}
 
 	assignedPorts, createErr := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project, r.opts)
 	if createErr != nil {
-		log.Printf(tag+"failed to recreate sandbox: %v", createErr)
+		lg.Infof("%s: failed to recreate sandbox: %v", r.reason, createErr)
 		te.failSandboxRecreate(setup,
 			fmt.Sprintf("Failed to recreate sandbox for %s: %v", r.reason, createErr),
 			fmt.Sprintf("Sandbox recreation failed: %v", createErr),
@@ -58,7 +59,7 @@ func (te *TaskExecutor) recreateTaskSandbox(setup *taskExecSetup, state *executi
 
 	newAgentClient, clientErr := te.sandboxMgr.GetClient(setup.task.ID)
 	if clientErr != nil {
-		log.Printf(tag+"failed to connect to new sandbox bridge: %v", clientErr)
+		lg.Infof("%s: failed to connect to new sandbox bridge: %v", r.reason, clientErr)
 		te.failSandboxRecreate(setup,
 			fmt.Sprintf("Failed to connect to sandbox bridge after %s: %v", r.reason, clientErr),
 			fmt.Sprintf("Agent connection failed after %s: %v", r.reason, clientErr),
@@ -225,7 +226,7 @@ func waitForExecutorExit(taskID string, state *executionState, timeout time.Dura
 	select {
 	case <-state.finished:
 	case <-time.After(timeout):
-		log.Printf("[exec] task=%s executor still writing after %s; applying the transition anyway", taskID, timeout)
+		logging.For(logging.Exec).With(logging.TaskID, taskID).Infof("executor still writing after %s; applying the transition anyway", timeout)
 	}
 }
 
@@ -251,7 +252,7 @@ func (te *TaskExecutor) persistStopTransition(task *types.Task) bool {
 	}
 	changed, uerr := te.store.TransitionInFlightTask(task.ID, task.ProjectID, task.ExecutionState, output)
 	if uerr != nil {
-		log.Printf("[stop] task=%s in-flight transition failed: %v", task.ID, uerr)
+		logging.For(logging.Exec).With(logging.TaskID, task.ID).Warnf("in-flight transition failed: %v", uerr)
 		return false
 	}
 	if changed {
@@ -298,7 +299,7 @@ func (te *TaskExecutor) applyModelSwitch(mc *modelConfig, task *types.Task, proj
 			if discovered := te.configStore.DiscoverContextWindow(modelName, serverURL); discovered != nil {
 				contextWindow = discovered
 				te.configStore.SaveModelContextWindow(modelName, serverURL, *discovered)
-				log.Printf("[context] discovered context window for %s: %d", modelName, *discovered)
+				logging.For(logging.Exec).Infof("discovered context window for %s: %d", modelName, *discovered)
 			}
 		}
 	}
@@ -560,7 +561,7 @@ func (te *TaskExecutor) prepareMergeConflictTurn(setup *taskExecSetup, lc *loopC
 	if err != nil {
 		// No instructions, but still continue: the conflict is in the worktree either way,
 		// and the model can read `git status` for itself.
-		log.Printf("[merge] task=%s failed to render merge conflict prompt: %v", setup.task.ID, err)
+		logging.For(logging.Merge).With(logging.TaskID, setup.task.ID).Warnf("failed to render merge conflict prompt: %v", err)
 	} else {
 		queueAdvisory(lc, advisory{kind: advisoryMergeConflict, severity: "error", text: prompt})
 	}
@@ -597,7 +598,7 @@ func setSystemPrompt(messages []types.ChatMessage, prompt string) []types.ChatMe
 		messages[0].Content = prompt
 		return messages
 	}
-	log.Printf("[summarize] warning: conversation has no system message at index 0; prepending one to carry the summary")
+	logging.For(logging.Summarize).Infof("warning: conversation has no system message at index 0; prepending one to carry the summary")
 	return append([]types.ChatMessage{{Role: "system", Content: prompt}}, messages...)
 }
 
@@ -639,7 +640,7 @@ func (te *TaskExecutor) applySummarization(setup *taskExecSetup, ctx context.Con
 	}
 	sumResult, err := te.summarizeContext(ctx, messages, serverURL, modelName, prevSummary)
 	if err != nil {
-		log.Printf("[summarize] task=%s summarization failed: %v", taskID, err)
+		logging.For(logging.Summarize).With(logging.TaskID, taskID).Warnf("summarization failed: %v", err)
 		clearFlag()
 		if resultCh != nil {
 			resultCh <- err
@@ -693,7 +694,7 @@ func (te *TaskExecutor) applySummarization(setup *taskExecSetup, ctx context.Con
 		"predicted_ms":     sumResult.predictedMs,
 		"model_name":       modelName,
 	}})
-	log.Printf("[summarize] task=%s summarized context (messages preserved, LLM context compressed)", taskID)
+	logging.For(logging.Summarize).With(logging.TaskID, taskID).Infof("summarized context (messages preserved, LLM context compressed)")
 
 	clearFlag()
 
@@ -736,7 +737,7 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 	}
 
 	hint := buildHint(loopType, target)
-	log.Printf("[loop] task=%s detected loop type=%d (streak %d/%d), target=%s", taskID, loopType, detector.loopStreak, maxLoopHints, target)
+	logging.For(logging.Exec).With(logging.TaskID, taskID).Infof("detected loop type=%d (streak %d/%d), target=%s", loopType, detector.loopStreak, maxLoopHints, target)
 	hintIdx := len(*messages)
 	*messages = append(*messages, types.ChatMessage{Role: "user", Content: hint})
 	detector.recordHintIndex(hintIdx)
@@ -768,11 +769,11 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 // container (start, plan/build-mode switch, agent config change, bridge recovery) and share
 // it, so a new field cannot be set in three of them. Only the image comes from the caller -
 // only EnsureImageForProject knows what it settled on.
-func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, planMode bool) kanban_sandbox.SandboxOpts {
+func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, planMode bool) sandbox.SandboxOpts {
 	// Everything the container may see on the host comes from the project's own configuration, which is
 	// why all four create paths assemble their options here: a field set in one of them and not the
 	// others is a container that changes shape depending on which way it was started.
-	return kanban_sandbox.SandboxOpts{
+	return sandbox.SandboxOpts{
 		BaseImage:        image,
 		NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
 		MemoryLimit:      setup.sandboxOpts.MemoryLimit,
@@ -789,7 +790,7 @@ func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, pl
 // setupSandbox creates or reuses a sandbox container and connects to the agent.
 // Returns the image used, the agent client, and any assigned ports.
 // The caller is responsible for creating callbacks from the agent client.
-func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *sandbox.Client, []types.AssignedPort, error) {
+func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Client, []types.AssignedPort, error) {
 	task := setup.task
 	projectID := setup.projectID
 	worktreePath := setup.worktreePath
@@ -829,7 +830,7 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *sandbox.Cli
 		if createErr != nil {
 			return "", nil, nil, fmt.Errorf("failed to create sandbox: %w", createErr)
 		}
-		log.Printf("[sandbox] task=%s sandbox created with image %s", task.ID, imageToUse)
+		logging.For(logging.Sandbox).With(logging.TaskID, task.ID).Infof("sandbox created with image %s", imageToUse)
 		// Store and broadcast assigned ports (carried on the task object)
 		if len(assignedPorts) > 0 {
 			task.AssignedPorts = assignedPorts
@@ -838,7 +839,7 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *sandbox.Cli
 		}
 		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Sandbox container started"}})
 	} else {
-		log.Printf("[sandbox] task=%s reusing existing sandbox container", task.ID)
+		logging.For(logging.Sandbox).With(logging.TaskID, task.ID).Infof("reusing existing sandbox container")
 	}
 
 	// Get agent client for tool calls (required — sandbox creation ensures agent is running)

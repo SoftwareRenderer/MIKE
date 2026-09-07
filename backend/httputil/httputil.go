@@ -6,10 +6,10 @@ package httputil
 import (
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 
 	"kanban/backend/errs"
+	"kanban/pkg/logging"
 )
 
 // JSONResponse sends a JSON response with the given status code.
@@ -84,6 +84,6 @@ func Fail(w http.ResponseWriter, err error, operation, notFoundMessage string) {
 		JSONError(w, http.StatusNotFound, notFoundMessage)
 		return
 	}
-	log.Printf("%s failed: %v", operation, err)
+	logging.For(logging.HTTP).Errorf("%s failed: %v", operation, err)
 	JSONError(w, http.StatusInternalServerError, "internal error")
 }

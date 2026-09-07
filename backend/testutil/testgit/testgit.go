@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"kanban/backend/git"
 )
 
 // Identity written into every repository created here.
@@ -59,7 +61,7 @@ func GitOutput(t *testing.T, dir string, args ...string) string {
 func gitCmd(t *testing.T, dir string, args ...string) *exec.Cmd {
 	t.Helper()
 	all := append(append([]string{}, identityArgs...), args...)
-	cmd := exec.Command("git", all...)
+	cmd := git.Command("", all...)
 	cmd.Dir = dir
 	return cmd
 }

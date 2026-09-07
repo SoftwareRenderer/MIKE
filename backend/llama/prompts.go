@@ -1,13 +1,13 @@
 package llama
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	"time"
 
 	"kanban/backend/prompts"
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 )
 
 // BuildSystemPrompt creates the system prompt for task execution. worktreePath is where AGENTS.md
@@ -51,7 +51,7 @@ func BuildSystemPrompt(worktreePath, cwd, summary, skillsMount string, operating
 
 	result, err := prompts.RenderSystemPrompt(data)
 	if err != nil {
-		log.Printf("warning: rendering system prompt failed: %v", err)
+		logging.For(logging.LLM).Warnf("warning: rendering system prompt failed: %v", err)
 		return ""
 	}
 	return result

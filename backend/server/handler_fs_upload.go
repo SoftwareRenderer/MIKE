@@ -4,13 +4,13 @@ import (
 	"errors"
 	"io"
 	"kanban/backend/httputil"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"kanban/backend/fsutil"
+	"kanban/pkg/logging"
 )
 
 // Uploads are the only fs write whose body is not JSON: /api/fs/write's `content`
@@ -114,7 +114,7 @@ func (s *Server) handleFSUpload(w http.ResponseWriter, r *http.Request) {
 	// MaxBytesReader already capped the body; this check is the one that names the file.
 	content, err := io.ReadAll(io.LimitReader(file, MaxUploadSize+1))
 	if err != nil {
-		log.Printf("fs upload read failed: %v", err)
+		logging.For(logging.HTTP).Errorf("fs upload read failed: %v", err)
 		JSONError(w, http.StatusInternalServerError, "failed to read uploaded file")
 		return
 	}

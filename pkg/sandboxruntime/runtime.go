@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"kanban/pkg/logging"
 )
 
 // imageRefPattern matches valid OCI/Docker image references.
@@ -113,18 +114,14 @@ const PodmanWaitDelay = 10 * time.Second
 
 // PodmanExec runs a podman command and returns the combined output.
 func (r *Runtime) PodmanExec(args ...string) ([]byte, error) {
-	c := exec.Command("podman", args...)
-	c.WaitDelay = PodmanWaitDelay
-	return c.CombinedOutput()
+	return PodmanCommand(args...).CombinedOutput()
 }
 
 // PodmanExecContext is like PodmanExec but bounds execution to the context's
 // deadline. Use it for best-effort calls (e.g. startup cleanup) where a wedged
 // podman must not block the caller indefinitely.
 func (r *Runtime) PodmanExecContext(ctx context.Context, args ...string) ([]byte, error) {
-	c := exec.CommandContext(ctx, "podman", args...)
-	c.WaitDelay = PodmanWaitDelay
-	return c.CombinedOutput()
+	return PodmanCommandContext(ctx, args...).CombinedOutput()
 }
 
 // RemoveContainer force-removes a container, handling overlay filesystem issues
@@ -175,17 +172,23 @@ const staleCleanupTimeout = 15 * time.Second
 // the host can run a gVisor container at all, and both fail closed the same way.
 func GVisorAvailable(logTag string) bool {
 	if _, err := exec.LookPath("runsc"); err != nil {
-		log.Printf("[%s] runsc not found in PATH: %v", logTag, err)
+		logging.For(logging.Runtime).Infof("runsc not found in PATH (probe %s): %v", logTag, err)
 		return false
 	}
-	out, err := exec.Command("runsc", "--version").CombinedOutput()
+	runscCmd := exec.Command("runsc", "--version")
+	// Not PodmanCommand: that constructor pins the binary to podman, and this probe must run runsc
+	// (a host with podman but no runsc is the exact case being detected). The environment is the
+	// same allowlist — it is the container-runtime CLI environment, and runsc needs none of it.
+	runscCmd.Env = PodmanEnv()
+	runscCmd.WaitDelay = PodmanWaitDelay
+	out, err := runscCmd.CombinedOutput()
 	if err != nil {
-		log.Printf("[%s] runsc version check failed: %v (%s)", logTag, err, out)
+		logging.For(logging.Runtime).Warnf("runsc version check failed (probe %s): %v (%s)", logTag, err, out)
 		return false
 	}
-	log.Printf("[%s] runsc version: %s", logTag, strings.TrimSpace(string(out)))
+	logging.For(logging.Runtime).Infof("runsc version (probe %s): %s", logTag, strings.TrimSpace(string(out)))
 	if _, err := exec.LookPath("podman"); err != nil {
-		log.Printf("[%s] podman not found in PATH: %v", logTag, err)
+		logging.For(logging.Runtime).Infof("podman not found in PATH (probe %s): %v", logTag, err)
 		return false
 	}
 	return true
@@ -226,16 +229,16 @@ func (r *Runtime) CleanupStaleContainers(logTag, nameFilter string) []string {
 
 	out, err := r.PodmanExecContext(ctx, "ps", "-a", "--filter", "name="+nameFilter, "--format", "{{.Names}}")
 	if err != nil {
-		log.Printf("[%s] startup: failed to list stale containers: %v", logTag, err)
+		logging.For(logging.Runtime).Warnf("startup: failed to list stale containers (probe %s): %v", logTag, err)
 		return nil
 	}
 	var removed []string
 	for _, name := range staleContainerNames(strings.Fields(strings.TrimSpace(string(out))), r.IsRunning) {
 		if rmErr := r.RemoveContainer(name); rmErr != nil {
-			log.Printf("[%s] startup: failed to remove stale container %s: %v", logTag, name, rmErr)
+			logging.For(logging.Runtime).Warnf("startup: failed to remove stale container %s (probe %s): %v", name, logTag, rmErr)
 			continue
 		}
-		log.Printf("[%s] startup: removed stale container %s", logTag, name)
+		logging.For(logging.Runtime).Infof("startup: removed stale container %s (probe %s)", name, logTag)
 		removed = append(removed, name)
 	}
 	return removed
@@ -455,7 +458,7 @@ func (r *Runtime) ApplyMemoryLimit(name string, limitMB int) error {
 	if err := os.WriteFile(filepath.Join(dir, "memory.swap.max"), []byte("0"), 0); err != nil {
 		// Non-fatal: hosts without a swap controller still enforce memory.max
 		// as a hard cap (there is no swap to absorb the overshoot).
-		log.Printf("[sandboxruntime] %s: could not set memory.swap.max=0 (swap not isolated): %v", name, err)
+		logging.For(logging.Runtime).Warnf("%s: could not set memory.swap.max=0 (swap not isolated): %v", name, err)
 	}
 	return nil
 }
@@ -480,7 +483,7 @@ func clearCgroupMemoryLimit(dir string) error {
 		return fmt.Errorf("clear memory.max in %s: %w", dir, err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "memory.swap.max"), []byte("max"), 0); err != nil {
-		log.Printf("[sandboxruntime] could not set memory.swap.max=max in %s: %v", dir, err)
+		logging.For(logging.Runtime).Warnf("could not set memory.swap.max=max in %s: %v", dir, err)
 	}
 	return nil
 }

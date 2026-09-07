@@ -1,18 +1,16 @@
 package httputil
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"kanban/backend/errs"
+	"kanban/pkg/logging"
 )
 
 // decodeError reads the {"error": "..."} envelope JSONError/Fail write.
@@ -53,10 +51,8 @@ func TestFailAnswersNotFoundWithTheCallersMessage(t *testing.T) {
 func TestFailTurnsAnyOtherErrorIntoServerFaultWithoutLeakingDetail(t *testing.T) {
 	const internal = "no such table: tasks"
 
-	var logged bytes.Buffer
-	out := log.Writer()
-	log.SetOutput(&logged)
-	defer log.SetOutput(out)
+	logged, restore := logging.TestSink()
+	defer restore()
 
 	rec := httptest.NewRecorder()
 	Fail(rec, errors.New(internal), "get project", "project not found")
@@ -79,9 +75,10 @@ func TestFailTurnsAnyOtherErrorIntoServerFaultWithoutLeakingDetail(t *testing.T)
 
 // A nil error is a handler bug; answering 500 surfaces it instead of a phantom 404.
 func TestFailTreatsNilErrorAsServerFault(t *testing.T) {
-	out := log.Writer()
-	log.SetOutput(io.Discard)
-	defer log.SetOutput(out)
+	// Captured rather than discarded: silence is indistinguishable from "the fault was never
+	// logged", which is the thing the sibling test asserts happens.
+	_, restore := logging.TestSink()
+	defer restore()
 
 	rec := httptest.NewRecorder()
 	Fail(rec, nil, "get task", "task not found")

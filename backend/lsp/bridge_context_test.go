@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	sandbox "kanban/pkg/bridge"
+	"kanban/pkg/bridge"
 )
 
 // A bridge whose peer never reads is a language server that stopped answering. These tests pin
@@ -18,11 +18,11 @@ import (
 // write half, so Write blocks; nothing writes to the read half, so the readLoop blocks and
 // IsAlive stays true — which is what makes the caller's deadline the only thing that can end
 // a call.
-func wedgedBridge(t *testing.T) *sandbox.Client {
+func wedgedBridge(t *testing.T) *bridge.Client {
 	t.Helper()
 	_, writeEnd := io.Pipe() // its reader never reads, so every Write blocks forever
 	readEnd, _ := io.Pipe()  // nothing ever writes to it, so the readLoop blocks forever
-	cl := sandbox.NewClient(writeEnd, readEnd)
+	cl := bridge.NewClient(writeEnd, readEnd)
 	t.Cleanup(func() {
 		_ = writeEnd.Close()
 		_ = readEnd.Close()
@@ -86,7 +86,7 @@ func TestLSPNotifyEndsAtCallerDeadline(t *testing.T) {
 	if elapsed > 3*time.Second {
 		t.Errorf("LSPNotify took %v: the caller's 200ms deadline must end the write, not the %v ceiling", elapsed, lspNotifyTimeout)
 	}
-	if !errors.Is(err, sandbox.ErrWriteStalled) {
+	if !errors.Is(err, bridge.ErrWriteStalled) {
 		t.Logf("notify error (expected the stalled-write path): %v", err)
 	}
 }

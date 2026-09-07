@@ -8,11 +8,11 @@ package git
 import (
 	"crypto/sha256"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +22,7 @@ import (
 	"kanban/backend/fsutil"
 	"kanban/backend/store"
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 )
 
 // EmptyTreeHash is the SHA-1 of an empty git tree object.
@@ -93,9 +94,16 @@ var ignoredDirs = map[string]struct{}{
 	".docker":       {},
 }
 
-// IgnoredDirs returns the set of well-known directory names to always skip.
+// IgnoredDirs returns the well-known directory names to always skip.
+//
+// It returns a COPY: handing out the live map let any caller change what every other caller,
+// including the worktree watcher, considers ignorable.
 func IgnoredDirs() map[string]struct{} {
-	return ignoredDirs
+	out := make(map[string]struct{}, len(ignoredDirs))
+	for k, v := range ignoredDirs {
+		out[k] = v
+	}
+	return out
 }
 
 // ShouldIgnorePath returns true if any path component (directory name) in the
@@ -155,7 +163,7 @@ func IsGitIgnored(repoRoot, relPath string) bool {
 			return false
 		}
 	}
-	cmd := exec.Command("git", "check-ignore", "--quiet", "--", relPath)
+	cmd := Command("", "check-ignore", "--quiet", "--", relPath)
 	cmd.Dir = repoRoot
 	// Exit code 0 means ignored, 1 means not ignored, 128 means fatal error.
 	// Any error (not ignored or git unavailable) → not ignored.
@@ -213,27 +221,71 @@ func (wm *WorktreeManager) GetTaskByID(taskID string) (*types.Task, error) {
 	return wm.store.GetTaskByID(taskID)
 }
 
-// getProjectWorktreeMu returns a per-project mutex for serializing worktree creation.
+// getProjectWorktreeMu returns the per-project worktree mutex. Private on purpose: a mutex that
+// leaves this package can be stored or copied, and copying a WorktreeManager (which the executor's
+// tests do) swaps which locks callers find - two callers then serialize on different locks while
+// both believe they hold one.
 func (wm *WorktreeManager) getProjectWorktreeMu(projectID string) *sync.Mutex {
 	mu, _ := wm.worktreeMu.LoadOrStore(projectID, &sync.Mutex{})
 	return mu.(*sync.Mutex)
 }
 
-// GetProjectStashMu returns a per-project mutex for serializing stash operations.
-// Stash is repo-wide, so concurrent stash operations from different worktrees must be serialized.
-func (wm *WorktreeManager) GetProjectStashMu(projectID string) *sync.Mutex {
-	mu, _ := wm.stashMu.LoadOrStore(projectID, &sync.Mutex{})
-	return mu.(*sync.Mutex)
+// worktreeLockTimeout is how long a caller waits for a project's worktree lock. Creating a worktree
+// runs a handful of git commands, so a longer wait means something is wedged.
+const worktreeLockTimeout = 30 * time.Second
+
+// tryLockProjectWorktree waits up to timeout for the project's worktree lock, and returns the
+// release function. On timeout it returns (nil, false) without leaving the mutex held: the goroutine
+// still blocked in Lock eventually wins it, and the previous inline version abandoned that goroutine,
+// so the lock was taken and never released and every later CreateWorktree for the project timed out
+// for the life of the process. The reaper hands a late win straight back.
+func (wm *WorktreeManager) tryLockProjectWorktree(projectID string, timeout time.Duration) (func(), bool) {
+	m := wm.getProjectWorktreeMu(projectID)
+	got := make(chan struct{})
+	go func() {
+		m.Lock()
+		close(got)
+	}()
+
+	select {
+	case <-got:
+		return m.Unlock, true
+	case <-time.After(timeout):
+		go func() {
+			<-got
+			m.Unlock()
+		}()
+		return nil, false
+	}
 }
 
-// GetProjectMergeMu returns a per-project mutex for serializing merges that
-// operate on the project's main checkout (root-task merges). The main checkout
-// has a single HEAD/index — interleaved merges clobber each other's checkout,
-// stashes, and restore. Lock order: always acquired BEFORE (never after) the
-// project stash mutex.
-func (wm *WorktreeManager) GetProjectMergeMu(projectID string) *sync.Mutex {
-	mu, _ := wm.mergeMu.LoadOrStore(projectID, &sync.Mutex{})
-	return mu.(*sync.Mutex)
+// LockProjectStash acquires the per-project stash lock and returns the function that releases it.
+// Stash is repo-wide - one stack for every worktree of the project, holding the user's own entries -
+// so concurrent stash operations must not interleave. When the critical section is the enclosing
+// block, call it as:
+//
+//	defer wm.LockProjectStash(projectID)()
+//
+// and capture the release function when it is not.
+func (wm *WorktreeManager) LockProjectStash(projectID string) func() {
+	return wm.projectLock(&wm.stashMu, projectID)
+}
+
+// LockProjectMerge acquires the per-project merge lock and returns the function that releases it.
+// The main checkout has a single HEAD and index, so interleaved merges clobber each other's checkout,
+// stashes and restore. Lock order: always acquired BEFORE (never after) the project stash lock.
+func (wm *WorktreeManager) LockProjectMerge(projectID string) func() {
+	return wm.projectLock(&wm.mergeMu, projectID)
+}
+
+// projectLock is the one implementation of the per-project lock table. The *sync.Map is taken by
+// pointer so the three tables stay distinct - an accidental wm.stashMu = wm.mergeMu would merge two
+// lock domains.
+func (wm *WorktreeManager) projectLock(table *sync.Map, projectID string) func() {
+	mu, _ := table.LoadOrStore(projectID, &sync.Mutex{})
+	m := mu.(*sync.Mutex)
+	m.Lock()
+	return m.Unlock
 }
 
 // WorktreePath returns the filesystem path for a task's worktree.
@@ -280,19 +332,11 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 	worktreePath := filepath.Join(worktreesDir, projectID, taskID)
 
 	// Acquire per-project mutex with timeout
-	mu := wm.getProjectWorktreeMu(projectID)
-	done := make(chan struct{})
-	go func() {
-		mu.Lock()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(30 * time.Second):
+	unlockWorktree, locked := wm.tryLockProjectWorktree(projectID, worktreeLockTimeout)
+	if !locked {
 		return "", "", fmt.Errorf("timeout waiting for worktree lock (another task is initializing)")
 	}
-	defer mu.Unlock()
+	defer unlockWorktree()
 
 	// Keep worktree content out of the project's git state when the worktrees
 	// dir lives inside the project directory.
@@ -328,7 +372,7 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 	staleRegPath := filepath.Join(project.Path, ".git", "worktrees", taskID)
 	_ = os.RemoveAll(staleRegPath)
 
-	cmd := exec.Command("git", "worktree", "add", "--detach", worktreePath, sourceRef)
+	cmd := Command("", "worktree", "add", "--detach", worktreePath, sourceRef)
 	cmd.Dir = project.Path
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("create worktree: %s: %w", string(out), err)
@@ -404,17 +448,17 @@ func (wm *WorktreeManager) ensureWorktreesExcluded(project *types.Project, workt
 		}
 	}
 	if err := os.MkdirAll(filepath.Join(gitDir, "info"), 0o755); err != nil {
-		log.Printf("[worktree] project=%s failed to create info dir: %v", project.ID, err)
+		logging.For(logging.Worktree).With(logging.ProjectID, project.ID).Warnf("failed to create info dir: %v", err)
 		return
 	}
 	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		log.Printf("[worktree] project=%s failed to open info/exclude: %v", project.ID, err)
+		logging.For(logging.Worktree).With(logging.ProjectID, project.ID).Warnf("failed to open info/exclude: %v", err)
 		return
 	}
 	defer f.Close()
 	if _, err := f.WriteString("\n# kanban worktrees (kept out of project status)\n" + entry + "\n"); err != nil {
-		log.Printf("[worktree] project=%s failed to write info/exclude: %v", project.ID, err)
+		logging.For(logging.Worktree).With(logging.ProjectID, project.ID).Warnf("failed to write info/exclude: %v", err)
 	}
 }
 
@@ -473,7 +517,7 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	// match any task ID but are still in use.
 	activeBranches, err := wm.store.GetAllTaskBranches()
 	if err != nil {
-		log.Printf("[gc] error getting task branches: %v", err)
+		logging.For(logging.Worktree).Warnf("error getting task branches: %v", err)
 	}
 	activeBranchSet := make(map[string]bool, len(activeBranches))
 	for _, b := range activeBranches {
@@ -483,7 +527,7 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	// Get all active thread IDs for orphaned thread branch detection
 	activeThreadIDs, err := wm.store.GetAllThreadIDs()
 	if err != nil {
-		log.Printf("[gc] error getting thread IDs: %v", err)
+		logging.For(logging.Worktree).Warnf("error getting thread IDs: %v", err)
 	}
 	activeThreadSet := make(map[string]bool, len(activeThreadIDs))
 	for _, id := range activeThreadIDs {
@@ -492,7 +536,7 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 
 	projects, err := wm.store.ListProjects()
 	if err != nil {
-		log.Printf("[gc] error listing projects: %v", err)
+		logging.For(logging.Worktree).Warnf("error listing projects: %v", err)
 		return 0, nil
 	}
 
@@ -527,12 +571,12 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 				if !activeSet[taskName] {
 					orphanPath := filepath.Join(projectDir, taskName)
 					if dryRun {
-						log.Printf("[gc] would remove orphaned worktree: %s", orphanPath)
+						logging.For(logging.Worktree).Infof("would remove orphaned worktree: %s", orphanPath)
 						removed++
 					} else {
-						log.Printf("[gc] removing orphaned worktree: %s", orphanPath)
+						logging.For(logging.Worktree).Infof("removing orphaned worktree: %s", orphanPath)
 						if err := os.RemoveAll(orphanPath); err != nil {
-							log.Printf("[gc] error removing %s: %v", orphanPath, err)
+							logging.For(logging.Worktree).Warnf("error removing %s: %v", orphanPath, err)
 						} else {
 							removed++
 						}
@@ -544,7 +588,17 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 
 	// Prune git worktree registrations and orphaned branches per project
 	for _, p := range projects {
-		wm.gitRun(p.Path, "worktree", "prune")
+		// The same lock CreateWorktree takes: prune rewrites the repository's .git/worktrees/ registry while
+		// add writes into it. Scoped to the prune, not the whole GC body, because that body continues and a
+		// lock released on some paths only is how a permanently-locked project is born.
+		if unlockWorktree, locked := wm.tryLockProjectWorktree(p.ID, worktreeLockTimeout); locked {
+			wm.gitRun(p.Path, "worktree", "prune")
+			unlockWorktree()
+		} else {
+			// Branch GC is skipped with it: this project is busy, and the next GC round covers it.
+			logging.For(logging.Worktree).Infof("skipping project %s this round: a worktree operation holds the lock", p.Name)
+			continue
+		}
 		// Keep slug-named Main branches of active titled tasks: once a fork becomes the
 		// active branch, the slug branch leaves activeBranchSet and would be GC'd.
 		slugPrefixes := taskSlugPrefixSet(wm.store, p.ID)
@@ -561,9 +615,9 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 			taskID := strings.TrimPrefix(branch, "task/")
 			if !activeSet[taskID] && !activeBranchSet[branch] && !slugPrefixes[types.TaskBranchSlugPrefix(branch)] {
 				if dryRun {
-					log.Printf("[gc] would delete orphaned branch %s in project %s", branch, p.Name)
+					logging.For(logging.Worktree).Infof("would delete orphaned branch %s in project %s", branch, p.Name)
 				} else {
-					log.Printf("[gc] deleting orphaned branch %s in project %s", branch, p.Name)
+					logging.For(logging.Worktree).Infof("deleting orphaned branch %s in project %s", branch, p.Name)
 					wm.gitRun(p.Path, "branch", "-D", branch)
 				}
 			}
@@ -581,9 +635,9 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 			threadID := strings.TrimPrefix(branch, "thread/")
 			if !activeThreadSet[threadID] {
 				if dryRun {
-					log.Printf("[gc] would delete orphaned thread branch %s in project %s", branch, p.Name)
+					logging.For(logging.Worktree).Infof("would delete orphaned thread branch %s in project %s", branch, p.Name)
 				} else {
-					log.Printf("[gc] deleting orphaned thread branch %s in project %s", branch, p.Name)
+					logging.For(logging.Worktree).Infof("deleting orphaned thread branch %s in project %s", branch, p.Name)
 					wm.gitRun(p.Path, "branch", "-D", branch)
 				}
 			}
@@ -613,24 +667,24 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 				dropRefs = append(dropRefs, e)
 			}
 		}
-		wm.GetProjectStashMu(p.ID).Lock()
+		unlockStash := wm.LockProjectStash(p.ID)
 		// Reverse order: highest stash index first so refs don't shift.
 		for i := len(dropRefs) - 1; i >= 0; i-- {
 			e := dropRefs[i]
 			if dryRun {
-				log.Printf("[gc] would drop stale stash entry %s in project %s", e.Hash[:8], p.Name)
+				logging.For(logging.Worktree).Infof("would drop stale stash entry %s in project %s", e.Hash[:8], p.Name)
 			} else {
-				log.Printf("[gc] dropping stale stash entry %s in project %s", e.Hash[:8], p.Name)
+				logging.For(logging.Worktree).Infof("dropping stale stash entry %s in project %s", e.Hash[:8], p.Name)
 				_ = wm.gitRun(p.Path, "stash", "drop", e.Ref)
 			}
 		}
-		wm.GetProjectStashMu(p.ID).Unlock()
+		unlockStash()
 	}
 
 	if dryRun {
-		log.Printf("[gc] dry-run complete: %d orphaned worktrees would be removed", removed)
+		logging.For(logging.Worktree).Infof("dry-run complete: %d orphaned worktrees would be removed", removed)
 	} else {
-		log.Printf("[gc] complete: %d orphaned worktrees removed", removed)
+		logging.For(logging.Worktree).Infof("complete: %d orphaned worktrees removed", removed)
 	}
 
 	return removed, nil
@@ -717,13 +771,13 @@ func taskSlugPrefixSet(store worktreeStore, projectID string) map[string]bool {
 func (wm *WorktreeManager) PruneOrphanedBranches(projectID string) int {
 	project, err := wm.store.GetProject(projectID)
 	if err != nil {
-		log.Printf("[prune] error getting project %s: %v", projectID, err)
+		logging.For(logging.Worktree).Warnf("error getting project %s: %v", projectID, err)
 		return 0
 	}
 
 	activeTaskIDs, err := wm.store.GetAllTaskIDs()
 	if err != nil {
-		log.Printf("[prune] error getting task IDs: %v", err)
+		logging.For(logging.Worktree).Warnf("error getting task IDs: %v", err)
 		return 0
 	}
 	activeTaskSet := make(map[string]bool, len(activeTaskIDs))
@@ -734,7 +788,7 @@ func (wm *WorktreeManager) PruneOrphanedBranches(projectID string) int {
 	// Also check branch names referenced by tasks (slugified names won't match task IDs)
 	activeBranches, err := wm.store.GetAllTaskBranches()
 	if err != nil {
-		log.Printf("[prune] error getting task branches: %v", err)
+		logging.For(logging.Worktree).Warnf("error getting task branches: %v", err)
 	}
 	activeBranchSet := make(map[string]bool, len(activeBranches))
 	for _, b := range activeBranches {
@@ -743,7 +797,7 @@ func (wm *WorktreeManager) PruneOrphanedBranches(projectID string) int {
 
 	activeThreadIDs, err := wm.store.GetAllThreadIDs()
 	if err != nil {
-		log.Printf("[prune] error getting thread IDs: %v", err)
+		logging.For(logging.Worktree).Warnf("error getting thread IDs: %v", err)
 	}
 	activeThreadSet := make(map[string]bool, len(activeThreadIDs))
 	for _, id := range activeThreadIDs {
@@ -762,7 +816,7 @@ func (wm *WorktreeManager) PruneOrphanedBranches(projectID string) int {
 			}
 			taskID := strings.TrimPrefix(branch, "task/")
 			if !activeTaskSet[taskID] && !activeBranchSet[branch] {
-				log.Printf("[prune] deleting orphaned branch %s in project %s", branch, project.Name)
+				logging.For(logging.Worktree).Infof("deleting orphaned branch %s in project %s", branch, project.Name)
 				wm.gitRun(project.Path, "branch", "-D", branch)
 				removed++
 			}
@@ -779,7 +833,7 @@ func (wm *WorktreeManager) PruneOrphanedBranches(projectID string) int {
 			}
 			threadID := strings.TrimPrefix(branch, "thread/")
 			if !activeThreadSet[threadID] {
-				log.Printf("[prune] deleting orphaned thread branch %s in project %s", branch, project.Name)
+				logging.For(logging.Worktree).Infof("deleting orphaned thread branch %s in project %s", branch, project.Name)
 				wm.gitRun(project.Path, "branch", "-D", branch)
 				removed++
 			}
@@ -787,7 +841,7 @@ func (wm *WorktreeManager) PruneOrphanedBranches(projectID string) int {
 	}
 
 	if removed > 0 {
-		log.Printf("[prune] project %s: removed %d orphaned branches", project.Name, removed)
+		logging.For(logging.Worktree).Infof("project %s: removed %d orphaned branches", project.Name, removed)
 	}
 
 	return removed
@@ -920,15 +974,19 @@ type TrackedDiffFile struct {
 // Tracked is a per-file map for incremental updates. Diff is the legacy
 // monolithic unified diff string (kept for backward compatibility).
 type TaskDiff struct {
-	Diff              string                      `json:"diff"`
-	CommittedDiff     string                      `json:"-"` // raw diff of committed changes since baseRef (for hash computation)
-	Tracked           map[string]*TrackedDiffFile `json:"-"` // per-file parsed diffs (not JSON-serialized in legacy format)
-	Untracked         []UntrackedFile             `json:"untracked"`
-	ShortStat         string                      `json:"short_stat"`
-	TruncatedFiles    []string                    `json:"truncated_files,omitempty"`
-	OriginalFileStats map[string]FileChangeStats  `json:"original_file_stats,omitempty"`
-	StagedHash        string                      `json:"-"` // SHA-256 of staged state; changes diff hash when files are staged/unstaged
-	StagedPaths       []string                    `json:"-"` // paths currently staged in the index
+	Diff          string                      `json:"diff"`
+	CommittedDiff string                      `json:"-"` // raw diff of committed changes since baseRef (for hash computation)
+	Tracked       map[string]*TrackedDiffFile `json:"-"` // per-file parsed diffs (not JSON-serialized in legacy format)
+	// ParsedFiles is the diff as an ordered array, present only when the caller asked for ?parsed=1, so
+	// the browser does not run a second grammar over the same patch text. Not named `files`: this route's
+	// manifest response already uses that key for a keyed map of hashes.
+	ParsedFiles       []TrackedDiffFile          `json:"parsed_files,omitempty"`
+	Untracked         []UntrackedFile            `json:"untracked"`
+	ShortStat         string                     `json:"short_stat"`
+	TruncatedFiles    []string                   `json:"truncated_files,omitempty"`
+	OriginalFileStats map[string]FileChangeStats `json:"original_file_stats,omitempty"`
+	StagedHash        string                     `json:"-"` // SHA-256 of staged state; changes diff hash when files are staged/unstaged
+	StagedPaths       []string                   `json:"-"` // paths currently staged in the index
 }
 
 // FileChangeStats holds the original added/removed line counts for a file.
@@ -1141,6 +1199,21 @@ func countFileChanges(diff string) map[string]FileChangeStats {
 	return stats
 }
 
+// ParseUnifiedDiff parses raw git diff output into per-file entries, sorted by path. This is the one
+// diff grammar in the product - the frontend used to carry a second one over the same text, and they
+// drifted. backend/git/diff_parse_parity_test.go holds the cases the old browser parser had.
+func ParseUnifiedDiff(patch string) []TrackedDiffFile {
+	files := parseUnifiedDiffToFiles(patch, nil, nil, nil)
+	out := make([]TrackedDiffFile, 0, len(files))
+	for _, f := range files {
+		out = append(out, *f)
+	}
+	slices.SortFunc(out, func(a, b TrackedDiffFile) int {
+		return strings.Compare(a.Path, b.Path)
+	})
+	return out
+}
+
 // parseUnifiedDiffToFiles parses a unified diff into per-file TrackedDiffFile entries.
 // This mirrors the frontend parseUnifiedDiff but runs on the backend for caching.
 // annotations provides metadata for binary/large files whose hunks were replaced.
@@ -1195,6 +1268,39 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 			if current != nil {
 				current.IsDeleted = true
 			}
+			continue
+		}
+		// A file that did not exist before has no old side to diff against. git normally also writes
+		// `new file mode`, but not always — the frontend parser read /dev/null as a signal of its own,
+		// and a brand-new file shown as modified is a badge lie rather than a cosmetic miss.
+		if line == "--- /dev/null" {
+			if current != nil {
+				current.IsNew = true
+			}
+			continue
+		}
+		if line == "+++ /dev/null" {
+			if current != nil {
+				current.IsDeleted = true
+			}
+			continue
+		}
+		// git's own verdict that the file cannot be diffed as text. Without this the notice was dropped
+		// on the floor: a binary file in a commit-to-commit diff (which has no annotations — only the
+		// task-diff pipeline produces those) came back with no size, no flag and no rows, so the panel
+		// rendered an empty file that looks like a bug rather than a file git refuses to diff.
+		if strings.HasPrefix(line, "Binary files ") {
+			if current != nil {
+				current.IsBinary = true
+				// The row is emitted only when there is no annotation for this file. filterLargeBinaryDiffs
+				// keeps this line AND appends `# binary-file: N`, and the task panel renders such a file
+				// from FileSize/IsBinary — adding a row there would print the notice as prose under the
+				// size label. With no annotation, this line is the only explanation the file will get.
+				if annotations[current.Path] == nil {
+					current.Rows = append(current.Rows, DiffRow{LineNumber: nil, Variant: "context", Text: line})
+				}
+			}
+			inHunk = false
 			continue
 		}
 		if strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
@@ -1422,8 +1528,7 @@ func (wm *WorktreeManager) dropMatchingStashes(projectID string, filter func(sub
 // DropStashEntriesForTask removes kanban-labeled stash entries for the given task.
 // Drops by commit hash — no index renumbering issues.
 func (wm *WorktreeManager) DropStashEntriesForTask(projectID, taskID string) error {
-	wm.GetProjectStashMu(projectID).Lock()
-	defer wm.GetProjectStashMu(projectID).Unlock()
+	defer wm.LockProjectStash(projectID)()
 	return wm.dropMatchingStashes(projectID, func(subject string) bool {
 		return matchKanbanTaskID(subject, taskID)
 	})
@@ -1432,8 +1537,7 @@ func (wm *WorktreeManager) DropStashEntriesForTask(projectID, taskID string) err
 // DropStashEntriesForBranch removes stash entries for the given branch.
 // Drops by commit hash — no index renumbering issues.
 func (wm *WorktreeManager) DropStashEntriesForBranch(projectID string, branchName string) error {
-	wm.GetProjectStashMu(projectID).Lock()
-	defer wm.GetProjectStashMu(projectID).Unlock()
+	defer wm.LockProjectStash(projectID)()
 	branchMarker := " " + branchName + ":"
 	return wm.dropMatchingStashes(projectID, func(subject string) bool {
 		return strings.Contains(subject, branchMarker)
@@ -1840,21 +1944,68 @@ func extractBlobHash(line string) string {
 
 // extractDiffPaths pulls both a/ and b/ paths from "diff --git a/X b/Y" header.
 func extractDiffPaths(line string) (aPath, bPath string) {
-	line = strings.TrimPrefix(line, "diff --git ")
+	rest := strings.TrimPrefix(line, "diff --git ")
+
+	// git C-quotes a path when it contains a double quote, a backslash or a control character, so the
+	// header arrives as `diff --git "a/quo\"te.ts" "b/quo\"te.ts"`. Two things went wrong if we did not
+	// notice: the `a/` prefix test below failed (the token starts with a quote), and the ` b/` separator
+	// was inside the quoting — so the path came back empty and EVERY such file in one diff landed in a
+	// single entry keyed by "", their rows merged. Quoting also moves the separator from ` b/` to `" "`.
+	if strings.HasPrefix(rest, `"`) {
+		aTok, bTok := splitQuotedPathPair(rest)
+		// The a/ and b/ prefixes are INSIDE the quoting (git quotes the whole `b/path` token), so they
+		// are stripped after unquoting, not before.
+		return stripDiffSide(unquoteGitPath(aTok), "a/"), stripDiffSide(unquoteGitPath(bTok), "b/")
+	}
+
 	// Parse "a/path b/path"
-	if !strings.HasPrefix(line, "a/") {
+	if !strings.HasPrefix(rest, "a/") {
 		return "", ""
 	}
-	line = line[2:] // strip "a/"
-	aPath = line
+	path := rest[2:] // strip "a/"
+	aPath = path
 	// Find " b/" separator
-	if idx := strings.Index(line, " b/"); idx >= 0 {
-		aPath = line[:idx]
-		bPath = line[idx+3:] // strip " b/"
+	if idx := strings.Index(path, " b/"); idx >= 0 {
+		aPath = path[:idx]
+		bPath = path[idx+3:] // strip " b/"
 	} else {
 		bPath = aPath
 	}
 	return aPath, bPath
+}
+
+// stripDiffSide removes a leading "a/" or "b/" diff-side prefix.
+func stripDiffSide(path, side string) string {
+	return strings.TrimPrefix(path, side)
+}
+
+// splitQuotedPathPair divides `"a/x" "b/x"` into its two raw quoted tokens, honoring backslash escapes
+// so an escaped quote inside the first path is not mistaken for its end.
+func splitQuotedPathPair(s string) (string, string) {
+	for i := 1; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			i++ // the escaped byte is part of the token, whatever it is
+		case '"':
+			return s[:i+1], strings.TrimSpace(s[i+1:])
+		}
+	}
+	return s, ""
+}
+
+// unquoteGitPath turns a git C-quoted path token into the path itself. strconv.Unquote speaks the same
+// escape language git writes (\", \\, \n, \t, \uXXXX), so it is used rather than a hand-rolled subset.
+func unquoteGitPath(tok string) string {
+	tok = strings.TrimSpace(tok)
+	if len(tok) < 2 || tok[0] != '"' || tok[len(tok)-1] != '"' {
+		return tok
+	}
+	if unq, err := strconv.Unquote(tok); err == nil {
+		return unq
+	}
+	// An escape strconv rejects (git writes \a, for instance) must not lose the path. Return the token
+	// with its outer quotes removed, which is still a usable path and beats the empty string.
+	return tok[1 : len(tok)-1]
 }
 
 // binaryExts is a set of file extensions considered binary.
@@ -1929,17 +2080,18 @@ func (wm *WorktreeManager) gitRun(dir string, args ...string) error {
 // gitRunInGitDir runs git against dir's own gitdir and returns what git printed. The output is the point:
 // git's reason for refusing is on stderr, and a caller that keeps only the exit code cannot tell the user
 // anything ("exit status 1").
+//
+// GIT_DIR is passed as an Env extra rather than by assigning cmd.Env: the assignment would replace
+// the allowlist and the hook fence, and os/exec takes the assignment rather than merging.
 func (wm *WorktreeManager) gitRunInGitDir(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_DIR="+filepath.Join(dir, ".git"))
+	cmd := Command(dir, args...)
+	cmd.Env = Env("GIT_DIR=" + filepath.Join(dir, ".git"))
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
 
 func (wm *WorktreeManager) gitRunOutput(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
+	cmd := Command(dir, args...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -2031,7 +2183,7 @@ func (wm *WorktreeManager) GitRunInWorktreeOutput(taskID string, args ...string)
 func (wm *WorktreeManager) StageIndexedFiles(taskID string) {
 	out, err := wm.GitRunInWorktreeOutput(taskID, "diff", "--staged", "--name-only", "-z", "HEAD")
 	if err != nil {
-		log.Printf("[stage] task=%s failed to list staged files: %v", taskID, err)
+		logging.For(logging.Worktree).With(logging.TaskID, taskID).Warnf("failed to list staged files: %v", err)
 		return
 	}
 	// Output is NUL-separated; the final token after the trailing NUL is empty.
@@ -2046,7 +2198,7 @@ func (wm *WorktreeManager) StageIndexedFiles(taskID string) {
 	}
 	args := append([]string{"add", "--"}, paths...)
 	if err := wm.GitRunInWorktree(taskID, args...); err != nil {
-		log.Printf("[stage] task=%s failed to re-stage %d file(s): %v", taskID, len(paths), err)
+		logging.For(logging.Worktree).With(logging.TaskID, taskID).Warnf("failed to re-stage %d file(s): %v", len(paths), err)
 	}
 }
 
@@ -2130,7 +2282,7 @@ func (wm *WorktreeManager) IsAncestor(taskID, ancestor, descendant string) bool 
 	if err != nil {
 		return false
 	}
-	cmd := exec.Command("git", "-C", worktreePath, "merge-base", "--is-ancestor", ancestor, descendant)
+	cmd := Command("", "-C", worktreePath, "merge-base", "--is-ancestor", ancestor, descendant)
 	return cmd.Run() == nil
 }
 
@@ -2141,7 +2293,7 @@ func (wm *WorktreeManager) IsMergedInto(projectPath, taskBranch, targetBranch st
 	if taskBranch == "" || targetBranch == "" {
 		return false
 	}
-	cmd := exec.Command("git", "-C", projectPath, "merge-base", "--is-ancestor", taskBranch, targetBranch)
+	cmd := Command("", "-C", projectPath, "merge-base", "--is-ancestor", taskBranch, targetBranch)
 	return cmd.Run() == nil
 }
 
@@ -2300,6 +2452,11 @@ func (wm *WorktreeManager) stashHashSet(repoPath string) (map[string]bool, error
 // DropStashByHash drops a stash entry identified by its commit hash.
 // Searches the stash list to find the matching entry and drops it by ref.
 // The caller must hold the project stash mutex.
+//
+// An entry that is not in the list is treated as already gone and returns nil. It used to fall back
+// to dropping stash@{0}, which is the exact hazard this hash-identity API exists to remove: the
+// stack is shared by every worktree of the repository and holds the user's own entries, so the top
+// entry when ours has vanished is somebody else's state.
 func (wm *WorktreeManager) DropStashByHash(repoPath, hash string) error {
 	if hash == "" {
 		return nil
@@ -2314,7 +2471,115 @@ func (wm *WorktreeManager) DropStashByHash(repoPath, hash string) error {
 			return wm.gitRun(repoPath, "stash", "drop", e.Ref)
 		}
 	}
-	return wm.gitRun(repoPath, "stash", "drop", "stash@{0}")
+	return nil
+}
+
+// PopStashByHash restores the stash entry with this commit hash into dir's working tree and drops it,
+// returning whether the entry was found.
+//
+// This and PushStash exist because `git stash pop` pops stash@{0} and has no idea who pushed it. The
+// stack is one per repository - shared by every worktree of the project and holding the user's own
+// entries - so with two merges running, A pops B's work and leaves its own for B. Nothing reports an
+// error. apply-by-hash is the fix, so every stash call site identifies the entry by hash (or, when the
+// push happened elsewhere, by its label - see NewestStashHashForMessage).
+//
+// A failed apply leaves the entry on the stack: dropping what could not be applied would turn a
+// resolvable conflict into lost work. The caller must hold the project stash mutex.
+func (wm *WorktreeManager) PopStashByHash(dir, hash string) (bool, error) {
+	if hash == "" {
+		return false, nil
+	}
+	hash = strings.TrimSpace(hash)
+
+	found := false
+	entries, err := wm.listStashEntries(dir)
+	if err != nil {
+		return false, fmt.Errorf("stash list: %w", err)
+	}
+	for _, e := range entries {
+		if e.Hash == hash || strings.HasPrefix(e.Hash, hash) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		// Not an error: the entry was already dropped or swept. Callers use the result to decide
+		// whether to say so, because silently continuing is how lost work stays lost.
+		return false, nil
+	}
+
+	if out, err := wm.gitRunInGitDir(dir, "stash", "apply", hash); err != nil {
+		// Deliberately not dropped — see the doc comment.
+		return true, fmt.Errorf("stash apply %s: %s", shortHash(hash), gitMessage(out, err))
+	}
+	if err := wm.DropStashByHash(dir, hash); err != nil {
+		// The work is already restored; a leftover entry is cosmetic, not data loss.
+		return true, fmt.Errorf("stash applied but the entry could not be dropped: %w", err)
+	}
+	return true, nil
+}
+
+// shortHash renders a commit hash for a log line or error message.
+func shortHash(hash string) string {
+	if len(hash) <= 8 {
+		return hash
+	}
+	return hash[:8]
+}
+
+// NewestStashHashForMessage returns the hash of the newest entry whose reflog subject carries label.
+//
+// For restores that happen long after the push - a sync-merge keeps the stash across a conflict and
+// restores it once the resolution is committed, in code that never saw the push. The labels embed the
+// task ID, so "newest entry labelled for this task" is ours rather than the newest on a shared stack.
+//
+// A caller still holding the hash from PushStash should use PopStashByHash instead: the label is a weaker
+// identity, and two threads of one task can both have pushed under it. The caller must hold the project
+// stash mutex.
+func (wm *WorktreeManager) NewestStashHashForMessage(dir, label string) (string, bool, error) {
+	if label == "" {
+		return "", false, nil
+	}
+	entries, err := wm.listStashEntries(dir)
+	if err != nil {
+		return "", false, err
+	}
+	for _, e := range entries { // newest first
+		if strings.Contains(e.Subject, label) {
+			return e.Hash, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+// RestoreStashForTask restores the stash entry pushed under `label` (a StashMessageFor* value), if
+// one is on the stack.
+//
+// It combines the label lookup with the restore so that no caller has to reach for `git stash pop`,
+// which pops stash@{0} regardless of who pushed it. found reports whether anything of ours was there.
+//
+// The caller must hold the project stash mutex.
+func (wm *WorktreeManager) RestoreStashForTask(dir, label string) (bool, error) {
+	hash, found, err := wm.NewestStashHashForMessage(dir, label)
+	if err != nil || !found {
+		return false, err
+	}
+	return wm.PopStashByHash(dir, hash)
+}
+
+// DropStashForTask discards the stash entry pushed under label (a StashMessageFor* value), if present.
+//
+// The conflict-resolution path must discard stashed pre-sync edits rather than re-apply them (they are
+// committed by then), and it used to do that with a bare `git stash drop` - which drops stash@{0}, the
+// newest entry whoever pushed it, on a stack shared with the user's own entries.
+//
+// The caller must hold the project stash mutex.
+func (wm *WorktreeManager) DropStashForTask(dir, label string) (bool, error) {
+	hash, found, err := wm.NewestStashHashForMessage(dir, label)
+	if err != nil || !found {
+		return false, err
+	}
+	return true, wm.DropStashByHash(dir, hash)
 }
 
 // maxStashMessage is the maximum length for any stash message.
@@ -2353,7 +2618,7 @@ var fileRe = regexp.MustCompile(`^diff --git a/(.+?) b/`)
 
 // IsGitRepo checks if a path is a git repository.
 func IsGitRepo(path string) bool {
-	cmd := exec.Command("git", "-C", path, "rev-parse", "--git-dir")
+	cmd := Command("", "-C", path, "rev-parse", "--git-dir")
 	cmd.Dir = path
 	return cmd.Run() == nil
 }

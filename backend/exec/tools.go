@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,12 +16,13 @@ import (
 
 	"kanban/backend/git"
 	"kanban/backend/llama"
-	kanban_sandbox "kanban/backend/sandbox"
+	"kanban/backend/sandbox"
 	"kanban/backend/types"
-	sandbox "kanban/pkg/bridge"
+	"kanban/pkg/bridge"
 	"kanban/pkg/bridge/protocol"
 
 	"github.com/google/uuid"
+	"kanban/pkg/logging"
 )
 
 // execFunc runs a shell command. Provided by the sandbox in container mode.
@@ -44,7 +44,7 @@ type editFunc func(ctx context.Context, path string, edits []protocol.Edit) erro
 
 // makeSandboxCallbacks creates exec/read/write/edit callbacks that route through
 // the sandbox agent client inside a container.
-func makeSandboxCallbacks(client *sandbox.Client) (execFunc, execStreamFunc, readFunc, writeFunc, editFunc) {
+func makeSandboxCallbacks(client *bridge.Client) (execFunc, execStreamFunc, readFunc, writeFunc, editFunc) {
 	execCb := func(ctx context.Context, command string, timeout int64) (string, error) {
 		holder, err := client.Bash(ctx, command, timeout)
 		if err != nil {
@@ -561,7 +561,7 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 				summary = fmt.Sprintf("Plan created with %d subtask%s. Awaiting approval.",
 					nestedCount, git.PluralS(nestedCount))
 			}
-			log.Printf("[request_review] plan mode: %s", summary)
+			logging.For(logging.Tools).Infof("plan mode: %s", summary)
 		}
 		return "Task complete", true
 	case llama.ToolCreateTask:
@@ -642,7 +642,7 @@ func parseToolArgs(s string) map[string]any {
 		if len(s) >= 1 && s[0] == '{' && s[len(s)-1] != '}' {
 			return result
 		}
-		log.Printf("[tool] failed to parse args: %v (raw: %q)", err, s)
+		logging.For(logging.Tools).Warnf("failed to parse args: %v (raw: %q)", err, s)
 		return map[string]any{"raw": s}
 	}
 	return result
@@ -656,7 +656,7 @@ func normalizePath(projectName, path string) string {
 		return cleaned
 	}
 	// Strip sandbox mount prefix: /home/sandbox/<projectName>/…
-	if rel, ok := kanban_sandbox.TrimMountPrefix(projectName, cleaned); ok {
+	if rel, ok := sandbox.TrimMountPrefix(projectName, cleaned); ok {
 		return rel
 	}
 	// Other absolute paths — os.Root treats them as relative to root
@@ -763,16 +763,16 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 		Content:   prompt,
 		CreatedAt: now,
 	}); err != nil {
-		log.Printf("[create_task] task=%s failed to store prompt message: %v", newTaskID, err)
+		logging.For(logging.Tools).With(logging.TaskID, newTaskID).Warnf("failed to store prompt message: %v", err)
 	}
 
 	// Broadcast the new task to the frontend
 	te.appStreamMgr.BroadcastTaskUpdated(parent.ProjectID, *newTask)
 
 	if actualParentID != "" {
-		log.Printf("[create_task] task=%s created subtask %s (parent=%s): %q", parent.ID, newTaskID, actualParentID, title)
+		logging.For(logging.Tools).With(logging.TaskID, parent.ID).Infof("created subtask %s (parent=%s): %q", newTaskID, actualParentID, title)
 	} else {
-		log.Printf("[create_task] task=%s created task %s: %q", parent.ID, newTaskID, title)
+		logging.For(logging.Tools).With(logging.TaskID, parent.ID).Infof("created task %s: %q", newTaskID, title)
 	}
 
 	// Return JSON with task_id so the LLM can reference it for nested subtasks
@@ -798,7 +798,7 @@ func (te *TaskExecutor) planCreatedTaskIDs(task *types.Task, state *executionSta
 	// threadID "" returns all messages for the task (all threads + legacy).
 	msgs, err := te.store.GetTaskMessages(task.ID, "")
 	if err != nil {
-		log.Printf("[plan] task=%s history scan failed: %v", task.ID, err)
+		logging.For(logging.Exec).With(logging.TaskID, task.ID).Warnf("history scan failed: %v", err)
 		return ids
 	}
 	for i := range msgs {
@@ -866,7 +866,7 @@ func (te *TaskExecutor) handleViewTasks(currentTask *types.Task) (string, error)
 		return "", fmt.Errorf("failed to marshal tasks: %w", err)
 	}
 
-	log.Printf("[view_tasks] task=%s listed %d backlog task(s) in project %s", currentTask.ID, len(summaries), currentTask.ProjectID)
+	logging.For(logging.Tools).With(logging.TaskID, currentTask.ID).Infof("listed %d backlog task(s) in project %s", len(summaries), currentTask.ProjectID)
 	return string(data), nil
 }
 
@@ -938,7 +938,7 @@ func (te *TaskExecutor) handleEditTask(args map[string]any, currentTask *types.T
 	// Broadcast the updated task to the frontend
 	te.appStreamMgr.BroadcastTaskUpdated(currentTask.ProjectID, *target)
 
-	log.Printf("[edit_task] task=%s edited task %s: %q", currentTask.ID, taskID, target.Title)
+	logging.For(logging.Tools).With(logging.TaskID, currentTask.ID).Infof("edited task %s: %q", taskID, target.Title)
 
 	result, _ := json.Marshal(map[string]string{"task_id": taskID, "title": target.Title, "status": "updated"})
 	return string(result), nil

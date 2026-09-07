@@ -5,14 +5,14 @@ import (
 	"os/exec"
 	"testing"
 
-	sandbox "kanban/pkg/bridge"
+	"kanban/pkg/bridge"
 )
 
 // testBridgeClient builds a bridge client over a pair of pipes. Nothing is spoken over them.
-func testBridgeClient(t *testing.T) *sandbox.Client {
+func testBridgeClient(t *testing.T) *bridge.Client {
 	t.Helper()
 	read, write := io.Pipe()
-	client := sandbox.NewClient(write, read)
+	client := bridge.NewClient(write, read)
 	t.Cleanup(func() {
 		_ = write.Close()
 		_ = read.Close()
@@ -22,7 +22,7 @@ func testBridgeClient(t *testing.T) *sandbox.Client {
 
 // registerSession records a session the way StartSession would, minus the `podman exec`: these
 // tests have no container, only the bookkeeping.
-func registerSession(t *testing.T, sm *ExtensionSandboxManager, extID string, clients ...*sandbox.Client) {
+func registerSession(t *testing.T, sm *ExtensionSandboxManager, extID string, clients ...*bridge.Client) {
 	t.Helper()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -32,7 +32,7 @@ func registerSession(t *testing.T, sm *ExtensionSandboxManager, extID string, cl
 		sm.states[extID] = state
 	}
 	if state.sessions == nil {
-		state.sessions = make(map[*sandbox.Client]*exec.Cmd)
+		state.sessions = make(map[*bridge.Client]*exec.Cmd)
 	}
 	for _, c := range clients {
 		state.sessions[c] = nil // no process to reap

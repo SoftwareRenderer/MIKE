@@ -1,8 +1,7 @@
-// Package sandbox is the host-side client of the sandbox-bridge protocol (the package lives
-// in pkg/bridge; its name predates that directory). It wraps the stdin/stdout of one
-// "podman exec … /sandbox-bridge" and issues tool calls over it - no dial, no port - so a
-// tool call does not pay for a podman exec each.
-package sandbox
+// Package bridge is the host-side client of the sandbox-bridge protocol. It wraps the stdin/stdout of
+// one "podman exec ... /sandbox-bridge" and issues tool calls over it - no dial, no port - so a tool call
+// does not pay for a podman exec each.
+package bridge
 
 import (
 	"context"
@@ -11,13 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"kanban/pkg/bridge/protocol"
+	"kanban/pkg/logging"
 )
 
 // pipeConn wraps separate read/write pipes as a net.Conn.
@@ -214,7 +213,7 @@ func (c *Client) readLoop() {
 				select {
 				case p.chunkCh <- frame:
 				default:
-					log.Printf("[sandbox/client] chunk channel full for MsgID=%d", frame.MsgID)
+					logging.For(logging.Bridge).Infof("chunk channel full for MsgID=%d", frame.MsgID)
 				}
 			case protocol.TypeResult, protocol.TypeError:
 				p.closeChunk()
@@ -232,14 +231,14 @@ func (c *Client) readLoop() {
 			select {
 			case c.lspNotificationCh <- frame.Payload:
 			default:
-				log.Printf("[sandbox/client] lsp notification channel full")
+				logging.For(logging.Bridge).Info("lsp notification channel full")
 			}
 			c.mu.Unlock()
 			continue
 		}
 		c.mu.Unlock()
 
-		log.Printf("[sandbox/client] unhandled frame MsgID=%d Type=%s", frame.MsgID, protocol.MessageTypeName(frame.Type))
+		logging.For(logging.Bridge).Infof("unhandled frame MsgID=%d Type=%s", frame.MsgID, protocol.MessageTypeName(frame.Type))
 	}
 }
 

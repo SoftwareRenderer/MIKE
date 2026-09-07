@@ -4,8 +4,8 @@
     import type { DiffFile } from '$lib/types/diff';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext, getExpandedTasksContext } from '$lib/context';
-    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile } from '$lib/api';
-    import { parseUnifiedDiff, enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
+    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile, toDiffFiles } from '$lib/api';
+    import { enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
     import { shouldAutoFullscreenDiffEditor } from '$lib/utils/diff-editor-layout';
     import { filterTopLevelTaskIds } from '$lib/utils/task-utils';
     import { clearHighlightCache } from '$lib/highlighter';
@@ -303,10 +303,10 @@
         checkpointDiffUntracked = [];
         try {
             const headRef = commitHash || undefined;
-            const result = await getTaskDiff(task.project_id, task.id, { headRef, checkpointIndex });
+            const result = await getTaskDiff(task.project_id, task.id, { headRef, checkpointIndex, parsed: true });
             const truncatedSet = new Set(result.truncated_files || []);
             const origStats = result.original_file_stats || {};
-            checkpointDiffFiles = parseUnifiedDiff(result.diff).filter(f => !f.path.split('/').pop()?.match(/\..*\.swp$/)).map(f => ({
+            checkpointDiffFiles = toDiffFiles(result.parsed_files ?? []).filter(f => !f.path.split('/').pop()?.match(/\..*\.swp$/)).map(f => ({
                 ...f,
                 truncated: truncatedSet.has(f.path),
                 origAdded: origStats[f.path]?.added,

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"kanban/backend/httputil"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -15,6 +14,7 @@ import (
 	"kanban/backend/exec"
 	"kanban/backend/git"
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 )
 
 func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
@@ -58,11 +58,11 @@ func (s *Server) releaseThreadSnapshots(taskID, threadID string) {
 			}
 		}
 	} else {
-		log.Printf("[snapshots] task=%s thread=%s could not list its messages: %v", taskID, threadID, err)
+		logging.For(logging.Worktree).With(logging.TaskID, taskID).Warnf("thread=%s could not list its messages: %v", threadID, err)
 	}
 	s.releaseMessageSnapshots(taskID, ids)
 	if err := wm.DeleteThreadSnapshot(taskID, threadID); err != nil && !errors.Is(err, git.ErrWorktreeNotFound) {
-		log.Printf("[snapshots] task=%s thread=%s could not release its handoff snapshot: %v", taskID, threadID, err)
+		logging.For(logging.Worktree).With(logging.TaskID, taskID).Warnf("thread=%s could not release its handoff snapshot: %v", threadID, err)
 	}
 }
 
@@ -73,7 +73,7 @@ func (s *Server) releaseMessageSnapshots(taskID string, messageIDs []string) {
 		return
 	}
 	if err := s.executor.WorktreeMgr().UnpinMessageSnapshots(taskID, messageIDs); err != nil && !errors.Is(err, git.ErrWorktreeNotFound) {
-		log.Printf("[snapshots] task=%s could not release %d checkpoint snapshot(s): %v", taskID, len(messageIDs), err)
+		logging.For(logging.Worktree).With(logging.TaskID, taskID).Warnf("could not release %d checkpoint snapshot(s): %v", len(messageIDs), err)
 	}
 }
 
@@ -102,9 +102,7 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 
 	// Acquire per-task mutex to serialize git operations on this worktree.
 	// Delete may checkout a replacement branch and reset the worktree.
-	mu := s.getWorktreeMutex(taskID)
-	mu.Lock()
-	defer mu.Unlock()
+	defer s.lockWorktree(taskID)()
 
 	// Re-fetch task after acquiring lock — state may have changed.
 	task, err = s.store.GetTask(projectID, taskID)
@@ -188,9 +186,7 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 	// Acquire per-task mutex to serialize git operations on this worktree.
 	// Prevents concurrent stash/checkout/branch/reset operations that would
 	// corrupt worktree state if interleaved.
-	mu := s.getWorktreeMutex(taskID)
-	mu.Lock()
-	defer mu.Unlock()
+	defer s.lockWorktree(taskID)()
 
 	// Re-fetch task after acquiring lock — state may have changed.
 	task, err := s.store.GetTask(projectID, taskID)
@@ -250,7 +246,7 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 		// there is (do NOT reset to the base commit — that would discard committed fork work).
 		if thread.WorktreeStashHash != "" {
 			if err := s.executor.WorktreeMgr().ResetWorktreeTo(taskID, thread.WorktreeStashHash); err != nil {
-				log.Printf("[thread-switch] task=%s thread=%s could not restore its saved worktree (%.12s): %v", taskID, req.ThreadID, thread.WorktreeStashHash, err)
+				logging.For(logging.Thread).With(logging.TaskID, taskID).Warnf("thread=%s could not restore its saved worktree (%.12s): %v", req.ThreadID, thread.WorktreeStashHash, err)
 			}
 		} else if last := s.getLastCommitHashInThread(req.ThreadID); last != "" && s.executor.WorktreeMgr().IsAncestor(taskID, "HEAD", last) {
 			// Uncommitted work not yet on the branch, still sitting on top of HEAD.
@@ -313,9 +309,7 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	// Acquire per-task mutex to serialize git operations on this worktree.
 	// Prevents concurrent stash/checkout/branch/reset operations that would
 	// corrupt worktree state if interleaved with a switch or another fork.
-	mu := s.getWorktreeMutex(taskID)
-	mu.Lock()
-	defer mu.Unlock()
+	defer s.lockWorktree(taskID)()
 
 	// Re-fetch task after acquiring lock — state may have changed.
 	task, err := s.store.GetTask(projectID, taskID)
@@ -366,7 +360,7 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		// Reset worktree to checkpoint state.
 		if branchPoint != "" {
 			if err := s.executor.WorktreeMgr().ResetWorktreeTo(taskID, branchPoint); err != nil {
-				log.Printf("[thread-fork] task=%s could not rewind the worktree to %.12s: %v", taskID, branchPoint, err)
+				logging.For(logging.Thread).With(logging.TaskID, taskID).Warnf("could not rewind the worktree to %.12s: %v", branchPoint, err)
 			}
 		} else {
 			// No checkpoint — reset to base ref (clean initial state).
@@ -421,7 +415,7 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	// same objects, so a failed re-pin costs durability against a future deletion, not correctness now.
 	for _, cp := range inherited {
 		if pinErr := s.executor.WorktreeMgr().PinTaskSnapshot(taskID, cp.MessageID, cp.CommitHash); pinErr != nil {
-			log.Printf("[thread-fork] task=%s could not pin inherited snapshot %.12s for message %s: %v", taskID, cp.CommitHash, cp.MessageID, pinErr)
+			logging.For(logging.Thread).With(logging.TaskID, taskID).Warnf("could not pin inherited snapshot %.12s for message %s: %v", cp.CommitHash, cp.MessageID, pinErr)
 		}
 	}
 	// If new_content is provided, update the checkpoint message in the fork
@@ -474,7 +468,7 @@ func (s *Server) generateThreadName(ctx context.Context, task *types.Task, conte
 			if len(name) > 35 {
 				name = name[:35]
 			}
-			log.Printf("[thread-name] task=%s generated: %q", task.ID, name)
+			logging.For(logging.Thread).With(logging.TaskID, task.ID).Infof("generated: %q", name)
 			return name
 		}
 	}
@@ -507,7 +501,7 @@ func (s *Server) checkoutThreadBranch(projectID, taskID string, task *types.Task
 	out, err := s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "checkout", "-f", branch)
 	if err != nil {
 		// git's own words, because "exit status 1" tells you nothing about a refused checkout.
-		log.Printf("[thread] task=%s could not check out %s: %v: %s", taskID, branch, err, gitErrorDetail(out))
+		logging.For(logging.Thread).With(logging.TaskID, taskID).Warnf("could not check out %s: %v: %s", branch, err, gitErrorDetail(out))
 		return ""
 	}
 	_, _ = s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "clean", "-fd")
@@ -522,7 +516,7 @@ func (s *Server) deleteThreadBranch(taskID string, branchName string) {
 	// A failure here is a branch that outlived its thread, so it must not be dropped silently.
 	out, err := s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "branch", "-D", branchName)
 	if err != nil {
-		log.Printf("[thread] task=%s could not delete branch %s: %v: %s", taskID, branchName, err, gitErrorDetail(out))
+		logging.For(logging.Thread).With(logging.TaskID, taskID).Warnf("could not delete branch %s: %v: %s", branchName, err, gitErrorDetail(out))
 	}
 }
 
@@ -549,8 +543,7 @@ func (s *Server) stashWorktreeState(projectID, taskID, threadID, label string) (
 	if err != nil {
 		return "", err
 	}
-	wm.GetProjectStashMu(projectID).Lock()
-	defer wm.GetProjectStashMu(projectID).Unlock()
+	defer wm.LockProjectStash(projectID)()
 
 	stashHash, err := wm.PushStash(worktreePath, label)
 	if errors.Is(err, git.ErrNothingToStash) {
@@ -563,7 +556,7 @@ func (s *Server) stashWorktreeState(projectID, taskID, threadID, label string) (
 	if pinErr := wm.PinSnapshot(worktreePath, git.SnapshotRef(taskID, git.ThreadSnapshotOwner(threadID)), stashHash); pinErr != nil {
 		// Leave the stash entry where it is: dropped and unpinned, the snapshot is git's to prune, and an
 		// entry the user can see outliving its thread is the lesser evil.
-		log.Printf("[worktree] task=%s thread=%s saved %.12s but could not pin it, so it stays in the stash list: %v", taskID, threadID, stashHash, pinErr)
+		logging.For(logging.Worktree).With(logging.TaskID, taskID).Warnf("thread=%s saved %.12s but could not pin it, so it stays in the stash list: %v", threadID, stashHash, pinErr)
 		return stashHash, nil
 	}
 	_ = wm.DropStashByHash(worktreePath, stashHash)
@@ -577,7 +570,7 @@ func (s *Server) stashWorktreeState(projectID, taskID, threadID, label string) (
 // One thing really did change: a task stopped so its work could be captured stays stopped. That is recorded
 // and broadcast here, because a card still showing "running" after a refusal is a lie about the board.
 func (s *Server) refuseUnsavedWork(w http.ResponseWriter, projectID string, task *types.Task, done string, cause error, wasRunning bool) {
-	log.Printf("[thread] task=%s refused to %s: %v", task.ID, done, cause)
+	logging.For(logging.Thread).With(logging.TaskID, task.ID).Warnf("refused to %s: %v", done, cause)
 	message := fmt.Sprintf("could not save this thread's work — nothing was %s", done)
 	if detail := gitErrorDetail(cause.Error()); detail != "" {
 		message += ": " + detail
@@ -587,7 +580,7 @@ func (s *Server) refuseUnsavedWork(w http.ResponseWriter, projectID string, task
 		task.ExecutionState = types.ExecStateIdle
 		task.UpdatedAt = time.Now().UTC()
 		if err := s.store.UpdateTask(task); err != nil {
-			log.Printf("[thread] task=%s refused to %s and could not record the stop: %v", task.ID, done, err)
+			logging.For(logging.Thread).With(logging.TaskID, task.ID).Warnf("refused to %s and could not record the stop: %v", done, err)
 		}
 		s.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
 	}
@@ -600,7 +593,7 @@ func (s *Server) resetWorktreeToCommit(taskID, commitHash string) {
 		return
 	}
 	if err := s.executor.WorktreeMgr().ResetWorktreeTo(taskID, commitHash); err != nil {
-		log.Printf("[worktree] task=%s could not restore %.12s: %v", taskID, commitHash, err)
+		logging.For(logging.Worktree).With(logging.TaskID, taskID).Warnf("could not restore %.12s: %v", commitHash, err)
 	}
 }
 
@@ -665,16 +658,23 @@ func getOrCreateMutex(mu *sync.RWMutex, m map[string]*sync.Mutex, key string) *s
 	return created
 }
 
-// getWorktreeMutex returns a per-task mutex for serializing git operations.
-func (s *Server) getWorktreeMutex(taskID string) *sync.Mutex {
-	return getOrCreateMutex(&s.worktreeMuxMu, s.worktreeMux, taskID)
+// lockWorktree locks the per-task worktree and returns the function that releases it.
+//
+// Release function rather than mutex: these are injected into managers.GitHandler, and a mutex handed
+// across a package boundary is a value that can be stored, copied, and unlocked by whoever holds a
+// copy — see git.WorktreeManager.LockProjectStash for the same argument.
+func (s *Server) lockWorktree(taskID string) func() {
+	mu := getOrCreateMutex(&s.worktreeMuxMu, s.worktreeMux, taskID)
+	mu.Lock()
+	return mu.Unlock
 }
 
-// getProjectMutex returns a per-project mutex for serializing project-level git
-// operations (stash, checkout, pull, push) that touch shared state like
-// .git/refs/stash.
-func (s *Server) getProjectMutex(projectID string) *sync.Mutex {
-	return getOrCreateMutex(&s.projectMuxMu, s.projectMux, projectID)
+// lockProject locks the per-project git operations (stash, checkout, pull, push) that touch shared
+// state like .git/refs/stash, and returns the function that releases it.
+func (s *Server) lockProject(projectID string) func() {
+	mu := getOrCreateMutex(&s.projectMuxMu, s.projectMux, projectID)
+	mu.Lock()
+	return mu.Unlock
 }
 
 // generateCheckpointLabelForFork generates a short label for the checkpoint message

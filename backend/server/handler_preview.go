@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"kanban/backend/httputil"
-	"log"
 	"mime"
 	"net/http"
 	"os"
@@ -22,6 +21,7 @@ import (
 	"kanban/backend/fsutil"
 	"kanban/backend/sandbox"
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 )
 
 // Preview document lifecycle limits.
@@ -340,7 +340,7 @@ func (s *Server) HandlePreviewServe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Token mint failure: never emit a weak token.
-		log.Printf("preview serve failed: %v", err)
+		logging.For(logging.HTTP).Errorf("preview serve failed: %v", err)
 		JSONError(w, http.StatusInternalServerError, "preview unavailable")
 		return
 	}

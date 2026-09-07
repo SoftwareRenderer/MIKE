@@ -12,12 +12,12 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"log"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"kanban/backend/extensions"
+	"kanban/pkg/logging"
 	"kanban/pkg/shlex"
 )
 
@@ -120,7 +120,7 @@ func (m *ExtensionLSPManager) Environment(workspacePath, filePath string) Enviro
 	if !healthy {
 		// Once per verdict, not once per turn: the user needs to know the state,
 		// and the log does not need the same line for every file.
-		log.Printf("[lsp-env] workspace=%s lang=%s cannot resolve the project: %s", workspacePath, cfg.Language, note)
+		logging.For(logging.LSP).Infof("workspace=%s lang=%s cannot resolve the project: %s", workspacePath, cfg.Language, note)
 	}
 	return environmentResult(envStatus{healthy: healthy, note: note, checked: true}, gate)
 }
@@ -152,7 +152,7 @@ func (m *ExtensionLSPManager) runEnvCheck(sc *sandboxClient, gate *extensions.En
 	defer cancel()
 	holder, err := sc.bridgeClient.Bash(ctx, cmd, int64((timeout+time.Second)/time.Second))
 	if err != nil {
-		log.Printf("[lsp-env] check could not run for %s: %v", workspacePath, err)
+		logging.For(logging.LSP).Warnf("check could not run for %s: %v", workspacePath, err)
 		return true, ""
 	}
 
@@ -167,7 +167,7 @@ func (m *ExtensionLSPManager) runEnvCheck(sc *sandboxClient, gate *extensions.En
 
 	select {
 	case <-ctx.Done():
-		log.Printf("[lsp-env] check timed out for %s after %s", workspacePath, timeout)
+		logging.For(logging.LSP).Warnf("check timed out for %s after %s", workspacePath, timeout)
 		return false, gate.Note
 	case code := <-holder.ExitCode():
 		<-drained
@@ -176,7 +176,7 @@ func (m *ExtensionLSPManager) runEnvCheck(sc *sandboxClient, gate *extensions.En
 			return true, ""
 		}
 		if out != "" {
-			log.Printf("[lsp-env] check failed for %s (exit %d): %s", workspacePath, code, out)
+			logging.For(logging.LSP).Warnf("check failed for %s (exit %d): %s", workspacePath, code, out)
 		}
 		return false, gate.Note
 	}

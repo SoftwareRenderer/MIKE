@@ -11,9 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
@@ -29,12 +27,13 @@ import (
 	"kanban/backend/llmadapter"
 	"kanban/backend/lsp"
 	"kanban/backend/prompts"
-	sandboxmgr "kanban/backend/sandbox"
+	"kanban/backend/sandbox"
 	"kanban/backend/store"
 	"kanban/backend/stream"
 	"kanban/backend/types"
 
 	"github.com/google/uuid"
+	"kanban/pkg/logging"
 )
 
 // taskStore is what the execution loop persists: task rows and their state
@@ -78,7 +77,7 @@ type TaskExecutor struct {
 	configStore   *config.ConfigStore
 	appStreamMgr  *stream.AppStreamManager
 	worktreeMgr   *git.WorktreeManager
-	sandboxMgr    *sandboxmgr.SandboxManager
+	sandboxMgr    *sandbox.SandboxManager
 	agentRegistry *agent.AgentRegistry
 	lspMgr        lspManager
 	commitQueue   *CommitQueue
@@ -314,7 +313,7 @@ func (mc *modelConfig) set(serverURL, modelName string) {
 }
 
 // NewTaskExecutor creates a new TaskExecutor.
-func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStreamMgr *stream.AppStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandboxmgr.SandboxManager, agentRegistry *agent.AgentRegistry, lspMgr *lsp.ExtensionLSPManager, commitQueue *CommitQueue) *TaskExecutor {
+func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStreamMgr *stream.AppStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandbox.SandboxManager, agentRegistry *agent.AgentRegistry, lspMgr *lsp.ExtensionLSPManager, commitQueue *CommitQueue) *TaskExecutor {
 	// Normalize nil concrete to a nil interface so te.lspMgr == nil guards hold.
 	var lspMgrI lspManager
 	if lspMgr != nil {
@@ -339,10 +338,14 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStr
 	return te
 }
 
-// GetWorktreeMu returns the per-task mutex for serializing worktree access.
-func (te *TaskExecutor) GetWorktreeMu(taskID string) *sync.Mutex {
+// LockWorktree acquires the per-task worktree lock and returns the function that releases it. The lock
+// cannot leave the package this way: TaskExecutor is copied around by tests and by the manager wiring,
+// and `*te = *te2` would swap which mutex callers find.
+func (te *TaskExecutor) LockWorktree(taskID string) func() {
 	mu, _ := te.worktreeMu.LoadOrStore(taskID, &sync.Mutex{})
-	return mu.(*sync.Mutex)
+	m := mu.(*sync.Mutex)
+	m.Lock()
+	return m.Unlock
 }
 
 // runToolProtected runs a tool call under the task's worktree lock (which
@@ -351,13 +354,11 @@ func (te *TaskExecutor) GetWorktreeMu(taskID string) *sync.Mutex {
 // call left without one renders as "Running" forever — and a stranded worktree lock
 // would deadlock every later write for the task.
 func (te *TaskExecutor) runToolProtected(taskID, toolName string, run func() (string, bool)) (result string, success bool) {
-	mu := te.GetWorktreeMu(taskID)
-	mu.Lock()
-	defer mu.Unlock()
+	defer te.LockWorktree(taskID)()
 
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[tool] panic while executing %s for task=%s: %v\n%s", toolName, taskID, r, debug.Stack())
+			logging.For(logging.Tools).Warnf("panic while executing %s for task=%s: %v\n%s", toolName, taskID, r, debug.Stack())
 			result = fmt.Sprintf("Error: internal error while running %s: %v", toolName, r)
 			success = false
 		}
@@ -716,7 +717,7 @@ Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
 	serverURL := parent.LlamaServerURL
 	modelName := parent.ModelName
 	if serverURL == "" || modelName == "" {
-		log.Printf("[subtask-select] task=%s no LLM config, using fallback", parent.ID)
+		logging.For(logging.Exec).With(logging.TaskID, parent.ID).Infof("no LLM config, using fallback")
 		return deepest[0].ID
 	}
 
@@ -730,7 +731,7 @@ Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
 
 	_, response, err := te.ChatCompletion(ctx, serverURL, modelName, messages, nil)
 	if err != nil {
-		log.Printf("[subtask-select] task=%s LLM call failed: %v, using fallback", parent.ID, err)
+		logging.For(logging.Exec).With(logging.TaskID, parent.ID).Warnf("LLM call failed: %v, using fallback", err)
 		return deepest[0].ID
 	}
 
@@ -738,12 +739,12 @@ Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
 	// Validate the returned ID matches one of the deepest subtasks
 	for _, s := range deepest {
 		if s.ID == selectedID {
-			log.Printf("[subtask-select] task=%s LLM selected subtask %s", parent.ID, selectedID)
+			logging.For(logging.Exec).With(logging.TaskID, parent.ID).Infof("LLM selected subtask %s", selectedID)
 			return selectedID
 		}
 	}
 
-	log.Printf("[subtask-select] task=%s LLM returned invalid ID %q, using fallback", parent.ID, selectedID)
+	logging.For(logging.Exec).With(logging.TaskID, parent.ID).Warnf("LLM returned invalid ID %q, using fallback", selectedID)
 	return deepest[0].ID
 }
 
@@ -828,12 +829,12 @@ func (te *TaskExecutor) EnsureParentBranch(projectID string, parent *types.Task)
 			return nil // branch exists, nothing to do
 		}
 		// Branch missing in git — create it from HEAD so the stored name becomes valid.
-		cmd := osexec.Command("git", "-C", project.Path, "branch", parent.Branch, "HEAD")
+		cmd := git.Command("", "-C", project.Path, "branch", parent.Branch, "HEAD")
 		if out, err := cmd.CombinedOutput(); err != nil {
-			log.Printf("[ensure-parent-branch] task=%s branch %q missing in git, create failed: %s", parent.ID, parent.Branch, string(out))
+			logging.For(logging.Merge).With(logging.TaskID, parent.ID).Warnf("branch %q missing in git, create failed: %s", parent.Branch, string(out))
 			return fmt.Errorf("create missing parent branch %q: %w", parent.Branch, err)
 		}
-		log.Printf("[ensure-parent-branch] task=%s recovered missing branch %q from HEAD", parent.ID, parent.Branch)
+		logging.For(logging.Merge).With(logging.TaskID, parent.ID).Warnf("recovered missing branch %q from HEAD", parent.Branch)
 		return nil
 	}
 
@@ -878,7 +879,7 @@ func (te *TaskExecutor) EnsureParentBranch(projectID string, parent *types.Task)
 		return fmt.Errorf("update parent task with branch: %w", err)
 	}
 
-	log.Printf("[ensure-parent-branch] task=%s created worktree with branch %s for parent", parent.ID, branchName)
+	logging.For(logging.Merge).With(logging.TaskID, parent.ID).Infof("created worktree with branch %s for parent", branchName)
 	return nil
 }
 
@@ -928,7 +929,7 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 	if len(pending) > 0 {
 		// A Backlog parent was never started by the user — no sibling autostart.
 		if parent.Status == types.StatusBacklog {
-			log.Printf("[auto-start] parent %s is in backlog, skipping sibling auto-start (%d pending siblings)", parentTaskID, len(pending))
+			logging.For(logging.Startup).Infof("parent %s is in backlog, skipping sibling auto-start (%d pending siblings)", parentTaskID, len(pending))
 			return nil
 		}
 
@@ -942,11 +943,11 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 		// Reload to avoid stale state — prepareTaskExecution has its own guard.
 		selected, err := te.store.GetTaskByID(selectedID)
 		if err != nil || !te.IsStartableNow(*selected) {
-			log.Printf("[auto-start] task=%s selected sibling %s no longer startable, skipping", finishedTaskID, selectedID)
+			logging.For(logging.Startup).With(logging.TaskID, finishedTaskID).Infof("selected sibling %s no longer startable, skipping", selectedID)
 			return nil
 		}
 
-		log.Printf("[auto-start] task=%s finished, starting next sibling %s (parent=%s)", finishedTaskID, selectedID, parentTaskID)
+		logging.For(logging.Startup).With(logging.TaskID, finishedTaskID).Infof("finished, starting next sibling %s (parent=%s)", selectedID, parentTaskID)
 		return te.StartSubtask(projectID, selectedID, true)
 	}
 
@@ -954,9 +955,9 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 	if allDone {
 		// All children done: autostart the parent only if the user started it.
 		if parent.Status == types.StatusInProgress {
-			log.Printf("[auto-start] task=%s all children done, starting parent %s", finishedTaskID, parent.ID)
+			logging.For(logging.Startup).With(logging.TaskID, finishedTaskID).Infof("all children done, starting parent %s", parent.ID)
 			if err := te.StartTask(projectID, parent.ID, true); err != nil {
-				log.Printf("[auto-start] task=%s failed to start parent %s: %v", finishedTaskID, parent.ID, err)
+				logging.For(logging.Startup).With(logging.TaskID, finishedTaskID).Warnf("failed to start parent %s: %v", parent.ID, err)
 			} else {
 				started, _ := te.store.GetTaskByID(parent.ID)
 				if started != nil {
@@ -964,7 +965,7 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 				}
 			}
 		} else {
-			log.Printf("[auto-start] task=%s all children done, parent %s in backlog — waiting for user to start", finishedTaskID, parent.ID)
+			logging.For(logging.Startup).With(logging.TaskID, finishedTaskID).Infof("all children done, parent %s in backlog — waiting for user to start", parent.ID)
 		}
 		return nil
 	}
@@ -986,10 +987,10 @@ func (te *TaskExecutor) autoStartAncestorSiblings(projectID string, parent *type
 		return nil
 	}
 	if grandparent.Status == types.StatusBacklog {
-		log.Printf("[auto-start] ancestor %s is in backlog, skipping auto-start", grandparent.ID)
+		logging.For(logging.Startup).Infof("ancestor %s is in backlog, skipping auto-start", grandparent.ID)
 		return nil
 	}
-	log.Printf("[auto-start] task=%s parent %s waiting on children, recursing up to %s", finishedTaskID, parent.ID, parent.ParentTaskID)
+	logging.For(logging.Startup).With(logging.TaskID, finishedTaskID).Infof("parent %s waiting on children, recursing up to %s", parent.ID, parent.ParentTaskID)
 	return te.AutoStartNextSibling(projectID, parent.ID, parent.ParentTaskID)
 }
 
@@ -1049,7 +1050,7 @@ func (te *TaskExecutor) InitTask(projectID, taskID string) (*types.Task, error) 
 		return nil, fmt.Errorf("update task: %w", err)
 	}
 
-	log.Printf("[init] task=%s created worktree with branch %s", taskID, branchName)
+	logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("created worktree with branch %s", branchName)
 	return task, nil
 }
 
@@ -1096,7 +1097,7 @@ func (te *TaskExecutor) branchChildFrom(projectID string, task *types.Task) (str
 func (te *TaskExecutor) pinBaselineAndWatch(projectID string, task *types.Task) {
 	if task.BaseCommit == "" && task.BaseRef != "" {
 		if project, _ := te.store.GetProject(projectID); project != nil {
-			c := osexec.Command("git", "-C", project.Path, "rev-parse", task.BaseRef)
+			c := git.Command("", "-C", project.Path, "rev-parse", task.BaseRef)
 			if out, err := c.CombinedOutput(); err == nil {
 				task.BaseCommit = strings.TrimSpace(string(out))
 			}
@@ -1125,7 +1126,7 @@ type taskExecSetup struct {
 	initialContent string                 // user message content for lazy-start (empty for normal start)
 	regenerate     bool
 	sandboxEnabled bool
-	sandboxOpts    sandboxmgr.SandboxOpts
+	sandboxOpts    sandbox.SandboxOpts
 	done           chan struct{} // closed by executor defer; see executionState.done
 	finished       chan struct{} // closed after the executor's last DB write
 	// taskSlotURL is the provider URL whose running-task slot this execution
@@ -1174,7 +1175,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		if activelyRunning {
 			return nil, fmt.Errorf("task already running")
 		}
-		log.Printf("[start] task=%s stale running state detected, resetting", taskID)
+		logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("stale running state detected, resetting")
 		task.ExecutionState = types.ExecStateIdle
 	}
 
@@ -1293,7 +1294,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		userMsgChan:    userMsgChan,
 		summarizeCh:    summarizeCh,
 		sandboxEnabled: project.SandboxEnabled,
-		sandboxOpts: sandboxmgr.SandboxOpts{
+		sandboxOpts: sandbox.SandboxOpts{
 			NetworkIsolation: project.SandboxNetworkIsolation,
 			MemoryLimit:      project.SandboxMemoryLimit,
 			ForwardPorts:     project.ForwardPorts,
@@ -1432,7 +1433,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string, autostarted bool) er
 	// the user — that is review. Leaving it in_progress would show "Pending" with nothing
 	// pending: this start has no work to do.
 	if len(existingMsgs) > 0 && existingMsgs[len(existingMsgs)-1].Role == "assistant" {
-		log.Printf("[start] task=%s last message is from assistant, skipping LLM call -> review (awaiting user)", taskID)
+		logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("last message is from assistant, skipping LLM call -> review (awaiting user)")
 		execSetup.cancel()
 		te.taskMu.Lock()
 		delete(te.tasks, taskID)
@@ -1505,7 +1506,7 @@ func (te *TaskExecutor) StopProjectTasks(projectID string) int {
 			state.cancel()
 			delete(te.tasks, task.ID)
 			stopped++
-			log.Printf("[stop-project-tasks] task=%s project=%s stopped (settings change)", task.ID, projectID)
+			logging.For(logging.Exec).With(logging.TaskID, task.ID).Infof("project=%s stopped (settings change)", projectID)
 			te.taskMu.Unlock()
 			// Same ordering as StopTask.
 			waitForExecutorExit(task.ID, state, executorExitGrace)
@@ -1525,7 +1526,7 @@ func (te *TaskExecutor) StopProjectTasks(projectID string) int {
 func (te *TaskExecutor) RecoverStaleTasks() int {
 	inFlight, err := te.store.GetInFlightTasks()
 	if err != nil {
-		log.Printf("[recover] list in-flight tasks failed: %v", err)
+		logging.For(logging.Recovery).Warnf("list in-flight tasks failed: %v", err)
 		return 0
 	}
 	recovered := 0
@@ -1547,11 +1548,11 @@ func (te *TaskExecutor) RecoverStaleTasks() int {
 		if !te.persistStopTransition(&task) {
 			continue
 		}
-		log.Printf("[recover] task=%s stale %s/%s -> %s/%s", task.ID, task.Status, oldState, task.Status, task.ExecutionState)
+		logging.For(logging.Recovery).With(logging.TaskID, task.ID).Infof("stale %s/%s -> %s/%s", task.Status, oldState, task.Status, task.ExecutionState)
 		recovered++
 	}
 	if recovered > 0 {
-		log.Printf("[recover] %d stale in-flight task(s) recovered", recovered)
+		logging.For(logging.Recovery).Infof("%d stale in-flight task(s) recovered", recovered)
 	}
 	// Now the rows that were never in flight but still show as pending.
 	te.normalizePendingTasks()
@@ -1566,7 +1567,7 @@ func (te *TaskExecutor) RecoverStaleTasks() int {
 func (te *TaskExecutor) normalizePendingTasks() int {
 	pending, err := te.store.GetPendingIdleTasks()
 	if err != nil {
-		log.Printf("[recover] list pending tasks failed: %v", err)
+		logging.For(logging.Recovery).Warnf("list pending tasks failed: %v", err)
 		return 0
 	}
 	normalized := 0
@@ -1578,16 +1579,16 @@ func (te *TaskExecutor) normalizePendingTasks() int {
 			continue
 		}
 		if children, cerr := te.store.GetChildren(task.ID); cerr == nil && len(children) > 0 && !ChildrenAllDone(children) {
-			log.Printf("[recover] task=%s pending while subtasks are unfinished — left as is", task.ID)
+			logging.For(logging.Recovery).With(logging.TaskID, task.ID).Infof("pending while subtasks are unfinished — left as is")
 			continue
 		}
 		last, lerr := te.store.GetLastMessageInThread(task.CurrentThreadID)
 		if lerr != nil {
-			log.Printf("[recover] task=%s last message lookup failed: %v", task.ID, lerr)
+			logging.For(logging.Recovery).With(logging.TaskID, task.ID).Warnf("last message lookup failed: %v", lerr)
 			continue
 		}
 		if last == nil || last.Role == "user" {
-			log.Printf("[recover] task=%s pending with an unanswered user message — left as is", task.ID)
+			logging.For(logging.Recovery).With(logging.TaskID, task.ID).Infof("pending with an unanswered user message — left as is")
 			continue
 		}
 		fresh, gerr := te.store.GetTask(task.ProjectID, task.ID)
@@ -1599,14 +1600,14 @@ func (te *TaskExecutor) normalizePendingTasks() int {
 		fresh.Output = "Nothing to run — the agent has the last word and is waiting for your reply"
 		fresh.UpdatedAt = time.Now().UTC()
 		if perr := te.storeTask(fresh, task.ProjectID); perr != nil {
-			log.Printf("[recover] task=%s pending normalization failed: %v", task.ID, perr)
+			logging.For(logging.Recovery).With(logging.TaskID, task.ID).Warnf("pending normalization failed: %v", perr)
 			continue
 		}
-		log.Printf("[recover] task=%s pending with %s holding the last word -> review/idle", task.ID, last.Role)
+		logging.For(logging.Recovery).With(logging.TaskID, task.ID).Infof("pending with %s holding the last word -> review/idle", last.Role)
 		normalized++
 	}
 	if normalized > 0 {
-		log.Printf("[recover] %d task(s) moved to review: pending with nothing pending", normalized)
+		logging.For(logging.Recovery).Infof("%d task(s) moved to review: pending with nothing pending", normalized)
 	}
 	return normalized
 }
@@ -1654,7 +1655,7 @@ func (te *TaskExecutor) ForwardUserMessage(projectID, taskID string, um stream.U
 	state, exists := te.tasks[taskID]
 	if exists {
 		if state.ctx.Err() != nil {
-			log.Printf("[executor-switch] task=%s executor loop is dead, restarting via lazy-start", taskID)
+			logging.For(logging.Exec).With(logging.TaskID, taskID).Infof("executor loop is dead, restarting via lazy-start")
 			if state.agentRunner != nil && !state.runnerClosed {
 				state.agentRunner.Close()
 				state.runnerClosed = true
@@ -1666,7 +1667,7 @@ func (te *TaskExecutor) ForwardUserMessage(projectID, taskID string, um stream.U
 			return
 		}
 		if state.executorType != requestedType {
-			log.Printf("[executor-switch] task=%s switching from %s to %s", taskID, state.executorType, requestedType)
+			logging.For(logging.Exec).With(logging.TaskID, taskID).Infof("switching from %s to %s", state.executorType, requestedType)
 			done := state.done
 			if state.agentRunner != nil && !state.runnerClosed {
 				state.agentRunner.Close()
@@ -1682,7 +1683,7 @@ func (te *TaskExecutor) ForwardUserMessage(projectID, taskID string, um stream.U
 		select {
 		case state.userMsgChan <- um:
 		default:
-			log.Printf("[user-msg] task=%s channel full, dropping message", taskID)
+			logging.For(logging.Exec).With(logging.TaskID, taskID).Infof("channel full, dropping message")
 		}
 		te.taskMu.Unlock()
 		return
@@ -1691,7 +1692,7 @@ func (te *TaskExecutor) ForwardUserMessage(projectID, taskID string, um stream.U
 	// Block lazy-start while summarization is in progress to prevent
 	// concurrent LLM calls. Message is already in DB from HandleSend.
 	if task, _ := te.store.GetTaskByID(taskID); task != nil && task.Summarizing {
-		log.Printf("[user-msg] task=%s blocking lazy-start: summarization in progress", taskID)
+		logging.For(logging.Exec).With(logging.TaskID, taskID).Infof("blocking lazy-start: summarization in progress")
 		te.blockedMessages.mu.Lock()
 		te.blockedMessages.tasks[taskID] = struct{}{}
 		te.blockedMessages.mu.Unlock()
@@ -1713,7 +1714,7 @@ func (te *TaskExecutor) NotifyContextChanged(projectID, taskID string) {
 	select {
 	case state.userMsgChan <- stream.UserMessage{ContextChanged: true}:
 	default:
-		log.Printf("[context-changed] task=%s channel full, dropping notification", taskID)
+		logging.For(logging.Exec).With(logging.TaskID, taskID).Infof("channel full, dropping notification")
 	}
 }
 
@@ -1721,7 +1722,7 @@ func (te *TaskExecutor) NotifyContextChanged(projectID, taskID string) {
 func (te *TaskExecutor) StopSandbox(taskID string) {
 	if te.sandboxMgr != nil {
 		if err := te.sandboxMgr.Stop(taskID); err != nil {
-			log.Printf("[sandbox] task=%s stop error: %v", taskID, err)
+			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("stop error: %v", err)
 		}
 	}
 }
@@ -1739,7 +1740,7 @@ func (te *TaskExecutor) RetryTask(projectID, taskID string) error {
 
 // handleLazyStart is called when a user message arrives for a task with no active executor.
 func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, serverURL, reasoningEffort string, regenerate bool) {
-	log.Printf("[lazy-start] task=%s project=%s (override: model=%s, url=%s, effort=%s, regenerate=%v)", taskID, projectID, modelName, serverURL, reasoningEffort, regenerate)
+	logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("project=%s (override: model=%s, url=%s, effort=%s, regenerate=%v)", projectID, modelName, serverURL, reasoningEffort, regenerate)
 
 	te.taskMu.Lock()
 	if _, exists := te.tasks[taskID]; exists {
@@ -1750,7 +1751,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 
 	task, err := te.store.GetTaskByID(taskID)
 	if err != nil {
-		log.Printf("[lazy-start] task=%s get error: %v", taskID, err)
+		logging.For(logging.Startup).With(logging.TaskID, taskID).Warnf("get error: %v", err)
 		return
 	}
 	// Apply model override from the user message (may arrive before updateTask completes)
@@ -1761,7 +1762,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 
 	execSetup, err := te.prepareTaskExecution(projectID, taskID, serverURL, modelName, true)
 	if err != nil {
-		log.Printf("[lazy-start] task=%s setup failed: %v", taskID, err)
+		logging.For(logging.Startup).With(logging.TaskID, taskID).Warnf("setup failed: %v", err)
 		task.ExecutionState = types.ExecStateFailed
 		task.Status = types.StatusReview
 		task.Output = err.Error()
@@ -1784,19 +1785,19 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 			ConflictedFiles: conflictedFiles,
 		})
 		if pErr != nil {
-			log.Printf("[lazy-start] task=%s failed to render merge conflict prompt: %v", taskID, pErr)
+			logging.For(logging.Startup).With(logging.TaskID, taskID).Warnf("failed to render merge conflict prompt: %v", pErr)
 		}
 		conflictContext += "\nAfter resolving the merge, continue with the user's request."
 		content = conflictContext + "\n\n--- User message ---\n\n" + content
-		log.Printf("[lazy-start] task=%s merge conflict detected, injecting conflict context", taskID)
+		logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("merge conflict detected, injecting conflict context")
 	}
 
 	execSetup.initialContent = content // pass user message to executor
 	execSetup.regenerate = regenerate
-	log.Printf("[lazy-start] task=%s worktree=%s", taskID, execSetup.worktreePath)
+	logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("worktree=%s", execSetup.worktreePath)
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 
-	log.Printf("[lazy-start] task=%s starting executor", taskID)
+	logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("starting executor")
 
 	// Signal the executor (re)started so clients arm the "Awaiting LLM" indicator
 	if !te.configStore.IsAgentProvider(execSetup.serverURL) {
@@ -1818,11 +1819,11 @@ func (te *TaskExecutor) CommitAndMerge(projectID, taskID, worktreePath, commitMs
 	if autoMerge {
 		task, _ := te.store.GetTaskByID(taskID)
 		if err := te.MergeBranch(projectID, taskID, task); err != nil {
-			log.Printf("[auto-commit] task=%s merge failed: %v", taskID, err)
+			logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("merge failed: %v", err)
 			return err
 		}
 	} else {
-		log.Printf("[auto-commit] task=%s merge skipped (auto_merge=false)", taskID)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("merge skipped (auto_merge=false)")
 	}
 	return nil
 }
@@ -1834,8 +1835,7 @@ func (te *TaskExecutor) CommitAndMerge(projectID, taskID, worktreePath, commitMs
 // task.ExecutionState afterwards and skip the final merge on "merge_conflict".
 func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, taskBranch string, task *types.Task) error {
 	// Serialize against the task's own tool execution.
-	te.GetWorktreeMu(taskID).Lock()
-	defer te.GetWorktreeMu(taskID).Unlock()
+	defer te.LockWorktree(taskID)()
 
 	project, err := te.store.GetProject(projectID)
 	if err != nil {
@@ -1844,30 +1844,30 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 
 	// Check if target branch has new commits beyond where task branch diverged.
 	// merge-base is the common ancestor; if it equals target HEAD, target hasn't moved.
-	mergeBaseCmd := osexec.Command("git", "merge-base", taskBranch, targetBranch)
+	mergeBaseCmd := git.Command("", "merge-base", taskBranch, targetBranch)
 	mergeBaseCmd.Dir = project.Path
 	mergeBaseOut, err := mergeBaseCmd.Output()
 	if err != nil {
-		log.Printf("[sync-merge] task=%s could not compute merge-base: %v, skipping sync", taskID, err)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("could not compute merge-base: %v, skipping sync", err)
 		return nil
 	}
 	mergeBase := strings.TrimSpace(string(mergeBaseOut))
 
-	targetHeadCmd := osexec.Command("git", "rev-parse", targetBranch)
+	targetHeadCmd := git.Command("", "rev-parse", targetBranch)
 	targetHeadCmd.Dir = project.Path
 	targetHeadOut, err := targetHeadCmd.Output()
 	if err != nil {
-		log.Printf("[sync-merge] task=%s could not resolve target HEAD: %v, skipping sync", taskID, err)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("could not resolve target HEAD: %v, skipping sync", err)
 		return nil
 	}
 	targetHead := strings.TrimSpace(string(targetHeadOut))
 
 	if mergeBase == targetHead {
-		log.Printf("[sync-merge] task=%s target %s has no new commits, skipping sync", taskID, targetBranch)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("target %s has no new commits, skipping sync", targetBranch)
 		return nil
 	}
 
-	log.Printf("[sync-merge] task=%s target %s has new commits (merge-base=%s, target=%s), syncing", taskID, targetBranch, mergeBase[:7], targetHead[:7])
+	logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("target %s has new commits (merge-base=%s, target=%s), syncing", targetBranch, mergeBase[:7], targetHead[:7])
 
 	// Get task's worktree path
 	worktreePath, err := te.worktreeMgr.WorktreePath(taskID)
@@ -1875,17 +1875,19 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 		return fmt.Errorf("get worktree path for sync: %w", err)
 	}
 	if _, err := os.Stat(worktreePath); err != nil {
-		log.Printf("[sync-merge] task=%s worktree does not exist, skipping sync", taskID)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("worktree does not exist, skipping sync")
 		return nil
 	}
 
-	// Stash any working tree changes in the worktree.
+	// Stash any working tree changes in the worktree, and restore them by the hash PushStash returned -
+	// not by position. See PopStashByHash.
 	hadStash := false
-	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-	if err := te.worktreeMgr.GitRunInDir(worktreePath, "stash", "push", "-u", "-m", git.StashMessageForSyncMerge(taskID)); err == nil {
-		hadStash = true
+	stashHash := ""
+	unlockStash := te.worktreeMgr.LockProjectStash(projectID)
+	if h, err := te.worktreeMgr.PushStash(worktreePath, git.StashMessageForSyncMerge(taskID)); err == nil {
+		hadStash, stashHash = true, h
 	}
-	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	unlockStash()
 
 	// Ensure we're on the task branch
 	if err := te.worktreeMgr.GitRunInDir(worktreePath, "checkout", "-f", taskBranch); err != nil {
@@ -1895,18 +1897,17 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 	// Merge target branch into task branch
 	_, mergeErr := te.worktreeMgr.GitRunInDirOutput(worktreePath, "merge", targetBranch, "--no-edit")
 	if mergeErr == nil {
-		log.Printf("[sync-merge] task=%s synced %s into %s cleanly", taskID, targetBranch, taskBranch)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("synced %s into %s cleanly", targetBranch, taskBranch)
 		te.logSystemMessage(taskID, task.CurrentThreadID, "info",
 			fmt.Sprintf("Synced %s into task branch (no conflicts).", targetBranch))
-		// Pop stash — restore user's unstaged changes.
-		// If stash pop conflicts, drop it to avoid leaving markers.
+		// Restore the task's unstaged changes. A failed restore leaves the entry on the stack, so the work
+		// survives for the user to resolve instead of going with the conflict markers.
 		if hadStash {
-			te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-			if err := te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop"); err != nil {
-				log.Printf("[sync-merge] task=%s stash pop failed, dropping stash: %v", taskID, err)
-				_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "drop")
+			unlockRestore := te.worktreeMgr.LockProjectStash(projectID)
+			if _, err := te.worktreeMgr.PopStashByHash(worktreePath, stashHash); err != nil {
+				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("stash pop failed, leaving the entry for the user: %v", err)
 			}
-			te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+			unlockRestore()
 		}
 		return nil
 	}
@@ -1914,7 +1915,7 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 	// Merge conflict — set flag so the LLM loop (or HandleCommitAndDone)
 	// can trigger the agent to resolve via file tools.
 	// Keep user's stash intact — it will be popped after merge --continue.
-	log.Printf("[sync-merge] task=%s conflict syncing %s into %s, setting merge conflict flag", taskID, targetBranch, taskBranch)
+	logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("conflict syncing %s into %s, setting merge conflict flag", targetBranch, taskBranch)
 	_ = te.store.SetTaskMergeConflict(taskID, projectID, true)
 	task.HasMergeConflict = true
 	te.logSystemMessage(taskID, task.CurrentThreadID, "warning",
@@ -1957,14 +1958,14 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 
 	taskBranch := task.Branch
 	if taskBranch == "" {
-		log.Printf("[merge] task=%s no task branch set, skipping merge", taskID)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("no task branch set, skipping merge")
 		return nil
 	}
 
 	// Verify the branch points to a valid commit before attempting merge.
 	// If the branch ref is broken (e.g., worktree was removed, ref corrupted),
 	// skip the merge gracefully rather than failing with a cryptic error.
-	cmd := osexec.Command("git", "rev-parse", "--verify", "--quiet", taskBranch)
+	cmd := git.Command("", "rev-parse", "--verify", "--quiet", taskBranch)
 	cmd.Dir = project.Path
 	if err := cmd.Run(); err != nil {
 		recovered := te.recoverMissingBranch(projectID, taskID, taskBranch)
@@ -1973,7 +1974,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 		}
 		// If still missing, skip the merge.
 		if taskBranch == "" || !te.branchExists(projectID, taskBranch) {
-			log.Printf("[merge] task=%s branch %q is not a valid commit, skipping merge: %v", taskID, taskBranch, err)
+			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("branch %q is not a valid commit, skipping merge: %v", taskBranch, err)
 			return nil
 		}
 	}
@@ -1986,7 +1987,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 	if task.ParentTaskID != "" {
 		parent, err := te.store.GetTaskByID(task.ParentTaskID)
 		if err != nil {
-			log.Printf("[merge] task=%s parent_task_id=%s not found: %v, aborting merge", taskID, task.ParentTaskID, err)
+			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("parent_task_id=%s not found: %v, aborting merge", task.ParentTaskID, err)
 			te.logSystemMessage(taskID, task.CurrentThreadID, "error",
 				fmt.Sprintf("Error: parent task %s not found — merge aborted.", task.ParentTaskID))
 			return fmt.Errorf("parent task %s not found", task.ParentTaskID)
@@ -1994,9 +1995,9 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 		// Child tasks MUST merge into their parent's branch, never origin.
 		// If the parent has no branch yet, create it now.
 		if parent.Branch == "" {
-			log.Printf("[merge] task=%s parent %s has no branch, creating it now", taskID, parent.ID)
+			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("parent %s has no branch, creating it now", parent.ID)
 			if err := te.EnsureParentBranch(projectID, parent); err != nil {
-				log.Printf("[merge] task=%s failed to create parent branch: %v, aborting merge", taskID, err)
+				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to create parent branch: %v, aborting merge", err)
 				te.logSystemMessage(taskID, task.CurrentThreadID, "error",
 					fmt.Sprintf("Error: could not create branch for parent task %q — merge aborted: %v", parent.Title, err))
 				return fmt.Errorf("create parent branch: %w", err)
@@ -2014,13 +2015,13 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 		}
 		if !hasWorktree {
 			// Parent has no worktree — create one from its branch.
-			log.Printf("[merge] task=%s parent %s has no worktree, creating it now", taskID, parent.ID)
+			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("parent %s has no worktree, creating it now", parent.ID)
 			branchName := parent.Branch
 			if branchName == "" {
 				branchName = te.generateBranchName(parent, parent.ID, projectID)
 			}
 			if _, _, err := te.worktreeMgr.CreateWorktree(projectID, parent.ID, branchName, ""); err != nil {
-				log.Printf("[merge] task=%s failed to create parent worktree: %v", taskID, err)
+				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to create parent worktree: %v", err)
 			} else {
 				parentWorktreePath, _ = te.worktreeMgr.WorktreePath(parent.ID)
 				hasWorktree = true
@@ -2042,7 +2043,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 			var err error
 			targetBranch, err = te.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
 			if err != nil {
-				log.Printf("[merge] task=%s not a git repo, skipping merge: %v", taskID, err)
+				logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("not a git repo, skipping merge: %v", err)
 				return nil
 			}
 		}
@@ -2050,7 +2051,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 	targetBranch = strings.TrimSpace(targetBranch)
 	// Create target branch if it doesn't exist (user-specified base_ref).
 	if task.ParentTaskID == "" && task.BaseRef != "" && targetBranch == task.BaseRef {
-		cmd := osexec.Command("git", "rev-parse", "--verify", "--quiet", "refs/heads/"+targetBranch)
+		cmd := git.Command("", "rev-parse", "--verify", "--quiet", "refs/heads/"+targetBranch)
 		cmd.Dir = project.Path
 		if cmd.Run() != nil {
 			// Branch doesn't exist — create it from origin branch
@@ -2058,29 +2059,29 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 			if startPoint == "" {
 				startPoint = "HEAD"
 			}
-			createCmd := osexec.Command("git", "-C", project.Path, "branch", targetBranch, startPoint)
+			createCmd := git.Command("", "-C", project.Path, "branch", targetBranch, startPoint)
 			if out, err := createCmd.CombinedOutput(); err != nil {
 				// A concurrent merge may have created it between our check and
 				// now — re-verify before failing.
-				recheck := osexec.Command("git", "-C", project.Path, "rev-parse", "--verify", "--quiet", "refs/heads/"+targetBranch)
+				recheck := git.Command("", "-C", project.Path, "rev-parse", "--verify", "--quiet", "refs/heads/"+targetBranch)
 				if recheck.Run() == nil {
-					log.Printf("[merge] task=%s branch %q created by a concurrent merge, proceeding", taskID, targetBranch)
+					logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("branch %q created by a concurrent merge, proceeding", targetBranch)
 				} else {
-					log.Printf("[merge] task=%s failed to create branch %q from %q: %s", taskID, targetBranch, startPoint, string(out))
+					logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to create branch %q from %q: %s", targetBranch, startPoint, string(out))
 					te.logSystemMessage(taskID, task.CurrentThreadID, "error",
 						fmt.Sprintf("Error: could not create branch %q from %q — merge skipped.", targetBranch, startPoint))
 					return fmt.Errorf("create branch %q: %w", targetBranch, err)
 				}
 			} else {
-				log.Printf("[merge] task=%s created branch %q from %q", taskID, targetBranch, startPoint)
+				logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("created branch %q from %q", targetBranch, startPoint)
 			}
 		}
 	}
 	if targetBranch == "" || targetBranch == "HEAD" {
-		log.Printf("[merge] task=%s no branch (detached HEAD), skipping merge", taskID)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("no branch (detached HEAD), skipping merge")
 		return nil
 	}
-	log.Printf("[merge] task=%s merging %s into %s (parent_task_id=%s)", taskID, taskBranch, targetBranch, task.ParentTaskID)
+	logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("merging %s into %s (parent_task_id=%s)", taskBranch, targetBranch, task.ParentTaskID)
 
 	// Sync target branch into task branch first (catches conflicts early).
 	if syncErr := te.syncTargetIntoTask(projectID, taskID, targetBranch, taskBranch, task); syncErr != nil {
@@ -2089,7 +2090,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 	// If sync has a merge conflict, skip the final merge.
 	task, _ = te.store.GetTaskByID(taskID)
 	if task.HasMergeConflict {
-		log.Printf("[merge] task=%s sync has merge conflict, skipping final merge", taskID)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("sync has merge conflict, skipping final merge")
 		return nil
 	}
 
@@ -2117,8 +2118,7 @@ func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, task
 	// single HEAD/index, so interleaved merges clobber each other's checkout,
 	// stashes, and restore. Held for the whole sequence below (capture →
 	// merge → restore → stash pop). Lock order: before the project stash mutex.
-	te.worktreeMgr.GetProjectMergeMu(projectID).Lock()
-	defer te.worktreeMgr.GetProjectMergeMu(projectID).Unlock()
+	defer te.worktreeMgr.LockProjectMerge(projectID)()
 	// Prune stale worktree registrations so a deleted worktree doesn't block checkout.
 	te.worktreeMgr.GitRunInProject(projectID, "worktree", "prune")
 	// If the target branch is checked out in a worktree, merge there instead.
@@ -2144,7 +2144,7 @@ func (te *TaskExecutor) findWorktreeForBranch(projectID, branch string) string {
 	if err != nil {
 		return ""
 	}
-	cmd := osexec.Command("git", "worktree", "list", "--porcelain")
+	cmd := git.Command("", "worktree", "list", "--porcelain")
 	cmd.Dir = project.Path
 	out, err := cmd.Output()
 	if err != nil {
@@ -2173,8 +2173,7 @@ func (te *TaskExecutor) findWorktreeForBranch(projectID, branch string) string {
 // Acquires ownerTaskID's mutex to serialize against the owner's tool execution.
 func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, taskBranch, taskID, ownerTaskID string) error {
 	if ownerTaskID != "" {
-		te.GetWorktreeMu(ownerTaskID).Lock()
-		defer te.GetWorktreeMu(ownerTaskID).Unlock()
+		defer te.LockWorktree(ownerTaskID)()
 	}
 	// Worktrees must stay on their own branch — no checkout restore.
 	return te.mergeInto(projectID, worktreePath, targetBranch, taskBranch, taskID, "")
@@ -2184,7 +2183,7 @@ func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, t
 // dir's HEAD is on. Returns "" when it cannot be determined — in that case the
 // merge leaves the checkout where it ends up, as before.
 func currentCheckoutRef(dir string) string {
-	cmd := osexec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd := git.Command("", "rev-parse", "--abbrev-ref", "HEAD")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -2193,7 +2192,7 @@ func currentCheckoutRef(dir string) string {
 	ref := strings.TrimSpace(string(out))
 	if ref == "" || ref == "HEAD" {
 		// Detached HEAD — remember the exact commit.
-		cmd = osexec.Command("git", "rev-parse", "HEAD")
+		cmd = git.Command("", "rev-parse", "HEAD")
 		cmd.Dir = dir
 		out, err = cmd.Output()
 		if err != nil {
@@ -2210,18 +2209,28 @@ func currentCheckoutRef(dir string) string {
 // from targetBranch, dir's checkout is switched back to restoreRef after the merge,
 // preserving the caller's checkout state.
 func (te *TaskExecutor) mergeInto(projectID, dir, targetBranch, taskBranch, taskID, restoreRef string) error {
-	// Stash any working tree changes (serialized with shared stash mutex).
+	// Stash any working tree changes, serialized under the shared stash mutex. PushStash rather than
+	// `git stash push`, and its hash rather than a later pop - see PopStashByHash. PushStash also reports
+	// ErrNothingToStash on a clean tree, where `push` exits 0 having created nothing (the old `err == nil`
+	// there meant "we stashed something" and popped whatever was already on top).
 	hadStash := false
-	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-	if err := te.worktreeMgr.GitRunInDir(dir, "stash", "push", "-u", "-m", git.StashMessageForAutoMerge(taskID)); err == nil {
-		hadStash = true
+	stashHash := ""
+	unlockStash := te.worktreeMgr.LockProjectStash(projectID)
+	if h, err := te.worktreeMgr.PushStash(dir, git.StashMessageForAutoMerge(taskID)); err == nil {
+		hadStash, stashHash = true, h
+	} else if !errors.Is(err, git.ErrNothingToStash) {
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("could not stash the worktree's changes: %v", err)
 	}
-	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	unlockStash()
 	defer func() {
 		if hadStash {
-			te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-			_ = te.worktreeMgr.GitRunInDir(dir, "stash", "pop")
-			te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+			unlockRestore := te.worktreeMgr.LockProjectStash(projectID)
+			if _, err := te.worktreeMgr.PopStashByHash(dir, stashHash); err != nil {
+				// The entry stays on the stack when it cannot be applied, so the work still exists
+				// and its label still says whose it is.
+				logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("restoring the stashed changes: %v", err)
+			}
+			unlockRestore()
 		}
 	}()
 	// Restore the caller's checkout after the merge. Registered after the
@@ -2230,7 +2239,7 @@ func (te *TaskExecutor) mergeInto(projectID, dir, targetBranch, taskBranch, task
 	if restoreRef != "" && restoreRef != targetBranch {
 		defer func() {
 			if _, err := te.worktreeMgr.GitRunInDirOutput(dir, "checkout", "-f", restoreRef); err != nil {
-				log.Printf("[merge] task=%s failed to restore checkout to %s: %v", taskID, restoreRef, err)
+				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to restore checkout to %s: %v", restoreRef, err)
 			}
 		}()
 	}
@@ -2251,7 +2260,7 @@ func (te *TaskExecutor) mergeInto(projectID, dir, targetBranch, taskBranch, task
 				if mergeDetail == "" {
 					mergeDetail = mergeErr.Error()
 				}
-				log.Printf("[merge] task=%s merge failed (not a conflict): %s", taskID, mergeDetail)
+				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("merge failed (not a conflict): %s", mergeDetail)
 				te.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %s", mergeDetail))
 				return fmt.Errorf("merge failed (not a conflict): %s", mergeDetail)
 			}
@@ -2262,7 +2271,7 @@ func (te *TaskExecutor) mergeInto(projectID, dir, targetBranch, taskBranch, task
 			return fmt.Errorf("merge conflict detected (will resolve via LLM): %w", resolveErr)
 		}
 	} else {
-		log.Printf("[merge] task=%s merged %s into %s successfully", taskID, taskBranch, targetBranch)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("merged %s into %s successfully", taskBranch, targetBranch)
 		task, _ := te.store.GetTaskByID(taskID)
 		te.logMergeComplete(taskID, task.CurrentThreadID, taskBranch, targetBranch)
 	}
@@ -2279,8 +2288,8 @@ func composeSystemPrompt(task *types.Task, worktreePath, projectName string, san
 	cwd := worktreePath
 	skillsMount := ""
 	if sandboxEnabled {
-		cwd = sandboxmgr.MountPath(projectName)
-		skillsMount = sandboxmgr.SkillsMount
+		cwd = sandbox.MountPath(projectName)
+		skillsMount = sandbox.SkillsMount
 	}
 	return llama.BuildSystemPrompt(worktreePath, cwd, summary, skillsMount, task.OperatingMode)
 }
@@ -2400,10 +2409,10 @@ func (te *TaskExecutor) recoverMissingBranch(projectID, taskID, missingBranch st
 	}
 
 	if err := te.store.SetTaskBranch(taskID, projectID, recovered); err != nil {
-		log.Printf("[merge] task=%s failed to update branch from %q to %q: %v", taskID, missingBranch, recovered, err)
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to update branch from %q to %q: %v", missingBranch, recovered, err)
 		return ""
 	}
-	log.Printf("[merge] task=%s recovered missing branch %q → %q", taskID, missingBranch, recovered)
+	logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("recovered missing branch %q → %q", missingBranch, recovered)
 	return recovered
 }
 

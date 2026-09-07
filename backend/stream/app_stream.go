@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -22,6 +21,7 @@ import (
 	"kanban/backend/types"
 
 	"github.com/coder/websocket"
+	"kanban/pkg/logging"
 )
 
 var toolCallMarker = []byte(`"event":"tool_call"`)
@@ -895,7 +895,7 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 		}
 	}()
 
-	log.Printf("[app stream] connection accepted (total: %d)", len(asm.clients))
+	logging.For(logging.Stream).Infof("connection accepted (total: %d)", len(asm.clients))
 
 	// Send initial project counts
 	asm.BroadcastProjectCounts()
@@ -942,7 +942,7 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 			var sub AppStreamSubscription
 			if err := json.Unmarshal(input.Data, &sub); err == nil && sub.ProjectID != "" {
 				asm.subscribeProject(conn, sub.ProjectID)
-				log.Printf("[app stream] subscribed to project=%s", sub.ProjectID)
+				logging.For(logging.Stream).Infof("subscribed to project=%s", sub.ProjectID)
 
 				// Send initial data for the project (background to not block the read loop)
 				go asm.sendInitialProjectData(ctx, client, conn, sub)
@@ -952,21 +952,21 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 			var sub AppStreamSubscription
 			if err := json.Unmarshal(input.Data, &sub); err == nil && sub.ProjectID != "" {
 				asm.unsubscribeProject(conn, sub.ProjectID)
-				log.Printf("[app stream] unsubscribed from project=%s", sub.ProjectID)
+				logging.For(logging.Stream).Infof("unsubscribed from project=%s", sub.ProjectID)
 			}
 
 		case "subscribe_task":
 			var sub AppStreamSubscription
 			if err := json.Unmarshal(input.Data, &sub); err == nil && sub.ProjectID != "" && sub.TaskID != "" {
 				asm.subscribeTask(conn, sub.ProjectID, sub.TaskID)
-				log.Printf("[app stream] subscribed to task=%s in project=%s", sub.TaskID, sub.ProjectID)
+				logging.For(logging.Stream).Infof("subscribed to task=%s in project=%s", sub.TaskID, sub.ProjectID)
 			}
 
 		case "unsubscribe_task":
 			var sub AppStreamSubscription
 			if err := json.Unmarshal(input.Data, &sub); err == nil && sub.ProjectID != "" && sub.TaskID != "" {
 				asm.unsubscribeTask(conn, sub.ProjectID, sub.TaskID)
-				log.Printf("[app stream] unsubscribed from task=%s in project=%s", sub.TaskID, sub.ProjectID)
+				logging.For(logging.Stream).Infof("unsubscribed from task=%s in project=%s", sub.TaskID, sub.ProjectID)
 			}
 
 		}

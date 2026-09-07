@@ -814,7 +814,7 @@ func TestRunToolProtected_PanicBecomesFailedResult(t *testing.T) {
 		t.Errorf("result = %q, want an internal-error message naming the tool", result)
 	}
 
-	mu := te.GetWorktreeMu("task-panic")
+	mu := worktreeLockFor(te, "task-panic")
 	if !mu.TryLock() {
 		t.Fatal("worktree lock still held after a panicking tool — later tools would deadlock")
 	}
@@ -826,7 +826,7 @@ func TestRunToolProtected_PassesResultThroughUnderLock(t *testing.T) {
 
 	var heldInside bool
 	result, ok := te.runToolProtected("task-ok", "read_file", func() (string, bool) {
-		mu := te.GetWorktreeMu("task-ok")
+		mu := worktreeLockFor(te, "task-ok")
 		heldInside = !mu.TryLock() // fails only because we already hold it
 		if !heldInside {
 			mu.Unlock()
@@ -840,8 +840,8 @@ func TestRunToolProtected_PassesResultThroughUnderLock(t *testing.T) {
 	if !heldInside {
 		t.Error("the worktree lock was not held while the tool ran")
 	}
-	if !te.GetWorktreeMu("task-ok").TryLock() {
+	if !worktreeLockFor(te, "task-ok").TryLock() {
 		t.Fatal("worktree lock still held after a successful tool")
 	}
-	te.GetWorktreeMu("task-ok").Unlock()
+	worktreeLockFor(te, "task-ok").Unlock()
 }

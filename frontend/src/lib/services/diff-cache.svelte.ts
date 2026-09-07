@@ -1,4 +1,5 @@
 import type { ApiDiffRow, DiffFile, DiffRow } from '$lib/types/diff';
+import { toDiffFiles, type ParsedDiffFile } from '$lib/api/git';
 
 /** Metadata for untracked files. */
 export interface UntrackedMeta {
@@ -23,7 +24,7 @@ export interface DiffStats {
 
 /** API callbacks the component must provide. */
 export interface DiffCacheApis {
-    getTaskDiff: (projectId: string, taskId: string, options?: { headRef?: string; baseRef?: string; full?: boolean }) => Promise<DiffApiResponse>;
+    getTaskDiff: (projectId: string, taskId: string, options?: { headRef?: string; baseRef?: string; full?: boolean; checkpointIndex?: number; parsed?: boolean }) => Promise<DiffApiResponse>;
     getDiffFile: (projectId: string, taskId: string, path: string, options?: { signal?: AbortSignal; full?: boolean }) => Promise<DiffFileApiResponse>;
     stageFile: (projectId: string, taskId: string, path: string, stage: boolean) => Promise<unknown>;
     enrichRows: (rows: ApiDiffRow[]) => DiffRow[];
@@ -49,6 +50,8 @@ export interface DiffApiResponse {
     short_stat?: string;
     base_ref?: string;
     diff?: string; // raw unified diff (returned when headRef is set)
+    /** Present for ?parsed=1 — this same diff, parsed by the server (backend/git). */
+    parsed_files?: ParsedDiffFile[];
 }
 
 /** Response from getDiffFile API. */
@@ -348,15 +351,12 @@ export class DiffCache {
         this.state.loading = true;
 
         try {
-            const result = await this._apis.getTaskDiff(this._getProjectId(), this._getTaskId(), options);
-            // When headRef is set, backend returns a raw diff string (commit-to-commit diff).
-            // Parse it directly instead of fetching individual files from a manifest.
+            const result = await this._apis.getTaskDiff(this._getProjectId(), this._getTaskId(), { ...options, parsed: true });
+            // With headRef set the response is a commit-to-commit diff. The server already parsed it to compute
+            // hashes and truncation, so the structure rides along instead of a second parse in the browser;
+            // toDiffFiles adds the word-level row enrichment.
             if (result.diff) {
-                const { parseUnifiedDiff } = await import('$lib/utils/diff-parser');
-                const files = parseUnifiedDiff(result.diff).filter((f: DiffFile) => !f.path.split('/').pop()?.match(/\..*\.swp$/));
-                for (const file of files) {
-                    file.rows = this._apis.enrichRows(file.rows as any[] as ApiDiffRow[]);
-                }
+                const files = toDiffFiles(result.parsed_files ?? []);
                 this.updateDiffFromFiles(files);
             } else {
                 // Manifest format — fetch individual files on-demand

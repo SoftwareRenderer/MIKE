@@ -1,7 +1,6 @@
 package server
 
 import (
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -9,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"kanban/pkg/logging"
 )
 
 // clientBucket tracks the request count for a single client IP within
@@ -141,7 +142,7 @@ func newLoginRateLimiter() *RateLimiter {
 	limit := defaultLoginRateLimit
 	if v := os.Getenv("MIKE_LOGIN_RATE_LIMIT"); v != "" {
 		if n, err := strconv.Atoi(v); err != nil || n <= 0 {
-			log.Printf("[server] MIKE_LOGIN_RATE_LIMIT=%q is not a positive integer; using the default of %d requests/minute (rate limiting cannot be disabled)", v, defaultLoginRateLimit)
+			logging.For(logging.HTTP).Infof("MIKE_LOGIN_RATE_LIMIT=%q is not a positive integer; using the default of %d requests/minute (rate limiting cannot be disabled)", v, defaultLoginRateLimit)
 		} else {
 			limit = n
 		}

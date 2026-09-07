@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,6 +15,7 @@ import (
 
 	"kanban/backend/httputil"
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 )
 
 // sseEvent is one SSE payload: progress events, then a final Done=true event
@@ -441,7 +441,7 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 	// Apply the saved memory limit to a running sandbox
 	if ext.IsLSP() && ext.SandboxConfig.MemoryLimit != oldMemoryLimit {
 		if memErr := h.sandbox.ApplyMemoryLimit(id, ext.SandboxConfig.MemoryLimit); memErr != nil {
-			log.Printf("[extensions] ext=%s WARNING: memory limit %dMB not applied to running sandbox: %v", id, ext.SandboxConfig.MemoryLimit, memErr)
+			logging.For(logging.Extensions).Infof("ext=%s WARNING: memory limit %dMB not applied to running sandbox: %v", id, ext.SandboxConfig.MemoryLimit, memErr)
 		}
 	}
 
@@ -603,11 +603,11 @@ func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *ht
 		recreated = "running sandbox stopped, so the next use recreates it with this mount"
 	}
 	if granted == "" {
-		log.Printf("[extensions] ext=%s dependency grant revoked (was %s); %s reads the image's own copy again — %s", id, previous, declared.Env, recreated)
+		logging.For(logging.Extensions).Infof("ext=%s dependency grant revoked (was %s); %s reads the image's own copy again — %s", id, previous, declared.Env, recreated)
 	} else {
 		// The mode is stated, not computed: this extension's sandbox is the only container that binds the
 		// grant, and it binds it read-only.
-		log.Printf("[extensions] ext=%s dependency grant %s -> %s (mounted read-only at %s, in this extension's sandbox only) — %s", id, previous, granted, declared.ContainerPath, recreated)
+		logging.For(logging.Extensions).Infof("ext=%s dependency grant %s -> %s (mounted read-only at %s, in this extension's sandbox only) — %s", id, previous, granted, declared.ContainerPath, recreated)
 	}
 
 	httputil.JSONResponse(w, http.StatusOK, h.toResponse(ext, h.sandbox.ListRunning()))
@@ -1129,7 +1129,7 @@ func (h *ExtensionHandler) rollbackFailedInstall(entry *RegistryEntry, gitPinned
 		return
 	}
 	if warning := h.removeMaterializedDir(entry.Name, entry.Author, entry.Name); warning != "" {
-		log.Printf("[extensions] %s/%s install failed and left files behind: %s", entry.Author, entry.Name, warning)
+		logging.For(logging.Extensions).Warnf("%s/%s install failed and left files behind: %s", entry.Author, entry.Name, warning)
 	}
 }
 
@@ -1391,9 +1391,7 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 				}
 				if len(merged.Envs) > len(before.Envs) || len(merged.Mounts) > len(before.Mounts) ||
 					len(merged.Capabilities) > len(before.Capabilities) {
-					log.Printf("[extensions] ext=%s update added %d env, %d mount, %d capability declaration(s) from the manifest",
-						id, len(merged.Envs)-len(before.Envs), len(merged.Mounts)-len(before.Mounts),
-						len(merged.Capabilities)-len(before.Capabilities))
+					logging.For(logging.Extensions).Infof("ext=%s update added %d env, %d mount, %d capability declaration(s) from the manifest", id, len(merged.Envs)-len(before.Envs), len(merged.Mounts)-len(before.Mounts), len(merged.Capabilities)-len(before.Capabilities))
 				}
 				ext.SandboxConfig = merged
 			}
@@ -1571,7 +1569,7 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 	proxyReq.Header.Set("Accept", "application/json")
 
 	// Log the proxy request
-	log.Printf("[proxy] extension=%s method=%s url=%s status=pending", ext.Name, req.Method, req.URL)
+	logging.For(logging.Extensions).Infof("extension=%s method=%s url=%s status=pending", ext.Name, req.Method, req.URL)
 
 	// Execute proxy request. Redirects are NOT followed: the allowlist only
 	// validates the original URL's hostname, so following a redirect could
@@ -1591,13 +1589,13 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 	}
 	// The upstream is only named by a domain in the manifest; cap what it can send back.
 	if int64(len(body)) > maxProxyResponseBytes {
-		log.Printf("[proxy] extension=%s url=%s response exceeded %d bytes", ext.Name, req.URL, maxProxyResponseBytes)
+		logging.For(logging.Extensions).Infof("extension=%s url=%s response exceeded %d bytes", ext.Name, req.URL, maxProxyResponseBytes)
 		httputil.JSONError(w, http.StatusBadGateway, "proxy response too large")
 		return
 	}
 
 	// Log the proxy response
-	log.Printf("[proxy] extension=%s method=%s url=%s status=%d", ext.Name, req.Method, req.URL, resp.StatusCode)
+	logging.For(logging.Extensions).Infof("extension=%s method=%s url=%s status=%d", ext.Name, req.Method, req.URL, resp.StatusCode)
 
 	// Return raw response
 	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))

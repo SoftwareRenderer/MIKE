@@ -9,7 +9,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -36,6 +35,7 @@ import (
 	"kanban/backend/term"
 	"kanban/backend/tls"
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 )
 
 // handlerStore is the persistence the HTTP handlers reach. It is wide because message
@@ -202,12 +202,12 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 		// Column-only write: a full-row write from a row read a moment ago could
 		// undo a concurrent status or execution_state change.
 		if err := store.SetTaskAssignedPorts(taskID, projectID, ports); err != nil {
-			log.Printf("[terminal] failed to store port assignment for task %s: %v", taskID, err)
+			logging.For(logging.Terminal).Warnf("failed to store port assignment for task %s: %v", taskID, err)
 			return
 		}
 		task, err := store.GetTaskByID(taskID)
 		if err != nil {
-			log.Printf("[terminal] failed to get task %s for port assignment: %v", taskID, err)
+			logging.For(logging.Terminal).Warnf("failed to get task %s for port assignment: %v", taskID, err)
 			return
 		}
 		s.appStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -248,7 +248,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	refreshLLMAdapters := func() {
 		ms, err := extensions.CollectLLMMappings(s.extStore, extCfg.ExtensionsDirOrDefault())
 		if err != nil {
-			log.Printf("[server] collect llm mappings: %v", err)
+			logging.For(logging.HTTP).Infof("collect llm mappings: %v", err)
 			return
 		}
 		s.llmAdapter.SetMappings(ms)
@@ -267,7 +267,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	s.taskHandler = managers.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, commitQueue, s.sandboxMgr)
 	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())
 	// Wire worktree mutex so GitHandler can serialize per-task git operations.
-	s.gitHandler.SetWorktreeMutex(s.getWorktreeMutex)
+	s.gitHandler.SetWorktreeMutex(s.lockWorktree)
 
 	// s.gitHandler wires the worktree mutex in above; extensions are entirely
 	// registry-driven now — there is no built-in bootstrap step.
@@ -326,25 +326,25 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 		s.lspHandler.BroadcastLSPReset()
 	})
 	// Wire project mutex so GitHandler can serialize project-level git operations.
-	s.gitHandler.SetProjectMutex(s.getProjectMutex)
+	s.gitHandler.SetProjectMutex(s.lockProject)
 	// Wire worktree watcher -> GitHandler diff cache so on-demand file fetches work
 	s.appStreamMgr.SetDiffCacheUpdate(s.gitHandler.UpdateDiffCache)
 
 	// Run garbage collector on startup
 	dryRun := os.Getenv("MIKE_GC_DRY_RUN") == "1"
 	if removed, err := s.executor.WorktreeMgr().GarbageCollect(dryRun); err != nil {
-		log.Printf("[gc] startup error: %v", err)
+		logging.For(logging.Worktree).Warnf("startup error: %v", err)
 	} else if removed > 0 {
-		log.Printf("[gc] startup: %d orphaned worktrees cleaned", removed)
+		logging.For(logging.Worktree).Infof("startup: %d orphaned worktrees cleaned", removed)
 	}
 
 	// Clear stale title_generating flags from previous server sessions
 	if err := store.ClearStaleTitleGenerating(); err != nil {
-		log.Printf("[title-gen] startup: failed to clear stale flags: %v", err)
+		logging.For(logging.Generate).Warnf("startup: failed to clear stale flags: %v", err)
 	}
 	// Clear stale summarizing flags from previous server sessions
 	if err := store.ClearStaleSummarizing(); err != nil {
-		log.Printf("[summarize] startup: failed to clear stale flags: %v", err)
+		logging.For(logging.Summarize).Warnf("startup: failed to clear stale flags: %v", err)
 	}
 
 	s.setupRoutes()
@@ -368,17 +368,17 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 func (s *Server) refreshPromptLocale() {
 	ov, err := extensions.ActivePromptOverlay(s.extStore, s.extensionsDir)
 	if err != nil {
-		log.Printf("[prompts] cannot read the active pack: %v — keeping the current prompt language", err)
+		logging.For(logging.Prompts).Infof("cannot read the active pack: %v — keeping the current prompt language", err)
 		return
 	}
 	prompts.SetOverlay(ov.Dir, ov.Locale)
 	switch {
 	case ov.Locale == "":
-		log.Printf("[prompts] locale=en (no translation pack enabled)")
+		logging.For(logging.Prompts).Infof("locale=en (no translation pack enabled)")
 	case ov.Dir == "":
-		log.Printf("[prompts] locale=%s (pack ships no prompt templates — core English renders, the answer is asked for in %s)", ov.Locale, ov.Locale)
+		logging.For(logging.Prompts).Infof("locale=%s (pack ships no prompt templates — core English renders, the answer is asked for in %s)", ov.Locale, ov.Locale)
 	default:
-		log.Printf("[prompts] locale=%s templates=%s", ov.Locale, ov.Dir)
+		logging.For(logging.Prompts).Infof("locale=%s templates=%s", ov.Locale, ov.Dir)
 	}
 }
 
@@ -666,8 +666,7 @@ func (l *sniffDropLogger) note(addr net.Addr, cause error) {
 	if l == nil || addr == nil || !l.allowed(addr) {
 		return
 	}
-	log.Printf("[accept] dropped connection from %s before its first byte: %v (further drops from this host are suppressed for %s)",
-		addr, cause, sniffLogInterval)
+	logging.For(logging.Startup).Infof("dropped connection from %s before its first byte: %v (further drops from this host are suppressed for %s)", addr, cause, sniffLogInterval)
 }
 
 // allowed stamps addr's host and reports whether it may be logged now.
@@ -744,7 +743,7 @@ func (s *Server) middlewareChain(h http.Handler) http.Handler {
 func (s *Server) tlsConfigToStd() *stdtls.Config {
 	cert, err := stdtls.LoadX509KeyPair(s.tlsConfig.CertFile, s.tlsConfig.KeyFile)
 	if err != nil {
-		log.Printf("failed to load key pair: %v", err)
+		logging.For(logging.HTTP).Warnf("failed to load key pair: %v", err)
 		return nil
 	}
 	return &stdtls.Config{Certificates: []stdtls.Certificate{cert}}
@@ -760,7 +759,7 @@ func (s *Server) tlsConfigToStd() *stdtls.Config {
 // not allowed to be the reason a shutdown waits.
 func (s *Server) RepairExtensionFiles(ctx context.Context) {
 	if _, _, err := s.extHandler.RepairMissingFiles(ctx); err != nil {
-		log.Printf("[extensions] repair: could not check installed extension files: %v", err)
+		logging.For(logging.Extensions).Warnf("repair: could not check installed extension files: %v", err)
 	}
 }
 
@@ -783,13 +782,13 @@ func (s *Server) Serve() error {
 	// Echo the Host allowlist extras: a 421 through a reverse proxy is almost
 	// always a missing entry here, so make the effective value visible at startup.
 	if extra := s.effectiveAllowedHosts(); extra != "" {
-		log.Printf("[host] accepting extra Host header values: %s", extra)
+		logging.For(logging.Host).Infof("accepting extra Host header values: %s", extra)
 	}
 
 	if s.tlsConfig != nil {
-		log.Printf("Server starting on https://%s (TLS: %s, %s)", s.addr, s.tlsConfig.CertFile, s.tlsConfig.KeyFile)
+		logging.For(logging.HTTP).Infof("Server starting on https://%s (TLS: %s, %s)", s.addr, s.tlsConfig.CertFile, s.tlsConfig.KeyFile)
 		if s.tlsConfig.CAFile != "" {
-			log.Printf("TLS: import %s into a device's trust store to trust this certificate", s.tlsConfig.CAFile)
+			logging.For(logging.HTTP).Infof("TLS: import %s into a device's trust store to trust this certificate", s.tlsConfig.CAFile)
 		}
 		l, err := net.Listen("tcp", s.addr)
 		if err != nil {
@@ -798,7 +797,7 @@ func (s *Server) Serve() error {
 		return srv.Serve(newHybridListener(l, s.tlsConfigToStd(), 0))
 	}
 
-	log.Printf("Server starting on http://%s", s.addr)
+	logging.For(logging.HTTP).Infof("Server starting on http://%s", s.addr)
 	return srv.ListenAndServe()
 }
 
@@ -826,7 +825,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		if run == nil {
 			return
 		}
-		log.Printf("shutdown: %s", name)
+		logging.For(logging.HTTP).Infof("shutdown: %s", name)
 		run()
 	}
 	// Stop preview document cleanup
@@ -884,11 +883,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	// Logged once on the way out: a zero wait count is the evidence the single-connection
 	// pool is not the constraint, and a large one is the trigger to widen it.
 	stats := s.store.DBStats()
-	log.Printf("database pool over this run: %d connection waits totalling %s (open=%d, inUse=%d, maxOpen=%d)",
-		stats.WaitCount, stats.WaitDuration.Round(time.Millisecond), stats.OpenConnections, stats.InUse, stats.MaxOpenConnections)
+	logging.For(logging.HTTP).Infof("database pool over this run: %d connection waits totalling %s (open=%d, inUse=%d, maxOpen=%d)", stats.WaitCount, stats.WaitDuration.Round(time.Millisecond), stats.OpenConnections, stats.InUse, stats.MaxOpenConnections)
 	shutdownStep("database", func() {
 		if err := s.store.Close(); err != nil {
-			log.Printf("shutdown: closing database: %v", err)
+			logging.For(logging.HTTP).Infof("shutdown: closing database: %v", err)
 		}
 	})
 	return nil

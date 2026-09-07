@@ -1,12 +1,11 @@
 package exec
 
 import (
-	"log"
-
-	kanban_sandbox "kanban/backend/sandbox"
+	"kanban/backend/sandbox"
 	"kanban/backend/types"
 
-	sandbox "kanban/pkg/bridge"
+	"kanban/pkg/bridge"
+	"kanban/pkg/logging"
 )
 
 // bridgeSandboxManager is the subset of SandboxManager operations used by
@@ -15,14 +14,14 @@ import (
 type bridgeSandboxManager interface {
 	// GetClient returns the agent client for a task, creating a fresh client on
 	// the task's agent pipes if the cached one is dead.
-	GetClient(taskID string) (*sandbox.Client, error)
+	GetClient(taskID string) (*bridge.Client, error)
 	// ContainerIsRunning reports whether the task's sandbox container is
 	// tracked and running.
 	ContainerIsRunning(taskID string) bool
 	// Stop tears down the task's sandbox container, agent process, and client.
 	Stop(taskID string) error
 	// Create provisions a fresh sandbox container and agent for the task.
-	Create(taskID, worktreePath string, project *types.Project, opts kanban_sandbox.SandboxOpts) ([]types.AssignedPort, error)
+	Create(taskID, worktreePath string, project *types.Project, opts sandbox.SandboxOpts) ([]types.AssignedPort, error)
 }
 
 // maxBridgeRecoveryAttempts bounds consecutive recovery attempts per task.
@@ -36,54 +35,54 @@ func (te *TaskExecutor) recoverBridgeForTask(mgr bridgeSandboxManager, setup *ta
 	te.taskMu.Lock()
 	if state.bridgeRecoveryAttempts >= maxAttempts {
 		te.taskMu.Unlock()
-		log.Printf("[bridge-recovery] task=%s max attempts (%d) reached, giving up", setup.task.ID, maxAttempts)
+		logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Infof("max attempts (%d) reached, giving up", maxAttempts)
 		return false
 	}
 	state.bridgeRecoveryAttempts++
 	attempt := state.bridgeRecoveryAttempts
 	te.taskMu.Unlock()
 
-	log.Printf("[bridge-recovery] task=%s attempt %d: trying client reconnect", setup.task.ID, attempt)
+	logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Infof("attempt %d: trying client reconnect", attempt)
 	// try to get a fresh client
 	newClient, err := mgr.GetClient(setup.task.ID)
 	if err == nil {
 		probeErr := newClient.Ping(setup.ctx)
 		if probeErr == nil {
-			log.Printf("[bridge-recovery] task=%s client reconnect successful", setup.task.ID)
+			logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Infof("client reconnect successful")
 			state.setSandbox(func(sb *sandboxState) {
 				sb.exec, sb.execStream, sb.read, sb.write, sb.edit = makeSandboxCallbacks(newClient)
 			})
 			te.resetBridgeRecoveryAttempts(state)
 			return true
 		}
-		log.Printf("[bridge-recovery] task=%s client probe failed: %v, escalating to sandbox recreation", setup.task.ID, probeErr)
+		logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Warnf("client probe failed: %v, escalating to sandbox recreation", probeErr)
 		err = probeErr
 	}
 
 	// agent is dead — recreate the sandbox
 	if mgr.ContainerIsRunning(setup.task.ID) {
-		log.Printf("[bridge-recovery] task=%s client reconnect failed (%v), recreating sandbox", setup.task.ID, err)
+		logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Warnf("client reconnect failed (%v), recreating sandbox", err)
 		if stopErr := mgr.Stop(setup.task.ID); stopErr != nil {
-			log.Printf("[bridge-recovery] task=%s failed to stop old sandbox: %v", setup.task.ID, stopErr)
+			logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Warnf("failed to stop old sandbox: %v", stopErr)
 		}
 	} else {
-		log.Printf("[bridge-recovery] task=%s container not running, creating sandbox from scratch", setup.task.ID)
+		logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Infof("container not running, creating sandbox from scratch")
 	}
 	if _, createErr := mgr.Create(setup.task.ID, setup.worktreePath, setup.project, te.sandboxCreateOpts(setup, imageToUse, setup.task.IsPlanMode())); createErr != nil {
-		log.Printf("[bridge-recovery] task=%s failed to recreate sandbox: %v", setup.task.ID, createErr)
+		logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Warnf("failed to recreate sandbox: %v", createErr)
 		return false
 	}
 	newClient, clientErr := mgr.GetClient(setup.task.ID)
 	if clientErr != nil {
-		log.Printf("[bridge-recovery] task=%s failed to connect after recreation: %v", setup.task.ID, clientErr)
+		logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Warnf("failed to connect after recreation: %v", clientErr)
 		return false
 	}
 	if probeErr := newClient.Ping(setup.ctx); probeErr != nil {
-		log.Printf("[bridge-recovery] task=%s probe failed after recreation: %v", setup.task.ID, probeErr)
+		logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Warnf("probe failed after recreation: %v", probeErr)
 		return false
 	}
 
-	log.Printf("[bridge-recovery] task=%s sandbox recreated successfully", setup.task.ID)
+	logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Infof("sandbox recreated successfully")
 	state.setSandbox(func(sb *sandboxState) {
 		sb.exec, sb.execStream, sb.read, sb.write, sb.edit = makeSandboxCallbacks(newClient)
 	})

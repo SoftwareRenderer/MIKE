@@ -2,12 +2,13 @@ package httputil
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/coder/websocket"
+
+	"kanban/pkg/logging"
 )
 
 // AcceptWS upgrades a WebSocket with the settings every MIKE endpoint shares, so no
@@ -23,7 +24,7 @@ func AcceptWS(w http.ResponseWriter, r *http.Request, logTag string) (conn *webs
 		CompressionMode: websocket.CompressionContextTakeover,
 	})
 	if err != nil {
-		log.Printf("[%s] accept error: %v", logTag, err)
+		logging.For(logging.HTTP).Warnf("websocket accept error at %s: %v", logTag, err)
 		return nil, false
 	}
 	return c, true

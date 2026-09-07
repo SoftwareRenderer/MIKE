@@ -16,14 +16,14 @@ vi.mock('svelte', async (importOriginal) => {
 // Mock the git API — every function the panel touches.
 vi.mock('$lib/api/git', () => ({
     getGitStatus: vi.fn(),
-    getProjectDiff: vi.fn(),
+    getProjectDiffFiles: vi.fn(),
     getProjectDiffFile: vi.fn(),
     stageProjectFile: vi.fn(),
     commitProject: vi.fn(),
     pullProject: vi.fn(),
     pushProject: vi.fn(),
     getGitLogFull: vi.fn(),
-    getCommitDiff: vi.fn(),
+    getCommitDiffFiles: vi.fn(),
 }));
 
 vi.mock('$lib/stores', () => ({
@@ -44,12 +44,12 @@ import * as gitApi from '$lib/api/git';
 import { dialogStore } from '$lib/stores';
 
 const getGitStatus = gitApi.getGitStatus as ReturnType<typeof vi.fn>;
-const getProjectDiff = gitApi.getProjectDiff as ReturnType<typeof vi.fn>;
+const getProjectDiffFiles = gitApi.getProjectDiffFiles as ReturnType<typeof vi.fn>;
 const getProjectDiffFile = gitApi.getProjectDiffFile as ReturnType<typeof vi.fn>;
 const pullProject = gitApi.pullProject as ReturnType<typeof vi.fn>;
 const pushProject = gitApi.pushProject as ReturnType<typeof vi.fn>;
 const getGitLogFull = gitApi.getGitLogFull as ReturnType<typeof vi.fn>;
-const getCommitDiff = gitApi.getCommitDiff as ReturnType<typeof vi.fn>;
+const getCommitDiffFiles = gitApi.getCommitDiffFiles as ReturnType<typeof vi.fn>;
 
 const COMMIT = {
     hash: 'a'.repeat(40),
@@ -72,10 +72,10 @@ beforeEach(() => {
     vi.clearAllMocks();
     // Clean working tree by default.
     getGitStatus.mockResolvedValue({ clean: true, status: '', head: 'h1', authorName: 'Test', authorEmail: 'test@test.com' });
-    getProjectDiff.mockResolvedValue('');
+    getProjectDiffFiles.mockResolvedValue([]);
     getProjectDiffFile.mockRejectedValue(new Error('no untracked files'));
     getGitLogFull.mockResolvedValue({ commits: [COMMIT], current_branch: 'main' });
-    getCommitDiff.mockResolvedValue('');
+    getCommitDiffFiles.mockResolvedValue([]);
     pullProject.mockResolvedValue({ status: 'pulled' });
     pushProject.mockResolvedValue({ status: 'pushed' });
 });
@@ -85,6 +85,15 @@ afterEach(() => {
 });
 
 describe('GitStatusPanel header actions', () => {
+    it('loads staged and unstaged diffs through the server-parsed API', async () => {
+        // Guards the diff-grammar move. If the panel calls a function the module no longer exports, the call
+        // throws inside Promise.all and .catch(() => []) turns it into an empty diff - so every other test here
+        // would still pass on a broken panel. Asserting the call is what makes that visible.
+        render(GitStatusPanel, { props: baseProps() });
+        await waitFor(() => expect(getProjectDiffFiles).toHaveBeenCalledWith('p1', { cached: true }));
+        expect(getProjectDiffFiles).toHaveBeenCalledWith('p1');
+    });
+
     it('always renders the Commit button, disabled when nothing is staged', async () => {
         const { container } = render(GitStatusPanel, { props: baseProps() });
 

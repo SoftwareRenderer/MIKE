@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os/exec"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"kanban/pkg/bridge/protocol"
+	"kanban/pkg/logging"
 )
 
 // lspSession is one language server process started on this connection, spoken to over
@@ -72,7 +72,7 @@ func newLSPSession(command string, args []string) (*lspSession, error) {
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			log.Printf("lsp[%s]: %s", command, scanner.Text())
+			logging.For(logging.Bridge).Infof("lsp %s: %s", command, scanner.Text())
 		}
 	}()
 
@@ -146,7 +146,7 @@ func (s *lspSession) readLoop() {
 			select {
 			case s.outputCh <- msg:
 			default:
-				log.Printf("lsp: notification output channel full")
+				logging.For(logging.Bridge).Infof("lsp: notification output channel full")
 			}
 			continue
 		}
@@ -338,7 +338,7 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 
 	// Forward raw JSON-RPC to LSP server
 	if len(p.Raw) == 0 {
-		log.Printf("lsp: raw JSON-RPC message required for MsgID=%d", req.MsgID)
+		logging.For(logging.Bridge).Infof("lsp: raw JSON-RPC message required for MsgID=%d", req.MsgID)
 		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, "raw JSON-RPC message required"))
 		return
 	}
@@ -347,7 +347,7 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 	defer cancel()
 	resp, err := lsp.session.send(ctx, p.Raw)
 	if err != nil {
-		log.Printf("lsp: send error: %v", err)
+		logging.For(logging.Bridge).Warnf("lsp: send error: %v", err)
 		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, err.Error()))
 		return
 	}
@@ -362,19 +362,19 @@ func (h *handler) handleLSPNotify(_ net.Conn, frame *protocol.Frame) {
 	defer h.recoverPanic(nil, 0)
 	// Extract JSON params from frame payload: [method:1][reserved:1][jsonLen:4][json:params]
 	if len(frame.Payload) < 6 {
-		log.Printf("lsp: notification payload too short")
+		logging.For(logging.Bridge).Infof("lsp: notification payload too short")
 		return
 	}
 	jsonLen := binary.BigEndian.Uint32(frame.Payload[2:6])
 	if uint32(len(frame.Payload)) < 6+jsonLen {
-		log.Printf("lsp: notification payload truncated")
+		logging.For(logging.Bridge).Infof("lsp: notification payload truncated")
 		return
 	}
 	paramsJSON := frame.Payload[6 : 6+jsonLen]
 
 	var p protocol.LSPParams
 	if err := json.Unmarshal(paramsJSON, &p); err != nil {
-		log.Printf("lsp: parse notification params: %v", err)
+		logging.For(logging.Bridge).Infof("lsp: parse notification params: %v", err)
 		return
 	}
 
@@ -383,12 +383,12 @@ func (h *handler) handleLSPNotify(_ net.Conn, frame *protocol.Frame) {
 	h.mu.Unlock()
 
 	if lsp == nil || lsp.session == nil || lsp.session.isClosed() {
-		log.Printf("lsp: notification dropped — server not started")
+		logging.For(logging.Bridge).Infof("lsp: notification dropped — server not started")
 		return
 	}
 
 	if len(p.Raw) == 0 {
-		log.Printf("lsp: raw JSON-RPC message required for notification")
+		logging.For(logging.Bridge).Infof("lsp: raw JSON-RPC message required for notification")
 		return
 	}
 

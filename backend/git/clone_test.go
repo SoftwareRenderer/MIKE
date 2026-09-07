@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -44,7 +45,7 @@ func TestClone(t *testing.T) {
 	}
 
 	var events []int
-	out, err := Clone(src, dst, func(pct int) {
+	out, err := CloneContext(context.Background(), src, dst, func(pct int) {
 		events = append(events, pct)
 	})
 	if err != nil {
@@ -173,7 +174,7 @@ func TestClone_NilCallback(t *testing.T) {
 		t.Fatalf("mkdir workspace: %v", err)
 	}
 
-	if _, err := Clone(src, dst, nil); err != nil {
+	if _, err := CloneContext(context.Background(), src, dst, nil); err != nil {
 		t.Fatalf("Clone with nil callback: %v", err)
 	}
 	if !IsGitRepo(dst) {
@@ -185,7 +186,7 @@ func TestClone_Error(t *testing.T) {
 	tmp := t.TempDir()
 	missing := filepath.Join(tmp, "does-not-exist")
 
-	out, err := Clone(missing, filepath.Join(tmp, "dst"), nil)
+	out, err := CloneContext(context.Background(), missing, filepath.Join(tmp, "dst"), nil)
 	if err == nil {
 		t.Fatal("expected error cloning a missing source")
 	}

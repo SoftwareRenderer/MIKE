@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,6 +20,7 @@ import (
 	"kanban/backend/types"
 
 	"kanban/backend/httputil"
+	"kanban/pkg/logging"
 )
 
 // LlamaError is a structured error returned by the llama.cpp-compatible server
@@ -120,7 +120,7 @@ func (c *LlamaClient) applyAdapter(reqBody map[string]any) map[string]string {
 	if !ok {
 		return nil
 	}
-	log.Printf("[llama] request adapted for provider %s (mapping %s)", c.baseURL, match)
+	logging.For(logging.LLM).Infof("request adapted for provider %s (mapping %s)", c.baseURL, match)
 	return headers
 }
 
@@ -375,10 +375,9 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 		if usage.PredictedMs == 0 && !firstTokenTime.IsZero() {
 			usage.PredictedMs = streamEnd.Sub(firstTokenTime).Milliseconds()
 		}
-		log.Printf("[llama] final usage: prompt_tokens=%d, completion_tokens=%d, cache_tokens=%d, prompt_ms=%d, predicted_ms=%d",
-			usage.PromptTokens, usage.CompletionTokens, usage.PromptTokensDetails.CachedTokens, usage.PromptMs, usage.PredictedMs)
+		logging.For(logging.LLM).Infof("final usage: prompt_tokens=%d, completion_tokens=%d, cache_tokens=%d, prompt_ms=%d, predicted_ms=%d", usage.PromptTokens, usage.CompletionTokens, usage.PromptTokensDetails.CachedTokens, usage.PromptMs, usage.PredictedMs)
 	} else {
-		log.Printf("[llama] no usage data received")
+		logging.For(logging.LLM).Infof("no usage data received")
 	}
 	return usage, scanner.Err()
 }
@@ -507,8 +506,7 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 				usage.PredictedMs = totalDuration - usage.PromptMs
 			}
 		}
-		log.Printf("[llama] non-streaming usage: prompt_tokens=%d, completion_tokens=%d, cache_tokens=%d, prompt_ms=%d, predicted_ms=%d",
-			usage.PromptTokens, usage.CompletionTokens, usage.PromptTokensDetails.CachedTokens, usage.PromptMs, usage.PredictedMs)
+		logging.For(logging.LLM).Infof("non-streaming usage: prompt_tokens=%d, completion_tokens=%d, cache_tokens=%d, prompt_ms=%d, predicted_ms=%d", usage.PromptTokens, usage.CompletionTokens, usage.PromptTokensDetails.CachedTokens, usage.PromptMs, usage.PredictedMs)
 	}
 
 	return usage, content, nil

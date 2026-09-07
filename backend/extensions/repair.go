@@ -17,11 +17,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"kanban/pkg/logging"
 )
 
 // How long one restore may take, and the whole pass. A boot runs this off the boot path, so the numbers
@@ -210,7 +211,7 @@ func (h *ExtensionHandler) RepairMissingFiles(ctx context.Context) (repaired, re
 		}
 		if err := passCtx.Err(); err != nil {
 			refused = append(refused, m.ext.ID)
-			log.Printf("[extensions] repair: ext=%s skipped — repair pass ended (%v)", m.ext.ID, err)
+			logging.For(logging.Extensions).Infof("repair: ext=%s skipped — repair pass ended (%v)", m.ext.ID, err)
 			continue
 		}
 		extCtx, cancelExt := context.WithTimeout(passCtx, repairPerExtensionTimeout)
@@ -220,12 +221,12 @@ func (h *ExtensionHandler) RepairMissingFiles(ctx context.Context) (repaired, re
 		switch {
 		case repErr == nil:
 			repaired = append(repaired, m.ext.ID)
-			log.Printf("[extensions] repair: ext=%s restored %s from %s@%s", m.ext.ID, m.dir, m.ext.Repo, short(m.ext.Commit))
+			logging.For(logging.Extensions).Infof("repair: ext=%s restored %s from %s@%s", m.ext.ID, m.dir, m.ext.Repo, short(m.ext.Commit))
 		case errors.Is(repErr, errRepairInFlight):
-			log.Printf("[extensions] repair: ext=%s skipped — an install or update is running", m.ext.ID)
+			logging.For(logging.Extensions).Infof("repair: ext=%s skipped — an install or update is running", m.ext.ID)
 		default:
 			refused = append(refused, m.ext.ID)
-			log.Printf("[extensions] repair: ext=%s could not be restored from %s@%s: %v", m.ext.ID, m.ext.Repo, short(m.ext.Commit), repErr)
+			logging.For(logging.Extensions).Warnf("repair: ext=%s could not be restored from %s@%s: %v", m.ext.ID, m.ext.Repo, short(m.ext.Commit), repErr)
 		}
 	}
 
@@ -235,7 +236,7 @@ func (h *ExtensionHandler) RepairMissingFiles(ctx context.Context) (repaired, re
 	if len(repaired) > 0 && h.onExtensionChanged != nil {
 		h.onExtensionChanged()
 	}
-	log.Printf("[extensions] repair: done — %d restored, %d could not be restored", len(repaired), len(refused))
+	logging.For(logging.Extensions).Warnf("repair: done — %d restored, %d could not be restored", len(repaired), len(refused))
 	return repaired, refused, nil
 }
 
@@ -255,7 +256,7 @@ func describeMissing(missing []missingInstall) string {
 	for _, m := range missing {
 		parts = append(parts, m.String())
 	}
-	return strings.Join(parts, "\n[extensions] repair: ")
+	return strings.Join(parts, "\n  - ")
 }
 
 // logMissing records what the walk found. Nothing is logged when nothing is missing: a healthy boot
@@ -264,6 +265,5 @@ func logMissing(missing []missingInstall) {
 	if len(missing) == 0 {
 		return
 	}
-	log.Printf("[extensions] repair: %d installed extension(s) have no files:\n[extensions] repair: %s",
-		len(missing), describeMissing(missing))
+	logging.For(logging.Extensions).Infof("repair: %d installed extension(s) have no files:\n%s", len(missing), describeMissing(missing))
 }

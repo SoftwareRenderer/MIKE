@@ -1,11 +1,11 @@
 package server
 
 import (
-	"log"
 	"net/http"
 
 	"kanban/backend/httputil"
 	"kanban/backend/tls"
+	"kanban/pkg/logging"
 )
 
 // caCertFileName is the download name offered for the local CA.
@@ -34,6 +34,6 @@ func (s *Server) HandleTLSCA(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(certPEM); err != nil {
-		log.Printf("TLS: failed to serve CA certificate: %v", err)
+		logging.For(logging.HTTP).Warnf("TLS: failed to serve CA certificate: %v", err)
 	}
 }

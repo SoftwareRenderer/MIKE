@@ -2,7 +2,8 @@ package store
 
 import (
 	"fmt"
-	"log"
+
+	"kanban/pkg/logging"
 )
 
 // SQLite has no "ALTER TABLE … ADD COLUMN IF NOT EXISTS", so startup used to fire ~50
@@ -26,7 +27,7 @@ const schemaVersion = 1
 func (s *Store) userVersion() int {
 	var v int
 	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
-		log.Printf("[store] reading user_version failed, re-running schema probes: %v", err)
+		logging.For(logging.Store).Warnf("reading user_version failed, re-running schema probes: %v", err)
 		return 0
 	}
 	return v
@@ -36,7 +37,7 @@ func (s *Store) userVersion() int {
 // next start, so it is logged rather than fatal; refusing to open the database would be worse.
 func (s *Store) setUserVersion(v int) {
 	if _, err := s.db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, v)); err != nil {
-		log.Printf("[store] stamping schema version %d failed: %v", v, err)
+		logging.For(logging.Store).Warnf("stamping schema version %d failed: %v", v, err)
 	}
 }
 
@@ -47,7 +48,7 @@ func (s *Store) hasColumn(table, column string) bool {
 	// pragma_table_info is a table-valued function, so the table name binds as a
 	// parameter instead of being formatted into SQL.
 	if err := s.db.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, table, column).Scan(&n); err != nil {
-		log.Printf("[store] schema probe %s.%s failed: %v", table, column, err)
+		logging.For(logging.Store).Warnf("schema probe %s.%s failed: %v", table, column, err)
 		return false
 	}
 	return n > 0
@@ -60,7 +61,7 @@ func (s *Store) addColumn(table, column, def string) {
 		return
 	}
 	if _, err := s.db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, def)); err != nil {
-		log.Printf("[store] schema migration %s.%s failed: %v", table, column, err)
+		logging.For(logging.Store).Warnf("schema migration %s.%s failed: %v", table, column, err)
 	}
 }
 
@@ -72,6 +73,6 @@ func (s *Store) renameColumn(table, from, to string) {
 		return
 	}
 	if _, err := s.db.Exec(fmt.Sprintf(`ALTER TABLE %s RENAME COLUMN %s TO %s`, table, from, to)); err != nil {
-		log.Printf("[store] schema rename %s.%s -> %s failed: %v", table, from, to, err)
+		logging.For(logging.Store).Warnf("schema rename %s.%s -> %s failed: %v", table, from, to, err)
 	}
 }

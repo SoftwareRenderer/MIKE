@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 
@@ -12,6 +11,7 @@ import (
 	"kanban/backend/llama"
 	"kanban/backend/prompts"
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 )
 
 // commitMessagePrompt is the system prompt for generating commit messages.
@@ -425,13 +425,14 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 		// Staging touches the index, which every worktree of the repository shares. A task with no
 		// project has no project lock to take.
 		if projectID != "" {
-			stashMu := te.worktreeMgr.GetProjectStashMu(projectID)
-			stashMu.Lock()
-			defer stashMu.Unlock()
+			defer te.worktreeMgr.LockProjectStash(projectID)()
 		}
-		te.GetWorktreeMu(taskID).Lock()
+		// Released explicitly rather than deferred: the original scope ended at the capture, and
+		// holding the task worktree lock across the pinning and everything after it would widen a
+		// lock that tool calls, subtask merges and this checkpoint path all contend on.
+		unlockWorktree := te.LockWorktree(taskID)
 		snapHash, snapErr := capture()
-		te.GetWorktreeMu(taskID).Unlock()
+		unlockWorktree()
 
 		// A hash alone is not a checkpoint: git may prune an object nothing references, and the restore
 		// would fail much later against a conversation that still claims the state exists. So a failed
@@ -443,7 +444,7 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 		}
 
 		if snapErr != nil {
-			log.Printf("[checkpoint] task=%s snapshot failed: %v", taskID, snapErr)
+			logging.For(logging.Worktree).With(logging.TaskID, taskID).Warnf("snapshot failed: %v", snapErr)
 			te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
 				"message_id":  assistantMsgID,
 				"commit_hash": "",
@@ -486,14 +487,14 @@ func (te *TaskExecutor) GenerateCheckpointLabel(ctx context.Context, taskID, dif
 	maxTokens := 10
 	_, label, err := te.ChatCompletion(ctx, serverURL, modelName, labelMessages, &ChatCompletionOpts{MaxTokens: &maxTokens, ReasoningEffort: "off"})
 	if err != nil {
-		log.Printf("[checkpoint-label] task=%s LLM call failed: %v", taskID, err)
+		logging.For(logging.Generate).With(logging.TaskID, taskID).Warnf("LLM call failed: %v", err)
 		return fallback
 	}
 	label = strings.TrimSpace(label)
 	if label == "" {
 		return fallback
 	}
-	log.Printf("[checkpoint-label] task=%s generated: %q", taskID, label)
+	logging.For(logging.Generate).With(logging.TaskID, taskID).Infof("generated: %q", label)
 	return label
 }
 
@@ -512,14 +513,14 @@ func (te *TaskExecutor) generateCommitMessageLLM(ctx context.Context, task *type
 	maxTokens := 128
 	_, label, err := te.ChatCompletion(ctx, serverURL, modelName, labelMessages, &ChatCompletionOpts{MaxTokens: &maxTokens, ReasoningEffort: "off"})
 	if err != nil {
-		log.Printf("[commit-message] task=%s LLM call failed: %v", task.ID, err)
+		logging.For(logging.Generate).With(logging.TaskID, task.ID).Warnf("LLM call failed: %v", err)
 		return fallback
 	}
 	label = strings.TrimSpace(label)
 	if label == "" {
 		return fallback
 	}
-	log.Printf("[commit-message] task=%s generated: %q", task.ID, label)
+	logging.For(logging.Generate).With(logging.TaskID, task.ID).Infof("generated: %q", label)
 	return label
 }
 
@@ -591,7 +592,7 @@ func groupTaskMessages(taskMsgs []types.TaskMessage) []types.ChatMessage {
 	}
 
 	if unattached := totalToolRows - attached; unattached > 0 {
-		log.Printf("[messages] dropped %d tool_call rows whose assistant message is not in this thread", unattached)
+		logging.For(logging.Exec).Infof("dropped %d tool_call rows whose assistant message is not in this thread", unattached)
 	}
 	return messages
 }
@@ -854,7 +855,7 @@ func (te *TaskExecutor) StreamCommitMessage(w SSEFlusher, taskID string, task *t
 		},
 	)
 	if err != nil {
-		log.Printf("[commit-preview-stream] task=%s LLM stream failed: %v", taskID, err)
+		logging.For(logging.Generate).With(logging.TaskID, taskID).Warnf("LLM stream failed: %v", err)
 		content := strings.TrimSpace(sb.String())
 		if content == "" {
 			content = task.Title

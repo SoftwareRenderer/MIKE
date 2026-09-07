@@ -2,7 +2,7 @@ package server
 
 import (
 	"kanban/backend/httputil"
-	"log"
+	"kanban/pkg/logging"
 	"net/http"
 	"os"
 	"strings"
@@ -23,7 +23,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		log.Printf("fs home dir failed: %v", err)
+		logging.For(logging.HTTP).Errorf("fs home dir failed: %v", err)
 		JSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}

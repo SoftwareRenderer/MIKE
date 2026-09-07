@@ -1,4 +1,6 @@
 import type { GitLogResponse, TaskCommit } from '../types';
+import type { ApiDiffRow, DiffFile } from '../types/diff';
+import { enrichRowsWithInlineSegments } from '../utils/diff-parser';
 import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
 import { setBoardCache, getBoardCache, diffCacheKey, doneDiffCacheKey } from '../storage';
 import { markCached } from './cache';
@@ -19,12 +21,73 @@ export async function getGitLogFull(projectId: string, options?: { branch?: stri
     return res.json();
 }
 
-/** Fetch the unified diff between two commits as raw text. */
-export async function getCommitDiff(projectId: string, baseHash: string, headHash: string): Promise<string> {
-    const params = new URLSearchParams({ base: baseHash, head: headHash });
+
+/**
+ * A file as the server parsed it. The field names are backend/git.TrackedDiffFile's JSON tags, which
+ * are the same names the task-diff manifest already uses — note `isNew` on the wire vs the client's
+ * `DiffFile.isNewFile`, a mapping diff-cache.svelte.ts already performs.
+ */
+export interface ParsedDiffFile {
+    path: string;
+    origPath?: string;
+    rows?: ApiDiffRow[];
+    committedRows?: ApiDiffRow[];
+    added: number;
+    removed: number;
+    fileSize?: number;
+    isBinary?: boolean;
+    isNew?: boolean;
+    isDeleted?: boolean;
+    truncated?: boolean;
+    origAdded?: number;
+    origRemoved?: number;
+}
+
+/**
+ * Turn server-parsed entries into the DiffFile list the diff components bind to.
+ *
+ * Two steps that used to be inside parseUnifiedDiff and stay a VIEW concern:
+ *  - the display filter (a file with no rows, no size, and no add/delete has nothing to show — e.g. a
+ *    mode-only change), and
+ *  - word-level inline segments, which need the `diff` package and pair removed/added rows by eye.
+ * Parsing is the server's; presenting stays here.
+ */
+export function toDiffFiles(parsed: ParsedDiffFile[]): DiffFile[] {
+    return parsed
+        .map((f): DiffFile => ({
+            path: f.path,
+            origPath: f.origPath,
+            rows: (f.rows ?? []) as unknown as DiffFile['rows'],
+            committedRows: f.committedRows ? (f.committedRows as unknown as DiffFile['rows']) : undefined,
+            added: f.added ?? 0,
+            removed: f.removed ?? 0,
+            fileSize: f.fileSize,
+            isBinary: f.isBinary,
+            isNewFile: f.isNew,
+            isDeleted: f.isDeleted,
+            truncated: f.truncated,
+            origAdded: f.origAdded,
+            origRemoved: f.origRemoved,
+        }))
+        .filter(f => f.rows.length > 0 || f.fileSize || f.isDeleted || f.isNewFile)
+        .map(f => ({ ...f, rows: enrichRowsWithInlineSegments(f.rows as unknown as ApiDiffRow[]) as unknown as DiffFile['rows'] }));
+}
+
+/** Fetch a project diff already parsed by the server. */
+export async function getProjectDiffFiles(projectId: string, options?: { base?: string; head?: string; ref?: string; cached?: boolean }): Promise<DiffFile[]> {
+    const params = new URLSearchParams({ parsed: '1' });
+    if (options?.base) params.set('base', options.base);
+    if (options?.head) params.set('head', options.head);
+    if (options?.ref) params.set('ref', options.ref);
+    if (options?.cached) params.set('cached', '1');
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/diff?${params}`);
-    if (!res.ok) throw await apiError(res, t('api.fetchCommitDiff'));
-    return res.text();
+    if (!res.ok) throw await apiError(res, t('api.fetchProjectDiff'));
+    return toDiffFiles(await res.json());
+}
+
+/** Fetch the diff between two commits, already parsed by the server. */
+export async function getCommitDiffFiles(projectId: string, baseHash: string, headHash: string): Promise<DiffFile[]> {
+    return getProjectDiffFiles(projectId, { base: baseHash, head: headHash });
 }
 
 /** List all branches for a project. */
@@ -55,19 +118,6 @@ export async function getGitStatus(projectId: string): Promise<{ clean: boolean;
     return res.json();
 }
 
-/** Fetch the unified diff between two commits (or working tree vs ref) as raw text.
- * When cached=true, returns staged changes only (git diff --cached). */
-export async function getProjectDiff(projectId: string, options?: { base?: string; head?: string; ref?: string; cached?: boolean }): Promise<string> {
-    const params = new URLSearchParams();
-    if (options?.base) params.set('base', options.base);
-    if (options?.head) params.set('head', options.head);
-    if (options?.ref) params.set('ref', options.ref);
-    if (options?.cached) params.set('cached', '1');
-    const url = params.toString() ? `${API_BASE}/projects/${projectId}/git/diff?${params}` : `${API_BASE}/projects/${projectId}/git/diff`;
-    const res = await apiFetch(url);
-    if (!res.ok) throw await apiError(res, t('api.fetchProjectDiff'));
-    return res.text();
-}
 
 /** Fetch the content (or metadata) of a single file in the project repo.
  * When meta=true, only line_count/file_size/isBinary are returned (cheap).
@@ -140,23 +190,31 @@ export interface TaskDiff {
     truncated_files?: string[];
     original_file_stats?: Record<string, { added: number; removed: number }>;
     files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number }>;
+    /** Present only for ?parsed=1 — the same diff the server already parsed, per file. Named apart from
+     * `files` above because that key is the manifest's keyed hash map. */
+    parsed_files?: ParsedDiffFile[];
     base_ref?: string;
 }
 
-export async function getTaskDiff(projectId: string, taskId: string, options?: { headRef?: string; baseRef?: string; full?: boolean; checkpointIndex?: number }): Promise<TaskDiff> {
+export async function getTaskDiff(projectId: string, taskId: string, options?: { headRef?: string; baseRef?: string; full?: boolean; checkpointIndex?: number; parsed?: boolean }): Promise<TaskDiff> {
     const params = new URLSearchParams();
     if (options?.headRef) params.set('head', options.headRef);
     if (options?.baseRef) params.set('base', options.baseRef);
     if (options?.full) params.set('full', '1');
     if (options?.checkpointIndex != null) params.set('checkpointIdx', String(options.checkpointIndex));
+    if (options?.parsed) params.set('parsed', '1');
     const url = params.toString() ? `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff?${params}` : `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff`;
-    const isCurrentDiff = !options?.headRef && !options?.baseRef && options?.checkpointIndex == null;
+    // A parsed request bypasses the IndexedDB cache, read AND write: the cached shapes predate
+    // parsed_files, so a cache hit would answer a parsed request with no parsed files (an empty diff) and a
+    // parsed body stored under the plain key would do the reverse. One extra round trip beats a result whose
+    // shape depends on cache state.
+    const isCurrentDiff = !options?.parsed && !options?.headRef && !options?.baseRef && options?.checkpointIndex == null;
     // The canonical done-task diff (pinned BaseCommit..BranchTip, requested by
     // head ref only) is immutable — serve it straight from IndexedDB when we
     // have it (zero network), and persist it after the first fetch. Checkpoint
     // diffs and custom-base comparisons share the headRef param but are NOT
     // the canonical done diff, so they must bypass this cache.
-    const isDoneDiff = !!options?.headRef && !options?.baseRef && options?.checkpointIndex == null && !options?.full;
+    const isDoneDiff = !options?.parsed && !!options?.headRef && !options?.baseRef && options?.checkpointIndex == null && !options?.full;
     if (isDoneDiff) {
         const cached = await getBoardCache<TaskDiff>(doneDiffCacheKey(projectId, taskId, options!.headRef!));
         if (cached) return markCached(cached);
@@ -230,10 +288,19 @@ export async function getTaskGitLog(projectId: string, taskId: string, options?:
     return res.json();
 }
 
-/** Fetch the unified diff between two commits in a task's worktree as raw text. */
-export async function getTaskCommitDiff(projectId: string, taskId: string, baseHash: string, headHash: string): Promise<string> {
-    const params = new URLSearchParams({ base: baseHash, head: headHash });
+
+/**
+ * The diff for one commit in a task's log, already parsed by the server.
+ *
+ * The old path read this route's body with `res.text()` and fed it to the browser's diff parser — but
+ * `/tasks/{id}/diff` answers with a JSON TaskDiff, and a JSON document on one line yields zero files,
+ * so the overlay had nothing to draw. Taking `files` off the parsed response is both the fix and the
+ * point: the server already parsed this diff, so the client should not try to.
+ */
+export async function getTaskCommitDiffFiles(projectId: string, taskId: string, baseHash: string, headHash: string): Promise<DiffFile[]> {
+    const params = new URLSearchParams({ base: baseHash, head: headHash, parsed: '1' });
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/diff?${params}`);
     if (!res.ok) throw await apiError(res, t('api.fetchTaskCommitDiff'));
-    return res.text();
+    const body = await res.json();
+    return toDiffFiles(body?.parsed_files ?? []);
 }

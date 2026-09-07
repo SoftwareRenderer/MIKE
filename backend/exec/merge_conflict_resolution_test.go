@@ -54,9 +54,9 @@ func TestMergeConflictResolution_StagesOnlyConflictedFiles(t *testing.T) {
 
 	// Manually simulate the sync-merge that creates the conflict state:
 	// 1. Stash working tree changes
-	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+	unlockStash1 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "push", "-u", "-m", "kanban sync-merge stash")
-	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	unlockStash1()
 
 	// 2. Checkout task branch
 	runGitInDir(t, wtPath, "checkout", "-f", "task/conflict-resolve")
@@ -101,9 +101,9 @@ func TestMergeConflictResolution_StagesOnlyConflictedFiles(t *testing.T) {
 	}
 
 	// 3. Pop stash (restore user's unstaged changes)
-	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+	unlockStash2 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "pop")
-	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	unlockStash2()
 
 	// 4. Clear merge conflict flag
 	_ = te.rawStore().SetTaskMergeConflict(taskID, projectID, false)
@@ -195,9 +195,9 @@ func TestMergeConflictResolution_MultipleConflictedFiles(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "master edits A and B")
 
 	// Simulate sync-merge conflict
-	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+	unlockStash3 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "push", "-u", "-m", "kanban sync-merge stash")
-	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	unlockStash3()
 	runGitInDir(t, wtPath, "checkout", "-f", "task/multi-conflict")
 	cmd := runGitCmd(wtPath, "merge", "master", "--no-edit")
 	if cmd.exitCode == 0 {
@@ -225,9 +225,9 @@ func TestMergeConflictResolution_MultipleConflictedFiles(t *testing.T) {
 	if err := te.gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
 		t.Fatalf("git commit failed: %v", err)
 	}
-	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+	unlockStash4 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "pop")
-	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	unlockStash4()
 
 	// --- Verify ---
 	if isMergeInProgress(wtPath) {
@@ -283,9 +283,9 @@ func TestMergeConflictResolution_CommitMessage(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "master edit")
 
 	// Simulate sync-merge conflict
-	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+	unlockStash5 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "push", "-u", "-m", "kanban sync-merge stash")
-	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	unlockStash5()
 	runGitInDir(t, wtPath, "checkout", "-f", "task/commit-msg")
 	runGitCmd(wtPath, "merge", "master", "--no-edit")
 
@@ -349,9 +349,9 @@ func TestMergeConflictResolution_WithFinalMerge(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "master edit")
 
 	// Simulate sync-merge conflict
-	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+	unlockStash6 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "push", "-u", "-m", "kanban sync-merge stash")
-	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	unlockStash6()
 	runGitInDir(t, wtPath, "checkout", "-f", "task/full-flow")
 	runGitCmd(wtPath, "merge", "master", "--no-edit")
 
@@ -371,9 +371,9 @@ func TestMergeConflictResolution_WithFinalMerge(t *testing.T) {
 		te.gitRun(wtPath, addArgs...)
 	}
 	te.gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
-	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+	unlockStash7 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "pop")
-	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	unlockStash7()
 	_ = te.rawStore().SetTaskMergeConflict(taskID, projectID, false)
 
 	// --- Attempt final merge (task branch into master) ---
@@ -443,9 +443,9 @@ func TestMergeConflictResolution_StashRestored(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "master edit")
 
 	// Simulate sync-merge conflict (stashes the notes.txt)
-	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+	unlockStash8 := te.worktreeMgr.LockProjectStash(projectID)
 	stashErr := te.worktreeMgr.GitRunInDir(wtPath, "stash", "push", "-u", "-m", "kanban sync-merge stash")
-	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	unlockStash8()
 	if stashErr != nil {
 		t.Fatalf("stash should succeed: %v", stashErr)
 	}
@@ -470,9 +470,9 @@ func TestMergeConflictResolution_StashRestored(t *testing.T) {
 	te.gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
 
 	// Pop stash — should restore notes.txt
-	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+	unlockStash9 := te.worktreeMgr.LockProjectStash(projectID)
 	popErr := te.worktreeMgr.GitRunInDir(wtPath, "stash", "pop")
-	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	unlockStash9()
 
 	// Verify notes.txt is restored
 	if popErr != nil {
@@ -590,9 +590,9 @@ func TestMergeConflictResolution_UnresolvedSkipped(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "master edit")
 
 	// Simulate sync-merge conflict
-	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+	unlockStash10 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "push", "-u", "-m", "kanban sync-merge stash")
-	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	unlockStash10()
 	runGitInDir(t, wtPath, "checkout", "-f", "task/unresolved")
 	runGitCmd(wtPath, "merge", "master", "--no-edit")
 
@@ -686,9 +686,9 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 	runGitInDir(t, parentWtPath, "commit", "-m", "parent edit shared")
 
 	// --- Simulate sync-merge conflict in subtask worktree ---
-	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+	unlockStash11 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(subtaskWtPath, "stash", "push", "-u", "-m", "kanban sync-merge stash")
-	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	unlockStash11()
 	runGitInDir(t, subtaskWtPath, "checkout", "-f", "task/"+subtaskID)
 	runGitCmd(subtaskWtPath, "merge", "task/"+parentID, "--no-edit")
 
@@ -708,9 +708,9 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 		te.gitRun(subtaskWtPath, addArgs...)
 	}
 	te.gitRun(subtaskWtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
-	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+	unlockStash12 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(subtaskWtPath, "stash", "pop")
-	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	unlockStash12()
 	_ = te.rawStore().SetTaskMergeConflict(subtaskID, projectID, false)
 
 	// --- Merge subtask into parent branch ---
@@ -775,9 +775,9 @@ func TestMergeConflictResolution_PartialResolution_SkipsCommit(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "master edits A and B")
 
 	// Simulate sync-merge conflict
-	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+	unlockStash13 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "push", "-u", "-m", "kanban sync-merge stash")
-	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	unlockStash13()
 	runGitInDir(t, wtPath, "checkout", "-f", "task/partial-resolve")
 	runGitCmd(wtPath, "merge", "master", "--no-edit")
 
@@ -851,9 +851,9 @@ func TestMergeConflictResolution_CommitIsMergeCommit(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "master edit")
 
 	// Simulate sync-merge conflict
-	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
+	unlockStash14 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "push", "-u", "-m", "kanban sync-merge stash")
-	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+	unlockStash14()
 	runGitInDir(t, wtPath, "checkout", "-f", "task/merge-commit")
 	runGitCmd(wtPath, "merge", "master", "--no-edit")
 

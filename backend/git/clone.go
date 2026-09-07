@@ -3,10 +3,9 @@ package git
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"regexp"
 	"slices"
 	"strconv"
@@ -133,28 +132,31 @@ func validateScpLikeCloneURL(s string, colon int) error {
 	return nil
 }
 
-// CloneEnv builds the environment for a clone: never prompt for credentials, and
-// restrict the transports git may speak (GIT_ALLOW_PROTOCOL is enforced by git
-// itself, whatever the user's git config says).
+// CloneEnv returns the complete environment for a clone. It is Env plus the transport fence, not
+// a base to be appended to: GIT_ALLOW_PROTOCOL is enforced by git itself whatever the user's git
+// config says, and GIT_TERMINAL_PROMPT=0 plus the hook fence already come from Env.
+//
+// It returns a whole environment because that is how its three callers use it (`cmd.Env =
+// git.CloneEnv()`), and a caller that assigned a bare extra list to cmd.Env would silently discard
+// the allowlist — os/exec takes the assignment, not a merge.
 func CloneEnv() []string {
-	return append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-		"GIT_ALLOW_PROTOCOL="+strings.Join(CloneAllowedProtocols, ":"),
-	)
+	return Env("GIT_ALLOW_PROTOCOL=" + strings.Join(CloneAllowedProtocols, ":"))
 }
 
-// Clone runs `git clone --progress src dst`, restricted to CloneAllowedProtocols
-// (see CloneArgs/CloneEnv), and calls onProgress with the "Receiving objects"
-// percentage (0-100) every time it strictly increases. onProgress may be nil.
-// --progress forces progress output even though stderr is not a terminal.
+// CloneContext runs `git clone --progress src dst` under ctx, restricted to CloneAllowedProtocols, and
+// calls onProgress with the "Receiving objects" percentage whenever it strictly increases (nil is fine).
+// It returns git's stderr and the process error.
 //
-// It returns git's stderr (progress + diagnostics, useful in error messages) and
-// the process error, if any.
-// for error messages) and the process error, if any.
-func Clone(src, dst string, onProgress func(percent int)) (string, error) {
+// The context matters: a clone is the longest git operation this server does - minutes on a real remote -
+// and it used to run to completion whatever the client did, so closing a tab left a server-side git
+// holding the disk for its full duration. On cancel the caller's failure path removes the partial clone.
+//
+// There is no context-less twin on purpose: every clone here is triggered by a request that can be
+// abandoned. Detached callers pass context.Background() and say why.
+func CloneContext(ctx context.Context, src, dst string, onProgress func(percent int)) (string, error) {
 	// `git clone` is silent on stdout — stderr carries both progress and
 	// errors, so discarding stdout is safe.
-	cmd := exec.Command("git", CloneArgs(src, dst)...)
+	cmd := CommandContext(ctx, "", CloneArgs(src, dst)...)
 	cmd.Env = CloneEnv()
 	cmd.Stdout = io.Discard
 

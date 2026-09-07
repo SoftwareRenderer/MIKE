@@ -94,15 +94,16 @@ export {
     getDiffFile,
     stageFile,
     getGitLogFull,
-    getCommitDiff,
+    getCommitDiffFiles,
+    getProjectDiffFiles,
+    toDiffFiles,
     getGitBranches,
     checkoutBranch,
     getGitStatus,
-    getProjectDiff,
     stageProjectFile,
     commitProject,
     getTaskGitLog,
-    getTaskCommitDiff,
+    getTaskCommitDiffFiles,
 } from './git';
 
 // -- Stream --

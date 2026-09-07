@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -20,6 +19,7 @@ import (
 
 	"kanban/backend/httputil"
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 )
 
 // JSONRPCMessage is a JSON-RPC 2.0 message: a request (id and method), a response (id only),
@@ -234,22 +234,20 @@ func (h *LSPHandler) HandleLSP(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if held := h.sessionsUsingLocked(wk); held > 0 {
-				log.Printf("[lsp] workspace=%s lang=%s still used by %d session(s), keeping the server",
-					ws.process.Workspace, ws.process.Language, held)
+				logging.For(logging.LSP).Infof("workspace=%s lang=%s still used by %d session(s), keeping the server", ws.process.Workspace, ws.process.Language, held)
 				continue
 			}
 			h.manager.Release(ws.process.Workspace, ws.process.Language)
 			delete(h.workspaces, wk)
-			log.Printf("[lsp] removed process for workspace=%s lang=%s (no clients)",
-				ws.process.Workspace, ws.process.Language)
+			logging.For(logging.LSP).Infof("removed process for workspace=%s lang=%s (no clients)", ws.process.Workspace, ws.process.Language)
 		}
 		h.mu.Unlock()
 
 		conn.Close(websocket.StatusNormalClosure, "closed")
-		log.Printf("[lsp] client %d disconnected", clientID)
+		logging.For(logging.LSP).Infof("client %d disconnected", clientID)
 	}()
 
-	log.Printf("[lsp] client %d connected", clientID)
+	logging.For(logging.LSP).Infof("client %d connected", clientID)
 
 	// A failed ping cancels the read context, which is what unblocks the Read loop below:
 	// a peer that stopped talking never closes the connection itself.
@@ -304,12 +302,12 @@ func (h *LSPHandler) handleClientMessage(ctx context.Context, session *ClientSes
 	// Parse to check message type
 	var rpc JSONRPCMessage
 	if err := json.Unmarshal(stripped, &rpc); err != nil {
-		log.Printf("[lsp] client %d: invalid JSON: %v", session.clientID, err)
+		logging.For(logging.LSP).Warnf("client %d: invalid JSON: %v", session.clientID, err)
 		return
 	}
 
 	if workspace == "" {
-		log.Printf("[lsp] client %d: message missing _workspace hint", session.clientID)
+		logging.For(logging.LSP).Warnf("client %d: message missing _workspace hint", session.clientID)
 		return
 	}
 
@@ -398,20 +396,20 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 		Params    SubscribeParams `json:"params"`
 	}
 	if err := json.Unmarshal(msg, &sub); err != nil {
-		log.Printf("[lsp] client %d: invalid subscribe message: %v", session.clientID, err)
+		logging.For(logging.LSP).Warnf("client %d: invalid subscribe message: %v", session.clientID, err)
 		session.conn.Close(websocket.StatusProtocolError, "invalid subscribe message")
 		return
 	}
 
 	if sub.Params.Workspace == "" {
-		log.Printf("[lsp] client %d: subscribe missing workspace", session.clientID)
+		logging.For(logging.LSP).Warnf("client %d: subscribe missing workspace", session.clientID)
 		session.conn.Close(websocket.StatusProtocolError, "missing workspace")
 		return
 	}
 
 	// Restrict the workspace to allowed paths when a validator is configured.
 	if h.validateWorkspace != nil && !h.validateWorkspace(sub.Params.Workspace) {
-		log.Printf("[lsp] client %d: workspace %q not allowed", session.clientID, sub.Params.Workspace)
+		logging.For(logging.LSP).Debugf("client %d: workspace %q not allowed", session.clientID, sub.Params.Workspace)
 		session.conn.Close(websocket.StatusProtocolError, "workspace not allowed")
 		return
 	}
@@ -424,7 +422,7 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 	}
 	if cfg == nil {
 		// No config found — close connection with error
-		log.Printf("[lsp] client %d: no language server config for file %s", session.clientID, sub.Params.File)
+		logging.For(logging.LSP).Debugf("client %d: no language server config for file %s", session.clientID, sub.Params.File)
 		session.conn.Close(websocket.StatusProtocolError, "no language server config for file")
 		return
 	}
@@ -445,7 +443,7 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 		// Spawn a new process (OUTSIDE lock to avoid blocking other operations)
 		process, err := h.manager.GetOrCreate(ctx, sub.Params.Workspace, cfg.Language, cfg)
 		if err != nil {
-			log.Printf("[lsp] client %d: failed to spawn process: %v", session.clientID, err)
+			logging.For(logging.LSP).Warnf("client %d: failed to spawn process: %v", session.clientID, err)
 			session.conn.Close(websocket.StatusInternalError, fmt.Sprintf("spawn failed: %v", err))
 			return
 		}
@@ -479,8 +477,7 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 	session.mu.Lock()
 	session.activeWorkspaces[workspaceKey]++ // track for cleanup on disconnect
 	session.mu.Unlock()
-	log.Printf("[lsp] client %d ch=%d subscribed to workspace=%s lang=%s (clients=%d)",
-		session.clientID, sub.ChannelID, sub.Params.Workspace, cfg.Language, ws.clientCount)
+	logging.For(logging.LSP).Debugf("client %d ch=%d subscribed to workspace=%s lang=%s (clients=%d)", session.clientID, sub.ChannelID, sub.Params.Workspace, cfg.Language, ws.clientCount)
 
 	// Notify frontend that LSP is ready for this channel
 	h.sendLSPReady(ctx, session, sub.ChannelID)
@@ -494,7 +491,7 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 	h.mu.Lock()
 	ws, ok := h.workspaces[workspaceKey]
 	if !ok {
-		log.Printf("[lsp] client %d: workspaceKey=%s not found, lazy init", session.clientID, workspaceKey)
+		logging.For(logging.LSP).Debugf("client %d: workspaceKey=%s not found, lazy init", session.clientID, workspaceKey)
 		h.mu.Unlock()
 		// First request for this language: look up the server config from the file path and
 		// create the workspace, outside the lock so nobody else waits on it.
@@ -503,12 +500,12 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 			cfg = h.registry.Lookup(workspacePath)
 		}
 		if cfg == nil {
-			log.Printf("[lsp] client %d: no language server config for file %s (lazy init failed)", session.clientID, filePath)
+			logging.For(logging.LSP).Warnf("client %d: no language server config for file %s (lazy init failed)", session.clientID, filePath)
 			return
 		}
 		process, err := h.manager.GetOrCreate(ctx, workspacePath, cfg.Language, cfg)
 		if err != nil {
-			log.Printf("[lsp] client %d: failed to spawn process for lazy init: %v", session.clientID, err)
+			logging.For(logging.LSP).Warnf("client %d: failed to spawn process for lazy init: %v", session.clientID, err)
 			return
 		}
 		// Re-acquire lock to register workspace (double-check pattern)
@@ -528,7 +525,7 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 			session.mu.Lock()
 			session.activeWorkspaces[workspaceKey]++
 			session.mu.Unlock()
-			log.Printf("[lsp] client %d: lazy-created workspace=%s lang=%s", session.clientID, workspacePath, cfg.Language)
+			logging.For(logging.LSP).Debugf("client %d: lazy-created workspace=%s lang=%s", session.clientID, workspacePath, cfg.Language)
 		}
 		h.mu.Unlock()
 		if droppedProcess {
@@ -628,7 +625,7 @@ func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession,
 	// Remap the id in the JSON
 	remapped := remapRequestID(msg, backendID)
 	if remapped == nil {
-		log.Printf("[lsp] client %d: failed to remap request id=%s", session.clientID, clientReqID)
+		logging.For(logging.LSP).Warnf("client %d: failed to remap request id=%s", session.clientID, clientReqID)
 		return fmt.Errorf("could not forward request id=%s", clientReqID)
 	}
 
@@ -638,12 +635,12 @@ func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession,
 	h.mu.Unlock()
 
 	if !ok || ws.process == nil {
-		log.Printf("[lsp] client %d: workspaceKey=%s not found or process nil (ok=%v, process=%v)", session.clientID, workspaceKey, ok, ok && ws.process != nil)
+		logging.For(logging.LSP).Debugf("client %d: workspaceKey=%s not found or process nil (ok=%v, process=%v)", session.clientID, workspaceKey, ok, ok && ws.process != nil)
 		return fmt.Errorf("no language server for workspace")
 	}
 
 	if err := h.manager.SendToServer(ctx, ws.process, remapped); err != nil {
-		log.Printf("[lsp] client %d: send to server failed: %v", session.clientID, err)
+		logging.For(logging.LSP).Warnf("client %d: send to server failed: %v", session.clientID, err)
 		// If sandbox is stale, remove workspace entry so next message triggers reconnect
 		if errors.Is(err, errStaleClient) {
 			h.mu.Lock()
@@ -674,7 +671,7 @@ func (h *LSPHandler) answerError(ctx context.Context, session *ClientSession, cl
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := session.conn.Write(writeCtx, websocket.MessageText, payload); err != nil {
-		log.Printf("[lsp] client %d: could not deliver the failure of request %s: %v", session.clientID, clientReqID, err)
+		logging.For(logging.LSP).Warnf("client %d: could not deliver the failure of request %s: %v", session.clientID, clientReqID, err)
 	}
 }
 
@@ -695,7 +692,7 @@ func (h *LSPHandler) forwardRaw(ctx context.Context, session *ClientSession, msg
 	}
 
 	if err := h.manager.SendToServer(ctx, ws.process, msg); err != nil {
-		log.Printf("[lsp] client %d: forward raw failed: %v", session.clientID, err)
+		logging.For(logging.LSP).Warnf("client %d: forward raw failed: %v", session.clientID, err)
 		if errors.Is(err, errStaleClient) {
 			h.mu.Lock()
 			delete(h.workspaces, workspaceKey)
@@ -708,7 +705,7 @@ func (h *LSPHandler) forwardRaw(ctx context.Context, session *ClientSession, msg
 func (h *LSPHandler) routeServerMessage(serverMsg json.RawMessage) {
 	var rpc JSONRPCMessage
 	if err := json.Unmarshal(serverMsg, &rpc); err != nil {
-		log.Printf("[lsp] invalid server message: %v", err)
+		logging.For(logging.LSP).Warnf("invalid server message: %v", err)
 		return
 	}
 
@@ -784,7 +781,7 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 	h.mu.Unlock()
 
 	if targetSession == nil {
-		log.Printf("[lsp] no client found for backend response id=%s", backendID)
+		logging.For(logging.LSP).Infof("no client found for backend response id=%s", backendID)
 		return
 	}
 

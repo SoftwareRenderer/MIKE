@@ -365,6 +365,106 @@ func TestHandleDiff_ValidRefs(t *testing.T) {
 
 // --- HandleProjectDiffFile tests ---
 
+// TestHandleDiffParsed is the wire contract for the single diff grammar: ?parsed=1 carries the
+// parser's structure so the browser stops re-parsing the same patch with a second implementation.
+func TestHandleDiffParsed(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	createFile(t, projPath, "tracked.txt", "one\ntwo\nthree\n")
+	testgit.Git(t, projPath, "add", "tracked.txt")
+	testgit.Git(t, projPath, "commit", "-m", "base")
+	// Modify without committing: the default `git diff` (working tree vs index) now has content.
+	createFile(t, projPath, "tracked.txt", "one\nTWO\nthree\nfour\n")
+
+	proj := &types.Project{ID: "diff-parsed-proj", Name: "diff-parsed-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+	mux := newTestGitMux(h)
+
+	rr := doRequest(t, mux, "GET", "/api/projects/diff-parsed-proj/git/diff?parsed=1")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+
+	var files []git.TrackedDiffFile
+	if err := json.Unmarshal(rr.Body.Bytes(), &files); err != nil {
+		t.Fatalf("body is not []TrackedDiffFile: %v\n%s", err, rr.Body.String())
+	}
+	if len(files) != 1 {
+		t.Fatalf("got %d files, want 1: %s", len(files), rr.Body.String())
+	}
+	f := files[0]
+	if f.Path != "tracked.txt" {
+		t.Errorf("path = %q, want tracked.txt", f.Path)
+	}
+	if f.Added != 2 || f.Removed != 1 {
+		t.Errorf("added/removed = %d/%d, want 2/1", f.Added, f.Removed)
+	}
+	if len(f.Rows) == 0 {
+		t.Error("rows is empty; the client would render a file with no content")
+	}
+	// The JSON field names are the frontend's contract (frontend/src/lib/types/diff.ts DiffFile).
+	if !strings.Contains(rr.Body.String(), `"lineNumber"`) || !strings.Contains(rr.Body.String(), `"variant"`) {
+		t.Errorf("response does not use the DiffFile/DiffRow field names the client binds to: %s", rr.Body.String())
+	}
+}
+
+// TestHandleDiffParsedEmptyIsArrayNotNull: `null` would make `files.length` throw in the client, and
+// an unchanged working tree is the ordinary case rather than an error.
+func TestHandleDiffParsedEmptyIsArrayNotNull(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	proj := &types.Project{ID: "diff-parsed-empty", Name: "diff-parsed-empty", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+	mux := newTestGitMux(h)
+
+	rr := doRequest(t, mux, "GET", "/api/projects/diff-parsed-empty/git/diff?parsed=1")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if body := strings.TrimSpace(rr.Body.String()); body != "[]" {
+		t.Errorf("body = %q, want []", body)
+	}
+}
+
+// TestHandleDiffDefaultStaysPlainText: the raw form is what every existing consumer reads, so making
+// the structured form the default would break them silently — a plain-text response is a string, and
+// a JSON array parsed as text looks like a diff of nothing.
+func TestHandleDiffDefaultStaysPlainText(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	createFile(t, projPath, "t.txt", "a\n")
+	testgit.Git(t, projPath, "add", "t.txt")
+	testgit.Git(t, projPath, "commit", "-m", "base")
+	createFile(t, projPath, "t.txt", "b\n")
+
+	proj := &types.Project{ID: "diff-plain-proj", Name: "diff-plain-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+	mux := newTestGitMux(h)
+
+	rr := doRequest(t, mux, "GET", "/api/projects/diff-plain-proj/git/diff")
+	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Errorf("Content-Type = %q, want text/plain", ct)
+	}
+	if !strings.HasPrefix(rr.Body.String(), "diff --git") {
+		t.Errorf("body is not a patch: %q", rr.Body.String())
+	}
+}
+
 func TestHandleProjectDiffFile_Meta_Untracked(t *testing.T) {
 	h, s, _, _ := newTestGitHandler(t)
 	projPath := t.TempDir()

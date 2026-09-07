@@ -4,17 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
 	"kanban/backend/agent"
+	"kanban/backend/git"
 	"kanban/backend/prompts"
 	"kanban/backend/stream"
 	"kanban/backend/types"
 	pkgagent "kanban/pkg/agent"
 
 	"github.com/google/uuid"
+	"kanban/pkg/logging"
 )
 
 // AgentSentinelPrefix is the URL prefix for agent providers.
@@ -27,7 +28,7 @@ const AgentSentinelPrefix = "agent://"
 func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Task, projectID, worktreePath, serverURL, requestedModel string, userMsgChan chan stream.UserMessage, sandboxEnabled bool, initialContent string) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[agent-panic] task=%s recovered from panic: %v", task.ID, r)
+			logging.For(logging.Recovery).With(logging.TaskID, task.ID).Errorf("recovered from panic: %v", r)
 			te.sendAndPersistError(task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
 		}
 	}()
@@ -61,13 +62,13 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 			return
 		}
 
-		log.Printf("[agent] task=%s creating runner in container (agent=%s, session=%s)", task.ID, agentName, sessionName)
+		logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("creating runner in container (agent=%s, session=%s)", agentName, sessionName)
 		runner, err = agent.NewAgentRunner(ctx, ext, te.sandboxMgr, task.ID, worktreePath, sessionName, true)
 	} else {
 		// Agent runs on the host.
 		// The adapter's SubprocessConfig() sets config dir env vars from the
 		// extension's sandbox_mount declaration, so no agent-specific code needed here.
-		log.Printf("[agent] task=%s creating runner (cwd=%s, session=%s)", task.ID, worktreePath, sessionName)
+		logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("creating runner (cwd=%s, session=%s)", worktreePath, sessionName)
 		runner, err = agent.NewAgentRunner(ctx, ext, nil, task.ID, worktreePath, sessionName, false)
 	}
 	if err != nil {
@@ -83,11 +84,11 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	}
 	te.taskMu.Unlock()
 
-	log.Printf("[agent] task=%s runner started (pid=%d)", task.ID, runner.PID())
+	logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("runner started (pid=%d)", runner.PID())
 
 	// Set the requested model (from task config) before first prompt.
 	if requestedModel != "" {
-		log.Printf("[agent] task=%s setting model=%s", task.ID, requestedModel)
+		logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("setting model=%s", requestedModel)
 		setModelCtx, setModelCancel := context.WithTimeout(ctx, 5*time.Second)
 		runner.SetModel(setModelCtx, requestedModel)
 		setModelCancel()
@@ -97,12 +98,12 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	modelCtx, modelCancel := context.WithTimeout(ctx, 5*time.Second)
 	activeModel := runner.QueryModel(modelCtx)
 	modelCancel()
-	log.Printf("[agent] task=%s model=%s", task.ID, activeModel)
+	logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("model=%s", activeModel)
 
 	// Capture session file path from get_state response (for session resumption on restart).
 	sessionFile := runner.SessionFile()
 	if sessionFile != "" {
-		log.Printf("[agent] task=%s sessionFile=%s", task.ID, sessionFile)
+		logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("sessionFile=%s", sessionFile)
 	}
 
 	// Get existing messages
@@ -131,12 +132,12 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 		// Restart: try to resume the saved agent session.
 		switchCtx, switchCancel := context.WithTimeout(ctx, 5*time.Second)
 		if runner.SwitchSession(switchCtx, task.SessionID) {
-			log.Printf("[agent] task=%s switching to session %s", task.ID, task.SessionID)
+			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("switching to session %s", task.SessionID)
 			// Wait briefly for switch to take effect
 			time.Sleep(500 * time.Millisecond)
 			useSessionResumption = true
 		} else {
-			log.Printf("[agent] task=%s switch_session failed, falling back to context replay", task.ID)
+			logging.For(logging.Agent).With(logging.TaskID, task.ID).Warnf("switch_session failed, falling back to context replay")
 		}
 		switchCancel()
 	}
@@ -144,7 +145,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	if sessionFile != "" && task.SessionID == "" {
 		task.SessionID = sessionFile
 		te.storeTask(task, projectID)
-		log.Printf("[agent] task=%s saved sessionFile=%s", task.ID, sessionFile)
+		logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("saved sessionFile=%s", sessionFile)
 	}
 
 	var initialPrompt string
@@ -153,7 +154,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 		if useSessionResumption {
 			// Agent has the session from switch_session, just send the new message.
 			initialPrompt = initialContent
-			log.Printf("[agent] task=%s lazy-start via session resume: sending user message", task.ID)
+			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("lazy-start via session resume: sending user message")
 		} else {
 			// Replay context as fallback.
 			replayMsgs := taskMsgs
@@ -162,10 +163,10 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 			}
 			if len(replayMsgs) > 0 {
 				initialPrompt = buildContextReplay(replayMsgs) + "\n\n--- New message ---\n\n" + initialContent
-				log.Printf("[agent] task=%s lazy-start: replaying %d messages + new message", task.ID, len(replayMsgs))
+				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("lazy-start: replaying %d messages + new message", len(replayMsgs))
 			} else {
 				initialPrompt = initialContent
-				log.Printf("[agent] task=%s lazy-start: sending user message as initial prompt", task.ID)
+				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("lazy-start: sending user message as initial prompt")
 			}
 		}
 	} else if len(taskMsgs) > 1 {
@@ -173,18 +174,18 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 		if useSessionResumption {
 			// Agent has the session, send the task prompt to continue.
 			initialPrompt = task.Prompt
-			log.Printf("[agent] task=%s restart via session resume: sending task prompt", task.ID)
+			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("restart via session resume: sending task prompt")
 		} else {
 			// Replay full conversation history.
 			// The task prompt is already the first message in taskMsgs,
 			// so the replay includes it plus all subsequent messages.
 			initialPrompt = buildContextReplay(taskMsgs)
-			log.Printf("[agent] task=%s restart: replaying %d messages", task.ID, len(taskMsgs))
+			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("restart: replaying %d messages", len(taskMsgs))
 		}
 	} else {
 		// Fresh start: agent has no session, send the task prompt.
 		initialPrompt = task.Prompt
-		log.Printf("[agent] task=%s fresh-start: sending task prompt", task.ID)
+		logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("fresh-start: sending task prompt")
 	}
 	err = runner.Prompt(ctx, initialPrompt)
 	if err != nil {
@@ -201,12 +202,12 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 		select {
 		case event, ok := <-runner.EventChan():
 			if !ok {
-				log.Printf("[agent] task=%s event channel closed during startup", task.ID)
+				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("event channel closed during startup")
 				runner.Close()
 				te.failTask(task, projectID, "Agent process exited unexpectedly", "agent_process_exited")
 				return
 			}
-			log.Printf("[agent] task=%s startup event: %s", task.ID, event.Type)
+			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("startup event: %s", event.Type)
 			if streamEvent := toStreamEvent(event, sandboxEnabled, runner); streamEvent.Type != "" {
 				te.sendAgentStreamEvent(projectID, task.ID, streamEvent)
 			}
@@ -224,7 +225,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 			}
 		case <-startupCtx.Done():
 			if startupCtx.Err() == context.DeadlineExceeded {
-				log.Printf("[agent] task=%s startup timeout (no status within 30s)", task.ID)
+				logging.For(logging.Agent).With(logging.TaskID, task.ID).Errorf("startup timeout (no status within 30s)")
 				runner.Close()
 				te.failTask(task, projectID, "Agent failed to start (timeout)", "agent_startup_timeout")
 			} else {
@@ -311,7 +312,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	for !agentEnded {
 		select {
 		case <-ctx.Done():
-			log.Printf("[agent] task=%s context cancelled", task.ID)
+			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("context cancelled")
 			runner.Close()
 			te.handleCancelledTask(task.ID, projectID)
 			return
@@ -370,27 +371,27 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 					stopReason = "toolUse"
 				}
 
-				log.Printf("[agent] task=%s persist complete, stopReason=%s", task.ID, stopReason)
+				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("persist complete, stopReason=%s", stopReason)
 
 				// Check for queued user messages before ending.
 				select {
 				case um := <-userMsgChan:
 					if um.ContextChanged {
-						log.Printf("[agent] task=%s context changed notification, skipping", task.ID)
+						logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("context changed notification, skipping")
 					} else {
 						// Handle model switch if requested with this message.
 						if um.ModelName != "" {
-							log.Printf("[agent] task=%s model switch requested: %s", task.ID, um.ModelName)
+							logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("model switch requested: %s", um.ModelName)
 							setModelCtx, setModelCancel := context.WithTimeout(ctx, 5*time.Second)
 							runner.SetModel(setModelCtx, um.ModelName)
 							setModelCancel()
 						}
-						log.Printf("[agent] task=%s persist: forwarding queued user message for next turn", task.ID)
+						logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("persist: forwarding queued user message for next turn")
 						turnStartTime = time.Now()
 						firstTokenTime = time.Time{}
 						err := runner.Prompt(ctx, um.Content, "steer")
 						if err != nil {
-							log.Printf("[agent] task=%s failed to forward queued message: %v", task.ID, err)
+							logging.For(logging.Agent).With(logging.TaskID, task.ID).Warnf("failed to forward queued message: %v", err)
 						}
 					}
 				default:
@@ -406,7 +407,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 			case pkgagent.EventTypeError:
 				if event.RawData != nil {
 					msg, _ := event.RawData["message"].(string)
-					log.Printf("[agent] task=%s error: %s", task.ID, msg)
+					logging.For(logging.Agent).With(logging.TaskID, task.ID).Warnf("error: %s", msg)
 				}
 
 			case pkgagent.EventTypeStatus:
@@ -417,34 +418,34 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 
 		case um := <-userMsgChan:
 			if um.ContextChanged {
-				log.Printf("[agent] task=%s context changed notification, skipping", task.ID)
+				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("context changed notification, skipping")
 				continue
 			}
 			// Handle model switch if requested with this message.
 			if um.ModelName != "" {
-				log.Printf("[agent] task=%s model switch requested: %s", task.ID, um.ModelName)
+				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("model switch requested: %s", um.ModelName)
 				setModelCtx, setModelCancel := context.WithTimeout(ctx, 5*time.Second)
 				runner.SetModel(setModelCtx, um.ModelName)
 				setModelCancel()
 			}
-			log.Printf("[agent] task=%s forwarding user message (len=%d)", task.ID, len(um.Content))
+			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("forwarding user message (len=%d)", len(um.Content))
 			turnStartTime = time.Now()
 			firstTokenTime = time.Time{}
 			err := runner.Prompt(ctx, um.Content, "steer")
 			if err != nil {
-				log.Printf("[agent] task=%s failed to forward user message: %v", task.ID, err)
+				logging.For(logging.Agent).With(logging.TaskID, task.ID).Warnf("failed to forward user message: %v", err)
 			}
 
 		case resultCh := <-compactCh:
-			log.Printf("[agent] task=%s compact requested", task.ID)
+			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("compact requested")
 			compactCtx, compactCancel := context.WithTimeout(ctx, 120*time.Second)
 			compactResult, err := runner.Compact(compactCtx)
 			compactCancel()
 			if err != nil {
-				log.Printf("[agent] task=%s compact failed: %v", task.ID, err)
+				logging.For(logging.Agent).With(logging.TaskID, task.ID).Warnf("compact failed: %v", err)
 				resultCh <- &CompactResult{Error: err}
 			} else if compactResult != nil {
-				log.Printf("[agent] task=%s compact succeeded (summary len=%d)", task.ID, len(compactResult.Summary))
+				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("compact succeeded (summary len=%d)", len(compactResult.Summary))
 				resultCh <- &CompactResult{Summary: compactResult.Summary, Error: compactResult.Err}
 			}
 		}
@@ -452,7 +453,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 
 	// Task completion
 	duration := time.Since(startTime)
-	log.Printf("[agent] task=%s completed stopReason=%s duration=%s", task.ID, stopReason, duration)
+	logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("completed stopReason=%s duration=%s", stopReason, duration)
 
 	task, _ = te.store.GetTaskByID(task.ID)
 	if task.ExecutionState == types.ExecStateRunning {
@@ -473,7 +474,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 			providerName = "Pi Coding Agent"
 		}
 		te.store.AccumulateProjectStats(projectID, modelName, providerName, finalCost)
-		log.Printf("[agent] task=%s accumulated session cost=%f for model=%s provider=%s", task.ID, finalCost, modelName, providerName)
+		logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("accumulated session cost=%f for model=%s provider=%s", finalCost, modelName, providerName)
 	}
 	// Persist session cost to the task so it's available when viewing non-streaming tasks.
 	// Accumulate onto any previously carried-over cost (e.g. from a prior executor run).
@@ -498,7 +499,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 		// A commit-and-done click merges whatever auto_merge says: read it here, consume it after.
 		commitDone := task.HasMergeConflict && te.CommitAndDonePending(task.ID)
 		if task.HasMergeConflict {
-			log.Printf("[agent] task=%s agent finished resolving conflicts, committing resolution", task.ID)
+			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("agent finished resolving conflicts, committing resolution")
 			// Same stage + commit steps the LLM loop runs (commitConflictResolution).
 			// What deliberately differs is the stash: this flow POPS it, because the
 			// agent keeps working on this turn and CommitAndMerge runs next, while the
@@ -509,10 +510,17 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 				commitOK = te.commitMergeConflictResolution(task.ID, worktreePath)
 			}
 			if commitOK {
-				log.Printf("[agent] task=%s conflict resolution committed", task.ID)
-				te.worktreeMgr.GetProjectStashMu(projectID).Lock()
-				_ = te.worktreeMgr.GitRunInDir(worktreePath, "stash", "pop")
-				te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
+				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("conflict resolution committed")
+				// Restored by label, because this runs long after the sync-merge that pushed - see
+				// NewestStashHashForMessage.
+				//
+				// Released explicitly, not deferred: a lock held past this block would be held across the merges below,
+				// which take the merge lock, and merge must come before the stash lock, never after.
+				unlockStash := te.worktreeMgr.LockProjectStash(projectID)
+				if _, err := te.worktreeMgr.RestoreStashForTask(worktreePath, git.StashMessageForSyncMerge(task.ID)); err != nil {
+					logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("restoring the sync-merge stash: %v", err)
+				}
+				unlockStash()
 			}
 			_ = te.store.SetTaskMergeConflict(task.ID, projectID, false)
 			task.ExecutionState = types.ExecStateIdle
@@ -530,10 +538,10 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 				TaskDescription: task.Prompt,
 				ConflictedFiles: conflictedFiles,
 			})
-			log.Printf("[agent] task=%s merge conflict, prompting agent to resolve", task.ID)
+			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("merge conflict, prompting agent to resolve")
 			err := runner.Prompt(context.Background(), prompt)
 			if err != nil {
-				log.Printf("[agent] task=%s failed to send merge conflict prompt: %v", task.ID, err)
+				logging.For(logging.Agent).With(logging.TaskID, task.ID).Warnf("failed to send merge conflict prompt: %v", err)
 				*agentEnded = true
 			}
 			return
@@ -541,7 +549,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 		// The conflict is over, so the click is spent - merge failure included.
 		commitDone = te.takeCommitAndDone(task.ID, mergeErr == nil)
 		if mergeErr != nil {
-			log.Printf("[agent] task=%s merge failed, moving to review: %v", task.ID, mergeErr)
+			logging.For(logging.Agent).With(logging.TaskID, task.ID).Warnf("merge failed, moving to review: %v", mergeErr)
 			task.ExecutionState = types.ExecStateIdle
 			task.Status = types.StatusReview
 			task.Output = "Merge failed: " + mergeErr.Error()
@@ -578,7 +586,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 		res := te.commitConflictResolution(projectID, task.ID, worktreePath, task)
 		task = res.task
 		if task.HasMergeConflict {
-			log.Printf("[agent] task=%s merge still conflicted after agent ended", task.ID)
+			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("merge still conflicted after agent ended")
 			task.ExecutionState = types.ExecStateFailed
 			task.Status = types.StatusReview
 			if te.sandboxMgr != nil {

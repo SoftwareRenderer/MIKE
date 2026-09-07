@@ -1,9 +1,10 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { getTaskGitLog, getTaskCommitDiff, initTask } from '$lib/api';
+    import { getTaskGitLog, getTaskCommitDiffFiles, initTask } from '$lib/api';
     import { toHomeRelative } from '$lib/utils/path';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import type { GitCommit, GitLogResponse } from '$lib/types';
+    import type { DiffFile } from '$lib/types/diff';
     import TaskFileBrowser from './TaskFileBrowser.svelte';
     import BranchGitGraph from './BranchGitGraph.svelte';
     import FileSearchPanel from './FileSearchPanel.svelte';
@@ -67,7 +68,7 @@
     // Commit diff overlay state
     let diffCommit = $state<GitCommit | null>(null);
     let diffCommitIndex = $state(-1);
-    let diffUnified = $state('');
+    let diffCommitFiles = $state<DiffFile[]>([]);
     let diffLoading = $state(false);
     const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf899d69f826635b6';
 
@@ -365,7 +366,7 @@
         diffCommit = commit;
         diffCommitIndex = index;
         diffLoading = true;
-        diffUnified = '';
+        diffCommitFiles = [];
         if (isMobileCtx.isMobile) activeTab = 'editor';
         try {
             let baseHash: string;
@@ -376,10 +377,10 @@
             } else {
                 baseHash = EMPTY_TREE;
             }
-            diffUnified = await getTaskCommitDiff(projectId, taskId, baseHash, commit.hash);
+            diffCommitFiles = await getTaskCommitDiffFiles(projectId, taskId, baseHash, commit.hash);
         } catch (e) {
             console.error('Failed to fetch commit diff:', e);
-            diffUnified = '';
+            diffCommitFiles = [];
         } finally {
             diffLoading = false;
         }
@@ -388,7 +389,7 @@
     function closeCommitDiff() {
         diffCommit = null;
         diffCommitIndex = -1;
-        diffUnified = '';
+        diffCommitFiles = [];
     }
 
     function handleDiffNavigate(direction: 'prev' | 'next') {
@@ -702,7 +703,7 @@
                 {#if diffCommit}
                     <CommitDiffOverlay
                         commit={diffCommit}
-                        diff={diffUnified}
+                        files={diffCommitFiles}
                         loading={diffLoading}
                         projectPath={taskPath}
                         onClose={closeCommitDiff}

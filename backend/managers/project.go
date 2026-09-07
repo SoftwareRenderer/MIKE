@@ -1,12 +1,12 @@
 package managers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -21,6 +21,7 @@ import (
 	"kanban/backend/store"
 	"kanban/backend/term"
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 	"kanban/pkg/sandboxruntime"
 )
 
@@ -107,7 +108,7 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		// Same restricted argv/env as the SSE clone (transport allowlist,
 		// no interactive credential prompt).
-		cmd := osexec.Command("git", git.CloneArgs(req.GitURL, targetPath)...)
+		cmd := git.Command("", git.CloneArgs(req.GitURL, targetPath)...)
 		cmd.Env = git.CloneEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
 			httputil.JSONError(w, http.StatusBadRequest, "git clone failed: "+strings.TrimSpace(string(out)))
@@ -295,12 +296,18 @@ func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 
 	sendEvent(map[string]any{"type": "status", "message": "Cloning " + req.GitURL + " into " + targetPath + "..."})
 
-	out, err := git.Clone(req.GitURL, targetPath, func(percent int) {
+	out, err := git.CloneContext(r.Context(), req.GitURL, targetPath, func(percent int) {
 		sendEvent(map[string]any{"type": "progress", "percent": percent})
 	})
 	if err != nil {
 		// Drop the partial clone so a retry can start clean.
 		_ = os.RemoveAll(targetPath)
+		if errors.Is(err, context.Canceled) {
+			// The client went away; nobody is reading this stream, and calling a cancelled
+			// clone a "git clone failure" would put the user's own navigation in the error log.
+			logging.For(logging.Git).Infof("cancelled by client: %s", req.GitURL)
+			return
+		}
 		sendEvent(map[string]any{"type": "error", "message": "git clone failed: " + strings.TrimSpace(out)})
 		return
 	}
@@ -588,7 +595,7 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			}
 			stopped := h.executor.StopProjectTasks(id)
 			if stopped > 0 {
-				log.Printf("[project] stopped %d stale running tasks in project %s due to sandbox settings change", stopped, id)
+				logging.For(logging.Managers).Infof("stopped %d stale running tasks in project %s due to sandbox settings change", stopped, id)
 			}
 		}
 		if req.SandboxEnabled != nil {

@@ -3,11 +3,11 @@ package stream
 import (
 	"encoding/json"
 	"errors"
-	"log"
 
 	"kanban/backend/git"
 	"kanban/backend/store"
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 )
 
 // DoneTaskDiff is the materialized, immutable diff payload for a done task.
@@ -131,7 +131,7 @@ func persistSnapshot(st DiffStore, task *types.Task, baseRef, headRef string, st
 		StatsJSON:  string(statsJSON),
 		DiffJSON:   string(diffJSON),
 	}); err != nil {
-		log.Printf("[diff-snapshot] task=%s persist failed: %v", task.ID, err)
+		logging.For(logging.Worktree).With(logging.TaskID, task.ID).Warnf("persist failed: %v", err)
 	}
 }
 

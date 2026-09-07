@@ -11,7 +11,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -25,7 +24,8 @@ import (
 	"github.com/creack/pty"
 
 	"kanban/backend/types"
-	sandbox "kanban/pkg/bridge"
+	"kanban/pkg/bridge"
+	"kanban/pkg/logging"
 	"kanban/pkg/sandboxruntime"
 )
 
@@ -120,29 +120,42 @@ type SandboxOpts struct {
 const shellTERM = "xterm-256color"
 
 // containerEnvArgs returns the -e flags for a sandbox container: the variables configured for it and
-// nothing else. Order is lowest to highest priority — the agent extension's envs, then the project's own
-// configuration, since podman takes the last -e. Nothing is invented here: -e overrides the image's ENV,
-// so a hardcoded PATH or TERM would silently replace what the image sets.
-func containerEnvArgs(taskID string, opts SandboxOpts) []string {
+// nothing else, lowest priority first (podman takes the last -e). Nothing is invented here: -e overrides
+// the image's ENV, so a hardcoded PATH or TERM would silently replace what the image sets.
+//
+// It returns an error and Create refuses to start the container on one, because emitting what parsed and
+// dropping the rest produces a container with an environment nobody configured. types.SandboxEnvArgs
+// assembles the list and cannot produce a bare `-e NAME`, which podman reads as "copy NAME out of the
+// server's own environment".
+func containerEnvArgs(taskID string, opts SandboxOpts) ([]string, error) {
 	var args []string
 	// The agent's declared environment first, so the project's own configuration wins a clash on the
 	// same name (podman takes the last -e): an install-wide default loses to a project that named the
 	// variable itself.
-	add := func(source string, envs []types.SandboxEnv) {
-		for _, e := range envs {
-			if e.Key == "" {
-				continue
+	if opts.AgentSandbox != nil {
+		agentArgs, err := types.SandboxEnvArgs(opts.AgentSandbox.Envs)
+		if err != nil {
+			return nil, fmt.Errorf("agent extension env: %w", err)
+		}
+		args = append(args, agentArgs...)
+		// Values are never logged — they are routinely API keys and tokens.
+		for _, e := range opts.AgentSandbox.Envs {
+			if e.Key != "" {
+				logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("setting agent env %s", e.Key)
 			}
-			args = append(args, "-e", e.Key+"="+e.Value)
-			// Values are never logged — they are routinely API keys and tokens.
-			log.Printf("[sandbox] task=%s setting %s env %s", taskID, source, e.Key)
 		}
 	}
-	if opts.AgentSandbox != nil {
-		add("agent", opts.AgentSandbox.Envs)
+	projectArgs, err := types.SandboxEnvArgs(opts.SandboxEnvs)
+	if err != nil {
+		return nil, fmt.Errorf("project sandbox configuration: %w", err)
 	}
-	add("sandbox", opts.SandboxEnvs)
-	return args
+	args = append(args, projectArgs...)
+	for _, e := range opts.SandboxEnvs {
+		if e.Key != "" {
+			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("setting sandbox env %s", e.Key)
+		}
+	}
+	return args, nil
 }
 
 // shellExecArgs builds the podman arguments for an interactive shell. TERM is set
@@ -172,7 +185,7 @@ type SandboxManager struct {
 	active        map[string]string             // taskID -> containerName
 	mountPaths    map[string]string             // taskID -> mount path inside container
 	agents        map[string]*agentConn         // taskID -> agent pipes + process
-	clients       map[string]*sandbox.Client    // taskID -> agent client (cached)
+	clients       map[string]*bridge.Client     // taskID -> agent client (cached)
 	livenessCache map[string]time.Time          // taskID -> last time running was confirmed
 	mem           *sandboxruntime.MemoryTracker // taskID -> container memory, via containerName
 	// imageOps holds in-flight image builds/pulls by image ref, so concurrent sandbox starts share
@@ -191,21 +204,21 @@ func NewSandboxManager() *SandboxManager {
 		active:        make(map[string]string),
 		mountPaths:    make(map[string]string),
 		agents:        make(map[string]*agentConn),
-		clients:       make(map[string]*sandbox.Client),
+		clients:       make(map[string]*bridge.Client),
 		livenessCache: make(map[string]time.Time),
 		mem:           sandboxruntime.NewMemoryTracker(rt),
 		imageOps:      make(map[string]*imageOp),
 	}
 	sm.available = sm.checkAvailable()
 	if sm.available {
-		log.Println("[sandbox] gVisor available, sandboxing enabled")
+		logging.For(logging.Sandbox).Info("gVisor available, sandboxing enabled")
 		// Skip cleanup if MIKE_SANDBOX_SKIP_STARTUP_CLEANUP is set (e.g. during tests
 		// where TestMain handles cleanup once to avoid races between parallel tests).
 		if !sandboxruntime.SkipStartupCleanup() {
 			sm.cleanupStaleContainers()
 		}
 	} else {
-		log.Println("[sandbox] gVisor not available (runsc not found), sandboxing disabled")
+		logging.For(logging.Sandbox).Info("gVisor not available (runsc not found), sandboxing disabled")
 	}
 	return sm
 }
@@ -235,7 +248,7 @@ func (sm *SandboxManager) podmanExec(args ...string) ([]byte, error) {
 
 // GetClient returns the agent client for a task.
 // The client communicates directly with the container agent via podman exec pipes.
-func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
+func (sm *SandboxManager) GetClient(taskID string) (*bridge.Client, error) {
 	sm.mu.Lock()
 	if c, ok := sm.clients[taskID]; ok {
 		if c.IsAlive() {
@@ -251,7 +264,7 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 		return nil, fmt.Errorf("no agent process for task %s", taskID)
 	}
 
-	client := sandbox.NewClient(ac.stdin, ac.stdout)
+	client := bridge.NewClient(ac.stdin, ac.stdout)
 
 	sm.mu.Lock()
 	sm.clients[taskID] = client
@@ -356,7 +369,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	}
 	if exists {
 		// Clean up stale container from a previous server run
-		log.Printf("[sandbox] task=%s removing stale container %s", taskID, containerName)
+		logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("removing stale container %s", containerName)
 		if rmErr := sm.rt.RemoveContainer(containerName); rmErr != nil {
 			return nil, fmt.Errorf("remove stale container %s: %w", containerName, rmErr)
 		}
@@ -400,19 +413,19 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	var assignedPorts []types.AssignedPort
 	for _, pf := range opts.ForwardPorts {
 		if pf.ContainerPort < 1 || pf.ContainerPort > 65535 {
-			log.Printf("[sandbox] task=%s skipping invalid container port: %d", taskID, pf.ContainerPort)
+			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("skipping invalid container port: %d", pf.ContainerPort)
 			continue
 		}
 		hostIP, err := types.NormalizeSandboxHostIP(pf.HostIP)
 		if err != nil {
-			log.Printf("[sandbox] task=%s skipping port %d: %v", taskID, pf.ContainerPort, err)
+			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("skipping port %d: %v", pf.ContainerPort, err)
 			continue
 		}
 		// Binding the probe to hostIP reports a missing interface here, against the port we
 		// were asked for, instead of later as a podman failure.
 		ln, err := net.Listen("tcp", net.JoinHostPort(hostIP, "0"))
 		if err != nil {
-			log.Printf("[sandbox] task=%s failed to assign host port on %q for container port %d: %v", taskID, hostIP, pf.ContainerPort, err)
+			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("failed to assign host port on %q for container port %d: %v", hostIP, pf.ContainerPort, err)
 			continue
 		}
 		hostPort := ln.Addr().(*net.TCPAddr).Port
@@ -420,7 +433,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 		binding := forwardPortSpec(hostIP, hostPort, pf.ContainerPort)
 		createArgs = append(createArgs, "-p", binding)
 		assignedPorts = append(assignedPorts, types.AssignedPort{HostPort: hostPort, ContainerPort: pf.ContainerPort, HostIP: hostIP})
-		log.Printf("[sandbox] task=%s publishing %s for container port %d", taskID, binding, pf.ContainerPort)
+		logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("publishing %s for container port %d", binding, pf.ContainerPort)
 	}
 	if opts.MemoryLimit > 0 {
 		createArgs = append(createArgs, "--memory", fmt.Sprintf("%dM", opts.MemoryLimit))
@@ -433,7 +446,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 			createArgs = append(createArgs,
 				"-v", gitDir+":"+gitDir+":rprivate,ro",
 			)
-			log.Printf("[sandbox] task=%s mounting .git read-only: %s", taskID, gitDir)
+			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("mounting .git read-only: %s", gitDir)
 		}
 	}
 
@@ -446,7 +459,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 			}
 			absHost, err := filepath.Abs(m.HostPath)
 			if err != nil {
-				log.Printf("[sandbox] task=%s skipping agent mount: invalid host path %s: %v", taskID, m.HostPath, err)
+				logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("skipping agent mount: invalid host path %s: %v", m.HostPath, err)
 				continue
 			}
 			mountMode := m.Mode
@@ -456,7 +469,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 			createArgs = append(createArgs,
 				"-v", absHost+":"+m.ContainerPath+":rprivate,"+mountMode,
 			)
-			log.Printf("[sandbox] task=%s mounting agent sandbox %s -> %s (%s)", taskID, absHost, m.ContainerPath, mountMode)
+			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("mounting agent sandbox %s -> %s (%s)", absHost, m.ContainerPath, mountMode)
 		}
 	}
 
@@ -464,12 +477,12 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	if opts.SkillsDir != "" {
 		absSkillsDir, err := filepath.Abs(opts.SkillsDir)
 		if err != nil {
-			log.Printf("[sandbox] task=%s skipping skills mount: invalid path %s: %v", taskID, opts.SkillsDir, err)
+			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("skipping skills mount: invalid path %s: %v", opts.SkillsDir, err)
 		} else if _, err := os.Stat(absSkillsDir); err == nil {
 			createArgs = append(createArgs,
 				"-v", absSkillsDir+":"+SkillsMount+":rprivate,ro",
 			)
-			log.Printf("[sandbox] task=%s mounting skills read-only: %s -> %s", taskID, absSkillsDir, SkillsMount)
+			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("mounting skills read-only: %s -> %s", absSkillsDir, SkillsMount)
 		}
 	}
 
@@ -477,15 +490,15 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	for _, m := range opts.SandboxMounts {
 		hostPath, err := filepath.Abs(m.HostPath)
 		if err != nil {
-			log.Printf("[sandbox] task=%s skipping mount: invalid host path %s: %v", taskID, m.HostPath, err)
+			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("skipping mount: invalid host path %s: %v", m.HostPath, err)
 			continue
 		}
 		if _, err := os.Stat(hostPath); err != nil {
 			if mkErr := os.MkdirAll(hostPath, 0o755); mkErr != nil {
-				log.Printf("[sandbox] task=%s skipping mount: cannot create host path %s: %v", taskID, hostPath, mkErr)
+				logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("skipping mount: cannot create host path %s: %v", hostPath, mkErr)
 				continue
 			}
-			log.Printf("[sandbox] task=%s created host directory %s", taskID, hostPath)
+			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("created host directory %s", hostPath)
 		}
 		mode := m.Mode
 		if mode != "ro" && mode != "rw" {
@@ -494,12 +507,19 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 		createArgs = append(createArgs,
 			"-v", hostPath+":"+m.ContainerPath+":rprivate,"+mode,
 		)
-		log.Printf("[sandbox] task=%s mounting %s -> %s (%s)", taskID, hostPath, m.ContainerPath, mode)
+		logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("mounting %s -> %s (%s)", hostPath, m.ContainerPath, mode)
 	}
 
-	// Environment: exactly what was configured for this sandbox. A dependency cache granted to an LSP
-	// extension is deliberately not among it — see SandboxOpts.
-	createArgs = append(createArgs, containerEnvArgs(taskID, opts)...)
+	// Environment: exactly what was configured for this sandbox, and nothing else. Built here, at
+	// the point of use, which is still before the container exists — `podman run` below is the
+	// create, and everything above it is read-only — so a malformed configuration row refuses the
+	// create rather than starting a container with a partial environment. A dependency cache granted
+	// to an LSP extension is deliberately not among it: see SandboxOpts.
+	envArgs, err := containerEnvArgs(taskID, opts)
+	if err != nil {
+		return nil, fmt.Errorf("task %s: sandbox environment rejected: %w", taskID, err)
+	}
+	createArgs = append(createArgs, envArgs...)
 
 	// Container entrypoint: just sleep (agent is started via podman exec)
 	createArgs = append(createArgs, image,
@@ -539,7 +559,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	// continue — the sandbox still works, just without a cap.
 	if opts.MemoryLimit > 0 {
 		if err := sm.rt.ApplyMemoryLimit(containerName, opts.MemoryLimit); err != nil {
-			log.Printf("[sandbox] task=%s WARNING: memory limit %dMB not enforced (cgroup write failed): %v", taskID, opts.MemoryLimit, err)
+			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("WARNING: memory limit %dMB not enforced (cgroup write failed): %v", opts.MemoryLimit, err)
 		}
 	}
 
@@ -577,25 +597,37 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	sm.mountPaths[taskID] = mountPath
 	sm.agents[taskID] = &agentConn{cmd: agentCmd, stdin: stdin, stdout: stdout}
 
-	log.Printf("[sandbox] task=%s agent ready", taskID)
+	logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("agent ready")
 	return assignedPorts, nil
 }
 
 // Exec runs a command inside the task's sandbox container.
 // Returns the combined stdout/stderr output.
-func (sm *SandboxManager) Exec(taskID, command string, env []string) (string, error) {
+//
+// env is a declared-variable list, not a list of names, and that is the point of the type: a bare
+// `-e NAME` tells podman to copy NAME out of the environment of the podman process — the server's —
+// so a signature that accepted names would make host-environment leakage the natural-looking thing
+// to write. types.SandboxEnvArgs cannot emit one.
+func (sm *SandboxManager) Exec(taskID, command string, env []types.SandboxEnv) (string, error) {
 	return sm.execInternal(taskID, command, nil, env)
 }
 
 // ExecWithInput runs a command inside the task's sandbox container with stdin input.
 // Returns the combined stdout/stderr output.
-func (sm *SandboxManager) ExecWithInput(taskID, command string, stdin []byte, env []string) (string, error) {
+func (sm *SandboxManager) ExecWithInput(taskID, command string, stdin []byte, env []types.SandboxEnv) (string, error) {
 	return sm.execInternal(taskID, command, stdin, env)
 }
 
 // execInternal is the shared implementation for Exec and ExecWithInput.
 // When stdin is non-nil, it is piped to the command's standard input.
-func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env []string) (string, error) {
+func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env []types.SandboxEnv) (string, error) {
+	// Validated before the container lookup: a malformed declaration is the caller's bug and should
+	// report itself as one whether or not a container happens to be running.
+	envArgs, err := types.SandboxEnvArgs(env)
+	if err != nil {
+		return "", fmt.Errorf("task %s: exec environment rejected: %w", taskID, err)
+	}
+
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]
 	mountPath := sm.mountPaths[taskID]
@@ -616,9 +648,7 @@ func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env
 		containerName,
 	)
 
-	for _, e := range env {
-		execArgs = append(execArgs, "-e", e)
-	}
+	execArgs = append(execArgs, envArgs...)
 
 	// Run sh -c to handle shell features
 	execArgs = append(execArgs, "sh", "-c", command)
@@ -699,11 +729,11 @@ func (sm *SandboxManager) ensureProjectContainer(taskID string, project *types.P
 	if err != nil {
 		// If we can't inspect the container, assume it's stale and recreate it
 		// rather than risk serving a stale mount.
-		log.Printf("[sandbox] project=%s cannot inspect mount source (recreating): %v", project.ID, err)
+		logging.For(logging.Sandbox).With(logging.ProjectID, project.ID).Infof("cannot inspect mount source (recreating): %v", err)
 		source = ""
 	}
 	if filepath.Clean(source) != filepath.Clean(absWorktree) {
-		log.Printf("[sandbox] project=%s mount source %q != worktree %q (recreating stale container)", project.ID, source, absWorktree)
+		logging.For(logging.Sandbox).With(logging.ProjectID, project.ID).Infof("mount source %q != worktree %q (recreating stale container)", source, absWorktree)
 		_ = sm.Stop(taskID)
 		if _, err := sm.Create(taskID, project.Path, project, opts); err != nil {
 			return fmt.Errorf("create sandbox container: %w", err)
@@ -760,7 +790,7 @@ func (sm *SandboxManager) startShell(taskID, worktreePath string, project *types
 		sm.mu.Unlock()
 	} else if !sm.ContainerIsRunning(taskID) {
 		// Container exists in map but is not running — recreate it
-		log.Printf("[sandbox] task=%s container %s not running, recreating", taskID, containerName)
+		logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("container %s not running, recreating", containerName)
 		_ = sm.Stop(taskID)
 		var err error
 		assignedPorts, err = sm.Create(taskID, worktreePath, project, opts)
@@ -783,9 +813,12 @@ func (sm *SandboxManager) startShell(taskID, worktreePath string, project *types
 	// -i: keep STDIN open
 	// -t: allocate a pseudo-TTY
 	cmd := podmanCommand(shellExecArgs(containerName, mountPath, shell)...)
-	// No cmd.Env: podman needs the server's own environment (rootless storage keys
-	// off HOME / XDG_*), and none of it reaches the container — podman exec
-	// inherits the container's environment unless -e says otherwise.
+	// cmd.Env comes from podmanCommand → sandboxruntime.PodmanEnv: the rootless-podman essentials
+	// (HOME, XDG_RUNTIME_DIR, the D-Bus address) and nothing else — notably not
+	// MIKE_LOGIN_PASSWORD or MIKE_ENCRYPTION_KEY, which os.Environ() used to hand this process.
+	// The claim that none of it reaches the container is still true and still the reason the
+	// terminal's own environment is the container's: podman exec inherits the container's
+	// environment unless an -e says otherwise.
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
 	if err != nil {
@@ -799,7 +832,7 @@ func (sm *SandboxManager) startShell(taskID, worktreePath string, project *types
 		Ptmx: ptmx,
 	}
 
-	log.Printf("[sandbox] task=%s started shell in container %s", taskID, containerName)
+	logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("started shell in container %s", containerName)
 	return sp, assignedPorts, nil
 }
 
@@ -880,7 +913,7 @@ func (sm *SandboxManager) StartProcess(taskID, command string, args []string) (*
 		Stdout: stdout,
 	}
 
-	log.Printf("[sandbox] task=%s started process %q in container %s (pid=%d)", taskID, command, containerName, cmd.Process.Pid)
+	logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("started process %q in container %s (pid=%d)", command, containerName, cmd.Process.Pid)
 	return ph, nil
 }
 
@@ -942,11 +975,11 @@ func (sm *SandboxManager) Stop(taskID string) error {
 	// Remove container (force stop if running)
 	err := sm.rt.RemoveContainer(containerName)
 	if err != nil {
-		log.Printf("[sandbox] task=%s warning: failed to remove container: %v", taskID, err)
+		logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("warning: failed to remove container: %v", err)
 		return fmt.Errorf("remove container: %w", err)
 	}
 
-	log.Printf("[sandbox] task=%s removed container %s", taskID, containerName)
+	logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("removed container %s", containerName)
 	return nil
 }
 
@@ -1036,7 +1069,7 @@ func (sm *SandboxManager) GetContainerPorts(taskID string) ([]types.AssignedPort
 		}
 		port, ok := parsePortBinding(line)
 		if !ok {
-			log.Printf("[sandbox] task=%s ignoring unreadable port line %q", taskID, line)
+			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("ignoring unreadable port line %q", line)
 			continue
 		}
 		// One container port bound on both families reads as the same mapping twice.
@@ -1102,29 +1135,26 @@ func (sm *SandboxManager) PullImageWithProgress(image string, onProgress func(li
 		return err
 	}
 	image = sm.rt.ResolveImageRef(image)
-	log.Printf("[sandbox] pulling image %s", image)
+	logging.For(logging.Sandbox).Infof("pulling image %s", image)
 
 	if err := sm.streamPodman(podmanCommand("pull", image), "pull", image, "pull", onProgress); err != nil {
 		return err
 	}
-	log.Printf("[sandbox] image %s pulled", image)
+	logging.For(logging.Sandbox).Infof("image %s pulled", image)
 	return nil
 }
 
-// streamPodman runs a podman command whose output is worth watching while it happens — a
-// pull or a build takes minutes. stdout and stderr share one pipe because podman writes
-// progress to stderr, and one interleaved stream renders readably.
-//
-// onProgress may be nil; every line is logged under logTag either way. The error names op
-// and image so a caller can show it as-is.
-// podmanCommand is how this package starts podman, so every call carries WaitDelay: cmd.Wait waits
-// for the output pipes, not just the process, and a wedged container holds them open.
+// podmanCommand is how this package starts podman. It delegates to sandboxruntime.PodmanCommand so the
+// environment allowlist and WaitDelay are set in one place: cmd.Wait waits for the output pipes, not just
+// the process, and a wedged container holds them open.
 func podmanCommand(args ...string) *exec.Cmd {
-	c := exec.Command("podman", args...)
-	c.WaitDelay = sandboxruntime.PodmanWaitDelay
-	return c
+	return sandboxruntime.PodmanCommand(args...)
 }
 
+// streamPodman runs a podman command whose output is worth watching - a pull or a build takes minutes.
+// stdout and stderr share one pipe because podman writes progress to stderr, and one interleaved stream
+// renders readably. onProgress may be nil; every line is logged under logTag either way. The error names
+// op and image so a caller can show it as-is.
 func (sm *SandboxManager) streamPodman(cmd *exec.Cmd, op, image, logTag string, onProgress func(line string)) error {
 	pr, pw := io.Pipe()
 	cmd.Stdout = pw
@@ -1144,7 +1174,7 @@ func (sm *SandboxManager) streamPodman(cmd *exec.Cmd, op, image, logTag string, 
 			if onProgress != nil {
 				onProgress(line)
 			}
-			log.Printf("[sandbox] %s: %s", logTag, line)
+			logging.For(logging.Sandbox).Infof("%s: %s", logTag, line)
 		}
 	}()
 
@@ -1243,11 +1273,11 @@ func (sm *SandboxManager) BuildImageWithOptions(projectName, dockerfilePath stri
 	_, _ = sm.podmanExec("rmi", imageName) // best-effort
 
 	// Build the image with streaming output
-	log.Printf("[sandbox] project=%s building image %s from %s (no_cache=%v)", projectName, imageName, dockerfilePath, opts.NoCache)
+	logging.For(logging.Sandbox).With(logging.ProjectID, projectName).Infof("building image %s from %s (no_cache=%v)", imageName, dockerfilePath, opts.NoCache)
 	if err := sm.streamPodman(podmanCommand(buildPodmanBuildArgs(imageName, tmpDir, opts.NoCache)...), "build", imageName, "build", onProgress); err != nil {
 		return err
 	}
-	log.Printf("[sandbox] project=%s image %s built successfully", projectName, imageName)
+	logging.For(logging.Sandbox).With(logging.ProjectID, projectName).Infof("image %s built successfully", imageName)
 	return nil
 }
 

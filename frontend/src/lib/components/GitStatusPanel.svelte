@@ -1,10 +1,9 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import type { DiffFile } from '$lib/types/diff';
-    import { parseUnifiedDiff } from '$lib/utils/diff-parser';
     import { gitStatusLabel } from '$lib/utils/git-status';
     import { t } from '$lib/i18n';
-    import { getGitStatus, getProjectDiff, getProjectDiffFile, stageProjectFile, commitProject, pullProject, pushProject, getGitLogFull, getCommitDiff } from '$lib/api/git';
+    import { getGitStatus, getProjectDiffFiles, getCommitDiffFiles, getProjectDiffFile, stageProjectFile, commitProject, pullProject, pushProject, getGitLogFull } from '$lib/api/git';
     import type { GitCommit } from '$lib/types';
     import { dialogStore } from '$lib/stores';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
@@ -343,8 +342,7 @@
         // Preload the diff viewer chunk
         loadDiffViewer();
         try {
-            const diffText = await getCommitDiff(projectId, fromCommit, toCommit);
-            compareDiff = parseUnifiedDiff(diffText);
+            compareDiff = await getCommitDiffFiles(projectId, fromCommit, toCommit);
         } catch (e: any) {
             compareError = e.message || t('git.fetchDiffFailed');
             compareDiff = [];
@@ -492,9 +490,9 @@
             unstagedEntries = unstaged;
 
             // Fetch diffs for DiffViewer and metadata for untracked files
-            const [stagedDiff, unstagedDiff, untrackedMeta] = await Promise.all([
-                getProjectDiff(projectId, { cached: true }).catch(() => ''),
-                getProjectDiff(projectId).catch(() => ''),
+            const [stagedFiles, unstagedFiles, untrackedMeta] = await Promise.all([
+                getProjectDiffFiles(projectId, { cached: true }).catch(() => []),
+                getProjectDiffFiles(projectId).catch(() => []),
                 Promise.all(untrackedPaths.map(async (path) => {
                     try {
                         return { path, meta: await getProjectDiffFile(projectId, path, { meta: true }) };
@@ -504,8 +502,8 @@
                 })),
             ]);
 
-            stagedDiffFiles = parseUnifiedDiff(stagedDiff);
-            unstagedDiffFiles = parseUnifiedDiff(unstagedDiff);
+            stagedDiffFiles = stagedFiles;
+            unstagedDiffFiles = unstagedFiles;
             unstagedUntracked = untrackedMeta.flatMap(({ path, meta }) => {
                 if (!meta) return [];
                 const added = meta.line_count ?? 0;

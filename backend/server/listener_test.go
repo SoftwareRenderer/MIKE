@@ -11,13 +11,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math/big"
 	"net"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"kanban/pkg/logging"
 )
 
 // The hybrid listener reads a connection's first byte to tell TLS from plain HTTP, and
@@ -244,10 +245,8 @@ func TestHybridListener_ListenerCloseEndsServe(t *testing.T) {
 // TestSniffDropLogger_RateLimitsPerHost keeps a scan from burying the log while still
 // reporting each new host once.
 func TestSniffDropLogger_RateLimitsPerHost(t *testing.T) {
-	var buf strings.Builder
-	out := log.Writer()
-	log.SetOutput(&buf)
-	defer log.SetOutput(out)
+	buf, restore := logging.TestSink()
+	defer restore()
 
 	l := &sniffDropLogger{}
 	cause := errors.New("i/o timeout")

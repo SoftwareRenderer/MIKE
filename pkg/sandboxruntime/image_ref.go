@@ -2,8 +2,9 @@ package sandboxruntime
 
 import (
 	"fmt"
-	"log"
 	"strings"
+
+	"kanban/pkg/logging"
 )
 
 // Podman must never be handed an unqualified ("short") image name: it picks a registry by
@@ -164,7 +165,7 @@ func (r *Runtime) imageExists(image string) bool {
 	out, err := r.PodmanExec("image", "exists", image)
 	if err != nil {
 		if line := strings.TrimSpace(string(out)); line != "" {
-			log.Printf("[sandboxruntime] image exists %s: %s", image, line)
+			logging.For(logging.Runtime).Infof("image exists %s: %s", image, line)
 		}
 		return false
 	}

@@ -16,7 +16,7 @@ import (
 
 	"kanban/backend/extensions"
 
-	bridge "kanban/pkg/bridge"
+	"kanban/pkg/bridge"
 )
 
 // TestTSServerCrossFileViaBridge drives the real sandbox-bridge binary (stdin/stdout, as in the

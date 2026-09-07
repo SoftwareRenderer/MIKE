@@ -9,15 +9,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os/exec"
 	"sync"
 	"syscall"
 	"time"
 
 	"kanban/backend/extensions"
-	sandboxmgr "kanban/backend/sandbox"
+	"kanban/backend/sandbox"
 	pkgagent "kanban/pkg/agent"
+	"kanban/pkg/logging"
 )
 
 // AgentRunner manages an agent adapter (WASM) and its subprocess.
@@ -75,7 +75,7 @@ type RunnerConfig struct {
 // It loads the WASM adapter, initializes it, spawns the agent subprocess,
 // and starts the stdout reader goroutine.
 // ctx is used for cancellation during adapter initialization.
-func NewAgentRunner(ctx context.Context, ext *extensions.Extension, sandboxMgr *sandboxmgr.SandboxManager, taskID, worktreePath, sessionName string, sandboxEnabled bool) (*AgentRunner, error) {
+func NewAgentRunner(ctx context.Context, ext *extensions.Extension, sandboxMgr *sandbox.SandboxManager, taskID, worktreePath, sessionName string, sandboxEnabled bool) (*AgentRunner, error) {
 	cfg := RunnerConfig{
 		ExtensionName: ext.Name,
 		SessionName:   sessionName,
@@ -174,7 +174,7 @@ func NewAgentRunner(ctx context.Context, ext *extensions.Extension, sandboxMgr *
 	}()
 	go r.readOutput(readCtx)
 
-	log.Printf("[agent] runner started (binary=%s, pid=%d, session=%s)", spCfg.Binary, r.PID(), sessionName)
+	logging.For(logging.Agent).Infof("runner started (binary=%s, pid=%d, session=%s)", spCfg.Binary, r.PID(), sessionName)
 	return r, nil
 }
 
@@ -293,7 +293,7 @@ func (r *AgentRunner) SetModel(ctx context.Context, modelName string) {
 	case <-r.modelUpdated:
 		// Model updated successfully
 	case <-timeout.C:
-		log.Printf("[agent] SetModel timed out waiting for response")
+		logging.For(logging.Agent).Warnf("SetModel timed out waiting for response")
 	case <-ctx.Done():
 		// Context cancelled
 	}
@@ -445,7 +445,7 @@ func (r *AgentRunner) readOutput(ctx context.Context) {
 		}
 		if err != nil {
 			if err != io.EOF {
-				log.Printf("[agent] stdout read error: %v", err)
+				logging.For(logging.Agent).Warnf("stdout read error: %v", err)
 			}
 			break
 		}
@@ -474,7 +474,7 @@ func (r *AgentRunner) dispatchEvent(ctx context.Context, event pkgagent.Event) {
 		select {
 		case r.statsChan <- event.Stats:
 		default:
-			log.Printf("[agent] stats channel full, dropping")
+			logging.For(logging.Agent).Infof("stats channel full, dropping")
 		}
 		return
 	}
@@ -509,7 +509,7 @@ func (r *AgentRunner) dispatchEvent(ctx context.Context, event pkgagent.Event) {
 			select {
 			case r.compactChan <- result:
 			default:
-				log.Printf("[agent] compact channel full, dropping")
+				logging.For(logging.Agent).Infof("compact channel full, dropping")
 			}
 			return
 		}
@@ -572,7 +572,7 @@ func (r *AgentRunner) dispatchEvent(ctx context.Context, event pkgagent.Event) {
 		select {
 		case r.eventChan <- event:
 		default:
-			log.Printf("[agent] event channel full, dropping type=%s", event.Type)
+			logging.For(logging.Agent).Infof("event channel full, dropping type=%s", event.Type)
 		}
 	}
 	r.sendMu.RUnlock()

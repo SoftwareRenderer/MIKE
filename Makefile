@@ -46,6 +46,21 @@ bridge-check: ## Fail if sandbox/sandbox-bridge was not built from this tree's s
 	@scripts/bridge-stamp.sh check $(BRIDGE_STAMP)
 
 # ---------------------------------------------------------------------------
+# Scope
+# ---------------------------------------------------------------------------
+
+# The package scope every Go command here uses. The trailing `.` is load-bearing: the root package
+# holds main.go and the startup-config tests, and `./backend/... ./pkg/...` skipped them while
+# `make test` still printed green. `./...` is never used - it fails at HEAD on the pulled artifacts
+# under extensions/, which are not this tree.
+GO_SCOPE := ./backend/... ./pkg/... .
+
+# Every Go file this repo owns, and only those. Not `.`: that also walks extensions/ (a pulled
+# artifact from another module) and node_modules/, and would recurse into backend/ and pkg/ and
+# report each violation twice.
+GOFMT_DIRS := backend pkg scripts main.go startup_config.go
+
+# ---------------------------------------------------------------------------
 # Test
 # ---------------------------------------------------------------------------
 
@@ -54,15 +69,14 @@ test: test-go test-frontend ## Run all tests (Go unit + frontend unit)
 
 .PHONY: test-go
 test-go: ## Run Go unit tests (~60s, parallel)
-	go test ./backend/... ./pkg/... -count=1 -parallel 8
+	go test $(GO_SCOPE) -count=1 -parallel 8
 
-# The executor, the stream manager and the sandbox/terminal layers run ~120 detached
-# goroutines between them, which is exactly the shape where a race hides for months.
-# -parallel is lower than test-go because the race detector multiplies the work per
-# test, and the sandbox packages need a working podman + runsc on top of it.
+# The executor, stream manager and sandbox/terminal layers run ~120 detached goroutines between them.
+# -parallel is lower than test-go because the race detector multiplies the work per test, and the
+# sandbox packages need a working podman + runsc on top of it.
 .PHONY: test-go-race
 test-go-race: ## Run Go unit tests under the race detector (~4min)
-	go test -race ./backend/... ./pkg/... -count=1 -parallel 4
+	go test -race $(GO_SCOPE) -count=1 -parallel 4
 
 .PHONY: test-frontend
 test-frontend: ## Run frontend unit tests + the gates (vitest, ~10s)
@@ -91,6 +105,59 @@ i18n-parity: ## Check a locale pack against the English contract (make i18n-pari
 .PHONY: test-i18n-parity
 test-i18n-parity: ## Run the i18n parity checker's own tests (~0.2s)
 	go test ./scripts/i18nparity/ -count=1
+
+# ---------------------------------------------------------------------------
+# Quality gate
+# ---------------------------------------------------------------------------
+
+# AGENTS.md tells every agent to run gofmt, scoped go vet, staticcheck and deadcode - and nothing in
+# the repo ran any of them. This target is the gate; `make check` is what "done" means.
+#
+# Order is cost, cheapest first. None of these may skip: scripts/lint-tools.sh turns a missing linter
+# into an error carrying its install command, because a gate that passes an unrun check is the same
+# false "done" with better formatting.
+.PHONY: lint
+lint: ## gofmt + scoped vet + staticcheck (all checks) + deadcode (both roots)
+	@echo "==> gofmt"
+	@unformatted=$$(gofmt -l $(GOFMT_DIRS)); \
+	if [ -n "$$unformatted" ]; then \
+		echo "not gofmt-clean:"; echo "$$unformatted" | sed 's/^/    /'; \
+		echo "    fix with: gofmt -w \$$(gofmt -l $(GOFMT_DIRS))"; \
+		exit 1; \
+	fi
+	@echo "==> go vet"
+	@go vet $(GO_SCOPE)
+	@echo "==> staticcheck -checks=all"
+	@$$(scripts/lint-tools.sh path staticcheck) -checks=all $(GO_SCOPE)
+	@echo "==> deadcode"
+	@scripts/deadcode-check.sh
+
+.PHONY: check
+check: ## THE GATE: lint + bridge-check + build + Go tests + frontend gates
+	@$(MAKE) --no-print-directory lint
+	@echo "==> bridge-check (a stale sandbox-bridge is an edit that never runs)"
+	@$(MAKE) --no-print-directory bridge-check
+	@echo "==> build"
+	@go build -trimpath -o kanban .
+	@echo "==> go test"
+	@$(MAKE) --no-print-directory test-go
+	@echo "==> svelte-check"
+	@cd frontend && npm run check
+	@echo "==> frontend unit tests + gates"
+	@$(MAKE) --no-print-directory test-frontend
+	@echo ""
+	@echo "make check: all gates green"
+
+# The packages that own the detached goroutines and the executor's lock discipline. A full -race
+# sweep is ~4min and would not get run; these are where races have actually hidden. AGENTS.md: "A
+# green ./backend/exec/ is not proof" - the executor's locking bugs surface only under -race in
+# ./backend/server/, so both are here.
+RACE_PKGS := ./backend/git/ ./backend/exec/ ./backend/server/ ./backend/stream/ ./backend/managers/ ./pkg/logging/
+
+.PHONY: check-race
+check-race: ## -race over the executor/stream/terminal layers (~2min) — required for any concurrency change
+	@echo "==> go test -race $(RACE_PKGS)"
+	@go test -race $(RACE_PKGS) -count=1 -parallel 4
 
 # ---------------------------------------------------------------------------
 # Dev

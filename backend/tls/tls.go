@@ -12,7 +12,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
-	"log"
 	"math/big"
 	"net"
 	"os"
@@ -20,6 +19,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"kanban/pkg/logging"
 )
 
 // Config holds TLS certificate paths for the server.
@@ -69,7 +70,7 @@ func LoadWithCert(dataDir, certFile, keyFile string) (*Config, error) {
 		if _, err := os.Stat(keyFile); err != nil {
 			return nil, fmt.Errorf("tls: key file not found: %s: %w", keyFile, err)
 		}
-		log.Printf("TLS enabled using provided certificates (%s, %s)", certFile, keyFile)
+		logging.For(logging.TLS).Infof("TLS enabled using provided certificates (%s, %s)", certFile, keyFile)
 		return &Config{CertFile: certFile, KeyFile: keyFile}, nil
 	}
 
@@ -90,13 +91,12 @@ func LoadWithCert(dataDir, certFile, keyFile string) (*Config, error) {
 	dnsNames, ips := collectLeafNames()
 
 	if leafIsValid(certPath, keyPath, ca, dnsNames, ips) {
-		log.Printf("TLS: using existing certificate (%s)", certPath)
+		logging.For(logging.TLS).Infof("TLS: using existing certificate (%s)", certPath)
 	} else {
 		if err := generateLeaf(certPath, keyPath, ca, dnsNames, ips); err != nil {
 			return nil, fmt.Errorf("tls: failed to generate server certificate: %w", err)
 		}
-		log.Printf("TLS: generated certificate signed by %s (%s); import %s into a device's trust store to trust it",
-			caCommonName, certPath, ca.certPath)
+		logging.For(logging.TLS).Infof("TLS: generated certificate signed by %s (%s); import %s into a device's trust store to trust it", caCommonName, certPath, ca.certPath)
 	}
 
 	return &Config{CertFile: certPath, KeyFile: keyPath, CAFile: ca.certPath}, nil
@@ -136,7 +136,7 @@ func ensureCA(tlsDir string) (*certificateAuthority, error) {
 		return ca, nil
 	} else if !os.IsNotExist(err) {
 		// Files exist but are unusable (corrupt, rotated key, …) — regenerate.
-		log.Printf("TLS: regenerating local CA (%v)", err)
+		logging.For(logging.TLS).Infof("TLS: regenerating local CA (%v)", err)
 	}
 
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

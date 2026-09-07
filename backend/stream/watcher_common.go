@@ -1,18 +1,19 @@
 package stream
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 
 	"github.com/fsnotify/fsnotify"
+
+	"kanban/pkg/logging"
 )
 
 // runWatcherEventLoop dispatches fsnotify events to handleEvent until the
 // watcher is closed. prefix is used in log messages to identify which watcher
 // the loop belongs to (e.g. "branch-watcher", "project-watcher", "watcher").
 func runWatcherEventLoop(w *fsnotify.Watcher, prefix string, handleEvent func(fsnotify.Event)) {
-	log.Printf("[%s] event loop started", prefix)
+	logging.For(logging.Stream).Infof("event loop started (%s)", prefix)
 	for {
 		select {
 		case event, ok := <-w.Events:
@@ -24,7 +25,7 @@ func runWatcherEventLoop(w *fsnotify.Watcher, prefix string, handleEvent func(fs
 			if !ok {
 				return
 			}
-			log.Printf("[%s] error: %v", prefix, err)
+			logging.For(logging.Stream).Warnf("event loop error (%s): %v", prefix, err)
 		}
 	}
 }

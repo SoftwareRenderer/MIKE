@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { GitCommit } from '$lib/types';
     import type { DiffFile, DiffRow } from '$lib/types/diff';
-    import { parseUnifiedDiff, buildSideBySideRows, truncatePath } from '$lib/utils/diff-parser';
+    import { buildSideBySideRows, truncatePath } from '$lib/utils/diff-parser';
     import type { SideBySideRow } from '$lib/utils/diff-parser';
     import { highlightLinesAsync } from '$lib/highlighter';
     // Token colors for the highlighted spans below. This overlay's side-by-side columns put that HTML
@@ -15,7 +15,9 @@
 
     interface Props {
         commit: GitCommit;
-        diff: string;
+        /** Already parsed by the server — see toDiffFiles in $lib/api/git. This component used to run
+         * the browser's own diff grammar over raw patch text here. */
+        files: DiffFile[];
         loading: boolean;
         projectPath: string;
         onClose: () => void;
@@ -26,10 +28,7 @@
         isMobile?: boolean;
     }
 
-    let { commit, diff, loading, projectPath, onClose, onNavigate, onFileSelected, hasPrev, hasNext, isMobile }: Props = $props();
-
-    // Parse the unified diff into structured files
-    let diffFiles = $derived<DiffFile[]>(parseUnifiedDiff(diff));
+    let { commit, files: diffFiles, loading, projectPath, onClose, onNavigate, onFileSelected, hasPrev, hasNext, isMobile }: Props = $props();
     let hasContent = $derived(diffFiles.length > 0);
 
     // Syntax highlight cache: path -> Map<lineText, highlightedHtml>

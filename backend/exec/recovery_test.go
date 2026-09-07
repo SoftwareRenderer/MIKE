@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	kanban_sandbox "kanban/backend/sandbox"
+	"kanban/backend/sandbox"
 	"kanban/backend/types"
 
-	sandbox "kanban/pkg/bridge"
+	"kanban/pkg/bridge"
 	"kanban/pkg/bridge/protocol"
 )
 
@@ -23,11 +23,11 @@ import (
 // spawnMockBridge starts a fake sandbox-bridge agent speaking the real bridge
 // protocol over pipes, and returns a Client connected to it. It answers read
 // (used by Ping) and bash requests like the real agent.
-func spawnMockBridge() (*sandbox.Client, func()) {
+func spawnMockBridge() (*bridge.Client, func()) {
 	agentReadPr, agentReadPw := io.Pipe()   // client → agent (requests)
 	clientReadPr, clientReadPw := io.Pipe() // agent → client (responses)
 
-	client := sandbox.NewClient(agentReadPw, clientReadPr)
+	client := bridge.NewClient(agentReadPw, clientReadPr)
 
 	done := make(chan struct{})
 	go func() {
@@ -75,7 +75,7 @@ type fakeSandboxMgr struct {
 	taskID      string
 	running     bool // container tracked + running
 	agentAlive  bool // agent process (and its pipes) present
-	client      *sandbox.Client
+	client      *bridge.Client
 	stopAgent   func()
 	allStops    []func()
 	createErr   error
@@ -88,7 +88,7 @@ func newFakeSandboxMgr(taskID string) *fakeSandboxMgr {
 	return &fakeSandboxMgr{taskID: taskID}
 }
 
-func (f *fakeSandboxMgr) spawnLocked() *sandbox.Client {
+func (f *fakeSandboxMgr) spawnLocked() *bridge.Client {
 	client, stop := spawnMockBridge()
 	f.client = client
 	f.stopAgent = stop
@@ -98,7 +98,7 @@ func (f *fakeSandboxMgr) spawnLocked() *sandbox.Client {
 	return client
 }
 
-func (f *fakeSandboxMgr) GetClient(taskID string) (*sandbox.Client, error) {
+func (f *fakeSandboxMgr) GetClient(taskID string) (*bridge.Client, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.getCalls++
@@ -132,7 +132,7 @@ func (f *fakeSandboxMgr) Stop(taskID string) error {
 	return nil
 }
 
-func (f *fakeSandboxMgr) Create(taskID, worktreePath string, project *types.Project, opts kanban_sandbox.SandboxOpts) ([]types.AssignedPort, error) {
+func (f *fakeSandboxMgr) Create(taskID, worktreePath string, project *types.Project, opts sandbox.SandboxOpts) ([]types.AssignedPort, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.createCalls++
@@ -184,7 +184,7 @@ func TestRecoverBridgeForTask_Tier1ClientReconnect(t *testing.T) {
 	setup, state := recoveryTestSetup("task-tier1")
 
 	// Initial sandbox (like setupSandbox): Create then GetClient.
-	if _, err := f.Create(setup.task.ID, setup.worktreePath, setup.project, kanban_sandbox.SandboxOpts{}); err != nil {
+	if _, err := f.Create(setup.task.ID, setup.worktreePath, setup.project, sandbox.SandboxOpts{}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	initialCreateCalls := f.createCalls
@@ -237,7 +237,7 @@ func TestRecoverBridgeForTask_Tier2RecreateRunningContainer(t *testing.T) {
 	setup, state := recoveryTestSetup("task-tier2")
 
 	// Initial sandbox (like setupSandbox): Create then GetClient.
-	if _, err := f.Create(setup.task.ID, setup.worktreePath, setup.project, kanban_sandbox.SandboxOpts{}); err != nil {
+	if _, err := f.Create(setup.task.ID, setup.worktreePath, setup.project, sandbox.SandboxOpts{}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	initialCreateCalls := f.createCalls
@@ -288,7 +288,7 @@ func TestRecoverBridgeForTask_CreatesSandboxFromScratchWhenStopped(t *testing.T)
 	setup, state := recoveryTestSetup("task-stopped")
 
 	// Initial sandbox (like setupSandbox): Create then GetClient.
-	if _, err := f.Create(setup.task.ID, setup.worktreePath, setup.project, kanban_sandbox.SandboxOpts{}); err != nil {
+	if _, err := f.Create(setup.task.ID, setup.worktreePath, setup.project, sandbox.SandboxOpts{}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	initialCreateCalls := f.createCalls

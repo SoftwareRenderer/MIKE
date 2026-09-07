@@ -56,19 +56,20 @@ func isAgentSafeEnv(name string) bool {
 	return false
 }
 
-// SafeAgentEnv returns the environment for an agent subprocess: the allowlisted part of the
-// server's environment, then extras — adapter-supplied values win, because os/exec keeps the
-// LAST occurrence of a key. extras come from the extension's SubprocessConfig() and are passed
-// through as given; that is how an agent gets provider credentials, which are deliberately not
-// inherited. An allowlisted variable the server lacks is omitted rather than emitted empty, since
-// shells and Node treat `VAR=` and unset differently.
+// SafeAgentEnv returns the environment for an agent subprocess: the allowlisted part of the server's,
+// then extras - adapter-supplied values win, because os/exec keeps the last occurrence. Extras are how
+// an agent gets provider credentials, which are never inherited. A variable the server lacks is omitted
+// rather than emitted empty: shells and Node treat VAR= and unset differently.
 //
-// Do not use this elsewhere. These os.Environ() sites are intentional: backend/sandbox (rootless
-// podman needs XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS), backend/git (its configuration and
-// credentials), and pkg/bridge/agent/shell.go (already inside the sandbox container). The host
-// terminal in backend/term is conditional: os.Environ() only under DANGER_ZONE=1, this allowlist
-// without it (term.hostShellEnv). Everything else that spawns a process the LLM can steer —
-// including the host bash tool — gets SafeAgentEnv.
+// Do not use this elsewhere. Every subprocess family gets its own named allowlist, kept next to what it
+// runs:
+//
+//	git             git.Env / git.Command     - the operator's git config and credentials, plus the hook fence
+//	podman, runsc   sandboxruntime.PodmanEnv  - rootless-storage essentials (HOME, XDG_*, D-Bus)
+//	host terminal   term.hostShellEnv         - os.Environ() only under DANGER_ZONE=1
+//
+// None of them is a route into a container: a container's environment is its image plus the project's
+// declared Sandbox Configuration, assembled by types.SandboxEnvArgs.
 func SafeAgentEnv(extras ...string) []string {
 	env := make([]string, 0, len(agentEnvNames)+len(extras)+2)
 	for _, kv := range os.Environ() {

@@ -2,9 +2,7 @@ package stream
 
 import (
 	"fmt"
-	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -15,6 +13,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"kanban/backend/git"
+	"kanban/pkg/logging"
 )
 
 // DiffStatsEvent holds data for a diff stats broadcast to clients.
@@ -170,7 +169,7 @@ func (ww *WorktreeWatcher) Watch(taskID, projectID, baseRef string) error {
 	}
 	ww.worktrees[taskID] = wtInfo
 
-	log.Printf("[watcher] task=%s watching %s (ignored dirs: %d)", taskID, path, len(ignored))
+	logging.For(logging.Watcher).With(logging.TaskID, taskID).Infof("watching %s (ignored dirs: %d)", path, len(ignored))
 	return nil
 }
 
@@ -203,7 +202,7 @@ func (ww *WorktreeWatcher) Unwatch(taskID string) {
 		delete(ww.throttles, taskID)
 	}
 
-	log.Printf("[watcher] task=%s stopped watching", taskID)
+	logging.For(logging.Watcher).With(logging.TaskID, taskID).Infof("stopped watching")
 }
 
 // Close stops the watcher, worker pool, and releases resources.
@@ -228,7 +227,7 @@ func (ww *WorktreeWatcher) Close() {
 	ww.fsEventQueue = nil
 
 	_ = ww.watcher.Close()
-	log.Println("[watcher] closed")
+	logging.For(logging.Watcher).Info("closed")
 }
 
 // StartEventLoop runs the fsnotify event loop. Call in a goroutine.
@@ -471,7 +470,7 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 			HasCommittedChanges: diffResult.CommittedDiff != "",
 			AlreadyMerged:       alreadyMerged,
 		})
-		log.Printf("[watcher] task=%s diff changed: %s (untracked: %d files)", taskID, diffResult.ShortStat, untrackedN)
+		logging.For(logging.Watcher).With(logging.TaskID, taskID).Infof("diff changed: %s (untracked: %d files)", diffResult.ShortStat, untrackedN)
 	} else if len(changedHashes) > 0 || len(removedFiles) > 0 {
 		ww.broadcast(DiffStatsEvent{
 			ProjectID:           projectID,
@@ -603,7 +602,7 @@ func loadIgnoredDirs(repoRoot string) map[string]struct{} {
 		return result
 	}
 
-	cmd := exec.Command("git", "check-ignore", "--stdin")
+	cmd := git.Command("", "check-ignore", "--stdin")
 	cmd.Dir = repoRoot
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

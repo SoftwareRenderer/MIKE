@@ -3,7 +3,6 @@ package extensions
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,7 +12,8 @@ import (
 	"time"
 
 	"kanban/backend/types"
-	sandbox "kanban/pkg/bridge"
+	"kanban/pkg/bridge"
+	"kanban/pkg/logging"
 	"kanban/pkg/sandboxruntime"
 )
 
@@ -50,7 +50,7 @@ type extensionSandboxState struct {
 	// sessions are the live bridge connections into this container, each with the `podman exec`
 	// behind it. There is no single "the" client: a language server belongs to one workspace, so
 	// every consumer gets its own connection and the agent keeps its session on that connection.
-	sessions      map[*sandbox.Client]*exec.Cmd
+	sessions      map[*bridge.Client]*exec.Cmd
 	ports         []types.AssignedPort
 	createdAt     time.Time
 	lastCheckedAt time.Time
@@ -85,9 +85,9 @@ func NewExtensionSandboxManager(reg *RegistryClient, store *ExtensionStore) *Ext
 		extensionsDir: "extensions",
 	}
 	if sm.available {
-		log.Println("[ext-sandbox] gVisor available, extension sandboxing enabled")
+		logging.For(logging.Sandbox).Info("gVisor available, extension sandboxing enabled")
 	} else {
-		log.Println("[ext-sandbox] gVisor not available, extension sandboxing disabled")
+		logging.For(logging.Sandbox).Info("gVisor not available, extension sandboxing disabled")
 	}
 	// Clean up stale containers from previous runs — except when this process is a test binary
 	// that has no business touching the host's sandboxes (see SkipStartupCleanup), and except
@@ -175,11 +175,11 @@ func (sm *ExtensionSandboxManager) mountPolicy(grantHostPath string) *MountPolic
 		extensionsDir = sm.extensionsDir
 		var err error
 		if projectPaths, err = sm.store.ListProjectPaths(); err != nil {
-			log.Printf("[ext-sandbox] WARNING: cannot list project paths for the mount allowlist: %v", err)
+			logging.For(logging.Sandbox).Infof("WARNING: cannot list project paths for the mount allowlist: %v", err)
 			projectPaths = nil
 		}
 		if projectMounts, err = sm.store.ListProjectSandboxMountPaths(); err != nil {
-			log.Printf("[ext-sandbox] WARNING: cannot list project sandbox mounts for the mount allowlist: %v", err)
+			logging.For(logging.Sandbox).Infof("WARNING: cannot list project sandbox mounts for the mount allowlist: %v", err)
 			projectMounts = nil
 		}
 	}
@@ -309,7 +309,7 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 	// Add back explicitly requested capabilities
 	for _, cap := range ext.SandboxConfig.Capabilities {
 		if err := ValidateCapability(cap); err != nil {
-			log.Printf("[ext-sandbox] ext=%s SKIPPED capability %q: %v", ext.ID, cap, err)
+			logging.For(logging.Sandbox).Infof("ext=%s SKIPPED capability %q: %v", ext.ID, cap, err)
 			continue
 		}
 		createArgs = append(createArgs, "--cap-add", cap)
@@ -327,12 +327,23 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 	// Sort for deterministic comparison
 	sort.Strings(mountedProjects)
 
-	// Environment variables
-	createArgs = append(createArgs,
-		"-e", "TERM=xterm-256color",
-	)
+	// Environment variables. Each one goes through types.SandboxEnvArgs, which can only produce
+	// `-e KEY=VALUE`: a bare `-e NAME` means "copy NAME out of the podman process's environment" to
+	// podman, and that process is the server, so an empty or malformed key must never reach the
+	// argument vector. Skipped and logged rather than returned as an error, matching how mounts and
+	// capabilities are handled here — and a manifest's envs are validated at install too.
+	envArgs, err := types.SandboxEnvArgs([]types.SandboxEnv{{Key: "TERM", Value: "xterm-256color"}})
+	if err != nil {
+		logging.For(logging.Sandbox).Infof("ext=%s SKIPPED TERM: %v", ext.ID, err)
+	}
+	createArgs = append(createArgs, envArgs...)
 	for _, env := range ext.SandboxConfig.Envs {
-		createArgs = append(createArgs, "-e", fmt.Sprintf("%s=%s", env.Key, env.Value))
+		assigned, err := types.SandboxEnvArgs([]types.SandboxEnv{env})
+		if err != nil {
+			logging.For(logging.Sandbox).Infof("ext=%s SKIPPED env %q: %v", ext.ID, env.Key, err)
+			continue
+		}
+		createArgs = append(createArgs, assigned...)
 	}
 
 	// Memory limit (0 = no limit — omit the flag so the container starts unlimited)
@@ -345,14 +356,18 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 	// one that has to give way (see the collision check below).
 	bind := dependencyBind(ext, policy)
 	if bind.OK {
+		bindEnv, err := types.SandboxEnvArgs([]types.SandboxEnv{bind.Env})
+		if err != nil {
+			logging.For(logging.Sandbox).Infof("ext=%s SKIPPED dependency-cache env: %v", ext.ID, err)
+			bindEnv = nil
+		}
 		createArgs = append(createArgs,
 			"-v", fmt.Sprintf("%s:%s:rprivate,%s", bind.Mount.HostPath, bind.Mount.ContainerPath, bind.Mount.Mode),
-			"-e", fmt.Sprintf("%s=%s", bind.Env.Key, bind.Env.Value),
 		)
-		log.Printf("[ext-sandbox] ext=%s mounted the granted dependency directory %s at %s (%s) and assigned %s=%s",
-			ext.ID, bind.Mount.HostPath, bind.Mount.ContainerPath, bind.Mount.Mode, bind.Env.Key, bind.Env.Value)
+		createArgs = append(createArgs, bindEnv...)
+		logging.For(logging.Sandbox).Infof("ext=%s mounted the granted dependency directory %s at %s (%s) and assigned %s=%s", ext.ID, bind.Mount.HostPath, bind.Mount.ContainerPath, bind.Mount.Mode, bind.Env.Key, bind.Env.Value)
 	} else if bind.Reason != "" {
-		log.Printf("[ext-sandbox] ext=%s SKIPPED dependency directory: %s — the server resolves only what its image contains, and its environment check will say so", ext.ID, bind.Reason)
+		logging.For(logging.Sandbox).Infof("ext=%s SKIPPED dependency directory: %s — the server resolves only what its image contains, and its environment check will say so", ext.ID, bind.Reason)
 	}
 
 	// Custom mounts, each re-checked: the container path charset keeps the
@@ -362,17 +377,16 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 		if bind.OK && m.ContainerPath == bind.Mount.ContainerPath {
 			// Two -v specs on one container path make podman fail the whole create, which would
 			// look like a broken extension rather than a mount that collides with a declaration.
-			log.Printf("[ext-sandbox] ext=%s SKIPPED mount (host %q -> container %q): core mounts the granted dependency directory there",
-				ext.ID, m.HostPath, m.ContainerPath)
+			logging.For(logging.Sandbox).Infof("ext=%s SKIPPED mount (host %q -> container %q): core mounts the granted dependency directory there", ext.ID, m.HostPath, m.ContainerPath)
 			continue
 		}
 		if err := ValidateContainerPath(m.ContainerPath); err != nil {
-			log.Printf("[ext-sandbox] ext=%s SKIPPED mount (host %q): %v", ext.ID, m.HostPath, err)
+			logging.For(logging.Sandbox).Infof("ext=%s SKIPPED mount (host %q): %v", ext.ID, m.HostPath, err)
 			continue
 		}
 		resolved, err := policy.ValidateHostPath(m.HostPath)
 		if err != nil {
-			log.Printf("[ext-sandbox] ext=%s SKIPPED mount (container %q): %v", ext.ID, m.ContainerPath, err)
+			logging.For(logging.Sandbox).Infof("ext=%s SKIPPED mount (container %q): %v", ext.ID, m.ContainerPath, err)
 			continue
 		}
 		// Read-only unless the caller asked for write access to a path the app owns.
@@ -418,7 +432,7 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 		return nil, fmt.Errorf("check container: %w", err)
 	}
 	if exists {
-		log.Printf("[ext-sandbox] ext=%s removing stale container %s", ext.ID, containerName)
+		logging.For(logging.Sandbox).Infof("ext=%s removing stale container %s", ext.ID, containerName)
 		if rmErr := sm.rt.RemoveContainer(containerName); rmErr != nil {
 			return nil, fmt.Errorf("remove stale container %s: %w", containerName, rmErr)
 		}
@@ -478,11 +492,11 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 	// limits itself (see sandboxruntime.ApplyMemoryLimit). Fail open, and 0 needs no write.
 	if memLimit := extensionMemoryLimit(ext); memLimit > 0 {
 		if memErr := sm.rt.ApplyMemoryLimit(containerName, memLimit); memErr != nil {
-			log.Printf("[ext-sandbox] ext=%s WARNING: memory limit %dMB not enforced (cgroup write failed): %v", ext.ID, memLimit, memErr)
+			logging.For(logging.Sandbox).Warnf("ext=%s WARNING: memory limit %dMB not enforced (cgroup write failed): %v", ext.ID, memLimit, memErr)
 		}
 	}
 
-	log.Printf("[ext-sandbox] ext=%s created and started container %s (mounts: %d projects)", ext.ID, containerName, len(projectMounts))
+	logging.For(logging.Sandbox).Infof("ext=%s created and started container %s (mounts: %d projects)", ext.ID, containerName, len(projectMounts))
 
 	// Snapshot of the extension's custom mounts and own envs for compatibility checks.
 	// The same derivation the create used, so a later compatibility check wants what this container
@@ -506,7 +520,7 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 
 // StartSession opens a dedicated bridge connection into a running extension sandbox and takes a
 // reference for the caller. The connection is the reference: ReleaseSession ends both together.
-func (sm *ExtensionSandboxManager) StartSession(extID string) (*sandbox.Client, error) {
+func (sm *ExtensionSandboxManager) StartSession(extID string) (*bridge.Client, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -520,21 +534,26 @@ func (sm *ExtensionSandboxManager) StartSession(extID string) (*sandbox.Client, 
 		return nil, err
 	}
 	if state.sessions == nil {
-		state.sessions = make(map[*sandbox.Client]*exec.Cmd)
+		state.sessions = make(map[*bridge.Client]*exec.Cmd)
 	}
 	state.sessions[client] = agentCmd
 	sm.refs[extID]++
 	sm.cancelStopLocked(extID, state, "session connected")
 
-	log.Printf("[ext-sandbox] ext=%s started a bridge session in container %s (%d live)", extID, state.containerName, len(state.sessions))
+	logging.For(logging.Sandbox).Infof("ext=%s started a bridge session in container %s (%d live)", extID, state.containerName, len(state.sessions))
 	return client, nil
 }
 
 // startBridgeLocked spawns `podman exec -i <container> /sandbox-bridge` and wraps its pipes in a
 // bridge client, recording nothing: the caller owns the process and must reap it.
-func startBridgeLocked(containerName string) (*exec.Cmd, *sandbox.Client, error) {
-	agentCmd := exec.Command(
-		"podman", "--runtime-flag=overlay2=root:self", "--runtime-flag=ignore-cgroups",
+func startBridgeLocked(containerName string) (*exec.Cmd, *bridge.Client, error) {
+	// PodmanCommand, not exec.Command. This process lives as long as the container, and used to
+	// inherit the whole server environment — it carries no -e, so none of it reached the container,
+	// but MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY sat readable in /proc/<pid>/environ for the
+	// life of the sandbox — and it set no WaitDelay, so a container that stopped answering could
+	// hold cmd.Wait open past shutdown.
+	agentCmd := sandboxruntime.PodmanCommand(
+		"--runtime-flag=overlay2=root:self", "--runtime-flag=ignore-cgroups",
 		"exec", "-i", containerName,
 		"/sandbox-bridge",
 	)
@@ -556,7 +575,7 @@ func startBridgeLocked(containerName string) (*exec.Cmd, *sandbox.Client, error)
 		return nil, nil, fmt.Errorf("start agent: %w", err)
 	}
 
-	return agentCmd, sandbox.NewClient(stdin, stdout), nil
+	return agentCmd, bridge.NewClient(stdin, stdout), nil
 }
 
 // cancelStopLocked calls off a pending grace-period stop.
@@ -566,7 +585,7 @@ func (sm *ExtensionSandboxManager) cancelStopLocked(extID string, state *extensi
 	}
 	state.stopTimer.Stop()
 	state.stopTimer = nil
-	log.Printf("[ext-sandbox] ext=%s grace period cancelled (%s)", extID, reason)
+	logging.For(logging.Sandbox).Infof("ext=%s grace period cancelled (%s)", extID, reason)
 }
 
 // ReleaseSession closes one bridge connection and hands back the reference that came with it;
@@ -574,7 +593,7 @@ func (sm *ExtensionSandboxManager) cancelStopLocked(extID string, state *extensi
 //
 // It reports whether the sandbox still knew this connection — a late hand-back must not decrement
 // the count of a sandbox recreated behind the caller's back. The connection is closed either way.
-func (sm *ExtensionSandboxManager) ReleaseSession(extID string, client *sandbox.Client) bool {
+func (sm *ExtensionSandboxManager) ReleaseSession(extID string, client *bridge.Client) bool {
 	if client == nil {
 		return false
 	}
@@ -616,7 +635,7 @@ func (sm *ExtensionSandboxManager) ReleaseSession(extID string, client *sandbox.
 			sm.stopLocked(extID)
 		}
 	})
-	log.Printf("[ext-sandbox] ext=%s entering %v grace period", extID, ExtensionStopGracePeriod)
+	logging.For(logging.Sandbox).Infof("ext=%s entering %v grace period", extID, ExtensionStopGracePeriod)
 	return true
 }
 
@@ -651,7 +670,7 @@ func (sm *ExtensionSandboxManager) stopLocked(extID string) {
 	delete(sm.states, extID)
 	sm.mem.Forget(state.containerName)
 
-	log.Printf("[ext-sandbox] ext=%s stopped", extID)
+	logging.For(logging.Sandbox).Infof("ext=%s stopped", extID)
 }
 
 // Stop stops an extension sandbox.
@@ -689,7 +708,7 @@ func (sm *ExtensionSandboxManager) Destroy(extID string) error {
 		}
 	}
 
-	log.Printf("[ext-sandbox] ext=%s destroyed", extID)
+	logging.For(logging.Sandbox).Infof("ext=%s destroyed", extID)
 	return nil
 }
 
@@ -704,7 +723,7 @@ func (sm *ExtensionSandboxManager) Close() {
 	sm.mu.Unlock()
 
 	for _, extID := range extIDs {
-		log.Printf("[ext-sandbox] shutdown: stopping ext=%s", extID)
+		logging.For(logging.Sandbox).Infof("shutdown: stopping ext=%s", extID)
 		sm.Stop(extID)
 	}
 }
@@ -903,7 +922,7 @@ func (sm *ExtensionSandboxManager) extensionImageSource(ext *Extension) (image, 
 	if dfErr != nil {
 		// An unreadable extensions dir does not disqualify an extension that declares its image; it
 		// only means a missing local build cannot be rebuilt.
-		log.Printf("[ext-sandbox] ext=%s Dockerfile lookup failed: %v", ext.ID, dfErr)
+		logging.For(logging.Sandbox).Warnf("ext=%s Dockerfile lookup failed: %v", ext.ID, dfErr)
 		dockerfilePath = ""
 	}
 
@@ -925,18 +944,18 @@ func (sm *ExtensionSandboxManager) extensionImageSource(ext *Extension) (image, 
 // nothing. The caller's copy is the LSP manager's own and is never written back wholesale.
 func (sm *ExtensionSandboxManager) persistDerivedImage(ext *Extension, image string) {
 	if sm.store == nil {
-		log.Printf("[ext-sandbox] ext=%s image %s derived at start, but with no store it will be derived again next time", ext.ID, image)
+		logging.For(logging.Sandbox).Infof("ext=%s image %s derived at start, but with no store it will be derived again next time", ext.ID, image)
 		return
 	}
 	cc := ext.ContainerConfig
 	cc.Image = image
 	if err := sm.store.SetImageRef(ext.ID, image, cc); err != nil {
-		log.Printf("[ext-sandbox] ext=%s WARNING: derived image %s could not be recorded: %v", ext.ID, image, err)
+		logging.For(logging.Sandbox).Warnf("ext=%s WARNING: derived image %s could not be recorded: %v", ext.ID, image, err)
 		return
 	}
 	ext.ContainerConfig.Image = image
 	ext.ImageRef = image
-	log.Printf("[ext-sandbox] ext=%s had no image on record; built %s and recorded it", ext.ID, image)
+	logging.For(logging.Sandbox).Infof("ext=%s had no image on record; built %s and recorded it", ext.ID, image)
 }
 
 // ensureExtensionImage makes the image exist locally: rebuild it from the extension's Dockerfile, pull
@@ -951,7 +970,7 @@ func (sm *ExtensionSandboxManager) ensureExtensionImage(ext *Extension, image, d
 		if err != nil {
 			return fmt.Errorf("read Dockerfile %s: %w", dockerfilePath, err)
 		}
-		log.Printf("[ext-sandbox] ext=%s image %s missing; rebuilding from %s", ext.ID, image, dockerfilePath)
+		logging.For(logging.Sandbox).Warnf("ext=%s image %s missing; rebuilding from %s", ext.ID, image, dockerfilePath)
 		if err := sm.registry.BuildExtensionImage(string(data), image); err != nil {
 			return fmt.Errorf("rebuild image %s from %s: %w", image, dockerfilePath, err)
 		}
@@ -960,7 +979,7 @@ func (sm *ExtensionSandboxManager) ensureExtensionImage(ext *Extension, image, d
 	// Nothing to rebuild from, so the image is remote, and with --pull never on the create this is the
 	// only way it arrives.
 	if pullsMissingRemoteImage(image) {
-		log.Printf("[ext-sandbox] ext=%s image %s missing; pulling", ext.ID, image)
+		logging.For(logging.Sandbox).Warnf("ext=%s image %s missing; pulling", ext.ID, image)
 		if err := sm.registry.PullImage(image); err != nil {
 			return fmt.Errorf("pull image %s: %w", image, err)
 		}

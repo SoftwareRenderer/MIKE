@@ -1,7 +1,6 @@
 package stream
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 
 	"kanban/backend/fsutil"
+	"kanban/pkg/logging"
 )
 
 // isInternalPathInProject checks if absPath is .git or flight recorder relative to projectRoot.
@@ -86,7 +86,7 @@ func (pw *ProjectWatcher) Watch(projectID, path string) error {
 		return err
 	}
 
-	log.Printf("[project-watcher] project=%s watching %s", projectID, path)
+	logging.For(logging.Watcher).With(logging.ProjectID, projectID).Infof("watching %s", path)
 	return nil
 }
 
@@ -116,7 +116,7 @@ func (pw *ProjectWatcher) Unwatch(projectID string) {
 		delete(pw.debounces, projectID)
 	}
 
-	log.Printf("[project-watcher] project=%s stopped watching", projectID)
+	logging.For(logging.Watcher).With(logging.ProjectID, projectID).Infof("stopped watching")
 }
 
 // Close stops the watcher and releases resources.
@@ -131,7 +131,7 @@ func (pw *ProjectWatcher) Close() {
 	pw.pathCache = nil
 
 	_ = pw.watcher.Close()
-	log.Println("[project-watcher] closed")
+	logging.For(logging.Watcher).Info("closed")
 }
 
 // StartEventLoop runs the fsnotify event loop. Call in a goroutine.

@@ -10,10 +10,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"kanban/pkg/logging"
 )
 
 // removeExtensionFiles deletes a deleted extension's materialized directory and returns a sentence
@@ -60,7 +61,7 @@ func removeInstalledDir(extID, absRoot, dir string) string {
 	if err := os.RemoveAll(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		// The row is already gone, so nothing in the UI can point at this any more. What remains is
 		// executable content nobody owns — say so loudly.
-		log.Printf("[extensions] ext=%s LEFTOVER FILES: %s could not be removed: %v", extID, dir, err)
+		logging.For(logging.Extensions).Warnf("ext=%s LEFTOVER FILES: %s could not be removed: %v", extID, dir, err)
 		return fmt.Sprintf("%s could not be removed: %v", dir, err)
 	}
 
@@ -70,7 +71,7 @@ func removeInstalledDir(extID, absRoot, dir string) string {
 			_ = os.Remove(parent)
 		}
 	}
-	log.Printf("[extensions] ext=%s removed its files: %s", extID, dir)
+	logging.For(logging.Extensions).Infof("ext=%s removed its files: %s", extID, dir)
 	return ""
 }
 

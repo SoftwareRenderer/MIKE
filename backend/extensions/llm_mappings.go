@@ -2,13 +2,13 @@ package extensions
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"kanban/backend/llmadapter"
+	"kanban/pkg/logging"
 )
 
 // defaultMappingsFile is used when the llm capability does not name a file.
@@ -45,17 +45,17 @@ func CollectLLMMappings(store *ExtensionStore, extensionsDir string) ([]llmadapt
 		}
 		path, ok := mappingsFilePath(extensionsDir, e.Author, e.Name, file)
 		if !ok {
-			log.Printf("[extensions] llm extension %s/%s: invalid mappings_file %q, skipping", e.Author, e.Name, file)
+			logging.For(logging.Extensions).Warnf("llm extension %s/%s: invalid mappings_file %q, skipping", e.Author, e.Name, file)
 			continue
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
-			log.Printf("[extensions] llm extension %s/%s: cannot read mappings file %s: %v, skipping", e.Author, e.Name, path, err)
+			logging.For(logging.Extensions).Infof("llm extension %s/%s: cannot read mappings file %s: %v, skipping", e.Author, e.Name, path, err)
 			continue
 		}
 		ms, err := llmadapter.MappingsFromJSON(data)
 		if err != nil {
-			log.Printf("[extensions] llm extension %s/%s: invalid mappings file %s: %v, skipping", e.Author, e.Name, path, err)
+			logging.For(logging.Extensions).Warnf("llm extension %s/%s: invalid mappings file %s: %v, skipping", e.Author, e.Name, path, err)
 			continue
 		}
 		all = append(all, ms...)

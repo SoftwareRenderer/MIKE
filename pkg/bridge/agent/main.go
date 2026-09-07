@@ -12,6 +12,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"kanban/pkg/logging"
 )
 
 // stdioConn implements net.Conn using stdin/stdout pipes.
@@ -50,7 +52,7 @@ func main() {
 
 	go func() {
 		<-sigCh
-		log.Println("agent shutting down")
+		logging.For(logging.Bridge).Info("agent shutting down")
 		h.close()
 		os.Exit(0)
 	}()

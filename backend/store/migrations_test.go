@@ -1,12 +1,12 @@
 package store
 
 import (
-	"bytes"
 	"database/sql"
-	"log"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"kanban/pkg/logging"
 )
 
 // Migrations are the only schema path for a database created by an older MIKE. Pinning the
@@ -197,10 +197,8 @@ func TestMigration_FreshDatabaseHasNoLegacyOrJunkColumns(t *testing.T) {
 // logged nothing only because every error was discarded along with 34 ALTERs that
 // could not succeed; now a schema failure has somewhere to be reported.
 func TestMigration_SilentAndErrorFreeOnCurrentDatabase(t *testing.T) {
-	var logs bytes.Buffer
-	orig := log.Writer()
-	log.SetOutput(&logs)
-	defer log.SetOutput(orig)
+	logs, restore := logging.TestSink()
+	defer restore()
 
 	path := filepath.Join(t.TempDir(), "kanban.db")
 	s, err := NewStore(path)
@@ -215,8 +213,7 @@ func TestMigration_SilentAndErrorFreeOnCurrentDatabase(t *testing.T) {
 	}
 	s2.Close()
 
-	log.SetOutput(orig)
-	if out := logs.String(); strings.Contains(out, "[store] schema") {
+	if out := logs.String(); strings.Contains(out, "schema") {
 		t.Errorf("migrations reported a problem on a current database:\n%s", out)
 	}
 }
@@ -325,10 +322,8 @@ func TestNewerSchemaVersionIsLeftAlone(t *testing.T) {
 		t.Fatalf("close fixture: %v", err)
 	}
 
-	var logs bytes.Buffer
-	previous := log.Writer()
-	log.SetOutput(&logs)
-	defer log.SetOutput(previous)
+	logs, restore2 := logging.TestSink()
+	defer restore2()
 
 	s2, err := NewStore(path)
 	if err != nil {

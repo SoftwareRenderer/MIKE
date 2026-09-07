@@ -3,11 +3,11 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
-	"log"
 	"reflect"
 	"time"
 
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 )
 
 // CreateProject inserts a new project.
@@ -268,7 +268,7 @@ func (s *Store) GetAllProjectCounts() map[string]types.ProjectCounts {
 	// A truncated iteration would under-count a project's badge silently, and the caller
 	// cannot re-check these counts.
 	if err := rows.Err(); err != nil {
-		log.Printf("[store] project task counts incomplete: %v", err)
+		logging.For(logging.Store).Infof("project task counts incomplete: %v", err)
 	}
 	return counts
 }

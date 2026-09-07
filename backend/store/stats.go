@@ -1,9 +1,8 @@
 package store
 
 import (
-	"log"
-
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 )
 
 // GetProjectStats returns aggregated token usage for a project, grouped by model/provider.
@@ -111,7 +110,7 @@ func (s *Store) GetProjectStats(projectID string) (*types.ProjectStats, error) {
 		}
 		// A truncated join would show as an unexplained 0; the token totals are complete.
 		if err := taskRows.Err(); err != nil {
-			log.Printf("[store] project=%s task counts incomplete: %v", projectID, err)
+			logging.For(logging.Store).With(logging.ProjectID, projectID).Infof("task counts incomplete: %v", err)
 		}
 	}
 

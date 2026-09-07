@@ -8,7 +8,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -16,6 +15,7 @@ import (
 
 	"kanban/backend/types"
 
+	"kanban/pkg/logging"
 	_ "modernc.org/sqlite"
 )
 
@@ -96,7 +96,7 @@ func NewStore(dbPath string) (*Store, error) {
 func restrictSidecarModes(dbPath string) {
 	for _, suffix := range []string{"-wal", "-shm"} {
 		if err := os.Chmod(dbPath+suffix, 0o600); err != nil && !os.IsNotExist(err) {
-			log.Printf("[store] could not restrict permissions of %s: %v", dbPath+suffix, err)
+			logging.For(logging.Store).Warnf("could not restrict permissions of %s: %v", dbPath+suffix, err)
 		}
 	}
 }
@@ -289,7 +289,7 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	// stamped newer than this build must not be edited by it. See schemaVersion in migrations.go.
 	if stored := s.userVersion(); stored >= schemaVersion {
 		if stored > schemaVersion {
-			log.Printf("[store] database schema version %d is newer than this build's %d — leaving the schema alone", stored, schemaVersion)
+			logging.For(logging.Store).Infof("database schema version %d is newer than this build's %d — leaving the schema alone", stored, schemaVersion)
 		}
 		return nil
 	}

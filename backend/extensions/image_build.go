@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -63,8 +62,7 @@ func (rc *RegistryClient) BuildExtensionImage(dockerfileContent, imageRef string
 		return fmt.Errorf("stage build context for %s: %w", imageRef, err)
 	}
 
-	cmd := exec.Command("podman", buildExtensionImageArgs(imageRef, contextDir)...)
-	cmd.WaitDelay = sandboxruntime.PodmanWaitDelay
+	cmd := sandboxruntime.PodmanCommand(buildExtensionImageArgs(imageRef, contextDir)...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("build image %s: %w (output: %s)", imageRef, err, string(output))
