@@ -684,13 +684,15 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 		if err != nil {
 			return "", fmt.Errorf("parent task %s not found", actualParentID)
 		}
-		if parentTask.Status != types.StatusBacklog && parentTask.Status != types.StatusInProgress {
-			return "", fmt.Errorf("parent task %s is not in backlog or in_progress (status: %s)", actualParentID, parentTask.Status)
-		}
 	}
 
 	// Create the new task
 	now := time.Now().UTC()
+	// Same rule the task API applies (types.SubtaskStatusFor).
+	newTaskStatus := types.StatusBacklog
+	if parentTask != nil {
+		newTaskStatus = types.SubtaskStatusFor(parentTask.Status)
+	}
 	newTaskID := types.GenerateTaskID()
 	// Ensure uniqueness (unlikely collision, but guard against it)
 	for {
@@ -705,7 +707,7 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 		ProjectID:                 parent.ProjectID,
 		Title:                     title,
 		Prompt:                    prompt,
-		Status:                    types.StatusBacklog,
+		Status:                    newTaskStatus,
 		ExecutionState:            types.ExecStateIdle,
 		LlamaServerURL:            parent.LlamaServerURL,
 		ModelName:                 parent.ModelName,
@@ -901,15 +903,13 @@ func (te *TaskExecutor) handleEditTask(args map[string]any, currentTask *types.T
 		return "", fmt.Errorf("task %s is not in backlog (status: %s). Only backlog tasks can be edited", taskID, target.Status)
 	}
 
-	// If changing parent, validate the parent exists and is also backlog
+	// If changing parent, validate the parent exists; any status may have subtasks.
+	// The target above stays backlog-only: editing started work would rewrite a run.
 	if hasParent {
 		if parentTaskID != "" {
 			parent, err := te.store.GetTaskByID(parentTaskID)
 			if err != nil {
 				return "", fmt.Errorf("parent task %s not found", parentTaskID)
-			}
-			if parent.Status != types.StatusBacklog {
-				return "", fmt.Errorf("parent task %s is not in backlog (status: %s). Parent must be a backlog task", parentTaskID, parent.Status)
 			}
 			// Only re-derive auto-merge when the parent actually changes
 			if target.ParentTaskID != parentTaskID {

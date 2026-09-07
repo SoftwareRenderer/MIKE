@@ -1486,6 +1486,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onTaskCreated={() => { uiStore.creatingChildOf = null; }} // board stream pushes update
             onOptimisticTaskCreated={(task: Task) => { tasks = [...tasks, task]; }}
             onReplaceOptimisticTask={(optimisticId: string, realTask: Task) => { tasks = tasks.map(t => t.id === optimisticId ? realTask : t); }}
+            onRemoveOptimisticTask={(optimisticId: string) => { tasks = tasks.filter(t => t.id !== optimisticId); }}
         />
     {/if}
     {#if appStore.showEditTask && appStore.editTaskData}

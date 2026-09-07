@@ -16,8 +16,9 @@ import (
 //
 // "In Progress + Pending" means status in_progress with execution_state idle, allowed only
 // while work is really pending: queued for a slot, a user message just accepted
-// (HandleSend), or a parent waiting on unfinished subtasks (MoveTask). Nothing may rest in
-// in_progress+idle — check those three cases before adding a writer.
+// (HandleSend), a parent waiting on unfinished subtasks (MoveTask), or a subtask under a
+// started parent that the user has not started (types.SubtaskStatusFor).
+// Nothing may rest in in_progress+idle - check those four cases before adding a writer.
 //
 // Agent providers are excluded — they manage their own concurrency.
 

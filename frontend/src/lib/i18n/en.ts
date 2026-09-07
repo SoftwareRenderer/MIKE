@@ -694,6 +694,7 @@ const catalog = {
     'app.task.subtasksAutoMerge': 'Allow subtasks to auto-merge',
     'app.task.subtasksAutoMergeDesc': 'Subtasks created under this task will auto-merge into it',
     'app.task.autoStartFailed': 'Task created, but auto-start failed.',
+    'app.task.createFailed': 'Could not create task: {error}',
     'app.task.queuedOffline': 'Offline — task creation and start are queued; it will run when you are back online.',
     'app.task.discardTitle': 'Discard task?',
     'app.task.discardMessage': 'Your task description has not been saved. If you close now, your changes will be lost.',

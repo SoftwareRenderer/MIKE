@@ -353,21 +353,49 @@ func TestHandleCreateTask_ParentNotFound(t *testing.T) {
 	}
 }
 
-func TestHandleCreateTask_ParentNotInBacklog(t *testing.T) {
-	te := newTestExecutor(t)
-	parent := createParentTask(t, te.rawStore(), "parent-task-9", "proj-1", "done")
-
-	_, err := te.handleCreateTask(map[string]any{
-		"title":          "Child Task",
-		"prompt":         "Test prompt",
-		"parent_task_id": "parent-task-9",
-	}, parent, nil)
-
-	if err == nil {
-		t.Error("expected error for parent not in backlog, got nil")
+// TestHandleCreateTask_ParentStatusPlacesChild: any parent may have a subtask, and its
+// status decides which column the child lands in.
+func TestHandleCreateTask_ParentStatusPlacesChild(t *testing.T) {
+	cases := []struct {
+		parent string
+		want   types.Status
+	}{
+		{"backlog", types.StatusBacklog},
+		{"in_progress", types.StatusInProgress},
+		{"review", types.StatusBacklog},
+		{"done", types.StatusBacklog},
 	}
-	if !strings.Contains(err.Error(), "not in backlog") {
-		t.Errorf("unexpected error message: %s", err)
+	for n, tc := range cases {
+		t.Run(tc.parent, func(t *testing.T) {
+			te := newTestExecutor(t)
+			parent := createParentTask(t, te.rawStore(), fmt.Sprintf("parent-place-%d", n), "proj-1", types.Status(tc.parent))
+
+			result, err := te.handleCreateTask(map[string]any{
+				"title":          "Placed Child",
+				"prompt":         "Test prompt",
+				"parent_task_id": parent.ID,
+			}, parent, nil)
+			if err != nil {
+				t.Fatalf("a parent in %s must accept a subtask: %v", tc.parent, err)
+			}
+			var resp map[string]string
+			if err := json.Unmarshal([]byte(result), &resp); err != nil {
+				t.Fatalf("expected JSON response, got: %s", result)
+			}
+			child, err := te.rawStore().GetTaskByID(resp["task_id"])
+			if err != nil {
+				t.Fatalf("created child is missing: %v", err)
+			}
+			if child.Status != tc.want {
+				t.Errorf("child status = %s, want %s", child.Status, tc.want)
+			}
+			if child.Status == types.StatusInProgress && child.ExecutionState != types.ExecStateIdle {
+				t.Errorf("a child waiting beneath a started parent must read Pending, got %s", child.ExecutionState)
+			}
+			if child.ParentTaskID != parent.ID {
+				t.Errorf("child parent_task_id = %q, want %s", child.ParentTaskID, parent.ID)
+			}
+		})
 	}
 }
 
@@ -822,17 +850,27 @@ func TestExecuteTool_CreateTask_ErrorFeedback(t *testing.T) {
 		t.Errorf("expected 'not found' in error message, got: %q", result)
 	}
 
-	// Parent not in backlog — error message must be in result string
+	// A done parent is accepted and the child lands in the backlog beneath it.
 	doneParent := createParentTask(t, te.rawStore(), "done-parent", "proj-fb-done", "done")
 	result, ok = te.executeTool(context.Background(), "create_task", map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Test prompt",
 		"parent_task_id": "done-parent",
 	}, "", doneParent, &executionState{}, nil)
-	if ok {
-		t.Error("expected create_task to fail with parent not in backlog")
+	if !ok {
+		t.Fatalf("a done parent must accept a subtask, got: %s", result)
 	}
-	if !strings.Contains(result, "not in backlog") {
-		t.Errorf("expected 'not in backlog' in error message, got: %q", result)
+	var created struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal([]byte(result), &created); err != nil || created.TaskID == "" {
+		t.Fatalf("expected a task_id in %s (%v)", result, err)
+	}
+	child, err := te.rawStore().GetTaskByID(created.TaskID)
+	if err != nil {
+		t.Fatalf("created child is missing: %v", err)
+	}
+	if child.Status != types.StatusBacklog {
+		t.Errorf("child under a done parent = %s, want backlog", child.Status)
 	}
 }

@@ -16,6 +16,7 @@ export {
     loadQueue,
     clearQueue,
     enqueueAction,
+    isTransientError,
     getQueuedTaskIds,
     getQueuedDeleteTaskIds,
     flushQueueNow,

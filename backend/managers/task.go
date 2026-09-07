@@ -221,10 +221,11 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 				httputil.JSONError(w, http.StatusBadRequest, "task cannot be its own parent")
 				return
 			}
-			// Only tasks in backlog can accept subtasks
-			if parent.Status != types.StatusBacklog {
-				httputil.JSONError(w, http.StatusBadRequest, "parent task must be in backlog to accept subtasks")
-				return
+			// Any task may have subtasks; the parent's status picks the child's column.
+			task.Status = types.SubtaskStatusFor(parent.Status)
+			if task.Status == types.StatusInProgress {
+				// Pending: created, not started. The user starts it.
+				task.ExecutionState = types.ExecStateIdle
 			}
 		}
 		// If the first line is short (≤5 words), use it as the title directly
@@ -414,6 +415,12 @@ func (h *TaskHandler) HandleClearDone(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		taskID := task.ID
+		// Deleting a task deletes its whole subtree, so a Done parent that still holds
+		// unfinished work stays on the board to be cleared deliberately.
+		if unfinished := h.unfinishedDescendants(taskID); unfinished > 0 {
+			logging.For(logging.Managers).With(logging.TaskID, taskID).Infof("not cleared: %d descendant(s) still unfinished", unfinished)
+			continue
+		}
 		h.broadcastTaskDeleted(projectID, taskID)
 		h.cleanupTask(taskID)
 		deleted++
@@ -673,6 +680,24 @@ func (h *TaskHandler) moveAllDescendants(projectID, taskID string, targetStatus 
 			h.boardStreamMgr.BroadcastTaskUpdated(projectID, d)
 		}
 	}
+}
+
+// unfinishedDescendants counts the descendants of a task that are not done, so Clear
+// Done can leave a finished parent whose subtree still holds live work.
+func (h *TaskHandler) unfinishedDescendants(taskID string) int {
+	descendants, err := h.store.GetAllDescendants(taskID)
+	if err != nil {
+		// An unreadable subtree is not an empty one: keep the parent.
+		logging.For(logging.Managers).Warnf("descendants of %s unreadable: %v", taskID, err)
+		return 1
+	}
+	n := 0
+	for i := range descendants {
+		if descendants[i].Status != types.StatusDone {
+			n++
+		}
+	}
+	return n
 }
 
 // checkAncestorInProgress walks up the ancestor chain and returns an error

@@ -11,8 +11,8 @@
     });
     import type { Config, Provider, Task } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
-    import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId, startTask } from '$lib/api';
-    import { appStore, uiStore, dialogStore } from '$lib/stores';
+    import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId, startTask, isTransientError } from '$lib/api';
+    import { appStore, uiStore, dialogStore, removeTaskFromBoard } from '$lib/stores';
     import { t } from '$lib/i18n';
     import { readImageAttachments, describeRejectedImages, MAX_IMAGES } from '$lib/utils/attachments';
     import BaseModal from './BaseModal.svelte';
@@ -22,12 +22,13 @@
     import ModeSelect from './ModeSelect.svelte';
     import { useFileMention } from '$lib/composables/use-file-mention.svelte';
     import { resolveWorker, getModelName } from '$lib/utils/providers';
+    import { subtaskStatusFor, subtaskExecutionStateFor } from '$lib/utils/subtask-status';
     import { applyExploreModeRule } from '$lib/utils/explore-mode';
     import { matchesCreateTaskSubmitKey, effectiveCreateTaskSubmitKey, formatShortcut, shortcutHintsHidden } from '$lib/utils/keyboard';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     import { MODE_DESCRIPTIONS } from '$lib/constants/modes';
 
-    let { projectId, onClose, onTaskCreated, parentId, currentBranch, onOptimisticTaskCreated, onReplaceOptimisticTask, initialPrompt = '', lineTask = false, onOpenTask = null }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void; parentId?: string; currentBranch?: string; onOptimisticTaskCreated?: (task: Task) => void; onReplaceOptimisticTask?: (optimisticId: string, realTask: Task) => void; initialPrompt?: string; lineTask?: boolean; onOpenTask?: ((task: Task) => void) | null } = $props();
+    let { projectId, onClose, onTaskCreated, parentId, currentBranch, onOptimisticTaskCreated, onReplaceOptimisticTask, onRemoveOptimisticTask, initialPrompt = '', lineTask = false, onOpenTask = null }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void; parentId?: string; currentBranch?: string; onOptimisticTaskCreated?: (task: Task) => void; onReplaceOptimisticTask?: (optimisticId: string, realTask: Task) => void; onRemoveOptimisticTask?: (optimisticId: string) => void; initialPrompt?: string; lineTask?: boolean; onOpenTask?: ((task: Task) => void) | null } = $props();
 
     // One-time initialization from the prop (e.g. gutter line-selection prefill)
     const initialPromptValue = () => initialPrompt;
@@ -52,8 +53,10 @@
     let autoMerge = $state(false);
     let subtasksAutoMerge = $state(true);
     let loading = $state(false);
-    let error = $state('');
     let parentTitle = $state('');
+    // Fetched with the parent's title; decides the column of a new subtask until the
+    // server's answer replaces it (see utils/subtask-status).
+    let parentStatus = $state<string | undefined>(undefined);
     let attachments = $state<Array<{ mimeType: string; data: string }>>([]);
     let fileInput: HTMLInputElement | null = $state(null);
 
@@ -229,6 +232,7 @@
             try {
                 const parentTask = await getTask(projectId, parentId);
                 parentTitle = parentTask.title;
+                parentStatus = parentTask.status;
                 // Inherit auto_commit and auto_merge from parent
                 autoCommit = parentTask.auto_commit ?? autoCommit;
                 autoMerge = parentTask.subtasks_auto_merge ?? autoMerge;
@@ -287,7 +291,6 @@
         const lineTaskFlow = lineTask;
         if (!projectId || !prompt.trim()) return;
         loading = true;
-        error = '';
         const taskData: Record<string, unknown> = {
             prompt: prompt.trim(),
             auto_commit: autoMerge, // auto-commit is prerequisite for auto-merge
@@ -305,13 +308,17 @@
         if (selectedUrl) taskData.llama_server_url = selectedUrl;
         if (selectedReasoningEffort) taskData.reasoning_effort = selectedReasoningEffort;
         if (parentId) taskData.parent_task_id = parentId;
+        // Send the column we will draw the card in, so the offline queue and its replay
+        // agree with it. The server re-derives it from the parent either way.
+        taskData.status = subtaskStatusFor(parentStatus);
 
         const isOfflineNow = getOfflineStatus();
         // Always show optimistic card immediately — close modal right away
         const id = generateId();
         // Include optimistic ID in taskData so getQueuedTaskIds() can find it
         const taskDataWithId = { ...taskData, id, title: (taskData.prompt as string)?.slice(0, 80) || '' };
-        const optimisticTask = { ...taskDataWithId, title: (taskData.prompt as string)?.slice(0, 80) || '', status: 'backlog', created_at: new Date().toISOString(), queued: true } as any;
+        // Same column as the reply will use, plus the badge that goes with it.
+        const optimisticTask = { ...taskDataWithId, execution_state: subtaskExecutionStateFor(parentStatus), created_at: new Date().toISOString(), queued: true } as any;
 
         const queueStartIfEnabled = async () => {
             if (lineTaskFlow && autoStart) {
@@ -337,6 +344,24 @@
             return;
         }
 
+        /** A create that did not land. A network failure is queued for retry; anything
+         *  else is the server refusing it, and a refusal would sit in the persisted
+         *  queue forever promising a task that never exists - so the card goes with it. */
+        const handleCreateFailure = async (err: unknown, announceOffline: boolean) => {
+            if (!isTransientError(err)) {
+                const reason = err instanceof Error ? err.message : String(err);
+                removeTaskFromBoard(appStore, id);
+                onRemoveOptimisticTask?.(id);
+                dialogStore.showToast(t('app.task.createFailed', { error: reason }), 'error');
+                return;
+            }
+            setOfflineStatus(true);
+            const queued = await enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
+            (optimisticTask as any).actionId = queued.id;
+            await queueStartIfEnabled();
+            if (announceOffline) dialogStore.showToast(t('app.task.queuedOffline'));
+        };
+
         if (lineTaskFlow) {
             // The line-task variant needs the real ID to open the floating task
             try {
@@ -344,13 +369,8 @@
                 replaceOptimisticTask(id, realTask);
                 startTaskIfEnabled(projectId, realTask.id);
                 onOpenTask?.(realTask);
-            } catch {
-                // Server unreachable — queue create + start as fallback
-                setOfflineStatus(true);
-                const queued = await enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
-                (optimisticTask as any).actionId = queued.id;
-                await queueStartIfEnabled();
-                dialogStore.showToast(t('app.task.queuedOffline'));
+            } catch (err) {
+                await handleCreateFailure(err, true);
             }
             return;
         }
@@ -361,13 +381,7 @@
         createTask(projectId, taskData).then((realTask) => {
             replaceOptimisticTask(id, realTask);
             startTaskIfEnabled(projectId, realTask.id);
-        }).catch(async () => {
-            // Server unreachable — queue the action as fallback
-            setOfflineStatus(true);
-            const queued = await enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
-            (optimisticTask as any).actionId = queued.id;
-            await queueStartIfEnabled();
-        });
+        }).catch((err) => handleCreateFailure(err, false));
     }
 
     /**
@@ -434,7 +448,7 @@
                 {/each}
             </div>
         {/if}
-        <textarea bind:this={promptTextarea} id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined} oninput={() => { handlePromptInput(); mention.handleInput(); }} onkeydown={handlePromptKeydown} onpaste={handlePaste}></textarea>
+        <textarea bind:this={promptTextarea} id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required oninput={() => { handlePromptInput(); mention.handleInput(); }} onkeydown={handlePromptKeydown} onpaste={handlePaste}></textarea>
         <!-- Anchor for sandboxed UI extensions (e.g. GitHub issue importer) -->
         <div bind:this={extAnchor} class="ext-anchor"></div>
     </label>
@@ -528,9 +542,6 @@
         </div>
         {/if}
     </div>
-    {#if error}
-        <div id="task-error" class="error" role="alert">{error}</div>
-    {/if}
 </BaseModal>
 
 <!-- @ file mention dropdown — must be outside BaseModal (floating element) -->
@@ -781,11 +792,6 @@
         font-weight: 500;
         color: var(--color-text-secondary);
     }
-    .error {
-        color: var(--color-status-red);
-        font-size: 0.875rem;
-    }
-
     @media (max-width: 768px) {
         :global(.modal-body) {
             padding: 16px;

@@ -164,9 +164,12 @@
         return 'move';
     });
 
+    // Any card can take a subtask, so the only condition is whether the host offers it.
+    let canCreateSubtask = $derived(!!onCreateChildTask);
+
     // Number of action elements in the title bar (for dynamic padding)
     let actionCount = $derived(
-        (!inline || !task.parent_task_id || hasChildren || showSubtaskBorder ? 1 : 0) // create subtask
+        (canCreateSubtask ? 1 : 0) // create subtask
         + (!isDoneSubtask ? 1 : 0) // edit
         + (thirdAction ? 1 : 0) // pause/resume/idle/delete/move
     );
@@ -380,7 +383,7 @@
 
         const items: Array<{ icon: readonly IconShape[]; label: string; action: (e: MouseEvent) => void; danger?: boolean }> = [];
 
-        if (!inline || !task.parent_task_id || hasChildren || showSubtaskBorder) {
+        if (canCreateSubtask) {
             items.push({ icon: OVERFLOW_ICONS.subtask, label: t('board.card.createSubtask'), action: handleCreateChild });
         }
         if (!isDoneSubtask) {
@@ -789,7 +792,7 @@
                         <span class="action-idle" aria-label="Idle" title="Idle">{t('board.card.idle')}</span>
                     {/if}
                 {:else}
-                    {#if !inline || !task.parent_task_id || hasChildren || showSubtaskBorder}
+                    {#if canCreateSubtask}
                         <button
                             type="button"
                             class="action-icon action-add"

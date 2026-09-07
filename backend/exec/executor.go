@@ -1064,7 +1064,9 @@ func (te *TaskExecutor) branchChildFrom(projectID string, task *types.Task) (str
 	}
 
 	parent, err := te.store.GetTaskByID(task.ParentTaskID)
-	if err == nil && parent.Branch == "" {
+	// Idempotent, and it checks the stored branch in git too: a parent whose branch was
+	// merged and cleaned up gets it back from HEAD, so the child has a real source.
+	if err == nil {
 		if err := te.EnsureParentBranch(projectID, parent); err != nil {
 			return "", fmt.Errorf("ensure parent branch: %w", err)
 		}
