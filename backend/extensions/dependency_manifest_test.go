@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"kanban/backend/types"
 )
 
 func lspManifest(sandbox *SandboxConfig) *LSPConfig {
@@ -137,23 +139,6 @@ func TestValidate_EnvironmentGate(t *testing.T) {
 	}
 }
 
-func TestDependencyCacheAssignments(t *testing.T) {
-	// The assignment is derived from the two declared fields — the manifest states a location and a
-	// name, and the core never takes a value from it.
-	d := &DependencyCache{ContainerPath: "/go/pkg/mod", Env: "GOMODCACHE"}
-	got := d.Assignments()
-	if len(got) != 1 || got[0] != "GOMODCACHE=/go/pkg/mod" {
-		t.Errorf("Assignments() = %v, want [GOMODCACHE=/go/pkg/mod]", got)
-	}
-	if (&DependencyCache{ContainerPath: "/go/pkg/mod"}).Assignments() != nil {
-		t.Error("an env-less declaration must produce no assignment rather than \"=/go/pkg/mod\"")
-	}
-	var none *DependencyCache
-	if none.Assignments() != nil {
-		t.Error("no declaration must produce no assignment")
-	}
-}
-
 func TestDependencyCache_IgnoresTheRemovedReadOnlyKey(t *testing.T) {
 	// `read_only` is gone: this container always reads, and the containers that fill the cache write
 	// it from their own side. A manifest or a stored record that still carries the key must decode,
@@ -172,15 +157,28 @@ func TestDependencyCache_IgnoresTheRemovedReadOnlyKey(t *testing.T) {
 		if err := d.Validate(); err != nil {
 			t.Errorf("%s refused: %v", raw, err)
 		}
-		if got := d.Assignments(); len(got) != 1 || got[0] != "GOMODCACHE=/go/pkg/mod" {
-			t.Errorf("%s assignments = %v, want [GOMODCACHE=/go/pkg/mod]", raw, got)
+		// What matters is the assignment podman is finally handed, not what the struct can print:
+		// every form of this declaration must reach the container as the same `-e` argument.
+		args, err := types.SandboxEnvArgs([]types.SandboxEnv{{Key: d.Env, Value: d.ContainerPath}})
+		if err != nil {
+			t.Errorf("%s: container env: %v", raw, err)
+			continue
+		}
+		if len(args) != 2 || args[0] != "-e" || args[1] != "GOMODCACHE=/go/pkg/mod" {
+			t.Errorf("%s container env = %v, want [-e GOMODCACHE=/go/pkg/mod]", raw, args)
 		}
 	}
 
-	// And nothing in the type can express a write request any more.
-	var none *DependencyCache
-	if none.Assignments() != nil {
-		t.Error("an absent cache must produce no assignment")
+	// And nothing in either type can express a write request any more: what reaches the container is
+	// the mount core builds (always ro), and a declaration only reaches it once a human has granted a
+	// host directory.
+	var none *SandboxConfig
+	if none.DependencyGrant() != "" {
+		t.Error("an absent configuration must grant no directory")
+	}
+	declared := &SandboxConfig{Dependency: &DependencyCache{ContainerPath: "/go/pkg/mod", Env: "GOMODCACHE"}}
+	if declared.DependencyGrant() != "" {
+		t.Error("a declaration nobody granted must bind nothing")
 	}
 }
 

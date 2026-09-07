@@ -1200,51 +1200,6 @@ func (h *GitHandler) getTaskDiffFromProject(projectID, taskID string, task *type
 	}, nil
 }
 
-// HandleResetWorktree resets the task's worktree to a specific commit.
-// Used when deleting messages after a checkpoint to roll back file changes.
-func (h *GitHandler) HandleResetWorktree(w http.ResponseWriter, r *http.Request) {
-	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodPost {
-		httputil.JSONError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	var req struct {
-		CommitHash string `json:"commit_hash"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.CommitHash == "" {
-		httputil.JSONError(w, http.StatusBadRequest, "commit_hash required")
-		return
-	}
-	// The one client-supplied ref that reaches git with no name in front of it: this
-	// hash becomes `rev-parse --verify <hash>^{tree}` and `read-tree --reset -u <hash>`.
-	if err := types.ValidateCommitHash(req.CommitHash); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	task, ok := resolveTask(w, r, h.store)
-	if !ok {
-		return
-	}
-	if !requireWorktreeMgr(w, h.worktreeMgr) {
-		return
-	}
-	// Only reset if worktree exists and task is active
-	if task.Status == types.StatusBacklog || task.Status == types.StatusDone {
-		httputil.JSONError(w, http.StatusBadRequest, "task must be in_progress or review")
-		return
-	}
-	// Acquire per-task mutex to serialize git operations on this worktree.
-	if h.getWorktreeMutex != nil {
-		defer h.getWorktreeMutex(taskID)()
-	}
-	// Reset worktree to the checkpoint (commit hash or stash hash)
-	if err := h.worktreeMgr.ResetWorktreeTo(taskID, req.CommitHash); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("reset failed: %v", err))
-		return
-	}
-	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "reset"})
-}
-
 // stageOrUnstage applies one file's staged state in dir and returns the action name for the
 // response body. Both stage endpoints (task worktree, project checkout) do exactly this and
 // differ only in the directory they target and the mutex their caller holds. Every path goes
@@ -1453,54 +1408,4 @@ func (h *GitHandler) HandleTaskLog(w http.ResponseWriter, r *http.Request) {
 		commits = append(commits, types.GitCommit{Hash: parts[0], Short: parts[1], Subject: parts[2]})
 	}
 	httputil.JSONResponse(w, http.StatusOK, commits)
-}
-
-// HandleTaskBranches lists branches for a task's worktree.
-func (h *GitHandler) HandleTaskBranches(w http.ResponseWriter, r *http.Request) {
-	if _, ok := resolveTask(w, r, h.store); !ok {
-		return
-	}
-
-	worktreePath, ok := resolveWorktree(w, r, h.worktreeMgr)
-	if !ok {
-		return
-	}
-
-	branches, err := gitBranchNames(worktreePath, "branch", "--format=%(refname:short)")
-	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git branch failed: %v", err))
-		return
-	}
-	httputil.JSONResponse(w, http.StatusOK, branches)
-}
-
-// HandleTaskCheckout checks out a branch in a task's worktree.
-func (h *GitHandler) HandleTaskCheckout(w http.ResponseWriter, r *http.Request) {
-	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
-	if _, ok := resolveTask(w, r, h.store); !ok {
-		return
-	}
-
-	worktreePath, ok := resolveWorktree(w, r, h.worktreeMgr)
-	if !ok {
-		return
-	}
-
-	branch, ok := checkoutBranchFrom(w, r)
-	if !ok {
-		return
-	}
-	// A checkout rewrites the whole worktree, so it takes the same per-task mutex as
-	// every other worktree mutation (reset, stage).
-	if h.getWorktreeMutex != nil {
-		defer h.getWorktreeMutex(taskID)()
-	}
-	if !runCheckout(w, worktreePath, branch) {
-		return
-	}
-	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "checked out", "branch": branch})
 }

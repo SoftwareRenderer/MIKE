@@ -1109,6 +1109,146 @@ func TestSubscriptionAllowsAllowedWorkspace(t *testing.T) {
 	}
 }
 
+// waitForSentMessages waits until n messages have reached the language server.
+func waitForSentMessages(t *testing.T, mgr *mockProcessManager, n int) []json.RawMessage {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		sent := mgr.SentMessages()
+		if len(sent) >= n {
+			return sent
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %d sent message(s), have %d", n, len(sent))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// sendInit sends an initialize with the routing hints and no workspace/subscribe.
+func sendInit(t *testing.T, c *testClient, id int, workspace, file string) {
+	t.Helper()
+	c.send(t, map[string]any{
+		"jsonrpc":    "2.0",
+		"id":         id,
+		"method":     "initialize",
+		"_ch":        c.channelID,
+		"_workspace": workspace,
+		"_lang":      c.language,
+		"_file":      file,
+		"params":     map[string]any{"rootUri": "file://" + workspace, "capabilities": map[string]any{}},
+	})
+}
+
+// TestLazyInitializeWithoutSubscribe: initialize alone creates the workspace. This path
+// used to unlock h.mu twice, and a double unlock is a runtime throw — the process died
+// instead of the test failing.
+func TestLazyInitializeWithoutSubscribe(t *testing.T) {
+	mgr := newMockProcessManager()
+	handler := NewLSPHandler(newTestRegistry(), mgr)
+	handler.SetWorkspaceValidator(func(ws string) bool { return ws == "/tmp/test-project" })
+	defer handler.Close()
+
+	url := startTestServer(t, handler)
+	client := connectClient(t, url)
+	client.channelID = 1
+	client.language = "go"
+	sendInit(t, client, 1, "/tmp/test-project", "main.go")
+
+	sent := waitForSentMessages(t, mgr, 1)
+	if got := mgr.ProcessCount(); got != 1 {
+		t.Fatalf("expected the lazy path to create one server, got %d", got)
+	}
+
+	var initReq map[string]any
+	if err := json.Unmarshal(sent[0], &initReq); err != nil {
+		t.Fatalf("sent initialize is not JSON: %v", err)
+	}
+	mgr.Deliver(mustMarshal(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      initReq["id"],
+		"result":  map[string]any{"capabilities": map[string]any{}, "serverInfo": map[string]any{"name": "gopls"}},
+	}))
+
+	resp := client.receiveJSON(t)
+	if resp.ID == nil || resp.ID.String() != "1" {
+		t.Fatalf("expected the initialize answer under id 1, got %v", resp.ID)
+	}
+	if resp.Result == nil {
+		t.Fatal("expected a result on the lazy initialize answer")
+	}
+
+	// The entry is registered, not left pending: a second client gets the cached answer.
+	client2 := connectClient(t, url)
+	client2.channelID = 2
+	client2.language = "go"
+	sendInit(t, client2, 7, "/tmp/test-project", "main.go")
+
+	resp2 := client2.receiveJSON(t)
+	if resp2.ID == nil || resp2.ID.String() != "7" {
+		t.Fatalf("expected the cached answer under id 7, got %v", resp2.ID)
+	}
+	if resp2.Result == nil {
+		t.Fatal("expected the cached result for the second lazy initialize")
+	}
+	if got := mgr.ProcessCount(); got != 1 {
+		t.Fatalf("the second lazy initialize spawned another server: %d", got)
+	}
+}
+
+// TestLazyInitializeRejectsDisallowedWorkspace: the workspace hint is the client's and a
+// lazy workspace is bind-mounted into the extension sandbox, so the validator guards this
+// path too. The request is answered and the connection stays open.
+func TestLazyInitializeRejectsDisallowedWorkspace(t *testing.T) {
+	mgr := newMockProcessManager()
+	handler := NewLSPHandler(newTestRegistry(), mgr)
+	handler.SetWorkspaceValidator(func(ws string) bool { return ws == "/tmp/test-project" })
+	defer handler.Close()
+
+	url := startTestServer(t, handler)
+	client := connectClient(t, url)
+	client.channelID = 1
+	client.language = "go"
+	sendInit(t, client, 1, "/etc", "main.go")
+
+	// receiveJSON fails the test if the connection was closed instead of answered.
+	resp := client.receiveJSON(t)
+	if resp.Error == nil {
+		t.Fatalf("expected a JSON-RPC error for a disallowed workspace, got %+v", resp)
+	}
+	if resp.ID == nil || resp.ID.String() != "1" {
+		t.Fatalf("expected the error under id 1, got %v", resp.ID)
+	}
+	if got := mgr.ProcessCount(); got != 0 {
+		t.Fatalf("a rejected workspace must spawn nothing, got %d server(s)", got)
+	}
+	if got := len(mgr.SentMessages()); got != 0 {
+		t.Fatalf("a rejected workspace must forward nothing, got %d message(s)", got)
+	}
+}
+
+// TestLazyInitializeAnswersWhenNoServerOwnsTheFile: a lazy create that finds no server
+// must still answer, or the editor waits forever for a reply that never comes.
+func TestLazyInitializeAnswersWhenNoServerOwnsTheFile(t *testing.T) {
+	mgr := newMockProcessManager()
+	handler := NewLSPHandler(newTestRegistry(), mgr)
+	defer handler.Close()
+
+	url := startTestServer(t, handler)
+	client := connectClient(t, url)
+	client.channelID = 1
+	client.language = "go"
+	sendInit(t, client, 3, "/tmp/test-project", "notes.txt") // the test registry knows .go only
+
+	resp := client.receiveJSON(t)
+	if resp.Error == nil {
+		t.Fatalf("expected a JSON-RPC error for a file no server owns, got %+v", resp)
+	}
+	if got := mgr.ProcessCount(); got != 0 {
+		t.Fatalf("no server config means no spawn, got %d", got)
+	}
+}
+
 func TestWebSocketOrigin_RejectsCrossOrigin(t *testing.T) {
 	mgr := newMockProcessManager()
 	reg := newTestRegistry()
