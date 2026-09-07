@@ -388,6 +388,16 @@ func extractHints(msg json.RawMessage) (int64, string, string, string, json.RawM
 	return channelID, workspace, lang, file, result
 }
 
+// allowWorkspace is the one answer to "may this client work in this directory?". Every
+// path that creates a workspace must ask it. A nil validator means no constraint (tests).
+func (h *LSPHandler) allowWorkspace(session *ClientSession, workspace string) bool {
+	if h.validateWorkspace == nil || h.validateWorkspace(workspace) {
+		return true
+	}
+	logging.For(logging.LSP).Debugf("client %d: workspace %q not allowed", session.clientID, workspace)
+	return false
+}
+
 // handleSubscription processes the workspace/subscribe message.
 // A single session can subscribe to multiple workspaces (one per channel).
 func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSession, msg json.RawMessage) {
@@ -407,9 +417,8 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 		return
 	}
 
-	// Restrict the workspace to allowed paths when a validator is configured.
-	if h.validateWorkspace != nil && !h.validateWorkspace(sub.Params.Workspace) {
-		logging.For(logging.LSP).Debugf("client %d: workspace %q not allowed", session.clientID, sub.Params.Workspace)
+	// Restrict the workspace to allowed paths when a validator is configured
+	if !h.allowWorkspace(session, sub.Params.Workspace) {
 		session.conn.Close(websocket.StatusProtocolError, "workspace not allowed")
 		return
 	}
@@ -486,53 +495,31 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 // handleInitialize intercepts initialize requests: only the first client's (or first channel's
 // in multiplex mode) reaches the server, later ones get the cached response, and those arriving
 // while it is in flight are queued and replayed. A workspace that does not exist yet — a second
-// language on the same WS — is created lazily from the file path's server config.
+// language on the same WS, or a client that sends initialize before subscribing — is created
+// lazily from the file path's server config.
+//
+// Nothing holds h.mu on entry, and no branch keeps it across a spawn.
 func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string, channelID int64, workspacePath, workspaceKey, filePath string) {
+	// This path creates a workspace from a client-supplied hint, with no subscribe first.
+	if !h.allowWorkspace(session, workspacePath) {
+		// Answer the request rather than closing: this socket carries every other editor.
+		h.answerError(ctx, session, clientReqID, channelID, "workspace not allowed")
+		return
+	}
+
+	if _, ok := h.lookupWorkspace(workspaceKey); !ok {
+		if !h.lazyCreateWorkspace(ctx, session, clientReqID, channelID, workspacePath, workspaceKey, filePath) {
+			return // the client's request was already answered
+		}
+	}
+
 	h.mu.Lock()
 	ws, ok := h.workspaces[workspaceKey]
 	if !ok {
-		logging.For(logging.LSP).Debugf("client %d: workspaceKey=%s not found, lazy init", session.clientID, workspaceKey)
+		// Released by a disconnect between the create above and this lock.
 		h.mu.Unlock()
-		// First request for this language: look up the server config from the file path and
-		// create the workspace, outside the lock so nobody else waits on it.
-		cfg := h.registry.Lookup(filePath)
-		if cfg == nil {
-			cfg = h.registry.Lookup(workspacePath)
-		}
-		if cfg == nil {
-			logging.For(logging.LSP).Warnf("client %d: no language server config for file %s (lazy init failed)", session.clientID, filePath)
-			return
-		}
-		process, err := h.manager.GetOrCreate(ctx, workspacePath, cfg.Language, cfg)
-		if err != nil {
-			logging.For(logging.LSP).Warnf("client %d: failed to spawn process for lazy init: %v", session.clientID, err)
-			return
-		}
-		// Re-acquire lock to register workspace (double-check pattern)
-		var droppedProcess bool
-		h.mu.Lock()
-		if existing, ok := h.workspaces[workspaceKey]; ok {
-			ws = existing
-			droppedProcess = true
-		} else {
-			ws = &workspaceState{
-				process:     process,
-				language:    cfg.Language,
-				cfg:         cfg,
-				clientCount: 1,
-			}
-			h.workspaces[workspaceKey] = ws
-			session.mu.Lock()
-			session.activeWorkspaces[workspaceKey]++
-			session.mu.Unlock()
-			logging.For(logging.LSP).Debugf("client %d: lazy-created workspace=%s lang=%s", session.clientID, workspacePath, cfg.Language)
-		}
-		h.mu.Unlock()
-		if droppedProcess {
-			// Same as above: this call started a server that another session's entry already
-			// covers, so its own reference goes back immediately.
-			h.manager.Release(workspacePath, cfg.Language)
-		}
+		h.answerError(ctx, session, clientReqID, channelID, "language server went away before it initialized")
+		return
 	}
 
 	if ws.initialized {
@@ -570,6 +557,63 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 		// The request itself is already answered — forwardRequest answers what it fails to send.
 		h.failInitialize(workspaceKey, err)
 	}
+}
+
+// lookupWorkspace returns the state registered for a workspace key. The lock is not held
+// on return, so "found" is not "held".
+func (h *LSPHandler) lookupWorkspace(workspaceKey string) (*workspaceState, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	ws, ok := h.workspaces[workspaceKey]
+	return ws, ok
+}
+
+// lazyCreateWorkspace registers a workspace that no workspace/subscribe brought — the
+// second language on a connection, or a client that sends initialize first. It spawns
+// outside h.mu and registers with a double-check, handing back a reference another caller
+// won. ok is false after the client's request has been answered.
+func (h *LSPHandler) lazyCreateWorkspace(ctx context.Context, session *ClientSession, clientReqID string, channelID int64, workspacePath, workspaceKey, filePath string) bool {
+	logging.For(logging.LSP).Debugf("client %d: workspaceKey=%s not found, lazy init", session.clientID, workspaceKey)
+	cfg := h.registry.Lookup(filePath)
+	if cfg == nil {
+		cfg = h.registry.Lookup(workspacePath)
+	}
+	if cfg == nil {
+		logging.For(logging.LSP).Warnf("client %d: no language server config for file %s (lazy init failed)", session.clientID, filePath)
+		h.answerError(ctx, session, clientReqID, channelID, "no language server for this file")
+		return false
+	}
+	// The workspace is already allowed: this is the call that bind-mounts it into the
+	// extension sandbox (see SetWorkspaceValidator).
+	process, err := h.manager.GetOrCreate(ctx, workspacePath, cfg.Language, cfg)
+	if err != nil {
+		logging.For(logging.LSP).Warnf("client %d: failed to spawn process for lazy init: %v", session.clientID, err)
+		h.answerError(ctx, session, clientReqID, channelID, fmt.Sprintf("failed to start language server: %v", err))
+		return false
+	}
+	// Register it, re-checking the window the spawn left open.
+	var droppedProcess bool
+	h.mu.Lock()
+	if _, ok := h.workspaces[workspaceKey]; ok {
+		droppedProcess = true
+	} else {
+		h.workspaces[workspaceKey] = &workspaceState{
+			process:     process,
+			language:    cfg.Language,
+			cfg:         cfg,
+			clientCount: 1,
+		}
+		session.mu.Lock()
+		session.activeWorkspaces[workspaceKey]++
+		session.mu.Unlock()
+		logging.For(logging.LSP).Debugf("client %d: lazy-created workspace=%s lang=%s", session.clientID, workspacePath, cfg.Language)
+	}
+	h.mu.Unlock()
+	if droppedProcess {
+		// Another entry already covers this server, so this call's reference goes back.
+		h.manager.Release(workspacePath, cfg.Language)
+	}
+	return true
 }
 
 // failInitialize unwinds a first `initialize` that never reached the server: the pending marker
