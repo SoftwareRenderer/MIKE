@@ -744,7 +744,6 @@ const catalog = {
     'api.noReader': 'No reader available',
     'api.operationEndedEarly': 'Operation ended before reporting completion',
     'api.fetchGitLog': 'Failed to fetch git log',
-    'api.fetchCommitDiff': 'Failed to fetch commit diff',
     'api.fetchBranches': 'Failed to fetch branches',
     'api.checkoutBranch': 'Failed to checkout branch',
     'api.fetchGitStatus': 'Failed to fetch git status',
@@ -1365,7 +1364,6 @@ const catalog = {
     // is why they read as abbreviations. A pack can override them for a locale whose
     // narrow style reads badly (French narrow gives "-5 min").
     'time.justNow': 'just now',
-    'time.secondAgo': '{n}s ago',
     'time.minuteAgo': '{n}m ago',
     'time.hourAgo': '{n}h ago',
     'time.dayAgo': '{n}d ago',

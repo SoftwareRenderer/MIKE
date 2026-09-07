@@ -248,7 +248,10 @@ func dependencyBind(ext *Extension, policy *MountPolicy) DependencyMount {
 		// Read-only, always: the mode is not a manifest's to choose and not this container's to want.
 		Mount: types.SandboxMount{HostPath: resolved, ContainerPath: declared.ContainerPath, Mode: "ro"},
 		// The container path, not the host path: the host path means nothing in there, and must not
-		// reach a process that could report it back.
+		// reach a process that could report it back. Both halves are fields the manifest already
+		// states, so this derives nothing the manifest could invent at runtime; an extension whose
+		// dependencies sit in the checkout (node_modules) or in the image declares no cache at all
+		// and is answered above with no mount.
 		Env: types.SandboxEnv{Key: declared.Env, Value: declared.ContainerPath},
 		OK:  true,
 	}

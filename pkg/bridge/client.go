@@ -245,24 +245,10 @@ func (c *Client) readLoop() {
 func (c *Client) waitForCtx(ctx context.Context, frame *protocol.Frame, timeout time.Duration) (*protocol.Frame, []*protocol.Frame, error) {
 	msgID := frame.MsgID
 
-	p := &pendingReq{
-		chunkCh: make(chan *protocol.Frame, 64),
-		done:    make(chan *protocol.Frame, 1),
+	p, err := c.register(msgID)
+	if err != nil {
+		return nil, nil, err
 	}
-
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		return nil, nil, errors.New("client closed")
-	}
-	if c.readDoneClosed() {
-		// readLoop already exited (e.g. bridge died) — fail fast so callers can
-		// trigger bridge recovery instead of hanging forever.
-		c.mu.Unlock()
-		return nil, nil, errors.New("connection closed")
-	}
-	c.pending[msgID] = p
-	c.mu.Unlock()
 
 	if err := c.writeFrameCtx(ctx, frame); err != nil {
 		c.cleanup(msgID)
@@ -271,74 +257,75 @@ func (c *Client) waitForCtx(ctx context.Context, frame *protocol.Frame, timeout 
 
 	var chunks []*protocol.Frame
 
-	// timeout == 0 means block indefinitely (no timer)
-	hasTimeout := timeout > 0
-	var timer *time.Timer
-	if hasTimeout {
-		timer = time.NewTimer(timeout)
+	// timeout == 0 means block indefinitely, and a receive from a nil channel blocks
+	// forever, so one select answers both cases. It used to be two copies of every branch
+	// per phase, kept in step by hand — which is exactly how a new case ends up added to
+	// one copy and not the other.
+	var timeoutC <-chan time.Time
+	if timeout > 0 {
+		timer := time.NewTimer(timeout)
 		defer timer.Stop()
+		timeoutC = timer.C
 	}
 
-	// Phase 1: collect chunks
+	// Phase 1: collect chunks until the stream closes or the answer arrives.
 	for {
-		if hasTimeout {
-			select {
-			case chunk, ok := <-p.chunkCh:
-				if !ok {
-					goto waitDone
-				}
-				chunks = append(chunks, chunk)
-			case final := <-p.done:
-				c.cleanup(msgID)
-				return final, chunks, nil
-			case <-timer.C:
-				c.cleanup(msgID)
-				return nil, chunks, fmt.Errorf("timeout waiting for result")
-			case <-ctx.Done():
-				c.cleanup(msgID)
-				return nil, chunks, ctx.Err()
-			}
-		} else {
-			select {
-			case chunk, ok := <-p.chunkCh:
-				if !ok {
-					goto waitDone
-				}
-				chunks = append(chunks, chunk)
-			case final := <-p.done:
-				c.cleanup(msgID)
-				return final, chunks, nil
-			case <-ctx.Done():
-				c.cleanup(msgID)
-				return nil, chunks, ctx.Err()
-			}
-		}
-	}
-
-waitDone:
-	// Phase 2: wait for final result/error
-	if hasTimeout {
 		select {
+		case chunk, ok := <-p.chunkCh:
+			if !ok {
+				goto waitDone
+			}
+			chunks = append(chunks, chunk)
 		case final := <-p.done:
 			c.cleanup(msgID)
 			return final, chunks, nil
-		case <-timer.C:
+		case <-timeoutC:
 			c.cleanup(msgID)
 			return nil, chunks, fmt.Errorf("timeout waiting for result")
 		case <-ctx.Done():
 			c.cleanup(msgID)
-			return nil, nil, ctx.Err()
-		}
-	} else {
-		select {
-		case final := <-p.done:
-			c.cleanup(msgID)
-			return final, chunks, nil
-		case <-ctx.Done():
-			c.cleanup(msgID)
-			return nil, nil, ctx.Err()
+			return nil, chunks, ctx.Err()
 		}
 	}
+
+waitDone:
+	// Phase 2: the chunk stream ended with no answer; wait for the result alone. Chunks are
+	// dropped on cancellation here and never were returned, which is what the caller wants:
+	// a cancelled call has nothing downstream that reads a partial stream.
+	select {
+	case final := <-p.done:
+		c.cleanup(msgID)
+		return final, chunks, nil
+	case <-timeoutC:
+		c.cleanup(msgID)
+		return nil, chunks, fmt.Errorf("timeout waiting for result")
+	case <-ctx.Done():
+		c.cleanup(msgID)
+		return nil, nil, ctx.Err()
+	}
+}
+
+// register puts a pending request into the table under msgID, refusing when nothing could
+// ever answer it. Both refusals say the same thing to a caller: a request registered now
+// would wait for a reply that can no longer arrive - for an LSP call up to its round-trip
+// bound, for bash up to the whole command timeout - so each one is a fast error that lets
+// the caller trigger bridge recovery instead of parking.
+func (c *Client) register(msgID uint32) (*pendingReq, error) {
+	p := &pendingReq{
+		chunkCh: make(chan *protocol.Frame, 64),
+		done:    make(chan *protocol.Frame, 1),
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil, errors.New("client closed")
+	}
+	if c.readDoneClosed() {
+		return nil, errors.New("connection closed")
+	}
+	c.pending[msgID] = p
+	return p, nil
 }
 
 func (c *Client) cleanup(msgID uint32) {
@@ -450,28 +437,14 @@ func (c *Client) Bash(ctx context.Context, command string, timeout int64) (*Bash
 
 	// Start the request
 	msgID := frame.MsgID
-	p := &pendingReq{
-		chunkCh: make(chan *protocol.Frame, 64),
-		done:    make(chan *protocol.Frame, 1),
-	}
-
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
+	p, err := c.register(msgID)
+	if err != nil {
+		// Both halves of the holder close even on this early exit: a caller that got no
+		// result must see "no more output" rather than block on a channel no one will write.
 		close(holder.outputCh)
 		close(holder.exitCode)
-		return nil, errors.New("client closed")
+		return nil, err
 	}
-	if c.readDoneClosed() {
-		// readLoop already exited — fail fast so callers can trigger bridge
-		// recovery instead of blocking until the (very long) bash timeout.
-		c.mu.Unlock()
-		close(holder.outputCh)
-		close(holder.exitCode)
-		return nil, errors.New("connection closed")
-	}
-	c.pending[msgID] = p
-	c.mu.Unlock()
 
 	if err := c.writeFrame(frame); err != nil {
 		c.cleanup(msgID)

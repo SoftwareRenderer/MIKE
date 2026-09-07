@@ -1250,32 +1250,6 @@ func (h *ExtensionHandler) changelogForUpdate(entry RegistryEntry, sinceHash str
 	return ChangelogSince(ParseChangelog(data), sinceHash)
 }
 
-// HandleSandboxLogs returns sandbox logs (streaming).
-func (h *ExtensionHandler) HandleSandboxLogs(w http.ResponseWriter, r *http.Request, id string) {
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
-
-	_, err := h.store.GetByID(id)
-	if err != nil {
-		httputil.Fail(w, err, "get extension", "extension not found")
-		return
-	}
-
-	// Check if sandbox is running
-	if !h.sandbox.IsRunning(id) {
-		httputil.JSONError(w, http.StatusServiceUnavailable, "extension sandbox not running")
-		return
-	}
-
-	// TODO: Stream logs from container
-	// For now, return empty
-	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, "Logs streaming not yet implemented")
-}
-
 // HandleUpdateImage updates an extension's image from the registry.
 // Rebuilds from Dockerfile if available, otherwise pulls latest pre-built image.
 func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Request, id string) {

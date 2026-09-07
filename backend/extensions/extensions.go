@@ -583,18 +583,6 @@ func (sc *SandboxConfig) DependencyGrant() string {
 	return sc.DependencyHostPath
 }
 
-// Assignments returns the environment assignments that point this server at its declared
-// cache — one `ENV=/container/path`, derived from fields the manifest already states, so
-// nothing here is a value the manifest could invent at runtime. Returns nil when no cache is
-// declared, which is every language whose dependencies sit in the checkout (node_modules) or
-// in the image: for those there is nothing to bind and the honest answer is no assignments.
-func (d *DependencyCache) Assignments() []string {
-	if d == nil || d.Env == "" || d.ContainerPath == "" {
-		return nil
-	}
-	return []string{d.Env + "=" + d.ContainerPath}
-}
-
 // CommandRef is a manifest-declared command. Core never runs it on the host: it
 // runs in the extension's own sandbox (EnvironmentGate.Check).
 type CommandRef struct {
