@@ -19,8 +19,10 @@ vi.mock('$lib/assets/icons/search.svg?raw', () => ({ default: '' }));
 vi.mock('$lib/assets/icons/edit.svg?raw', () => ({ default: '' }));
 vi.mock('$lib/assets/icons/check-circle.svg?raw', () => ({ default: '' }));
 vi.mock('$lib/assets/icons/question.svg?raw', () => ({ default: '' }));
-vi.mock('marked', () => ({ marked: { parse: (text: string) => `<p>${text}</p>` } }));
-vi.mock('dompurify', () => ({ default: { sanitize: (html: string) => html } }));
+// `marked`/`dompurify` used to be mocked here as identity functions; neither
+// component imports them any more (markdown goes through `$lib/utils/sanitize`), and
+// an identity `sanitize` mock is how a sink that stopped sanitizing stayed invisible.
+// What the sinks render is pinned in `chat-sink-sanitization.unit.svelte.ts`.
 vi.mock('$lib/utils/diff-parser', () => ({ buildModifiedSegments: () => ({ oldSegments: [], newSegments: [] }) }));
 vi.mock('$lib/api', () => ({ getTaskMessageFull: vi.fn() }));
 

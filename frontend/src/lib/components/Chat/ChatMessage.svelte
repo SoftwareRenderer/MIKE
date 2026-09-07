@@ -1,6 +1,5 @@
 <script lang="ts">
-    import { marked } from 'marked';
-    import DOMPurify from 'dompurify';
+    import { markdownToSafeHTML } from '$lib/utils/sanitize';
     import ToolCall from './ToolCall.svelte';
     import MessageActions from './MessageActions.svelte';
     import EditForm from './EditForm.svelte';
@@ -96,7 +95,7 @@
         if (role === 'user') {
             result = content.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
         } else {
-            result = DOMPurify.sanitize(marked.parse(content, { async: false }) as string);
+            result = markdownToSafeHTML(content);
         }
         if (renderCache.size >= CACHE_MAX) {
             const firstKey = renderCache.keys().next().value;

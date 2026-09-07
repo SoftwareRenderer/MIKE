@@ -223,9 +223,9 @@ func TestHandleEditTask_TitleOnlyEditKeepsAutoMerge(t *testing.T) {
 	}
 }
 
-// TestHandleEditTask_NonBacklogParentRejected verifies that nesting under a
-// non-backlog parent is rejected and auto-merge fields are left untouched.
-func TestHandleEditTask_NonBacklogParentRejected(t *testing.T) {
+// TestHandleEditTask_StartedParentAccepted: nesting a backlog task under a started parent
+// is accepted, and the child inherits that parent's subtasks_auto_merge.
+func TestHandleEditTask_StartedParentAccepted(t *testing.T) {
 	te := newTestExecutorWithConfig(t, true, true)
 	parent := createParentTask(t, te.rawStore(), "parent-nb-7", "proj-nb-7", "in_progress")
 	parent.SubtasksAutoMerge = false
@@ -233,22 +233,22 @@ func TestHandleEditTask_NonBacklogParentRejected(t *testing.T) {
 
 	editTaskTarget(t, te.rawStore(), "proj-nb-7", "target-nb-7", true, true, true, "")
 
-	_, err := te.handleEditTask(map[string]any{
+	if _, err := te.handleEditTask(map[string]any{
 		"task_id":        "target-nb-7",
 		"parent_task_id": "parent-nb-7",
-	}, parent)
-	if err == nil {
-		t.Fatal("expected error for non-backlog parent")
+	}, parent); err != nil {
+		t.Fatalf("a started parent must accept the nesting: %v", err)
 	}
 
 	updated, err := te.rawStore().GetTaskByID("target-nb-7")
 	if err != nil {
 		t.Fatalf("get updated task: %v", err)
 	}
-	if updated.ParentTaskID != "" {
-		t.Errorf("expected ParentTaskID unchanged, got %q", updated.ParentTaskID)
+	if updated.ParentTaskID != "parent-nb-7" {
+		t.Errorf("ParentTaskID = %q, want parent-nb-7", updated.ParentTaskID)
 	}
-	if !updated.AutoMerge {
-		t.Errorf("expected AutoMerge unchanged (true), got false")
+	// The parent owns its children: subtasks_auto_merge=false means no auto-merge.
+	if updated.AutoMerge {
+		t.Errorf("AutoMerge = true, want false (inherited from the new parent)")
 	}
 }

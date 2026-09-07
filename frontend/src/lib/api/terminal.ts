@@ -1,4 +1,4 @@
-import { API_BASE } from './helpers';
+import { API_BASE, parseStreamFrame } from './helpers';
 import { STALE_THRESHOLD_MS } from '$lib/constants';
 import { t } from '$lib/i18n';
 
@@ -68,7 +68,8 @@ function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal, on
     });
     ws.onmessage = (e) => {
         terminalActivity.set(ws, Date.now());
-        const msg = JSON.parse(e.data);
+        const msg = parseStreamFrame(e.data, 'terminal');
+        if (!msg) return; // an unreadable frame is dropped; the shell stays connected
         if (msg.type === 'output') term.write(msg.data);
         if (msg.type === 'title') (term as any).title = msg.data; // xterm Terminal lacks .title in types
         if (msg.type === 'status') term.write(msg.data);

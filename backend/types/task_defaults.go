@@ -43,6 +43,19 @@ func ApplyTaskCreationDefaults(task *Task, cfg *Config, parent *Task, skipFields
 	}
 }
 
+// SubtaskStatusFor is the status a new subtask gets from its parent's status.
+//
+// A started parent gets an in_progress child (callers pair it with ExecStateIdle, the
+// "Pending" badge) so it sits under its parent instead of in Backlog - the column
+// MoveTask refuses to move it into. Any other parent gets a backlog child. This only
+// places the card; it never starts a run.
+func SubtaskStatusFor(parent Status) Status {
+	if parent == StatusInProgress {
+		return StatusInProgress
+	}
+	return StatusBacklog
+}
+
 func hasSkipField(fields map[string]struct{}, name string) bool {
 	_, ok := fields[name]
 	return ok

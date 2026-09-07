@@ -43,6 +43,57 @@ export async function ensureCsrfToken(): Promise<string> {
     return '';
 }
 
+/**
+ * Parse one WebSocket frame into the message object every handler expects.
+ *
+ * A frame the parser cannot read is dropped and reported once per socket, not
+ * thrown. Both WebSocket consumers used to call `JSON.parse` straight inside the
+ * handler, where a throw is swallowed by the browser event loop: the frame vanishes,
+ * the socket stays open, and the app silently misses whatever that frame carried - the
+ * worst shape a failure can have, because nothing is observably wrong. The LSP client
+ * already wrapped its parses this way (`utils/lsp-connection-manager.ts`); this is the
+ * same rule with one implementation.
+ *
+ * The server is not the adversary here — a frame it cannot serialize is a bug or a
+ * truncated write, not an attack — so this is about not losing a live connection over
+ * it, and about saying so once rather than on every frame.
+ */
+const reportedBadFrame = new Set<string>();
+
+export function parseStreamFrame(data: unknown, source: string): any | null {
+    const msg = asJsonObject(data);
+    if (msg !== null) return msg;
+    // Once per socket *name*, and the payload is never echoed: a frame carries repository
+    // content, and the log outlives the moment it came from. The set is module-level, so a
+    // reconnect does not re-arm it — one bad frame from `stream` says the thing, and a
+    // repeating one would be the same message over and over for the rest of the session.
+    if (!reportedBadFrame.has(source)) {
+        reportedBadFrame.add(source);
+        console.warn(`[${source}] dropped a WebSocket frame that is not a JSON object; further bad frames are dropped silently`);
+    }
+    return null;
+}
+
+/**
+ * The frame's JSON, when it is an object — a truncated write, a plain-text frame and a
+ * bare `null`/number/string are one failure to the caller, which has no use for the
+ * distinction beyond "this frame carried no message".
+ */
+function asJsonObject(data: unknown): any | null {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(String(data));
+    } catch {
+        return null;
+    }
+    return parsed !== null && typeof parsed === 'object' ? parsed : null;
+}
+
+/** Test seam: forget the reported-already state. */
+export function resetBadFrameReports(): void {
+    reportedBadFrame.clear();
+}
+
 /** Import queue helpers lazily to avoid circular deps */
 let _setOfflineStatus: ((offline: boolean) => void) | null = null;
 export function registerSetOffline(fn: (offline: boolean) => void): void {

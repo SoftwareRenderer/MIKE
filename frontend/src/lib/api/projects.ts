@@ -12,6 +12,7 @@ import {
 import { setBoardCache, getBoardCache, boardCacheKey } from '../storage';
 import { markCached } from './cache';
 import { repoNameFromGitUrl } from '../utils/repo-name';
+import { gitUrlCarriesCredentials } from '../utils/git-url';
 import { t } from '$lib/i18n';
 
 /** Fetch all projects from the server. Falls back to cached copy on failure.
@@ -66,6 +67,7 @@ export async function resetProjectStats(projectId: string, modelName: string, pr
 /** Create a new project at the given filesystem path (or from a git repo). Queued when offline. */
 export async function createProject(path: string, sandboxEnabled = false, gitUrl?: string): Promise<Project> {
     if (getOfflineStatus()) {
+        refuseQueuedGitCredentials(gitUrl);
         return await queueWrite('createProject', { path, sandboxEnabled, gitUrl }, {
             id: '', name: path, path, sandbox_enabled: sandboxEnabled,
             created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
@@ -75,6 +77,21 @@ export async function createProject(path: string, sandboxEnabled = false, gitUrl
 }
 
 // -- Clone with live progress (SSE) --
+
+/**
+ * A clone URL with a credential in it is refused while offline, never stripped.
+ *
+ * The queue is persisted, so a queued URL is an access token in IndexedDB after the
+ * tab closes — the same reasoning that refuses to queue a provider key
+ * (`updateConfig`). Stripping the userinfo instead would queue a URL that clones
+ * something else (a public repo of the same name, or nothing), which is the quiet
+ * failure the key refusal exists to avoid.
+ */
+function refuseQueuedGitCredentials(gitUrl?: string): void {
+    if (gitUrl && gitUrlCarriesCredentials(gitUrl)) {
+        throw new Error(t('api.queueGitCredentials'));
+    }
+}
 
 /** Terminal events emitted by POST /api/projects/clone (one JSON object per SSE frame). */
 export type CloneEvent =
@@ -117,6 +134,7 @@ export async function cloneProject(
     onProgress?: (percent: number) => void,
 ): Promise<Project> {
     if (getOfflineStatus()) {
+        refuseQueuedGitCredentials(gitUrl);
         return await queueWrite('createProject', { path: targetDir, sandboxEnabled, gitUrl }, {
             id: '', name: repoNameFromGitUrl(gitUrl), path: targetDir, sandbox_enabled: sandboxEnabled,
             created_at: new Date().toISOString(), updated_at: new Date().toISOString(),

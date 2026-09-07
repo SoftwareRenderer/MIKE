@@ -34,11 +34,29 @@ const (
 )
 
 // previewDocCSPStrict is the DEFAULT policy
-const previewDocCSPStrict = "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' data: blob:; style-src 'self' 'unsafe-inline' data: blob:; img-src 'self' data: blob:; font-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'none'; frame-src 'none'; worker-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+//
+// The `sandbox` directive is the part that must never be dropped. The preview URL
+// is served on the application's own origin, so the only thing standing between a
+// previewed document and the signed-in session is that the document is opaque-origin
+// — and until now that came from the `<iframe sandbox>` attribute the EXTENSION
+// creates (html-preview sets `allow-scripts`, or nothing). A frame mounted without
+// it would run on the app's origin with its cookies, where GET /api/auth/session
+// hands out the CSRF token and every mutating endpoint is one call from arbitrary
+// code execution. With the directive on the response, the origin is gone whichever
+// element embeds the document, and the attribute stays as the second lock.
+//
+// `allow-scripts` is present in BOTH policies on purpose, and is not a lapse: a
+// sandbox source only ever adds restrictions, so the token here merely declines to
+// forbid scripts that the frame's own attribute may already allow. Written as a bare
+// `sandbox`, this would take scripts away from the scripts-on preview mode - which
+// html-preview offers as a setting — and break it.
+const previewDocCSPStrict = "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' data: blob:; style-src 'self' 'unsafe-inline' data: blob:; img-src 'self' data: blob:; font-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'none'; frame-src 'none'; worker-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts"
 
 // previewDocCSPNetwork — the permissive policy; served only when the
-// extension's "allow network" setting opts in per serve
-const previewDocCSPNetwork = "default-src * data: blob: 'unsafe-inline'; script-src * 'unsafe-inline' data: blob:; style-src * 'unsafe-inline' data: blob:; img-src * data: blob:; font-src * data: blob:; connect-src * data: blob:; frame-src * data: blob:; worker-src * blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+// extension's "allow network" setting opts in per serve. `connect-src *` includes
+// 'self', so this is the policy that most needed the sandbox above: without it, a
+// document holding this header could reach the same-origin API directly.
+const previewDocCSPNetwork = "default-src * data: blob: 'unsafe-inline'; script-src * 'unsafe-inline' data: blob:; style-src * 'unsafe-inline' data: blob:; img-src * data: blob:; font-src * data: blob:; connect-src * data: blob:; frame-src * data: blob:; worker-src * blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts"
 
 // previewNavRecord — only committed HTML-family page loads are recorded
 // (see isDocNav). A 404 or an out-of-tree navigation leaves the record

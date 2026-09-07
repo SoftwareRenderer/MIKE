@@ -163,15 +163,17 @@ describe('Card action count (title padding calc)', () => {
         expect(result.actionsVar).toBe('3');
     });
 
-    it('counts the delete button for a done subtask in the done column (delete only)', () => {
+    it('counts create + delete for a done subtask in the done column', () => {
+        // A done task keeps the + like every other card, so the padding counts two.
         const result = renderCard({
             task: makeTask({ status: 'done', execution_state: 'completed' }),
             columnId: 'done',
             inline: true,
         });
         expect(result.classes.some(c => c.includes('action-delete'))).toBe(true);
-        expect(result.elements.length).toBe(1);
-        expect(result.actionsVar).toBe('1');
+        expect(result.classes.some(c => c.includes('action-add'))).toBe(true);
+        expect(result.elements.length).toBe(2);
+        expect(result.actionsVar).toBe('2');
     });
 
     it('keeps create + edit for a backlog subtask with children (no third action)', () => {

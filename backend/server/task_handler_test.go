@@ -284,38 +284,32 @@ func TestTaskParentValidation(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
-	// Create a parent in backlog (with LLM config so auto-start succeeds)
-	parentID := createTestTaskWithLLM(t, s, projID, "Parent task")
+	parentID := createTestTask(t, s, projID, "Parent task")
 
-	// Create a child with valid parent
+	// Create a child with a valid parent
+	if id := createTestSubtask(t, s, projID, parentID, "Child task"); id == "" {
+		t.Fatal("expected a child id")
+	}
+
+	// A parent that has started keeps accepting children; its column decides where the
+	// new child lands, never whether it may exist.
+	for _, status := range []string{"in_progress", "review", "done"} {
+		updateTask(t, s, projID, parentID, map[string]any{"status": status, "execution_state": "idle"})
+		child := map[string]any{"prompt": "Child of a " + status + " parent", "parent_task_id": parentID}
+		req := testRequest("POST", "/api/projects/"+projID+"/tasks", child)
+		rr := testResponseAuth(t, s, req)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("parent in %s: expected 201, got %d: %s", status, rr.Code, rr.Body.String())
+		}
+	}
+
+	// What is still refused is a parent that does not exist: a task no one can reach.
 	req := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
-		"prompt":         "Child task",
-		"parent_task_id": parentID,
+		"prompt":         "Child with missing parent",
+		"parent_task_id": "nonexistent-parent",
 	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	// Move parent to in_progress (no longer valid for subtasks)
-	req = testRequest("POST", "/api/projects/"+projID+"/tasks/"+parentID+"/move", map[string]any{
-		"status": "in_progress",
-	})
-	testResponseAuth(t, s, req)
-
-	// Verify parent stayed in in_progress (auto-start succeeded with LLM config)
-	if getTaskStatus(t, s, projID, parentID) != "in_progress" {
-		t.Fatalf("expected parent in_progress, got %s", getTaskStatus(t, s, projID, parentID))
-	}
-
-	// Try to create another child — should fail (parent not in backlog)
-	req = testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
-		"prompt":         "Another child",
-		"parent_task_id": parentID,
-	})
-	rr = testResponseAuth(t, s, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for non-backlog parent, got %d", rr.Code)
+	if rr := testResponseAuth(t, s, req); rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a missing parent, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 

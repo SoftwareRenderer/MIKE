@@ -356,6 +356,27 @@ describe('hoverDocsHTML', () => {
         expect(html).not.toContain('onerror');
     });
 
+    it('drops the style a server could paint the card over the app with', () => {
+        // The card is appended inside the application, so a fixed-position box
+        // here would sit above the real UI rather than inside the tooltip.
+        const html = hoverDocsHTML(plugin, {
+            contents: { kind: 'markdown', value: '<p style="position:fixed;inset:0">confirm?</p>func F()' },
+        });
+        expect(html).not.toMatch(/style/i);
+        expect(html).toContain('confirm?');
+        expect(html).toContain('func F()');
+    });
+
+    it('drops a style element as well as the style attribute', () => {
+        // Same layout power, different syntax — and the shape DOMPurify's defaults keep
+        // when the element is nested in something, which is how a doc comment delivers it.
+        const html = hoverDocsHTML(plugin, {
+            contents: { kind: 'markdown', value: '<div><style>.cm-hoverCard{position:fixed;inset:0}</style></div>func F()' },
+        });
+        expect(html).not.toMatch(/<style|position:fixed/i);
+        expect(html).toContain('func F()');
+    });
+
     it('drops the rules a server puts between sections, keeping the sections', () => {
         // A real server emits these as markdown `---`, which its renderer turns
         // into <hr> — the stub above does no markdown, so ask for the tag.

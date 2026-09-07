@@ -32,7 +32,7 @@ import { t } from '$lib/i18n';
 export async function createTask(projectId: string, task: Partial<Task>): Promise<Task> {
     if (getOfflineStatus()) {
         const id = generateId();
-        return await queueWrite('createTask', { projectId, taskData: task }, { ...task, id, status: 'backlog', created_at: new Date().toISOString() } as Task);
+        return await queueWrite('createTask', { projectId, taskData: task }, { ...task, id, status: task.status ?? 'backlog', created_at: new Date().toISOString() } as Task);
     }
     return createTaskRaw(projectId, task);
 }

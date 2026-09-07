@@ -15,8 +15,10 @@ import (
 // manage their own concurrency.
 //
 // "In Progress + Pending" is in_progress with execution_state idle, allowed only while work is
-// really pending: queued for a slot, a message just accepted (HandleSend), or a parent waiting
-// on subtasks (MoveTask). Nothing may rest in in_progress+idle.
+// really pending: queued for a slot, a user message just accepted (HandleSend), a parent waiting
+// on unfinished subtasks (MoveTask), or a subtask under a started parent that the user has not
+// started (types.SubtaskStatusFor). Nothing may rest in in_progress+idle — check those four cases
+// before adding a writer.
 
 // acquireTaskSlot blocks until a running-task slot for providerURL is granted or the
 // execution context is cancelled (which returns false). While waiting the task reads as
