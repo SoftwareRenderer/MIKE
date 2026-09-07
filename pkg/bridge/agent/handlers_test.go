@@ -15,38 +15,23 @@ import (
 
 // --- Direct handler logic tests (no network simulation) ---
 
-func TestWriteFileAtomic(t *testing.T) {
+// TestWriteAtomic calls the real helper rather than restating its steps, and holds the
+// two properties the callers depend on: the bytes land complete with the count reported,
+// and nothing is left behind. The version of this test it replaces re-typed the
+// create-temp/write/chmod/rename sequence inline and asserted on that, so it kept passing
+// with write.go deleted — it could not fail a real bug.
+func TestWriteAtomic(t *testing.T) {
 	dir := t.TempDir()
-
+	path := filepath.Join(dir, "file.txt")
 	content := "atomic write test\n"
-	path := filepath.Join(dir, "subdir", "new.txt")
 
-	// Simulate what handleWrite does
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	tmpPath, err := os.CreateTemp(filepath.Dir(path), ".kanban-tmp-*")
+	n, err := writeAtomic(path, content)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("writeAtomic: %v", err)
 	}
-	tmpName := tmpPath.Name()
-
-	n, err := tmpPath.WriteString(content)
-	if err != nil {
-		tmpPath.Close()
-		os.Remove(tmpName)
-		t.Fatal(err)
+	if n != len(content) {
+		t.Errorf("wrote %d bytes, reported %d", len(content), n)
 	}
-	_ = tmpPath.Close()
-	_ = os.Chmod(tmpName, 0o644)
-
-	if err := os.Rename(tmpName, path); err != nil {
-		os.Remove(tmpName)
-		t.Fatal(err)
-	}
-
-	// Verify
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
@@ -54,9 +39,53 @@ func TestWriteFileAtomic(t *testing.T) {
 	if string(data) != content {
 		t.Errorf("content = %q, want %q", data, content)
 	}
-	if int64(len(data)) != int64(n) {
-		t.Errorf("len = %d, wrote %d", len(data), n)
+
+	// Replacing an existing file keeps the one file and the new bytes — the rename is
+	// over the target, not beside it.
+	if _, err := writeAtomic(path, "shorter\n"); err != nil {
+		t.Fatalf("rewrite: %v", err)
 	}
+	if data, err = os.ReadFile(path); err != nil || string(data) != "shorter\n" {
+		t.Errorf("after rewrite: %q, %v", data, err)
+	}
+
+	// The temp file is removed on every path, and the target is not left with a mode the
+	// task's own tools would trip over.
+	leftovers := tempFiles(t, dir)
+	if len(leftovers) != 0 {
+		t.Errorf("temp files left behind in the worktree: %v", leftovers)
+	}
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o644 {
+		t.Errorf("mode = %v (%v), want 0644", fi.Mode(), err)
+	}
+
+	// A failure leaves nothing behind either. The directory does not exist, so this fails
+	// before a temp file is created — the point is that the caller's tree is untouched, not
+	// that a particular step reported an error.
+	missing := filepath.Join(dir, "no-such-dir", "file.txt")
+	if _, err := writeAtomic(missing, "x"); err == nil {
+		t.Error("writeAtomic into a missing directory succeeded")
+	}
+	if fi, err := os.Stat(filepath.Join(dir, "no-such-dir")); err == nil && fi.IsDir() {
+		t.Error("a failed write created a directory the caller never asked for")
+	}
+}
+
+// tempFiles lists the bridge's own temp names in dir, the ones a task's `git status`
+// would show and a `git add -A` would commit.
+func tempFiles(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	var out []string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".kanban-tmp-") {
+			out = append(out, e.Name())
+		}
+	}
+	return out
 }
 
 func TestEditApply(t *testing.T) {

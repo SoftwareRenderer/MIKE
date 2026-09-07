@@ -78,9 +78,6 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/extensions/install", s.extHandler.HandleInstall)
 	s.mux.HandleFunc("POST /api/extensions/install-local", s.extHandler.HandleInstallLocal)
 	s.mux.HandleFunc("GET /api/extensions/check-updates", s.extHandler.HandleCheckUpdates)
-	s.mux.HandleFunc("GET /api/extensions/{id}/logs", func(w http.ResponseWriter, r *http.Request) {
-		s.extHandler.HandleSandboxLogs(w, r, r.PathValue("id"))
-	})
 	s.mux.HandleFunc("POST /api/extensions/{id}/update", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleUpdateImage(w, r, r.PathValue("id"))
 	})
@@ -130,7 +127,6 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/diff/file", s.gitHandler.HandleTaskDiffFile)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/diff/stage", s.gitHandler.HandleStageFile)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/commits", s.gitHandler.HandleTaskCommits)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/reset-worktree", s.gitHandler.HandleResetWorktree)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/commit-preview", s.taskHandler.HandleCommitPreview)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/commit-preview/stream", s.taskHandler.HandleCommitPreviewStream)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/commit", s.taskHandler.HandleCommitAndDone)
@@ -157,8 +153,6 @@ func (s *Server) setupRoutes() {
 
 	// Task-specific git operations
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/git/log", s.gitHandler.HandleTaskLog)
-	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/git/branches", s.gitHandler.HandleTaskBranches)
-	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/git/checkout", s.gitHandler.HandleTaskCheckout)
 
 	// Frontend
 	if s.frontendDist != "" {

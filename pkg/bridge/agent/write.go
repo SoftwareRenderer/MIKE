@@ -26,35 +26,9 @@ func handleWrite(h *handler, conn net.Conn, req *protocol.Request) error {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 
-	// Write to temp file in same directory (ensures same filesystem for atomic rename)
-	tmpPath, err := os.CreateTemp(dir, ".kanban-tmp-*")
+	n, err := writeAtomic(p.Path, p.Content)
 	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-	tmpName := tmpPath.Name()
-
-	n, err := tmpPath.WriteString(p.Content)
-	if err != nil {
-		_ = tmpPath.Close()
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("write content: %w", err)
-	}
-
-	if err := tmpPath.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("close temp file: %w", err)
-	}
-
-	// Set file permissions
-	if err := os.Chmod(tmpName, 0o644); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("chmod temp file: %w", err)
-	}
-
-	// Atomic rename
-	if err := os.Rename(tmpName, p.Path); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("rename to %s: %w", p.Path, err)
+		return err
 	}
 
 	// Send result with bytes written

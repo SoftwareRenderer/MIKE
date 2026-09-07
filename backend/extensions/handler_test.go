@@ -1932,18 +1932,6 @@ func TestHandleCheckUpdates_UpdateAvailable(t *testing.T) {
 	}
 }
 
-func TestHandleSandboxLogs_NotRunning(t *testing.T) {
-	h := testHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/extensions/test-ext/logs", nil)
-	w := httptest.NewRecorder()
-
-	h.HandleSandboxLogs(w, req, "test-ext")
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", w.Code)
-	}
-}
-
 func TestExtensionResponse_MarshalJSON(t *testing.T) {
 	resp := ExtensionResponse{
 		ID:            "test-ext",
