@@ -1,18 +1,14 @@
 package sandboxruntime
 
-// The parts of a `podman create` command line that arrive from outside this process: a
-// Linux capability someone asked for, and the in-container path of a bind mount. Both are
-// interpolated into the command. The mount rules carry the real security weight: one mount
-// of "/" hands the sandbox the host tree, and a ":" or "," inside a container path
-// rewrites the mount's options — an "ro" becomes "rw" without anyone asking. A capability
-// does not: every container MIKE creates runs under gVisor with `--cap-drop ALL`, so a
-// granted capability is a privilege inside the guest kernel, and the guest cannot reach
-// through the gofer to write a read-only bind mount, see a host PID, or mount its way onto
-// a host path (see GVisorIsolationForCaps for what was measured). What is checked here is
-// therefore the *shape* of a capability plus, at the call site that grants one, the runtime
-// that makes granting it safe. The rule lives in this package once, for every caller that
-// builds container arguments: a task sandbox (backend/sandbox), an extension sandbox
-// (backend/extensions), and the API that stores both settings.
+// The parts of a `podman create` command line that arrive from outside this process: a Linux
+// capability someone asked for, and the in-container path of a bind mount. The mount rules carry
+// the real security weight: one mount of "/" hands the sandbox the host tree, and a ":" or ","
+// inside a container path rewrites the mount's options — an "ro" becomes "rw". A capability is
+// judged by its shape instead, because every container MIKE creates runs under gVisor with
+// `--cap-drop ALL` (see GVisorIsolationForCaps for what was measured), and the call site that
+// grants one checks the runtime that makes the grant safe.
+//
+// This is the one place the rule lives, for every caller that builds container arguments.
 
 import (
 	"fmt"
@@ -79,18 +75,14 @@ func ValidateCapability(cap string) error {
 	return nil
 }
 
-// GVisorIsolationForCaps reports whether a `podman create` argument list isolates the
-// container the way granting a capability assumes it is isolated: gVisor as the runtime,
-// and every capability dropped before the grant. Anywhere else, `--cap-add` is a
-// privilege on the host kernel, so a caller that is about to add one and fails this check
-// must not add it.
+// GVisorIsolationForCaps reports whether a `podman create` argument list isolates the container
+// the way granting a capability assumes: gVisor as the runtime, and every capability dropped
+// before the grant. Anywhere else `--cap-add` is a privilege on the host kernel, so a caller that
+// fails this check must not add one.
 //
-// This replaced a denylist of capability *names*, on the measurement that under runsc the
-// names were not the boundary: a guest holding SYS_ADMIN could not write through a
-// read-only bind mount (the guest remounts it "rw" in its own mount table and the gofer
-// still refuses), saw only its own four PIDs, and its `mount --bind / x` exposed the
-// guest's own overlay rather than the host tree. The runtime is what that safety rests
-// on, so the runtime is what gets checked.
+// This replaced a denylist of capability names, measured not to be the boundary: under runsc a
+// guest with SYS_ADMIN still cannot write through a read-only bind mount, see a host PID, or
+// bind-mount the host tree. The runtime is what the safety rests on.
 func GVisorIsolationForCaps(args []string) error {
 	if !hasArgPair(args, "--runtime", "runsc") {
 		return fmt.Errorf("capabilities may only be granted to a gVisor (runsc) container; this command line does not select that runtime")

@@ -4,31 +4,20 @@ import { DEFAULT_LOCALE } from '$lib/i18n/en';
 import { identityKey } from './extension-identity';
 
 /**
- * The first-run language offer: the decision of whether to ask a browser whose
- * language is not the fallback locale to install the registry's pack for it.
+ * The first-run language offer: whether to ask a browser whose language is not the
+ * fallback locale to install the registry's pack for it. Pure — the resolver takes the
+ * facts and returns a decision; the service gathers them and owns the install.
  *
- * Everything here is pure — the resolver takes the three facts it needs plus the
- * dismissal record and returns a decision, so the whole policy is testable
- * without a browser, a server, or a registry. The service
- * (`$lib/services/locale-offer.svelte.ts`) is what gathers those facts and owns
- * the install; the component only renders the decision.
+ * Four conditions must all hold, and silent is the correct answer to every other case:
+ *  1. no i18n pack is enabled;
+ *  2. the browser's primary subtag is not the fallback locale;
+ *  3. the registry carries a pack whose `capabilities.i18n.locale` answers that subtag
+ *     (one bare subtag, so one language can be offered);
+ *  4. nothing has been asked before — a dismissed, installed *or failed* record ends it,
+ *     because an unreachable registry must not nag on every boot.
  *
- * Four conditions must all hold, and **silent is the correct answer to every
- * other case**:
- *  1. no i18n pack is enabled — English *is* the no-pack state, so an enabled pack
- *     already means the user has a language and made their choice;
- *  2. the browser's primary language subtag is not the fallback locale;
- *  3. the registry index carries a pack whose declared `capabilities.i18n.locale`
- *     answers that subtag — the pack's locale is one bare subtag ("de"), which is
- *     why one browser language can only ever name one language to offer;
- *     no match, no word, ever;
- *  4. nothing has been asked before: a dismissed, installed *or failed* record
- *     ends the conversation. The failure case matters most: a registry that is
- *     unreachable, or a pack that will not install, must not nag on every boot.
- *
- * What core holds about languages: one tag (`DEFAULT_LOCALE`, from `en.ts`) and
- * the shape of a BCP 47 tag. No language names — the pack's own `display_name`
- * is what the offer shows, verbatim, in its own script.
+ * Core holds one tag (`DEFAULT_LOCALE`) and the shape of a BCP 47 tag: no language names,
+ * the pack's own `display_name` is what the offer shows.
  */
 
 /** Key in the IndexedDB `app-settings` store (via `$lib/storage`, never IndexedDB directly). */

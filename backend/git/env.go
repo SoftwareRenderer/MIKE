@@ -1,17 +1,13 @@
 package git
 
-// Environment and process construction for every git subprocess this server starts.
+// Environment and process construction for every git subprocess this server starts. Two rules:
 //
-// Two rules, both previously false:
-//
-//  1. A git subprocess is never handed the server's environment. Spawns either set
-//     cmd.Env = append(os.Environ(), ...) or left it nil, which os/exec resolves to os.Environ().
-//     That included MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY.
-//  2. A git subprocess never runs repository-supplied code. Hooks are repo content, and projects
+//  1. A git subprocess is never handed the server's environment — that included
+//     MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY.
+//  2. A git subprocess never runs repository-supplied code: hooks are repo content, and projects
 //     are routinely added from a path the operator already has.
 //
-// Enforced here, not at call sites: 71 spawns across 13 files, and Command is now the only way to
-// start git.
+// Enforced here rather than at call sites, and Command is the only way to start git.
 
 import (
 	"context"
@@ -96,12 +92,11 @@ func isGitSafeEnv(name string) bool {
 // entries.
 //
 // Env-based rather than a flag, for one measured reason: --no-verify does not exist for every
-// hook-capable operation. git worktree add has no such flag and runs post-checkout, which is a MIKE
-// hot path. Verified on git 2.55. core.hooksPath covers pre-commit, commit-msg, post-commit,
-// post-merge and post-checkout at once, and /dev/null is never an executable directory.
-//
-// GIT_CONFIG_COUNT/KEY_n/VALUE_0 is git's own "config as environment", so it has the precedence of
-// -c but cannot be reordered or forgotten at a call site.
+// HookFence returns the config that stops git running repository-supplied hooks, as environment
+// entries. Env-based rather than a flag because --no-verify does not exist for every
+// hook-capable operation: git worktree add has no such flag and runs post-checkout.
+// GIT_CONFIG_COUNT/KEY_n/VALUE_0 is git's own config-as-environment, so it has -c's precedence
+// and cannot be forgotten at a call site.
 func HookFence() []string {
 	return []string{
 		"GIT_CONFIG_COUNT=1",
@@ -115,11 +110,12 @@ func HookFence() []string {
 //
 // Policy comes last because os/exec keeps the LAST occurrence of a duplicated key, so a caller
 // cannot weaken the hook fence by passing its own core.hooksPath. That ordering is the security
-// argument; TestEnv_PolicySurvivesAnExtra pins it.
+// Env returns the environment for a git subprocess: the allowlisted part of the server's, then
+// extras, then policy. Policy comes last because os/exec keeps the LAST occurrence of a
+// duplicate key, so a caller cannot weaken the hook fence with its own core.hooksPath.
 //
-// Variables the server lacks or has set empty are omitted, not emitted as VAR=. Git and the tools it
-// shells out to treat those differently, and here empty is worse: SSH_AUTH_SOCK= reads as a
-// configured but broken agent instead of falling back to the key files.
+// Variables the server lacks or has set empty are omitted, not emitted as VAR=: SSH_AUTH_SOCK=
+// reads as a configured but broken agent instead of falling back to the key files.
 func Env(extra ...string) []string {
 	env := make([]string, 0, 32+len(extra))
 	for _, kv := range os.Environ() {

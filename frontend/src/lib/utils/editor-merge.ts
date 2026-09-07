@@ -1,18 +1,12 @@
 import { diffLines } from 'diff';
 
 /**
- * Three-way merge utilities for reconciling an externally-updated file with the
- * editor's in-memory buffer without losing unsaved user edits.
+ * Three-way merge reconciling an externally-updated file with the editor's buffer without
+ * losing unsaved edits: `base` is the content last loaded from or saved to disk, `ours` the
+ * current buffer, `theirs` fresh disk content after an `fs_event`.
  *
- * Model:
- *   - savedContent (`base`): the file content the editor last loaded from / saved
- *     to disk. This is the merge base.
- *   - ours: the current editor buffer (includes the user's unsaved edits).
- *   - theirs: freshly read disk content after an external change (`fs_event`).
- *
- * The merge is line-based. Non-overlapping changes from both sides are combined;
- * when both sides change the same region differently, the merge fails (returns
- * `null`) so the caller can keep the local buffer and warn instead of silently
+ * Line-based. Non-overlapping changes from both sides combine; a two-sided change to one
+ * region fails the merge (null) so the caller keeps the local buffer and warns rather than
  * dropping user content.
  */
 

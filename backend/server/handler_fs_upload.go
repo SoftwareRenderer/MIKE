@@ -32,14 +32,10 @@ const (
 
 // handleFSUpload writes one uploaded file into a project's directory tree.
 //
-// multipart/form-data, with `path` (target directory, in the container form when
-// the project is sandboxed), `relpath` (path inside it, defaulting to the part
-// filename), `overwrite` ("1"), and the `file` part. The relative path needs its
-// own field because Go strips directories from a part's filename: a drop of
-// assets/img/logo.png arrives as "logo.png".
-//
-// An existing name is answered 409 unless overwrite=1 — replacing a file is the
-// user's decision, not a default of the transport.
+// multipart/form-data with `path` (target directory, in container form when the project is
+// sandboxed), `relpath` (path inside it, defaulting to the part filename), `overwrite` ("1")
+// and the `file` part. The relative path needs its own field because Go strips directories from
+// a part's filename. An existing name is answered 409 unless overwrite=1.
 func (s *Server) handleFSUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		httputil.MethodNotAllowed(w)

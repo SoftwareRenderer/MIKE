@@ -23,6 +23,7 @@ import (
 	"kanban/backend/config"
 	kanbanexec "kanban/backend/exec"
 	"kanban/backend/extensions"
+	"kanban/backend/fsutil"
 	"kanban/backend/git"
 	"kanban/backend/httputil"
 	"kanban/backend/llmadapter"
@@ -104,7 +105,7 @@ type Server struct {
 	lspHandler          *lsp.LSPHandler
 	loginLimiter        *RateLimiter
 	previewStore        *previewStore
-	// cookieSecure is the SESSION cookie's Secure flag, set once in NewServer.
+	// cookieSecure is the SESSION cookie's Secure flag.
 	cookieSecure bool
 	mux          *http.ServeMux
 	addr         string
@@ -112,10 +113,12 @@ type Server struct {
 	tlsConfig    *tls.Config
 	allowedHosts string // extra accepted Host values (--allowed-hosts, else MIKE_ALLOWED_HOSTS)
 
-	// worktreeMux serializes git operations per task.
+	// hostRoot jails the no-project file endpoints (picker, mkdir, git init, add-project path).
+	// Built once and shared with the project handler so the two cannot disagree.
+	hostRoot *fsutil.HostRoot
 
-	// Prevents concurrent stash/checkout/branch/reset operations that would
-	// corrupt worktree state if interleaved (e.g., fork+switch, delete+switch).
+	// worktreeMux prevents concurrent stash/checkout/branch/reset operations that would corrupt
+	// worktree state if interleaved (e.g., fork+switch, delete+switch).
 	worktreeMux   map[string]*sync.Mutex // taskID -> per-task mutex
 	worktreeMuxMu sync.RWMutex           // protects worktreeMux map
 
@@ -127,10 +130,8 @@ type Server struct {
 	projectMuxMu sync.RWMutex           // protects projectMux map
 }
 
-// NewServer creates a new Server instance.
-// addr is the listen address (e.g. ":3000"). frontendDist is the path to the frontend build output (empty to skip).
-// allowedHosts lists extra hostnames accepted in the Host header, comma-separated;
-// empty falls back to MIKE_ALLOWED_HOSTS (see effectiveAllowedHosts).
+// NewServer builds the server. allowedHosts adds to the accepted Host values; empty falls back
+// to MIKE_ALLOWED_HOSTS (see effectiveAllowedHosts). frontendDist empty skips static serving.
 func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tlsCfg *tls.Config) (*Server, error) {
 	store, err := store.NewStore(dbPath)
 	if err != nil {
@@ -146,7 +147,6 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 		return nil, fmt.Errorf("get config: %w", err)
 	}
 
-	// Set worktrees directory (CLI flag / env var, or default)
 	if worktreesDir == "" {
 		worktreesDir = config.DefaultWorkspaceDir
 	}
@@ -157,7 +157,6 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	// (CAFile empty) or plain HTTP has nothing to advertise.
 	cfgStore.SetTLSCAAvailable(tlsCfg != nil && tlsCfg.CAFile != "")
 
-	// Ensure the effective worktrees directory exists.
 	if err := os.MkdirAll(cfg.WorkspaceDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create worktrees dir: %w", err)
 	}
@@ -176,28 +175,24 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	s.previewStore = newPreviewStore()
 	s.previewStore.startSweeper()
 
-	// Create session manager — fails if MIKE_LOGIN_PASSWORD is not set
 	sessionMgr, err := auth.NewSessionManager(store)
 	if err != nil {
 		return nil, fmt.Errorf("create session manager: %w\nSet MIKE_LOGIN_PASSWORD environment variable to enable authentication", err)
 	}
 	s.sessionMgr = sessionMgr
 
-	// Configure cookie Secure flag.
-	// Auto-enable when TLS is active; also respect explicit env var for reverse proxy setups.
+	// MIKE_SECURE_COOKIES forces the flag for a TLS-terminating reverse proxy.
 	s.cookieSecure = tlsCfg != nil || os.Getenv("MIKE_SECURE_COOKIES") == "1"
 
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.appStreamMgr = stream.NewAppStreamManager(store, worktreeMgr)
 	s.sandboxMgr = sandbox.NewSandboxManager()
-	// Sandbox memory stats: sample running tasks every 2 s, push sandbox_stats
-	// task events on change, and serve the most recent usage on task subscribe.
+	// Samples running tasks and pushes sandbox_stats task events when usage changes.
 	s.sandboxStatsSampler = stream.NewSandboxStatsSampler(s.sandboxMgr, store, s.appStreamMgr, stream.DefaultSandboxStatsInterval)
 	s.appStreamMgr.SetSandboxStatsProvider(s.sandboxStatsSampler.LatestStatsProvider())
 	s.sandboxStatsSampler.Start()
 	s.boardHandler = managers.NewBoardHandler(store, s.appStreamMgr, cfgStore, s.sandboxMgr)
 	s.terminalMgr = term.NewTerminalManager(store, cfgStore, s.sandboxMgr, nil) // agentRegistry wired after creation
-	// Wire port assignment callback → store + WebSocket broadcast
 	s.terminalMgr.SetOnPortsAssigned(func(taskID, projectID string, ports []types.AssignedPort) {
 		// Column-only write: a full-row write from a row read a moment ago could
 		// undo a concurrent status or execution_state change.
@@ -212,36 +207,34 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 		}
 		s.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	})
-	// Wire project-level terminal port assignment callback → WebSocket broadcast
 	s.terminalMgr.SetOnProjectPortsAssigned(func(projectID string, ports []types.AssignedPort) {
 		s.appStreamMgr.BroadcastProjectPorts(projectID, ports)
 	})
 	commitQueue := kanbanexec.NewCommitQueue()
 
-	// Extension system
 	s.extStore = extensions.NewExtensionStore(store)
 	if err := s.extStore.InitSchema(); err != nil {
 		return nil, fmt.Errorf("init extension schema: %w", err)
 	}
 
-	// Agent registry — discovers agent extensions and maps agent:// URLs
+	// agent:// URLs are providers; the registry maps them to enabled agent extensions.
 	agentRegistry := agent.NewAgentRegistry(s.extStore, cfgStore)
 	s.agentRegistry = agentRegistry
-	// Wire agent registry to config store so agent providers (e.g. agent://pi →
-	// 'Pi Coding Agent') are included in the /api/config response.
+	// So agent:// providers appear in the /api/config response.
 	cfgStore.SetAgentRegistry(agentRegistry)
 
 	extRegistry := extensions.NewRegistryClient()
 	s.extSandboxMgr = extensions.NewExtensionSandboxManager(extRegistry, s.extStore)
 	s.extLSPMgr = lsp.NewExtensionLSPManager(s.extStore, s.extSandboxMgr, store)
 
-	// Provider request adapter — enabled `llm` extensions map MIKE's requests
-	// to provider-specific formats. Mappings come from each extension's
-	// mappings file and are re-collected on every extension change below.
+	// Enabled `llm` extensions rewrite MIKE's provider requests; their mappings files are
+	// re-collected on every extension change below.
 	extCfg := &extensions.ExtensionConfig{RegistryURL: cfg.RegistryURL}
 	s.extensionsDir = extCfg.ExtensionsDirOrDefault()
-	// Extension sandbox host mounts are restricted to an allowlist; teach it the
-	// effective workspace dir and the directory extension files live in.
+	// The no-project jail: home plus the directories declared at startup, which no request can
+	// carry. The data directory is deliberately absent — it holds kanban.db and the TLS keys.
+	s.hostRoot = fsutil.NewHostRoot(cfg.WorkspaceDir, extCfg.ExtensionsDirOrDefault())
+	// Roots of the extension mount allowlist.
 	s.extSandboxMgr.SetWorkspaceDir(cfg.WorkspaceDir)
 	s.extSandboxMgr.SetExtensionsDir(extCfg.ExtensionsDirOrDefault())
 	s.llmAdapter = llmadapter.NewAdapter()
@@ -261,20 +254,17 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	s.executor = kanbanexec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr, agentRegistry, s.extLSPMgr, commitQueue)
 	s.executor.SetLLMAdapter(s.llmAdapter)
 	s.executor.RecoverStaleTasks()
-	// Wire agent registry to terminal manager (created earlier before agentRegistry was available)
 	s.terminalMgr.SetAgentRegistry(agentRegistry)
-	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor)
+	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor, s.hostRoot)
 	s.taskHandler = managers.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, commitQueue, s.sandboxMgr)
 	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())
-	// Wire worktree mutex so GitHandler can serialize per-task git operations.
 	s.gitHandler.SetWorktreeMutex(s.lockWorktree)
 
-	// s.gitHandler wires the worktree mutex in above; extensions are entirely
-	// registry-driven now — there is no built-in bootstrap step.
+	// Extensions are entirely registry-driven — there is no built-in bootstrap step.
 	s.extHandler = extensions.NewExtensionHandler(s.extStore, s.extSandboxMgr, extRegistry, extCfg)
-	// Settings → Extensions shows one honest sentence when a language server cannot
-	// resolve the project it is serving — the state behind diagnostics core
-	// deliberately withheld rather than forwarded as fact.
+	// What Settings → Extensions shows when a language server cannot resolve the project it
+	// is serving: the state behind diagnostics core deliberately withheld rather than
+	// forwarded as fact.
 	s.extHandler.SetEnvironmentStatus(func(extID string) *extensions.EnvironmentStatus {
 		healthy, note := s.extLSPMgr.EnvironmentSummary(extID)
 		if healthy || note == "" {
@@ -282,8 +272,6 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 		}
 		return &extensions.EnvironmentStatus{Healthy: false, Note: note}
 	})
-	// LSP handler for language server WebSocket bridging
-	// Use extension-based registry and manager for dynamic LSP discovery
 	extLSPRegistry := lsp.NewExtensionRegistry(s.extStore)
 	s.lspHandler = lsp.NewLSPHandler(extLSPRegistry, s.extLSPMgr)
 	// Restrict LSP workspaces to project paths and task worktrees so a client
@@ -294,7 +282,6 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 			return false
 		}
 		ws := filepath.Clean(workspace)
-		// Task worktrees and projects located under the workspace dir.
 		wsDir := filepath.Clean(cfg.WorkspaceDir)
 		if ws == wsDir || strings.HasPrefix(ws, wsDir+string(os.PathSeparator)) {
 			return true
@@ -312,7 +299,6 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 		}
 		return false
 	})
-	// Wire extension change callback → reload agent registry + broadcast to all clients
 	s.extHandler.SetOnExtensionChanged(func() {
 		agentRegistry.Reload()
 		refreshLLMAdapters()
@@ -321,16 +307,13 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 		s.refreshPromptLocale()
 		s.appStreamMgr.BroadcastExtensionChange()
 	})
-	// Wire extension update callback → broadcast LSP reset to frontend
 	s.extHandler.SetOnImageUpdated(func(extID string) {
 		s.lspHandler.BroadcastLSPReset()
 	})
-	// Wire project mutex so GitHandler can serialize project-level git operations.
 	s.gitHandler.SetProjectMutex(s.lockProject)
-	// Wire worktree watcher -> GitHandler diff cache so on-demand file fetches work
+	// On-demand file fetches read through the watcher's diff cache.
 	s.appStreamMgr.SetDiffCacheUpdate(s.gitHandler.UpdateDiffCache)
 
-	// Run garbage collector on startup
 	dryRun := os.Getenv("MIKE_GC_DRY_RUN") == "1"
 	if removed, err := s.executor.WorktreeMgr().GarbageCollect(dryRun); err != nil {
 		logging.For(logging.Worktree).Warnf("startup error: %v", err)
@@ -338,11 +321,9 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 		logging.For(logging.Worktree).Infof("startup: %d orphaned worktrees cleaned", removed)
 	}
 
-	// Clear stale title_generating flags from previous server sessions
 	if err := store.ClearStaleTitleGenerating(); err != nil {
 		logging.For(logging.Generate).Warnf("startup: failed to clear stale flags: %v", err)
 	}
-	// Clear stale summarizing flags from previous server sessions
 	if err := store.ClearStaleSummarizing(); err != nil {
 		logging.For(logging.Summarize).Warnf("startup: failed to clear stale flags: %v", err)
 	}
@@ -352,19 +333,12 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	return s, nil
 }
 
-// Serve starts the HTTP server.
-// handleFetchModels handles POST /api/config/fetch-models.
-// It supports both standard OpenAI-compatible LLM servers and Pi agent extensions.
-// refreshPromptLocale derives the prompt language from the enabled `i18n` pack and
-// installs it as the template overlay. It is called at startup and on every extension
-// change, so enabling a pack changes the language of the next turn with no restart —
-// and there is no setting to reconcile with the extension list, because the enabled
-// pack *is* the language (extensions.ActiveI18N is the one rule; the browser applies
-// the same one).
+// refreshPromptLocale derives the prompt language from the enabled i18n pack and installs it as
+// the template overlay, at startup and on every extension change. The enabled pack *is* the
+// language (extensions.ActiveI18N is the one rule), so there is no setting to reconcile.
 //
-// A list that cannot be read leaves the current language in place rather than
-// resetting to English: a database that had a bad moment is not a reason to start
-// answering somebody in a language they did not choose.
+// A list that cannot be read leaves the current language in place rather than resetting to
+// English.
 func (s *Server) refreshPromptLocale() {
 	ov, err := extensions.ActivePromptOverlay(s.extStore, s.extensionsDir)
 	if err != nil {
@@ -408,7 +382,6 @@ func (s *Server) handleFetchModels(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Load the adapter and ask it for available models
 		adapter, err := agent.LoadAdapter(ext)
 		if err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to load agent adapter: %v", err))
@@ -416,7 +389,7 @@ func (s *Server) handleFetchModels(w http.ResponseWriter, r *http.Request) {
 		}
 		defer adapter.Close()
 
-		// Initialize the adapter with minimal config (just enough for SubprocessConfig)
+		// Only enough config for the adapter's SubprocessConfig — no worktree, no sandbox.
 		initCfg, _ := json.Marshal(map[string]any{
 			"extension_name": ext.Name,
 			"session_name":   "fetch-models-probe",
@@ -442,8 +415,7 @@ func (s *Server) handleFetchModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fallback to standard LLM fetching.
-	// A masked/empty key means "use the stored key for this provider".
+	// A masked or empty key means "use the stored key for this provider".
 	req.APIKey = s.configStore.ResolveAPIKey(req.LlamaServerURL, req.APIKey)
 	result := s.configStore.FetchModels(req)
 	httputil.JSONResponse(w, http.StatusOK, result)
@@ -471,12 +443,10 @@ func (s *Server) RedirectHTTPSMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// withNonce wraps an http.Handler (the frontend file server) and intercepts
-// requests for "/" to serve index.html with a request-specific CSP nonce.
-// All other requests are passed through to the underlying handler.
+// withNonce serves index.html for "/" with a request-specific CSP nonce; everything else
+// passes through to the file server.
 func (s *Server) withNonce(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Only intercept exact "/" requests (the index page)
 		if r.URL.Path == "/" {
 			indexPath := filepath.Join(s.frontendDist, "index.html")
 			content, err := os.ReadFile(indexPath)
@@ -490,7 +460,6 @@ func (s *Server) withNonce(next http.Handler) http.Handler {
 				nonce = "fallback"
 			}
 
-			// Inject nonce into the inline script
 			updatedContent := strings.Replace(string(content), "nonce=\"{{.Nonce}}\"", fmt.Sprintf("nonce=\"%s\"", nonce), 1)
 
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -498,7 +467,6 @@ func (s *Server) withNonce(next http.Handler) http.Handler {
 			return
 		}
 
-		// Pass all other requests (assets, favicon, etc.) to the file server
 		next.ServeHTTP(w, r)
 	})
 }
@@ -784,6 +752,7 @@ func (s *Server) Serve() error {
 	if extra := s.effectiveAllowedHosts(); extra != "" {
 		logging.For(logging.Host).Infof("accepting extra Host header values: %s", extra)
 	}
+	s.logHostRootPolicy()
 
 	if s.tlsConfig != nil {
 		logging.For(logging.HTTP).Infof("Server starting on https://%s (TLS: %s, %s)", s.addr, s.tlsConfig.CertFile, s.tlsConfig.KeyFile)
@@ -799,6 +768,26 @@ func (s *Server) Serve() error {
 
 	logging.For(logging.HTTP).Infof("Server starting on http://%s", s.addr)
 	return srv.ListenAndServe()
+}
+
+// logHostRootPolicy echoes the host-directory jail, otherwise invisible until it refuses
+// something. Both misconfigurations are silent: a variable set to anything but "1" leaves the
+// picker jailed, and a root of "/" constrains nothing.
+func (s *Server) logHostRootPolicy() {
+	if s.hostRoot.Unrestricted() {
+		logging.For(logging.Host).Warnf("%s=1: the file endpoints, project creation and clone may reach any host path",
+			fsutil.AllowRootFSEnv)
+		return
+	}
+	// A set-but-empty variable means "unset" in this config ladder, so it stays silent here too.
+	if v := os.Getenv(fsutil.AllowRootFSEnv); v != "" && v != "1" {
+		logging.For(logging.Host).Warnf("%s=%q is not the exact value 1, so the host directory jail stays in force (allowed: %s)",
+			fsutil.AllowRootFSEnv, v, strings.Join(s.hostRoot.Roots(), ", "))
+	}
+	if s.hostRoot.HasUniversalRoot() {
+		logging.For(logging.Host).Warnf("the host directory jail includes the filesystem root (roots: %s), which constrains nothing: "+
+			"every host path is reachable without the widening variable", strings.Join(s.hostRoot.Roots(), ", "))
+	}
 }
 
 func newHybridListener(l net.Listener, stdCfg *stdtls.Config, sniffTimeout time.Duration) *hybridListener {
@@ -817,7 +806,8 @@ func newHybridListener(l net.Listener, stdCfg *stdtls.Config, sniffTimeout time.
 	return h
 }
 
-// Shutdown gracefully shuts down the server.
+// Shutdown runs every teardown step. Each is best-effort and none can be interrupted, so the
+// order below is the dependency order, not a preference.
 func (s *Server) Shutdown(ctx context.Context) error {
 	// Logged before it runs: none of these can be interrupted, so when the shutdown deadline fires
 	// the last line here is the only thing that names what hung.
@@ -828,7 +818,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		logging.For(logging.HTTP).Infof("shutdown: %s", name)
 		run()
 	}
-	// Stop preview document cleanup
 	shutdownStep("preview sweeper", func() {
 		if s.previewStore != nil {
 			s.previewStore.stopSweeper()
@@ -848,7 +837,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			s.terminalMgr.Close()
 		}
 	})
-	// Stop all LSP connections and sandbox containers
 	shutdownStep("lsp handler", func() {
 		if s.lspHandler != nil {
 			s.lspHandler.Close()
@@ -864,7 +852,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			s.extSandboxMgr.Close()
 		}
 	})
-	// Stop sandbox memory sampling, then clean up all task sandbox containers
 	shutdownStep("sandbox stats sampler", func() {
 		if s.sandboxStatsSampler != nil {
 			s.sandboxStatsSampler.Stop()

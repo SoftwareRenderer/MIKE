@@ -205,26 +205,31 @@ func (ww *WorktreeWatcher) Unwatch(taskID string) {
 	logging.For(logging.Watcher).With(logging.TaskID, taskID).Infof("stopped watching")
 }
 
-// Close stops the watcher, worker pool, and releases resources.
+// Close stops the watcher and its worker pool.
+//
+// The mutex is released before workerWg.Wait, never held across it: a worker in
+// computeAndBroadcast takes ww.mu in its deferred cleanup, so waiting for the pool while
+// holding it deadlocks whenever a compute is in flight.
 func (ww *WorktreeWatcher) Close() {
 	ww.mu.Lock()
-	defer ww.mu.Unlock()
-
 	for _, timer := range ww.throttles {
 		timer.Stop()
 	}
 	for _, timer := range ww.fsDebounces {
 		timer.Stop()
 	}
-
 	close(ww.doneCh)
+	ww.mu.Unlock()
+
 	ww.workerWg.Wait()
 
+	ww.mu.Lock()
 	ww.pathCache = nil
 	ww.indexDirToTask = nil
 	ww.inFlight = nil
 	ww.fsDebounces = nil
 	ww.fsEventQueue = nil
+	ww.mu.Unlock()
 
 	_ = ww.watcher.Close()
 	logging.For(logging.Watcher).Info("closed")
@@ -354,11 +359,10 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 	projectID := info.projectID
 	baseRef := info.baseRef
 
-	// scheduleDiff arms a diff-compute timer for the task. If a compute is already
-	// in flight when the timer fires, it re-arms with a short delay instead of
-	// dropping the pending change — otherwise a burst of writes during a slow
-	// compute (git diff can exceed the 1s throttle on large repos) would leave the
-	// diff panel stale until the next filesystem event or a page refresh.
+	// scheduleDiff arms a diff-compute timer for the task. If a compute is in flight when the
+	// timer fires it re-arms instead of dropping the pending change, which would leave the diff
+	// panel stale until the next filesystem event.
+	// (git diff can exceed the 1s throttle on large repos.)
 	var scheduleDiff func()
 	scheduleDiff = func() {
 		ww.mu.Lock()

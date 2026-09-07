@@ -1,20 +1,11 @@
 /**
- * Catalog shape and parsing — the boundary between "a file a third party shipped"
- * and "a translation map the UI may render".
+ * Catalog shape and parsing — the boundary between "a file a third party shipped" and "a
+ * translation map the UI may render". A catalog is flat `key -> string` or a plural table
+ * (`{ one, other, ... }`, `other` required because it is the only category every language
+ * has). Nothing here touches the DOM or Svelte.
  *
- * A catalog is flat `key -> string` and nothing else. Nothing here touches the
- * DOM or Svelte; the runtime (`runtime.svelte.ts`) owns state, this owns the
- * rules for what may enter it.
- *
- * Every rejection is reported with a reason rather than thrown: the rule is that
- * a pack that cannot be understood leaves the UI in English *and says so*, and a
- * half-applied catalog is worse than none.
- *
- * A value is a `string` **or** a plural table (`{ one, other, … }`) — the same two
- * shapes `en.ts` uses, because a catalog that could not carry a plural would leave
- * every counted string in the UI English forever. `other` is required of a table:
- * it is the only category every language has, and the only one a single-form
- * language needs.
+ * Every rejection is reported with a reason rather than thrown: a pack that cannot be
+ * understood leaves the UI in English and says so; a half-applied catalog is worse.
  */
 import type { MessageValue, PluralCategory, PluralTable } from './en';
 

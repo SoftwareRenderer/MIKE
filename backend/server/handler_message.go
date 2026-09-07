@@ -338,19 +338,10 @@ func (s *Server) cleanupDeletedMessageForks(projectID, taskID string, task *type
 	}
 }
 
-// resolveRollbackCommit returns the commit the worktree should be reset to after
-// messages are deleted from a thread, so the file state reflects the remaining
-// conversation (discarding changes made by the deleted messages).
-//
-// Resolution order:
-//  1. The last commit hash among the remaining messages — the state captured at
-//     the end of the last surviving turn.
-//  2. The thread's checkpoint_commit_hash — the state a fork was cut from, used when the
-//     deleted range took every checkpoint in the thread with it.
-//  3. The task's base_commit — the state before any conversation changes. Required
-//     when the deleted portion contained the only checkpoint(s) (e.g. deleting the
-//     first real request), so no checkpoint remains and the conversation has no
-//     recorded state.
+// resolveRollbackCommit returns the commit the worktree is reset to after messages are deleted
+// from a thread, so the file state reflects the remaining conversation. In order: the last
+// commit hash among the remaining messages; the thread's checkpoint_commit_hash, when the
+// deleted range took every checkpoint with it; the task's base_commit, when no checkpoint remains.
 func (s *Server) resolveRollbackCommit(task *types.Task, threadID string) string {
 	if c := s.getLastCommitHashInThread(threadID); c != "" {
 		return c

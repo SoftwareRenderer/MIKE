@@ -32,18 +32,11 @@ export interface InterleavedLayout<T extends LayoutToolCall = LayoutToolCall> {
 export const TURN_ENDING_TOOLS: ReadonlySet<string> = new Set(['ask_question', 'request_review']);
 
 /**
- * Build the interleaved layout for an assistant message that has positioned tool
- * calls (i.e. each carries contentIndex + reasoningIndex, captured at the moment
- * the tool_call event streamed in).
- *
- * Tool calls whose reasoningIndex points inside the reasoning text are rendered
- * within the reasoning block; everything else (after-reasoning tools and tools
- * with no position data) trails the content bubble. Turn-ending tools
- * (ask_question / request_review) are always routed to trailingTools so the
- * question/summary card shows below the message text.
- *
- * Returns null when there is nothing to interleave — callers then fall back to
- * the standard content layout (reasoning, then content bubble, then tool calls).
+ * Build the interleaved layout for an assistant message whose tool calls carry
+ * contentIndex + reasoningIndex, captured when the event streamed in. A tool call whose
+ * reasoningIndex falls inside the reasoning text renders there; the rest trail the content
+ * bubble, and turn-ending tools (ask_question / request_review) always trail it so the card
+ * sits below the message text. Returns null when there is nothing to interleave.
  */
 export function computeInterleavedLayout<T extends LayoutToolCall>(
     tcs: T[] | undefined,

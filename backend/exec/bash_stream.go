@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"kanban/backend/agent"
+	"kanban/backend/sandbox"
+	"kanban/backend/toolresult"
 	"kanban/pkg/procterm"
 )
 
@@ -37,45 +39,69 @@ func normalizeBashTimeout(timeout int64) int64 {
 	}
 }
 
-// streamLineWriter accumulates a command's output and hands each completed line
-// to onLine as it arrives. mu lets one writer serve both the stdout and stderr
-// copiers.
+// streamLineWriter accumulates a command's output and hands each completed line to onLine as
+// it arrives. mu lets one writer serve both the stdout and stderr copiers. The accumulator is
+// bounded because the bytes come from an LLM-written command; the line stream to the browser is
+// not, since the UI follows a running command.
 type streamLineWriter struct {
-	mu     sync.Mutex
-	total  bytes.Buffer
-	onLine func(text string)
-	pend   []byte
+	mu      sync.Mutex
+	total   bytes.Buffer
+	onLine  func(text string)
+	pend    []byte
+	dropped int
 }
+
+// partialFlushBytes bounds the buffer held back waiting for a newline.
+const partialFlushBytes = 64 << 10
 
 func (w *streamLineWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	// Never fails, so always report the full length: a short count would make
-	// io.Copy stop and drop output.
-	w.total.Write(p)
+	// Always report the full length: a short count makes io.Copy stop and drop output.
+	w.captureLocked(p)
 	w.pend = append(w.pend, p...)
 	if i := bytes.LastIndexByte(w.pend, '\n'); i >= 0 {
 		w.emitLocked(string(w.pend[:i+1]))
 		w.pend = append(w.pend[:0:0], w.pend[i+1:]...)
+	} else if len(w.pend) >= partialFlushBytes {
+		w.emitLocked(string(w.pend))
+		w.pend = nil
 	}
 	return len(p), nil
 }
 
-// WriteFrom streams a pipe into the writer until EOF, or until procterm.Drain closes
-// the fd (the normal end for a command that detached a child still holding it).
+// captureLocked keeps the result string bounded; bytes past the cap are counted, not stored.
+func (w *streamLineWriter) captureLocked(p []byte) {
+	room := toolresult.MaxCaptureBytes - w.total.Len()
+	switch {
+	case room <= 0:
+		w.dropped += len(p)
+	case len(p) <= room:
+		w.total.Write(p)
+	default:
+		w.total.Write(p[:room])
+		w.dropped += len(p) - room
+	}
+}
+
+// WriteFrom streams a pipe into the writer until EOF, or until procterm.Drain closes the fd
+// (the normal end for a command that detached a child still holding it).
 func (w *streamLineWriter) WriteFrom(r io.Reader) (int64, error) {
 	return io.Copy(w, r)
 }
 
-// String returns everything captured so far.
+// String returns what was captured — up to the cap, plus the marker naming what was dropped.
 func (w *streamLineWriter) String() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.total.String()
+	if w.dropped == 0 {
+		return w.total.String()
+	}
+	return w.total.String() + toolresult.CaptureMarker(w.dropped)
 }
 
-// flush emits a trailing partial line — a command that ends without a newline
-// still gets its last line reported.
+// flush emits a trailing partial line, so a command that ends without a newline still gets
+// its last line reported.
 func (w *streamLineWriter) flush() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -86,8 +112,8 @@ func (w *streamLineWriter) flush() {
 	w.pend = nil
 }
 
-// emitLocked splits a chunk into lines and forwards them (called with mu held, so
-// the lines stay in order). Trailing \r is trimmed to match the sandbox path.
+// emitLocked splits a chunk into lines and forwards them (called with mu held, so lines stay
+// in order). Trailing \r is trimmed to match the sandbox path.
 func (w *streamLineWriter) emitLocked(chunk string) {
 	if w.onLine == nil {
 		return
@@ -97,29 +123,29 @@ func (w *streamLineWriter) emitLocked(chunk string) {
 	}
 }
 
-// execCommandStream runs a shell command on the host in dir, returns its combined output,
-// and forwards it line by line to onLine (may be nil).
+// execCommandStream runs a shell command on the host in dir, returns its combined output, and
+// forwards it line by line to onLine (may be nil). timeout is seconds: the whole process group
+// is killed when it expires, while a child the command detached keeps running, on purpose.
 //
-// The command gets the allowlisted environment only (agent.SafeAgentEnv): these commands are
-// LLM-driven and run on the host for sandbox-disabled projects, so the server environment —
-// above all MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY — must never reach them.
-// GIT_TERMINAL_PROMPT=0 stops an injected git transfer from blocking on a credential prompt.
-//
-// timeout is seconds and is enforced: the whole process group is killed when it expires and
-// the error says so. A child the command detaches keeps running, on purpose.
+// Only the allowlisted environment reaches the command: these are LLM-written commands on the
+// host, so MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY must never be in their environment, and
+// GIT_TERMINAL_PROMPT=0 keeps an injected git transfer off a credential prompt.
 func execCommandStream(ctx context.Context, dir, command string, timeout int64, onLine func(text string)) (string, error) {
+	// A project configured without a sandbox is not consent to run on the host: the flag is
+	// checked here as well as at create time.
+	if !sandbox.HostExecutionAllowed() {
+		return "", sandbox.ErrHostExecution("running a tool command on the host")
+	}
 	secs := normalizeBashTimeout(timeout)
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(secs)*time.Second)
 	defer cancel()
 
 	c := exec.CommandContext(runCtx, "bash", "-c", command)
 	c.Dir = dir
-	// See the doc comment above: allowlisted env only, never the server's own.
 	c.Env = agent.SafeAgentEnv("GIT_TERMINAL_PROMPT=0")
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	// Kill the group, not just bash. The error is swallowed on purpose: exec turns a
-	// Cancel error into the Wait error, hiding the result of a process that had
-	// already exited.
+	// Kill the group, not just bash. The error is swallowed on purpose: exec turns a Cancel
+	// error into the Wait error, hiding the result of a process that had already exited.
 	c.Cancel = func() error {
 		_ = procterm.KillGroup(c.Process)
 		return nil

@@ -12,61 +12,21 @@ import {
 export type { Catalog, MessageKey, MessageParams, MessageValue };
 
 /**
- * =============================================================================
- * i18n runtime — where the app's language lives, and the only thing that decides
- * what a message id renders as and what locale formatting runs in.
- * =============================================================================
+ * The i18n runtime: the only writer of the active locale and of
+ * `document.documentElement.lang`. The language is derived from the enabled i18n
+ * extension — nothing stores it, so there is no setting to reconcile with the
+ * extension list. `setCatalog` is the production write surface; `setLocale` is the
+ * in-memory test/preview seam.
  *
- * The active language is **derived from the enabled i18n extension**: nothing
- * stores it, there is no `language` setting to keep in sync, and nothing reads a
- * locale out of storage at boot. `setCatalog` is the whole production write
- * surface — the loader (`load-pack.ts`) resolves the enabled pack from the
- * server's extension list, fetches and validates its catalog, and hands it here.
- * `setLocale` is the same write with no catalog behind it: a test/preview seam,
- * in-memory only, so a probe can render a locale without installing a pack. It
- * persists nothing, because a stored language would have to be reconciled with
- * the extension list forever and the two would disagree.
+ * Two different questions, deliberately separate answers:
+ *   - `activeLocale()`   → what to hand `Intl.*`; undefined means "use the browser's".
+ *   - `documentLanguage()` → what to write into `<html lang>`: the language of the
+ *     strings actually rendered (the pack's tag, else `en`), never the browser's —
+ *     that tag drives the `:lang()` typography rules in app.css.
  *
- * `tag` and the catalog table are `$state`/`$derived`, so any component that calls
- * `t()` or `activeLocale()` while rendering re-renders when a pack is enabled,
- * replaced or disabled. That is the entire live-switch mechanism: no version
- * bumper, no `$effect` mirror, no reload.
- *
- * Two accessors, deliberately different questions:
- *
- *   • `activeLocale()`  → what to hand `Intl.*` / `toLocale*`. `undefined` means
- *     "no pack, use the browser's" — exactly what every call site did before i18n
- *     existed, so a user with no language pack installed sees no change.
- *   • `documentLanguage()` → what to write into `<html lang>`: the language of the
- *     STRINGS actually rendered, i.e. the active pack's tag else `en`. NOT the
- *     browser's language — without a pack the UI text is English whatever the
- *     browser speaks, and `<html lang>` drives the `:lang()` typography rules (see
- *     the CJK block in `app.css`); claiming Japanese there would restyle English chrome.
- *
- * `locale.code` is the same answer as `documentLanguage()` — the locale the
- * interface is rendering in — and is what the converted components' `t()` calls
- * pair with. It is never a translated language *name*; core names no language.
- *
- * **The fallback ladder, per key and never per catalog.** A pack may be partial:
- *
- * 1. the active pack's value for the key;
- * 2. the `en.ts` value — plus one warning naming the locale and the key, so "the
- *    pack silently never translated this" cannot rot into a half-translated UI;
- * 3. the key itself — plus a warning, because a key nothing has is a hole in the
- *    catalog of record. The key prints rather than nothing on purpose: a visible
- *    `settings.extensions.foo` is a bug report and an empty string is a mystery
- *    (and the a11y test compares a control's accessible name against its rendered
- *    text, so both sides must resolve to the same thing in any catalog state).
- *
- * Warnings are deduped per key and cleared when the tag moves (a reloaded pack may
- * have fixed it), and a production build does not pay for them at all.
- *
- * This file is the only writer of `document.documentElement.lang`, and the only
- * place a locale is ever computed — no consumer may derive one of its own. The
- * pre-paint script in `index.html` may have tagged the document before this
- * module runs; boot *adopts* that tag (see `prePaintTag`) rather than painting
- * over it, because stamping the fallback back is the flash the script exists to
- * prevent.
+ * Fallback is per key, never per catalog: pack value, then `en.ts` with one warning,
+ * then the key itself with a warning (a visible key id is a bug report; an empty
+ * string is a mystery). Full mechanism: docs/i18n.md.
  */
 
 /**
@@ -146,19 +106,15 @@ export class I18nRuntime {
     /** The locale the UI is rendering: the active pack's tag, or the fallback. */
     locale = $derived(this.tag ?? DEFAULT_LOCALE);
 
-    /**
-     * Catalogs installed on this runtime, keyed by lower-cased tag: `en` is the
-     * catalog of record and always present, packs arrive later through
-     * `registerCatalog` (a language pack is fetched long after this module was
-     * imported, so the table cannot be a static import).
-     *
-     * A reactive `Map`, not a plain one. The tag alone is not enough to re-render
-     * the app: `boot.ts` applies the cached catalog under a tag, and `load-pack.ts`
-     * then hands the same tag the freshly fetched one — same tag, different bytes.
-     * With a plain `Map` that second write changes nothing the UI is watching, and
-     * the app keeps showing a stale catalog until the locale itself moves. Every
-     * lookup reads this map through `packCatalog()`, so the read is the dependency.
-     */
+        /**
+         * Catalogs installed on this runtime, keyed by lower-cased tag. `en` is the catalog of
+         * record; packs arrive later through `registerCatalog`.
+         *
+         * A reactive Map, not a plain one: `boot.ts` applies the cached catalog under a tag and
+         * `load-pack.ts` then hands the same tag the freshly fetched bytes. A plain Map makes
+         * that second write invisible to the UI, which keeps showing a stale catalog until the
+         * locale itself moves.
+         */
     private table = new SvelteMap<string, Catalog>([[DEFAULT_LOCALE, en]]);
 
     /** Listeners notified when the tag changes — cached-state consumers only. */
@@ -408,20 +364,12 @@ type LocaleListener = (locale: string | undefined) => void;
 export const i18n = new I18nRuntime();
 
 /**
- * The tag the document was painted with, if it is not the fallback.
+ * The tag the document was painted with, if it is not the fallback. Only the pre-paint
+ * script in `index.html` can put a non-`en` tag here before this module runs. Adopting it
+ * is what makes that script real: syncing `en` over it undid the hint one frame later and
+ * a reload flashed back through English between two Chinese frames.
  *
- * Nothing but the pre-paint script in `index.html` can put a non-`en` tag here
- * before this module runs — it reads the tag `i18n/cache.ts` mirrors into
- * `localStorage`, so the first frame is already in the last known language.
- * Adopting it is what makes that step real: syncing `en` over it here (which is
- * what this file used to do) undid the hint one frame after the script set it,
- * and a reload flashed back through English between two Chinese frames.
- *
- * The document is the only input — nothing is read from storage here — so a
- * first run, or a run with the hint cleared, still starts in English. And it is
- * a tag with no catalog behind it yet: `boot.ts` gives it text from the cached
- * catalog, and the first `loadI18NFromExtensions` either confirms it or takes it
- * back.
+ * The document is the only input, so a first run still starts in English.
  */
 function prePaintTag(): string | null {
     if (typeof document === 'undefined') return null;

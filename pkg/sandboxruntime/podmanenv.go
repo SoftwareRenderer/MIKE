@@ -1,15 +1,13 @@
 package sandboxruntime
 
-// The environment handed to the podman CLI. Rootless podman really does read it: storage is keyed off
-// the user, temporary volumes live under an XDG directory, and the systemd cgroup manager is reached
-// over D-Bus. That need used to be met by leaving cmd.Env nil, which hands over the whole server
-// environment including MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY.
+// The environment handed to the podman CLI. Rootless podman really does read it: storage is
+// keyed off the user, temporary volumes live under an XDG directory, and the systemd cgroup
+// manager is reached over D-Bus. Leaving cmd.Env nil used to hand over the whole server
+// environment, including MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY.
 //
-// Two things to know before editing this list:
-//  1. This is the podman CLIENT's environment. Nothing here reaches a container - that is
-//     containerEnvArgs in backend/sandbox, with its own rule and its own container-level test.
-//  2. Deleting an entry can break sandboxing in a way that reads like a podman bug. Each entry says why
-//     it is needed and TestPodmanEnvKeepsWhatRootlessPodmanNeeds pins them.
+// This is the podman CLIENT's environment: nothing here reaches a container (that is
+// containerEnvArgs in backend/sandbox), and deleting an entry can break sandboxing in a way
+// that reads like a podman bug.
 
 import (
 	"context"

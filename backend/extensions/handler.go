@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -124,7 +125,6 @@ func authorDir(author string) string {
 	return strings.TrimRight(out, "-._")
 }
 
-// NewExtensionHandler creates a new ExtensionHandler.
 func NewExtensionHandler(store *ExtensionStore, sandbox *ExtensionSandboxManager, registry *RegistryClient, cfg *ExtensionConfig) *ExtensionHandler {
 	return &ExtensionHandler{
 		store:       store,
@@ -423,11 +423,9 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 
-	// A translation pack has no user-editable field — its locale and catalog are
-	// what the manifest declared — so the stored declaration is re-checked on
-	// every save rather than merged. Checked after the merges above, because that
-	// is the shape that gets stored: an extension must not be able to rewrite its
-	// own way out of validation.
+	// A translation pack has no user-editable field, so the stored declaration is re-checked on
+	// every save, after the merges above: an extension must not be able to rewrite its own way
+	// out of validation.
 	if err := ext.Manifest.Capabilities.GetI18N().Validate(); err != nil {
 		http.Error(w, "extension declares an unusable translation pack: "+err.Error(), http.StatusBadRequest)
 		return
@@ -531,11 +529,10 @@ func (h *ExtensionHandler) HandleSetEnabled(w http.ResponseWriter, r *http.Reque
 }
 
 // HandleSetDependencyCache grants — or revokes — the one host directory an extension's language
-// server reads its resolved dependencies from. It is its own endpoint rather than a field on the
-// sandbox form because an empty value here means "revoke" while the form handler copies only
-// non-empty fields, and because applying it must destroy the running container, whose mount set
-// is fixed at creation. The manifest declares the location; only a human names the directory, and
-// a manifest carrying dependency_host_path is refused at install.
+// server reads its resolved dependencies from. Its own endpoint because an empty value means
+// "revoke" while the form handler copies only non-empty fields, and because applying it must
+// destroy the running container. Only a human names the directory: a manifest carrying
+// dependency_host_path is refused at install.
 func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
 		httputil.MethodNotAllowed(w)
@@ -591,12 +588,9 @@ func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// The mount set is fixed when the container is created, so a running container now has the
-	// wrong view of the world. Stopping it is the whole application: the bridge connection dies
-	// with it, the host reads the closed channel as "this server is gone" and retires it, and the
-	// next request starts a container with the new mount. Nothing here waits for that, and an
-	// extension with no running container needs nothing — the next start reads the grant from the
-	// stored record on its own.
+	// The mount set is fixed at container creation, so a running container now has the wrong view
+	// of the world. Stopping it is the whole application: the bridge connection dies with it and
+	// the next request starts a container with the new mount.
 	recreated := "no sandbox was running, so the next start picks it up"
 	if h.sandbox.IsRunning(id) {
 		h.sandbox.Stop(id)
@@ -616,14 +610,10 @@ func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *ht
 	}
 }
 
-// inferExtensionType returns the extension type implied by its capabilities,
-// in priority order (lsp > ui > css > agent > llm > i18n). Returns "" when no capability
-// maps to a type.
-//
-// i18n is last because a pack is the only capability that is pure data: anything else in the same
-// manifest would mean an extension that also runs something. That case is unreachable through a
-// valid install — validateI18N refuses a pack that declares a sibling capability — so the order
-// here only decides what a rejected manifest is called in the log.
+// inferExtensionType returns the extension type implied by its capabilities, in priority order
+// (lsp > ui > css > agent > llm > i18n), or "" when none maps to a type. i18n is last because a
+// pack is pure data and validateI18N refuses a pack with a sibling capability, so this order only
+// decides what a rejected manifest is called in the log.
 func inferExtensionType(caps *Capabilities) string {
 	if caps == nil {
 		return ""
@@ -723,11 +713,9 @@ func findLocalExtension(root, author, name string) *localExtension {
 	return nil
 }
 
-// HandleLocalExtensions lists extensions present in the local extensions
-// directory (on the filesystem) as registry-style entries. These are the
-// extensions available locally that are not necessarily published in a registry.
-// Each entry's name is derived from the manifest's parent directory
-// (extensions/<author>/<name>/manifest.json).
+// HandleLocalExtensions lists the extensions in the local extensions directory as registry-style
+// entries, whether or not they are published. Each entry's name comes from the manifest's parent
+// directory (extensions/<author>/<name>/manifest.json).
 func (h *ExtensionHandler) HandleLocalExtensions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httputil.MethodNotAllowed(w)
@@ -985,12 +973,9 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 		fail(fmt.Errorf("extension %s declares an unusable language configuration: %w", entry.Name, err))
 		return
 	}
-	// A translation pack is checked here on the fetched manifest (the shape that gets stored — a
-	// registry entry carries only the projection the UI renders) *and* against the files it actually
-	// shipped with, in the directory they were materialized into: a locale that is not a language
-	// subtag, a catalog pointing at another origin, a catalog that will not parse or a prompt
-	// overlay that will not compile is refused now rather than stored and then discovered in the
-	// browser, in a later turn, or never.
+	// Checked on the fetched manifest and against the files it shipped into targetDir, so a bad
+	// locale, a foreign-origin or unparsable catalog, or a prompt overlay that will not compile is
+	// refused now rather than discovered in the browser.
 	if err := validateI18N(manifest.Capabilities, targetDir); err != nil {
 		fail(fmt.Errorf("extension %s declares an unusable translation pack: %w", entry.Name, err))
 		return
@@ -1048,12 +1033,10 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 	}
 }
 
-// acquireInstallImage returns the image an installing extension will run, or "" if it ships neither a
-// pre-built image nor a Dockerfile. It is the install-side twin of extensionImageSource: the same answer
-// whether asked at install or at first start.
-//
-// A declared image is not pulled here. It was validated by ValidateImage, and the sandbox pulls it on
-// first use, so installing never downloads an image the user may never start.
+// acquireInstallImage returns the image an installing extension will run, or "" if it ships neither
+// a pre-built image nor a Dockerfile. It is the install-side twin of extensionImageSource. A
+// declared image is not pulled here: the sandbox pulls it on first use, so an install never
+// downloads an image the user may never start.
 func (h *ExtensionHandler) acquireInstallImage(entry *RegistryEntry, registryURL, targetDir string, gitPinned bool, emit func(float64, string)) (string, error) {
 	if entry.Image != "" {
 		return entry.Image, nil
@@ -1073,12 +1056,10 @@ func (h *ExtensionHandler) acquireInstallImage(entry *RegistryEntry, registryURL
 	return imageRef, nil
 }
 
-// installDockerfile reads the Dockerfile to build from, wherever the package lives: the extension's own
-// folder (local install), the checkout (git-pinned), or the registry's URL. ("", "", nil) means it
-// shipped no Dockerfile.
-//
-// A read failure is an error, not "no Dockerfile": present-but-unreadable used to look absent, and the
-// install went on to record an extension whose image would never exist.
+// installDockerfile reads the Dockerfile to build from, wherever the package lives: the extension's
+// own folder (local install), the checkout (git-pinned), or the registry's URL. ("", "", nil) means
+// it shipped no Dockerfile. A read failure is an error, not "no Dockerfile": an unreadable one used
+// to look absent and the install recorded an extension whose image would never exist.
 func (h *ExtensionHandler) installDockerfile(entry *RegistryEntry, registryURL, targetDir string, gitPinned bool, emit func(float64, string)) (content, source string, err error) {
 	var path string
 	switch {
@@ -1339,11 +1320,9 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 			var m ExtensionManifest
 			if err := json.Unmarshal(data, &m); err == nil {
 				ext.Manifest = m
-				// What the manifest declares about the sandbox is part of what this commit
-				// delivers, so re-read it: a language server updated to a commit that moves its
-				// cache would otherwise keep running on the stored paths from install time.
-				// A manifest that grants itself a mount outside the app's roots, or a capability
-				// that reaches past the container, fails the update exactly as it fails an install.
+				// The sandbox declaration is part of what this commit delivers, so re-read it: an
+				// update that moves the cache must not keep running on install-time paths. A
+				// manifest that self-grants beyond the policy fails as it does at install.
 				before := ext.SandboxConfig
 				merged := mergeManifestSandboxAdditions(ext.SandboxConfig, lspSandboxFromManifest(&m))
 				if err := h.mountPolicy().ValidateSandboxAdditions(merged.Mounts, merged.Capabilities); err != nil {
@@ -1460,6 +1439,18 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 // API can make the server allocate whatever it likes to answer one tool call.
 const maxProxyResponseBytes = 8 << 20
 
+// proxyContentType decides what the browser is told a proxied body IS. The upstream's own
+// Content-Type is never echoed: the response is served from MIKE's own origin, so a third-party
+// upstream must not choose how that origin labels its bytes. JSON is kept because the client
+// branches on it; everything else maps to a type that cannot execute.
+func proxyContentType(upstream string) string {
+	media, _, err := mime.ParseMediaType(upstream)
+	if err == nil && (media == "application/json" || strings.HasSuffix(media, "+json")) {
+		return "application/json"
+	}
+	return "text/plain; charset=utf-8"
+}
+
 // HandleProxy proxies requests to external APIs on behalf of an extension.
 // The extension must declare a `network` capability in its manifest with
 // allowed_domains and optional header templates.
@@ -1568,11 +1559,10 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 
-	// Log the proxy response
 	logging.For(logging.Extensions).Infof("extension=%s method=%s url=%s status=%d", ext.Name, req.Method, req.URL, resp.StatusCode)
 
-	// Return raw response
-	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	// Return raw response; the type is MIKE's choice, never the upstream's.
+	w.Header().Set("Content-Type", proxyContentType(resp.Header.Get("Content-Type")))
 	w.WriteHeader(resp.StatusCode)
 	w.Write(body)
 }

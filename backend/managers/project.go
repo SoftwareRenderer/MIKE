@@ -15,6 +15,7 @@ import (
 
 	"kanban/backend/config"
 	"kanban/backend/exec"
+	"kanban/backend/fsutil"
 	"kanban/backend/git"
 	"kanban/backend/httputil"
 	"kanban/backend/sandbox"
@@ -58,11 +59,14 @@ type ProjectHandler struct {
 	terminalMgr *term.TerminalManager
 	sandboxMgr  *sandbox.SandboxManager
 	executor    *exec.TaskExecutor
+	// hostRoot is the jail the file endpoints use, injected so "which directories did the
+	// operator declare" has one answer. A nil policy fails closed: nothing is inside a jail
+	// with no roots.
+	hostRoot *fsutil.HostRoot
 }
 
-// NewProjectHandler creates a new ProjectHandler.
-func NewProjectHandler(store *store.Store, configStore *config.ConfigStore, worktreeMgr *git.WorktreeManager, terminalMgr *term.TerminalManager, sandboxMgr *sandbox.SandboxManager, taskExecutor *exec.TaskExecutor) *ProjectHandler {
-	return &ProjectHandler{store: store, configStore: configStore, worktreeMgr: worktreeMgr, terminalMgr: terminalMgr, sandboxMgr: sandboxMgr, executor: taskExecutor}
+func NewProjectHandler(store *store.Store, configStore *config.ConfigStore, worktreeMgr *git.WorktreeManager, terminalMgr *term.TerminalManager, sandboxMgr *sandbox.SandboxManager, taskExecutor *exec.TaskExecutor, hostRoot *fsutil.HostRoot) *ProjectHandler {
+	return &ProjectHandler{store: store, configStore: configStore, worktreeMgr: worktreeMgr, terminalMgr: terminalMgr, sandboxMgr: sandboxMgr, executor: taskExecutor, hostRoot: hostRoot}
 }
 
 // HandleList returns all projects.
@@ -101,9 +105,13 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	// If git_url is provided, clone the repo into <path>/<repo-name> first,
 	// then proceed with normal project creation from the cloned directory.
 	if req.GitURL != "" {
-		targetPath, err := prepareCloneTarget(req)
+		targetPath, err := h.prepareCloneTarget(req)
 		if err != nil {
-			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			code := http.StatusBadRequest
+			if fsutil.IsHostRootRefusal(err) {
+				code = http.StatusForbidden
+			}
+			httputil.JSONError(w, code, err.Error())
 			return
 		}
 		// Same restricted argv/env as the SSE clone (transport allowlist,
@@ -125,11 +133,28 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, code, p)
 }
 
+// checkHostPath is the project side of the host jail: a request path must be inside $HOME plus
+// the declared directories unless MIKE_ALLOW_ROOT_FS=1 widened it. It answers nil when the
+// caller's own checks describe the failure better (a missing path is a 400, not a 403).
+func (h *ProjectHandler) checkHostPath(path string) error {
+	if h.hostRoot.Unrestricted() {
+		return nil
+	}
+	if _, err := h.hostRoot.Stat(path); err != nil && fsutil.IsHostRootRefusal(err) {
+		return err
+	}
+	return nil
+}
+
 // prepareCloneTarget validates the clone source URL and resolves the clone
 // target directory (<path>/<repo-name>) inside the existing parent dir
 // req.Path. Returns the target path, or an error describing what is wrong.
-func prepareCloneTarget(req types.CreateProjectRequest) (string, error) {
+func (h *ProjectHandler) prepareCloneTarget(req types.CreateProjectRequest) (string, error) {
 	if err := validateGitCloneURL(req.GitURL); err != nil {
+		return "", err
+	}
+	// Before any byte is fetched: a refused clone must leave no checkout behind.
+	if err := h.checkHostPath(req.Path); err != nil {
 		return "", err
 	}
 	repoName, err := repoNameFromGitURL(req.GitURL)
@@ -157,6 +182,12 @@ func prepareCloneTarget(req types.CreateProjectRequest) (string, error) {
 // HTTP status code and a client-facing message.
 func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest) (*types.Project, int, string) {
 	req.Path = strings.TrimSpace(req.Path)
+
+	// The server reads, watches and runs git here, so the picker's jail gates it. Checked first:
+	// a refusal creates no row.
+	if err := h.checkHostPath(req.Path); err != nil {
+		return nil, http.StatusForbidden, err.Error()
+	}
 
 	info, err := os.Stat(req.Path)
 	if err != nil {
@@ -286,9 +317,9 @@ func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
-	// Validate source URL and target location up front (same rules as
-	// HandleCreate) so common failures are known before any work starts.
-	targetPath, err := prepareCloneTarget(req)
+	// Same rules as HandleCreate, so common failures are known before any work starts; the host
+	// jail's refusal arrives here as an error frame rather than a 403.
+	targetPath, err := h.prepareCloneTarget(req)
 	if err != nil {
 		sendEvent(map[string]any{"type": "error", "message": err.Error()})
 		return
@@ -371,7 +402,6 @@ func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 		return // no config, skip pricing
 	}
 
-	// Build provider ID -> provider map.
 	providerMap := make(map[string]types.Provider)
 	for _, p := range cfg.Providers {
 		if p.ID != 0 {

@@ -2,17 +2,10 @@ import { EditorView, ViewPlugin, hasHoverTooltips, closeHoverTooltips } from '@c
 import { inBox } from './hit-box';
 
 /**
- * Close any open hover tooltip when the editor scrolls — except when the
- * pointer is inside the tooltip itself.
- *
- * What is left in the hover-plugin family here is the diagnostics hover
- * (`serverDiagnostics` renders through `@codemirror/lint`, whose hover is a
- * `hoverTooltip`); the go-to-definition card is not a hover tooltip and
- * dismisses itself — see `lsp-hover-actions.ts`. For either kind the rule is
- * the same: a trackpad nudge that begins while the pointer is resting on the
- * box is the user reading it, so the box stays. A scroll that starts anywhere
- * else means the user moved on, and the tooltip would be left pointing at text
- * it is not about.
+ * Close any open hover tooltip when the editor scrolls, except when the pointer is inside
+ * the tooltip: a trackpad nudge that begins while the pointer rests on the box is the user
+ * reading it. Applies to the diagnostics hover (a `hoverTooltip`); the go-to-definition card
+ * dismisses itself — see `lsp-hover-actions.ts`.
  */
 export function closeHoverOnScroll() {
     return ViewPlugin.fromClass(

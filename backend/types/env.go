@@ -9,14 +9,8 @@ import (
 //
 //	The container's environment is the image's plus what the project declared. Never the host's.
 //
-// The mechanism is podman-specific: `-e NAME` with no `=value` does not set an empty variable, it copies
-// NAME out of the podman process's environment, which is the server's. Measured on this host:
-//
-//	-e MIKE_LOGIN_PASSWORD    -> supersecret
-//	(no -e at all)            -> EMPTY
-//
-// Formatting kept this safe by accident, and Exec took []string, for which {"HOME"} is the natural way
-// to say "pass HOME through". These two functions can only produce KEY=VALUE.
+// podman's `-e NAME` with no `=value` copies NAME out of the podman process's environment — the
+// server's — rather than setting it empty. These functions can only produce KEY=VALUE.
 
 // ValidateSandboxEnv reports whether one declared variable can be turned into a podman `-e`
 // assignment.

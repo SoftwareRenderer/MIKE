@@ -39,18 +39,16 @@ func MethodNotAllowed(w http.ResponseWriter) {
 // JSON into memory until it dies.
 const MaxRequestBodyBytes int64 = 32 << 20
 
-// DecodeJSON decodes the JSON request body into v, bounded by MaxRequestBodyBytes. On
-// failure it writes 400 "invalid request body", or 413 when the body was simply too big
-// — not a malformed request, and one the client cannot fix by resending it — and
-// returns false, so handlers read as a linear happy path:
+// DecodeJSON decodes the JSON request body into v, bounded by MaxRequestBodyBytes. On failure
+// it writes 400, or 413 when the body was simply too big, and returns false so handlers read as
+// a linear happy path:
 //
 //	var req FooRequest
 //	if !httputil.DecodeJSON(w, r, &req) {
-//		return
+//	        return
 //	}
 //
-// It checks nothing else on purpose — method and required fields stay with the
-// handler, which is where the domain rules for them live.
+// It checks nothing else: method and required fields stay with the handler.
 func DecodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	return decodeJSON(w, r, v, MaxRequestBodyBytes)
 }

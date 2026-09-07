@@ -177,16 +177,12 @@ func normalizeHost(raw string) string {
 	return strings.ToLower(h)
 }
 
-// HostPinMiddleware rejects requests whose Host header names a different
-// authority than this server (HTTP 421).
+// HostPinMiddleware rejects requests whose Host header names a different authority than this
+// server (HTTP 421).
 //
-// This is DNS-rebinding protection, not authentication: a page at evil.test can
-// point its A record at 127.0.0.1, and once that navigation makes the page
-// same-origin, SameSite=Lax, CORS and the publicly readable CSRF token all stop
-// protecting. A fixed allowlist breaks the attack because the attacker has to
-// use the same authority as their own page origin for the read to work, and that
-// authority is not in the list. It never replaces the session check — it only
-// decides which names this server answers.
+// This is DNS-rebinding protection, not authentication: a page at evil.test can point its A
+// record at 127.0.0.1, and once that navigation is same-origin, SameSite=Lax, CORS and the
+// publicly readable CSRF token all stop protecting. It never replaces the session check.
 func (s *Server) HostPinMiddleware(next http.Handler) http.Handler {
 	allowed := newHostAllowlist(s.addr, s.effectiveAllowedHosts())
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

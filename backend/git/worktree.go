@@ -1,8 +1,6 @@
-// Package git is the version-control layer: one worktree and branch per task, plus the
-// status, diff, stash, merge and checkpoint operations the UI needs.
-// Two invariants shape it: client refs are validated and then fenced with
-// --end-of-options, and clones are restricted to allowed transports by both our own check
-// and git's (clone.go).
+// Package git is the version-control layer: one worktree and branch per task, plus the status,
+// diff, stash, merge and checkpoint operations the UI needs. Client refs are validated and then
+// fenced with --end-of-options, and clones are restricted to allowed transports (clone.go).
 package git
 
 import (
@@ -148,11 +146,9 @@ func ShouldIgnoreFile(path string) bool {
 	return false
 }
 
-// IsGitIgnored reports whether relPath (relative to repoRoot) is excluded by the
-// repository's gitignore rules. Tracked files are NOT considered ignored (matching
-// git check-ignore default behavior), so events for tracked files still get
-// broadcast. Returns false when git is unavailable, repoRoot is not a git repo,
-// or the path is outside repoRoot.
+// IsGitIgnored reports whether relPath (relative to repoRoot) is excluded by gitignore. Tracked
+// files are never considered ignored (git check-ignore's default), so events for them are still
+// broadcast. False when git is unavailable, the repo is missing, or the path is outside it.
 func IsGitIgnored(repoRoot, relPath string) bool {
 	if repoRoot == "" || relPath == "" {
 		return false
@@ -211,7 +207,6 @@ type WorktreeManager struct {
 
 }
 
-// NewWorktreeManager creates a new WorktreeManager.
 func NewWorktreeManager(store *store.Store, configStore *config.ConfigStore) *WorktreeManager {
 	return &WorktreeManager{store: store, configStore: configStore}
 }
@@ -234,11 +229,9 @@ func (wm *WorktreeManager) getProjectWorktreeMu(projectID string) *sync.Mutex {
 // runs a handful of git commands, so a longer wait means something is wedged.
 const worktreeLockTimeout = 30 * time.Second
 
-// tryLockProjectWorktree waits up to timeout for the project's worktree lock, and returns the
-// release function. On timeout it returns (nil, false) without leaving the mutex held: the goroutine
-// still blocked in Lock eventually wins it, and the previous inline version abandoned that goroutine,
-// so the lock was taken and never released and every later CreateWorktree for the project timed out
-// for the life of the process. The reaper hands a late win straight back.
+// tryLockProjectWorktree waits up to timeout for the project's worktree lock and returns its
+// release function. On timeout it returns (nil, false) without leaving the mutex held: a goroutine
+// abandoned here eventually wins the lock and never releases it.
 func (wm *WorktreeManager) tryLockProjectWorktree(projectID string, timeout time.Duration) (func(), bool) {
 	m := wm.getProjectWorktreeMu(projectID)
 	got := make(chan struct{})
@@ -260,13 +253,9 @@ func (wm *WorktreeManager) tryLockProjectWorktree(projectID string, timeout time
 }
 
 // LockProjectStash acquires the per-project stash lock and returns the function that releases it.
-// Stash is repo-wide - one stack for every worktree of the project, holding the user's own entries -
-// so concurrent stash operations must not interleave. When the critical section is the enclosing
-// block, call it as:
-//
-//	defer wm.LockProjectStash(projectID)()
-//
-// and capture the release function when it is not.
+// Stash is repo-wide - one stack for every worktree, holding the user's own entries - so stash
+// operations must not interleave. Call it as `defer wm.LockProjectStash(projectID)()` when the
+// critical section is the enclosing block; capture the release function when it is not.
 func (wm *WorktreeManager) LockProjectStash(projectID string) func() {
 	return wm.projectLock(&wm.stashMu, projectID)
 }
@@ -744,12 +733,10 @@ func (wm *WorktreeManager) ResolveMainBranch(projectID, taskID, title, canonical
 	return best
 }
 
-// taskSlugPrefixSet returns a set of task-branch slug prefixes ("task/<slug>-")
-// for all active titled tasks in a project, so the GC can recognize and keep a
-// titled task's slug-named Main branch even when a fork is the active branch.
-// The slug comes from types.SlugifyBranchName — the same function the executor used
-// to name the branch. If the two diverged, the GC would stop recognizing a live
-// branch and delete it.
+// taskSlugPrefixSet returns the task-branch slug prefixes ("task/<slug>-") of a project's active
+// titled tasks, so the GC keeps a slug-named Main branch even when a fork is the active branch.
+// The slug comes from types.SlugifyBranchName, the same function that named the branch: a GC
+// parsing a different shape deletes a live branch.
 func taskSlugPrefixSet(store worktreeStore, projectID string) map[string]bool {
 	set := make(map[string]bool)
 	tasks, err := store.GetTasksByProject(projectID)
@@ -847,12 +834,36 @@ func (wm *WorktreeManager) PruneOrphanedBranches(projectID string) int {
 	return removed
 }
 
+// UntrackedReadTarget resolves a worktree-relative path to the host file whose content may go
+// into a diff, plus its size, and refuses anything that is not a regular file inside the
+// worktree. git status lists a symlink the way it lists a file, so without this a
+// `key -> ../../.ssh/id_rsa` planted in a task worktree puts a private key in the task diff.
+func UntrackedReadTarget(worktreePath, rel string) (string, int64, error) {
+	if rel == "" || filepath.IsAbs(rel) {
+		return "", 0, fmt.Errorf("path %q must be relative to the worktree", rel)
+	}
+	resolved, err := fsutil.Contained(filepath.Join(worktreePath, rel), []string{filepath.Clean(worktreePath)})
+	if err != nil {
+		return "", 0, err
+	}
+	info, err := os.Lstat(resolved)
+	if err != nil {
+		return "", 0, err
+	}
+	if !info.Mode().IsRegular() {
+		return "", 0, fmt.Errorf("%s is not a regular file", rel)
+	}
+	return resolved, info.Size(), nil
+}
+
 // walkUntrackedEntries expands git status --porcelain "?? " entries into individual file paths.
 // When a whole directory is untracked, git status returns "?? dir/" — this function walks
 // the directory and returns all regular file paths (relative to worktreePath).
 func walkUntrackedEntries(worktreePath, path string) []string {
 	fullPath := filepath.Join(worktreePath, path)
-	info, err := os.Stat(fullPath)
+	// Lstat, not Stat: a symlink is neither a regular file nor a directory, so it is listed
+	// neither here nor walked into. UntrackedReadTarget judges its target.
+	info, err := os.Lstat(fullPath)
 	if err != nil {
 		return nil
 	}
@@ -862,10 +873,13 @@ func walkUntrackedEntries(worktreePath, path string) []string {
 		}
 		return []string{path}
 	}
+	if !info.IsDir() {
+		return nil
+	}
 	// It's a directory — walk it recursively
 	var files []string
 	_ = filepath.Walk(fullPath, func(fp string, info os.FileInfo, err error) error {
-		if err != nil || !info.Mode().IsRegular() {
+		if err != nil || info == nil || !info.Mode().IsRegular() {
 			return nil
 		}
 		rel, err := filepath.Rel(worktreePath, fp)
@@ -899,11 +913,10 @@ func (wm *WorktreeManager) GitStatus(taskID string) (string, error) {
 	return out, nil
 }
 
-// ParseStatusPaths reads `git status --porcelain` (v1) output into workspace-relative
-// paths: two status columns, a space, then the path — "R  old -> new" for a rename (whose
-// destination is the file that exists), quoted when it contains unusual characters.
-// Directories reported as untracked ("?? dir/") come back as the directory, not expanded;
-// callers that need files use walkUntrackedEntries for those.
+// ParseStatusPaths reads `git status --porcelain` (v1) output into workspace-relative paths: two
+// status columns, a space, then the path — "R  old -> new" for a rename (whose destination is the
+// file that exists), quoted when it contains unusual characters. An untracked directory ("?? dir/")
+// comes back unexpanded; use walkUntrackedEntries for the files inside it.
 func ParseStatusPaths(out string) []string {
 	var files []string
 	for _, line := range strings.Split(out, "\n") {
@@ -1030,11 +1043,9 @@ func (d *TaskDiff) GetPerFileHashes() map[string]string {
 // Default maximum number of change lines per file before truncation.
 const defaultMaxChangeLines = 60
 
-// truncateDiffLines truncates a unified diff so each file has at most
-// maxChangeLines change lines (lines starting with + or -).
-// Within a hunk, lines are dropped from the end and the @@ header counts
-// are updated to stay valid. Returns the truncated diff and list of
-// truncated file paths.
+// truncateDiffLines truncates a unified diff so each file has at most maxChangeLines change
+// lines. Lines are dropped from the end of a hunk and the @@ header counts are updated to stay
+// valid. Returns the truncated diff and the paths that were cut.
 func truncateDiffLines(diff string, maxChangeLines int) (string, []string) {
 	if !strings.Contains(diff, "\n") {
 		return diff, nil
@@ -1417,11 +1428,8 @@ func annotationsToFiles(annotations map[string]*fileAnnotation) map[string]*Trac
 	return files
 }
 
-// hunkRe parses a unified diff hunk header.
-// Groups: 1=oldStart, 2=oldCount, 3=newStart, 4=newCount, 5=context
-// shortStatFromDiff computes a git-style shortstat string from a unified diff.
-// Format: "X file(s) changed, Y insertion(s)(+), Z deletion(s)(-)"
-// Omits zero-value parts (e.g., no deletions mentioned if count is 0).
+// shortStatFromDiff computes a git-style shortstat: "X file(s) changed, Y insertion(s)(+),
+// Z deletion(s)(-)", omitting zero-value parts.
 func shortStatFromDiff(diff string) string {
 	stats := countFileChanges(diff)
 	files := len(stats)
@@ -1462,6 +1470,8 @@ func SplitLines(content string) []string {
 	return lines
 }
 
+// hunkRe parses a unified diff hunk header: 1=oldStart, 2=oldCount, 3=newStart, 4=newCount,
+// 5=context.
 var hunkRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))?(.*)@@`)
 
 // Stash message label prefixes used by kanban operations
@@ -1582,11 +1592,8 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 		diffOut, annotations = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
 		// No untracked files for commit-to-commit diff
 	} else {
-		// Single-ref diff: working tree vs baseRef.
-		// Checkpoints use stash create+store, so changes stay visible in the working tree.
-		// Working-tree diff: always compare against HEAD.
-		// This captures only uncommitted changes (staged + unstaged).
-		// Committed changes are handled separately below.
+		// Working tree vs HEAD: only uncommitted changes, since committed ones are handled
+		// separately below. Checkpoints use stash create+store, so changes stay visible here.
 		diffOut, err = wm.gitRunOutput(worktreePath, "diff", "HEAD")
 		if err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
@@ -1618,12 +1625,13 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 					if ShouldIgnorePath(filePath) {
 						continue
 					}
-					fullPath := filepath.Join(worktreePath, filePath)
-					info, err := os.Stat(fullPath)
-					if err != nil || !info.Mode().IsRegular() {
+					// The read target, not the status path: an untracked symlink names a file
+					// somewhere else, and "somewhere else" may be a private key.
+					fullPath, fileSize, err := UntrackedReadTarget(worktreePath, filePath)
+					if err != nil {
+						logging.For(logging.Git).Debugf("untracked %s: skipped: %v", filePath, err)
 						continue
 					}
-					fileSize := info.Size()
 					// Skip content for large files or binary files.
 					// Binary detection: extension check first (O(1)), null-byte scan as fallback.
 					isBin := isBinaryExtension(filePath) || isBinaryContent(fullPath, fileSize)
@@ -1946,11 +1954,9 @@ func extractBlobHash(line string) string {
 func extractDiffPaths(line string) (aPath, bPath string) {
 	rest := strings.TrimPrefix(line, "diff --git ")
 
-	// git C-quotes a path when it contains a double quote, a backslash or a control character, so the
-	// header arrives as `diff --git "a/quo\"te.ts" "b/quo\"te.ts"`. Two things went wrong if we did not
-	// notice: the `a/` prefix test below failed (the token starts with a quote), and the ` b/` separator
-	// was inside the quoting — so the path came back empty and EVERY such file in one diff landed in a
-	// single entry keyed by "", their rows merged. Quoting also moves the separator from ` b/` to `" "`.
+	// git C-quotes a path containing a double quote, backslash or control character, so the header
+	// arrives as `diff --git "a/quo\"te.ts" "b/quo\"te.ts"`. Unhandled, the `a/` test fails and the
+	// ` b/` separator sits inside the quoting, so every such file in a diff merges into one "" entry.
 	if strings.HasPrefix(rest, `"`) {
 		aTok, bTok := splitQuotedPathPair(rest)
 		// The a/ and b/ prefixes are INSIDE the quoting (git quotes the whole `b/path` token), so they
@@ -2008,12 +2014,9 @@ func unquoteGitPath(tok string) string {
 	return tok[1 : len(tok)-1]
 }
 
-// binaryExts is a set of file extensions considered binary.
-//
-// Everything here must be unreadable as text. SVG is deliberately NOT in this set: it is XML source, and
-// this set is what labels a new (untracked) file "Binary file — N bytes" in the diff panel instead of
-// showing its lines. Being an image is a different question — see imageExts in backend/exec/loop.go, the
-// staging allowlist, which does include .svg.
+// binaryExts lists extensions unreadable as text; it is what labels a new file "Binary file — N
+// bytes" in the diff panel. SVG is deliberately absent (it is XML source) — the separate imageExts
+// allowlist in backend/exec/loop.go is what includes it.
 var binaryExts = map[string]bool{
 	// Images
 	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,
@@ -2077,12 +2080,9 @@ func (wm *WorktreeManager) gitRun(dir string, args ...string) error {
 	return err
 }
 
-// gitRunInGitDir runs git against dir's own gitdir and returns what git printed. The output is the point:
-// git's reason for refusing is on stderr, and a caller that keeps only the exit code cannot tell the user
-// anything ("exit status 1").
-//
-// GIT_DIR is passed as an Env extra rather than by assigning cmd.Env: the assignment would replace
-// the allowlist and the hook fence, and os/exec takes the assignment rather than merging.
+// gitRunInGitDir runs git against dir's own gitdir and returns what git printed: git's reason for
+// refusing is on stderr, and an exit code alone tells the user nothing. GIT_DIR is an Env extra,
+// not an assignment to cmd.Env, which would replace the allowlist and the hook fence.
 func (wm *WorktreeManager) gitRunInGitDir(dir string, args ...string) (string, error) {
 	cmd := Command(dir, args...)
 	cmd.Env = Env("GIT_DIR=" + filepath.Join(dir, ".git"))
@@ -2246,11 +2246,9 @@ func (wm *WorktreeManager) GetTaskCommits(taskID, baseRef string) (*TaskCommitsR
 	return TaskCommitsIn(worktreePath, baseRef, "")
 }
 
-// ResolveDiffBaseline computes the effective git ref to diff against for a task.
-// For the original thread, returns baseRef (e.g., "master").
-// For a forked thread, returns the merge-base between forkBranch and taskBranch.
-// If forkBranch == taskBranch (task branch was switched to thread branch),
-// returns baseRef (the original baseline) since all changes are on the thread branch.
+// ResolveDiffBaseline computes the ref to diff a task against: baseRef for the original thread, the
+// merge-base of forkBranch and taskBranch for a fork, and baseRef again when the task branch *is*
+// the thread branch, because all its changes live there.
 func (wm *WorktreeManager) ResolveDiffBaseline(taskID, baseRef, taskBranch, forkBranch string) (string, error) {
 	// Reject invalid baseRef values (e.g. git error messages like "fatal: ...")
 	if strings.HasPrefix(baseRef, "fatal:") {
@@ -2297,12 +2295,10 @@ func (wm *WorktreeManager) IsMergedInto(projectPath, taskBranch, targetBranch st
 	return cmd.Run() == nil
 }
 
-// ResetWorktreeTo restores the files a snapshot captured and never moves HEAD. The restored files land on
-// the current branch as unstaged/untracked changes, which is what git status, the diff views and the
-// commit flow read as the task's work.
-//
-// The snapshot is read as a tree, not applied as a patch: a patch cannot carry a binary file, and the old
-// `reset --hard` fallback moved the branch onto the snapshot commit — restoring files by rewriting history.
+// ResetWorktreeTo restores the files a snapshot captured and never moves HEAD: they land as
+// unstaged/untracked changes, which is what git status, the diff views and the commit flow read.
+// The snapshot is read as a tree, not applied as a patch — a patch cannot carry a binary file, and
+// `reset --hard` would move the branch onto the snapshot commit.
 func (wm *WorktreeManager) ResetWorktreeTo(taskID, hash string) error {
 	worktreePath, err := wm.WorktreePath(taskID)
 	if err != nil {
@@ -2395,11 +2391,9 @@ func (wm *WorktreeManager) listStashEntries(repoPath string) ([]StashEntry, erro
 	return entries, nil
 }
 
-// PushStash stashes the worktree changes under `message` and returns the hash of the entry it created.
-// The entry is identified by diffing the stash list across the push: the stack is shared by every worktree
-// of the repository and holds the user's own entries, so the entry on top is not necessarily the one we
-// just made, and handing it back would save somebody else's state as this thread's.
-//
+// PushStash stashes the worktree changes under `message` and returns the hash of the entry it
+// created, found by diffing the stash list across the push: the stack is one per repository and
+// holds the user's own entries, so the entry on top is not necessarily ours.
 // The caller must hold the project stash mutex.
 func (wm *WorktreeManager) PushStash(repoPath, message string) (string, error) {
 	before, err := wm.stashHashSet(repoPath)
@@ -2449,14 +2443,9 @@ func (wm *WorktreeManager) stashHashSet(repoPath string) (map[string]bool, error
 	return set, nil
 }
 
-// DropStashByHash drops a stash entry identified by its commit hash.
-// Searches the stash list to find the matching entry and drops it by ref.
-// The caller must hold the project stash mutex.
-//
-// An entry that is not in the list is treated as already gone and returns nil. It used to fall back
-// to dropping stash@{0}, which is the exact hazard this hash-identity API exists to remove: the
-// stack is shared by every worktree of the repository and holds the user's own entries, so the top
-// entry when ours has vanished is somebody else's state.
+// DropStashByHash drops the stash entry with this commit hash. An entry not in the list is treated
+// as already gone and returns nil — never a fallback to stash@{0}, which when ours has vanished is
+// somebody else's state. The caller must hold the project stash mutex.
 func (wm *WorktreeManager) DropStashByHash(repoPath, hash string) error {
 	if hash == "" {
 		return nil
@@ -2474,17 +2463,12 @@ func (wm *WorktreeManager) DropStashByHash(repoPath, hash string) error {
 	return nil
 }
 
-// PopStashByHash restores the stash entry with this commit hash into dir's working tree and drops it,
-// returning whether the entry was found.
-//
-// This and PushStash exist because `git stash pop` pops stash@{0} and has no idea who pushed it. The
-// stack is one per repository - shared by every worktree of the project and holding the user's own
-// entries - so with two merges running, A pops B's work and leaves its own for B. Nothing reports an
-// error. apply-by-hash is the fix, so every stash call site identifies the entry by hash (or, when the
-// push happened elsewhere, by its label - see NewestStashHashForMessage).
-//
-// A failed apply leaves the entry on the stack: dropping what could not be applied would turn a
-// resolvable conflict into lost work. The caller must hold the project stash mutex.
+// PopStashByHash restores the stash entry with this commit hash into dir's working tree and drops
+// it, returning whether the entry was found. `git stash pop` pops stash@{0} with no idea who pushed
+// it, so on a shared stack one merge restores another's work and keeps its own entry, with no error
+// on either side — hence identity by hash. A failed apply leaves the entry on the stack: dropping
+// what could not be applied turns a resolvable conflict into lost work.
+// The caller must hold the project stash mutex.
 func (wm *WorktreeManager) PopStashByHash(dir, hash string) (bool, error) {
 	if hash == "" {
 		return false, nil
@@ -2527,15 +2511,10 @@ func shortHash(hash string) string {
 	return hash[:8]
 }
 
-// NewestStashHashForMessage returns the hash of the newest entry whose reflog subject carries label.
-//
-// For restores that happen long after the push - a sync-merge keeps the stash across a conflict and
-// restores it once the resolution is committed, in code that never saw the push. The labels embed the
-// task ID, so "newest entry labelled for this task" is ours rather than the newest on a shared stack.
-//
-// A caller still holding the hash from PushStash should use PopStashByHash instead: the label is a weaker
-// identity, and two threads of one task can both have pushed under it. The caller must hold the project
-// stash mutex.
+// NewestStashHashForMessage returns the hash of the newest entry whose reflog subject carries
+// label, for restores that happen in code that never saw the push; labels embed the task ID. Weaker
+// than a hash — a caller still holding one should use PopStashByHash.
+// The caller must hold the project stash mutex.
 func (wm *WorktreeManager) NewestStashHashForMessage(dir, label string) (string, bool, error) {
 	if label == "" {
 		return "", false, nil
@@ -2553,11 +2532,8 @@ func (wm *WorktreeManager) NewestStashHashForMessage(dir, label string) (string,
 }
 
 // RestoreStashForTask restores the stash entry pushed under `label` (a StashMessageFor* value), if
-// one is on the stack.
-//
-// It combines the label lookup with the restore so that no caller has to reach for `git stash pop`,
-// which pops stash@{0} regardless of who pushed it. found reports whether anything of ours was there.
-//
+// one is on the stack; found reports whether anything of ours was there. It exists so no caller
+// reaches for `git stash pop`, which ignores who pushed it.
 // The caller must hold the project stash mutex.
 func (wm *WorktreeManager) RestoreStashForTask(dir, label string) (bool, error) {
 	hash, found, err := wm.NewestStashHashForMessage(dir, label)
@@ -2567,13 +2543,9 @@ func (wm *WorktreeManager) RestoreStashForTask(dir, label string) (bool, error) 
 	return wm.PopStashByHash(dir, hash)
 }
 
-// DropStashForTask discards the stash entry pushed under label (a StashMessageFor* value), if present.
-//
-// The conflict-resolution path must discard stashed pre-sync edits rather than re-apply them (they are
-// committed by then), and it used to do that with a bare `git stash drop` - which drops stash@{0}, the
-// newest entry whoever pushed it, on a stack shared with the user's own entries.
-//
-// The caller must hold the project stash mutex.
+// DropStashForTask discards the stash entry pushed under label (a StashMessageFor* value), if
+// present: the conflict-resolution path discards stashed pre-sync edits rather than re-applying
+// them, because they are committed by then. The caller must hold the project stash mutex.
 func (wm *WorktreeManager) DropStashForTask(dir, label string) (bool, error) {
 	hash, found, err := wm.NewestStashHashForMessage(dir, label)
 	if err != nil || !found {
@@ -2623,14 +2595,9 @@ func IsGitRepo(path string) bool {
 	return cmd.Run() == nil
 }
 
-// HasGitDir reports whether path carries a .git entry of its own — a repository
-// root, a linked worktree (where .git is a file), or a submodule checkout. One
-// stat instead of a `git rev-parse` process, for callers that check many entries.
-//
-// Narrower than IsGitRepo on purpose: rev-parse walks up the tree, so it also
-// says yes to a plain subdirectory of a repository. Ask that question once for
-// the directory being listed — when it is yes, every entry is inside the same
-// repository.
+// HasGitDir reports whether path carries a .git entry of its own — a repository root, a linked
+// worktree (where .git is a file), or a submodule. One stat instead of a `git rev-parse`, for
+// callers that check many entries. Narrower than IsGitRepo, whose rev-parse walks up the tree.
 func HasGitDir(path string) bool {
 	_, err := os.Lstat(filepath.Join(path, ".git"))
 	return err == nil

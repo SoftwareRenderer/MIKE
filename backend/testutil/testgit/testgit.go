@@ -1,17 +1,13 @@
-// Package testgit builds throwaway git repositories for tests.
+// Package testgit builds throwaway git repositories for tests, so the packages that touch git
+// stop each carrying their own copy of "init a repo, commit one file, fail the test on error".
 //
-// Every package that touches git (managers, server, stream, exec, lsp) grew its own copy of
-// "init a repo, commit one file, run a command, fail the test on error"; these helpers run
-// the same commands, so switching a suite over changes no fixture.
+//   - Every command carries an explicit identity (-c user.name / -c user.email): a real git
+//     commit fails where no global identity exists, and a test must not depend on the
+//     developer's config.
+//   - Init does NOT rename the initial branch: suites that follow with git worktree add -B main
+//     create main rather than move it, so pinning it here would break them.
 //
-//   - Every command carries an explicit identity (-c user.name / -c user.email): a real
-//     `git commit` fails with "Committer identity unknown" where no global identity exists,
-//     and a test must not depend on the developer's config.
-//   - Init does NOT rename the initial branch - it stays the machine's init.defaultBranch.
-//     Suites that follow with `git worktree add -B main` create main rather than move it, so
-//     pinning it here would break them. Need a branch, create it.
-//
-// Test-only: nothing under backend/ or pkg/ outside _test files may import it.
+// Test-only: nothing outside _test files may import it.
 package testgit
 
 import (

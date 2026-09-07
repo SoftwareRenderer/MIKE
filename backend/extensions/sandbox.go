@@ -71,7 +71,6 @@ type extensionSandboxState struct {
 	envs []string
 }
 
-// NewExtensionSandboxManager creates a new ExtensionSandboxManager.
 func NewExtensionSandboxManager(reg *RegistryClient, store *ExtensionStore) *ExtensionSandboxManager {
 	rt := sandboxruntime.NewRuntime()
 	sm := &ExtensionSandboxManager{
@@ -205,13 +204,10 @@ func extensionMemoryLimit(ext *Extension) int {
 // DependencyMount is what a granted dependency directory gives a container: a mount plus the
 // environment assignment that points at it, or the reason there is nothing to bind.
 //
-// Derived in one place and used on both sides of the lifecycle — if the compatibility check and
+// Derived in one place and used on both sides of the lifecycle: if the compatibility check and
 // the create each computed their own answer, a container built before a grant would be called
-// compatible with it and the grant would never take effect.
-//
-// The assignment belongs on the container, not on the server process: `environment.check` is an
-// exec in this container asking the toolchain the same question, and given only to the server it
-// would report failure forever with the mount right there.
+// compatible with it and the grant would never take effect. The assignment belongs on the
+// container, not the server process.
 type DependencyMount struct {
 	Mount  types.SandboxMount
 	Env    types.SandboxEnv
@@ -913,13 +909,10 @@ func pullsMissingRemoteImage(image string) bool {
 // extensionImageSource answers two questions together because they must agree: which image an
 // extension's sandbox runs, and what builds it when the host lacks it.
 //
-// There is no default image. There used to be (docker.io/library/ubuntu:latest when the record's image
-// was empty), and it failed in the worst way for a language server: the container started, reported
-// running, and held no server, so the editor's LSP never resolved and nothing said why. Now an
-// extension that cannot name an image is an error, and no container is created.
-//
-// A record with no image but a Dockerfile on disk is repaired here, so an extension broken by the old
-// default heals on its next start instead of needing a reinstall.
+// There is no default image. The old one (ubuntu:latest for an empty record) failed in the worst
+// way for a language server: the container started, reported running, and held no server. Now an
+// extension that cannot name an image is an error and no container is created. A record with no
+// image but a Dockerfile on disk is repaired here, so it heals on its next start.
 func (sm *ExtensionSandboxManager) extensionImageSource(ext *Extension) (image, dockerfilePath string, err error) {
 	dockerfilePath, dfErr := sm.findLocalDockerfile(ext.Name)
 	if dfErr != nil {

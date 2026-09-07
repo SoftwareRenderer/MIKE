@@ -33,16 +33,15 @@ var adapterRegistry = struct {
 //
 // Memory model (the wazero tinygo/greet.go pattern):
 //
-//	Host → WASM: call the module's Alloc(size), write the bytes there, and pass
-//	  (offset, size) as a `string` parameter - the Go compiler maps string to
-//	  (i32 ptr, i32 len). Alloc → Write → Call → Free.
-//	WASM → host: the module calls the host-imported store_result(data string),
-//	  which reads the string out of linear memory and delivers it on resultCh.
-//	  Safe because that callback fires synchronously, before fn.Call returns.
+//	Host → WASM: Alloc(size), write the bytes there, pass (offset, size) as a `string`
+//	  parameter. Alloc → Write → Call → Free.
+//	WASM → host: the module calls the host-imported store_result(data string), which reads
+//	  the string out of linear memory and delivers it on resultCh — safe because that
+//	  callback fires synchronously, before fn.Call returns.
 //
-// Every exported call must be serialized under mu: the module, its bump allocator (memOffset)
-// and the size-1 resultCh are not concurrency-safe, and AgentRunner.readOutput calls
-// ParseOutput *without* holding r.mu while Prompt/Compact call EncodeCommand holding it.
+// Every exported call must be serialized under mu: the module, its bump allocator and the
+// size-1 resultCh are not concurrency-safe, and AgentRunner.readOutput calls ParseOutput
+// *without* holding r.mu.
 type wasmAdapter struct {
 	mu       sync.Mutex
 	runtime  wazero.Runtime

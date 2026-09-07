@@ -23,6 +23,7 @@ import (
 
 	"github.com/creack/pty"
 
+	"kanban/backend/toolresult"
 	"kanban/backend/types"
 	"kanban/pkg/bridge"
 	"kanban/pkg/logging"
@@ -305,19 +306,15 @@ func createContainerArgs(containerName, mountPath string) []string {
 
 // Create creates a gVisor sandbox container for a task.
 //
-// Mounts: the worktree at /home/sandbox/<project.Name> (read-only in plan mode, read-write
-// otherwise); project.Path/.git read-only at its own absolute path, so git can resolve refs,
-// objects and worktree metadata; opts.AgentSandbox mounts and envs (default
-// /root/.config/agent); skillsDir read-only at SkillsMount when non-empty; opts.SandboxMounts
-// appended last.
+// Mounts: the worktree at /home/sandbox/<project.Name> (read-only in plan mode);
+// project.Path/.git read-only at its own absolute path, so git can resolve refs and
+// worktree metadata; opts.AgentSandbox mounts and envs; skillsDir read-only at SkillsMount
+// when non-empty; opts.SandboxMounts appended last.
 //
-// Configuration: opts.BaseImage or the BaseImage constant; --network none when networkIsolation;
-// --memory=<limit>M when memoryLimit > 0; environment limited to what was configured (see
-// containerEnvArgs) — PATH and the rest stay as the image sets them.
-//
-// Each opts.ForwardPorts entry gets an ephemeral host port (net.Listen ":0" on the entry's
-// bind address) mapped to the container port; the returned slice lists those mappings, nil
-// on failure.
+// Configuration: opts.BaseImage or the BaseImage constant; --network none when
+// networkIsolation; --memory=<limit>M when memoryLimit > 0; environment limited to what was
+// configured (see containerEnvArgs). Each opts.ForwardPorts entry gets an ephemeral host port;
+// the returned slice lists those mappings, nil on failure.
 func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Project, opts SandboxOpts) ([]types.AssignedPort, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -659,11 +656,16 @@ func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env
 		c.Stdin = bytes.NewReader(stdin)
 	}
 
-	out, err := c.CombinedOutput()
+	// The capture bounds what one tool command can make this process hold: output past
+	// MaxCaptureBytes is counted, not stored, and the text says it stopped.
+	out := toolresult.NewCapture()
+	c.Stdout = out
+	c.Stderr = out
+	err = c.Run()
 	if err != nil {
-		return string(out), fmt.Errorf("exec failed: %w", err)
+		return out.String(), fmt.Errorf("exec failed: %w", err)
 	}
-	return string(out), nil
+	return out.String(), nil
 }
 
 // ProcessHandle holds a running process inside the sandbox (no PTY).
@@ -812,14 +814,13 @@ func (sm *SandboxManager) startShell(taskID, worktreePath string, project *types
 	// Start podman exec with PTY
 	// -i: keep STDIN open
 	// -t: allocate a pseudo-TTY
-	cmd := podmanCommand(shellExecArgs(containerName, mountPath, shell)...)
 	// cmd.Env comes from podmanCommand → sandboxruntime.PodmanEnv: the rootless-podman essentials
 	// (HOME, XDG_RUNTIME_DIR, the D-Bus address) and nothing else — notably not
 	// MIKE_LOGIN_PASSWORD or MIKE_ENCRYPTION_KEY, which os.Environ() used to hand this process.
 	// The claim that none of it reaches the container is still true and still the reason the
 	// terminal's own environment is the container's: podman exec inherits the container's
 	// environment unless an -e says otherwise.
-
+	cmd := podmanCommand(shellExecArgs(containerName, mountPath, shell)...)
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
 	if err != nil {
 		return nil, nil, fmt.Errorf("start shell: %w", err)

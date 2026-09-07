@@ -10,13 +10,10 @@ import (
 // taskUpdateRequest is the body of PUT /api/projects/{projectID}/tasks/{taskID}.
 //
 // Every field is a pointer because the endpoint is a partial update: an absent key means "leave
-// that column alone", a present one means "write this value" - including "" and false. A JSON null
-// decodes to nil and reads as absent, the same convention config's parseBoolPtr uses.
-//
-// Pointers are also what makes a wrong-typed value a 400. This handler used to read a
-// map[string]any and assert each value (`v.(string)`, `v.(bool)`, `int(v.(float64))`), so
-// {"title":123} panicked and {"auto_commit":"yes"} was dropped silently while the UI believed
-// its own save.
+// that column alone", a present one means "write this value" — including "" and false. A JSON
+// null decodes to nil and reads as absent. Pointers are also what makes a wrong-typed value a
+// 400: reading a map[string]any and asserting each value panicked on {"title":123} and silently
+// dropped {"auto_commit":"yes"} while the UI believed its own save.
 type taskUpdateRequest struct {
 	Title                     *string `json:"title"`
 	Prompt                    *string `json:"prompt"`

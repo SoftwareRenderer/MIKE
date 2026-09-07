@@ -8,18 +8,15 @@ import (
 
 // Task-level provider concurrency.
 //
-// A task holds a provider slot (te.taskGate, a ConcurrencyGate keyed by provider URL) from
-// the start of executeTask until it goes idle, is stopped, or fails; a message that resumes
-// an idle task acquires one again, possibly queuing. This is separate from the per-request
-// gate (te.gate), which caps in-flight LLM requests and RPS. They cannot form a cycle: a
-// task slot is never acquired while holding a request slot.
+// A task holds a provider slot (te.taskGate, keyed by provider URL) from the start of
+// executeTask until it goes idle, is stopped, or fails; resuming an idle task acquires one
+// again. It is separate from the per-request gate (te.gate) and cannot cycle with it: a task
+// slot is never acquired while holding a request slot. Agent providers are excluded — they
+// manage their own concurrency.
 //
-// "In Progress + Pending" means status in_progress with execution_state idle, allowed only
-// while work is really pending: queued for a slot, a user message just accepted
-// (HandleSend), or a parent waiting on unfinished subtasks (MoveTask). Nothing may rest in
-// in_progress+idle — check those three cases before adding a writer.
-//
-// Agent providers are excluded — they manage their own concurrency.
+// "In Progress + Pending" is in_progress with execution_state idle, allowed only while work is
+// really pending: queued for a slot, a message just accepted (HandleSend), or a parent waiting
+// on subtasks (MoveTask). Nothing may rest in in_progress+idle.
 
 // acquireTaskSlot blocks until a running-task slot for providerURL is granted or the
 // execution context is cancelled (which returns false). While waiting the task reads as

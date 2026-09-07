@@ -1,14 +1,11 @@
 package extensions
 
-// The server-side half of the derived language: which pack's prompt templates the
-// server renders. It is derived from the same one rule the UI uses (ActiveI18N) and
-// resolved with the same containment rule the pack's catalog is read with
-// (packFilePath), so the UI's language and the prompt's language cannot be answers
-// to two different questions.
+// The server-side half of the derived language: which pack's prompt templates the server
+// renders, from the same rule the UI uses (ActiveI18N) and the same containment rule the pack's
+// catalog is read with (packFilePath).
 //
-// This package resolves the path and never installs it: the caller
-// (backend/server) hands the answer to prompts.SetOverlay. `extensions` already
-// imports `prompts` for FuncMap(), so `prompts` importing back here would be a
+// This package resolves the path and never installs it: backend/server hands the answer to
+// prompts.SetOverlay, because extensions already imports prompts and the reverse would be a
 // cycle — the dependency is injected, not imported.
 
 import (
@@ -80,15 +77,11 @@ func PromptOverlayFor(exts []Extension, extensionsDir string) PromptOverlay {
 // PromptDirInPack resolves a pack-relative prompts directory and proves the result is
 // the pack's own.
 //
-// Contained twice, exactly like the delete path: `packFilePath` is the lexical proof
-// (which is what refuses `..` in a readable way), and the symlink check is the
-// enforcement, because filepath.Join collapses the segments a lexical check refused to
-// see and a symlink answers with a directory nobody granted. The symlink-free path is
-// what comes back, so the reader cannot be walked back through the link.
-//
-// A `prompts_dir` naming the pack directory itself is refused (rel == "."), which is
-// the same line validateI18N drew at install: the declaration names a directory of
-// templates, not the whole pack.
+// PromptDirInPack resolves a pack-relative prompts directory and proves the result is the
+// pack's own. Contained twice, like the delete path: packFilePath is the lexical proof (which
+// is what refuses .. readably) and the symlink check is the enforcement, because filepath.Join
+// collapses the segments a lexical check refused to see. The symlink-free path is returned.
+// A prompts_dir naming the pack directory itself (rel == ".") is refused, as at install.
 func PromptDirInPack(packDir, rel string) (string, bool) {
 	full, ok := packFilePath(packDir, rel)
 	if !ok {

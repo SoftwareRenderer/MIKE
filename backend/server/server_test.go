@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"kanban/backend/fsutil"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -32,7 +33,6 @@ func testServer(t *testing.T) *Server {
 	worktreesDir := filepath.Join(dir, "worktrees")
 	os.MkdirAll(worktreesDir, 0o755)
 
-	// Set env var for worktrees dir
 	oldWT := os.Getenv("MIKE_WORKTREES_DIR")
 	os.Setenv("MIKE_WORKTREES_DIR", worktreesDir)
 	t.Cleanup(func() {
@@ -52,7 +52,6 @@ func testServer(t *testing.T) *Server {
 		t.Cleanup(func() { os.Unsetenv("MIKE_LOGIN_RATE_LIMIT") })
 	}
 
-	// Set env var for auth password
 	oldPW := os.Getenv("MIKE_LOGIN_PASSWORD")
 	os.Setenv("MIKE_LOGIN_PASSWORD", testPassword)
 	t.Cleanup(func() {
@@ -67,8 +66,15 @@ func testServer(t *testing.T) *Server {
 	// parallel sandbox package tests (they manage their own cleanup via TestMain).
 	os.Setenv("MIKE_SANDBOX_SKIP_STARTUP_CLEANUP", "1")
 
-	// Allow sandbox to be disabled in tests (individual tests can override).
+	// Tests that pin the refusal override this with t.Setenv.
 	os.Setenv("DANGER_ZONE", "1")
+
+	// Every fixture here is a t.TempDir() directory under /tmp, outside the jail, so the
+	// suite runs widened. A test that pins the jailed behaviour sets the variable itself
+	// BEFORE calling testServer, and an explicit value (including "") always wins.
+	if _, ok := os.LookupEnv(fsutil.AllowRootFSEnv); !ok {
+		t.Setenv(fsutil.AllowRootFSEnv, "1")
+	}
 
 	// Set path to sandbox-bridge binary so tests can create sandbox containers.
 	// Without this, GetAgentBinaryPath() searches relative to the test executable
@@ -246,7 +252,6 @@ func createTestTask(t *testing.T, s *Server, projectID string, prompt string) st
 func TestHandleFSWrite(t *testing.T) {
 	s := testServer(t)
 
-	// Create a test project for FS write tests
 	tmpDir := t.TempDir()
 	project := &types.Project{
 		ID:   "test-project-write",
@@ -277,7 +282,6 @@ func TestHandleFSWrite(t *testing.T) {
 			t.Fatalf("expected status=written, got %v", result["status"])
 		}
 
-		// Verify file was written
 		data, err := os.ReadFile(filePath)
 		if err != nil {
 			t.Fatalf("read file: %v", err)
@@ -361,7 +365,6 @@ func TestHandleFSWrite(t *testing.T) {
 func TestHandleFSPathValidation(t *testing.T) {
 	s := testServer(t)
 
-	// Create a test project
 	tmpDir := t.TempDir()
 	project := &types.Project{
 		ID:   "test-project-fs",
@@ -371,7 +374,6 @@ func TestHandleFSPathValidation(t *testing.T) {
 	if err := s.rawStore().CreateProject(project); err != nil {
 		t.Fatal(err)
 	}
-	// Create a file inside the project
 	os.WriteFile(filepath.Join(tmpDir, "allowed.txt"), []byte("ok"), 0644)
 
 	cookie, csrfToken := loginTestCSRF(t, s)
@@ -458,7 +460,6 @@ func TestHandleFSPathValidation(t *testing.T) {
 func TestHandleFSReadGutterMarkers(t *testing.T) {
 	s := testServer(t)
 
-	// Create a git repo with a committed file
 	tmpDir := t.TempDir()
 	project := &types.Project{
 		ID:   "test-project-gutter",
@@ -469,12 +470,10 @@ func TestHandleFSReadGutterMarkers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Initialize git repo and commit a file
 	mustRunGit(t, tmpDir, "init")
 	mustRunGit(t, tmpDir, "config", "user.email", "test@test.com")
 	mustRunGit(t, tmpDir, "config", "user.name", "Test")
 
-	// Create and commit a file with known content
 	originalContent := "line1\nline2\nline3\nline4\nline5\n"
 	testFile := filepath.Join(tmpDir, "test.txt")
 	os.WriteFile(testFile, []byte(originalContent), 0644)
@@ -484,7 +483,7 @@ func TestHandleFSReadGutterMarkers(t *testing.T) {
 	cookie, csrfToken := loginTestCSRF(t, s)
 
 	t.Run("modified file returns gutter markers", func(t *testing.T) {
-		// Modify the file: change line 2, delete line 4, add a line at end
+		// Change line 2, delete line 4, append a line.
 		modifiedContent := "line1\nline2-changed\nline3\nline5\nline6-new\n"
 		os.WriteFile(testFile, []byte(modifiedContent), 0644)
 
@@ -503,16 +502,13 @@ func TestHandleFSReadGutterMarkers(t *testing.T) {
 			t.Fatal("expected gutter markers, got nil")
 		}
 
-		// Line 2 was modified (line2 → line2-changed)
 		if markers, ok := resp.GutterMarkers[2]; !ok || len(markers) == 0 {
 			t.Errorf("expected marker on line 2, got %v", resp.GutterMarkers)
 		} else if markers[0] != "modified" {
 			t.Errorf("expected 'modified' on line 2, got %v", markers)
 		}
 
-		// Line 4 (was line5, now at position 4) — line 4 was removed,
-		// so a "removed" marker should appear on line 3 (before the gap)
-		// Line 5 (line6-new) is added
+		// Line 4 was deleted, so its "removed" marker sits on line 3, before the gap.
 		if markers, ok := resp.GutterMarkers[5]; !ok || len(markers) == 0 {
 			t.Errorf("expected marker on line 5 (added), got %v", resp.GutterMarkers)
 		} else if markers[0] != "added" {
@@ -521,7 +517,6 @@ func TestHandleFSReadGutterMarkers(t *testing.T) {
 	})
 
 	t.Run("unmodified file returns no markers", func(t *testing.T) {
-		// Reset file to match HEAD
 		os.WriteFile(testFile, []byte(originalContent), 0644)
 
 		req := testRequest(http.MethodGet, "/api/fs/read?path="+testFile+"&project=test-project-gutter", nil)
@@ -541,7 +536,6 @@ func TestHandleFSReadGutterMarkers(t *testing.T) {
 	})
 
 	t.Run("untracked file returns no markers", func(t *testing.T) {
-		// Create a file that is not tracked by git
 		untrackedFile := filepath.Join(tmpDir, "untracked.txt")
 		os.WriteFile(untrackedFile, []byte("new content\n"), 0644)
 
@@ -586,7 +580,6 @@ func TestHandleFSSearch(t *testing.T) {
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 
-	// Create a test project with files
 	tmpDir := t.TempDir()
 	os.MkdirAll(filepath.Join(tmpDir, "src", "components"), 0o755)
 	os.MkdirAll(filepath.Join(tmpDir, "node_modules", "pkg"), 0o755)
@@ -597,7 +590,6 @@ func TestHandleFSSearch(t *testing.T) {
 	os.WriteFile(filepath.Join(tmpDir, "node_modules", "pkg", "index.js"), []byte("pkg"), 0o644)
 	os.WriteFile(filepath.Join(tmpDir, ".hidden"), []byte("hidden"), 0o644)
 
-	// Register project
 	projectID := "test-search-project"
 	if err := s.rawStore().CreateProject(&types.Project{ID: projectID, Name: "Test Search", Path: tmpDir}); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -703,7 +695,6 @@ func TestHandleFSSearch(t *testing.T) {
 	})
 
 	t.Run("limits results to 10", func(t *testing.T) {
-		// Create many files
 		for i := 0; i < 20; i++ {
 			filename := filepath.Join(tmpDir, fmt.Sprintf("file%02d.txt", i))
 			os.WriteFile(filename, []byte(fmt.Sprintf("content %d", i)), 0o644)
@@ -721,12 +712,10 @@ func TestHandleFSSearch(t *testing.T) {
 		}
 	})
 
-	// --- Content search tests ---
-	// Create files with known content for content search
+	// Content search.
 	os.WriteFile(filepath.Join(tmpDir, "greeting.txt"), []byte("Hello world\nGoodbye world\n"), 0o644)
 	os.WriteFile(filepath.Join(tmpDir, "src", "app.ts"), []byte("const x = 42;\nfunction hello() { return 'hi'; }\n"), 0o644)
 	os.WriteFile(filepath.Join(tmpDir, "src", "utils.ts"), []byte("// utility functions\nexport function format(s: string) { return s.trim(); }\n"), 0o644)
-	// Binary file
 	os.WriteFile(filepath.Join(tmpDir, "binary.dat"), []byte("hello\x00world\x00data"), 0o644)
 
 	t.Run("content search finds matching lines", func(t *testing.T) {
@@ -783,7 +772,6 @@ func TestHandleFSSearch(t *testing.T) {
 	})
 
 	t.Run("content search with regex", func(t *testing.T) {
-		// Use url.QueryEscape to properly encode the regex pattern
 		q := url.QueryEscape(`export\s+function`)
 		req := testRequest(http.MethodGet, "/api/fs/search?q="+q+"&regex=1&content=1&project="+projectID, nil)
 		withAuthCSRF(req, cookie, csrfToken)
@@ -875,7 +863,6 @@ func TestHandleFSSearch(t *testing.T) {
 }
 
 func TestGitIdentityAvailable(t *testing.T) {
-	// Save and restore env vars for standard git identity
 	saveEnv := func(keys ...string) map[string]string {
 		orig := make(map[string]string)
 		for _, k := range keys {
@@ -949,7 +936,6 @@ func TestGitIdentityAvailable(t *testing.T) {
 		if email != "only-email@example.com" {
 			t.Errorf("expected email=\"only-email@example.com\", got %q", email)
 		}
-		// Name may come from git config if set on this system
 		_ = name
 	})
 
@@ -965,7 +951,6 @@ func TestGitIdentityAvailable(t *testing.T) {
 		if name != "Only Name" {
 			t.Errorf("expected name=\"Only Name\", got %q", name)
 		}
-		// Email may come from git config if set on this system
 		_ = email
 	})
 
@@ -977,9 +962,8 @@ func TestGitIdentityAvailable(t *testing.T) {
 		}
 
 		name, email := resolveGitIdentity()
-		// Falls back to git config --global. If configured, should return values.
-		// If not configured, returns empty strings.
-		// This test just verifies the function doesn't panic.
+		// Asserts only that the git-config fallback does not panic: the answer depends
+		// on the machine's global config.
 		_ = name
 		_ = email
 	})
@@ -988,7 +972,6 @@ func TestGitIdentityAvailable(t *testing.T) {
 func TestHandleFSInitGit_EnvVars(t *testing.T) {
 	s := testServer(t)
 
-	// Save and restore env vars
 	gitEnvKeys := []string{
 		"GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME",
 		"GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL",
@@ -1016,8 +999,8 @@ func TestHandleFSInitGit_EnvVars(t *testing.T) {
 		for _, k := range gitEnvKeys {
 			os.Unsetenv(k)
 		}
-		// Set standard git env vars (KANBAN vars are package-level, set at init)
-		// The handler checks resolveGitIdentity() which reads GIT_* env vars at call time
+		// resolveGitIdentity reads GIT_* at call time, so env vars stand in for a
+		// machine-level git config.
 		os.Setenv("GIT_AUTHOR_NAME", "Test Author")
 		os.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
 
@@ -1033,7 +1016,6 @@ func TestHandleFSInitGit_EnvVars(t *testing.T) {
 			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 		}
 
-		// Verify git repo was created
 		if _, err := os.Stat(filepath.Join(tmpDir, ".git")); os.IsNotExist(err) {
 			t.Fatal("expected .git directory to exist")
 		}
@@ -1045,7 +1027,6 @@ func TestHandleFSInitGit_EnvVars(t *testing.T) {
 		for _, k := range gitEnvKeys {
 			os.Unsetenv(k)
 		}
-		// Set standard git env vars as fallback
 		os.Setenv("GIT_COMMITTER_NAME", "Kanban Bot")
 		os.Setenv("GIT_COMMITTER_EMAIL", "bot@kanban.local")
 
@@ -1077,9 +1058,8 @@ func TestHandleFSInitGit_EnvVars(t *testing.T) {
 		withAuthCSRF(req, cookie, csrfToken)
 		rr := testResponse(t, s, req)
 
-		// Should fail if git config is also not set
 		if rr.Code == http.StatusOK {
-			// This is acceptable if the test environment has git config set
+			// A machine-level git config makes the negative case impossible here.
 			t.Log("git config was available, skipping negative test")
 			return
 		}
@@ -1106,7 +1086,6 @@ func TestHandleStatus_IncludesAuthorInfo(t *testing.T) {
 	// Initialize a git repo with specific author config
 	initGitRepo(t, tmpDir)
 
-	// Fetch git status
 	req := testRequest("GET", "/api/projects/test-status-author/git/status", nil)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	withAuthCSRF(req, cookie, csrfToken)
@@ -1117,7 +1096,6 @@ func TestHandleStatus_IncludesAuthorInfo(t *testing.T) {
 
 	result := mustJSON[map[string]any](t, rr.Body)
 
-	// Verify authorName and authorEmail are present
 	authorName, okName := result["authorName"].(string)
 	authorEmail, okEmail := result["authorEmail"].(string)
 
@@ -1141,19 +1119,17 @@ func TestHandleStatus_IncludesAuthorInfo(t *testing.T) {
 func TestDoneTaskDiffReturnsCommittedDiff(t *testing.T) {
 	s := testServer(t)
 
-	// Create a git repo in the temp dir
 	dir := t.TempDir()
 	exec.Command("git", "-C", dir, "init", "-b", "main").Run()
 	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
 	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
 
-	// Create initial commit (this will be the base)
+	// The initial commit is the task's base.
 	os.WriteFile(join(dir, "initial.txt"), []byte("initial\n"), 0644)
 	exec.Command("git", "-C", dir, "add", "initial.txt").Run()
 	exec.Command("git", "-C", dir, "commit", "-m", "Initial commit").Run()
 	baseCommit := strings.TrimSpace(execOutput(t, "git", "-C", dir, "rev-parse", "HEAD"))
 
-	// Create a project pointing to this repo
 	proj := &types.Project{
 		ID:   "diff-test-proj",
 		Name: "diff-test",
@@ -1182,7 +1158,6 @@ func TestDoneTaskDiffReturnsCommittedDiff(t *testing.T) {
 	}
 	s.rawStore().CreateTask(task)
 
-	// Call the diff API without explicit head param
 	// For done tasks, the backend should automatically use BranchTip
 	cookie, csrfToken := loginTestCSRF(t, s)
 	req := testRequest(http.MethodGet, "/api/projects/diff-test-proj/tasks/done-diff-task/diff", nil)
@@ -1196,13 +1171,12 @@ func TestDoneTaskDiffReturnsCommittedDiff(t *testing.T) {
 	var resp map[string]any
 	json.NewDecoder(rr.Body).Decode(&resp)
 
-	// For done tasks, the response should contain a raw diff string (not a manifest)
+	// A done task answers with a raw diff string, not a manifest.
 	diff, ok := resp["diff"].(string)
 	if !ok {
 		t.Fatalf("expected 'diff' field (string) in response, got: %v", resp)
 	}
 
-	// The diff should contain the committed file
 	if !strings.Contains(diff, "new-file.txt") {
 		t.Fatalf("diff does not contain committed file 'new-file.txt':\n%s", diff)
 	}
@@ -1385,7 +1359,6 @@ func TestDoneTaskDiffSnapshotBypassedForFullAndCustomRefs(t *testing.T) {
 func TestSandboxDisableBlockedWithoutDangerZone(t *testing.T) {
 	s := testServer(t)
 
-	// Ensure DANGER_ZONE is not set
 	oldVal := os.Getenv("DANGER_ZONE")
 	os.Unsetenv("DANGER_ZONE")
 	t.Cleanup(func() {
@@ -1396,7 +1369,6 @@ func TestSandboxDisableBlockedWithoutDangerZone(t *testing.T) {
 		}
 	})
 
-	// Create a project with sandbox enabled
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 	cookie, csrfToken := loginTestCSRF(t, s)
@@ -1416,7 +1388,6 @@ func TestSandboxDisableBlockedWithoutDangerZone(t *testing.T) {
 	result := mustJSON[map[string]any](t, rr.Body)
 	projectID := result["id"].(string)
 
-	// Try to disable sandbox — should be blocked
 	update := map[string]any{
 		"sandbox_enabled": false,
 	}
@@ -1439,7 +1410,6 @@ func TestSandboxDisableBlockedWithoutDangerZone(t *testing.T) {
 func TestSandboxDisableAllowedWithDangerZone(t *testing.T) {
 	s := testServer(t)
 
-	// Set DANGER_ZONE=1
 	oldVal := os.Getenv("DANGER_ZONE")
 	os.Setenv("DANGER_ZONE", "1")
 	t.Cleanup(func() {
@@ -1450,7 +1420,6 @@ func TestSandboxDisableAllowedWithDangerZone(t *testing.T) {
 		}
 	})
 
-	// Create a project with sandbox enabled
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 	cookie, csrfToken := loginTestCSRF(t, s)
@@ -1470,7 +1439,6 @@ func TestSandboxDisableAllowedWithDangerZone(t *testing.T) {
 	result := mustJSON[map[string]any](t, rr.Body)
 	projectID := result["id"].(string)
 
-	// Disable sandbox — should succeed with DANGER_ZONE=1
 	update := map[string]any{
 		"sandbox_enabled": false,
 	}
@@ -1492,7 +1460,6 @@ func TestSandboxDisableAllowedWithDangerZone(t *testing.T) {
 func TestSandboxCreateDisabledBlockedWithoutDangerZone(t *testing.T) {
 	s := testServer(t)
 
-	// Ensure DANGER_ZONE is not set
 	oldVal := os.Getenv("DANGER_ZONE")
 	os.Unsetenv("DANGER_ZONE")
 	t.Cleanup(func() {
@@ -1503,7 +1470,6 @@ func TestSandboxCreateDisabledBlockedWithoutDangerZone(t *testing.T) {
 		}
 	})
 
-	// Try to create a project with sandbox disabled — should be blocked
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 	cookie, csrfToken := loginTestCSRF(t, s)

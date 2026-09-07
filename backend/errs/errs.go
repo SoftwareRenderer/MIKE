@@ -1,13 +1,9 @@
-// Package errs holds the sentinel errors that cross package boundaries.
+// Package errs holds the sentinel errors that cross package boundaries. A producer reports an
+// outcome by wrapping one of these; the transport maps it to a status in one place
+// (httputil.Fail) instead of guessing from the call site, so producers never mention HTTP and
+// handlers never compare error strings.
 //
-// A producer (the store, the extension store) reports an outcome by wrapping one
-// of these sentinels; the transport maps it to a status in one place
-// (httputil.Fail) instead of guessing from the call site. Producers therefore
-// never mention HTTP, and handlers never compare error strings.
-//
-// Only classifications a caller actually acts on belong here. ErrNotFound is the
-// one that exists today; ErrConflict or ErrInvalid should be added when a
-// producer needs them, not before.
+// Only classifications a caller actually acts on belong here.
 package errs
 
 import "errors"

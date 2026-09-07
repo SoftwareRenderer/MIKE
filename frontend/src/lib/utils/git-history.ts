@@ -1,20 +1,15 @@
 /**
  * Layout utilities for the git History list (commit rows in BranchGitGraph).
  *
- * The History panel lives in the resizable Explorer left column (default 250px,
- * min 180px; the column's 1px border means row width = panel width − 1), so
- * rows degrade in density as the panel narrows:
+ * The panel is the resizable Explorer column (default 250px, min 180px; its 1px border
+ * means row width = panel width - 1), so rows degrade as it narrows:
  *
  *   normal  (row width >= 245)  full layout — origin text badge, author, date
  *   compact (row width >= 205)  origin badge collapses to icon-only
  *   tight   (row width >= 180)  date hidden
  *   tighest (row width <  180)  author hidden
  *
- * The default panel (row width 249) stays at `normal` — today's layout — and
- * the minimum panel (row width 179) degrades to `tighest`.
- *
- * Fields hidden by the density are always present in the row tooltip
- * (buildCommitTooltip) so no information is lost.
+ * Hidden fields stay in the row tooltip (buildCommitTooltip), so no information is lost.
  */
 import type { GitCommit } from '$lib/types';
 

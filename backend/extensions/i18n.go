@@ -22,21 +22,12 @@ func (e *Extension) GetI18N() *I18NConfig {
 	return e.Manifest.Capabilities.GetI18N()
 }
 
-// ActiveI18N returns the enabled translation pack that defines the active
-// language, or nil when no pack is enabled — which means English.
+// ActiveI18N returns the enabled translation pack that defines the active language, or nil when
+// none is enabled — which means English. The winner is the first enabled pack by priority then
+// name, the same rule the frontend resolves with; a disabled pack never contributes text.
 //
-// The winner is the first enabled pack ordered by manifest priority ascending,
-// then by name ascending: the same rule HandleList sorts the extension list by
-// and the same rule the frontend resolves with, so two enabled packs are a
-// deterministic choice rather than a coin flip, and neither the API order nor a
-// map's iteration order can change which language a user sees.
-//
-// A disabled pack never contributes text — it is skipped here exactly as the
-// frontend skips it.
-//
-// This is the ONE derivation. The server-side prompt locale must call this
-// rather than re-deriving the rule, or the UI and the prompts can disagree about
-// which pack is active while both look correct.
+// This is the one derivation: the server-side prompt locale calls it rather than re-deriving the
+// rule, or the UI and the prompts disagree about which pack is active.
 func ActiveI18N(extensions []Extension) *Extension {
 	var winner *Extension
 	for i := range extensions {

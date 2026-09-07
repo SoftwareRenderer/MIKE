@@ -18,6 +18,7 @@ import (
 	"kanban/backend/httputil"
 	"kanban/backend/store"
 	"kanban/backend/stream"
+	"kanban/backend/toolresult"
 	"kanban/backend/types"
 	"kanban/pkg/logging"
 )
@@ -41,18 +42,15 @@ type GitHandler struct {
 	worktreeMgr *git.WorktreeManager
 	diffCache   sync.Map // taskID -> *git.TaskDiff (full result including untracked file content)
 	// getWorktreeMutex locks the per-task worktree and returns the function that releases it.
-	// Set by the server to prevent concurrent worktree mutations.
-	//
-	// It hands back a release function rather than a *sync.Mutex for the reason given on
-	// git.WorktreeManager.LockProjectStash: a mutex that crosses a package boundary can be stored and
-	// copied, and two holders of copies serialize nothing.
+	// Set by the server. A release function is handed back rather than a *sync.Mutex because a
+	// mutex that crosses a package boundary can be stored and copied, and two holders of copies
+	// serialize nothing.
 	getWorktreeMutex func(taskID string) func()
 	// getProjectMutex locks the per-project git operations (checkout, pull, push) that touch shared
 	// state, and returns the function that releases it.
 	getProjectMutex func(projectID string) func()
 }
 
-// NewGitHandler creates a new GitHandler.
 func NewGitHandler(store *store.Store, worktreeMgr *git.WorktreeManager) *GitHandler {
 	return &GitHandler{store: store, diffs: store, worktreeMgr: worktreeMgr}
 }
@@ -99,12 +97,10 @@ func (h *GitHandler) GetDiffManifest(taskID, baseRef string) (any, error) {
 // line of pipe-separated fields, then the body between the BODY/END markers.
 const fullLogFormat = `--format=%H|%h|%s|%aN|%aI|%P%n---BODY---%n%b%n---END---`
 
-// writeFullGitLog writes the ?full=1 commit log for dir: every commit with
-// author/date/parents/body, plus the current branch, the origin tip and a hasMore flag. Both
-// log endpoints answer ?full=1 with exactly this. Their non-full responses are deliberately
-// different — the project endpoint returns decorated `git log --oneline` lines honouring
-// ?offset, the task endpoint structured %H|%h|%s rows ignoring it. Callers validate branch
-// and path first.
+// writeFullGitLog writes the ?full=1 commit log for dir: every commit with author, date,
+// parents and body, plus the current branch, the origin tip and a hasMore flag. Both log
+// endpoints answer ?full=1 with exactly this; their non-full responses deliberately differ.
+// Callers validate branch and path first.
 func (h *GitHandler) writeFullGitLog(w http.ResponseWriter, dir, branch, path string, limit, offset int) {
 	args := []string{"-C", dir, "log"}
 	if offset > 0 {
@@ -392,14 +388,9 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// ?parsed=1 returns the parser's output instead of the patch text.
-	//
-	// This is where the product's second diff grammar used to live: the browser fetched this text and
-	// ran its own parseUnifiedDiff over it, so the same patch was parsed twice and the two grammars
-	// drifted (see backend/git/diff_parse_parity_test.go). Go already has to parse a diff for its own
-	// work — per-file hashes for the diff cache, change detection, truncation — so it is the single
-	// grammar and the wire carries its structure. The raw form stays the default because
-	// `?cached=1`/base/head consumers and any external caller still read text.
+	// ?parsed=1 returns the parser's output instead of the patch text, so the wire carries the
+	// one grammar Go already parses — a second one in the browser drifted from it. Raw stays the
+	// default for ?cached=1/base/head consumers and external callers.
 	if r.URL.Query().Get("parsed") == "1" {
 		files := git.ParseUnifiedDiff(string(out))
 		w.Header().Set("Content-Type", "application/json")
@@ -498,22 +489,30 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	// Stat before reading: this is a file the request named.
+	var fileSize int64
+	if st, err := os.Stat(worktreeFile); err == nil {
+		fileSize = st.Size()
+	}
+
 	// Get file content from working tree or index
 	var fileContent string
 	var lineCount int
 	var isBinary bool
 	if staged {
-		// Read from index (staged version)
+		// Read the staged version, bounded at capture.
 		c = git.Command("", "-C", project.Path, "show", ":"+filePath)
-		contentOut, contentErr := c.CombinedOutput()
-		if contentErr == nil {
-			fileContent = string(contentOut)
+		contentOut := toolresult.NewCapture()
+		c.Stdout = contentOut
+		c.Stderr = contentOut
+		if contentErr := c.Run(); contentErr == nil {
+			fileContent = contentOut.String()
 			lineCount = strings.Count(fileContent, "\n")
 			if fileContent != "" && fileContent[len(fileContent)-1] != '\n' {
 				lineCount++
 			}
 		}
-	} else {
+	} else if fileSize <= maxDiffFileBytes {
 		// Read from working tree
 		contentOut, contentErr := os.ReadFile(worktreeFile)
 		if contentErr == nil {
@@ -535,15 +534,8 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	// File size from disk (used for metadata and binary detection)
-	var fileSize int64
-	if st, err := os.Stat(worktreeFile); err == nil {
-		fileSize = st.Size()
-	}
-
 	// Only report file_size when the file is binary or too large to render inline
-	const maxDiffSize = 1 << 20 // 1MB
-	reportFileSize := isBinary || (!isBinary && fileSize > maxDiffSize)
+	reportFileSize := isBinary || (!isBinary && fileSize > maxDiffFileBytes)
 
 	if metaOnly {
 		resp := map[string]any{
@@ -579,15 +571,15 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 	httputil.JSONResponse(w, http.StatusOK, resp)
 }
 
-// repoFilePath jails a repository-relative path to the checkout in dir and returns the
-// host file it names, symlink-resolved. An absolute path or one that walks out of the
-// repository is a forged request, not a filename.
-//
-// The symlink check is the point: git answers a pathspec from the object database, but
-// the working-tree read follows links, so a committed `key.pem -> ../../.ssh/id_rsa`
-// would read any file the server user can open. `..` alone already fails by accident
-// (git rejects a pathspec outside the repository); a link inside it fails nothing until
-// it is read.
+// maxDiffFileBytes is the largest working-tree file a diff read here pulls into memory. The
+// stat is already taken, so an oversized read is refused rather than tried.
+const maxDiffFileBytes int64 = 1_000_000
+
+// repoFilePath jails a repository-relative path to the checkout in dir and returns the host
+// file it names, symlink-resolved. An absolute path or one that walks out of the repository is
+// a forged request, not a filename. The symlink check is the point: the working-tree read
+// follows links, so a committed `key.pem -> ../../.ssh/id_rsa` would read any file the server
+// user can open.
 func repoFilePath(dir, rel string) (string, error) {
 	if rel == "" {
 		return "", fmt.Errorf("path is required")
@@ -678,16 +670,13 @@ func (h *GitHandler) handleGitRemote(w http.ResponseWriter, r *http.Request, op 
 	if h.getProjectMutex != nil {
 		defer h.getProjectMutex(projectID)()
 	}
-	// Bounded to the request: a push or a pull is the other thing this server does over a network,
-	// and an unreachable remote used to hold a per-project mutex — and a server-side git process — for
-	// the full ssh/TCP timeout, with every other git operation on that project queued behind it.
+	// Bounded to the request: an unreachable remote used to hold the per-project mutex — and a
+	// server-side git process — for the full ssh/TCP timeout, queueing every other git operation
+	// on that project behind it.
 	c := git.CommandContext(r.Context(), "", "-C", project.Path, op)
-	// No c.Env here on purpose: assigning a bare extra list would replace the environment git.Command sets,
-	// and this used to be append(os.Environ(), "GIT_TERMINAL_PROMPT=0"). Both prompt refusal and the hook
-	// fence now come from git.Env.
-	//
-	// The fence means a pre-push hook will not run when the user clicks Push. That is the accepted
-	// consequence of never executing repository content.
+	// No c.Env on purpose: a bare extra list replaces the environment git.Command sets, which is
+	// where the prompt refusal and the hook fence come from. The fence means a pre-push hook does
+	// not run when the user clicks Push.
 	if out, err := c.CombinedOutput(); err != nil {
 		logging.For(logging.Managers).Errorf("git %s failed: %v: %s", op, err, out)
 		httputil.JSONError(w, http.StatusInternalServerError, "git "+op+" failed: "+gitErrorSummary(out))
@@ -1125,21 +1114,31 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 	for _, u := range taskDiff.Untracked {
 		if u.Path == filePath {
 			lines := u.Lines
+			truncated := u.Truncated
 			// A truncated entry is re-read from the worktree when the caller asked for the file.
 			if fullFile && u.Truncated && h.worktreeMgr != nil {
 				worktreePath, err := h.worktreeMgr.WorktreePath(taskID)
 				if err == nil {
-					fullPath := filepath.Join(worktreePath, filePath)
-					data, err := os.ReadFile(fullPath)
-					if err == nil {
-						lines = git.SplitLines(string(data))
+					// The cached path came from git status, which lists a symlink the way it lists
+					// a file, so the re-read needs the listing's jail and the size cap: past the cap
+					// the cached lines are the answer and truncated says so.
+					target, size, err := git.UntrackedReadTarget(worktreePath, filePath)
+					if err != nil {
+						httputil.JSONError(w, http.StatusForbidden, err.Error())
+						return
+					}
+					if size <= maxDiffFileBytes {
+						if data, readErr := os.ReadFile(target); readErr == nil {
+							lines = git.SplitLines(string(data))
+							truncated = false
+						}
 					}
 				}
 			}
 			resp := map[string]any{
 				"lines":      lines,
 				"line_count": len(lines),
-				"truncated":  false,
+				"truncated":  truncated,
 				"origAdded":  len(lines),
 			}
 			if u.IsBinary {
@@ -1201,10 +1200,8 @@ func (h *GitHandler) getTaskDiffFromProject(projectID, taskID string, task *type
 }
 
 // stageOrUnstage applies one file's staged state in dir and returns the action name for the
-// response body. Both stage endpoints (task worktree, project checkout) do exactly this and
-// differ only in the directory they target and the mutex their caller holds. Every path goes
-// to git after `--`, so a path like "-f" is never parsed as an option. On failure the error is
-// written to w and false is returned, so callers just return.
+// response body. Every path goes to git after `--`, so a path like "-f" is never parsed as an
+// option. On failure the error is written to w and false is returned, so callers just return.
 func (h *GitHandler) stageOrUnstage(w http.ResponseWriter, dir, path string, stage bool) bool {
 	if stage {
 		// git add records a deletion too, so a staged delete survives the round trip.

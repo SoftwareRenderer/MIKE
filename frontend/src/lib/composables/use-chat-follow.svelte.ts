@@ -53,17 +53,13 @@ export interface ChatFollow {
 }
 
 /**
- * Single owner of the chat's "follow the latest content" behaviour. TaskChat
- * (stream events, sends) and ChatEntries (entry changes, the jump-to-latest
- * button) act through one instance, so there is one notion of "is the user at the
- * bottom" and one writer of scrollTop.
+ * Single owner of the chat's "follow the latest content" behaviour, so TaskChat and
+ * ChatEntries share one notion of "the user is at the bottom" and one writer of scrollTop.
  *
- * Following is driven by layout, not only by scroll events: scroll events update
- * atBottom, and a ResizeObserver on the container (viewport / panel / fullscreen /
- * soft-keyboard resize) and on the content wrapper (lazy entry rendering, images,
- * async labels) re-measures and re-pins. Those changes fire no scroll event, so
- * watching scroll alone silently leaves the viewport above the bottom with the
- * jump button hidden.
+ * Following is driven by layout, not only by scroll events: a ResizeObserver on the
+ * container and on the content wrapper re-measures and re-pins, because lazy entries,
+ * images and panel resizes fire no scroll event and would otherwise leave the viewport
+ * above the bottom with the jump button hidden.
  */
 export function createChatFollow(): ChatFollow {
     // Raw: node identity must stay exact, and a node's own properties are not reactive.

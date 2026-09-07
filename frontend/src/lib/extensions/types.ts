@@ -60,17 +60,12 @@ export interface HostRequest {
 }
 
 /**
- * Channel handshake (document identity).
- *
- * The iframe's *frame* is not a trust boundary: a sandboxed frame may navigate
- * itself to any origin, and the sandbox flags (hence the opaque origin) follow
- * the document there — so `ev.origin === 'null'` + `ev.source` prove only
- * "this came from that frame". The handshake binds the channel to the specific
- * document the host mounted: the host mints a one-time token, puts it in the
- * iframe URL, and the bridge echoes it back from `location.search`. A document
- * that arrived any other way (a navigation away and back, a hostile
- * destination) cannot know it, so it gets no `init`, no pushed events, and no
- * capability dispatch.
+ * Channel handshake (document identity). The iframe's frame is not a trust boundary: a
+ * sandboxed frame can navigate itself anywhere and the sandbox flags follow the document,
+ * so `ev.origin === 'null'` + `ev.source` prove only "that frame sent this". The handshake
+ * binds the channel to the document the host mounted: a one-time token in the iframe URL,
+ * echoed back from `location.search`. A document that arrived any other way gets no `init`,
+ * no pushed events and no capability dispatch.
  */
 export interface HostHello {
     type: 'exthello';

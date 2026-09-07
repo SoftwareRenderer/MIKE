@@ -4,21 +4,17 @@ import { t } from '$lib/i18n';
 import { collectDroppedFiles, collectPickedFiles, dragCarriesFiles, MAX_DROP_FILES, MAX_UPLOAD_BYTES, type DroppedFile, type DroppedSelection } from '$lib/utils/file-drop';
 
 /**
- * The drop zone of a file list: files (or whole folders) dragged in from the desktop
- * are written into the directory that list is showing. Both file browsers use it, and
- * what it owns is the behaviour that is easy to get wrong:
+ * The drop zone of a file list: files or whole folders dragged in are written into the
+ * directory that list shows. The parts that are easy to get wrong:
  *
- *  - **Depth counting.** `dragleave` fires when the pointer crosses a *child*
- *    element, so an overlay that hides on the first leave blinks on every row.
- *  - **Files only.** In-app drags (cards, selected text) carry `text/plain` and must
- *    neither light the zone up nor be swallowed by it.
- *  - **One question per drop.** The server answers 409 per existing name, so a folder
- *    drop asks once for every clash instead of once per file. Answering "no" aborts the
- *    drop: what is already written stays written and the toast says so.
- *  - **Cancellation** aborts every request in flight and starts nothing further.
- *
- * One request per file is what makes progress, cancellation and the overwrite question
- * answerable per file; a few of them run in parallel.
+ *  - Depth counting: `dragleave` fires when the pointer crosses a child element, so an
+ *    overlay that hides on the first leave blinks on every row.
+ *  - Files only: in-app drags carry `text/plain` and must neither light the zone up nor
+ *    be swallowed by it.
+ *  - One question per drop: the server answers 409 per existing name, so a folder drop
+ *    asks once for every clash. Answering "no" aborts the drop; what is already written
+ *    stays written and the toast says so.
+ *  - Cancellation aborts every request in flight and starts nothing further.
  */
 
 /** Files uploaded in parallel. */

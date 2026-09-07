@@ -1,23 +1,13 @@
 <script lang="ts">
     /**
-     * Help icon ("?") next to a form label.
+     * Help icon ("?") next to a form label. Hover devices keep the native `title`
+     * tooltip; touch devices never show one on tap, so the icon is a button toggling a
+     * bubble. The bubble is fixed-positioned (the card clips overflow), follows the icon
+     * on scroll rather than dismissing (the settings modal scrolls programmatically while
+     * the press lands), and closes on re-press, outside tap or Escape.
      *
-     * Hover-capable devices keep the native `title` tooltip on hover. Touch
-     * devices (`(hover: none)`) never get a native title tooltip on tap, so
-     * the icon becomes a button that toggles a tooltip bubble on press. The
-     * bubble is fixed-positioned (escapes the card's `overflow: hidden`) and
-     * dismisses on re-press, outside tap, Escape, or resize away from hover.
-     *
-     * On scroll the bubble is repositioned to follow the icon (instead of
-     * being dismissed): the settings modal scrolls when a new provider card
-     * is revealed (`scrollIntoView` smooth), and that programmatic scroll can
-     * still be settling while the user presses the icon — dismissing on it
-     * would swallow the tooltip.
-     *
-     * The dismissing listeners are attached imperatively (not via an effect
-     * that reads `open`) — in Svelte's async scheduling a `$effect` invalid-
-     * ated by `open` would defer and drop the very render update that opens
-     * the bubble.
+     * The dismissing listeners are attached imperatively: a `$effect` invalidated by
+     * `open` would defer and drop the render update that opens the bubble.
      *
      * @param text  the tooltip message
      * @param label short field name for the accessible name (e.g. "Concurrency")

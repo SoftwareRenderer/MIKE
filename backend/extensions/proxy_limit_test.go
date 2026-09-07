@@ -8,10 +8,8 @@ import (
 	"testing"
 )
 
-// TestHandleProxyCapsResponse bounds what an upstream may send back. The proxy is the
-// one way an extension reaches the network, and its upstream is named by a third-party
-// manifest, so without a cap any API on the allowlist could make the server buffer a
-// response of any size.
+// TestHandleProxyCapsResponse: the proxied response is buffered in full, so without a cap any
+// API on an extension's allowlist could make the server buffer a response of any size.
 func TestHandleProxyCapsResponse(t *testing.T) {
 	// A real body just past the cap: the handler buffers whatever it is handed.
 	const oversized = maxProxyResponseBytes + 4096
@@ -67,5 +65,55 @@ func TestHandleProxyPassesNormalResponse(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"ok":true`) {
 		t.Errorf("body = %q, want the upstream's", w.Body.String())
+	}
+}
+
+// TestProxyContentType: JSON keeps the shape the client branches on; everything else becomes a
+// type that cannot execute.
+func TestProxyContentType(t *testing.T) {
+	for _, tc := range []struct{ upstream, want string }{
+		{"application/json", "application/json"},
+		{"application/json; charset=utf-8", "application/json"},
+		{"application/geo+json", "application/json"},
+		{"text/html", "text/plain; charset=utf-8"},
+		{"text/html; charset=utf-8", "text/plain; charset=utf-8"},
+		{"image/svg+xml", "text/plain; charset=utf-8"},
+		{"application/x-shockwave-flash", "text/plain; charset=utf-8"},
+		{"", "text/plain; charset=utf-8"},
+		{"not a media type at all", "text/plain; charset=utf-8"},
+	} {
+		if got := proxyContentType(tc.upstream); got != tc.want {
+			t.Errorf("proxyContentType(%q) = %q, want %q", tc.upstream, got, tc.want)
+		}
+	}
+}
+
+// The response is served from MIKE's own origin, so an upstream's bytes must never arrive
+// labelled as something the browser would run.
+func TestHandleProxyDoesNotEchoUpstreamContentType(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte("<script>alert(1)</script>"))
+	}))
+	defer upstream.Close()
+
+	h := testHandler(t)
+	u, _ := url.Parse(upstream.URL)
+	makeProxyExt(t, h, []string{u.Hostname()})
+
+	body := `{"url":"` + upstream.URL + `","method":"GET"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/proxy-ext/proxy", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.HandleProxy(w, req, "proxy-ext")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Errorf("Content-Type = %q: an upstream chose the type of a MIKE-origin response", got)
+	}
+	// Only the label changed; the bytes still reach the extension.
+	if !strings.Contains(w.Body.String(), "alert(1)") {
+		t.Errorf("body = %q, want the upstream's bytes passed through", w.Body.String())
 	}
 }

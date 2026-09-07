@@ -106,11 +106,10 @@ func makeSandboxCallbacks(client *bridge.Client) (execFunc, execStreamFunc, read
 // ensureRootDir creates the parent directory chain of path inside root.
 //
 // The mkdir must go through the os.Root handle. The obvious host-side form,
-// os.MkdirAll(filepath.Join(worktreePath, path), 0o755), resolves ".." against the
-// host path, so an LLM-supplied path like "../../x/y" creates
-// <parent-of-worktree>/x/y before root.Create rejects the write — arbitrary
-// directory creation as the server user, reachable from prompt injection in repo
-// content. Root.MkdirAll refuses the same path and creates nothing.
+// os.MkdirAll(filepath.Join(worktreePath, path), 0o755), resolves ".." against the host path,
+// so an LLM-supplied path like "../../x/y" creates <parent-of-worktree>/x/y before root.Create
+// rejects the write — arbitrary directory creation as the server user, reachable from prompt
+// injection in repo content. Root.MkdirAll refuses the same path and creates nothing.
 //
 // New directories are 0o700: a worktree is private to the server user.
 func ensureRootDir(root *os.Root, path string) error {

@@ -1,21 +1,11 @@
 package prompts
 
-// The prompt-template overlay: a translation pack's directory of templates laid
-// over core's English ones.
+// The prompt-template overlay: a translation pack's directory of templates laid over core's
+// English ones. It resolves per template, pack first then core, so a partial pack is the normal
+// state and a translation must never fail a turn.
 //
-// A pack is data, not code (docs/i18n.md), and its templates are the same
-// `*.tmpl` files core ships — so the overlay resolves **per template**, pack
-// first then core. A pack that ships only `base.tmpl` still gets core's
-// `summarize.tmpl`, and a pack template that cannot parse or execute loses only
-// *its own* template to core's English one. Per-template fallback is the
-// prompt-side analog of the catalog's per-key fallback: a partial pack is the
-// normal state, never an error state, and a translation must never fail a turn.
-//
-// The state is **injected** through SetOverlay and never imported from
-// `backend/extensions`: extensions already imports this package for FuncMap(),
-// so the dependency would be a cycle. Whoever knows which pack is enabled
-// (`extensions.ActiveI18N`, called from backend/server) resolves it to a host
-// directory and hands the answer here.
+// The state is injected through SetOverlay, never imported from backend/extensions — extensions
+// already imports this package, so the dependency would be a cycle.
 
 import (
 	"bytes"
@@ -52,18 +42,12 @@ var (
 
 func init() { overlay.Store(&overlayState{}) }
 
-// SetOverlay installs a pack's prompt templates. It is called at startup and on
-// every extension change, so enabling a pack switches the prompt language
-// without a restart.
+// SetOverlay installs a pack's prompt templates; it is called at startup and on every extension
+// change, so enabling a pack switches the prompt language without a restart. Both arguments empty
+// is English; an empty dir with a locale is a pack that ships no templates.
 //
-// Both arguments empty is English: today's behaviour, byte for byte. An empty
-// dir with a locale is a pack that translates the UI but ships no templates —
-// the answer-language directive still applies, the templates do not.
-//
-// Nothing here is validated: the caller resolved `dir` through the pack's own
-// containment rules (extensions.PromptOverlayFor), because a path derived from
-// a manifest has to be proven inside the pack's directory before anything reads
-// it, and that proof belongs where the pack directory is known.
+// Nothing here is validated: the caller proved `dir` inside the pack through
+// extensions.PromptOverlayFor, which is where that containment belongs.
 func SetOverlay(dir, locale string) {
 	next := &overlayState{dir: strings.TrimSpace(dir), locale: strings.TrimSpace(locale)}
 	if prev := overlay.Swap(next); prev != nil && prev.dir != next.dir {
@@ -120,18 +104,11 @@ func parseCore(files []string) (*template.Template, error) {
 	return template.New("prompts").Funcs(funcs).ParseFiles(files...)
 }
 
-// applyOverlay redefines the pack's templates over an existing set, one file at
-// a time.
-//
-// The per-file call is the whole mechanism. text/template replaces a same-named
-// definition and leaves the set untouched when a file fails to parse, so a
-// translated `base.tmpl` wins over core's while a broken `plan-mode.tmpl`
-// leaves core's in place — verified against the real templates in
-// overlay_test.go. A pack file whose name core does not use is simply added,
-// which lets a pack ship a sub-template its own `base.tmpl` calls.
-//
-// Glob returns names sorted, so which file wins a case-insensitive clash is
-// deterministic rather than a filesystem answer.
+// applyOverlay redefines the pack's templates over an existing set, one file at a time.
+// text/template replaces a same-named definition and leaves the set untouched when a file fails
+// to parse, so a broken pack template loses only itself to core's English one, and a pack may add
+// a sub-template its own base.tmpl calls. Glob's sorted names keep a case-insensitive clash
+// deterministic.
 func applyOverlay(set *template.Template, dir string) {
 	if dir == "" {
 		return

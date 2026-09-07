@@ -1,19 +1,13 @@
 /**
- * `en.ts` — the English catalog: one flat object of dotted keys, grouped into
- * `═══ namespace ═══` sections. A new key goes into the section that owns it.
+ * `en.ts` — the English catalog: one flat object of dotted keys in `namespace` sections.
  *
- * Rules:
  *  - A value is a string with named `{placeholders}`, or a plural table
- *    `{ one, other, ... }` selected by `count`. `other` is required.
- *  - Placeholder names stay English in every translation: a pack that renames
- *    `{time}` loses the time.
- *  - Core holds no translated strings and no language names. Translations live in
- *    i18n extension packs (`../MIKE-extensions/i18n/`); `npm run check:i18n`
- *    enforces that.
- *  - `i18n.offer.*` renders only when no pack is installed and `i18n.test.*`
- *    renders nowhere, so both stay English.
- *  - Never key text the app does not own: extension names and descriptions,
- *    changelog entries, log lines, or anything a manifest or API response gives.
+ *    `{ one, other, ... }` selected by `count`; `other` is required.
+ *  - Placeholder names stay English in every translation: a pack that renames `{time}`
+ *    loses the time.
+ *  - Core holds no translated strings and no language names; `npm run check:i18n`
+ *    enforces that. Never key text the app does not own (extension names, changelogs,
+ *    log lines, anything a manifest or API response gives).
  */
 
 /** The categories `Intl.PluralRules` can answer with. */
@@ -153,6 +147,7 @@ const catalog = {
     'explorer.fileBrowser.cloning': 'Cloning...',
     'explorer.fileBrowser.cloneIntoDirTitle': 'Clone repository into the current directory',
     'explorer.fileBrowser.cloneNeedUrl': 'Please enter a git repository URL',
+    'explorer.fileBrowser.jailedHint': 'Limited to {home} and the directories MIKE was configured with. Set {env}=1 in the server’s environment to browse anywhere.',
 
     // ── TaskFileBrowser.svelte — the file tree of one task's worktree ──
     'explorer.taskFiles.empty': 'Empty folder',

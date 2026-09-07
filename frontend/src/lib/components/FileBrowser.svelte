@@ -40,18 +40,19 @@
     let cloneUrlInput: HTMLInputElement | null = $state(null);
     let mkdirLoading = $state(false);
 
-    // Clone tab state
     let cloneUrl = $state('');
     let cloneLoading = $state(false);
     let cloneError = $state('');
 
+    /** The host jail as `/api/home` reports it; the variable name comes from the server. */
+    let homeDir = $state('');
+    let jailed = $state(false);
+    let jailEnv = $state('');
+
     /**
-     * Request sequence for `loadDir`. Two loads can overlap: the initial listing
-     * of the default path and a path the user types/picks right after it. The
-     * responses have no ordering guarantee, so without this guard a *stale*
-     * reply lands last and overwrites the directory the user actually asked for
-     * — the list (and `isGitRepo`, hence the indicator and the Select button)
-     * then describes a different directory than `currentPath`.
+     * Request sequence for `loadDir`: loads overlap and responses have no ordering guarantee,
+     * so without this a stale reply lands last and the list (and `isGitRepo`, hence the
+     * indicator and the Select button) describes a directory other than `currentPath`.
      */
     let loadSeq = 0;
 
@@ -154,7 +155,6 @@
                 const err = await res.json();
                 throw new Error(err.error || t('explorer.shared.errCreateFolder'));
             }
-            // Navigate into the new folder
             showNewFolder = false;
             newFolderName = '';
             await loadDir(newPath);
@@ -191,13 +191,21 @@
         }
     }
 
-    // Load user's home directory on mount
-    onMount(() => {
-        fetch('/api/home')
-            .then(r => r.json())
-            .then(data => loadDir(data.home || '/home'))
-            .catch(() => loadDir('/home'));
-    });
+    onMount(() => { goHome(); });
+
+    /** The home button and the mount share this, so the hint matches the directory on screen. */
+    async function goHome() {
+        try {
+            const res = await fetch('/api/home');
+            const data = await res.json();
+            homeDir = data.home || '';
+            jailed = data.jailed === true;
+            jailEnv = data.jail_env || '';
+            await loadDir(homeDir || '/home');
+        } catch {
+            await loadDir('/home');
+        }
+    }
 
     function formatPath(p: string): string {
         return p || '/';
@@ -231,7 +239,7 @@
             {#if activeTab === 'browse'}
                 <div class="path-bar">
                 <div class="path-bar-row">
-                    <button class="home-btn" onclick={() => { fetch('/api/home').then(r => r.json()).then(d => loadDir(d.home)).catch(() => loadDir('/home')); }} aria-label={t('explorer.shared.goHome')} title={t('explorer.shared.goHome')}>
+                    <button class="home-btn" onclick={goHome} aria-label={t('explorer.shared.goHome')} title={t('explorer.shared.goHome')}>
                         <Icon src={homeIcon} color="#8B949E" width={18} height={18} />
                     </button>
                     <input
@@ -273,6 +281,12 @@
             {#if activeTab === 'browse'}
                 {#if error}
                     <div class="error">{error}</div>
+                {/if}
+
+                {#if jailed}
+                    <div class="jailed-hint" role="note">
+                        {t('explorer.fileBrowser.jailedHint', { home: homeDir, env: jailEnv })}
+                    </div>
                 {/if}
 
                 {#if loading}
@@ -479,6 +493,16 @@
         text-align: center;
         color: var(--color-text-secondary);
         padding: 24px;
+    }
+    .jailed-hint {
+        color: var(--color-text-secondary);
+        font-size: 0.75rem;
+        line-height: 1.4;
+        padding: 8px;
+        background: var(--color-bg-secondary);
+        border-left: 2px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        overflow-wrap: anywhere;
     }
     .git-indicator {
         color: var(--color-status-green);

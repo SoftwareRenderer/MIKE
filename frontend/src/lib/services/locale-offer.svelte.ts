@@ -14,28 +14,16 @@ import {
 import { extensionManager } from './extension-manager.svelte';
 
 /**
- * The first-run language offer, as app state.
+ * The first-run language offer as app state. The policy is pure
+ * (`$lib/utils/locale-offer.ts`); this gathers the facts and owns the install.
  *
- * This is the only place the offer is decided to be visible at all: the policy is
- * pure (`$lib/utils/locale-offer.ts`) and the chrome (`LocaleOffer.svelte`) only
- * renders what is here. The rules that shape this file:
- *
- *  - **Detect after the extension list resolves.** `detect()` is chained onto
- *    `extensionManager.loadExtensions()` at boot; run earlier, the "no pack is
- *    enabled" check would read stale state and offer a pack that is already on.
- *  - **One pass per boot.** `loadExtensions()` also runs on every
- *    `extension_change` broadcast, and an offer that reappears after the user
- *    answered it (or after the pack it offered got installed) is a nag, not a
- *    feature. `checked` is what makes the boot pass once.
- *  - **Silence on a registry that will not answer.** `MIKE_REGISTRY_URL` is a
- *    local fixture path in tests and simply unreachable offline; a fetch failure
- *    is the normal case, not an error to report. That is also why this calls
- *    `getRegistryIndex()` directly instead of `extensionManager.loadRegistry()`,
- *    whose `state.error` would light up Settings → Extensions with a failure the
- *    user never asked about.
- *  - **The click is the consent.** Nothing is installed here until the user asks;
- *    and the install goes through the existing git-pinned registry path
- *    (`POST /extensions/install`), never a second one.
+ *  - Detect after `loadExtensions()`: run earlier, the "no pack enabled" check reads
+ *    stale state. One pass per boot (`checked`) — loadExtensions also runs on every
+ *    `extension_change`, and an offer that returns after being answered is a nag.
+ *  - A registry that will not answer is silence, not an error: this calls
+ *    `getRegistryIndex()` directly so its `state.error` cannot light up Settings with a
+ *    failure the user never asked about.
+ *  - The click is the consent; the install reuses the git-pinned registry path.
  */
 
 /** What the chrome renders. `idle` means "nothing to show", whatever the reason. */

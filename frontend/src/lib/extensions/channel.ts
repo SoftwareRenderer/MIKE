@@ -133,21 +133,14 @@ export class ExtensionHostChannel {
     }
 
     /**
-     * Handle a `load` of the extension iframe. The frame's document is NOT
-     * re-read here (an opaque-origin frame's URL is unreadable), so identity is
-     * re-established by handshake instead:
-     *
-     * - 1st load: ask the mounted document to prove itself.
-     * - 2nd+ load: the frame navigated. A UI extension entry document is a
-     *   single document, so this is always unexpected. Warn and DISARM (stop
-     *   answering calls, stop pushing events/config) and ask again — a genuine
-     *   extension reload simply re-handshakes and keeps working. Deliberately
-     *   no teardown: the watchdog is diagnostic, the handshake is the control.
-     *
-     * Residual, by design: a document that was legitimately armed and then
-     * *chooses* to forward `extch` to its navigation target hands the channel to
-     * that target. That needs an already-scripted extension document willing to
-     * leak its own channel — the warning above is the signal for it.
+     * Handle a `load` of the extension iframe. The frame's document cannot be re-read
+     * (an opaque-origin frame's URL is unreadable), so identity is re-established by
+     * handshake: the 1st load asks the mounted document to prove itself; a 2nd load means
+     * the frame navigated, which is always unexpected, so warn, DISARM (stop answering
+     * calls, stop pushing events/config) and ask again. A genuine reload simply
+     * re-handshakes. No teardown: the watchdog is diagnostic, the handshake is the
+     * control. Residual by design: a document that forwards `extch` to its navigation
+     * target hands the channel over — the warning is the signal for that.
      */
     notifyFrameLoad(): void {
         if (this.destroyed) return;

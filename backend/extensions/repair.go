@@ -1,15 +1,12 @@
 package extensions
 
-// The delete path (remove.go) treats an extension's directory under the extensions root as the
-// extension itself, because that is what it is: UI code is served out of it, an agent adapter's WASM
-// and binary are loaded from it. The same fact has a second consequence — a row that says "installed"
-// with no files behind it is an extension that silently does nothing. A UI extension's iframe 404s, so
-// its document never boots, so it never registers the footer button or the overlay it exists for, and
-// nothing in the UI or the log says so: the row is still enabled and the Settings list still shows it.
+// The delete path (remove.go) treats an extension's directory as the extension itself, because
+// that is what it is: UI code is served out of it, an agent adapter's WASM and binary load from
+// it. The same fact has a second consequence — a row that says "installed" with no files behind
+// it is an extension that silently does nothing while Settings still shows it enabled.
 //
-// This file is the other half of remove.go: the row outliving its files by accident (a wipe of the
-// ignored extensions directory, a failed checkout, a hand-cleaned checkout tree) is detected once, when
-// the app starts, and repaired from the commit the row itself was installed at.
+// This file is the other half of remove.go: a row outliving its files is detected once, at
+// startup, and repaired from the commit the row itself was installed at.
 
 import (
 	"context"

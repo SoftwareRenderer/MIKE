@@ -606,12 +606,9 @@ func setSystemPrompt(messages []types.ChatMessage, prompt string) []types.ChatMe
 // broadcasts the event. It returns the conversation for the next call and the installed
 // summary, which is "" if summarization failed and the messages came back untouched.
 //
-// The summary row is persisted before anything is published, so a restart at any point
-// resumes with it, and the live run needs the same refresh: buildLLMContext sends
-// messages[0] verbatim and drops the marker along with the rows the summary replaced.
-//
-// The prompt is rewritten in place rather than rebuilt from the DB, because the in-memory
-// conversation is a superset of the persisted one (loop hints, conflict instructions).
+// The summary row is persisted before anything is published, so a restart at any point resumes
+// with it. The prompt is rewritten in place rather than rebuilt from the DB, because the
+// in-memory conversation is a superset of the persisted one.
 func (te *TaskExecutor) applySummarization(setup *taskExecSetup, ctx context.Context, messages []types.ChatMessage, serverURL, modelName string, resultCh chan error) ([]types.ChatMessage, string) {
 	task := setup.task
 	taskID := setup.task.ID

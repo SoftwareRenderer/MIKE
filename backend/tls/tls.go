@@ -51,16 +51,10 @@ type certificateAuthority struct {
 	certPath string
 }
 
-// LoadWithCert creates a TLS config with explicit certificate paths.
-//
-// If certFile and keyFile are both non-empty, they are used directly.
-// Otherwise a local CA (dataDir/tls/mike-ca.crt) is created if needed and used
-// to sign the server certificate (dataDir/tls/mike.crt), whose subject
-// alternative names cover localhost, the machine hostname and the host's LAN
-// addresses. The leaf is re-issued only when those names change; the CA itself
-// is reused across restarts.
-//
-// Returns a *Config (never nil). Use LoadDisabled() to disable TLS.
+// LoadWithCert creates a TLS config from explicit certificate paths, or, when either is empty,
+// from a local CA (dataDir/tls/mike-ca.crt) that signs the server leaf. The leaf's SANs cover
+// localhost, the hostname and the LAN addresses, and it is re-issued only when those names
+// change; the CA is reused across restarts. Returns a *Config (never nil).
 func LoadWithCert(dataDir, certFile, keyFile string) (*Config, error) {
 	if certFile != "" && keyFile != "" {
 		// User-provided cert and key files

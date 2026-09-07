@@ -20,22 +20,13 @@ func IsAtomicTemp(path string) bool {
 	return strings.HasPrefix(filepath.Base(path), AtomicTempPrefix)
 }
 
-// WriteFileAtomic replaces the contents of path. The bytes go to a temporary
-// file in the same directory — rename is only atomic within one filesystem —
-// which is renamed over the target, so a crash mid-write costs the temporary,
-// never the file.
+// WriteFileAtomic replaces the contents of path through a temporary file in the same directory
+// (rename is only atomic within one filesystem), so a crash mid-write costs the temporary, never
+// the file. Like os.WriteFile: an existing file keeps its mode, a new one is 0644, and the parent
+// directory must exist.
 //
-// Like the os.WriteFile it replaces: an existing file keeps its mode (a temporary
-// is created 0600, so without this an executable loses its +x), a new file is
-// 0644, and the parent directory must already exist.
-//
-// A symlinked target is refused: renaming over a link replaces the link instead
-// of writing through it, which would redirect a path the caller already
-// containment-checked. Callers resolve first, so this only fires if a link
-// appeared in between.
-//
-// The file is synced before the rename; the directory is not. So a save cannot
-// produce a half-written file, but a power loss can still lose the newest one.
+// A symlinked target is refused: renaming over a link would redirect a path the caller already
+// containment-checked. The file is synced before the rename, the directory is not.
 func WriteFileAtomic(path string, content []byte) error {
 	dir := filepath.Dir(path)
 

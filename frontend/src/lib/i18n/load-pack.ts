@@ -6,22 +6,14 @@ import { i18n } from './runtime.svelte';
 import { clearCachedCatalog, writeCachedCatalog } from './cache';
 
 /**
- * Resolving the enabled i18n extension and putting its catalog on screen.
+ * Resolving the enabled i18n extension and putting its catalog on screen. The active
+ * language *is* the enabled pack that wins the ordering rule, English when there is none;
+ * nothing is stored and there is no new server route — the catalog is a file in the
+ * pack's own directory, served from `ext.served_url` exactly as a css pack's css_url is.
  *
- * This is the whole language mechanism: the active language *is* the enabled pack
- * that wins the ordering rule, English when there is none. Nothing is stored,
- * there is no setting to keep in sync, and no new server route — the catalog is a
- * file in the pack's own directory, served by the existing `/extensions/…` static
- * tree at the directory the installed record is served from (`ext.served_url`),
- * resolved exactly the way a `css` pack's `css_url` is: manifest asset against the
- * extension's own base, applied app-globally, with no iframe, no channel and no
- * permission.
- *
- * The mirror of `resolveI18NPack` on the server is `extensions.ActiveI18N`
- * (backend/extensions/i18n.go). Both read the *capability declaration* rather
- * than the `type` field, both skip disabled packs, and both order by
- * (priority, name) — that agreement is what makes it impossible for the UI and
- * the prompt locale to disagree about which pack is active.
+ * The server-side mirror is `extensions.ActiveI18N`; both read the capability
+ * declaration rather than the `type` field, skip disabled packs and order by
+ * (priority, name), which is what keeps the UI and the prompt locale in agreement.
  */
 
 /** Outcome of one reconcile, returned so callers (and tests) can assert it. */
@@ -37,17 +29,10 @@ export interface I18NLoadResult {
 }
 
 /**
- * The pack that defines the active language, or null — which is English.
- *
- * Ordered by `manifest.priority` ascending, then name ascending: the rule
- * `HandleList` sorts the API response by and the rule the backend derives with.
- * The sort is done here rather than trusting the incoming order so the winner is
- * deterministic wherever the list came from, and so two enabled packs are a
- * documented choice instead of a coin flip on fetch timing.
- *
- * Keyed on the capability declaration, not `type === 'i18n'`: `type` is what
- * `inferExtensionType` inferred for routing, so a pack that also ships something
- * heavier still ships a catalog. Same test as `Extension.GetI18N` on the server.
+ * The pack that defines the active language, or null — which is English. Ordered by
+ * `manifest.priority` then name, the rule `HandleList` sorts by and the backend derives with,
+ * applied here so the winner does not depend on the order a response arrived in. Keyed on
+ * the capability declaration rather than `type === 'i18n'`, which is an inference.
  */
 export function resolveI18NPack(extensions: Extension[]): Extension | null {
     let winner: Extension | null = null;

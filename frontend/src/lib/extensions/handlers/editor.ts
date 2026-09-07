@@ -1,25 +1,11 @@
 /**
- * Handlers for the `editor` area capabilities — generic, content-agnostic
- * building blocks for file-editor UI extensions.
+ * Handlers for the `editor` capabilities — the only way a sandboxed extension can touch
+ * the code editor: addFooterButton, getContent, setContent, setOverlay, contentChange.
  *
- * These are the ONLY way a sandboxed extension can touch the code editor:
- *   - add a button to the editor footer (`editor.addFooterButton`)
- *   - read the current editor content (`editor.getContent`)
- *   - replace the editor content (`editor.setContent`) — e.g. to push edits made
- *     in a WYSIWYG overlay back into the code editor
- *   - hide/show the code editor to reveal an extension overlay (`editor.setOverlay`)
- *   - receive editor content updates (`editor.contentChange`)
- *
- * `editor.footerButtonClick` and `editor.removeFooterButton` are NOT separately
- * grantable. Clicking a button the extension itself created is intrinsic to
- * `editor.addFooterButton` — the click event only ever carries the button's
- * `id`, which the extension supplied. Likewise, removing a button it created is
- * scoped to its own buttons only. Both are granted implicitly alongside
- * `editor.addFooterButton` and need no manifest declaration.
- *
- * Nothing here understands what the extension does with these primitives
- * (e.g. markdown preview). The core stays feature-agnostic — the extension
- * decides what a footer button or an overlay means.
+ * `editor.footerButtonClick` and `editor.removeFooterButton` are not separately grantable:
+ * clicking or removing a button the extension created is intrinsic to
+ * `addFooterButton` (the event carries only the id the extension supplied), so both are
+ * granted with it. Nothing here interprets what the extension renders.
  */
 import type { CapabilityDef, HostContext } from '../types';
 
@@ -42,19 +28,12 @@ export const CAP_EDITOR_SAVE = 'editor.save';
 export const CONTENT_SET_USER_EVENT = 'setContent';
 
 /**
- * True when EVERY transaction in a CodeMirror update was dispatched by an
- * extension's editor.setContent capability — i.e. the document change is an
- * extension's own push.
+ * True when EVERY transaction in a CodeMirror update came from an extension's
+ * editor.setContent push. Such updates must not be forwarded as editor.contentChange: the
+ * extension already knows the text it sent, and a delayed echo of a superseded push makes a
+ * WYSIWYG extension rewrite its document from stale text and yank the caret.
  *
- * Such updates must not be forwarded as editor.contentChange: the extension
- * already knows the text it sent, and a delayed echo of a superseded push
- * would be misread as an external change (a WYSIWYG extension would rewrite
- * its whole document from the stale text, dropping fresh keystrokes and
- * yanking the caret to the top of the file).
- *
- * Accepts the structural `userEvent` shape so this stays unit-testable
- * without a real CodeMirror view. The FileEditor's call site is
- * `update.transactions.map(tr => tr.annotation(Transaction.userEvent))`.
+ * Takes the structural `userEvent` shape so it is unit-testable without a real view.
  */
 export function isExtensionContentSet(userEvents: readonly (string | undefined)[]): boolean {
     return userEvents.length > 0 && userEvents.every(e => e === CONTENT_SET_USER_EVENT);
@@ -198,23 +177,10 @@ function getContent(ctx: HostContext): { content: string } {
 }
 
 /**
- * Toggle a full-bleed overlay over the editor content area.
- *
- * - `visible: true`  — hide the code editor and size the extension iframe to
- *   fill the editor content area, so the extension can render its own view.
- * - `visible: false` — restore the code editor and collapse the iframe.
- *
- * The overlay anchor is generic; the extension decides what it renders.
- */
-/**
- * Replace the entire editor document text. Used by WYSIWYG-style extensions
- * (e.g. a rich-text markdown preview) to push edits made in an overlay back
- * into the code editor. The change flows through the editor's normal
- * `updateListener` (dirty tracking, drafts, history persistence all apply),
- * but it is dispatched with the {@link CONTENT_SET_USER_EVENT} marker so the
- * editor does NOT echo it back as `contentChange` — the extension already
- * knows the text it sent, and a delayed echo of a superseded push would be
- * misread as an external change (see {@link isExtensionContentSet}).
+ * Replace the entire editor document text, for WYSIWYG-style extensions pushing overlay
+ * edits back into the code editor. It flows through the normal `updateListener` (dirty
+ * tracking, drafts, history all apply) but carries the {@link CONTENT_SET_USER_EVENT}
+ * marker so it is not echoed back as `contentChange` (see {@link isExtensionContentSet}).
  */
 function setContent(ctx: HostContext, args: { content: string }): void {
     const root = editorRoot(ctx);
@@ -230,6 +196,11 @@ function setContent(ctx: HostContext, args: { content: string }): void {
     });
 }
 
+/**
+ * Toggle a full-bleed overlay over the editor content area: true hides the code editor and
+ * sizes the extension iframe to fill it, false restores both. The anchor is generic; the
+ * extension decides what it renders.
+ */
 function setOverlay(ctx: HostContext, args: { visible: boolean }): void {
     const root = editorRoot(ctx);
     if (!root || !ctx.anchor) throw new Error('editor overlay target not found');

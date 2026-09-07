@@ -2165,9 +2165,9 @@ func putUpdate(t *testing.T, h *ExtensionHandler, id string, body map[string]any
 	return w
 }
 
-// TestHandleUpdate_RejectsSandboxWidening covers M5: the update endpoint must
-// refuse mounts that escape the app's own host roots and capabilities that
-// reach past the container, naming the offending value and persisting nothing.
+// TestHandleUpdate_RejectsSandboxWidening: an update must refuse mounts that escape the app's own
+// host roots and capabilities that reach past the container, naming the offending value and
+// persisting nothing.
 func TestHandleUpdate_RejectsSandboxWidening(t *testing.T) {
 	mountsBody := func(host, container, mode string) map[string]any {
 		return map[string]any{

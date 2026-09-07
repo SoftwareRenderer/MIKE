@@ -1,23 +1,12 @@
 /**
- * `$lib/i18n` — the only import site code needs.
+ * `$lib/i18n` — the only import site code needs. `t(key, params?)` is the whole surface
+ * a component uses; keys are typed off `en.ts`, so a typo is a build error. `setCatalog`
+ * / `resetToEnglish` are exported for the pack-loading path and its tests.
  *
- * `t(key, params?)` is the whole surface a component uses; message keys are typed
- * off `en.ts`, so a typo is a build error rather than a string on screen.
- * `setCatalog` / `resetToEnglish` are exported here as well, because the pack-loading
- * path and its tests are this module's other consumer.
- *
- * Everything else comes from the module that owns it: a barrel that re-exports the
- * internals gives each of them a second name, and the second name is the one that
- * goes stale.
- *   `./runtime.svelte` the runtime (`i18n`, `registerCatalog`, `setLocale`,
- *                       `onLocaleChange`, `I18nRuntime`) and the locale questions,
- *                       which are deliberately different answers:
- *                         `activeLocale()`     — the tag to hand `Intl.*`
- *                                               (`undefined` = use the browser's)
- *                         `documentLanguage()` — the language of the strings actually
- *                                               rendered (`en` with no pack)
- *   `./en`             the English catalog of record, `DEFAULT_LOCALE`, its key types
- *   `./catalog` · `./cache` · `./load-pack` — the pack-loading half
+ * Nothing else is re-exported: a barrel that re-exports internals gives each of them a
+ * second name, and the second name is the one that goes stale. The locale questions
+ * (`activeLocale`, `documentLanguage`) live in `./runtime.svelte`, where the difference
+ * between them is documented.
  */
 export {
     // the resolution surface — what a component renders with

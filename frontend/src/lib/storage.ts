@@ -1,36 +1,24 @@
 // =============================================================================
-// Unified client-side storage module
-// =============================================================================
-// All client-side storage for the Kanban app goes through this module.
-// Components should NEVER access IndexedDB directly.
-//
-// Single IndexedDB database: `kanban-storage` (v2)
+// All client-side storage goes through this module; components never touch IndexedDB.
+// Single database: `kanban-storage` (v2).
 //
 // Object stores:
-//   collapsed-tasks      — Single key 'ids' → string[] of collapsed parent task IDs
-//   collapsed-sections   — Single key 'ids' → string[] of collapsed board section IDs
-//   drafts               — key: taskId → string (draft chat text)
-//   editor-drafts        — key: file path → string (draft file content)
-//   editor-history       — key: file path → EditorHistory (undo/redo history)
-//   editor-tabs          — key: projectId → EditorTabState (open files, active file, pinned files)
-//   unsaved-files        — key: projectId → string[] (unsaved file paths)
-//   offline-queue        — Single key 'actions' → QueuedAction[]
-//   explorer-layout      — Single key 'layout' → ExplorerLayout
-//   collapsed-diff-files — Single key 'ids' → string[] of collapsed diff file paths
-//   app-settings         — key: setting key → any (terminal height, panel ratios, sidebar, etc.)
-//   attachments          — key: taskId → DraftAttachment[] (draft image attachments)
-//   board-cache          — key: cache type → BoardCacheEntry (projects, board, config mirror,
-//                           plus per-task offline content: messages:<pid>:<tid>,
-//                           message-full:<pid>:<tid>:<mid>, diff:<pid>:<tid>)
+//   collapsed-tasks / collapsed-sections / collapsed-diff-files — key 'ids' → string[]
+//   drafts             — key: taskId → string (draft chat text)
+//   editor-drafts      — key: file path → string (draft file content)
+//   editor-history     — key: file path → EditorHistory (undo/redo history)
+//   editor-tabs        — key: projectId → EditorTabState
+//   unsaved-files      — key: projectId → string[]
+//   offline-queue      — key 'actions' → QueuedAction[]
+//   explorer-layout    — key 'layout' → ExplorerLayout
+//   app-settings       — key: setting key → any
+//   attachments        — key: taskId → DraftAttachment[]
+//   board-cache        — key: cache type → BoardCacheEntry (projects, board, config
+//                        mirror, plus per-task offline content)
 //
-// Garbage collection:
-//   Call `gc(allTaskIds, allProjectPaths?)` after the board is loaded. It removes all stale
-//   entries for task IDs that no longer exist (deleted tasks, etc.).
-//   If `allProjectPaths` is provided, also cleans stale branch editor drafts.
-//
-// Sign-out:
-//   `clearAll()` erases every store and the pre-paint `localStorage` hints. `gc()`
-//   is not a substitute for it: it prunes only entries whose task no longer exists.
+// `gc(allTaskIds, allProjectPaths?)` runs after the board loads and prunes entries whose
+// task no longer exists. It is not a sign-out: `clearAll()` erases every store plus the
+// pre-paint localStorage hints.
 // =============================================================================
 
 // `$lib/i18n` is cycle-free from here: the import surface is `index.ts` →

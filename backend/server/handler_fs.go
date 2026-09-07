@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"kanban/backend/httputil"
 	"net/http"
 	"os"
@@ -357,6 +359,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	includeFiles := r.URL.Query().Get("files") == "1"
 	project, _ := s.optionalProject(r)
 	taskID := r.URL.Query().Get("task")
+	var err error
 
 	worktreePath, rootOK := s.fsWorktreeRoot(w, r, project)
 	if !rootOK {
@@ -405,7 +408,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 		var output string
 		var err error
 		if taskID != "" {
-			// Use task sandbox (creates container on demand)
+			// ExecTask creates the task's container on demand.
 			output, err = s.sandboxMgr.ExecTask(taskID, worktreePath, project, "ls -pA "+shellQuote(sandboxPath), opts)
 		} else {
 			output, err = s.sandboxMgr.ExecProject(project, "ls -pA "+shellQuote(sandboxPath), opts)
@@ -415,8 +418,6 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		result.Path = sandboxPath
-		// IsGitRepo is unused by the in-sandbox browser.
-
 		if sandboxPath != mountPath {
 			parent := filepath.Dir(sandboxPath)
 			result.Entries = append(result.Entries, fsEntry{Name: "..", IsDir: true, Path: parent})
@@ -434,6 +435,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			sandboxFullPath := filepath.Join(sandboxPath, name)
+			// IsGitRepo stays false: the in-sandbox browser has no use for it.
 			result.Entries = append(result.Entries, fsEntry{Name: name, IsDir: isDir, Path: sandboxFullPath})
 		}
 		sort.SliceStable(result.Entries, func(i, j int) bool {
@@ -442,8 +444,19 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 		JSONResponse(w, http.StatusOK, result)
 		return
 	}
-	// Host filesystem (no project or sandbox disabled)
-	entries, err := os.ReadDir(path)
+	// Host filesystem (no project or sandbox disabled). A project's path was already contained
+	// to its checkout plus the named task worktree, and a registered project may live outside
+	// home; with no project the path came from the query string, so HostRoot contains it.
+	var entries []fs.DirEntry
+	if project == nil {
+		entries, err = s.hostRoot.ReadDir(path)
+		if err != nil && fsutil.IsHostRootRefusal(err) {
+			JSONError(w, http.StatusForbidden, err.Error())
+			return
+		}
+	} else {
+		entries, err = os.ReadDir(path)
+	}
 	if err != nil {
 		logging.For(logging.HTTP).Errorf("fs readdir failed: %v", err)
 		JSONError(w, http.StatusNotFound, "directory not found")
@@ -458,7 +471,9 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	isGit := git.IsGitRepo(path)
 	result.IsGitRepo = isGit
 
-	if path != string(os.PathSeparator) {
+	// A jail boundary has no parent to offer. IsRoot is false when the jail is widened, so the
+	// picker keeps its old behaviour then.
+	if path != string(os.PathSeparator) && !s.hostRoot.IsRoot(path) {
 		if parent := filepath.Dir(path); parent != path {
 			result.Entries = append(result.Entries, fsEntry{Name: "..", IsDir: true, Path: parent, IsGitRepo: git.IsGitRepo(parent)})
 		}
@@ -484,19 +499,16 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, result)
 }
 
-// handleFSSearch recursively searches for files by name and optionally by content.
+// handleFSSearch recursively searches for files by name and, with content=1, by content.
 //
 // Query parameters:
 //   - q: search query (required)
 //   - project: project ID (required)
-//   - task: optional task ID for worktree-scoped search
+//   - task: optional task ID for a worktree-scoped search
 //   - content: "1" to search file contents in addition to filenames
-//   - case: "1" for case-sensitive matching
-//   - word: "1" for whole-word matching
-//   - regex: "1" to treat query as a regular expression
+//   - case, word, regex: "1" to match case-sensitively, whole words, or a regular expression
 //
-// Filename search returns up to 10 results; content search returns up to 50.
-// Binary files are skipped for content search but still matched by filename.
+// Filename search returns up to 10 results, content search up to 50, skipping binary files.
 func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		httputil.MethodNotAllowed(w)
@@ -899,13 +911,10 @@ func fsSandboxPath(worktreePath string, project *types.Project, p string) string
 	return sandbox.HostToContainer(worktreePath, project.Name, clean)
 }
 
-// validateFSPath returns the form of path that is safe to open, jailed to the project
-// checkout plus, when the request names a task, that task's worktree. Callers MUST
-// open the returned path, not the one they passed in.
-//
-// The workspace directory is deliberately not a root: it holds every project's task
-// worktrees, so allowing it let one project-scoped read or write reach any task on the
-// host.
+// validateFSPath returns the form of path that is safe to open, jailed to the project checkout
+// plus, when the request names a task, that task's worktree. Callers MUST open the returned path.
+// The workspace dir is deliberately not a root: it holds every project's task worktrees, so
+// allowing it let one project-scoped request reach any task on the host.
 func (s *Server) validateFSPath(project *types.Project, worktreeRoot, path string) (string, error) {
 	if project == nil {
 		return path, nil // no project constraint
@@ -929,15 +938,12 @@ func (s *Server) validateFSPath(project *types.Project, worktreeRoot, path strin
 	return fsutil.Contained(cleanPath, roots)
 }
 
-// fsWriteTarget answers, in the one order that is safe, the four questions every write
-// into a project asks: which tree the request names (?task=, bound to ?project=), whether
-// the host can run the sandbox that tree lives in, which host file a container path names,
-// and whether the result is inside the project once symlinks are followed.
-//
-// A handler calls this rather than repeating the steps. Each one is the jail for the next,
-// so a caller that drops one — or passes "" where the worktree root belongs — writes
-// outside the project, and the omission still compiles. This is the shape of the bug that
-// the upload endpoint arrived with. ok is false after writing the response.
+// fsWriteTarget answers, in the one order that is safe, what every write into a project must
+// settle: which tree the request names (?task= bound to ?project=), whether the host can run the
+// sandbox that tree lives in, which host file a container path names, and whether the result is
+// inside the project once symlinks are followed. Each step is the jail for the next, so a handler
+// that repeats them by hand can drop one and still compile. ok is false after writing the
+// response.
 func (s *Server) fsWriteTarget(w http.ResponseWriter, r *http.Request, project *types.Project, path string) (string, bool) {
 	worktreePath, ok := s.fsWorktreeRoot(w, r, project)
 	if !ok {
@@ -1034,8 +1040,8 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// With a project context the path is jailed to it like every other fs endpoint.
-	// The no-project directory-picker flow stays unconstrained, as in handleFSMkdir.
+	// With a project the path is jailed to it like every other fs endpoint; with none the host
+	// jail decides.
 	if project != nil {
 		resolved, err := s.validateFSPath(project, "", req.Path)
 		if err != nil {
@@ -1043,6 +1049,10 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.Path = resolved
+	} else if _, err := s.hostRoot.Stat(req.Path); err != nil && fsutil.IsHostRootRefusal(err) {
+		// Refuse before git is spawned.
+		JSONError(w, http.StatusForbidden, err.Error())
+		return
 	}
 
 	// Enforce sandbox if enabled — no fallback to host
@@ -1230,9 +1240,19 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "path": req.Path})
 		return
 	}
-	// Host filesystem (no project or sandbox disabled)
-	// Project-scoped mkdir must stay within the project and its task worktree; the
-	// no-project directory-picker flow intentionally has no constraint.
+	// Host filesystem (no project or sandbox disabled): the picker's path, so everything below
+	// goes through fsutil.HostRoot instead of os.
+	stat := os.Stat
+	mkdir := func(p string) error { return os.MkdirAll(p, 0755) }
+	// hostRefused answers a jail refusal wherever it surfaced — on the path, its parent, or the
+	// mkdir walk. Unreported it arrives as a plausible 400 or a 500 instead of a 403.
+	hostRefused := func(err error) bool {
+		if err != nil && project == nil && fsutil.IsHostRootRefusal(err) {
+			JSONError(w, http.StatusForbidden, err.Error())
+			return true
+		}
+		return false
+	}
 	if project != nil {
 		resolved, err := s.validateFSPath(project, worktreePath, req.Path)
 		if err != nil {
@@ -1240,20 +1260,33 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.Path = resolved
+	} else {
+		stat = s.hostRoot.Stat
+		mkdir = func(p string) error { return s.hostRoot.MkdirAll(p, 0755) }
+		// Stat the requested path before its parent so a jail refusal is not blamed on the parent.
+		if _, err := s.hostRoot.Stat(req.Path); err != nil && !errors.Is(err, fs.ErrNotExist) && hostRefused(err) {
+			return
+		}
 	}
 	parent := filepath.Dir(req.Path)
-	info, err := os.Stat(parent)
+	info, err := stat(parent)
+	if hostRefused(err) {
+		return
+	}
 	if err != nil || !info.IsDir() {
 		JSONError(w, http.StatusBadRequest, "parent directory does not exist")
 		return
 	}
 
-	if _, err := os.Stat(req.Path); err == nil {
+	if _, err := stat(req.Path); err == nil {
 		JSONError(w, http.StatusBadRequest, "path already exists")
 		return
 	}
 
-	if err := os.MkdirAll(req.Path, 0755); err != nil {
+	if err := mkdir(req.Path); err != nil {
+		if hostRefused(err) {
+			return
+		}
 		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", err))
 		return
 	}
@@ -1262,10 +1295,8 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 }
 
 // fsSandboxOpts returns the sandbox config for FS operations, having made sure the project's image
-// exists. Opening an explorer is often the first thing that touches a project's image, and container
-// creation runs with --pull=never, so this is where the image arrives — and its output goes out over
-// the project's WebSocket channel, which is how the explorer can show progress while this request is
-// blocked on the build.
+// exists — opening an explorer is often the first thing to touch it, and the build output goes out
+// over the project's WebSocket so the explorer can show progress while this request blocks.
 func (s *Server) fsSandboxOpts(project *types.Project) (sandbox.SandboxOpts, error) {
 	image, err := s.sandboxMgr.EnsureImageForProject(project, func(status types.SandboxImageStatus) {
 		if s.appStreamMgr != nil {

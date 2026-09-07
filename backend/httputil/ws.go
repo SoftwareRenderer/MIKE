@@ -2,7 +2,10 @@ package httputil
 
 import (
 	"context"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,15 +14,23 @@ import (
 	"kanban/pkg/logging"
 )
 
-// AcceptWS upgrades a WebSocket with the settings every MIKE endpoint shares, so no
-// endpoint hand-rolls its own accept.
+// AcceptWS upgrades a WebSocket with the settings every MIKE endpoint shares, so no endpoint
+// hand-rolls its own accept. logTag names the endpoint in the failure log; on ok == false
+// nothing was accepted.
 //
-// Origin checking is left on: SameSite=Lax blocks a cross-site request first, and this
-// is the second lock on endpoints that hand out a shell, a workspace's files, or its
-// language servers.
-//
-// logTag names the endpoint in the failure log. On ok == false nothing was accepted.
+// The Origin rule is stated here rather than inherited from coder/websocket, which accepts an
+// empty Origin. SameSite=Lax blocks a cross-site request first; this is the second lock on the
+// endpoints that hand out a shell, a workspace's files, or its language servers. A request with
+// no Origin is accepted: only a non-browser client omits it, and that client can set the
+// session cookie by hand anyway.
 func AcceptWS(w http.ResponseWriter, r *http.Request, logTag string) (conn *websocket.Conn, ok bool) {
+	if origin := r.Header.Get("Origin"); origin != "" && !sameOriginHost(origin, r.Host) {
+		// The operator needs to see the mismatch, not just that something refused.
+		logging.For(logging.HTTP).Warnf("websocket handshake at %s refused: Origin %q is not the request host %q",
+			logTag, origin, r.Host)
+		http.Error(w, "cross-origin websocket request rejected", http.StatusForbidden)
+		return nil, false
+	}
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		CompressionMode: websocket.CompressionContextTakeover,
 	})
@@ -28,6 +39,35 @@ func AcceptWS(w http.ResponseWriter, r *http.Request, logTag string) (conn *webs
 		return nil, false
 	}
 	return c, true
+}
+
+// sameOriginHost reports whether an Origin header names the host the request arrived at. The
+// scheme is ignored, the comparison is case-insensitive, and a port counts: "localhost" and
+// "localhost:3000" are different origins.
+func sameOriginHost(origin, host string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false // a malformed Origin is not a same-origin one
+	}
+	if strings.EqualFold(u.Host, host) {
+		return true
+	}
+	oHost, oPort := splitHostPort(u.Host)
+	rHost, rPort := splitHostPort(host)
+	if !strings.EqualFold(oHost, rHost) || oHost == "" {
+		return false
+	}
+	// An address with no port is the scheme's default; both sides are compared as written.
+	return oPort == rPort
+}
+
+// splitHostPort keeps the port text as written; an address without one yields "".
+func splitHostPort(hostport string) (host, port string) {
+	h, p, err := net.SplitHostPort(hostport)
+	if err != nil {
+		return hostport, ""
+	}
+	return h, p
 }
 
 const (
@@ -43,17 +83,11 @@ const (
 	KeepaliveFrame = `{"type":"ping"}`
 )
 
-// Keepalive pings conn until ctx is done, in its own goroutine.
-//
-// A failed ping calls onDead and stops. Callers pass the cancel of the context their
-// read loop is blocked on, because Read never returns for a peer that merely stopped
-// talking.
-//
-// writeMu holds off the caller's own frames while pinging; pass nil if nothing else
-// writes to this connection.
-//
-// The caller must also be reading conn concurrently: only Read() delivers a pong, so
-// with no reader every ping times out and a live peer looks dead.
+// Keepalive pings conn until ctx is done, in its own goroutine. A failed ping calls onDead
+// and stops; callers pass the cancel of the context their read loop is blocked on, because
+// Read never returns for a peer that merely stopped talking. writeMu holds off the caller's
+// own frames while pinging (nil if nothing else writes). The caller must also be reading conn:
+// only Read() delivers a pong, so with no reader a live peer looks dead.
 func Keepalive(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, onDead func()) {
 	keepalive(ctx, conn, KeepaliveInterval, KeepaliveTimeout, writeMu, onDead)
 }

@@ -45,18 +45,11 @@ function authorDir(author?: string): string {
 
 // extBaseURL returns the served base URL for an installed extension directory.
 //
-// The server's own answer (`served_url`) is used when it is present and safe,
-// because it is derived from the installed record — the same path the server
-// reads, deletes and repairs the extension through. The author/name derivation
-// below is the fallback for a response that carries no `served_url`, and it is a
-// guess: it is only right when the install really did land under
-// `<slug(manifest.author)>/<name>`.
-//
-// `ext.name` is percent-encoded so a name can never reshape the same-origin
-// path (a raw `../` would otherwise climb out of /extensions/<author>/ before
-// the browser normalises it). The Go static handler decodes the path again, so
-// an encoded name still resolves to the same on-disk directory. Exported for
-// tests.
+// The server's `served_url` wins when present: it is derived from the installed record, the
+// same path the server reads, deletes and repairs the extension through. The author/name
+// derivation below is a fallback guess, right only when the install landed under
+// <slug(manifest.author)>/<name>. `ext.name` is percent-encoded so a name cannot reshape the
+// same-origin path; the Go static handler decodes it again.
 export function extBaseURL(ext: Extension): string {
     return (
         servedBaseURL(ext.served_url) ??

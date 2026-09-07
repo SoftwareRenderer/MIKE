@@ -1,17 +1,9 @@
 /**
- * `ui.modal` — app-level modal dialog for sandboxed UI extensions.
- *
- * An extension's own iframe is invisible (and is collapsed to height 0 the
- * moment it stops overlaying the editor), so anything an extension must show
- * AFTER handing control back to the editor has to be rendered by the host.
- * This renders a blocking, app-level modal (same visual language as
- * BaseModal.svelte, plain DOM because capability handlers run outside any
- * component).
- *
- * Each call creates its own overlay; stacked modals close inside-out
- * (Escape and backdrop clicks act on the topmost only). The returned
- * promise resolves when the user dismisses the modal — callers can treat
- * `await showExtensionModal(…)` as "the user acknowledged".
+ * `ui.modal` — app-level modal for sandboxed UI extensions. An extension's own iframe is
+ * invisible once it stops overlaying the editor, so anything it must show after handing
+ * control back is rendered by the host (plain DOM, because capability handlers run outside
+ * any component). Stacked modals close inside-out; the promise resolves when the user
+ * dismisses.
  */
 
 import { t } from '$lib/i18n';

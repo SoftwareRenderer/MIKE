@@ -1,19 +1,12 @@
 /**
- * Every token the syntax layer can emit, painted in one place.
+ * Every token the syntax layer can emit, painted in one place. Four renderers colour a
+ * token — the editor's dark and light HighlightStyle and two diff views, which render
+ * HTML strings styled by the `.hl-*` classes in app.css. Five hand-written lists used to
+ * describe them and drifted (an `atom` tag with no parent matched nothing, so constants
+ * came out in the default colour everywhere).
  *
- * Four renderers color a token: the editor's dark `HighlightStyle`, the editor's light one, and two
- * diff views — which cannot use a `HighlightStyle` at all, because they render HTML strings and style
- * them through `.hl-*` classes driven by the `--cm-*` variables in `app.css` (so a diff follows the
- * theme without a second color table). Five hand-written lists used to describe those tokens (one per
- * renderer plus the diff class table), and they drifted: a declared profile tags `true` / `None` / `nil`
- * as `tags.atom` (see `TOK.constant`) and `atom` has no parent tag, so the `constant(keyword)` entry all
- * five carried matched nothing — constants came out in the default text color, in the editor and in
- * both diffs alike. The commit overlay's list was also the copy that lagged: it gained no new token
- * when the others did.
- *
- * One row per token; the editor reads the colors, `styles/token-colors.css` reads the classes. Adding
- * a token means adding a row **and** its rule there — `__tests__/token-style.unit.ts` fails either half
- * on its own, and fails any second stylesheet that colors a token class again.
+ * One row per token; the editor reads the colours and `styles/token-colors.css` reads the
+ * classes. Adding a token means adding both — the unit test fails either half alone.
  */
 import { HighlightStyle } from '@codemirror/language';
 import { tagHighlighter, tags } from '@lezer/highlight';

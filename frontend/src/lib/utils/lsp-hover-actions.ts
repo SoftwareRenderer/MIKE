@@ -1,22 +1,13 @@
 /**
  * LSP hover card with a clickable "Go to Definition" action.
  *
- * Not a `hoverTooltip()` source: CodeMirror dismisses a hover as soon as the pointer leaves the hovered
- * position (±4px around the box), so a tooltip carrying a button closes during the motion needed to
- * press it. A promise-returning source is late too — nothing shows until the server answers, by which
- * time the pointer has started moving. So open and close are ours:
- *
- *   • opens after `hoverTime` (500 ms) of stillness on an identifier. Every card pays it: moving to
- *     another identifier closes this one and starts a fresh dwell, so a card never appears for a symbol
- *     the pointer only passed over.
- *   • stays open while the pointer is on the identifier or inside the card, and for `graceMs` after it
- *     leaves both — the time needed to cross the gap and press the button. Coming back to the
- *     identifier inside that window re-arms the dwell, because the card on screen is about a symbol
- *     that was left. A wiggle inside the identifier is not a new hover: `mousemove` fires for a single
- *     pixel, and restarting there would make the dwell impossible to reach.
- *   • closes on a scroll the pointer is not inside, and on any doc change.
- *
- * `reduceHover` below makes these decisions; the view class is timers, DOM and dispatch.
+ * Not a `hoverTooltip()` source: CodeMirror dismisses a hover as soon as the pointer
+ * leaves the hovered position, so a tooltip carrying a button closes during the motion
+ * needed to press it. Open and close are therefore ours: it opens after `hoverTime` of
+ * stillness on an identifier, stays while the pointer is on the identifier or inside the
+ * card plus `graceMs` after it leaves both, re-arms the dwell if the pointer comes back
+ * inside that window, and ignores single-pixel moves (which would make the dwell
+ * unreachable). It closes on a scroll from outside and on any doc change.
  */
 
 import { EditorView, ViewPlugin, showTooltip, type PluginValue, type Tooltip, type TooltipView, type ViewUpdate } from '@codemirror/view';

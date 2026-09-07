@@ -114,7 +114,7 @@ func (m *mockSandbox) StartShell(taskID, worktreePath string, project *types.Pro
 	if m.startShellErr != nil {
 		return nil, nil, m.startShellErr
 	}
-	// Create a real PTY shell so the readLoop can run
+	// A real PTY, so the readLoop is actually running.
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
@@ -225,7 +225,6 @@ func TestProjectTerminalStopsContainerOnExit(t *testing.T) {
 	mock := newMockSandbox(t)
 	tm := NewTerminalManager(s, cs, mock, nil)
 
-	// Create a project with sandbox enabled
 	projID := "test-proj-stop"
 	proj := &types.Project{
 		ID:             projID,
@@ -237,14 +236,12 @@ func TestProjectTerminalStopsContainerOnExit(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	// Get or create the project-level terminal session
 	sessionKey := "proj:" + projID
 	sess, err := tm.getOrCreate(sessionKey, sessionKey, dir, projID)
 	if err != nil {
 		t.Fatalf("getOrCreate: %v", err)
 	}
 
-	// Verify session exists
 	tm.mu.RLock()
 	_, ok := tm.sessions[sessionKey]
 	tm.mu.RUnlock()
@@ -265,10 +262,8 @@ func TestProjectTerminalStopsContainerOnExit(t *testing.T) {
 	}
 	sess.mu.Unlock()
 
-	// Wait briefly for readLoop to detect exit and call onExit.
-	// The readLoop blocks on ptmx.Read, which returns EOF when PTY is closed.
-	// Wait for BOTH session removal AND Stop() call to avoid a race
-	// between the two operations inside onExit.
+	// Wait for BOTH session removal AND the Stop() call: they happen in sequence inside
+	// onExit, and reading only one of them races the other.
 	done := make(chan struct{})
 	go func() {
 		for {
@@ -284,7 +279,6 @@ func TestProjectTerminalStopsContainerOnExit(t *testing.T) {
 
 	select {
 	case <-done:
-		// Session was removed and Stop was called
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for session removal and container stop")
 	}
@@ -313,7 +307,6 @@ func TestMultiClientResizeSmallestWidthWins(t *testing.T) {
 		t.Fatalf("getOrCreate: %v", err)
 	}
 
-	// Verify initial PTY size is the default 40x120
 	rows, cols, err := pty.Getsize(sess.ptmx)
 	if err != nil {
 		t.Fatalf("get initial winsize: %v", err)
@@ -322,7 +315,7 @@ func TestMultiClientResizeSmallestWidthWins(t *testing.T) {
 		t.Fatalf("initial size = %dx%d, want 120x40", cols, rows)
 	}
 
-	// Create real websocket connections to get distinct map keys
+	// Real connections: each is a distinct map key.
 	desktopPtr := newTestConn(t)
 	phonePtr := newTestConn(t)
 
@@ -461,7 +454,6 @@ func TestTaskTerminalDoesNotStopContainerOnExit(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	// Create a task-level terminal session
 	taskID := "test-task-no-stop"
 
 	sess, err := tm.getOrCreate(taskID, taskID, dir, projID)
@@ -482,8 +474,7 @@ func TestTaskTerminalDoesNotStopContainerOnExit(t *testing.T) {
 	}
 	sess.mu.Unlock()
 
-	// Wait for session to be removed, then verify Stop was NOT called.
-	// Small delay to ensure onExit has fully completed.
+	// The delay lets onExit finish: removal happens before the Stop decision.
 	done := make(chan struct{})
 	go func() {
 		for {
@@ -491,7 +482,6 @@ func TestTaskTerminalDoesNotStopContainerOnExit(t *testing.T) {
 			_, ok := tm.sessions[taskID]
 			tm.mu.RUnlock()
 			if !ok {
-				// Give onExit a moment to finish all its work
 				time.Sleep(100 * time.Millisecond)
 				close(done)
 				return
@@ -501,13 +491,11 @@ func TestTaskTerminalDoesNotStopContainerOnExit(t *testing.T) {
 
 	select {
 	case <-done:
-		// Session was removed, onExit was called
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for session to be removed")
 	}
 
-	// Verify Stop was NOT called for task-level terminal
-	// (task-level containers are managed by the task executor lifecycle)
+	// The task executor owns a task container's lifecycle, not the terminal.
 	if mock.wasStopped(taskID) {
 		t.Error("expected Stop to NOT be called for task-level terminal session")
 	}
@@ -556,7 +544,6 @@ func TestHandleTerminal_RejectsTaskFromAnotherProject(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	// Request the task under a different project ID.
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/other/tasks/"+taskID+"/terminal", nil)
 	req.SetPathValue("projectID", "other")
 	req.SetPathValue("taskID", taskID)
@@ -610,10 +597,9 @@ func wsUpgradeStatus(t *testing.T, urlStr, origin string) int {
 	return resp.StatusCode
 }
 
-// TestHandleTerminal_OriginVerification covers M2: the endpoint that hands out a
-// shell must verify the WebSocket Origin like the LSP endpoint does, so a
-// cross-site page cannot ride the session cookie into a shell. Cookies are not
-// involved in this test — it isolates the Origin check itself.
+// TestHandleTerminal_OriginVerification: the endpoint that hands out a shell verifies the
+// WebSocket Origin, so a cross-site page cannot ride the session cookie into a shell. Cookies are
+// not involved here — this isolates the Origin check itself.
 func TestHandleTerminal_OriginVerification(t *testing.T) {
 	s, cs := newTestConfigStore(t)
 	mock := newMockSandbox(t)
@@ -696,6 +682,9 @@ func TestTerminalShellOptsCarryTheProjectConfiguration(t *testing.T) {
 // TestTerminalManagerClose is the regression for "shutdown leaves shells running": two real host
 // PTY sessions, and after Close both the registry and the child processes must be gone.
 func TestTerminalManagerClose(t *testing.T) {
+	// The project is unsandboxed, which is what a host PTY means: DANGER_ZONE is the flag
+	// that allows it, and TerminalManager refuses without it (TestHostTerminalNeedsDangerZone).
+	t.Setenv("DANGER_ZONE", "1")
 	dir := t.TempDir()
 	s, cs := newTestConfigStore(t)
 	tm := NewTerminalManager(s, cs, newMockSandbox(t), nil)

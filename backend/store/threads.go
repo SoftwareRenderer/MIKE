@@ -178,18 +178,12 @@ type entryRow struct {
 	assistantMsgID string
 }
 
-// entryCutoffLocked returns the created_at of the last row of the entry that holds upToMessageID — the
-// boundary a fork copies up to. An assistant row and the tool calls it issued are separate rows that the
-// browser (chat-entries.ts) and the LLM rebuild (exec.groupTaskMessages) both show as one entry, so a fork
-// cuts between entries, never through one.
+// entryCutoffLocked returns the created_at of the last row of the entry that holds upToMessageID —
+// the boundary a fork copies up to. An assistant row and the tool calls it issued are separate
+// rows that both readers show as one entry, so a fork cuts between entries, never through one.
 //
-// Which entry a row belongs to:
-//   - an assistant row owns itself;
-//   - a tool_call row belongs to its assistant_msg_id owner, or, when that is empty (legacy rows), to the
-//     nearest preceding assistant row;
-//   - any other role is its own entry.
-//
-// The boundary is that entry's newest row. Callers must hold s.mu.
+// A tool_call row belongs to its assistant_msg_id owner, or, when that is empty (legacy rows), to
+// the nearest preceding assistant row; every other role is its own entry. Callers hold s.mu.
 func (s *Store) entryCutoffLocked(sourceThreadID, upToMessageID string) (string, error) {
 	rows, err := s.db.Query(`
 		SELECT id, role, created_at, COALESCE(assistant_msg_id, '')

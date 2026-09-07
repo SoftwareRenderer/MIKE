@@ -106,7 +106,6 @@ type TaskExecutor struct {
 	}
 }
 
-// AgentRegistry returns the agent registry used by this executor.
 func (te *TaskExecutor) AgentRegistry() *agent.AgentRegistry {
 	return te.agentRegistry
 }
@@ -139,14 +138,13 @@ type CompactResult struct {
 }
 
 // executionState is everything one running task holds between an executor taking it and its
-// defer releasing it.
-//
-// Locking, because these fields are read from the executor loop, HTTP handlers and tool calls:
+// defer releasing it. Locking, because these fields are read from the executor loop, HTTP
+// handlers and tool calls:
 //
 //   - sandboxMu guards the sandboxExec/sandboxExecStream/sandboxRead/sandboxWrite/sandboxEdit/
-//     sandboxOperatingMode/agentSandboxHash/recoverBridge group. Use sandbox() and setSandbox();
-//     never read those fields directly. sandboxMu is never held while taking taskMu, so the two
-//     cannot deadlock.
+//     sandboxOperatingMode/agentSandboxHash/recoverBridge group. Read it with sandbox() and write
+//     it with setSandbox(), never field by field. sandboxMu is a leaf: never held while taking
+//     taskMu.
 //   - activeSummarize has its own mutex, for the same one-field-one-lock reason.
 //   - taskMu (on TaskExecutor) guards everything else here together with the tasks map:
 //     runnerClosed, taskStatus, lastDiffHash, bridgeRecoveryAttempts, root. A method that reached
@@ -312,7 +310,6 @@ func (mc *modelConfig) set(serverURL, modelName string) {
 	mc.modelName = modelName
 }
 
-// NewTaskExecutor creates a new TaskExecutor.
 func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStreamMgr *stream.AppStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandbox.SandboxManager, agentRegistry *agent.AgentRegistry, lspMgr *lsp.ExtensionLSPManager, commitQueue *CommitQueue) *TaskExecutor {
 	// Normalize nil concrete to a nil interface so te.lspMgr == nil guards hold.
 	var lspMgrI lspManager
@@ -1357,7 +1354,6 @@ func (te *TaskExecutor) getAgentRunner(ctx context.Context, projectID, taskID st
 		}
 	}
 
-	// Create the agent runner.
 	var runner *agent.AgentRunner
 	var runnerErr error
 	if setup.sandboxEnabled {

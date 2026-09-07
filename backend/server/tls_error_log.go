@@ -9,17 +9,14 @@ import (
 	"kanban/pkg/logging"
 )
 
-// net/http logs its own errors through Server.ErrorLog; with none it writes to the standard
-// logger. One of them is pure noise here:
+// net/http logs its own errors through Server.ErrorLog. One of them is pure noise here:
 //
 //	http: TLS handshake error from 192.168.1.190:61946: remote error: tls: unknown certificate authority
 //
-// It comes from the client, which could not chain our certificate to a root in its own trust store
-// (never imported the local CA, or holds an older copy), and such a device retries every request, so
-// one phone buries the log. httpErrorLog logs a certificate-trust rejection once per remote host —
-// with the actionable hint — and drops the rest. Everything else passes through, including errors
-// that do point at the server: an expired leaf (never renewed on expiry, by design) or no usable
-// cipher ("remote error: tls: handshake failure").
+// It comes from a client that could not chain our certificate to a root it trusts, and such a
+// device retries every request, so one phone buries the log. httpErrorLog logs a
+// certificate-trust rejection once per remote host, with the actionable hint, and drops the
+// rest; anything that does point at the server passes through.
 func httpErrorLog(caFile string) *log.Logger {
 	return log.New(&tlsTrustNoiseFilter{caFile: caFile, seen: map[string]bool{}}, "", 0)
 }

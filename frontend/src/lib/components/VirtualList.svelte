@@ -2,13 +2,10 @@
     import type { Snippet } from 'svelte';
 
     /**
-     * Fixed-height virtual scroll list component.
-     *
-     * Renders only visible rows plus a buffer, using absolute positioning
-     * within a scrollable container. Lists below `minThreshold` items render
-     * fully (no windowing). All rows must have the same height — use
-     * `content-visibility: auto` (see ChatEntries.svelte) instead for
-     * variable-height content.
+     * Fixed-height virtual scroll list: renders visible rows plus a buffer, absolutely
+     * positioned in a scrollable container. Lists below `minThreshold` items render fully.
+     * All rows must be the same height — variable-height content wants
+     * `content-visibility: auto` (see ChatEntries.svelte) instead.
      *
      * Usage:
      *   <VirtualList {items} itemHeight={28} minThreshold={50}

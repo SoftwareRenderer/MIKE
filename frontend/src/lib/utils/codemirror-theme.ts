@@ -322,20 +322,13 @@ export const lightTheme = EditorView.theme({
 export const lightSyntax = syntaxHighlighting(lightHighlight);
 
 /**
- * Block spacing for the markdown a language server sends into a tooltip — the
- * hover card, completion info and signature help all render it, and all three
- * carry the `.cm-lsp-documentation` class the renderer puts on their content
- * element (the hover card's docs div carries it too).
- *
- * A server's documentation is a signature block followed by prose, and the
- * browser lays that out as if it were a page: 1em margins around paragraphs,
- * lists and headings, plus `1.5em`+ font sizes on the headings `####` doc
- * comments produce. In a 12px tooltip that reads as mostly whitespace, so every
- * block element is pulled to the 2px the renderer itself uses for `p`/`pre`,
- * with the first and last block flush against the card edge.
- *
- * Color-free on purpose — this belongs to neither theme, so it is not
- * duplicated in both.
+ * Block spacing for the markdown a language server sends into a tooltip — hover card,
+ * completion info and signature help all carry the `.cm-lsp-documentation` class. A
+ * server's documentation is a signature followed by prose, and the browser lays it out
+ * like a page: 1em margins and 1.5em headings, which in a 12px tooltip is mostly
+ * whitespace. Every block element is pulled to the 2px the renderer uses for p/pre, with
+ * the first and last flush to the card edge. Colour-free on purpose — it belongs to
+ * neither theme.
  */
 const LSP_DOCS = '.cm-lsp-documentation';
 const HEADINGS = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].map(h => `${LSP_DOCS} ${h}`).join(', ');
@@ -353,18 +346,13 @@ export const lspDocsTheme = EditorView.baseTheme({
     [`${LSP_DOCS} > :last-child`]: { marginBottom: '0' },
 });
 
-/**
- * Detect whether a light theme is active by checking a CSS variable.
- * Theme extensions override --color-bg-page to a light value.
- * We check if the background is lighter than a midpoint.
- */
+/** Light when the theme's own `--color-bg-page` sits above the brightness midpoint. */
 export function isLightTheme(): boolean {
     try {
         const bg = getComputedStyle(document.documentElement)
             .getPropertyValue('--color-bg-page')
             .trim();
         if (!bg) return false;
-        // Parse hex color and check brightness
         const r = parseInt(bg.slice(1, 3), 16);
         const g = parseInt(bg.slice(3, 5), 16);
         const b = parseInt(bg.slice(5, 7), 16);

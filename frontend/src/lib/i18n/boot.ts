@@ -3,20 +3,11 @@ import { DEFAULT_LOCALE } from './en';
 import { i18n } from './runtime.svelte';
 
 /**
- * Applying the last resolved catalog before the first frame.
- *
- * The language comes from the server's extension list, which is a round-trip
- * away, so on a cold boot the UI would otherwise paint English and then switch
- * mid-view. This closes that gap the same way `kanban-theme-css` closes it for a
- * theme stylesheet: apply what was true last time, immediately, and let the live
- * extension list correct it a moment later.
- *
- * The cache is never the answer — `loadI18NFromExtensions` is. Two things keep
- * that honest:
- *  - the entry is deleted the moment the live list resolves to English, so a
- *    pack that is disabled or uninstalled leaves nothing to apply, and
- *  - whatever is applied here is replaced by the first `loadExtensions()`,
- *    including being replaced by English.
+ * Applying the last resolved catalog before the first frame. The language comes from the
+ * server's extension list, a round-trip away, so a cold boot would otherwise paint
+ * English and switch mid-view. The cache is never the answer: the entry is deleted the
+ * moment the live list resolves to English, and anything applied here is replaced by the
+ * first `loadExtensions()`.
  */
 
 /**

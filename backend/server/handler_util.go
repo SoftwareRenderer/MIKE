@@ -1,6 +1,7 @@
 package server
 
 import (
+	"kanban/backend/fsutil"
 	"kanban/backend/httputil"
 	"kanban/pkg/logging"
 	"net/http"
@@ -27,7 +28,12 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	JSONResponse(w, http.StatusOK, map[string]string{"home": homeDir})
+	// `jailed` lets the picker state the limit up front instead of the user finding it in a 403.
+	JSONResponse(w, http.StatusOK, map[string]any{
+		"home":     homeDir,
+		"jailed":   s.hostRoot.Jailed(),
+		"jail_env": fsutil.AllowRootFSEnv,
+	})
 }
 
 // safeNotFoundError returns a generic not-found message without leaking the path.

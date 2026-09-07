@@ -17,18 +17,12 @@ export interface ScrollbarLineLayout {
 
 /** Compute the (y, h) rect of a marker band on the scrollbar annotation canvas.
  *
- * Positions derive from `layout` (the line's measured block + the document
- * content height) so wrapped lines and folded regions map to their real
- * scrollbar position. Falls back to a plain line-count fraction when no layout
- * is available (1 doc line = 1 visual row).
+ * Positions derive from `layout` (the line's measured block + document content height) so
+ * wrapped lines and folded regions land where they really are; without a layout this falls
+ * back to a plain line-count fraction.
  *
- * @param ln - 1-based document line number
- * @param totalLines - total document line count
- * @param canvasHeight - annotation canvas height (px)
- * @param layout - measured line block + content height (optional)
- * @param boundary - place the band at the line's bottom edge instead of its
- *   center. Used for 'removed' marks: the deleted content sits in the gap
- *   below the anchor line.
+ * @param boundary - place the band at the line's bottom edge instead of its center, for
+ *   'removed' marks: the deleted content sits in the gap below the anchor line.
  */
 export function scrollbarMarkerRect(
     ln: number,
@@ -179,23 +173,16 @@ export interface GitGutterState {
     mapVersion: number; // incremented whenever map is recomputed
 }
 
-/** CodeMirror extension for VS Code-style git gutter indicators.
- *
- * Shows colored stripes to the left of line numbers:
- * - Green for added lines
- * - Blue for modified lines
+/** CodeMirror extension for VS Code-style git gutter indicators: colored stripes left of
+ * the line numbers (green added, blue modified).
  *
  * Usage:
  *   const { extension, state } = gitGutter({ title: 'Create a task from selected lines' });
- *   // ... create editor with extension ...
- *   state.initialMarkers = serverMarkers; // from /api/fs/read response
+ *   state.initialMarkers = serverMarkers; // from /api/fs/read
  *   state.baselineContent = fileContent;  // content from disk
- *   // After save (re-fetch file):
- *   state.initialMarkers = newMarkers;
- *   state.baselineContent = newContent;
+ *   // after a save, re-fetch the file and assign both again
  *
- * @param options.title - Native hover tooltip stamped on every gutter row
- *   (e.g. the line-selection "create task" affordance). Empty = no tooltip.
+ * @param options.title - native hover tooltip on every gutter row; empty = none
  */
 export function gitGutter(options?: { title?: string }) {
     const title = options?.title ?? '';

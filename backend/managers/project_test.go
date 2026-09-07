@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"kanban/backend/config"
+	"kanban/backend/fsutil"
 	"kanban/backend/git"
 	"kanban/backend/store"
 	"kanban/backend/types"
@@ -325,6 +326,9 @@ func testProjectHandlerWithStore(t *testing.T) (*ProjectHandler, string, *store.
 	h := &ProjectHandler{
 		store:       s,
 		configStore: cfgStore,
+		// The fixtures are t.TempDir() directories under the system temp dir, so declare
+		// it as a root the way a real install declares its workspace dir.
+		hostRoot: fsutil.NewHostRoot(os.TempDir()),
 	}
 
 	// Create a test project

@@ -60,20 +60,16 @@ export type RelativeTimeScale = 'compact' | 'calendar';
 type RelativeUnit = 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year';
 
 /**
- * "N units ago", in the active locale.
+ * "N units ago", in the active locale. Two sources, in order:
  *
- * Two sources, in this order:
+ * 1. The active pack's `time.<unit>Ago` key — ICU is not always usable (French narrow
+ *    renders "-5 min", a diff rather than a label), so a pack must be able to overrule it.
+ * 2. `Intl.RelativeTimeFormat(locale, { style: 'narrow' })` otherwise. Narrow is what
+ *    yields "5m ago" / "2mo ago"; `long` prints "5 minutes ago" and breaks every pinned
+ *    assertion, so do not "fix" it to long.
  *
- * 1. The active pack's `time.<unit>Ago` key. It wins because ICU is not always
- *    usable — French narrow renders "-5 min", which is a diff, not a label — so a
- *    pack has to be able to overrule it.
- * 2. `Intl.RelativeTimeFormat(locale, { style: 'narrow' })` otherwise. Narrow is the
- *    style that matches what this file used to hardcode: in `en` it yields exactly
- *    "5m ago" / "3w ago" / "2mo ago". `style: 'long'` would give "5 minutes ago" and
- *    break every pinned assertion — do not "fix" it to long.
- *
- * With no locale chosen the `en` catalog answers (1), so a user with no pack installed
- * sees exactly what they saw before i18n existed.
+ * With no locale chosen the `en` catalog answers, so a user with no pack sees what they
+ * saw before i18n existed.
  */
 function relativePhrase(unit: RelativeUnit, n: number): string {
     const fromPack = packText(`time.${unit}Ago`, { n });

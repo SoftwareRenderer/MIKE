@@ -80,14 +80,12 @@ type EnvironmentReport struct {
 
 // Environment answers for one file in one workspace.
 //
-// Not wired: no caller asks it, so no verdict is ever recorded and
-// EnvironmentSummary always reports healthy, which means the Settings →
-// Extensions health note can never appear. Deleting this chain or calling it
-// from the diagnostics pass are the two honest endings.
+// Not wired: no caller asks it, so no verdict is ever recorded and EnvironmentSummary always
+// reports healthy, which means the Settings -> Extensions health note can never appear.
 //
-// Everything about it is permissive on purpose: no LSP session, no declared check, or a
-// check that could not be run all report healthy, so a failure here can only ever restore
-// the old behaviour, never hide a real error because a probe was unreachable.
+// Everything about it is permissive on purpose: no LSP session, no declared check, or a check
+// that could not be run all report healthy, so wiring it can only restore the old behaviour,
+// never hide a real error behind an unreachable probe.
 func (m *ExtensionLSPManager) Environment(workspacePath, filePath string) EnvironmentReport {
 	cfg := m.GetRegistry().Lookup(filePath)
 	if cfg == nil {

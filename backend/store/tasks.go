@@ -127,16 +127,14 @@ func (s *Store) UpdateTaskSessionCost(taskID string, cost float64) error {
 // inFlightStates are the execution_state values that mean a run is live.
 const inFlightStates = "('running','pulling_image')"
 
-// UpdateTask updates all fields of the task.
+// UpdateTask updates all fields of the task. Ownership guard: it must not move a row into an
+// in-flight execution_state — callers hand in a long-lived copy, so a stale one (a shutting
+// down executor) would restart a run StopTask had just ended. UpdateTaskClaimingExecution is
+// the version that may start a run.
 //
-// Ownership guard: it must not move a row into an in-flight execution_state.
-// Callers hand in a long-lived copy of the task, so a stale copy (a shutting
-// down executor, say) would restart a run that StopTask had just ended.
-// UpdateTaskClaimingExecution is the version that may start a run.
-//
-// moved_at (the board's sort key) advances only when the column changes: SQLite evaluates
-// SET expressions against the pre-update row, so "status <> ?" compares old with new status.
-// RETURNING puts the stored value back into t, so a broadcast right after persisting is exact.
+// moved_at advances only when the column changes: SQLite evaluates SET expressions against the
+// pre-update row. RETURNING puts the stored value back into t, so a broadcast right after is
+// exact.
 func (s *Store) UpdateTask(t *types.Task) error {
 	return s.updateTask(t, false)
 }

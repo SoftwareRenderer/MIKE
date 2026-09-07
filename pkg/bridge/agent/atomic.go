@@ -6,23 +6,15 @@ import (
 	"path/filepath"
 )
 
-// writeAtomic replaces the contents of path with content in one visible step: write a
-// temp file in the same directory (same filesystem, so the rename is atomic), set the
-// mode, rename over the target. A reader therefore sees either the old file or the new
-// one, never a half-written file — which matters because the bridge writes while the
-// task's own shell, an LSP server and the editor are all reading the same checkout.
+// writeAtomic replaces the contents of path in one visible step: temp file in the same directory
+// (so the rename is atomic), set the mode, rename over the target. A reader sees either the old
+// file or the new one — the bridge writes while the task's shell, an LSP server and the editor
+// are reading the same checkout. This is the only place that sequence lives, because the bridge
+// is a committed binary and a fix applied to one copy never runs in the other.
 //
-// This is the only place that sequence lives. It used to be copied verbatim into
-// handleWrite and handleEdit, and because the bridge is a *committed binary*, a fix
-// applied to one copy is an edit that silently never runs in the other.
-//
-// The mode is 0o644 exactly as both copies had it, so an edit still drops the executable
-// bit. That is a behaviour worth deciding on on its own — preserving the target's mode
-// means stating what a brand-new file gets, since the file need not exist yet — and it is
-// deliberately not smuggled into a de-duplication.
-//
-// The parent directory is the caller's business: write creates it, edit requires the file
-// it is editing to already exist.
+// The mode is 0o644, so an edit still drops the executable bit: preserving the target's mode
+// needs a decision about brand-new files and is not smuggled in here. The parent directory is the
+// caller's business — write creates it, edit requires it.
 func writeAtomic(path, content string) (int, error) {
 	tmpFile, err := os.CreateTemp(filepath.Dir(path), ".kanban-tmp-*")
 	if err != nil {

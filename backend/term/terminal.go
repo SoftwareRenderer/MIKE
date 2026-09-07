@@ -110,14 +110,10 @@ func (t *taskTerminal) applySize(rows, cols uint16) {
 	}
 }
 
-// hostShellEnv is the environment of a host terminal — the one terminal that runs
-// outside a container, for a project with sandboxing disabled.
-//
-// Under DANGER_ZONE=1, the flag that allows such a project, the terminal is the
-// operator's own shell and gets its environment, credentials included: a scrubbed one
-// cannot run the ssh-agent or registry logins the flag was set up for. Without the
-// flag the shell gets SafeAgentEnv instead, because a project restored from an old
-// database must not be handed MIKE_LOGIN_PASSWORD or MIKE_ENCRYPTION_KEY.
+// hostShellEnv is the environment of a host terminal — the one terminal outside a container, for
+// a project with sandboxing disabled. Under DANGER_ZONE=1 it is the operator's own shell and gets
+// its environment, credentials included; without the flag it gets SafeAgentEnv, because a project
+// restored from an old database must not be handed MIKE_LOGIN_PASSWORD or MIKE_ENCRYPTION_KEY.
 func hostShellEnv() []string {
 	if os.Getenv("DANGER_ZONE") == "1" {
 		return append(os.Environ(), "TERM=xterm-256color")
@@ -177,7 +173,6 @@ type TerminalManager struct {
 	onProjectPortsAssigned func(projectID string, ports []types.AssignedPort)         // callback when project-level terminal ports are assigned
 }
 
-// NewTerminalManager creates a new TerminalManager.
 func NewTerminalManager(store *store.Store, cfgStore *config.ConfigStore, sandboxMgr sandboxOps, agentRegistry *agent.AgentRegistry) *TerminalManager {
 	return &TerminalManager{
 		sessions:      make(map[string]*taskTerminal),
@@ -305,12 +300,9 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		if !tm.sandboxMgr.IsAvailable() {
 			return nil, fmt.Errorf("gVisor (runsc) is not installed — sandbox cannot be used")
 		}
-		// The project's image has to exist before a container can run from it. This session has no
-		// stream to report progress on — the WS handler that opens the terminal does, and the two
-		// share one build (see SandboxManager.EnsureImageForProject). It is called again here rather
-		// than passed down on purpose: this is the function that creates the container, so it must
-		// not depend on its caller having prepared the image. After a completed build the repeat
-		// costs one `podman image exists`.
+		// The image must exist before a container can run from it. Called again here rather than
+		// passed down: this is the function that creates the container, so it cannot depend on its
+		// caller having prepared the image. This session has no stream to report progress on.
 		imageToUse, imgErr := tm.sandboxMgr.EnsureImageForProject(proj, nil)
 		if imgErr != nil {
 			return nil, fmt.Errorf("sandbox not available: %w", imgErr)
@@ -354,7 +346,11 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 	}
 
 	if sess == nil {
-		// Direct shell (sandbox not enabled for this project)
+		// Direct shell (sandbox not enabled for this project). A row with sandboxing off is not
+		// consent: the flag is checked here as well as at create time.
+		if !sandbox.HostExecutionAllowed() {
+			return nil, sandbox.ErrHostExecution("a terminal on the host")
+		}
 		shell := os.Getenv("SHELL")
 		if shell == "" {
 			shell = "/bin/sh"
@@ -414,12 +410,10 @@ func (tm *TerminalManager) activeSessionCount() int {
 	return len(tm.sessions)
 }
 
-// Close terminates every live terminal session. Each holds a PTY and a child shell, which would
-// otherwise outlive shutdown; Server.Shutdown calls this before sandbox cleanup so the kill lands
-// while the container is still there to receive it.
-//
-// Detach under the lock, close outside it: taskTerminal.close waits on the read loop, and the read
-// loop calls back into RemoveSession, which takes this same lock.
+// Close terminates every live terminal session; each holds a PTY and a child shell that would
+// otherwise outlive shutdown, and Server.Shutdown calls it before sandbox cleanup so the kill
+// lands while the container can still receive it. Detach under the lock and close outside it:
+// close waits on the read loop, which calls back into RemoveSession and takes this same lock.
 func (tm *TerminalManager) Close() {
 	tm.mu.Lock()
 	sessions := make([]*taskTerminal, 0, len(tm.sessions))

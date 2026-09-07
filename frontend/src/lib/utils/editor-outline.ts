@@ -1,20 +1,14 @@
 /**
  * The outline for an open file, for the cases LSP document symbols cannot answer.
  *
- * Three file types, and each is here for the same reason: its grammar has no definition nodes for a
- * symbol walk to find. A Go template is a stream grammar with nothing but tokens; a Markdown outline
- * *is* its ATX headings; a Svelte component's is the declarations in its `<script>` block. Everything
- * else gets its outline from the language server, and a file no server owns gets an empty outline —
- * which is the honest answer, not a missing feature.
+ * Three file types, each here because its grammar has no definition nodes for a symbol
+ * walk: a Go template is a token stream, a Markdown outline is its ATX headings, a Svelte
+ * component's is the declarations in its <script> block. Everything else comes from the
+ * language server, and a file no server owns gets an empty outline — the honest answer.
  *
- * What used to sit here (inside `highlighter.ts`, next to code that had nothing to do with it) was a
- * tree walk hunting `FunctionDecl` / `ClassDeclaration` / `FunctionItem` and friends. Those node names
- * come from the `@codemirror/lang-*` grammars, which are deliberately out of the dependency set
- * (docs/languages.md): every language an extension covers is compiled from a declared `syntax{}`
- * profile into a `StreamLanguage`, whose tree is token names. Measured against every grammar this app
- * can load, the walk returned zero symbols for all of them — these three extractors and LSP symbols
- * produced every entry the panel ever showed. No extension can bring it back either: a manifest
- * declares data, never code.
+ * A tree walk over `@codemirror/lang-*` node names used to sit here; those grammars are
+ * out of the dependency set and every extension language is a StreamLanguage, so it
+ * returned zero symbols for all of them (docs/languages.md).
  */
 import { fileSuffix } from './file-suffix';
 

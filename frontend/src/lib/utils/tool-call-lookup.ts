@@ -30,17 +30,11 @@ export function findToolCall(entries: ChatEntry[], toolId: string): LiveToolCall
 }
 
 /**
- * Resolve the live tool call object for a tool_id.
- *
- * `activeToolCalls` is only a fast-path hint, never the source of truth: a
- * history reload (loadHistory) replaces buffer entries with DB-loaded ones that
- * keep the same tool_id but carry a different entry id, which silently
- * invalidates a cached `{entryId, toolCall}` ref. A ref is honoured only while
- * it still points into `entries`; otherwise entries are scanned by tool_id.
- *
- * Without this, a `tool_result` whose ref went stale resolves to nothing, its
- * `isPending` is never cleared and the card keeps spinning "Running" although
- * the backend finished the tool long ago.
+ * Resolve the live tool call object for a tool_id. `activeToolCalls` is a fast-path hint,
+ * never the source of truth: a history reload replaces buffer entries with DB rows that keep
+ * the tool_id but change the entry id, which invalidates a cached ref. A ref is honoured only
+ * while it still points into `entries`; otherwise entries are scanned by tool_id. Without
+ * this a stale ref leaves a finished tool card spinning on "Running".
  */
 export function resolveLiveToolCall(
     entries: ChatEntry[],

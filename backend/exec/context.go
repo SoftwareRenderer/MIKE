@@ -531,8 +531,8 @@ func BuildConversationFromTaskMessages(taskMsgs []types.TaskMessage) []types.Cha
 	return groupTaskMessages(taskMsgs)
 }
 
-// groupTaskMessages rebuilds a conversation from persisted rows. The LLM context
-// (buildMessagesFromDB) and the utility prompts (BuildConversationFromTaskMessages) share it:
+// groupTaskMessages rebuilds a conversation from persisted rows, shared by the LLM context
+// (buildMessagesFromDB) and the utility prompts:
 //
 //   - a tool_call row is emitted with the assistant row that issued it and its results right
 //     after, so a call is never separated from its answer;
@@ -541,8 +541,8 @@ func BuildConversationFromTaskMessages(taskMsgs []types.TaskMessage) []types.Cha
 //     credit the user with an environment note;
 //   - roles no conversation understands are dropped.
 //
-// Attaching tool calls by adjacency rather than by owner loses a turn's remaining calls
-// whenever anything is written between an assistant row and its tool_call rows.
+// Attaching tool calls by adjacency rather than by owner loses a turn's remaining calls whenever
+// anything is written between an assistant row and its tool_call rows.
 func groupTaskMessages(taskMsgs []types.TaskMessage) []types.ChatMessage {
 	toolRows, totalToolRows := toolCallRowsByOwner(taskMsgs)
 	messages := make([]types.ChatMessage, 0, len(taskMsgs))

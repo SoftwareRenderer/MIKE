@@ -223,8 +223,9 @@ func (p *MountPolicy) ValidateMounts(mounts []types.SandboxMount) error {
 	return nil
 }
 
-// ValidateCapability rejects malformed capability strings and every entry on the
-// shared denylist, naming the capability in the message.
+// ValidateCapability rejects a malformed capability string, naming it. There is no denylist: a
+// grant lands in a gVisor guest that started from --cap-drop ALL, so callers judge it by what it
+// can reach (sandboxruntime.GVisorIsolationForCaps).
 func ValidateCapability(cap string) error { return sandboxruntime.ValidateCapability(cap) }
 
 // ValidateCapabilities validates a capability list, naming the first offender.

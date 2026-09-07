@@ -2,17 +2,11 @@ import { loadAppSetting, saveAppSetting, deleteAppSetting } from '$lib/storage';
 import { parseCatalog, type Catalog } from './catalog';
 
 /**
- * The last catalog the server's extension list actually produced, kept so the
- * next boot can render in the right language before the round-trip finishes.
- *
- * It is a *cache of the last resolved answer*, never a setting:
- *  - it is written only after a catalog was fetched and validated, and
- *  - it is deleted whenever the live extension list resolves to English (no
- *    pack, disabled, uninstalled, or a pack that failed to load).
- *
- * That last rule is what stops a cache from outranking reality: an uninstalled
- * pack cannot leave the app speaking a language with no pack behind it, because
- * the day it stopped being the winner is the day its entry was deleted.
+ * The last catalog the server's extension list actually produced, so the next boot can
+ * render in the right language before the round-trip finishes. A cache of the last resolved
+ * answer, never a setting: written only after a catalog was fetched and validated, and
+ * deleted whenever the live list resolves to English — which is what stops an uninstalled
+ * pack leaving the app in a language with no pack behind it.
  */
 
 /** Key in the `app-settings` store. */

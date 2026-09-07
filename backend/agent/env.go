@@ -56,20 +56,15 @@ func isAgentSafeEnv(name string) bool {
 	return false
 }
 
-// SafeAgentEnv returns the environment for an agent subprocess: the allowlisted part of the server's,
-// then extras - adapter-supplied values win, because os/exec keeps the last occurrence. Extras are how
-// an agent gets provider credentials, which are never inherited. A variable the server lacks is omitted
-// rather than emitted empty: shells and Node treat VAR= and unset differently.
+// SafeAgentEnv returns the environment for an agent subprocess: the allowlisted part of the
+// server's, then extras (adapter-supplied values win, because os/exec keeps the last
+// occurrence) — extras are how an agent gets provider credentials, which are never inherited.
+// A variable the server lacks is omitted rather than emitted empty; shells treat VAR= and unset
+// differently.
 //
-// Do not use this elsewhere. Every subprocess family gets its own named allowlist, kept next to what it
-// runs:
-//
-//	git             git.Env / git.Command     - the operator's git config and credentials, plus the hook fence
-//	podman, runsc   sandboxruntime.PodmanEnv  - rootless-storage essentials (HOME, XDG_*, D-Bus)
-//	host terminal   term.hostShellEnv         - os.Environ() only under DANGER_ZONE=1
-//
-// None of them is a route into a container: a container's environment is its image plus the project's
-// declared Sandbox Configuration, assembled by types.SandboxEnvArgs.
+// Do not use this elsewhere: git takes git.Env, podman/runsc take sandboxruntime.PodmanEnv, and
+// a host terminal takes term.hostShellEnv (os.Environ() only under DANGER_ZONE=1). None of them
+// is a route into a container — that environment is types.SandboxEnvArgs.
 func SafeAgentEnv(extras ...string) []string {
 	env := make([]string, 0, len(agentEnvNames)+len(extras)+2)
 	for _, kv := range os.Environ() {
