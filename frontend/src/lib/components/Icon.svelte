@@ -1,8 +1,25 @@
 <script lang="ts">
+    import { singleSvgMarkup } from '$lib/utils/sanitize';
+
     let { src, color = 'currentColor', width = 16, height = 16, title, class: className }: { src: string; color?: string; width?: number; height?: number; title?: string; class?: string } = $props();
+
+    // `src` is rendered as markup, so only the shape this component is for is
+    // accepted: a lone, sanitized `<svg>` root. Everything real passes — the 26
+    // call sites each pass an `*.svg?raw` import — and anything else renders
+    // nothing rather than whatever it was.
+    let safeSrc = $derived(singleSvgMarkup(src));
+
+    // A dropped icon must not be silent for the developer who asked for one. In an
+    // effect rather than at init, so it re-checks when `src` changes instead of
+    // reading the first value forever (which is what Svelte is warning about).
+    $effect(() => {
+        if (import.meta.env.DEV && src && !safeSrc) {
+            console.warn('[Icon] src is not a single <svg> element; rendering nothing:', src.slice(0, 80));
+        }
+    });
 </script>
 
-<span class="icon {className}" aria-hidden="true" style="--icon-color: {color}; --icon-width: {width}px; --icon-height: {height}px" title={title}>{@html src}</span>
+<span class="icon {className}" aria-hidden="true" style="--icon-color: {color}; --icon-width: {width}px; --icon-height: {height}px" title={title}>{@html safeSrc}</span>
 
 <style>
     :global(.icon svg) {

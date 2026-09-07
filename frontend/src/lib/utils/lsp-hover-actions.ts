@@ -22,7 +22,7 @@
 import { EditorView, ViewPlugin, showTooltip, type PluginValue, type Tooltip, type TooltipView, type ViewUpdate } from '@codemirror/view';
 import { t } from '$lib/i18n';
 import { StateEffect, StateField, type Extension, type Text } from '@codemirror/state';
-import DOMPurify from 'dompurify';
+import { sanitizeHTML } from '$lib/utils/sanitize';
 import { LSPPlugin } from '@codemirror/lsp-client';
 import { inBox } from './hit-box';
 import { identifierRange, pickDefinitionTarget, toLspPosition, type CharRange, type DefinitionTarget, type LspPosition } from './lsp-definition';
@@ -178,6 +178,10 @@ function renderMarked(plugin: LSPPlugin, item: MarkedString): string {
     return '';
 }
 
+/** A language server separates doc sections with a rule the hover card's own
+ * layout already provides; everything else the sanitizer refuses by default. */
+const HOVER_FORBID_TAGS = ['hr'] as const;
+
 /** `Hover.contents` (string | MarkupContent | MarkedString[]) to sanitized HTML. */
 export function hoverDocsHTML(plugin: LSPPlugin, hover: RawMarkup | null | undefined): string {
     if (!hover || hover.contents == null) return '';
@@ -191,7 +195,7 @@ export function hoverDocsHTML(plugin: LSPPlugin, hover: RawMarkup | null | undef
         return '';
     }
 
-    return DOMPurify.sanitize(html, { FORBID_TAGS: ['hr'] });
+    return sanitizeHTML(html, HOVER_FORBID_TAGS);
 }
 
 /**
