@@ -1,6 +1,5 @@
 <script lang="ts">
-    import { marked } from 'marked';
-    import DOMPurify from 'dompurify';
+    import { markdownToSafeHTML } from '$lib/utils/sanitize';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
     import { t } from '$lib/i18n';
 
@@ -21,12 +20,12 @@
 
     let descriptionHtml = $derived.by(() => {
         if (!description) return '';
-        return DOMPurify.sanitize(marked.parse(description, { async: false }));
+        return markdownToSafeHTML(description);
     });
 
     let setupHtml = $derived.by(() => {
         if (!setupInfo) return '';
-        return DOMPurify.sanitize(marked.parse(setupInfo, { async: false }));
+        return markdownToSafeHTML(setupInfo);
     });
 </script>
 

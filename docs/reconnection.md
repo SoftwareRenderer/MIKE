@@ -10,7 +10,8 @@ When the WebSocket drops and reconnects, the current view (board, task view) upd
 - `TaskChat` subscribes to the `wsConnection` store and reloads history on reconnect. Turns completed
   while offline aren't replayed (buffer cleared at turn end), so DB reload is required.
 - Browser `online`/`offline` events complement the WS backoff: `offline` queues writes immediately
-  (a config carrying a real provider API key is the exception — it is refused, never persisted);
+  (the exceptions are a config carrying a real provider API key and a clone URL carrying credentials —
+  both refused, never persisted);
   `online` flushes the queue and calls `reconnectNow()` to skip backoff.
 - Board refresh on `visibilitychange` handles phone-sleep cases.
 
@@ -20,4 +21,4 @@ advance state.
 
 ## Behaviour in full (moved from AGENTS.md)
 ### Reconnection & Offline
-`onConnected(true)` in `App.svelte` runs `silentRefresh()` once `initialLoadComplete`; `TaskChat` reloads history from the DB on reconnect because **turns completed while offline are never replayed** (buffer cleared at turn end). `offline` queues writes immediately, except `updateConfig` with an unmasked provider key, which is refused because the queue is persisted; `online` flushes the queue and calls `reconnectNow()` to skip backoff; `visibilitychange` refreshes the board (phone-sleep). Project re-subscription forces a re-send of `task_diff_stats`. Mechanism + test approach: `docs/reconnection.md`.
+`onConnected(true)` in `App.svelte` runs `silentRefresh()` once `initialLoadComplete`; `TaskChat` reloads history from the DB on reconnect because **turns completed while offline are never replayed** (buffer cleared at turn end). `offline` queues writes immediately, except a value that carries a secret — an unmasked provider key, or a clone URL with credentials in it — which is refused because the queue is persisted; `online` flushes the queue and calls `reconnectNow()` to skip backoff; `visibilitychange` refreshes the board (phone-sleep). Project re-subscription forces a re-send of `task_diff_stats`. Mechanism + test approach: `docs/reconnection.md`.

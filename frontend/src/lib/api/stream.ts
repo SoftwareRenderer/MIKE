@@ -1,5 +1,5 @@
 import type { ProjectCounts, Task, StreamEvent } from '$lib/types';
-import { API_BASE } from './helpers';
+import { API_BASE, parseStreamFrame } from './helpers';
 import { STALE_THRESHOLD_MS, HEARTBEAT_INTERVAL_MS, RECONNECT_MAX_DELAY_MS } from '$lib/constants';
 
 /**
@@ -167,7 +167,8 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
 
         ws.onmessage = (e) => {
             lastActivityAt = Date.now();
-            const msg = JSON.parse(e.data);
+            const msg = parseStreamFrame(e.data, 'stream');
+            if (!msg) return; // an unreadable frame is dropped; the connection stays up
             // Handle task_event (server-side multiplexed task events)
             if (msg.type === 'task_event' && callbacks.onTaskEvent) {
                 callbacks.onTaskEvent(msg.task_id, {

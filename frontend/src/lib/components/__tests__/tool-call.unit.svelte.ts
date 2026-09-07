@@ -14,12 +14,11 @@ vi.mock('$lib/assets/icons/search.svg?raw', () => ({ default: '' }));
 vi.mock('$lib/assets/icons/edit.svg?raw', () => ({ default: '' }));
 vi.mock('$lib/assets/icons/check-circle.svg?raw', () => ({ default: '' }));
 vi.mock('$lib/assets/icons/question.svg?raw', () => ({ default: '' }));
-vi.mock('marked', () => ({
-    marked: { parse: (text: string) => `<p>${text}</p>` },
-}));
-vi.mock('dompurify', () => ({
-    default: { sanitize: (html: string) => html },
-}));
+// NOTE: this file used to mock `marked` and `dompurify` directly. ToolCall no longer
+// imports either — markdown goes through `$lib/utils/sanitize` — so those mocks were
+// both dead and misleading: an identity `sanitize` mock means this suite could never
+// have noticed a sink that stopped sanitizing. What the three markdown sinks render is
+// pinned in `chat-sink-sanitization.unit.svelte.ts`, which mocks nothing of the sort.
 vi.mock('$lib/utils/diff-parser', () => ({
     buildModifiedSegments: () => ({ oldSegments: [], newSegments: [] }),
 }));

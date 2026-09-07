@@ -67,6 +67,20 @@ must be frameable). Scripts-off previews are fully static (exfil impossible — 
 author-written) so they get the permissive CSP; scripts-on get the strict zero-egress CSP unless
 `allow_network` opts back into the permissive one.
 
+**The origin is taken away by the server, not by the extension.** The preview URL is
+same-origin with the application, so that `sandbox` attribute is what stands between a
+previewed document and the signed-in session — and `GET /api/auth/session` answers any
+cookie-carrying same-origin GET with the CSRF token, which leaves an unconfined preview
+document one call from every mutating endpoint. Both policies therefore end in
+`sandbox allow-scripts` (`previewDocCSPStrict`, `previewDocCSPNetwork`), so the document
+is opaque-origin whichever element embeds it; the attribute the extension sets is the
+second lock rather than the only one. `allow-scripts` is in both on purpose — a sandbox
+source only adds restrictions, so the token costs nothing, while a bare `sandbox` would
+strip scripts from the scripts-on mode. `allow-same-origin` must never appear
+(`TestPreviewDocCSP_SandboxsWithoutSameOrigin` holds both halves). A browser without CSP
+`sandbox` support falls back to exactly the previous behaviour, the attribute still
+applying, so the directive is defense in depth and not a new dependency.
+
 **Self-navigation — in-tree allow-list.** The extension arms a load counter at every `frame.src` set;
 the first load is the doc it installed (it then syncs its baseline `lastNavSeq` from `/nav` — the
 `load` event fires after subresources, so nested-iframe loads at install are absorbed into the

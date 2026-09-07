@@ -80,11 +80,11 @@ test-go-race: ## Run Go unit tests under the race detector (~4min)
 
 .PHONY: test-frontend
 test-frontend: ## Run frontend unit tests + the gates (vitest, ~10s)
-	cd frontend && npm test && npm run check:i18n && npm run check:i18n-surface-test && npm run check:i18n-surface && npm run check:sinks
+	cd frontend && npm test && npm run check:i18n && npm run check:i18n-surface-test && npm run check:i18n-surface && npm run check:sinks-test && npm run check:sinks
 
 .PHONY: test-sinks
-test-sinks: ## Fail if an HTML sink in core is unlisted or renders a translation (~1s)
-	cd frontend && npm run check:sinks
+test-sinks: ## Fail if an HTML sink in core is unlisted, renders a translation, or lost the mechanism it declares (~1s)
+	cd frontend && npm run check:sinks-test && npm run check:sinks
 
 .PHONY: test-i18n-surface
 test-i18n-surface: ## Fail if any user-facing string is still a core literal (~5s)

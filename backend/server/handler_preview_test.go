@@ -270,6 +270,61 @@ func TestPreviewDocCSPStrict_NoWildcardInLoadDirectives(t *testing.T) {
 	}
 }
 
+// INVARIANT: the preview document is opaque-origin because the SERVER says so, not
+// because the extension remembered to write `sandbox` on the frame it builds. The
+// preview URL is same-origin with the application, and GET /api/auth/session answers
+// any cookie-carrying same-origin GET with the CSRF token — so a preview document
+// that kept the origin is one fetch away from every mutating endpoint, and from
+// arbitrary code execution. `allow-same-origin` is the token that would hand it back.
+//
+// `allow-scripts` must be present in both policies: a sandbox source only adds
+// restrictions, so the token costs nothing, while a bare `sandbox` would silently
+// break the scripts-on preview mode html-preview offers as a setting.
+func TestPreviewDocCSP_SandboxsWithoutSameOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		csp  string
+	}{
+		{"strict", previewDocCSPStrict},
+		{"network", previewDocCSPNetwork},
+	} {
+		sandbox := cspDirectiveValue(tc.csp, "sandbox")
+		if sandbox == "" {
+			t.Errorf("%s CSP: no sandbox directive — an unframed preview document would keep the app's origin", tc.name)
+			continue
+		}
+		for _, token := range strings.Fields(sandbox) {
+			if token == "allow-same-origin" {
+				t.Errorf("%s CSP: sandbox carries allow-same-origin, which restores the app's origin, its cookies and its API", tc.name)
+			}
+		}
+		if !strings.Contains(" "+sandbox+" ", " allow-scripts ") {
+			t.Errorf("%s CSP: sandbox = %q, want allow-scripts (a bare sandbox breaks the scripts-on preview mode)", tc.name, sandbox)
+		}
+	}
+}
+
+// The directive must reach the browser, not just the constant: both postures answer
+// with it on the document response.
+func TestPreviewResponsesCarrySandbox(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+
+	for _, allowNetwork := range []bool{false, true} {
+		token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{
+			"content":       "<!DOCTYPE html><html><body><h1>hi</h1></body></html>",
+			"allow_network": allowNetwork,
+		})
+		rr := getPreview(t, s, "/api/preview/"+token+"/")
+		if rr.Code != http.StatusOK {
+			t.Fatalf("allow_network=%v doc GET: expected 200, got %d %s", allowNetwork, rr.Code, rr.Body.String())
+		}
+		if got := cspDirectiveValue(rr.Header().Get("Content-Security-Policy"), "sandbox"); got == "" {
+			t.Errorf("allow_network=%v: served document has no sandbox directive", allowNetwork)
+		}
+	}
+}
+
 // cspDirectiveValue extracts one directive's value from a CSP string ("" if absent).
 func cspDirectiveValue(csp, name string) string {
 	for _, part := range strings.Split(csp, ";") {

@@ -786,6 +786,7 @@ const catalog = {
     'api.updateMessage': 'Failed to update message',
     'api.updateConfig': 'Failed to update config',
     'api.updateConfigOfflineKey': 'Provider API keys are not saved while offline — reconnect and save again.',
+    'api.queueGitCredentials': 'A repository URL with credentials in it is not saved while offline — reconnect and clone again.',
     'api.switchThread': 'Failed to switch thread',
     'api.forkThread': 'Failed to fork thread',
     'api.fetchProjects': 'Failed to fetch projects',

@@ -12,6 +12,7 @@
     "check:i18n-surface": "python3 i18n-count.py",
     "check:i18n-surface-test": "python3 i18n-count_test.py",
     "check:sinks": "python3 html-sinks.py",
+    "check:sinks-test": "python3 html-sinks_test.py",
     "test": "vitest run",
     "test:watch": "vitest"
   },
