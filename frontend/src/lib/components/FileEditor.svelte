@@ -53,6 +53,7 @@
         taskId,
         filePath,
         targetLine,
+        reveal,
         active = true,
         onFocused = () => {},
         onSymbolsUpdate = () => {},
@@ -78,6 +79,8 @@
         taskId?: string;
         filePath: string;
         targetLine: number;
+        /** Count of reveal requests for this file (see the reveal effect below). */
+        reveal?: number;
         active?: boolean;
         pendingFsEvent?: { op: 'create' | 'delete'; path: string } | null;
         onFocused?: (focused: boolean) => void;
@@ -1173,7 +1176,12 @@
     // Jump to targetLine when editor is ready (from diff view click)
     $effect(() => {
         const line = targetLine;
-        if (line >= 1 && view && !loading && !fileTooLarge && !fileNotFound && !error && filePath) {
+        // Explorer tabs reveal per **request**: `reveal` counts them, so clicking the
+        // same search result again scrolls again — a line number on its own cannot
+        // say it was asked for twice. The diff editor has no request channel and
+        // keeps revealing whenever its line changes.
+        const request = reveal;
+        if (line >= 1 && (request === undefined || request > 0) && view && !loading && !fileTooLarge && !fileNotFound && !error && filePath) {
             requestAnimationFrame(() => jumpToLine(line));
         }
     });
