@@ -166,6 +166,9 @@ type executionState struct {
 	createdIDs   []string     // task IDs created by create_task during this execution
 	executorType string       // "llm" or "agent" — tracks which executor type is active
 	taskStatus   types.Status // task status at start; cleared by StopTask so HasRunningTasks can skip it
+	// sandboxEnabled is the task's project setting, fixed for the run. executeToolInner refuses
+	// a sandboxed task's host fallbacks with it.
+	sandboxEnabled bool
 	// lastDiffHash tracks the last broadcast diff hash to avoid duplicate broadcasts
 	// when fsnotify already caught the same change.
 	lastDiffHash string
@@ -1278,7 +1281,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	}
 	doneCh := make(chan struct{})
 	finishedCh := make(chan struct{})
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, compactCh: make(chan chan *CompactResult, 16), projectName: project.Name, executorType: execType, taskStatus: task.Status, done: doneCh, finished: finishedCh}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, compactCh: make(chan chan *CompactResult, 16), projectName: project.Name, sandboxEnabled: project.SandboxEnabled, executorType: execType, taskStatus: task.Status, done: doneCh, finished: finishedCh}
 	te.taskMu.Unlock()
 
 	return &taskExecSetup{
@@ -1377,17 +1380,18 @@ func (te *TaskExecutor) getAgentRunner(ctx context.Context, projectID, taskID st
 	}
 	// Use the setup created above.
 	state = &executionState{
-		ctx:          setup.ctx,
-		cancel:       setup.cancel,
-		userMsgChan:  setup.userMsgChan,
-		summarizeCh:  setup.summarizeCh,
-		compactCh:    make(chan chan *CompactResult, 16),
-		agentRunner:  runner,
-		projectName:  setup.project.Name,
-		executorType: "agent",
-		taskStatus:   task.Status,
-		done:         setup.done,
-		finished:     setup.finished,
+		ctx:            setup.ctx,
+		cancel:         setup.cancel,
+		userMsgChan:    setup.userMsgChan,
+		summarizeCh:    setup.summarizeCh,
+		compactCh:      make(chan chan *CompactResult, 16),
+		agentRunner:    runner,
+		projectName:    setup.project.Name,
+		sandboxEnabled: setup.sandboxEnabled,
+		executorType:   "agent",
+		taskStatus:     task.Status,
+		done:           setup.done,
+		finished:       setup.finished,
 	}
 	te.tasks[taskID] = state
 	te.taskMu.Unlock()

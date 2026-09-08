@@ -156,9 +156,9 @@ func makeRootCallbacks(root *os.Root, worktreePath string) (readFunc, writeFunc)
 }
 
 // executeTool dispatches a tool call to its handler. Sandbox callbacks come from state; when
-// nil, os.Root provides folder isolation on the host. ctx cancels long-running tools (bash)
-// when the task stops, and outputCallback, if non-nil, receives incremental output from the
-// streaming tools.
+// nil on an unsandboxed task, os.Root provides folder isolation on the host, and a sandboxed
+// task is refused instead (hostGuard). ctx cancels long-running tools (bash) when the task
+// stops, and outputCallback, if non-nil, receives incremental output from the streaming tools.
 func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[string]any, worktreePath string, task *types.Task, state *executionState, outputCallback func(toolID string, text string)) (string, bool) {
 	result, ok := te.executeToolInner(ctx, name, args, worktreePath, task, state, outputCallback)
 	// A successful tool call proves the sandbox bridge is healthy (or unused),
@@ -175,7 +175,6 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 	sb := state.sandbox()
 	sandboxExec := sb.exec
 	sandboxExecStream := sb.execStream
-	sandboxRead := sb.read
 	sandboxWrite := sb.write
 	sandboxEdit := sb.edit
 
@@ -197,11 +196,22 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 		return recover()
 	}
 
-	// Lazy os.Root fallback (only used when sandbox callbacks are nil).
-	// In production, loop.go always provides sandboxWrite via os.Root.
-	// Read uses plain os.ReadFile (no isolation) when sandbox is disabled.
+	// Host fallbacks. A project with sandboxing disabled is the operator's choice of the host,
+	// so these carry no jail. A sandboxed task must never reach one — every tool call of one runs
+	// in its container — so a missing sandbox callback fails closed here rather than working on
+	// the host behind the container. DANGER_ZONE=1 does not widen this: it opts in an unsandboxed
+	// project, never a sandboxed one.
+	hostGuard := func(what string) error {
+		if state.sandboxEnabled {
+			return fmt.Errorf("cannot %s on the host: this task's project is sandboxed and its sandbox bridge is not connected", what)
+		}
+		return nil
+	}
 	makeRead := func() readFunc {
 		return func(_ context.Context, p string) ([]byte, error) {
+			if err := hostGuard("read files"); err != nil {
+				return nil, err
+			}
 			norm := normalizePath(state.projectName, p)
 			if !filepath.IsAbs(norm) {
 				norm = filepath.Join(worktreePath, norm)
@@ -209,7 +219,20 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 			return os.ReadFile(norm)
 		}
 	}
+	// resolveRead answers "which reader does this tool call use": the container's when the task
+	// has a bridge, the host fallback otherwise. It reads the live state rather than the snapshot
+	// above, so a retry after bridge recovery does not reuse the reader of the connection that
+	// just died.
+	resolveRead := func() readFunc {
+		if r := state.sandbox().read; r != nil {
+			return r
+		}
+		return makeRead()
+	}
 	makeWrite := func() writeFunc {
+		if err := hostGuard("write files"); err != nil {
+			return func(_ context.Context, p, c string) error { return err }
+		}
 		// Use existing root from state, or create one lazily.
 		var root *os.Root
 		te.taskMu.Lock()
@@ -253,18 +276,10 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 	switch name {
 	case llama.ToolReadFile:
 		path, _ := args["path"].(string)
-		read := sandboxRead
-		if read == nil {
-			read = makeRead()
-		}
-		data, err := read(ctx, path)
+		data, err := resolveRead()(ctx, path)
 		if err != nil {
 			if recoverBridge(err.Error()) {
-				read = sb.read
-				if read == nil {
-					read = makeRead()
-				}
-				data, err = read(ctx, path)
+				data, err = resolveRead()(ctx, path)
 				if err != nil {
 					return fmt.Sprintf("Error: %v", err), false
 				}
@@ -329,11 +344,8 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 		return fmt.Sprintf("Wrote %d bytes to %s", len(content), path), true
 	case llama.ToolEditFile:
 		path, _ := args["path"].(string)
-		read := sandboxRead
+		read := resolveRead()
 		write := sandboxWrite
-		if read == nil {
-			read = makeRead()
-		}
 		if write == nil {
 			write = makeWrite()
 		}
@@ -384,10 +396,7 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 		data, err := read(ctx, path)
 		if err != nil {
 			if recoverBridge(err.Error()) {
-				read = sb.read
-				if read == nil {
-					read = makeRead()
-				}
+				read = resolveRead()
 				data, err = read(ctx, path)
 				if err != nil {
 					return fmt.Sprintf("Error: %v", err), false
@@ -490,6 +499,9 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 			} else {
 				// Direct execution (no sandbox), streaming output line by line. The timeout
 				// is enforced there, so a command that never exits can't pin the tool.
+				if err := hostGuard("run commands"); err != nil {
+					return "", err
+				}
 				var onLine func(text string)
 				if outputCallback != nil {
 					onLine = func(text string) { outputCallback(task.ID, text) }
@@ -582,33 +594,29 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 		}
 		return result, true
 	case llama.ToolLSPReferences:
-		result, err := te.handleLSPSymbolRequest(ctx, args, worktreePath, "textDocument/references", map[string]any{"includeDeclaration": true})
+		result, err := te.handleLSPSymbolRequest(ctx, args, worktreePath, "textDocument/references", map[string]any{"includeDeclaration": true}, resolveRead())
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
 		return result, true
 	case llama.ToolLSPDefinition:
-		result, err := te.handleLSPSymbolRequest(ctx, args, worktreePath, "textDocument/definition", nil)
+		result, err := te.handleLSPSymbolRequest(ctx, args, worktreePath, "textDocument/definition", nil, resolveRead())
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
 		return result, true
 	case llama.ToolLSPHover:
-		result, err := te.handleLSPHover(ctx, args, worktreePath)
+		result, err := te.handleLSPHover(ctx, args, worktreePath, resolveRead())
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
 		return result, true
 	case llama.ToolLSPRename:
-		read := sandboxRead
-		if read == nil {
-			read = makeRead()
-		}
 		write := sandboxWrite
 		if write == nil {
 			write = makeWrite()
 		}
-		result, err := te.handleLSPRename(ctx, args, worktreePath, read, write)
+		result, err := te.handleLSPRename(ctx, args, worktreePath, resolveRead(), write)
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
@@ -956,8 +964,9 @@ func (te *TaskExecutor) applyAutoMergeOnParentChange(target *types.Task, parent 
 
 // handleLSPSymbolRequest resolves a symbol name to a position via text search,
 // then calls the given LSP method at that position. ctx bounds the language-server
-// round trip, so stopping the task stops the tool.
-func (te *TaskExecutor) handleLSPSymbolRequest(ctx context.Context, args map[string]any, worktreePath string, method string, extraParams map[string]any) (string, error) {
+// round trip, so stopping the task stops the tool. The file is read through the task's
+// own file access, so a sandboxed task resolves its symbol in the container.
+func (te *TaskExecutor) handleLSPSymbolRequest(ctx context.Context, args map[string]any, worktreePath string, method string, extraParams map[string]any, read readFunc) (string, error) {
 	if te.lspMgr == nil {
 		return "", fmt.Errorf("LSP manager not available")
 	}
@@ -979,7 +988,7 @@ func (te *TaskExecutor) handleLSPSymbolRequest(ctx context.Context, args map[str
 	}
 
 	// Read the file and find the symbol by text search
-	content, err := os.ReadFile(absPath)
+	content, err := read(ctx, path)
 	if err != nil {
 		return "", fmt.Errorf("read file: %w", err)
 	}
@@ -1008,8 +1017,8 @@ func (te *TaskExecutor) handleLSPSymbolRequest(ctx context.Context, args map[str
 
 // handleLSPHover resolves a symbol name to a position via text search,
 // then calls textDocument/hover at that position.
-func (te *TaskExecutor) handleLSPHover(ctx context.Context, args map[string]any, worktreePath string) (string, error) {
-	return te.handleLSPSymbolRequest(ctx, args, worktreePath, "textDocument/hover", nil)
+func (te *TaskExecutor) handleLSPHover(ctx context.Context, args map[string]any, worktreePath string, read readFunc) (string, error) {
+	return te.handleLSPSymbolRequest(ctx, args, worktreePath, "textDocument/hover", nil, read)
 }
 
 // handleLSPRename renames a symbol across files with textDocument/rename, validating with
