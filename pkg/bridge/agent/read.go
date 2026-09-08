@@ -34,6 +34,9 @@ func handleRead(h *handler, conn net.Conn, req *protocol.Request) error {
 	}
 
 	totalSize := stat.Size()
+	if totalSize > protocol.MaxReadBytes {
+		return fmt.Errorf("%w: %s is %d bytes, limit %d", protocol.ErrResponseTooLarge, p.Path, totalSize, protocol.MaxReadBytes)
+	}
 
 	// Read and send in chunks
 	buf := make([]byte, readChunkSize)

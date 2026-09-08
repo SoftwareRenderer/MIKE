@@ -153,6 +153,10 @@ func (c *Client) writeFrame(frame *protocol.Frame) error {
 // deadline — the peer stopped reading. Callers decide whether to retire the client.
 var ErrWriteStalled = errors.New("bridge write stalled past its deadline")
 
+// ErrStreamOverflow reports that frames arrived faster than this process could queue them. The
+// lost bytes cannot be recovered, so the request fails rather than answering with a short body.
+var ErrStreamOverflow = errors.New("bridge stream overflowed the client buffer")
+
 // writeFrameCtx writes one frame, giving up when ctx is done. Giving up does not close the
 // connection, even though the abandoned Write holds writeMu until the peer drains: closing would
 // let a task sandbox build a second client over the same pipes and interleave frames mid-frame,
@@ -213,7 +217,13 @@ func (c *Client) readLoop() {
 				select {
 				case p.chunkCh <- frame:
 				default:
-					logging.For(logging.Bridge).Infof("chunk channel full for MsgID=%d", frame.MsgID)
+					logging.For(logging.Bridge).Warnf("chunk channel full for MsgID=%d, failing the request", frame.MsgID)
+					p.closeChunk()
+					select {
+					case p.done <- protocol.NewError(frame.MsgID, ErrStreamOverflow.Error()):
+					default:
+					}
+					delete(c.pending, frame.MsgID)
 				}
 			case protocol.TypeResult, protocol.TypeError:
 				p.closeChunk()
@@ -256,6 +266,7 @@ func (c *Client) waitForCtx(ctx context.Context, frame *protocol.Frame, timeout 
 	}
 
 	var chunks []*protocol.Frame
+	chunkBytes := 0
 
 	// timeout == 0 means block indefinitely, and a receive from a nil channel blocks
 	// forever, so one select answers both cases. It used to be two copies of every branch
@@ -276,7 +287,25 @@ func (c *Client) waitForCtx(ctx context.Context, frame *protocol.Frame, timeout 
 				goto waitDone
 			}
 			chunks = append(chunks, chunk)
+			// Counted as it arrives: a total checked at assembly has already cost the host the
+			// whole response. Read is the only method that streams through this path.
+			chunkBytes += len(chunk.Payload)
+			if chunkBytes > protocol.MaxReadBytes {
+				c.cleanup(msgID)
+				return nil, nil, fmt.Errorf("%w: stream carried %d bytes, limit %d",
+					protocol.ErrResponseTooLarge, chunkBytes, protocol.MaxReadBytes)
+			}
 		case final := <-p.done:
+			// The readLoop closes the chunk channel before it answers, so a chunk still queued
+			// here belongs to this body: returning on the answer alone handed back a random
+			// prefix of a streamed file as a success.
+			var queued int
+			chunks, queued = drainQueued(p.chunkCh, chunks)
+			if chunkBytes += queued; chunkBytes > protocol.MaxReadBytes {
+				c.cleanup(msgID)
+				return nil, nil, fmt.Errorf("%w: stream carried %d bytes, limit %d",
+					protocol.ErrResponseTooLarge, chunkBytes, protocol.MaxReadBytes)
+			}
 			c.cleanup(msgID)
 			return final, chunks, nil
 		case <-timeoutC:
@@ -302,6 +331,25 @@ waitDone:
 	case <-ctx.Done():
 		c.cleanup(msgID)
 		return nil, nil, ctx.Err()
+	}
+}
+
+// drainQueued collects the frames a chunk channel still holds. Receiving from a closed channel
+// yields its buffered frames first, and the default branch keeps this from waiting on a stream
+// that has not been closed.
+func drainQueued(ch chan *protocol.Frame, into []*protocol.Frame) ([]*protocol.Frame, int) {
+	total := 0
+	for {
+		select {
+		case chunk, ok := <-ch:
+			if !ok {
+				return into, total
+			}
+			into = append(into, chunk)
+			total += len(chunk.Payload)
+		default:
+			return into, total
+		}
 	}
 }
 

@@ -359,7 +359,6 @@ func TestConcurrentWritesNoCorruption(t *testing.T) {
 // Under -race this fails on the old code with a DATA RACE; without -race the
 // flood+iteration count makes the send-on-closed-channel panic likely.
 func TestReadFileCancelDuringChunkFlood(t *testing.T) {
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	const iterations = 400
 	const chunksPerFlood = 4000
 
@@ -393,7 +392,9 @@ func TestReadFileCancelDuringChunkFlood(t *testing.T) {
 		// chunks for the same request.
 		ctx, cancel := context.WithCancel(context.Background())
 		go func() {
-			time.Sleep(time.Duration(rng.Intn(2000)) * time.Microsecond)
+			// The package source, not a local *rand.Rand: one is shared by every iteration's
+			// goroutine, and two of them overlap once a ReadFile returns early.
+			time.Sleep(time.Duration(rand.Intn(2000)) * time.Microsecond)
 			cancel()
 		}()
 

@@ -12,9 +12,8 @@ import (
 	"kanban/backend/types"
 )
 
-// A tool call of a sandboxed task runs in its container. The host fallback must refuse
-// rather than work on the host behind the container, so that a missing sandbox callback
-// is a visible error instead of a silent escape.
+// A tool call of a sandboxed task runs in its container, so a missing sandbox callback is a
+// visible refusal rather than a silent escape onto the host.
 func TestSandboxedTaskCannotReadHostFileWithoutBridge(t *testing.T) {
 	worktree := t.TempDir()
 	te := newReadTestExecutor(t, worktree)
@@ -39,8 +38,8 @@ func TestSandboxedTaskCannotReadHostFileWithoutBridge(t *testing.T) {
 	}
 }
 
-// The other half of the rule: a project with sandboxing disabled is the operator's choice
-// of the host, so its reads are not jailed to the worktree.
+// A project with sandboxing disabled is the operator's choice of the host, so its reads are not
+// jailed to the worktree.
 func TestUnsandboxedTaskReadsOutsideWorktree(t *testing.T) {
 	worktree := t.TempDir()
 	te := newReadTestExecutor(t, worktree)
@@ -78,9 +77,8 @@ func TestSandboxedTaskCannotWriteHostFileWithoutBridge(t *testing.T) {
 	}
 }
 
-// The bash fallback is the widest of the host paths, and DANGER_ZONE=1 is set for this whole
-// package (TestMain), so a refusal here is the sandbox rule holding and not the danger-zone
-// flag doing the work.
+// DANGER_ZONE=1 is set for this whole package (TestMain), so a refusal here is the sandbox rule
+// holding rather than the danger-zone flag doing the work.
 func TestSandboxedTaskCannotRunHostCommandWithoutBridge(t *testing.T) {
 	worktree := t.TempDir()
 	te := newReadTestExecutor(t, worktree)
@@ -128,9 +126,8 @@ func goplsExtension() *extensions.Extension {
 	}
 }
 
-// The LSP tools resolve a symbol by reading the file first, so that read carries the same
-// boundary as read_file: a sandboxed task looks its symbol up in the container. The host path
-// is not where its file lives, and filepath.Join(worktree, "../x") walks out of the worktree.
+// The LSP tools read the file to find the symbol, so that read carries the same boundary as
+// read_file: a sandboxed task looks it up in the container, not at filepath.Join(worktree, "..").
 func TestLSPToolReadsThroughSandboxCallback(t *testing.T) {
 	root := t.TempDir()
 	worktree := filepath.Join(root, "wt")
@@ -164,8 +161,8 @@ func TestLSPToolReadsThroughSandboxCallback(t *testing.T) {
 	}
 }
 
-// The other side: a task with sandboxing disabled keeps the host read, so the symbol is found
-// in the worktree copy and its position is the one in that file.
+// A task with sandboxing disabled keeps the host read, so the position the tool asks about is the
+// one in the worktree copy.
 func TestLSPToolReadsWorktreeFileWhenUnsandboxed(t *testing.T) {
 	worktree := t.TempDir()
 	writeFile(t, filepath.Join(worktree, "main.go"), "package main\n\nfunc hostSymbol() {}\n")

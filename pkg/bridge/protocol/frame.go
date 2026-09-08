@@ -7,6 +7,7 @@ package protocol
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -52,6 +53,20 @@ type Frame struct {
 // HeaderSize is the fixed frame header: MsgID (4) + Type (1) + Length (4) = 9 bytes.
 const HeaderSize = 9
 
+// MaxFramePayload bounds one frame's payload: the length is a 4-byte field, so allocating from
+// it before reading hands the host whatever number a peer claims.
+const MaxFramePayload = 64 << 20
+
+// MaxReadBytes bounds the body of one chunked response. handleRead refuses the file in the guest
+// and the client stops collecting at the same number: a bound held only inside the container is
+// no bound, because an older bridge keeps streaming.
+const MaxReadBytes = 16 << 20
+
+var (
+	ErrFrameTooLarge    = errors.New("frame payload exceeds the bridge limit")
+	ErrResponseTooLarge = errors.New("response exceeds the bridge limit")
+)
+
 // ReadFrame reads a single frame from r.
 // Returns io.ErrUnexpectedEOF if the connection is closed mid-frame.
 func ReadFrame(r io.Reader) (*Frame, error) {
@@ -66,6 +81,10 @@ func ReadFrame(r io.Reader) (*Frame, error) {
 	msgID := binary.BigEndian.Uint32(header[0:4])
 	typ := header[4]
 	length := binary.BigEndian.Uint32(header[5:9])
+
+	if length > MaxFramePayload {
+		return nil, fmt.Errorf("%w: %d bytes declared, limit %d", ErrFrameTooLarge, length, MaxFramePayload)
+	}
 
 	payload := make([]byte, length)
 	if length > 0 {

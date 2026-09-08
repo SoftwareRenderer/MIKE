@@ -2,7 +2,6 @@ package exec
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,6 +16,7 @@ import (
 	"kanban/backend/git"
 	"kanban/backend/llama"
 	"kanban/backend/sandbox"
+	"kanban/backend/toolresult"
 	"kanban/backend/types"
 	"kanban/pkg/bridge"
 	"kanban/pkg/bridge/protocol"
@@ -42,6 +42,42 @@ type writeFunc func(ctx context.Context, path, content string) error
 // Provided by the sandbox in container mode; nil means fall back to read+edit+write.
 type editFunc func(ctx context.Context, path string, edits []protocol.Edit) error
 
+// captureOutput reads a command's whole output stream up to toolresult.MaxCaptureBytes: the
+// bridge hands over everything a command printed, and the host bash path stops at the same limit.
+func captureOutput(r io.Reader) string {
+	sink := toolresult.NewCapture()
+	_, _ = io.Copy(sink, r)
+	return sink.String()
+}
+
+// readFileCapped refuses a file it cannot hold instead of learning halfway through. The limit is
+// the bridge's own, so a sandboxed and an unsandboxed task read the same set of files; the copy
+// carries the bound, not the stat, because a file can grow in between.
+func readFileCapped(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > protocol.MaxReadBytes {
+		return nil, fmt.Errorf("%w: %s is %d bytes, limit %d",
+			protocol.ErrResponseTooLarge, path, info.Size(), protocol.MaxReadBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, protocol.MaxReadBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > protocol.MaxReadBytes {
+		return nil, fmt.Errorf("%w: %s passed the limit of %d bytes mid-read",
+			protocol.ErrResponseTooLarge, path, protocol.MaxReadBytes)
+	}
+	return data, nil
+}
+
 // makeSandboxCallbacks creates exec/read/write/edit callbacks that route through
 // the sandbox agent client inside a container.
 func makeSandboxCallbacks(client *bridge.Client) (execFunc, execStreamFunc, readFunc, writeFunc, editFunc) {
@@ -50,34 +86,33 @@ func makeSandboxCallbacks(client *bridge.Client) (execFunc, execStreamFunc, read
 		if err != nil {
 			return "", fmt.Errorf("bash: %w", err)
 		}
-		var buf bytes.Buffer
-		_, _ = buf.ReadFrom(holder.Output())
+		out := captureOutput(holder.Output())
 		exitCode := <-holder.ExitCode()
 		if exitCode != 0 {
-			return buf.String(), fmt.Errorf("exit code %d", exitCode)
+			return out, fmt.Errorf("exit code %d", exitCode)
 		}
-		return buf.String(), nil
+		return out, nil
 	}
 	execStreamCb := func(ctx context.Context, command string, timeout int64, outputCallback func(text string)) (string, error) {
 		holder, err := client.Bash(ctx, command, timeout)
 		if err != nil {
 			return "", fmt.Errorf("bash: %w", err)
 		}
-		var buf bytes.Buffer
+		sink := toolresult.NewCapture()
 		streamReader := holder.Output()
 		scanner := bufio.NewScanner(streamReader)
 		for scanner.Scan() {
 			line := scanner.Text() + "\n"
-			buf.WriteString(line)
+			_, _ = sink.Write([]byte(line))
 			if outputCallback != nil {
 				outputCallback(line)
 			}
 		}
 		exitCode := <-holder.ExitCode()
 		if exitCode != 0 {
-			return buf.String(), fmt.Errorf("exit code %d", exitCode)
+			return sink.String(), fmt.Errorf("exit code %d", exitCode)
 		}
-		return buf.String(), nil
+		return sink.String(), nil
 	}
 	readCb := func(ctx context.Context, path string) ([]byte, error) {
 		content, _, err := client.ReadFile(ctx, path)
@@ -196,11 +231,9 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 		return recover()
 	}
 
-	// Host fallbacks. A project with sandboxing disabled is the operator's choice of the host,
-	// so these carry no jail. A sandboxed task must never reach one — every tool call of one runs
-	// in its container — so a missing sandbox callback fails closed here rather than working on
-	// the host behind the container. DANGER_ZONE=1 does not widen this: it opts in an unsandboxed
-	// project, never a sandboxed one.
+	// Host fallbacks. A project with sandboxing disabled is the operator's choice of the host, so
+	// these carry no jail; a sandboxed task must never reach one, so a missing sandbox callback
+	// fails closed here. DANGER_ZONE=1 opts in an unsandboxed project, never a sandboxed one.
 	hostGuard := func(what string) error {
 		if state.sandboxEnabled {
 			return fmt.Errorf("cannot %s on the host: this task's project is sandboxed and its sandbox bridge is not connected", what)
@@ -216,13 +249,12 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 			if !filepath.IsAbs(norm) {
 				norm = filepath.Join(worktreePath, norm)
 			}
-			return os.ReadFile(norm)
+			return readFileCapped(norm)
 		}
 	}
-	// resolveRead answers "which reader does this tool call use": the container's when the task
-	// has a bridge, the host fallback otherwise. It reads the live state rather than the snapshot
-	// above, so a retry after bridge recovery does not reuse the reader of the connection that
-	// just died.
+	// resolveRead answers "which reader does this tool call use": the container's when the task has
+	// a bridge, the host fallback otherwise. It reads the live state, not the snapshot above, so a
+	// retry after bridge recovery does not reuse the reader of the connection that just died.
 	resolveRead := func() readFunc {
 		if r := state.sandbox().read; r != nil {
 			return r
