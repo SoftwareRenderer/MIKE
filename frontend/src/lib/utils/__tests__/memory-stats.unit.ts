@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MEMORY_WARNING_RATIO, isNearMemoryLimit, isMemoryLimitReached, isSandboxMemoryWarning, formatSandboxMemory, parseMemoryLimitMB, memoryLimitToInput, formatMemoryLimitMB, noMemoryLimitLabel } from '$lib/utils/memory-stats';
+import { MEMORY_WARNING_RATIO, isNearMemoryLimit, isMemoryLimitReached, isSandboxMemoryWarning, formatSandboxMemory, parseMemoryLimitMB, memoryLimitToInput, formatMemoryLimitMB, noMemoryLimitLabel, taskSandboxMemoryFallback } from '$lib/utils/memory-stats';
 import type { SandboxMemoryStats } from '$lib/types';
 
 function stats(overrides: Partial<SandboxMemoryStats> = {}): SandboxMemoryStats {
@@ -195,5 +195,41 @@ describe('formatSandboxMemory', () => {
 
     it('renders "current MB (no limit)" when the limit is unknown (0)', () => {
         expect(formatSandboxMemory(stats({ memory_current_mb: 42, memory_limit_mb: 0 }))).toBe('42 MB (no limit)');
+    });
+});
+
+describe('taskSandboxMemoryFallback', () => {
+    function taskWithPeak(peak?: number) {
+        return { sandbox_memory_peak_mb: peak };
+    }
+
+    it('answers null for a task with no recorded peak', () => {
+        expect(taskSandboxMemoryFallback(null, 1024)).toBeNull();
+        expect(taskSandboxMemoryFallback(undefined, 1024)).toBeNull();
+        expect(taskSandboxMemoryFallback(taskWithPeak(), 1024)).toBeNull();
+        expect(taskSandboxMemoryFallback(taskWithPeak(0), 1024)).toBeNull();
+    });
+
+    it('keeps the recorded peak and nothing else once the container is gone', () => {
+        expect(taskSandboxMemoryFallback(taskWithPeak(742), 1024)).toEqual({
+            running: false,
+            memory_current_mb: 0,
+            memory_limit_mb: 1024,
+            memory_peak_mb: 742,
+            oom_kills: 0,
+        });
+    });
+
+    it('draws the peak against the project limit it will be shown with', () => {
+        // A project saved as unlimited reports 0, and stays 0: no invented limit for the run.
+        expect(taskSandboxMemoryFallback(taskWithPeak(742), 0)?.memory_limit_mb).toBe(0);
+        expect(taskSandboxMemoryFallback(taskWithPeak(742), 2048)?.memory_limit_mb).toBe(2048);
+    });
+
+    it('still reports a run that hit its limit after the container is gone', () => {
+        const fallback = taskSandboxMemoryFallback(taskWithPeak(1024), 1024);
+        expect(isMemoryLimitReached(fallback)).toBe(true);
+        // Near-the-limit needs a running container, so a finished run never claims it.
+        expect(isNearMemoryLimit(fallback)).toBe(false);
     });
 });

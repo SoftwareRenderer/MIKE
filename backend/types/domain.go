@@ -44,6 +44,9 @@ type Task struct {
 	MovedAt       time.Time      `json:"moved_at"`
 	AssignedPorts []AssignedPort `json:"assigned_ports,omitempty"`
 	SessionCost   float64        `json:"session_cost"`
+	// SandboxMemoryPeakMB is the peak container memory of the task's most recent sandbox run,
+	// recorded as that container was removed. Written only by Store.UpdateTaskSandboxMemoryPeak.
+	SandboxMemoryPeakMB int64 `json:"sandbox_memory_peak_mb,omitempty"`
 }
 
 // IsPlanMode returns true if the task is in plan mode.

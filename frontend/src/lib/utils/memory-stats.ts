@@ -1,5 +1,5 @@
 import { t } from '$lib/i18n';
-import type { SandboxMemoryStats } from '$lib/types';
+import type { SandboxMemoryStats, Task } from '$lib/types';
 
 /** Fraction of the memory limit at which the sandbox is considered "close". */
 export const MEMORY_WARNING_RATIO = 0.8;
@@ -82,6 +82,26 @@ export function isMemoryLimitReached(stats: SandboxMemoryStats | null | undefine
 export function isSandboxMemoryWarning(stats: SandboxMemoryStats | null | undefined): boolean {
     if (!stats) return false;
     return isNearMemoryLimit(stats) || stats.oom_kills > 0 || isMemoryLimitReached(stats);
+}
+
+/**
+ * The memory record for a task whose sandbox container is gone — the state where no
+ * `sandbox_stats` event will ever arrive. Only the peak recorded as the container was removed
+ * survives, on the task row; null when none was recorded, which is not a run that used no memory.
+ */
+export function taskSandboxMemoryFallback(
+    task: Pick<Task, 'sandbox_memory_peak_mb'> | null | undefined,
+    limitMB: number,
+): SandboxMemoryStats | null {
+    const peakMB = task?.sandbox_memory_peak_mb ?? 0;
+    if (peakMB <= 0) return null;
+    return {
+        running: false,
+        memory_current_mb: 0,
+        memory_limit_mb: parseMemoryLimitMB(limitMB),
+        memory_peak_mb: peakMB,
+        oom_kills: 0,
+    };
 }
 
 /**

@@ -33,10 +33,10 @@ function stats(overrides: Partial<SandboxMemoryStats> = {}): SandboxMemoryStats 
     };
 }
 
-function renderPanel(stats: SandboxMemoryStats | null) {
+function renderPanel(stats: SandboxMemoryStats | null, taskOverrides: Partial<Task> = {}) {
     return render(SandboxPanel, {
         props: {
-            task,
+            task: { ...task, ...taskOverrides },
             stats,
             onClose: () => {},
         },
@@ -198,5 +198,66 @@ describe('SandboxPanel memory section', () => {
         const { container } = renderPanel(stats({ running: false, memory_current_mb: 0 }));
 
         expect(await memoryRowValue(container)).toBe('No limit');
+    });
+
+    // Once the container is gone no sandbox_stats event will ever arrive for this task again.
+    describe('with no live stats (review / done)', () => {
+        it('shows the peak recorded when the container was removed', async () => {
+            const { container } = renderPanel(null, { status: 'review', sandbox_memory_peak_mb: 742 });
+            const peak = await vi.waitFor(() => {
+                const el = container.querySelector('.memory-peak');
+                if (!el) throw new Error('no peak rendered');
+                return el;
+            });
+            expect(peak.textContent).toContain('Peak 742 MB');
+            expect(container.querySelector('.memory-value')?.textContent).toContain('Not running');
+        });
+
+        it('draws the recorded peak against the limit the settings list names', async () => {
+            const { container } = renderPanel(null, { status: 'done', sandbox_memory_peak_mb: 742 });
+            await vi.waitFor(() => {
+                if (!container.querySelector('.memory-bar-peak')) throw new Error('no tick yet');
+            });
+            expect((container.querySelector('.memory-bar-peak') as HTMLElement).style.left).toBe('72%');
+            expect((container.querySelector('.memory-bar-fill') as HTMLElement).style.width).toBe('0%');
+            expect(await memoryRowValue(container)).toBe('1024 MB');
+        });
+
+        it('marks a recorded peak that hit its limit', async () => {
+            const { container } = renderPanel(null, { status: 'done', sandbox_memory_peak_mb: 1024 });
+            await vi.waitFor(() => {
+                if (!container.querySelector('.memory-peak')) throw new Error('no peak rendered');
+            });
+            expect(container.querySelector('.memory-peak')?.classList.contains('reached')).toBe(true);
+        });
+
+        it('shows a recorded peak without a bar when the project saved no limit', async () => {
+            vi.mocked(getProject).mockResolvedValueOnce({
+                id: 'p1',
+                name: 'Test Project',
+                sandbox_enabled: true,
+                sandbox_network_isolation: false,
+                sandbox_memory_limit: 0,
+            } as any);
+            const { container } = renderPanel(null, { status: 'done', sandbox_memory_peak_mb: 742 });
+            await vi.waitFor(() => {
+                if (!container.querySelector('.memory-peak')) throw new Error('no peak rendered');
+            });
+            expect(container.querySelector('.memory-bar')).toBeNull();
+            expect(container.querySelector('.memory-peak')?.classList.contains('reached')).toBe(false);
+        });
+
+        it('hides the memory section for a task that never recorded a peak', async () => {
+            const { container } = renderPanel(null, { status: 'done' });
+            await memoryRowValue(container); // the project has loaded, so the choice is final
+            expect(container.querySelector('.memory-section')).toBeNull();
+        });
+
+        it('prefers live stats over the recorded peak while the container runs', () => {
+            // A new turn's container has its own peak.
+            const { container } = renderPanel(stats({ memory_current_mb: 100 }), { sandbox_memory_peak_mb: 742 });
+            expect(container.querySelector('.memory-value')?.textContent).toContain('100 / 1024 MB');
+            expect(container.querySelector('.memory-peak')).toBeNull();
+        });
     });
 });

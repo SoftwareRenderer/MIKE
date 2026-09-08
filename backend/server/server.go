@@ -130,6 +130,16 @@ type Server struct {
 	projectMuxMu sync.RWMutex           // protects projectMux map
 }
 
+// sandboxMemoryPeakSink is the sandbox manager's receiver for a container's final peak memory:
+// the task row, the only thing that outlives the cgroup it was read from.
+func sandboxMemoryPeakSink(st *store.Store) func(taskID string, peakMB int64) {
+	return func(taskID string, peakMB int64) {
+		if err := st.UpdateTaskSandboxMemoryPeak(taskID, peakMB); err != nil {
+			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("recording peak sandbox memory %d MB: %v", peakMB, err)
+		}
+	}
+}
+
 // NewServer builds the server. allowedHosts adds to the accepted Host values; empty falls back
 // to MIKE_ALLOWED_HOSTS (see effectiveAllowedHosts). frontendDist empty skips static serving.
 func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tlsCfg *tls.Config) (*Server, error) {
@@ -191,6 +201,8 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	s.sandboxStatsSampler = stream.NewSandboxStatsSampler(s.sandboxMgr, store, s.appStreamMgr, stream.DefaultSandboxStatsInterval)
 	s.appStreamMgr.SetSandboxStatsProvider(s.sandboxStatsSampler.LatestStatsProvider())
 	s.sandboxStatsSampler.Start()
+	// The sampler only sees a live container; this sink is what outlives it.
+	s.sandboxMgr.SetMemoryPeakSink(sandboxMemoryPeakSink(store))
 	s.boardHandler = managers.NewBoardHandler(store, s.appStreamMgr, cfgStore, s.sandboxMgr)
 	s.terminalMgr = term.NewTerminalManager(store, cfgStore, s.sandboxMgr, nil) // agentRegistry wired after creation
 	s.terminalMgr.SetOnPortsAssigned(func(taskID, projectID string, ports []types.AssignedPort) {

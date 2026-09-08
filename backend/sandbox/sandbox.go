@@ -179,16 +179,39 @@ type agentConn struct {
 	stdout io.ReadCloser
 }
 
+// memoryUsage answers one container's memory usage and drops the cached cgroup path of one that
+// is gone. An interface so Stop's capture-on-teardown rule is testable without podman.
+type memoryUsage interface {
+	Usage(containerName string) sandboxruntime.MemoryUsageMB
+	Forget(containerName string)
+}
+
+// noMemory answers "no data" for a manager with no tracker; a container is removed regardless.
+type noMemory struct{}
+
+func (noMemory) Usage(string) sandboxruntime.MemoryUsageMB { return sandboxruntime.MemoryUsageMB{} }
+func (noMemory) Forget(string)                             {}
+
+func (sm *SandboxManager) memory() memoryUsage {
+	if sm.mem == nil {
+		return noMemory{}
+	}
+	return sm.mem
+}
+
 // SandboxManager manages gVisor sandbox containers for tasks.
 type SandboxManager struct {
 	mu            sync.Mutex
 	rt            *sandboxruntime.Runtime
-	active        map[string]string             // taskID -> containerName
-	mountPaths    map[string]string             // taskID -> mount path inside container
-	agents        map[string]*agentConn         // taskID -> agent pipes + process
-	clients       map[string]*bridge.Client     // taskID -> agent client (cached)
-	livenessCache map[string]time.Time          // taskID -> last time running was confirmed
-	mem           *sandboxruntime.MemoryTracker // taskID -> container memory, via containerName
+	active        map[string]string         // taskID -> containerName
+	mountPaths    map[string]string         // taskID -> mount path inside container
+	agents        map[string]*agentConn     // taskID -> agent pipes + process
+	clients       map[string]*bridge.Client // taskID -> agent client (cached)
+	livenessCache map[string]time.Time      // taskID -> last time running was confirmed
+	mem           memoryUsage               // taskID -> container memory, via containerName
+	// peakSink receives a container's final peak memory from Stop. Read under mu, never called
+	// with mu held: the sink writes to SQLite.
+	peakSink func(taskID string, peakMB int64)
 	// imageOps holds in-flight image builds/pulls by image ref, so concurrent sandbox starts share
 	// one build. imageOpsMu is separate from mu: a build runs for minutes and must not block the
 	// container maps.
@@ -222,6 +245,13 @@ func NewSandboxManager() *SandboxManager {
 		logging.For(logging.Sandbox).Info("gVisor not available (runsc not found), sandboxing disabled")
 	}
 	return sm
+}
+
+// SetMemoryPeakSink registers the receiver of a container's final peak memory.
+func (sm *SandboxManager) SetMemoryPeakSink(sink func(taskID string, peakMB int64)) {
+	sm.mu.Lock()
+	sm.peakSink = sink
+	sm.mu.Unlock()
 }
 
 // cleanupStaleContainers removes any kanban-sandbox-* containers left behind.
@@ -936,6 +966,23 @@ func (sm *SandboxManager) BinaryAvailable(taskID, binaryName string) bool {
 	return err == nil
 }
 
+// recordFinalPeak hands a container's peak memory to the registered sink and drops its cached
+// cgroup path. Stop calls it before the removal: memory.peak dies with the container, and a
+// removal that fails must not cost the run its measurement. A cgroup it cannot read, or a peak
+// of 0, reports nothing rather than erasing a recorded run. The caller holds no lock.
+func (sm *SandboxManager) recordFinalPeak(taskID, containerName string) {
+	sm.mu.Lock()
+	sink := sm.peakSink
+	sm.mu.Unlock()
+	mem := sm.memory()
+	if sink != nil {
+		if usage := mem.Usage(containerName); usage.Known && usage.Peak > 0 {
+			sink(taskID, usage.Peak)
+		}
+	}
+	mem.Forget(containerName)
+}
+
 // Stop removes the sandbox container for a task.
 func (sm *SandboxManager) Stop(taskID string) error {
 	sm.mu.Lock()
@@ -954,7 +1001,7 @@ func (sm *SandboxManager) Stop(taskID string) error {
 	delete(sm.livenessCache, taskID)
 	sm.mu.Unlock()
 	if ok {
-		sm.mem.Forget(containerName)
+		sm.recordFinalPeak(taskID, containerName)
 	}
 
 	// Close agent client
@@ -1106,7 +1153,7 @@ func (sm *SandboxManager) GetMemoryStats(taskID string) *types.SandboxMemoryStat
 		return &types.SandboxMemoryStats{}
 	}
 
-	usage := sm.mem.Usage(name)
+	usage := sm.memory().Usage(name)
 	return &types.SandboxMemoryStats{
 		Running:   usage.Known,
 		CurrentMB: usage.Current,

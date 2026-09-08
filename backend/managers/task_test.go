@@ -1091,3 +1091,31 @@ func TestSubtasksToStart_Parallel(t *testing.T) {
 		t.Fatalf("expected 3 subtasks in parallel mode, got %d: %v", len(ids), ids)
 	}
 }
+
+// The peak is a reading the sandbox layer takes from a container as it is removed, so a created
+// task has none — whatever the body claimed.
+func TestTaskHandler_POST_DoesNotSeedAMeasuredPeak(t *testing.T) {
+	h, s, worktreesDir := newTestTaskHandler(t)
+	proj := &types.Project{ID: "peak-seed-proj", Name: "peak-seed", Path: filepath.Join(worktreesDir, "peak-seed")}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := doTaskRequest(t, newTaskMux(h), http.MethodPost, "/api/projects/peak-seed-proj/tasks",
+		map[string]any{"title": "seeded peak", "sandbox_memory_peak_mb": 99999})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create task: %d %s", rr.Code, rr.Body.String())
+	}
+	var created types.Task
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatalf("parse created task: %v", err)
+	}
+
+	stored, err := s.GetTask(proj.ID, created.ID)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if stored.SandboxMemoryPeakMB != 0 {
+		t.Errorf("created task carries peak %d MB, want 0", stored.SandboxMemoryPeakMB)
+	}
+}
