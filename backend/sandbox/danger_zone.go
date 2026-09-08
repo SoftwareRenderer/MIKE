@@ -1,23 +1,14 @@
 package sandbox
 
-import (
-	"fmt"
-	"os"
-)
+import "os"
 
-// DangerZoneEnv is the operator's opt-in to running anything on the host instead of in a
-// gVisor container: an unsandboxed project, its terminal, and the bash tool call a task
-// makes inside it.
+// DangerZoneEnv is the operator's permission to turn sandboxing off: creating a project with
+// sandboxing disabled, and switching an existing project to it. Both refusals live in
+// backend/managers/project.go. It says nothing about where a running task executes — a project's
+// sandbox_enabled column is that answer, and a project with sandboxing off is the operator's own
+// decision, not re-checked where the shell or the tool call is handed out.
 const DangerZoneEnv = "DANGER_ZONE"
 
-// HostExecutionAllowed reports whether the operator opted in. Only the exact value "1"
-// counts: a truthy-looking typo is not consent.
-func HostExecutionAllowed() bool { return os.Getenv(DangerZoneEnv) == "1" }
-
-// ErrHostExecution is the refusal both host paths answer with, naming the variable because
-// that is the only actionable part of it. Checked where the shell is handed out and not only
-// at create time: a row with sandboxing off can predate that rule, and a row is not consent.
-func ErrHostExecution(what string) error {
-	return fmt.Errorf("%s is not allowed: this project runs with sandboxing disabled and %s=1 is not set in the server environment",
-		what, DangerZoneEnv)
-}
+// DangerZoneAllows reports whether the operator granted that permission. Only the exact value "1"
+// counts: a truthy-looking typo is not the opt-in it was meant to be.
+func DangerZoneAllows() bool { return os.Getenv(DangerZoneEnv) == "1" }

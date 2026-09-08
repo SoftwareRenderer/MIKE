@@ -11,9 +11,8 @@ import (
 //   - without DANGER_ZONE, the shell must not carry the server's secrets
 //     (MIKE_LOGIN_PASSWORD logs in as the operator; MIKE_ENCRYPTION_KEY decrypts every
 //     stored provider key) while still being a usable shell;
-//   - with DANGER_ZONE=1 — the flag that lets a project run host shells at all — the
-//     terminal IS the operator's own shell and keeps the environment their own shell
-//     would have. Scrubbing that silently breaks the tooling they opted in for.
+//   - with DANGER_ZONE=1, the terminal is the operator's own shell and keeps the environment
+//     their own shell would have. Scrubbing that silently breaks the tooling they opted in for.
 func TestHostShellEnvIsGatedOnDangerZone(t *testing.T) {
 	t.Setenv("MIKE_LOGIN_PASSWORD", "operator-password")
 	t.Setenv("MIKE_ENCRYPTION_KEY", "encryption-key")

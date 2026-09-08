@@ -88,20 +88,30 @@ func isGitSafeEnv(name string) bool {
 	return false
 }
 
-// HookFence returns the config that stops git running repository-supplied hooks, as environment
-// entries.
+// HookFence returns the config that stops a repository of this server's checkout running code on
+// this machine, as environment entries.
 //
-// Env-based rather than a flag, for one measured reason: --no-verify does not exist for every
-// HookFence returns the config that stops git running repository-supplied hooks, as environment
-// entries. Env-based rather than a flag because --no-verify does not exist for every
-// hook-capable operation: git worktree add has no such flag and runs post-checkout.
-// GIT_CONFIG_COUNT/KEY_n/VALUE_0 is git's own config-as-environment, so it has -c's precedence
-// and cannot be forgotten at a call site.
+// Env-based rather than a flag, because --no-verify does not exist for every code-running
+// operation: `git worktree add` has no such flag and runs post-checkout. And hooks are not the
+// whole surface — a repository's own config can start a process with no hook in sight:
+// core.fsmonitor is executed by `git status`, which this server runs continuously in every
+// registered checkout (measured on git 2.43: with only core.hooksPath fenced, a repo carrying
+// core.fsmonitor=<cmd> ran <cmd>). GIT_CONFIG_COUNT/KEY_n/VALUE_n is git's own config-as-environment,
+// so it has -c's precedence, is applied by every caller through Env, and cannot be forgotten at a
+// call site. The count must equal the number of KEY_n entries: git refuses the whole set on a
+// mismatch, which fails closed rather than reading as "the fence is fine".
+//
+// Still uncovered, for whoever hardens the next transfer: core.sshCommand, core.gitProxy,
+// core.askPass, credential.helper and filter.<driver>.clean|smudge. Each needs either a remote
+// transfer this server starts or a config entry plus a matching .gitattributes, and `git clone`
+// does not copy [core] out of the source — a repo that arrives by copy, restore or archive does.
 func HookFence() []string {
 	return []string{
-		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_COUNT=2",
 		"GIT_CONFIG_KEY_0=core.hooksPath",
 		"GIT_CONFIG_VALUE_0=/dev/null",
+		"GIT_CONFIG_KEY_1=core.fsmonitor",
+		"GIT_CONFIG_VALUE_1=false",
 	}
 }
 

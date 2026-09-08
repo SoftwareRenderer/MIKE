@@ -269,31 +269,9 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	})
 	extLSPRegistry := lsp.NewExtensionRegistry(s.extStore)
 	s.lspHandler = lsp.NewLSPHandler(extLSPRegistry, s.extLSPMgr)
-	// Restrict LSP workspaces to project paths and task worktrees so a client
-	// cannot spawn a language server with cwd at an arbitrary host directory.
-	s.lspHandler.SetWorkspaceValidator(func(workspace string) bool {
-		cfg, err := s.configStore.GetConfig()
-		if err != nil {
-			return false
-		}
-		ws := filepath.Clean(workspace)
-		wsDir := filepath.Clean(cfg.WorkspaceDir)
-		if ws == wsDir || strings.HasPrefix(ws, wsDir+string(os.PathSeparator)) {
-			return true
-		}
-		// Projects may live anywhere on the host; allow their roots and descendants.
-		projects, err := s.store.ListProjects()
-		if err != nil {
-			return false
-		}
-		for _, p := range projects {
-			root := filepath.Clean(p.Path)
-			if ws == root || strings.HasPrefix(ws, root+string(os.PathSeparator)) {
-				return true
-			}
-		}
-		return false
-	})
+	// The LSP workspace becomes the bind-mount source of the language server's container, so it
+	// answers to the same jail as every other host path the server opens. See lspWorkspaceAllowed.
+	s.lspHandler.SetWorkspaceValidator(s.lspWorkspaceAllowed)
 	s.extHandler.SetOnExtensionChanged(func() {
 		agentRegistry.Reload()
 		refreshLLMAdapters()
@@ -782,6 +760,30 @@ func (s *Server) logHostRootPolicy() {
 		logging.For(logging.Host).Warnf("the host directory jail includes the filesystem root (roots: %s), which constrains nothing: "+
 			"every host path is reachable without the widening variable", strings.Join(s.hostRoot.Roots(), ", "))
 	}
+}
+
+// lspWorkspaceAllowed answers "may an LSP client open a language server at this directory?". The
+// workspace string arrives in a browser message and becomes the `-v` source of the language
+// server's container, so it goes through fsutil.Contained rather than a prefix comparison: a
+// symlink planted inside a worktree a task can write to resolves against the host, and a lexical
+// check reads straight through it into, say, the operator's ~/.ssh.
+func (s *Server) lspWorkspaceAllowed(workspace string) bool {
+	cfg, err := s.configStore.GetConfig()
+	if err != nil {
+		return false
+	}
+	// Projects may live anywhere on the host; the workspace dir holds every project's task
+	// worktrees, which is where an open file usually is.
+	roots := []string{filepath.Clean(cfg.WorkspaceDir)}
+	projects, err := s.store.ListProjects()
+	if err != nil {
+		return false
+	}
+	for _, p := range projects {
+		roots = append(roots, filepath.Clean(p.Path))
+	}
+	_, err = fsutil.Contained(workspace, roots)
+	return err == nil
 }
 
 func newHybridListener(l net.Listener, stdCfg *stdtls.Config, sniffTimeout time.Duration) *hybridListener {

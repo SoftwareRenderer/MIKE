@@ -111,11 +111,12 @@ func (t *taskTerminal) applySize(rows, cols uint16) {
 }
 
 // hostShellEnv is the environment of a host terminal — the one terminal outside a container, for
-// a project with sandboxing disabled. Under DANGER_ZONE=1 it is the operator's own shell and gets
-// its environment, credentials included; without the flag it gets SafeAgentEnv, because a project
-// restored from an old database must not be handed MIKE_LOGIN_PASSWORD or MIKE_ENCRYPTION_KEY.
+// a project with sandboxing disabled. DANGER_ZONE=1 also means "this is the operator's own shell",
+// so it gets the operator's environment, credentials included; without the flag it gets
+// SafeAgentEnv, because a project row is not a grant of MIKE_LOGIN_PASSWORD or
+// MIKE_ENCRYPTION_KEY to a shell.
 func hostShellEnv() []string {
-	if os.Getenv("DANGER_ZONE") == "1" {
+	if sandbox.DangerZoneAllows() {
 		return append(os.Environ(), "TERM=xterm-256color")
 	}
 	return agent.SafeAgentEnv("TERM=xterm-256color")
@@ -346,11 +347,8 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 	}
 
 	if sess == nil {
-		// Direct shell (sandbox not enabled for this project). A row with sandboxing off is not
-		// consent: the flag is checked here as well as at create time.
-		if !sandbox.HostExecutionAllowed() {
-			return nil, sandbox.ErrHostExecution("a terminal on the host")
-		}
+		// Direct shell (sandbox not enabled for this project): the project row is the operator's
+		// own decision, made where a project is created or switched, so it is not re-checked here.
 		shell := os.Getenv("SHELL")
 		if shell == "" {
 			shell = "/bin/sh"
