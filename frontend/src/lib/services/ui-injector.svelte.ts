@@ -2,6 +2,7 @@ import type { Extension } from '$lib/types';
 import { computeGrants, CAP_THEME_UPDATE } from '$lib/extensions/capabilities';
 import { readThemeVars } from '$lib/extensions/handlers/theme';
 import { ExtensionHostChannel, mintChannelToken } from '$lib/extensions/channel';
+import { dropExtensionAssetCache, extensionSetFingerprint } from './sw-cache';
 import {
     INJECTION_POINTS,
     type InjectionPoint,
@@ -86,20 +87,72 @@ function servedBaseURL(served: unknown): string | null {
     return EXTENSIONS_PREFIX + encoded.join('/');
 }
 
+/** Resolve `.` and `..` in an absolute path, or return '' when it climbs above the root. */
+function normalizePath(path: string): string {
+    const segments: string[] = [];
+    for (const segment of path.split('/')) {
+        if (segment === '' || segment === '.') continue;
+        if (segment === '..') {
+            if (segments.length === 0) return ''; // above the root: not a path we can load
+            segments.pop();
+            continue;
+        }
+        segments.push(segment);
+    }
+    return '/' + segments.join('/');
+}
+
+/**
+ * True when `path` names a file inside the installed-extension tree.
+ *
+ * Checked twice over, on the string and on its percent-decoded form: the Go
+ * static handler decodes once before it routes, so `%2e%2e` and `%2F` are the
+ * same segments to it as to the browser's URL parser. A query, a fragment, a
+ * backslash or a control character is a refusal as well — an extension's asset
+ * is a file it shipped, not a request.
+ */
+function isInsideExtensionTree(path: string): boolean {
+    if (!path.startsWith(EXTENSIONS_PREFIX) || /[\\?#\u0000-\u001f\u007f]/.test(path)) return false;
+    let decoded: string;
+    try {
+        decoded = decodeURIComponent(path);
+    } catch {
+        return false; // a broken escape sequence is not a path
+    }
+    for (const candidate of [path, decoded]) {
+        if (!candidate.startsWith(EXTENSIONS_PREFIX)) return false;
+        const segments = candidate.slice(EXTENSIONS_PREFIX.length).split('/');
+        if (segments.length < 2) return false; // the tree root and an extension directory are not files
+        if (segments.some((s) => s === '' || s === '.' || s === '..')) return false;
+    }
+    return true;
+}
+
 // resolveAssetURL resolves a manifest asset path (e.g. a css_url) against the
 // extension's served base (extBaseURL), so a relative path like "./styles.css" or
 // "styles.css" resolves to that directory plus the asset —
 // /extensions/<author>/<name>/styles.css for a registry install, /extensions/<name>/…
 // for one placed flat under the extensions root.
-// Only same-origin assets are allowed: URLs with a scheme (http:, https:,
-// data:, …) or protocol-relative URLs (//host/…) are rejected ('') — a CSS
-// extension must not load its global stylesheet from an external origin.
-// A leading '/' is treated as relative to the extension's own directory
-// (never as a server-root path). Exported for tests.
+// The answer is that directory plus the asset, or '' — there is no third answer.
+// '' covers a URL with a scheme (http:, https:, data:, …) or protocol-relative
+// (`//host/…`), which a CSS extension must never load from an external origin, and
+// equally a path that leaves that directory once `..` is resolved: the browser
+// normalizes the URL before it sends it, so `/extensions/a/b/../../../api/config`
+// *is* a request for `/api/config` with this session's cookie, whatever the string
+// looked like on the way in. Containment is therefore decided on the normalized
+// path, against the base's own normalized form — which also refuses a base that is
+// not a directory. Mirrors validatePackRelPath/packFilePath on the Go side, which
+// refuses the same shapes before a manifest is stored.
+// A leading '/' is relative to the extension's own directory (never to the server root).
+// Exported for tests.
 export function resolveAssetURL(ext: Extension, asset: string): string {
     if (!asset) return asset;
     if (/^[a-z][a-z0-9+.-]*:/i.test(asset) || asset.startsWith('//')) return ''; // external — reject
-    return `${extBaseURL(ext)}/${asset.replace(/^\.?\//, '')}`;
+    const base = normalizePath(extBaseURL(ext));
+    if (!base) return ''; // a base that is not a directory has no assets to resolve against
+    const resolved = normalizePath(`${base}/${asset.replace(/^\.?\//, '')}`);
+    if (!resolved.startsWith(`${base}/`) || !isInsideExtensionTree(resolved)) return '';
+    return resolved;
 }
 
 /**
@@ -109,7 +162,7 @@ export function resolveAssetURL(ext: Extension, asset: string): string {
  * be imported) — change both.
  */
 export function isPrepaintableThemeURL(url: string): boolean {
-    return /^\/extensions\/[^/\\]/.test(url);
+    return isInsideExtensionTree(url);
 }
 
 export interface InjectionRegistration {
@@ -131,9 +184,25 @@ export class UIInjector {
     private channels = new Map<HTMLElement, Map<string, ExtensionHostChannel>>();
     private version = $state(0);
     private activeCSSUrl = $state<string | null>(null);
+    /** The installed set this registration was built from, and the drop its change started. */
+    private extensionsFingerprint = '';
+    private hasBaseline = false;
+    assetCacheDropped: Promise<void> = Promise.resolve();
 
     registerFromExtensions(extensions: Extension[]) {
         this.destroyAll();
+
+        // An updated or deleted extension leaves its previous bytes in the service
+        // worker's cache, and that cache is the offline fallback for the frame the
+        // host arms. Drop it when the installed set moved since this browser last
+        // looked — not on the first list of a session, where there is nothing to
+        // compare against and deleting would cost the offline fallback for free.
+        const fingerprint = extensionSetFingerprint(extensions);
+        if (this.hasBaseline && fingerprint !== this.extensionsFingerprint) {
+            this.assetCacheDropped = dropExtensionAssetCache();
+        }
+        this.extensionsFingerprint = fingerprint;
+        this.hasBaseline = true;
 
         this.registrations = [];
         let cssUrl: string | null = null;
@@ -145,6 +214,13 @@ export class UIInjector {
             if (ext.type === 'css' && ext.manifest.capabilities?.css?.css_url) {
                 if (!cssUrl) {
                     cssUrl = resolveAssetURL(ext, ext.manifest.capabilities.css.css_url);
+                    if (!cssUrl) {
+                        // Reported, not swallowed: a pack whose stylesheet cannot be resolved
+                        // otherwise just never paints, which reads as a broken theme.
+                        console.error(
+                            `[ui-injector] ${ext.name}: css_url ${JSON.stringify(ext.manifest.capabilities.css.css_url)} is not a file in the extension's own directory; no theme stylesheet loaded.`,
+                        );
+                    }
                 }
                 continue;
             }
@@ -351,6 +427,8 @@ export class UIInjector {
     clearCache() {
         this.destroyAll();
         this.setThemeCSS(null);
+        this.hasBaseline = false;
+        this.extensionsFingerprint = '';
     }
 
     hasContent(point: InjectionPoint): boolean {

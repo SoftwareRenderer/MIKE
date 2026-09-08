@@ -127,6 +127,14 @@ func (c *Capabilities) GetI18N() *I18NConfig {
 	return c.I18N
 }
 
+// GetCSS returns the global-stylesheet capability, or nil if not present.
+func (c *Capabilities) GetCSS() *CSSConfig {
+	if c == nil {
+		return nil
+	}
+	return c.CSS
+}
+
 // I18NConfig declares a translation pack: translated interface strings plus an optional overlay
 // of translated prompt templates, both inside the extension's own directory. That is the whole
 // security argument — a pack is read as data, so it gets no sandbox, no mounts, no network and

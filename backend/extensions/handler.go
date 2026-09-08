@@ -431,6 +431,13 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	// Same rule for the stylesheet: it is the one stored declaration the browser resolves into a
+	// <link> and into the pre-paint storage, so a save must not be able to aim it elsewhere.
+	if err := ext.Manifest.Capabilities.GetCSS().Validate(); err != nil {
+		http.Error(w, "extension declares an unusable stylesheet: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	if err := h.store.Update(id, ext); err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, "failed to update extension: "+err.Error())
 		return
@@ -989,6 +996,12 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 		fail(fmt.Errorf("extension %s declares an unusable translation pack: %w", entry.Name, err))
 		return
 	}
+	// The stylesheet of a css pack gets the same containment the pack's files get, and for the
+	// same reason: the browser resolves it into a <link> before anything here can look again.
+	if err := manifest.Capabilities.GetCSS().Validate(); err != nil {
+		fail(fmt.Errorf("extension %s declares an unusable stylesheet: %w", entry.Name, err))
+		return
+	}
 	// An image that names no registry cannot be pulled headless, so reject the entry here rather
 	// than failing at every later start.
 	if err := h.registry.ValidateImage(entry.Image); err != nil {
@@ -1358,6 +1371,12 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 				// manifest is replaced.
 				if err := validateI18N(m.Capabilities, targetDir); err != nil {
 					fail(fmt.Errorf("extension %s declares an unusable translation pack: %w", entry.Name, err))
+					return
+				}
+				// And the same for the new commit's stylesheet: an update that moves or escapes
+				// css_url is refused before the stored manifest is replaced.
+				if err := m.Capabilities.GetCSS().Validate(); err != nil {
+					fail(fmt.Errorf("extension %s declares an unusable stylesheet: %w", entry.Name, err))
 					return
 				}
 				if len(merged.Envs) > len(before.Envs) || len(merged.Mounts) > len(before.Mounts) ||

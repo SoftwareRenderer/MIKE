@@ -13,8 +13,9 @@ const (
 	sessionMaxAge     = 30 * 24 * 3600 // 30 days in seconds
 )
 
-// The SESSION cookie's Secure flag comes from Server.cookieSecure, set in NewServer: TLS is active,
-// or MIKE_SECURE_COOKIES=1 behind a TLS-terminating proxy.
+// The SESSION cookie's Secure flag comes from requestIsHTTPS: TLS terminated here, or a
+// TLS-terminating proxy that said so under MIKE_TRUST_PROXY. There is deliberately no variable for
+// it — a flag an operator has to know about is a flag that is off during the deployment it is for.
 
 // handleAuthLogin handles POST /api/auth/login.
 // Accepts {"password": "..."}, validates against MIKE_LOGIN_PASSWORD,
@@ -43,7 +44,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.setSessionCookie(w, token, sessionMaxAge)
+	s.setSessionCookie(w, r, token, sessionMaxAge)
 	w.Header().Set("X-CSRF-Token", csrfToken)
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -68,7 +69,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = s.sessionMgr.Logout(cookie.Value)
-	s.clearSessionCookie(w)
+	s.clearSessionCookie(w, r)
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -91,8 +92,10 @@ func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, map[string]bool{"authenticated": false})
 }
 
-// setSessionCookie sets the SESSION cookie with secure flags.
-func (s *Server) setSessionCookie(w http.ResponseWriter, token string, maxAge int) {
+// setSessionCookie sets the SESSION cookie with secure flags. The Secure flag is decided per
+// request (see requestIsHTTPS), never once at boot: the same server answers cleartext on loopback
+// for development and HTTPS behind a proxy, and a boot-time answer is wrong for one of them.
+func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    token,
@@ -100,12 +103,14 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, token string, maxAge in
 		MaxAge:   maxAge,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   s.cookieSecure,
+		Secure:   requestIsHTTPS(r),
 	})
 }
 
-// clearSessionCookie removes the SESSION cookie.
-func (s *Server) clearSessionCookie(w http.ResponseWriter) {
+// clearSessionCookie removes the SESSION cookie. It has to be written with the same Secure flag it
+// was set with, or the browser keeps the cookie it already has and "logout" leaves a live session
+// in the jar.
+func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
@@ -113,6 +118,6 @@ func (s *Server) clearSessionCookie(w http.ResponseWriter) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   s.cookieSecure,
+		Secure:   requestIsHTTPS(r),
 	})
 }

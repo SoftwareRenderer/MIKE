@@ -50,6 +50,20 @@ const REJECTED = [
     '/theme.css',                  // same-origin, but not the extension tree
     '/extensions/',                // a directory, not a file
     '/extensions//theme.css',
+    // Dot segments: the browser normalizes these before it sends, so each of these
+    // is a request for something outside the installed-extension tree — with this
+    // session's cookie. Stated in both the resolved and the still-relative form,
+    // because the value reaches here from storage, not from resolveAssetURL.
+    '/extensions/acme/pack/../../../../api/config',
+    '/extensions/acme/pack/../../other-pack/theme.css',
+    '/extensions/../api/config',
+    '/extensions/../../etc/passwd',
+    '/extensions/./acme/pack/theme.css',
+    '/extensions/acme/%2e%2e/theme.css',      // the server decodes once, then routes
+    '/extensions/..%2Fapi/config',
+    '/extensions/acme/pack/theme.css?v=2',    // an asset is a file, not a request
+    '/extensions/acme/pack/theme.css#x',
+    '/extensions/acme/pack/theme\\.css',   // a backslash is not a separator here
 ];
 
 describe('theme pre-paint URL rule', () => {

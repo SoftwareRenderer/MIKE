@@ -10,12 +10,31 @@
 </head>
 <body>
     <script nonce="{{.Nonce}}">
+        // A theme stylesheet URL is storage's value, not ours, so only a file inside the
+        // installed-extension tree may be painted before the app boots. This is
+        // ui-injector.isPrepaintableThemeURL, rewritten because nothing can be imported
+        // this early — change both. The dot-segment and percent-decoded halves carry the
+        // weight: the browser turns "/extensions/a/b/../../../api/config" into a request
+        // for "/api/config", and the server decodes "%2e%2e" into a dot segment before it
+        // routes, so both spellings of ".." are refused in both forms.
+        function _extAssetPath(u) {
+            if (u.indexOf('/extensions/') !== 0) return false;
+            if (/[\\?#\u0000-\u001f\u007f]/.test(u)) return false;
+            var forms;
+            try { forms = [u, decodeURIComponent(u)]; } catch (e) { return false; }
+            for (var i = 0; i < forms.length; i++) {
+                if (forms[i].indexOf('/extensions/') !== 0) return false;
+                var segs = forms[i].slice('/extensions/'.length).split('/');
+                if (segs.length < 2) return false;
+                for (var j = 0; j < segs.length; j++) {
+                    if (segs[j] === '' || segs[j] === '.' || segs[j] === '..') return false;
+                }
+            }
+            return true;
+        }
         try {
             var _t = localStorage.getItem('kanban-theme-css');
-            // Same-origin, extension tree only: this value comes from storage, not
-            // from us. ui-injector.isPrepaintableThemeURL applies the same test on
-            // the way in and cannot be imported here — change both.
-            if (_t && /^\/extensions\/[^/\\]/.test(_t)) {
+            if (_t && _extAssetPath(_t)) {
                 var _l = document.createElement('link');
                 _l.rel = 'stylesheet';
                 _l.href = _t;

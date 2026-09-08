@@ -105,13 +105,11 @@ type Server struct {
 	lspHandler          *lsp.LSPHandler
 	loginLimiter        *RateLimiter
 	previewStore        *previewStore
-	// cookieSecure is the SESSION cookie's Secure flag.
-	cookieSecure bool
-	mux          *http.ServeMux
-	addr         string
-	frontendDist string
-	tlsConfig    *tls.Config
-	allowedHosts string // extra accepted Host values (--allowed-hosts, else MIKE_ALLOWED_HOSTS)
+	mux                 *http.ServeMux
+	addr                string
+	frontendDist        string
+	tlsConfig           *tls.Config
+	allowedHosts        string // extra accepted Host values (--allowed-hosts, else MIKE_ALLOWED_HOSTS)
 
 	// hostRoot jails the no-project file endpoints (picker, mkdir, git init, add-project path).
 	// Built once and shared with the project handler so the two cannot disagree.
@@ -180,9 +178,6 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 		return nil, fmt.Errorf("create session manager: %w\nSet MIKE_LOGIN_PASSWORD environment variable to enable authentication", err)
 	}
 	s.sessionMgr = sessionMgr
-
-	// MIKE_SECURE_COOKIES forces the flag for a TLS-terminating reverse proxy.
-	s.cookieSecure = tlsCfg != nil || os.Getenv("MIKE_SECURE_COOKIES") == "1"
 
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.appStreamMgr = stream.NewAppStreamManager(store, worktreeMgr)
@@ -430,16 +425,12 @@ func (s *Server) RedirectHTTPSMiddleware(next http.Handler) http.Handler {
 
 		// Only trust X-Forwarded-Proto when explicitly behind a trusted proxy.
 		// Otherwise an attacker can set it to "https" to bypass the redirect.
-		isHTTPS := r.TLS != nil
-		if !isHTTPS && trustProxy() && r.Header.Get("X-Forwarded-Proto") == "https" {
-			isHTTPS = true
-		}
-		if !isHTTPS {
-			target := fmt.Sprintf("https://%s%s", r.Host, r.URL.RequestURI())
-			http.Redirect(w, r, target, http.StatusMovedPermanently)
+		if requestIsHTTPS(r) {
+			next.ServeHTTP(w, r)
 			return
 		}
-		next.ServeHTTP(w, r)
+		target := fmt.Sprintf("https://%s%s", r.Host, r.URL.RequestURI())
+		http.Redirect(w, r, target, http.StatusMovedPermanently)
 	})
 }
 

@@ -30,7 +30,19 @@ sends the leaf alone: the CA is a root, so an importing client needs no intermed
 
 Plain HTTP on a TLS-enabled server gets a 301 → https. Custom certs: `--tls-cert/--tls-key` or
 `MIKE_TLS_CERT`/`MIKE_TLS_KEY` (no CA involved). Disable: `--no-tls` or `MIKE_TLS=0`. With TLS
-active, WebSockets upgrade to `wss://` and session cookies get `Secure` automatically.
+active, WebSockets upgrade to `wss://`.
+
+The session cookie's `Secure` flag follows the request, not the boot configuration
+(`requestIsHTTPS`): TLS terminated here, or a TLS-terminating proxy whose `X-Forwarded-Proto: https`
+is honoured because `MIKE_TRUST_PROXY=1` is set. One reading, two users — the redirect above and
+the cookie — because a deployment where they disagree is the failure the flag exists to prevent.
+A proxy must therefore set `proxy_set_header X-Forwarded-Proto $scheme;` *and* have
+`MIKE_TRUST_PROXY=1`; with either missing, MIKE can only see cleartext and marks the cookie
+honestly. The single case that stays unencrypted is `--no-tls` with no proxy — loopback
+development and the e2e harness, where a `Secure` cookie could never be stored and no one could
+sign in. (`MIKE_SECURE_COOKIES` used to force the flag from the process side; it was removed
+because the proxy case is detectable from the request, and an opt-in flag is off in exactly the
+deployment it was written for.)
 
 ## A certificate is not the gate
 
@@ -41,8 +53,8 @@ explicitly listening on that address).
 
 A reverse proxy that forwards the public domain (`proxy_set_header Host $host`) hits exactly this —
 nginx's default (`$proxy_host`, i.e. the upstream address) passes unlisted. Behind a proxy also set
-`MIKE_TRUST_PROXY=1`, or `X-Forwarded-Proto` (HTTPS redirect) and `X-Forwarded-For` (rate-limit IP)
-are ignored.
+`MIKE_TRUST_PROXY=1`, or `X-Forwarded-Proto` (HTTPS redirect, and the session cookie's `Secure`
+flag) and `X-Forwarded-For` (rate-limit IP) are ignored.
 
 Entries are matched literally — e.g. `MIKE_ALLOWED_HOSTS=kanban.example.com,192.168.1.20`. Ports are
 stripped on both sides, so an `example.com` entry answers `example.com:443`; a missing/empty `Host` is
