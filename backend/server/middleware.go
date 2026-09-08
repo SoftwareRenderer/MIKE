@@ -76,6 +76,25 @@ func isPreviewNavPath(path string) bool {
 	return strings.Count(path, "/") == 4
 }
 
+// requestIsHTTPS reports whether the browser's side of this request was encrypted: TLS terminated
+// here, or a TLS-terminating proxy that said so in X-Forwarded-Proto under MIKE_TRUST_PROXY. It is
+// the one reading of that pair, shared by the two places that act on it — the HTTPS redirect and
+// the session cookie's Secure flag — because a deployment where they disagree is the whole point of
+// the flag: the redirect would believe the connection is HTTPS while the cookie goes out in
+// cleartext anyway.
+//
+// X-Forwarded-Proto counts only under MIKE_TRUST_PROXY, exactly as it does for the redirect: any
+// client can set the header, and a cookie marked Secure on the strength of a lie is worse than one
+// marked honestly. The one answer that stays unencrypted is a server with TLS off (`--no-tls`) and
+// no proxy in front of it — cleartext to the browser, where a Secure cookie would never be stored
+// or sent at all, so the app could not log in.
+func requestIsHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return trustProxy() && r.Header.Get("X-Forwarded-Proto") == "https"
+}
+
 // CORSMiddleware handles CORS, CSP, and other security headers.
 func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,8 +107,21 @@ func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 		// Security Headers
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Permissions-Policy", permissionsPolicy)
+		// Only the two trees an opaque-origin frame loads as a subresource are left unmarked —
+		// see isOpaqueOriginAsset. Everything else answers same-origin, so no other site can
+		// embed this install's pages, its API responses or its bundle as a subresource of its own.
+		if !isOpaqueOriginAsset(r.URL.Path) {
+			w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+		}
 
 		if !strings.HasPrefix(r.URL.Path, "/api/preview/") || isPreviewNavPath(r.URL.Path) {
+			// 'self' is required — the app's own hashed bundle is a same-origin script — and it is
+			// also the ceiling: extension code is served from this same origin under /extensions/,
+			// so the nonce cannot be the control here, only a statement about index.html's one
+			// inline step. Narrowing that means a second origin for /extensions/ (see docs/tls.md),
+			// not a longer nonce. Extension frames never script this document: they are sandboxed
+			// without allow-same-origin and talk to the host only through the armed channel.
 			csp := "default-src 'self'; frame-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; form-action 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self';"
 			if nonce, ok := r.Context().Value(nonceKey).(string); ok && nonce != "" {
 				csp += fmt.Sprintf(" script-src 'self' 'nonce-%s';", nonce)
@@ -105,6 +137,27 @@ func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// permissionsPolicy denies the browser features this app has no caller for, so that a future
+// markup bug cannot reach them either. Deliberately absent: clipboard (the terminal's paste reads
+// it), fullscreen (a terminal may want it), and the display of the document itself. A sandboxed
+// opaque-origin frame is denied these by its origin anyway — this is the top-level document, which
+// renders model-authored markup and would otherwise be the granting principal.
+const permissionsPolicy = "camera=(), microphone=(), geolocation=(), usb=(), serial=(), hid=(), " +
+	"bluetooth=(), payment=(), display-capture=(), wake-lock=(), idle-detection=(), " +
+	"keyboard-map=(), window-management=()"
+
+// isOpaqueOriginAsset reports whether a path is fetched as a subresource by a document that has no
+// origin to name: a sandboxed extension iframe loading its own files from /extensions/, and a
+// preview document loading its siblings from /api/preview/. Cross-Origin-Resource-Policy:
+// same-origin on those would refuse them both — the frame's opaque origin is not this origin — so
+// they are the two paths the header is not applied to.
+func isOpaqueOriginAsset(path string) bool {
+	if strings.HasPrefix(path, "/extensions/") {
+		return true
+	}
+	return strings.HasPrefix(path, "/api/preview/") && !isPreviewNavPath(path)
 }
 
 // allowedHostsEnv lists extra hostnames accepted in the Host header,

@@ -781,7 +781,9 @@ func (m *ExtensionLSPManager) findProjectForWorkspace(workspacePath string) (*ty
 	if err != nil {
 		return nil, err
 	}
-	// Find the longest matching project path prefix.
+	// Find the longest matching project path prefix. The separator is part of the test:
+	// /home/u/proj-evil is not inside the project at /home/u/proj, and attributing it there
+	// would apply that project's sandbox configuration to a directory it does not own.
 	var bestPath string
 	var bestProject *types.Project
 	for i := range projects {
@@ -789,7 +791,8 @@ func (m *ExtensionLSPManager) findProjectForWorkspace(workspacePath string) (*ty
 		if err != nil {
 			continue
 		}
-		if strings.HasPrefix(absWorkspace, absPath) && (bestProject == nil || len(absPath) > len(bestPath)) {
+		if (absWorkspace == absPath || strings.HasPrefix(absWorkspace, absPath+string(filepath.Separator))) &&
+			(bestProject == nil || len(absPath) > len(bestPath)) {
 			bestPath = absPath
 			bestProject = &projects[i]
 		}

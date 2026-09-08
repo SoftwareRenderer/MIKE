@@ -31,6 +31,11 @@ function makeExt(name: string, author: string): Extension {
     } as Extension;
 }
 
+/** The same record with a served directory the server reported. */
+function withServed(name: string, author: string, served: unknown): Extension {
+    return { ...makeExt(name, author), served_url: served } as Extension;
+}
+
 describe('extBaseURL', () => {
     it('builds /extensions/<author-slug>/<name>', () => {
         expect(extBaseURL(makeExt('html-preview', 'SoftwareRenderer')))
@@ -52,8 +57,6 @@ describe('extBaseURL', () => {
 });
 
 describe('extBaseURL — the served directory the server reported', () => {
-    const withServed = (name: string, author: string, served: unknown): Extension =>
-        ({ ...makeExt(name, author), served_url: served } as Extension);
 
     it('uses served_url for the author-namespaced layout', () => {
         expect(extBaseURL(withServed('zh', 'SoftwareRenderer', '/extensions/softwarerenderer/zh')))
@@ -109,5 +112,45 @@ describe('resolveAssetURL', () => {
         expect(resolveAssetURL(ext, 'https://evil.example/x.css')).toBe('');
         expect(resolveAssetURL(ext, 'data:text/css,body{}')).toBe('');
         expect(resolveAssetURL(ext, '//evil.example/x.css')).toBe('');
+    });
+
+    it('refuses an asset that leaves the directory it belongs to', () => {
+        // The browser normalizes a dot segment before it sends, so each of these is
+        // a request for something else — with this session's cookie. Only the
+        // answer is asserted, never the shape: a URL the caller must then check is
+        // a URL the caller may forget to check.
+        const ext = makeExt('pack', 'acme');
+        const escaping = [
+            '../../../../api/config',
+            '../../other-pack/theme.css',
+            '/../../../../etc/passwd',
+            './sub/../../other-pack/theme.css',
+            'sub/%2e%2e/%2e%2e/api/config',   // the server decodes once, then routes
+            'theme.css?v=2',                  // an asset is a file, not a request
+            'theme.css#x',
+            'theme\\.css',
+        ];
+        for (const asset of escaping) {
+            expect(resolveAssetURL(ext, asset), asset).toBe('');
+        }
+    });
+
+    it('keeps an asset inside the directory, however it is spelled', () => {
+        const ext = makeExt('pack', 'acme');
+        expect(resolveAssetURL(ext, 'styles/theme.css')).toBe('/extensions/acme/pack/styles/theme.css');
+        expect(resolveAssetURL(ext, './styles/theme.css')).toBe('/extensions/acme/pack/styles/theme.css');
+        expect(resolveAssetURL(ext, 'sub/../theme.css')).toBe('/extensions/acme/pack/theme.css');
+        expect(resolveAssetURL(ext, 'a/../b/./c.css')).toBe('/extensions/acme/pack/b/c.css');
+        // A doubled separator is the same path once resolved, so it is answered, not
+        // refused — the rule is where the path lands, not how it was typed.
+        expect(resolveAssetURL(ext, 'sub//theme.css')).toBe('/extensions/acme/pack/sub/theme.css');
+    });
+
+    it('refuses an asset of an extension whose own directory is not a directory', () => {
+        // `encodeURIComponent` leaves dots alone, so a record whose name is `..` really
+        // does produce '/extensions/acme/..' as its base. There is no directory to be
+        // inside, and answering '/extensions/theme.css' — the tree root's file — is an
+        // answer that belongs to nobody.
+        expect(resolveAssetURL(makeExt('..', 'acme'), 'theme.css')).toBe('');
     });
 });

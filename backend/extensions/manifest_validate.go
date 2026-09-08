@@ -271,10 +271,21 @@ func (c *I18NConfig) Validate() error {
 	if err := validateLocale(c.Locale); err != nil {
 		return err
 	}
-	if err := validatePackRelPath("messages_url", c.MessagesURL, true); err != nil {
+	if err := validateAssetRelPath("capabilities.i18n.messages_url", c.MessagesURL, true); err != nil {
 		return err
 	}
-	return validatePackRelPath("prompts_dir", c.PromptsDir, false)
+	return validateAssetRelPath("capabilities.i18n.prompts_dir", c.PromptsDir, false)
+}
+
+// Validate checks the shape of a css pack's declaration. `css_url` is the one manifest field the
+// browser resolves before any of this package can run: the theme stylesheet is put in a <link> and,
+// because it must be right on the first frame, into the storage the pre-paint script in
+// index.html reads. The same refusals the i18n paths get apply here for the same reason.
+func (c *CSSConfig) Validate() error {
+	if c == nil {
+		return nil
+	}
+	return validateAssetRelPath("capabilities.css.css_url", c.CSSURL, true)
 }
 
 // validateLocale accepts one bare language subtag and nothing else.
@@ -299,21 +310,26 @@ func validateLocale(locale string) error {
 	return fmt.Errorf("capabilities.i18n.locale %q is not a bare BCP-47 language subtag — 2-3 or 5-8 lowercase letters, with no region, script or modifier after it: use \"zh\", not \"zh-CN\" or \"fr_FR@euro\"", locale)
 }
 
-// maxPackAssetPathLen bounds a declared pack path. Catalog names and prompt directories are
-// short by nature; the bound exists so a manifest cannot smuggle a megabyte of path into a
-// log line or an error message.
+// maxPackAssetPathLen bounds a declared asset path. Catalog names, prompt directories and
+// stylesheets are short by nature; the bound exists so a manifest cannot smuggle a megabyte of
+// path into a log line or an error message.
 const maxPackAssetPathLen = 200
 
-// validatePackRelPath is the one containment rule for both pack paths. They are resolved inside
-// the extension's own directory and are read by the host and by the browser alike, so the rule
-// mirrors both halves of that: mappingsFilePath (host side) and resolveAssetURL (browser side).
-// A leading "./" is refused as well as "..": the value is projected into the registry index and
-// matched by the loader, so there is exactly one spelling of every pack path.
-func validatePackRelPath(field, value string, required bool) error {
-	where := "capabilities.i18n." + field
+// validateAssetRelPath is the one containment rule for every path a manifest declares inside the
+// extension's own directory: the i18n catalog and prompt overlay, and a css pack's stylesheet. The
+// browser resolves them (resolveAssetURL in $lib/services/ui-injector) and the host resolves them
+// (packFilePath), so the rule mirrors both halves. A leading "./" is refused as well as "..": the
+// value is projected into the registry index and matched by the loader, so there is exactly one
+// spelling of every declared path.
+//
+// The dot segments are the security half of this. A declared path is concatenated into a URL by
+// the browser before anything reads it, and the URL parser resolves ".." on the way out, so
+// "/extensions/<ext>/" plus "../../../../api/config" is an authenticated request for /api/config
+// issued by the app itself — against its own origin, with its own session cookie.
+func validateAssetRelPath(where, value string, required bool) error {
 	if value == "" {
 		if required {
-			return fmt.Errorf("%s is required — the pack's own file, relative to its own directory", where)
+			return fmt.Errorf("%s is required — the extension's own file, relative to its own directory", where)
 		}
 		return nil
 	}
@@ -324,7 +340,7 @@ func validatePackRelPath(field, value string, required bool) error {
 		return fmt.Errorf("%s %q contains a control character", where, value)
 	}
 	if externalRef.MatchString(value) || strings.HasPrefix(value, "//") {
-		return fmt.Errorf("%s %q is an external reference — a pack ships its files inside its own directory, and a translation loaded from a host nobody chose is not a translation", where, value)
+		return fmt.Errorf("%s %q is an external reference — an extension ships its files inside its own directory, and a resource loaded from a host nobody chose is not that file", where, value)
 	}
 	if filepath.IsAbs(value) || filepath.VolumeName(value) != "" || strings.HasPrefix(value, "/") {
 		return fmt.Errorf("%s %q is absolute — the path is resolved inside the extension's own directory", where, value)
@@ -337,7 +353,7 @@ func validatePackRelPath(field, value string, required bool) error {
 		case "":
 			return fmt.Errorf("%s %q has an empty path segment", where, value)
 		case ".", "..":
-			return fmt.Errorf("%s %q must not contain '.' or '..' — it is a plain path inside the pack's own directory", where, value)
+			return fmt.Errorf("%s %q must not contain '.' or '..' — it is a plain path inside the extension's own directory", where, value)
 		}
 	}
 	return nil

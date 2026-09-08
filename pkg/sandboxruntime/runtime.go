@@ -27,7 +27,7 @@ var imageRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9/._:@-]*$`)
 
 // ValidateProjectName rejects project names that would break a container image name,
 // a mount path, or a shell command: empty, a leading dash (flag injection), a control
-// character, a ".." segment (the name is interpolated into the mount path
+// character, a ".." segment or a name that names no directory (both move the mount,
 // /home/sandbox/<name>), or anything outside letters, digits, spaces and -_./.
 //
 // Names flow into ProjectImageName() and mount paths, so rejecting them here — the
@@ -59,6 +59,13 @@ func ValidateProjectName(name string) error {
 		if seg == ".." {
 			return fmt.Errorf("project name must not contain '..' path segments")
 		}
+	}
+	// MountPath is Join(mountRoot, name), so a name that cleans to nothing makes this project's
+	// mount the shared root instead of a directory below it. A "." segment inside a longer name is
+	// collapsed by Join and stays allowed.
+	switch filepath.Clean(name) {
+	case ".", "/":
+		return fmt.Errorf("project name %q names no directory of its own", name)
 	}
 	return nil
 }

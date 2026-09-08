@@ -105,13 +105,11 @@ type Server struct {
 	lspHandler          *lsp.LSPHandler
 	loginLimiter        *RateLimiter
 	previewStore        *previewStore
-	// cookieSecure is the SESSION cookie's Secure flag.
-	cookieSecure bool
-	mux          *http.ServeMux
-	addr         string
-	frontendDist string
-	tlsConfig    *tls.Config
-	allowedHosts string // extra accepted Host values (--allowed-hosts, else MIKE_ALLOWED_HOSTS)
+	mux                 *http.ServeMux
+	addr                string
+	frontendDist        string
+	tlsConfig           *tls.Config
+	allowedHosts        string // extra accepted Host values (--allowed-hosts, else MIKE_ALLOWED_HOSTS)
 
 	// hostRoot jails the no-project file endpoints (picker, mkdir, git init, add-project path).
 	// Built once and shared with the project handler so the two cannot disagree.
@@ -190,9 +188,6 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 		return nil, fmt.Errorf("create session manager: %w\nSet MIKE_LOGIN_PASSWORD environment variable to enable authentication", err)
 	}
 	s.sessionMgr = sessionMgr
-
-	// MIKE_SECURE_COOKIES forces the flag for a TLS-terminating reverse proxy.
-	s.cookieSecure = tlsCfg != nil || os.Getenv("MIKE_SECURE_COOKIES") == "1"
 
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.appStreamMgr = stream.NewAppStreamManager(store, worktreeMgr)
@@ -286,31 +281,9 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	})
 	extLSPRegistry := lsp.NewExtensionRegistry(s.extStore)
 	s.lspHandler = lsp.NewLSPHandler(extLSPRegistry, s.extLSPMgr)
-	// Restrict LSP workspaces to project paths and task worktrees so a client
-	// cannot spawn a language server with cwd at an arbitrary host directory.
-	s.lspHandler.SetWorkspaceValidator(func(workspace string) bool {
-		cfg, err := s.configStore.GetConfig()
-		if err != nil {
-			return false
-		}
-		ws := filepath.Clean(workspace)
-		wsDir := filepath.Clean(cfg.WorkspaceDir)
-		if ws == wsDir || strings.HasPrefix(ws, wsDir+string(os.PathSeparator)) {
-			return true
-		}
-		// Projects may live anywhere on the host; allow their roots and descendants.
-		projects, err := s.store.ListProjects()
-		if err != nil {
-			return false
-		}
-		for _, p := range projects {
-			root := filepath.Clean(p.Path)
-			if ws == root || strings.HasPrefix(ws, root+string(os.PathSeparator)) {
-				return true
-			}
-		}
-		return false
-	})
+	// The LSP workspace becomes the bind-mount source of the language server's container, so it
+	// answers to the same jail as every other host path the server opens. See lspWorkspaceAllowed.
+	s.lspHandler.SetWorkspaceValidator(s.lspWorkspaceAllowed)
 	s.extHandler.SetOnExtensionChanged(func() {
 		agentRegistry.Reload()
 		refreshLLMAdapters()
@@ -442,16 +415,12 @@ func (s *Server) RedirectHTTPSMiddleware(next http.Handler) http.Handler {
 
 		// Only trust X-Forwarded-Proto when explicitly behind a trusted proxy.
 		// Otherwise an attacker can set it to "https" to bypass the redirect.
-		isHTTPS := r.TLS != nil
-		if !isHTTPS && trustProxy() && r.Header.Get("X-Forwarded-Proto") == "https" {
-			isHTTPS = true
-		}
-		if !isHTTPS {
-			target := fmt.Sprintf("https://%s%s", r.Host, r.URL.RequestURI())
-			http.Redirect(w, r, target, http.StatusMovedPermanently)
+		if requestIsHTTPS(r) {
+			next.ServeHTTP(w, r)
 			return
 		}
-		next.ServeHTTP(w, r)
+		target := fmt.Sprintf("https://%s%s", r.Host, r.URL.RequestURI())
+		http.Redirect(w, r, target, http.StatusMovedPermanently)
 	})
 }
 
@@ -803,6 +772,30 @@ func (s *Server) logHostRootPolicy() {
 		logging.For(logging.Host).Warnf("the host directory jail includes the filesystem root (roots: %s), which constrains nothing: "+
 			"every host path is reachable without the widening variable", strings.Join(s.hostRoot.Roots(), ", "))
 	}
+}
+
+// lspWorkspaceAllowed answers "may an LSP client open a language server at this directory?". The
+// workspace string arrives in a browser message and becomes the `-v` source of the language
+// server's container, so it goes through fsutil.Contained rather than a prefix comparison: a
+// symlink planted inside a worktree a task can write to resolves against the host, and a lexical
+// check reads straight through it into, say, the operator's ~/.ssh.
+func (s *Server) lspWorkspaceAllowed(workspace string) bool {
+	cfg, err := s.configStore.GetConfig()
+	if err != nil {
+		return false
+	}
+	// Projects may live anywhere on the host; the workspace dir holds every project's task
+	// worktrees, which is where an open file usually is.
+	roots := []string{filepath.Clean(cfg.WorkspaceDir)}
+	projects, err := s.store.ListProjects()
+	if err != nil {
+		return false
+	}
+	for _, p := range projects {
+		roots = append(roots, filepath.Clean(p.Path))
+	}
+	_, err = fsutil.Contained(workspace, roots)
+	return err == nil
 }
 
 func newHybridListener(l net.Listener, stdCfg *stdtls.Config, sniffTimeout time.Duration) *hybridListener {

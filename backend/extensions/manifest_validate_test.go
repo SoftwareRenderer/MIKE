@@ -417,6 +417,81 @@ func TestI18NConfigValidate(t *testing.T) {
 // rule. A pack is refused rather than stripped, for the same reason a self-granted dependency host
 // path is refused: a manifest that grants itself something has said something the user did not agree
 // to, and silently dropping it would install an extension that is not the one that was reviewed.
+// TestCSSConfigValidate holds the stylesheet declaration to the same containment the i18n pack's
+// files get. The field path in the message is part of the assertion: an author told the wrong
+// field is wrong leaves them editing the one that was never the problem.
+func TestCSSConfigValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		css     *CSSConfig
+		wantErr string
+	}{
+		{name: "a declared stylesheet is valid", css: &CSSConfig{CSSURL: "styles.css"}, wantErr: ""},
+		{name: "a subdirectory is still inside the extension", css: &CSSConfig{CSSURL: "styles/dark.css"}, wantErr: ""},
+		{name: "no css capability declares nothing to validate", css: nil, wantErr: ""},
+		{
+			// The gap this closes: the browser concatenates this into a URL and resolves the
+			// dot segments itself, so it is an authenticated request for /api/config made by
+			// the app — and it lands in the storage the pre-paint script reads on every load.
+			name:    "a stylesheet above the extension directory",
+			css:     &CSSConfig{CSSURL: "../../../../api/config"},
+			wantErr: "must not contain '.' or '..'",
+		},
+		{
+			name:    "a stylesheet declared from the server root",
+			css:     &CSSConfig{CSSURL: "/etc/passwd"},
+			wantErr: "capabilities.css.css_url \"/etc/passwd\" is absolute",
+		},
+		{
+			name:    "a stylesheet on another host",
+			css:     &CSSConfig{CSSURL: "https://cdn.example/theme.css"},
+			wantErr: "is an external reference",
+		},
+		{
+			name:    "a protocol-relative stylesheet is a host too",
+			css:     &CSSConfig{CSSURL: "//cdn.example/theme.css"},
+			wantErr: "is an external reference",
+		},
+		{
+			// A css extension with no stylesheet is an installed extension that does nothing,
+			// invisibly — the failure this package refuses rather than stores.
+			name:    "a css capability with no stylesheet",
+			css:     &CSSConfig{},
+			wantErr: "capabilities.css.css_url is required",
+		},
+		{
+			name:    "a windows separator is not a path here",
+			css:     &CSSConfig{CSSURL: "styles\\dark.css"},
+			wantErr: "must use '/' separators",
+		},
+		{
+			name:    "a control character in a path",
+			css:     &CSSConfig{CSSURL: "styles.css\x00"},
+			wantErr: "contains a control character",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.css.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("a valid declaration was refused: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("%q was accepted", tt.wantErr)
+			}
+			for _, want := range []string{"capabilities.css.css_url", tt.wantErr} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("%q does not say %q", err, want)
+				}
+			}
+		})
+	}
+}
+
 func TestValidateI18NIsTheOnlyCapability(t *testing.T) {
 	pack := &Capabilities{I18N: i18nPack()}
 	if err := validateI18N(pack, ""); err != nil {

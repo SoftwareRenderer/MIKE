@@ -208,13 +208,66 @@ func TestClientIP_IgnoresXFFByDefault(t *testing.T) {
 	}
 }
 
-func TestClientIP_TrustsXFFWhenProxyEnabled(t *testing.T) {
+func TestClientIP_UsesTheAddressTheTrustedProxyAppended(t *testing.T) {
+	// A proxy appends, so everything left of the last entry is what the client wrote. Keying the
+	// limit on the first entry let a caller buy a fresh login budget per attempt.
 	setTrustProxy(t, true)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
 	req.RemoteAddr = "10.0.0.1:54321"
-	req.Header.Set("X-Forwarded-For", "198.51.100.7, 10.0.0.1")
+	req.Header.Set("X-Forwarded-For", "1.2.3.4, 198.51.100.7")
 	if got := clientIP(req); got != "198.51.100.7" {
 		t.Fatalf("clientIP with XFF (proxy enabled): got %q, want %q", got, "198.51.100.7")
+	}
+}
+
+func TestClientIP_CanonicalisesTheForwardedAddress(t *testing.T) {
+	// One client must not buy two budgets by spelling its address differently.
+	setTrustProxy(t, true)
+	for _, written := range []string{"FE80::1", "fe80:0:0:0:0:0:0:1", " fe80::1 "} {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+		req.RemoteAddr = "10.0.0.1:54321"
+		req.Header.Set("X-Forwarded-For", "1.2.3.4, "+written)
+		if got := clientIP(req); got != "fe80::1" {
+			t.Errorf("clientIP with %q: got %q, want the canonical %q", written, got, "fe80::1")
+		}
+	}
+}
+
+func TestClientIP_ChainThatDoesNotEndInAnAddressUsesThePeer(t *testing.T) {
+	// Scanning left for a parseable entry would be the bypass again.
+	setTrustProxy(t, true)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req.RemoteAddr = "10.0.0.1:54321"
+	req.Header.Set("X-Forwarded-For", "198.51.100.7, evil")
+	if got := clientIP(req); got != "10.0.0.1" {
+		t.Fatalf("clientIP with a non-address last entry: got %q, want the peer %q", got, "10.0.0.1")
+	}
+}
+
+func TestRateLimitMiddleware_XFFCannotBypassATrustedProxyLimit(t *testing.T) {
+	// The brute-force shape behind a proxy: rotate the entry the client writes, keep the one the
+	// proxy appends. All attempts share one budget.
+	setTrustProxy(t, true)
+	limiter := NewRateLimiter(2, time.Minute)
+	defer limiter.Stop()
+	handler := RateLimitMiddleware(limiter, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	limited := false
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+		req.RemoteAddr = "10.0.0.1:54321"
+		req.Header.Set("X-Forwarded-For", "1.2.3."+strconv.Itoa(i)+", 203.0.113.9")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code == http.StatusTooManyRequests {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Error("rotating the client-written part of X-Forwarded-For kept a proxy-fronted login past its limit")
 	}
 }
 

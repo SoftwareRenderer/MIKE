@@ -682,9 +682,6 @@ func TestTerminalShellOptsCarryTheProjectConfiguration(t *testing.T) {
 // TestTerminalManagerClose is the regression for "shutdown leaves shells running": two real host
 // PTY sessions, and after Close both the registry and the child processes must be gone.
 func TestTerminalManagerClose(t *testing.T) {
-	// The project is unsandboxed, which is what a host PTY means: DANGER_ZONE is the flag
-	// that allows it, and TerminalManager refuses without it (TestHostTerminalNeedsDangerZone).
-	t.Setenv("DANGER_ZONE", "1")
 	dir := t.TempDir()
 	s, cs := newTestConfigStore(t)
 	tm := NewTerminalManager(s, cs, newMockSandbox(t), nil)

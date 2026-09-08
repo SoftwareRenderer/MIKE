@@ -147,7 +147,7 @@ type CompactResult struct {
 //     taskMu.
 //   - activeSummarize has its own mutex, for the same one-field-one-lock reason.
 //   - taskMu (on TaskExecutor) guards everything else here together with the tasks map:
-//     runnerClosed, taskStatus, lastDiffHash, bridgeRecoveryAttempts, root. A method that reached
+//     runnerClosed, taskStatus, lastDiffHash, bridgeRecoveryAttempts. A method that reached
 //     this state through the map already holds it.
 //   - ctx, cancel and the channels are set once at construction, so they need no lock.
 type executionState struct {
@@ -172,8 +172,9 @@ type executionState struct {
 	// lastDiffHash tracks the last broadcast diff hash to avoid duplicate broadcasts
 	// when fsnotify already caught the same change.
 	lastDiffHash string
-	// Sandbox I/O callbacks — nil means use os.Root fallback inside executeTool. These six fields
-	// plus recoverBridge are guarded by sandboxMu; see the type comment.
+	// Sandbox I/O callbacks — nil means the task's project runs without a sandbox, so the tool
+	// call works on the host instead. These six fields plus recoverBridge are guarded by
+	// sandboxMu; see the type comment.
 	sandboxMu         sync.Mutex
 	sandboxExec       execFunc
 	sandboxExecStream execStreamFunc
@@ -187,9 +188,6 @@ type executionState struct {
 	// recoverBridge attempts to reconnect the sandbox bridge (client reconnect or full sandbox
 	// recreation). Returns true if success. Only non-nil when sandbox is enabled.
 	recoverBridge func() bool
-	// os.Root handle for non-sandbox write isolation. Guarded by taskMu: the write path creates it
-	// lazily while the loop may be tearing the run down.
-	root *os.Root
 	// bridgeRecoveryAttempts counts bridge-recovery tries against maxAttempts. Guarded by taskMu.
 	bridgeRecoveryAttempts int
 	// Closed by executor defer so ForwardUserMessage type-switch can wait for clean exit.

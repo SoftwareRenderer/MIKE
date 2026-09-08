@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -319,12 +318,6 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			// paused) so a panic can't leave a stale "running" row.
 			te.handleCancelledTask(setup.task.ID, setup.projectID)
 		}
-		// Close os.Root to release file descriptor (non-sandbox tasks)
-		te.taskMu.Lock()
-		if state, exists := te.tasks[setup.task.ID]; exists && state.root != nil {
-			_ = state.root.Close()
-		}
-		te.taskMu.Unlock()
 		// Only remove from tasks map if we're still the active executor
 		// (prevents old executor from deleting a replacement during type switch).
 		// For Pi executors, keep the setup.task alive for on-demand compaction.
@@ -392,17 +385,6 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			})
 		}
 		state.setSandbox(func(dst *sandboxState) { *dst = sb })
-	} else {
-		// Non-sandbox: use os.Root only for write isolation.
-		// Read uses plain os.ReadFile (no isolation).
-		root, err := os.OpenRoot(setup.worktreePath)
-		if err != nil {
-			te.failTask(setup.task, setup.projectID, fmt.Sprintf("Failed to create worktree root: %v", err), "root_create_failed")
-			return
-		}
-		state.root = root
-		_, write := makeRootCallbacks(root, setup.worktreePath)
-		state.setSandbox(func(sb *sandboxState) { sb.write = write })
 	}
 
 	// Check if this setup.task uses an agent provider

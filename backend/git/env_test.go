@@ -104,6 +104,61 @@ func TestHookFenceIsWhatStopsTheHook(t *testing.T) {
 	}
 }
 
+// setRepoConfig writes one value into the repository's own .git/config, which is the shape a repo
+// arrives with when it was copied, restored or unpacked rather than cloned (`git clone` writes a
+// fresh config and does not carry [core] over).
+func setRepoConfig(t *testing.T, repo, key, value string) {
+	t.Helper()
+	cmd := Command(repo, "config", "--local", key, value)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git config %s: %v\n%s", key, err, out)
+	}
+}
+
+// fsmonitorMarker is the command a hostile core.fsmonitor would run: append to a file outside the
+// repo, so "the marker exists" is the whole assertion.
+func fsmonitorMarker(t *testing.T, repo string) string {
+	t.Helper()
+	marker := filepath.Join(t.TempDir(), "fsmonitor-ran")
+	setRepoConfig(t, repo, "core.fsmonitor", "echo FIRED >> "+marker)
+	return marker
+}
+
+// TestRepoFsmonitorNeverRuns covers the config-driven half of the fence. core.fsmonitor is not a
+// hook, so core.hooksPath never reached it: `git status` — which this server runs continuously in
+// every registered checkout — executes the command the repository named.
+func TestRepoFsmonitorNeverRuns(t *testing.T) {
+	repo := initRepo(t)
+	marker := fsmonitorMarker(t, repo)
+
+	if out, err := Command(repo, "status", "--porcelain").CombinedOutput(); err != nil {
+		t.Fatalf("git status with the fence: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("core.fsmonitor from the repository's own config ran despite the fence")
+	}
+}
+
+// TestUnfencedFsmonitorRuns is the control case: the config value must be capable of firing in this
+// environment, or the test above proves nothing about the fence.
+func TestUnfencedFsmonitorRuns(t *testing.T) {
+	repo := initRepo(t)
+	marker := fsmonitorMarker(t, repo)
+
+	// Deliberately an unfenced process: os.Environ(), no GIT_CONFIG_* — the shape this repo had
+	// before backend/git/env.go existed.
+	cmd := exec.Command(gitBinary, "-C", repo, "status", "--porcelain")
+	cmd.Env = os.Environ()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("unfenced git status: %v\n%s", err, out)
+	}
+	if _, statErr := os.Stat(marker); statErr != nil {
+		t.Fatalf("control case: an unfenced git status did NOT run core.fsmonitor, so every "+
+			"fsmonitor assertion in this file is vacuous and must be rewritten (git said: %s)", out)
+	}
+}
+
 // TestPostCheckoutHookNeverRunsOnWorktreeAdd covers the case --no-verify structurally cannot:
 // `git worktree add` has no --no-verify flag, and it runs post-checkout. CreateWorktree is a hot
 // path, so this is the hook a repository would most reliably get executed.
@@ -235,9 +290,11 @@ func TestHookFenceShape(t *testing.T) {
 	// git's env-config mechanism requires the count to match the number of KEY_n entries, or the
 	// configuration is silently ignored — which would read as "hooks are fine".
 	for _, want := range []string{
-		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_COUNT=2",
 		"GIT_CONFIG_KEY_0=core.hooksPath",
 		"GIT_CONFIG_VALUE_0=/dev/null",
+		"GIT_CONFIG_KEY_1=core.fsmonitor",
+		"GIT_CONFIG_VALUE_1=false",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("HookFence() missing %q; full value:\n%s", want, got)

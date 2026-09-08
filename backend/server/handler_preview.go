@@ -585,9 +585,9 @@ func (s *Server) resolveWorktreeForFile(project *types.Project, taskID, path str
 	return worktreePath, path, nil
 }
 
-// resolveFSFilePath resolves an editor file path to (worktreeRoot, dir,
-// hostPath). The path must be inside the project root or the configured
-// workspace dir. worktreeRoot is the preview's asset root.
+// resolveFSFilePath resolves an editor file path to (worktreeRoot, dir, hostPath). worktreeRoot is
+// the preview's asset root, so the file must be inside the project's checkout or the worktree of
+// the task the request names — never the workspace dir, which holds every project's task worktrees.
 func (s *Server) resolveFSFilePath(projectID, taskID, filePath string) (worktreeRoot, dir, hostPath string, err error) {
 	if projectID == "" || filePath == "" {
 		return "", "", "", errors.New("project and path are required")
