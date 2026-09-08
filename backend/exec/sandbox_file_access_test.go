@@ -3,6 +3,7 @@ package exec
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,33 +14,89 @@ import (
 )
 
 // A tool call of a sandboxed task runs in its container, so a missing sandbox callback is a
-// visible refusal rather than a silent escape onto the host.
-func TestSandboxedTaskCannotReadHostFileWithoutBridge(t *testing.T) {
-	worktree := t.TempDir()
-	te := newReadTestExecutor(t, worktree)
-	task := makeTestTask(t, te.rawStore(), "proj-hostguard-1", "task-hostguard-1")
-
-	secret := filepath.Join(t.TempDir(), "secret.txt")
-	if err := os.WriteFile(secret, []byte("SECRET ON THE HOST"), 0o600); err != nil {
-		t.Fatal(err)
+// visible refusal rather than a silent escape onto the host. One table, because every tool that
+// could reach the host shares the one guard and must answer the same way; the LSP tools carry the
+// same boundary and are pinned by TestLSPToolReadsThroughSandboxCallback below.
+func TestSandboxedTaskWithoutBridgeRefusesEveryHostTool(t *testing.T) {
+	cases := []struct {
+		name      string
+		tool      string
+		args      func(target string) map[string]any
+		target    func(worktree, outside string) string
+		planted   bool                  // target exists before the call, so only its content matters
+		forbidden func(res string) bool // host content that must never come back
+	}{
+		{
+			name: "read_file",
+			tool: "read_file",
+			args: func(target string) map[string]any { return map[string]any{"path": target} },
+			target: func(_, outside string) string {
+				p := filepath.Join(outside, "secret.txt")
+				writeFile(t, p, "SECRET ON THE HOST")
+				return p
+			},
+			planted:   true,
+			forbidden: func(res string) bool { return strings.Contains(res, "SECRET ON THE HOST") },
+		},
+		{
+			name: "write_file",
+			tool: "write_file",
+			args: func(target string) map[string]any {
+				return map[string]any{"path": target, "content": "written"}
+			},
+			target: func(_, outside string) string { return filepath.Join(outside, "dropped.txt") },
+		},
+		{
+			name: "edit_file",
+			tool: "edit_file",
+			args: func(target string) map[string]any {
+				return map[string]any{"path": target, "edits": json.RawMessage(`[{"oldText":"a","newText":"b"}]`)}
+			},
+			target: func(_, outside string) string { return filepath.Join(outside, "edited.txt") },
+		},
+		{
+			name: "bash",
+			tool: "bash",
+			args: func(string) map[string]any {
+				return map[string]any{"command": "printf 'RAN ON THE HOST\\n' > ran.txt", "timeout": float64(10)}
+			},
+			// The command works in the worktree, so this is the case that catches a guard
+			// sitting after the spawn.
+			target: func(worktree, _ string) string { return filepath.Join(worktree, "ran.txt") },
+		},
 	}
 
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{"path": secret},
-		worktree, task, &executionState{sandboxEnabled: true}, nil)
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			worktree := t.TempDir()
+			outside := t.TempDir()
+			te := newReadTestExecutor(t, worktree)
+			task := makeTestTask(t, te.rawStore(), fmt.Sprintf("proj-hostguard-%d", i), fmt.Sprintf("task-hostguard-%d", i))
 
-	if ok {
-		t.Errorf("sandboxed task read a host file with no bridge: %q", result)
-	}
-	if strings.Contains(result, "SECRET ON THE HOST") {
-		t.Errorf("host content was returned to the task: %q", result)
-	}
-	if !strings.Contains(result, "sandbox") {
-		t.Errorf("refusal should name the sandbox, got: %q", result)
+			target := tc.target(worktree, outside)
+			result, ok := te.executeTool(context.Background(), tc.tool, tc.args(target),
+				worktree, task, &executionState{sandboxEnabled: true}, nil)
+
+			if ok {
+				t.Errorf("sandboxed task completed a host %s with no bridge: %q", tc.tool, result)
+			}
+			if !tc.planted {
+				if _, err := os.Stat(target); err == nil {
+					t.Errorf("the refused %s still created a host file at %s", tc.tool, target)
+				}
+			}
+			if tc.forbidden != nil && tc.forbidden(result) {
+				t.Errorf("host content was returned to the task: %q", result)
+			}
+			if !strings.Contains(result, "sandbox") {
+				t.Errorf("refusal should name the sandbox, got: %q", result)
+			}
+		})
 	}
 }
 
-// A project with sandboxing disabled is the operator's choice of the host, so its reads are not
-// jailed to the worktree.
+// A project with sandboxing disabled is the operator's choice of the host, so its reads and writes
+// are not jailed to the worktree.
 func TestUnsandboxedTaskReadsOutsideWorktree(t *testing.T) {
 	worktree := t.TempDir()
 	te := newReadTestExecutor(t, worktree)
@@ -55,48 +112,6 @@ func TestUnsandboxedTaskReadsOutsideWorktree(t *testing.T) {
 
 	if !ok || result != "outside content" {
 		t.Errorf("unsandboxed task should read any host path, got ok=%v result=%q", ok, result)
-	}
-}
-
-// The same refusal on the write side, where the host fallback is the worktree os.Root.
-func TestSandboxedTaskCannotWriteHostFileWithoutBridge(t *testing.T) {
-	worktree := t.TempDir()
-	te := newReadTestExecutor(t, worktree)
-	task := makeTestTask(t, te.rawStore(), "proj-hostguard-3", "task-hostguard-3")
-
-	target := filepath.Join(t.TempDir(), "dropped.txt")
-	result, ok := te.executeTool(context.Background(), "write_file", map[string]any{
-		"path": target, "content": "written",
-	}, worktree, task, &executionState{sandboxEnabled: true}, nil)
-
-	if ok {
-		t.Errorf("sandboxed task wrote to the host with no bridge: %q", result)
-	}
-	if _, err := os.Stat(target); err == nil {
-		t.Errorf("the refused write still created a host file at %s", target)
-	}
-}
-
-// DANGER_ZONE=1 is set for this whole package (TestMain), so a refusal here is the sandbox rule
-// holding rather than the danger-zone flag doing the work.
-func TestSandboxedTaskCannotRunHostCommandWithoutBridge(t *testing.T) {
-	worktree := t.TempDir()
-	te := newReadTestExecutor(t, worktree)
-	task := makeTestTask(t, te.rawStore(), "proj-hostguard-4", "task-hostguard-4")
-
-	result, ok := te.executeTool(context.Background(), "bash", map[string]any{
-		"command": "printf 'RAN ON THE HOST\\n' > ran.txt",
-		"timeout": float64(10),
-	}, worktree, task, &executionState{sandboxEnabled: true}, nil)
-
-	if ok {
-		t.Errorf("sandboxed task ran a command on the host with no bridge: %q", result)
-	}
-	if _, err := os.Stat(filepath.Join(worktree, "ran.txt")); err == nil {
-		t.Error("the refused command still ran — the guard sits after the spawn")
-	}
-	if !strings.Contains(result, "sandbox") {
-		t.Errorf("refusal should name the sandbox, got: %q", result)
 	}
 }
 

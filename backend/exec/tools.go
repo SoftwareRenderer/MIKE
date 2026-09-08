@@ -138,62 +138,11 @@ func makeSandboxCallbacks(client *bridge.Client) (execFunc, execStreamFunc, read
 	return execCb, execStreamCb, readCb, writeCb, editCb
 }
 
-// ensureRootDir creates the parent directory chain of path inside root.
-//
-// The mkdir must go through the os.Root handle. The obvious host-side form,
-// os.MkdirAll(filepath.Join(worktreePath, path), 0o755), resolves ".." against the host path,
-// so an LLM-supplied path like "../../x/y" creates <parent-of-worktree>/x/y before root.Create
-// rejects the write — arbitrary directory creation as the server user, reachable from prompt
-// injection in repo content. Root.MkdirAll refuses the same path and creates nothing.
-//
-// New directories are 0o700: a worktree is private to the server user.
-func ensureRootDir(root *os.Root, path string) error {
-	dir := filepath.Dir(filepath.Clean(path))
-	if dir == "." || dir == "/" || dir == string(filepath.Separator) {
-		return nil // file sits in the root itself — nothing to create
-	}
-	return root.MkdirAll(dir, 0o700)
-}
-
-// makeRootCallbacks creates read/write callbacks that use os.Root for folder isolation.
-func makeRootCallbacks(root *os.Root, worktreePath string) (readFunc, writeFunc) {
-	readCb := func(_ context.Context, path string) ([]byte, error) {
-		f, err := root.Open(path)
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-		return io.ReadAll(f)
-	}
-	writeCb := func(_ context.Context, path, content string) error {
-		// Creates parent dirs inside the jail; an escaping path fails here, before
-		// anything is created on the host (see ensureRootDir).
-		if err := ensureRootDir(root, path); err != nil {
-			return err
-		}
-		f, err := root.Create(path)
-		if err != nil {
-			return err
-		}
-		_, writeErr := f.WriteString(content)
-		closeErr := f.Close()
-		if writeErr != nil {
-			_ = root.Remove(path)
-			return writeErr
-		}
-		if closeErr != nil {
-			_ = root.Remove(path)
-			return closeErr
-		}
-		return os.Chmod(filepath.Join(worktreePath, path), 0o644)
-	}
-	return readCb, writeCb
-}
-
-// executeTool dispatches a tool call to its handler. Sandbox callbacks come from state; when
-// nil on an unsandboxed task, os.Root provides folder isolation on the host, and a sandboxed
-// task is refused instead (hostGuard). ctx cancels long-running tools (bash) when the task
-// stops, and outputCallback, if non-nil, receives incremental output from the streaming tools.
+// executeTool dispatches a tool call to its handler. Sandbox callbacks come from state; when they
+// are nil the task's project runs without a sandbox and the tool call works on the host, and a
+// sandboxed task with no callbacks is refused instead (hostGuard). ctx cancels long-running tools
+// (bash) when the task stops, and outputCallback, if non-nil, receives incremental output from the
+// streaming tools.
 func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[string]any, worktreePath string, task *types.Task, state *executionState, outputCallback func(toolID string, text string)) (string, bool) {
 	result, ok := te.executeToolInner(ctx, name, args, worktreePath, task, state, outputCallback)
 	// A successful tool call proves the sandbox bridge is healthy (or unused),
@@ -231,9 +180,9 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 		return recover()
 	}
 
-	// Host fallbacks. A project with sandboxing disabled is the operator's choice of the host, so
-	// these carry no jail; a sandboxed task must never reach one, so a missing sandbox callback
-	// fails closed here. DANGER_ZONE=1 opts in an unsandboxed project, never a sandboxed one.
+	// Host fallbacks: what a tool call uses when the task has no sandbox callbacks, which means its
+	// project runs without a sandbox. A sandboxed task must never reach one, so a missing callback
+	// fails closed here rather than working on the host behind the container.
 	hostGuard := func(what string) error {
 		if state.sandboxEnabled {
 			return fmt.Errorf("cannot %s on the host: this task's project is sandboxed and its sandbox bridge is not connected", what)
@@ -265,43 +214,15 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 		if err := hostGuard("write files"); err != nil {
 			return func(_ context.Context, p, c string) error { return err }
 		}
-		// Use existing root from state, or create one lazily.
-		var root *os.Root
-		te.taskMu.Lock()
-		if state.root != nil {
-			root = state.root
-		} else {
-			r, err := os.OpenRoot(worktreePath)
-			if err != nil {
-				te.taskMu.Unlock()
-				return func(_ context.Context, p, c string) error { return fmt.Errorf("open root: %w", err) }
-			}
-			state.root = r
-			root = r
-		}
-		te.taskMu.Unlock()
 		return func(_ context.Context, p, c string) error {
 			norm := normalizePath(state.projectName, p)
-			// Creates parent dirs inside the jail; an escaping path fails here, before
-			// anything is created on the host (see ensureRootDir).
-			if err := ensureRootDir(root, norm); err != nil {
+			if !filepath.IsAbs(norm) {
+				norm = filepath.Join(worktreePath, norm)
+			}
+			if err := os.MkdirAll(filepath.Dir(norm), 0o700); err != nil {
 				return err
 			}
-			f, err := root.Create(norm)
-			if err != nil {
-				return err
-			}
-			_, writeErr := f.WriteString(c)
-			closeErr := f.Close()
-			if writeErr != nil {
-				_ = root.Remove(norm)
-				return writeErr
-			}
-			if closeErr != nil {
-				_ = root.Remove(norm)
-				return closeErr
-			}
-			return os.Chmod(filepath.Join(worktreePath, norm), 0o644)
+			return os.WriteFile(norm, []byte(c), 0o644)
 		}
 	}
 
@@ -687,8 +608,9 @@ func parseToolArgs(s string) map[string]any {
 	return result
 }
 
-// normalizePath strips the sandbox mount prefix from absolute paths.
-// Relative paths are returned as-is (os.Root handles traversal prevention).
+// normalizePath strips the sandbox mount prefix from absolute paths, so a path written the way the
+// container sees it names the same file on both sides. A relative path is returned as-is and
+// resolved against the worktree by the caller; any other absolute path stays absolute.
 func normalizePath(projectName, path string) string {
 	cleaned := filepath.Clean(path)
 	if !filepath.IsAbs(cleaned) {
@@ -698,7 +620,7 @@ func normalizePath(projectName, path string) string {
 	if rel, ok := sandbox.TrimMountPrefix(projectName, cleaned); ok {
 		return rel
 	}
-	// Other absolute paths — os.Root treats them as relative to root
+	// Other absolute paths are what they name.
 	return cleaned
 }
 

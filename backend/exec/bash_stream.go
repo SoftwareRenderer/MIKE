@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"kanban/backend/agent"
-	"kanban/backend/sandbox"
 	"kanban/backend/toolresult"
 	"kanban/pkg/procterm"
 )
@@ -131,11 +130,6 @@ func (w *streamLineWriter) emitLocked(chunk string) {
 // host, so MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY must never be in their environment, and
 // GIT_TERMINAL_PROMPT=0 keeps an injected git transfer off a credential prompt.
 func execCommandStream(ctx context.Context, dir, command string, timeout int64, onLine func(text string)) (string, error) {
-	// A project configured without a sandbox is not consent to run on the host: the flag is
-	// checked here as well as at create time.
-	if !sandbox.HostExecutionAllowed() {
-		return "", sandbox.ErrHostExecution("running a tool command on the host")
-	}
 	secs := normalizeBashTimeout(timeout)
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(secs)*time.Second)
 	defer cancel()

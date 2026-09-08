@@ -110,16 +110,27 @@ func TestExecuteTool_ReadFile_HostFallback(t *testing.T) {
 	}
 }
 
-func TestExecuteTool_ReadFile_PathEscape(t *testing.T) {
-	// Non-sandbox: os.Root blocks path escapes at the OS level
+func TestExecuteTool_ReadFile_RelativeParentIsAHostPath(t *testing.T) {
+	// A task whose project runs without a sandbox works on the host: ".." resolves against
+	// the worktree and reads whatever it names. The boundary for such a task is the
+	// project's sandbox_enabled column; TestSandboxedTaskWithoutBridgeRefusesEveryHostTool
+	// holds the other side.
+	base := t.TempDir()
+	worktree := filepath.Join(base, "worktree")
+	if err := os.Mkdir(worktree, 0o755); err != nil {
+		t.Fatalf("create worktree dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "notes.txt"), []byte("outside"), 0o644); err != nil {
+		t.Fatalf("seed file outside the worktree: %v", err)
+	}
 	te := &TaskExecutor{}
 
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{"path": "../etc/passwd"}, "/tmp/worktree", &types.Task{}, &executionState{}, nil)
-	if ok {
-		t.Fatalf("expected failure for path escape, got success: %s", result)
+	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{"path": "../notes.txt"}, worktree, &types.Task{}, &executionState{}, nil)
+	if !ok {
+		t.Fatalf("expected the host path to be read, got failure: %s", result)
 	}
-	if !strings.Contains(result, "Error:") {
-		t.Errorf("expected error, got %q", result)
+	if result != "outside" {
+		t.Errorf("read %q, want %q", result, "outside")
 	}
 }
 
@@ -190,41 +201,11 @@ func TestExecuteTool_WriteFile_HostFallback(t *testing.T) {
 	}
 }
 
-func TestExecuteTool_WriteFile_PathEscape(t *testing.T) {
-	// Non-sandbox: os.Root blocks path escapes at the OS level. Crucially, the parent
-	// directory chain must NOT be created on the host on the way to that error — the
-	// jail used to os.MkdirAll the host-joined path first, which happily created
-	// <parent-of-worktree>/etc before root.Create rejected the file itself.
-	base := t.TempDir()
-	worktree := filepath.Join(base, "worktree")
-	if err := os.Mkdir(worktree, 0o755); err != nil {
-		t.Fatalf("create worktree dir: %v", err)
-	}
-	te := &TaskExecutor{}
-
-	result, ok := te.executeTool(context.Background(), "write_file", map[string]any{
-		"path":    "../etc/evil",
-		"content": "malicious",
-	}, worktree, &types.Task{}, &executionState{}, nil)
-	if ok {
-		t.Fatalf("expected failure for path escape, got success: %s", result)
-	}
-	if !strings.Contains(result, "Error:") {
-		t.Errorf("expected error, got %q", result)
-	}
-
-	// The escaped parent directory must not exist.
-	if _, err := os.Stat(filepath.Join(base, "etc")); !os.IsNotExist(err) {
-		t.Errorf("escape leaked directory %q into the parent of the worktree (stat err = %v)", filepath.Join(base, "etc"), err)
-	}
-	if _, err := os.Stat(filepath.Join(base, "etc", "evil")); !os.IsNotExist(err) {
-		t.Errorf("escape leaked %q into the parent of the worktree (stat err = %v)", filepath.Join(base, "etc", "evil"), err)
-	}
-}
-
-func TestExecuteTool_WriteFile_PathEscape_Nested(t *testing.T) {
-	// A deeper escape ("../../x/y") must fail before ANY component of the chain is
-	// created — the whole point of running the mkdir through os.Root.
+func TestExecuteTool_WriteFile_WritesWhereThePathNames(t *testing.T) {
+	// The host write is the mirror of the host read: a relative path resolves against the
+	// worktree, ".." and absolute paths name whatever they name, and the parent chain is
+	// created as needed. A task that must not touch the host is a task whose project is
+	// sandboxed, and that is refused before a callback is chosen.
 	base := t.TempDir()
 	worktree := filepath.Join(base, "a", "b", "worktree")
 	if err := os.MkdirAll(worktree, 0o755); err != nil {
@@ -232,34 +213,34 @@ func TestExecuteTool_WriteFile_PathEscape_Nested(t *testing.T) {
 	}
 	te := &TaskExecutor{}
 
-	result, ok := te.executeTool(context.Background(), "write_file", map[string]any{
-		"path":    "../../pwned-dir/deeper/file.txt",
-		"content": "malicious",
-	}, worktree, &types.Task{}, &executionState{}, nil)
-	if ok {
-		t.Fatalf("expected failure for nested path escape, got success: %s", result)
-	}
-	if !strings.Contains(result, "Error:") {
-		t.Errorf("expected error, got %q", result)
-	}
-
-	for _, leaked := range []string{
-		filepath.Join(base, "pwned-dir"),      // what filepath.Join(worktree, "../../pwned-dir") resolves to
-		filepath.Join(base, "a", "pwned-dir"), // the intermediate ".." hop
-		filepath.Join(worktree, "pwned-dir"),  // same name, inside the jail
-	} {
-		if _, err := os.Stat(leaked); !os.IsNotExist(err) {
-			t.Errorf("escape leaked directory %q (stat err = %v)", leaked, err)
+	abs := filepath.Join(base, "absolute", "file.txt")
+	for _, target := range []string{"deep/nested/dir/file.txt", "../escaped/evil.txt", abs} {
+		result, ok := te.executeTool(context.Background(), "write_file", map[string]any{
+			"path": target, "content": "written",
+		}, worktree, &types.Task{}, &executionState{}, nil)
+		if !ok {
+			t.Fatalf("write_file(%q) failed: %s", target, result)
+		}
+		full := target
+		if !filepath.IsAbs(full) {
+			full = filepath.Join(worktree, target)
+		}
+		data, err := os.ReadFile(filepath.Clean(full))
+		if err != nil {
+			t.Errorf("write_file(%q) left nothing at %s: %v", target, filepath.Clean(full), err)
+			continue
+		}
+		if string(data) != "written" {
+			t.Errorf("write_file(%q) wrote %q", target, data)
 		}
 	}
-	// Nothing at all was created under the temp base except the worktree we made.
-	assertTreeEquals(t, base, []string{"a"})
+	// Inside the worktree, only the path that was named there exists.
+	assertTreeEquals(t, worktree, []string{"deep"})
 }
 
 func TestExecuteTool_WriteFile_CreatesNestedDirs(t *testing.T) {
-	// Positive control for the jail: a NEW nested subdirectory INSIDE the worktree is
-	// still created by the real os.Root write callback (no sandboxWrite injected), and
-	// the file keeps the historical 0644 mode.
+	// A brand-new nested subdirectory under the worktree is created on the way to the
+	// file (no sandboxWrite injected), which keeps the historical 0644 mode.
 	worktree := t.TempDir()
 	te := &TaskExecutor{}
 
@@ -295,49 +276,6 @@ func TestExecuteTool_WriteFile_CreatesNestedDirs(t *testing.T) {
 			t.Errorf("%q is not a directory", d)
 		}
 	}
-}
-
-func TestMakeRootCallbacks_WriteCbIsJailed(t *testing.T) {
-	// The write callback returned by makeRootCallbacks is the one used by write_file AND
-	// edit_file in non-sandbox mode (loop.go installs it as state.sandboxWrite), so the
-	// jail is exercised here directly for both entry points.
-	base := t.TempDir()
-	worktree := filepath.Join(base, "worktree")
-	if err := os.Mkdir(worktree, 0o755); err != nil {
-		t.Fatalf("create worktree dir: %v", err)
-	}
-	root, err := os.OpenRoot(worktree)
-	if err != nil {
-		t.Fatalf("open root: %v", err)
-	}
-	defer root.Close()
-
-	_, writeCb := makeRootCallbacks(root, worktree)
-	ctx := context.Background()
-
-	// Escapes fail and leave nothing behind.
-	for _, p := range []string{"../etc/evil", "../../pwned-dir/deeper/file.txt", "/abs/host/file.txt"} {
-		if err := writeCb(ctx, p, "malicious"); err == nil {
-			t.Errorf("writeCb(%q): expected error, got nil", p)
-		}
-	}
-	assertTreeEquals(t, base, []string{"worktree"})
-	if _, err := os.Stat(filepath.Join(worktree, "abs")); !os.IsNotExist(err) {
-		t.Errorf("absolute path leaked %q inside the worktree (stat err = %v)", filepath.Join(worktree, "abs"), err)
-	}
-
-	// In-jail writes still work, including brand-new nested directories.
-	if err := writeCb(ctx, "pkg/new/sub/out.go", "package sub\n"); err != nil {
-		t.Fatalf("writeCb into new nested dir: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(worktree, "pkg", "new", "sub", "out.go"))
-	if err != nil {
-		t.Fatalf("read written file: %v", err)
-	}
-	if string(data) != "package sub\n" {
-		t.Errorf("written content = %q", string(data))
-	}
-	assertTreeEquals(t, worktree, []string{"pkg"})
 }
 
 func TestExecuteTool_WriteFile_DirCreation(t *testing.T) {
@@ -884,19 +822,18 @@ func TestExecuteTool_EditFile_OverlappingEdits(t *testing.T) {
 	}
 }
 
-func TestExecuteTool_EditFile_PathEscape(t *testing.T) {
-	// Non-sandbox edit_file reads with a plain host read (which happily follows ".."),
-	// then writes through the jailed os.Root write callback. The write must fail, the
-	// file outside the worktree must be left untouched, and no directory may be created
-	// outside the jail on the way to the error.
+func TestExecuteTool_EditFile_OutsideWorktreeIsAHostEdit(t *testing.T) {
+	// edit_file reads and writes the same path, so on a host task it edits whatever
+	// ".." names — one rule for both halves, never a middle ground where the read
+	// escapes and the write does not.
 	base := t.TempDir()
-	worktree := filepath.Join(base, "a", "b", "worktree")
-	if err := os.MkdirAll(worktree, 0o755); err != nil {
+	worktree := filepath.Join(base, "worktree")
+	if err := os.Mkdir(worktree, 0o755); err != nil {
 		t.Fatalf("create worktree dir: %v", err)
 	}
-	victim := filepath.Join(base, "victim.txt")
-	if err := os.WriteFile(victim, []byte("x"), 0o644); err != nil {
-		t.Fatalf("seed victim file: %v", err)
+	target := filepath.Join(base, "victim.txt")
+	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed file outside the worktree: %v", err)
 	}
 
 	te := &TaskExecutor{}
@@ -905,25 +842,21 @@ func TestExecuteTool_EditFile_PathEscape(t *testing.T) {
 	})
 
 	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
-		"path":  "../../victim.txt",
+		"path":  "../victim.txt",
 		"edits": json.RawMessage(editsJSON),
 	}, worktree, &types.Task{}, &executionState{}, nil)
-	if ok {
-		t.Fatalf("expected failure for path escape, got success: %s", result)
-	}
-	if !strings.Contains(result, "Error:") {
-		t.Errorf("expected error, got %q", result)
+	if !ok {
+		t.Fatalf("expected the host edit to succeed, got failure: %s", result)
 	}
 
-	data, err := os.ReadFile(victim)
+	data, err := os.ReadFile(target)
 	if err != nil {
-		t.Fatalf("read victim file: %v", err)
+		t.Fatalf("read edited file: %v", err)
 	}
-	if string(data) != "x" {
-		t.Errorf("escaped edit modified the file outside the worktree: got %q, want %q", string(data), "x")
+	if string(data) != "y" {
+		t.Errorf("host edit did not reach %s: got %q", target, string(data))
 	}
-	// The only thing under base is the directory chain + the seeded file.
-	assertTreeEquals(t, base, []string{"a", "victim.txt"})
+	assertTreeEquals(t, base, []string{"victim.txt", "worktree"})
 }
 
 func TestExecuteTool_EditFile_EmptyOldText(t *testing.T) {

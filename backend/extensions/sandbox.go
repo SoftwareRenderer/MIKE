@@ -314,10 +314,22 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 		createArgs = append(createArgs, "--cap-add", cap)
 	}
 
-	// Mount each registered project at /mnt/<project-dirname> read-only.
-	// This allows the container to serve any workspace without recreation.
+	// Mount each registered project at /mnt/<project-dirname> read-only. This allows the container
+	// to serve any workspace without recreation. A source here is not always operator-chosen: the
+	// current LSP workspace arrives in this map and originates from a client message, so it is
+	// judged by the same policy as the extension's own mounts — resolved, then inside a root.
+	// A refused source is still recorded, because the record is what MountsCompatible compares the
+	// desired set against: recording it only when mounted would make every request look like
+	// "project mounts changed" and recreate the sandbox forever.
 	mountedProjects := make([]string, 0, len(projectMounts))
 	for hostPath, containerPath := range projectMounts {
+		if policy != nil {
+			if _, err := policy.ValidateHostPath(hostPath); err != nil {
+				logging.For(logging.Sandbox).Warnf("ext=%s SKIPPED project mount: %v", ext.ID, err)
+				mountedProjects = append(mountedProjects, hostPath)
+				continue
+			}
+		}
 		createArgs = append(createArgs,
 			"-v", hostPath+":"+containerPath+":rprivate,ro",
 		)
