@@ -182,6 +182,12 @@ func (h *ProjectHandler) prepareCloneTarget(req types.CreateProjectRequest) (str
 // HTTP status code and a client-facing message.
 func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest) (*types.Project, int, string) {
 	req.Path = strings.TrimSpace(req.Path)
+	if req.Path == "" {
+		return nil, http.StatusBadRequest, "path is required"
+	}
+	// The project ID, the default name and the stored path are all derived from this string, so it
+	// is cleaned once here: Base("<repo>/sub/..") is "..", and the first two would inherit it.
+	req.Path = filepath.Clean(req.Path)
 
 	// The server reads, watches and runs git here, so the picker's jail gates it. Checked first:
 	// a refusal creates no row.
@@ -236,6 +242,13 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 	for _, p := range projects {
 		existingIDs = append(existingIDs, p.ID)
 	}
+	// The ID is a URL path segment and a worktree directory name (<worktrees>/<id>/<taskID>), so it
+	// is checked as a name rather than trusted because it came out of a path: ID ".." puts every
+	// task worktree in the parent of the declared worktrees dir, out of reach of their GC.
+	projectID := generateProjectID(req.Path, existingIDs)
+	if err := sandboxruntime.ValidateProjectName(projectID); err != nil {
+		return nil, http.StatusBadRequest, "cannot derive a project id from " + req.Path + ": " + err.Error()
+	}
 
 	now := time.Now().UTC()
 	memoryLimit := req.SandboxMemoryLimit
@@ -255,7 +268,7 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 		networkIsolation = *req.SandboxNetworkIsolation
 	}
 	p := &types.Project{
-		ID:                      generateProjectID(req.Path, existingIDs),
+		ID:                      projectID,
 		Name:                    name,
 		Path:                    req.Path,
 		SandboxEnabled:          req.SandboxEnabled,
@@ -787,12 +800,14 @@ func repoNameFromGitURL(gitURL string) (string, error) {
 	return base, nil
 }
 
-// generateProjectID generates a project ID from path (basename or slugified).
+// generateProjectID derives a project ID from path: its base name when that is a safe project
+// name, otherwise its slug. The slug can come back empty — a path with no letters or digits — so
+// the caller checks the answer.
 func generateProjectID(path string, existingIDs []string) string {
-	base := filepath.Base(path)
-	if !slices.Contains(existingIDs, base) {
-		return base
+	base := filepath.Base(filepath.Clean(path))
+	// Slugging the whole path keeps colliding basenames distinguishable.
+	if slices.Contains(existingIDs, base) || sandboxruntime.ValidateProjectName(base) != nil {
+		return types.Slugify(path, 0)
 	}
-	// Collision — slug the full path so colliding basenames stay distinguishable.
-	return types.Slugify(path, 0)
+	return base
 }

@@ -107,27 +107,32 @@ func trustProxy() bool {
 	return os.Getenv("MIKE_TRUST_PROXY") == "1"
 }
 
-// clientIP extracts the client IP from a request, considering
-// X-Forwarded-For headers if present (for reverse proxy setups).
+// clientIP is the address the login rate limiter budgets a request under. Behind a trusted proxy
+// that is the rightmost X-Forwarded-For entry — the only one the proxy wrote. Everything to its
+// left is client-chosen, so a key taken from there can be changed per attempt; a chain not ending
+// in an address falls back to the peer for the same reason.
 func clientIP(r *http.Request) string {
-	// Only trust X-Forwarded-For when explicitly behind a trusted proxy.
-	// Otherwise an attacker can spoof the header to bypass IP-based
-	// rate limiting (e.g. the login brute-force limit).
 	if trustProxy() {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			// X-Forwarded-For can contain multiple IPs; the first is the original client
-			if idx := strings.IndexByte(xff, ','); idx >= 0 {
-				return xff[:idx]
-			}
-			return xff
+		if last := lastForwardedIP(r.Header.Get("X-Forwarded-For")); last != "" {
+			return last
 		}
 	}
-	// Fall back to the direct remote address
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// lastForwardedIP is the rightmost X-Forwarded-For entry, or "" when the header does not end in an
+// IP address. Canonical form: "FE80::1" and "fe80::1" are one client.
+func lastForwardedIP(xff string) string {
+	entries := strings.Split(xff, ",")
+	ip := net.ParseIP(strings.TrimSpace(entries[len(entries)-1]))
+	if ip == nil {
+		return ""
+	}
+	return ip.String()
 }
 
 // defaultLoginRateLimit is the login budget per client IP per minute, used when
