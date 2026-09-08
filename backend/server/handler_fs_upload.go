@@ -96,13 +96,13 @@ func (s *Server) handleFSUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if info, err := os.Lstat(target); err == nil {
+	if info, err := os.Lstat(target.path); err == nil {
 		if info.IsDir() {
 			JSONError(w, http.StatusConflict, "a directory with that name already exists")
 			return
 		}
 		if !overwrite {
-			JSONError(w, http.StatusConflict, "file already exists: "+filepath.Base(target))
+			JSONError(w, http.StatusConflict, "file already exists: "+filepath.Base(target.path))
 			return
 		}
 	}
@@ -122,5 +122,5 @@ func (s *Server) handleFSUpload(w http.ResponseWriter, r *http.Request) {
 	if !s.writeContainedFile(w, target, content) {
 		return
 	}
-	JSONResponse(w, http.StatusOK, map[string]string{"status": "written", "path": target})
+	JSONResponse(w, http.StatusOK, map[string]string{"status": "written", "path": target.path})
 }

@@ -33,11 +33,12 @@ type hostRoot struct {
 // startup. A request naming a project is jailed to that project instead
 // (Server.validateFSPath).
 //
-// os.Root is not one uniform jail: reads refuse any symlink in the path even when it stays
-// inside, and MkdirAll creates through a symlink that leaves. Hence the Contained fallback on
-// reads and the component walk on creation.
+// Measured on go1.27/Linux: os.Root's Open, Stat, Create and MkdirAll all follow a symlink out
+// of the root, so the jail rests on Contained for reads and the component walk for creation.
 type HostRoot struct {
 	roots []hostRoot
+	// envWidens marks the no-project jail; a root set built around a project never widens.
+	envWidens bool
 }
 
 // NewHostRoot builds the jail from the operator's home plus declaredDirs — directories named
@@ -48,7 +49,13 @@ func NewHostRoot(declaredDirs ...string) *HostRoot {
 	if err != nil {
 		home = ""
 	}
-	return &HostRoot{roots: normalizeHostRoots(append([]string{home}, declaredDirs...)...)}
+	return &HostRoot{roots: normalizeHostRoots(append([]string{home}, declaredDirs...)...), envWidens: true}
+}
+
+// NewContainedRoots builds the same walk over exactly the directories given, with no implicit
+// home and no widening by AllowRootFSEnv.
+func NewContainedRoots(dirs ...string) *HostRoot {
+	return &HostRoot{roots: normalizeHostRoots(dirs...)}
 }
 
 // normalizeHostRoots drops blanks and duplicates and keeps the symlink-resolved form of each
@@ -85,7 +92,7 @@ func normalizeHostRoots(dirs ...string) []hostRoot {
 
 // unrestricted reads the environment on every call. A nil policy is never unrestricted.
 func (h *HostRoot) unrestricted() bool {
-	return h != nil && os.Getenv(AllowRootFSEnv) == "1"
+	return h != nil && h.envWidens && os.Getenv(AllowRootFSEnv) == "1"
 }
 
 // Unrestricted reports whether host-wide access was granted by the environment.

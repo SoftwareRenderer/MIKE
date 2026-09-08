@@ -2,9 +2,11 @@ package server
 
 import (
 	"io/fs"
+	"kanban/backend/fsutil"
 	"kanban/backend/httputil"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -169,8 +171,9 @@ func (s *Server) setupRoutes() {
 	// send session cookies), so it stays minimal. A raw http.FileServer would
 	// render a directory index for /extensions/ and /extensions/<author>/,
 	// handing the installed-extension tree to any unauthenticated client;
-	// noListingFS returns 404 for those instead. http.Dir still rejects traversal.
-	s.mux.Handle("/extensions/", http.StripPrefix("/extensions/", http.FileServer(noListingFS{http.Dir("extensions")})))
+	// noListingFS returns 404 for those instead, and noEscapeFS refuses what http.Dir follows.
+	s.mux.Handle("/extensions/", http.StripPrefix("/extensions/",
+		http.FileServer(noListingFS{noEscapeFS{dir: "extensions"}})))
 }
 
 // noListingFS wraps an http.FileSystem so http.FileServer can never render a
@@ -203,4 +206,17 @@ func (n noListingFS) Open(name string) (http.File, error) {
 		index.Close()
 	}
 	return f, nil
+}
+
+// noEscapeFS refuses any path whose symlink-resolved form leaves the served root. http.Dir
+// follows symlinks and this prefix is served with no session (isPublicPath), so one planted
+// link would make its target world-readable.
+type noEscapeFS struct{ dir string }
+
+func (n noEscapeFS) Open(name string) (http.File, error) {
+	abs := filepath.Join(n.dir, filepath.FromSlash("/"+name))
+	if _, err := fsutil.Contained(abs, []string{n.dir}); err != nil {
+		return nil, fs.ErrNotExist
+	}
+	return http.Dir(n.dir).Open(name)
 }

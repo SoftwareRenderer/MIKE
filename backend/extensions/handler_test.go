@@ -2123,6 +2123,7 @@ func TestHandleProxy_RejectsNonHTTPScheme(t *testing.T) {
 }
 
 func TestHandleProxy_DoesNotFollowRedirects(t *testing.T) {
+	allowLoopbackProxy(t)
 	// The "internal" server must never be reached via a redirect from an
 	// allowed domain (SSRF via redirect).
 	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

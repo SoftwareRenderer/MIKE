@@ -2,8 +2,8 @@ package extensions
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -798,6 +798,11 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 		httputil.JSONError(w, http.StatusNotFound, "extension not found in registry: "+req.Name)
 		return
 	}
+	// 400 before the SSE stream starts; installInBackground checks again before it writes.
+	if err := refuseUninstallable(entry); err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// Check by identity — records use timestamped IDs, so an ID lookup misses
 	// duplicates. Author is normalized to the on-disk namespace slug.
@@ -899,6 +904,10 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 	}()
 	var manifest ExtensionManifest
 	root := h.config.ExtensionsDirOrDefault()
+	if err := refuseUninstallable(entry); err != nil {
+		fail(err)
+		return
+	}
 	targetDir := filepath.Join(root, authorDir(entry.Author), entry.Name)
 	if entry.localDir != "" {
 		targetDir = entry.localDir
@@ -1224,6 +1233,11 @@ func (h *ExtensionHandler) changelogForUpdate(entry RegistryEntry, sinceHash str
 	if sinceHash == "" {
 		return nil
 	}
+	// The changelog path is built from entry.Name; this metadata is best-effort, so a bad
+	// entry is skipped rather than reported.
+	if err := refuseUninstallable(&entry); err != nil {
+		return nil
+	}
 	data, err := h.registry.FetchChangelog(h.config.RegistryURL, entry.Author, entry.Name)
 	if err != nil {
 		return nil
@@ -1293,10 +1307,14 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 
 	// Stop sandbox if running
 	_ = h.sandbox.Stop(id)
-
 	ext, err := h.store.GetByID(id)
 	if err != nil {
 		fail(fmt.Errorf("extension not found: %w", err))
+		return
+	}
+
+	if err := refuseUninstallable(entry); err != nil {
+		fail(err)
 		return
 	}
 
@@ -1434,11 +1452,6 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 	events <- sseEvent{Extension: name, Progress: 100, Message: "Updated", Done: true, Result: &result}
 }
 
-// maxProxyResponseBytes bounds one proxied extension response. The upstream is chosen
-// by a third-party manifest and the body is buffered in full, so without a bound one
-// API can make the server allocate whatever it likes to answer one tool call.
-const maxProxyResponseBytes = 8 << 20
-
 // proxyContentType decides what the browser is told a proxied body IS. The upstream's own
 // Content-Type is never echoed: the response is served from MIKE's own origin, so a third-party
 // upstream must not choose how that origin labels its bytes. JSON is kept because the client
@@ -1450,6 +1463,10 @@ func proxyContentType(upstream string) string {
 	}
 	return "text/plain; charset=utf-8"
 }
+
+// proxyClient builds the HTTP client for one proxied call. It is a variable because httptest
+// servers listen on the loopback address that client refuses.
+var proxyClient = httputil.NewExtensionEgressClient
 
 // HandleProxy proxies requests to external APIs on behalf of an extension.
 // The extension must declare a `network` capability in its manifest with
@@ -1539,7 +1556,7 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 	// Execute proxy request. Redirects are NOT followed: the allowlist only
 	// validates the original URL's hostname, so following a redirect could
 	// otherwise reach an arbitrary internal host (SSRF via redirect).
-	client := httputil.NewSingleAttemptClient(30 * time.Second)
+	client := proxyClient(30 * time.Second)
 	resp, err := client.Do(proxyReq)
 	if err != nil {
 		httputil.JSONError(w, http.StatusBadGateway, "proxy request failed: "+err.Error())
@@ -1547,15 +1564,14 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxProxyResponseBytes+1))
+	body, err := httputil.ReadUpstream(resp.Body)
 	if err != nil {
+		logging.For(logging.Extensions).Infof("extension=%s url=%s %v", ext.Name, req.URL, err)
+		if errors.Is(err, httputil.ErrUpstreamTooLarge) {
+			httputil.JSONError(w, http.StatusBadGateway, "proxy response too large")
+			return
+		}
 		httputil.JSONError(w, http.StatusBadGateway, "failed to read proxy response: "+err.Error())
-		return
-	}
-	// The upstream is only named by a domain in the manifest; cap what it can send back.
-	if int64(len(body)) > maxProxyResponseBytes {
-		logging.For(logging.Extensions).Infof("extension=%s url=%s response exceeded %d bytes", ext.Name, req.URL, maxProxyResponseBytes)
-		httputil.JSONError(w, http.StatusBadGateway, "proxy response too large")
 		return
 	}
 

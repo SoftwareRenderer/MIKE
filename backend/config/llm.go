@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -69,7 +68,10 @@ func (cs *ConfigStore) TestConnection(req TestConnectionRequest) TestConnectionR
 		return TestConnectionResponse{Success: false, Message: fmt.Sprintf("Connection failed: %v", err)}
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, readErr := httputil.ReadUpstream(resp.Body)
+	if readErr != nil {
+		return TestConnectionResponse{Success: false, Message: fmt.Sprintf("HTTP %d: %v", resp.StatusCode, readErr)}
+	}
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return TestConnectionResponse{Success: true, Message: "Connection successful!"}
@@ -171,7 +173,10 @@ func (cs *ConfigStore) FetchModels(req FetchModelsRequest) FetchModelsResponse {
 		return FetchModelsResponse{Models: nil, Error: fmt.Sprintf("Connection failed: %v", err)}
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, readErr := httputil.ReadUpstream(resp.Body)
+	if readErr != nil {
+		return FetchModelsResponse{Models: nil, Error: fmt.Sprintf("Reading response: %v", readErr)}
+	}
 
 	if resp.StatusCode >= 400 {
 		return FetchModelsResponse{Models: nil, Error: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(body))}
@@ -220,7 +225,10 @@ func (cs *ConfigStore) DiscoverContextWindow(modelName, providerURL string) *int
 		return nil
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, err := httputil.ReadUpstream(resp.Body)
+	if err != nil {
+		return nil
+	}
 
 	var oaiResp struct {
 		Data []struct {
@@ -253,7 +261,10 @@ func (cs *ConfigStore) DiscoverContextWindow(modelName, providerURL string) *int
 		return nil
 	}
 	defer resp.Body.Close()
-	body, _ = io.ReadAll(resp.Body)
+	body, err = httputil.ReadUpstream(resp.Body)
+	if err != nil {
+		return nil
+	}
 
 	var upstreamResp struct {
 		Data []struct {

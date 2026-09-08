@@ -1,8 +1,13 @@
 package httputil
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"time"
 )
 
@@ -46,4 +51,79 @@ func NewSingleAttemptClient(timeout time.Duration) *http.Client {
 			return http.ErrUseLastResponse
 		},
 	}
+}
+
+// egressTransport is sharedTransport with an address-judging dialer, on its own Transport so
+// its connections stay out of the shared idle pool.
+var egressTransport = func() *http.Transport {
+	t := sharedTransport.Clone()
+	t.DialContext = dialPublicOnly
+	return t
+}()
+
+// ErrInternalAddress says an egress target resolved to a non-public address.
+var ErrInternalAddress = errors.New("target resolves to a non-public address")
+
+// NewExtensionEgressClient is NewSingleAttemptClient plus the address rule in publicAddress,
+// for egress an extension asked for rather than the operator: an allowlisted name can resolve
+// to this host. RFC1918 stays allowed — a LAN service is a real extension target.
+func NewExtensionEgressClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: egressTransport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+// publicAddress: IsGlobalUnicast excludes loopback, link-local (the cloud metadata address),
+// interface-local and multicast; unspecified needs its own clause because "dial 0.0.0.0" is a
+// local dial.
+func publicAddress(ip netip.Addr) bool {
+	return ip.IsGlobalUnicast() && !ip.IsUnspecified()
+}
+
+func dialPublicOnly(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return nil, err
+	}
+	dial := sharedTransport.DialContext
+	var last = ErrInternalAddress
+	for _, ip := range ips {
+		if !publicAddress(ip) {
+			last = fmt.Errorf("%w: %s", ErrInternalAddress, ip)
+			continue
+		}
+		conn, derr := dial(ctx, network, net.JoinHostPort(ip.String(), port))
+		if derr == nil {
+			return conn, nil
+		}
+		last = derr
+	}
+	return nil, last
+}
+
+// MaxUpstreamBodyBytes bounds an upstream body read into memory: it is somebody else's server.
+const MaxUpstreamBodyBytes int64 = 8 << 20
+
+// ErrUpstreamTooLarge says an upstream body went past MaxUpstreamBodyBytes.
+var ErrUpstreamTooLarge = errors.New("upstream response too large")
+
+// ReadUpstream reads an upstream body, refusing past the cap. Truncating would let a caller
+// report "invalid response" instead of the truth.
+func ReadUpstream(body io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(body, MaxUpstreamBodyBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > MaxUpstreamBodyBytes {
+		return nil, fmt.Errorf("%w: more than %d bytes", ErrUpstreamTooLarge, MaxUpstreamBodyBytes)
+	}
+	return data, nil
 }

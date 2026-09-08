@@ -110,8 +110,13 @@ func (rc *RegistryClient) FetchIndex(url string) (RegistryIndex, error) {
 	}
 	defer body.Close()
 
+	// Read before parsing: decoding off the body reads as much as the sender streams.
+	data, err := httputil.ReadUpstream(body)
+	if err != nil {
+		return nil, fmt.Errorf("read registry index: %w", err)
+	}
 	var index RegistryIndex
-	if err := json.NewDecoder(body).Decode(&index); err != nil {
+	if err := json.Unmarshal(data, &index); err != nil {
 		return nil, fmt.Errorf("decode registry index: %w", err)
 	}
 	return index, nil
@@ -129,7 +134,7 @@ func (rc *RegistryClient) FetchChangelog(baseURL, author, name string) (string, 
 	}
 	defer body.Close()
 
-	data, err := io.ReadAll(body)
+	data, err := httputil.ReadUpstream(body)
 	if err != nil {
 		return "", fmt.Errorf("read changelog for %s/%s: %w", author, name, err)
 	}
@@ -144,7 +149,7 @@ func (rc *RegistryClient) FetchDockerfile(url string) (string, error) {
 	}
 	defer body.Close()
 
-	data, err := io.ReadAll(body)
+	data, err := httputil.ReadUpstream(body)
 	if err != nil {
 		return "", fmt.Errorf("read dockerfile: %w", err)
 	}

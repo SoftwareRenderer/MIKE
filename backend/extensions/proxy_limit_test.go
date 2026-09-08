@@ -6,13 +6,16 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"kanban/backend/httputil"
 )
 
 // TestHandleProxyCapsResponse: the proxied response is buffered in full, so without a cap any
 // API on an extension's allowlist could make the server buffer a response of any size.
 func TestHandleProxyCapsResponse(t *testing.T) {
+	allowLoopbackProxy(t)
 	// A real body just past the cap: the handler buffers whatever it is handed.
-	const oversized = maxProxyResponseBytes + 4096
+	const oversized = int(httputil.MaxUpstreamBodyBytes) + 4096
 	big := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		chunk := strings.Repeat("y", 1<<20)
@@ -37,7 +40,11 @@ func TestHandleProxyCapsResponse(t *testing.T) {
 	if w.Code != http.StatusBadGateway {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusBadGateway)
 	}
-	if w.Body.Len() > int(maxProxyResponseBytes) {
+	// The refusal must be the cap, not any other read failure — both answer 502.
+	if !strings.Contains(w.Body.String(), "too large") {
+		t.Errorf("the refusal should name the cap, got: %s", w.Body.String())
+	}
+	if w.Body.Len() > int(httputil.MaxUpstreamBodyBytes) {
 		t.Errorf("the refusal itself carried %d bytes", w.Body.Len())
 	}
 }
@@ -45,6 +52,7 @@ func TestHandleProxyCapsResponse(t *testing.T) {
 // TestHandleProxyPassesNormalResponse is the other side: the cap is a bound, not a
 // break. A response well inside it still reaches the extension unchanged.
 func TestHandleProxyPassesNormalResponse(t *testing.T) {
+	allowLoopbackProxy(t)
 	small := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"ok":true}`))
@@ -91,6 +99,7 @@ func TestProxyContentType(t *testing.T) {
 // The response is served from MIKE's own origin, so an upstream's bytes must never arrive
 // labelled as something the browser would run.
 func TestHandleProxyDoesNotEchoUpstreamContentType(t *testing.T) {
+	allowLoopbackProxy(t)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte("<script>alert(1)</script>"))

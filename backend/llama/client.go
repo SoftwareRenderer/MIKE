@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -40,6 +39,15 @@ func (e *LlamaError) Error() string {
 // IsRateLimit reports whether this error is a 429 Too Many Requests response.
 func (e *LlamaError) IsRateLimit() bool {
 	return e.StatusCode == http.StatusTooManyRequests
+}
+
+// errorBody is what a LlamaError carries for a non-200: the body, or the failure to hold it.
+func errorBody(resp *http.Response) string {
+	body, err := httputil.ReadUpstream(resp.Body)
+	if err != nil {
+		return err.Error()
+	}
+	return string(body)
 }
 
 // newLlamaError builds a LlamaError from a non-200 response, parsing the
@@ -267,8 +275,7 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, newLlamaError(resp.StatusCode, resp.Header, string(body))
+		return nil, newLlamaError(resp.StatusCode, resp.Header, errorBody(resp))
 	}
 
 	var usage *types.ChatUsage
@@ -440,12 +447,15 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, "", newLlamaError(resp.StatusCode, resp.Header, string(body))
+		return nil, "", newLlamaError(resp.StatusCode, resp.Header, errorBody(resp))
 	}
 
 	var result types.ChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	payload, err := httputil.ReadUpstream(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("read response: %w", err)
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
 		return nil, "", fmt.Errorf("decode response: %w", err)
 	}
 

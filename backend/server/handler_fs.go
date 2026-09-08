@@ -344,7 +344,7 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 	if !s.writeContainedFile(w, target, []byte(req.Content)) {
 		return
 	}
-	JSONResponse(w, http.StatusOK, map[string]string{"status": "written", "path": target})
+	JSONResponse(w, http.StatusOK, map[string]string{"status": "written", "path": target.path})
 }
 
 func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
@@ -661,7 +661,11 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Host walk: the worktree is bind-mounted into the sandbox, so it sees the same files.
+	ctx := r.Context()
 	err = filepath.WalkDir(searchRoot, func(path string, d os.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return errStopWalk
+		}
 		if err != nil {
 			return nil // skip unreadable entries
 		}
@@ -696,6 +700,9 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 
 		// Content search ignores the filename filter.
 		if searchContent {
+			if info, infoErr := d.Info(); infoErr == nil && info.Size() > searchMaxFileBytes {
+				return nil
+			}
 			searchContentInFile(path, q, matchCase, wholeWord, useRegex, contentRe, func(lineNum int, lineText string) {
 				results = append(results, searchResult{Path: rel, Line: lineNum, Text: lineText})
 			})
@@ -726,6 +733,9 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 		"results": results,
 	})
 }
+
+// searchMaxFileBytes: with no matches to stop at, a content search would read the whole file.
+const searchMaxFileBytes int64 = 2 << 20
 
 // searchContentInFile searches for matches within a single file.
 // Returns true if the file was binary (content search skipped).
@@ -911,10 +921,21 @@ func fsSandboxPath(worktreePath string, project *types.Project, p string) string
 	return sandbox.HostToContainer(worktreePath, project.Name, clean)
 }
 
-// validateFSPath returns the form of path that is safe to open, jailed to the project checkout
-// plus, when the request names a task, that task's worktree. Callers MUST open the returned path.
-// The workspace dir is deliberately not a root: it holds every project's task worktrees, so
-// allowing it let one project-scoped request reach any task on the host.
+// projectFSRoots is what a project-scoped file request is contained to: the checkout plus,
+// when the request names a task, that task's worktree. Never the workspace dir.
+func projectFSRoots(project *types.Project, worktreeRoot string) []string {
+	roots := []string{filepath.Clean(project.Path)}
+	if worktreeRoot == "" {
+		return roots
+	}
+	if wt := filepath.Clean(worktreeRoot); wt != roots[0] {
+		roots = append(roots, wt)
+	}
+	return roots
+}
+
+// validateFSPath returns the form of path that is safe to open, jailed to projectFSRoots.
+// Callers MUST open the returned path.
 func (s *Server) validateFSPath(project *types.Project, worktreeRoot, path string) (string, error) {
 	if project == nil {
 		return path, nil // no project constraint
@@ -931,26 +952,28 @@ func (s *Server) validateFSPath(project *types.Project, worktreeRoot, path strin
 		return "", fmt.Errorf("path outside allowed project directory")
 	}
 
-	roots := []string{filepath.Clean(project.Path)}
-	if worktreeRoot != "" {
-		roots = append(roots, filepath.Clean(worktreeRoot))
-	}
-	return fsutil.Contained(cleanPath, roots)
+	return fsutil.Contained(cleanPath, projectFSRoots(project, worktreeRoot))
+}
+
+// fsTarget is a contained write destination and the roots its parent creation stays inside.
+type fsTarget struct {
+	path  string
+	roots []string
 }
 
 // fsWriteTarget answers, in the one order that is safe, what every write into a project must
 // settle: which tree the request names (?task= bound to ?project=), whether the host can run the
 // sandbox that tree lives in, which host file a container path names, and whether the result is
 // inside the project once symlinks are followed. Each step is the jail for the next, so a handler
-// that repeats them by hand can drop one and still compile. ok is false after writing the
-// response.
-func (s *Server) fsWriteTarget(w http.ResponseWriter, r *http.Request, project *types.Project, path string) (string, bool) {
+// that repeats them by hand can drop one and still compile. project must not be nil. ok is
+// false after writing the response.
+func (s *Server) fsWriteTarget(w http.ResponseWriter, r *http.Request, project *types.Project, path string) (fsTarget, bool) {
 	worktreePath, ok := s.fsWorktreeRoot(w, r, project)
 	if !ok {
-		return "", false
+		return fsTarget{}, false
 	}
 	if !s.requireSandboxAvailable(w, project) {
-		return "", false
+		return fsTarget{}, false
 	}
 	if project.SandboxEnabled {
 		// The container path names the bind-mounted host file.
@@ -963,24 +986,28 @@ func (s *Server) fsWriteTarget(w http.ResponseWriter, r *http.Request, project *
 	resolved, err := s.validateFSPath(project, worktreePath, path)
 	if err != nil {
 		JSONError(w, http.StatusBadRequest, err.Error())
-		return "", false
+		return fsTarget{}, false
 	}
-	return resolved, true
+	return fsTarget{path: resolved, roots: projectFSRoots(project, worktreePath)}, true
 }
 
 // writeContainedFile writes content to a target that fsWriteTarget already contained,
 // creating its parent directories on the way. The target must come from fsWriteTarget:
-// the parent-directory creation is the part that resolves ".." on the host, so it is only
-// safe behind that check. ok is false after writing the response.
-func (s *Server) writeContainedFile(w http.ResponseWriter, target string, content []byte) bool {
-	// Host filesystem (the worktree is bind-mounted into the sandbox).
-	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+// the parent creation resolves ".." on the host and the task owns that directory, so the
+// walk is contained rather than a mkdir. ok is false after writing the response.
+func (s *Server) writeContainedFile(w http.ResponseWriter, target fsTarget, content []byte) bool {
+	jailed := fsutil.NewContainedRoots(target.roots...)
+	if err := jailed.MkdirAll(filepath.Dir(target.path), 0755); err != nil {
+		if fsutil.IsHostRootRefusal(err) {
+			JSONError(w, http.StatusForbidden, err.Error())
+			return false
+		}
 		logging.For(logging.HTTP).Errorf("fs mkdir failed: %v", err)
 		JSONError(w, http.StatusInternalServerError, "create directory failed")
 		return false
 	}
 	// Not a plain write: a save that dies halfway must not leave a truncated file.
-	if err := fsutil.WriteFileAtomic(target, content); err != nil {
+	if err := fsutil.WriteFileAtomic(target.path, content); err != nil {
 		logging.For(logging.HTTP).Errorf("fs write failed: %v", err)
 		JSONError(w, http.StatusInternalServerError, "write file failed")
 		return false
@@ -1185,6 +1212,14 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if project != nil && project.SandboxEnabled {
+		// Contain the path first: fsSandboxPath joins it relative to the mount, and a path
+		// outside the worktree becomes "../../.." that filepath.Join cleans away.
+		resolved, err := s.validateFSPath(project, worktreePath, req.Path)
+		if err != nil {
+			JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		req.Path = resolved
 		sandboxPath := fsSandboxPath(worktreePath, project, req.Path)
 		sandboxParent := filepath.Dir(sandboxPath)
 

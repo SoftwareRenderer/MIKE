@@ -110,7 +110,8 @@ func (h *GitHandler) writeFullGitLog(w http.ResponseWriter, dir, branch, path st
 		// Fetch one extra commit to detect whether more exist.
 		args = append(args, "-n", strconv.Itoa(limit+1))
 	}
-	args = append(args, fullLogFormat, branch)
+	// --end-of-options: the branch is a client value.
+	args = append(args, fullLogFormat, "--end-of-options", branch)
 	if path != "" {
 		args = append(args, "--", path)
 	}

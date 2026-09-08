@@ -457,7 +457,10 @@ func (s *Server) withNonce(next http.Handler) http.Handler {
 
 			nonce, ok := r.Context().Value(nonceKey).(string)
 			if !ok || nonce == "" {
-				nonce = "fallback"
+				// A constant nonce is a published CSP bypass.
+				logging.For(logging.HTTP).Errorf("serving / refused: no CSP nonce (entropy source failed)")
+				http.Error(w, "unable to serve application", http.StatusInternalServerError)
+				return
 			}
 
 			updatedContent := strings.Replace(string(content), "nonce=\"{{.Nonce}}\"", fmt.Sprintf("nonce=\"%s\"", nonce), 1)
