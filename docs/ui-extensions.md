@@ -19,6 +19,25 @@ contract (`/extensions/<author>/<name>/`) intact. `manifest.json` carries metada
 also lands on its **directory** URL (Go's `FileServer` 301s `/index.html` → `./`), so match a mounted
 frame by directory path, not by `index.html`.
 
+**Cross-Origin-Resource-Policy — `/host-client.js` is an opaque-origin path like the two trees above.**
+The mounted frame is `sandbox="allow-scripts"` *without* `allow-same-origin`, so its document has no
+origin to name and CORP `same-origin` refuses every subresource it fetches — including the bridge it
+loads out of the app root (`<script src="/host-client.js">`, which every shipped extension carries).
+Marked, the frame still mounts and its own `.js` still loads, but `window.extHost` is never defined,
+so the extension dies on `ReferenceError: extHost is not defined`. `isOpaqueOriginAsset`
+(`backend/server/middleware.go`) therefore exempts `/extensions/`, `/api/preview/` **and**
+`/host-client.js`, the last under the same constant that exempts it from authentication.
+
+Nothing is given up by that: the file is public, the same bytes for every visitor, and holds no user
+data — CORP exists to stop *other sites* embedding what is ours. A foreign page that framed the
+bridge would only be talking to itself, because the host answers nothing until the document echoes
+the per-mount `?extch=` token.
+
+Pinned by `TestIsolationHeaders` (the header) and e2e `extension-frame-channel.spec.ts`, which arms a
+real channel through the real file and fails as "the mounted extension document never armed its
+channel" if the exemption is dropped. Against a running server, without the e2e harness:
+`node frontend/tests/extension-bridge-load-check.mjs`.
+
 ## Channel handshake (document identity)
 
 The host mints a per-mount token, passes it as `?extch=` in the iframe URL and arms the channel only
