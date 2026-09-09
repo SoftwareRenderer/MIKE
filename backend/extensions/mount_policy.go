@@ -31,11 +31,11 @@ const EnvMountRoots = "MIKE_EXT_MOUNT_ROOTS"
 // empty allowlist.
 type MountPolicy struct {
 	roots []string
-	// readOnlyRoots are roots the sandbox may read but never write. They are the
-	// host paths a project's own Sandbox Configuration declares — borrowed so a
-	// language server can see the same caches its workspace sees (a Go module
-	// cache, a node_modules bind) — and a third-party extension must never be able
-	// to turn one of them into a writable host directory.
+	// readOnlyRoots are roots the sandbox may read but never write: the workspace dir (every
+	// project's task worktrees live under it), the registered project checkouts, and the host
+	// paths a project's Sandbox Configuration declares. A manifest is registry text, so naming
+	// one of them is a read, not a write grant. The remaining roots — extensions dir, temp dir,
+	// MIKE_EXT_MOUNT_ROOTS extras — are where an extension writes its own files.
 	readOnlyRoots []string
 }
 
@@ -160,9 +160,8 @@ func (p *MountPolicy) insideRoot(resolved string) bool {
 	return insideAny(resolved, p.roots)
 }
 
-// ForceReadOnly reports whether a host path comes from a project's Sandbox
-// Configuration rather than from the app's own roots, in which case the mount is
-// read-only whatever the caller asked for. Call it with a resolved path (see
+// ForceReadOnly reports whether a host path is one the sandbox may only read, whatever mode the
+// caller asked for (see MountPolicy.readOnlyRoots). Call it with a resolved path (see
 // ValidateHostPath).
 func (p *MountPolicy) ForceReadOnly(resolved string) bool {
 	if p == nil {
@@ -194,9 +193,12 @@ func (p *MountPolicy) ValidateHostPath(hostPath string) (string, error) {
 }
 
 // withExtraRoots returns a policy with additional roots added to p's own
-// (re-normalized, deduplicated).
+// (re-normalized, deduplicated). Adding a root must not un-pin the existing ones.
 func (p *MountPolicy) withExtraRoots(roots ...string) *MountPolicy {
-	return newMountPolicy(append(p.Roots(), roots...))
+	if p == nil {
+		return newMountPolicy(roots)
+	}
+	return newMountPolicyWithReadOnly(append(p.Roots(), roots...), p.readOnlyRoots)
 }
 
 // ValidateMount validates a single extension sandbox mount.

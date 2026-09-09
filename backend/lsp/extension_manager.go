@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"kanban/backend/extensions"
+	"kanban/backend/fsutil"
 	"kanban/backend/sandbox"
 	"kanban/backend/types"
 	"kanban/pkg/bridge"
@@ -1071,11 +1072,21 @@ func decideDocSync(opened bool, lastSent, onDisk string, lastVersion int) docSyn
 	return docSyncAction{}
 }
 
+// docSyncPath resolves the file a document sync is about to read against its workspace.
+// filePath is a tool argument joined to the workspace, and the read is the server's own —
+// hostGuard refuses the sandboxed task's, which leaves this one.
+func docSyncPath(workspacePath, filePath string) (string, error) {
+	return fsutil.Contained(filepath.Join(workspacePath, filePath), []string{workspacePath})
+}
+
 // ensureDocSync sends didOpen or didChange so the server never works from stale content, and
 // reports whether it sent anything: a server that already holds this exact text will not
 // republish it, so a caller waiting for a notification needs to know none is coming.
 func (m *ExtensionLSPManager) ensureDocSync(ctx context.Context, sc *sandboxClient, uri, workspacePath, filePath string, cfg *ServerConfig) (bool, error) {
-	absPath := filepath.Join(workspacePath, filePath)
+	absPath, err := docSyncPath(workspacePath, filePath)
+	if err != nil {
+		return false, err
+	}
 	content, err := os.ReadFile(absPath)
 	if err != nil {
 		return false, fmt.Errorf("read file for doc sync: %w", err)
