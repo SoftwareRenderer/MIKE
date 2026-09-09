@@ -106,36 +106,11 @@ type AppStreamSubscription struct {
 	KnownStats map[string]string `json:"known_stats,omitempty"`
 }
 
-// DiffStore is what a task's diff baseline is resolved against: the project, the thread it
-// forked from, and the cached snapshot. Exported because MaterializeDoneTaskDiff is callable
-// from outside this package.
-type DiffStore interface {
-	GetProject(id string) (*types.Project, error)
-	GetThread(threadID string) (*types.TaskThread, error)
-	GetTaskDiffSnapshot(taskID string) (*store.TaskDiffSnapshot, error)
-	UpsertTaskDiffSnapshot(snap *store.TaskDiffSnapshot) error
-}
-
-var _ DiffStore = (*store.Store)(nil)
-
-// streamStore is what the WebSocket layer reads to build frames, plus the diff-stat
-// cache it writes back.
-type streamStore interface {
-	GetAllProjectCounts() map[string]types.ProjectCounts
-	GetProject(id string) (*types.Project, error)
-	GetTaskDiffSnapshot(taskID string) (*store.TaskDiffSnapshot, error)
-	GetTasksByProject(projectID string) ([]types.Task, error)
-	GetThread(threadID string) (*types.TaskThread, error)
-	UpsertTaskDiffSnapshot(snap *store.TaskDiffSnapshot) error
-}
-
-var _ streamStore = (*store.Store)(nil)
-
 // AppStreamManager manages the /api/stream WebSocket for all app events.
 type AppStreamManager struct {
 	mu          sync.RWMutex
 	clients     map[*websocket.Conn]*clientState
-	store       streamStore
+	store       *store.Store
 	worktreeMgr *git.WorktreeManager
 
 	// Filesystem watcher for worktree changes
@@ -169,15 +144,9 @@ type taskFrame struct {
 
 // NewAppStreamManager creates a new AppStreamManager with filesystem watchers.
 func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *AppStreamManager {
-	// A nil *Store must stay nil: assigned straight in it becomes a non-nil interface
-	// holding a nil pointer, which the `asm.store == nil` guards would dereference.
-	var st streamStore
-	if store != nil {
-		st = store
-	}
 	asm := &AppStreamManager{
 		clients:     make(map[*websocket.Conn]*clientState),
-		store:       st,
+		store:       store,
 		worktreeMgr: worktreeMgr,
 		taskBuffers: make(map[string][]taskFrame),
 		taskBufSize: DefaultBufferSize,
@@ -790,7 +759,7 @@ func (asm *AppStreamManager) ClearTaskBuffer(projectID, taskID string) {
 // resolveTaskDiffBaseline resolves a task's diff baseline the way every path
 // does: pinned BaseCommit/BaseRef (via ResolveTaskBaseline), divergence
 // fallback for diverged forks, fork-thread merge-base resolution.
-func resolveTaskDiffBaseline(st DiffStore, wm *git.WorktreeManager, projectID string, task *types.Task) (string, error) {
+func resolveTaskDiffBaseline(st *store.Store, wm *git.WorktreeManager, projectID string, task *types.Task) (string, error) {
 	thread, _ := st.GetThread(task.CurrentThreadID)
 	forkBranch := ""
 	if thread != nil {

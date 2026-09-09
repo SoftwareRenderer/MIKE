@@ -17,7 +17,7 @@ func TestFSWriteAtomic(t *testing.T) {
 	s := testServer(t)
 	tmpDir := t.TempDir()
 	const projID = "atomic-write-project"
-	if err := s.rawStore().CreateProject(&types.Project{ID: projID, Name: "Atomic", Path: tmpDir}); err != nil {
+	if err := s.store.CreateProject(&types.Project{ID: projID, Name: "Atomic", Path: tmpDir}); err != nil {
 		t.Fatal(err)
 	}
 

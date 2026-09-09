@@ -32,20 +32,9 @@ var (
 	ErrExpiredToken    = errors.New("session token expired")
 )
 
-// sessionStore is the session rows and nothing else.
-type sessionStore interface {
-	BackfillSessionTokens(ctx context.Context) (int, error)
-	CreateSession(ctx context.Context, ses store.NewSession) error
-	DeleteExpiredSessions(ctx context.Context) (int, error)
-	DeleteSession(ctx context.Context, token string) error
-	GetSessionByToken(ctx context.Context, token string) (id, csrfToken string, expiresAt time.Time, err error)
-}
-
-var _ sessionStore = (*store.Store)(nil)
-
 // SessionManager handles session lifecycle: login, validation, and logout.
 type SessionManager struct {
-	store sessionStore
+	store *store.Store
 	// passwordHash is sha256(MIKE_LOGIN_PASSWORD); the plaintext is not retained.
 	// Logins compare digests, so both sides are always 32 bytes and the
 	// constant-time comparison can neither short-circuit on length nor leak the

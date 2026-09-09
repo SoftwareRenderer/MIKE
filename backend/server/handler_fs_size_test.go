@@ -42,7 +42,7 @@ func sparseFile(t *testing.T, path string, size int64) {
 func fsSizeProject(t *testing.T, s *Server, projectID, name string, size int64) (string, string) {
 	t.Helper()
 	repo := t.TempDir()
-	if err := s.rawStore().CreateProject(&types.Project{
+	if err := s.store.CreateProject(&types.Project{
 		ID: projectID, Name: projectID, Path: repo,
 	}); err != nil {
 		t.Fatal(err)
@@ -150,7 +150,7 @@ func TestGitBlobSize(t *testing.T) {
 // projectDirOf reads back the checkout a project row was created with.
 func projectDirOf(t *testing.T, s *Server, projectID string) string {
 	t.Helper()
-	p, err := s.rawStore().GetProject(projectID)
+	p, err := s.store.GetProject(projectID)
 	if err != nil {
 		t.Fatal(err)
 	}

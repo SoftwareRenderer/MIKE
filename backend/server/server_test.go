@@ -258,7 +258,7 @@ func TestHandleFSWrite(t *testing.T) {
 		Name: "FS Write Test",
 		Path: tmpDir,
 	}
-	if err := s.rawStore().CreateProject(project); err != nil {
+	if err := s.store.CreateProject(project); err != nil {
 		t.Fatal(err)
 	}
 
@@ -371,7 +371,7 @@ func TestHandleFSPathValidation(t *testing.T) {
 		Name: "FS Test Project",
 		Path: tmpDir,
 	}
-	if err := s.rawStore().CreateProject(project); err != nil {
+	if err := s.store.CreateProject(project); err != nil {
 		t.Fatal(err)
 	}
 	os.WriteFile(filepath.Join(tmpDir, "allowed.txt"), []byte("ok"), 0644)
@@ -466,7 +466,7 @@ func TestHandleFSReadGutterMarkers(t *testing.T) {
 		Name: "Gutter Test Project",
 		Path: tmpDir,
 	}
-	if err := s.rawStore().CreateProject(project); err != nil {
+	if err := s.store.CreateProject(project); err != nil {
 		t.Fatal(err)
 	}
 
@@ -591,7 +591,7 @@ func TestHandleFSSearch(t *testing.T) {
 	os.WriteFile(filepath.Join(tmpDir, ".hidden"), []byte("hidden"), 0o644)
 
 	projectID := "test-search-project"
-	if err := s.rawStore().CreateProject(&types.Project{ID: projectID, Name: "Test Search", Path: tmpDir}); err != nil {
+	if err := s.store.CreateProject(&types.Project{ID: projectID, Name: "Test Search", Path: tmpDir}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 
@@ -1081,7 +1081,7 @@ func TestHandleStatus_IncludesAuthorInfo(t *testing.T) {
 		Name: "Status Author Test",
 		Path: tmpDir,
 	}
-	s.rawStore().CreateProject(project)
+	s.store.CreateProject(project)
 
 	// Initialize a git repo with specific author config
 	initGitRepo(t, tmpDir)
@@ -1135,7 +1135,7 @@ func TestDoneTaskDiffReturnsCommittedDiff(t *testing.T) {
 		Name: "diff-test",
 		Path: dir,
 	}
-	s.rawStore().CreateProject(proj)
+	s.store.CreateProject(proj)
 
 	// Create a task branch with a commit
 	exec.Command("git", "-C", dir, "checkout", "-b", "task/test-done-diff").Run()
@@ -1156,7 +1156,7 @@ func TestDoneTaskDiffReturnsCommittedDiff(t *testing.T) {
 		BaseCommit: baseCommit,
 		BranchTip:  branchTip,
 	}
-	s.rawStore().CreateTask(task)
+	s.store.CreateTask(task)
 
 	// For done tasks, the backend should automatically use BranchTip
 	cookie, csrfToken := loginTestCSRF(t, s)
@@ -1207,7 +1207,7 @@ func TestDoneTaskDiffServedFromSnapshot(t *testing.T) {
 		Name: "diff-snap",
 		Path: dir,
 	}
-	s.rawStore().CreateProject(proj)
+	s.store.CreateProject(proj)
 
 	exec.Command("git", "-C", dir, "checkout", "-b", "task/test-done-snap").Run()
 	os.WriteFile(join(dir, "new-file.txt"), []byte("committed content\n"), 0644)
@@ -1226,7 +1226,7 @@ func TestDoneTaskDiffServedFromSnapshot(t *testing.T) {
 		BaseCommit: baseCommit,
 		BranchTip:  branchTip,
 	}
-	s.rawStore().CreateTask(task)
+	s.store.CreateTask(task)
 
 	cookie, csrfToken := loginTestCSRF(t, s)
 	diffRequest := func() *httptest.ResponseRecorder {
@@ -1240,7 +1240,7 @@ func TestDoneTaskDiffServedFromSnapshot(t *testing.T) {
 	if first.Code != http.StatusOK {
 		t.Fatalf("first diff fetch returned %d: %s", first.Code, first.Body.String())
 	}
-	snap, err := s.rawStore().GetTaskDiffSnapshot("done-snap-task")
+	snap, err := s.store.GetTaskDiffSnapshot("done-snap-task")
 	if err != nil {
 		t.Fatalf("get snapshot: %v", err)
 	}
@@ -1287,7 +1287,7 @@ func TestDoneTaskDiffSnapshotBypassedForFullAndCustomRefs(t *testing.T) {
 		Name: "diff-bypass",
 		Path: dir,
 	}
-	s.rawStore().CreateProject(proj)
+	s.store.CreateProject(proj)
 
 	exec.Command("git", "-C", dir, "checkout", "-b", "task/test-done-bypass").Run()
 	os.WriteFile(join(dir, "new-file.txt"), []byte("line1\nline2\n"), 0644)
@@ -1306,7 +1306,7 @@ func TestDoneTaskDiffSnapshotBypassedForFullAndCustomRefs(t *testing.T) {
 		BaseCommit: baseCommit,
 		BranchTip:  branchTip,
 	}
-	s.rawStore().CreateTask(task)
+	s.store.CreateTask(task)
 
 	cookie, csrfToken := loginTestCSRF(t, s)
 
@@ -1331,7 +1331,7 @@ func TestDoneTaskDiffSnapshotBypassedForFullAndCustomRefs(t *testing.T) {
 	if rr = testResponse(t, s, req); rr.Code != http.StatusOK {
 		t.Fatalf("canonical diff fetch returned %d: %s", rr.Code, rr.Body.String())
 	}
-	if snap, err := s.rawStore().GetTaskDiffSnapshot("done-bypass-task"); err != nil || snap == nil {
+	if snap, err := s.store.GetTaskDiffSnapshot("done-bypass-task"); err != nil || snap == nil {
 		t.Fatalf("expected a persisted snapshot (err=%v snap=%+v)", err, snap)
 	}
 

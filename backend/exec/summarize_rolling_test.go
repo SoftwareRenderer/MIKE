@@ -78,7 +78,7 @@ func rollingSetup(t *testing.T, llm *summaryLLM) (*TaskExecutor, *taskExecSetup,
 	t.Helper()
 	te := newTestExecutor(t)
 	te.gate = NewConcurrencyGate()
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-rolling-"+t.Name(), "Rolling Sum")
 
 	now := time.Now().UTC()

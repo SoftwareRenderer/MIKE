@@ -184,7 +184,7 @@ func TestRefusedSwitchReportsTheTaskItStopped(t *testing.T) {
 	}
 	// UpdateTask will not start a run by design, so this goes through the claim the executor uses.
 	task.ExecutionState = types.ExecStateRunning
-	if err := s.rawStore().UpdateTaskClaimingExecution(task); err != nil {
+	if err := s.store.UpdateTaskClaimingExecution(task); err != nil {
 		t.Fatalf("mark task running: %v", err)
 	}
 	writeWorktreeFile(t, fx.worktreePath, "file.txt", "work mid-turn\n")

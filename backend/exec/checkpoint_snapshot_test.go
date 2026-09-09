@@ -41,7 +41,7 @@ func waitForSnapshot(t *testing.T, what string, f func() bool) {
 
 func TestCheckpointPinsItsSnapshot(t *testing.T) {
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
-	s := te.rawStore()
+	s := te.store
 	const (
 		taskID  = "amber-checkpoint"
 		msgID   = "asst-snapshot-1"

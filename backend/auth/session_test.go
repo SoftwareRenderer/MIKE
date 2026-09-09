@@ -20,7 +20,7 @@ func testManager(t *testing.T) *SessionManager {
 }
 
 // testManagerWithStore also returns the store: a few tests inspect or backdate columns
-// directly, and raw SQL belongs in a fixture rather than in sessionStore's surface.
+// directly, and raw SQL belongs in a fixture rather than on the store's API.
 func testManagerWithStore(t *testing.T) (*SessionManager, *store.Store) {
 	t.Helper()
 	dir := t.TempDir()

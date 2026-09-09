@@ -29,32 +29,9 @@ import (
 	"kanban/pkg/logging"
 )
 
-// taskStore is the task lifecycle the API drives. It has no execution-state methods
-// on purpose - backend/exec owns that.
-type taskStore interface {
-	ClearTitleGenerating(projectID, taskID string) error
-	CreateTask(t *types.Task) error
-	CreateTaskMessage(m *types.TaskMessage) error
-	CreateThread(th *types.TaskThread) error
-	DeleteTask(projectID, taskID string) error
-	DeleteTaskDiffSnapshot(taskID string) error
-	GetAllDescendants(taskID string) ([]types.Task, error)
-	GetChildren(taskID string) ([]types.Task, error)
-	GetProject(id string) (*types.Project, error)
-	GetTask(projectID, taskID string) (*types.Task, error)
-	GetTaskByID(taskID string) (*types.Task, error)
-	GetTasksByProject(projectID string) ([]types.Task, error)
-	GetThread(threadID string) (*types.TaskThread, error)
-	GetThreadsByTask(taskID string) ([]types.TaskThread, error)
-	SetTaskTitle(projectID, taskID, title string) error
-	UpdateTask(t *types.Task) error
-}
-
-var _ taskStore = (*store.Store)(nil)
-
 // TaskHandler handles task CRUD operations.
 type TaskHandler struct {
-	store          taskStore
+	store          *store.Store
 	boardStreamMgr *stream.AppStreamManager
 	configStore    *config.ConfigStore
 	terminalMgr    *term.TerminalManager

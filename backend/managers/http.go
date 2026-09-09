@@ -13,7 +13,7 @@ import (
 	"kanban/backend/git"
 )
 
-// taskGetter is the store call the shared preambles need; taskStore and gitStore both satisfy it.
+// taskGetter is the store call the shared preambles need.
 type taskGetter interface {
 	GetTask(projectID, taskID string) (*types.Task, error)
 }

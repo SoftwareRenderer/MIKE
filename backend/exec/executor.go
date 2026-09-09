@@ -36,44 +36,9 @@ import (
 	"kanban/pkg/logging"
 )
 
-// taskStore is what the execution loop persists: task rows and their state
-// transitions, messages, threads and token accounting.
-type taskStore interface {
-	AccumulateProjectStats(projectID, modelName, providerName string, cost float64)
-	ClearTaskBranch(taskID, projectID string) error
-	CreateTask(t *types.Task) error
-	CreateTaskMessage(m *types.TaskMessage) error
-	CreateThread(th *types.TaskThread) error
-	FixPostSummaryTimestamps(taskID, threadID string, anchorTime, summaryTime time.Time) error
-	GetChildren(taskID string) ([]types.Task, error)
-	GetInFlightTasks() ([]types.Task, error)
-	GetLastMessageInThread(threadID string) (*types.TaskMessage, error)
-	GetPendingIdleTasks() ([]types.Task, error)
-	GetProject(id string) (*types.Project, error)
-	GetTask(projectID, taskID string) (*types.Task, error)
-	GetTaskByID(taskID string) (*types.Task, error)
-	GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, error)
-	GetTasksByProject(projectID string) ([]types.Task, error)
-	GetThread(threadID string) (*types.TaskThread, error)
-	SetTaskAssignedPorts(taskID, projectID string, ports []types.AssignedPort) error
-	SetTaskBranch(taskID, projectID, branch string) error
-	SetTaskBranchIfEmpty(taskID, projectID, branch string) (bool, error)
-	SetTaskMergeConflict(taskID, projectID string, hasConflict bool) error
-	SetTaskSummarizing(taskID string, summarizing bool) error
-	TransitionInFlightTask(taskID, projectID string, executionState types.ExecutionState, output *string) (bool, error)
-	UpdateTask(t *types.Task) error
-	UpdateTaskClaimingExecution(t *types.Task) error
-	UpdateTaskExecutionState(taskID, projectID string, executionState types.ExecutionState) error
-	UpdateTaskMessageCommitHash(messageID, hash string) error
-	UpdateTaskMessageToolResult(messageID, toolResult string) error
-	UpdateTaskSessionCost(taskID string, cost float64) error
-}
-
-var _ taskStore = (*store.Store)(nil)
-
 // TaskExecutor handles task execution endpoints and orchestrates AI task execution.
 type TaskExecutor struct {
-	store         taskStore
+	store         *store.Store
 	configStore   *config.ConfigStore
 	appStreamMgr  *stream.AppStreamManager
 	worktreeMgr   *git.WorktreeManager
