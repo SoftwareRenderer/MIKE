@@ -1,9 +1,7 @@
 package git
 
-// WithStash is the bracket the merge paths run inside: push the worktree's uncommitted work, run
-// the merge, put the work back. Its whole job is that the merge never runs when the push failed,
-// because a bracketed section begins with `git checkout -f`, which reverts tracked modifications to
-// HEAD with exit 0 and no warning.
+// WithStash's whole job is that the merge never runs when the push failed: a bracketed section
+// begins with `git checkout -f`, which reverts tracked modifications to HEAD with exit 0.
 
 import (
 	"errors"
@@ -14,11 +12,9 @@ import (
 	"testing"
 )
 
-// blockStashRef makes `git stash push` fail while leaving the rest of the repository usable —
-// a directory where the stash ref belongs, which is how a ref collision looks. An index lock is
-// the obvious injection and the wrong one: it blocks the forced checkout too, so a test written
-// against it passes even when the bracket happily proceeds. Here the checkout succeeds, which is
-// precisely the case that loses the work.
+// blockStashRef makes `git stash push` fail while leaving the repository usable — a directory where
+// the stash ref belongs. An index lock is the obvious injection and the wrong one: it blocks the
+// forced checkout too, so a test built on it passes even when the bracket proceeds and loses work.
 func blockStashRef(t *testing.T, dir string) (release func()) {
 	t.Helper()
 	commonDir := strings.TrimSpace(runGitOutput(t, dir, "rev-parse", "--path-format=absolute", "--git-common-dir"))
@@ -32,9 +28,8 @@ func blockStashRef(t *testing.T, dir string) (release func()) {
 	return func() { _ = os.RemoveAll(blocked) }
 }
 
-// TestWithStashDoesNotRunTheWorkWhenTheStashFails is the lost-work regression: with the push
-// refused, the work it was meant to protect is still in the working tree, and the caller never
-// reaches the forced checkout that would have thrown it away.
+// TestWithStashDoesNotRunTheWorkWhenTheStashFails: with the push refused, the work is still in the
+// working tree and the caller never reaches the forced checkout.
 func TestWithStashDoesNotRunTheWorkWhenTheStashFails(t *testing.T) {
 	repoDir, projID, _, _, _, wm := setupStashTest(t)
 	release := blockStashRef(t, repoDir)
@@ -88,8 +83,7 @@ func TestWithStashRunsAndRestoresWithNothingToStash(t *testing.T) {
 	}
 }
 
-// TestWithStashRestoresTheEntryItCreated is the hash-identity property of PushStash and
-// PopStashByHash, now pinned for the bracket: ours comes back, the user's survives.
+// TestWithStashRestoresTheEntryItCreated: ours comes back, the user's stays on the stack.
 func TestWithStashRestoresTheEntryItCreated(t *testing.T) {
 	repoDir, projID, _, _, _, wm := setupStashTest(t)
 	userHash := seedUserStash(t, wm, repoDir)

@@ -10,17 +10,15 @@ import (
 	pkgagent "kanban/pkg/agent"
 )
 
-// The extension under test is deliberately not named "pi" and its binary is deliberately not
-// named "pi" either: an agent extension whose binary has some other name is the case the
-// pre-flight used to refuse, and it is the only case that tells the two names apart.
+// Neither the extension nor its binary is named "pi": an agent whose binary has some other name is
+// the only case that tells the two names apart.
 const (
 	otherAgentName   = "codelint"
 	otherAgentBinary = "codelint-cli"
 )
 
-// stubAdapter is the WASM adapter an agent extension ships. The one field that matters is the
-// binary its SubprocessConfig names: that is the only place in the product where the name the
-// pre-flight must ask about exists.
+// stubAdapter is the adapter an agent extension ships. The field that matters is the binary its
+// SubprocessConfig names — the only place in the product that name exists.
 type stubAdapter struct {
 	binary string
 	closed bool
@@ -79,8 +77,8 @@ func TestPrepareAgentProbesTheAdaptersOwnBinary(t *testing.T) {
 	}
 }
 
-// TestPrepareAgentRefusalNamesTheBinaryItMissed pins the second half of the same bug: a report that
-// names the extension but not the binary leaves the operator guessing what the container lacked.
+// TestPrepareAgentRefusalNamesTheBinaryItMissed: naming the extension but not the binary leaves the
+// operator guessing what the container lacked.
 func TestPrepareAgentRefusalNamesTheBinaryItMissed(t *testing.T) {
 	registerStubAgent(t)
 	te := &TaskExecutor{agentBinaries: &recordingProber{available: false}}

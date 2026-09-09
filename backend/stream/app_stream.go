@@ -496,7 +496,7 @@ func (asm *AppStreamManager) BroadcastProjectCounts() {
 	asm.BroadcastAll(msg)
 }
 
-// -- BoardStreamManager compatibility --
+// -- One-shot event broadcasts: board, explorer, diff, extension --
 
 // Broadcast sends a board_refresh event to a project and project_counts to all clients.
 func (asm *AppStreamManager) Broadcast(projectID string) {

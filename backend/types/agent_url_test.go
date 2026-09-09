@@ -10,7 +10,6 @@ func TestParseAgentURL(t *testing.T) {
 	}{
 		{"agent://pi", "pi", true},
 		{"agent://claude-code", "claude-code", true},
-		// A hand-typed URL carries the trailing slash; Lookup has always accepted it.
 		{"agent://pi/", "pi", true},
 		// Names nothing.
 		{"agent://", "", false},

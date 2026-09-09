@@ -290,11 +290,9 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 	// Container runs sleep infinity; sandbox-bridge is started via podman exec when needed.
 	createArgs := append(sandboxruntime.GVisorCreateArgs(containerName), "--network", "none")
 
-	// Capabilities. A malformed NAME is skipped one at a time — one stale entry in a stored manifest
-	// must not cost the rest of the grant — while the POSTURE is all-or-nothing: AppendCapabilities
-	// refuses the whole grant onto a command line that does not run runsc on top of a full
-	// `--cap-drop ALL`, so a refusal here means this builder stopped asserting its own isolation and
-	// the extension starts without the privileges it cannot safely be given.
+	// A malformed NAME is skipped one at a time — one stale entry in a stored manifest must not
+	// cost the rest of the grant — while the posture is all-or-nothing inside AppendCapabilities.
+	// Reaching that refusal here means this builder stopped asserting its own isolation.
 	var valid []string
 	for _, cap := range ext.SandboxConfig.Capabilities {
 		if err := ValidateCapability(cap); err != nil {

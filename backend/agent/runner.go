@@ -71,9 +71,9 @@ type RunnerConfig struct {
 	AgentManifest *extensions.AgentConfig `json:"agent_manifest,omitempty"`
 }
 
-// NewAgentRunner creates a new agent runner: prepare the adapter, then start its process.
-// Callers that must know the binary before it is spawned take PrepareAgent and Start instead -
-// the binary name lives only in the adapter, so nothing may ask the container about it first.
+// NewAgentRunner prepares the adapter, then starts its process. A caller that must know the
+// binary before anything is spawned takes PrepareAgent and Start instead: the name lives only in
+// the adapter.
 func NewAgentRunner(ctx context.Context, ext *extensions.Extension, sandboxMgr *sandbox.SandboxManager, taskID, worktreePath, sessionName string, sandboxEnabled bool) (*AgentRunner, error) {
 	prepared, err := PrepareAgent(ctx, ext, worktreePath, sessionName, sandboxEnabled)
 	if err != nil {
@@ -82,10 +82,10 @@ func NewAgentRunner(ctx context.Context, ext *extensions.Extension, sandboxMgr *
 	return prepared.Start(sandboxMgr, taskID)
 }
 
-// Prepared is an agent adapter that is loaded, initialized, and asked which process it runs,
-// with that process not started yet. Splitting construction this way is what lets the sandboxed
-// task's pre-flight ask the container about the binary the adapter actually named - the backend
-// knows nothing about agent protocols and must not guess a name of its own.
+// Prepared is a loaded, initialized adapter that has said which process it runs, with that
+// process not started. Splitting construction here is what lets a sandboxed task's pre-flight ask
+// the container about the binary the adapter named — the backend knows nothing about agent
+// protocols and must not guess a name.
 type Prepared struct {
 	adapter      pkgagent.AgentAdapter
 	spCfg        pkgagent.SubprocessConfig
@@ -93,9 +93,8 @@ type Prepared struct {
 	sandbox      bool
 }
 
-// PrepareAgent loads the extension's adapter, initializes it with the runner configuration and
-// resolves the subprocess config. An adapter that cannot name a binary is refused here, before
-// any process exists.
+// PrepareAgent loads, initializes and resolves the adapter's subprocess config. An adapter that
+// cannot name a binary is refused here, before any process exists.
 func PrepareAgent(ctx context.Context, ext *extensions.Extension, worktreePath, sessionName string, sandboxEnabled bool) (*Prepared, error) {
 	cfg := RunnerConfig{
 		ExtensionName: ext.Name,
@@ -105,8 +104,8 @@ func PrepareAgent(ctx context.Context, ext *extensions.Extension, worktreePath, 
 		Config:        ext.Config,
 		AgentManifest: ext.Manifest.Capabilities.GetAgent(),
 	}
-	// Resolve {{property}} template references in sandbox using config_schema defaults
-	// so the adapter receives concrete values, not template strings.
+	// {{property}} references become config_schema defaults, so the adapter gets values and not
+	// template strings.
 	if cfg.AgentManifest != nil {
 		resolved := *cfg.AgentManifest
 		resolved.Sandbox = cfg.AgentManifest.ResolveSandboxTemplates(ext.Manifest.ConfigSchema)
@@ -126,7 +125,6 @@ func PrepareAgent(ctx context.Context, ext *extensions.Extension, worktreePath, 
 		return nil, fmt.Errorf("init adapter: %w", err)
 	}
 
-	// Get subprocess config from adapter
 	spCfg := adapter.SubprocessConfig(ctx)
 	if spCfg.Binary == "" {
 		adapter.Close()
@@ -141,7 +139,7 @@ func PrepareAgent(ctx context.Context, ext *extensions.Extension, worktreePath, 
 	}, nil
 }
 
-// Binary is the executable the adapter said it will run, exactly as the adapter named it.
+// Binary is the executable the adapter named, verbatim.
 func (p *Prepared) Binary() string { return p.spCfg.Binary }
 
 // Close releases the adapter of a preparation whose process was never started.

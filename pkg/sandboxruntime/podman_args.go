@@ -1,16 +1,15 @@
 package sandboxruntime
 
-// The parts of a `podman create` command line that are a security decision: the shared isolation
-// preface every container MIKE builds starts from (GVisorCreateArgs), the one append path for a
-// capability grant (AppendCapabilities), and the values that arrive from outside this process — a
-// capability someone asked for, and the in-container path of a bind mount. The mount rules carry
-// the real security weight: one mount of "/" hands the sandbox the host tree, and a ":" or ","
-// inside a container path rewrites the mount's options — an "ro" becomes "rw". A capability is
-// judged by its shape instead, because every container MIKE creates runs under gVisor with
-// `--cap-drop ALL` (see GVisorIsolationForCaps for what was measured), and the grant goes through
-// the one function that checks that runtime before appending.
+// The parts of a `podman create` command line that are a security decision: the isolation preface
+// every container MIKE builds starts from (GVisorCreateArgs), the one append path for a capability
+// grant (AppendCapabilities), and the values that arrive from outside this process — a capability
+// name, and a bind mount's in-container path. Mounts carry the weight: one mount of "/" hands the
+// sandbox the host tree, and a ":" or "," in a container path rewrites the mount's options — an
+// "ro" becomes "rw". A capability is judged by shape instead, because every container MIKE creates
+// runs under gVisor with `--cap-drop ALL` (GVisorIsolationForCaps records what was measured) and
+// the grant goes through the one function that checks that runtime before appending.
 //
-// This is the one place the rule lives, for every caller that builds container arguments.
+// Every caller that builds container arguments takes these from here.
 
 import (
 	"fmt"
@@ -23,10 +22,9 @@ import (
 // ValidateContainerPath for why ':' and ',' are excluded.
 var containerPathPattern = regexp.MustCompile(`^/[A-Za-z0-9._/-]+$`)
 
-// capabilityPattern accepts plain capability names only, so a value cannot smuggle a
-// flag, whitespace or a separator into the podman arguments. This is the part of the old
-// capability denylist that was never about the capability: "--privileged" and
-// "SYS_ADMIN ALL" reach `--cap-add` as *arguments*, and no runtime makes that safe.
+// capabilityPattern accepts plain capability names only, so a value cannot smuggle a flag,
+// whitespace or a separator into the podman arguments: "--privileged" and "SYS_ADMIN ALL" reach
+// `--cap-add` as *arguments*, and no runtime makes that safe.
 var capabilityPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 
 // HasDotDotSegment reports whether p contains a ".." path segment.

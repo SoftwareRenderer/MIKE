@@ -403,9 +403,8 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 
 	// Create container with gVisor runtime
 	createArgs := createContainerArgs(containerName, mountPath)
-	// Add back any explicitly requested capabilities. AppendCapabilities is the only path to a
-	// --cap-add, and it refuses the whole grant if this command line stopped isolating as the
-	// grant assumes.
+	// AppendCapabilities is the only path to a --cap-add; it refuses the whole grant if this
+	// command line stopped isolating as the grant assumes.
 	if len(opts.Capabilities) > 0 {
 		createArgs, err = sandboxruntime.AppendCapabilities(createArgs, opts.Capabilities)
 		if err != nil {

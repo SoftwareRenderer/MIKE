@@ -10,12 +10,9 @@ import (
 	"kanban/backend/types"
 )
 
-// TestSyncTargetIntoTask_NoNewCommits verifies that sync returns early
-// when the target branch has no new commits beyond the task branch.
 func TestSyncTargetIntoTask_NoNewCommits(t *testing.T) {
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
-	// Create a task with a branch
 	taskID := "task-no-new"
 	task := &types.Task{
 		ID:             taskID,
@@ -29,31 +26,25 @@ func TestSyncTargetIntoTask_NoNewCommits(t *testing.T) {
 	}
 	te.store.CreateTask(task)
 
-	// Create the task branch from master
 	runGit(t, repoDir, "checkout", "-b", "task/test-branch")
 	runGit(t, repoDir, "checkout", "master")
 
-	// Create worktree for the task
 	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/test-branch")
 	runGitInDir(t, wtPath, "checkout", "task/test-branch")
 
-	// No new commits on master — sync should be a no-op
 	err := te.merge.syncTargetIntoTask(projectID, taskID, "master", "task/test-branch", task)
 	if err != nil {
 		t.Fatalf("syncTargetIntoTask should succeed with no new commits: %v", err)
 	}
 
-	// Task state should be unchanged
 	taskFromDB, _ := te.store.GetTaskByID(taskID)
 	if taskFromDB.ExecutionState != "" && taskFromDB.ExecutionState != types.ExecStateIdle {
 		t.Errorf("execution state should be idle, got %q", taskFromDB.ExecutionState)
 	}
 }
 
-// TestSyncTargetIntoTask_CleanMerge verifies that when target has new commits
-// that don't conflict, the sync merges cleanly.
 func TestSyncTargetIntoTask_CleanMerge(t *testing.T) {
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
@@ -70,31 +61,26 @@ func TestSyncTargetIntoTask_CleanMerge(t *testing.T) {
 	}
 	te.store.CreateTask(task)
 
-	// Create task branch with a change to file A
 	runGit(t, repoDir, "checkout", "-b", "task/clean-branch")
 	os.WriteFile(filepath.Join(repoDir, "fileA.txt"), []byte("task version\n"), 0o644)
 	runGit(t, repoDir, "add", "fileA.txt")
 	runGit(t, repoDir, "commit", "-m", "task change file A")
 	runGit(t, repoDir, "checkout", "master")
 
-	// Create worktree for the task
 	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/clean-branch")
 	runGitInDir(t, wtPath, "checkout", "task/clean-branch")
 
-	// Add a non-conflicting change to master (file B)
 	os.WriteFile(filepath.Join(repoDir, "fileB.txt"), []byte("master version\n"), 0o644)
 	runGit(t, repoDir, "add", "fileB.txt")
 	runGit(t, repoDir, "commit", "-m", "master change file B")
 
-	// Sync should merge cleanly
 	err := te.merge.syncTargetIntoTask(projectID, taskID, "master", "task/clean-branch", task)
 	if err != nil {
 		t.Fatalf("syncTargetIntoTask should succeed with clean merge: %v", err)
 	}
 
-	// Verify fileB.txt exists in the task branch (merged from master)
 	mergedFile := filepath.Join(wtPath, "fileB.txt")
 	content, err := os.ReadFile(mergedFile)
 	if err != nil {
@@ -105,9 +91,7 @@ func TestSyncTargetIntoTask_CleanMerge(t *testing.T) {
 	}
 }
 
-// TestSyncTargetIntoTask_Conflict_EntersMergeConflictState verifies that
-// when a sync merge has conflicts, the task enters merge_conflict state
-// and the merge is kept in progress for the LLM to resolve.
+// A conflicted sync enters merge_conflict and leaves the merge open for the model to resolve.
 func TestSyncTargetIntoTask_Conflict_EntersMergeConflictState(t *testing.T) {
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
@@ -131,7 +115,6 @@ func TestSyncTargetIntoTask_Conflict_EntersMergeConflictState(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "task change shared")
 	runGit(t, repoDir, "checkout", "master")
 
-	// Create worktree for the task
 	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
 	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/conflict-branch")
@@ -142,32 +125,26 @@ func TestSyncTargetIntoTask_Conflict_EntersMergeConflictState(t *testing.T) {
 	runGit(t, repoDir, "add", "shared.txt")
 	runGit(t, repoDir, "commit", "-m", "master change shared")
 
-	// Sync should conflict and enter merge_conflict state
 	err := te.merge.syncTargetIntoTask(projectID, taskID, "master", "task/conflict-branch", task)
 	if err != nil {
 		t.Fatalf("syncTargetIntoTask should return nil (enters merge_conflict state): %v", err)
 	}
 
-	// Verify task is in merge_conflict state
 	taskFromDB, _ := te.store.GetTaskByID(taskID)
 	if !taskFromDB.HasMergeConflict {
 		t.Fatalf("expected has_merge_conflict=true, got false")
 	}
 
-	// Verify merge is still in progress (MERGE_HEAD exists)
 	if !isMergeInProgress(wtPath) {
 		t.Fatal("merge should still be in progress (MERGE_HEAD should exist)")
 	}
 
-	// Verify conflicted file has conflict markers
 	sharedContent, _ := os.ReadFile(filepath.Join(wtPath, "shared.txt"))
 	if !strings.Contains(string(sharedContent), "<<<<<<<") {
 		t.Error("shared.txt should have conflict markers")
 	}
 }
 
-// TestSyncTargetIntoTask_WorktreeMissing verifies that sync returns nil
-// (no error) when the task's worktree doesn't exist.
 func TestSyncTargetIntoTask_WorktreeMissing(t *testing.T) {
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
@@ -203,8 +180,7 @@ func TestSyncTargetIntoTask_WorktreeMissing(t *testing.T) {
 	}
 }
 
-// TestSyncTargetIntoTask_SubtaskChain verifies that sync works correctly
-// in a subtask chain: child task syncs parent branch (not origin).
+// A child syncs its parent's branch, not origin.
 func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
@@ -268,16 +244,13 @@ func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 	runGitInDir(t, parentWtPath, "add", "parent_new.txt")
 	runGitInDir(t, parentWtPath, "commit", "-m", "parent new file")
 
-	// Reload child task
 	child, _ = te.store.GetTaskByID(childID)
 
-	// Sync parent into child — should merge cleanly
 	err := te.merge.syncTargetIntoTask(projectID, childID, "task/parent-branch", "task/child-branch", child)
 	if err != nil {
 		t.Fatalf("syncTargetIntoTask should succeed: %v", err)
 	}
 
-	// Verify parent_new.txt exists in child worktree
 	mergedFile := filepath.Join(childWtPath, "parent_new.txt")
 	if _, err := os.Stat(mergedFile); err != nil {
 		t.Fatalf("parent_new.txt should exist in child worktree after sync: %v", err)
@@ -315,7 +288,6 @@ func TestSyncTargetIntoTask_KeepsUnstagedWorkWhenTheStashFails(t *testing.T) {
 	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/refuse-branch")
 	runGitInDir(t, wtPath, "checkout", "task/refuse-branch")
 
-	// master moves, so there is something to sync.
 	os.WriteFile(filepath.Join(repoDir, "fileB.txt"), []byte("master version\n"), 0o644)
 	runGit(t, repoDir, "add", "fileB.txt")
 	runGit(t, repoDir, "commit", "-m", "master change file B")

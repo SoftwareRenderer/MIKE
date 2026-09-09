@@ -38,22 +38,21 @@ import (
 // TaskExecutor handles task execution endpoints and orchestrates AI task execution.
 //
 // A concern is split out of this type by moving its methods onto a collaborator struct that
-// NewTaskExecutor constructs and holds, never by splitting executionState: its lock discipline
+// NewTaskExecutor constructs and holds — never by splitting executionState: its lock discipline
 // depends on the sandbox fields being read as one snapshot (sandbox, setSandbox), and a state
-// owned by two packages is a state whose fields get captured piecemeal — a mix of old and new
-// sandbox callbacks reads a stopped container through a live client.
+// owned by two groups gets its fields captured piecemeal — a mix of old and new sandbox
+// callbacks reads a stopped container through a live client.
 //
 // A collaborator is constructed with exactly the dependencies its own functions use, plus:
-//   - a lock as a release func — func() func(), or func(string) func() for the per-task one —
-//     never a *sync.Mutex, for the reason LockWorktree gives;
-//   - *executionState only when its concern owns the fields it reads, and otherwise neither it nor
-//     a *TaskExecutor;
-//   - no way to take taskMu or sandboxMu. Nothing across the seam does today; a collaborator that
-//     ever needs state guarded by them gets a func value whose body takes the lock here, on this
-//     side of the seam.
+//   - a lock as a release func — func() func(), or func(string) func() per task — never a
+//     *sync.Mutex, for the reason LockWorktree gives;
+//   - *executionState only when its concern owns the fields it reads, and otherwise neither it
+//     nor a *TaskExecutor;
+//   - no way to take taskMu or sandboxMu. A collaborator that needs state they guard gets a func
+//     value whose body takes the lock here, on this side of the seam.
 //
-// Everything outside this package calls TaskExecutor and no other type in it, so a split keeps a
-// one-line delegator for every name callers outside the package already use.
+// Outside callers only ever see TaskExecutor, so a split keeps a one-line delegator for each
+// name they use.
 type TaskExecutor struct {
 	store         *store.Store
 	configStore   *config.ConfigStore
@@ -61,9 +60,8 @@ type TaskExecutor struct {
 	worktreeMgr   *git.WorktreeManager
 	sandboxMgr    *sandbox.SandboxManager
 	agentRegistry *agent.AgentRegistry
-	// agentBinaries answers whether a task's sandbox container holds a binary. NewTaskExecutor wires
-	// the sandbox manager here; a test injects a recorder, since which name the agent pre-flight asks
-	// about is the behaviour under test.
+	// Whether a task's sandbox container holds a given binary. A test injects a recorder: which
+	// name the pre-flight asks about is the behaviour under test.
 	agentBinaries agentBinaries
 	lspMgr        lspManager
 	commitQueue   *CommitQueue
@@ -74,11 +72,10 @@ type TaskExecutor struct {
 	tasks         map[string]*executionState
 	// Per-task mutexes to serialize worktree access across executors and merges.
 	worktreeMu sync.Map // taskID -> *sync.Mutex
-	// merge owns the branch and merge behaviour of a finished turn. Constructed here with the
-	// dependencies it reads; it holds no executionState and takes neither taskMu nor sandboxMu.
+	// Branch and merge behaviour of a finished turn. Its lock discipline is in mergeOrchestrator.
 	merge *mergeOrchestrator
-	// summarize owns the task's context window: the threshold decision, the rolling summary and
-	// the two manual-summarize paths. Its lock discipline is in summarizeOrchestrator.
+	// The task's context window: the threshold decision, the rolling summary, the manual paths.
+	// Its lock discipline is in summarizeOrchestrator.
 	summarize *summarizeOrchestrator
 }
 
@@ -731,10 +728,8 @@ Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
 // StartSubtask starts the executor for the specified subtask,
 // inheriting the parent's LLM config and ensuring the parent's branch. It does
 // not move the parent or its siblings — the caller places the chain.
-// autostarted records whether the subtask runs on its parent's behalf, with no
-// human present to answer ask_question: true for a start issued for a parent
-// (the group start of its children, the sibling continuation chain), false when
-// a user started this one task and is waiting for it.
+// autostarted is true when the subtask runs on its parent's behalf, with no human present to
+// answer ask_question; false when a user started this task and is waiting on it.
 func (te *TaskExecutor) StartSubtask(projectID, subtaskID string, autostarted bool) error {
 	subtask, err := te.store.GetTaskByID(subtaskID)
 	if err != nil {
@@ -1728,9 +1723,9 @@ func (te *TaskExecutor) getCompactCh(taskID string) chan chan *CompactResult {
 	return nil
 }
 
-// runningState returns the executionState of a running task, or nil when none holds it. Its
-// body takes taskMu here so a collaborator can reach a running task without ever seeing the
-// lock; what a collaborator may read through the result is its own contract.
+// runningState returns the executionState of a running task, or nil. Its body takes taskMu here
+// so a collaborator can reach a running task without seeing the lock; what it may read through
+// the result is the collaborator's own contract.
 func (te *TaskExecutor) runningState(taskID string) *executionState {
 	te.taskMu.Lock()
 	defer te.taskMu.Unlock()

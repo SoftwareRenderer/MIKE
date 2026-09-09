@@ -50,10 +50,7 @@ func mockSessionCostLLM(firstChat chan<- struct{}) *httptest.Server {
 	}))
 }
 
-// TestExecuteTask_PreservesSessionCostAcrossRun verifies that starting a new
-// executor run for a task with an existing accumulated session cost does NOT
-// reset the cost to zero (the bug when the provider/model is changed and the
-// executor is restarted). The persisted SessionCost must carry over.
+// A restarted run accumulates on top of the stored SessionCost; it never resets it.
 func TestExecuteTask_PreservesSessionCostAcrossRun(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
 	s := te.store

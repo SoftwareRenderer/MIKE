@@ -62,7 +62,6 @@ func TestExtensionRuntimeStatus_MarshalJSON(t *testing.T) {
 		t.Fatalf("MarshalJSON: %v", err)
 	}
 
-	// Verify the JSON contains expected fields
 	jsonStr := string(data)
 	if !contains(jsonStr, `"running":true`) {
 		t.Errorf("JSON missing running:true: %s", jsonStr)

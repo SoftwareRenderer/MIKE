@@ -1458,10 +1458,8 @@ func (h *TaskHandler) subtasksToStart(parent *types.Task, subtasks []types.Task)
 }
 
 // startSubtaskIDs starts each subtask autostarted — what that decides is on
-// TaskExecutor.StartSubtask. Per-start failures are logged but not fatal, so one
-// error doesn't block the other parallel siblings. Returns the last requested
-// ID, whether any start succeeded, and the first error (nil if every start
-// succeeded).
+// TaskExecutor.StartSubtask. A failed start is logged, not fatal, so one error does not block the
+// other siblings. Returns the last requested ID, whether any start succeeded, and the first error.
 func (h *TaskHandler) startSubtaskIDs(projectID, taskID, logPrefix string, ids []string) (lastID string, anyStarted bool, firstErr error) {
 	for _, id := range ids {
 		if err := h.executor.StartSubtask(projectID, id, true); err != nil {
