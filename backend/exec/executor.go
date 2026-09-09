@@ -1832,7 +1832,9 @@ func (te *TaskExecutor) CommitAndMerge(projectID, taskID, worktreePath, commitMs
 // when the target has new commits since the task diverged, so conflicts surface while the LLM
 // still has the task's changes in context. It returns nil on a clean merge, when there is
 // nothing to merge, or when merge_conflict state was entered — MergeBranch must check
-// task.ExecutionState afterwards and skip the final merge on "merge_conflict".
+// task.ExecutionState afterwards and skip the final merge on "merge_conflict". Any other failure,
+// the stash's included, is returned, so the final merge never runs on a worktree that could not
+// be moved safely.
 func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, taskBranch string, task *types.Task) error {
 	// Serialize against the task's own tool execution.
 	defer te.LockWorktree(taskID)()
@@ -1879,50 +1881,36 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 		return nil
 	}
 
-	// Stash any working tree changes in the worktree, and restore them by the hash PushStash returned -
-	// not by position. See PopStashByHash.
-	hadStash := false
-	stashHash := ""
-	unlockStash := te.worktreeMgr.LockProjectStash(projectID)
-	if h, err := te.worktreeMgr.PushStash(worktreePath, git.StashMessageForSyncMerge(taskID)); err == nil {
-		hadStash, stashHash = true, h
-	}
-	unlockStash()
-
-	// Ensure we're on the task branch
-	if err := te.worktreeMgr.GitRunInDir(worktreePath, "checkout", "-f", taskBranch); err != nil {
-		return fmt.Errorf("checkout task branch %s for sync: %w", taskBranch, err)
-	}
-
-	// Merge target branch into task branch
-	_, mergeErr := te.worktreeMgr.GitRunInDirOutput(worktreePath, "merge", targetBranch, "--no-edit")
-	if mergeErr == nil {
-		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("synced %s into %s cleanly", targetBranch, taskBranch)
-		te.logSystemMessage(taskID, task.CurrentThreadID, "info",
-			fmt.Sprintf("Synced %s into task branch (no conflicts).", targetBranch))
-		// Restore the task's unstaged changes. A failed restore leaves the entry on the stack, so the work
-		// survives for the user to resolve instead of going with the conflict markers.
-		if hadStash {
-			unlockRestore := te.worktreeMgr.LockProjectStash(projectID)
-			if _, err := te.worktreeMgr.PopStashByHash(worktreePath, stashHash); err != nil {
-				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("stash pop failed, leaving the entry for the user: %v", err)
-			}
-			unlockRestore()
+	syncErr := te.worktreeMgr.WithStash(projectID, worktreePath, git.StashMessageForSyncMerge(taskID), func() error {
+		// Ensure we're on the task branch
+		if err := te.worktreeMgr.GitRunInDir(worktreePath, "checkout", "-f", taskBranch); err != nil {
+			return fmt.Errorf("checkout task branch %s for sync: %w", taskBranch, err)
 		}
+
+		// Merge target branch into task branch
+		if _, mergeErr := te.worktreeMgr.GitRunInDirOutput(worktreePath, "merge", targetBranch, "--no-edit"); mergeErr == nil {
+			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("synced %s into %s cleanly", targetBranch, taskBranch)
+			te.logSystemMessage(taskID, task.CurrentThreadID, "info",
+				fmt.Sprintf("Synced %s into task branch (no conflicts).", targetBranch))
+			return nil
+		}
+
+		// Merge conflict — set flag so the LLM loop (or HandleCommitAndDone)
+		// can trigger the agent to resolve via file tools.
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("conflict syncing %s into %s, setting merge conflict flag", targetBranch, taskBranch)
+		_ = te.store.SetTaskMergeConflict(taskID, projectID, true)
+		task.HasMergeConflict = true
+		te.logSystemMessage(taskID, task.CurrentThreadID, "warning",
+			fmt.Sprintf("Conflicts detected when syncing %s into task branch. Resolve the conflicted files using your tools — the backend will commit and continue the merge automatically.", targetBranch))
+		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+		// Keep merge in progress — do NOT abort. LLM will resolve with file tools, and the stash is
+		// popped after merge --continue.
+		return git.ErrKeepStash
+	})
+	if errors.Is(syncErr, git.ErrKeepStash) {
 		return nil
 	}
-
-	// Merge conflict — set flag so the LLM loop (or HandleCommitAndDone)
-	// can trigger the agent to resolve via file tools.
-	// Keep user's stash intact — it will be popped after merge --continue.
-	logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("conflict syncing %s into %s, setting merge conflict flag", targetBranch, taskBranch)
-	_ = te.store.SetTaskMergeConflict(taskID, projectID, true)
-	task.HasMergeConflict = true
-	te.logSystemMessage(taskID, task.CurrentThreadID, "warning",
-		fmt.Sprintf("Conflicts detected when syncing %s into task branch. Resolve the conflicted files using your tools — the backend will commit and continue the merge automatically.", targetBranch))
-	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-	// Keep merge in progress — do NOT abort. LLM will resolve with file tools.
-	return nil
+	return syncErr
 }
 
 // ResolveMergeTarget determines the branch that changes will be merged into.
@@ -2209,41 +2197,23 @@ func currentCheckoutRef(dir string) string {
 // from targetBranch, dir's checkout is switched back to restoreRef after the merge,
 // preserving the caller's checkout state.
 func (te *TaskExecutor) mergeInto(projectID, dir, targetBranch, taskBranch, taskID, restoreRef string) error {
-	// Stash any working tree changes, serialized under the shared stash mutex. PushStash rather than
-	// `git stash push`, and its hash rather than a later pop - see PopStashByHash. PushStash also reports
-	// ErrNothingToStash on a clean tree, where `push` exits 0 having created nothing (the old `err == nil`
-	// there meant "we stashed something" and popped whatever was already on top).
-	hadStash := false
-	stashHash := ""
-	unlockStash := te.worktreeMgr.LockProjectStash(projectID)
-	if h, err := te.worktreeMgr.PushStash(dir, git.StashMessageForAutoMerge(taskID)); err == nil {
-		hadStash, stashHash = true, h
-	} else if !errors.Is(err, git.ErrNothingToStash) {
-		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("could not stash the worktree's changes: %v", err)
-	}
-	unlockStash()
-	defer func() {
-		if hadStash {
-			unlockRestore := te.worktreeMgr.LockProjectStash(projectID)
-			if _, err := te.worktreeMgr.PopStashByHash(dir, stashHash); err != nil {
-				// The entry stays on the stack when it cannot be applied, so the work still exists
-				// and its label still says whose it is.
-				logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("restoring the stashed changes: %v", err)
-			}
-			unlockRestore()
-		}
-	}()
-	// Restore the caller's checkout after the merge. Registered after the
-	// stash-pop defer above, so (LIFO) it runs first and the stashed changes
-	// pop back onto the user's own branch rather than the merge target.
-	if restoreRef != "" && restoreRef != targetBranch {
-		defer func() {
+	return te.worktreeMgr.WithStash(projectID, dir, git.StashMessageForAutoMerge(taskID), func() error {
+		mergeErr := te.mergeOnTargetBranch(projectID, dir, targetBranch, taskBranch, taskID)
+		// Back off the caller's checkout before the bracket restores the stashed work, so it lands
+		// on the branch the directory belongs to rather than on the merge target.
+		if restoreRef != "" && restoreRef != targetBranch {
 			if _, err := te.worktreeMgr.GitRunInDirOutput(dir, "checkout", "-f", restoreRef); err != nil {
 				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to restore checkout to %s: %v", restoreRef, err)
 			}
-		}()
-	}
+		}
+		return mergeErr
+	})
+}
 
+// mergeOnTargetBranch checks dir out on targetBranch and merges taskBranch into it, recording the
+// outcome. dir's own work is parked by the caller's stash bracket — nothing here may touch the
+// working tree before the checkout.
+func (te *TaskExecutor) mergeOnTargetBranch(projectID, dir, targetBranch, taskBranch, taskID string) error {
 	if err := te.worktreeMgr.GitRunInDir(dir, "checkout", "-f", targetBranch); err != nil {
 		return fmt.Errorf("checkout target branch %s: %w", targetBranch, err)
 	}

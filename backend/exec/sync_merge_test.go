@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"kanban/backend/git"
 	"kanban/backend/types"
 )
 
@@ -280,5 +281,78 @@ func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 	mergedFile := filepath.Join(childWtPath, "parent_new.txt")
 	if _, err := os.Stat(mergedFile); err != nil {
 		t.Fatalf("parent_new.txt should exist in child worktree after sync: %v", err)
+	}
+}
+
+// TestSyncTargetIntoTask_KeepsUnstagedWorkWhenTheStashFails is the lost-work regression. The sync
+// begins with `git checkout -f`, which reverts tracked modifications to HEAD with exit 0 and no
+// warning, so the stash taken before it is the only thing protecting the task's unstaged work. When
+// that stash cannot be taken, the sync has to refuse.
+func TestSyncTargetIntoTask_KeepsUnstagedWorkWhenTheStashFails(t *testing.T) {
+	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
+
+	taskID := "task-refuse"
+	task := &types.Task{
+		ID:             taskID,
+		ProjectID:      projectID,
+		Title:          "Test Task",
+		Prompt:         "Test prompt",
+		Status:         types.StatusInProgress,
+		Branch:         "task/refuse-branch",
+		LlamaServerURL: "http://localhost:8080",
+		ModelName:      "test-model",
+	}
+	te.rawStore().CreateTask(task)
+
+	runGit(t, repoDir, "checkout", "-b", "task/refuse-branch")
+	os.WriteFile(filepath.Join(repoDir, "fileA.txt"), []byte("committed version\n"), 0o644)
+	runGit(t, repoDir, "add", "fileA.txt")
+	runGit(t, repoDir, "commit", "-m", "task change file A")
+	runGit(t, repoDir, "checkout", "master")
+
+	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
+	os.MkdirAll(wtPath, 0o755)
+	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/refuse-branch")
+	runGitInDir(t, wtPath, "checkout", "task/refuse-branch")
+
+	// master moves, so there is something to sync.
+	os.WriteFile(filepath.Join(repoDir, "fileB.txt"), []byte("master version\n"), 0o644)
+	runGit(t, repoDir, "add", "fileB.txt")
+	runGit(t, repoDir, "commit", "-m", "master change file B")
+
+	// The work at risk: an unstaged edit to a tracked file, which is what a forced checkout reverts.
+	os.WriteFile(filepath.Join(wtPath, "fileA.txt"), []byte("uncommitted work\n"), 0o644)
+
+	// The stash cannot be taken: the stash ref is unusable, while the rest of the repository — the
+	// checkout below included — still works. An index lock would be the obvious injection and the
+	// wrong one, because it stops that checkout too and the loss never happens.
+	commonDirCmd := git.Command("", "rev-parse", "--path-format=absolute", "--git-common-dir")
+	commonDirCmd.Dir = wtPath
+	commonDirOut, err := commonDirCmd.Output()
+	if err != nil {
+		t.Fatalf("resolve the repository's common dir: %v", err)
+	}
+	blocked := filepath.Join(strings.TrimSpace(string(commonDirOut)), "refs", "stash")
+	if err := os.MkdirAll(blocked, 0o755); err != nil {
+		t.Fatalf("block the stash ref: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(blocked, "blocker"), []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("block the stash ref: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(blocked) }()
+
+	err = te.syncTargetIntoTask(projectID, taskID, "master", "task/refuse-branch", task)
+	if err == nil {
+		t.Fatal("the sync ran with nothing protecting the worktree's unstaged work")
+	}
+
+	if content, readErr := os.ReadFile(filepath.Join(wtPath, "fileA.txt")); readErr != nil || string(content) != "uncommitted work\n" {
+		t.Errorf("the unstaged edit is gone: %q (%v)", string(content), readErr)
+	}
+	if isMergeInProgress(wtPath) {
+		t.Error("a merge is in progress in a worktree whose sync was refused")
+	}
+	if refreshed, _ := te.rawStore().GetTaskByID(taskID); refreshed.HasMergeConflict {
+		t.Error("the task entered merge_conflict state without a merge having been attempted")
 	}
 }
