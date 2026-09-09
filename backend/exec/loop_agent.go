@@ -583,7 +583,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 			task.ExecutionState = types.ExecStateIdle
 			_ = te.store.UpdateTaskExecutionState(task.ID, projectID, "idle")
 		}
-		commitMsg := te.GenerateCommitMessage(context.Background(), task)
+		commitMsg := te.merge.GenerateCommitMessage(context.Background(), task)
 		mergeErr := te.merge.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge || commitDone)
 		task, _ = te.store.GetTaskByID(task.ID)
 		if task.HasMergeConflict {

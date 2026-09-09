@@ -1154,7 +1154,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, stat
 				}
 
 				// No merge conflict — normal auto-commit path
-				commitMsg := te.GenerateCommitMessage(setup.ctx, setup.task)
+				commitMsg := te.merge.GenerateCommitMessage(setup.ctx, setup.task)
 				mergeErr := te.merge.CommitAndMerge(setup.projectID, setup.task.ID, setup.worktreePath, commitMsg, setup.task.AutoMerge)
 				setup.task, _ = te.store.GetTaskByID(setup.task.ID)
 				if setup.task.HasMergeConflict {

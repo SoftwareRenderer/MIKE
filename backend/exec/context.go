@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"kanban/backend/config"
@@ -498,32 +497,6 @@ func (te *TaskExecutor) GenerateCheckpointLabel(ctx context.Context, taskID, dif
 	return label
 }
 
-// generateCommitMessageLLM uses the LLM to generate a descriptive commit message
-// from pre-formatted conversation turn text. Falls back to
-// "{title}\n\nAssisted-by: {model}" on any error.
-func (te *TaskExecutor) generateCommitMessageLLM(ctx context.Context, task *types.Task, turnText string) string {
-	serverURL, modelName, _ := te.utilityTarget(task)
-	if serverURL == "" || modelName == "" {
-		return "file changes"
-	}
-	fallback := fmt.Sprintf("%s\n\nAssisted-by: %s", task.Title, assistedByModel(modelName))
-
-	labelMessages := buildCommitMessages(turnText)
-
-	maxTokens := 128
-	_, label, err := te.ChatCompletion(ctx, serverURL, modelName, labelMessages, &ChatCompletionOpts{MaxTokens: &maxTokens, ReasoningEffort: "off"})
-	if err != nil {
-		logging.For(logging.Generate).With(logging.TaskID, task.ID).Warnf("LLM call failed: %v", err)
-		return fallback
-	}
-	label = strings.TrimSpace(label)
-	if label == "" {
-		return fallback
-	}
-	logging.For(logging.Generate).With(logging.TaskID, task.ID).Infof("generated: %q", label)
-	return label
-}
-
 // BuildConversationFromTaskMessages converts DB TaskMessages into ChatMessages for the
 // utility prompts (commit messages, checkpoint labels, thread fork titles). It rebuilds
 // the same conversation the LLM sees — see groupTaskMessages.
@@ -753,119 +726,6 @@ func buildCommitMessageWithAssistedBy(body string, models []string) string {
 		return body
 	}
 	return body + trailer
-}
-
-// GenerateCommitMessage builds a full commit message from task title, summary, and model.
-// Generates one via LLM from conversation + diff. This is the single source of truth for commit
-// message generation across all commit paths (auto-commit, manual commit-and-done).
-// If multiple models contributed to the task, each gets its own Assisted-by line.
-func (te *TaskExecutor) GenerateCommitMessage(ctx context.Context, task *types.Task) string {
-	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
-	conversation := BuildConversationFromTaskMessages(taskMsgs)
-	commitMsg := te.generateCommitMessageLLM(ctx, task, FormatConversationTurns(ExtractCommitContext(conversation)))
-	// generateCommitMessageLLM returns "file changes" as a generic fallback when LLM is unavailable.
-	// Use the task title instead for a more useful commit message.
-	if commitMsg == "file changes" && task.Title != "" {
-		commitMsg = task.Title
-	}
-
-	// Collect all unique models that contributed to this task.
-	models := collectUniqueModels(taskMsgs)
-	// If no models found in messages, fall back to the task's current model.
-	if len(models) == 0 {
-		if task.ModelName != "" {
-			models = []string{task.ModelName}
-		} else {
-			models = []string{"unknown model"}
-		}
-	}
-
-	return buildCommitMessageWithAssistedBy(commitMsg, models)
-}
-
-// SSEFlusher is the interface needed for SSE streaming.
-type SSEFlusher interface {
-	http.ResponseWriter
-	http.Flusher
-}
-
-// StreamCommitMessage generates a commit message via LLM streaming and sends
-// tokens as SSE events. No timeout is applied. Caller must set SSE headers first.
-// If multiple models contributed to the task, each gets its own Assisted-by line.
-func (te *TaskExecutor) StreamCommitMessage(w SSEFlusher, taskID string, task *types.Task) {
-	serverURL, modelName, _ := te.utilityTarget(task)
-	if serverURL == "" || modelName == "" {
-		fallback := task.Title
-		if fallback == "" {
-			fallback = "file changes"
-		}
-		fmt.Fprintf(w, "event: done\ndata: {\"content\":%q}\n\n", fallback)
-		return
-	}
-
-	taskMsgs, _ := te.store.GetTaskMessages(taskID, task.CurrentThreadID)
-	conversation := BuildConversationFromTaskMessages(taskMsgs)
-	turnText := FormatConversationTurns(ExtractCommitContext(conversation))
-	labelMessages := buildCommitMessages(turnText)
-
-	// Collect all unique models that contributed to this task.
-	models := collectUniqueModels(taskMsgs)
-	if len(models) == 0 {
-		models = []string{task.ModelName}
-	}
-
-	var sb strings.Builder
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	writeSSE := func(event, data string) {
-		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data); err != nil {
-			cancel()
-			return
-		}
-		w.Flush()
-	}
-
-	_, err := te.StreamCompletion(ctx, serverURL, modelName, labelMessages,
-		func(choice types.ChatChoice) {
-			if choice.Delta.Content != nil && *choice.Delta.Content != "" {
-				token := *choice.Delta.Content
-				sb.WriteString(token)
-				writeSSE("token", fmt.Sprintf("{\"content\":%q}", token))
-			}
-			if choice.FinishReason != "" {
-				content := strings.TrimSpace(sb.String())
-				if content == "" {
-					content = task.Title
-					if content == "" {
-						content = "file changes"
-					}
-				}
-				content = buildCommitMessageWithAssistedBy(content, models)
-				writeSSE("done", fmt.Sprintf("{\"content\":%q}", content))
-			}
-		},
-		func(progress types.PromptProgressData) {
-			total := progress.Total
-			if total == 0 {
-				total = 1
-			}
-			pct := (progress.Processed * 100) / total
-			writeSSE("prompt_progress", fmt.Sprintf("{\"processed\":%d,\"total\":%d,\"percent\":%d}", progress.Processed, progress.Total, pct))
-		},
-	)
-	if err != nil {
-		logging.For(logging.Generate).With(logging.TaskID, taskID).Warnf("LLM stream failed: %v", err)
-		content := strings.TrimSpace(sb.String())
-		if content == "" {
-			content = task.Title
-			if content == "" {
-				content = "file changes"
-			}
-		}
-		content = buildCommitMessageWithAssistedBy(content, models)
-		writeSSE("done", fmt.Sprintf("{\"content\":%q}", content))
-	}
 }
 
 // hasRequestReview checks if an assistant message contains a request_review tool call.
