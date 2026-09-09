@@ -1051,6 +1051,39 @@ func TestBuildExtensionCreateArgs_CapabilityPosture(t *testing.T) {
 	}
 }
 
+// sharedPrefaceDiff names the first argument at which args stops matching the shared gVisor
+// preface, and "" when it matches. backend/sandbox holds the same check for its builder: the two
+// command lines share the posture byte for byte and this is what fails the day one of them
+// re-inlines it.
+func sharedPrefaceDiff(args []string, containerName string) string {
+	preface := sandboxruntime.GVisorCreateArgs(containerName)
+	for i, want := range preface {
+		if i >= len(args) {
+			return fmt.Sprintf("args end before the shared preface does (arg %d, %q)", i, want)
+		}
+		if args[i] != want {
+			return fmt.Sprintf("arg %d = %q, the shared preface says %q", i, args[i], want)
+		}
+	}
+	return ""
+}
+
+// TestBuildExtensionCreateArgsBeginWithTheSharedPreface: the extension sandbox's posture is the one
+// in pkg/sandboxruntime, not a copy of it — AppendCapabilities refuses a capability grant onto
+// anything else, so a drifted copy here would leave every extension whose manifest asks for a
+// capability running without it.
+func TestBuildExtensionCreateArgsBeginWithTheSharedPreface(t *testing.T) {
+	const name = "kanban-ext-ext-preface"
+	ext := &Extension{ID: "ext-preface", SandboxConfig: SandboxConfig{Capabilities: []string{"CHOWN"}}}
+	args, _ := buildExtensionCreateArgs(ext, name, "ubuntu:latest", nil, nil)
+	if diff := sharedPrefaceDiff(args, name); diff != "" {
+		t.Errorf("the extension builder no longer begins with the shared preface: %s\nargs = %v", diff, args)
+	}
+	if len(args) <= len(sandboxruntime.GVisorCreateArgs(name)) {
+		t.Errorf("an extension sandbox adds no argument of its own (network): %v", args)
+	}
+}
+
 // mountArgs returns the "-v" bind specs from a podman create argument list.
 func mountArgs(args []string) []string {
 	var out []string

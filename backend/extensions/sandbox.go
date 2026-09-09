@@ -288,29 +288,28 @@ func withDependencyEnv(envs []types.SandboxEnv, bind DependencyMount) []types.Sa
 // mount at all (fail closed).
 func buildExtensionCreateArgs(ext *Extension, containerName, image string, projectMounts map[string]string, policy *MountPolicy) ([]string, []string) {
 	// Container runs sleep infinity; sandbox-bridge is started via podman exec when needed.
-	createArgs := []string{
-		"--runtime-flag=overlay2=root:self",
-		"--runtime-flag=ignore-cgroups",
-		"create",
-		// ensureExtensionImage builds or pulls the image first, so an implicit pull here would only
-		// be a silent, unbounded repeat of a failure that is reported better elsewhere.
-		"--pull", "never",
-		"--name", containerName,
-		"--runtime", "runsc",
-		"--security-opt", "label=disable",
-		"--cap-drop", "ALL",
-		"--security-opt", "no-new-privileges",
-		"--entrypoint", "",
-		"--network", "none",
-	}
+	createArgs := append(sandboxruntime.GVisorCreateArgs(containerName), "--network", "none")
 
-	// Add back explicitly requested capabilities
+	// Capabilities. A malformed NAME is skipped one at a time — one stale entry in a stored manifest
+	// must not cost the rest of the grant — while the POSTURE is all-or-nothing: AppendCapabilities
+	// refuses the whole grant onto a command line that does not run runsc on top of a full
+	// `--cap-drop ALL`, so a refusal here means this builder stopped asserting its own isolation and
+	// the extension starts without the privileges it cannot safely be given.
+	var valid []string
 	for _, cap := range ext.SandboxConfig.Capabilities {
 		if err := ValidateCapability(cap); err != nil {
 			logging.For(logging.Sandbox).Infof("ext=%s SKIPPED capability %q: %v", ext.ID, cap, err)
 			continue
 		}
-		createArgs = append(createArgs, "--cap-add", cap)
+		valid = append(valid, cap)
+	}
+	if len(valid) > 0 {
+		withCaps, err := sandboxruntime.AppendCapabilities(createArgs, valid)
+		if err != nil {
+			logging.For(logging.Sandbox).Errorf("ext=%s granted no capabilities (%v): %v", ext.ID, valid, err)
+		} else {
+			createArgs = withCaps
+		}
 	}
 
 	// Mount each registered project at /mnt/<project-dirname> read-only. This allows the container
