@@ -1,14 +1,10 @@
 <script lang="ts">
     import FileEditor from './FileEditor.svelte';
+    import type { OpenFileTab } from '$lib/utils/editor-tabs';
     import { t } from '$lib/i18n';
     import type { LSPSymbol } from '$lib/utils/lsp-symbols';
     import { appStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
-
-    interface OpenFile {
-        path: string;
-        targetLine: number;
-    }
 
     let { projectId, projectPath, taskId, openFiles, activeFilePath, unsavedFiles, pinnedFiles, onFocused, onSymbolsUpdate, onHasChanges,
         onSelectTab, onCloseTab, onPinTab, onSave, saving, onToggleFullscreen, mobileFullscreen, pendingFsEvent = null,
@@ -16,7 +12,7 @@
         projectId: string;
         projectPath?: string;
         taskId?: string;
-        openFiles: OpenFile[];
+        openFiles: OpenFileTab[];
         activeFilePath: string;
         unsavedFiles: Set<string>;
         pinnedFiles: Set<string>;
@@ -165,6 +161,7 @@
                     taskId={taskId}
                     filePath={file.path}
                     targetLine={file.targetLine}
+                    reveal={file.reveal}
                     active={file.path === activeFilePath}
                     onFocused={(focused: boolean) => handleEditorFocused(file.path, focused)}
                     onSymbolsUpdate={(symbols) => handleSymbolsUpdate(file.path, symbols)}

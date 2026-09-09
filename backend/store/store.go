@@ -371,6 +371,8 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	s.addColumn("tasks", "summarizing", "INTEGER NOT NULL DEFAULT 0")
 	// Accumulated API cost (USD) for the last task run
 	s.addColumn("tasks", "session_cost", "REAL NOT NULL DEFAULT 0")
+	// Peak container memory (MB) of the last sandbox run; owned by UpdateTaskSandboxMemoryPeak.
+	s.addColumn("tasks", "sandbox_memory_peak_mb", "INTEGER NOT NULL DEFAULT 0")
 	// Records whether the task execution was auto-started from a parent (sibling continuation)
 	s.addColumn("tasks", "autostarted", "INTEGER NOT NULL DEFAULT 0")
 	// moved_at orders the board: it changes only when a task moves column (see UpdateTask).
@@ -521,7 +523,7 @@ func scanTask(s scanner, t *types.Task) error {
 	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status,
 		&t.SessionID, &t.Branch, &baseRef, &baseCommit, &branchTip, &t.Output, &t.ExecutionState, &hasMergeConflict,
 		&t.LlamaServerURL, &t.ModelName, &reasoningEffort, &t.MaxConsecutiveFailedTurns,
-		&autoCommit, &autoMerge, &subtasksAutoMerge, &t.OperatingMode, &parentTaskID, &autostarted, &titleGenerating, &summarizing, &currentThreadID, &createdAt, &updatedAt, &movedAt, &assignedPortsJSON, &t.SessionCost)
+		&autoCommit, &autoMerge, &subtasksAutoMerge, &t.OperatingMode, &parentTaskID, &autostarted, &titleGenerating, &summarizing, &currentThreadID, &createdAt, &updatedAt, &movedAt, &assignedPortsJSON, &t.SessionCost, &t.SandboxMemoryPeakMB)
 	if err != nil {
 		return err
 	}

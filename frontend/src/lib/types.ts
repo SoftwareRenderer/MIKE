@@ -114,6 +114,8 @@ export interface Task {
     assigned_ports?: AssignedPort[];
     base_ref?: string;
     session_cost?: number;
+    /** Peak container memory (MB) of the last sandbox run; absent when no run recorded one. */
+    sandbox_memory_peak_mb?: number;
 }
 
 export interface Thread {

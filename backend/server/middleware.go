@@ -32,11 +32,16 @@ var publicPaths = map[string]map[string]struct{}{
 	"/api/auth/session": {http.MethodGet: {}},
 }
 
+// hostClientPath is the extension bridge (frontend/public/host-client.js), which every UI
+// extension's entry document loads. Named once because two rules read it: the auth exemption below
+// and the CORP exemption in isOpaqueOriginAsset.
+const hostClientPath = "/host-client.js"
+
 // isPublicPath returns true if the given path+method combination is publicly accessible.
 // Static assets (frontend) are always public.
 func isPublicPath(path, method string) bool {
 	// Frontend static assets are always public
-	if path == "/" || path == "/host-client.js" || strings.HasPrefix(path, "/assets/") || strings.HasPrefix(path, "/favicon") {
+	if path == "/" || path == hostClientPath || strings.HasPrefix(path, "/assets/") || strings.HasPrefix(path, "/favicon") {
 		return true
 	}
 	// Extension static assets (extension code, UI entrypoints) are always
@@ -108,7 +113,7 @@ func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Permissions-Policy", permissionsPolicy)
-		// Only the two trees an opaque-origin frame loads as a subresource are left unmarked —
+		// Only the paths an opaque-origin frame loads as a subresource are left unmarked —
 		// see isOpaqueOriginAsset. Everything else answers same-origin, so no other site can
 		// embed this install's pages, its API responses or its bundle as a subresource of its own.
 		if !isOpaqueOriginAsset(r.URL.Path) {
@@ -149,12 +154,16 @@ const permissionsPolicy = "camera=(), microphone=(), geolocation=(), usb=(), ser
 	"keyboard-map=(), window-management=()"
 
 // isOpaqueOriginAsset reports whether a path is fetched as a subresource by a document that has no
-// origin to name: a sandboxed extension iframe loading its own files from /extensions/, and a
-// preview document loading its siblings from /api/preview/. Cross-Origin-Resource-Policy:
-// same-origin on those would refuse them both — the frame's opaque origin is not this origin — so
-// they are the two paths the header is not applied to.
+// origin to name: a sandboxed extension iframe loading its own files from /extensions/ and the host
+// bridge from /host-client.js, and a preview document loading its siblings from /api/preview/.
+// Cross-Origin-Resource-Policy: same-origin on those would refuse them all — the frame's opaque
+// origin is not this origin — so they are the paths the header is not applied to.
+//
+// The bridge is in the app root but is an extension's file like any other: marked, no frame can
+// fetch it, so no extension gets an extHost and none of them work. Why that is safe: the file is
+// public and carries no user data (docs/ui-extensions.md).
 func isOpaqueOriginAsset(path string) bool {
-	if strings.HasPrefix(path, "/extensions/") {
+	if strings.HasPrefix(path, "/extensions/") || path == hostClientPath {
 		return true
 	}
 	return strings.HasPrefix(path, "/api/preview/") && !isPreviewNavPath(path)

@@ -1072,12 +1072,18 @@ func TestGetMemoryStats(t *testing.T) {
 		t.Errorf("CurrentMB = %d, want >= 150 (hog allocated ~200MB)", stats.CurrentMB)
 	}
 
-	// After Stop the task is untracked → not-running.
+	// After Stop the task is untracked → not-running, and the peak has been handed off with the
+	// cgroup it was read from.
+	var reported []int64
+	sm.SetMemoryPeakSink(func(_ string, peakMB int64) { reported = append(reported, peakMB) })
 	if err := sm.Stop(taskID); err != nil {
 		t.Fatalf("stop sandbox: %v", err)
 	}
 	if stats := sm.GetMemoryStats(taskID); stats.Running {
 		t.Error("expected not-running after Stop")
+	}
+	if len(reported) != 1 || reported[0] < 150 {
+		t.Errorf("peak reported at teardown = %v, want one reading of >= 150 MB — without it the sandbox panel has no memory number once the task leaves In Progress", reported)
 	}
 }
 

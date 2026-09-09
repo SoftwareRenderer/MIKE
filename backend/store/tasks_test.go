@@ -1,6 +1,7 @@
 package store
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -1045,5 +1046,91 @@ func TestSetTaskAssignedPortsIsTargeted(t *testing.T) {
 	}
 	if after, _ := s.GetTaskByID("task-ports"); len(after.AssignedPorts) != 0 {
 		t.Fatalf("wrong-project write must not apply, got %+v", after.AssignedPorts)
+	}
+}
+
+func TestSandboxMemoryPeakSurvivesFullRowUpdate(t *testing.T) {
+	s := testStore(t)
+	if err := s.CreateProject(newProject("proj-peak", "peak", "/tmp/peak")); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(newTask("task-peak", "proj-peak")); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	stale, err := s.GetTaskByID("task-peak")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if stale.SandboxMemoryPeakMB != 0 {
+		t.Fatalf("a new task must start with no recorded peak, got %d", stale.SandboxMemoryPeakMB)
+	}
+
+	if err := s.UpdateTaskSandboxMemoryPeak("task-peak", 742); err != nil {
+		t.Fatalf("record peak: %v", err)
+	}
+
+	// Read before the peak was recorded, written back after it.
+	stale.Title = "renamed after the run"
+	stale.Output = "written by a stale copy"
+	if err := s.UpdateTask(stale); err != nil {
+		t.Fatalf("full-row update from a stale copy: %v", err)
+	}
+
+	got, err := s.GetTaskByID("task-peak")
+	if err != nil {
+		t.Fatalf("get task after update: %v", err)
+	}
+	if got.SandboxMemoryPeakMB != 742 {
+		t.Errorf("peak = %d after a full-row UpdateTask, want 742 — UpdateTask must not own this column", got.SandboxMemoryPeakMB)
+	}
+	// The caller broadcasts the struct it just wrote, so it must come back holding the peak the
+	// sink recorded in the meantime.
+	if stale.SandboxMemoryPeakMB != 742 {
+		t.Errorf("the written-back copy carries peak %d, want 742", stale.SandboxMemoryPeakMB)
+	}
+	if got.Title != "renamed after the run" {
+		t.Errorf("the peak column must not block the rest of UpdateTask, title = %q", got.Title)
+	}
+}
+
+func TestSandboxMemoryPeakPersistsAcrossReopen(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "peak.db")
+	s, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := s.CreateProject(newProject("proj-reopen", "reopen", "/tmp/reopen")); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(newTask("task-reopen", "proj-reopen")); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := s.UpdateTaskSandboxMemoryPeak("task-reopen", 900); err != nil {
+		t.Fatalf("record peak: %v", err)
+	}
+	s.Close()
+
+	s2, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer s2.Close()
+
+	got, err := s2.GetTask("proj-reopen", "task-reopen")
+	if err != nil {
+		t.Fatalf("get task after reopen: %v", err)
+	}
+	if got.SandboxMemoryPeakMB != 900 {
+		t.Errorf("peak after reopen = %d, want 900", got.SandboxMemoryPeakMB)
+	}
+}
+
+// The teardown path also carries the project-level container's "proj:…" key and any task
+// deleted mid-run. Neither is a teardown failure.
+func TestUpdateTaskSandboxMemoryPeakIgnoresAnUnknownTask(t *testing.T) {
+	s := testStore(t)
+	if err := s.UpdateTaskSandboxMemoryPeak("proj:gone", 512); err != nil {
+		t.Errorf("recording a peak for an unknown task: %v", err)
 	}
 }

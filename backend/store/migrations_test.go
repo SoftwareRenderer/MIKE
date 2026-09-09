@@ -99,7 +99,7 @@ func TestMigration_AddsColumnsMissingFromOldDatabase(t *testing.T) {
 	for _, want := range []string{
 		"auto_merge", "subtasks_auto_merge", "operating_mode",
 		"summarizing", "has_merge_conflict", "moved_at", "assigned_ports",
-		"current_thread_id", "base_commit", "session_cost",
+		"current_thread_id", "base_commit", "session_cost", "sandbox_memory_peak_mb",
 	} {
 		if !cols[want] {
 			t.Errorf("migration did not add tasks.%s", want)

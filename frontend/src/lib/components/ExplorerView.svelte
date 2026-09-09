@@ -24,6 +24,7 @@
     import { effectiveOpenTerminalKey, effectiveToggleFullscreenKey, formatShortcut, matchShortcut } from '$lib/utils/keyboard';
     import { t } from '$lib/i18n';
     import { EDITOR_SAVE_SETTLED, SAVE_SETTLE_BACKSTOP_MS, SaveRequestGuard } from '$lib/utils/save-state';
+    import { revealFileTab, toPersistedTabs, fromPersistedTabs, type OpenFileTab } from '$lib/utils/editor-tabs';
 
     // Terminal button tooltip — always shows the effective shortcut (tooltips
     // keep the shortcut text even when keycap hints are hidden).
@@ -134,8 +135,7 @@
     }
 
     // Multi-tab file state
-    interface OpenFile { path: string; targetLine: number; }
-    let openFiles = $state<OpenFile[]>([]);
+    let openFiles = $state<OpenFileTab[]>([]);
     let activeFilePath = $state('');
     // Set of file paths that are "pinned" (not preview). Preview tabs are replaced when another file is selected.
     let pinnedFiles = $state(new Set<string>());
@@ -152,7 +152,7 @@
     $effect(() => {
         const file = initialFile;
         if (file && isPathSafe(file) && openFiles.length === 0) {
-            openFiles = [{ path: file, targetLine: 0 }];
+            openFiles = [{ path: file, targetLine: 0, reveal: 0 }];
             activeFilePath = file;
         }
     });
@@ -169,7 +169,7 @@
             scrollTops = saved.scrollTops ?? {};
             fileListScroll = saved.fileListScroll ?? 0;
             if (saved.openFiles.length > 0) {
-                openFiles = saved.openFiles;
+                openFiles = fromPersistedTabs(saved.openFiles);
                 activeFilePath = saved.activeFilePath;
                 pinnedFiles = new Set(saved.pinnedFiles);
                 onUpdateFile(activeFilePath || null);
@@ -214,7 +214,7 @@
 
     function buildTabState() {
         return {
-            openFiles: toPlainOpenFiles(openFiles),
+            openFiles: toPersistedTabs(openFiles),
             activeFilePath,
             pinnedFiles: [...pinnedFiles],
             scrollTops,
@@ -275,11 +275,6 @@
         if (!list) return;
         fileListScroll = list.scrollTop;
         queueTabSave();
-    }
-
-    /** Convert openFiles array to plain objects (avoid Svelte 5 proxy issues). */
-    function toPlainOpenFiles(files: OpenFile[]): OpenFile[] {
-        return files.map(f => ({ path: f.path, targetLine: f.targetLine }));
     }
 
     // Mobile layout
@@ -435,25 +430,9 @@
     function handleFileSelected(path: string, line?: number, pin: boolean = false) {
         if (!isPathSafe(path)) return;
         closeCommitDiff();
-        const existing = openFiles.findIndex(f => f.path === path);
-        if (existing >= 0) {
-            // File already open — switch to its tab
-            activeFilePath = path;
-            if (pin) pinTab(path);
-        } else {
-            // If there's an unpinned (preview) tab, replace it
-            const previewIdx = openFiles.findIndex(f => !pinnedFiles.has(f.path));
-            if (previewIdx >= 0) {
-                const next = [...openFiles];
-                next[previewIdx] = { path, targetLine: line || 0 };
-                openFiles = next;
-            } else {
-                // No preview tab — add a new one
-                openFiles = [...openFiles, { path, targetLine: line || 0 }];
-            }
-            activeFilePath = path;
-            if (pin) pinTab(path);
-        }
+        openFiles = revealFileTab(openFiles, path, line || 0, p => pinnedFiles.has(p));
+        activeFilePath = path;
+        if (pin) pinTab(path);
         onUpdateFile(path);
         if (isMobileCtx.isMobile) activeTab = 'editor';
     }

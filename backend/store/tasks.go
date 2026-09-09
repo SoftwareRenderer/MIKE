@@ -27,7 +27,7 @@ func marshalAssignedPorts(ports []types.AssignedPort) string {
 // (and for CreateTask's INSERT). The mapping is positional, so a column added to
 // the schema but not to this list — or listed in a different order than scanTask
 // expects — breaks at scan time rather than at compile time.
-const taskColumns = `id, project_id, title, prompt, status, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, moved_at, assigned_ports, session_cost`
+const taskColumns = `id, project_id, title, prompt, status, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, moved_at, assigned_ports, session_cost, sandbox_memory_peak_mb`
 
 func (s *Store) CreateTask(t *types.Task) error {
 	s.mu.Lock()
@@ -40,10 +40,10 @@ func (s *Store) CreateTask(t *types.Task) error {
 	}
 	_, err := s.db.Exec(
 		`INSERT INTO tasks (`+taskColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.ProjectID, t.Title, t.Prompt, t.Status, t.SessionID, t.Branch, ptrStr(t.BaseRef), ptrStr(t.BaseCommit), ptrStr(t.BranchTip), t.Output, t.ExecutionState, B2I(t.HasMergeConflict),
 		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, B2I(t.AutoCommit), B2I(t.AutoMerge), B2I(t.SubtasksAutoMerge), t.OperatingMode,
-		ptrStr(t.ParentTaskID), B2I(t.Autostarted), B2I(t.TitleGenerating), B2I(t.Summarizing), ptrStr(t.CurrentThreadID), t.CreatedAt.Format(time.RFC3339), t.UpdatedAt.Format(time.RFC3339), movedAt.UTC().Format(time.RFC3339), assignedPortsJSON, t.SessionCost,
+		ptrStr(t.ParentTaskID), B2I(t.Autostarted), B2I(t.TitleGenerating), B2I(t.Summarizing), ptrStr(t.CurrentThreadID), t.CreatedAt.Format(time.RFC3339), t.UpdatedAt.Format(time.RFC3339), movedAt.UTC().Format(time.RFC3339), assignedPortsJSON, t.SessionCost, t.SandboxMemoryPeakMB,
 	)
 	return err
 }
@@ -124,6 +124,18 @@ func (s *Store) UpdateTaskSessionCost(taskID string, cost float64) error {
 	return err
 }
 
+// UpdateTaskSandboxMemoryPeak records the peak container memory of a task's last sandbox run. It
+// is the only writer of the column — UpdateTask does not carry it, so a task copy read before the
+// run cannot erase a peak recorded during it. An ID naming no row (a project-level container, a
+// task deleted mid-run) is a no-op, not a failure; updated_at stays put, so a teardown cannot
+// reorder the queue GetPendingIdleTasks reads out of that column.
+func (s *Store) UpdateTaskSandboxMemoryPeak(taskID string, peakMB int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE tasks SET sandbox_memory_peak_mb = ? WHERE id = ?`, peakMB, taskID)
+	return err
+}
+
 // inFlightStates are the execution_state values that mean a run is live.
 const inFlightStates = "('running','pulling_image')"
 
@@ -168,10 +180,11 @@ func (s *Store) updateTask(t *types.Task, claim bool) error {
 	// The row answers with the state it actually holds; typing the scan target keeps
 	// the assignment below from accepting anything the database happened to contain.
 	var storedExec types.ExecutionState
+	// The peak is read back because the sandbox sink writes that column while this copy is alive.
 	err := s.db.QueryRow(
-		`UPDATE tasks SET moved_at = CASE WHEN status <> ? THEN ? ELSE moved_at END, title = ?, prompt = ?, status = ?, session_id = ?, branch = ?, base_ref = ?, base_commit = ?, branch_tip = ?, output = ?, `+execSet+`, has_merge_conflict = ?, llama_server_url = ?, model_name = ?, reasoning_effort = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_merge = ?, subtasks_auto_merge = ?, operating_mode = ?, parent_task_id = ?, autostarted = ?, title_generating = ?, current_thread_id = ?, assigned_ports = ?, session_cost = ?, updated_at = ? WHERE id = ? RETURNING moved_at, execution_state`,
+		`UPDATE tasks SET moved_at = CASE WHEN status <> ? THEN ? ELSE moved_at END, title = ?, prompt = ?, status = ?, session_id = ?, branch = ?, base_ref = ?, base_commit = ?, branch_tip = ?, output = ?, `+execSet+`, has_merge_conflict = ?, llama_server_url = ?, model_name = ?, reasoning_effort = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_merge = ?, subtasks_auto_merge = ?, operating_mode = ?, parent_task_id = ?, autostarted = ?, title_generating = ?, current_thread_id = ?, assigned_ports = ?, session_cost = ?, updated_at = ? WHERE id = ? RETURNING moved_at, execution_state, sandbox_memory_peak_mb`,
 		args...,
-	).Scan(&movedAt, &storedExec)
+	).Scan(&movedAt, &storedExec, &t.SandboxMemoryPeakMB)
 	if err != nil {
 		// No row matched (task deleted concurrently): same outcome as the 0-rows-affected
 		// case the previous Exec-based update returned without error for.

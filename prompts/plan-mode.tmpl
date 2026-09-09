@@ -39,25 +39,29 @@ Wait for the user's response before proceeding.
 ## Phase 3: Propose Tasks
 Using the analysis and the user's answers, propose the tasks and request approval to create them. State dependencies in the proposal if any.
 
+**Run order: children run BEFORE parents.** The tree is read bottom-up — the deepest task runs first, the root task last. The task with no parent is the **root**.
+
 Nested Tasks (Dependent): A task that depends on other tasks is their **parent**; each task it depends on is nested directly under it as a **child**. A parent can't start until all its children are done.
 - If A depends on B: B is nested under A (B is A's child, A is B's parent).
-- If B depends on C: C is nested under B. Result: A → B → C, top to bottom.
-- If a task depends on several tasks, it is the parent of **all** of them (a task has one parent; state every dependency in its prompt).
-- The topmost task is the final deliverable.
+- If B depends on C: A is the parent of B is the parent of C — run order is C, then B, then A.
+- Dependencies are transitive: nest a task **once**, under the deepest task that needs it — every ancestor inherits that ordering, so a root does not also directly nest its descendants' children. This is what resolves a diamond: the root needs A and B, and A needs B, so B nests under A only.
+- If a task depends on several tasks, it is the parent of **all** of them (a task has one parent).
+- State every dependency in the task's prompt **in addition to** nesting it, never instead of it: nesting is what the board enforces, prompt text is documentation.
+- The root task is the final deliverable.
 - Self-check before creating: for each task, "what must be done before this can start?" = its **children**; "what uses this task's output?" = its **parent**.
 
-Sibling Tasks (Parallel): Sibling tasks must not contain interdependencies.
+Sibling Tasks (Parallel): Sibling tasks must not contain interdependencies. Two tasks that depend on each other cannot be siblings — make one the parent of the other.
 
 Example proposal:
 ```markdown
 # Goal
 One sentence describing what will be built or fixed.
 
-## Tasks
-- [ ] Final assembly / integration task   (depends on 1 and 2)
-  - [ ] 1. Prerequisite subtask           (independent of 2; depends on 1.1)
-    - [ ] 1.1 Base subtask                (1.1 must finish before 1)
-  - [ ] 2. Second prerequisite subtask    (independent, sibling of 1)
+## Tasks (numbered in run order: 1 runs first, the root runs last)
+- [ ] 4. Root task — final assembly      (depends on 2 and 3; runs last)
+  - [ ] 2. Prerequisite task             (depends on 1)
+    - [ ] 1. Base task                   (leaf — runs first)
+  - [ ] 3. Second prerequisite task      (independent; sibling of 2)
 
 ## Notes
 List of constraints, decisions, or known risks.
@@ -74,7 +78,8 @@ Reply Approve to create tasks, or tell me what to change.
 - Tasks must be **small and independently verifiable** (one logical change each).
 - Each task must contain all the context the individual developer needs.
 - No vague items like "fix things" or "improve code".
-- The Primary Task must contain context relevant to the original goal and brief summary of subtasks
+- Because children run first, leaf position means runs-earliest: work that must happen soonest belongs at a leaf.
+- The root task must contain context relevant to the original goal and brief summary of subtasks
 
 ## Phase 4: Revision Loop (if needed)
 
@@ -93,6 +98,8 @@ Repeat until the user approves.
 
 Ensure that you have used `ask_question` to request approval before using the `create_task` tool.
 
-After creating tasks, use `request_review' and provide a concise hierarchical overview.
+After creating tasks, use `view_tasks` and check every parent edge against the plan before calling `request_review`: the run order lives only in those edges. Re-parenting can make a task its own ancestor, and `edit_task` leaves an omitted field unchanged.
+
+Finally, use `request_review` and provide a concise hierarchical overview.
 
 {{end -}}

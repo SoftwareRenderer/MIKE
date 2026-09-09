@@ -106,10 +106,9 @@ func TestSessionCookieSecureFlag(t *testing.T) {
 	}
 }
 
-// TestIsolationHeaders lists what every response carries and, more usefully, the two trees
-// that must not carry Cross-Origin-Resource-Policy: a sandboxed extension iframe and a
-// preview document both have an opaque origin, and same-origin on a subresource they load
-// is a refusal to load the extension at all.
+// TestIsolationHeaders lists what every response carries and, more usefully, the paths that must not
+// carry Cross-Origin-Resource-Policy: an opaque-origin frame cannot fetch a subresource marked
+// same-origin, so marking one of them switches that extension or preview off.
 func TestIsolationHeaders(t *testing.T) {
 	s := testServer(t)
 
@@ -123,6 +122,18 @@ func TestIsolationHeaders(t *testing.T) {
 		{path: "/api/config", wantCORP: true, wantPerms: true},
 		{path: "/api/preview/deadbeef/nav", wantCORP: true, wantPerms: true},
 		{path: "/api/tls/ca", wantCORP: true, wantPerms: true},
+		{
+			// The bridge every extension entry loads from an opaque-origin frame.
+			path:       "/host-client.js",
+			wantPerms:  true,
+			wantNoCorp: "no extension can fetch its bridge if this is marked",
+		},
+		{
+			// One exact path, not any file that happens to end in the name.
+			path:      "/assets/host-client.js",
+			wantCORP:  true,
+			wantPerms: true,
+		},
 		{
 			path:       "/extensions/acme/pack/index.html",
 			wantPerms:  true,

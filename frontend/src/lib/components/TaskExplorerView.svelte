@@ -22,6 +22,7 @@
     import { effectiveOpenTerminalKey, effectiveToggleFullscreenKey, formatShortcut, matchShortcut } from '$lib/utils/keyboard';
     import { t } from '$lib/i18n';
     import { EDITOR_SAVE_SETTLED, SAVE_SETTLE_BACKSTOP_MS, SaveRequestGuard } from '$lib/utils/save-state';
+    import { revealFileTab, toPersistedTabs, fromPersistedTabs, type OpenFileTab } from '$lib/utils/editor-tabs';
 
     // Terminal button tooltip — always shows the effective shortcut (tooltips
     // keep the shortcut text even when keycap hints are hidden).
@@ -113,8 +114,7 @@
     }
 
     // Multi-tab file state
-    interface OpenFile { path: string; targetLine: number; }
-    let openFiles = $state<OpenFile[]>([]);
+    let openFiles = $state<OpenFileTab[]>([]);
     let activeFilePath = $state('');
     let pinnedFiles = $state(new Set<string>());
     let initialSafeFile = $derived('');
@@ -135,7 +135,7 @@
         // Restore persisted tabs for this project
         loadEditorTabs(projectId).then((saved) => {
             if (saved && saved.openFiles.length > 0) {
-                openFiles = saved.openFiles.filter(f => isPathSafe(f.path));
+                openFiles = fromPersistedTabs(saved.openFiles.filter(f => isPathSafe(f.path)));
                 activeFilePath = saved.openFiles.find(f => f.path === saved.activeFilePath && isPathSafe(f.path))?.path || '';
                 pinnedFiles = new Set(saved.pinnedFiles.filter(p => openFiles.some(f => f.path === p)));
                 scrollTops = saved.scrollTops ?? {};
@@ -180,17 +180,13 @@
         activeFilePath;
         pinnedFiles;
         saveEditorTabs(projectId, {
-            openFiles: toPlainOpenFiles(openFiles),
+            openFiles: toPersistedTabs(openFiles),
             activeFilePath,
             pinnedFiles: [...pinnedFiles],
             scrollTops,
             fileListScroll,
         }).catch(() => {});
     });
-
-    function toPlainOpenFiles(files: OpenFile[]): OpenFile[] {
-        return files.map(f => ({ path: f.path, targetLine: f.targetLine }));
-    }
 
     // Mobile layout
     const isMobileCtx = useIsMobile();
@@ -288,22 +284,9 @@
             }
         }
         closeCommitDiff();
-        const existing = openFiles.findIndex(f => f.path === path);
-        if (existing >= 0) {
-            activeFilePath = path;
-            if (pin) pinTab(path);
-        } else {
-            const previewIdx = openFiles.findIndex(f => !pinnedFiles.has(f.path));
-            if (previewIdx >= 0) {
-                const next = [...openFiles];
-                next[previewIdx] = { path, targetLine: line || 0 };
-                openFiles = next;
-            } else {
-                openFiles = [...openFiles, { path, targetLine: line || 0 }];
-            }
-            activeFilePath = path;
-            if (pin) pinTab(path);
-        }
+        openFiles = revealFileTab(openFiles, path, line || 0, p => pinnedFiles.has(p));
+        activeFilePath = path;
+        if (pin) pinTab(path);
         onUpdateFile(path);
         if (isMobileCtx.isMobile) activeTab = 'editor';
     }

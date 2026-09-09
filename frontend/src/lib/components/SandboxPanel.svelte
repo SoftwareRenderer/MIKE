@@ -4,7 +4,7 @@
     import { getProject } from '$lib/api';
     import Icon from '$lib/components/Icon.svelte';
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
-    import { isNearMemoryLimit, isMemoryLimitReached, formatSandboxMemory, formatMemoryLimitMB } from '$lib/utils/memory-stats';
+    import { isNearMemoryLimit, isMemoryLimitReached, formatSandboxMemory, formatMemoryLimitMB, taskSandboxMemoryFallback } from '$lib/utils/memory-stats';
     import { formatAssignedHost } from '$lib/utils/sandbox-ports';
 import BaseModal from './BaseModal.svelte';
 import { t } from '$lib/i18n';
@@ -29,6 +29,11 @@ import { t } from '$lib/i18n';
     let project = $state<Project | null>(null);
     let loading = $state(true);
     let error = $state('');
+
+    // The limit the settings row states and the peak is drawn against are one number.
+    const limitMB = $derived(project?.sandbox_memory_limit ?? 1024);
+    // Live usage while the container runs; afterwards, the peak recorded on the task row.
+    const shownStats = $derived(stats ?? (project ? taskSandboxMemoryFallback(task, limitMB) : null));
 
     $effect(() => {
         async function load() {
@@ -57,28 +62,27 @@ import { t } from '$lib/i18n';
 {t('sandbox.isolationEnabled')}
             </div>
 
-            <!-- Live memory usage (WS-pushed; most recent value persists while idle) -->
-            {#if stats}
+            {#if shownStats}
                 <div class="memory-section">
                     <div class="memory-row">
                         <span class="memory-label">{t('sandbox.memoryUsage')}</span>
-                        <span class="memory-value">{formatSandboxMemory(stats)}</span>
+                        <span class="memory-value">{formatSandboxMemory(shownStats)}</span>
                     </div>
-                    {#if stats.memory_limit_mb > 0}
+                    {#if shownStats.memory_limit_mb > 0}
                         <!-- Stays visible when not running: empty track + peak tick -->
                         <div class="memory-bar">
-                            <div class="memory-bar-fill" class:warn={isNearMemoryLimit(stats)} style="width: {memoryPct(stats)}%"></div>
-                            {#if stats.memory_peak_mb > 0}
-                                <div class="memory-bar-peak" style="left: {peakPct(stats)}%" title={t('sandbox.peakMemory', { mb: stats.memory_peak_mb })}></div>
+                            <div class="memory-bar-fill" class:warn={isNearMemoryLimit(shownStats)} style="width: {memoryPct(shownStats)}%"></div>
+                            {#if shownStats.memory_peak_mb > 0}
+                                <div class="memory-bar-peak" style="left: {peakPct(shownStats)}%" title={t('sandbox.peakMemory', { mb: shownStats.memory_peak_mb })}></div>
                             {/if}
                         </div>
                     {/if}
-                    {#if stats.memory_peak_mb > 0}
-                        <div class="memory-peak" class:reached={isMemoryLimitReached(stats)}>{t('sandbox.peakMemory', { mb: stats.memory_peak_mb })}</div>
+                    {#if shownStats.memory_peak_mb > 0}
+                        <div class="memory-peak" class:reached={isMemoryLimitReached(shownStats)}>{t('sandbox.peakMemory', { mb: shownStats.memory_peak_mb })}</div>
                     {/if}
-                    {#if stats.oom_kills > 0}
+                    {#if shownStats.oom_kills > 0}
                         <div class="oom-warning" role="alert">
-                            <span class="oom-warning-count">{stats.oom_kills}</span> {t('sandbox.oomKilled', { count: stats.oom_kills })}
+                            <span class="oom-warning-count">{shownStats.oom_kills}</span> {t('sandbox.oomKilled', { count: shownStats.oom_kills })}
                         </div>
                     {/if}
                 </div>
@@ -99,7 +103,7 @@ import { t } from '$lib/i18n';
                     <!-- Memory limit -->
                     <div class="setting-row">
                         <span class="setting-label">{t('sandbox.memoryLimit')}</span>
-                        <span class="setting-value">{formatMemoryLimitMB(project.sandbox_memory_limit ?? 1024)}</span>
+                        <span class="setting-value">{formatMemoryLimitMB(limitMB)}</span>
                     </div>
 
                     <!-- Image -->

@@ -159,6 +159,9 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			task.ID = types.GenerateTaskID()
 		}
 		task.ProjectID = projectID
+		// The peak is the sandbox layer's to record as a container is removed; one from the body
+		// would be a number no container ever produced.
+		task.SandboxMemoryPeakMB = 0
 		if task.Status == "" {
 			task.Status = types.StatusBacklog
 		}
