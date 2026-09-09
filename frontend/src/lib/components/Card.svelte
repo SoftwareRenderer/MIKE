@@ -167,11 +167,17 @@
     // Any card can take a subtask, so the only condition is whether the host offers it.
     let canCreateSubtask = $derived(!!onCreateChildTask);
 
-    // Number of action elements in the title bar (for dynamic padding)
+    const isMobileCtx = useIsMobile();
+
+    let isMobileSubtask = $derived(isMobileCtx.isMobile && inline && !!task.parent_task_id);
+
+    /** The script counts rendered elements; every width that count buys lives in the style block. */
     let actionCount = $derived(
-        (canCreateSubtask ? 1 : 0) // create subtask
-        + (!isDoneSubtask ? 1 : 0) // edit
-        + (thirdAction ? 1 : 0) // pause/resume/idle/delete/move
+        isMobileSubtask
+            ? 1 + (thirdAction === 'idle' ? 1 : 0) // ⋯ menu, plus the Idle badge
+            : (canCreateSubtask ? 1 : 0) // create subtask
+              + (!isDoneSubtask ? 1 : 0) // edit
+              + (thirdAction ? 1 : 0) // pause/resume/idle/delete/move
     );
 
     const statuses = ['backlog', 'in_progress', 'review', 'done'] as const;
@@ -324,10 +330,7 @@
         }
     }
 
-    const isMobileCtx = useIsMobile();
-
     // Mobile subtask overflow menu ("..." button)
-    let isMobileSubtask = $derived(isMobileCtx.isMobile && inline && !!task.parent_task_id);
     let overflowOpen = $state(false);
     let overflowRef: HTMLButtonElement | null = $state(null);
     let overflowMenuEl: HTMLDivElement | null = null;
@@ -765,7 +768,7 @@
     aria-label={`Open task: ${task.title || '(untitled)'}, Status: ${statusWord(task.status)}`}
     aria-keyshortcuts="Alt+ArrowLeft, Alt+ArrowRight"
     aria-current={isSelected ? 'page' : undefined}
-    style={`--actions: ${actionCount}; --idle-px: ${thirdAction === 'idle' ? '10px' : '0px'}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}${parentSelected && inline && task.parent_task_id ? `; border-left: 3px solid ${statusColor}` : ""}`}
+    style={`--actions: ${actionCount}; --idle: ${thirdAction === 'idle' ? 1 : 0}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}${parentSelected && inline && task.parent_task_id ? `; border-left: 3px solid ${statusColor}` : ""}`}
 >
     <div class="card-title">
             {#if task.title_generating}
@@ -962,6 +965,11 @@
         -webkit-user-select: none;
         -webkit-user-drag: element;
         contain: layout style paint;
+        /* The Idle badge is wider than an icon; 6px is the ellipsis's own room. */
+        --action-size: 26px;
+        --action-gap: 2px;
+        --idle-slot: 36px;
+        --actions-reserve: calc((var(--actions) - var(--idle, 0)) * (var(--action-size) + var(--action-gap)) + var(--idle, 0) * var(--idle-slot) + 6px);
     }
     /* Diagonal fade overlay for tasks with queued offline actions */
     .card.queued::after {
@@ -1085,7 +1093,6 @@
         overflow: hidden;
         text-overflow: ellipsis;
         padding-right: 0;
-        transition: padding-right 0.15s ease;
     }
     .title-spinner {
         display: inline-flex;
@@ -1102,8 +1109,7 @@
     .card:hover:not(:has(.card:hover)) > .card-title > .card-title-text,
     .card:focus-within:not(:has(.card:focus-within)) > .card-title > .card-title-text,
     .card.selected > .card-title > .card-title-text {
-        /* --idle-px covers the Idle badge being wider than a 26px icon slot */
-        padding-right: calc(var(--actions) * 28px + var(--idle-px, 0px) + 6px);
+        padding-right: var(--actions-reserve);
     }
     .card-actions {
         position: absolute;
@@ -1114,7 +1120,7 @@
         z-index: 2;
         display: flex;
         align-items: center;
-        gap: 2px;
+        gap: var(--action-gap);
         opacity: 0;
         pointer-events: none;
         transition: opacity 0.15s ease;
@@ -1129,8 +1135,8 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 26px;
-        height: 26px;
+        width: var(--action-size);
+        height: var(--action-size);
         border-radius: var(--radius-sm);
         background: transparent;
         color: var(--color-text-tertiary);
@@ -1152,18 +1158,21 @@
         color: white;
     }
     .action-idle {
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        /* width, never min-width: a longer label from a translation pack must not outgrow the
+           slot the title gave up. */
+        display: block;
+        width: var(--idle-slot);
+        line-height: var(--action-size);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-align: center;
         font-size: 0.75rem;
         font-weight: 500;
         text-transform: uppercase;
         letter-spacing: 0.3px;
         color: var(--color-text-tertiary);
-        padding: 0 4px;
         pointer-events: none;
-        /* Fixed slot width so the title padding calc stays deterministic */
-        width: 36px;
     }
     .action-overflow.is-open {
         background: var(--color-surface-4);
@@ -1232,25 +1241,24 @@
         margin: 0 2px;
     }
     @media (hover: none) {
+        .card {
+            --action-size: 44px;
+            --action-gap: 4px;
+            --idle-slot: 44px;
+        }
         .card-actions {
             opacity: 1;
             transition: none;
-            gap: 4px;
+        }
+        /* The container is pointer-events:none for the card's link, and it is re-enabled only by
+           :hover/:focus-within/.selected rules, which a device that cannot hover never matches. */
+        .card-actions .action-icon {
+            pointer-events: auto;
         }
         .card-title-text {
-            padding-right: calc(var(--actions) * 48px + 10px);
-        }
-        .card.is-subtask > .card-title > .card-title-text {
-            padding-right: 58px;
-        }
-        /* Subtasks render the overflow menu (+ Idle badge in the in-progress
-           column); account for the badge in the fixed padding. */
-        .card.is-subtask:has(.action-idle) > .card-title > .card-title-text {
-            padding-right: 106px;
+            padding-right: var(--actions-reserve);
         }
         .action-icon {
-            width: 44px;
-            height: 44px;
             padding: 0;
             touch-action: manipulation;
             -webkit-tap-highlight-color: transparent;
@@ -1259,11 +1267,7 @@
             width: 18px;
             height: 18px;
         }
-        .action-idle {
-            min-width: 44px;
-            min-height: 44px;
-            padding: 0 8px;
-        }
+        /* A 44px target overhangs the title row into the one row below it that has a control. */
         .subtask-progress-bar {
             height: 44px;
         }
