@@ -74,6 +74,7 @@ type ExtensionManifest struct {
 	Priority     int           `json:"priority"` // loading order: lower values load first (default 0)
 	ConfigSchema *ConfigSchema `json:"config_schema,omitempty"`
 	Capabilities *Capabilities `json:"capabilities,omitempty"`
+	Image        string        `json:"image,omitempty"`
 }
 
 // Capabilities groups the functional capabilities an extension provides.

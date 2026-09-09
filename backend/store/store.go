@@ -287,7 +287,8 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	}
 	// A database already at this build's schema version does not need 53 column probes, and one
 	// stamped newer than this build must not be edited by it. See schemaVersion in migrations.go.
-	if stored := s.userVersion(); stored >= schemaVersion {
+	stored := s.userVersion()
+	if stored >= schemaVersion {
 		if stored > schemaVersion {
 			logging.For(logging.Store).Infof("database schema version %d is newer than this build's %d — leaving the schema alone", stored, schemaVersion)
 		}
@@ -442,6 +443,12 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 			WHERE tm.role IN ('assistant', 'title')
 		`)
 		_, _ = s.db.Exec(`INSERT OR IGNORE INTO config (key, value) VALUES ('migration_cumulative_stats', '1')`)
+	}
+
+	if stored < doneDiffParsedStamp {
+		if _, err := s.db.Exec(`DELETE FROM task_diff_snapshots`); err != nil {
+			logging.For(logging.Store).Warnf("clearing done-task diff snapshots failed: %v", err)
+		}
 	}
 
 	s.setUserVersion(schemaVersion)

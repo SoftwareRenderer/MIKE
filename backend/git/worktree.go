@@ -1199,10 +1199,17 @@ func countFileChanges(diff string) map[string]FileChangeStats {
 // diff grammar in the product - the frontend used to carry a second one over the same text, and they
 // drifted. backend/git/diff_parse_parity_test.go holds the cases the old browser parser had.
 func ParseUnifiedDiff(patch string) []TrackedDiffFile {
-	files := parseUnifiedDiffToFiles(patch, nil, nil, nil)
-	out := make([]TrackedDiffFile, 0, len(files))
-	for _, f := range files {
-		out = append(out, *f)
+	return SortedParsedFiles(parseUnifiedDiffToFiles(patch, nil, nil, nil))
+}
+
+// SortedParsedFiles flattens a parsed map into path order, so a response never inherits Go's map
+// iteration order.
+func SortedParsedFiles(tracked map[string]*TrackedDiffFile) []TrackedDiffFile {
+	out := make([]TrackedDiffFile, 0, len(tracked))
+	for _, f := range tracked {
+		if f != nil {
+			out = append(out, *f)
+		}
 	}
 	slices.SortFunc(out, func(a, b TrackedDiffFile) int {
 		return strings.Compare(a.Path, b.Path)

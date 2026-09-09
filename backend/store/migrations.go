@@ -20,7 +20,11 @@ import (
 // steps in place. A database stamped N has been through 1..N; an older one reads 0 and runs the
 // whole chain. So the steps must stay idempotent, and one that must run exactly once needs its own
 // marker (see the config-row guard on the backfill) rather than trusting this number.
-const schemaVersion = 2
+const schemaVersion = doneDiffParsedStamp
+
+// doneDiffParsedStamp is the stamp from which a stored done-task diff body carries parsed_files.
+// Older bodies are served byte for byte and cannot grow the key, so initSchema drops those rows.
+const doneDiffParsedStamp = 3
 
 // userVersion reads PRAGMA user_version. A read failure answers 0, which reruns the probe chain:
 // slow, but it cannot leave a column missing. The caller holds s.mu.

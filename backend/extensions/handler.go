@@ -720,6 +720,25 @@ func findLocalExtension(root, author, name string) *localExtension {
 	return nil
 }
 
+// localRegistryEntry is the one mapping from a folder on disk to the registry-shaped entry both the
+// browse listing and the install path use.
+func localRegistryEntry(le localExtension) RegistryEntry {
+	return RegistryEntry{
+		Name:         le.Name,
+		Version:      le.Manifest.Version,
+		Type:         le.Type,
+		DisplayName:  le.Manifest.DisplayName,
+		Description:  le.Manifest.Description,
+		Author:       le.Author,
+		Homepage:     le.Manifest.Homepage,
+		LicenseURL:   le.Manifest.LicenseURL,
+		Image:        le.Manifest.Image,
+		Capabilities: le.Manifest.Capabilities,
+		LocalPath:    le.Dir,
+		localDir:     le.Dir,
+	}
+}
+
 // HandleLocalExtensions lists the extensions in the local extensions directory as registry-style
 // entries, whether or not they are published. Each entry's name comes from the manifest's parent
 // directory (extensions/<author>/<name>/manifest.json).
@@ -737,18 +756,7 @@ func (h *ExtensionHandler) HandleLocalExtensions(w http.ResponseWriter, r *http.
 
 	index := make(RegistryIndex, 0, len(found))
 	for _, le := range found {
-		index = append(index, RegistryEntry{
-			Name:         le.Name,
-			Version:      le.Manifest.Version,
-			Type:         le.Type,
-			DisplayName:  le.Manifest.DisplayName,
-			Description:  le.Manifest.Description,
-			Author:       le.Author,
-			Homepage:     le.Manifest.Homepage,
-			LicenseURL:   le.Manifest.LicenseURL,
-			Capabilities: le.Manifest.Capabilities,
-			LocalPath:    le.Dir,
-		})
+		index = append(index, localRegistryEntry(le))
 	}
 
 	httputil.JSONResponse(w, http.StatusOK, index)
@@ -856,18 +864,7 @@ func (h *ExtensionHandler) HandleInstallLocal(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	entry := &RegistryEntry{
-		Name:         local.Name,
-		Version:      local.Manifest.Version,
-		Type:         local.Type,
-		DisplayName:  local.Manifest.DisplayName,
-		Description:  local.Manifest.Description,
-		Author:       local.Author,
-		Homepage:     local.Manifest.Homepage,
-		LicenseURL:   local.Manifest.LicenseURL,
-		Capabilities: local.Manifest.Capabilities,
-		localDir:     local.Dir,
-	}
+	entry := localRegistryEntry(*local)
 
 	if existing, _ := h.store.GetByAuthorName(entry.Author, entry.Name); existing != nil {
 		httputil.JSONError(w, http.StatusConflict, "extension already installed: "+entry.Author+"/"+entry.Name)
@@ -881,7 +878,7 @@ func (h *ExtensionHandler) HandleInstallLocal(w http.ResponseWriter, r *http.Req
 	}
 
 	events := make(chan sseEvent, 16)
-	go h.installInBackground(entry.Name, entry, "", events)
+	go h.installInBackground(entry.Name, &entry, "", events)
 
 	h.streamOperation(w, r, events)
 }

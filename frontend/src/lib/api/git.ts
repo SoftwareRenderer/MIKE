@@ -3,7 +3,7 @@ import type { ApiDiffRow, DiffFile } from '../types/diff';
 import { enrichRowsWithInlineSegments } from '../utils/diff-parser';
 import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
 import { setBoardCache, getBoardCache, diffCacheKey, doneDiffCacheKey } from '../storage';
-import { markCached } from './cache';
+import { markCached, isDisconnectedError } from './cache';
 import { t } from '$lib/i18n';
 
 // -- Git endpoints --
@@ -180,9 +180,9 @@ export async function pushProject(projectId: string): Promise<{ status: string }
 
 // -- Task Git endpoints --
 
-/** Fetch the unified diff for a task's worktree. Supports optional head/base refs and full file content.
- * The current worktree diff (no head/base/checkpoint options) is cached so it remains viewable offline;
- * on failure it falls back to the cached copy. Non-current diffs are not cached. */
+/** Fetch the unified diff for a task's worktree. Supports optional head/base refs and full file
+ * content. The current worktree diff (no head/base/checkpoint) is cached so it stays viewable when
+ * the server cannot be reached; non-current diffs are not cached. */
 export interface TaskDiff {
     diff: string;
     untracked: Array<{ path: string; diff: string; file_size?: number; truncated?: boolean; orig_added?: number; lines?: string[]; line_count?: number }>;
@@ -204,20 +204,20 @@ export async function getTaskDiff(projectId: string, taskId: string, options?: {
     if (options?.checkpointIndex != null) params.set('checkpointIdx', String(options.checkpointIndex));
     if (options?.parsed) params.set('parsed', '1');
     const url = params.toString() ? `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff?${params}` : `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff`;
-    // A parsed request bypasses the IndexedDB cache, read AND write: the cached shapes predate
-    // parsed_files, so a cache hit would answer a parsed request with no parsed files (an empty diff) and a
-    // parsed body stored under the plain key would do the reverse. One extra round trip beats a result whose
-    // shape depends on cache state.
-    const isCurrentDiff = !options?.parsed && !options?.headRef && !options?.baseRef && options?.checkpointIndex == null;
+    // Cacheability is the ref shape, never the parsed flag: the diff panel sends parsed=1 on every load.
+    const isCurrentDiff = !options?.headRef && !options?.baseRef && options?.checkpointIndex == null;
     // The canonical done-task diff (pinned BaseCommit..BranchTip, requested by
     // head ref only) is immutable — serve it straight from IndexedDB when we
     // have it (zero network), and persist it after the first fetch. Checkpoint
     // diffs and custom-base comparisons share the headRef param but are NOT
     // the canonical done diff, so they must bypass this cache.
-    const isDoneDiff = !options?.parsed && !!options?.headRef && !options?.baseRef && options?.checkpointIndex == null && !options?.full;
+    const isDoneDiff = !!options?.headRef && !options?.baseRef && options?.checkpointIndex == null && !options?.full;
+    // A stored body that carries only patch text is a miss for a parsed request: it renders empty.
+    const usableCached = (cached: TaskDiff | null): cached is TaskDiff =>
+        !!cached && (!options?.parsed || !!cached.parsed_files);
     if (isDoneDiff) {
         const cached = await getBoardCache<TaskDiff>(doneDiffCacheKey(projectId, taskId, options!.headRef!));
-        if (cached) return markCached(cached);
+        if (usableCached(cached)) return markCached(cached);
     }
     try {
         const res = await apiFetch(url);
@@ -232,15 +232,14 @@ export async function getTaskDiff(projectId: string, taskId: string, options?: {
         }
         return data;
     } catch (e) {
-        // Fall back to a cached copy for the current diff request
-        if (isCurrentDiff) {
+        if (isCurrentDiff && isDisconnectedError(e)) {
             const cached = await getBoardCache<TaskDiff>(diffCacheKey(projectId, taskId));
             if (cached) return markCached(cached);
         }
-        // ...or for the immutable done diff (a stale cache is still correct)
+        // Unlike the live worktree diff, this one is immutable: a stored copy is right whatever failed.
         if (isDoneDiff) {
             const cached = await getBoardCache<TaskDiff>(doneDiffCacheKey(projectId, taskId, options!.headRef!));
-            if (cached) return markCached(cached);
+            if (usableCached(cached)) return markCached(cached);
         }
         throw e;
     }

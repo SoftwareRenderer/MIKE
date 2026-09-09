@@ -2,10 +2,12 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"kanban/backend/types"
 	"kanban/pkg/logging"
 )
 
@@ -339,5 +341,92 @@ func TestNewerSchemaVersionIsLeftAlone(t *testing.T) {
 	}
 	if v := s2.userVersion(); v != 99 {
 		t.Errorf("user_version = %d, want 99 — this build must not rewrite a newer stamp", v)
+	}
+}
+
+func TestMigration_ClearsDoneTaskDiffSnapshotsWrittenBeforeParsedFiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kanban.db")
+
+	legacyBody := `{"diff":"patch text","untracked":[],"short_stat":"1 file changed"}`
+	currentBody := `{"diff":"patch text","parsed_files":[{"path":"a.txt","rows":[],"added":1,"removed":0}],"untracked":[],"short_stat":"1 file changed"}`
+
+	seed := func(withTask bool, diffJSON string) {
+		s, err := NewStore(path)
+		if err != nil {
+			t.Fatalf("NewStore: %v", err)
+		}
+		defer func() { _ = s.Close() }()
+		if withTask {
+			if err := s.CreateProject(&types.Project{ID: "mig-proj", Name: "mig-proj", Path: "/tmp/mig-proj"}); err != nil {
+				t.Fatalf("create project: %v", err)
+			}
+			if err := s.CreateTask(&types.Task{ID: "mig-task", ProjectID: "mig-proj", Title: "t", Status: "done"}); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+		}
+		if err := s.UpsertTaskDiffSnapshot(&TaskDiffSnapshot{
+			TaskID: "mig-task", ProjectID: "mig-proj", BaseCommit: "aaa", BranchTip: "bbb",
+			StatsJSON: `{"files_n":1}`, DiffJSON: diffJSON,
+		}); err != nil {
+			t.Fatalf("seed snapshot: %v", err)
+		}
+	}
+
+	stamp := func(v int) {
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatalf("open db: %v", err)
+		}
+		defer func() { _ = db.Close() }()
+		if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, v)); err != nil {
+			t.Fatalf("stamp user_version: %v", err)
+		}
+	}
+
+	snapshots := func() int {
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatalf("open db: %v", err)
+		}
+		defer func() { _ = db.Close() }()
+		var n int
+		if err := db.QueryRow(`SELECT count(*) FROM task_diff_snapshots`).Scan(&n); err != nil {
+			t.Fatalf("count snapshots: %v", err)
+		}
+		return n
+	}
+
+	seed(true, legacyBody)
+	stamp(doneDiffParsedStamp - 1)
+	if got := snapshots(); got != 1 {
+		t.Fatalf("fixture should hold one snapshot, got %d", got)
+	}
+
+	s, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("open the pre-parsed database: %v", err)
+	}
+	if v := s.userVersion(); v != schemaVersion {
+		t.Errorf("user_version = %d, want %d", v, schemaVersion)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if got := snapshots(); got != 0 {
+		t.Errorf("%d snapshot rows survived the upgrade — their bodies carry no parsed view and are served verbatim", got)
+	}
+
+	// A row written at the current stamp survives: the drop is the migration, not every start.
+	seed(false, currentBody)
+	if got := snapshots(); got != 1 {
+		t.Fatalf("fixture should hold one snapshot after reseeding, got %d", got)
+	}
+	s2, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("reopen at the current stamp: %v", err)
+	}
+	_ = s2.Close()
+	if got := snapshots(); got != 1 {
+		t.Errorf("snapshot written at the current stamp was deleted: %d rows left", got)
 	}
 }

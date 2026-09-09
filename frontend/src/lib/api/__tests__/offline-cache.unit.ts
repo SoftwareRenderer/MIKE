@@ -246,3 +246,123 @@ describe('done-task diff cache (immutable head-ref diff)', () => {
         await expect(getTaskDiff('p1', 't1', { headRef: 'sha-tip', checkpointIndex: 0 })).rejects.toBeTruthy();
     });
 });
+
+describe('diff panel load through DiffCache (the caller that owns the cache)', () => {
+    const parsedDoneDiff = {
+        diff: 'diff --git a/a.ts b/a.ts\n+one',
+        parsed_files: [{ path: 'a.ts', rows: [{ lineNumber: 1, variant: 'added', text: 'one' }], added: 1, removed: 0 }],
+        untracked: [],
+        short_stat: '1 file changed',
+    };
+
+    /** A DiffCache wired to the real api function, so the cache gates are the ones under test. */
+    async function newPanelCache() {
+        const { getTaskDiff } = await import('$lib/api/git');
+        const { DiffCache } = await import('$lib/services/diff-cache.svelte');
+        return new DiffCache(
+            {
+                getTaskDiff,
+                getDiffFile: async () => ({ rows: [] }),
+                stageFile: async () => ({ status: 'ok', action: 'stage' }),
+                enrichRows: rows => rows as never,
+            },
+            () => 'p1',
+            () => 't1',
+        );
+    }
+
+    it('persists the done diff loadDiff fetched and serves the next load with no network', async () => {
+        const storage = await import('$lib/storage');
+        mockResolvedFetch(parsedDoneDiff);
+        const fetchMock = vi.mocked(fetch);
+
+        const cache = await newPanelCache();
+        await cache.loadDiff(() => {}, { headRef: 'sha-tip' });
+        expect(Object.keys(cache.state.files)).toEqual(['a.ts']);
+        const cached = await storage.getBoardCache(storage.doneDiffCacheKey('p1', 't1', 'sha-tip'));
+        expect(cached).toMatchObject(parsedDoneDiff);
+
+        fetchMock.mockClear();
+        const reopened = await newPanelCache();
+        await reopened.loadDiff(() => {}, { headRef: 'sha-tip' });
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(Object.keys(reopened.state.files)).toEqual(['a.ts']);
+    });
+
+    it('does not let a stored body without parsed files answer a parsed request', async () => {
+        const storage = await import('$lib/storage');
+        // A stored body from before parsed_files: patch text only.
+        await storage.setBoardCache(
+            storage.doneDiffCacheKey('p1', 't1', 'sha-tip'),
+            { diff: parsedDoneDiff.diff, untracked: [], short_stat: '1 file changed' },
+        );
+        mockResolvedFetch(parsedDoneDiff);
+
+        const cache = await newPanelCache();
+        await cache.loadDiff(() => {}, { headRef: 'sha-tip' });
+        expect(vi.mocked(fetch)).toHaveBeenCalled();
+        expect(Object.keys(cache.state.files)).toEqual(['a.ts']);
+    });
+
+    it('caches the current worktree diff even though the panel asks for the parsed view', async () => {
+        const storage = await import('$lib/storage');
+        const manifest = { files: { 'a.ts': { hash: 'h1', type: 'tracked', added: 1, removed: 0 } }, untracked: [], short_stat: '1 file changed' };
+        mockResolvedFetch(manifest);
+
+        const cache = await newPanelCache();
+        await cache.loadDiff(() => {});
+        const cached = await storage.getBoardCache(storage.diffCacheKey('p1', 't1'));
+        expect(cached).toMatchObject(manifest);
+    });
+});
+
+describe('a diff cache hit is for a disconnected read only', () => {
+    beforeEach(() => {
+        vi.resetModules();
+        vi.stubGlobal('indexedDB', createMockIndexedDB());
+    });
+
+    function mockAbortedFetch() {
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new DOMException('The user aborted a request.', 'AbortError')));
+    }
+
+    it('lets an aborted current-diff request fail rather than render the cached worktree diff', async () => {
+        const storage = await import('$lib/storage');
+        await storage.setBoardCache(storage.diffCacheKey('p1', 't1'), diff);
+        mockAbortedFetch();
+
+        const { getTaskDiff } = await import('$lib/api/git');
+        await expect(getTaskDiff('p1', 't1', { parsed: true })).rejects.toBeTruthy();
+    });
+
+    it('still serves the cached current diff when the server cannot be reached at all', async () => {
+        const storage = await import('$lib/storage');
+        const { isFromCache } = await import('$lib/api/cache');
+        await storage.setBoardCache(storage.diffCacheKey('p1', 't1'), diff);
+        mockRejectedFetch();
+
+        const { getTaskDiff } = await import('$lib/api/git');
+        const result = await getTaskDiff('p1', 't1', { parsed: true });
+        expect(result).toMatchObject(diff);
+        expect(isFromCache(result)).toBe(true);
+    });
+
+    it('serves the stored done diff on an abort, because a pinned diff cannot have changed', async () => {
+        const storage = await import('$lib/storage');
+        const { isFromCache } = await import('$lib/api/cache');
+        await storage.setBoardCache(storage.doneDiffCacheKey('p1', 't1', 'sha-tip'), parsedDoneDiffBody);
+        mockAbortedFetch();
+
+        const { getTaskDiff } = await import('$lib/api/git');
+        const result = await getTaskDiff('p1', 't1', { headRef: 'sha-tip', parsed: true });
+        expect(result).toMatchObject(parsedDoneDiffBody);
+        expect(isFromCache(result)).toBe(true);
+    });
+});
+
+const parsedDoneDiffBody = {
+    diff: 'diff --git a/a.ts b/a.ts\n+one',
+    parsed_files: [{ path: 'a.ts', rows: [{ lineNumber: 1, variant: 'added', text: 'one' }], added: 1, removed: 0 }],
+    untracked: [],
+    short_stat: '1 file changed',
+};

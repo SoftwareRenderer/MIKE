@@ -3,6 +3,7 @@
     "description": "Local fixture: an LSP extension that declares a dependency cache, so the grant UI has something real to ask about.",
     "author": "Test Dev",
     "version": "0.1.0",
+    "image": "localhost/kanban-ext-dep-cache-fixture:0.1.0",
     "capabilities": {
         "lsp": {
             "command": "dep-cache-lsp",

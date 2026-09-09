@@ -9,9 +9,9 @@ import path from 'path';
  * running sandbox is stopped so the next use recreates it. Component states are in vitest.
  *
  * Subject: the local fixture `tests/fixtures/local-extensions/testdev/dep-cache-lsp`, which declares
- * `capabilities.lsp.sandbox.dependency_cache`. A local LSP install needs no image, so this is a real
- * install; it is deleted at the end. The first test is the pre-install story: the Browse card badges
- * it and says setup follows installation.
+ * `capabilities.lsp.sandbox.dependency_cache` and the image it runs in (an LSP with neither is
+ * refused at install). It is deleted at the end. The first test is the pre-install story: the Browse
+ * card badges it and says setup follows installation.
  */
 
 const FIXTURE_AUTHOR = 'testdev';

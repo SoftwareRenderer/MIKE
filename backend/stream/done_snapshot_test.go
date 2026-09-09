@@ -276,3 +276,77 @@ func TestMaterializeDoneTaskDiff_NoBranch(t *testing.T) {
 		t.Fatalf("expected nil for a task without a branch, got %+v", got)
 	}
 }
+
+// doneDiffBody reads a served snapshot body the way the browser does: it renders parsed_files.
+type doneDiffBody struct {
+	Diff        string                `json:"diff"`
+	ParsedFiles []git.TrackedDiffFile `json:"parsed_files"`
+}
+
+func parseDoneDiffBody(t *testing.T, body string) doneDiffBody {
+	t.Helper()
+	var b doneDiffBody
+	if err := json.Unmarshal([]byte(body), &b); err != nil {
+		t.Fatalf("unmarshal done-diff body: %v", err)
+	}
+	return b
+}
+
+func TestMaterializeDoneTaskDiff_BodyCarriesParsedFiles(t *testing.T) {
+	repoDir, s, _, wm, task := setupDoneSnapshotTest(t)
+	base := revParse(t, repoDir, "HEAD")
+	tip := commitInWorktree(t, wm, "task-1", "a.txt", "alpha\nbeta\n")
+	markDone(t, s, task, base, tip)
+
+	first, err := MaterializeDoneTaskDiff(s, wm, "proj-1", task)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	body := parseDoneDiffBody(t, first.DiffJSON)
+	if len(body.ParsedFiles) != 1 {
+		t.Fatalf("expected 1 parsed file, got %d (%s)", len(body.ParsedFiles), first.DiffJSON)
+	}
+	file := body.ParsedFiles[0]
+	if file.Path != "a.txt" || file.Added != 2 || len(file.Rows) != 2 {
+		t.Fatalf("parsed entry does not describe the commit: %+v", file)
+	}
+
+	snap, err := s.GetTaskDiffSnapshot("task-1")
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	if snap == nil {
+		t.Fatal("expected a persisted snapshot")
+	}
+	if stored := parseDoneDiffBody(t, snap.DiffJSON); len(stored.ParsedFiles) != 1 {
+		t.Fatalf("stored snapshot carries no parsed view: %s", snap.DiffJSON)
+	}
+}
+
+// A binary file has no hunk: only the parsed structure carries isBinary, fileSize and the rename's
+// origPath, which patch text alone would flatten into git's "Binary files … differ" marker as a row.
+func TestMaterializeDoneTaskDiff_ParsedFilesKeepsBinaryEntry(t *testing.T) {
+	repoDir, s, _, wm, task := setupDoneSnapshotTest(t)
+	base := revParse(t, repoDir, "HEAD")
+	tip := commitInWorktree(t, wm, "task-1", "logo.png", "\x89PNG\r\n\x1a\n\x00\x01\x02\x03binary\n")
+	markDone(t, s, task, base, tip)
+
+	got, err := MaterializeDoneTaskDiff(s, wm, "proj-1", task)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	body := parseDoneDiffBody(t, got.DiffJSON)
+	if len(body.ParsedFiles) != 1 || body.ParsedFiles[0].Path != "logo.png" {
+		t.Fatalf("binary file lost from the parsed view: %+v", body.ParsedFiles)
+	}
+	file := body.ParsedFiles[0]
+	if !file.IsBinary {
+		t.Fatalf("binary entry is not marked binary: %+v", file)
+	}
+	if file.FileSize == nil || *file.FileSize != 19 {
+		t.Fatalf("binary entry does not carry its size: %+v", file)
+	}
+	if len(file.Rows) != 0 {
+		t.Fatalf("binary entry renders git's marker line as content: %+v", file.Rows)
+	}
+}

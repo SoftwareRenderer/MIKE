@@ -26,7 +26,10 @@ type DoneTaskDiff struct {
 // response for a commit-to-commit (headRef) diff: TaskDiff fields with
 // json tags, untracked file lines stripped to line counts.
 type doneDiffResponse struct {
-	Diff              string                         `json:"diff"`
+	Diff string `json:"diff"`
+	// Never omitempty: in a stored body the key's presence is what marks it as carrying the parsed
+	// view (empty diffs are never persisted).
+	ParsedFiles       []git.TrackedDiffFile          `json:"parsed_files"`
 	Untracked         []git.UntrackedFile            `json:"untracked"`
 	ShortStat         string                         `json:"short_stat"`
 	TruncatedFiles    []string                       `json:"truncated_files,omitempty"`
@@ -179,6 +182,7 @@ func doneDiffResponseFromTaskDiff(d *git.TaskDiff) doneDiffResponse {
 	}
 	return doneDiffResponse{
 		Diff:              d.Diff,
+		ParsedFiles:       git.SortedParsedFiles(d.Tracked),
 		Untracked:         untracked,
 		ShortStat:         d.ShortStat,
 		TruncatedFiles:    d.TruncatedFiles,

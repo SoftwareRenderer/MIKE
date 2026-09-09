@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -892,22 +891,9 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	// already parsed this diff to compute hashes and truncation, so the work is done. The manifest
 	// branch above already returns per-file data and needs nothing.
 	if r.URL.Query().Get("parsed") == "1" {
-		taskDiff.ParsedFiles = sortedTrackedFiles(taskDiff.Tracked)
+		taskDiff.ParsedFiles = git.SortedParsedFiles(taskDiff.Tracked)
 	}
 	httputil.JSONResponse(w, http.StatusOK, taskDiff)
-}
-
-// sortedTrackedFiles flattens the parsed map into path order, so a response never inherits Go's map
-// iteration order.
-func sortedTrackedFiles(tracked map[string]*git.TrackedDiffFile) []git.TrackedDiffFile {
-	out := make([]git.TrackedDiffFile, 0, len(tracked))
-	for _, f := range tracked {
-		if f != nil {
-			out = append(out, *f)
-		}
-	}
-	slices.SortFunc(out, func(a, b git.TrackedDiffFile) int { return strings.Compare(a.Path, b.Path) })
-	return out
 }
 
 // stripUntrackedLines creates a copy of TaskDiff with Lines removed from untracked entries.
