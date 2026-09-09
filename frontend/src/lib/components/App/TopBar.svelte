@@ -4,6 +4,7 @@
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
     import { toHomeRelative } from '$lib/utils/path';
+    import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { appStore } from '$lib/stores';
     import { openTerminalTitle } from '$lib/utils/keyboard';
 
@@ -30,6 +31,15 @@
     } = $props();
 
     let isMainBranch = $derived(currentBranch === 'main' || currentBranch === 'master');
+
+    // Mobile has no room for the parent folders, so the button names the project;
+    // the full path is one tap away in the explorer view's own header.
+    const isMobileCtx = useIsMobile();
+    const explorerLabel = $derived(
+        isMobileCtx.isMobile
+            ? currentProject.name || toHomeRelative(currentProject.path)
+            : toHomeRelative(currentProject.path)
+    );
 
     // Terminal button tooltip — always shows the effective shortcut (tooltips
     // keep the shortcut text even when keycap hints are hidden).
@@ -64,7 +74,7 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
             </svg>
-            <span class="project-path">{toHomeRelative(currentProject.path)}</span>
+            <span class="project-path">{explorerLabel}</span>
             {#if currentBranch}
                 <span class="branch-badge" class:main={isMainBranch} title={currentBranch}>
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
