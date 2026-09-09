@@ -223,61 +223,48 @@ func TestHostRootReadsThroughASymlinkThatStaysInside(t *testing.T) {
 	}
 }
 
-// Creation never traverses a symlink, not even one that stays inside. This is stricter than
-// os.MkdirAll on purpose, and is why the walk exists instead of root.MkdirAll.
+// The refusal must come from the walk, not from os.Root: only ErrHostRoot becomes a 403, and it
+// names the link.
 func TestHostRootMkdirNeverTraversesASymlink(t *testing.T) {
 	h := jail(t)
 	home := os.Getenv("HOME")
 	outside := t.TempDir()
-
-	for name, target := range map[string]string{"out": outside, "in": filepath.Join(home, "real")} {
-		if err := os.MkdirAll(target, 0o700); err != nil {
+	inside := filepath.Join(home, "real")
+	absTarget := filepath.Join(outside, "abs-target")
+	relTargetDir := filepath.Join(outside, "rel-target")
+	for _, dir := range []string{absTarget, relTargetDir, inside} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		link := filepath.Join(home, "link-"+name)
-		if err := os.Symlink(target, link); err != nil {
+	}
+	relTarget, rerr := filepath.Rel(home, relTargetDir)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+
+	for _, tc := range []struct{ name, target, created string }{
+		{"abs", absTarget, filepath.Join(absTarget, "sub")},
+		{"rel", relTarget, filepath.Join(relTargetDir, "sub")},
+		{"in", inside, filepath.Join(inside, "sub")},
+	} {
+		link := filepath.Join(home, "link-"+tc.name)
+		if err := os.Symlink(tc.target, link); err != nil {
 			t.Fatal(err)
 		}
 		err := h.MkdirAll(filepath.Join(link, "sub"), 0o700)
 		if err == nil {
-			t.Errorf("MkdirAll through symlink %q succeeded, want refusal", link)
+			t.Errorf("MkdirAll through the %s symlink %q succeeded, want refusal", tc.name, link)
+			continue
 		}
-		if _, err := os.Stat(filepath.Join(target, "sub")); !errors.Is(err, os.ErrNotExist) {
-			t.Errorf("MkdirAll through %q created %s — the walk followed the link", link, target)
+		if !IsHostRootRefusal(err) {
+			t.Errorf("MkdirAll through %q: want a jail refusal, got %v", link, err)
 		}
-	}
-}
-
-// The tripwire: os.Root.MkdirAll follows a symlink out of the root, which is why
-// HostRoot.MkdirAll walks the components itself. If this test fails, Go fixed it upstream and
-// the walk can go.
-func TestStdlibRootMkdirAllStillEscapesAndOursDoesNot(t *testing.T) {
-	home := t.TempDir()
-	outside := t.TempDir()
-	link := filepath.Join(home, "link-out")
-	if err := os.Symlink(outside, link); err != nil {
-		t.Fatal(err)
-	}
-
-	r, err := os.OpenRoot(home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	if err := r.MkdirAll(filepath.Join("link-out", "created-by-stdlib"), 0o700); err != nil {
-		t.Fatalf(`Go's (*os.Root).MkdirAll no longer escapes through a symlink (err=%v). `+
-			`HostRoot.MkdirAll can now be replaced by it — delete the component walk.`, err)
-	}
-	if _, err := os.Stat(filepath.Join(outside, "created-by-stdlib")); err != nil {
-		t.Fatalf("expected the stdlib call to have escaped and created the directory, stat: %v", err)
-	}
-
-	t.Setenv("HOME", home)
-	if err := NewHostRoot().MkdirAll(filepath.Join(link, "created-by-us"), 0o700); err == nil {
-		t.Error("HostRoot.MkdirAll refused nothing")
-	}
-	if _, err := os.Stat(filepath.Join(outside, "created-by-us")); !errors.Is(err, os.ErrNotExist) {
-		t.Error("HostRoot.MkdirAll escaped through the symlink")
+		if !strings.Contains(err.Error(), "link-"+tc.name) {
+			t.Errorf("MkdirAll through %q: the refusal must name the link, got %q", link, err)
+		}
+		if _, err := os.Stat(tc.created); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("MkdirAll through %q created %s — the walk followed the link", link, tc.created)
+		}
 	}
 }
 

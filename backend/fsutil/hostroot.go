@@ -33,8 +33,8 @@ type hostRoot struct {
 // startup. A request naming a project is jailed to that project instead
 // (Server.validateFSPath).
 //
-// Measured on go1.27/Linux: os.Root's Open, Stat, Create and MkdirAll all follow a symlink out
-// of the root, so the jail rests on Contained for reads and the component walk for creation.
+// os.Root refuses any path involving a symlink, even one inside the root: reads of a legitimate
+// link fall back to Contained, and creation walks the components itself.
 type HostRoot struct {
 	roots []hostRoot
 	// envWidens marks the no-project jail; a root set built around a project never widens.
@@ -217,9 +217,8 @@ func (h *HostRoot) Stat(p string) (fs.FileInfo, error) {
 	return fi, serr
 }
 
-// statResolved is the read fallback: os.Root refuses a path involving any symlink, even one
-// that stays inside. Contained requires the resolved path to be inside the same roots, so the
-// fallback cannot widen the jail.
+// statResolved is the read fallback for a link os.Root refused. Contained requires the resolved
+// path to be inside the same roots, so the fallback cannot widen the jail.
 func (h *HostRoot) statResolved(p string, cause error) (fs.FileInfo, error) {
 	resolved, err := h.resolveInside(p)
 	if err != nil {
@@ -274,11 +273,10 @@ func (h *HostRoot) resolveInside(p string) (string, error) {
 	return resolved, nil
 }
 
-// MkdirAll creates a directory chain under a root.
+// MkdirAll creates a directory chain under a root, never through a symlink.
 //
-// Never use (*os.Root).MkdirAll here: it creates the directory through a symlink that leaves
-// the root (pinned by TestStdlibRootMkdirAllStillEscapesAndOursDoesNot). The walk below
-// refuses any symlink on the path instead, inside the root or not.
+// Not (*os.Root).MkdirAll: its own refusal is a *PathError nothing can classify, so a jailed
+// mkdir would answer 500 where the jail means 403.
 func (h *HostRoot) MkdirAll(p string, perm fs.FileMode) error {
 	if h.unrestricted() {
 		return os.MkdirAll(p, perm)
