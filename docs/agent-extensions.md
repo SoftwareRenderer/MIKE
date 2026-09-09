@@ -42,7 +42,25 @@ with zero agent-specific persistence in the backend.
 | `manifest.json` | Declares `agent.wasm_module` |
 | `LICENSE` / `NOTICE` / `THIRD_PARTY_NOTICES.md` | Required — extensions are independently licensed projects |
 
-**URL scheme:** `agent://<name>` (legacy `pi://agent`).
+**URL scheme:** `agent://<name>` (legacy `pi://agent`). The shape has one home —
+`types.AgentURLPrefix` with `AgentProviderURL` (emit) and `ParseAgentURL` / `IsAgentURL` (read) in
+`backend/types/agent_url.go` — because `backend/agent` already sits *above* `backend/config` in the
+import graph, and the config store is one of the readers. Every Go site calls it; the browser mirrors
+the prefix as `AGENT_URL_PREFIX` (`frontend/src/lib/types.ts`). Both directions are held:
+`TestRegistry_EmittedProviderURLsParseBack` re-reads every URL `ToProviders()` emits.
+
+## Which binary the agent runs
+
+`SubprocessConfig().Binary` is the **only** place the executable's name exists — never a manifest
+field, never a name guessed in the backend. `agent.PrepareAgent` loads and initializes the adapter
+and resolves that config without spawning anything; `Prepared.Binary()` reports it and
+`Prepared.Start` spawns it. `NewAgentRunner` is the two in sequence.
+
+The sandboxed task's pre-flight (`exec.prepareAgent`) therefore runs **after** the adapter is known
+good, and asks the container about `Prepared.Binary()` — a hard-coded name refused every agent whose
+binary was not literally `pi`, in sandboxed projects only. A refusal keeps its own code,
+`agent_not_available`, distinct from `agent_start_failed`; the message names the binary it actually
+looked for.
 
 ## An agent extension *is* a provider — and the UI learns about it live
 

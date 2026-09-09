@@ -29,6 +29,18 @@ var adapterRegistry = struct {
 	factories: make(map[string]agent.AdapterFactory),
 }
 
+// RegisterAdapterFactory overrides how the adapter for an extension name is produced. It is a test
+// seam, not a configuration path - nothing in the server calls it, and a real extension's adapter is
+// always its own WASM module. It lives here rather than in a _test.go file so a test in another
+// package can register the fake as well: backend/exec holds the test that a sandboxed task probes
+// the binary its own adapter named, and that question cannot be posed without an adapter this
+// package is willing to load.
+func RegisterAdapterFactory(name string, fn agent.AdapterFactory) {
+	adapterRegistry.Lock()
+	defer adapterRegistry.Unlock()
+	adapterRegistry.factories[name] = fn
+}
+
 // wasmAdapter wraps a wazero-loaded WASI reactor module behind the AgentAdapter interface.
 //
 // Memory model (the wazero tinygo/greet.go pattern):

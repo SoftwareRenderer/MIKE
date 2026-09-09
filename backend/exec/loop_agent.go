@@ -3,11 +3,13 @@ package exec
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"kanban/backend/agent"
+	"kanban/backend/extensions"
 	"kanban/backend/git"
 	"kanban/backend/prompts"
 	"kanban/backend/stream"
@@ -17,9 +19,6 @@ import (
 	"github.com/google/uuid"
 	"kanban/pkg/logging"
 )
-
-// AgentSentinelPrefix is the URL prefix for agent providers.
-const AgentSentinelPrefix = "agent://"
 
 // executeTaskWithAgent runs the task using an agent extension via the generic agent runner.
 // The agent handles its own LLM calls, tool execution, loop detection, and compaction.
@@ -39,8 +38,8 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	sessionName := fmt.Sprintf("kanban-%s", task.ID)
 
 	// Extract agent name from URL: "agent://pi" -> "pi"
-	agentName := strings.TrimPrefix(serverURL, AgentSentinelPrefix)
-	if agentName == "" || agentName == serverURL {
+	agentName, ok := types.ParseAgentURL(serverURL)
+	if !ok {
 		te.failTask(task, projectID, "Invalid agent URL: "+serverURL, "invalid_agent_url")
 		return
 	}
@@ -52,25 +51,15 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 		return
 	}
 
-	var runner *agent.AgentRunner
-	var err error
-
-	if sandboxEnabled {
-		// Pre-flight: check if agent binary exists in the container
-		if !te.sandboxMgr.BinaryAvailable(task.ID, "pi") {
-			te.failTask(task, projectID, fmt.Sprintf("Agent binary not found in sandbox container for %s", agentName), "agent_not_available")
-			return
-		}
-
-		logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("creating runner in container (agent=%s, session=%s)", agentName, sessionName)
-		runner, err = agent.NewAgentRunner(ctx, ext, te.sandboxMgr, task.ID, worktreePath, sessionName, true)
-	} else {
-		// Agent runs on the host.
-		// The adapter's SubprocessConfig() sets config dir env vars from the
-		// extension's sandbox_mount declaration, so no agent-specific code needed here.
-		logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("creating runner (cwd=%s, session=%s)", worktreePath, sessionName)
-		runner, err = agent.NewAgentRunner(ctx, ext, nil, task.ID, worktreePath, sessionName, false)
+	// The adapter is what knows which binary the agent runs, so it is loaded and asked before
+	// anything goes looking for that binary in the container.
+	prepared, err := te.prepareAgent(ctx, ext, task.ID, worktreePath, sessionName, sandboxEnabled)
+	if err != nil {
+		te.failTask(task, projectID, err.Error(), agentStartErrorCode(err))
+		return
 	}
+	logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("creating runner (agent=%s, binary=%s, sandbox=%v, cwd=%s)", agentName, prepared.Binary(), sandboxEnabled, worktreePath)
+	runner, err := prepared.Start(te.sandboxMgr, task.ID)
 	if err != nil {
 		te.failTask(task, projectID, fmt.Sprintf("Failed to start agent: %v", err), "agent_start_failed")
 		return
@@ -490,6 +479,63 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	if task.ParentTaskID != "" {
 		_ = te.AutoStartNextSibling(projectID, task.ID, task.ParentTaskID)
 	}
+}
+
+// agentBinaries is the container-side question the agent pre-flight asks. *sandbox.SandboxManager
+// answers it for real; a test answers it to record which name was asked about, because which name
+// is asked about is the whole content of the pre-flight.
+type agentBinaries interface {
+	BinaryAvailable(taskID, binary string) bool
+}
+
+// errAgentBinaryNotAvailable marks the refusal that a task's sandbox container does not hold the
+// binary its agent adapter names. It keeps its own code all the way to the browser, where a missing
+// binary reads differently from an agent that failed to start.
+var errAgentBinaryNotAvailable = errors.New("agent binary not available in the sandbox container")
+
+// agentStartErrorCode picks the code a start that never reached the event loop reports.
+func agentStartErrorCode(err error) string {
+	if errors.Is(err, errAgentBinaryNotAvailable) {
+		return "agent_not_available"
+	}
+	return "agent_start_failed"
+}
+
+// binaryProber answers the container question for this executor: whatever was injected, else the
+// task sandbox manager, else nothing - and "nothing" is not "available".
+func (te *TaskExecutor) binaryProber() agentBinaries {
+	if te.agentBinaries != nil {
+		return te.agentBinaries
+	}
+	if te.sandboxMgr != nil {
+		return te.sandboxMgr
+	}
+	return nil
+}
+
+// prepareAgent loads an agent extension's adapter and, for a sandboxed task, checks that the
+// container holds the binary that adapter named. The order is the point: the adapter is the only
+// place that name exists, so the container cannot be asked about it beforehand.
+func (te *TaskExecutor) prepareAgent(ctx context.Context, ext *extensions.Extension, taskID, worktreePath, sessionName string, sandboxEnabled bool) (*agent.Prepared, error) {
+	prepared, err := agent.PrepareAgent(ctx, ext, worktreePath, sessionName, sandboxEnabled)
+	if err != nil {
+		return nil, err
+	}
+	if !sandboxEnabled {
+		return prepared, nil
+	}
+
+	prober := te.binaryProber()
+	if prober == nil {
+		prepared.Close()
+		return nil, fmt.Errorf("agent %q runs in a sandbox container and this server has none", ext.Name)
+	}
+	if !prober.BinaryAvailable(taskID, prepared.Binary()) {
+		prepared.Close()
+		return nil, fmt.Errorf("agent %q runs %q, which is not available in the sandbox container: %w",
+			ext.Name, prepared.Binary(), errAgentBinaryNotAvailable)
+	}
+	return prepared, nil
 }
 
 // handleAgentTurnComplete handles post-turn logic after an agent turn completes.

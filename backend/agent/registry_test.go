@@ -580,3 +580,47 @@ func TestRegistry_GetAgentSandboxTemplatesWithOverride(t *testing.T) {
 		t.Errorf("Mounts[0].ContainerPath = %q, want /root/.pi/agent (from config)", sb.Mounts[0].ContainerPath)
 	}
 }
+
+// TestRegistry_EmittedProviderURLsParseBack holds the URL scheme together in both directions:
+// every provider URL ToProviders emits parses back through types.ParseAgentURL to the extension it
+// came from, and every enabled agent extension is emitted. A URL the parser refuses is a provider
+// the UI can select and no task can run, and a missing row is an installed agent nobody can pick.
+func TestRegistry_EmittedProviderURLsParseBack(t *testing.T) {
+	store := &mockExtensionStore{
+		extensions: []ext.Extension{
+			{Name: "pi", Type: ext.ExtensionTypeAgent, Enabled: true},
+			{Name: "claude-code", Type: ext.ExtensionTypeAgent, Enabled: true},
+			{Name: "disabled-agent", Type: ext.ExtensionTypeAgent, Enabled: false},
+			{Name: "gopls", Type: ext.ExtensionTypeLSP, Enabled: true},
+		},
+	}
+	registry := NewAgentRegistry(store, nil)
+
+	providers := registry.ToProviders()
+	emitted := make(map[string]bool, len(providers))
+	for _, p := range providers {
+		emitted[p.Name] = true
+		name, ok := types.ParseAgentURL(p.URL)
+		if !ok {
+			t.Errorf("provider %q has URL %q that ParseAgentURL refuses", p.Name, p.URL)
+			continue
+		}
+		if name != p.Name {
+			t.Errorf("ParseAgentURL(%q) = %q, want the provider's own name %q", p.URL, name, p.Name)
+		}
+		if got := registry.Lookup(p.URL); got == nil || got.Name != p.Name {
+			t.Errorf("Lookup(%q) resolved to %v, want extension %q", p.URL, got, p.Name)
+		}
+	}
+
+	for _, want := range registry.List() {
+		if !emitted[want.Name] {
+			t.Errorf("enabled agent %q has no provider row", want.Name)
+		}
+	}
+	for _, forbidden := range []string{"disabled-agent", "gopls"} {
+		if emitted[forbidden] {
+			t.Errorf("provider list emitted %q, which is not an enabled agent extension", forbidden)
+		}
+	}
+}

@@ -79,6 +79,10 @@ type TaskExecutor struct {
 	worktreeMgr   *git.WorktreeManager
 	sandboxMgr    *sandbox.SandboxManager
 	agentRegistry *agent.AgentRegistry
+	// agentBinaries answers whether a task's sandbox container holds a binary. NewTaskExecutor wires
+	// the sandbox manager here; a test injects a recorder, since which name the agent pre-flight asks
+	// about is the behaviour under test.
+	agentBinaries agentBinaries
 	lspMgr        lspManager
 	commitQueue   *CommitQueue
 	gate          *ConcurrencyGate // per-LLM-request in-flight limit (incl. utility calls)
@@ -317,6 +321,12 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStr
 	if lspMgr != nil {
 		lspMgrI = lspMgr
 	}
+	// Same reason for the pre-flight's container question: a nil *SandboxManager stored in the
+	// interface is not nil, and the pre-flight must read "no sandbox" as "not available".
+	var binaries agentBinaries
+	if sandboxMgr != nil {
+		binaries = sandboxMgr
+	}
 	te := &TaskExecutor{
 		store:         store,
 		configStore:   configStore,
@@ -324,6 +334,7 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStr
 		worktreeMgr:   worktreeMgr,
 		sandboxMgr:    sandboxMgr,
 		agentRegistry: agentRegistry,
+		agentBinaries: binaries,
 		lspMgr:        lspMgrI,
 		commitQueue:   commitQueue,
 		gate:          NewConcurrencyGate(),
@@ -1329,8 +1340,8 @@ func (te *TaskExecutor) getAgentRunner(ctx context.Context, projectID, taskID st
 	}
 
 	// Extract agent name from URL: "agent://pi" -> "pi"
-	agentName := strings.TrimPrefix(task.LlamaServerURL, "agent://")
-	if agentName == "" || agentName == task.LlamaServerURL {
+	agentName, ok := types.ParseAgentURL(task.LlamaServerURL)
+	if !ok {
 		return nil, fmt.Errorf("invalid agent URL: %s", task.LlamaServerURL)
 	}
 

@@ -356,11 +356,15 @@ func (s *Server) handleFetchModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.HasPrefix(req.LlamaServerURL, "agent://") {
+	if types.IsAgentURL(req.LlamaServerURL) {
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
 
-		agentName := strings.TrimPrefix(req.LlamaServerURL, "agent://")
+		agentName, ok := types.ParseAgentURL(req.LlamaServerURL)
+		if !ok {
+			httputil.JSONError(w, http.StatusBadRequest, "agent URL must name exactly one extension: "+req.LlamaServerURL)
+			return
+		}
 		ext := s.agentRegistry.LookupByName(agentName)
 		if ext == nil {
 			httputil.JSONError(w, http.StatusNotFound, fmt.Sprintf("Agent %q not found", agentName))
