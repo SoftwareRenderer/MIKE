@@ -32,7 +32,7 @@ func TestMergeConflictResolution_StagesOnlyConflictedFiles(t *testing.T) {
 		HasMergeConflict: true,
 		CurrentThreadID:  "thread-1",
 	}
-	te.rawStore().CreateTask(task)
+	te.store.CreateTask(task)
 
 	// Create task branch with a change to shared.txt
 	runGit(t, repoDir, "checkout", "-b", "task/conflict-resolve")
@@ -106,7 +106,7 @@ func TestMergeConflictResolution_StagesOnlyConflictedFiles(t *testing.T) {
 	unlockStash2()
 
 	// 4. Clear merge conflict flag
-	_ = te.rawStore().SetTaskMergeConflict(taskID, projectID, false)
+	_ = te.store.SetTaskMergeConflict(taskID, projectID, false)
 
 	// --- Verify ---
 
@@ -172,7 +172,7 @@ func TestMergeConflictResolution_MultipleConflictedFiles(t *testing.T) {
 		HasMergeConflict: true,
 		CurrentThreadID:  "thread-1",
 	}
-	te.rawStore().CreateTask(task)
+	te.store.CreateTask(task)
 
 	// Create task branch with changes to multiple files
 	runGit(t, repoDir, "checkout", "-b", "task/multi-conflict")
@@ -264,7 +264,7 @@ func TestMergeConflictResolution_CommitMessage(t *testing.T) {
 		HasMergeConflict: true,
 		CurrentThreadID:  "thread-1",
 	}
-	te.rawStore().CreateTask(task)
+	te.store.CreateTask(task)
 
 	// Set up conflict
 	runGit(t, repoDir, "checkout", "-b", "task/commit-msg")
@@ -328,7 +328,7 @@ func TestMergeConflictResolution_WithFinalMerge(t *testing.T) {
 		AutoMerge:        true,
 		CurrentThreadID:  "thread-1",
 	}
-	te.rawStore().CreateTask(task)
+	te.store.CreateTask(task)
 
 	// Create task branch with a change
 	runGit(t, repoDir, "checkout", "-b", "task/full-flow")
@@ -374,10 +374,10 @@ func TestMergeConflictResolution_WithFinalMerge(t *testing.T) {
 	unlockStash7 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "pop")
 	unlockStash7()
-	_ = te.rawStore().SetTaskMergeConflict(taskID, projectID, false)
+	_ = te.store.SetTaskMergeConflict(taskID, projectID, false)
 
 	// --- Attempt final merge (task branch into master) ---
-	task, _ = te.rawStore().GetTaskByID(taskID)
+	task, _ = te.store.GetTaskByID(taskID)
 	if task.HasMergeConflict {
 		t.Fatal("task should not have merge conflict after resolution")
 	}
@@ -418,7 +418,7 @@ func TestMergeConflictResolution_StashRestored(t *testing.T) {
 		HasMergeConflict: true,
 		CurrentThreadID:  "thread-1",
 	}
-	te.rawStore().CreateTask(task)
+	te.store.CreateTask(task)
 
 	// Create task branch
 	runGit(t, repoDir, "checkout", "-b", "task/stash-restore")
@@ -507,7 +507,7 @@ func TestMergeConflictResolution_NoConflictedFilesAutoContinues(t *testing.T) {
 		HasMergeConflict: false,
 		CurrentThreadID:  "thread-1",
 	}
-	te.rawStore().CreateTask(task)
+	te.store.CreateTask(task)
 
 	// Create task branch with a file
 	runGit(t, repoDir, "checkout", "-b", "task/auto-resolve")
@@ -534,7 +534,7 @@ func TestMergeConflictResolution_NoConflictedFilesAutoContinues(t *testing.T) {
 	}
 
 	// Verify no merge conflict flag
-	task, _ = te.rawStore().GetTaskByID(taskID)
+	task, _ = te.store.GetTaskByID(taskID)
 	if task.HasMergeConflict {
 		t.Error("should not have merge conflict flag for clean merge")
 	}
@@ -569,7 +569,7 @@ func TestMergeConflictResolution_UnresolvedSkipped(t *testing.T) {
 		HasMergeConflict: true,
 		CurrentThreadID:  "thread-1",
 	}
-	te.rawStore().CreateTask(task)
+	te.store.CreateTask(task)
 
 	// Create task branch with a change
 	runGit(t, repoDir, "checkout", "-b", "task/unresolved")
@@ -636,7 +636,7 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 		ModelName:       "test-model",
 		CurrentThreadID: "thread-parent",
 	}
-	te.rawStore().CreateTask(parent)
+	te.store.CreateTask(parent)
 
 	// Create parent branch
 	runGit(t, repoDir, "checkout", "-b", "task/"+parentID)
@@ -665,7 +665,7 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 		ModelName:       "test-model",
 		CurrentThreadID: "thread-subtask",
 	}
-	te.rawStore().CreateTask(subtask)
+	te.store.CreateTask(subtask)
 
 	// Create subtask branch from parent branch
 	runGitInDir(t, parentWtPath, "checkout", "-b", "task/"+subtaskID)
@@ -711,10 +711,10 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 	unlockStash12 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(subtaskWtPath, "stash", "pop")
 	unlockStash12()
-	_ = te.rawStore().SetTaskMergeConflict(subtaskID, projectID, false)
+	_ = te.store.SetTaskMergeConflict(subtaskID, projectID, false)
 
 	// --- Merge subtask into parent branch ---
-	subtaskFromDB, _ := te.rawStore().GetTaskByID(subtaskID)
+	subtaskFromDB, _ := te.store.GetTaskByID(subtaskID)
 	err := te.MergeBranch(projectID, subtaskID, subtaskFromDB)
 	if err != nil {
 		t.Fatalf("MergeBranch failed: %v", err)
@@ -752,7 +752,7 @@ func TestMergeConflictResolution_PartialResolution_SkipsCommit(t *testing.T) {
 		HasMergeConflict: true,
 		CurrentThreadID:  "thread-1",
 	}
-	te.rawStore().CreateTask(task)
+	te.store.CreateTask(task)
 
 	// Create task branch with changes to two files
 	runGit(t, repoDir, "checkout", "-b", "task/partial-resolve")
@@ -830,7 +830,7 @@ func TestMergeConflictResolution_CommitIsMergeCommit(t *testing.T) {
 		HasMergeConflict: true,
 		CurrentThreadID:  "thread-1",
 	}
-	te.rawStore().CreateTask(task)
+	te.store.CreateTask(task)
 
 	// Create task branch with a change
 	runGit(t, repoDir, "checkout", "-b", "task/merge-commit")
@@ -900,7 +900,7 @@ func TestCommitConflictResolution_DoesNotSweepUntrackedFiles(t *testing.T) {
 		AutoMerge:        true,
 		CurrentThreadID:  "thread-1",
 	}
-	if err := te.rawStore().CreateTask(task); err != nil {
+	if err := te.store.CreateTask(task); err != nil {
 		t.Fatal(err)
 	}
 
@@ -985,7 +985,7 @@ func newSyncConflictFixture(t *testing.T, taskID, branch string, autoMerge bool)
 		AutoMerge:        autoMerge,
 		CurrentThreadID:  "thread-1",
 	}
-	if err := te.rawStore().CreateTask(task); err != nil {
+	if err := te.store.CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 
@@ -1026,7 +1026,7 @@ func TestCommitConflictResolution_CommitAndDoneClickMergesWithAutoMergeOff(t *te
 	os.WriteFile(filepath.Join(fx.wtPath, "shared.txt"), []byte(syncResolved), 0o644)
 	fx.te.ArmCommitAndDone(fx.taskID)
 
-	task, err := fx.te.rawStore().GetTaskByID(fx.taskID)
+	task, err := fx.te.store.GetTaskByID(fx.taskID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
@@ -1062,7 +1062,7 @@ func TestCommitConflictResolution_NoClickNoMergeWithAutoMergeOff(t *testing.T) {
 	fx := newSyncConflictFixture(t, "noclick-merge-task", "task/noclick-merge", false)
 	os.WriteFile(filepath.Join(fx.wtPath, "shared.txt"), []byte(syncResolved), 0o644)
 
-	task, err := fx.te.rawStore().GetTaskByID(fx.taskID)
+	task, err := fx.te.store.GetTaskByID(fx.taskID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
@@ -1092,7 +1092,7 @@ func TestCommitConflictResolution_StillConflictedKeepsTheClick(t *testing.T) {
 	runGit(t, fx.repoDir, "commit", "-m", "master moved")
 
 	fx.te.ArmCommitAndDone(fx.taskID)
-	task, err := fx.te.rawStore().GetTaskByID(fx.taskID)
+	task, err := fx.te.store.GetTaskByID(fx.taskID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
@@ -1113,7 +1113,7 @@ func TestCommitConflictResolution_StillConflictedKeepsTheClick(t *testing.T) {
 
 	// Resolve the new conflict and run it again: the click still completes.
 	os.WriteFile(filepath.Join(fx.wtPath, "shared.txt"), []byte(syncResolved), 0o644)
-	task, err = fx.te.rawStore().GetTaskByID(fx.taskID)
+	task, err = fx.te.store.GetTaskByID(fx.taskID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}

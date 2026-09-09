@@ -182,24 +182,9 @@ func IsInternalFile(path string) bool {
 	return false
 }
 
-// worktreeStore is the ids and branches that tie a worktree to a task - the only
-// database access a git runner needs.
-type worktreeStore interface {
-	GetAllTaskBranches() ([]string, error)
-	GetAllTaskIDs() ([]string, error)
-	GetAllThreadIDs() ([]string, error)
-	GetProject(id string) (*types.Project, error)
-	GetTaskByID(taskID string) (*types.Task, error)
-	GetTasksByProject(projectID string) ([]types.Task, error)
-	ListProjects() ([]types.Project, error)
-	UpdateProjectOriginBranch(id string, branch string) error
-}
-
-var _ worktreeStore = (*store.Store)(nil)
-
 // WorktreeManager handles git worktree operations.
 type WorktreeManager struct {
-	store       worktreeStore
+	store       *store.Store
 	configStore *config.ConfigStore
 	worktreeMu  sync.Map // per-project mutex for worktree creation
 	stashMu     sync.Map // per-project mutex for stash operations
@@ -737,7 +722,7 @@ func (wm *WorktreeManager) ResolveMainBranch(projectID, taskID, title, canonical
 // titled tasks, so the GC keeps a slug-named Main branch even when a fork is the active branch.
 // The slug comes from types.SlugifyBranchName, the same function that named the branch: a GC
 // parsing a different shape deletes a live branch.
-func taskSlugPrefixSet(store worktreeStore, projectID string) map[string]bool {
+func taskSlugPrefixSet(store *store.Store, projectID string) map[string]bool {
 	set := make(map[string]bool)
 	tasks, err := store.GetTasksByProject(projectID)
 	if err != nil {

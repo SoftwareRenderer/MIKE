@@ -23,22 +23,9 @@ import (
 	"kanban/pkg/logging"
 )
 
-// gitStore is what the git endpoints read before shelling out to git.
-type gitStore interface {
-	GetProject(id string) (*types.Project, error)
-	GetTask(projectID, taskID string) (*types.Task, error)
-	GetTaskByID(taskID string) (*types.Task, error)
-	GetThread(threadID string) (*types.TaskThread, error)
-}
-
-var _ gitStore = (*store.Store)(nil)
-
 // GitHandler handles git operations.
 type GitHandler struct {
-	store gitStore
-	// diffs is the store surface the done-task diff is materialized against — a separate
-	// field so the four diff methods do not have to join gitStore just for this call.
-	diffs       stream.DiffStore
+	store       *store.Store
 	worktreeMgr *git.WorktreeManager
 	diffCache   sync.Map // taskID -> *git.TaskDiff (full result including untracked file content)
 	// getWorktreeMutex locks the per-task worktree and returns the function that releases it.
@@ -52,7 +39,7 @@ type GitHandler struct {
 }
 
 func NewGitHandler(store *store.Store, worktreeMgr *git.WorktreeManager) *GitHandler {
-	return &GitHandler{store: store, diffs: store, worktreeMgr: worktreeMgr}
+	return &GitHandler{store: store, worktreeMgr: worktreeMgr}
 }
 
 // SetWorktreeMutex sets the callback for acquiring per-task worktree mutexes.
@@ -818,7 +805,7 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	// full (untruncated) requests still go through the live computation.
 	if task.Status == types.StatusDone && task.BranchTip != "" && customBase == "" && checkpointIdxStr == "" && !fullDiff &&
 		(headRef == "" || headRef == task.BranchTip) {
-		if d, err := stream.MaterializeDoneTaskDiff(h.diffs, h.worktreeMgr, projectID, task); err == nil && d != nil && d.HasChanges {
+		if d, err := stream.MaterializeDoneTaskDiff(h.store, h.worktreeMgr, projectID, task); err == nil && d != nil && d.HasChanges {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(d.DiffJSON))

@@ -26,34 +26,9 @@ import (
 	"kanban/pkg/sandboxruntime"
 )
 
-// projectStore is the project lifecycle: creation, deletion, stats, sandbox columns.
-type projectStore interface {
-	CreateProject(p *types.Project) error
-	DeleteProject(id string) error
-	DeleteProjectStats(projectID, modelName, providerName string) error
-	GetAllProjectCounts() map[string]types.ProjectCounts
-	GetProject(id string) (*types.Project, error)
-	GetProjectStats(projectID string) (*types.ProjectStats, error)
-	GetTasksByProject(projectID string) ([]types.Task, error)
-	GetThreadsByTask(taskID string) ([]types.TaskThread, error)
-	ListProjects() ([]types.Project, error)
-	UpdateProject(id string, name string) (*types.Project, error)
-	UpdateProjectSandboxCapabilities(id string, capabilities []string) error
-	UpdateProjectSandboxDockerfilePath(id string, path string) error
-	UpdateProjectSandboxEnabled(id string, enabled bool) error
-	UpdateProjectSandboxEnvs(id string, envs []types.SandboxEnv) error
-	UpdateProjectSandboxForwardPorts(id string, ports []types.PortForward) error
-	UpdateProjectSandboxImage(id string, image string) error
-	UpdateProjectSandboxMemoryLimit(id string, limit int) error
-	UpdateProjectSandboxMounts(id string, mounts []types.SandboxMount) error
-	UpdateProjectSandboxNetworkIsolation(id string, enabled bool) error
-}
-
-var _ projectStore = (*store.Store)(nil)
-
 // ProjectHandler handles project CRUD operations.
 type ProjectHandler struct {
-	store       projectStore
+	store       *store.Store
 	configStore *config.ConfigStore
 	worktreeMgr *git.WorktreeManager
 	terminalMgr *term.TerminalManager

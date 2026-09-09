@@ -39,7 +39,7 @@ type doneDiffResponse struct {
 // branch or empty diff) — the same condition under which the legacy code
 // sends no stats frame. Errors are returned when the diff cannot be computed
 // at all (e.g. repo missing); callers should fall back to the legacy path.
-func MaterializeDoneTaskDiff(st DiffStore, wm *git.WorktreeManager, projectID string, task *types.Task) (*DoneTaskDiff, error) {
+func MaterializeDoneTaskDiff(st *store.Store, wm *git.WorktreeManager, projectID string, task *types.Task) (*DoneTaskDiff, error) {
 	if task.Branch == "" {
 		return nil, nil
 	}
@@ -122,7 +122,7 @@ func MaterializeDoneTaskDiff(st DiffStore, wm *git.WorktreeManager, projectID st
 }
 
 // persistSnapshot stores a freshly computed done-task snapshot.
-func persistSnapshot(st DiffStore, task *types.Task, baseRef, headRef string, statsJSON, diffJSON []byte) {
+func persistSnapshot(st *store.Store, task *types.Task, baseRef, headRef string, statsJSON, diffJSON []byte) {
 	if err := st.UpsertTaskDiffSnapshot(&store.TaskDiffSnapshot{
 		TaskID:     task.ID,
 		ProjectID:  task.ProjectID,
@@ -139,7 +139,7 @@ func persistSnapshot(st DiffStore, task *types.Task, baseRef, headRef string, st
 // diff: the pinned BaseCommit when captured (authoritative — required for a
 // correct diff after fast-forward merges, deliberately NOT re-resolved for
 // usability), otherwise the same resolved baseline the live paths use.
-func resolveDoneTaskBaseRef(st DiffStore, wm *git.WorktreeManager, projectID string, task *types.Task) (string, error) {
+func resolveDoneTaskBaseRef(st *store.Store, wm *git.WorktreeManager, projectID string, task *types.Task) (string, error) {
 	if task.BaseCommit != "" {
 		return task.BaseCommit, nil
 	}
@@ -149,7 +149,7 @@ func resolveDoneTaskBaseRef(st DiffStore, wm *git.WorktreeManager, projectID str
 // computeDoneTaskDiff computes the canonical commit-to-commit diff, using the
 // task worktree when it exists and falling back to the project repo after
 // worktree deletion.
-func computeDoneTaskDiff(wm *git.WorktreeManager, st DiffStore, projectID string, task *types.Task, baseRef, headRef string) (*git.TaskDiff, error) {
+func computeDoneTaskDiff(wm *git.WorktreeManager, st *store.Store, projectID string, task *types.Task, baseRef, headRef string) (*git.TaskDiff, error) {
 	diffResult, err := wm.GetTaskDiff(task.ID, baseRef, headRef)
 	if err == nil {
 		return diffResult, nil

@@ -16,7 +16,7 @@ func TestBranchChildFrom_RecreatesMissingParentBranch(t *testing.T) {
 
 	parentID := "parent-branch-gone"
 	parentBranch := "task/" + parentID
-	if err := te.rawStore().CreateTask(&types.Task{
+	if err := te.store.CreateTask(&types.Task{
 		ID:        parentID,
 		ProjectID: projectID,
 		Title:     "Merged and cleaned up",
@@ -43,7 +43,7 @@ func TestBranchChildFrom_RecreatesMissingParentBranch(t *testing.T) {
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-	if err := te.rawStore().CreateTask(child); err != nil {
+	if err := te.store.CreateTask(child); err != nil {
 		t.Fatalf("create child: %v", err)
 	}
 
@@ -59,7 +59,7 @@ func TestBranchChildFrom_RecreatesMissingParentBranch(t *testing.T) {
 	}
 
 	// The ref comes back under the same name.
-	reloaded, err := te.rawStore().GetTaskByID(parentID)
+	reloaded, err := te.store.GetTaskByID(parentID)
 	if err != nil || reloaded.Branch != parentBranch {
 		t.Errorf("parent branch = %q (err %v), want %s", reloaded.Branch, err, parentBranch)
 	}

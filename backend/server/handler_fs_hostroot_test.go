@@ -230,7 +230,7 @@ func TestProjectScopedListingIgnoresTheHostJail(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(projPath, "main.go"), []byte("package main\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.rawStore().CreateProject(&types.Project{
+	if err := s.store.CreateProject(&types.Project{
 		ID: "hostroot-project", Name: "Hostroot", Path: projPath,
 	}); err != nil {
 		t.Fatal(err)

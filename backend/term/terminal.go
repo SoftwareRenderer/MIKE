@@ -152,21 +152,11 @@ type sandboxOps interface {
 	GetContainerPorts(taskID string) ([]types.AssignedPort, error)
 }
 
-// terminalStore is the read-only persistence a terminal session needs: which project a
-// task belongs to, and that project's sandbox settings.
-type terminalStore interface {
-	GetProject(id string) (*types.Project, error)
-	GetTask(projectID, taskID string) (*types.Task, error)
-	GetTasksByProject(projectID string) ([]types.Task, error)
-}
-
-var _ terminalStore = (*store.Store)(nil)
-
 // TerminalManager manages per-task persistent terminal sessions.
 type TerminalManager struct {
 	mu                     sync.RWMutex
 	sessions               map[string]*taskTerminal
-	store                  terminalStore
+	store                  *store.Store
 	cfgStore               *config.ConfigStore
 	sandboxMgr             sandboxOps
 	agentRegistry          *agent.AgentRegistry

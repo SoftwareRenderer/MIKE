@@ -100,10 +100,10 @@ func TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart(t *testing.T) {
 		CreatedAt:       time.Now().UTC(),
 		UpdatedAt:       time.Now().UTC(),
 	}
-	if err := te.rawStore().CreateTask(task); err != nil {
+	if err := te.store.CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if err := te.rawStore().CreateTaskMessage(&types.TaskMessage{
+	if err := te.store.CreateTaskMessage(&types.TaskMessage{
 		ID: uuid.New().String(), TaskID: taskID, ThreadID: "thread-1",
 		Role: "user", Content: "Please do the thing", CreatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -123,7 +123,7 @@ func TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart(t *testing.T) {
 	// Wait for the summarization LLM call to be in flight, then verify the
 	// flag is set (the precondition the ordering fix must preserve).
 	waitFor(t, 10*time.Second, "flag to be set while summarization is in flight", func() bool {
-		got, err := te.rawStore().GetTaskByID(taskID)
+		got, err := te.store.GetTaskByID(taskID)
 		return err == nil && got != nil && got.Summarizing
 	})
 	// The mock holds the summarization call open until release is closed, so it is still in
@@ -141,7 +141,7 @@ func TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart(t *testing.T) {
 
 	// Send a user message while the flag is set: HandleSend persists the
 	// message first, then ForwardUserMessage must block the lazy start.
-	if err := te.rawStore().CreateTaskMessage(&types.TaskMessage{
+	if err := te.store.CreateTaskMessage(&types.TaskMessage{
 		ID: uuid.New().String(), TaskID: taskID, ThreadID: "thread-1",
 		Role: "user", Content: "Message sent during summarization", CreatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -166,7 +166,7 @@ func TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart(t *testing.T) {
 	// overwritten as soon as the turn ends, and this mock answers fast enough that a
 	// whole turn can fit between two polls. A persisted assistant message is monotone.
 	waitFor(t, 30*time.Second, "the blocked message to lazy-start a turn (assistant reply persisted)", func() bool {
-		msgs, err := te.rawStore().GetTaskMessages(taskID, "thread-1")
+		msgs, err := te.store.GetTaskMessages(taskID, "thread-1")
 		if err != nil {
 			return false
 		}
@@ -182,11 +182,11 @@ func TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart(t *testing.T) {
 	// its task copy at slot acquisition), the DB flag must be false — and it
 	// must NOT flip back to true from a stale in-memory copy.
 	waitFor(t, 5*time.Second, "flag to be cleared after summarization completes", func() bool {
-		got, err := te.rawStore().GetTaskByID(taskID)
+		got, err := te.store.GetTaskByID(taskID)
 		return err == nil && got != nil && !got.Summarizing
 	})
 	for i := 0; i < 60; i++ {
-		got, err := te.rawStore().GetTaskByID(taskID)
+		got, err := te.store.GetTaskByID(taskID)
 		if err == nil && got != nil && got.Summarizing {
 			t.Fatalf("summarizing flag was resurrected after summarization completed (stale executor write)")
 		}
@@ -194,7 +194,7 @@ func TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart(t *testing.T) {
 	}
 
 	// The summary must have been persisted.
-	msgs, err := te.rawStore().GetTaskMessages(taskID, "thread-1")
+	msgs, err := te.store.GetTaskMessages(taskID, "thread-1")
 	if err != nil {
 		t.Fatalf("get messages: %v", err)
 	}

@@ -29,32 +29,9 @@ import (
 	"kanban/pkg/logging"
 )
 
-// taskStore is the task lifecycle the API drives. It has no execution-state methods
-// on purpose - backend/exec owns that.
-type taskStore interface {
-	ClearTitleGenerating(projectID, taskID string) error
-	CreateTask(t *types.Task) error
-	CreateTaskMessage(m *types.TaskMessage) error
-	CreateThread(th *types.TaskThread) error
-	DeleteTask(projectID, taskID string) error
-	DeleteTaskDiffSnapshot(taskID string) error
-	GetAllDescendants(taskID string) ([]types.Task, error)
-	GetChildren(taskID string) ([]types.Task, error)
-	GetProject(id string) (*types.Project, error)
-	GetTask(projectID, taskID string) (*types.Task, error)
-	GetTaskByID(taskID string) (*types.Task, error)
-	GetTasksByProject(projectID string) ([]types.Task, error)
-	GetThread(threadID string) (*types.TaskThread, error)
-	GetThreadsByTask(taskID string) ([]types.TaskThread, error)
-	SetTaskTitle(projectID, taskID, title string) error
-	UpdateTask(t *types.Task) error
-}
-
-var _ taskStore = (*store.Store)(nil)
-
 // TaskHandler handles task CRUD operations.
 type TaskHandler struct {
-	store          taskStore
+	store          *store.Store
 	boardStreamMgr *stream.AppStreamManager
 	configStore    *config.ConfigStore
 	terminalMgr    *term.TerminalManager
@@ -531,7 +508,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 				// All subtasks done — start this task's own execution.
 				var err error
 				if task.ParentTaskID != "" {
-					err = h.StartSubtask(projectID, taskID, false)
+					err = h.executor.StartSubtask(projectID, taskID, false)
 				} else {
 					err = h.executor.StartTask(projectID, taskID, false)
 				}
@@ -548,7 +525,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 			// (allowed Pending: waiting on the children).
 		} else if task.ParentTaskID != "" {
 			// Leaf subtask: subtask-aware start (branch from parent, inherit model config)
-			if err := h.StartSubtask(projectID, taskID, false); err != nil {
+			if err := h.executor.StartSubtask(projectID, taskID, false); err != nil {
 				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("subtask start failed: %v", err)
 				task.ExecutionState = types.ExecStateIdle
 				task.Status = originalStatus
@@ -597,17 +574,12 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 
 	// If a subtask moved to review/done, auto-start the next sibling
 	if task.ParentTaskID != "" && (targetStatus == types.StatusReview || targetStatus == types.StatusDone) {
-		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID)
+		_ = h.executor.AutoStartNextSibling(projectID, taskID, task.ParentTaskID)
 	}
 
 	h.refreshTaskPorts(task)
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
-}
-
-// autoStartNextSibling delegates to the executor's sibling auto-start logic.
-func (h *TaskHandler) autoStartNextSibling(projectID, finishedTaskID, parentTaskID string) error {
-	return h.executor.AutoStartNextSibling(projectID, finishedTaskID, parentTaskID)
 }
 
 // moveAllDescendantsToInProgress recursively moves all descendant tasks (children, grandchildren, etc.)
@@ -1040,7 +1012,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 
 	// If a subtask was marked done, auto-start the next sibling
 	if task.ParentTaskID != "" {
-		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID)
+		_ = h.executor.AutoStartNextSibling(projectID, taskID, task.ParentTaskID)
 	}
 
 	h.refreshTaskPorts(task)
@@ -1479,20 +1451,20 @@ func (h *TaskHandler) subtasksToStart(parent *types.Task, subtasks []types.Task)
 		}
 		return ids
 	}
-	if id := h.SelectSubtaskToStart(parent, subtasks); id != "" {
+	if id := h.executor.SelectSubtaskToStart(parent, subtasks); id != "" {
 		return []string{id}
 	}
 	return nil
 }
 
-// startSubtaskIDs starts each subtask as an autostarted execution (no human
-// present to answer ask_question). Per-start failures are logged but not
-// fatal, so one error doesn't block the other parallel siblings. Returns the
-// last requested ID, whether any start succeeded, and the first error (nil if
-// every start succeeded).
+// startSubtaskIDs starts each subtask autostarted — what that decides is on
+// TaskExecutor.StartSubtask. Per-start failures are logged but not fatal, so one
+// error doesn't block the other parallel siblings. Returns the last requested
+// ID, whether any start succeeded, and the first error (nil if every start
+// succeeded).
 func (h *TaskHandler) startSubtaskIDs(projectID, taskID, logPrefix string, ids []string) (lastID string, anyStarted bool, firstErr error) {
 	for _, id := range ids {
-		if err := h.StartSubtask(projectID, id, true); err != nil {
+		if err := h.executor.StartSubtask(projectID, id, true); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -1516,24 +1488,6 @@ func (h *TaskHandler) respondWithStartedTask(w http.ResponseWriter, projectID, t
 		h.boardStreamMgr.BroadcastTaskUpdated(projectID, startedTask)
 	}
 	httputil.JSONResponse(w, http.StatusOK, startedTask)
-}
-
-// SelectSubtaskToStart delegates to the executor's subtask selection logic.
-//
-// Start paths should prefer subtasksToStart, which honors the "run siblings in
-// parallel" setting (it returns every startable subtask when that is on).
-// Use this directly only when a single pick is genuinely wanted.
-func (h *TaskHandler) SelectSubtaskToStart(parent *types.Task, subtasks []types.Task) string {
-	return h.executor.SelectSubtaskToStart(parent, subtasks)
-}
-
-// StartSubtask delegates to the executor.
-// The autostarted flag records whether the subtask runs autonomously on behalf
-// of its parent (no human present to answer ask_question): true when started via
-// HandleStart or AutoStartNextSibling, false only when the user
-// explicitly starts a single subtask (HandleStartSubtask).
-func (h *TaskHandler) StartSubtask(projectID, subtaskID string, autostarted bool) error {
-	return h.executor.StartSubtask(projectID, subtaskID, autostarted)
 }
 
 // StopTaskAndDescendants stops a task and all its in-flight descendants.

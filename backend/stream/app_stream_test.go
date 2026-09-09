@@ -421,12 +421,12 @@ func TestTaskBufferClearedOnTaskDeleted(t *testing.T) {
 	}
 }
 
-// TestNilStoreStaysNilAfterConstruction: a nil *Store assigned into the streamStore field
-// arrives as a non-nil interface holding a nil pointer, which every `asm.store == nil`
-// guard would read as "a store exists" and dereference.
+// TestNilStoreStaysNilAfterConstruction: a store-less manager must stay store-less, or
+// every `asm.store == nil` guard in this package reads as "a store exists". The guarded
+// path must stay callable with none.
 func TestNilStoreStaysNilAfterConstruction(t *testing.T) {
 	if asm := NewAppStreamManager(nil, nil); asm.store != nil {
-		t.Fatal("NewAppStreamManager(nil, nil) produced a non-nil store interface — the nil guards in this file are now dead code")
+		t.Fatal("NewAppStreamManager(nil, nil) produced a non-nil store — the nil guards in this file are now dead code")
 	}
 	// And the guarded path must actually be callable.
 	NewAppStreamManager(nil, nil).BroadcastProjectCounts()

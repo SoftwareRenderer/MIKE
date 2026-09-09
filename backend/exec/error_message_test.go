@@ -16,7 +16,7 @@ func TestFailTask_PersistsOneErrorAndStopsReplayingIt(t *testing.T) {
 	now := time.Now().UTC()
 
 	proj := &types.Project{ID: "proj-fail-once", Name: "Fail Once", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := e.rawStore().CreateProject(proj); err != nil {
+	if err := e.store.CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	task := &types.Task{
@@ -82,7 +82,7 @@ func TestSendAgentStreamEvent_PersistsAgentError(t *testing.T) {
 	now := time.Now().UTC()
 
 	proj := &types.Project{ID: "proj-agent-err", Name: "Agent Err", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := e.rawStore().CreateProject(proj); err != nil {
+	if err := e.store.CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	task := &types.Task{

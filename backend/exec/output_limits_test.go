@@ -67,7 +67,7 @@ func TestReadFileCappedReadsAFileWithinTheLimit(t *testing.T) {
 func TestReadFileToolRefusesAFilePastTheLimit(t *testing.T) {
 	worktree := t.TempDir()
 	te := newReadTestExecutor(t, worktree)
-	task := makeTestTask(t, te.rawStore(), "proj-readcap", "task-readcap")
+	task := makeTestTask(t, te.store, "proj-readcap", "task-readcap")
 
 	path := filepath.Join(t.TempDir(), "huge.log")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o600)
