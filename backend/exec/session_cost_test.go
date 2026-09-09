@@ -210,3 +210,89 @@ func TestExecuteTask_PreservesSessionCostAcrossRun(t *testing.T) {
 		t.Fatalf("expected session cost to remain 0.5 after second run, got %f", got2.SessionCost)
 	}
 }
+
+// TestAccumulateAgentSessionCost_InheritsCarriedOverCost is the agent path's half of the rule
+// TestExecuteTask_PreservesSessionCostAcrossRun holds for the LLM path. The agent path reaches it
+// through a different door: it re-reads the task from the store before adding, so the base it
+// accumulates onto is the stored row, not the copy the executor started with.
+func TestAccumulateAgentSessionCost_InheritsCarriedOverCost(t *testing.T) {
+	te, s := newTestExecutorWithStore(t)
+	proj := createProject(t, s, "proj-agent-cost", "Agent Cost Proj")
+
+	task := &types.Task{
+		ID:          "agent-cost-task",
+		ProjectID:   proj.ID,
+		Title:       "Agent cost task",
+		Prompt:      "Do something",
+		SessionCost: 1.25, // spent by an earlier run, on another provider
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	te.accumulateAgentSessionCost(proj.ID, task, 0.5, "model-x", "")
+
+	if task.SessionCost != 1.75 {
+		t.Fatalf("task session cost = %f, want 1.75 (carried 1.25 + run 0.5)", task.SessionCost)
+	}
+	stored, err := s.GetTaskByID(task.ID)
+	if err != nil {
+		t.Fatalf("read task back: %v", err)
+	}
+	if stored.SessionCost != 1.75 {
+		t.Fatalf("stored session cost = %f, want 1.75 — the badge reads the row, not the caller's copy", stored.SessionCost)
+	}
+
+	stats, err := s.GetProjectStats(proj.ID)
+	if err != nil {
+		t.Fatalf("project stats: %v", err)
+	}
+	// The project sees this run's increment only; the carried cost was already counted there.
+	if stats.TotalCost != 0.5 {
+		t.Fatalf("project total cost = %f, want 0.5 — the increment, not the task total", stats.TotalCost)
+	}
+	// An empty provider name is answered by the default, not stored blank.
+	if len(stats.ByModel) != 1 || stats.ByModel[0].ProviderName == "" {
+		t.Fatalf("by-model stats = %+v, want one row with a provider name", stats.ByModel)
+	}
+}
+
+// TestAccumulateAgentSessionCost_ZeroCostRunKeepsTheCarriedValue pins the other half: a run that
+// spent nothing must neither touch the project stats nor drop the cost the task already carried.
+func TestAccumulateAgentSessionCost_ZeroCostRunKeepsTheCarriedValue(t *testing.T) {
+	te, s := newTestExecutorWithStore(t)
+	proj := createProject(t, s, "proj-agent-cost-zero", "Agent Cost Zero Proj")
+
+	task := &types.Task{
+		ID:          "agent-cost-zero",
+		ProjectID:   proj.ID,
+		Title:       "Agent cost zero",
+		Prompt:      "Do something",
+		SessionCost: 0.75,
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	te.accumulateAgentSessionCost(proj.ID, task, 0, "model-x", "provider-x")
+
+	if task.SessionCost != 0.75 {
+		t.Fatalf("task session cost = %f, want the carried 0.75 untouched", task.SessionCost)
+	}
+	stats, err := s.GetProjectStats(proj.ID)
+	if err != nil {
+		t.Fatalf("project stats: %v", err)
+	}
+	if stats.TotalCost != 0 {
+		t.Fatalf("project total cost = %f, want 0 — a run that spent nothing reports nothing", stats.TotalCost)
+	}
+	// The guard is not about the number: a zero-cost call would still open a stats row for the
+	// model, so a project would list a model it never spent anything on.
+	if len(stats.ByModel) != 0 {
+		t.Fatalf("by-model stats = %+v, want none — a run that spent nothing adds no model row", stats.ByModel)
+	}
+}

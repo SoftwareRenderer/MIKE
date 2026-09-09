@@ -247,13 +247,15 @@ func passExecutor(t *testing.T, s *store.Store, mgr lspManager) *TaskExecutor {
 	t.Helper()
 	cs := config.NewConfigStore(s, "", "test")
 	cs.SetWorkspaceDirOverride(t.TempDir())
-	return &TaskExecutor{
+	te := &TaskExecutor{
 		store:        s,
 		configStore:  cs,
 		appStreamMgr: newTestStreamMgr(s),
 		worktreeMgr:  git.NewWorktreeManager(s, cs),
 		lspMgr:       mgr,
 	}
+	te.merge = te.newMergeOrchestrator()
+	return te
 }
 
 // TestCollectTurnDiagnostics_OneHandshakePerLanguage: a pass attaches, handshakes and releases

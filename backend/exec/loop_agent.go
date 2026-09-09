@@ -12,7 +12,6 @@ import (
 	"kanban/backend/extensions"
 	"kanban/backend/git"
 	"kanban/backend/prompts"
-	"kanban/backend/stream"
 	"kanban/backend/types"
 	pkgagent "kanban/pkg/agent"
 
@@ -23,8 +22,15 @@ import (
 // executeTaskWithAgent runs the task using an agent extension via the generic agent runner.
 // The agent handles its own LLM calls, tool execution, loop detection, and compaction.
 // Kanban only manages the subprocess lifecycle and streams events to the frontend.
-// requestedModel is the model name from the task config; if set, it sends set_model before the first prompt.
-func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Task, projectID, worktreePath, serverURL, requestedModel string, userMsgChan chan stream.UserMessage, sandboxEnabled bool, initialContent string) {
+// setup.ModelName, when set, sends set_model before the first prompt.
+func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
+	// Bound once here rather than passed as nine positional arguments, four of them adjacent
+	// strings. task is rebound from the store later in the run, so it is a local and not an alias
+	// for setup.task.
+	ctx, task, projectID, worktreePath := setup.ctx, setup.task, setup.projectID, setup.worktreePath
+	serverURL, requestedModel := setup.serverURL, setup.modelName
+	userMsgChan, sandboxEnabled, initialContent := setup.userMsgChan, setup.sandboxEnabled, setup.initialContent
+
 	defer func() {
 		if r := recover(); r != nil {
 			logging.For(logging.Recovery).With(logging.TaskID, task.ID).Errorf("recovered from panic: %v", r)
@@ -455,20 +461,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	// Accumulate session cost into project_token_stats (aggregate increment, not per-message)
 	// Use SessionCost() directly — it's accumulated from message_end events and persist
 	// entries, bypassing the broken get_session_stats NaN cost entirely.
-	finalCost := runner.SessionCost()
-	if finalCost > 0 {
-		modelName := runner.ModelName()
-		providerName := runner.ProviderName()
-		if providerName == "" {
-			providerName = "Pi Coding Agent"
-		}
-		te.store.AccumulateProjectStats(projectID, modelName, providerName, finalCost)
-		logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("accumulated session cost=%f for model=%s provider=%s", finalCost, modelName, providerName)
-	}
-	// Persist session cost to the task so it's available when viewing non-streaming tasks.
-	// Accumulate onto any previously carried-over cost (e.g. from a prior executor run).
-	task.SessionCost += finalCost
-	te.storeTask(task, projectID)
+	te.accumulateAgentSessionCost(projectID, task, runner.SessionCost(), runner.ModelName(), runner.ProviderName())
 
 	// Broadcast complete event to clear streaming state on the frontend.
 	sendAgentComplete(task.ExecutionState, totalPromptTokens, totalPredictedTokens, duration)
@@ -538,12 +531,30 @@ func (te *TaskExecutor) prepareAgent(ctx context.Context, ext *extensions.Extens
 	return prepared, nil
 }
 
+// accumulateAgentSessionCost records what an agent run spent: an increment on the project's token
+// stats, and a new total on the task.
+//
+// The task total is task.SessionCost + finalCost, never finalCost alone. The task arrived with
+// whatever earlier runs left there, and writing the run's own cost over it resets the session badge
+// to a single run's spend — which is what a provider or model switch looked like when it broke.
+func (te *TaskExecutor) accumulateAgentSessionCost(projectID string, task *types.Task, finalCost float64, modelName, providerName string) {
+	if finalCost > 0 {
+		if providerName == "" {
+			providerName = "Pi Coding Agent"
+		}
+		te.store.AccumulateProjectStats(projectID, modelName, providerName, finalCost)
+		logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("accumulated session cost=%f for model=%s provider=%s", finalCost, modelName, providerName)
+	}
+	task.SessionCost += finalCost
+	te.storeTask(task, projectID)
+}
+
 // handleAgentTurnComplete handles post-turn logic after an agent turn completes.
 func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, taskID, worktreePath string, runner *agent.AgentRunner, stopReason string, agentEnded *bool) {
 	// Check auto-commit/merge
 	if task.AutoCommit {
 		// A commit-and-done click merges whatever auto_merge says: read it here, consume it after.
-		commitDone := task.HasMergeConflict && te.CommitAndDonePending(task.ID)
+		commitDone := task.HasMergeConflict && te.merge.CommitAndDonePending(task.ID)
 		if task.HasMergeConflict {
 			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("agent finished resolving conflicts, committing resolution")
 			// Same stage + commit steps the LLM loop runs (commitConflictResolution).
@@ -551,9 +562,9 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 			// agent keeps working on this turn and CommitAndMerge runs next, while the
 			// LLM loop DROPS it (its pre-sync edits are already committed, so popping
 			// would re-apply them as unstaged changes).
-			commitOK := te.stageResolvedConflicts(task.ID, worktreePath)
+			commitOK := te.merge.stageResolvedConflicts(task.ID, worktreePath)
 			if commitOK {
-				commitOK = te.commitMergeConflictResolution(task.ID, worktreePath)
+				commitOK = te.merge.commitMergeConflictResolution(task.ID, worktreePath)
 			}
 			if commitOK {
 				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("conflict resolution committed")
@@ -573,13 +584,13 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 			_ = te.store.UpdateTaskExecutionState(task.ID, projectID, "idle")
 		}
 		commitMsg := te.GenerateCommitMessage(context.Background(), task)
-		mergeErr := te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge || commitDone)
+		mergeErr := te.merge.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge || commitDone)
 		task, _ = te.store.GetTaskByID(task.ID)
 		if task.HasMergeConflict {
 			conflictedFiles := GetConflictedFiles(worktreePath)
 			prompt, _ := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 				TaskBranch:      task.Branch,
-				TargetBranch:    te.ResolveMergeTarget(projectID, task),
+				TargetBranch:    te.merge.ResolveMergeTarget(projectID, task),
 				TaskTitle:       task.Title,
 				TaskDescription: task.Prompt,
 				ConflictedFiles: conflictedFiles,
@@ -593,7 +604,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 			return
 		}
 		// The conflict is over, so the click is spent - merge failure included.
-		commitDone = te.takeCommitAndDone(task.ID, mergeErr == nil)
+		commitDone = te.merge.takeCommitAndDone(task.ID, mergeErr == nil)
 		if mergeErr != nil {
 			logging.For(logging.Agent).With(logging.TaskID, task.ID).Warnf("merge failed, moving to review: %v", mergeErr)
 			task.ExecutionState = types.ExecStateIdle
@@ -629,7 +640,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 	}
 
 	if task.HasMergeConflict {
-		res := te.commitConflictResolution(projectID, task.ID, worktreePath, task)
+		res := te.merge.commitConflictResolution(projectID, task.ID, worktreePath, task)
 		task = res.task
 		if task.HasMergeConflict {
 			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("merge still conflicted after agent ended")

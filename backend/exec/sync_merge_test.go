@@ -40,7 +40,7 @@ func TestSyncTargetIntoTask_NoNewCommits(t *testing.T) {
 	runGitInDir(t, wtPath, "checkout", "task/test-branch")
 
 	// No new commits on master — sync should be a no-op
-	err := te.syncTargetIntoTask(projectID, taskID, "master", "task/test-branch", task)
+	err := te.merge.syncTargetIntoTask(projectID, taskID, "master", "task/test-branch", task)
 	if err != nil {
 		t.Fatalf("syncTargetIntoTask should succeed with no new commits: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestSyncTargetIntoTask_CleanMerge(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "master change file B")
 
 	// Sync should merge cleanly
-	err := te.syncTargetIntoTask(projectID, taskID, "master", "task/clean-branch", task)
+	err := te.merge.syncTargetIntoTask(projectID, taskID, "master", "task/clean-branch", task)
 	if err != nil {
 		t.Fatalf("syncTargetIntoTask should succeed with clean merge: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestSyncTargetIntoTask_Conflict_EntersMergeConflictState(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "master change shared")
 
 	// Sync should conflict and enter merge_conflict state
-	err := te.syncTargetIntoTask(projectID, taskID, "master", "task/conflict-branch", task)
+	err := te.merge.syncTargetIntoTask(projectID, taskID, "master", "task/conflict-branch", task)
 	if err != nil {
 		t.Fatalf("syncTargetIntoTask should return nil (enters merge_conflict state): %v", err)
 	}
@@ -197,7 +197,7 @@ func TestSyncTargetIntoTask_WorktreeMissing(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "master change")
 
 	// Don't create a worktree — sync should skip gracefully
-	err := te.syncTargetIntoTask(projectID, taskID, "master", "task/no-wt-branch", task)
+	err := te.merge.syncTargetIntoTask(projectID, taskID, "master", "task/no-wt-branch", task)
 	if err != nil {
 		t.Fatalf("syncTargetIntoTask should return nil when worktree is missing: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 	child, _ = te.store.GetTaskByID(childID)
 
 	// Sync parent into child — should merge cleanly
-	err := te.syncTargetIntoTask(projectID, childID, "task/parent-branch", "task/child-branch", child)
+	err := te.merge.syncTargetIntoTask(projectID, childID, "task/parent-branch", "task/child-branch", child)
 	if err != nil {
 		t.Fatalf("syncTargetIntoTask should succeed: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestSyncTargetIntoTask_KeepsUnstagedWorkWhenTheStashFails(t *testing.T) {
 		LlamaServerURL: "http://localhost:8080",
 		ModelName:      "test-model",
 	}
-	te.rawStore().CreateTask(task)
+	te.store.CreateTask(task)
 
 	runGit(t, repoDir, "checkout", "-b", "task/refuse-branch")
 	os.WriteFile(filepath.Join(repoDir, "fileA.txt"), []byte("committed version\n"), 0o644)
@@ -341,7 +341,7 @@ func TestSyncTargetIntoTask_KeepsUnstagedWorkWhenTheStashFails(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(blocked) }()
 
-	err = te.syncTargetIntoTask(projectID, taskID, "master", "task/refuse-branch", task)
+	err = te.merge.syncTargetIntoTask(projectID, taskID, "master", "task/refuse-branch", task)
 	if err == nil {
 		t.Fatal("the sync ran with nothing protecting the worktree's unstaged work")
 	}
@@ -352,7 +352,7 @@ func TestSyncTargetIntoTask_KeepsUnstagedWorkWhenTheStashFails(t *testing.T) {
 	if isMergeInProgress(wtPath) {
 		t.Error("a merge is in progress in a worktree whose sync was refused")
 	}
-	if refreshed, _ := te.rawStore().GetTaskByID(taskID); refreshed.HasMergeConflict {
+	if refreshed, _ := te.store.GetTaskByID(taskID); refreshed.HasMergeConflict {
 		t.Error("the task entered merge_conflict state without a merge having been attempted")
 	}
 }

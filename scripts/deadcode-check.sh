@@ -27,6 +27,7 @@ backend/extensions/i18n_prompts.go:none
 backend/llama/tools_names.go:AllToolNames
 backend/prompts/overlay.go:ActiveOverlay
 backend/term/terminal.go:activeSessionCount
+backend/exec/merge.go:CommitAndDonePending
 pkg/logging/logging.go:TestSink
 pkg/logging/logging.go:setOutput
 pkg/logging/logging.go:Write
@@ -45,6 +46,11 @@ pkg/logging/logging.go:Lines
 # backend/agent: RegisterAdapterFactory is the mock-adapter seam backend/exec uses to hold that a
 # sandboxed task probes the binary its own adapter named. Production always loads WASM, so no
 # production path reaches it - and deleting it would put that test out of reach.
+#
+# backend/exec: CommitAndDonePending is how backend/managers holds that a "Commit and move to done"
+# click armed the merge. Callers inside the package ask the merge orchestrator directly, so no
+# production path reaches the delegator - and deleting it would leave that click's arming
+# unobservable from the package that owns the HTTP handler.
 
 is_allowed() {
 	local file="$1" name="$2" entry

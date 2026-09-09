@@ -48,6 +48,7 @@ func diagTestSetup(t *testing.T, s *store.Store, projectID, taskID string) *task
 func TestFlushAdvisories_PersistsAdvisoryRoleAndKeepsOrder(t *testing.T) {
 	s := testStore(t)
 	te := &TaskExecutor{store: s, appStreamMgr: newTestStreamMgr(s), tasks: make(map[string]*executionState)}
+	te.merge = te.newMergeOrchestrator()
 	setup := diagTestSetup(t, s, "adv-proj", "adv-task")
 
 	lc := &loopContext{messages: []types.ChatMessage{
@@ -124,6 +125,7 @@ func TestFlushAdvisories_PersistsAdvisoryRoleAndKeepsOrder(t *testing.T) {
 func TestFlushAdvisories_EmptyAndBlank(t *testing.T) {
 	s := testStore(t)
 	te := &TaskExecutor{store: s, appStreamMgr: newTestStreamMgr(s), tasks: make(map[string]*executionState)}
+	te.merge = te.newMergeOrchestrator()
 	setup := diagTestSetup(t, s, "adv-proj2", "adv-task2")
 
 	lc := &loopContext{}
@@ -150,6 +152,7 @@ func TestFlushAdvisories_EmptyAndBlank(t *testing.T) {
 func TestPrepareMergeConflictTurn_DeliversBeforeTheNextCall(t *testing.T) {
 	s := testStore(t)
 	te := &TaskExecutor{store: s, appStreamMgr: newTestStreamMgr(s), tasks: make(map[string]*executionState)}
+	te.merge = te.newMergeOrchestrator()
 	setup := diagTestSetup(t, s, "mc-proj", "mc-task")
 	lc := &loopContext{
 		messages: []types.ChatMessage{{Role: "system", Content: "sys"}, {Role: "user", Content: "merge it"}},
@@ -348,6 +351,7 @@ func TestAdvisoriesWrittenAfterToolRowsSurviveTheRebuild(t *testing.T) {
 	// rows a turn produces read tool_call*, advisory — and the rebuild stays complete.
 	s := testStore(t)
 	te := &TaskExecutor{store: s, appStreamMgr: newTestStreamMgr(s), tasks: make(map[string]*executionState)}
+	te.merge = te.newMergeOrchestrator()
 	setup := diagTestSetup(t, s, "boundary-proj", "boundary-task")
 	lc := &loopContext{}
 

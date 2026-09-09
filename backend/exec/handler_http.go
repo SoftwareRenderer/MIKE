@@ -71,7 +71,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 
 	// Every user message arrives here, and it replaces any commit-and-done click still waiting on a
 	// merge conflict.
-	te.clearCommitAndDone(taskID)
+	te.merge.clearCommitAndDone(taskID)
 
 	threadID := task.CurrentThreadID
 

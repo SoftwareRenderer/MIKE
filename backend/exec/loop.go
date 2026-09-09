@@ -390,7 +390,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 	// Check if this setup.task uses an agent provider
 	if te.configStore.IsAgentProvider(setup.serverURL) {
 		logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("detected agent provider (url=%s), calling executeTaskWithAgent", setup.serverURL)
-		te.executeTaskWithAgent(setup.ctx, setup.task, setup.projectID, setup.worktreePath, setup.serverURL, setup.modelName, setup.userMsgChan, setup.sandboxEnabled, setup.initialContent)
+		te.executeTaskWithAgent(setup)
 		logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("executeTaskWithAgent returned")
 		return
 	}
@@ -1087,7 +1087,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, stat
 			if !hadRequestReview && !autoAnswered {
 				// A question hands the task back to the user, so it replaces any pending
 				// commit-and-done click - the merge-conflict prompt invites exactly that question.
-				te.clearCommitAndDone(setup.task.ID)
+				te.merge.clearCommitAndDone(setup.task.ID)
 				tr := toolResults[askResults[questionIdxs[0]]]
 				setup.task.ExecutionState = types.ExecStateIdle
 				setup.task.Status = types.StatusReview
@@ -1116,7 +1116,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, stat
 		if hadRequestReview {
 			if setup.task.AutoCommit {
 				if setup.task.HasMergeConflict {
-					res := te.commitConflictResolution(setup.projectID, setup.task.ID, setup.worktreePath, setup.task)
+					res := te.merge.commitConflictResolution(setup.projectID, setup.task.ID, setup.worktreePath, setup.task)
 					setup.task = res.task
 					if setup.task.HasMergeConflict {
 						// Still conflicted — hand the model the instructions and continue
@@ -1155,7 +1155,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, stat
 
 				// No merge conflict — normal auto-commit path
 				commitMsg := te.GenerateCommitMessage(setup.ctx, setup.task)
-				mergeErr := te.CommitAndMerge(setup.projectID, setup.task.ID, setup.worktreePath, commitMsg, setup.task.AutoMerge)
+				mergeErr := te.merge.CommitAndMerge(setup.projectID, setup.task.ID, setup.worktreePath, commitMsg, setup.task.AutoMerge)
 				setup.task, _ = te.store.GetTaskByID(setup.task.ID)
 				if setup.task.HasMergeConflict {
 					te.prepareMergeConflictTurn(setup, lc, GetResolvedConflictedFiles(setup.worktreePath))
@@ -1183,7 +1183,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, stat
 					}
 				}
 			} else if setup.task.HasMergeConflict {
-				res := te.commitConflictResolution(setup.projectID, setup.task.ID, setup.worktreePath, setup.task)
+				res := te.merge.commitConflictResolution(setup.projectID, setup.task.ID, setup.worktreePath, setup.task)
 				setup.task = res.task
 				if setup.task.HasMergeConflict {
 					logging.For(logging.Merge).With(logging.TaskID, setup.task.ID).Infof("merge still conflicted after request_review")
@@ -1723,7 +1723,8 @@ func userMessagesEqual(a, b types.ChatMessage) bool {
 	return a.Content == b.Content
 }
 
-func (te *TaskExecutor) gitRun(dir string, args ...string) error {
+// gitRun runs one git command in dir and discards its output.
+func gitRun(dir string, args ...string) error {
 	c := git.Command("", args...)
 	c.Dir = dir
 	_, err := c.CombinedOutput()

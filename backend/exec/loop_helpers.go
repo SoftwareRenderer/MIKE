@@ -553,7 +553,7 @@ func (te *TaskExecutor) flushAdvisories(setup *taskExecSetup, lc *loopContext) {
 func (te *TaskExecutor) prepareMergeConflictTurn(setup *taskExecSetup, lc *loopContext, conflictedFiles []string) {
 	prompt, err := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 		TaskBranch:      setup.task.Branch,
-		TargetBranch:    te.ResolveMergeTarget(setup.projectID, setup.task),
+		TargetBranch:    te.merge.ResolveMergeTarget(setup.projectID, setup.task),
 		TaskTitle:       setup.task.Title,
 		TaskDescription: setup.task.Prompt,
 		ConflictedFiles: conflictedFiles,

@@ -28,7 +28,7 @@ func TestBranchChildFrom_RecreatesMissingParentBranch(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create parent: %v", err)
 	}
-	if te.branchExists(projectID, parentBranch) {
+	if te.merge.branchExists(projectID, parentBranch) {
 		t.Fatalf("fixture expects %s to be missing from git", parentBranch)
 	}
 
@@ -47,14 +47,14 @@ func TestBranchChildFrom_RecreatesMissingParentBranch(t *testing.T) {
 		t.Fatalf("create child: %v", err)
 	}
 
-	source, err := te.branchChildFrom(projectID, child)
+	source, err := te.merge.branchChildFrom(projectID, child)
 	if err != nil {
 		t.Fatalf("branchChildFrom: %v", err)
 	}
 	if source != parentBranch {
 		t.Errorf("child branches from %q, want %q", source, parentBranch)
 	}
-	if !te.branchExists(projectID, parentBranch) {
+	if !te.merge.branchExists(projectID, parentBranch) {
 		t.Fatalf("parent branch %s was not recreated - the child would fail to start", parentBranch)
 	}
 

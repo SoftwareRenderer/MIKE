@@ -7,7 +7,6 @@ package exec
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,6 +36,24 @@ import (
 )
 
 // TaskExecutor handles task execution endpoints and orchestrates AI task execution.
+//
+// A concern is split out of this type by moving its methods onto a collaborator struct that
+// NewTaskExecutor constructs and holds, never by splitting executionState: its lock discipline
+// depends on the sandbox fields being read as one snapshot (sandbox, setSandbox), and a state
+// owned by two packages is a state whose fields get captured piecemeal — a mix of old and new
+// sandbox callbacks reads a stopped container through a live client.
+//
+// A collaborator is constructed with exactly the dependencies its own functions use, plus:
+//   - a lock as a release func — func() func(), or func(string) func() for the per-task one —
+//     never a *sync.Mutex, for the reason LockWorktree gives;
+//   - *executionState only when its concern owns the fields it reads, and otherwise neither it nor
+//     a *TaskExecutor;
+//   - no way to take taskMu or sandboxMu. Nothing across the seam does today; a collaborator that
+//     ever needs state guarded by them gets a func value whose body takes the lock here, on this
+//     side of the seam.
+//
+// Everything outside this package calls TaskExecutor and no other type in it, so a split keeps a
+// one-line delegator for every name callers outside the package already use.
 type TaskExecutor struct {
 	store         *store.Store
 	configStore   *config.ConfigStore
@@ -67,12 +84,9 @@ type TaskExecutor struct {
 		mu    sync.Mutex
 		tasks map[string]struct{}
 	}
-	// commitDone tracks tasks whose merge conflict came from a commit-and-done click
-	// (commit_and_done.go).
-	commitDone struct {
-		mu    sync.Mutex
-		tasks map[string]struct{}
-	}
+	// merge owns the branch and merge behaviour of a finished turn. Constructed here with the
+	// dependencies it reads; it holds no executionState and takes neither taskMu nor sandboxMu.
+	merge *mergeOrchestrator
 }
 
 func (te *TaskExecutor) AgentRegistry() *agent.AgentRegistry {
@@ -308,6 +322,7 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStr
 	}
 	te.dbSummarizeCancel.tasks = make(map[string]context.CancelFunc)
 	te.blockedMessages.tasks = make(map[string]struct{})
+	te.merge = te.newMergeOrchestrator()
 	te.appStreamMgr.SetLazyStartHandler(te.handleLazyStart)
 	return te
 }
@@ -765,7 +780,7 @@ func (te *TaskExecutor) StartSubtask(projectID, subtaskID string, autostarted bo
 	// Ensure the parent has a branch (needed for subtask merge target).
 	// This does NOT change the parent's status — it stays in its current column.
 	if parent.Branch == "" {
-		if err := te.EnsureParentBranch(projectID, parent); err != nil {
+		if err := te.merge.EnsureParentBranch(projectID, parent); err != nil {
 			return fmt.Errorf("ensure parent branch: %w", err)
 		}
 		parent, _ = te.store.GetTaskByID(subtask.ParentTaskID)
@@ -792,77 +807,6 @@ func (te *TaskExecutor) StartSubtask(projectID, subtaskID string, autostarted bo
 
 	// Start the subtask executor
 	return te.StartTask(projectID, subtaskID, autostarted)
-}
-
-// EnsureParentBranch creates the parent task's branch when the parent has not started yet
-// (parent.Branch == ""); that branch is the merge target when a subtask finishes with
-// auto_merge. A full worktree is created rather than a bare branch so prepareTaskExecution
-// reuses it when the parent eventually starts. Only Branch is set — the parent keeps its
-// status and column while subtasks run — and a parent that already has a branch is left alone.
-func (te *TaskExecutor) EnsureParentBranch(projectID string, parent *types.Task) error {
-	project, err := te.store.GetProject(projectID)
-	if err != nil {
-		return fmt.Errorf("get project: %w", err)
-	}
-
-	if parent.Branch != "" {
-		// verify it actually exists in git.
-		if te.branchExists(projectID, parent.Branch) {
-			return nil // branch exists, nothing to do
-		}
-		// Branch missing in git — create it from HEAD so the stored name becomes valid.
-		cmd := git.Command("", "-C", project.Path, "branch", parent.Branch, "HEAD")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			logging.For(logging.Merge).With(logging.TaskID, parent.ID).Warnf("branch %q missing in git, create failed: %s", parent.Branch, string(out))
-			return fmt.Errorf("create missing parent branch %q: %w", parent.Branch, err)
-		}
-		logging.For(logging.Merge).With(logging.TaskID, parent.ID).Warnf("recovered missing branch %q from HEAD", parent.Branch)
-		return nil
-	}
-
-	branchName := te.generateBranchName(parent, parent.ID, projectID)
-
-	// Atomic set prevents double worktree creation from concurrent callers.
-	set, err := te.store.SetTaskBranchIfEmpty(parent.ID, projectID, branchName)
-	if err != nil {
-		return fmt.Errorf("set parent branch: %w", err)
-	}
-	if !set {
-		latest, err := te.store.GetTaskByID(parent.ID)
-		if err != nil {
-			return fmt.Errorf("reload parent task: %w", err)
-		}
-		if latest.Branch != "" {
-			parent.Branch = latest.Branch
-			return nil
-		}
-		// Unreachable safety net — SQLite guarantees this won't happen.
-	}
-
-	// Create a worktree for the parent from HEAD.
-	// This creates the branch AND the worktree directory in one step.
-	// When the parent starts later, CreateWorktree will find the directory
-	// already exists and return early (reusing this worktree).
-	_, _, err = te.worktreeMgr.CreateWorktree(projectID, parent.ID, branchName, "")
-	if err != nil {
-		return fmt.Errorf("create parent worktree: %w", err)
-	}
-
-	// Refresh updatedAt; adopt another caller's branch name if they won the race.
-	latest, _ := te.store.GetTaskByID(parent.ID)
-	if latest.Branch != "" && latest.Branch != branchName {
-		branchName = latest.Branch
-	}
-	parent.Branch = branchName
-	parent.UpdatedAt = time.Now().UTC()
-	if err := te.storeTask(parent, projectID); err != nil {
-		// Clean up the worktree if DB update fails
-		_ = te.worktreeMgr.RemoveWorktree(projectID, parent.ID, branchName)
-		return fmt.Errorf("update parent task with branch: %w", err)
-	}
-
-	logging.For(logging.Merge).With(logging.TaskID, parent.ID).Infof("created worktree with branch %s for parent", branchName)
-	return nil
 }
 
 // AutoStartNextSibling continues the autostart chain after a task finishes: start the next
@@ -990,7 +934,7 @@ func (te *TaskExecutor) InitTask(projectID, taskID string) (*types.Task, error) 
 		return task, nil
 	}
 
-	branchName := te.generateBranchName(task, taskID, projectID)
+	branchName := te.merge.generateBranchName(task, taskID, projectID)
 
 	// Atomic set prevents double worktree creation from concurrent callers.
 	set, err := te.store.SetTaskBranchIfEmpty(taskID, projectID, branchName)
@@ -1010,7 +954,7 @@ func (te *TaskExecutor) InitTask(projectID, taskID string) (*types.Task, error) 
 		return nil, fmt.Errorf("branch was not set by concurrent caller")
 	}
 
-	sourceBranch, err := te.branchChildFrom(projectID, task)
+	sourceBranch, err := te.merge.branchChildFrom(projectID, task)
 	if err != nil {
 		return nil, err
 	}
@@ -1034,44 +978,6 @@ func (te *TaskExecutor) InitTask(projectID, taskID string) (*types.Task, error) 
 
 	logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("created worktree with branch %s", branchName)
 	return task, nil
-}
-
-// branchChildFrom settles what a task branches from, in the order both start paths need:
-// the parent must have a branch before the child does (it is the subtask auto-merge
-// target), and the child forks from the parent's actual worktree branch, because the
-// stored parent.Branch can be stale. "" means branch from the project baseline.
-func (te *TaskExecutor) branchChildFrom(projectID string, task *types.Task) (string, error) {
-	if task.ParentTaskID == "" {
-		return "", nil
-	}
-
-	parent, err := te.store.GetTaskByID(task.ParentTaskID)
-	// Idempotent, and it checks the stored branch in git too: a parent whose branch was
-	// merged and cleaned up gets it back from HEAD, so the child has a real source.
-	if err == nil {
-		if err := te.EnsureParentBranch(projectID, parent); err != nil {
-			return "", fmt.Errorf("ensure parent branch: %w", err)
-		}
-	}
-
-	// Re-read: EnsureParentBranch (or a concurrent caller that won the same race)
-	// may have just given the parent its branch.
-	parent, err = te.store.GetTaskByID(task.ParentTaskID)
-	if err != nil {
-		return "", nil
-	}
-
-	if parentWtPath, wtErr := te.worktreeMgr.WorktreePath(parent.ID); wtErr == nil {
-		if _, statErr := os.Stat(parentWtPath); statErr == nil {
-			if actualBranch, gitErr := te.worktreeMgr.GitRunInDirOutput(parentWtPath, "rev-parse", "--abbrev-ref", "HEAD"); gitErr == nil {
-				if b := strings.TrimSpace(actualBranch); b != "" {
-					return b, nil
-				}
-			}
-		}
-	}
-	// Fall back to the stored branch when the parent's worktree is unavailable.
-	return parent.Branch, nil
 }
 
 // pinBaselineAndWatch records the base ref's commit hash and starts diff watching on it.
@@ -1178,10 +1084,10 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 
 	branchName := task.Branch
 	if branchName == "" {
-		branchName = te.generateBranchName(task, taskID, projectID)
+		branchName = te.merge.generateBranchName(task, taskID, projectID)
 	}
 	// A child branches from its parent, which also gives the parent a branch if it has none.
-	sourceBranch, err := te.branchChildFrom(projectID, task)
+	sourceBranch, err := te.merge.branchChildFrom(projectID, task)
 	if err != nil {
 		return nil, err
 	}
@@ -1763,7 +1669,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		conflictedFiles := GetConflictedFiles(execSetup.worktreePath)
 		conflictContext, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 			TaskBranch:      task.Branch,
-			TargetBranch:    te.ResolveMergeTarget(projectID, task),
+			TargetBranch:    te.merge.ResolveMergeTarget(projectID, task),
 			TaskTitle:       task.Title,
 			TaskDescription: task.Prompt,
 			ConflictedFiles: conflictedFiles,
@@ -1789,447 +1695,6 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	}
 
 	go te.executeTask(execSetup)
-}
-
-// CommitAndMerge commits staged worktree changes and optionally merges the task branch.
-// Only explicitly staged files are committed; unstaged changes remain in the working tree.
-// Operations are serialized per project via the commit queue to prevent git race conditions.
-func (te *TaskExecutor) CommitAndMerge(projectID, taskID, worktreePath, commitMsg string, autoMerge bool) error {
-	release := te.commitQueue.Acquire(projectID)
-	defer release()
-
-	te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg, "--allow-empty")...)
-
-	if autoMerge {
-		task, _ := te.store.GetTaskByID(taskID)
-		if err := te.MergeBranch(projectID, taskID, task); err != nil {
-			logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("merge failed: %v", err)
-			return err
-		}
-	} else {
-		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("merge skipped (auto_merge=false)")
-	}
-	return nil
-}
-
-// syncTargetIntoTask merges the target branch into the task's branch in the task's worktree
-// when the target has new commits since the task diverged, so conflicts surface while the LLM
-// still has the task's changes in context. It returns nil on a clean merge, when there is
-// nothing to merge, or when merge_conflict state was entered — MergeBranch must check
-// task.ExecutionState afterwards and skip the final merge on "merge_conflict". Any other failure,
-// the stash's included, is returned, so the final merge never runs on a worktree that could not
-// be moved safely.
-func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, taskBranch string, task *types.Task) error {
-	// Serialize against the task's own tool execution.
-	defer te.LockWorktree(taskID)()
-
-	project, err := te.store.GetProject(projectID)
-	if err != nil {
-		return fmt.Errorf("get project for sync: %w", err)
-	}
-
-	// Check if target branch has new commits beyond where task branch diverged.
-	// merge-base is the common ancestor; if it equals target HEAD, target hasn't moved.
-	mergeBaseCmd := git.Command("", "merge-base", taskBranch, targetBranch)
-	mergeBaseCmd.Dir = project.Path
-	mergeBaseOut, err := mergeBaseCmd.Output()
-	if err != nil {
-		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("could not compute merge-base: %v, skipping sync", err)
-		return nil
-	}
-	mergeBase := strings.TrimSpace(string(mergeBaseOut))
-
-	targetHeadCmd := git.Command("", "rev-parse", targetBranch)
-	targetHeadCmd.Dir = project.Path
-	targetHeadOut, err := targetHeadCmd.Output()
-	if err != nil {
-		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("could not resolve target HEAD: %v, skipping sync", err)
-		return nil
-	}
-	targetHead := strings.TrimSpace(string(targetHeadOut))
-
-	if mergeBase == targetHead {
-		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("target %s has no new commits, skipping sync", targetBranch)
-		return nil
-	}
-
-	logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("target %s has new commits (merge-base=%s, target=%s), syncing", targetBranch, mergeBase[:7], targetHead[:7])
-
-	// Get task's worktree path
-	worktreePath, err := te.worktreeMgr.WorktreePath(taskID)
-	if err != nil {
-		return fmt.Errorf("get worktree path for sync: %w", err)
-	}
-	if _, err := os.Stat(worktreePath); err != nil {
-		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("worktree does not exist, skipping sync")
-		return nil
-	}
-
-	syncErr := te.worktreeMgr.WithStash(projectID, worktreePath, git.StashMessageForSyncMerge(taskID), func() error {
-		// Ensure we're on the task branch
-		if err := te.worktreeMgr.GitRunInDir(worktreePath, "checkout", "-f", taskBranch); err != nil {
-			return fmt.Errorf("checkout task branch %s for sync: %w", taskBranch, err)
-		}
-
-		// Merge target branch into task branch
-		if _, mergeErr := te.worktreeMgr.GitRunInDirOutput(worktreePath, "merge", targetBranch, "--no-edit"); mergeErr == nil {
-			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("synced %s into %s cleanly", targetBranch, taskBranch)
-			te.logSystemMessage(taskID, task.CurrentThreadID, "info",
-				fmt.Sprintf("Synced %s into task branch (no conflicts).", targetBranch))
-			return nil
-		}
-
-		// Merge conflict — set flag so the LLM loop (or HandleCommitAndDone)
-		// can trigger the agent to resolve via file tools.
-		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("conflict syncing %s into %s, setting merge conflict flag", targetBranch, taskBranch)
-		_ = te.store.SetTaskMergeConflict(taskID, projectID, true)
-		task.HasMergeConflict = true
-		te.logSystemMessage(taskID, task.CurrentThreadID, "warning",
-			fmt.Sprintf("Conflicts detected when syncing %s into task branch. Resolve the conflicted files using your tools — the backend will commit and continue the merge automatically.", targetBranch))
-		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-		// Keep merge in progress — do NOT abort. LLM will resolve with file tools, and the stash is
-		// popped after merge --continue.
-		return git.ErrKeepStash
-	})
-	if errors.Is(syncErr, git.ErrKeepStash) {
-		return nil
-	}
-	return syncErr
-}
-
-// ResolveMergeTarget determines the branch that changes will be merged into.
-// For child tasks, the target is the parent's branch.
-// For root tasks, the target is the task's base_ref (if set), otherwise the project's origin branch.
-func (te *TaskExecutor) ResolveMergeTarget(projectID string, task *types.Task) string {
-	if task.ParentTaskID != "" {
-		parent, err := te.store.GetTaskByID(task.ParentTaskID)
-		if err == nil && parent.Branch != "" {
-			return parent.Branch
-		}
-	}
-	if task.BaseRef != "" {
-		return task.BaseRef
-	}
-	project, err := te.store.GetProject(projectID)
-	if err != nil || project.OriginBranch == "" {
-		return ""
-	}
-	return project.OriginBranch
-}
-
-// MergeBranch merges the task's branch into the target branch: a child task merges into its
-// parent's branch, a root task into origin. It returns nil on success or when a merge does
-// not apply. When the target is checked out in another worktree (a parent created by
-// EnsureParentBranch, say) the merge runs inside that worktree, since git refuses to check
-// out a branch another worktree already holds.
-func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) error {
-	project, err := te.store.GetProject(projectID)
-	if err != nil {
-		return fmt.Errorf("get project: %w", err)
-	}
-
-	taskBranch := task.Branch
-	if taskBranch == "" {
-		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("no task branch set, skipping merge")
-		return nil
-	}
-
-	// Verify the branch points to a valid commit before attempting merge.
-	// If the branch ref is broken (e.g., worktree was removed, ref corrupted),
-	// skip the merge gracefully rather than failing with a cryptic error.
-	cmd := git.Command("", "rev-parse", "--verify", "--quiet", taskBranch)
-	cmd.Dir = project.Path
-	if err := cmd.Run(); err != nil {
-		recovered := te.recoverMissingBranch(projectID, taskID, taskBranch)
-		if recovered != "" {
-			taskBranch = recovered
-		}
-		// If still missing, skip the merge.
-		if taskBranch == "" || !te.branchExists(projectID, taskBranch) {
-			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("branch %q is not a valid commit, skipping merge: %v", taskBranch, err)
-			return nil
-		}
-	}
-
-	// Determine target branch and the git directory to run merge in.
-	// For child tasks, the target is ALWAYS the parent's branch (never origin).
-	// For root tasks, the target is the origin branch.
-	var targetBranch string
-	var mergeInWorktree string // non-empty: run merge in this worktree path
-	if task.ParentTaskID != "" {
-		parent, err := te.store.GetTaskByID(task.ParentTaskID)
-		if err != nil {
-			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("parent_task_id=%s not found: %v, aborting merge", task.ParentTaskID, err)
-			te.logSystemMessage(taskID, task.CurrentThreadID, "error",
-				fmt.Sprintf("Error: parent task %s not found — merge aborted.", task.ParentTaskID))
-			return fmt.Errorf("parent task %s not found", task.ParentTaskID)
-		}
-		// Child tasks MUST merge into their parent's branch, never origin.
-		// If the parent has no branch yet, create it now.
-		if parent.Branch == "" {
-			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("parent %s has no branch, creating it now", parent.ID)
-			if err := te.EnsureParentBranch(projectID, parent); err != nil {
-				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to create parent branch: %v, aborting merge", err)
-				te.logSystemMessage(taskID, task.CurrentThreadID, "error",
-					fmt.Sprintf("Error: could not create branch for parent task %q — merge aborted: %v", parent.Title, err))
-				return fmt.Errorf("create parent branch: %w", err)
-			}
-			parent, _ = te.store.GetTaskByID(task.ParentTaskID)
-		}
-		// Ensure parent has a worktree to merge into.
-		parentWorktreePath, wtErr := te.worktreeMgr.WorktreePath(parent.ID)
-		hasWorktree := wtErr == nil && parentWorktreePath != ""
-		if hasWorktree {
-			if _, statErr := os.Stat(parentWorktreePath); statErr != nil {
-				hasWorktree = false
-				parentWorktreePath = ""
-			}
-		}
-		if !hasWorktree {
-			// Parent has no worktree — create one from its branch.
-			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("parent %s has no worktree, creating it now", parent.ID)
-			branchName := parent.Branch
-			if branchName == "" {
-				branchName = te.generateBranchName(parent, parent.ID, projectID)
-			}
-			if _, _, err := te.worktreeMgr.CreateWorktree(projectID, parent.ID, branchName, ""); err != nil {
-				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to create parent worktree: %v", err)
-			} else {
-				parentWorktreePath, _ = te.worktreeMgr.WorktreePath(parent.ID)
-				hasWorktree = true
-			}
-		}
-		// Use the parent's worktree and the branch it's actually on.
-		if hasWorktree && parentWorktreePath != "" {
-			mergeInWorktree = parentWorktreePath
-			if currentBranch, err := te.worktreeMgr.GitRunInDirOutput(parentWorktreePath, "rev-parse", "--abbrev-ref", "HEAD"); err == nil {
-				targetBranch = strings.TrimSpace(currentBranch)
-			}
-		}
-		if targetBranch == "" {
-			targetBranch = parent.Branch
-		}
-	} else {
-		targetBranch = te.ResolveMergeTarget(projectID, task)
-		if targetBranch == "" {
-			var err error
-			targetBranch, err = te.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
-			if err != nil {
-				logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("not a git repo, skipping merge: %v", err)
-				return nil
-			}
-		}
-	}
-	targetBranch = strings.TrimSpace(targetBranch)
-	// Create target branch if it doesn't exist (user-specified base_ref).
-	if task.ParentTaskID == "" && task.BaseRef != "" && targetBranch == task.BaseRef {
-		cmd := git.Command("", "rev-parse", "--verify", "--quiet", "refs/heads/"+targetBranch)
-		cmd.Dir = project.Path
-		if cmd.Run() != nil {
-			// Branch doesn't exist — create it from origin branch
-			startPoint := project.OriginBranch
-			if startPoint == "" {
-				startPoint = "HEAD"
-			}
-			createCmd := git.Command("", "-C", project.Path, "branch", targetBranch, startPoint)
-			if out, err := createCmd.CombinedOutput(); err != nil {
-				// A concurrent merge may have created it between our check and
-				// now — re-verify before failing.
-				recheck := git.Command("", "-C", project.Path, "rev-parse", "--verify", "--quiet", "refs/heads/"+targetBranch)
-				if recheck.Run() == nil {
-					logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("branch %q created by a concurrent merge, proceeding", targetBranch)
-				} else {
-					logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to create branch %q from %q: %s", targetBranch, startPoint, string(out))
-					te.logSystemMessage(taskID, task.CurrentThreadID, "error",
-						fmt.Sprintf("Error: could not create branch %q from %q — merge skipped.", targetBranch, startPoint))
-					return fmt.Errorf("create branch %q: %w", targetBranch, err)
-				}
-			} else {
-				logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("created branch %q from %q", targetBranch, startPoint)
-			}
-		}
-	}
-	if targetBranch == "" || targetBranch == "HEAD" {
-		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("no branch (detached HEAD), skipping merge")
-		return nil
-	}
-	logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("merging %s into %s (parent_task_id=%s)", taskBranch, targetBranch, task.ParentTaskID)
-
-	// Sync target branch into task branch first (catches conflicts early).
-	if syncErr := te.syncTargetIntoTask(projectID, taskID, targetBranch, taskBranch, task); syncErr != nil {
-		return fmt.Errorf("sync target into task: %w", syncErr)
-	}
-	// If sync has a merge conflict, skip the final merge.
-	task, _ = te.store.GetTaskByID(taskID)
-	if task.HasMergeConflict {
-		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("sync has merge conflict, skipping final merge")
-		return nil
-	}
-
-	if mergeInWorktree != "" {
-		err := te.mergeInWorktree(projectID, mergeInWorktree, targetBranch, taskBranch, taskID, task.ParentTaskID)
-		if err == nil && task.ParentTaskID != "" {
-			te.broadcastParentDiffStats(projectID, task.ParentTaskID)
-		}
-		return err
-	}
-	// Root tasks only reach mergeInProject (child tasks always merge into the
-	// parent's worktree above). The worktree routing for the target branch
-	// happens inside it, under the project merge lock.
-	err = te.mergeInProject(projectID, targetBranch, taskBranch, taskID)
-	if err == nil && task.ParentTaskID != "" {
-		te.broadcastParentDiffStats(projectID, task.ParentTaskID)
-	}
-	return err
-}
-
-// mergeInProject performs a merge in the project's main directory.
-func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, taskID string) error {
-	project, _ := te.store.GetProject(projectID)
-	// Serialize against other merges on this project's main checkout: it has a
-	// single HEAD/index, so interleaved merges clobber each other's checkout,
-	// stashes, and restore. Held for the whole sequence below (capture →
-	// merge → restore → stash pop). Lock order: before the project stash mutex.
-	defer te.worktreeMgr.LockProjectMerge(projectID)()
-	// Prune stale worktree registrations so a deleted worktree doesn't block checkout.
-	te.worktreeMgr.GitRunInProject(projectID, "worktree", "prune")
-	// If the target branch is checked out in a worktree, merge there instead.
-	// This check must run under the merge lock: an in-flight main-checkout
-	// merge temporarily checks the target out in the main checkout, which an
-	// unlocked scan would mis-route to (skipping both the lock and the
-	// checkout restore).
-	if wtPath := te.findWorktreeForBranch(projectID, targetBranch); wtPath != "" {
-		return te.mergeInWorktree(projectID, wtPath, targetBranch, taskBranch, taskID, "")
-	}
-	// The merge temporarily switches the project's main checkout to the target
-	// branch. Remember what it is on now so the merge can put it back — the
-	// user's working checkout is theirs, not the merge's.
-	return te.mergeInto(projectID, project.Path, targetBranch, taskBranch, taskID, currentCheckoutRef(project.Path))
-}
-
-// findWorktreeForBranch returns the path of the worktree that has the given branch
-// checked out, or empty string if no worktree holds it. This is needed because git
-// won't allow checking out a branch in the main working tree if a worktree already
-// has it checked out.
-func (te *TaskExecutor) findWorktreeForBranch(projectID, branch string) string {
-	project, err := te.store.GetProject(projectID)
-	if err != nil {
-		return ""
-	}
-	cmd := git.Command("", "worktree", "list", "--porcelain")
-	cmd.Dir = project.Path
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	worktrees := strings.Split(string(out), "\n")
-	var currentPath, currentBranch string
-	for _, line := range worktrees {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "worktree ") {
-			currentPath = strings.TrimPrefix(line, "worktree ")
-			currentBranch = ""
-		} else if strings.HasPrefix(line, "branch ") {
-			currentBranch = strings.TrimPrefix(line, "branch refs/heads/")
-		}
-		if currentBranch == branch && currentPath != "" {
-			if _, err := os.Stat(currentPath); err == nil {
-				return currentPath
-			}
-		}
-	}
-	return ""
-}
-
-// mergeInWorktree merges inside another task's worktree (e.g. the parent's).
-// Acquires ownerTaskID's mutex to serialize against the owner's tool execution.
-func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, taskBranch, taskID, ownerTaskID string) error {
-	if ownerTaskID != "" {
-		defer te.LockWorktree(ownerTaskID)()
-	}
-	// Worktrees must stay on their own branch — no checkout restore.
-	return te.mergeInto(projectID, worktreePath, targetBranch, taskBranch, taskID, "")
-}
-
-// currentCheckoutRef returns the ref (branch name, or SHA when detached) that
-// dir's HEAD is on. Returns "" when it cannot be determined — in that case the
-// merge leaves the checkout where it ends up, as before.
-func currentCheckoutRef(dir string) string {
-	cmd := git.Command("", "rev-parse", "--abbrev-ref", "HEAD")
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	ref := strings.TrimSpace(string(out))
-	if ref == "" || ref == "HEAD" {
-		// Detached HEAD — remember the exact commit.
-		cmd = git.Command("", "rev-parse", "HEAD")
-		cmd.Dir = dir
-		out, err = cmd.Output()
-		if err != nil {
-			return ""
-		}
-		ref = strings.TrimSpace(string(out))
-	}
-	return ref
-}
-
-// mergeInto performs a merge of taskBranch into targetBranch inside the given directory.
-// Both mergeInProject and mergeInWorktree delegate here — the only difference between them
-// is the directory in which git commands are run. When restoreRef is non-empty and differs
-// from targetBranch, dir's checkout is switched back to restoreRef after the merge,
-// preserving the caller's checkout state.
-func (te *TaskExecutor) mergeInto(projectID, dir, targetBranch, taskBranch, taskID, restoreRef string) error {
-	return te.worktreeMgr.WithStash(projectID, dir, git.StashMessageForAutoMerge(taskID), func() error {
-		mergeErr := te.mergeOnTargetBranch(projectID, dir, targetBranch, taskBranch, taskID)
-		// Back off the caller's checkout before the bracket restores the stashed work, so it lands
-		// on the branch the directory belongs to rather than on the merge target.
-		if restoreRef != "" && restoreRef != targetBranch {
-			if _, err := te.worktreeMgr.GitRunInDirOutput(dir, "checkout", "-f", restoreRef); err != nil {
-				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to restore checkout to %s: %v", restoreRef, err)
-			}
-		}
-		return mergeErr
-	})
-}
-
-// mergeOnTargetBranch checks dir out on targetBranch and merges taskBranch into it, recording the
-// outcome. dir's own work is parked by the caller's stash bracket — nothing here may touch the
-// working tree before the checkout.
-func (te *TaskExecutor) mergeOnTargetBranch(projectID, dir, targetBranch, taskBranch, taskID string) error {
-	if err := te.worktreeMgr.GitRunInDir(dir, "checkout", "-f", targetBranch); err != nil {
-		return fmt.Errorf("checkout target branch %s: %w", targetBranch, err)
-	}
-
-	mergeOut, mergeErr := te.worktreeMgr.GitRunInDirOutput(dir, "merge", taskBranch, "--no-edit")
-	if mergeErr != nil {
-		// Merge conflict — detect, set flag for LLM resolution, then abort
-		task, _ := te.store.GetTaskByID(taskID)
-		if resolveErr := te.tryResolveMergeConflicts(dir, taskID, targetBranch, taskBranch, task); resolveErr != nil {
-			if errors.Is(resolveErr, ErrNotAMergeConflict) {
-				// Not a conflict — git merge failed for another reason (hook, lock, etc.)
-				// Include git output so the user sees the actual reason
-				mergeDetail := strings.TrimSpace(mergeOut)
-				if mergeDetail == "" {
-					mergeDetail = mergeErr.Error()
-				}
-				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("merge failed (not a conflict): %s", mergeDetail)
-				te.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %s", mergeDetail))
-				return fmt.Errorf("merge failed (not a conflict): %s", mergeDetail)
-			}
-			// Real merge conflict — set flag so HandleCommitAndDone triggers LLM resolution
-			_ = te.store.SetTaskMergeConflict(taskID, projectID, true)
-			_ = te.worktreeMgr.GitRunInDir(dir, "merge", "--abort")
-			te.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %v", resolveErr))
-			return fmt.Errorf("merge conflict detected (will resolve via LLM): %w", resolveErr)
-		}
-	} else {
-		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("merged %s into %s successfully", taskBranch, targetBranch)
-		task, _ := te.store.GetTaskByID(taskID)
-		te.logMergeComplete(taskID, task.CurrentThreadID, taskBranch, targetBranch)
-	}
-	return nil
 }
 
 // -- Helper functions --
@@ -2300,123 +1765,6 @@ func (te *TaskExecutor) getCompactCh(taskID string) chan chan *CompactResult {
 		return state.compactCh
 	}
 	return nil
-}
-
-// branchExists checks if a git branch exists in the project.
-func (te *TaskExecutor) branchExists(projectID, branchName string) bool {
-	_, err := te.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--verify", branchName)
-	return err == nil
-}
-
-// recoverMissingBranch looks for a stale/orphaned branch with the same slug
-// pattern when the expected branch is missing. Returns the recovered branch
-// name (and updates the task in DB), or empty string if no match found.
-func (te *TaskExecutor) recoverMissingBranch(projectID, taskID, missingBranch string) string {
-	slugPrefix := types.TaskBranchSlugPrefix(missingBranch)
-	if slugPrefix == "" {
-		return ""
-	}
-
-	// List all branches matching the pattern.
-	branchesOut, err := te.worktreeMgr.GitRunInProjectOutput(projectID, "branch", "--list", slugPrefix+"*")
-	if err != nil {
-		return ""
-	}
-
-	var matches []string
-	for line := range strings.SplitSeq(branchesOut, "\n") {
-		b := strings.TrimSpace(line)
-		// Strip " + " prefix from git branch --list output (marks checked-out branch).
-		b = strings.TrimPrefix(b, " + ")
-		b = strings.TrimPrefix(b, "+ ")
-		if b != "" && b != missingBranch {
-			matches = append(matches, b)
-		}
-	}
-	if len(matches) == 0 {
-		return ""
-	}
-
-	// If multiple matches, pick the most recent one (by commit date).
-	var recovered string
-	if len(matches) == 1 {
-		recovered = matches[0]
-	} else {
-		// Pick the branch with the most recent commit.
-		var latestTime time.Time
-		for _, b := range matches {
-			tsOut, err := te.worktreeMgr.GitRunInProjectOutput(projectID, "log", "-1", "--format=%ct", b)
-			if err != nil {
-				continue
-			}
-			if ts, err := strconv.ParseInt(strings.TrimSpace(tsOut), 10, 64); err == nil {
-				t := time.Unix(ts, 0)
-				if t.After(latestTime) {
-					latestTime = t
-					recovered = b
-				}
-			}
-		}
-		if recovered == "" {
-			recovered = matches[0] // fallback to first
-		}
-	}
-
-	if err := te.store.SetTaskBranch(taskID, projectID, recovered); err != nil {
-		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to update branch from %q to %q: %v", missingBranch, recovered, err)
-		return ""
-	}
-	logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("recovered missing branch %q → %q", missingBranch, recovered)
-	return recovered
-}
-
-// randomSuffix generates a random alphanumeric string of length n.
-func randomSuffix(n int) string {
-	chars := "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	for i := range b {
-		b[i] = chars[int(b[i])%len(chars)]
-	}
-	return string(b)
-}
-
-// randomSuffixLen is the random tail of a task branch name — see
-// types.TaskBranchSuffixLen, which the branch-name parser matches against it.
-const randomSuffixLen = types.TaskBranchSuffixLen
-
-// generateBranchName creates a unique git branch name for a task.
-// Uses a slugified title when possible (e.g. "task/fix-login-bug"),
-// falls back to the task ID (e.g. "task/frost-amber-quartz"),
-// and appends a short suffix if the branch already exists from a deleted task.
-// The total branch name (including prefix) is capped at types.MaxBranchName.
-func (te *TaskExecutor) generateBranchName(task *types.Task, taskID, projectID string) string {
-	baseName := types.TaskBranchPrefix + task.ID
-	if !task.AutoMerge && task.Title != "" {
-		slug := types.SlugifyBranchName(task.Title)
-		if slug != "" {
-			baseName = types.TaskBranchPrefix + slug
-		}
-	}
-	// Always append random suffix to avoid collisions with stale branches.
-	// Truncate base to leave room for "-" + randomSuffixLen chars.
-	suffixSpace := 1 + randomSuffixLen // "-" + 6 chars
-	if len(baseName)+suffixSpace > types.MaxBranchName {
-		baseName = baseName[:types.MaxBranchName-suffixSpace]
-	}
-	branchName := baseName + "-" + randomSuffix(randomSuffixLen)
-
-	// Safety net: if this random name somehow collides, append taskID chars.
-	wtPath, wtErr := te.worktreeMgr.WorktreePath(taskID)
-	_, wtStatErr := os.Stat(wtPath)
-	wtExists := wtErr == nil && wtStatErr == nil
-	if !wtExists && te.branchExists(projectID, branchName) {
-		extra := "-" + taskID[:8]
-		if len(branchName)+len(extra) <= types.MaxBranchName {
-			branchName += extra
-		}
-	}
-	return branchName
 }
 
 func agentSandboxHash(sb *types.AgentSandbox) string {

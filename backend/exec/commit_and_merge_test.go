@@ -85,6 +85,7 @@ func setupCommitAndMergeTest(t *testing.T) (*TaskExecutor, string, string, strin
 		commitQueue:  NewCommitQueue(),
 		tasks:        make(map[string]*executionState),
 	}
+	te.merge = te.newMergeOrchestrator()
 
 	return te, repoDir, projectID, wtPath
 }
@@ -96,7 +97,7 @@ func TestCommitAndMerge_AutoMergeFalse_SkipsMerge(t *testing.T) {
 	te, repoDir, projectID, wtPath := setupCommitAndMergeTest(t)
 
 	// feature.txt is unstaged on the task branch
-	err := te.CommitAndMerge(projectID, "test-task", wtPath, "Test commit", false)
+	err := te.merge.CommitAndMerge(projectID, "test-task", wtPath, "Test commit", false)
 	if err != nil {
 		t.Fatalf("CommitAndMerge failed: %v", err)
 	}
@@ -137,7 +138,7 @@ func TestCommitAndMerge_AutoMergeFalse_SkipsMerge(t *testing.T) {
 func TestCommitAndMerge_AutoMergeTrue_MergesIntoTarget(t *testing.T) {
 	te, repoDir, projectID, wtPath := setupCommitAndMergeTest(t)
 
-	err := te.CommitAndMerge(projectID, "test-task", wtPath, "Test commit", true)
+	err := te.merge.CommitAndMerge(projectID, "test-task", wtPath, "Test commit", true)
 	if err != nil {
 		t.Fatalf("CommitAndMerge failed: %v", err)
 	}

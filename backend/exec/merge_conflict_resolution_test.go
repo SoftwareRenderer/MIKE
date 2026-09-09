@@ -90,13 +90,13 @@ func TestMergeConflictResolution_StagesOnlyConflictedFiles(t *testing.T) {
 	conflictedFiles = GetResolvedConflictedFiles(wtPath)
 	if len(conflictedFiles) > 0 {
 		addArgs := append([]string{"add"}, conflictedFiles...)
-		if err := te.gitRun(wtPath, addArgs...); err != nil {
+		if err := gitRun(wtPath, addArgs...); err != nil {
 			t.Fatalf("git add conflicted files failed: %v", err)
 		}
 	}
 
 	// 2. Commit the resolution (in modern git, this completes the merge)
-	if err := te.gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
+	if err := gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
 		t.Fatalf("git commit failed: %v", err)
 	}
 
@@ -218,11 +218,11 @@ func TestMergeConflictResolution_MultipleConflictedFiles(t *testing.T) {
 	conflictedFiles = GetResolvedConflictedFiles(wtPath)
 	if len(conflictedFiles) > 0 {
 		addArgs := append([]string{"add"}, conflictedFiles...)
-		if err := te.gitRun(wtPath, addArgs...); err != nil {
+		if err := gitRun(wtPath, addArgs...); err != nil {
 			t.Fatalf("git add failed: %v", err)
 		}
 	}
-	if err := te.gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
+	if err := gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
 		t.Fatalf("git commit failed: %v", err)
 	}
 	unlockStash4 := te.worktreeMgr.LockProjectStash(projectID)
@@ -296,9 +296,9 @@ func TestMergeConflictResolution_CommitMessage(t *testing.T) {
 	conflictedFiles := GetResolvedConflictedFiles(wtPath)
 	if len(conflictedFiles) > 0 {
 		addArgs := append([]string{"add"}, conflictedFiles...)
-		te.gitRun(wtPath, addArgs...)
+		gitRun(wtPath, addArgs...)
 	}
-	te.gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
+	gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
 
 	// Verify commit message
 	cmd := runGitCmd(wtPath, "log", "-1", "--format=%s")
@@ -368,9 +368,9 @@ func TestMergeConflictResolution_WithFinalMerge(t *testing.T) {
 	conflictedFiles := GetResolvedConflictedFiles(wtPath)
 	if len(conflictedFiles) > 0 {
 		addArgs := append([]string{"add"}, conflictedFiles...)
-		te.gitRun(wtPath, addArgs...)
+		gitRun(wtPath, addArgs...)
 	}
-	te.gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
+	gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
 	unlockStash7 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "pop")
 	unlockStash7()
@@ -465,9 +465,9 @@ func TestMergeConflictResolution_StashRestored(t *testing.T) {
 	conflictedFiles := GetResolvedConflictedFiles(wtPath)
 	if len(conflictedFiles) > 0 {
 		addArgs := append([]string{"add"}, conflictedFiles...)
-		te.gitRun(wtPath, addArgs...)
+		gitRun(wtPath, addArgs...)
 	}
-	te.gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
+	gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
 
 	// Pop stash — should restore notes.txt
 	unlockStash9 := te.worktreeMgr.LockProjectStash(projectID)
@@ -528,7 +528,7 @@ func TestMergeConflictResolution_NoConflictedFilesAutoContinues(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "master adds file")
 
 	// Merge should succeed cleanly (no conflicts)
-	err := te.syncTargetIntoTask(projectID, taskID, "master", "task/auto-resolve", task)
+	err := te.merge.syncTargetIntoTask(projectID, taskID, "master", "task/auto-resolve", task)
 	if err != nil {
 		t.Fatalf("sync should succeed (no conflicts): %v", err)
 	}
@@ -705,9 +705,9 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 	conflictedFiles := GetResolvedConflictedFiles(subtaskWtPath)
 	if len(conflictedFiles) > 0 {
 		addArgs := append([]string{"add"}, conflictedFiles...)
-		te.gitRun(subtaskWtPath, addArgs...)
+		gitRun(subtaskWtPath, addArgs...)
 	}
-	te.gitRun(subtaskWtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
+	gitRun(subtaskWtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
 	unlockStash12 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(subtaskWtPath, "stash", "pop")
 	unlockStash12()
@@ -864,9 +864,9 @@ func TestMergeConflictResolution_CommitIsMergeCommit(t *testing.T) {
 	conflictedFiles := GetResolvedConflictedFiles(wtPath)
 	if len(conflictedFiles) > 0 {
 		addArgs := append([]string{"add"}, conflictedFiles...)
-		te.gitRun(wtPath, addArgs...)
+		gitRun(wtPath, addArgs...)
 	}
-	te.gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
+	gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
 
 	// Verify the resolution commit is a merge commit (has 2 parents)
 	cmd := runGitCmd(wtPath, "cat-file", "-p", "HEAD")
@@ -927,7 +927,7 @@ func TestCommitConflictResolution_DoesNotSweepUntrackedFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(wtPath, "shared.txt"), []byte("resolved\n"), 0o644)
 	os.WriteFile(filepath.Join(wtPath, "untracked.txt"), []byte("unstaged content\n"), 0o644)
 
-	res := te.commitConflictResolution(projectID, taskID, wtPath, task)
+	res := te.merge.commitConflictResolution(projectID, taskID, wtPath, task)
 	if !res.committed {
 		t.Fatal("commitConflictResolution should succeed")
 	}
@@ -1030,7 +1030,7 @@ func TestCommitConflictResolution_CommitAndDoneClickMergesWithAutoMergeOff(t *te
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	res := fx.te.commitConflictResolution(fx.projectID, fx.taskID, fx.wtPath, task)
+	res := fx.te.merge.commitConflictResolution(fx.projectID, fx.taskID, fx.wtPath, task)
 
 	if !res.committed {
 		t.Fatal("the resolution was not committed")
@@ -1066,7 +1066,7 @@ func TestCommitConflictResolution_NoClickNoMergeWithAutoMergeOff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	res := fx.te.commitConflictResolution(fx.projectID, fx.taskID, fx.wtPath, task)
+	res := fx.te.merge.commitConflictResolution(fx.projectID, fx.taskID, fx.wtPath, task)
 
 	if !res.committed {
 		t.Fatal("the resolution was not committed")
@@ -1096,7 +1096,7 @@ func TestCommitConflictResolution_StillConflictedKeepsTheClick(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	res := fx.te.commitConflictResolution(fx.projectID, fx.taskID, fx.wtPath, task)
+	res := fx.te.merge.commitConflictResolution(fx.projectID, fx.taskID, fx.wtPath, task)
 
 	if !res.committed {
 		t.Fatal("fixture: the first resolution should have been committed")
@@ -1117,7 +1117,7 @@ func TestCommitConflictResolution_StillConflictedKeepsTheClick(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	res = fx.te.commitConflictResolution(fx.projectID, fx.taskID, fx.wtPath, task)
+	res = fx.te.merge.commitConflictResolution(fx.projectID, fx.taskID, fx.wtPath, task)
 	if !res.finishesTask() {
 		t.Errorf("the second resolution did not finish the click: committed=%v mergeErr=%v conflicted=%v",
 			res.committed, res.mergeErr, res.task.HasMergeConflict)

@@ -812,6 +812,7 @@ func setupExecutorWithGitForSubtask(t *testing.T) (*TaskExecutor, string, string
 		taskGate:     NewConcurrencyGate(),
 		tasks:        make(map[string]*executionState),
 	}
+	te.merge = te.newMergeOrchestrator()
 
 	return te, repoDir, projectID
 }
@@ -2130,7 +2131,7 @@ func TestMergeBranch_RecoverMissingBranch(t *testing.T) {
 	te.store.CreateTask(parent)
 
 	// Verify the new branch doesn't exist.
-	if te.branchExists(projectID, newBranch) {
+	if te.merge.branchExists(projectID, newBranch) {
 		t.Fatal("new branch should not exist in git")
 	}
 
