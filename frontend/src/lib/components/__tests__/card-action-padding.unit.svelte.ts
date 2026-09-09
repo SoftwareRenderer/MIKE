@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render } from '@testing-library/svelte';
 
 // Mock svelte transitions and raw asset imports (not available in jsdom)
@@ -27,10 +27,12 @@ vi.mock('$lib/context', () => {
     };
 });
 
-// Polyfill matchMedia for useIsMobile (desktop: never matches)
+// The matchMedia polyfill for useIsMobile: tests that need the ⋯-menu shape flip `mobileMatches`
+// before rendering.
+let mobileMatches = false;
 beforeAll(() => {
     vi.stubGlobal('matchMedia', (query: string) => ({
-        matches: false,
+        matches: mobileMatches,
         media: query,
         onchange: null,
         addEventListener: () => {},
@@ -114,11 +116,13 @@ function renderCard({ task, columnId, childrenMap, inline = false, showSubtaskBo
     const elements = [...actions.querySelectorAll('.action-icon, .action-idle')];
     const style = card.getAttribute('style') || '';
     const actionsVar = (style.match(/--actions:\s*(\d+)/) || [])[1];
+    const idleVar = (style.match(/--idle:\s*(\d+)/) || [])[1];
     return {
         container,
         elements,
         classes: elements.map(el => el.className.replace(/svelte-\w+/g, '').trim()),
         actionsVar,
+        idleVar,
         hasIdle: elements.some(el => el.classList.contains('action-idle')),
     };
 }
@@ -133,6 +137,7 @@ describe('Card action count (title padding calc)', () => {
             inline: true,
         });
         expect(result.hasIdle).toBe(true);
+        expect(result.idleVar).toBe('1');
         expect(result.classes.some(c => c.includes('action-add'))).toBe(true);
         expect(result.elements.length).toBe(3);
         expect(result.actionsVar).toBe('3');
@@ -234,5 +239,53 @@ describe('Card action count (title padding calc)', () => {
         expect(result.classes.some(c => c.includes('action-add'))).toBe(true);
         expect(result.elements.length).toBe(3);
         expect(result.actionsVar).toBe('3');
+    });
+});
+
+describe('Card action count on a narrow (mobile) viewport', () => {
+    beforeEach(() => { mobileMatches = true; });
+    afterEach(() => { mobileMatches = false; });
+
+    it('counts the overflow menu alone for an inline subtask (not create + edit + move)', () => {
+        const result = renderCard({
+            task: makeTask({ status: 'backlog' }),
+            columnId: 'backlog',
+            inline: true,
+        });
+        expect(result.classes).toEqual(['action-icon action-overflow']);
+        expect(result.elements.length).toBe(1);
+        expect(result.actionsVar).toBe('1');
+    });
+
+    it('counts the overflow menu plus the Idle badge for an idle in-progress subtask', () => {
+        const result = renderCard({
+            task: makeTask({ status: 'in_progress', execution_state: 'idle' }),
+            columnId: 'in_progress',
+            inline: true,
+        });
+        expect(result.hasIdle).toBe(true);
+        expect(result.idleVar).toBe('1');
+        expect(result.elements.length).toBe(2);
+        expect(result.actionsVar).toBe('2');
+    });
+
+    it('still counts every button for a top-level card, which has no overflow menu', () => {
+        const result = renderCard({
+            task: makeTask({ id: 'top-1', parent_task_id: '', status: 'in_progress', execution_state: 'paused' }),
+            columnId: 'in_progress',
+            inline: false,
+        });
+        expect(result.elements.length).toBe(3);
+        expect(result.actionsVar).toBe('3');
+    });
+
+    it('does not claim an Idle slot for a card that draws no Idle badge', () => {
+        const result = renderCard({
+            task: makeTask({ id: 'top-1', parent_task_id: '', status: 'in_progress', execution_state: '' }),
+            columnId: 'in_progress',
+            inline: false,
+        });
+        expect(result.hasIdle).toBe(false);
+        expect(result.idleVar).toBe('0');
     });
 });

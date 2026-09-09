@@ -21,6 +21,10 @@ stale-state cleanup stay in `AGENTS.md → Testing`.
 - **Config-modifying tests** (settings, models, shortcuts, mode select, …) must run in the `isolated`
   project — add the spec name to `ISOLATED_SPECS` in `frontend/playwright.config.ts` (one array; the
   chromium lane's `testMatch` is derived from it, so the two lanes cannot drift apart).
+- **The harness serves `frontend/dist`, and `global-setup` never builds it.** An e2e run proves what
+  the last `npm run build` contained, never what is in `src/`, so a frontend change nobody built
+  reads as green either way. Build before the run, then make it prove it bites: revert the changed
+  file, rebuild, and watch the spec fail before believing the green.
 - **Never write a test that greps a component's source.** `readFileSync('../Foo.svelte')` +
   `expect(source).toContain('…')` cannot fail a real bug, breaks on any rename, and duplicates what
   `npm run check` already gives you. Assert on rendered output (`render(Foo, props)`) or on behaviour
