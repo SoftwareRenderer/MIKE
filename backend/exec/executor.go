@@ -641,6 +641,11 @@ func isIncompleteForStart(t types.Task) bool {
 // SelectSubtaskToStart picks the subtask to start: the sole deepest startable
 // one, or the LLM's choice when several tie (first on LLM failure). Empty
 // string if none is startable.
+//
+// A start path should prefer TaskHandler.subtasksToStart (backend/managers),
+// which honors the "run siblings in parallel" setting by returning every
+// startable subtask when that is on; use this directly only when a single pick
+// is genuinely wanted.
 func (te *TaskExecutor) SelectSubtaskToStart(parent *types.Task, subtasks []types.Task) string {
 	deepest := te.FindDeepestStartableSubtasks(subtasks)
 	if len(deepest) == 0 {
@@ -714,7 +719,10 @@ Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
 // StartSubtask starts the executor for the specified subtask,
 // inheriting the parent's LLM config and ensuring the parent's branch. It does
 // not move the parent or its siblings — the caller places the chain.
-// autostarted records whether this start came from autonomous sibling continuation.
+// autostarted records whether the subtask runs on its parent's behalf, with no
+// human present to answer ask_question: true for a start issued for a parent
+// (the group start of its children, the sibling continuation chain), false when
+// a user started this one task and is waiting for it.
 func (te *TaskExecutor) StartSubtask(projectID, subtaskID string, autostarted bool) error {
 	subtask, err := te.store.GetTaskByID(subtaskID)
 	if err != nil {
