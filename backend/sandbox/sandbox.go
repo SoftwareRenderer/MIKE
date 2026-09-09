@@ -315,23 +315,10 @@ func forwardPortSpec(hostIP string, hostPort, containerPort int) string {
 	return net.JoinHostPort(hostIP, strconv.Itoa(hostPort)) + ":" + strconv.Itoa(containerPort)
 }
 
+// createContainerArgs is the task sandbox's head of the create: the shared gVisor posture, plus
+// the one task-only flag.
 func createContainerArgs(containerName, mountPath string) []string {
-	return []string{
-		"--runtime-flag=overlay2=root:self",
-		"--runtime-flag=ignore-cgroups",
-		"create",
-		// Every caller ensures the image first, with progress the browser can show. An implicit
-		// pull here would be silent and unbounded, and would fail as a resolution error instead of
-		// "this image was never built".
-		"--pull", "never",
-		"--name", containerName,
-		"--runtime", "runsc",
-		"--security-opt", "label=disable",
-		"--cap-drop", "ALL",
-		"--security-opt", "no-new-privileges",
-		"--entrypoint", "",
-		"--workdir", mountPath,
-	}
+	return append(sandboxruntime.GVisorCreateArgs(containerName), "--workdir", mountPath)
 }
 
 // Create creates a gVisor sandbox container for a task.
@@ -416,13 +403,13 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 
 	// Create container with gVisor runtime
 	createArgs := createContainerArgs(containerName, mountPath)
-	// Add back any explicitly requested capabilities
+	// Add back any explicitly requested capabilities. AppendCapabilities is the only path to a
+	// --cap-add, and it refuses the whole grant if this command line stopped isolating as the
+	// grant assumes.
 	if len(opts.Capabilities) > 0 {
-		if err := sandboxruntime.GVisorIsolationForCaps(createArgs); err != nil {
+		createArgs, err = sandboxruntime.AppendCapabilities(createArgs, opts.Capabilities)
+		if err != nil {
 			return nil, fmt.Errorf("cannot grant sandbox capabilities to project %s: %w", projectName, err)
-		}
-		for _, cap := range opts.Capabilities {
-			createArgs = append(createArgs, "--cap-add", cap)
 		}
 	}
 	worktreeMode := "rw"

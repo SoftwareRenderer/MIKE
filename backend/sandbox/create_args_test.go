@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -59,12 +60,43 @@ func TestCreateRefusesUnsafeSandboxAdditions(t *testing.T) {
 	}
 }
 
+// sharedPrefaceDiff names the first argument at which args stops matching the shared gVisor
+// preface, and "" when it matches. backend/extensions holds the same check for its builder: the two
+// command lines share the posture byte for byte and this is what fails the day one of them
+// re-inlines it.
+func sharedPrefaceDiff(args []string, containerName string) string {
+	preface := sandboxruntime.GVisorCreateArgs(containerName)
+	for i, want := range preface {
+		if i >= len(args) {
+			return fmt.Sprintf("args end before the shared preface does (arg %d, %q)", i, want)
+		}
+		if args[i] != want {
+			return fmt.Sprintf("arg %d = %q, the shared preface says %q", i, args[i], want)
+		}
+	}
+	return ""
+}
+
+// TestTaskCreateArgsBeginWithTheSharedPreface: the task sandbox's isolation posture is the one in
+// pkg/sandboxruntime, not a copy of it — AppendCapabilities refuses a capability grant onto
+// anything else, and a drifted copy would turn every task with capabilities into a refusal.
+func TestTaskCreateArgsBeginWithTheSharedPreface(t *testing.T) {
+	const name = "kanban-sandbox-task-preface"
+	args := createContainerArgs(name, "/home/sandbox/proj")
+	if diff := sharedPrefaceDiff(args, name); diff != "" {
+		t.Errorf("the task builder no longer begins with the shared preface: %s\nargs = %v", diff, args)
+	}
+	if len(args) <= len(sandboxruntime.GVisorCreateArgs(name)) {
+		t.Errorf("a task sandbox adds no argument of its own (workdir): %v", args)
+	}
+}
+
 // TestTaskSandboxIsolatesWhatACapabilityGrantAssumes pins what the removal of the
 // capability denylist rests on: the container MIKE creates runs under gVisor and starts
 // from a full --cap-drop ALL, so a re-added capability is a privilege in the guest rather
-// than on the host kernel. Create checks the pairing itself before it appends a single
-// --cap-add, so a future change to createContainerArgs that drops either half turns into a
-// refused task instead of a wider sandbox.
+// than on the host kernel. Create appends through sandboxruntime.AppendCapabilities, the only path
+// to a --cap-add, so a change to createContainerArgs that drops either half turns into a refused
+// task instead of a wider sandbox.
 func TestTaskSandboxIsolatesWhatACapabilityGrantAssumes(t *testing.T) {
 	args := createContainerArgs("kanban-sandbox-task-args", "/home/sandbox/args-proj")
 	if err := sandboxruntime.GVisorIsolationForCaps(args); err != nil {

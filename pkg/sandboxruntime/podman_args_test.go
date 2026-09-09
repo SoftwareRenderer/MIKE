@@ -1,6 +1,7 @@
 package sandboxruntime
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -106,5 +107,90 @@ func TestGVisorIsolationForCaps(t *testing.T) {
 		if err := GVisorIsolationForCaps(args); err == nil {
 			t.Errorf("%s: GVisorIsolationForCaps(%v) = nil, want a refusal", name, args)
 		}
+	}
+}
+
+// indexOfArg returns the first index of want, or -1.
+func indexOfArg(args []string, want string) int {
+	for i, a := range args {
+		if a == want {
+			return i
+		}
+	}
+	return -1
+}
+
+// TestGVisorCreateArgsIsTheIsolatedShape pins the shared preface as a whole: its exact contents,
+// that it is by itself the shape GVisorIsolationForCaps demands of a capability grant (so the
+// builders cannot compose a command line that their own append path then refuses), that it carries
+// the `create` verb rather than expecting a caller to supply it, and that no per-sandbox choice or
+// container environment crept into it — an `-e PATH` override dropped a custom image's own tooling,
+// and TERM belongs to the TTY session that asks for it.
+func TestGVisorCreateArgsIsTheIsolatedShape(t *testing.T) {
+	got := GVisorCreateArgs("kanban-sandbox-task-1")
+	want := []string{
+		"--runtime-flag=overlay2=root:self",
+		"--runtime-flag=ignore-cgroups",
+		"create",
+		"--pull", "never",
+		"--name", "kanban-sandbox-task-1",
+		"--runtime", "runsc",
+		"--security-opt", "label=disable",
+		"--cap-drop", "ALL",
+		"--security-opt", "no-new-privileges",
+		"--entrypoint", "",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("GVisorCreateArgs =\n%v\nwant\n%v", got, want)
+	}
+	if err := GVisorIsolationForCaps(got); err != nil {
+		t.Errorf("the shared preface is not the isolated shape a grant assumes: %v", err)
+	}
+	for _, absent := range []string{"--workdir", "--network", "-e", "--env", "-v", "--memory"} {
+		if indexOfArg(got, absent) != -1 {
+			t.Errorf("%s is a per-sandbox choice, not the shared posture: %v", absent, got)
+		}
+	}
+	// Every builder appends to what this returns, so a caller's append must not reach another
+	// caller's command line.
+	first, second := GVisorCreateArgs("a"), GVisorCreateArgs("b")
+	first = append(first, "--network", "none")
+	if !reflect.DeepEqual(second, GVisorCreateArgs("b")) {
+		t.Errorf("appending to one preface changed another's: first=%v second=%v", first, second)
+	}
+}
+
+// TestAppendCapabilitiesRefusesAnUnisolatedGrant is the pairing moved out of the tests and into the
+// append path: without runsc, or without the full drop, no --cap-add may land, and the argument
+// list comes back exactly as it went in — a partial grant is a privilege set nobody asked for.
+func TestAppendCapabilitiesRefusesAnUnisolatedGrant(t *testing.T) {
+	cases := map[string][]string{
+		"no runtime selected":    {"create", "--cap-drop", "ALL"},
+		"a different runtime":    {"create", "--runtime", "crun", "--cap-drop", "ALL"},
+		"caps not dropped":       {"create", "--runtime", "runsc"},
+		"caps partially dropped": {"create", "--runtime", "runsc", "--cap-drop", "SYS_ADMIN"},
+	}
+	for name, args := range cases {
+		out, err := AppendCapabilities(args, []string{"CHOWN", "SYS_ADMIN"})
+		if err == nil {
+			t.Errorf("%s: AppendCapabilities = nil error, want a refusal", name)
+		}
+		if !reflect.DeepEqual(out, args) {
+			t.Errorf("%s: a refusal changed the argument list:\n got %v\nwant %v", name, out, args)
+		}
+	}
+
+	// On the isolated shape the grant lands, in order, after the drop.
+	isolated := GVisorCreateArgs("kanban-ext-x")
+	out, err := AppendCapabilities(isolated, []string{"CHOWN", "SYS_ADMIN"})
+	if err != nil {
+		t.Fatalf("AppendCapabilities on an isolated command line = %v", err)
+	}
+	down, added := indexOfArg(out, "--cap-drop"), indexOfArg(out, "--cap-add")
+	if added < down {
+		t.Errorf("--cap-add at %d must follow --cap-drop at %d: %v", added, down, out)
+	}
+	if got := out[len(isolated):]; !reflect.DeepEqual(got, []string{"--cap-add", "CHOWN", "--cap-add", "SYS_ADMIN"}) {
+		t.Errorf("appended %v", got)
 	}
 }
