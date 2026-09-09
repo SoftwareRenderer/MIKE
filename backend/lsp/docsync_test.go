@@ -1,9 +1,13 @@
 package lsp
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"kanban/backend/extensions"
+	"kanban/backend/fsutil"
 )
 
 func TestDecideDocSync(t *testing.T) {
@@ -107,5 +111,58 @@ func TestServerConfigLanguageIDFor(t *testing.T) {
 				t.Errorf("LanguageIDFor(%q) = %q, want %q", tt.path, got, tt.want)
 			}
 		})
+	}
+}
+
+// The document sync's read is the server's own, so a path walking out of the workspace is stopped
+// here or it happens.
+func TestDocSyncPathStaysInsideTheWorkspace(t *testing.T) {
+	home := t.TempDir()
+	workspace := filepath.Join(home, "worktrees")
+	// The worktree layout a tool's relative path is joined onto: <workspace>/<project>/<task>.
+	worktree := filepath.Join(workspace, "frost", "amber")
+	if err := os.MkdirAll(filepath.Join(worktree, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sibling := filepath.Join(home, "secrets")
+	if err := os.MkdirAll(sibling, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(sibling, "id_rsa")
+	if err := os.WriteFile(secret, []byte("private"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := docSyncPath(workspace, "frost/amber/src/main.go")
+	if err != nil {
+		t.Fatalf("a file inside the workspace was refused: %v", err)
+	}
+	if got != filepath.Join(worktree, "src", "main.go") {
+		t.Errorf("docSyncPath = %q, want the joined workspace path", got)
+	}
+
+	for _, escape := range []string{
+		"../../secrets/id_rsa",
+		"frost/amber/../../../secrets/id_rsa",
+	} {
+		if got, err := docSyncPath(workspace, escape); err == nil {
+			t.Errorf("docSyncPath(%q) = %q, want a refusal", escape, got)
+		} else if !errors.Is(err, fsutil.ErrOutside) {
+			t.Errorf("docSyncPath(%q) failed with %v, want ErrOutside", escape, err)
+		}
+	}
+
+	// An absolute path is not an escape: filepath.Join drops what precedes it.
+	if got, err := docSyncPath(workspace, "/etc/passwd"); err != nil || got != filepath.Join(workspace, "etc", "passwd") {
+		t.Errorf(`docSyncPath("/etc/passwd") = %q, %v; want it resolved inside the workspace`, got, err)
+	}
+
+	// A link in the worktree escapes only after the join, so the lexical check would pass it.
+	link := filepath.Join(worktree, "src", "link.go")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := docSyncPath(workspace, "frost/amber/src/link.go"); err == nil {
+		t.Errorf("a symlink out of the workspace was read anyway: %q", got)
 	}
 }

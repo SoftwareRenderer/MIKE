@@ -134,13 +134,11 @@ func (sm *ExtensionSandboxManager) SetWorkspaceDir(dir string) {
 
 // MountPolicy returns the host roots an extension sandbox may mount: workspace dir, registered
 // project paths, the extensions dir, the temp dir, the EnvMountRoots extras, and the paths
-// projects declare in their own Sandbox Configuration. Project paths are pinned read-only, so a
-// project can let a language server read a cache without handing an extension a writable host
-// directory. Built on demand, so new projects apply without a restart.
+// projects declare in their own Sandbox Configuration. Which of those a sandbox may write is
+// ForceReadOnly's rule. Built on demand, so new projects apply without a restart.
 //
-// Install and settings validation (ExtensionHandler.mountPolicy) gets neither those project roots
-// nor anyone's granted dependency directory: an extension may not ask for a path a user
-// configured, and a grant enters only through MountPolicyForExtension.
+// Install and settings validation (ExtensionHandler.mountPolicy) never gets anyone's granted
+// dependency directory: a grant enters only through MountPolicyForExtension.
 func (sm *ExtensionSandboxManager) MountPolicy() *MountPolicy {
 	return sm.mountPolicy("")
 }
@@ -184,7 +182,8 @@ func (sm *ExtensionSandboxManager) mountPolicy(grantHostPath string) *MountPolic
 	}
 
 	roots := append(mountRoots(extensionsDir, workspaceDir, projectPaths), projectMounts...)
-	readOnlyRoots := append([]string(nil), projectMounts...)
+	readOnlyRoots := append([]string{workspaceDir}, projectPaths...)
+	readOnlyRoots = append(readOnlyRoots, projectMounts...)
 	if grantHostPath != "" {
 		roots = append(roots, grantHostPath)
 		readOnlyRoots = append(readOnlyRoots, grantHostPath)

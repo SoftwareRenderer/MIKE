@@ -135,9 +135,10 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 
 // checkHostPath is the project side of the host jail: a request path must be inside $HOME plus
 // the declared directories unless MIKE_ALLOW_ROOT_FS=1 widened it. It answers nil when the
-// caller's own checks describe the failure better (a missing path is a 400, not a 403).
+// caller's own checks describe the failure better (a missing path is a 400, not a 403), and for
+// an empty path, which is a setting left at its default.
 func (h *ProjectHandler) checkHostPath(path string) error {
-	if h.hostRoot.Unrestricted() {
+	if strings.TrimSpace(path) == "" || h.hostRoot.Unrestricted() {
 		return nil
 	}
 	if _, err := h.hostRoot.Stat(path); err != nil && fsutil.IsHostRootRefusal(err) {
@@ -234,6 +235,11 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 	// already has to meet.
 	if err := types.ValidateSandboxAdditions(req.SandboxMounts, req.SandboxCapabilities); err != nil {
 		return nil, http.StatusBadRequest, err.Error()
+	}
+	// Checked where it is accepted: the build reads the stored value with the server's own
+	// privileges and never re-checks it.
+	if err := h.checkHostPath(req.SandboxDockerfilePath); err != nil {
+		return nil, http.StatusForbidden, "sandbox_dockerfile_path: " + err.Error()
 	}
 
 	// Collect existing project IDs to avoid collisions
@@ -616,6 +622,12 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		if req.SandboxMounts != nil || req.SandboxCapabilities != nil {
 			if err := types.ValidateSandboxAdditions(req.SandboxMounts, req.SandboxCapabilities); err != nil {
 				httputil.JSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		if req.SandboxDockerfilePath != nil {
+			if err := h.checkHostPath(*req.SandboxDockerfilePath); err != nil {
+				httputil.JSONError(w, http.StatusForbidden, "sandbox_dockerfile_path: "+err.Error())
 				return
 			}
 		}
