@@ -145,7 +145,7 @@ func TestSummarizeContext_UsesCompressedHistoryOnly(t *testing.T) {
 		{Role: "assistant", Content: "SECOND-WORK-UNIQUETOKEN"},
 	}
 
-	if _, err := te.summarizeContext(context.Background(), messages, llm.server.URL, "test-model", extractPrevSummary(messages)); err != nil {
+	if _, err := te.summarize.summarizeContext(context.Background(), messages, llm.server.URL, "test-model", extractPrevSummary(messages)); err != nil {
 		t.Fatalf("summarize: %v", err)
 	}
 
@@ -175,7 +175,7 @@ func TestMaybeAutoSummarize_SecondPassFoldsSummaryPlusTail(t *testing.T) {
 		types.ChatMessage{Role: "assistant", Content: "ROUND-ONE-WORK-UNIQUETOKEN"},
 	)
 
-	te.maybeAutoSummarize(setup, lc, "test-model", true)
+	te.summarize.maybeAutoSummarize(setup, lc, "test-model", true)
 
 	first := llm.last(t)
 	mustContain(t, first, "first pass", "ROUND-ONE-REQUEST-UNIQUETOKEN")
@@ -212,7 +212,7 @@ func TestMaybeAutoSummarize_SecondPassFoldsSummaryPlusTail(t *testing.T) {
 		}
 	}
 
-	te.maybeAutoSummarize(setup, lc, "test-model", true)
+	te.summarize.maybeAutoSummarize(setup, lc, "test-model", true)
 
 	if len(llm.requests()) != 2 {
 		t.Fatalf("expected two summarization calls, got %d", len(llm.requests()))

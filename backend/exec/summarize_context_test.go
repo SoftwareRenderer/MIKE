@@ -112,7 +112,7 @@ func TestMaybeAutoSummarize_SummaryReachesLLMContext(t *testing.T) {
 	chdirRepoRoot(t)
 	te, setup, lc, _ := summarizeSetup(t, "SUMMARY-ONE: build the widget")
 
-	te.maybeAutoSummarize(setup, lc, "test-model", true)
+	te.summarize.maybeAutoSummarize(setup, lc, "test-model", true)
 
 	if !strings.Contains(lc.messages[0].Content, "SUMMARY-ONE") {
 		t.Fatalf("system message does not embed the new summary:\n%s", lc.messages[0].Content)
@@ -148,14 +148,14 @@ func TestMaybeAutoSummarize_NewestSummaryWins(t *testing.T) {
 	chdirRepoRoot(t)
 	te, setup, lc, _ := summarizeSetup(t, "SUMMARY-ONE: first phase", "SUMMARY-TWO: second phase")
 
-	te.maybeAutoSummarize(setup, lc, "test-model", true)
+	te.summarize.maybeAutoSummarize(setup, lc, "test-model", true)
 	if !strings.Contains(lc.messages[0].Content, "SUMMARY-ONE") {
 		t.Fatalf("first summary missing from system message:\n%s", lc.messages[0].Content)
 	}
 
 	// Context is still above the threshold, so a second summarization runs and must
 	// fold the first summary in (passed as PreviousSummary) and replace it.
-	te.maybeAutoSummarize(setup, lc, "test-model", true)
+	te.summarize.maybeAutoSummarize(setup, lc, "test-model", true)
 
 	if got := extractPrevSummary(lc.messages); got != "SUMMARY-TWO: second phase" {
 		t.Fatalf("latest summarization marker = %q, want the second summary", got)
@@ -186,7 +186,7 @@ func TestMaybeAutoSummarize_RestartResumesWithSameSummary(t *testing.T) {
 	chdirRepoRoot(t)
 	te, setup, lc, proj := summarizeSetup(t, "SUMMARY-PERSISTED")
 
-	te.maybeAutoSummarize(setup, lc, "test-model", true)
+	te.summarize.maybeAutoSummarize(setup, lc, "test-model", true)
 
 	rows, err := te.store.GetTaskMessages(setup.task.ID, "thread-1")
 	if err != nil {

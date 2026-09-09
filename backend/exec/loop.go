@@ -1303,7 +1303,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, stat
 		lc.checkpointIdx = len(lc.messages)
 
 		// Auto-summarize if context is approaching the limit
-		te.maybeAutoSummarize(setup, lc, activeModel, true)
+		te.summarize.maybeAutoSummarize(setup, lc, activeModel, true)
 
 		// Continue to call LLM again with tool results — don't fall through to blocking select
 		return turnNextLLMCall
@@ -1379,7 +1379,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, stat
 		// after the message completes, without waiting for the task transition.
 		// The task goes idle here (context is NOT fed back to the LLM), so no
 		// "Proceed" is injected — a queued real user message supersedes it.
-		te.maybeAutoSummarize(setup, lc, activeModel, false)
+		te.summarize.maybeAutoSummarize(setup, lc, activeModel, false)
 
 		// Check for queued user messages.
 		select {
@@ -1462,7 +1462,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, stat
 		te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Reasoning-only response, requesting action"}})
 
 		// Auto-summarize if context is approaching the window limit
-		te.maybeAutoSummarize(setup, lc, activeModel, true)
+		te.summarize.maybeAutoSummarize(setup, lc, activeModel, true)
 
 		return turnNextLLMCall
 	}
@@ -1553,7 +1553,7 @@ idleWait:
 			// Fallback (non-utility) summarization requests go to the task's
 			// CURRENT provider - lc.mc follows mid-run switches.
 			sumURL, _ := lc.mc.get()
-			lc.messages, _ = te.applySummarization(setup, req.ctx, lc.messages, sumURL, activeModel, req.resultCh)
+			lc.messages, _ = te.summarize.applySummarization(setup, req.ctx, lc.messages, sumURL, activeModel, req.resultCh)
 			lc.detector.reset() // context changed, clear stale text window
 			lc.detector.clearHints()
 			// Count messages before DB sync (includes in-memory summary).

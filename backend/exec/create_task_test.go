@@ -55,6 +55,7 @@ func newTestExecutorWithStore(t *testing.T) (*TaskExecutor, *store.Store) {
 		taskGate:     NewConcurrencyGate(),
 		tasks:        make(map[string]*executionState),
 	}
+	te.summarize = te.newSummarizeOrchestrator()
 	return &te, s
 }
 

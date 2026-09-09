@@ -65,7 +65,7 @@ func TestSummarizeContext_EmptySummaryErrors(t *testing.T) {
 				{Role: "assistant", Content: "I fixed the bug"},
 			}
 
-			res, err := te.summarizeContext(context.Background(), messages, server.URL, "test-model", "")
+			res, err := te.summarize.summarizeContext(context.Background(), messages, server.URL, "test-model", "")
 			if err == nil {
 				t.Fatalf("summarizeContext accepted an empty summary (got %q); installing it would erase the conversation", res.summary)
 			}
@@ -89,7 +89,7 @@ func TestSummarizeContext_NonEmptySummarySucceeds(t *testing.T) {
 		{Role: "user", Content: "please fix the bug"},
 	}
 
-	res, err := te.summarizeContext(context.Background(), messages, server.URL, "test-model", "")
+	res, err := te.summarize.summarizeContext(context.Background(), messages, server.URL, "test-model", "")
 	if err != nil {
 		t.Fatalf("summarizeContext error: %v", err)
 	}

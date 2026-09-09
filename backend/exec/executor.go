@@ -74,19 +74,12 @@ type TaskExecutor struct {
 	tasks         map[string]*executionState
 	// Per-task mutexes to serialize worktree access across executors and merges.
 	worktreeMu sync.Map // taskID -> *sync.Mutex
-	// dbSummarizeCancel tracks cancel functions for DB-based background summarization.
-	dbSummarizeCancel struct {
-		mu    sync.Mutex
-		tasks map[string]context.CancelFunc
-	}
-	// blockedMessages tracks tasks that had user messages blocked during summarization.
-	blockedMessages struct {
-		mu    sync.Mutex
-		tasks map[string]struct{}
-	}
 	// merge owns the branch and merge behaviour of a finished turn. Constructed here with the
 	// dependencies it reads; it holds no executionState and takes neither taskMu nor sandboxMu.
 	merge *mergeOrchestrator
+	// summarize owns the task's context window: the threshold decision, the rolling summary and
+	// the two manual-summarize paths. Its lock discipline is in summarizeOrchestrator.
+	summarize *summarizeOrchestrator
 }
 
 func (te *TaskExecutor) AgentRegistry() *agent.AgentRegistry {
@@ -106,12 +99,6 @@ func (te *TaskExecutor) newLlamaClient(serverURL, modelName, reasoningEffort, ap
 	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
 	client.SetAdapter(te.llmAdapter)
 	return client
-}
-
-type summarizeRequest struct {
-	ctx      context.Context // cancelled when user clicks ✕ or new request arrives
-	resultCh chan error      // receives ok/err from the loop
-	cancel   context.CancelFunc
 }
 
 // CompactResult holds the result of an agent compact command.
@@ -320,9 +307,8 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStr
 		taskGate:      NewConcurrencyGate(),
 		tasks:         make(map[string]*executionState),
 	}
-	te.dbSummarizeCancel.tasks = make(map[string]context.CancelFunc)
-	te.blockedMessages.tasks = make(map[string]struct{})
 	te.merge = te.newMergeOrchestrator()
+	te.summarize = te.newSummarizeOrchestrator()
 	te.appStreamMgr.SetLazyStartHandler(te.handleLazyStart)
 	return te
 }
@@ -1049,9 +1035,9 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	}
 
 	if task.Summarizing {
-		te.dbSummarizeCancel.mu.Lock()
-		_, inFlight := te.dbSummarizeCancel.tasks[taskID]
-		te.dbSummarizeCancel.mu.Unlock()
+		te.summarize.dbSummarizeCancel.mu.Lock()
+		_, inFlight := te.summarize.dbSummarizeCancel.tasks[taskID]
+		te.summarize.dbSummarizeCancel.mu.Unlock()
 		if !inFlight {
 			task.Summarizing = false
 		}
@@ -1583,9 +1569,9 @@ func (te *TaskExecutor) ForwardUserMessage(projectID, taskID string, um stream.U
 	// concurrent LLM calls. Message is already in DB from HandleSend.
 	if task, _ := te.store.GetTaskByID(taskID); task != nil && task.Summarizing {
 		logging.For(logging.Exec).With(logging.TaskID, taskID).Infof("blocking lazy-start: summarization in progress")
-		te.blockedMessages.mu.Lock()
-		te.blockedMessages.tasks[taskID] = struct{}{}
-		te.blockedMessages.mu.Unlock()
+		te.summarize.blockedMessages.mu.Lock()
+		te.summarize.blockedMessages.tasks[taskID] = struct{}{}
+		te.summarize.blockedMessages.mu.Unlock()
 		return
 	}
 	go te.handleLazyStart(projectID, taskID, um.Content, um.ModelName, um.ServerURL, um.ReasoningEffort, um.Regenerate)
@@ -1699,8 +1685,6 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 
 // -- Helper functions --
 
-var wordRe = regexp.MustCompile(`\S+`)
-
 // composeSystemPrompt builds a task's system prompt, embedding the most recent
 // conversation summary (empty for a task that was never summarized)
 func composeSystemPrompt(task *types.Task, worktreePath, projectName string, sandboxEnabled bool, summary string) string {
@@ -1734,29 +1718,6 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 	return messages
 }
 
-func estimateTokensFromText(text string) int {
-	words := wordRe.FindAllString(text, -1)
-	return int(float64(len(words)) * 1.3)
-}
-
-func estimatePromptTokens(messages []types.ChatMessage) int {
-	total := 0
-	for _, m := range messages {
-		if len(m.ContentParts) > 0 {
-			// Multi-modal: text is in ContentParts[0].Text, not Content
-			for _, p := range m.ContentParts {
-				if p.Type == "text" {
-					total += estimateTokensFromText(p.Text)
-				}
-			}
-		} else {
-			total += estimateTokensFromText(m.Content)
-		}
-		total += estimateTokensFromText(m.ReasoningContent)
-	}
-	return total
-}
-
 // getCompactCh returns the compact channel for a running task, or nil if not found.
 func (te *TaskExecutor) getCompactCh(taskID string) chan chan *CompactResult {
 	te.taskMu.Lock()
@@ -1765,6 +1726,15 @@ func (te *TaskExecutor) getCompactCh(taskID string) chan chan *CompactResult {
 		return state.compactCh
 	}
 	return nil
+}
+
+// runningState returns the executionState of a running task, or nil when none holds it. Its
+// body takes taskMu here so a collaborator can reach a running task without ever seeing the
+// lock; what a collaborator may read through the result is its own contract.
+func (te *TaskExecutor) runningState(taskID string) *executionState {
+	te.taskMu.Lock()
+	defer te.taskMu.Unlock()
+	return te.tasks[taskID]
 }
 
 func agentSandboxHash(sb *types.AgentSandbox) string {

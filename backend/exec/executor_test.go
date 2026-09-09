@@ -73,6 +73,7 @@ func setupExecutorWithGit(t *testing.T) (*TaskExecutor, string, string, string) 
 		tasks:        make(map[string]*executionState),
 	}
 	te.merge = te.newMergeOrchestrator()
+	te.summarize = te.newSummarizeOrchestrator()
 
 	return te, repoDir, projectID, initialSHA
 }
@@ -723,7 +724,7 @@ func pkgagentPersistEntry(toolName, argsJSON string) string {
 func TestForwardUserMessage_BlocksLazyStartDuringSummarize(t *testing.T) {
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	te.gate = NewConcurrencyGate()
-	te.blockedMessages.tasks = make(map[string]struct{})
+	te.summarize.blockedMessages.tasks = make(map[string]struct{})
 	taskID := "test-task"
 
 	// Create a task with summarizing flag set
@@ -758,9 +759,9 @@ func TestForwardUserMessage_BlocksLazyStartDuringSummarize(t *testing.T) {
 	}
 
 	// Verify the blocked message was tracked
-	te.blockedMessages.mu.Lock()
-	_, hasBlocked := te.blockedMessages.tasks[taskID]
-	te.blockedMessages.mu.Unlock()
+	te.summarize.blockedMessages.mu.Lock()
+	_, hasBlocked := te.summarize.blockedMessages.tasks[taskID]
+	te.summarize.blockedMessages.mu.Unlock()
 	if !hasBlocked {
 		t.Fatal("blocked message should be tracked")
 	}

@@ -2582,7 +2582,7 @@ func TestMaybeAutoSummarize_TriggersAboveThreshold(t *testing.T) {
 		modelName: "test-model",
 	}
 
-	te.maybeAutoSummarize(setup, lc, "test-model", false)
+	te.summarize.maybeAutoSummarize(setup, lc, "test-model", false)
 
 	var hasSummary bool
 	for _, m := range lc.messages {
@@ -2665,7 +2665,7 @@ func TestMaybeAutoSummarize_InjectProceedWhenFeedingBack(t *testing.T) {
 		modelName: "test-model",
 	}
 
-	te.maybeAutoSummarize(setup, lc, "test-model", true)
+	te.summarize.maybeAutoSummarize(setup, lc, "test-model", true)
 
 	// A summarization message must be appended first.
 	summaryIdx := -1
@@ -2749,7 +2749,7 @@ func TestMaybeAutoSummarize_NoTriggerBelowThreshold(t *testing.T) {
 		modelName: "test-model",
 	}
 
-	te.maybeAutoSummarize(setup, lc, "test-model", false)
+	te.summarize.maybeAutoSummarize(setup, lc, "test-model", false)
 
 	for _, m := range lc.messages {
 		if m.Role == "summarization" {

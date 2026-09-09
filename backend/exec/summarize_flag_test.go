@@ -77,8 +77,8 @@ func TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart(t *testing.T) {
 
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	te.gate = NewConcurrencyGate()
-	te.blockedMessages.tasks = make(map[string]struct{})
-	te.dbSummarizeCancel.tasks = make(map[string]context.CancelFunc)
+	te.summarize.blockedMessages.tasks = make(map[string]struct{})
+	te.summarize.dbSummarizeCancel.tasks = make(map[string]context.CancelFunc)
 	taskID := "test-sum-db-flag-task"
 
 	release := make(chan struct{})
@@ -152,9 +152,9 @@ func TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart(t *testing.T) {
 		ModelName: "test-model",
 		ServerURL: server.URL,
 	})
-	te.blockedMessages.mu.Lock()
-	_, hasBlocked := te.blockedMessages.tasks[taskID]
-	te.blockedMessages.mu.Unlock()
+	te.summarize.blockedMessages.mu.Lock()
+	_, hasBlocked := te.summarize.blockedMessages.tasks[taskID]
+	te.summarize.blockedMessages.mu.Unlock()
 	if !hasBlocked {
 		t.Fatal("message sent during summarization should be blocked")
 	}
