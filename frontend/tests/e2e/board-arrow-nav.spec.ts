@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { getProjectId, createTaskViaApi, csrfFetch, isolatedProject, gotoProject, clearBoardExcept } from './helpers';
+import { getProjectId, createTaskViaApi, csrfFetch, isolatedProject, gotoProject, clearBoardExcept, apiGetJson } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -114,16 +114,40 @@ test.describe.serial('Board arrow-key navigation', () => {
   test('Alt+Arrow still moves the focused task (regression)', async ({ page }) => {
     const projectId = await getProjectId(page);
     const prompt = `nav-alt-${Date.now()}`;
-    await createTaskViaApi(page, projectId, prompt);
-    const card = page.locator('.card', { hasText: prompt }).first();
-    await expect(card).toBeVisible({ timeout: 10000 });
-    await card.focus();
+    const taskId = await createTaskViaApi(page, projectId, prompt);
+    // Seeded through review by API, for the reason the ring test states: a move into
+    // in_progress starts a turn, and that turn's completion moves the task onward while this
+    // test is still asserting.
+    await moveTask(page, projectId, taskId, 'review');
+    await page.reload();
+    await page.waitForSelector('.board .column', { timeout: 10000 });
 
+    // The task's status as the server has it. Not visibility of a column locator: a move
+    // repaints the card through the columns it passes, and the board store and the render
+    // disagree for a frame or two, so `expect(col.locator('.card')).toBeVisible()` also passed
+    // with Alt+ArrowLeft handled as Alt+ArrowRight (measured, not assumed).
+    const statusOf = () => expect.poll(async () => {
+      const board = await apiGetJson<{ tasks?: any[] }>(page, `/api/projects/${projectId}/board`);
+      return board?.tasks?.find((t: any) => t.id === taskId)?.status;
+    }, { timeout: 10000 });
+
+    await page.locator('.board .column').nth(2).locator('.card', { hasText: prompt }).focus();
     await page.keyboard.press('Alt+ArrowRight');
-    await expect(page.locator('.board .column').nth(1).locator('.card', { hasText: prompt })).toBeVisible({ timeout: 10000 });
+    await statusOf().toBe('done');
 
+    // Focus is on the card element, and the move recreates it: the second press needs its own
+    // focus or it lands on body and moves nothing.
+    await page.locator('.board .column').nth(3).locator('.card', { hasText: prompt }).focus();
     await page.keyboard.press('Alt+ArrowLeft');
-    await expect(page.locator('.board .column').first().locator('.card', { hasText: prompt })).toBeVisible({ timeout: 10000 });
+    await statusOf().toBe('review');
+
+    // And the board this page holds agrees with the server about where the card sits.
+    await expect.poll(async () => page.evaluate((p) => {
+      const cols = Array.from(document.querySelectorAll('.board .column'));
+      const card = (Array.from(document.querySelectorAll('.board .card')) as HTMLElement[])
+        .find((c) => (c.textContent || '').includes(p));
+      return card ? cols.indexOf(card.closest('.column') as Element) : -1;
+    }, prompt), { timeout: 10000 }).toBe(2);
   });
 
   test('project list: Down/Up walk the project ring and wrap', async ({ page }) => {

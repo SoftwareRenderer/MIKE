@@ -2,7 +2,7 @@ import { test, expect, Page } from '@playwright/test';
 import { execSync } from 'child_process';
 import { existsSync, writeFileSync, unlinkSync, rmSync } from 'fs';
 import { join } from 'path';
-import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, ensureTaskStarted, getWorktreePath, worktreeExists, isolatedProject, gotoProject } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, ensureTaskStarted, getWorktreePath, worktreeExists, isolatedProject, gotoProject, apiGetJson } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -60,6 +60,70 @@ function makeSharedTask() {
         shared = { taskInfo: { projectId, taskId }, worktreeDir };
         return shared;
     };
+}
+
+/** The newest checkpoint hash on this task's messages: the snapshot a message deletion resets
+ *  the worktree to. Empty while no turn has captured the working state. */
+async function lastCheckpoint(page: Page, projectId: string, taskId: string): Promise<string> {
+    const msgs = await apiGetJson<{ git_commit_hash?: string }[]>(page, `/api/projects/${projectId}/tasks/${taskId}/messages`);
+    return [...(msgs ?? [])].reverse().find((m) => m.git_commit_hash)?.git_commit_hash ?? '';
+}
+
+/** Send a message and wait for its turn to end: the reply persisted and the executor idle, which
+ *  is the state a deletion is honoured in rather than answered with 409. */
+async function sendTurn(page: Page, projectId: string, taskId: string, content: string): Promise<void> {
+    const path = `/api/projects/${projectId}/tasks/${taskId}`;
+    const before = (await apiGetJson<unknown[]>(page, `${path}/messages`))?.length ?? 0;
+    await csrfFetch(page, `${path}/send`, { method: 'POST', body: { content } });
+    await expect.poll(async () => (await apiGetJson<unknown[]>(page, `${path}/messages`))?.length ?? 0,
+        { timeout: 60000 }).toBeGreaterThanOrEqual(before + 2);
+    await expect.poll(async () =>
+        (await apiGetJson<{ execution_state?: string }>(page, path))?.execution_state, { timeout: 60000 }).toBe('idle');
+}
+
+/** Assert the newest checkpoint a surviving message owns actually holds `file`. That is the whole
+ *  question after a deletion: the worktree is reset to that snapshot, and `clean -fd` erases
+ *  anything it does not name (git.ResetWorktreeTo). Checked against the object, not inferred from
+ *  a hash existing — a checkpoint that predates the file passes the latter and fails the test. */
+async function expectRollbackTargetHolds(page: Page, worktreeDir: string, projectId: string, taskId: string, file: string): Promise<void> {
+    await expect.poll(async () => {
+        const hash = await lastCheckpoint(page, projectId, taskId);
+        if (!hash) return false;
+        try {
+            return execSync(`git -C ${worktreeDir} ls-tree -r --name-only ${hash} -- ${file}`, { encoding: 'utf-8' }).trim().length > 0;
+        } catch {
+            return false;
+        }
+    }, { timeout: 20000 }).toBe(true);
+}
+
+/** Move the task In Progress if it is not already. `/send` runs a turn only while the task is In
+ *  Progress, and a turn is the only thing that snapshots the worktree; a message persisted against
+ *  a task in Review checkpoints nothing, and the deletion then rolls back to an old snapshot. */
+async function ensureInProgress(page: Page, projectId: string, taskId: string): Promise<void> {
+    const task = `/api/projects/${projectId}/tasks/${taskId}`;
+    if ((await apiGetJson<{ status?: string }>(page, task))?.status !== 'in_progress') {
+        await csrfFetch(page, `${task}/move`, { method: 'POST', body: { status: 'in_progress' } });
+    }
+}
+
+/** Delete the last user message and everything after it. Asserts its own effect, and has no
+ *  `if (visible)` guard: a deletion that never happened leaves every later assertion true by
+ *  accident, which is how both specs below passed while testing nothing. */
+async function deleteLastUserMessage(page: Page, projectId: string, taskId: string): Promise<void> {
+    const task = `/api/projects/${projectId}/tasks/${taskId}`;
+    const before = (await apiGetJson<unknown[]>(page, `${task}/messages`))?.length ?? 0;
+    const userMessages = page.locator('.chat-message.user');
+    const deleteBtn = userMessages.nth(await userMessages.count() - 1).locator('[aria-label="Delete message and all following messages"]');
+    await expect(deleteBtn).toBeVisible({ timeout: 10000 });
+    await deleteBtn.click();
+    // Global confirmation dialog (BaseModal) — not the editor's .confirm-dialog
+    const confirmDialog = page.locator('[role="dialog"]');
+    await expect(confirmDialog).toBeVisible({ timeout: 5000 });
+    await page.click('[role="dialog"] .btn-confirm');
+    await expect(confirmDialog).not.toBeVisible({ timeout: 5000 });
+    await expect.poll(async () => (await apiGetJson<unknown[]>(page, `${task}/messages`))?.length ?? 0,
+        { timeout: 15000 }).toBeLessThan(before);
 }
 
 /** Run a git command in a worktree, retrying on index-lock contention with
@@ -123,6 +187,11 @@ async function waitForDiffFileContent(page: Page, projectId: string, taskId: str
 
 test.describe.serial('Diff panel user interactions', () => {
     const sharedTask = makeSharedTask();
+    // The two deletion specs each need a conversation of their own: a deletion deletes every message
+    // after its anchor and resets the worktree to the newest snapshot a SURVIVING message owns, so
+    // neither can reason about a task another test — or the other spec — already moved under it.
+    const deletionTask = makeSharedTask();
+    const stagedTask = makeSharedTask();
     test.beforeEach(async ({ page }) => {
         test.setTimeout(30000);
         await gotoProject(page);
@@ -331,7 +400,8 @@ test.describe.serial('Diff panel user interactions', () => {
     });
 
     test('diff panel preserves file content after message deletion', async ({ page }) => {
-        const result = await sharedTask(page);
+        test.setTimeout(120000);
+        const result = await deletionTask(page);
         if (!result) {
             await expect(page.locator('.board')).toBeVisible();
             return;
@@ -374,36 +444,22 @@ test.describe.serial('Diff panel user interactions', () => {
         }
         await expect(page.locator('.chat-form')).toBeVisible({ timeout: 10000 });
 
-        const msgContent = `delete me ${Date.now()}`;
-        await csrfFetch(page, `/api/projects/${taskInfo.projectId}/tasks/${taskInfo.taskId}/send`, {
-            method: 'POST',
-            body: { content: msgContent },
-        });
+        // Two turns after the write, and the deletion takes the second one with it. A deleted
+        // message carries its own checkpoint away, and the file state is then reset to the last
+        // snapshot a surviving message owns — or, with none left, to the task's base commit, whose
+        // restore runs `clean -fd` and erases whatever no snapshot holds
+        // (docs/threads-checkpoints.md). Measured: one turn → the file is gone after the delete;
+        // two → the earlier checkpoint restores it.
+        const { projectId, taskId } = taskInfo;
+        await ensureInProgress(page, projectId, taskId);
+        const userCountBefore = await page.locator('.chat-message.user').count();
+        await sendTurn(page, projectId, taskId, `snapshot ${Date.now()}`);
+        await sendTurn(page, projectId, taskId, `delete this turn ${Date.now()}`);
+        await expect(page.locator('.chat-message.user')).toHaveCount(userCountBefore + 2);
 
-        await expect(async () => {
-            const msgs = await page.locator('.chat-message.user').count();
-            expect(msgs).toBeGreaterThan(0);
-        }).toPass({ timeout: 10000 });
-
-        await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
-
-        const userMessages = page.locator('.chat-message.user');
-        const userCount = await userMessages.count();
-        if (userCount < 2) {
-            execSync(`rm -f ${join(worktreeDir, testFile)}`);
-            return;
-        }
-
-        const lastUserMsg = userMessages.nth(userCount - 1);
-        const deleteBtn = lastUserMsg.locator('[aria-label="Delete message and all following messages"]');
-        if (await deleteBtn.isVisible().catch(() => false)) {
-            await deleteBtn.click();
-            // Global confirmation dialog (BaseModal) — not the editor's .confirm-dialog
-            const confirmDialog = page.locator('[role="dialog"]');
-            await expect(confirmDialog).toBeVisible({ timeout: 5000 });
-            await page.click('[role="dialog"] .btn-confirm');
-            await expect(confirmDialog).not.toBeVisible({ timeout: 5000 });
-        }
+        await deleteLastUserMessage(page, projectId, taskId);
+        await expectRollbackTargetHolds(page, worktreeDir, projectId, taskId, testFile);
+        await waitForDiffFile(page, projectId, taskId, testFile);
 
         const changesTab = page.locator('.tab-btn:has-text("Changes")');
         if (await changesTab.isVisible().catch(() => false)) {
@@ -424,8 +480,9 @@ test.describe.serial('Diff panel user interactions', () => {
         execSync(`rm -f ${join(worktreeDir, testFile)}`);
     });
 
-    test('staged status preserved after message deletion', async ({ page }) => {
-        const result = await sharedTask(page);
+    test('a staged file survives a message deletion, restored unstaged', async ({ page }) => {
+        test.setTimeout(120000);
+        const result = await stagedTask(page);
         if (!result) {
             await expect(page.locator('.board')).toBeVisible();
             return;
@@ -461,18 +518,8 @@ test.describe.serial('Diff panel user interactions', () => {
             expect(diffText).toContain(testFile);
         }).toPass({ timeout: 10000 });
 
-        const stagedSection = page.locator('.diff-section:has-text("Staged"), .diff-group:has-text("Staged")');
-        let isStagedBefore = false;
-        if (await stagedSection.isVisible().catch(() => false)) {
-            const stagedContent = await stagedSection.textContent();
-            isStagedBefore = stagedContent?.includes(testFile) ?? false;
-        }
-        if (!isStagedBefore) {
-            const diffData = await getDiffViaApi(page, taskInfo.projectId, taskInfo.taskId);
-            if (diffData?.files && diffData.files[testFile]) {
-                isStagedBefore = diffData.files[testFile].staged === true;
-            }
-        }
+        const stagedBefore = await getDiffViaApi(page, taskInfo.projectId, taskInfo.taskId);
+        expect(stagedBefore?.files?.[testFile]?.staged).toBe(true);
 
         const chatTab = page.locator('.tab-btn:has-text("Chat")');
         if (await chatTab.isVisible().catch(() => false)) {
@@ -480,32 +527,18 @@ test.describe.serial('Diff panel user interactions', () => {
         }
         await expect(page.locator('.chat-form')).toBeVisible({ timeout: 10000 });
 
-        const msgContent = `delete me staged ${Date.now()}`;
-        await csrfFetch(page, `/api/projects/${taskInfo.projectId}/tasks/${taskInfo.taskId}/send`, {
-            method: 'POST',
-            body: { content: msgContent },
-        });
+        // Same two turns as the spec above: the checkpoint holding this file must outlive the
+        // message that is deleted, or the rollback erases it.
+        const { projectId, taskId } = taskInfo;
+        await ensureInProgress(page, projectId, taskId);
+        const userCountBefore = await page.locator('.chat-message.user').count();
+        await sendTurn(page, projectId, taskId, `snapshot staged ${Date.now()}`);
+        await sendTurn(page, projectId, taskId, `delete staged turn ${Date.now()}`);
+        await expect(page.locator('.chat-message.user')).toHaveCount(userCountBefore + 2);
 
-        await expect(async () => {
-            const msgs = await page.locator('.chat-message.user').count();
-            expect(msgs).toBeGreaterThan(0);
-        }).toPass({ timeout: 10000 });
-        await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
-
-        const userMessages = page.locator('.chat-message.user');
-        const userCount = await userMessages.count();
-        if (userCount >= 2) {
-            const lastUserMsg = userMessages.nth(userCount - 1);
-            const deleteBtn = lastUserMsg.locator('[aria-label="Delete message and all following messages"]');
-            if (await deleteBtn.isVisible().catch(() => false)) {
-                await deleteBtn.click();
-                // Global confirmation dialog (BaseModal) — not the editor's .confirm-dialog
-                const confirmDialog = page.locator('[role="dialog"]');
-                await expect(confirmDialog).toBeVisible({ timeout: 5000 });
-                await page.click('[role="dialog"] .btn-confirm');
-                await expect(confirmDialog).not.toBeVisible({ timeout: 5000 });
-            }
-        }
+        await deleteLastUserMessage(page, projectId, taskId);
+        await expectRollbackTargetHolds(page, worktreeDir, projectId, taskId, testFile);
+        await waitForDiffFile(page, projectId, taskId, testFile);
 
         const changesTab = page.locator('.tab-btn:has-text("Changes")');
         if (await changesTab.isVisible().catch(() => false)) {
@@ -519,11 +552,12 @@ test.describe.serial('Diff panel user interactions', () => {
         const diffAfter = await page.textContent('.diff-scroll');
         expect(diffAfter).toContain(testFile);
 
+        // What survives the rollback is the file and its content, restored UNSTAGED: the restore
+        // ends with `git reset -q` on purpose, "so the restored files read as the task's own
+        // changes, not a staged commit" (git.ResetWorktreeTo).
         const diffDataAfter = await getDiffViaApi(page, taskInfo.projectId, taskInfo.taskId);
-        if (diffDataAfter?.files && diffDataAfter.files[testFile]) {
-            const isStagedAfter = diffDataAfter.files[testFile].staged === true;
-            expect(isStagedAfter).toBe(typeof isStagedAfter === 'boolean');
-        }
+        expect(diffDataAfter?.files?.[testFile]).toBeTruthy();
+        expect(Boolean(diffDataAfter.files[testFile].staged)).toBe(false);
 
         execSync(`rm -f ${join(worktreeDir, testFile)}`);
         execSync(`cd ${worktreeDir} && git reset HEAD ${testFile} 2>/dev/null || true`);
