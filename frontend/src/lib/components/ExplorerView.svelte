@@ -577,7 +577,9 @@
         if (e.key === 'Escape') {
             // A modal (e.g. the floating line-task modal) owns Escape while open
             if (isAnyModalOpen()) return;
-            if (showFind) {
+            if (showDropdown) {
+                showDropdown = false;
+            } else if (showFind) {
                 showFind = false;
             } else if (showChanges) {
                 onChangesOpen(false);
@@ -754,7 +756,7 @@
                                     {:else}
                                         <span class="explorer-check-empty"></span>
                                     {/if}
-                                    <span>{branch}</span>
+                                    <span class="explorer-dropdown-name" title={branch}>{branch}</span>
                                 </button>
                             {/each}
                             {#if branches.length === 0}
@@ -1125,6 +1127,7 @@
         cursor: pointer;
         border: none;
         min-width: 0;
+        max-width: 100%;
     }
     .explorer-dropdown-btn svg {
         flex-shrink: 0;
@@ -1150,9 +1153,10 @@
     .explorer-dropdown-list {
         position: absolute;
         top: 100%;
-        right: 0;
+        left: 0;
         z-index: 100;
         min-width: 160px;
+        max-width: min(320px, 100vw);
         max-height: 240px;
         overflow-y: auto;
         background: var(--color-surface-2);
@@ -1181,6 +1185,15 @@
     }
     .explorer-dropdown-item.active {
         color: var(--color-status-purple);
+    }
+    .explorer-dropdown-item svg {
+        flex-shrink: 0;
+    }
+    .explorer-dropdown-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     .explorer-dropdown-item.loading,
     .explorer-dropdown-item.empty {
