@@ -14,7 +14,7 @@ import (
 func sandboxFSProject(t *testing.T, s *Server, id, name, path string, sandboxEnabled bool) *types.Project {
 	t.Helper()
 	p := &types.Project{ID: id, Name: name, Path: path, SandboxEnabled: sandboxEnabled}
-	if err := s.rawStore().CreateProject(p); err != nil {
+	if err := s.store.CreateProject(p); err != nil {
 		t.Fatalf("create project %s: %v", id, err)
 	}
 	return p

@@ -499,7 +499,7 @@ func (cs *ConfigStore) GetProviderMaxRequestsPerSecond(serverURL string) int {
 // Returns false if no matching provider is found.
 func (cs *ConfigStore) IsAgentProvider(serverURL string) bool {
 	// Handle agent:// URLs (agent extensions)
-	if strings.HasPrefix(serverURL, "agent://") {
+	if types.IsAgentURL(serverURL) {
 		return true
 	}
 	cfg, err := cs.GetConfig()

@@ -124,7 +124,7 @@ func (cs *ConfigStore) agentProviders() []types.Provider {
 func filterPersistedProviders(providers []types.Provider) []types.Provider {
 	filtered := make([]types.Provider, 0, len(providers))
 	for _, p := range providers {
-		if strings.HasPrefix(p.URL, "agent://") {
+		if types.IsAgentURL(p.URL) {
 			continue
 		}
 		filtered = append(filtered, p)
@@ -168,7 +168,7 @@ func (cs *ConfigStore) MigrateProviderIDs() error {
 	}
 	needsMigration := false
 	for _, p := range providers {
-		if !strings.HasPrefix(p.URL, "agent://") && p.ID == 0 {
+		if !types.IsAgentURL(p.URL) && p.ID == 0 {
 			needsMigration = true
 			break
 		}
@@ -366,7 +366,7 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			c.Providers[i].APIKey = &encrypted
 		}
 		// Display names are derived dynamically from the URL on the frontend
-		if !strings.HasPrefix(c.Providers[i].URL, "agent://") && c.Providers[i].Kind != "agent" {
+		if !types.IsAgentURL(c.Providers[i].URL) && c.Providers[i].Kind != "agent" {
 			c.Providers[i].DisplayName = ""
 		}
 	}

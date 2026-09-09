@@ -22,6 +22,7 @@ ROOTS=("." "./pkg/bridge/agent")
 # Test-only accessors: "<package-dir>:<funcName>". Scoped by directory as well as name so
 # allowing `none` in backend/extensions cannot also excuse an unrelated `none` elsewhere.
 ALLOWLIST="
+backend/agent/loader.go:RegisterAdapterFactory
 backend/extensions/i18n_prompts.go:none
 backend/llama/tools_names.go:AllToolNames
 backend/prompts/overlay.go:ActiveOverlay
@@ -40,6 +41,10 @@ pkg/logging/logging.go:Lines
 #                          call-graph walk cannot see (same reason bridge's protocol constructors look
 #                          dead).
 #   String / Reset / Lines what a capturing test reads back.
+#
+# backend/agent: RegisterAdapterFactory is the mock-adapter seam backend/exec uses to hold that a
+# sandboxed task probes the binary its own adapter named. Production always loads WASM, so no
+# production path reaches it - and deleting it would put that test out of reach.
 
 is_allowed() {
 	local file="$1" name="$2" entry

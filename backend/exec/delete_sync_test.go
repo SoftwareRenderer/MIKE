@@ -16,7 +16,7 @@ func TestDeletedMessagesNotSentToLLM(t *testing.T) {
 	now := time.Now().UTC()
 
 	proj := &types.Project{ID: "proj-del", Name: "Delete Test", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := te.rawStore().CreateProject(proj); err != nil {
+	if err := te.store.CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 
@@ -27,18 +27,18 @@ func TestDeletedMessagesNotSentToLLM(t *testing.T) {
 		LlamaServerURL: "http://test:8080", ModelName: "test-model",
 		CreatedAt: now, UpdatedAt: now,
 	}
-	if err := te.rawStore().CreateTask(task); err != nil {
+	if err := te.store.CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 
 	threadID := types.GenerateThreadID()
-	if err := te.rawStore().CreateThread(&types.TaskThread{
+	if err := te.store.CreateThread(&types.TaskThread{
 		ID: threadID, TaskID: taskID, Name: "Main", IsActive: true, CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
 	task.CurrentThreadID = threadID
-	_ = te.rawStore().UpdateTask(task)
+	_ = te.store.UpdateTask(task)
 
 	// Create messages in the DB: system, user1, assistant1, user2, assistant2
 	msg1 := &types.TaskMessage{ID: "msg-user1", TaskID: taskID, ThreadID: threadID, Role: "user", Content: "First user message", CreatedAt: now}
@@ -47,13 +47,13 @@ func TestDeletedMessagesNotSentToLLM(t *testing.T) {
 	msg4 := &types.TaskMessage{ID: "msg-assist2", TaskID: taskID, ThreadID: threadID, Role: "assistant", Content: "Second assistant response", CreatedAt: now.Add(3 * time.Second)}
 
 	for _, m := range []*types.TaskMessage{msg1, msg2, msg3, msg4} {
-		if err := te.rawStore().CreateTaskMessage(m); err != nil {
+		if err := te.store.CreateTaskMessage(m); err != nil {
 			t.Fatalf("create message: %v", err)
 		}
 	}
 
 	// Build initial messages from DB (simulates executor startup)
-	taskMsgs, _ := te.rawStore().GetTaskMessages(taskID, threadID)
+	taskMsgs, _ := te.store.GetTaskMessages(taskID, threadID)
 	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "Delete Test", false)
 
 	// Verify: should have system + 4 messages = 5
@@ -62,12 +62,12 @@ func TestDeletedMessagesNotSentToLLM(t *testing.T) {
 	}
 
 	// Simulate user deleting msg3 (user2) and everything after it (msg4)
-	if _, err := te.rawStore().DeleteTaskMessagesAfter(taskID, "msg-user2", threadID); err != nil {
+	if _, err := te.store.DeleteTaskMessagesAfter(taskID, "msg-user2", threadID); err != nil {
 		t.Fatalf("delete messages: %v", err)
 	}
 
 	// Verify DB state: should have system + 2 messages = 3
-	dbMsgs, _ := te.rawStore().GetTaskMessages(taskID, threadID)
+	dbMsgs, _ := te.store.GetTaskMessages(taskID, threadID)
 	if len(dbMsgs) != 2 {
 		t.Fatalf("expected 2 messages in DB after delete, got %d", len(dbMsgs))
 	}
@@ -85,7 +85,7 @@ func TestDeletedMessagesNotSentToLLM(t *testing.T) {
 	// so deleted messages are excluded.
 
 	// Simulate the fix: re-sync from DB
-	taskMsgs, _ = te.rawStore().GetTaskMessages(taskID, threadID)
+	taskMsgs, _ = te.store.GetTaskMessages(taskID, threadID)
 	messages = buildMessagesFromDB(task, taskMsgs, "/worktree", "Delete Test", false)
 
 	// Append new user message
@@ -133,7 +133,7 @@ func TestDeletedMessagesWithRegenerate(t *testing.T) {
 	now := time.Now().UTC()
 
 	proj := &types.Project{ID: "proj-regen", Name: "Regen Test", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := te.rawStore().CreateProject(proj); err != nil {
+	if err := te.store.CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 
@@ -144,18 +144,18 @@ func TestDeletedMessagesWithRegenerate(t *testing.T) {
 		LlamaServerURL: "http://test:8080", ModelName: "test-model",
 		CreatedAt: now, UpdatedAt: now,
 	}
-	if err := te.rawStore().CreateTask(task); err != nil {
+	if err := te.store.CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 
 	threadID := types.GenerateThreadID()
-	if err := te.rawStore().CreateThread(&types.TaskThread{
+	if err := te.store.CreateThread(&types.TaskThread{
 		ID: threadID, TaskID: taskID, Name: "Main", IsActive: true, CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
 	task.CurrentThreadID = threadID
-	_ = te.rawStore().UpdateTask(task)
+	_ = te.store.UpdateTask(task)
 
 	// Create messages: user1, assistant1, user2, assistant2
 	msg1 := &types.TaskMessage{ID: "msg-user1", TaskID: taskID, ThreadID: threadID, Role: "user", Content: "First user message", CreatedAt: now}
@@ -164,17 +164,17 @@ func TestDeletedMessagesWithRegenerate(t *testing.T) {
 	msg4 := &types.TaskMessage{ID: "msg-assist2", TaskID: taskID, ThreadID: threadID, Role: "assistant", Content: "Second assistant response", CreatedAt: now.Add(3 * time.Second)}
 
 	for _, m := range []*types.TaskMessage{msg1, msg2, msg3, msg4} {
-		if err := te.rawStore().CreateTaskMessage(m); err != nil {
+		if err := te.store.CreateTaskMessage(m); err != nil {
 			t.Fatalf("create message: %v", err)
 		}
 	}
 
 	// Build initial messages from DB
-	taskMsgs, _ := te.rawStore().GetTaskMessages(taskID, threadID)
+	taskMsgs, _ := te.store.GetTaskMessages(taskID, threadID)
 	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "Regen Test", false)
 
 	// Simulate regenerate: DB deletes msg3+msg4, in-memory truncates
-	_, _ = te.rawStore().DeleteTaskMessagesAfter(taskID, "msg-user2", threadID)
+	_, _ = te.store.DeleteTaskMessagesAfter(taskID, "msg-user2", threadID)
 	messages = truncateForRegenerate(messages)
 
 	// Append re-sent user message
@@ -201,7 +201,7 @@ func TestDeletedSingleMessageNotSentToLLM(t *testing.T) {
 	now := time.Now().UTC()
 
 	proj := &types.Project{ID: "proj-single", Name: "Single Delete Test", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := te.rawStore().CreateProject(proj); err != nil {
+	if err := te.store.CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 
@@ -212,18 +212,18 @@ func TestDeletedSingleMessageNotSentToLLM(t *testing.T) {
 		LlamaServerURL: "http://test:8080", ModelName: "test-model",
 		CreatedAt: now, UpdatedAt: now,
 	}
-	if err := te.rawStore().CreateTask(task); err != nil {
+	if err := te.store.CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 
 	threadID := types.GenerateThreadID()
-	if err := te.rawStore().CreateThread(&types.TaskThread{
+	if err := te.store.CreateThread(&types.TaskThread{
 		ID: threadID, TaskID: taskID, Name: "Main", IsActive: true, CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
 	task.CurrentThreadID = threadID
-	_ = te.rawStore().UpdateTask(task)
+	_ = te.store.UpdateTask(task)
 
 	// Create messages: user1, error (to dismiss), assistant1
 	msg1 := &types.TaskMessage{ID: "msg-user1", TaskID: taskID, ThreadID: threadID, Role: "user", Content: "User message", CreatedAt: now}
@@ -231,18 +231,18 @@ func TestDeletedSingleMessageNotSentToLLM(t *testing.T) {
 	msg3 := &types.TaskMessage{ID: "msg-assist1", TaskID: taskID, ThreadID: threadID, Role: "assistant", Content: "Assistant response", CreatedAt: now.Add(2 * time.Second)}
 
 	for _, m := range []*types.TaskMessage{msg1, msg2, msg3} {
-		if err := te.rawStore().CreateTaskMessage(m); err != nil {
+		if err := te.store.CreateTaskMessage(m); err != nil {
 			t.Fatalf("create message: %v", err)
 		}
 	}
 
 	// Simulate user dismissing the error message
-	if err := te.rawStore().DeleteTaskMessageByID("msg-error"); err != nil {
+	if err := te.store.DeleteTaskMessageByID("msg-error"); err != nil {
 		t.Fatalf("delete single message: %v", err)
 	}
 
 	// Re-sync from DB (the fix)
-	taskMsgs, _ := te.rawStore().GetTaskMessages(taskID, threadID)
+	taskMsgs, _ := te.store.GetTaskMessages(taskID, threadID)
 	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "Single Delete Test", false)
 
 	// Verify: system + user + assistant = 3 (error removed)

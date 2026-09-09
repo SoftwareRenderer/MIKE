@@ -109,7 +109,7 @@ func waitForCondition(timeout time.Duration, cond func() bool) bool {
 func summarizeIdleSetup(t *testing.T, projID, projName, taskID string, serverURL string) (*TaskExecutor, *taskExecSetup) {
 	t.Helper()
 	te := newSessionCostTestExecutor(t)
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, projID, projName)
 
 	task := &types.Task{
@@ -206,7 +206,7 @@ func TestExecuteTask_ManualSummarize_StaysIdleWithoutQueuedMessage(t *testing.T)
 		t.Fatalf("timed out waiting for first LLM request")
 	}
 	waitFor(t, 10*time.Second, "task to reach review/idle after first response", func() bool {
-		got, err := te.rawStore().GetTaskByID(taskID)
+		got, err := te.store.GetTaskByID(taskID)
 		return err == nil && got != nil && got.Status == types.StatusReview && got.ExecutionState == types.ExecStateIdle
 	})
 
@@ -232,7 +232,7 @@ func TestExecuteTask_ManualSummarize_StaysIdleWithoutQueuedMessage(t *testing.T)
 	}
 
 	// Task must still be review/idle.
-	got, err := te.rawStore().GetTaskByID(taskID)
+	got, err := te.store.GetTaskByID(taskID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestExecuteTask_ManualSummarize_StaysIdleWithoutQueuedMessage(t *testing.T)
 	}
 
 	// The summary must be persisted, and the summarization endpoint must have been hit.
-	msgs, _ := te.rawStore().GetTaskMessages(taskID, "thread-1")
+	msgs, _ := te.store.GetTaskMessages(taskID, "thread-1")
 	hasSummary := false
 	for _, m := range msgs {
 		if m.Role == "summarization" {
@@ -289,13 +289,13 @@ func TestExecuteTask_ManualSummarize_StartsWithQueuedMessage(t *testing.T) {
 		t.Fatalf("timed out waiting for first LLM request")
 	}
 	waitFor(t, 10*time.Second, "task to reach review/idle after first response", func() bool {
-		got, err := te.rawStore().GetTaskByID(taskID)
+		got, err := te.store.GetTaskByID(taskID)
 		return err == nil && got != nil && got.Status == types.StatusReview && got.ExecutionState == types.ExecStateIdle
 	})
 
 	// Queue a new user message (persisted in the DB exactly as HandleSend does,
 	// before the executor is notified) and request summarization.
-	if err := te.rawStore().CreateTaskMessage(&types.TaskMessage{
+	if err := te.store.CreateTaskMessage(&types.TaskMessage{
 		ID: uuid.New().String(), TaskID: taskID, ThreadID: "thread-1",
 		Role: "user", Content: "Second message", CreatedAt: time.Now().UTC(),
 	}); err != nil {

@@ -68,7 +68,7 @@ func TestSandboxMemoryPeakSinkIgnoresContainersThatNameNoTask(t *testing.T) {
 
 func TestTaskPayloadCarriesTheRecordedPeak(t *testing.T) {
 	s := testServer(t)
-	st := s.rawStore()
+	st := s.store
 
 	proj := &types.Project{ID: "proj-api", Name: "proj-api", Path: t.TempDir()}
 	if err := st.CreateProject(proj); err != nil {

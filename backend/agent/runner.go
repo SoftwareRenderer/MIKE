@@ -71,11 +71,32 @@ type RunnerConfig struct {
 	AgentManifest *extensions.AgentConfig `json:"agent_manifest,omitempty"`
 }
 
-// NewAgentRunner creates a new agent runner.
-// It loads the WASM adapter, initializes it, spawns the agent subprocess,
-// and starts the stdout reader goroutine.
-// ctx is used for cancellation during adapter initialization.
+// NewAgentRunner creates a new agent runner: prepare the adapter, then start its process.
+// Callers that must know the binary before it is spawned take PrepareAgent and Start instead -
+// the binary name lives only in the adapter, so nothing may ask the container about it first.
 func NewAgentRunner(ctx context.Context, ext *extensions.Extension, sandboxMgr *sandbox.SandboxManager, taskID, worktreePath, sessionName string, sandboxEnabled bool) (*AgentRunner, error) {
+	prepared, err := PrepareAgent(ctx, ext, worktreePath, sessionName, sandboxEnabled)
+	if err != nil {
+		return nil, err
+	}
+	return prepared.Start(sandboxMgr, taskID)
+}
+
+// Prepared is an agent adapter that is loaded, initialized, and asked which process it runs,
+// with that process not started yet. Splitting construction this way is what lets the sandboxed
+// task's pre-flight ask the container about the binary the adapter actually named - the backend
+// knows nothing about agent protocols and must not guess a name of its own.
+type Prepared struct {
+	adapter      pkgagent.AgentAdapter
+	spCfg        pkgagent.SubprocessConfig
+	worktreePath string
+	sandbox      bool
+}
+
+// PrepareAgent loads the extension's adapter, initializes it with the runner configuration and
+// resolves the subprocess config. An adapter that cannot name a binary is refused here, before
+// any process exists.
+func PrepareAgent(ctx context.Context, ext *extensions.Extension, worktreePath, sessionName string, sandboxEnabled bool) (*Prepared, error) {
 	cfg := RunnerConfig{
 		ExtensionName: ext.Name,
 		SessionName:   sessionName,
@@ -96,7 +117,6 @@ func NewAgentRunner(ctx context.Context, ext *extensions.Extension, sandboxMgr *
 		return nil, fmt.Errorf("marshal runner config: %w", err)
 	}
 
-	// Load and initialize the WASM adapter
 	adapter, err := LoadAdapter(ext)
 	if err != nil {
 		return nil, fmt.Errorf("load adapter: %w", err)
@@ -106,15 +126,6 @@ func NewAgentRunner(ctx context.Context, ext *extensions.Extension, sandboxMgr *
 		return nil, fmt.Errorf("init adapter: %w", err)
 	}
 
-	r := &AgentRunner{
-		adapter:      adapter,
-		eventChan:    make(chan pkgagent.Event, 64),
-		statsChan:    make(chan pkgagent.SessionStatsData, 16),
-		compactChan:  make(chan *pkgagent.CompactResult, 4),
-		modelUpdated: make(chan struct{}, 1),
-		done:         make(chan struct{}),
-	}
-
 	// Get subprocess config from adapter
 	spCfg := adapter.SubprocessConfig(ctx)
 	if spCfg.Binary == "" {
@@ -122,32 +133,64 @@ func NewAgentRunner(ctx context.Context, ext *extensions.Extension, sandboxMgr *
 		return nil, fmt.Errorf("adapter returned empty binary name")
 	}
 
+	return &Prepared{
+		adapter:      adapter,
+		spCfg:        spCfg,
+		worktreePath: worktreePath,
+		sandbox:      sandboxEnabled,
+	}, nil
+}
+
+// Binary is the executable the adapter said it will run, exactly as the adapter named it.
+func (p *Prepared) Binary() string { return p.spCfg.Binary }
+
+// Close releases the adapter of a preparation whose process was never started.
+func (p *Prepared) Close() { p.adapter.Close() }
+
+// Start spawns the agent process the adapter described and begins streaming its events. The
+// adapter is closed on failure and owned by the runner otherwise.
+func (p *Prepared) Start(sandboxMgr *sandbox.SandboxManager, taskID string) (*AgentRunner, error) {
+	if p.sandbox && sandboxMgr == nil {
+		return nil, fmt.Errorf("agent %q is configured to run in a sandbox container, which needs a sandbox manager", p.spCfg.Binary)
+	}
+
+	r := &AgentRunner{
+		adapter:      p.adapter,
+		eventChan:    make(chan pkgagent.Event, 64),
+		statsChan:    make(chan pkgagent.SessionStatsData, 16),
+		compactChan:  make(chan *pkgagent.CompactResult, 4),
+		modelUpdated: make(chan struct{}, 1),
+		done:         make(chan struct{}),
+	}
+
 	// Spawn the agent subprocess
-	if sandboxEnabled {
-		ph, err := sandboxMgr.StartProcess(taskID, spCfg.Binary, spCfg.Args)
+	if p.sandbox {
+		ph, err := sandboxMgr.StartProcess(taskID, p.spCfg.Binary, p.spCfg.Args)
 		if err != nil {
-			adapter.Close()
+			p.adapter.Close()
 			return nil, fmt.Errorf("start agent in container: %w", err)
 		}
 		r.cmd = ph.Cmd
 		r.stdin = ph.Stdin
 		r.stdout = ph.Stdout
 	} else {
-		cmd := exec.Command(spCfg.Binary, spCfg.Args...)
-		cmd.Dir = worktreePath
+		// Host mode needs nothing agent-specific: the adapter's SubprocessConfig already carries the
+		// config-dir env vars it derived from the extension's sandbox_mount declaration.
+		cmd := exec.Command(p.spCfg.Binary, p.spCfg.Args...)
+		cmd.Dir = p.worktreePath
 		// Never hand the agent the server's own environment: it would expose
 		// MIKE_LOGIN_PASSWORD / MIKE_ENCRYPTION_KEY to an extension-supplied binary.
-		cmd.Env = SafeAgentEnv(spCfg.Env...)
+		cmd.Env = SafeAgentEnv(p.spCfg.Env...)
 
 		stdin, err := cmd.StdinPipe()
 		if err != nil {
-			adapter.Close()
+			p.adapter.Close()
 			return nil, fmt.Errorf("create stdin pipe: %w", err)
 		}
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			stdin.Close()
-			adapter.Close()
+			p.adapter.Close()
 			return nil, fmt.Errorf("create stdout pipe: %w", err)
 		}
 		cmd.Stderr = nil // stderr goes to parent
@@ -155,7 +198,7 @@ func NewAgentRunner(ctx context.Context, ext *extensions.Extension, sandboxMgr *
 		if err := cmd.Start(); err != nil {
 			stdin.Close()
 			stdout.Close()
-			adapter.Close()
+			p.adapter.Close()
 			return nil, fmt.Errorf("start agent process: %w", err)
 		}
 
@@ -174,7 +217,7 @@ func NewAgentRunner(ctx context.Context, ext *extensions.Extension, sandboxMgr *
 	}()
 	go r.readOutput(readCtx)
 
-	logging.For(logging.Agent).Infof("runner started (binary=%s, pid=%d, session=%s)", spCfg.Binary, r.PID(), sessionName)
+	logging.For(logging.Agent).With(logging.TaskID, taskID).Infof("runner started (binary=%s, pid=%d)", p.spCfg.Binary, r.PID())
 	return r, nil
 }
 

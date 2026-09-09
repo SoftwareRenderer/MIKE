@@ -6,7 +6,6 @@ package server
 import (
 	"context"
 	stdtls "crypto/tls"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -39,51 +38,9 @@ import (
 	"kanban/pkg/logging"
 )
 
-// handlerStore is the persistence the HTTP handlers reach. It is wide because message
-// and thread editing talks to the store directly instead of through backend/managers, so
-// treat an addition here as that debt growing, not as a free method.
-type handlerStore interface {
-	ClearStaleSummarizing() error
-	ClearStaleTitleGenerating() error
-	Close() error
-	// DBStats returns the pool counters, which Shutdown logs.
-	DBStats() sql.DBStats
-	CopyMessagesToThread(sourceThreadID, targetThreadID, upToMessageID string) ([]store.CopiedCheckpoint, error)
-	CreateTaskMessage(m *types.TaskMessage) error
-	CreateThread(th *types.TaskThread) error
-	DeleteOtherSessions(ctx context.Context, currentID string) (int, error)
-	DeleteSessionByID(ctx context.Context, id string) (bool, error)
-	DeleteTaskMessageByID(messageID string) error
-	DeleteTaskMessagesAfter(taskID, messageID, threadID string) ([]string, error)
-	DeleteThread(threadID string) error
-	DeleteThreadWithMessages(threadID string) (*types.TaskThread, error)
-	GetLastCommitHashBeforeMessage(messageID, threadID string) (string, error)
-	GetLastUserMessageInThread(threadID string) (string, error)
-	GetMessageCreatedAt(messageID string) (*time.Time, error)
-	GetProject(id string) (*types.Project, error)
-	GetTask(projectID, taskID string) (*types.Task, error)
-	GetTaskByID(taskID string) (*types.Task, error)
-	GetTaskMessageByID(messageID string) (*types.TaskMessage, error)
-	GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, error)
-	GetThread(threadID string) (*types.TaskThread, error)
-	GetThreadsByCheckpointMessageID(messageID string) ([]types.TaskThread, error)
-	GetThreadsByCheckpointMessageTime(messageTime string) ([]types.TaskThread, error)
-	GetThreadsByTask(taskID string) ([]types.TaskThread, error)
-	ListProjects() ([]types.Project, error)
-	ListSessions(ctx context.Context) ([]store.SessionInfo, error)
-	SetActiveThread(threadID string) error
-	SetTaskAssignedPorts(taskID, projectID string, ports []types.AssignedPort) error
-	UpdateTask(t *types.Task) error
-	UpdateTaskMessage(messageID, content string) error
-	UpdateTaskMessageCommitHash(messageID, hash string) error
-	UpdateThreadWorktreeStashHash(threadID, hash string) error
-}
-
-var _ handlerStore = (*store.Store)(nil)
-
 // Server is the main HTTP server.
 type Server struct {
-	store               handlerStore
+	store               *store.Store
 	configStore         *config.ConfigStore
 	sessionMgr          *auth.SessionManager
 	projectHandler      *managers.ProjectHandler
@@ -356,11 +313,15 @@ func (s *Server) handleFetchModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.HasPrefix(req.LlamaServerURL, "agent://") {
+	if types.IsAgentURL(req.LlamaServerURL) {
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
 
-		agentName := strings.TrimPrefix(req.LlamaServerURL, "agent://")
+		agentName, ok := types.ParseAgentURL(req.LlamaServerURL)
+		if !ok {
+			httputil.JSONError(w, http.StatusBadRequest, "agent URL must name exactly one extension: "+req.LlamaServerURL)
+			return
+		}
 		ext := s.agentRegistry.LookupByName(agentName)
 		if ext == nil {
 			httputil.JSONError(w, http.StatusNotFound, fmt.Sprintf("Agent %q not found", agentName))

@@ -71,7 +71,7 @@ func TestSandboxedTaskWithoutBridgeRefusesEveryHostTool(t *testing.T) {
 			worktree := t.TempDir()
 			outside := t.TempDir()
 			te := newReadTestExecutor(t, worktree)
-			task := makeTestTask(t, te.rawStore(), fmt.Sprintf("proj-hostguard-%d", i), fmt.Sprintf("task-hostguard-%d", i))
+			task := makeTestTask(t, te.store, fmt.Sprintf("proj-hostguard-%d", i), fmt.Sprintf("task-hostguard-%d", i))
 
 			target := tc.target(worktree, outside)
 			result, ok := te.executeTool(context.Background(), tc.tool, tc.args(target),
@@ -100,7 +100,7 @@ func TestSandboxedTaskWithoutBridgeRefusesEveryHostTool(t *testing.T) {
 func TestUnsandboxedTaskReadsOutsideWorktree(t *testing.T) {
 	worktree := t.TempDir()
 	te := newReadTestExecutor(t, worktree)
-	task := makeTestTask(t, te.rawStore(), "proj-hostguard-2", "task-hostguard-2")
+	task := makeTestTask(t, te.store, "proj-hostguard-2", "task-hostguard-2")
 
 	outside := filepath.Join(t.TempDir(), "notes.txt")
 	if err := os.WriteFile(outside, []byte("outside content"), 0o600); err != nil {
@@ -154,7 +154,7 @@ func TestLSPToolReadsThroughSandboxCallback(t *testing.T) {
 	writeFile(t, filepath.Join(root, "outside.go"), "package other\n\nfunc hostSideSymbol() {}\n")
 
 	te := newLSPTestExecutorWithMgr(t, worktree, goplsExtension())
-	task := makeTestTaskLSP(t, te.rawStore(), "proj-lsp-guard", "task-lsp-guard")
+	task := makeTestTaskLSP(t, te.store, "proj-lsp-guard", "task-lsp-guard")
 
 	var asked []string
 	state := &executionState{sandboxEnabled: true}

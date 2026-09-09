@@ -260,14 +260,14 @@ func TestFilterDiagnosticFiles(t *testing.T) {
 
 func TestTurnDiagnosticFiles_AskGitWhatTheShellChanged(t *testing.T) {
 	te, _, projectID, _ := setupExecutorWithGit(t)
-	es := extensions.NewExtensionStore(te.rawStore())
+	es := extensions.NewExtensionStore(te.store)
 	if err := es.InitSchema(); err != nil {
 		t.Fatalf("InitSchema: %v", err)
 	}
 	if err := es.Create(lspGoExtension()); err != nil {
 		t.Fatalf("create lsp extension: %v", err)
 	}
-	te.lspMgr = lsp.NewExtensionLSPManager(es, nil, te.rawStore())
+	te.lspMgr = lsp.NewExtensionLSPManager(es, nil, te.store)
 
 	now := time.Now().UTC()
 	task := &types.Task{
@@ -275,7 +275,7 @@ func TestTurnDiagnosticFiles_AskGitWhatTheShellChanged(t *testing.T) {
 		Status: types.StatusInProgress, OperatingMode: "act", LlamaServerURL: "http://test:8080",
 		ModelName: "test-model", Branch: "task/shell-task", CreatedAt: now, UpdatedAt: now,
 	}
-	if err := te.rawStore().CreateTask(task); err != nil {
+	if err := te.store.CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 	setup := &taskExecSetup{task: task, projectID: projectID}

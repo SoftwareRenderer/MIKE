@@ -30,10 +30,10 @@ func seedReviewTask(t *testing.T, te *TaskExecutor, projectID, taskID, threadID 
 		ModelName:       "test-model",
 		CurrentThreadID: threadID,
 	}
-	if err := te.rawStore().CreateTask(task); err != nil {
+	if err := te.store.CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if err := te.rawStore().CreateThread(&types.TaskThread{ID: threadID, TaskID: taskID, IsActive: true}); err != nil {
+	if err := te.store.CreateThread(&types.TaskThread{ID: threadID, TaskID: taskID, IsActive: true}); err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
 	base := time.Now().UTC().Add(-time.Duration(len(tail)) * time.Minute)
@@ -43,7 +43,7 @@ func seedReviewTask(t *testing.T, te *TaskExecutor, projectID, taskID, threadID 
 		if m.CreatedAt.IsZero() {
 			m.CreatedAt = base.Add(time.Duration(i) * time.Second)
 		}
-		if err := te.rawStore().CreateTaskMessage(&m); err != nil {
+		if err := te.store.CreateTaskMessage(&m); err != nil {
 			t.Fatalf("seed message %d: %v", i, err)
 		}
 	}
@@ -63,7 +63,7 @@ func sendUserMessage(t *testing.T, te *TaskExecutor, projectID, taskID, content 
 
 func countUserMessages(t *testing.T, te *TaskExecutor, taskID, threadID, content string) int {
 	t.Helper()
-	msgs, err := te.rawStore().GetTaskMessages(taskID, threadID)
+	msgs, err := te.store.GetTaskMessages(taskID, threadID)
 	if err != nil {
 		t.Fatalf("get messages: %v", err)
 	}
@@ -78,7 +78,7 @@ func countUserMessages(t *testing.T, te *TaskExecutor, taskID, threadID, content
 
 func taskRow(t *testing.T, te *TaskExecutor, projectID, taskID string) *types.Task {
 	t.Helper()
-	task, err := te.rawStore().GetTask(projectID, taskID)
+	task, err := te.store.GetTask(projectID, taskID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}

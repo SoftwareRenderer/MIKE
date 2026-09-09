@@ -102,7 +102,7 @@ func TestAutomatedAnswers_SingleQuestion(t *testing.T) {
 	te, parent, subtask := setupAutoAnswerTasks(t)
 	// Parent's endpoint is preferred; point it at the mock.
 	parent.LlamaServerURL = server.URL
-	if err := te.rawStore().UpdateTask(parent); err != nil {
+	if err := te.store.UpdateTask(parent); err != nil {
 		t.Fatalf("update parent: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestAutomatedAnswers_MultipleQuestions(t *testing.T) {
 
 	te, parent, subtask := setupAutoAnswerTasks(t)
 	parent.LlamaServerURL = server.URL
-	if err := te.rawStore().UpdateTask(parent); err != nil {
+	if err := te.store.UpdateTask(parent); err != nil {
 		t.Fatalf("update parent: %v", err)
 	}
 

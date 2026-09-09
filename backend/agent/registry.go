@@ -3,7 +3,6 @@ package agent
 import (
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 
 	ext "kanban/backend/extensions"
@@ -45,12 +44,8 @@ func NewAgentRegistry(store ExtensionStore, configStore ConfigStore) *AgentRegis
 // Lookup resolves an agent://<name> URL to the matching extension.
 // Returns nil if no matching agent extension is found.
 func (r *AgentRegistry) Lookup(url string) *ext.Extension {
-	name := strings.TrimPrefix(url, "agent://")
-	if name == url {
-		return nil // not an agent URL
-	}
-	name = strings.TrimSuffix(name, "/")
-	if name == "" {
+	name, ok := types.ParseAgentURL(url)
+	if !ok {
 		return nil
 	}
 
@@ -105,7 +100,7 @@ func (r *AgentRegistry) ToProviders() []types.Provider {
 			Name:        ext.Name,
 			DisplayName: ext.Manifest.DisplayName,
 			Kind:        types.ProviderKindAgent,
-			URL:         fmt.Sprintf("agent://%s", ext.Name),
+			URL:         types.AgentProviderURL(ext.Name),
 			Concurrency: 1, // agents are single-concurrency by default
 			Models:      []types.ModelConfig{},
 		}

@@ -80,7 +80,7 @@ func createTaskRow(t *testing.T, s *store.Store, id, projectID string, status ty
 // fix StopTask returned "task not running" and the task was stuck "Running".
 func TestStopStaleRunningTask(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-stop-stale", "Stop Stale")
 
 	createTaskRow(t, s, "stale-running", proj.ID, "in_progress", "running")
@@ -99,7 +99,7 @@ func TestStopStaleRunningTask(t *testing.T) {
 // In Progress column settles to idle (not paused) when stopped.
 func TestStopStaleNonInProgressTask(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-stop-stale-2", "Stop Stale 2")
 
 	createTaskRow(t, s, "stale-review", proj.ID, "review", "running")
@@ -127,7 +127,7 @@ func TestStopStaleMissingTask(t *testing.T) {
 // freed for the next task.
 func TestStopRunningTaskMidStream(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-stop-live", "Stop Live")
 
 	mock := newHeldLLMMock()
@@ -175,7 +175,7 @@ func TestStopRunningTaskMidStream(t *testing.T) {
 // worktree/HTTP plumbing that the lightweight test executor lacks.
 func startExecTaskExisting(t *testing.T, te *TaskExecutor, proj *types.Project, taskID, serverURL string) *taskExecSetup {
 	t.Helper()
-	task, err := te.rawStore().GetTaskByID(taskID)
+	task, err := te.store.GetTaskByID(taskID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
@@ -219,7 +219,7 @@ func startExecTaskExisting(t *testing.T, te *TaskExecutor, proj *types.Project, 
 // executor for it (what /resume does) and confirm it runs again.
 func TestPauseResumeCycle(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-pause-resume", "Pause Resume")
 
 	mock := newHeldLLMMock()
@@ -256,7 +256,7 @@ func TestPauseResumeCycle(t *testing.T) {
 // handleStopped reverted it to review+idle).
 func TestStopDoesNotClobberMovedTask(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-stop-clobber", "Stop Clobber")
 
 	mock := newHeldLLMMock()
@@ -302,7 +302,7 @@ func TestStopDoesNotClobberMovedTask(t *testing.T) {
 // are not in-flight are untouched.
 func TestRecoverStaleTasks(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-recover", "Recover")
 
 	createTaskRow(t, s, "rec-running", proj.ID, "in_progress", "running")
@@ -331,7 +331,7 @@ func TestRecoverStaleTasks(t *testing.T) {
 // row, and no "Pending" card for a conversation that is waiting on the user.
 func TestStartTaskAssistantLastSettleIdle(t *testing.T) {
 	te, _, projectID, _ := setupExecutorWithGit(t)
-	s := te.rawStore()
+	s := te.store
 
 	task := &types.Task{
 		ID:             "start-assistant-last",
@@ -383,7 +383,7 @@ func TestStartTaskAssistantLastSettleIdle(t *testing.T) {
 // the task stuck until a second Stop.
 func TestStopWithAssignedPortsLeavesTaskPaused(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-stop-ports", "Stop Ports")
 
 	mock := newHeldLLMMock()
@@ -450,7 +450,7 @@ func TestStopWithAssignedPortsLeavesTaskPaused(t *testing.T) {
 // write must not restart the run, but the resumed run's own claim must work.
 func TestStaleWriterCannotResurrectButRealClaimCan(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-claim", "Claim")
 
 	mock := newHeldLLMMock()

@@ -98,7 +98,7 @@ func (m *heldLLMMock) Handler() http.HandlerFunc {
 // wiring without going through the HTTP layer).
 func runExecTask(t *testing.T, te *TaskExecutor, proj *types.Project, taskID, serverURL, prompt string) *taskExecSetup {
 	t.Helper()
-	s := te.rawStore()
+	s := te.store
 	task := &types.Task{
 		ID:             taskID,
 		ProjectID:      proj.ID,
@@ -193,7 +193,7 @@ var (
 // task runs, and picks up the slot as soon as the first task goes idle.
 func TestTaskGate_SecondTaskQueues(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-tg-queue", "TG Queue")
 
 	mock := newHeldLLMMock()
@@ -233,7 +233,7 @@ func TestTaskGate_SecondTaskQueues(t *testing.T) {
 // provider A's single slot is occupied.
 func TestTaskGate_PerProviderIsolation(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-tg-iso", "TG Isolation")
 
 	mockA := newHeldLLMMock()
@@ -272,7 +272,7 @@ func (emptyExtStore) GetByType(_ string) ([]ext.Extension, error) { return nil, 
 func TestTaskGate_AgentProviderBypasses(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
 	te.agentRegistry = agent.NewAgentRegistry(emptyExtStore{}, nil)
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-tg-agent", "TG Agent")
 
 	runExecTask(t, te, proj, "tg-agent-1", "agent://pi", "task agent")
@@ -288,7 +288,7 @@ func TestTaskGate_AgentProviderBypasses(t *testing.T) {
 // queued task there) and moves the task's slot to the new provider.
 func TestTaskGate_ProviderSwapFreesOldProvider(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-tg-swap", "TG Swap")
 
 	mockA := newHeldLLMMock()
@@ -337,7 +337,7 @@ func TestTaskGate_ProviderSwapFreesOldProvider(t *testing.T) {
 // same provider can start without queueing.
 func TestTaskSlotReleasedWhenIdle(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-tg-release", "TG Release")
 
 	mock := newHeldLLMMock()
@@ -372,7 +372,7 @@ func TestTaskSlotReleasedWhenIdle(t *testing.T) {
 // (ChatCompletion via RunWithGate) must queue until the slot is free.
 func TestUtilityCalls_RespectInFlightLimit(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-tg-util", "TG Utility")
 
 	mock := newHeldLLMMock()
@@ -423,7 +423,7 @@ func TestUtilityCalls_RespectInFlightLimit(t *testing.T) {
 // its start-time row copy.
 func TestPersistTaskPreservesTitle(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-tg-title", "TG Title")
 
 	task := &types.Task{
@@ -466,7 +466,7 @@ func TestPersistTaskPreservesTitle(t *testing.T) {
 // executor's turn-complete writes must not revert it.
 func TestTaskGate_TitleSurvivesExecutorWrites(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-tg-title2", "TG Title Run")
 
 	mock := newHeldLLMMock()

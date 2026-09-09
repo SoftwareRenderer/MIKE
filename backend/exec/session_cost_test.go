@@ -56,7 +56,7 @@ func mockSessionCostLLM(firstChat chan<- struct{}) *httptest.Server {
 // executor is restarted). The persisted SessionCost must carry over.
 func TestExecuteTask_PreservesSessionCostAcrossRun(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.rawStore()
+	s := te.store
 
 	proj := createProject(t, s, "proj-session-cost", "Session Cost Proj")
 	taskID := "session-cost-task-1"

@@ -69,7 +69,7 @@ func summarizeSetup(t *testing.T, summaries ...string) (*TaskExecutor, *taskExec
 	t.Helper()
 	te := newTestExecutor(t)
 	te.gate = NewConcurrencyGate()
-	s := te.rawStore()
+	s := te.store
 	proj := createProject(t, s, "proj-sum-ctx-"+t.Name(), "Sum Ctx")
 	server := mockSummarySeqLLM(summaries...)
 	t.Cleanup(server.Close)
@@ -188,7 +188,7 @@ func TestMaybeAutoSummarize_RestartResumesWithSameSummary(t *testing.T) {
 
 	te.maybeAutoSummarize(setup, lc, "test-model", true)
 
-	rows, err := te.rawStore().GetTaskMessages(setup.task.ID, "thread-1")
+	rows, err := te.store.GetTaskMessages(setup.task.ID, "thread-1")
 	if err != nil {
 		t.Fatalf("get task messages: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestMaybeAutoSummarize_RestartResumesWithSameSummary(t *testing.T) {
 	}
 
 	// Fresh process: rebuild the conversation from the DB, exactly as a restart does.
-	reloaded, err := te.rawStore().GetTaskByID(setup.task.ID)
+	reloaded, err := te.store.GetTaskByID(setup.task.ID)
 	if err != nil {
 		t.Fatalf("reload task: %v", err)
 	}

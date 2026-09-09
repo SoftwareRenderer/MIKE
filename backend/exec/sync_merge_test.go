@@ -27,7 +27,7 @@ func TestSyncTargetIntoTask_NoNewCommits(t *testing.T) {
 		LlamaServerURL: "http://localhost:8080",
 		ModelName:      "test-model",
 	}
-	te.rawStore().CreateTask(task)
+	te.store.CreateTask(task)
 
 	// Create the task branch from master
 	runGit(t, repoDir, "checkout", "-b", "task/test-branch")
@@ -46,7 +46,7 @@ func TestSyncTargetIntoTask_NoNewCommits(t *testing.T) {
 	}
 
 	// Task state should be unchanged
-	taskFromDB, _ := te.rawStore().GetTaskByID(taskID)
+	taskFromDB, _ := te.store.GetTaskByID(taskID)
 	if taskFromDB.ExecutionState != "" && taskFromDB.ExecutionState != types.ExecStateIdle {
 		t.Errorf("execution state should be idle, got %q", taskFromDB.ExecutionState)
 	}
@@ -68,7 +68,7 @@ func TestSyncTargetIntoTask_CleanMerge(t *testing.T) {
 		LlamaServerURL: "http://localhost:8080",
 		ModelName:      "test-model",
 	}
-	te.rawStore().CreateTask(task)
+	te.store.CreateTask(task)
 
 	// Create task branch with a change to file A
 	runGit(t, repoDir, "checkout", "-b", "task/clean-branch")
@@ -122,7 +122,7 @@ func TestSyncTargetIntoTask_Conflict_EntersMergeConflictState(t *testing.T) {
 		LlamaServerURL: "",
 		ModelName:      "",
 	}
-	te.rawStore().CreateTask(task)
+	te.store.CreateTask(task)
 
 	// Create task branch with a change to shared file
 	runGit(t, repoDir, "checkout", "-b", "task/conflict-branch")
@@ -149,7 +149,7 @@ func TestSyncTargetIntoTask_Conflict_EntersMergeConflictState(t *testing.T) {
 	}
 
 	// Verify task is in merge_conflict state
-	taskFromDB, _ := te.rawStore().GetTaskByID(taskID)
+	taskFromDB, _ := te.store.GetTaskByID(taskID)
 	if !taskFromDB.HasMergeConflict {
 		t.Fatalf("expected has_merge_conflict=true, got false")
 	}
@@ -182,7 +182,7 @@ func TestSyncTargetIntoTask_WorktreeMissing(t *testing.T) {
 		LlamaServerURL: "http://localhost:8080",
 		ModelName:      "test-model",
 	}
-	te.rawStore().CreateTask(task)
+	te.store.CreateTask(task)
 
 	// Create the task branch
 	runGit(t, repoDir, "checkout", "-b", "task/no-wt-branch")
@@ -220,7 +220,7 @@ func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 		LlamaServerURL: "http://localhost:8080",
 		ModelName:      "test-model",
 	}
-	te.rawStore().CreateTask(parent)
+	te.store.CreateTask(parent)
 
 	// Create parent branch
 	runGit(t, repoDir, "checkout", "-b", "task/parent-branch")
@@ -248,7 +248,7 @@ func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 		LlamaServerURL: "http://localhost:8080",
 		ModelName:      "test-model",
 	}
-	te.rawStore().CreateTask(child)
+	te.store.CreateTask(child)
 
 	// Create child branch from parent branch (in parent worktree since it's locked there)
 	runGitInDir(t, parentWtPath, "checkout", "-b", "task/child-branch")
@@ -269,7 +269,7 @@ func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 	runGitInDir(t, parentWtPath, "commit", "-m", "parent new file")
 
 	// Reload child task
-	child, _ = te.rawStore().GetTaskByID(childID)
+	child, _ = te.store.GetTaskByID(childID)
 
 	// Sync parent into child — should merge cleanly
 	err := te.syncTargetIntoTask(projectID, childID, "task/parent-branch", "task/child-branch", child)

@@ -36,49 +36,18 @@ import (
 	"kanban/pkg/logging"
 )
 
-// taskStore is what the execution loop persists: task rows and their state
-// transitions, messages, threads and token accounting.
-type taskStore interface {
-	AccumulateProjectStats(projectID, modelName, providerName string, cost float64)
-	ClearTaskBranch(taskID, projectID string) error
-	CreateTask(t *types.Task) error
-	CreateTaskMessage(m *types.TaskMessage) error
-	CreateThread(th *types.TaskThread) error
-	FixPostSummaryTimestamps(taskID, threadID string, anchorTime, summaryTime time.Time) error
-	GetChildren(taskID string) ([]types.Task, error)
-	GetInFlightTasks() ([]types.Task, error)
-	GetLastMessageInThread(threadID string) (*types.TaskMessage, error)
-	GetPendingIdleTasks() ([]types.Task, error)
-	GetProject(id string) (*types.Project, error)
-	GetTask(projectID, taskID string) (*types.Task, error)
-	GetTaskByID(taskID string) (*types.Task, error)
-	GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, error)
-	GetTasksByProject(projectID string) ([]types.Task, error)
-	GetThread(threadID string) (*types.TaskThread, error)
-	SetTaskAssignedPorts(taskID, projectID string, ports []types.AssignedPort) error
-	SetTaskBranch(taskID, projectID, branch string) error
-	SetTaskBranchIfEmpty(taskID, projectID, branch string) (bool, error)
-	SetTaskMergeConflict(taskID, projectID string, hasConflict bool) error
-	SetTaskSummarizing(taskID string, summarizing bool) error
-	TransitionInFlightTask(taskID, projectID string, executionState types.ExecutionState, output *string) (bool, error)
-	UpdateTask(t *types.Task) error
-	UpdateTaskClaimingExecution(t *types.Task) error
-	UpdateTaskExecutionState(taskID, projectID string, executionState types.ExecutionState) error
-	UpdateTaskMessageCommitHash(messageID, hash string) error
-	UpdateTaskMessageToolResult(messageID, toolResult string) error
-	UpdateTaskSessionCost(taskID string, cost float64) error
-}
-
-var _ taskStore = (*store.Store)(nil)
-
 // TaskExecutor handles task execution endpoints and orchestrates AI task execution.
 type TaskExecutor struct {
-	store         taskStore
+	store         *store.Store
 	configStore   *config.ConfigStore
 	appStreamMgr  *stream.AppStreamManager
 	worktreeMgr   *git.WorktreeManager
 	sandboxMgr    *sandbox.SandboxManager
 	agentRegistry *agent.AgentRegistry
+	// agentBinaries answers whether a task's sandbox container holds a binary. NewTaskExecutor wires
+	// the sandbox manager here; a test injects a recorder, since which name the agent pre-flight asks
+	// about is the behaviour under test.
+	agentBinaries agentBinaries
 	lspMgr        lspManager
 	commitQueue   *CommitQueue
 	gate          *ConcurrencyGate // per-LLM-request in-flight limit (incl. utility calls)
@@ -317,6 +286,12 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStr
 	if lspMgr != nil {
 		lspMgrI = lspMgr
 	}
+	// Same reason for the pre-flight's container question: a nil *SandboxManager stored in the
+	// interface is not nil, and the pre-flight must read "no sandbox" as "not available".
+	var binaries agentBinaries
+	if sandboxMgr != nil {
+		binaries = sandboxMgr
+	}
 	te := &TaskExecutor{
 		store:         store,
 		configStore:   configStore,
@@ -324,6 +299,7 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStr
 		worktreeMgr:   worktreeMgr,
 		sandboxMgr:    sandboxMgr,
 		agentRegistry: agentRegistry,
+		agentBinaries: binaries,
 		lspMgr:        lspMgrI,
 		commitQueue:   commitQueue,
 		gate:          NewConcurrencyGate(),
@@ -676,6 +652,11 @@ func isIncompleteForStart(t types.Task) bool {
 // SelectSubtaskToStart picks the subtask to start: the sole deepest startable
 // one, or the LLM's choice when several tie (first on LLM failure). Empty
 // string if none is startable.
+//
+// A start path should prefer TaskHandler.subtasksToStart (backend/managers),
+// which honors the "run siblings in parallel" setting by returning every
+// startable subtask when that is on; use this directly only when a single pick
+// is genuinely wanted.
 func (te *TaskExecutor) SelectSubtaskToStart(parent *types.Task, subtasks []types.Task) string {
 	deepest := te.FindDeepestStartableSubtasks(subtasks)
 	if len(deepest) == 0 {
@@ -749,7 +730,10 @@ Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
 // StartSubtask starts the executor for the specified subtask,
 // inheriting the parent's LLM config and ensuring the parent's branch. It does
 // not move the parent or its siblings — the caller places the chain.
-// autostarted records whether this start came from autonomous sibling continuation.
+// autostarted records whether the subtask runs on its parent's behalf, with no
+// human present to answer ask_question: true for a start issued for a parent
+// (the group start of its children, the sibling continuation chain), false when
+// a user started this one task and is waiting for it.
 func (te *TaskExecutor) StartSubtask(projectID, subtaskID string, autostarted bool) error {
 	subtask, err := te.store.GetTaskByID(subtaskID)
 	if err != nil {
@@ -1329,8 +1313,8 @@ func (te *TaskExecutor) getAgentRunner(ctx context.Context, projectID, taskID st
 	}
 
 	// Extract agent name from URL: "agent://pi" -> "pi"
-	agentName := strings.TrimPrefix(task.LlamaServerURL, "agent://")
-	if agentName == "" || agentName == task.LlamaServerURL {
+	agentName, ok := types.ParseAgentURL(task.LlamaServerURL)
+	if !ok {
 		return nil, fmt.Errorf("invalid agent URL: %s", task.LlamaServerURL)
 	}
 
