@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { execSync } from 'child_process';
 import {
-    isolatedProject, gotoProject, ownProjectId, ownProjectPath, csrfFetch,
+    isolatedProject, gotoProject, ownProjectId, ownProjectPath, csrfFetch, descenderProblems,
 } from './helpers';
 
 // A long branch name used to occupy a 160px badge that could not shrink (`flex-shrink: 0`) beside a
@@ -151,6 +151,10 @@ test.describe.serial('Explorer header with a long branch name', () => {
                 .toContainText(LONG_BRANCH_PREFIX);
             await expect(() => headerOverflow(page), `${width}px: header fits`).resolves.toBe('');
             await expect(() => badgeProblems(page), `${width}px: badge truncates`).resolves.toBe('');
+            for (const sel of ['.project-path', '.branch-badge-label']) {
+                await expect(() => descenderProblems(page, sel), `${width}px: ${sel} keeps its descenders`)
+                    .resolves.toBe('');
+            }
         }
     });
 
@@ -168,6 +172,8 @@ test.describe.serial('Explorer header with a long branch name', () => {
                 const label = page.locator(view === 'review' ? '.branch-badge-label' : '.explorer-name');
                 await expect(label, `${width}px/${view}: branch name shown`).toHaveText(PROJECT_BRANCH);
                 await expect(() => headerOverflow(page), `${width}px/${view}: header fits`).resolves.toBe('');
+                await expect(() => descenderProblems(page, '.project-path'), `${width}px/${view}: path keeps its descenders`)
+                    .resolves.toBe('');
                 await expect(() => coveredControls(page), `${width}px/${view}: nothing painted over a control`)
                     .resolves.toBe('');
                 if (view === 'review') {

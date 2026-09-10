@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { writeFileSync, rmSync, readdirSync, statSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { getProjectId, csrfFetch, projectDirPath, selectProject, isolatedProject, gotoProject } from './helpers';
+import { getProjectId, csrfFetch, projectDirPath, selectProject, isolatedProject, gotoProject, descenderProblems } from './helpers';
 
 // Own project: this file writes files into the project directory and commits them, and
 // the shared test repo is where other specs run their own `git add -A && git commit`.
@@ -191,6 +191,10 @@ test.describe('Explorer Git History Refresh After Commit', () => {
 
       // Verify the branch badge is still visible in the git graph
       await expect(page.locator('.branch-badge').first()).toBeVisible({ timeout: 5000 });
+      await expect(
+        descenderProblems(page, '.git-badge-label'),
+        'the git graph badge keeps its descenders'
+      ).resolves.toBe('');
     } finally {
       try { rmSync(filePath, { force: true }); } catch { /* ignore */ }
     }

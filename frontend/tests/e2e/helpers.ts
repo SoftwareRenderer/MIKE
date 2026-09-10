@@ -294,6 +294,33 @@ export async function clearBoardExcept(page: Page, projectId: string, keep: stri
 export async function gotoProject(page: Page, path = '/'): Promise<void> {
   await page.goto(projectUrl(path));
 }
+
+/**
+ * Does a text box that clips itself keep the ink of its own glyphs?
+ *
+ * `overflow: hidden` stops painting at the element's line box, and a line box shorter than the font's
+ * box removes the bottom of every descender — a path drawn as `~/code/dependenc-graph-engin`. The room
+ * below the baseline inside one line box is (line-height − ascent + descent) / 2; compare it with what
+ * "g" actually paints. jsdom has neither text metrics nor layout, so this is a browser measurement.
+ * Answers '' when the text fits, and a sentence naming the shortfall when it does not.
+ */
+export async function descenderProblems(page: Page, selector: string): Promise<string> {
+  return page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return `no ${sel}`;
+    const cs = getComputedStyle(el);
+    if (cs.overflow !== 'hidden') return ''; // nothing is being cut
+    if (cs.lineHeight === 'normal') return ''; // no line box of its own, so nothing shorter than the glyphs
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    ctx.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const g = ctx.measureText('g');
+    const room = (parseFloat(cs.lineHeight) - g.fontBoundingBoxAscent + g.fontBoundingBoxDescent) / 2;
+    return g.actualBoundingBoxDescent > room
+      ? `${sel}: "g" paints ${g.actualBoundingBoxDescent}px below the baseline, its `
+        + `${cs.lineHeight} line box leaves ${room.toFixed(2)}px`
+      : '';
+  }, selector);
+}
 /**
  * Click the sidebar row for `projectId`. With per-worker projects, `.project-item` +
  * `.first()` picks somebody else's project.

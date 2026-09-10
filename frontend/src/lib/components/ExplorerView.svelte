@@ -1034,7 +1034,7 @@
     .project-path {
         font-size: 0.8125rem;
         color: var(--color-text-primary);
-        line-height: 1;
+        line-height: var(--line-height-clipped);
         align-self: center;
         min-width: 0;
         overflow: hidden;

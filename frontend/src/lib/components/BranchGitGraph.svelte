@@ -342,7 +342,7 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        line-height: 1.4;
+        line-height: var(--line-height-clipped);
         flex: 1 1 auto;
         min-width: 0;
     }
@@ -358,7 +358,7 @@
         font-size: 0.625rem;
         font-family: var(--font-mono);
         flex-shrink: 0;
-        line-height: 1;
+        line-height: var(--line-height-clipped);
     }
     .git-badge-label {
         overflow: hidden;

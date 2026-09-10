@@ -167,18 +167,10 @@ input[type="number"] {
     --color-terminal-cursor: #0084FF;
     --color-terminal-selection: #3e464e;
 
-    /* Fonts. `--font-sans-latin` is the base; `--font-sans` is what every consumer
-       reads, and the CJK block at the bottom of this file re-derives it for a CJK
-       UI. Consumers must use `--font-sans` (never the Latin base) or inherit from
-       `body` — that is what makes the CJK chains apply to them for free.
-
-       `sans-serif` is NOT part of the base on purpose: a generic family MATCHES
-       every script, so wherever it appears it ends the list and every family after
-       it is unreachable. It belongs last, and each chain that appends to the base
-       carries its own copy. */
     --font-sans-latin: "Noto Sans", "Segoe UI", Helvetica, Arial;
     --font-sans: var(--font-sans-latin), sans-serif;
     --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --line-height-clipped: 1.4;
 
     /* Radii */
     --radius-sm: 4px;
