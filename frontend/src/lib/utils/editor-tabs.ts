@@ -62,3 +62,15 @@ export function toPersistedTabs(files: OpenFileTab[]): PersistedFileTab[] {
 export function fromPersistedTabs(files: readonly PersistedFileTab[]): OpenFileTab[] {
     return files.map(f => ({ path: f.path, targetLine: f.targetLine || 0, reveal: 0 }));
 }
+
+/**
+ * Combine the tabs of a previous session with the ones opened while that restore was
+ * still in flight. A jump can be what opens the explorer (a tool card's file, a
+ * go-to-definition out of a diff), so its tab arrives before IndexedDB answers — and a
+ * restore that overwrote the list would take it back away. The restored list keeps its
+ * order and a tab opened since goes at the end, where a newly opened tab goes.
+ */
+export function mergeRestoredTabs(current: OpenFileTab[], restored: OpenFileTab[]): OpenFileTab[] {
+    const arrived = current.filter(f => !restored.some(r => r.path === f.path));
+    return arrived.length === 0 ? restored : [...restored, ...arrived];
+}

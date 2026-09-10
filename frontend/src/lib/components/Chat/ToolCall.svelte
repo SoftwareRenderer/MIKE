@@ -120,6 +120,16 @@
         return t('chat.tool.writing');
     });
 
+    function openWrittenFile(path: string) {
+        window.dispatchEvent(new CustomEvent('open-file', { detail: { path, taskId } }));
+    }
+
+    // Empty when neither the tool event nor its arguments carried a path — the line then
+    // says "(unknown)" and there is nothing to jump to.
+    let writePath = $derived(
+        tc.toolName === 'write_file' && !tc.isPending ? String(tc.path || tc.args?.path || '') : ''
+    );
+
     function truncateArgs(display: string): { text: string; truncated: boolean } {
         if (display.length <= ARGS_MAX_LEN) return { text: display, truncated: false };
         return { text: display.slice(0, ARGS_MAX_LEN) + '…', truncated: true };
@@ -511,7 +521,11 @@
         {:else if tc.toolName === 'write_file' && !tc.isPending}
             <div class="tool-result tool-write-result">
                 <span class="write-result-text">{t('chat.tool.wroteTo', { bytes: formatBytes(tc.bytesWritten ?? 0) })}</span>
-                <span class="write-result-path">{tc.path || tc.args?.path || t('chat.tool.unknownPath')}</span>
+                {#if writePath && taskId}
+                    <button class="write-result-path write-result-link" title={t('chat.tool.openInExplorer')} onclick={() => openWrittenFile(writePath)}>{writePath}</button>
+                {:else}
+                    <span class="write-result-path">{writePath || t('chat.tool.unknownPath')}</span>
+                {/if}
             </div>
         {:else if tc.toolName === 'create_task' && tc.result && tc.success}
             {#if createResult && createResult.task_id}
@@ -858,6 +872,18 @@
         color: var(--color-text-primary);
         font-family: var(--font-mono);
         font-weight: 500;
+    }
+    .write-result-link {
+        padding: 0;
+        margin: 0;
+        text-align: left;
+        overflow-wrap: anywhere;
+        text-decoration: underline;
+        text-decoration-color: var(--color-border);
+        text-underline-offset: 2px;
+    }
+    .write-result-link:hover {
+        text-decoration-color: currentColor;
     }
     .create-task-text {
         color: var(--color-text-secondary);

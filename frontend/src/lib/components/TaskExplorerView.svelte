@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { getTaskGitLog, getTaskCommitDiffFiles, initTask } from '$lib/api';
-    import { toHomeRelative } from '$lib/utils/path';
+    import { toHomeRelative, toExplorerPath } from '$lib/utils/path';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import type { GitCommit, GitLogResponse } from '$lib/types';
     import type { DiffFile } from '$lib/types/diff';
@@ -22,7 +22,7 @@
     import { effectiveOpenTerminalKey, effectiveToggleFullscreenKey, formatShortcut, matchShortcut } from '$lib/utils/keyboard';
     import { t } from '$lib/i18n';
     import { EDITOR_SAVE_SETTLED, SAVE_SETTLE_BACKSTOP_MS, SaveRequestGuard } from '$lib/utils/save-state';
-    import { revealFileTab, toPersistedTabs, fromPersistedTabs, type OpenFileTab } from '$lib/utils/editor-tabs';
+    import { revealFileTab, mergeRestoredTabs, toPersistedTabs, fromPersistedTabs, type OpenFileTab } from '$lib/utils/editor-tabs';
 
     // Terminal button tooltip — always shows the effective shortcut (tooltips
     // keep the shortcut text even when keycap hints are hidden).
@@ -135,12 +135,14 @@
         // Restore persisted tabs for this project
         loadEditorTabs(projectId).then((saved) => {
             if (saved && saved.openFiles.length > 0) {
-                openFiles = fromPersistedTabs(saved.openFiles.filter(f => isPathSafe(f.path)));
-                activeFilePath = saved.openFiles.find(f => f.path === saved.activeFilePath && isPathSafe(f.path))?.path || '';
+                openFiles = mergeRestoredTabs(openFiles, fromPersistedTabs(saved.openFiles.filter(f => isPathSafe(f.path))));
+                if (!activeFilePath) {
+                    activeFilePath = saved.openFiles.find(f => f.path === saved.activeFilePath && isPathSafe(f.path))?.path || '';
+                    onUpdateFile(activeFilePath || null);
+                }
                 pinnedFiles = new Set(saved.pinnedFiles.filter(p => openFiles.some(f => f.path === p)));
-                scrollTops = saved.scrollTops ?? {};
-                fileListScroll = saved.fileListScroll ?? 0;
-                onUpdateFile(activeFilePath || null);
+                scrollTops = { ...saved.scrollTops, ...scrollTops };
+                fileListScroll = fileListScroll || (saved.fileListScroll ?? 0);
             }
         }).catch(() => {});
     });
@@ -521,11 +523,11 @@
         })();
     });
 
-    // open-file dispatch (go-to-definition / search results)
+    // open-file dispatch (go-to-definition / search results, and a tool call's file)
     function handleOpenFile(e: Event) {
         const detail = (e as CustomEvent<{ path: string; line?: number; taskId?: string }>).detail;
         if (detail.taskId && detail.taskId !== taskId) return;
-        handleFileSelected(detail.path, detail.line);
+        handleFileSelected(toExplorerPath(detail.path, sandboxEnabled ? mountPath : taskPath), detail.line);
     }
 
     onDestroy(() => {

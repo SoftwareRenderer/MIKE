@@ -10,6 +10,21 @@ export function toHomeRelative(path: string): string {
 }
 
 /**
+ * Resolve a tool call's file path into the path the explorer addresses that file by.
+ *
+ * A tool argument names its file relative to the task root, while the explorer's editor
+ * opens files by the absolute path of its own root — the sandbox mount when the project
+ * is sandboxed, the task worktree otherwise. An absolute argument is already in that
+ * space (a sandboxed agent writes `/home/sandbox/<project>/…`, and that is exactly what
+ * the explorer lists), so it passes through untouched.
+ */
+export function toExplorerPath(path: string, rootPath: string): string {
+    if (!path || path.startsWith('/') || !rootPath) return path;
+    const rel = path.startsWith('./') ? path.slice(2) : path;
+    return rootPath.replace(/\/+$/, '') + '/' + rel;
+}
+
+/**
  * Compute a display path for a task's worktree directory.
  * The backend sends an absolute workspaceDir (e.g. `/home/projects/kanban/worktrees`).
  * Appends projectId/taskId and converts to a `~/` prefixed display path.
