@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     revealFileTab,
+    mergeRestoredTabs,
     toPersistedTabs,
     fromPersistedTabs,
     type OpenFileTab,
@@ -84,5 +85,36 @@ describe('tab persistence', () => {
         expect(fromPersistedTabs([{ path: 'main.go', targetLine: 0 }])).toEqual([
             { path: 'main.go', targetLine: 0, reveal: 0 },
         ]);
+    });
+});
+
+describe('mergeRestoredTabs', () => {
+    it('keeps the file whose jump opened the explorer, restored around it', () => {
+        // The saved tabs come back from IndexedDB asynchronously, and a jump (a tool
+        // card's file, a definition out of a diff) can be what opens the explorer — so
+        // the restore answers after the file was opened. Overwriting the list there
+        // silently loses the click.
+        const arrived = revealFileTab([], 'src/main.go', 0, nonePinned);
+        const restored = fromPersistedTabs([{ path: 'README.md', targetLine: 0 }]);
+
+        expect(mergeRestoredTabs(arrived, restored).map(f => f.path))
+            .toEqual(['README.md', 'src/main.go']);
+    });
+
+    it('does not open twice a file both the saved session and the jump name', () => {
+        const arrived = revealFileTab([], 'src/main.go', 0, nonePinned);
+        const restored = fromPersistedTabs([{ path: 'src/main.go', targetLine: 0 }]);
+
+        const merged = mergeRestoredTabs(arrived, restored);
+        expect(merged).toEqual([{ path: 'src/main.go', targetLine: 0, reveal: 0 }]);
+    });
+
+    it('restores the saved session untouched when nothing arrived meanwhile', () => {
+        const restored = fromPersistedTabs([
+            { path: 'a.go', targetLine: 0 },
+            { path: 'b.go', targetLine: 12 },
+        ]);
+
+        expect(mergeRestoredTabs([], restored)).toEqual(restored);
     });
 });
