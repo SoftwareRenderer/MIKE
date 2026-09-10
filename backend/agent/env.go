@@ -1,8 +1,9 @@
 package agent
 
 import (
-	"os"
 	"strings"
+
+	"kanban/pkg/subproc"
 )
 
 // Agent adapters spawn a subprocess (e.g. the `pi` binary) from an extension, and
@@ -66,13 +67,7 @@ func isAgentSafeEnv(name string) bool {
 // a host terminal takes term.hostShellEnv (os.Environ() only under DANGER_ZONE=1). None of them
 // is a route into a container — that environment is types.SandboxEnvArgs.
 func SafeAgentEnv(extras ...string) []string {
-	env := make([]string, 0, len(agentEnvNames)+len(extras)+2)
-	for _, kv := range os.Environ() {
-		name, _, ok := strings.Cut(kv, "=")
-		if !ok || name == "" || !isAgentSafeEnv(name) {
-			continue
-		}
-		env = append(env, kv)
-	}
-	return append(env, extras...)
+	// KeepEmpty, unlike git and podman: this allowlist is a closed set of names, and an adapter may
+	// care whether LANGUAGES was cleared deliberately or never set at all.
+	return append(subproc.Inherit(isAgentSafeEnv, subproc.KeepEmpty), extras...)
 }

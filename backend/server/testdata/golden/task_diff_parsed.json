@@ -1,0 +1,106 @@
+{
+  "diff": "diff --git a/README.md b/README.md\nindex 62a0161..33536b4 100644\n--- a/README.md\n+++ b/README.md\n@@ -1 +1,3 @@\n # base\n+\n+changed by the golden task\ndiff --git a/feature.go b/feature.go\nnew file mode 100644\nindex 0000000..3f3782e\n--- /dev/null\n+++ b/feature.go\n@@ -0,0 +1,4 @@\n+package feature\n+\n+// Answer is the change the golden diff pins.\n+const Answer = 42",
+  "original_file_stats": {
+    "README.md": {
+      "added": 2,
+      "removed": 0
+    },
+    "feature.go": {
+      "added": 4,
+      "removed": 0
+    }
+  },
+  "parsed_files": [
+    {
+      "added": 2,
+      "committedRows": [
+        {
+          "lineNumber": 1,
+          "text": "# base",
+          "variant": "context"
+        },
+        {
+          "lineNumber": 2,
+          "text": "",
+          "variant": "added"
+        },
+        {
+          "lineNumber": 3,
+          "text": "changed by the golden task",
+          "variant": "added"
+        }
+      ],
+      "path": "README.md",
+      "removed": 0,
+      "rows": [
+        {
+          "lineNumber": 1,
+          "text": "# base",
+          "variant": "context"
+        },
+        {
+          "lineNumber": 2,
+          "text": "",
+          "variant": "added"
+        },
+        {
+          "lineNumber": 3,
+          "text": "changed by the golden task",
+          "variant": "added"
+        }
+      ]
+    },
+    {
+      "added": 4,
+      "committedRows": [
+        {
+          "lineNumber": 1,
+          "text": "package feature",
+          "variant": "added"
+        },
+        {
+          "lineNumber": 2,
+          "text": "",
+          "variant": "added"
+        },
+        {
+          "lineNumber": 3,
+          "text": "// Answer is the change the golden diff pins.",
+          "variant": "added"
+        },
+        {
+          "lineNumber": 4,
+          "text": "const Answer = 42",
+          "variant": "added"
+        }
+      ],
+      "isNew": true,
+      "path": "feature.go",
+      "removed": 0,
+      "rows": [
+        {
+          "lineNumber": 1,
+          "text": "package feature",
+          "variant": "added"
+        },
+        {
+          "lineNumber": 2,
+          "text": "",
+          "variant": "added"
+        },
+        {
+          "lineNumber": 3,
+          "text": "// Answer is the change the golden diff pins.",
+          "variant": "added"
+        },
+        {
+          "lineNumber": 4,
+          "text": "const Answer = 42",
+          "variant": "added"
+        }
+      ]
+    }
+  ],
+  "short_stat": "2 files changed, 6 insertions(+)",
+  "untracked": []
+}

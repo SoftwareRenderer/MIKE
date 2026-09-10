@@ -1,4 +1,5 @@
 import type { ProjectCounts, Task, StreamEvent } from '$lib/types';
+import type { AppStreamFrame } from './events';
 import { API_BASE, parseStreamFrame } from './helpers';
 import { STALE_THRESHOLD_MS, HEARTBEAT_INTERVAL_MS, RECONNECT_MAX_DELAY_MS } from '$lib/constants';
 
@@ -155,7 +156,6 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
             startHeartbeat();
             // Flush pending messages first
             flushPending();
-            // Re-subscribe to all previously subscribed projects/tasks
             for (const projectId of subscribedProjects) {
                 void sendSubscribeProject(projectId);
             }
@@ -167,7 +167,9 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
 
         ws.onmessage = (e) => {
             lastActivityAt = Date.now();
-            const msg = parseStreamFrame(e.data, 'stream');
+            // Typed as this socket's vocabulary: a comparison against a name the server does not send is a
+            // branch that can never run, and svelte-check is the only thing that would ever notice.
+            const msg = parseStreamFrame(e.data, 'stream') as AppStreamFrame | null;
             if (!msg) return; // an unreadable frame is dropped; the connection stays up
             // Handle task_event (server-side multiplexed task events)
             if (msg.type === 'task_event' && callbacks.onTaskEvent) {

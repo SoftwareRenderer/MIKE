@@ -76,7 +76,6 @@ test.describe('Editor Tabs', () => {
       // Verify CodeMirror shows file 1 content (active tab's editor is visible)
       await expect(page.locator('.cm-editor').first()).toBeVisible();
     } finally {
-      // Clean up
       try {
         rmSync(join(projectDir, file1), { force: true });
         rmSync(join(projectDir, file2), { force: true });

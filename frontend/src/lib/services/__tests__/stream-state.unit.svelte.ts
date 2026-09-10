@@ -256,4 +256,18 @@ describe('buildLog reactivity (proxy)', () => {
     });
 });
 
+describe('lockWait lifetime', () => {
+    it('reset() clears an announced wait', () => {
+        const s = new StreamState();
+        s.state.lockWait = { domain: 'worktree', seconds: 30 };
+        s.reset();
+        expect(s.state.lockWait).toBeNull();
+    });
 
+    it('clearAwaiting() clears it too — the turn is over, so nothing is queued', () => {
+        const s = new StreamState();
+        s.state.lockWait = { domain: 'stash', seconds: 6 };
+        s.clearAwaiting();
+        expect(s.state.lockWait).toBeNull();
+    });
+});

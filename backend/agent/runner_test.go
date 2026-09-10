@@ -180,7 +180,6 @@ func TestAgentRunner_Prompt(t *testing.T) {
 	}
 	defer runner.Close()
 
-	// Send a prompt
 	err = runner.Prompt(context.Background(), "hello world")
 	if err != nil {
 		t.Fatalf("Prompt: %v", err)

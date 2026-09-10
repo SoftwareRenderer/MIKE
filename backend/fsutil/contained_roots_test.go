@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// TestContainedRootsAreNotWidened: the variable that widens the picker must not widen a
-// project jail, and no home directory creeps in as a root the caller never named.
+// TestContainedRootsAreNotWidened: the widening the picker honors must not reach a project jail, and
+// no home directory creeps in as a root the caller never named.
 func TestContainedRootsAreNotWidened(t *testing.T) {
 	dir := t.TempDir()
 	home, err := os.UserHomeDir()
@@ -17,14 +17,14 @@ func TestContainedRootsAreNotWidened(t *testing.T) {
 		}
 	}
 
-	t.Setenv(AllowRootFSEnv, "1")
 	other := t.TempDir()
 	if _, err := NewContainedRoots(dir).Stat(other); err == nil {
-		t.Fatal("MIKE_ALLOW_ROOT_FS widened a project-scoped root set")
+		t.Fatal("a project-scoped root set was widened")
 	}
-	// The variable still widens the jail it was written for, so the refusal above is this rule.
-	if !NewHostRoot(dir).Unrestricted() {
-		t.Fatal("MIKE_ALLOW_ROOT_FS stopped widening the host jail")
+	// NewContainedRoots has no parameter for the widening — that is the rule, not an omission — while
+	// the host jail takes it, so the refusal above is this rule rather than a check that never fires.
+	if !NewHostRoot(true, dir).Unrestricted() {
+		t.Fatal("the host jail stopped honoring the widening it was built with")
 	}
 }
 

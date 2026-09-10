@@ -21,7 +21,7 @@ const (
 
 // ProjectImage is a project's sandbox image and what has to happen to make it exist.
 type ProjectImage struct {
-	// Image is the reference as configured or generated. It is qualified before podman sees it.
+	// Image is qualified before podman sees it.
 	Image string
 	// Source is one of the ImageSource* values.
 	Source string

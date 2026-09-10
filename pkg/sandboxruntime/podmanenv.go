@@ -11,13 +11,13 @@ package sandboxruntime
 
 import (
 	"context"
-	"os"
 	"os/exec"
 	"strings"
+
+	"kanban/pkg/subproc"
 )
 
-// podmanBinary is the CLI started. A variable so a test can point a subprocess at a stub, the way
-// backend/git does with its own binary.
+// podmanBinary: a variable so a test can point a subprocess at a stub, the way backend/git does.
 var podmanBinary = "podman"
 
 // podmanEnvNames is the part of the server's environment the podman CLI is given.
@@ -98,15 +98,7 @@ func isPodmanSafeEnv(name string) bool {
 // Empty values are dropped rather than passed through: podman treats an empty XDG_RUNTIME_DIR as a
 // fatal "cannot find runtime directory" rather than falling back, where an absent one is handled.
 func PodmanEnv(extra ...string) []string {
-	env := make([]string, 0, 32+len(extra))
-	for _, kv := range os.Environ() {
-		name, value, ok := strings.Cut(kv, "=")
-		if !ok || name == "" || value == "" || !isPodmanSafeEnv(name) {
-			continue
-		}
-		env = append(env, kv)
-	}
-	return append(env, extra...)
+	return append(subproc.Inherit(isPodmanSafeEnv, subproc.DropEmpty), extra...)
 }
 
 // PodmanCommand builds the *exec.Cmd for one podman invocation, with the environment allowlist and
@@ -130,7 +122,5 @@ func PodmanCommandContext(ctx context.Context, args ...string) *exec.Cmd {
 // constructors. It takes a built *exec.Cmd rather than a context so the context-free form can share
 // it without passing a nil context.
 func configurePodman(c *exec.Cmd) *exec.Cmd {
-	c.Env = PodmanEnv()
-	c.WaitDelay = PodmanWaitDelay
-	return c
+	return subproc.Bind(c, PodmanEnv(), PodmanWaitDelay)
 }

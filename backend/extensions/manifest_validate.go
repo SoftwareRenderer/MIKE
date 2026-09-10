@@ -315,17 +315,10 @@ func validateLocale(locale string) error {
 // path into a log line or an error message.
 const maxPackAssetPathLen = 200
 
-// validateAssetRelPath is the one containment rule for every path a manifest declares inside the
-// extension's own directory: the i18n catalog and prompt overlay, and a css pack's stylesheet. The
-// browser resolves them (resolveAssetURL in $lib/services/ui-injector) and the host resolves them
-// (packFilePath), so the rule mirrors both halves. A leading "./" is refused as well as "..": the
-// value is projected into the registry index and matched by the loader, so there is exactly one
-// spelling of every declared path.
-//
-// The dot segments are the security half of this. A declared path is concatenated into a URL by
-// the browser before anything reads it, and the URL parser resolves ".." on the way out, so
-// "/extensions/<ext>/" plus "../../../../api/config" is an authenticated request for /api/config
-// issued by the app itself — against its own origin, with its own session cookie.
+// validateAssetRelPath is the containment rule for every path a manifest declares inside its own
+// directory: the i18n catalog, the prompt overlay, a stylesheet. The browser turns each one into a
+// request against this server, so a path that escapes the directory with `..` would be an
+// authenticated read of anything the app serves.
 func validateAssetRelPath(where, value string, required bool) error {
 	if value == "" {
 		if required {
@@ -375,14 +368,7 @@ func packFilePath(packDir, rel string) (string, bool) {
 	return full, true
 }
 
-// validateI18N is the install/update entry point: it refuses a manifest whose `i18n` block cannot
-// be used as declared. extDir is where the pack's files were materialized; pass "" when nothing
-// was fetched (a registry entry with no git pin installs a row before any file exists), and the
-// declaration alone is checked — the same order the other capabilities are checked in.
-//
-// PUT /api/extensions/{id} is deliberately not a site: it merges named LSP fields from the request
-// and has no path that writes an i18n block, so nothing a request can send there can make a stored
-// pack undeclarable. Every manifest reaches a row through install or update, which are checked here.
+// validateI18N refuses a manifest whose i18n block cannot be used as declared. Pass extDir "" when nothing was fetched.
 func validateI18N(caps *Capabilities, extDir string) error {
 	c := caps.GetI18N()
 	if c == nil {

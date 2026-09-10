@@ -188,8 +188,7 @@ var sandboxableTools = map[string]struct{}{
 	llama.ToolReadFile: {}, llama.ToolWriteFile: {}, llama.ToolEditFile: {}, llama.ToolBash: {},
 }
 
-// lspTools are the tools that run inside an LSP extension sandbox.
-// These are always sandboxed regardless of the project's sandbox setting.
+// lspTools always run in an LSP extension sandbox, whatever the project's sandbox setting.
 var lspTools = map[string]struct{}{
 	llama.ToolLSPReferences: {}, llama.ToolLSPDefinition: {}, llama.ToolLSPHover: {}, llama.ToolLSPRename: {},
 }
@@ -326,18 +325,7 @@ func BuildConversationFromTaskMessages(taskMsgs []types.TaskMessage) []types.Cha
 	return groupTaskMessages(taskMsgs)
 }
 
-// groupTaskMessages rebuilds a conversation from persisted rows, shared by the LLM context
-// (buildMessagesFromDB) and the utility prompts:
-//
-//   - a tool_call row is emitted with the assistant row that issued it and its results right
-//     after, so a call is never separated from its answer;
-//   - loop hints are dropped — the model already acted on them;
-//   - advisory rows keep their own role, so neither toAPIMessage nor formatChatHistory can
-//     credit the user with an environment note;
-//   - roles no conversation understands are dropped.
-//
-// Attaching tool calls by adjacency rather than by owner loses a turn's remaining calls whenever
-// anything is written between an assistant row and its tool_call rows.
+// Rebuilds a conversation from persisted rows: a tool_call rides with the assistant row that issued it.
 func groupTaskMessages(taskMsgs []types.TaskMessage) []types.ChatMessage {
 	toolRows, totalToolRows := toolCallRowsByOwner(taskMsgs)
 	messages := make([]types.ChatMessage, 0, len(taskMsgs))
@@ -392,15 +380,9 @@ func groupTaskMessages(taskMsgs []types.TaskMessage) []types.ChatMessage {
 	return messages
 }
 
-// toolCallRowsByOwner maps each assistant row's POSITION to the tool_call rows that belong to
-// it, in row order, and reports the total number of tool_call rows (the caller compares the two
-// to log what could not be attached). A row carrying assistant_msg_id resolves to that
-// assistant; one written before the column existed attaches to the nearest preceding assistant.
-// Rows that resolve to nothing - no owner and no assistant above them, or an owner outside this
-// thread - are left out.
-//
-// Positions, not message ids, are the key: rows from tests or older writers may carry no id at
-// all, and the grouping must degrade to adjacency rather than drop everything.
+// toolCallRowsByOwner maps each assistant row's position to the tool_call rows belonging to it, and
+// returns the tool_call total so the caller can log what it could not attach. A row written before
+// the assistant_msg_id column existed names no owner, so it attaches to the nearest preceding assistant.
 func toolCallRowsByOwner(taskMsgs []types.TaskMessage) (map[int][]types.TaskMessage, int) {
 	idxByAssistantID := make(map[string]int)
 	total := 0

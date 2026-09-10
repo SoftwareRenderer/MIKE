@@ -1,5 +1,6 @@
 import type { ApiDiffRow, DiffFile, DiffRow } from '$lib/types/diff';
 import { toDiffFiles, type ParsedDiffFile } from '$lib/api/git';
+import { isAborted } from '$lib/api/helpers';
 
 /** Metadata for untracked files. */
 export interface UntrackedMeta {
@@ -484,7 +485,7 @@ export class DiffCache {
                         }
                     }
                 } catch (e) {
-                    if (e instanceof DOMException && e.name === 'AbortError') return;
+                    if (isAborted(e)) return;
                     console.error(`[diff] Failed to fetch file ${path}:`, e);
                 }
             })());

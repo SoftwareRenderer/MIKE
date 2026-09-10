@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,6 +13,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"io/fs"
+	"kanban/pkg/sandboxruntime"
 )
 
 func testHandler(t *testing.T) *ExtensionHandler {
@@ -25,11 +29,13 @@ func testHandler(t *testing.T) *ExtensionHandler {
 func testHandlerWithStore(t *testing.T) (*ExtensionHandler, *ExtensionStore) {
 	t.Helper()
 	extStore := testStore(t)
-	reg := NewRegistryClient()
+	// The handler's registry builds images on install and update, so it carries the committed bridge:
+	// a build stages that binary into its context and has no other way to find it.
+	reg := NewRegistryClientWithBoot(bridgeBoot(t))
 	cfg := &ExtensionConfig{
 		RegistryURL: "",
 	}
-	sandbox := NewExtensionSandboxManager(reg, extStore)
+	sandbox := NewExtensionSandboxManager(reg, extStore, sandboxruntime.Boot{})
 	return NewExtensionHandler(extStore, sandbox, reg, cfg), extStore
 }
 
@@ -104,7 +110,6 @@ func TestHandleList_WithExtensions(t *testing.T) {
 	if len(result) != 2 {
 		t.Errorf("result count = %d, want 2", len(result))
 	}
-	// Verify fields
 	if result[0].Name == "" {
 		t.Error("result[0].Name is empty")
 	}
@@ -199,17 +204,9 @@ func TestHandleList_SamePriority_SortedByName(t *testing.T) {
 	}
 }
 
-func TestHandleList_WrongMethod(t *testing.T) {
-	h := testHandler(t)
-	req := httptest.NewRequest(http.MethodPost, "/api/extensions", nil)
-	w := httptest.NewRecorder()
-
-	h.HandleList(w, req)
-
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("status = %d, want 405", w.Code)
-	}
-}
+// The wrong-method case is gone from here on purpose: the route pattern declares GET, so the mux
+// refuses anything else before HandleList runs, and no handler-level call can reach that decision.
+// It is asserted at backend/server/routes_method_test.go instead.
 
 func TestHandleGet_Found(t *testing.T) {
 	h := testHandler(t)
@@ -642,7 +639,6 @@ func TestHandleDelete(t *testing.T) {
 		t.Errorf("status = %d, want 200", w.Code)
 	}
 
-	// Verify deleted
 	_, err := h.store.GetByID("test-ext")
 	if err == nil {
 		t.Error("extension still exists after delete")
@@ -966,7 +962,6 @@ func TestHandleInstallLocal(t *testing.T) {
 		t.Fatalf("WriteFile Dockerfile: %v", err)
 	}
 	fake := fakePodmanOK(t)
-	setBridgeEnv(t)
 
 	body := map[string]any{"author": "sveltejs", "name": "svelte-language-server"}
 	bodyBytes, _ := json.Marshal(body)
@@ -2367,7 +2362,6 @@ func TestHandleInstall_BuildFailureLeavesNoRowAndNoFiles(t *testing.T) {
 	h.config.ExtensionsDir = extDir
 
 	fake := fakePodmanFails(t, 1, `Error: building at STEP "COPY": no items matching glob`)
-	setBridgeEnv(t)
 
 	body, _ := json.Marshal(map[string]any{"name": "gopls"})
 	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install", bytes.NewReader(body))
@@ -2389,9 +2383,33 @@ func TestHandleInstall_BuildFailureLeavesNoRowAndNoFiles(t *testing.T) {
 		t.Errorf("stored extensions after a failed build = %v (%v), want none", exts, err)
 	}
 	if _, err := os.Stat(filepath.Join(extDir, "go-team", "gopls")); !os.IsNotExist(err) {
-		t.Errorf("the checkout survived the failed install (stat err = %v)", err)
+		t.Errorf("the checkout survived the failed install (stat err = %v) — %s", err, describeTree(t, extDir))
 	}
 	if _, err := os.Stat(filepath.Join(extDir, "go-team")); !os.IsNotExist(err) {
-		t.Errorf("the emptied author folder was left behind (stat err = %v)", err)
+		t.Errorf("the emptied author folder was left behind (stat err = %v) — %s", err, describeTree(t, extDir))
 	}
+}
+
+// describeTree renders the tree with mtimes. "A directory was left behind" has three different causes —
+// never removed, half removed, or re-created after the removal — and the mtimes separate them: the original
+// checkout's stamps mean nothing was deleted, stamps newer than the removal name a second writer.
+func describeTree(t *testing.T, root string) string {
+	t.Helper()
+	var b strings.Builder
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d == nil {
+			return nil
+		}
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			fmt.Fprintf(&b, "%s (stat failed: %v) ", strings.TrimPrefix(path, root+string(filepath.Separator)), infoErr)
+			return nil
+		}
+		fmt.Fprintf(&b, "%s mtime=%s ", strings.TrimPrefix(path, root+string(filepath.Separator)), info.ModTime().Format("15:04:05.000"))
+		return nil
+	})
+	if b.Len() == 0 {
+		return "the tree is empty"
+	}
+	return strings.TrimSpace(b.String())
 }

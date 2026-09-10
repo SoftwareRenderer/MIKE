@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"kanban/pkg/bridge"
+
+	"kanban/pkg/sandboxruntime"
 )
 
 // testBridgeClient builds a bridge client over a pair of pipes. Nothing is spoken over them.
@@ -43,7 +45,7 @@ func registerSession(t *testing.T, sm *ExtensionSandboxManager, extID string, cl
 // TestRefCountFollowsConnections: one reference per bridge connection — taken when it is
 // registered, handed back one at a time as they are released.
 func TestRefCountFollowsConnections(t *testing.T) {
-	sm := NewExtensionSandboxManager(nil, nil)
+	sm := NewExtensionSandboxManager(nil, nil, sandboxruntime.Boot{})
 	const extID = "gopls"
 	first, second := testBridgeClient(t), testBridgeClient(t)
 	registerSession(t, sm, extID, first, second)
@@ -73,7 +75,7 @@ func TestRefCountFollowsConnections(t *testing.T) {
 // recreated behind its back owns no reference. Handing one back would stop the replacement
 // sandbox, which somebody else is using.
 func TestReleaseSessionCreditsOnlyRegisteredSessions(t *testing.T) {
-	sm := NewExtensionSandboxManager(nil, nil)
+	sm := NewExtensionSandboxManager(nil, nil, sandboxruntime.Boot{})
 	const extID = "gopls"
 	first, second := testBridgeClient(t), testBridgeClient(t)
 

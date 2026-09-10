@@ -24,10 +24,9 @@ async function proxyRequest(
         body: JSON.stringify({ url: args.url, method, body: args.body || '' }),
     });
     if (!res.ok) {
-        // Thrown, never rendered: `dispatch` catches a handler throw and posts it to the
-        // extension frame as a JSON-RPC error, so this is a protocol reply rather than
-        // copy — which is why the reason is thrown inline instead of assembled in a
-        // `msg` local (a local makes it read like a string the UI might display).
+        // Thrown, never rendered: `dispatch` catches a handler throw and posts it to the extension frame as a
+        // JSON-RPC error. The reason is thrown inline rather than built in a `msg` local, which would read
+        // like display copy.
         const body = await res.json().catch(() => null);
         if (body?.error) throw new Error(String(body.error));
         throw new Error(`proxy request failed (${res.status})`);

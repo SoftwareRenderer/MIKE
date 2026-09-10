@@ -20,10 +20,11 @@ import (
 // sandboxruntime.ValidateCapability) and, where it is granted, the runtime pairing
 // sandboxruntime.GVisorIsolationForCaps describes.
 
-// EnvMountRoots lists extra host roots an extension sandbox may mount from,
+// EnvMountRoots names the variable listing extra host roots an extension sandbox may mount from,
 // separated by os.PathListSeparator (':' on Linux). The implicit roots are the
 // workspace dir, registered project paths, the extensions dir and the system
-// temp dir; this is for deployments that keep extension data elsewhere.
+// temp dir; this is for deployments that keep extension data elsewhere. The value is resolved once
+// into startup.Config.ExtMountRoots; this constant is the name, quoted by startup's table of names.
 const EnvMountRoots = "MIKE_EXT_MOUNT_ROOTS"
 
 // MountPolicy is an allowlist of host roots an extension sandbox may
@@ -92,26 +93,14 @@ func (p *MountPolicy) Roots() []string {
 	return out
 }
 
-// envMountRoots returns the extra roots from EnvMountRoots (path-list separated).
-func envMountRoots() []string {
-	raw := strings.TrimSpace(os.Getenv(EnvMountRoots))
-	if raw == "" {
-		return nil
-	}
-	parts := strings.Split(raw, string(os.PathListSeparator))
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if part = strings.TrimSpace(part); part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
-}
-
 // mountRoots assembles the default allowlist: the configured workspace dir, the
 // registered project paths, the extensions dir, the system temp dir and the
-// EnvMountRoots extras.
-func mountRoots(extensionsDir, workspaceDir string, projectPaths []string) []string {
+// MIKE_EXT_MOUNT_ROOTS extras.
+//
+// extraRoots is the resolved value of that variable (startup.Config.ExtMountRoots), passed in by the
+// sandbox manager that was wired with it. Reading it here instead would let one policy in the
+// install path and another in the create path disagree about what the operator declared.
+func mountRoots(extensionsDir, workspaceDir string, projectPaths, extraRoots []string) []string {
 	roots := make([]string, 0, len(projectPaths)+4)
 	if workspaceDir != "" {
 		roots = append(roots, workspaceDir)
@@ -124,7 +113,7 @@ func mountRoots(extensionsDir, workspaceDir string, projectPaths []string) []str
 	if tmp := os.TempDir(); tmp != "" {
 		roots = append(roots, tmp)
 	}
-	return append(roots, envMountRoots()...)
+	return append(roots, extraRoots...)
 }
 
 // ValidateContainerPath checks a mount's in-container path: absolute, free of ".."
@@ -270,15 +259,10 @@ func ShadowsToolState(containerPath string) bool {
 	return false
 }
 
-// ValidateDependencyGrant validates the one host directory a user grants to one extension's
-// language server for its resolved dependencies, and returns the cleaned absolute path to
-// store. Its rule is deliberately not MountPolicy.ValidateHostPath: a module cache or Cargo
-// home sits exactly where that allowlist does not reach, which is why a human is asked for it.
-// Required: absolute, no `..`, symlinks resolved before storing, not the filesystem root, and
-// already existing — a missing directory surfaces as a podman error nobody traces back here.
-//
-// Everything under the path becomes readable inside that extension's container. One directory
-// per extension, never widened by anything the extension says.
+// ValidateDependencyGrant checks the host directory a person grants to one extension's language server
+// for its resolved dependencies, and returns the cleaned absolute path to store. It is deliberately
+// not MountPolicy's check: this is a directory the operator chose, not a path a manifest asked for, so
+// it is judged on being an absolute path and not being someone's home tree.
 func ValidateDependencyGrant(hostPath string) (string, error) {
 	trimmed := strings.TrimSpace(hostPath)
 	if trimmed == "" {

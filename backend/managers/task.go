@@ -6,7 +6,6 @@ package managers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -235,7 +234,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			GitBranch: task.Branch,
 			CreatedAt: now,
 		}); err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create default thread: %v", err))
+			httputil.Fail(w, err, "create default thread", "task not found")
 			return
 		}
 		task.CurrentThreadID = defaultThreadID
@@ -378,14 +377,10 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 // HandleClearDone deletes all tasks with status 'done' for a project.
 func (h *TaskHandler) HandleClearDone(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
-	if r.Method != http.MethodDelete {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	tasks, err := h.store.GetTasksByProject(projectID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to get tasks")
+		httputil.Fail(w, err, "list tasks", "project not found")
 		return
 	}
 
@@ -414,10 +409,6 @@ func (h *TaskHandler) HandleClearDone(w http.ResponseWriter, r *http.Request) {
 func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	var req types.MoveTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.JSONError(w, http.StatusBadRequest, "invalid JSON")
@@ -765,10 +756,6 @@ func resolveGitAuthor(projectID string, s interface {
 // for a commit-and-done operation, without performing the commit.
 func (h *TaskHandler) HandleCommitPreview(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	task, ok := resolveTask(w, r, h.store)
 	if !ok {
 		return
@@ -798,10 +785,6 @@ func (h *TaskHandler) HandleCommitPreview(w http.ResponseWriter, r *http.Request
 func (h *TaskHandler) HandleCommitPreviewStream(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	task, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -837,10 +820,6 @@ func (h *TaskHandler) HandleCommitPreviewStream(w http.ResponseWriter, r *http.R
 func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	task, ok := resolveTask(w, r, h.store)
 	if !ok {
 		return
@@ -861,8 +840,10 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	defer release()
 	h.boardStreamMgr.BroadcastCommitStatus(projectID, taskID, "processing")
 
-	// Commit worktree changes, serialized against tool execution.
-	unlockWorktree := h.executor.LockWorktree(taskID)
+	// Commit worktree changes, serialized against tool execution. The wait is announced because one that
+	// lands behind a long tool call looks like a click that went nowhere.
+	unlockWorktree := h.executor.LockWorktreeWatched(taskID, stream.LockWaitNoticeEvery,
+		h.boardStreamMgr.LockWaitNotifier(projectID, taskID, "worktree"))
 	_, wtErr := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat")
 	worktreeExists := wtErr == nil
 	if !worktreeExists {
@@ -914,7 +895,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		if !task.HasMergeConflict {
 			// Non-conflict merge failure (e.g., branch creation failed) — return error
 			h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-			httputil.JSONError(w, http.StatusInternalServerError, mergeErr.Error())
+			httputil.Fail(w, mergeErr, "merge branch", "task not found")
 			return
 		}
 	}
@@ -1201,7 +1182,7 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 
 		logging.For(logging.Generate).With(logging.TaskID, taskID).Infof("title updated to: %q", title)
 		if updated, err := h.store.GetTask(projectID, taskID); err == nil {
-			h.boardStreamMgr.BroadcastTaskUpdated(projectID, *updated)
+			h.boardStreamMgr.BroadcastTaskUpdated(projectID, updated)
 		}
 	}()
 }
@@ -1221,7 +1202,7 @@ func (h *TaskHandler) finishTitleGeneration(projectID, taskID string, broadcast 
 	}
 	if broadcast {
 		if updated, err := h.store.GetTask(projectID, taskID); err == nil {
-			h.boardStreamMgr.BroadcastTaskUpdated(projectID, *updated)
+			h.boardStreamMgr.BroadcastTaskUpdated(projectID, updated)
 		}
 	}
 }
@@ -1232,17 +1213,12 @@ func (h *TaskHandler) finishTitleGeneration(projectID, taskID string, broadcast 
 func (h *TaskHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	if _, ok := resolveTask(w, r, h.store); !ok {
 		return
 	}
 	task, err := h.executor.InitTask(projectID, taskID)
 	if err != nil {
-		logging.For(logging.Startup).With(logging.TaskID, taskID).Errorf("error: %v", err)
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.Fail(w, err, "initialize task", "task not found")
 		return
 	}
 	logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("worktree ready")
@@ -1258,16 +1234,10 @@ func (h *TaskHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// HandleStart is the HTTP handler for starting a task.
-// If the task has incomplete subtasks, it uses the LLM to pick one and starts it.
-// If the task has no subtasks, it starts normally.
+// HandleStart starts a task; with incomplete subtasks it uses the LLM to pick one and starts that.
 func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	task, ok := resolveTask(w, r, h.store)
 	if !ok {
 		return
@@ -1276,7 +1246,7 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 	// Check if task has children
 	children, err := h.store.GetChildren(taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("get children: %v", err))
+		httputil.Fail(w, err, "list subtasks", "task not found")
 		return
 	}
 
@@ -1301,7 +1271,7 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 		if len(toStart) > 0 {
 			lastID, anyStarted, firstErr := h.startSubtaskIDs(projectID, taskID, "[start-parent]", toStart)
 			if !anyStarted {
-				httputil.JSONError(w, http.StatusInternalServerError, firstErr.Error())
+				httputil.Fail(w, firstErr, "start subtask", "subtask not found")
 				return
 			}
 			logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("started %d subtask(s): %v", len(toStart), toStart)
@@ -1312,8 +1282,7 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 		// are done, else stay started-but-pending.
 		if exec.ChildrenAllDone(children) {
 			if err := h.executor.StartTask(projectID, taskID, false); err != nil {
-				logging.For(logging.Startup).With(logging.TaskID, taskID).Errorf("all subtasks done, start failed: %v", err)
-				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+				httputil.Fail(w, err, "start task", "task not found")
 				return
 			}
 		}
@@ -1326,12 +1295,11 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 
 	// No subtasks — start normally
 	if err := h.executor.StartTask(projectID, taskID, false); err != nil {
-		logging.For(logging.Startup).With(logging.TaskID, taskID).Errorf("error: %v", err)
-		if errors.Is(err, exec.ErrTaskAlreadyRunning) {
-			httputil.JSONError(w, http.StatusConflict, err.Error())
-		} else {
-			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
-		}
+		// Already-running arrives as errs.ErrConflict and answers 409 with its own sentence; a genuine
+		// fault answers 500 without echoing its text. The branch that used to live here tested
+		// errors.Is(err, exec.ErrTaskAlreadyRunning) and could never match — the executor returned a
+		// fresh error with the same words — so a double-click was reported as a server fault.
+		httputil.Fail(w, err, "start task", "task not found")
 		return
 	}
 	logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("started")
@@ -1341,15 +1309,10 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// HandleStop is the HTTP handler for stopping a task.
-// If the task has running descendants, it stops them all.
+// HandleStop stops a task and every running descendant.
 func (h *TaskHandler) HandleStop(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	// Check if task has descendants
 	descendants, _ := h.store.GetAllDescendants(taskID)
@@ -1357,12 +1320,14 @@ func (h *TaskHandler) HandleStop(w http.ResponseWriter, r *http.Request) {
 
 	if hasDescendants {
 		if err := h.StopTaskAndDescendants(projectID, taskID); err != nil {
-			httputil.JSONError(w, http.StatusNotFound, err.Error())
+			// A stop of a task that no longer exists is a 404 because the store says so; before this it
+			// was a 404 because this line said so, which reported a database fault as a missing row.
+			httputil.Fail(w, err, "stop task and descendants", "task not found")
 			return
 		}
 	} else {
 		if err := h.executor.StopTask(taskID); err != nil {
-			httputil.JSONError(w, http.StatusNotFound, err.Error())
+			httputil.Fail(w, err, "stop task", "task not found")
 			return
 		}
 	}
@@ -1379,10 +1344,6 @@ func (h *TaskHandler) HandleStop(w http.ResponseWriter, r *http.Request) {
 func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	task, ok := resolveTask(w, r, h.store)
 	if !ok {
 		return
@@ -1400,7 +1361,7 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 
 	children, err := h.store.GetChildren(taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("get children: %v", err))
+		httputil.Fail(w, err, "list subtasks", "task not found")
 		return
 	}
 	if len(children) > 0 {
@@ -1409,7 +1370,7 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 		if len(toStart) > 0 {
 			lastID, anyStarted, firstErr := h.startSubtaskIDs(projectID, taskID, "[start-subtask]", toStart)
 			if !anyStarted {
-				httputil.JSONError(w, http.StatusInternalServerError, firstErr.Error())
+				httputil.Fail(w, firstErr, "start subtask", "subtask not found")
 				return
 			}
 			logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("has subtasks, started %d: %v", len(toStart), toStart)
@@ -1428,8 +1389,7 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := h.executor.StartTask(projectID, taskID, false); err != nil {
-		logging.For(logging.Startup).With(logging.TaskID, taskID).Errorf("error: %v", err)
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.Fail(w, err, "start subtask", "task not found")
 		return
 	}
 	task, _ = h.store.GetTask(projectID, taskID)

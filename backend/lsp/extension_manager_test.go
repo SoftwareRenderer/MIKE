@@ -13,6 +13,8 @@ import (
 	"kanban/backend/extensions"
 	"kanban/backend/store"
 	"kanban/backend/types"
+
+	"kanban/pkg/sandboxruntime"
 )
 
 func testExtensionStore(t *testing.T) *extensions.ExtensionStore {
@@ -155,7 +157,7 @@ func TestLookupExtensionByFile_Extensionless(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	reg := extensions.NewRegistryClient()
-	sandbox := extensions.NewExtensionSandboxManager(reg, store)
+	sandbox := extensions.NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
 	mgr := NewExtensionLSPManager(store, sandbox, nil)
 
 	// Must return an error, not panic, for an extensionless file.
@@ -291,7 +293,7 @@ func TestNewExtensionLSPManager(t *testing.T) {
 		t.Fatalf("InitSchema: %v", err)
 	}
 	reg := extensions.NewRegistryClient()
-	sandbox := extensions.NewExtensionSandboxManager(reg, store)
+	sandbox := extensions.NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
 	mgr := NewExtensionLSPManager(store, sandbox, nil)
 
 	if mgr == nil {
@@ -308,7 +310,7 @@ func TestExtensionLSPManager_GetOrCreate_NoExtension(t *testing.T) {
 		t.Fatalf("InitSchema: %v", err)
 	}
 	reg := extensions.NewRegistryClient()
-	sandbox := extensions.NewExtensionSandboxManager(reg, store)
+	sandbox := extensions.NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
 	mgr := NewExtensionLSPManager(store, sandbox, nil)
 
 	_, err := mgr.GetOrCreate(context.Background(), "/tmp/workspace", "go", nil)
@@ -330,7 +332,7 @@ func TestExtensionLSPManager_GetOrCreate_ContextCancelled(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	reg := extensions.NewRegistryClient()
-	sandbox := extensions.NewExtensionSandboxManager(reg, store)
+	sandbox := extensions.NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
 	mgr := NewExtensionLSPManager(store, sandbox, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -358,7 +360,7 @@ func TestExtensionLSPManager_Release_NoClient(t *testing.T) {
 		t.Fatalf("InitSchema: %v", err)
 	}
 	reg := extensions.NewRegistryClient()
-	sandbox := extensions.NewExtensionSandboxManager(reg, store)
+	sandbox := extensions.NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
 	mgr := NewExtensionLSPManager(store, sandbox, nil)
 
 	// Should not panic
@@ -371,7 +373,7 @@ func TestExtensionLSPManager_ServerMessageCh(t *testing.T) {
 		t.Fatalf("InitSchema: %v", err)
 	}
 	reg := extensions.NewRegistryClient()
-	sandbox := extensions.NewExtensionSandboxManager(reg, store)
+	sandbox := extensions.NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
 	mgr := NewExtensionLSPManager(store, sandbox, nil)
 
 	ch := mgr.ServerMessageCh()
@@ -386,7 +388,7 @@ func TestExtensionLSPManager_SubscribeAndUnsubscribe(t *testing.T) {
 		t.Fatalf("InitSchema: %v", err)
 	}
 	reg := extensions.NewRegistryClient()
-	sandbox := extensions.NewExtensionSandboxManager(reg, store)
+	sandbox := extensions.NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
 	mgr := NewExtensionLSPManager(store, sandbox, nil)
 
 	// Subscribe two clients
@@ -411,7 +413,6 @@ func TestExtensionLSPManager_SubscribeAndUnsubscribe(t *testing.T) {
 		}
 	}
 
-	// Unsubscribe sub1
 	mgr.Unsubscribe(sub1)
 
 	// Broadcast another message
@@ -778,7 +779,7 @@ func TestExtensionLSPManager_SandboxMemory_NoClient(t *testing.T) {
 		t.Fatalf("Create(gopls): %v", err)
 	}
 	reg := extensions.NewRegistryClient()
-	sandbox := extensions.NewExtensionSandboxManager(reg, store)
+	sandbox := extensions.NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
 	mgr := NewExtensionLSPManager(store, sandbox, nil)
 
 	stats := mgr.SandboxMemory("/tmp/workspace", "/tmp/workspace/main.go")
@@ -796,7 +797,7 @@ func TestExtensionLSPManager_SandboxMemory_NoExtensionForFile(t *testing.T) {
 		t.Fatalf("Create(gopls): %v", err)
 	}
 	reg := extensions.NewRegistryClient()
-	sandbox := extensions.NewExtensionSandboxManager(reg, store)
+	sandbox := extensions.NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
 	mgr := NewExtensionLSPManager(store, sandbox, nil)
 
 	// Python file with only a Go extension installed → no lookup match.
@@ -815,7 +816,7 @@ func TestExtensionLSPManager_SandboxMemory_ClientWithoutSandbox(t *testing.T) {
 		t.Fatalf("Create(gopls): %v", err)
 	}
 	reg := extensions.NewRegistryClient()
-	sandbox := extensions.NewExtensionSandboxManager(reg, store)
+	sandbox := extensions.NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
 	mgr := NewExtensionLSPManager(store, sandbox, nil)
 
 	// Inject a client whose extension sandbox was never created.

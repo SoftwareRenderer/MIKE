@@ -640,7 +640,6 @@ test.describe.serial('Task Commit Diff', () => {
 
         await page.press('Escape');
 
-        // Click second dropdown
         await selectBtns.last().click();
         // Wait for dropdown options to appear
         await expect(page.locator('.sel-option').first()).toBeVisible();

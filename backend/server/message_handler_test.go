@@ -122,7 +122,6 @@ func TestMessageUpdate(t *testing.T) {
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
 
-	// Create a message
 	createReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
 		"role":    "user",
 		"content": "Original content",
@@ -131,7 +130,6 @@ func TestMessageUpdate(t *testing.T) {
 	msg := mustJSON[map[string]any](t, createRR.Body)
 	msgID := msg["id"].(string)
 
-	// Update the message
 	req := testRequest("PATCH", "/api/projects/"+projID+"/tasks/"+taskID+"/messages/"+msgID, map[string]any{
 		"content": "Updated content",
 	})
@@ -140,7 +138,6 @@ func TestMessageUpdate(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	// Verify update
 	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
 	listRR := testResponseAuth(t, s, listReq)
 	msgs := mustJSON[[]map[string]any](t, listRR.Body)
@@ -154,7 +151,6 @@ func TestMessageDeleteAfter(t *testing.T) {
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
 
-	// Create messages
 	var msgIDs []string
 	for _, content := range []string{"msg 1", "msg 2", "msg 3", "msg 4"} {
 		req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
@@ -286,7 +282,6 @@ func TestMessageGetByID(t *testing.T) {
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
 
-	// Create a message
 	createReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
 		"role":    "user",
 		"content": "Hello",
@@ -1118,7 +1113,6 @@ func TestDeleteMessagesAfterCheckpointRollsBackFork(t *testing.T) {
 	}
 	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
 
-	// Create a task.
 	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{"prompt": "test task"})
 	withAuthCSRF(taskReq, cookie, csrfToken)
 	taskRR := testResponse(t, s, taskReq)

@@ -79,7 +79,6 @@ describe('tool_result truncation metadata', () => {
         const { stream, handleEvent } = setup();
         // Start assistant
         handleEvent({ type: 'token', data: { text: '' } }, false);
-        // tool_call for bash
         handleEvent({ type: 'tool_call', data: { tool_id: 'tc-bash', tool_name: 'bash', args: { command: 'make build' } } }, false);
         // Several tool_output chunks accumulate the full streamed content
         handleEvent({ type: 'tool_output', data: { tool_id: 'tc-bash', text: 'Compiling module A...\n' } }, false);
@@ -1061,5 +1060,40 @@ describe('advisory events', () => {
         handleEvent({ type: 'advisory', data: { id: 'adv-1', kind: 'diagnostics', text: '2 errors' } }, false);
 
         expect(stream.state.entries.map(e => e.id)).toEqual(['adv-1', 'u1']);
+    });
+});
+
+describe('lock_wait — a click queued behind work it cannot see', () => {
+    function setup() {
+        const stream = new StreamState();
+        const cb = makeCallbacks();
+        const handleEvent = createStreamHandler(stream, cb);
+        return { stream, handleEvent };
+    }
+
+    it('names the wait by the lock that owns it', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'lock_wait', data: { domain: 'worktree', waited_seconds: 12, acquired: false } }, false);
+        expect(stream.state.lockWait).toEqual({ domain: 'worktree', seconds: 12 });
+    });
+
+    it('ends the wait when the lock is taken', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'lock_wait', data: { domain: 'stash', waited_seconds: 3, acquired: false } }, false);
+        handleEvent({ type: 'lock_wait', data: { domain: 'stash', waited_seconds: 6, acquired: true } }, false);
+        expect(stream.state.lockWait).toBeNull();
+    });
+
+    it('still reports a wait whose elapsed time grew (the repeats are the liveness signal)', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'lock_wait', data: { domain: 'stash', waited_seconds: 3, acquired: false } }, false);
+        handleEvent({ type: 'lock_wait', data: { domain: 'stash', waited_seconds: 9, acquired: false } }, false);
+        expect(stream.state.lockWait).toEqual({ domain: 'stash', seconds: 9 });
+    });
+
+    it('names an unrecognised domain rather than dropping the wait', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'lock_wait', data: { waited_seconds: 4, acquired: false } }, false);
+        expect(stream.state.lockWait).toEqual({ domain: 'other', seconds: 4 });
     });
 });

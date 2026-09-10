@@ -45,14 +45,14 @@ func (s *Store) GetThreadsByTask(taskID string) ([]types.TaskThread, error) {
 func (s *Store) GetThread(threadID string) (*types.TaskThread, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.getThreadLocked(threadID)
+	return s.getThreadLocked(s.db, threadID)
 }
 
 // getThreadLocked reads one thread assuming the caller already holds the lock.
 // sync.RWMutex is not reentrant, so a method that holds it must call this instead.
-func (s *Store) getThreadLocked(threadID string) (*types.TaskThread, error) {
+func (s *Store) getThreadLocked(db execer, threadID string) (*types.TaskThread, error) {
 	var th types.TaskThread
-	err := scanTaskThread(s.db.QueryRow(`SELECT `+threadColumns+` FROM task_threads WHERE id = ?`, threadID), &th)
+	err := scanTaskThread(db.QueryRow(`SELECT `+threadColumns+` FROM task_threads WHERE id = ?`, threadID), &th)
 	if err == sql.ErrNoRows {
 		return nil, ErrThreadNotFound
 	}
@@ -64,42 +64,51 @@ func (s *Store) getThreadLocked(threadID string) (*types.TaskThread, error) {
 // The row is read first and returned so the caller can clean up the git branch it names.
 // Deleting an absent thread is not an error: the endpoint may be replayed.
 func (s *Store) DeleteThreadWithMessages(threadID string) (*types.TaskThread, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	thread, err := s.getThreadLocked(threadID)
+	var thread *types.TaskThread
+	err := s.tx(func(tx *sql.Tx) error {
+		var err error
+		thread, err = s.deleteThreadWithMessagesLocked(tx, threadID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return thread, nil
+}
+
+func (s *Store) deleteThreadWithMessagesLocked(db execer, threadID string) (*types.TaskThread, error) {
+	thread, err := s.getThreadLocked(db, threadID)
 	if err == ErrThreadNotFound {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.db.Exec(`DELETE FROM task_messages WHERE thread_id = ?`, threadID); err != nil {
+	if _, err := db.Exec(`DELETE FROM task_messages WHERE thread_id = ?`, threadID); err != nil {
 		return nil, fmt.Errorf("delete thread messages: %w", err)
 	}
-	if _, err := s.db.Exec(`DELETE FROM task_threads WHERE id = ?`, threadID); err != nil {
+	if _, err := db.Exec(`DELETE FROM task_threads WHERE id = ?`, threadID); err != nil {
 		return nil, fmt.Errorf("delete thread: %w", err)
 	}
 	return thread, nil
 }
 
-// SetActiveThread marks a thread as active and deactivates all other threads for the same task.
+// SetActiveThread makes one thread the active one for its task. Exactly one row is active when this
+// returns, and none of it lands when it fails: the middle of the old sequence — every thread deactivated,
+// the target not yet activated — was reachable by a failed second statement, and a task with no active
+// thread has no board to show.
 func (s *Store) SetActiveThread(threadID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// Get the task_id for this thread
-	var taskID string
-	err := s.db.QueryRow(`SELECT task_id FROM task_threads WHERE id = ?`, threadID).Scan(&taskID)
-	if err != nil {
-		return fmt.Errorf("get thread task: %w", err)
-	}
-	// Deactivate all threads for this task
-	_, err = s.db.Exec(`UPDATE task_threads SET is_active = 0 WHERE task_id = ?`, taskID)
-	if err != nil {
+	return s.tx(func(tx *sql.Tx) error {
+		var taskID string
+		if err := tx.QueryRow(`SELECT task_id FROM task_threads WHERE id = ?`, threadID).Scan(&taskID); err != nil {
+			return fmt.Errorf("get thread task: %w", err)
+		}
+		if _, err := tx.Exec(`UPDATE task_threads SET is_active = 0 WHERE task_id = ?`, taskID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`UPDATE task_threads SET is_active = 1 WHERE id = ?`, threadID)
 		return err
-	}
-	// Activate the target thread
-	_, err = s.db.Exec(`UPDATE task_threads SET is_active = 1 WHERE id = ?`, threadID)
-	return err
+	})
 }
 
 // GetThreadsByCheckpointMessageID returns all threads whose checkpoint message matches the given ID.
@@ -184,8 +193,8 @@ type entryRow struct {
 //
 // A tool_call row belongs to its assistant_msg_id owner, or, when that is empty (legacy rows), to
 // the nearest preceding assistant row; every other role is its own entry. Callers hold s.mu.
-func (s *Store) entryCutoffLocked(sourceThreadID, upToMessageID string) (string, error) {
-	rows, err := s.db.Query(`
+func (s *Store) entryCutoffLocked(db execer, sourceThreadID, upToMessageID string) (string, error) {
+	rows, err := db.Query(`
 		SELECT id, role, created_at, COALESCE(assistant_msg_id, '')
 		FROM task_messages
 		WHERE thread_id = ?
@@ -283,21 +292,36 @@ func (s *Store) entryCutoffLocked(sourceThreadID, upToMessageID string) (string,
 // and reaches the model as an empty turn, a loop hint without its flag becomes real conversation input,
 // and rows without a checkpoint hash leave the fork with no recorded file state.
 func (s *Store) CopyMessagesToThread(sourceThreadID, targetThreadID, upToMessageID string) ([]CopiedCheckpoint, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	var inherited []CopiedCheckpoint
+	err := s.tx(func(tx *sql.Tx) error {
+		var err error
+		inherited, err = s.copyMessagesToThreadLocked(tx, sourceThreadID, targetThreadID, upToMessageID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return inherited, nil
+}
+
+// copyMessagesToThreadLocked runs the whole copy against one handle. A fork is read out of one snapshot and
+// written into the same transaction: a copy that stopped half-way would be a conversation with rows missing
+// and no error left to explain it, and the checkpoint list the caller pins would name rows that were never
+// written.
+func (s *Store) copyMessagesToThreadLocked(db execer, sourceThreadID, targetThreadID, upToMessageID string) ([]CopiedCheckpoint, error) {
 	// Copy up to the end of the checkpoint's entry, not up to the checkpoint row itself.
-	cutoffTime, err := s.entryCutoffLocked(sourceThreadID, upToMessageID)
+	cutoffTime, err := s.entryCutoffLocked(db, sourceThreadID, upToMessageID)
 	if err != nil {
 		return nil, err
 	}
 	// Get the task_id of the source thread
 	var taskID string
-	err = s.db.QueryRow(`SELECT task_id FROM task_threads WHERE id = ?`, sourceThreadID).Scan(&taskID)
+	err = db.QueryRow(`SELECT task_id FROM task_threads WHERE id = ?`, sourceThreadID).Scan(&taskID)
 	if err != nil {
 		return nil, fmt.Errorf("get source thread task: %w", err)
 	}
 	// Fetch all source messages into memory first (SQLite doesn't allow writes with open read cursors)
-	sourceRows, err := s.db.Query(`
+	sourceRows, err := db.Query(`
 		SELECT id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, assistant_msg_id, kind, created_at
 		FROM task_messages
 		WHERE thread_id = ? AND created_at <= ?
@@ -352,7 +376,7 @@ func (s *Store) CopyMessagesToThread(sourceThreadID, targetThreadID, upToMessage
 				assistantMsgID = ptrStr(mapped)
 			}
 		}
-		_, err := s.db.Exec(`
+		_, err := db.Exec(`
 			INSERT INTO task_messages (id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, assistant_msg_id, kind, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, newID, taskID, targetThreadID, m.role, m.severity, m.content,

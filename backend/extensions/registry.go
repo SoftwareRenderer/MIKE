@@ -15,6 +15,7 @@ import (
 
 	"kanban/backend/git"
 	"kanban/pkg/sandboxruntime"
+	"kanban/pkg/subproc"
 
 	"kanban/backend/httputil"
 	"kanban/pkg/logging"
@@ -28,10 +29,18 @@ type RegistryClient struct {
 	rt *sandboxruntime.Runtime
 }
 
-// NewRegistryClient creates a new RegistryClient.
+// NewRegistryClient creates a client that owns no host decision: the bridge binary it stages into a
+// build context is found in the normal places.
 func NewRegistryClient() *RegistryClient {
+	return NewRegistryClientWithBoot(sandboxruntime.Boot{})
+}
+
+// NewRegistryClientWithBoot creates a client whose builds stage the bridge from boot.AgentPath when it
+// names one. An image build has to COPY sandbox/sandbox-bridge into its context and the binary is not
+// in the working directory, so the wired path has to reach here; the server wires it from startup.Config.
+func NewRegistryClientWithBoot(boot sandboxruntime.Boot) *RegistryClient {
 	return &RegistryClient{
-		rt: sandboxruntime.NewRuntime(),
+		rt: sandboxruntime.NewRuntimeWithBoot(boot),
 		// A registry URL can come from MIKE_REGISTRY_URL, and a manifest's asset URLs are relative
 		// to whatever it resolved against: no redirect is followed, so nothing reaches a host the
 		// operator did not name.
@@ -169,6 +178,18 @@ func (rc *RegistryClient) ValidateImage(imageRef string) error {
 	return sandboxruntime.ValidateConfiguredImageRef(imageRef)
 }
 
+// pullSlowReport and buildSlowReport are the thresholds past which a network pull or an image build is
+// worth a log line. Both are deliberately longer than subproc.SlowWait: their ordinary path is minutes
+// long, and a warning that fires on the ordinary path teaches an operator to ignore it.
+const (
+	pullSlowReport  = 2 * time.Minute
+	buildSlowReport = 5 * time.Minute
+)
+
+func warnSlowPodman(format string, args ...any) {
+	logging.For(logging.Extensions).Warnf(format, args...)
+}
+
 // PullImage pulls an OCI image via podman.
 func (rc *RegistryClient) PullImage(imageRef string) error {
 	if err := sandboxruntime.ValidateImageRef(imageRef); err != nil {
@@ -179,7 +200,12 @@ func (rc *RegistryClient) PullImage(imageRef string) error {
 	// wedged on a registry that accepts the connection but never answers held cmd.Wait open
 	// indefinitely — and it inherited the server's whole environment.
 	cmd := sandboxruntime.PodmanCommand("pull", imageRef)
+	// A pull is expected to take minutes on a slow registry, so its report threshold is well past that;
+	// the line means "this is still the same pull", which is the difference between a slow install and a
+	// hung one when the progress stream has gone quiet.
+	stop := subproc.Watch("podman pull "+imageRef, pullSlowReport, warnSlowPodman)
 	output, err := cmd.CombinedOutput()
+	stop()
 	if err != nil {
 		return fmt.Errorf("pull image %s: %w (output: %s)", imageRef, err, string(output))
 	}

@@ -96,7 +96,6 @@ func TestBlockDetector_Basic(t *testing.T) {
 	det := newBlockDetector()
 	block := "This is a repeating block of text. "
 
-	// 1st occurrence
 	det.check(block)
 	// 2nd occurrence
 	if det.check(block) {

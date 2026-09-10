@@ -197,7 +197,6 @@ func TestBranchWatcherDetectsDetachedHEAD(t *testing.T) {
 	go bw.StartEventLoop()
 	defer bw.Close()
 
-	// Watch the project
 	err = bw.Watch("test-project", repoDir)
 	if err != nil {
 		t.Skipf("skip detached HEAD test (inotify limit): %v", err)

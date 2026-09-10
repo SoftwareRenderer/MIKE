@@ -129,7 +129,6 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     const bar = page.locator('.multi-select-bar');
     await expect(bar).toBeVisible();
 
-    // Parent should be selected
     await expect(page.locator(`.column-context [data-task-id="${parentTaskId}"]`).first()).toHaveClass(/multi-selected/);
     // Children should also be selected (check first occurrence — nested under parent)
     await expect(page.locator(`.column-context [data-task-id="${childTaskId1}"]`).first()).toHaveClass(/multi-selected/);
@@ -171,7 +170,6 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     await expect(bar).toBeVisible();
     await expect(bar).toContainText('Delete 4 tasks');
 
-    // Click delete and confirm
     await bar.locator('.bar-btn-delete').click();
     const confirmBtn = page.locator('.modal-footer .btn-confirm');
     await expect(confirmBtn).toBeVisible();

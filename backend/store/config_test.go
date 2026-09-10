@@ -10,7 +10,6 @@ import (
 func TestGetSetConfigValue(t *testing.T) {
 	s := testStore(t)
 
-	// Set a value
 	if err := s.SetConfigValue("test_key", "test_value"); err != nil {
 		t.Fatalf("set config: %v", err)
 	}

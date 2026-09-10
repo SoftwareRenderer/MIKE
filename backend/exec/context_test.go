@@ -285,7 +285,6 @@ func TestExtractCommitContext_MultipleUserMessages(t *testing.T) {
 	if result[1].Content != "You're welcome. Here's the summary." {
 		t.Errorf("second = %q, want final assistant", result[1].Content)
 	}
-	// Tool result
 	if result[2].Role != "tool" {
 		t.Errorf("third role = %q, want tool", result[2].Role)
 	}

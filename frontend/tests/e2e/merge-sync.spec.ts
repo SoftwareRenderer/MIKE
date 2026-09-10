@@ -11,7 +11,6 @@ test.describe.serial('Merge Sync', () => {
   });
 
   test('should sync main into task branch before final merge when main has new commits', async ({ page }) => {
-    // Create a task
     const taskId = await createTaskViaApi(page, projectId, `merge-sync-${Date.now()}`);
     expect(taskId).not.toBe('');
 

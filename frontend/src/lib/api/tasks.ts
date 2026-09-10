@@ -150,8 +150,9 @@ export async function sendTaskMessage(
     try {
         return await sendTaskMessageRaw(projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort, regenerate);
     } catch (e) {
-        // Network failure (fetch TypeError / timeout AbortError) — queue the message
-        // so it isn't lost. Non-transient errors (server 4xx/5xx) still propagate.
+        // Network failure — the request never reached the server — so queue the message instead of
+        // losing it. A cancellation is not transient (isTransientError says so): the user stopped this
+        // send, and a queued copy would replay it after they left. Server refusals still propagate.
         if (isTransientError(e)) {
             return await queueMessage();
         }

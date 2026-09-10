@@ -43,7 +43,6 @@ test.describe.serial('Sandbox Mounts', () => {
         await page.waitForFunction(() => false, {}, { timeout: 1000, polling: 1000 }).catch(() => {});
       }
 
-      // Now enable sandbox
       const putResult = await csrfFetch(page, `/api/projects/${projectId}`, {
         method: 'PUT',
         body: { sandbox_enabled: true, sandbox_network_isolation: false },
@@ -169,7 +168,6 @@ test.describe.serial('Sandbox Mounts', () => {
     await expect(page.locator('.mount-container')).toContainText('/mnt/data');
     await expect(page.locator('.mount-mode')).toContainText('rw');
 
-    // Remove mount
     await page.locator('.btn-remove-mount').first().click();
     await expect(page.locator('.mount-item')).toHaveCount(0);
 
@@ -286,7 +284,6 @@ test.describe.serial('Sandbox Mounts', () => {
     expect(saved.sandbox_mounts[0].mode).toBe('rw');
     expect(saved.sandbox_mounts[1].mode).toBe('ro');
 
-    // Clean up
     await csrfFetch(page, `/api/projects/${projectId}`, {
       method: 'PUT',
       body: { sandbox_mounts: [] },

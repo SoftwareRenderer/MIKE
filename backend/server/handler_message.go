@@ -230,7 +230,7 @@ func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if err := s.store.UpdateTaskMessageCommitHash(messageID, req.CommitHash); err != nil {
-				JSONError(w, http.StatusInternalServerError, err.Error())
+				Fault(w, "update message commit hash", err)
 				return
 			}
 		}
@@ -325,7 +325,7 @@ func (s *Server) cleanupDeletedMessageForks(projectID, taskID string, task *type
 		}
 		s.broadcastTaskDiff(taskID)
 		// Broadcast updated task so frontend has new currentThreadID before diff loads
-		s.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
+		s.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 		s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": task.CurrentThreadID, "task_id": taskID}})
 	} else {
 		// No fork threads affected, but messages were deleted.

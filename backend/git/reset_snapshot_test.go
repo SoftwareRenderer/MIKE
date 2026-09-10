@@ -74,7 +74,6 @@ func TestResetWorktreeTo_BinarySnapshotKeepsBranchAndBytes(t *testing.T) {
 		t.Error("files the snapshot does not contain must be gone")
 	}
 
-	// The assertion this test exists for: a restore is not a history edit.
 	if head := gitTrim(t, wt, "rev-parse", "HEAD"); head != branchTip {
 		t.Errorf("HEAD moved from %s to %s", branchTip, head)
 	}

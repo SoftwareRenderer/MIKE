@@ -127,7 +127,6 @@ func TestAuthSessionNotAuthenticated(t *testing.T) {
 func TestAuthSessionAuthenticated(t *testing.T) {
 	s := testServer(t)
 
-	// Login first
 	loginReq := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
 		"password": testPassword,
 	})
@@ -165,7 +164,6 @@ func TestAuthSessionAuthenticated(t *testing.T) {
 func TestAuthLogoutSuccess(t *testing.T) {
 	s := testServer(t)
 
-	// Login first
 	loginReq := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
 		"password": testPassword,
 	})

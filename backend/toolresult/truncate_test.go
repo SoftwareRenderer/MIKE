@@ -1,6 +1,7 @@
-package toolresult
+package toolresult_test
 
 import (
+	"kanban/backend/toolresult"
 	"strings"
 	"testing"
 )
@@ -8,7 +9,7 @@ import (
 // marker is what the client looks for to know the output was cut short.
 const marker = "... (truncated)"
 
-// TestTruncate is the whole of Truncate's contract in one place: it reports the
+// TestTruncate is the whole of toolresult.Truncate's contract in one place: it reports the
 // ORIGINAL line/byte counts back and rewrites the preview once either threshold
 // (more than 10 lines, more than 1024 bytes) is crossed. Each row is one point of
 // that function; the rows around 10 lines and around 1024 bytes exist in pairs so a
@@ -163,7 +164,7 @@ func TestTruncate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			preview, lines, bytes, trunc := Truncate(tc.input)
+			preview, lines, bytes, trunc := toolresult.Truncate(tc.input)
 
 			if trunc != tc.wantTrunc {
 				t.Errorf("truncated = %v, want %v", trunc, tc.wantTrunc)

@@ -74,7 +74,6 @@ func TestRegistry_Lookup(t *testing.T) {
 		t.Errorf("Name = %q, want %q", ext.Name, "pi")
 	}
 
-	// Disabled agent
 	ext = registry.Lookup("agent://disabled-agent")
 	if ext != nil {
 		t.Errorf("Lookup(agent://disabled-agent) = %v, want nil", ext)

@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"kanban/backend/types"
+
+	"kanban/pkg/sandboxruntime"
 )
 
 // grantCandidate returns an existing absolute directory that is NOT inside any policy root. Not
@@ -42,7 +44,7 @@ func dependencyExtension(id, hostPath string) *Extension {
 func sandboxManagerForTest(t *testing.T) *ExtensionSandboxManager {
 	t.Helper()
 	store := testStore(t)
-	return NewExtensionSandboxManager(NewRegistryClient(), store)
+	return NewExtensionSandboxManager(NewRegistryClient(), store, sandboxruntime.Boot{})
 }
 
 func TestMountPolicyForExtension_GrantIsARootForItsOwnExtensionOnly(t *testing.T) {
@@ -114,7 +116,7 @@ func TestMountPolicyForExtension_NarrowAtInstallAndSettings(t *testing.T) {
 	// The gate the plan cares about most: the validator behind install, update and
 	// PUT /api/extensions/{id} must not see anyone's grant, so a manifest cannot reach it.
 	store := testStore(t)
-	sm := NewExtensionSandboxManager(NewRegistryClient(), store)
+	sm := NewExtensionSandboxManager(NewRegistryClient(), store, sandboxruntime.Boot{})
 	h := NewExtensionHandler(store, sm, NewRegistryClient(), &ExtensionConfig{})
 	grant := grantCandidate(t)
 

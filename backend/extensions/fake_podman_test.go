@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"kanban/pkg/sandboxruntime"
 )
 
 // A stand-in podman for tests that need a build attempted without a daemon: it records the argv and a
@@ -72,8 +74,9 @@ func fakePodmanExit(t *testing.T, code int, outputCmd string) *fakePodman {
 	return &fakePodman{logPath: logPath}
 }
 
-// setBridgeEnv points MIKE_AGENT_PATH at the committed bridge, which every building test stages into
-// its context. Returns the absolute path.
+// setBridgeEnv returns the absolute path of the committed bridge, which every building test stages into
+// its context. It is a Boot field (bridgeBoot below), not MIKE_AGENT_PATH: the code that stages the
+// binary reads the boot its client was built with, so the value cannot change underneath it.
 func setBridgeEnv(t *testing.T) string {
 	t.Helper()
 	_, filename, _, _ := runtime.Caller(0)
@@ -84,8 +87,13 @@ func setBridgeEnv(t *testing.T) string {
 	if _, err := os.Stat(p); err != nil {
 		t.Fatalf("committed sandbox-bridge is missing (%v) — a build has nothing to stage", err)
 	}
-	t.Setenv("MIKE_AGENT_PATH", p)
 	return p
+}
+
+// bridgeBoot is the boot a building test runs under: the committed bridge named by path.
+func bridgeBoot(t *testing.T) sandboxruntime.Boot {
+	t.Helper()
+	return sandboxruntime.Boot{AgentPath: setBridgeEnv(t)}
 }
 
 // calls returns one entry per podman invocation: its argv (without the program name). A log with no

@@ -220,8 +220,8 @@ func (a *wasmAdapter) callFnStrings(ctx context.Context, name string, strs ...st
 	return a.callFnStringsLocked(ctx, name, strs...)
 }
 
-// callFnStringsLocked is the unlocked version of callFnStrings. Callers that
-// already hold a.mu (e.g. Init) must use this to avoid a re-entrant deadlock.
+// callFnStringsLocked is for callers already holding a.mu (e.g. Init); callFnStrings there re-enters
+// the lock.
 func (a *wasmAdapter) callFnStringsLocked(ctx context.Context, name string, strs ...string) ([]byte, error) {
 	fn := a.module.ExportedFunction(name)
 	if fn == nil {

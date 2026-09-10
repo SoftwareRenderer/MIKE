@@ -32,6 +32,8 @@ import (
 	"kanban/backend/types"
 
 	"github.com/google/uuid"
+	"kanban/backend/errs"
+	"kanban/pkg/keylock"
 	"kanban/pkg/logging"
 )
 
@@ -71,7 +73,7 @@ type TaskExecutor struct {
 	llmAdapter    *llmadapter.Adapter // provider request adaptation (llm extensions); nil = none
 	tasks         map[string]*executionState
 	// Per-task mutexes to serialize worktree access across executors and merges.
-	worktreeMu sync.Map // taskID -> *sync.Mutex
+	worktreeMu taskWorktreeLocks // taskID -> the task's own worktree lock
 	// Branch and merge behaviour of a finished turn. Its lock discipline is in mergeOrchestrator.
 	merge *mergeOrchestrator
 	// The task's context window: the threshold decision, the rolling summary, the manual paths.
@@ -304,20 +306,35 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStr
 		taskGate:      NewConcurrencyGate(),
 		tasks:         make(map[string]*executionState),
 	}
+	te.worktreeMu.Configure(taskLockSlowWait, func(taskID string, waited time.Duration) {
+		logging.For(logging.Tools).With(logging.TaskID, taskID).Warnf(
+			"waited %s for the task's worktree lock - a tool call holds it", waited.Round(time.Second))
+	})
 	te.merge = te.newMergeOrchestrator()
 	te.summarize = te.newSummarizeOrchestrator()
 	te.appStreamMgr.SetLazyStartHandler(te.handleLazyStart)
 	return te
 }
 
+// taskWorktreeLocks is the domain that serializes everything touching one task's worktree.
+type taskWorktreeLocks struct{ keylock.Table }
+
+// taskLockSlowWait is deliberately far above the git-family threshold: this lock is held across an
+// entire tool call — `read_file`, `edit_file` and `bash`, the last of which runs up to 300 s — and
+// `mergeInWorktree`/`syncTargetIntoTask` wait on it by design. Waiting behind a running tool is the
+// intended behaviour, so the only thing worth saying is when the wait reaches minutes.
+const taskLockSlowWait = 60 * time.Second
+
 // LockWorktree acquires the per-task worktree lock and returns the function that releases it. The lock
-// cannot leave the package this way: TaskExecutor is copied around by tests and by the manager wiring,
-// and `*te = *te2` would swap which mutex callers find.
+// itself never leaves the package: a returned *sync.Mutex can be stored, copied and handed on, and a
+// caller holding a copy of it serializes against nobody who holds the original.
 func (te *TaskExecutor) LockWorktree(taskID string) func() {
-	mu, _ := te.worktreeMu.LoadOrStore(taskID, &sync.Mutex{})
-	m := mu.(*sync.Mutex)
-	m.Lock()
-	return m.Unlock
+	return te.worktreeMu.Lock(taskID)
+}
+
+// LockWorktreeWatched is LockWorktree with the wait reported, for a caller a person is waiting on.
+func (te *TaskExecutor) LockWorktreeWatched(taskID string, every time.Duration, notice keylock.WaitNotice) func() {
+	return te.worktreeMu.LockWatched(taskID, every, notice)
 }
 
 // runToolProtected runs a tool call under the task's worktree lock (which
@@ -1015,9 +1032,15 @@ func (s *taskExecSetup) projectName() string {
 	return s.project.Name
 }
 
-// ErrTaskAlreadyRunning means another executor holds this task right now; the API answers
-// 409. Managers.StartTask distinguishes it from a genuine failure by this, not by text.
-var ErrTaskAlreadyRunning = errors.New("task already running")
+// ErrTaskAlreadyRunning means another executor holds this task right now. It classifies as
+// errs.ErrConflict, which is what the transport maps to 409; returning a fresh error with the same text
+// answered 500 for a condition the user caused.
+var ErrTaskAlreadyRunning = errs.Conflict("task already running")
+
+// ErrAgentNeedsNetwork is a configuration the person using MIKE can change — enable network for the
+// sandboxed project — so it declares a conflict and its sentence reaches the browser. Returned raw, the
+// answer was 500: a server fault for something the user has to fix.
+var ErrAgentNeedsNetwork = errs.Conflict("agent requires network to be enabled")
 
 // prepareTaskExecution sets up the shared infrastructure for task execution.
 // Both StartTask and handleLazyStart use this to avoid duplicating worktree
@@ -1044,7 +1067,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		_, activelyRunning := te.tasks[taskID]
 		te.taskMu.Unlock()
 		if activelyRunning {
-			return nil, fmt.Errorf("task already running")
+			return nil, ErrTaskAlreadyRunning
 		}
 		logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("stale running state detected, resetting")
 		task.ExecutionState = types.ExecStateIdle
@@ -1140,7 +1163,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		task.Status = types.StatusBacklog
 		task.UpdatedAt = time.Now().UTC()
 		_ = te.storeTask(task, projectID)
-		return nil, fmt.Errorf("agent requires network to be enabled")
+		return nil, ErrAgentNeedsNetwork
 	}
 
 	te.taskMu.Lock()
@@ -1208,7 +1231,7 @@ func (te *TaskExecutor) getAgentRunner(ctx context.Context, projectID, taskID st
 	// Lookup agent extension via registry
 	ext := te.agentRegistry.LookupByName(agentName)
 	if ext == nil {
-		return nil, fmt.Errorf("agent %q not found in extensions", agentName)
+		return nil, errs.Conflict(fmt.Sprintf("agent %q is not installed", agentName))
 	}
 
 	// Prepare execution environment without updating task status in DB.

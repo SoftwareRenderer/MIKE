@@ -437,6 +437,15 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 if (s.queuePosition > 0) s.awaitingResponse = true;
                 break;
             }
+            case 'lock_wait': {
+                // Repeated while the wait lasts, acquired=true at the end: a lost frame costs one repeat
+                // instead of a spinner that never stops.
+                const data = event.data as { domain?: string; waited_seconds?: number; acquired?: boolean };
+                s.lockWait = data.acquired
+                    ? null
+                    : { domain: data.domain || 'other', seconds: data.waited_seconds || 0 };
+                break;
+            }
             case 'prompt_progress': {
                 const data = event.data as { total: number; cache: number; processed: number; time_ms: number };
                 if (data.total > 0) s.promptProgress = Math.round((data.processed / data.total) * 100);

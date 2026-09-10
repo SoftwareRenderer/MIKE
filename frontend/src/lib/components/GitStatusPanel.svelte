@@ -57,7 +57,6 @@
 
     let loading = $state(true);
     let selectedPath = $state('');
-    // HEAD hash at last load — used to detect if repo changed while panel is open
     let headHash = $state('');
     // Git author identity for commit dialog
     let authorName = $state('');

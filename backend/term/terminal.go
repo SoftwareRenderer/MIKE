@@ -115,8 +115,8 @@ func (t *taskTerminal) applySize(rows, cols uint16) {
 // so it gets the operator's environment, credentials included; without the flag it gets
 // SafeAgentEnv, because a project row is not a grant of MIKE_LOGIN_PASSWORD or
 // MIKE_ENCRYPTION_KEY to a shell.
-func hostShellEnv() []string {
-	if sandbox.DangerZoneAllows() {
+func hostShellEnv(dz sandbox.DangerZone) []string {
+	if dz.Allows() {
 		return append(os.Environ(), "TERM=xterm-256color")
 	}
 	return agent.SafeAgentEnv("TERM=xterm-256color")
@@ -142,8 +142,7 @@ func (t *taskTerminal) removeConnSize(conn *websocket.Conn) {
 	t.applySize(r, c)
 }
 
-// sandboxOps is the subset of sandbox.SandboxManager methods used by the terminal manager.
-// Defined here so tests can provide a mock without depending on gVisor.
+// sandboxOps exists so tests can mock the sandbox without depending on gVisor.
 type sandboxOps interface {
 	IsAvailable() bool
 	EnsureImageForProject(project *types.Project, onProgress func(types.SandboxImageStatus)) (string, error)
@@ -159,17 +158,19 @@ type TerminalManager struct {
 	store                  *store.Store
 	cfgStore               *config.ConfigStore
 	sandboxMgr             sandboxOps
+	dangerZone             sandbox.DangerZone
 	agentRegistry          *agent.AgentRegistry
 	onPortsAssigned        func(taskID, projectID string, ports []types.AssignedPort) // callback when task ports are assigned
 	onProjectPortsAssigned func(projectID string, ports []types.AssignedPort)         // callback when project-level terminal ports are assigned
 }
 
-func NewTerminalManager(store *store.Store, cfgStore *config.ConfigStore, sandboxMgr sandboxOps, agentRegistry *agent.AgentRegistry) *TerminalManager {
+func NewTerminalManager(store *store.Store, cfgStore *config.ConfigStore, sandboxMgr sandboxOps, agentRegistry *agent.AgentRegistry, dangerZone sandbox.DangerZone) *TerminalManager {
 	return &TerminalManager{
 		sessions:      make(map[string]*taskTerminal),
 		store:         store,
 		cfgStore:      cfgStore,
 		sandboxMgr:    sandboxMgr,
+		dangerZone:    dangerZone,
 		agentRegistry: agentRegistry,
 	}
 }
@@ -346,7 +347,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 
 		cmd := exec.Command(shell)
 		cmd.Dir = worktreePath
-		cmd.Env = hostShellEnv()
+		cmd.Env = hostShellEnv(tm.dangerZone)
 
 		ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
 		if err != nil {
@@ -504,10 +505,6 @@ func (t *taskTerminal) close() {
 func (tm *TerminalManager) HandleTerminal(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	cfg, err := tm.cfgStore.GetConfig()
 	if err != nil {
@@ -534,10 +531,6 @@ func (tm *TerminalManager) HandleTerminal(w http.ResponseWriter, r *http.Request
 // HandleProjectTerminal handles WebSocket connections for a project-level terminal.
 func (tm *TerminalManager) HandleProjectTerminal(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	project, err := tm.store.GetProject(projectID)
 	if err != nil {

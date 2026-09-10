@@ -1,0 +1,19 @@
+# archgate baseline: frozen violations, regenerated with -update.
+# A key is <file>|<detail>; no line numbers, so unrelated edits do not churn this file.
+# Shrink it by fixing a violation, never by adding to it.
+backend/config/config.go|imports "net/http"
+backend/config/llm.go|imports "net/http"
+backend/exec/handler_http.go|imports "net/http"
+backend/exec/merge.go|imports "net/http"
+backend/exec/summarize.go|imports "net/http"
+backend/extensions/handler.go|imports "net/http"
+backend/extensions/registry.go|imports "net/http"
+backend/llama/client.go|imports "net/http"
+backend/lsp/handler.go|imports "net/http"
+backend/managers/board.go|imports "net/http"
+backend/managers/git.go|imports "net/http"
+backend/managers/http.go|imports "net/http"
+backend/managers/project.go|imports "net/http"
+backend/managers/task.go|imports "net/http"
+backend/stream/app_stream.go|imports "net/http"
+backend/term/terminal.go|imports "net/http"

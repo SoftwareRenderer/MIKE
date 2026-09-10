@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"kanban/pkg/logging"
+
+	"kanban/pkg/subproc"
 )
 
 // imageRefPattern matches valid OCI/Docker image references.
@@ -104,13 +106,35 @@ func ValidateDockerfilePath(path string) error {
 	return nil
 }
 
-// Runtime provides low-level Podman and gVisor operations used by sandbox managers.
-type Runtime struct{}
-
-// NewRuntime creates a new Sandbox Runtime.
-func NewRuntime() *Runtime {
-	return &Runtime{}
+// Boot is how the process started, as far as the container runtime is concerned. Both fields are
+// decided once at startup (backend/startup) and passed down, because each one controls something a
+// per-call re-read gets wrong: whether this process may delete the host's leftover sandbox containers,
+// and where the bridge binary is found.
+type Boot struct {
+	// SweepStaleContainersAtBoot claims the host's container namespace: it lets the boot sweep delete
+	// every stale kanban-* container family. That is a host-wide delete, so the zero value **declines**
+	// it. A test binary or an ad-hoc caller that swept would take a live server's language servers with
+	// it — the failure MIKE_SANDBOX_SKIP_STARTUP_CLEANUP existed to prevent, now prevented by default
+	// rather than by every suite remembering to set a variable.
+	SweepStaleContainersAtBoot bool
+	// AgentPath overrides where the sandbox-bridge binary is looked for. Empty searches beside the
+	// executable, which is where `make bridge` puts it.
+	AgentPath string
 }
+
+// Runtime provides low-level Podman and gVisor operations used by sandbox managers. It is built with a
+// Boot, so the decisions about the host are made once, where the process started.
+type Runtime struct {
+	boot Boot
+}
+
+// NewRuntimeWithBoot creates a Runtime with the boot decisions this process was started with.
+func NewRuntimeWithBoot(boot Boot) *Runtime {
+	return &Runtime{boot: boot}
+}
+
+// Boot returns the decisions this Runtime was built with.
+func (r *Runtime) Boot() Boot { return r.boot }
 
 // PodmanWaitDelay bounds how long a podman subprocess may hold its output pipes after it exits or
 // its context is cancelled. cmd.Wait waits for the pipes, not just the process, so a container that
@@ -120,15 +144,53 @@ func NewRuntime() *Runtime {
 const PodmanWaitDelay = 10 * time.Second
 
 // PodmanExec runs a podman command and returns the combined output.
+//
+// The watch is the only bound on the calls here: most of them have no caller worth cancelling (stop a
+// container, remove one, inspect one - they must finish whatever the browser did), so a context would
+// bound the wrong thing. What a wedged rootless podman needs is a line naming what is still running.
 func (r *Runtime) PodmanExec(args ...string) ([]byte, error) {
-	return PodmanCommand(args...).CombinedOutput()
+	cmd := PodmanCommand(args...)
+	stop := subproc.Watch(podmanLabel(args), subproc.SlowWait, podmanSlowLog)
+	out, err := cmd.CombinedOutput()
+	stop()
+	return out, err
 }
 
 // PodmanExecContext is like PodmanExec but bounds execution to the context's
 // deadline. Use it for best-effort calls (e.g. startup cleanup) where a wedged
 // podman must not block the caller indefinitely.
 func (r *Runtime) PodmanExecContext(ctx context.Context, args ...string) ([]byte, error) {
-	return PodmanCommandContext(ctx, args...).CombinedOutput()
+	cmd := PodmanCommandContext(ctx, args...)
+	stop := subproc.Watch(podmanLabel(args), subproc.SlowWait, podmanSlowLog)
+	out, err := cmd.CombinedOutput()
+	stop()
+	return out, err
+}
+
+// podmanSlowLog is the logger a slow podman child reports through. Warn, not Error: the run is still
+// going, and nothing has failed yet — the point is that an operator reading "podman inspect has been
+// running for 30s" knows where to look before concluding the server is hung.
+func podmanSlowLog(format string, args ...any) {
+	logging.For(logging.Sandbox).Warnf(format, args...)
+}
+
+// podmanLabel names a podman operation for the log: the verb and the first operand, which is the
+// container or image an operator needs to see ("podman inspect kanban-sandbox-frost-amber"). Flags are
+// skipped, so `rm -f <name>` keeps its name; the cost is that a flag **value** can occupy the second
+// slot (`create --runtime runsc` labels as "podman create runsc"), which is accepted rather than
+// resolved by a table of which podman flags take values — a wrong table would hide the operand.
+func podmanLabel(args []string) string {
+	verbs := make([]string, 0, 2)
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		verbs = append(verbs, a)
+		if len(verbs) == 2 {
+			break
+		}
+	}
+	return strings.TrimSpace("podman " + strings.Join(verbs, " "))
 }
 
 // RemoveContainer force-removes a container, handling overlay filesystem issues
@@ -184,10 +246,10 @@ func GVisorAvailable(logTag string) bool {
 	}
 	runscCmd := exec.Command("runsc", "--version")
 	// Not PodmanCommand: that constructor pins the binary to podman, and this probe must run runsc
-	// (a host with podman but no runsc is the exact case being detected). The environment is the
-	// same allowlist — it is the container-runtime CLI environment, and runsc needs none of it.
-	runscCmd.Env = PodmanEnv()
-	runscCmd.WaitDelay = PodmanWaitDelay
+	// (a host with podman but no runsc is the exact case being detected). The environment is the same
+	// allowlist — it is the container-runtime CLI environment, and runsc needs none of it — and it
+	// carries the WaitDelay through the same helper, so the pairing is not hand-copied here.
+	subproc.Bind(runscCmd, PodmanEnv(), PodmanWaitDelay)
 	out, err := runscCmd.CombinedOutput()
 	if err != nil {
 		logging.For(logging.Runtime).Warnf("runsc version check failed (probe %s): %v (%s)", logTag, err, out)
@@ -199,15 +261,6 @@ func GVisorAvailable(logTag string) bool {
 		return false
 	}
 	return true
-}
-
-// SkipStartupCleanup reports whether the startup sweep over leftover sandbox containers
-// should be skipped. MIKE_SANDBOX_SKIP_STARTUP_CLEANUP is set by test binaries (see the
-// TestMain of the sandbox suites) so that running a unit test never reaches into the host
-// that happens to be running a server: without it, `go test ./backend/...` swept every
-// kanban-* container family on the machine, including the live server's language servers.
-func SkipStartupCleanup() bool {
-	return os.Getenv("MIKE_SANDBOX_SKIP_STARTUP_CLEANUP") != ""
 }
 
 // staleContainerNames keeps the containers a startup sweep may reclaim: everything not running.
@@ -296,9 +349,11 @@ func (r *Runtime) GetContainerMountSource(name, dest string) (string, error) {
 	return "", nil
 }
 
-// GetAgentBinaryPath resolves the path to the sandbox-bridge binary.
+// GetAgentBinaryPath resolves the path to the sandbox-bridge binary: the path this Runtime was built
+// with (startup.Config.AgentPath, for a host where the bridge is not beside the executable), then the
+// locations relative to the executable.
 func (r *Runtime) GetAgentBinaryPath() (string, error) {
-	if p := os.Getenv("MIKE_AGENT_PATH"); p != "" {
+	if p := r.boot.AgentPath; p != "" {
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
 		}

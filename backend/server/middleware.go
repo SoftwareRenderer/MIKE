@@ -8,12 +8,13 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"runtime/debug"
 	"strings"
 
 	"kanban/backend/httputil"
 	"kanban/pkg/logging"
+
+	"kanban/backend/startup"
 )
 
 // Re-export JSON helpers from httputil.
@@ -23,6 +24,9 @@ var (
 	// Fail answers a domain error with the status the error declares, so a store
 	// fault is never reported to the browser as "not found".
 	Fail = httputil.Fail
+	// Fault is the same mapper for the one outcome with nothing richer to declare: the operation
+	// failed and the cause is MIKE's to read, not the browser's.
+	Fault = httputil.Fault
 )
 
 // Paths that don't require authentication.
@@ -81,23 +85,14 @@ func isPreviewNavPath(path string) bool {
 	return strings.Count(path, "/") == 4
 }
 
-// requestIsHTTPS reports whether the browser's side of this request was encrypted: TLS terminated
-// here, or a TLS-terminating proxy that said so in X-Forwarded-Proto under MIKE_TRUST_PROXY. It is
-// the one reading of that pair, shared by the two places that act on it — the HTTPS redirect and
-// the session cookie's Secure flag — because a deployment where they disagree is the whole point of
-// the flag: the redirect would believe the connection is HTTPS while the cookie goes out in
-// cleartext anyway.
-//
-// X-Forwarded-Proto counts only under MIKE_TRUST_PROXY, exactly as it does for the redirect: any
-// client can set the header, and a cookie marked Secure on the strength of a lie is worse than one
-// marked honestly. The one answer that stays unencrypted is a server with TLS off (`--no-tls`) and
-// no proxy in front of it — cleartext to the browser, where a Secure cookie would never be stored
-// or sent at all, so the app could not log in.
-func requestIsHTTPS(r *http.Request) bool {
+// requestIsHTTPS reports whether the browser reached this server over TLS: terminated here, or a proxy
+// said X-Forwarded-Proto: https and MIKE_TRUST_PROXY is set. The HTTPS redirect and the session
+// cookie's Secure flag read this one answer, so they cannot disagree about the same request.
+func requestIsHTTPS(r *http.Request, trustProxy bool) bool {
 	if r.TLS != nil {
 		return true
 	}
-	return trustProxy() && r.Header.Get("X-Forwarded-Proto") == "https"
+	return trustProxy && r.Header.Get("X-Forwarded-Proto") == "https"
 }
 
 // CORSMiddleware handles CORS, CSP, and other security headers.
@@ -153,15 +148,10 @@ const permissionsPolicy = "camera=(), microphone=(), geolocation=(), usb=(), ser
 	"bluetooth=(), payment=(), display-capture=(), wake-lock=(), idle-detection=(), " +
 	"keyboard-map=(), window-management=()"
 
-// isOpaqueOriginAsset reports whether a path is fetched as a subresource by a document that has no
-// origin to name: a sandboxed extension iframe loading its own files from /extensions/ and the host
-// bridge from /host-client.js, and a preview document loading its siblings from /api/preview/.
-// Cross-Origin-Resource-Policy: same-origin on those would refuse them all — the frame's opaque
-// origin is not this origin — so they are the paths the header is not applied to.
-//
-// The bridge is in the app root but is an extension's file like any other: marked, no frame can
-// fetch it, so no extension gets an extHost and none of them work. Why that is safe: the file is
-// public and carries no user data (docs/ui-extensions.md).
+// isOpaqueOriginAsset reports the paths fetched as subresources by a document with no origin to name:
+// a sandboxed extension iframe reading its own files and /host-client.js, and a preview document
+// reading its own assets. CORP: same-origin on those breaks them, because the browser has no origin
+// to match the header against.
 func isOpaqueOriginAsset(path string) bool {
 	if strings.HasPrefix(path, "/extensions/") || path == hostClientPath {
 		return true
@@ -169,20 +159,13 @@ func isOpaqueOriginAsset(path string) bool {
 	return strings.HasPrefix(path, "/api/preview/") && !isPreviewNavPath(path)
 }
 
-// allowedHostsEnv lists extra hostnames accepted in the Host header,
-// comma-separated (e.g. "kanban.example.com,staging.lan"). It is the opt-out for
-// reverse proxies, which forward a public domain the server cannot infer from
-// the address it listens on. The --allowed-hosts flag takes priority over it.
-const allowedHostsEnv = "MIKE_ALLOWED_HOSTS"
-
-// effectiveAllowedHosts resolves the extra accepted Host values: the value the
-// server was constructed with (the --allowed-hosts flag) wins, and
-// MIKE_ALLOWED_HOSTS is the fallback for an unset/blank flag.
+// effectiveAllowedHosts returns the extra accepted Host values (e.g.
+// "kanban.example.com,staging.lan") — the opt-out for reverse proxies, which forward a public
+// domain the server cannot infer from the address it listens on. It is the resolved value of the
+// --allowed-hosts / MIKE_ALLOWED_HOSTS ladder, so the flag-over-variable choice is made once at boot
+// and every request is measured against the same list.
 func (s *Server) effectiveAllowedHosts() string {
-	if strings.TrimSpace(s.allowedHosts) != "" {
-		return s.allowedHosts
-	}
-	return os.Getenv(allowedHostsEnv)
+	return strings.Join(s.settings.AllowedHosts, ",")
 }
 
 // loopbackHosts are always accepted: they can only name this machine.
@@ -252,7 +235,7 @@ func (s *Server) HostPinMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		logging.For(logging.Host).Infof("rejected request for Host %q (allow it with --allowed-hosts or %s)", r.Host, allowedHostsEnv)
+		logging.For(logging.Host).Infof("rejected request for Host %q (allow it with --allowed-hosts or %s)", r.Host, startup.EnvAllowedHosts)
 		JSONError(w, http.StatusMisdirectedRequest, "invalid Host header")
 	})
 }

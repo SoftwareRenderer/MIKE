@@ -130,7 +130,6 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
     await page.goto(`/?project=${projectId}`);
     await expect(page.locator('.board')).toBeVisible({ timeout: 10000 });
 
-    // Create a task
     const taskTitle = `nav-card-${Date.now()}`;
     const taskId = await createTaskViaApi(page, projectId, taskTitle);
 
@@ -140,7 +139,6 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
     // Check history length
     const historyBefore = await page.evaluate(() => history.length);
 
-    // Click the card
     await page.click(`.card-title-text:has-text("${taskTitle}")`);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 

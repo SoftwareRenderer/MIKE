@@ -147,11 +147,26 @@ func (s *Store) DeleteTaskMessageByID(messageID string) error {
 // summarization rows and breaks ties by rowid, so a caller that re-derived the set could release a
 // snapshot a surviving row still names — one git is then free to prune.
 func (s *Store) DeleteTaskMessagesAfter(taskID, messageID, threadID string) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	var checkpointed []string
+	err := s.tx(func(tx *sql.Tx) error {
+		var err error
+		checkpointed, err = s.deleteTaskMessagesAfterLocked(tx, taskID, messageID, threadID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return checkpointed, nil
+}
+
+// deleteTaskMessagesAfterLocked reads the checkpointed ids and deletes the rows against one handle, so the
+// set the caller is told to release is the set the delete removed: read on one statement and delete on the
+// next, with a failure between them, the caller would be handed ids for rows that are still there (or left
+// holding ids for rows that are not), and the snapshot a surviving row names is a snapshot git can prune.
+func (s *Store) deleteTaskMessagesAfterLocked(db execer, taskID, messageID, threadID string) ([]string, error) {
 	// Get the created_at of the message to delete
 	var createdAt string
-	if err := s.db.QueryRow(`SELECT created_at FROM task_messages WHERE id = ?`, messageID).Scan(&createdAt); err != nil {
+	if err := db.QueryRow(`SELECT created_at FROM task_messages WHERE id = ?`, messageID).Scan(&createdAt); err != nil {
 		return nil, err
 	}
 	// The message itself plus everything after it in the thread. Matching the ID explicitly covers
@@ -162,7 +177,7 @@ func (s *Store) DeleteTaskMessagesAfter(taskID, messageID, threadID string) ([]s
 		where = `task_id = ? AND thread_id = ? AND (id = ? OR (created_at >= ? AND role != 'summarization'))`
 		args = []any{taskID, threadID, messageID, createdAt}
 	}
-	rows, err := s.db.Query(`SELECT id, git_commit_hash FROM task_messages WHERE `+where, args...)
+	rows, err := db.Query(`SELECT id, git_commit_hash FROM task_messages WHERE `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +198,7 @@ func (s *Store) DeleteTaskMessagesAfter(taskID, messageID, threadID string) ([]s
 		}
 	}
 
-	if _, err := s.db.Exec(`DELETE FROM task_messages WHERE `+where, args...); err != nil {
+	if _, err := db.Exec(`DELETE FROM task_messages WHERE `+where, args...); err != nil {
 		return nil, err
 	}
 	return checkpointed, nil

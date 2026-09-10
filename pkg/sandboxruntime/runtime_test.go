@@ -78,7 +78,7 @@ func TestValidateProjectName(t *testing.T) {
 }
 
 func TestValidateImageRef(t *testing.T) {
-	r := NewRuntime()
+	r := NewRuntimeWithBoot(Boot{})
 	tests := []struct {
 		name    string
 		image   string
@@ -381,7 +381,7 @@ func TestGVisorAvailable_FalseWithoutPodman(t *testing.T) {
 func TestCleanupStaleContainers_UnreachablePodmanIsBestEffort(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // no podman on PATH
 
-	rt := NewRuntime()
+	rt := NewRuntimeWithBoot(Boot{})
 	if got := rt.CleanupStaleContainers("test", "kanban-sandbox-"); got != nil {
 		t.Errorf("CleanupStaleContainers = %v with no podman, want nil", got)
 	}
@@ -442,16 +442,47 @@ func TestStaleContainerNamesKeepsEverythingWhenStateIsUnreadable(t *testing.T) {
 	}
 }
 
-// TestSkipStartupCleanupIsTheSharedSwitch: the extension sandbox manager has to honour the same
-// switch the task sandbox manager does, or a test binary that opts out of one sweep still wipes
-// the other family's containers.
-func TestSkipStartupCleanupIsTheSharedSwitch(t *testing.T) {
-	t.Setenv("MIKE_SANDBOX_SKIP_STARTUP_CLEANUP", "")
-	if SkipStartupCleanup() {
-		t.Error("a blank value must mean \"not set\" — same rule the task sandbox manager has always used")
+// TestBootDeclinesTheHostSweepByDefault pins the shape of the claim: the boot sweep deletes every
+// stale kanban-* container family, which is a host-wide delete, so a Runtime built without a Boot
+// declines it. That is what keeps a test binary from wiping a live server's sandboxes by forgetting to
+// set a variable, and both sandbox managers are handed the same value from startup.Config, so the task
+// family and the extension family stay under one decision.
+func TestBootDeclinesTheHostSweepByDefault(t *testing.T) {
+	if NewRuntimeWithBoot(Boot{}).Boot().SweepStaleContainersAtBoot {
+		t.Error("the zero Boot claims the host's container namespace")
 	}
-	t.Setenv("MIKE_SANDBOX_SKIP_STARTUP_CLEANUP", "1")
-	if !SkipStartupCleanup() {
-		t.Error("MIKE_SANDBOX_SKIP_STARTUP_CLEANUP=1 must skip the sweep")
+	if NewRuntimeWithBoot(Boot{}).Boot().AgentPath != "" {
+		t.Error("the zero Boot overrides where the bridge binary is found")
+	}
+
+	claim := Boot{SweepStaleContainersAtBoot: true, AgentPath: "/opt/bridge/sandbox-bridge"}
+	rt := NewRuntimeWithBoot(claim)
+	if !rt.Boot().SweepStaleContainersAtBoot {
+		t.Error("NewRuntimeWithBoot lost the claim it was built with")
+	}
+	if rt.Boot().AgentPath != claim.AgentPath {
+		t.Errorf("Boot().AgentPath = %q, want %q", rt.Boot().AgentPath, claim.AgentPath)
+	}
+}
+
+// TestGetAgentBinaryPathPrefersTheWiredPath: the override is used when the file is there and ignored
+// when it is not, so a stale MIKE_AGENT_PATH-style override cannot point a task at the wrong binary.
+func TestGetAgentBinaryPathPrefersTheWiredPath(t *testing.T) {
+	bridge := filepath.Join(t.TempDir(), "sandbox-bridge")
+	if err := os.WriteFile(bridge, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := NewRuntimeWithBoot(Boot{AgentPath: bridge}).GetAgentBinaryPath()
+	if err != nil {
+		t.Fatalf("GetAgentBinaryPath with the wired path: %v", err)
+	}
+	if got != bridge {
+		t.Errorf("GetAgentBinaryPath = %q, want the wired path %q", got, bridge)
+	}
+
+	missing := filepath.Join(t.TempDir(), "not-here")
+	if got, err := NewRuntimeWithBoot(Boot{AgentPath: missing}).GetAgentBinaryPath(); err == nil && got == missing {
+		t.Error("a wired path that does not exist was used instead of the search fallback")
 	}
 }

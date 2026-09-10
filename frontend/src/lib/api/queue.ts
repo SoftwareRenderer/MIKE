@@ -1,4 +1,4 @@
-import { API_BASE, apiFetch, apiError, ensureCsrfToken, generateId, registerSetOffline } from './helpers';
+import { API_BASE, apiFetch, apiError, ensureCsrfToken, generateId, isAborted, registerSetOffline } from './helpers';
 import { loadQueue as loadQueueFromStorage, saveQueue as saveQueueToStorage, type QueuedAction as StoredQueuedAction } from '../storage';
 import type { Config, Project, Task, TaskMessage, Thread } from '../types';
 import { t } from '$lib/i18n';
@@ -160,7 +160,11 @@ export function getQueuedDeleteTaskIds(): Set<string> {
 
 /** Check if an error is a transient network failure (retryable). */
 export function isTransientError(e: unknown): boolean {
-    return (e as any)?.name === 'TypeError' || (e as any)?.name === 'AbortError';
+    // A cancellation is not a transient failure. The user stopped this request; queueing it replays
+    // something they asked to stop — later, from IndexedDB, possibly after the tab is closed. The abort
+    // used to be counted here because apiFetch produced the only aborts there were: its own 15 s timeout.
+    if (isAborted(e)) return false;
+    return (e as any)?.name === 'TypeError';
 }
 
 /**

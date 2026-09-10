@@ -6,6 +6,8 @@ import (
 	"kanban/backend/extensions"
 
 	"github.com/coder/websocket"
+
+	"kanban/pkg/sandboxruntime"
 )
 
 // TestReleaseHandsTheConnectionBackOnlyToTheLastHolder guards the rule that keeps a turn's
@@ -86,7 +88,7 @@ func TestSessionsUsingLockedCountsSessionsNotChannels(t *testing.T) {
 // removed the client — handing the sandbox reference back twice would stop a container that
 // another workspace is using.
 func TestRetireDropsADeadConnectionOnce(t *testing.T) {
-	sm := extensions.NewExtensionSandboxManager(nil, nil)
+	sm := extensions.NewExtensionSandboxManager(nil, nil, sandboxruntime.Boot{})
 	m := &ExtensionLSPManager{clients: map[string]*sandboxClient{}, extSandbox: sm}
 	key := processKey("/work/tree", "go")
 	m.clients[key] = newSandboxClient(nil, "/work/tree", "go", "gopls", nil)

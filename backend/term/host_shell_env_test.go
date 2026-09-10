@@ -3,6 +3,8 @@ package term
 import (
 	"strings"
 	"testing"
+
+	"kanban/backend/sandbox"
 )
 
 // TestHostShellEnvIsGatedOnDangerZone pins both sides of the host terminal's
@@ -11,8 +13,11 @@ import (
 //   - without DANGER_ZONE, the shell must not carry the server's secrets
 //     (MIKE_LOGIN_PASSWORD logs in as the operator; MIKE_ENCRYPTION_KEY decrypts every
 //     stored provider key) while still being a usable shell;
-//   - with DANGER_ZONE=1, the terminal is the operator's own shell and keeps the environment
+//   - with the grant, the terminal is the operator's own shell and keeps the environment
 //     their own shell would have. Scrubbing that silently breaks the tooling they opted in for.
+//
+// The grant is an argument (sandbox.DangerZone), not an environment variable: the test says which
+// process it is pretending to have booted.
 func TestHostShellEnvIsGatedOnDangerZone(t *testing.T) {
 	t.Setenv("MIKE_LOGIN_PASSWORD", "operator-password")
 	t.Setenv("MIKE_ENCRYPTION_KEY", "encryption-key")
@@ -37,8 +42,7 @@ func TestHostShellEnvIsGatedOnDangerZone(t *testing.T) {
 	}
 
 	// No opt-in: no server secrets, but a working shell.
-	t.Setenv("DANGER_ZONE", "")
-	env := hostShellEnv()
+	env := hostShellEnv(sandbox.DangerZone(false))
 	for _, secret := range []string{"MIKE_LOGIN_PASSWORD=", "MIKE_ENCRYPTION_KEY=", "MIKE_LISTEN="} {
 		if has(env, secret) {
 			t.Errorf("without DANGER_ZONE the host shell still receives %s", secret)
@@ -55,8 +59,7 @@ func TestHostShellEnvIsGatedOnDangerZone(t *testing.T) {
 	}
 
 	// Opt-in: the operator's environment, as documented.
-	t.Setenv("DANGER_ZONE", "1")
-	env = hostShellEnv()
+	env = hostShellEnv(sandbox.DangerZone(true))
 	if !has(env, "MIKE_LOGIN_PASSWORD=") {
 		t.Error("DANGER_ZONE=1 no longer gives the operator's own shell their environment")
 	}

@@ -123,7 +123,6 @@ test.describe('Sidebar persistence', () => {
         await page.waitForTimeout(200); // Wait for class update
         await expect(page.locator('#sidebar')).toHaveClass(/collapsed/);
 
-        // Reload the page
         await page.reload();
         await page.waitForSelector('.project-item, .empty-state', { timeout: 10000 });
 

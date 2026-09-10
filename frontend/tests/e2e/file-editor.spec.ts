@@ -114,7 +114,6 @@ test.describe('File Browser Actions', () => {
     await page.locator('.folder-name-input').press('Enter');
     await expect(page.locator('.folder-name-input')).toBeHidden({ timeout: 5000 });
 
-    // Go back to parent
     await pathInput.fill(TEST_NEW_FOLDER_PARENT);
     await pathInput.press('Enter');
     await expect(page.locator('.file-list')).toBeVisible({ timeout: 5000 });
@@ -503,7 +502,6 @@ test.describe('Explorer', () => {
     const folderPath = join(projectDir, folderName);
     expect(statSync(folderPath).isDirectory()).toBe(true);
 
-    // Clean up
     execSync(`rm -rf ${folderPath}`);
   });
 });

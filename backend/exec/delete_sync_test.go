@@ -88,7 +88,6 @@ func TestDeletedMessagesNotSentToLLM(t *testing.T) {
 	taskMsgs, _ = te.store.GetTaskMessages(taskID, threadID)
 	messages = buildMessagesFromDB(task, taskMsgs, "/worktree", "Delete Test", false)
 
-	// Append new user message
 	newMsg := types.ChatMessage{Role: "user", Content: "Third user message"}
 	messages = append(messages, newMsg)
 

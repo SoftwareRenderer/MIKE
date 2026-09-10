@@ -730,7 +730,7 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 	}
 
 	// Broadcast the new task to the frontend
-	te.appStreamMgr.BroadcastTaskUpdated(parent.ProjectID, *newTask)
+	te.appStreamMgr.BroadcastTaskUpdated(parent.ProjectID, newTask)
 
 	if actualParentID != "" {
 		logging.For(logging.Tools).With(logging.TaskID, parent.ID).Infof("created subtask %s (parent=%s): %q", newTaskID, actualParentID, title)
@@ -897,7 +897,7 @@ func (te *TaskExecutor) handleEditTask(args map[string]any, currentTask *types.T
 	}
 
 	// Broadcast the updated task to the frontend
-	te.appStreamMgr.BroadcastTaskUpdated(currentTask.ProjectID, *target)
+	te.appStreamMgr.BroadcastTaskUpdated(currentTask.ProjectID, target)
 
 	logging.For(logging.Tools).With(logging.TaskID, currentTask.ID).Infof("edited task %s: %q", taskID, target.Title)
 

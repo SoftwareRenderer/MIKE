@@ -74,7 +74,7 @@ func TestUpdateProjectJailsTheSandboxDockerfile(t *testing.T) {
 	}
 
 	// Widened: the same request goes through.
-	t.Setenv(fsutil.AllowRootFSEnv, "1")
+	widenHostRoot(h)
 	if rr = putDockerfile(t, h, id, filepath.Join(outside, "Dockerfile")); rr.Code != http.StatusOK {
 		t.Errorf("widened PUT outside the roots: status = %d, want 200 (%s)", rr.Code, rr.Body.String())
 	}

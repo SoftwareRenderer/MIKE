@@ -18,10 +18,8 @@ import (
 //
 // Gated like every other integration test here. A skip prints why; it is never a pass.
 func TestSandboxContainerSeesNoHostEnv(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	t.Setenv("MIKE_AGENT_PATH", agentPath)
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -111,7 +109,7 @@ func guestEcho(name string) string {
 // through" — and podman obliges. It now takes declared variables, so the request cannot be written;
 // what CAN be written is a malformed name, and that is refused rather than quietly dropped.
 func TestExecRejectsAVariableNameNotAValue(t *testing.T) {
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 
 	// No container is registered for this id, so a refusal on the environment is only observable if
 	// the environment is validated before the container lookup matters. Assert on the error text,

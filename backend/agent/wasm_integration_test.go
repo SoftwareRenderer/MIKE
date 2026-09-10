@@ -322,7 +322,6 @@ func TestWasmPiAdapter_GetStateModelDiscovery(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	// get_state with provider + name
 	getStateInput := []byte(`{"type":"response","command":"get_state","success":true,"data":{"model":{"provider":"openai","name":"gpt-4o"}}}
 `)
 	events := adapter.ParseOutput(context.Background(), getStateInput)

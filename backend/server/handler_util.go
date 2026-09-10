@@ -2,7 +2,6 @@ package server
 
 import (
 	"kanban/backend/fsutil"
-	"kanban/backend/httputil"
 	"kanban/pkg/logging"
 	"net/http"
 	"os"
@@ -10,18 +9,10 @@ import (
 )
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		logging.For(logging.HTTP).Errorf("fs home dir failed: %v", err)

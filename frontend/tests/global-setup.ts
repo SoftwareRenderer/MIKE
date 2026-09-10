@@ -64,6 +64,16 @@ const I18N_PACK_COMMIT_PLACEHOLDER = '__I18N_PACK_COMMIT__';
 // are cleaned by the next run's stale-state cleanup).
 const LOCAL_EXT_FIXTURES_DIR = path.join(__dirname, 'fixtures', 'local-extensions');
 const SEEDED_EXTENSIONS_FILE = '/tmp/kanban-test-seeded-extensions.json';
+// Published extensions the specs install with `install-local` have no committed fixture here — their source
+// is the sibling extensions repo. `install-local` reads only what is on disk, and **deleting an extension
+// deletes its directory**, so a run that uninstalls one consumes the source the next run needs: the spec
+// then says "html-preview not in local extensions list", which reads as a regression in the code under
+// test rather than a missing directory. Setup seeds from the sibling repo where the entry is absent, and
+// refuses the run naming the path when it cannot, so the cause is stated once instead of fourteen times.
+const PUBLISHED_EXT_SOURCE = path.resolve(PROJECT_ROOT, '..', 'MIKE-extensions');
+const LOCAL_EXT_PUBLISHED: { author: string; name: string; subdir: string }[] = [
+    { author: 'softwarerenderer', name: 'html-preview', subdir: 'ui/html-preview' },
+];
 
 let mockServer: ReturnType<typeof spawn> | null = null;
 let kanbanServer: ReturnType<typeof spawn> | null = null;
@@ -72,6 +82,7 @@ let kanbanServerIsolated: ReturnType<typeof spawn> | null = null;
 async function setup(): Promise<void> {
     ensureTestRepo();
     seedLocalExtensions();
+    seedPublishedExtensionSources();
     prepareRegistryIndex();
     await killKanbanServer();
 
@@ -338,6 +349,31 @@ function seedLocalExtensions(): void {
         }
     }
     writeSeededExtensions(created);
+}
+
+/** Seed the published extensions the specs install, from the sibling extensions repo. */
+function seedPublishedExtensionSources(): void {
+    const created = readSeededExtensions();
+    const missing: string[] = [];
+    for (const ext of LOCAL_EXT_PUBLISHED) {
+        const dest = path.join(PROJECT_ROOT, 'extensions', ext.author, ext.name);
+        if (fs.existsSync(dest)) continue;
+        const src = path.join(PUBLISHED_EXT_SOURCE, ext.subdir);
+        if (!fs.existsSync(src)) {
+            missing.push(`${src}  (needed at extensions/${ext.author}/${ext.name})`);
+            continue;
+        }
+        fs.cpSync(src, dest, { recursive: true });
+        created.push(dest);
+        console.log(`[global-setup] Seeded published extension: ${ext.author}/${ext.name}`);
+    }
+    writeSeededExtensions(created);
+    if (missing.length) {
+        throw new Error(
+            `[global-setup] local extension source is missing:\n  ${missing.join('\n  ')}\n` +
+            'Specs that install it with install-local cannot run. Restore the sibling checkout, or place a '
+            + 'copy of the extension under extensions/<author>/<name>.');
+    }
 }
 
 /** Remove exactly the extension dirs a (possibly previous) setup created. */

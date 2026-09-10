@@ -85,7 +85,7 @@ func TestResolveProjectImage(t *testing.T) {
 // starting their own. The join is deterministic — doOnce registers the key before calling fn, so a
 // caller that arrives after fn started must find the key and wait on it.
 func TestDoOnceJoinersShareTheInFlightResult(t *testing.T) {
-	sm := &SandboxManager{rt: sandboxruntime.NewRuntime(), imageOps: make(map[string]*imageOp)}
+	sm := &SandboxManager{rt: sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}), imageOps: make(map[string]*imageOp)}
 
 	const key = "localhost/sandbox-getmike.dev"
 	started := make(chan struct{}, 1)
@@ -138,7 +138,7 @@ func TestDoOnceJoinersShareTheInFlightResult(t *testing.T) {
 
 // Nothing is cached once the call returns: a failed build has to be retryable.
 func TestDoOnceAllowsRetryAfterFailure(t *testing.T) {
-	sm := &SandboxManager{rt: sandboxruntime.NewRuntime(), imageOps: make(map[string]*imageOp)}
+	sm := &SandboxManager{rt: sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}), imageOps: make(map[string]*imageOp)}
 
 	runs := 0
 	failing := func() error { runs++; return fmt.Errorf("boom") }
@@ -161,7 +161,7 @@ func TestDoOnceAllowsRetryAfterFailure(t *testing.T) {
 
 // An unreadable Dockerfile is a configuration mistake, named as one before any build starts.
 func TestEnsureImageForProjectUnreadableDockerfile(t *testing.T) {
-	sm := &SandboxManager{rt: sandboxruntime.NewRuntime(), imageOps: make(map[string]*imageOp)}
+	sm := &SandboxManager{rt: sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}), imageOps: make(map[string]*imageOp)}
 	missing := filepath.Join(t.TempDir(), "Dockerfile")
 
 	_, err := sm.EnsureImageForProject(&types.Project{
@@ -182,7 +182,7 @@ func TestEnsureImageForProjectUnreadableDockerfile(t *testing.T) {
 // TestEnsureImageForProjectBuildsProjectImage is the reported bug end to end: a Dockerfile-backed
 // project touched by a caller that used to assume the image existed.
 func TestEnsureImageForProjectBuildsProjectImage(t *testing.T) {
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(sandboxruntime.Boot{})
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}

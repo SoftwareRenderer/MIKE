@@ -69,19 +69,63 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any, limit int64) bool
 	return true
 }
 
+// statusClientClosedRequest is nginx's convention for "the peer hung up before we answered". Go has no
+// constant for it, and it belongs in that class rather than 500: a closed tab is not a server fault, and
+// a 5xx from an ordinary navigation is what makes an error rate unreadable.
+const statusClientClosedRequest = 499
+
 // Fail maps an error from a domain call to a status, so a handler never guesses:
 //
-//   - an error declaring errs.ErrNotFound → 404 with notFoundMessage
-//   - anything else, nil included        → 500 "internal error", real error logged
+//   - errs.ErrNotFound  → 404 with notFoundMessage
+//   - errs.ErrConflict  → 409 with the producer's own sentence (it was written for the person who
+//     caused it: "task already running")
+//   - context.Canceled  → 499, logged at debug
+//   - anything else, nil included → 500 "internal error", real error logged at error
 //
-// Inferring 404 from `err != nil` reports a closed database or a SQLITE_BUSY as a missing
-// row; only the error knows which it was. operation ("get task") is for the log line only
-// and never reaches the client.
+// Inferring 404 from `err != nil` reports a closed database or a SQLITE_BUSY as a missing row; only the
+// error knows which it was. Inferring 500 from it reports a user's double-click as a server fault, which
+// is the same mistake pointed at the other end. `operation` ("get task") names the log line and never reaches
+// the client.
+//
+// The two ways a request ends get different answers, and the pair is the rule: **the user left**
+// (`context.Canceled` → 499 at debug — there is no fault to report, and an operator's log is not a transcript
+// of every closed tab) or **the server could not answer** (everything else, at error). Neither is bounded
+// here: a deadline on a request path fails the browser while the server finishes the work behind it, and the
+// client then believes something failed. A subprocess or a protocol round-trip may carry its own timeout; a
+// wait on this server does not. What a long wait gets instead is a report naming what it is still waiting on
+// — `subproc.Watch` for a subprocess, the keylock slow-wait for a lock.
 func Fail(w http.ResponseWriter, err error, operation, notFoundMessage string) {
-	if errs.IsNotFound(err) {
+	switch {
+	case errs.IsNotFound(err):
 		JSONError(w, http.StatusNotFound, notFoundMessage)
-		return
+	case errs.IsConflict(err):
+		// The producer's own sentence, not err.Error(): by the time the error reaches here it is often
+		// wrapped, and a chain carries paths and driver text.
+		message := errs.Message(err)
+		if message == "" {
+			message = errs.ErrConflict.Error()
+		}
+		JSONError(w, http.StatusConflict, message)
+	case errs.IsOperation(err):
+		// The browser gets MIKE's own sentence and the log gets the cause, which is the opposite of
+		// what a hand-written 500 does: git's stderr reaches the panel and leaves no trace on the
+		// server, so the one person who can act on it sees nothing.
+		logging.For(logging.HTTP).Errorf("%s failed: %v", operation, errs.Cause(err))
+		JSONError(w, http.StatusInternalServerError, errs.Message(err))
+	case errs.IsCanceled(err):
+		logging.For(logging.HTTP).Debugf("%s cancelled: %v", operation, err)
+		JSONError(w, statusClientClosedRequest, "request cancelled")
+	default:
+		logging.For(logging.HTTP).Errorf("%s failed: %v", operation, err)
+		JSONError(w, http.StatusInternalServerError, "internal error")
 	}
-	logging.For(logging.HTTP).Errorf("%s failed: %v", operation, err)
-	JSONError(w, http.StatusInternalServerError, "internal error")
+}
+
+// Fault answers the one outcome a handler has no richer classification for: the operation did not
+// complete and the cause is MIKE's problem, not the caller's. It is Fail with an errs.Operation, so
+// the handler states what it was doing and the cause goes to the log rather than the browser.
+//
+// Use Fail when the error may classify as a missing thing or a conflict; Fault when it cannot.
+func Fault(w http.ResponseWriter, operation string, err error) {
+	Fail(w, errs.Operation(operation, err), operation, operation+" failed")
 }

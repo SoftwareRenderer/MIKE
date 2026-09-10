@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -25,18 +26,20 @@ func TestTryLockProjectWorktreeReleasesTheLateWinner(t *testing.T) {
 	const projectID = "leaky-project"
 
 	// Hold the lock the way a slow worktree creation would.
-	holder := wm.getProjectWorktreeMu(projectID)
-	holder.Lock()
+	holder, held := wm.tryLockProjectWorktree(projectID, time.Second)
+	if !held {
+		t.Fatal("could not take the lock to hold it")
+	}
 
 	release, locked := wm.tryLockProjectWorktree(projectID, 50*time.Millisecond)
 	if locked {
 		release()
-		holder.Unlock()
+		holder()
 		t.Fatal("tryLockProjectWorktree acquired a lock that was held")
 	}
 
 	// The holder finishes after the waiter gave up. The late win must hand the lock straight back.
-	holder.Unlock()
+	holder()
 	time.Sleep(200 * time.Millisecond)
 
 	// The bug's signature: this second attempt blocks for its whole timeout and fails, because the
@@ -57,15 +60,16 @@ func TestTryLockProjectWorktreeHappyPath(t *testing.T) {
 	if !locked {
 		t.Fatal("tryLockProjectWorktree failed to acquire an uncontended lock")
 	}
-	if wm.getProjectWorktreeMu("proj").TryLock() {
+	if _, busy := wm.tryLockProjectWorktree("proj", 20*time.Millisecond); busy {
 		release()
 		t.Fatal("the lock was reported acquired but is not held")
 	}
 	release()
-	if !wm.getProjectWorktreeMu("proj").TryLock() {
+	again, ok := wm.tryLockProjectWorktree("proj", 2*time.Second)
+	if !ok {
 		t.Fatal("the release function did not release")
 	}
-	wm.getProjectWorktreeMu("proj").Unlock()
+	again()
 }
 
 // TestLockProjectStashAndMergeAreDistinctTables: the stash lock and the merge lock are separate
@@ -73,6 +77,19 @@ func TestTryLockProjectWorktreeHappyPath(t *testing.T) {
 // the other and the ordering rule would silently become a self-deadlock.
 func TestLockProjectStashAndMergeAreDistinctTables(t *testing.T) {
 	wm := NewWorktreeManager(nil, nil)
+
+	// The mechanism-level half: three domains, three tables. Keys are the same kind of string in all
+	// three, so a shared table would make "stash" and "merge" block each other by accident and turn the
+	// documented ordering rule into a self-deadlock.
+	if &wm.stash.Table == &wm.merge.Table || &wm.stash.Table == &wm.worktree.Table || &wm.merge.Table == &wm.worktree.Table {
+		t.Fatal("two git lock domains share one table")
+	}
+	// Types, not just addresses: two domains sharing a type would make `wm.stash = wm.merge` compile,
+	// which is the fusion F16 says the keys cannot be trusted to reveal. Pointers are compared because
+	// passing the value to reflect.TypeOf would itself copy the lock.
+	if reflect.TypeOf(&wm.stash) == reflect.TypeOf(&wm.merge) {
+		t.Fatal("stash and merge are the same type; assigning one to the other would compile")
+	}
 
 	releaseMerge := wm.LockProjectMerge("proj")
 	defer releaseMerge()

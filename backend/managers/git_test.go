@@ -318,7 +318,6 @@ func TestHandleLog_ValidBranch(t *testing.T) {
 
 	mux := newTestGitMux(h)
 
-	// Valid branch (HEAD) → 200
 	rr := doRequest(t, mux, "GET", "/api/projects/log-proj-valid/git/log?branch=HEAD")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200 for valid branch HEAD, got %d: %s", rr.Code, rr.Body.String())
@@ -597,7 +596,6 @@ func TestHandleTaskLog_ValidBranch(t *testing.T) {
 	mux := newTestGitMux(h)
 	_ = wm
 
-	// Valid branch (HEAD) → 200
 	rr := doRequest(t, mux, "GET", "/api/projects/tasklog-proj-v/tasks/tasklog-task-v/git/log?branch=HEAD")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200 for valid branch HEAD, got %d: %s", rr.Code, rr.Body.String())
@@ -908,7 +906,6 @@ func TestHandleCheckout_ValidBranch(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/projects/{projectID}/git/checkout", h.HandleCheckout)
 
-	// Valid branch → 200
 	body := strings.NewReader(`{"branch": "feature-branch"}`)
 	req := httptest.NewRequest("POST", "/api/projects/checkout-valid-proj/git/checkout", body)
 	req.Header.Set("Content-Type", "application/json")

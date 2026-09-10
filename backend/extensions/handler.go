@@ -160,19 +160,17 @@ func (h *ExtensionHandler) mountPolicy() *MountPolicy {
 	if h.sandbox != nil {
 		return h.sandbox.MountPolicy().withExtraRoots(extDir)
 	}
-	return newMountPolicy(mountRoots(extDir, "", nil))
+	// No sandbox manager means no wired extras: the policy comes out narrower than the operator's,
+	// never wider, which is the only direction a degenerate wiring is allowed to go.
+	return newMountPolicy(mountRoots(extDir, "", nil, nil))
 }
 
 // HandleList returns all installed extensions with runtime status.
 func (h *ExtensionHandler) HandleList(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	extensions, err := h.store.List()
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to list extensions: "+err.Error())
+		httputil.Fault(w, "list extensions", err)
 		return
 	}
 
@@ -220,7 +218,7 @@ func (h *ExtensionHandler) registrySource(w http.ResponseWriter) (string, bool) 
 func (h *ExtensionHandler) fetchRegistryIndex(w http.ResponseWriter, url string) (RegistryIndex, bool) {
 	index, err := h.registry.FetchIndex(url)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch registry: "+err.Error())
+		httputil.Fault(w, "fetch registry", err)
 		return nil, false
 	}
 	return index, true
@@ -238,10 +236,6 @@ func findRegistryEntry(index RegistryIndex, name string) *RegistryEntry {
 
 // HandleGet returns a single extension by ID.
 func (h *ExtensionHandler) HandleGet(w http.ResponseWriter, r *http.Request, id string) {
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	ext, ok := h.extensionOr404(w, id)
 	if !ok {
@@ -254,10 +248,6 @@ func (h *ExtensionHandler) HandleGet(w http.ResponseWriter, r *http.Request, id 
 
 // HandleUpdate updates an existing extension.
 func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, id string) {
-	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	ext, ok := h.extensionOr404(w, id)
 	if !ok {
@@ -439,7 +429,7 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 	}
 
 	if err := h.store.Update(id, ext); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to update extension: "+err.Error())
+		httputil.Fault(w, "update extension", err)
 		return
 	}
 
@@ -461,10 +451,6 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 
 // HandleDelete removes an extension.
 func (h *ExtensionHandler) HandleDelete(w http.ResponseWriter, r *http.Request, id string) {
-	if r.Method != http.MethodDelete {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	// Read the record first: the files to delete are derived from its author and name.
 	ext, _ := h.store.GetByID(id)
@@ -499,10 +485,6 @@ func (h *ExtensionHandler) HandleDelete(w http.ResponseWriter, r *http.Request, 
 
 // HandleSetEnabled toggles the enabled state of an extension.
 func (h *ExtensionHandler) HandleSetEnabled(w http.ResponseWriter, r *http.Request, id string) {
-	if r.Method != http.MethodPatch && r.Method != http.MethodPut {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	var req struct {
 		Enabled bool `json:"enabled"`
@@ -541,10 +523,6 @@ func (h *ExtensionHandler) HandleSetEnabled(w http.ResponseWriter, r *http.Reque
 // destroy the running container. Only a human names the directory: a manifest carrying
 // dependency_host_path is refused at install.
 func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *http.Request, id string) {
-	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	// A pointer, because "empty" and "absent" must not mean the same thing here. An empty value is a
 	// revoke — that is the documented way to take a grant back — but a body whose key is misspelled
@@ -591,7 +569,7 @@ func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *ht
 
 	ext.SandboxConfig.DependencyHostPath = granted
 	if err := h.store.Update(id, ext); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to save the grant: "+err.Error())
+		httputil.Fault(w, "save the dependency-cache grant", err)
 		return
 	}
 
@@ -743,14 +721,10 @@ func localRegistryEntry(le localExtension) RegistryEntry {
 // entries, whether or not they are published. Each entry's name comes from the manifest's parent
 // directory (extensions/<author>/<name>/manifest.json).
 func (h *ExtensionHandler) HandleLocalExtensions(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	found, err := scanLocalExtensions(h.config.ExtensionsDirOrDefault())
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to scan extensions directory: "+err.Error())
+		httputil.Fault(w, "scan the extensions directory", err)
 		return
 	}
 
@@ -764,10 +738,6 @@ func (h *ExtensionHandler) HandleLocalExtensions(w http.ResponseWriter, r *http.
 
 // HandleRegistryIndex fetches the registry index.
 func (h *ExtensionHandler) HandleRegistryIndex(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	url, ok := h.registrySource(w)
 	if !ok {
@@ -785,10 +755,6 @@ func (h *ExtensionHandler) HandleRegistryIndex(w http.ResponseWriter, r *http.Re
 // synchronously; the actual install runs in a detached goroutine (so it survives
 // a client disconnect) while this handler streams SSE progress.
 func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	var req InstallExtensionRequest
 	if !httputil.DecodeJSON(w, r, &req) {
@@ -844,10 +810,6 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 // not consult the registry, so it works even when no registry is reachable. The
 // actual install runs in a detached goroutine and streams SSE progress.
 func (h *ExtensionHandler) HandleInstallLocal(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	var req InstallExtensionRequest
 	if !httputil.DecodeJSON(w, r, &req) {
@@ -886,26 +848,31 @@ func (h *ExtensionHandler) HandleInstallLocal(w http.ResponseWriter, r *http.Req
 // installInBackground runs the install detached from the request context so it
 // completes even if the client disconnects, reporting progress on events.
 func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry, url string, events chan<- sseEvent) {
-	defer h.inFlightOps.end(name)
-	defer close(events)
+	// The terminal event goes out last: a client that sees "install failed" while the rollback is still
+	// running re-lists the folder the rollback has not deleted yet, offered as installable, and the
+	// retry its message invites is refused as "install already in progress".
+	gitPinned := entry.Repo != "" && entry.Commit != ""
+	var failure error
+	var materialized, committed bool
+	defer func() {
+		if failure != nil && materialized && !committed {
+			h.rollbackFailedInstall(entry, gitPinned)
+		}
+		h.inFlightOps.end(name)
+		if failure != nil {
+			events <- sseEvent{Extension: name, Progress: 100, Message: "Install failed", Done: true, Error: failure.Error()}
+		}
+		close(events)
+	}()
 
 	emit := func(pct float64, msg string) {
 		events <- sseEvent{Extension: name, Progress: pct, Message: msg}
 	}
-	fail := func(err error) {
-		events <- sseEvent{Extension: name, Progress: 100, Message: "Install failed", Done: true, Error: err.Error()}
-	}
+	// Every failure site stays terminal (`fail(err); return`) and is answered by the deferred tail above.
+	fail := func(err error) { failure = err }
 
 	// Local (filesystem) extension: files are already materialized, so load the
 	// manifest in place rather than fetching from a registry or git repo.
-	gitPinned := entry.Repo != "" && entry.Commit != ""
-
-	var materialized, committed bool
-	defer func() {
-		if materialized && !committed {
-			h.rollbackFailedInstall(entry, gitPinned)
-		}
-	}()
 	var manifest ExtensionManifest
 	root := h.config.ExtensionsDirOrDefault()
 	if err := refuseUninstallable(entry); err != nil {
@@ -1156,6 +1123,12 @@ func (h *ExtensionHandler) streamOperation(w http.ResponseWriter, r *http.Reques
 	for {
 		select {
 		case <-ctx.Done():
+			// The browser is gone; the operation is not. Draining is what keeps it alive — an operation
+			// blocked on a send to a reader that left never reaches its store.Create, and its name stays
+			// in inFlightOps, so every later attempt at that extension answers "install already in
+			// progress" with nothing in the UI able to say why.
+			for range events {
+			}
 			return
 		case ev, ok := <-events:
 			if !ok {
@@ -1176,10 +1149,6 @@ func (h *ExtensionHandler) streamOperation(w http.ResponseWriter, r *http.Reques
 
 // HandleCheckUpdates checks for available updates.
 func (h *ExtensionHandler) HandleCheckUpdates(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	url, ok := h.registrySource(w)
 	if !ok {
@@ -1193,7 +1162,7 @@ func (h *ExtensionHandler) HandleCheckUpdates(w http.ResponseWriter, r *http.Req
 	// Compare with installed extensions
 	extensions, err := h.store.List()
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to list extensions: "+err.Error())
+		httputil.Fault(w, "list extensions", err)
 		return
 	}
 
@@ -1258,10 +1227,6 @@ func (h *ExtensionHandler) changelogForUpdate(entry RegistryEntry, sinceHash str
 // HandleUpdateImage updates an extension's image from the registry.
 // Rebuilds from Dockerfile if available, otherwise pulls latest pre-built image.
 func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Request, id string) {
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	ext, ok := h.extensionOr404(w, id)
 	if !ok {
@@ -1488,10 +1453,6 @@ var proxyClient = httputil.NewExtensionEgressClient
 // The extension must declare a `network` capability in its manifest with
 // allowed_domains and optional header templates.
 func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, id string) {
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	ext, ok := h.extensionOr404(w, id)
 	if !ok {
@@ -1522,7 +1483,6 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 		req.Method = http.MethodGet
 	}
 
-	// Validate
 	u, err := parseURL(req.URL)
 	if err != nil {
 		httputil.JSONError(w, http.StatusBadRequest, "invalid url: "+err.Error())
@@ -1557,7 +1517,7 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 	// Bound to the inbound request's context, so a closed tab also stops the outbound call.
 	proxyReq, err := http.NewRequestWithContext(r.Context(), req.Method, req.URL, strings.NewReader(req.Body))
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to create proxy request: "+err.Error())
+		httputil.Fault(w, "proxy the extension request", err)
 		return
 	}
 	for k, v := range headers {
@@ -1616,7 +1576,7 @@ func (h *ExtensionHandler) HandleStorage(w http.ResponseWriter, r *http.Request,
 		if key != "" {
 			entry, err := h.store.StorageGet(id, namespace, key)
 			if err != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to read storage: "+err.Error())
+				httputil.Fault(w, "read extension storage", err)
 				return
 			}
 			if entry == nil {
@@ -1628,7 +1588,7 @@ func (h *ExtensionHandler) HandleStorage(w http.ResponseWriter, r *http.Request,
 		}
 		entries, err := h.store.StorageList(id, namespace, r.URL.Query().Get("prefix"))
 		if err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, "failed to list storage: "+err.Error())
+			httputil.Fault(w, "list extension storage", err)
 			return
 		}
 		httputil.JSONResponse(w, http.StatusOK, entries)
@@ -1659,7 +1619,7 @@ func (h *ExtensionHandler) HandleStorage(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		if err := h.store.StorageDelete(id, namespace, key); err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, "failed to delete storage: "+err.Error())
+			httputil.Fault(w, "delete extension storage", err)
 			return
 		}
 		httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "deleted"})

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"kanban/backend/fsutil"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -19,6 +18,8 @@ import (
 	"kanban/backend/testutil/testgit"
 	"kanban/backend/tls"
 	"kanban/backend/types"
+
+	"kanban/backend/startup"
 )
 
 // testPassword is the password used in tests (matches LOGIN_PASSWORD env var).
@@ -26,72 +27,57 @@ const testPassword = "test-password-1234"
 
 // testServer creates a Server with a temporary database for testing.
 // The temp directory is cleaned up by t.Cleanup.
+// testServer is the one place the suite builds a server. It receives a resolved configuration, never
+// an environment: the decisions below used to be os.Setenv calls, which meant a test could change what
+// another test's server did, and a parallel run raced on them. mutate is the way a test asks for a
+// different decision (see testServerWith).
 func testServer(t *testing.T) *Server {
 	t.Helper()
+	return testServerWith(t, nil)
+}
+
+// testServerWith builds a server with one test's change to the resolved configuration. The mutate hook
+// is how a test pins a decision that would otherwise come from the environment: a refusal test asks
+// for DangerZone=false, a jail test for AllowRootFS=false, a proxy test for TrustProxy=true.
+func testServerWith(t *testing.T, mutate func(*startup.Config)) *Server {
+	t.Helper()
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
 	worktreesDir := filepath.Join(dir, "worktrees")
-	os.MkdirAll(worktreesDir, 0o755)
-
-	oldWT := os.Getenv("MIKE_WORKTREES_DIR")
-	os.Setenv("MIKE_WORKTREES_DIR", worktreesDir)
-	t.Cleanup(func() {
-		if oldWT != "" {
-			os.Setenv("MIKE_WORKTREES_DIR", oldWT)
-		} else {
-			os.Unsetenv("MIKE_WORKTREES_DIR")
-		}
-	})
-
-	// Keep login rate limiting ON but effectively unlimited: 0 (and any
-	// unparsable value) is no longer a way to disable it, and tests make many
-	// rapid login attempts that would hit the 5/minute default.
-	// Skip if the caller already set MIKE_LOGIN_RATE_LIMIT (e.g., rate limit tests).
-	if os.Getenv("MIKE_LOGIN_RATE_LIMIT") == "" {
-		os.Setenv("MIKE_LOGIN_RATE_LIMIT", "100000")
-		t.Cleanup(func() { os.Unsetenv("MIKE_LOGIN_RATE_LIMIT") })
+	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
+		t.Fatalf("create worktrees dir: %v", err)
 	}
 
-	oldPW := os.Getenv("MIKE_LOGIN_PASSWORD")
-	os.Setenv("MIKE_LOGIN_PASSWORD", testPassword)
-	t.Cleanup(func() {
-		if oldPW != "" {
-			os.Setenv("MIKE_LOGIN_PASSWORD", oldPW)
-		} else {
-			os.Unsetenv("MIKE_LOGIN_PASSWORD")
-		}
-	})
-
-	// Disable sandbox startup cleanup to prevent removing containers from
-	// parallel sandbox package tests (they manage their own cleanup via TestMain).
-	os.Setenv("MIKE_SANDBOX_SKIP_STARTUP_CLEANUP", "1")
-
-	// Tests that pin the refusal override this with t.Setenv.
-	os.Setenv("DANGER_ZONE", "1")
-
-	// Every fixture here is a t.TempDir() directory under /tmp, outside the jail, so the
-	// suite runs widened. A test that pins the jailed behaviour sets the variable itself
-	// BEFORE calling testServer, and an explicit value (including "") always wins.
-	if _, ok := os.LookupEnv(fsutil.AllowRootFSEnv); !ok {
-		t.Setenv(fsutil.AllowRootFSEnv, "1")
-	}
-
-	// Set path to sandbox-bridge binary so tests can create sandbox containers.
-	// Without this, GetAgentBinaryPath() searches relative to the test executable
-	// (in /tmp/go-build/...) and never finds it.
-	oldAgentPath := os.Getenv("MIKE_AGENT_PATH")
-	// Use absolute path since test CWD is backend/server/, not project root.
+	// Absolute path, because the test CWD is backend/server/, not the project root: the bridge binary
+	// sits beside the source tree, not beside the temporary test executable.
 	agentPath, _ := filepath.Abs("../../sandbox/sandbox-bridge")
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	t.Cleanup(func() {
-		if oldAgentPath != "" {
-			os.Setenv("MIKE_AGENT_PATH", oldAgentPath)
-		} else {
-			os.Unsetenv("MIKE_AGENT_PATH")
-		}
-	})
 
-	s, err := NewServer(dbPath, worktreesDir, ":0", "", "", nil)
+	cfg := startup.Config{
+		Port:    0,
+		Listen:  "127.0.0.1",
+		Addr:    ":0",
+		DataDir: dir,
+		DBPath:  filepath.Join(dir, "test.db"),
+		// Every fixture here is a t.TempDir() directory under /tmp, outside the jail, so the suite
+		// runs widened; a test that pins the jailed behaviour asks for AllowRootFS=false.
+		AllowRootFS:       true,
+		DangerZone:        true,
+		WorktreesOverride: worktreesDir,
+		MasterPassword:    testPassword,
+		EncryptionKey:     "test-encryption-key",
+		AgentPath:         agentPath,
+		// Left false on purpose, and named rather than omitted: the boot sweep deletes every stale
+		// kanban-* container family, which is a host-wide delete and not a test server's to run.
+		SweepStaleContainersAtBoot: false,
+		// Login rate limiting stays ON but effectively unlimited: 0 (and any unparsable value) is
+		// no longer a way to disable it, and tests make many rapid login attempts that would hit the
+		// 5/minute default. A rate-limit test lowers it deliberately.
+		LoginRateLimit: 100000,
+	}
+	if mutate != nil {
+		mutate(&cfg)
+	}
+
+	s, err := NewServer(cfg, nil)
 	if err != nil {
 		t.Fatalf("create test server: %v", err)
 	}
@@ -1357,17 +1343,9 @@ func TestDoneTaskDiffSnapshotBypassedForFullAndCustomRefs(t *testing.T) {
 // TestSandboxDisableBlockedWithoutDangerZone verifies that disabling sandbox
 // returns 403 Forbidden when DANGER_ZONE is not set to "1".
 func TestSandboxDisableBlockedWithoutDangerZone(t *testing.T) {
-	s := testServer(t)
-
-	oldVal := os.Getenv("DANGER_ZONE")
-	os.Unsetenv("DANGER_ZONE")
-	t.Cleanup(func() {
-		if oldVal != "" {
-			os.Setenv("DANGER_ZONE", oldVal)
-		} else {
-			os.Unsetenv("DANGER_ZONE")
-		}
-	})
+	// Without the grant, switching a project to unsandboxed is refused. The grant is the resolved
+	// DANGER_ZONE decision the server was built with, so this is the process being pinned.
+	s := testServerWith(t, func(c *startup.Config) { c.DangerZone = false })
 
 	dir := t.TempDir()
 	initGitRepo(t, dir)
@@ -1408,17 +1386,9 @@ func TestSandboxDisableBlockedWithoutDangerZone(t *testing.T) {
 // TestSandboxDisableAllowedWithDangerZone verifies that disabling sandbox
 // succeeds when DANGER_ZONE is set to "1".
 func TestSandboxDisableAllowedWithDangerZone(t *testing.T) {
-	s := testServer(t)
-
-	oldVal := os.Getenv("DANGER_ZONE")
-	os.Setenv("DANGER_ZONE", "1")
-	t.Cleanup(func() {
-		if oldVal != "" {
-			os.Setenv("DANGER_ZONE", oldVal)
-		} else {
-			os.Unsetenv("DANGER_ZONE")
-		}
-	})
+	// The grant, stated as the decision the server was built with rather than as a variable this
+	// process happens to carry.
+	s := testServerWith(t, func(c *startup.Config) { c.DangerZone = true })
 
 	dir := t.TempDir()
 	initGitRepo(t, dir)
@@ -1458,17 +1428,8 @@ func TestSandboxDisableAllowedWithDangerZone(t *testing.T) {
 // TestSandboxCreateDisabledBlockedWithoutDangerZone verifies that creating a
 // project with sandbox disabled returns 403 when DANGER_ZONE is not set.
 func TestSandboxCreateDisabledBlockedWithoutDangerZone(t *testing.T) {
-	s := testServer(t)
-
-	oldVal := os.Getenv("DANGER_ZONE")
-	os.Unsetenv("DANGER_ZONE")
-	t.Cleanup(func() {
-		if oldVal != "" {
-			os.Setenv("DANGER_ZONE", oldVal)
-		} else {
-			os.Unsetenv("DANGER_ZONE")
-		}
-	})
+	// Creating a project with sandboxing disabled is refused without the grant.
+	s := testServerWith(t, func(c *startup.Config) { c.DangerZone = false })
 
 	dir := t.TempDir()
 	initGitRepo(t, dir)
@@ -1523,8 +1484,8 @@ func join(parts ...string) string {
 }
 
 func TestRedirectHTTPSMiddleware_IgnoresXForwardedProtoByDefault(t *testing.T) {
+	// No proxy trust: a client-written X-Forwarded-Proto is not evidence.
 	s := &Server{tlsConfig: &tls.Config{CertFile: "cert", KeyFile: "key"}}
-	setTrustProxy(t, false)
 	var passed bool
 	h := s.RedirectHTTPSMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		passed = true
@@ -1547,8 +1508,8 @@ func TestRedirectHTTPSMiddleware_IgnoresXForwardedProtoByDefault(t *testing.T) {
 }
 
 func TestRedirectHTTPSMiddleware_TrustsXForwardedProtoWhenProxyEnabled(t *testing.T) {
-	s := &Server{tlsConfig: &tls.Config{CertFile: "cert", KeyFile: "key"}}
-	setTrustProxy(t, true)
+	// The resolved MIKE_TRUST_PROXY decision is a field, not an environment lookup.
+	s := &Server{tlsConfig: &tls.Config{CertFile: "cert", KeyFile: "key"}, settings: startup.Config{TrustProxy: true}}
 	var passed bool
 	h := s.RedirectHTTPSMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		passed = true

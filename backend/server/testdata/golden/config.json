@@ -1,0 +1,46 @@
+{
+  "database_path": "\u003cTMP\u003e/test.db",
+  "default_auto_commit": true,
+  "default_auto_merge": null,
+  "default_operating_mode": "plan",
+  "default_subtasks_auto_merge": null,
+  "encryption_enabled": true,
+  "hide_model_badge": true,
+  "keyboard_shortcuts": {
+    "create_task": ""
+  },
+  "providers": [
+    {
+      "api_key": "••••••••••",
+      "cache_read_price": 0,
+      "cache_write_price": 0,
+      "concurrency": 2,
+      "display_name": "",
+      "electricity_cost_per_kwh": 0,
+      "id": 1,
+      "input_price": 1.5,
+      "kind": "llm",
+      "max_requests_per_second": 0,
+      "models": [
+        {
+          "context_window": 128000,
+          "name": "golden-model",
+          "reasoning_effort": "default"
+        }
+      ],
+      "name": "",
+      "output_price": 0,
+      "power_consumption_w": 0,
+      "url": "https://llm.invalid/v1"
+    }
+  ],
+  "run_siblings_parallel": true,
+  "sort_oldest_first": true,
+  "tls_ca_available": false,
+  "utility_model": "golden-model",
+  "utility_provider": "Golden Provider",
+  "version": "dev",
+  "worker_model": "golden-model",
+  "worker_provider": "Golden Provider",
+  "workspace_dir": "\u003cTMP\u003e/worktrees"
+}

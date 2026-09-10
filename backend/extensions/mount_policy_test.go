@@ -304,15 +304,16 @@ func TestValidateSandboxAdditions(t *testing.T) {
 	}
 }
 
-func TestMountRootsIncludesEnvRoots(t *testing.T) {
+// TestMountRootsIncludesTheWiredExtras: MIKE_EXT_MOUNT_ROOTS arrives as an argument (resolved by
+// startup, wired by NewServer) and lands in the allowlist beside the implicit roots.
+func TestMountRootsIncludesTheWiredExtras(t *testing.T) {
 	ws := t.TempDir()
 	proj := t.TempDir()
 	extDir := t.TempDir()
 	extraA := t.TempDir()
 	extraB := t.TempDir()
-	t.Setenv(EnvMountRoots, extraA+string(os.PathListSeparator)+extraB)
 
-	policy := newMountPolicy(mountRoots(extDir, ws, []string{proj}))
+	policy := newMountPolicy(mountRoots(extDir, ws, []string{proj}, []string{extraA, extraB}))
 
 	for _, want := range []string{ws, proj, extDir, extraA, extraB, filepath.Clean(os.TempDir())} {
 		found := false
@@ -334,9 +335,8 @@ func TestMountRootsIncludesEnvRoots(t *testing.T) {
 	}
 }
 
-func TestMountRootsWithoutEnvRoots(t *testing.T) {
-	t.Setenv(EnvMountRoots, "")
-	policy := newMountPolicy(mountRoots("", "", nil))
+func TestMountRootsWithoutExtras(t *testing.T) {
+	policy := newMountPolicy(mountRoots("", "", nil, nil))
 	// With no explicit roots, the default extensions dir + temp dir remain.
 	if len(policy.Roots()) == 0 {
 		t.Fatal("expected default roots (extensions dir + temp dir)")

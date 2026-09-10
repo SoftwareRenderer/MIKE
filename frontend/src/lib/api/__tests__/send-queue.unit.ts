@@ -126,17 +126,17 @@ describe('sendTaskMessage queueing on network failure', () => {
         });
     });
 
-    it('queues a sendTaskMessage action on timeout (AbortError)', async () => {
+    // Used to be a test that a timeout (AbortError) queues the message. There is no client-side timeout
+    // any more, and an abort is no longer a network event: it means somebody stopped this request.
+    it('does NOT queue a send the user cancelled (AbortError), and the rejection reaches the caller', async () => {
         const { sendTaskMessage } = await import('$lib/api/tasks');
         const { loadQueue } = await import('$lib/api/queue');
         mockRejectedFetch('AbortError');
 
-        const result = await sendTaskMessage('p1', 't1', 'timeout message');
+        await expect(sendTaskMessage('p1', 't1', 'cancelled message')).rejects.toThrow();
 
-        expect(result.queued).toBe(true);
         const queue = await loadQueue();
-        expect(queue).toHaveLength(1);
-        expect(queue[0].type).toBe('sendTaskMessage');
+        expect(queue).toHaveLength(0);
     });
 
     it('does NOT queue and rejects on non-transient server errors (HTTP 500)', async () => {

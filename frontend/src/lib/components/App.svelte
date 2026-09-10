@@ -1163,10 +1163,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         // Manage focus: when collapsing, focus the toggle button; when expanding, focus the first project
         queueMicrotask(() => {
             if (collapsed) {
-                // Focus the collapse toggle button
                 (document.querySelector('.desktop-collapse-btn') as HTMLElement | null)?.focus();
             } else {
-                // Focus the first project item
                 (document.querySelector('.project-item') as HTMLElement | null)?.focus();
             }
         });

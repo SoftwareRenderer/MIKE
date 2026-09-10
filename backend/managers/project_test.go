@@ -19,6 +19,8 @@ import (
 	"kanban/backend/git"
 	"kanban/backend/store"
 	"kanban/backend/types"
+
+	"kanban/backend/sandbox"
 )
 
 // createBareRepo creates a bare git repository at the given path to act as a
@@ -62,11 +64,22 @@ func TestRepoNameFromGitURL(t *testing.T) {
 	}
 }
 
+// testProjectHandlerGranted is the fixture carrying the DANGER_ZONE grant — the permission to create
+// a project with sandboxing disabled. Production decides it once, at boot (startup.Config.DangerZone,
+// injected into NewProjectHandler), so a test names the process it is pretending to have booted
+// instead of editing this one's environment. The refusal is what a closed grant produces, and that is
+// pinned by TestSandboxCreateDisabledBlockedWithoutDangerZone.
+func testProjectHandlerGranted(t *testing.T) (*ProjectHandler, string) {
+	t.Helper()
+	h, projID := testProjectHandler(t)
+	h.dangerZone = sandbox.DangerZone(true)
+	return h, projID
+}
+
 // TestHandleCreateClone verifies that HandleCreate clones a repo into a
 // subdirectory of the target parent and creates the project from it.
 func TestHandleCreateClone(t *testing.T) {
-	t.Setenv("DANGER_ZONE", "1")
-	h, _ := testProjectHandler(t)
+	h, _ := testProjectHandlerGranted(t)
 	tmp := t.TempDir()
 	remote := filepath.Join(tmp, "my-remote-repo")
 	createBareRepo(t, remote)
@@ -158,8 +171,7 @@ func readSSEEvents(t *testing.T, body io.Reader) []map[string]any {
 // TestHandleCloneStreamsProgress verifies that HandleClone streams clone
 // progress events and finishes with a done event carrying the new project.
 func TestHandleCloneStreamsProgress(t *testing.T) {
-	t.Setenv("DANGER_ZONE", "1")
-	h, _ := testProjectHandler(t)
+	h, _ := testProjectHandlerGranted(t)
 	tmp := t.TempDir()
 	src := makeCommittedRepo(t, filepath.Join(tmp, "my-remote-repo"), 20)
 	workspace := filepath.Join(tmp, "workspace")
@@ -238,8 +250,7 @@ func TestHandleCloneStreamsProgress(t *testing.T) {
 // TestHandleCloneTargetExists verifies the failure path: a pre-existing
 // target dir yields a terminal error event and no project.
 func TestHandleCloneTargetExists(t *testing.T) {
-	t.Setenv("DANGER_ZONE", "1")
-	h, _ := testProjectHandler(t)
+	h, _ := testProjectHandlerGranted(t)
 	tmp := t.TempDir()
 	src := makeCommittedRepo(t, filepath.Join(tmp, "my-remote-repo"), 3)
 	workspace := filepath.Join(tmp, "workspace")
@@ -273,8 +284,7 @@ func TestHandleCloneTargetExists(t *testing.T) {
 // TestHandleCloneBadURL verifies that an invalid git URL fails fast with an
 // error event (no clone attempted).
 func TestHandleCloneBadURL(t *testing.T) {
-	t.Setenv("DANGER_ZONE", "1")
-	h, _ := testProjectHandler(t)
+	h, _ := testProjectHandlerGranted(t)
 	tmp := t.TempDir()
 
 	body, _ := json.Marshal(types.CreateProjectRequest{Path: tmp, GitURL: "-evil-flag"})
@@ -328,7 +338,7 @@ func testProjectHandlerWithStore(t *testing.T) (*ProjectHandler, string, *store.
 		configStore: cfgStore,
 		// The fixtures are t.TempDir() directories under the system temp dir, so declare
 		// it as a root the way a real install declares its workspace dir.
-		hostRoot: fsutil.NewHostRoot(os.TempDir()),
+		hostRoot: fsutil.NewHostRoot(true, os.TempDir()),
 	}
 
 	// Create a test project
@@ -1084,8 +1094,7 @@ func TestApplyPricingJSONSerialization(t *testing.T) {
 // file), even though git itself would honour it on a host that enables
 // protocol.ext.allow.
 func TestHandleCreateCloneRejectsHelperTransport(t *testing.T) {
-	t.Setenv("DANGER_ZONE", "1")
-	h, _ := testProjectHandler(t)
+	h, _ := testProjectHandlerGranted(t)
 	tmp := t.TempDir()
 	canary := filepath.Join(tmp, "pwned")
 	workspace := filepath.Join(tmp, "workspace")

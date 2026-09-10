@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"kanban/pkg/sandboxruntime"
 )
 
 // sourceRepo makes a one-commit git repo to act as the registry's pinned source and returns
@@ -72,8 +74,7 @@ func TestInstallRefusesRegistryNameOutsideExtensionsDir(t *testing.T) {
 	}
 
 	cfg := &ExtensionConfig{ExtensionsDir: extRoot}
-	h := NewExtensionHandler(testStore(t), NewExtensionSandboxManager(NewRegistryClient(), testStore(t)), NewRegistryClient(), cfg)
-
+	h := NewExtensionHandler(testStore(t), NewExtensionSandboxManager(NewRegistryClient(), testStore(t), sandboxruntime.Boot{}), NewRegistryClient(), cfg)
 	entry := &RegistryEntry{
 		// One ".." only reaches a sibling inside the extensions root, which would prove nothing.
 		Name:   filepath.Join("..", "..", "victim"),
@@ -135,8 +136,7 @@ func TestInstallAcceptsOrdinaryEntry(t *testing.T) {
 	root := t.TempDir()
 	extRoot := filepath.Join(root, "extensions")
 	cfg := &ExtensionConfig{ExtensionsDir: extRoot}
-	h := NewExtensionHandler(testStore(t), NewExtensionSandboxManager(NewRegistryClient(), testStore(t)), NewRegistryClient(), cfg)
-
+	h := NewExtensionHandler(testStore(t), NewExtensionSandboxManager(NewRegistryClient(), testStore(t), sandboxruntime.Boot{}), NewRegistryClient(), cfg)
 	entry := &RegistryEntry{Name: "good", Author: "someone", Type: ExtensionTypeUI, Repo: "file://" + repo, Commit: commit}
 	if err := refuseUninstallable(entry); err != nil {
 		t.Fatalf("an ordinary entry was refused: %v", err)

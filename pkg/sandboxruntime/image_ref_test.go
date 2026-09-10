@@ -198,7 +198,7 @@ func TestValidateConfiguredImageRef(t *testing.T) {
 // A reference podman could misread (empty, or a leading dash) is answered "not available" without
 // ever asking podman.
 func TestImageExistsRefusesUnusableRefs(t *testing.T) {
-	rt := NewRuntime()
+	rt := NewRuntimeWithBoot(Boot{})
 	for _, image := range []string{"", "-rm", "--volume=/tmp:/etc", "not a ref"} {
 		if rt.ImageExists(image) {
 			t.Errorf("ImageExists(%q) = true, want false without asking podman", image)

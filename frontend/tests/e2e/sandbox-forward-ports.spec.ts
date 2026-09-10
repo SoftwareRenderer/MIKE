@@ -43,7 +43,6 @@ test.describe.serial('Sandbox Forward Ports', () => {
         await page.waitForFunction(() => false, {}, { timeout: 1000, polling: 1000 }).catch(() => {});
       }
 
-      // Now enable sandbox
       const putResult = await csrfFetch(page, `/api/projects/${projectId}`, {
         method: 'PUT',
         body: { sandbox_enabled: true, sandbox_network_isolation: false },
@@ -336,7 +335,6 @@ test.describe.serial('Sandbox Forward Ports', () => {
     expect(saved.forward_ports.length).toBe(1);
     expect(saved.forward_ports[0].container_port).toBe(8080);
 
-    // Clean up
     await csrfFetch(page, `/api/projects/${projectId}`, {
       method: 'PUT',
       body: { sandbox_forward_ports: [] },

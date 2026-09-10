@@ -1,5 +1,6 @@
 <script lang="ts">
-    import { t } from '$lib/i18n';
+    import { t, type MessageKey } from '$lib/i18n';
+    import type { LockWait } from '$lib/types';
 
     interface Props {
         queuePosition: number;
@@ -8,11 +9,22 @@
         retryCount: number;
         retryError: string;
         isAgentSelected: () => boolean;
+        /** Absent means no wait is known. */
+        lockWait?: LockWait | null;
     }
 
-    let { queuePosition, queueEstimatedWait, promptProgress, retryCount, retryError, isAgentSelected }: Props = $props();
+    let { queuePosition, queueEstimatedWait, promptProgress, retryCount, retryError, isAgentSelected, lockWait = null }: Props = $props();
+
+    // The held lock decides the sentence; an unlisted domain still gets one.
+    const LOCK_KEYS: Record<string, MessageKey> = {
+        worktree: 'chat.queue.lockWorktree',
+        stash: 'chat.queue.lockStash',
+    };
 
     let label = $derived(() => {
+        if (lockWait) {
+            return t(LOCK_KEYS[lockWait.domain] || 'chat.queue.lockOther', { seconds: lockWait.seconds });
+        }
         const target = isAgentSelected() ? t('chat.queue.targetAgent') : t('chat.queue.targetLlm');
         if (queuePosition > 0) {
             return t('chat.queue.position', { target, position: queuePosition, wait: queueEstimatedWait });

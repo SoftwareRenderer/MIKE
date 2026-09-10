@@ -2,13 +2,13 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
-	"kanban/backend/httputil"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -27,10 +27,6 @@ import (
 )
 
 func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		JSONError(w, http.StatusBadRequest, "path is required")
@@ -312,10 +308,6 @@ func parseUnifiedDiff(diff string) map[int][]string {
 }
 
 func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	var req struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
@@ -348,10 +340,6 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		path = string(os.PathSeparator)
@@ -510,10 +498,6 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 //
 // Filename search returns up to 10 results, content search up to 50, skipping binary files.
 func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	projectID := r.URL.Query().Get("project")
 	if projectID == "" {
@@ -601,129 +585,18 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 		resultLimit = 50
 	}
 
-	type searchResult struct {
-		Path string `json:"path"`           // relative to search root
-		Line int    `json:"line,omitempty"` // 1-based line number (content search)
-		Text string `json:"text,omitempty"` // matching line content (content search)
-	}
-	var results []searchResult
-
-	if _, statErr := os.Stat(searchRoot); statErr != nil {
-		logging.For(logging.HTTP).Errorf("fs search root stat failed: %v", statErr)
-		JSONError(w, http.StatusNotFound, "search root does not exist")
-		return
-	}
-
-	// Compiled once for the whole walk, not per file. An invalid pattern matches
-	// nothing rather than failing the request.
-	var filenameRe *regexp.Regexp
-	if useRegex && q != "" {
-		flags := ""
-		if !matchCase {
-			flags = "(?i)"
-		}
-		if re, reErr := regexp.Compile(flags + q); reErr == nil {
-			filenameRe = re
-		}
-	}
-
-	filenameMatch := func(rel string) bool {
-		if q == "" {
-			return true
-		}
-		if useRegex {
-			if filenameRe == nil {
-				return false // invalid pattern
-			}
-			if wholeWord {
-				return filenameRe.MatchString("\b" + rel + "\b")
-			}
-			return filenameRe.MatchString(rel)
-		}
-		checkStr := rel
-		searchStr := q
-		if !matchCase {
-			checkStr = strings.ToLower(checkStr)
-			searchStr = strings.ToLower(searchStr)
-		}
-		if wholeWord {
-			// Simple whole-word: split by path separators and check each segment
-			parts := strings.Split(checkStr, "/")
-			for _, part := range parts {
-				if part == searchStr {
-					return true
-				}
-			}
-			// A whole word must equal one path segment.
-			return false
-		}
-		return strings.Contains(checkStr, searchStr)
-	}
-
-	// Host walk: the worktree is bind-mounted into the sandbox, so it sees the same files.
-	ctx := r.Context()
-	err = filepath.WalkDir(searchRoot, func(path string, d os.DirEntry, err error) error {
-		if ctx.Err() != nil {
-			return errStopWalk
-		}
-		if err != nil {
-			return nil // skip unreadable entries
-		}
-		rel, _ := filepath.Rel(searchRoot, path)
-		if rel == "." {
-			return nil
-		}
-
-		// WalkDir reports a link without following it, so both linked files and
-		// linked directories land here; opening one would read through the host.
-		if d.Type()&os.ModeSymlink != 0 {
-			return nil
-		}
-
-		if strings.HasPrefix(d.Name(), ".") {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		if git.ShouldIgnorePath(rel) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		if d.IsDir() {
-			return nil
-		}
-
-		// Content search ignores the filename filter.
-		if searchContent {
-			if info, infoErr := d.Info(); infoErr == nil && info.Size() > searchMaxFileBytes {
-				return nil
-			}
-			searchContentInFile(path, q, matchCase, wholeWord, useRegex, contentRe, func(lineNum int, lineText string) {
-				results = append(results, searchResult{Path: rel, Line: lineNum, Text: lineText})
-			})
-		} else if filenameMatch(rel) {
-			results = append(results, searchResult{Path: rel})
-		}
-
-		if len(results) >= resultLimit {
-			return errStopWalk
-		}
-		return nil
-	})
-	_ = err // ignore errStopWalk
-
-	// Sort results for deterministic output
-	sort.SliceStable(results, func(i, j int) bool {
-		if results[i].Path != results[j].Path {
-			return strings.ToLower(results[i].Path) < strings.ToLower(results[j].Path)
-		}
-		return results[i].Line < results[j].Line
-	})
+	// The predicate is compiled once and the walk owns the walk order, the ignores and the limit; the
+	// handler keeps the part only it can do, which is deciding what directory the request may see.
+	results := fsSearch{
+		root:      searchRoot,
+		query:     q,
+		matchCase: matchCase,
+		wholeWord: wholeWord,
+		useRegex:  useRegex,
+		content:   searchContent,
+		contentRe: contentRe,
+		limit:     resultLimit,
+	}.walk(r.Context())
 
 	if results == nil {
 		results = []searchResult{}
@@ -1049,10 +922,6 @@ func resolveGitIdentity() (name, email string) {
 }
 
 func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	var req struct {
 		Path string `json:"path"`
 	}
@@ -1123,7 +992,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 				"git -C "+shellQuote(sandboxPath)+" "+flagCmd+" commit -m 'Initial commit'",
 			[]byte(encoded+"\n"), opts)
 		if err != nil {
-			JSONError(w, http.StatusInternalServerError, "git commit failed: "+err.Error())
+			Fault(w, "git commit", err)
 			return
 		}
 		JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "path": req.Path})
@@ -1162,7 +1031,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 
 	readmePath := filepath.Join(req.Path, "README.md")
 	if err := os.WriteFile(readmePath, []byte("# "+filepath.Base(req.Path)+"\n"), 0644); err != nil {
-		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create README.md: %v", err))
+		Fault(w, "create README.md", err)
 		return
 	}
 
@@ -1182,10 +1051,6 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	var req struct {
 		Path string `json:"path"`
 	}
@@ -1241,7 +1106,7 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 			output, execErr = s.sandboxMgr.ExecProject(project, cmd, opts)
 		}
 		if execErr != nil {
-			JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", execErr))
+			Fault(w, "create directory", execErr)
 			return
 		}
 		trimmed := strings.TrimSpace(output)
@@ -1322,7 +1187,7 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		if hostRefused(err) {
 			return
 		}
-		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", err))
+		Fault(w, "create directory", err)
 		return
 	}
 
@@ -1366,4 +1231,137 @@ func gitAuthorFlagCmd() string {
 		parts = append(parts, shellQuote(flags[i]), shellQuote(flags[i+1]))
 	}
 	return strings.Join(parts, " ")
+}
+
+// searchResult is one matching file, or one matching line of one file when the search reads contents.
+type searchResult struct {
+	Path string `json:"path"`           // relative to search root
+	Line int    `json:"line,omitempty"` // 1-based line number (content search)
+	Text string `json:"text,omitempty"` // matching line content (content search)
+}
+
+// fsSearch is one search request: a root the handler already decided the caller may see, plus the
+// predicate compiled once for the whole walk. The patterns are built up front because the walk asks them
+// per file, and an invalid filename pattern has no safe answer mid-walk — it matches nothing, which is the
+// same answer an empty result gives.
+type fsSearch struct {
+	root      string
+	query     string
+	matchCase bool
+	wholeWord bool
+	useRegex  bool
+	content   bool
+	contentRe *regexp.Regexp // content+regex: compiled by the caller, which answers 400 when it fails
+	nameRe    *regexp.Regexp // nil when the pattern does not compile
+	limit     int
+}
+
+// matchesFile is the filename half of the predicate.
+func (f fsSearch) matchesFile(rel string) bool {
+	if f.query == "" {
+		return true
+	}
+	if f.useRegex {
+		if f.nameRe == nil {
+			return false // invalid pattern
+		}
+		if f.wholeWord {
+			return f.nameRe.MatchString("\b" + rel + "\b")
+		}
+		return f.nameRe.MatchString(rel)
+	}
+	checkStr := rel
+	searchStr := f.query
+	if !f.matchCase {
+		checkStr = strings.ToLower(checkStr)
+		searchStr = strings.ToLower(searchStr)
+	}
+	if f.wholeWord {
+		// A whole word must equal one path segment.
+		for _, part := range strings.Split(checkStr, "/") {
+			if part == searchStr {
+				return true
+			}
+		}
+		return false
+	}
+	return strings.Contains(checkStr, searchStr)
+}
+
+// walk collects the matches under the root, in a stable order, stopping at the limit or when ctx ends.
+// It reads the host filesystem even for a sandboxed task, because the worktree is bind-mounted into the
+// sandbox and both sides see the same files.
+func (f fsSearch) walk(ctx context.Context) []searchResult {
+	if f.useRegex && f.query != "" {
+		flags := ""
+		if !f.matchCase {
+			flags = "(?i)"
+		}
+		// An invalid pattern matches nothing rather than failing the request; the content search is the
+		// one that reports a bad pattern, because it is compiled before the walk starts.
+		f.nameRe, _ = regexp.Compile(flags + f.query)
+	}
+
+	var results []searchResult
+	_ = filepath.WalkDir(f.root, func(path string, d os.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return errStopWalk
+		}
+		if err != nil {
+			return nil // skip unreadable entries
+		}
+		rel, _ := filepath.Rel(f.root, path)
+		if rel == "." {
+			return nil
+		}
+
+		// WalkDir reports a link without following it, so both linked files and
+		// linked directories land here; opening one would read through the host.
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+
+		if strings.HasPrefix(d.Name(), ".") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if git.ShouldIgnorePath(rel) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+
+		// Content search ignores the filename filter.
+		if f.content {
+			if info, infoErr := d.Info(); infoErr == nil && info.Size() > searchMaxFileBytes {
+				return nil
+			}
+			searchContentInFile(path, f.query, f.matchCase, f.wholeWord, f.useRegex, f.contentRe, func(lineNum int, lineText string) {
+				results = append(results, searchResult{Path: rel, Line: lineNum, Text: lineText})
+			})
+		} else if f.matchesFile(rel) {
+			results = append(results, searchResult{Path: rel})
+		}
+
+		if len(results) >= f.limit {
+			return errStopWalk
+		}
+		return nil
+	})
+
+	sort.SliceStable(results, func(i, j int) bool {
+		if results[i].Path != results[j].Path {
+			return strings.ToLower(results[i].Path) < strings.ToLower(results[j].Path)
+		}
+		return results[i].Line < results[j].Line
+	})
+	return results
 }

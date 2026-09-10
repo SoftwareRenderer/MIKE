@@ -3,13 +3,9 @@ package server
 import (
 	"net"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"kanban/pkg/logging"
 )
 
 // clientBucket tracks the request count for a single client IP within
@@ -101,18 +97,16 @@ func (rl *RateLimiter) Stop() {
 	close(rl.stopCh)
 }
 
-// trustProxy reports whether the server is behind a trusted reverse proxy and
-// should honor forwarding headers (X-Forwarded-For, X-Forwarded-Proto).
-func trustProxy() bool {
-	return os.Getenv("MIKE_TRUST_PROXY") == "1"
-}
+// trustProxyIsSet is the name of the resolved decision, kept as a parameter rather than a lookup:
+// the answer decides whether a client-supplied header is believed, so it must be the same for the
+// rate limiter's key and for the cookie's Secure flag, and it must not change between two requests.
 
 // clientIP is the address the login rate limiter budgets a request under. Behind a trusted proxy
-// that is the rightmost X-Forwarded-For entry — the only one the proxy wrote. Everything to its
+// (trustProxy, the resolved MIKE_TRUST_PROXY) that is the rightmost X-Forwarded-For entry — the only one the proxy wrote. Everything to its
 // left is client-chosen, so a key taken from there can be changed per attempt; a chain not ending
 // in an address falls back to the peer for the same reason.
-func clientIP(r *http.Request) string {
-	if trustProxy() {
+func clientIP(r *http.Request, trustProxy bool) string {
+	if trustProxy {
 		if last := lastForwardedIP(r.Header.Get("X-Forwarded-For")); last != "" {
 			return last
 		}
@@ -139,18 +133,12 @@ func lastForwardedIP(xff string) string {
 // MIKE_LOGIN_RATE_LIMIT is unset, unparsable or non-positive.
 const defaultLoginRateLimit = 5
 
-// newLoginRateLimiter builds the login rate limiter from MIKE_LOGIN_RATE_LIMIT
-// (requests per minute per IP, default 5). It cannot be turned off: 0 and
-// unparsable values fall back to the default with a warning, so a typo cannot
-// silently drop brute-force protection.
-func newLoginRateLimiter() *RateLimiter {
-	limit := defaultLoginRateLimit
-	if v := os.Getenv("MIKE_LOGIN_RATE_LIMIT"); v != "" {
-		if n, err := strconv.Atoi(v); err != nil || n <= 0 {
-			logging.For(logging.HTTP).Infof("MIKE_LOGIN_RATE_LIMIT=%q is not a positive integer; using the default of %d requests/minute (rate limiting cannot be disabled)", v, defaultLoginRateLimit)
-		} else {
-			limit = n
-		}
+// newLoginRateLimiter builds the login rate limiter from the resolved budget (requests per minute
+// per IP). The budget is always positive — startup refuses 0, negative and unparsable values by
+// falling back to the default with a warning — because the protection must survive a typo.
+func newLoginRateLimiter(limit int) *RateLimiter {
+	if limit <= 0 {
+		limit = defaultLoginRateLimit
 	}
 	return NewRateLimiter(limit, time.Minute)
 }
@@ -158,9 +146,9 @@ func newLoginRateLimiter() *RateLimiter {
 // RateLimitMiddleware returns a middleware that applies rate limiting
 // to all requests passing through it. Clients exceeding the limit
 // receive HTTP 429 Too Many Requests with a Retry-After header.
-func RateLimitMiddleware(limiter *RateLimiter, next http.Handler) http.Handler {
+func RateLimitMiddleware(limiter *RateLimiter, trustProxy bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := clientIP(r)
+		ip := clientIP(r, trustProxy)
 		allowed, retryAfter := limiter.allow(ip)
 		if !allowed {
 			w.Header().Set("Retry-After", retryAfter.String())

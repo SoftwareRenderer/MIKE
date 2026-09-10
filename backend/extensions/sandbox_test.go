@@ -36,13 +36,13 @@ func TestSanitizeContainerID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got, err := sandboxruntime.NewRuntime().SanitizeID(tt.input)
+			got, err := sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}).SanitizeID(tt.input)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("sandboxruntime.NewRuntime().SanitizeID(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				t.Errorf("sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}).SanitizeID(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
 				return
 			}
 			if got != tt.want {
-				t.Errorf("sandboxruntime.NewRuntime().SanitizeID(%q) = %q, want %q", tt.input, got, tt.want)
+				t.Errorf("sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}).SanitizeID(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -98,7 +98,7 @@ func TestExtensionContainerPrefix(t *testing.T) {
 
 func TestApplyMemoryLimit_NotRunningIsNoOp(t *testing.T) {
 	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil) // nil store is ok for this test
+	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{}) // nil store is ok for this test
 	// No sandbox was created — applying or clearing a limit is a silent no-op:
 	// the next Create applies the persisted limit from scratch.
 	if err := sm.ApplyMemoryLimit("no-such-ext", 512); err != nil {
@@ -116,11 +116,11 @@ func TestApplyMemoryLimit_RunningSandbox(t *testing.T) {
 		t.Skip("gVisor (runsc) or podman not available")
 	}
 	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
+	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	sm.available = true
 	_, filename, _, _ := runtime.Caller(0)
 	projectRoot := filepath.Join(filepath.Dir(filename), "..", "..")
-	t.Setenv("MIKE_AGENT_PATH", filepath.Join(projectRoot, "sandbox", "sandbox-bridge"))
+	withBridge(sm, filepath.Join(projectRoot, "sandbox", "sandbox-bridge"))
 
 	const extID = "test-live-mem"
 	containerName := ExtensionContainerPrefix + "-" + extID
@@ -171,12 +171,19 @@ func TestApplyMemoryLimit_RunningSandbox(t *testing.T) {
 	}
 }
 
+// withBridge points an already-built manager's runtime at the committed bridge. A manager that creates
+// a real container needs it — the bridge is staged into that container — and the path is a boot
+// decision, so it is carried by the Runtime rather than read from the environment at use time.
+func withBridge(sm *ExtensionSandboxManager, path string) {
+	sm.rt = sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{AgentPath: path})
+}
+
 func TestNewExtensionSandboxManager(t *testing.T) {
-	// Test that manager can be created (without actual podman)
+	// Test that manager can be created (without actual podman, sandboxruntime.Boot{})
 	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil) // nil store is ok for this test
+	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{}) // nil store is ok for this test
 	if sm == nil {
-		t.Fatal("NewExtensionSandboxManager() = nil")
+		t.Fatal("NewExtensionSandboxManager = nil")
 	}
 	// Manager should be created even if gVisor is not available
 	// (it just won't be able to create sandboxes)
@@ -184,14 +191,14 @@ func TestNewExtensionSandboxManager(t *testing.T) {
 
 func TestIsAvailable(t *testing.T) {
 	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
+	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	// Just verify it doesn't panic
 	_ = sm.IsAvailable()
 }
 
 func TestListRunning_Empty(t *testing.T) {
 	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
+	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	result := sm.ListRunning()
 	if result == nil {
 		t.Fatal("ListRunning() = nil")
@@ -203,7 +210,7 @@ func TestListRunning_Empty(t *testing.T) {
 
 func TestIsRunning_NotCreated(t *testing.T) {
 	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
+	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	if sm.IsRunning("nonexistent") {
 		t.Error("IsRunning(nonexistent) = true, want false")
 	}
@@ -211,7 +218,7 @@ func TestIsRunning_NotCreated(t *testing.T) {
 
 func TestStop_NotCreated(t *testing.T) {
 	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
+	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	err := sm.Stop("nonexistent")
 	if err != nil {
 		t.Errorf("Stop(nonexistent) = %v, want nil", err)
@@ -221,7 +228,7 @@ func TestStop_NotCreated(t *testing.T) {
 func TestDestroy_NotCreated(t *testing.T) {
 	reg := NewRegistryClient()
 	store := testStore(t)
-	sm := NewExtensionSandboxManager(reg, store)
+	sm := NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
 	err := sm.Destroy("nonexistent")
 	if err != nil {
 		t.Errorf("Destroy(nonexistent) = %v, want nil", err)
@@ -229,7 +236,7 @@ func TestDestroy_NotCreated(t *testing.T) {
 }
 
 func TestStartSession_UnknownSandbox(t *testing.T) {
-	sm := NewExtensionSandboxManager(NewRegistryClient(), nil)
+	sm := NewExtensionSandboxManager(NewRegistryClient(), nil, sandboxruntime.Boot{})
 	client, err := sm.StartSession("nonexistent")
 	if err == nil {
 		t.Error("StartSession(nonexistent) = nil, want error — a session needs a container to exec into")
@@ -240,7 +247,7 @@ func TestStartSession_UnknownSandbox(t *testing.T) {
 }
 
 func TestReleaseSession_NotCreated(t *testing.T) {
-	sm := NewExtensionSandboxManager(NewRegistryClient(), nil)
+	sm := NewExtensionSandboxManager(NewRegistryClient(), nil, sandboxruntime.Boot{})
 	// Must not panic, and must not credit a hand-back for a sandbox that was never created.
 	if sm.ReleaseSession("nonexistent", testBridgeClient(t)) {
 		t.Error("ReleaseSession credited a hand-back for a sandbox with no state")
@@ -248,8 +255,7 @@ func TestReleaseSession_NotCreated(t *testing.T) {
 }
 
 func TestGracePeriod_TimerSetOnLastSession(t *testing.T) {
-	sm := NewExtensionSandboxManager(NewRegistryClient(), nil)
-
+	sm := NewExtensionSandboxManager(NewRegistryClient(), nil, sandboxruntime.Boot{})
 	extID := "test-grace-period"
 	sm.mu.Lock()
 	sm.states[extID] = &extensionSandboxState{containerName: "kanban-ext-test"}
@@ -280,7 +286,7 @@ func TestGracePeriod_TimerSetOnLastSession(t *testing.T) {
 }
 
 func TestGracePeriod_CancelledOnReconnect(t *testing.T) {
-	sm := NewExtensionSandboxManager(NewRegistryClient(), nil)
+	sm := NewExtensionSandboxManager(NewRegistryClient(), nil, sandboxruntime.Boot{})
 	extID := "test-grace-reconnect"
 
 	sm.mu.Lock()
@@ -305,7 +311,7 @@ func TestGracePeriod_CancelledOnReconnect(t *testing.T) {
 }
 
 func TestGracePeriod_TimerFiresAndStops(t *testing.T) {
-	sm := NewExtensionSandboxManager(NewRegistryClient(), nil)
+	sm := NewExtensionSandboxManager(NewRegistryClient(), nil, sandboxruntime.Boot{})
 	extID := "test-grace-fires"
 	stopped := make(chan string, 1)
 
@@ -347,12 +353,12 @@ func TestGracePeriod_TimerFiresAndStops(t *testing.T) {
 
 func TestCreate_RejectsLeadingDashImage(t *testing.T) {
 	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
+	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	sm.available = true
 	_, filename, _, _ := runtime.Caller(0)
 	projectRoot := filepath.Join(filepath.Dir(filename), "..", "..")
 	bridgePath := filepath.Join(projectRoot, "sandbox", "sandbox-bridge")
-	t.Setenv("MIKE_AGENT_PATH", bridgePath)
+	withBridge(sm, bridgePath)
 
 	ext := &Extension{
 		ID: "test-dash-image",
@@ -376,12 +382,12 @@ func TestCreate_RejectsLeadingDashImage(t *testing.T) {
 
 func TestCreate_AcceptsValidImage(t *testing.T) {
 	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
+	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	sm.available = true
 	_, filename, _, _ := runtime.Caller(0)
 	projectRoot := filepath.Join(filepath.Dir(filename), "..", "..")
 	bridgePath := filepath.Join(projectRoot, "sandbox", "sandbox-bridge")
-	t.Setenv("MIKE_AGENT_PATH", bridgePath)
+	withBridge(sm, bridgePath)
 
 	// Create really creates the container when the image validates, and this test only cares
 	// that validation passed — so the container is the test's to remove. Through the runtime,
@@ -409,12 +415,12 @@ func TestCreate_AcceptsValidImage(t *testing.T) {
 // container is created. It used to get ubuntu:latest - running, and holding no language server.
 func TestCreate_RefusesExtensionWithNoImageAndNoDockerfile(t *testing.T) {
 	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
+	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	sm.available = true
 	sm.extensionsDir = filepath.Join(t.TempDir(), "extensions") // installed, but no Dockerfile in it
 	_, filename, _, _ := runtime.Caller(0)
 	projectRoot := filepath.Join(filepath.Dir(filename), "..", "..")
-	t.Setenv("MIKE_AGENT_PATH", filepath.Join(projectRoot, "sandbox", "sandbox-bridge"))
+	withBridge(sm, filepath.Join(projectRoot, "sandbox", "sandbox-bridge"))
 
 	ext := &Extension{ID: "test-no-image", Name: "no-such-language-server", Version: "1.0.0"}
 	_, err := sm.Create(ext, nil)
@@ -433,12 +439,12 @@ func TestCreate_RefusesExtensionWithNoImageAndNoDockerfile(t *testing.T) {
 
 func TestCreate_RejectsShellInjectionImage(t *testing.T) {
 	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
+	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	sm.available = true
 	_, filename, _, _ := runtime.Caller(0)
 	projectRoot := filepath.Join(filepath.Dir(filename), "..", "..")
 	bridgePath := filepath.Join(projectRoot, "sandbox", "sandbox-bridge")
-	t.Setenv("MIKE_AGENT_PATH", bridgePath)
+	withBridge(sm, bridgePath)
 
 	tests := []struct {
 		name  string
@@ -635,7 +641,7 @@ func TestBuildExtensionCreateArgs_MemoryLimit(t *testing.T) {
 
 func TestFindLocalDockerfile(t *testing.T) {
 	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
+	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 
 	// Build a temp extensions directory with a nested Dockerfile.
 	extRoot := t.TempDir()
@@ -708,7 +714,7 @@ func TestPullsMissingRemoteImage(t *testing.T) {
 // a worse message. It used to return nil and let Create start a default container.
 func TestEnsureExtensionImage_LocalBuildIsNeverPulled(t *testing.T) {
 	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
+	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	sm.extensionsDir = filepath.Join(t.TempDir(), "extensions")
 
 	ext := &Extension{ID: "ext-no-df", Name: "some-local-build"}
@@ -750,7 +756,7 @@ func TestCustomMountSnapshot(t *testing.T) {
 
 func TestMountsCompatible_CustomMounts(t *testing.T) {
 	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
+	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 
 	// Simulate a state with no custom mounts.
 	sm.states["ext1"] = &extensionSandboxState{
@@ -807,7 +813,7 @@ func TestMountsCompatible_CustomMounts(t *testing.T) {
 // list: one workspace's module cache must never restart another's server.
 func TestMountsCompatible_Envs(t *testing.T) {
 	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
+	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 
 	envs := []types.SandboxEnv{{Key: "GOCACHE", Value: "/tmp/gocache"}}
 	sm.states["ext-env"] = &extensionSandboxState{
@@ -851,7 +857,7 @@ func TestMountsCompatible_Envs(t *testing.T) {
 
 func TestGetMemoryStats_NotCreated(t *testing.T) {
 	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
+	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 
 	stats := sm.GetMemoryStats("no-such-ext")
 	if stats == nil {
@@ -867,7 +873,7 @@ func TestGetMemoryStats_NotCreated(t *testing.T) {
 
 func TestGetMemoryStats_CreatedButNotRunning(t *testing.T) {
 	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
+	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	// State exists but no container (never created / already stopped):
 	// ContainerCgroupDir must fail → zero stats, no panic.
 	sm.states["ext1"] = &extensionSandboxState{containerName: "kanban-ext-nonexistent"}
@@ -1155,7 +1161,7 @@ func writeInstalledDockerfile(t *testing.T, root, author, name string) string {
 func TestExtensionImageSource(t *testing.T) {
 	extDir := t.TempDir()
 	writeInstalledDockerfile(t, extDir, "go-team", "gopls")
-	sm := NewExtensionSandboxManager(NewRegistryClient(), nil)
+	sm := NewExtensionSandboxManager(NewRegistryClient(), nil, sandboxruntime.Boot{})
 	sm.extensionsDir = extDir
 
 	tests := []struct {
@@ -1231,8 +1237,10 @@ func TestCreate_DerivesAndRecordsTheImageForARowWithNoImage(t *testing.T) {
 	}
 
 	fake := fakePodmanOK(t)
-	setBridgeEnv(t)
-	sm := NewExtensionSandboxManager(NewRegistryClient(), extStore)
+	// Both halves need the bridge: the manager stages it into the container, the registry client stages
+	// it into the build context of the image this create derives.
+	boot := bridgeBoot(t)
+	sm := NewExtensionSandboxManager(NewRegistryClientWithBoot(boot), extStore, boot)
 	sm.available = true
 	sm.extensionsDir = t.TempDir()
 	writeInstalledDockerfile(t, sm.extensionsDir, "go-team", "gopls")

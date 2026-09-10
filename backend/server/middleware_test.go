@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"kanban/backend/startup"
 )
 
 // login returns the session cookie and CSRF token of a fresh login on s. Several
@@ -283,10 +285,20 @@ func TestHostPinMiddleware(t *testing.T) {
 }
 
 func TestHostPinMiddlewareAllowedHostsEnv(t *testing.T) {
-	s := testServer(t)
-
-	// The reverse-proxy opt-out: a proxy forwards the public domain in Host.
-	t.Setenv("MIKE_ALLOWED_HOSTS", "kanban.example.com, staging.lan")
+	// The reverse-proxy opt-out: a proxy forwards the public domain in Host. The variable alone, with
+	// no flag, must reach the allowlist — and it reaches it through the one ladder that resolves it,
+	// so what is pinned here is the whole chain (variable -> startup.Config -> middleware) rather than
+	// a middleware that reads the environment on each request.
+	t.Setenv(startup.EnvAllowedHosts, "kanban.example.com, staging.lan")
+	t.Setenv(startup.EnvEncryptionKey, "a-long-enough-test-key")
+	resolved, err := startup.Resolve(startup.Flags{})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(resolved.AllowedHosts) != 2 {
+		t.Fatalf("resolved extras = %q, want the two entries split", resolved.AllowedHosts)
+	}
+	s := testServerWith(t, func(c *startup.Config) { c.AllowedHosts = resolved.AllowedHosts })
 
 	tests := []struct {
 		host string
@@ -316,14 +328,16 @@ func TestHostPinMiddlewareAllowedHostsEnv(t *testing.T) {
 	}
 }
 
-// TestHostPinMiddlewareAllowedHostsFlag pins down the --allowed-hosts plumbing:
-// the flag value reaches the allowlist and REPLACES (never unions with) the
-// MIKE_ALLOWED_HOSTS fallback, so a stale environment variable cannot silently
-// widen the allowlist of a deployment that switched to the flag.
-func TestHostPinMiddlewareAllowedHostsFlag(t *testing.T) {
+// TestHostPinMiddlewareUsesTheWiredAllowedHosts pins the --allowed-hosts / MIKE_ALLOWED_HOSTS
+// plumbing end to end: the resolved list reaches the allowlist, and the environment is not consulted
+// again at request time. The variable stays set below precisely to prove that — a middleware that
+// re-read it would let a stale environment widen the allowlist of a deployment that switched to the
+// flag, which is the reason the ladder resolves once (startup.Resolve) and the flag replaces rather
+// than extends.
+func TestHostPinMiddlewareUsesTheWiredAllowedHosts(t *testing.T) {
 	t.Setenv("MIKE_ALLOWED_HOSTS", "env.example.com")
 
-	s := &Server{addr: ":0", allowedHosts: "flag.example.com, other.lan"}
+	s := &Server{addr: ":0", settings: startup.Config{AllowedHosts: []string{"flag.example.com", "other.lan"}}}
 
 	tests := []struct {
 		host string
@@ -333,7 +347,7 @@ func TestHostPinMiddlewareAllowedHostsFlag(t *testing.T) {
 		{host: "flag.example.com:443", want: http.StatusOK},
 		{host: "OTHER.LAN", want: http.StatusOK},
 		{host: "localhost:3000", want: http.StatusOK},
-		// The flag replaces the env var rather than extending it.
+		// Set in the environment and wired out of the list: the request-time read is gone.
 		{host: "env.example.com", want: http.StatusMisdirectedRequest},
 		{host: "evil.test", want: http.StatusMisdirectedRequest},
 	}
@@ -349,26 +363,26 @@ func TestHostPinMiddlewareAllowedHostsFlag(t *testing.T) {
 	}
 }
 
-// TestEffectiveAllowedHosts covers the flag-over-env resolution the middleware
-// performs through it.
+// TestEffectiveAllowedHosts pins that the middleware answers from the resolved list and from nothing
+// else: the joining of entries is the middleware's, the choosing between flag and variable is
+// startup's (startup.TestResolveAllowedHosts).
 func TestEffectiveAllowedHosts(t *testing.T) {
-	t.Setenv("MIKE_ALLOWED_HOSTS", "env.example.com")
+	t.Setenv(startup.EnvAllowedHosts, "env.example.com")
 
 	tests := []struct {
-		name         string
-		allowedHosts string
-		want         string
+		name  string
+		hosts []string
+		want  string
 	}{
-		{name: "flag wins over env", allowedHosts: "flag.example.com", want: "flag.example.com"},
-		{name: "unset flag falls back to env", allowedHosts: "", want: "env.example.com"},
-		{name: "blank flag falls back to env", allowedHosts: "   ", want: "env.example.com"},
+		{name: "nothing wired means no extras", hosts: nil, want: ""},
+		{name: "entries are joined for the allowlist", hosts: []string{"a.example", "b.example"}, want: "a.example,b.example"},
+		{name: "the wired list is the whole answer", hosts: []string{"flag.example.com"}, want: "flag.example.com"},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &Server{allowedHosts: tt.allowedHosts}
+			s := &Server{settings: startup.Config{AllowedHosts: tt.hosts}}
 			if got := s.effectiveAllowedHosts(); got != tt.want {
-				t.Fatalf("effectiveAllowedHosts() = %q, want %q", got, tt.want)
+				t.Errorf("effectiveAllowedHosts() = %q, want %q", got, tt.want)
 			}
 		})
 	}

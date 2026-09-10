@@ -75,19 +75,7 @@ func ValidateCapability(cap string) error {
 	return nil
 }
 
-// GVisorCreateArgs returns the arguments every `podman create` MIKE builds begins with; the task
-// sandbox and the extension sandbox differ only in what they append after it (`--workdir`,
-// `--network none`, mounts, envs). The `create` verb is part of the result — the runtime flags are
-// global only relative to it — so the slice heads a `podman create` and nothing else (`start` and
-// `exec` name the runtime flags themselves).
-//
-// `--pull never` is posture, not a preference: every caller ensures the image first, with progress
-// the browser can show, so an implicit pull here would be silent, unbounded, and would surface as a
-// resolution error instead of "this image was never built".
-//
-// No `--workdir`, no `--network`, and no `-e`: a container's environment is what was configured for
-// it, never what a shared preface invents — an `-e PATH` override drops a custom image's own
-// tooling, and `TERM` belongs to the TTY session that asks for it.
+// GVisorCreateArgs is the arguments every `podman create` MIKE builds begins with; callers append their differences.
 func GVisorCreateArgs(containerName string) []string {
 	return []string{
 		"--runtime-flag=overlay2=root:self",
@@ -121,17 +109,9 @@ func GVisorIsolationForCaps(args []string) error {
 	return nil
 }
 
-// AppendCapabilities appends a capability grant to a `podman create` argument list, and is the only
-// way this repo appends one: GVisorIsolationForCaps runs before the first `--cap-add`, so isolation
-// is a precondition of the append instead of a check each call site remembers. It is all-or-nothing
-// — on a refusal args comes back untouched, because a partial grant is a privilege set nobody asked
-// for — and an empty `caps` is still checked, since the answer is about the command line.
-//
-// It judges posture, never names. Name shape is ValidateCapability, and the two call sites answer it
-// differently on purpose: a task refuses its whole capability list in sandbox.Create, because a
-// project row is operator configuration and a bad entry there is a configuration error worth
-// reporting; an extension sandbox skips the one malformed name and grants the rest, because a stale
-// entry in a stored manifest must not cost the good capabilities.
+// AppendCapabilities is the only way this repo appends a --cap-add. It writes the runsc and
+// --cap-drop ALL preface before the first capability, so a grant cannot land on a container that does
+// not start from that isolation, and no call site can get the ordering wrong.
 func AppendCapabilities(args []string, caps []string) ([]string, error) {
 	if err := GVisorIsolationForCaps(args); err != nil {
 		return args, err

@@ -77,7 +77,6 @@ test.describe('Chat draft text persistence', () => {
       });
     }, testMessage, { timeout: 5000 });
 
-    // Reload the page
     await page.reload();
     await expect(page.locator('.task-detail-page')).toBeVisible();
     await waitForIdle(page);

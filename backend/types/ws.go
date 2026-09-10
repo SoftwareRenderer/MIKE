@@ -12,10 +12,12 @@ const (
 	WSTypeToolResult         WSMessageType = "tool_result"
 	WSTypeStatus             WSMessageType = "status"
 	WSTypeQueue              WSMessageType = "queue"
+	WSTypeLockWait           WSMessageType = "lock_wait"
 	WSTypeComplete           WSMessageType = "complete"
 	WSTypeError              WSMessageType = "error"
 	WSTypeUserMessage        WSMessageType = "user_message"
 	WSTypeStats              WSMessageType = "stats"
+	WSTypeSummarization      WSMessageType = "summarization"
 	WSTypeDiffChanged        WSMessageType = "diff_changed"
 	WSTypeThreadSwitch       WSMessageType = "thread_switch"
 	WSTypeCheckpointPending  WSMessageType = "git_checkpoint_pending"
@@ -28,6 +30,19 @@ const (
 	WSTypeAdvisory           WSMessageType = "advisory"
 	WSTypeExtensionChange    WSMessageType = "extension_change"
 	WSTypeSandboxImageStatus WSMessageType = "sandbox_image_status"
+
+	// Frame-level names: what changed on the board. The constants above are per-turn events that ride
+	// inside a task_event envelope.
+	WSTypeTaskEvent     WSMessageType = "task_event"
+	WSTypeBoardRefresh  WSMessageType = "board_refresh"
+	WSTypeProjectCounts WSMessageType = "project_counts"
+	WSTypeProjectBranch WSMessageType = "project_branch"
+	WSTypeProjectPorts  WSMessageType = "project_ports"
+	WSTypeTaskUpdated   WSMessageType = "task_updated"
+	WSTypeTaskDeleted   WSMessageType = "task_deleted"
+	WSTypeTaskDiffStats WSMessageType = "task_diff_stats"
+	WSTypeCommitStatus  WSMessageType = "commit_status"
+	WSTypeFsEvent       WSMessageType = "fs_event"
 )
 
 // Phases of WSTypeSandboxImageStatus: preparing a project's sandbox image (building it from its

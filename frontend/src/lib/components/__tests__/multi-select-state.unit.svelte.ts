@@ -12,7 +12,6 @@ import MultiSelectBar from '$lib/components/MultiSelectBar.svelte';
 import { MultiSelect } from '$lib/composables/use-multi-select.svelte';
 import type { Task } from '$lib/types';
 
-// Mock the dialogStore
 vi.mock('$lib/stores', () => ({
     dialogStore: {
         showConfirm: vi.fn().mockResolvedValue(true),

@@ -128,23 +128,9 @@ function isInsideExtensionTree(path: string): boolean {
     return true;
 }
 
-// resolveAssetURL resolves a manifest asset path (e.g. a css_url) against the
-// extension's served base (extBaseURL), so a relative path like "./styles.css" or
-// "styles.css" resolves to that directory plus the asset —
-// /extensions/<author>/<name>/styles.css for a registry install, /extensions/<name>/…
-// for one placed flat under the extensions root.
-// The answer is that directory plus the asset, or '' — there is no third answer.
-// '' covers a URL with a scheme (http:, https:, data:, …) or protocol-relative
-// (`//host/…`), which a CSS extension must never load from an external origin, and
-// equally a path that leaves that directory once `..` is resolved: the browser
-// normalizes the URL before it sends it, so `/extensions/a/b/../../../api/config`
-// *is* a request for `/api/config` with this session's cookie, whatever the string
-// looked like on the way in. Containment is therefore decided on the normalized
-// path, against the base's own normalized form — which also refuses a base that is
-// not a directory. Mirrors validatePackRelPath/packFilePath on the Go side, which
-// refuses the same shapes before a manifest is stored.
-// A leading '/' is relative to the extension's own directory (never to the server root).
-// Exported for tests.
+// Resolves a manifest asset path against the served directory the server derives from the installed
+// record. A base guessed in the browser from the manifest's author field 404s the catalog or sheet of
+// any extension not laid down at <author-slug>/<name> - a flat local install is served at /extensions/<name>.
 export function resolveAssetURL(ext: Extension, asset: string): string {
     if (!asset) return asset;
     if (/^[a-z][a-z0-9+.-]*:/i.test(asset) || asset.startsWith('//')) return ''; // external — reject

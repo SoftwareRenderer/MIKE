@@ -15,14 +15,48 @@ import (
 	"kanban/backend/types"
 	pkgagent "kanban/pkg/agent"
 
-	"github.com/google/uuid"
 	"kanban/pkg/logging"
+
+	"github.com/google/uuid"
 )
 
-// executeTaskWithAgent runs the task using an agent extension via the generic agent runner.
-// The agent handles its own LLM calls, tool execution, loop detection, and compaction.
-// Kanban only manages the subprocess lifecycle and streams events to the frontend.
-// setup.ModelName, when set, sends set_model before the first prompt.
+// The adapter owns its LLM calls, tools and compaction; this manages the subprocess and streams its events.
+func agentInitialPrompt(task *types.Task, taskMsgs []types.TaskMessage, initialContent string, useSessionResumption bool) (initialPrompt string) {
+	if initialContent != "" {
+		if useSessionResumption {
+			// Agent has the session from switch_session, just send the new message.
+			initialPrompt = initialContent
+			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("lazy-start via session resume: sending user message")
+		} else {
+			// Replay context as fallback.
+			replayMsgs := taskMsgs
+			if len(taskMsgs) > 0 && taskMsgs[len(taskMsgs)-1].Content == initialContent {
+				replayMsgs = taskMsgs[:len(taskMsgs)-1]
+			}
+			if len(replayMsgs) > 0 {
+				initialPrompt = buildContextReplay(replayMsgs) + "\n\n--- New message ---\n\n" + initialContent
+				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("lazy-start: replaying %d messages + new message", len(replayMsgs))
+			} else {
+				initialPrompt = initialContent
+				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("lazy-start: sending user message as initial prompt")
+			}
+		}
+	} else if len(taskMsgs) > 1 {
+		if useSessionResumption {
+			// Agent has the session, send the task prompt to continue.
+			initialPrompt = task.Prompt
+			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("restart via session resume: sending task prompt")
+		} else {
+			initialPrompt = buildContextReplay(taskMsgs)
+			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("restart: replaying %d messages", len(taskMsgs))
+		}
+	} else {
+		initialPrompt = task.Prompt
+		logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("fresh-start: sending task prompt")
+	}
+	return initialPrompt
+}
+
 func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 	// task is rebound from the store later in the run, so it is a local, not an alias of setup.task.
 	ctx, task, projectID, worktreePath := setup.ctx, setup.task, setup.projectID, setup.worktreePath
@@ -125,86 +159,18 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 		logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("saved sessionFile=%s", sessionFile)
 	}
 
-	var initialPrompt string
-	if initialContent != "" {
-		if useSessionResumption {
-			// Agent has the session from switch_session, just send the new message.
-			initialPrompt = initialContent
-			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("lazy-start via session resume: sending user message")
-		} else {
-			// Replay context as fallback.
-			replayMsgs := taskMsgs
-			if len(taskMsgs) > 0 && taskMsgs[len(taskMsgs)-1].Content == initialContent {
-				replayMsgs = taskMsgs[:len(taskMsgs)-1]
-			}
-			if len(replayMsgs) > 0 {
-				initialPrompt = buildContextReplay(replayMsgs) + "\n\n--- New message ---\n\n" + initialContent
-				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("lazy-start: replaying %d messages + new message", len(replayMsgs))
-			} else {
-				initialPrompt = initialContent
-				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("lazy-start: sending user message as initial prompt")
-			}
-		}
-	} else if len(taskMsgs) > 1 {
-		if useSessionResumption {
-			// Agent has the session, send the task prompt to continue.
-			initialPrompt = task.Prompt
-			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("restart via session resume: sending task prompt")
-		} else {
-			initialPrompt = buildContextReplay(taskMsgs)
-			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("restart: replaying %d messages", len(taskMsgs))
-		}
-	} else {
-		initialPrompt = task.Prompt
-		logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("fresh-start: sending task prompt")
-	}
+	initialPrompt := agentInitialPrompt(task, taskMsgs, initialContent, useSessionResumption)
+
 	err = runner.Prompt(ctx, initialPrompt)
 	if err != nil {
 		te.failTask(task, projectID, fmt.Sprintf("Failed to send prompt to agent: %v", err), "agent_prompt_failed")
 		return
 	}
 
-	// An agent that has not reported a status within this timeout is a failed start.
-	startupCtx, startupCancel := context.WithTimeout(ctx, 30*time.Second)
-	defer startupCancel()
-
-	startupValidated := false
-	for !startupValidated {
-		select {
-		case event, ok := <-runner.EventChan():
-			if !ok {
-				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("event channel closed during startup")
-				runner.Close()
-				te.failTask(task, projectID, "Agent process exited unexpectedly", "agent_process_exited")
-				return
-			}
-			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("startup event: %s", event.Type)
-			if streamEvent := toStreamEvent(event, sandboxEnabled, runner); streamEvent.Type != "" {
-				te.sendAgentStreamEvent(projectID, task.ID, streamEvent)
-			}
-			switch event.Type {
-			case pkgagent.EventTypeStatus:
-				if event.Status.State == "running" {
-					startupValidated = true
-				}
-			case pkgagent.EventTypePersist:
-				// agent_end produced persist entries — startup validated
-				startupValidated = true
-			case pkgagent.EventTypeError:
-				te.failTask(task, projectID, fmt.Sprintf("Agent error: %v", event.RawData), "agent_error")
-				return
-			}
-		case <-startupCtx.Done():
-			if startupCtx.Err() == context.DeadlineExceeded {
-				logging.For(logging.Agent).With(logging.TaskID, task.ID).Errorf("startup timeout (no status within 30s)")
-				runner.Close()
-				te.failTask(task, projectID, "Agent failed to start (timeout)", "agent_startup_timeout")
-			} else {
-				// Stopped by user during agent startup
-				te.handleCancelledTask(task.ID, projectID)
-				return
-			}
-		}
+	// An agent that has not reported a status within a bounded window is a failed start; the wait owns
+	// that window and has already reported why if it says stop.
+	if !te.validateAgentStart(ctx, runner, task, projectID, sandboxEnabled) {
+		return
 	}
 
 	startTime := time.Now()
@@ -877,4 +843,55 @@ func toStreamEvent(event pkgagent.Event, sandbox bool, runner *agent.AgentRunner
 		// Pass through unknown events as status
 		return types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": fmt.Sprintf("Agent: %s", event.Type)}}
 	}
+}
+
+// validateAgentStart waits for the agent to show it is alive: a status of "running", or persist entries
+// from an agent that answered before saying anything. It returns false when the run must not continue, and
+// in every such case it has already reported the cause (a failed start, or a task the user stopped) — the
+// caller's only job is to return. The window exists because a subprocess that never answers is not
+// "slow", it is absent: nothing else in the run would notice, and the task would sit "running" forever.
+func (te *TaskExecutor) validateAgentStart(ctx context.Context, runner *agent.AgentRunner, task *types.Task, projectID string, sandboxEnabled bool) bool {
+	// An agent that has not reported a status within this timeout is a failed start.
+	startupCtx, startupCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer startupCancel()
+
+	startupValidated := false
+	for !startupValidated {
+		select {
+		case event, ok := <-runner.EventChan():
+			if !ok {
+				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("event channel closed during startup")
+				runner.Close()
+				te.failTask(task, projectID, "Agent process exited unexpectedly", "agent_process_exited")
+				return false
+			}
+			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("startup event: %s", event.Type)
+			if streamEvent := toStreamEvent(event, sandboxEnabled, runner); streamEvent.Type != "" {
+				te.sendAgentStreamEvent(projectID, task.ID, streamEvent)
+			}
+			switch event.Type {
+			case pkgagent.EventTypeStatus:
+				if event.Status.State == "running" {
+					startupValidated = true
+				}
+			case pkgagent.EventTypePersist:
+				// agent_end produced persist entries — startup validated
+				startupValidated = true
+			case pkgagent.EventTypeError:
+				te.failTask(task, projectID, fmt.Sprintf("Agent error: %v", event.RawData), "agent_error")
+				return false
+			}
+		case <-startupCtx.Done():
+			if startupCtx.Err() == context.DeadlineExceeded {
+				logging.For(logging.Agent).With(logging.TaskID, task.ID).Errorf("startup timeout (no status within 30s)")
+				runner.Close()
+				te.failTask(task, projectID, "Agent failed to start (timeout)", "agent_startup_timeout")
+			} else {
+				// Stopped by user during agent startup
+				te.handleCancelledTask(task.ID, projectID)
+				return false
+			}
+		}
+	}
+	return true
 }

@@ -92,7 +92,6 @@ test.describe('Explorer Review Changes', () => {
     // Should be on a line > 1 (we clicked on a row ~5 lines in)
     expect(lineNum).toBeGreaterThan(1);
 
-    // Clean up
     execSync(`rm -f ${filePath}`);
     execSync(`git -C ${projectDir} reset -q -- ${testFile}`, { stdio: 'ignore' });
   });

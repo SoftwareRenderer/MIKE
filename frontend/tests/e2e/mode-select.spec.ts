@@ -377,7 +377,6 @@ test.describe.serial('Question mark auto-switches operating mode to Explore', ()
     await page.locator('#task-description').fill(`${uniquePrompt}? What is going on?`);
     await expect(page.locator('.mode-btn .mode-label')).toHaveText('Explore');
 
-    // Submit
     await page.locator('.modal .btn-primary').click();
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
 

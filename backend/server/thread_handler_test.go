@@ -107,7 +107,6 @@ func TestThreadSwitch(t *testing.T) {
 	}
 	mainThreadID := threads[0]["id"].(string)
 
-	// Create a message
 	createReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
 		"role":    "user",
 		"content": "Message for fork",
@@ -201,7 +200,6 @@ func TestMessageScopedToThread(t *testing.T) {
 	msg := mustJSON[map[string]any](t, createRR2.Body)
 	msgID := msg["id"].(string)
 
-	// Fork
 	forkReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/fork", map[string]any{
 		"from_thread_id":  mainThreadID,
 		"from_message_id": msgID,
@@ -369,7 +367,6 @@ func TestThreadSwitchWorktreeContent(t *testing.T) {
 	}
 	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
 
-	// Create a task
 	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{"prompt": "test task"})
 	withAuthCSRF(taskReq, cookie, csrfToken)
 	taskRR := testResponse(t, s, taskReq)
@@ -538,7 +535,6 @@ func TestThreadForkFromInactiveThread(t *testing.T) {
 	}
 	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
 
-	// Create a task
 	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{"prompt": "test task"})
 	withAuthCSRF(taskReq, cookie, csrfToken)
 	taskRR := testResponse(t, s, taskReq)

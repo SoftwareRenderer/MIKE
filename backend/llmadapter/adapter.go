@@ -23,9 +23,8 @@ const (
 
 // Mapping describes how to adapt MIKE's request for one provider.
 type Mapping struct {
-	// Match is the provider base-URL prefix to match (trailing slash ignored).
-	// The character after the prefix must be "/" (or end of URL), so
-	// "https://openrouter" does not match "https://openrouter.ai".
+	// Match is a provider base-URL prefix (trailing slash ignored). The next character must be
+	// "/" or the end of the URL, so "https://openrouter" does not match "https://openrouter.ai".
 	Match string `json:"match"`
 	// Headers are added to the request once template-resolved. A header whose
 	// resolved value still contains an unresolved {{placeholder}} is skipped.

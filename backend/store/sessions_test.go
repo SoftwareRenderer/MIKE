@@ -281,11 +281,9 @@ func TestSessionDeleteExpired(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 
-	// Create an expired session
 	if err := s.CreateSession(ctx, NewSession{ID: "sess-expired", Token: "expired-token", CSRFToken: "csrf-expired", ExpiresAt: time.Now().Add(-1 * time.Hour)}); err != nil {
 		t.Fatalf("create expired session: %v", err)
 	}
-	// Create a valid session
 	if err := s.CreateSession(ctx, NewSession{ID: "sess-valid", Token: "valid-token", CSRFToken: "csrf-valid", ExpiresAt: time.Now().Add(24 * time.Hour)}); err != nil {
 		t.Fatalf("create valid session: %v", err)
 	}

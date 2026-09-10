@@ -16,12 +16,16 @@ import (
 	"kanban/backend/types"
 
 	"kanban/pkg/logging"
+
 	_ "modernc.org/sqlite"
 )
 
 // Store provides thread-safe access to the SQLite database.
 type Store struct {
 	db *sql.DB
+	// mu is the serialisation point AGENTS.md names: the pool is one connection, so this is what makes
+	// "no other caller can interleave" true, and it must be held for a whole multi-statement section, not
+	// per statement. It is not a substitute for tx — see tx for what a transaction adds on top.
 	mu sync.RWMutex
 }
 
@@ -106,9 +110,8 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// RawSQL is the raw-SQL escape hatch: the three database primitives and nothing else.
-// It exists for packages that own their own tables - today only backend/extensions - and
-// going through it keeps raw SQL to one grep-able caller.
+// RawSQL exposes the three database primitives and nothing else, for packages that own their own
+// tables — today only backend/extensions — which keeps raw SQL to one grep-able caller.
 type RawSQL interface {
 	Exec(query string, args ...any) (sql.Result, error)
 	Query(query string, args ...any) (*sql.Rows, error)
@@ -149,144 +152,17 @@ func (s *Store) QueryRow(query string, args ...any) *sql.Row {
 }
 
 func (s *Store) initSchema() error {
-	schema := `
-CREATE TABLE IF NOT EXISTS projects (
-    id                       TEXT PRIMARY KEY,
-    name                     TEXT NOT NULL,
-    path                     TEXT NOT NULL UNIQUE,
-    origin_branch            TEXT DEFAULT NULL,
-    sandbox_enabled          INTEGER NOT NULL DEFAULT 0,
-    sandbox_network_isolation INTEGER NOT NULL DEFAULT 0,
-    sandbox_image            TEXT DEFAULT NULL,
-    sandbox_dockerfile_path  TEXT DEFAULT NULL,
-    sandbox_memory_limit     INTEGER NOT NULL DEFAULT 1024,
-    created_at               TEXT NOT NULL,
-    updated_at               TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS tasks (
-    id                           TEXT PRIMARY KEY,
-    project_id                   TEXT NOT NULL,
-    title                        TEXT NOT NULL,
-    prompt                       TEXT NOT NULL,
-    status                       TEXT NOT NULL DEFAULT 'backlog',
-    session_id                   TEXT,
-    branch                       TEXT,
-    base_ref                     TEXT DEFAULT NULL,
-    base_commit                  TEXT DEFAULT NULL,
-    branch_tip                   TEXT DEFAULT NULL,
-    output                       TEXT,
-    execution_state              TEXT NOT NULL DEFAULT 'idle',
-    has_merge_conflict           INTEGER NOT NULL DEFAULT 0,
-    llama_server_url             TEXT NOT NULL DEFAULT '',
-    model_name                   TEXT NOT NULL DEFAULT '',
-    max_consecutive_failed_turns INTEGER NOT NULL DEFAULT 3,
-    auto_commit                  INTEGER NOT NULL DEFAULT 0,
-    auto_merge                   INTEGER NOT NULL DEFAULT 1,
-    subtasks_auto_merge          INTEGER NOT NULL DEFAULT 1,
-    operating_mode               TEXT NOT NULL DEFAULT 'act',
-    parent_task_id               TEXT NULL,
-    autostarted                  INTEGER NOT NULL DEFAULT 0,
-    created_at                   TEXT NOT NULL,
-    updated_at                   TEXT NOT NULL,
-    moved_at                     TEXT NOT NULL DEFAULT '',
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-    FOREIGN KEY (parent_task_id) REFERENCES tasks(id) ON DELETE SET NULL
-);
-
-CREATE TABLE IF NOT EXISTS config (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS task_threads (
-    id              TEXT PRIMARY KEY,
-    task_id         TEXT NOT NULL,
-    parent_thread_id TEXT NULL,
-    name            TEXT NOT NULL DEFAULT 'Main',
-    is_active       INTEGER NOT NULL DEFAULT 0,
-    git_branch      TEXT DEFAULT NULL,
-    created_at      TEXT NOT NULL,
-    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-    FOREIGN KEY (parent_thread_id) REFERENCES task_threads(id) ON DELETE SET NULL
-);
-
-CREATE TABLE IF NOT EXISTS task_messages (
-    id                 TEXT PRIMARY KEY,
-    task_id            TEXT NOT NULL,
-    thread_id          TEXT NULL,
-    role               TEXT NOT NULL,
-    severity           TEXT DEFAULT NULL,
-    content            TEXT NOT NULL,
-    reasoning_content  TEXT DEFAULT NULL,
-    tool_calls         TEXT DEFAULT NULL,
-    tool_result        TEXT DEFAULT NULL,
-    attachments        TEXT DEFAULT NULL,
-    model_name         TEXT DEFAULT NULL,
-    provider_name      TEXT DEFAULT NULL,
-    prompt_tokens      INTEGER DEFAULT 0,
-    predicted_tokens   INTEGER DEFAULT 0,
-    cache_tokens       INTEGER DEFAULT 0,
-    prompt_ms          INTEGER DEFAULT 0,
-    predicted_ms       INTEGER DEFAULT 0,
-    duration           INTEGER DEFAULT 0,
-    git_commit_hash    TEXT DEFAULT NULL,
-    is_loop_hint       INTEGER NOT NULL DEFAULT 0,
-    assistant_msg_id   TEXT DEFAULT NULL,
-    kind               TEXT DEFAULT NULL,
-    created_at         TEXT NOT NULL,
-    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS project_token_stats (
-    project_id       TEXT NOT NULL,
-    model_name       TEXT NOT NULL DEFAULT 'unknown',
-    provider_name    TEXT NOT NULL DEFAULT '',
-    prompt_tokens    INTEGER NOT NULL DEFAULT 0,
-    cache_tokens     INTEGER NOT NULL DEFAULT 0,
-    predicted_tokens INTEGER NOT NULL DEFAULT 0,
-    prompt_ms        INTEGER NOT NULL DEFAULT 0,
-    predicted_ms     INTEGER NOT NULL DEFAULT 0,
-    cost             REAL NOT NULL DEFAULT 0,
-    PRIMARY KEY (project_id, model_name, provider_name),
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS project_token_tasks (
-    project_id    TEXT NOT NULL,
-    model_name    TEXT NOT NULL DEFAULT 'unknown',
-    provider_name TEXT NOT NULL DEFAULT '',
-    task_id       TEXT NOT NULL,
-    PRIMARY KEY (project_id, model_name, provider_name, task_id),
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-);
-
--- Immutable diff snapshot for done tasks (BaseCommit..BranchTip — pinned SHAs).
--- Lazily materialized on first read; valid until the task's base/tip refs change.
-CREATE TABLE IF NOT EXISTS task_diff_snapshots (
-    task_id     TEXT PRIMARY KEY,
-    project_id  TEXT NOT NULL,
-    base_commit TEXT NOT NULL,
-    branch_tip  TEXT NOT NULL,
-    stats_json  TEXT NOT NULL,
-    diff_json   TEXT NOT NULL,
-    created_at  TEXT NOT NULL,
-    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
-CREATE INDEX IF NOT EXISTS idx_task_messages_task ON task_messages(task_id);
-CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
-`
+	// Held across the whole chain, as it was before the chain was split: schema work is the one thing that
+	// must not interleave with anything else this store does.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.db.Exec(schema)
-	if err != nil {
+
+	// Three layers, each idempotent for a different reason, and the whole chain gated by user_version
+	// rather than run once per process: a database already at this build's schema version does not need
+	// 53 column probes, and one stamped newer than this build must not be edited by it.
+	if err := s.createBaseTables(); err != nil {
 		return err
 	}
-	// A database already at this build's schema version does not need 53 column probes, and one
-	// stamped newer than this build must not be edited by it. See schemaVersion in migrations.go.
 	stored := s.userVersion()
 	if stored >= schemaVersion {
 		if stored > schemaVersion {
@@ -295,162 +171,9 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 		return nil
 	}
 
-	// Migrations for existing databases. Each is probed first (migrations.go), so a
-	// logged failure is a real one; the CREATE TABLE above covers a fresh database. The stamp at the
-	// end of this function makes the chain run once per database rather than once per process.
-	//
-	// plan_mode is absent on purpose: plan mode is task.OperatingMode == "plan", and the
-	// column was neither written nor read. Databases that have it keep it.
-	// auto_merge arrived as merge_on_commit and was renamed, so only a database older
-	// than both names needs the add-then-rename.
-	if !s.hasColumn("tasks", "auto_merge") && !s.hasColumn("tasks", "merge_on_commit") {
-		s.addColumn("tasks", "merge_on_commit", "INTEGER NOT NULL DEFAULT 1")
-	}
-	s.renameColumn("tasks", "merge_on_commit", "auto_merge")
-	if !s.hasColumn("tasks", "subtasks_auto_merge") && !s.hasColumn("tasks", "merge_children") {
-		s.addColumn("tasks", "merge_children", "INTEGER NOT NULL DEFAULT 1")
-	}
-	s.renameColumn("tasks", "merge_children", "subtasks_auto_merge")
-	s.addColumn("task_messages", "model_name", "TEXT DEFAULT NULL")
-	s.addColumn("task_messages", "prompt_tokens", "INTEGER DEFAULT 0")
-	s.addColumn("task_messages", "predicted_tokens", "INTEGER DEFAULT 0")
-	s.addColumn("task_messages", "prompt_ms", "INTEGER DEFAULT 0")
-	s.addColumn("task_messages", "predicted_ms", "INTEGER DEFAULT 0")
-	s.addColumn("task_messages", "duration", "INTEGER DEFAULT 0")
-	s.addColumn("task_messages", "tool_calls", "TEXT DEFAULT NULL")
-	s.addColumn("task_messages", "tool_result", "TEXT DEFAULT NULL")
-	s.addColumn("task_messages", "reasoning_content", "TEXT DEFAULT NULL")
-	s.addColumn("tasks", "parent_task_id", "TEXT NULL")
-	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)`)
-	s.addColumn("tasks", "title_generating", "INTEGER NOT NULL DEFAULT 0")
-	s.addColumn("task_messages", "cache_tokens", "INTEGER DEFAULT 0")
-	s.addColumn("task_messages", "is_loop_hint", "INTEGER NOT NULL DEFAULT 0")
-	s.addColumn("task_messages", "provider_name", "TEXT DEFAULT NULL")
-	// Thread support
-	s.addColumn("tasks", "current_thread_id", "TEXT NULL")
-	s.addColumn("task_messages", "thread_id", "TEXT NULL")
-	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id)`)
-	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_messages_thread ON task_messages(thread_id)`)
-	s.addColumn("task_threads", "parent_thread_id", "TEXT NULL")
-	s.addColumn("task_threads", "checkpoint_message_id", "TEXT NULL")
-	s.addColumn("task_threads", "checkpoint_message_time", "TEXT NULL")
-	s.addColumn("task_threads", "checkpoint_commit_hash", "TEXT NULL")
-	s.addColumn("task_threads", "worktree_stash_hash", "TEXT NULL")
-	s.addColumn("tasks", "reasoning_effort", "TEXT DEFAULT NULL")
-	s.addColumn("projects", "origin_branch", "TEXT DEFAULT NULL")
-	s.addColumn("projects", "sandbox_enabled", "INTEGER NOT NULL DEFAULT 0")
-	s.addColumn("projects", "sandbox_network_isolation", "INTEGER NOT NULL DEFAULT 0")
-	s.addColumn("projects", "sandbox_image", "TEXT DEFAULT NULL")
-	s.addColumn("projects", "sandbox_dockerfile_path", "TEXT DEFAULT NULL")
-	s.addColumn("projects", "sandbox_memory_limit", "INTEGER NOT NULL DEFAULT 1024")
-	s.addColumn("projects", "sandbox_forward_ports", "TEXT DEFAULT NULL")
-	s.addColumn("projects", "sandbox_mounts", "TEXT DEFAULT NULL")
-	s.addColumn("projects", "sandbox_envs", "TEXT DEFAULT NULL")
-	s.addColumn("projects", "sandbox_capabilities", "TEXT DEFAULT NULL")
-	s.addColumn("tasks", "base_ref", "TEXT DEFAULT NULL")
-	s.addColumn("tasks", "base_commit", "TEXT DEFAULT NULL")
-	s.addColumn("tasks", "branch_tip", "TEXT DEFAULT NULL")
-	s.renameColumn("tasks", "status_state", "execution_state")
-	// Runtime port mappings (ephemeral, cleared when task ends)
-	s.addColumn("tasks", "assigned_ports", "TEXT DEFAULT NULL")
-	// File checkpoint tracking
-	s.addColumn("task_messages", "git_commit_hash", "TEXT DEFAULT NULL")
-	s.addColumn("task_messages", "attachments", "TEXT DEFAULT NULL")
-	s.addColumn("task_messages", "severity", "TEXT DEFAULT NULL")
-	// The assistant message a tool_call row belongs to. Rebuilding the conversation used
-	// to rely on tool_call rows being contiguous with their assistant row, which any
-	// message written during tool execution (LSP diagnostics, merge-conflict notes)
-	// silently broke — dropping the rest of the turn's tool calls and results.
-	s.addColumn("task_messages", "assistant_msg_id", "TEXT DEFAULT NULL")
-	// Sub-classification of a row within its role — advisory rows carry "diagnostics" or
-	// "merge_conflict" so the transcript can title the note after a reload, not just live.
-	s.addColumn("task_messages", "kind", "TEXT DEFAULT NULL")
-	// Separate merge conflict flag so execution_state can stay "running"
-	s.addColumn("tasks", "has_merge_conflict", "INTEGER NOT NULL DEFAULT 0")
-	// Operating mode: act (default), plan, or explore
-	s.addColumn("tasks", "operating_mode", "TEXT NOT NULL DEFAULT 'act'")
-	s.addColumn("tasks", "summarizing", "INTEGER NOT NULL DEFAULT 0")
-	// Accumulated API cost (USD) for the last task run
-	s.addColumn("tasks", "session_cost", "REAL NOT NULL DEFAULT 0")
-	// Peak container memory (MB) of the last sandbox run; owned by UpdateTaskSandboxMemoryPeak.
-	s.addColumn("tasks", "sandbox_memory_peak_mb", "INTEGER NOT NULL DEFAULT 0")
-	// Records whether the task execution was auto-started from a parent (sibling continuation)
-	s.addColumn("tasks", "autostarted", "INTEGER NOT NULL DEFAULT 0")
-	// moved_at orders the board: it changes only when a task moves column (see UpdateTask).
-	// The backfill belongs to the moment the column first appears, so this one probes.
-	if !s.hasColumn("tasks", "moved_at") {
-		s.addColumn("tasks", "moved_at", "TEXT NOT NULL DEFAULT ''")
-		_, _ = s.db.Exec(`UPDATE tasks SET moved_at = created_at WHERE moved_at = ''`)
-	}
-	// Cumulative token stats table (survives task deletion)
-	_, _ = s.db.Exec(`
-		CREATE TABLE IF NOT EXISTS project_token_stats (
-			project_id       TEXT NOT NULL,
-			model_name       TEXT NOT NULL DEFAULT 'unknown',
-			provider_name    TEXT NOT NULL DEFAULT '',
-			prompt_tokens    INTEGER NOT NULL DEFAULT 0,
-			cache_tokens     INTEGER NOT NULL DEFAULT 0,
-			predicted_tokens INTEGER NOT NULL DEFAULT 0,
-			prompt_ms        INTEGER NOT NULL DEFAULT 0,
-			predicted_ms     INTEGER NOT NULL DEFAULT 0,
-			cost             REAL NOT NULL DEFAULT 0,
-			PRIMARY KEY (project_id, model_name, provider_name),
-			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-		)
-	`)
-	// A project_token_stats table predating cost has none; CREATE TABLE cannot alter it.
-	s.addColumn("project_token_stats", "cost", "REAL NOT NULL DEFAULT 0")
-	// Cumulative task tracking table (survives task deletion)
-	_, _ = s.db.Exec(`
-		CREATE TABLE IF NOT EXISTS project_token_tasks (
-			project_id    TEXT NOT NULL,
-			model_name    TEXT NOT NULL DEFAULT 'unknown',
-			provider_name TEXT NOT NULL DEFAULT '',
-			task_id       TEXT NOT NULL,
-			PRIMARY KEY (project_id, model_name, provider_name, task_id),
-			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-		)
-	`)
-	// Backfill existing data from task_messages (idempotent)
-	var migrationDone int
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM config WHERE key = 'migration_cumulative_stats'`).Scan(&migrationDone)
-	if migrationDone == 0 {
-		_, _ = s.db.Exec(`
-			INSERT INTO project_token_stats (project_id, model_name, provider_name, prompt_tokens, cache_tokens, predicted_tokens, prompt_ms, predicted_ms)
-			SELECT
-				t.project_id,
-				COALESCE(tm.model_name, 'unknown'),
-				COALESCE(tm.provider_name, ''),
-				SUM(tm.prompt_tokens),
-				SUM(COALESCE(tm.cache_tokens, 0)),
-				SUM(tm.predicted_tokens),
-				SUM(tm.prompt_ms),
-				SUM(tm.predicted_ms)
-			FROM task_messages tm
-			JOIN tasks t ON t.id = tm.task_id
-			WHERE tm.role IN ('assistant', 'title')
-			GROUP BY t.project_id, tm.model_name, tm.provider_name
-		`)
-		_, _ = s.db.Exec(`
-			INSERT INTO project_token_tasks (project_id, model_name, provider_name, task_id)
-			SELECT DISTINCT
-				t.project_id,
-				COALESCE(tm.model_name, 'unknown'),
-				COALESCE(tm.provider_name, ''),
-				tm.task_id
-			FROM task_messages tm
-			JOIN tasks t ON t.id = tm.task_id
-			WHERE tm.role IN ('assistant', 'title')
-		`)
-		_, _ = s.db.Exec(`INSERT OR IGNORE INTO config (key, value) VALUES ('migration_cumulative_stats', '1')`)
-	}
-
-	if stored < doneDiffParsedStamp {
-		if _, err := s.db.Exec(`DELETE FROM task_diff_snapshots`); err != nil {
-			logging.For(logging.Store).Warnf("clearing done-task diff snapshots failed: %v", err)
-		}
-	}
-
+	s.addMissingColumns()
+	s.migrateTokenStats()
+	s.clearDoneDiffSnapshotsIfOlderThan(stored)
 	s.setUserVersion(schemaVersion)
 	return nil
 }
@@ -580,3 +303,43 @@ func scanTaskThread(s scanner, th *types.TaskThread) error {
 	th.CreatedAt = scanTime(createdAt)
 	return nil
 }
+
+// tx runs a multi-statement write as one transaction: every statement lands, or none does. The pool
+// is one connection and s.mu is held across the section, so this buys failure atomicity, not
+// isolation - a reader outside the section never sees a half-applied write, and never sees an
+// intermediate state either.
+func (s *Store) tx(fn func(tx *sql.Tx) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	if err := fn(tx); err != nil {
+		// The rollback is not allowed to replace the failure that caused it: an operator reading
+		// "rollback: ...", wants to know what broke, not that the cleanup also had opinions.
+		if rbErr := tx.Rollback(); rbErr != nil {
+			logging.For(logging.Store).Errorf("rollback after %v failed: %v", err, rbErr)
+		}
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
+}
+
+// execer is satisfied by both *sql.DB and *sql.Tx for the three entry points this package uses. A
+// multi-statement section hands it to its helpers, so the same query text runs either on the transaction
+// or — outside one — on the pool, instead of the two copies that drift apart.
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+var (
+	_ execer = (*sql.DB)(nil)
+	_ execer = (*sql.Tx)(nil)
+)

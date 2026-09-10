@@ -176,9 +176,15 @@ func TestTLSTrustNoiseFilterCapsReports(t *testing.T) {
 		if _, err := f.Write([]byte(msg + "\n")); err != nil {
 			t.Fatalf("Write: %v", err)
 		}
+		logging.For(logging.HTTP).Errorf("a foreign line from some other goroutine")
 	}
-	if got := strings.Count(buf.String(), "\n"); got != maxTrustReports {
-		t.Fatalf("logged %d lines, want %d", got, maxTrustReports)
+	// Count only the lines this filter wrote. captureLog swaps the process-wide writer, so a late
+	// goroutine from an earlier test — a task loop finishing, a shutdown step — lands in the same
+	// buffer, and counting every line made this assertion depend on which test ran before it.
+	// The filter rewrites the line, so the marker is what it emits, not the input it was handed.
+	const marker = "TLS: unknown certificate authority from 10.0."
+	if got := strings.Count(buf.String(), marker); got != maxTrustReports {
+		t.Fatalf("logged %d lines, want %d (buffer was:\n%s)", got, maxTrustReports, buf.String())
 	}
 	if len(f.seen) != maxTrustReports {
 		t.Errorf("remembered %d hosts, want %d", len(f.seen), maxTrustReports)

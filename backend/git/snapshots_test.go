@@ -58,7 +58,6 @@ func TestPinSnapshotOutlivesStashClearAndGC(t *testing.T) {
 		t.Fatalf("pinning must not create a stash entry, got: %q", out)
 	}
 
-	// The unpinned control reproduces the old behaviour: registered in the stash reflog, then dropped.
 	gitIn(t, repoDir, "stash", "store", "-m", "mike-checkpoint-"+taskID, unpinned)
 	gitIn(t, repoDir, "stash", "drop", "stash@{0}")
 

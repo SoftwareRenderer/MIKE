@@ -1289,16 +1289,9 @@ func TestWebSocketOrigin_AcceptsSameOrigin(t *testing.T) {
 
 // ─── HandleSandboxMemory (GET /api/lsp/memory) ──────────────────────────────
 
-func TestHandleSandboxMemory_MethodNotAllowed(t *testing.T) {
-	handler := NewLSPHandler(newTestRegistry(), newMockProcessManager())
-	defer handler.Close()
-
-	w := httptest.NewRecorder()
-	handler.HandleSandboxMemory(w, httptest.NewRequest(http.MethodPost, "/api/lsp/memory?workspace=/tmp/ws&file=/tmp/ws/main.go", nil))
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("POST status = %d, want %d", w.Code, http.StatusMethodNotAllowed)
-	}
-}
+// The POST-is-refused case moved with the method pattern: "GET /api/lsp/memory" in the route table
+// means the mux refuses POST, so a handler-level call cannot reach that decision. Asserted at
+// backend/server/routes_method_test.go.
 
 func TestHandleSandboxMemory_MissingParams(t *testing.T) {
 	handler := NewLSPHandler(newTestRegistry(), newMockProcessManager())

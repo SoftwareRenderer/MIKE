@@ -55,8 +55,7 @@ type phraseDetector struct {
 	fired   bool           // already triggered for this response
 }
 
-// minPhraseWords is the minimum word count for a phrase to be tracked.
-// Phrases shorter than this are ignored to avoid false positives on common short text.
+// minPhraseWords: shorter phrases are not tracked — they match too much common text.
 const minPhraseWords = 5
 
 // newPhraseDetector creates a new phraseDetector.

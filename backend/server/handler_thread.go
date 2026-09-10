@@ -8,11 +8,11 @@ import (
 	"kanban/backend/httputil"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"kanban/backend/exec"
 	"kanban/backend/git"
+	"kanban/backend/stream"
 	"kanban/backend/types"
 	"kanban/pkg/logging"
 )
@@ -152,7 +152,7 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 	}
 	task, _ = s.store.GetTask(projectID, taskID)
 	if task != nil {
-		s.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
+		s.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	}
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -160,10 +160,6 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	var req struct {
 		ThreadID string `json:"thread_id"`
 	}
@@ -199,7 +195,7 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 	// already holds this thread's content, so skip checkout/stash/restore to avoid
 	// wiping uncommitted work. Just refresh the diff.
 	if task.CurrentThreadID == req.ThreadID {
-		s.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
+		s.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 		s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": req.ThreadID, "task_id": taskID}})
 		s.broadcastTaskDiff(taskID)
 		JSONResponse(w, http.StatusOK, thread)
@@ -253,7 +249,6 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 			s.resetWorktreeToCommit(taskID, last)
 		}
 	}
-	// Set new active thread
 	if err := s.store.SetActiveThread(req.ThreadID); err != nil {
 		Fail(w, err, "set active thread", "thread not found")
 		return
@@ -265,7 +260,7 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Broadcast updated task so frontend has new currentThreadID before diff loads
-	s.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
+	s.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	// Broadcast thread_switch event to WebSocket clients
 	s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": req.ThreadID, "task_id": taskID}})
 	// Send fresh diff so the Changes panel reflects the new thread's branch
@@ -276,10 +271,6 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	var req struct {
 		FromThreadID  string `json:"from_thread_id"`
 		FromMessageID string `json:"from_message_id"`
@@ -439,7 +430,7 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Broadcast updated task so frontend has new currentThreadID before diff loads
-	s.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
+	s.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	// Broadcast thread_switch event
 	s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": newThreadID, "task_id": taskID}})
 	// Send fresh diff so the Changes panel reflects the forked branch
@@ -520,14 +511,7 @@ func (s *Server) deleteThreadBranch(taskID string, branchName string) {
 	}
 }
 
-// stashWorktreeState moves the current worktree changes off the shared worktree and hands the snapshot to
-// threadID to keep. A clean worktree is not a failure: it returns "" with no error, because there is
-// nothing to save and nothing to lose. An error means the state exists and was NOT captured, and the
-// caller must then change nothing — carrying on would discard work that was never saved.
-//
-// The stash entry is dropped once pinned, because the user's stash list is not MIKE's to fill; pin first,
-// since an unpinned snapshot is one git may prune. Stash push/drop touch .git/refs/stash, which every
-// worktree of the project shares.
+// Parks the worktree's changes for threadID. A clean worktree returns "" with no error: nothing to save.
 func (s *Server) stashWorktreeState(projectID, taskID, threadID, label string) (string, error) {
 	wm := s.executor.WorktreeMgr()
 	// The status is read here rather than through HasWorktreeChanges, which reports a worktree it cannot
@@ -543,7 +527,9 @@ func (s *Server) stashWorktreeState(projectID, taskID, threadID, label string) (
 	if err != nil {
 		return "", err
 	}
-	defer wm.LockProjectStash(projectID)()
+	// A thread switch stashes the worktree, so it queues behind every other stash in the project.
+	defer wm.LockProjectStashWatched(projectID, stream.LockWaitNoticeEvery,
+		s.appStreamMgr.LockWaitNotifier(projectID, taskID, "stash"))()
 
 	stashHash, err := wm.PushStash(worktreePath, label)
 	if errors.Is(err, git.ErrNothingToStash) {
@@ -582,7 +568,7 @@ func (s *Server) refuseUnsavedWork(w http.ResponseWriter, projectID string, task
 		if err := s.store.UpdateTask(task); err != nil {
 			logging.For(logging.Thread).With(logging.TaskID, task.ID).Warnf("refused to %s and could not record the stop: %v", done, err)
 		}
-		s.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
+		s.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	}
 	JSONError(w, http.StatusConflict, message)
 }
@@ -634,47 +620,19 @@ func (s *Server) broadcastTaskDiff(taskID string) {
 	s.appStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeDiffChanged, Data: manifest})
 }
 
-// getOrCreateMutex returns a per-key mutex, creating it on first access.
-// Uses double-checked locking: fast path under the read lock, slow path under
-// the write lock. Mutexes are never cleaned up (bounded by key count,
-// negligible memory overhead).
-func getOrCreateMutex(mu *sync.RWMutex, m map[string]*sync.Mutex, key string) *sync.Mutex {
-	mu.RLock()
-	if existing, ok := m[key]; ok {
-		mu.RUnlock()
-		return existing
-	}
-	mu.RUnlock()
-
-	mu.Lock()
-	// Double-check after acquiring write lock
-	if existing, ok := m[key]; ok {
-		mu.Unlock()
-		return existing
-	}
-	created := &sync.Mutex{}
-	m[key] = created
-	mu.Unlock()
-	return created
-}
-
 // lockWorktree locks the per-task worktree and returns the function that releases it.
 //
 // Release function rather than mutex: these are injected into managers.GitHandler, and a mutex handed
 // across a package boundary is a value that can be stored, copied, and unlocked by whoever holds a
 // copy — see git.WorktreeManager.LockProjectStash for the same argument.
 func (s *Server) lockWorktree(taskID string) func() {
-	mu := getOrCreateMutex(&s.worktreeMuxMu, s.worktreeMux, taskID)
-	mu.Lock()
-	return mu.Unlock
+	return s.gitTask.Lock(taskID)
 }
 
 // lockProject locks the per-project git operations (stash, checkout, pull, push) that touch shared
 // state like .git/refs/stash, and returns the function that releases it.
 func (s *Server) lockProject(projectID string) func() {
-	mu := getOrCreateMutex(&s.projectMuxMu, s.projectMux, projectID)
-	mu.Lock()
-	return mu.Unlock
+	return s.gitProject.Lock(projectID)
 }
 
 // generateCheckpointLabelForFork generates a short label for the checkpoint message

@@ -107,10 +107,6 @@ func (cs *ConfigStore) ResolveAPIKey(serverURL string, providedKey string) strin
 
 // HandleTestConnection handles POST /api/config/test-connection.
 func (cs *ConfigStore) HandleTestConnection(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	var req TestConnectionRequest
 	if !httputil.DecodeJSON(w, r, &req) {

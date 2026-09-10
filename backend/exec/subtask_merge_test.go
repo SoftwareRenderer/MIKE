@@ -1251,7 +1251,6 @@ func TestAutoStartNextSibling_ParentInProgress(t *testing.T) {
 		t.Errorf("parent should still be in_progress, got %q", parentFromDB.Status)
 	}
 
-	// Cleanup
 	te.StopTask(subtask2ID)
 }
 
@@ -1361,7 +1360,6 @@ func TestStartSubtask_InheritsModelConfig(t *testing.T) {
 		t.Error("subtask should be registered in executor task map")
 	}
 
-	// Cleanup
 	te.StopTask(subtaskID)
 }
 

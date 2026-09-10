@@ -148,7 +148,6 @@ func TestTaskUpdate(t *testing.T) {
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Update me")
 
-	// Update the task title
 	req := testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
 		"title": "Updated Title",
 	})
@@ -220,7 +219,6 @@ func TestTaskDelete(t *testing.T) {
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Delete me")
 
-	// Delete the task
 	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID, nil)
 	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusNoContent {
@@ -628,7 +626,6 @@ func TestTaskDeleteCascadesToSubtasksInDifferentStates(t *testing.T) {
 	moveTask(t, s, projID, subReview, "review")
 	moveTask(t, s, projID, subDone, "done")
 
-	// Verify states
 	if getTaskStatus(t, s, projID, subBacklog) != "backlog" {
 		t.Fatal("subBacklog should be backlog")
 	}
@@ -758,7 +755,6 @@ func TestProjectSandboxToggle(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
-	// Get project
 	req := testRequest("GET", "/api/projects/"+projID, nil)
 	rr := testResponseAuth(t, s, req)
 	proj := mustJSON[map[string]any](t, rr.Body)
@@ -859,7 +855,6 @@ func TestBoardEndpointSubtasks(t *testing.T) {
 	// Move subtask to review
 	moveTask(t, s, projID, subID, "review")
 
-	// Get board
 	req := testRequest("GET", "/api/projects/"+projID+"/board", nil)
 	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
@@ -908,7 +903,6 @@ func TestCommitPreview(t *testing.T) {
 		t.Fatalf("move to review: %d %s", moveRR.Code, moveRR.Body.String())
 	}
 
-	// Get commit preview
 	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/commit-preview", nil)
 	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
@@ -957,6 +951,19 @@ func TestCommitAndDoneCustomMessage(t *testing.T) {
 // TestCommitAndDoneIncludesManualEditsAfterStaging verifies commit-and-done
 // includes manual edits made after staging, while unstaged-only files stay
 // out of the commit (staged/unstaged contract preserved).
+// taskWorktreePath is where this server put a task's worktree. It asks the server's configuration
+// instead of reading MIKE_WORKTREES_DIR: the worktrees directory is a decision resolved at boot and
+// handed to NewServer, so a test that read it from the environment was reading a variable nothing
+// sets.
+func taskWorktreePath(t *testing.T, s *Server, projID, taskID string) string {
+	t.Helper()
+	cfg, err := s.configStore.GetConfig()
+	if err != nil {
+		t.Fatalf("workspace dir: %v", err)
+	}
+	return filepath.Join(cfg.WorkspaceDir, projID, taskID)
+}
+
 func TestCommitAndDoneIncludesManualEditsAfterStaging(t *testing.T) {
 	s := testServer(t)
 
@@ -974,7 +981,6 @@ func TestCommitAndDoneIncludesManualEditsAfterStaging(t *testing.T) {
 	}
 	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
 
-	// Create a task
 	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
 		"prompt": "test manual edits on commit",
 	})
@@ -988,7 +994,7 @@ func TestCommitAndDoneIncludesManualEditsAfterStaging(t *testing.T) {
 	// Create a branch and worktree for the task
 	branchName := "task/" + taskID
 	mustRunGit(t, tmpDir, "branch", branchName)
-	wtPath := filepath.Join(os.Getenv("MIKE_WORKTREES_DIR"), projID, taskID)
+	wtPath := taskWorktreePath(t, s, projID, taskID)
 	mustRunGit(t, tmpDir, "worktree", "add", wtPath, branchName)
 
 	taskDB, _ := s.store.GetTask(projID, taskID)
@@ -1077,8 +1083,10 @@ func TestAgentBlockedWithNetworkIsolation(t *testing.T) {
 	// Try to start the task — should be blocked
 	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/start", nil)
 	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d: %s", rr.Code, rr.Body.String())
+	// A sandbox the user can reconfigure is a conflict, not a server fault: the answer is 409 and the
+	// producer's sentence reaches the browser because the person reading it has something to change.
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
 	if !strings.Contains(body, "agent requires network to be enabled") {
@@ -1153,7 +1161,6 @@ func TestLLMAllowedWithNetworkIsolation(t *testing.T) {
 		t.Fatalf("update config: %v", err)
 	}
 
-	// Enable network isolation
 	if err := s.store.UpdateProjectSandboxNetworkIsolation(projID, true); err != nil {
 		t.Fatalf("enable network isolation: %v", err)
 	}
@@ -1358,7 +1365,6 @@ func TestTaskDeleteCleansThreadBranches(t *testing.T) {
 		t.Fatal("thread branch should exist before task delete")
 	}
 
-	// Delete the task
 	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID, nil)
 	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusNoContent {
@@ -1379,7 +1385,6 @@ func TestTaskDeletePrunesOrphanedTaskBranches(t *testing.T) {
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "orphan-branch-cleanup")
 
-	// Get project path
 	proj, err := s.store.GetProject(projID)
 	if err != nil {
 		t.Fatalf("get project: %v", err)
@@ -1498,7 +1503,6 @@ func TestTaskDeleteCleansStashes(t *testing.T) {
 	}
 	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
 
-	// Create a task
 	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{"prompt": "test task"})
 	withAuthCSRF(taskReq, cookie, csrfToken)
 	taskRR := testResponse(t, s, taskReq)
@@ -1530,7 +1534,6 @@ func TestTaskDeleteCleansStashes(t *testing.T) {
 		t.Fatalf("expected 3 stashes before delete, got %d: %v", len(stashList), stashList)
 	}
 
-	// Delete the task
 	deleteReq := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID, nil)
 	deleteRR := testResponseAuth(t, s, deleteReq)
 	if deleteRR.Code != http.StatusNoContent {
@@ -1670,7 +1673,6 @@ func TestTaskDeleteCleansCheckpointStashes(t *testing.T) {
 		t.Fatalf("expected at least 2 stashes before delete, got %d: %v", len(stashList), stashList)
 	}
 
-	// Delete the task
 	deleteReq := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID, nil)
 	deleteRR := testResponseAuth(t, s, deleteReq)
 	if deleteRR.Code != http.StatusNoContent {
@@ -1775,8 +1777,8 @@ func TestCommitAndDoneMergeConflictTriggersResolution(t *testing.T) {
 	mustRunGit(t, tmpDir, "commit", "-m", "master edit shared")
 
 	// Create a worktree for the task at the path the worktree manager expects.
-	// MIKE_WORKTREES_DIR env var is set by testServer and takes priority over config.
-	wtPath := filepath.Join(os.Getenv("MIKE_WORKTREES_DIR"), projID, taskID)
+	// The task worktree path is read back from the server's own configuration.
+	wtPath := taskWorktreePath(t, s, projID, taskID)
 	mustRunGit(t, tmpDir, "worktree", "add", wtPath, branchName)
 
 	// Verify worktree exists at the expected path
@@ -1877,7 +1879,7 @@ func TestCommitAndDoneMergeConflictPreservesAutoMerge(t *testing.T) {
 	mustRunGit(t, tmpDir, "commit", "-m", "master edit shared")
 
 	// Create a worktree for the task
-	wtPath := filepath.Join(os.Getenv("MIKE_WORKTREES_DIR"), projID, taskID)
+	wtPath := taskWorktreePath(t, s, projID, taskID)
 	mustRunGit(t, tmpDir, "worktree", "add", wtPath, branchName)
 
 	// Update task with branch info
@@ -1964,7 +1966,7 @@ func TestCommitAndDoneMergeConflictSystemMessage(t *testing.T) {
 	mustRunGit(t, tmpDir, "commit", "-m", "master edit shared")
 
 	// Create a worktree for the task
-	wtPath := filepath.Join(os.Getenv("MIKE_WORKTREES_DIR"), projID, taskID)
+	wtPath := taskWorktreePath(t, s, projID, taskID)
 	mustRunGit(t, tmpDir, "worktree", "add", wtPath, branchName)
 
 	// Update task with branch info

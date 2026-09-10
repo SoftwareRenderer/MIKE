@@ -1,4 +1,4 @@
-import type { ChatEntry } from '$lib/types';
+import type { ChatEntry, LockWait } from '$lib/types';
 import { findToolCall } from '$lib/utils/tool-call-lookup';
 
 /** Tool call info — matches ChatEntry['toolCalls'][number]. */
@@ -23,6 +23,7 @@ export class StreamState {
         awaitingResponse: false,
         queuePosition: 0,
         queueEstimatedWait: 0,
+        lockWait: null as LockWait | null,
         promptProgress: 0,
         retryCount: 0,
         retryError: '',
@@ -64,6 +65,7 @@ export class StreamState {
         this.state.promptProgress = 0;
         this.state.queuePosition = 0;
         this.state.queueEstimatedWait = 0;
+        this.state.lockWait = null;
         this.clearRetry();
     }
 
@@ -107,6 +109,7 @@ export class StreamState {
         this.resetStreaming();
         this.state.queuePosition = 0;
         this.state.queueEstimatedWait = 0;
+        this.state.lockWait = null;
         this.state.promptProgress = 0;
         this.clearRetry();
         this.state.contextState = { used: 0, limit: 0 };

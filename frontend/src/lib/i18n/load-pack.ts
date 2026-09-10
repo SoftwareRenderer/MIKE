@@ -68,17 +68,7 @@ export async function loadI18NFromExtensions(extensions: Extension[]): Promise<I
     const winner = resolveI18NPack(extensions);
 
     if (!winner) {
-        // No enabled pack is English — including the case that matters most: a
-        // pack that is installed but disabled, and a pack that was uninstalled
-        // while the cache still holds its text. The cache goes with it, so a
-        // language can never outlive the pack behind it.
-        //
-        // Cleared unconditionally rather than "only if we last wrote one": an
-        // earlier version skipped the delete when it believed the cache was
-        // already empty, and that guess survived a stale entry from a previous
-        // session, another tab, or a pack deleted while the server was down.
-        // Deleting what is not there is free; a language with no pack behind it
-        // is not.
+        // No enabled pack means English, and the cache goes with it so a language cannot outlive its pack.
         await clearCachedCatalog();
         if (me !== reconcileSeq) return result();
         // Answer English unconditionally. `applied` tracks only what *this*

@@ -20,8 +20,9 @@ export function markCached<T extends object>(data: T): T {
 }
 
 /** The fetch never reached the server, so a cached copy is the only thing worth showing.
- * Narrower than queue.ts's isTransientError, which also counts apiFetch's own 15 s abort: that one
- * means "ask again", and answering it from cache hides a slow server behind an older copy. */
+ * Narrower than queue.ts's isTransientError, which also queues: answering a *retryable* failure from cache
+ * hides a slow server behind an older copy, while a failure that never reached the server is exactly when a
+ * cached copy is the best answer available. */
 export function isDisconnectedError(e: unknown): boolean {
     return (e as any)?.name === 'TypeError';
 }

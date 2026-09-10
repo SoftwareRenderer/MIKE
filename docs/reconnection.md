@@ -22,3 +22,66 @@ advance state.
 ## Behaviour in full (moved from AGENTS.md)
 ### Reconnection & Offline
 `onConnected(true)` in `App.svelte` runs `silentRefresh()` once `initialLoadComplete`; `TaskChat` reloads history from the DB on reconnect because **turns completed while offline are never replayed** (buffer cleared at turn end). `offline` queues writes immediately, except a value that carries a secret — an unmasked provider key, or a clone URL with credentials in it — which is refused because the queue is persisted; `online` flushes the queue and calls `reconnectNow()` to skip backoff; `visibilitychange` refreshes the board (phone-sleep). Project re-subscription forces a re-send of `task_diff_stats`. Mechanism + test approach: `docs/reconnection.md`.
+
+### How a request ends: cancelled, or unanswered
+
+`apiFetch` (`src/lib/api/helpers.ts`) is the one place that decides what a failed fetch means, because all
+69 call sites read it.
+
+| outcome | thrown | offline flag | what the user sees |
+|---|---|---|---|
+| caller aborted (unmount, navigate away, Stop/Cancel) | `RequestAborted` | untouched | nothing — they asked for this |
+| connection failed | `ConnectionFailure` | **set** | "MIKE did not answer — check the server is still running", and the queue takes over |
+
+Before this, both rows were one row: any `AbortError` counted as offline. Since `apiFetch` attached its own
+15 s `AbortController` to every call that had no caller signal, that meant a big task diff, a merge on
+commit-and-done, or a clone replayed from the queue **failed in the browser at 15 s while the server was
+still doing the work**, and then every later write went to IndexedDB because of it. Cancelling a commit
+dialog had the same effect on purpose-free terms.
+
+**No client-side deadline replaced it.** The plan's rule is that the queue gets bounded and the work does
+not, and the case the timeout existed for — a server that accepts a connection and never answers — is
+already surfaced honestly: the WebSocket drops, and `setOfflineStatus(!connected)` in `App.svelte` sets the
+same flag the HTTP layer would have. Stalls on the server are reported where they are known
+(`subproc.Watch` for podman, the lock slow-wait reports), not guessed at from the client.
+
+Both classes keep the DOM `name` (`AbortError`, `TypeError`) rather than inventing one, because a check that
+misses a cancellation fails silently in one of two directions: a cancellation starts toasting, or a queueable
+write starts failing. **The name is the test; `instanceof DOMException` is not** — these are `Error`s that
+carry the name, which is why `isAborted(e)` is a function rather than a class check. One call site
+(`diff-cache`'s fetch of a single file's diff) tested the instance, so the moment the throw became an `Error`
+a cancelled read stopped being silent: a check written against the throwing type, not the contract.
+
+`isTransientError` explicitly excludes a cancellation, so a send the user stopped is not replayed from
+storage after they left.
+
+The server answers the same pair, in `httputil.Fail`, which is the only place a status is chosen:
+`context.Canceled` → **499** logged at debug (no fault to report); an `errs.Operation` fault → **500** whose body
+is MIKE's own sentence for the operation (`"git log failed"`) with the cause logged; anything else → **500**
+`"internal error"` at error, cause logged. The middle class exists because 30 handlers had no way to say "this
+did not complete and it is MIKE's problem" without echoing the cause into the browser: they printed git's
+stderr and an absolute worktree path to the panel and left the server with no trace. `httputil.Fault` is that
+call — `Fault(w, "git log", err)` — and it is `Fail` with an `errs.Operation`, so a handler names what it was
+doing instead of choosing a code.
+
+Neither answer carries a deadline for the next request, and nothing in the product bounds how long a client
+may wait for this server — a subprocess or a protocol round-trip may carry its own timeout, a wait on MIKE
+does not.
+
+Tests: `src/lib/api/__tests__/fetch-failure.unit.ts` (including "no implicit abort after 60 s of fake timers"
+and "a cancellation does not call itself an outage"), `src/lib/api/__tests__/send-queue.unit.ts`. The server side is held by `backend/errs/errs_test.go` (an operation must not inherit its cause's
+classification) and `backend/httputil/httputil_test.go` (the sentence answers, the cause is logged, a host path
+never reaches the body).
+
+### A lock wait repeats, so a lost frame cannot strand the line
+
+`lock_wait` is the one task event whose *repetition* is the contract. While a click is queued behind a lock,
+`keylock.Table.LockWatched` re-sends it every `stream.LockWaitNoticeEvery` with a bigger `waited_seconds`, then
+sends one frame with `acquired: true`. A state set by a single frame and cleared by a single frame would leave the
+spinner running forever if the clearing frame were lost — a reconnect, a tab backgrounded at the wrong moment —
+and the user would have to reload to be told the truth. Repeating costs one small frame every three seconds and
+makes the worst case one repeat of staleness instead of an indefinite lie. Nothing on the server tracks whether a
+client saw the frames: there is no state to get out of step.
+
+Tests: `backend/stream/lock_wait_test.go` (both frames), `frontend/src/lib/services/__tests__/stream-handler.unit.ts`
+(the acquisition clears it, an unknown domain still names a wait).

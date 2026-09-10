@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"kanban/pkg/sandboxruntime"
 )
 
 // repairFixture is a handler whose extensions directory is an empty temp dir, plus that directory.
@@ -22,7 +24,7 @@ func repairFixture(t *testing.T) (*ExtensionHandler, *ExtensionStore, string) {
 	reg := NewRegistryClient()
 	dir := t.TempDir()
 	cfg := &ExtensionConfig{ExtensionsDir: dir}
-	return NewExtensionHandler(extStore, NewExtensionSandboxManager(reg, extStore), reg, cfg), extStore, dir
+	return NewExtensionHandler(extStore, NewExtensionSandboxManager(reg, extStore, sandboxruntime.Boot{}), reg, cfg), extStore, dir
 }
 
 // createRow stores an installed extension. The author is kept in the shape install stores it: the

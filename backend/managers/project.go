@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"kanban/backend/config"
+	"kanban/backend/errs"
 	"kanban/backend/exec"
 	"kanban/backend/fsutil"
 	"kanban/backend/git"
@@ -38,10 +39,14 @@ type ProjectHandler struct {
 	// operator declare" has one answer. A nil policy fails closed: nothing is inside a jail
 	// with no roots.
 	hostRoot *fsutil.HostRoot
+	// dangerZone is the resolved DANGER_ZONE grant, injected for the same reason as hostRoot: it
+	// decides whether an unsandboxed project may be created at all, and a project created and a
+	// project switched must consult one answer.
+	dangerZone sandbox.DangerZone
 }
 
-func NewProjectHandler(store *store.Store, configStore *config.ConfigStore, worktreeMgr *git.WorktreeManager, terminalMgr *term.TerminalManager, sandboxMgr *sandbox.SandboxManager, taskExecutor *exec.TaskExecutor, hostRoot *fsutil.HostRoot) *ProjectHandler {
-	return &ProjectHandler{store: store, configStore: configStore, worktreeMgr: worktreeMgr, terminalMgr: terminalMgr, sandboxMgr: sandboxMgr, executor: taskExecutor, hostRoot: hostRoot}
+func NewProjectHandler(store *store.Store, configStore *config.ConfigStore, worktreeMgr *git.WorktreeManager, terminalMgr *term.TerminalManager, sandboxMgr *sandbox.SandboxManager, taskExecutor *exec.TaskExecutor, hostRoot *fsutil.HostRoot, dangerZone sandbox.DangerZone) *ProjectHandler {
+	return &ProjectHandler{store: store, configStore: configStore, worktreeMgr: worktreeMgr, terminalMgr: terminalMgr, sandboxMgr: sandboxMgr, executor: taskExecutor, hostRoot: hostRoot, dangerZone: dangerZone}
 }
 
 // HandleList returns all projects.
@@ -56,10 +61,6 @@ func (h *ProjectHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 
 // HandleCounts returns task counts for all projects.
 func (h *ProjectHandler) HandleCounts(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	counts := h.store.GetAllProjectCounts()
 	httputil.JSONResponse(w, http.StatusOK, counts)
 }
@@ -237,7 +238,7 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 		memoryLimit = 1024 // default 1 GB
 	}
 	// Block creating a project with sandbox disabled unless DANGER_ZONE=1
-	if !req.SandboxEnabled && !sandbox.DangerZoneAllows() {
+	if !req.SandboxEnabled && !h.dangerZone.Allows() {
 		return nil, http.StatusForbidden, "cannot create project with sandbox disabled — set DANGER_ZONE=1 to allow"
 	}
 	// When sandbox is enabled, network isolation must be explicitly specified
@@ -315,14 +316,14 @@ func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 	// jail's refusal arrives here as an error frame rather than a 403.
 	targetPath, err := h.prepareCloneTarget(req)
 	if err != nil {
-		sendEvent(map[string]any{"type": "error", "message": err.Error()})
+		sendEvent(map[string]any{"type": string(types.SSETypeError), "message": err.Error()})
 		return
 	}
 
-	sendEvent(map[string]any{"type": "status", "message": "Cloning " + req.GitURL + " into " + targetPath + "..."})
+	sendEvent(map[string]any{"type": string(types.SSETypeStatus), "message": "Cloning " + req.GitURL + " into " + targetPath + "..."})
 
 	out, err := git.CloneContext(r.Context(), req.GitURL, targetPath, func(percent int) {
-		sendEvent(map[string]any{"type": "progress", "percent": percent})
+		sendEvent(map[string]any{"type": string(types.SSETypeProgress), "percent": percent})
 	})
 	if err != nil {
 		// Drop the partial clone so a retry can start clean.
@@ -333,15 +334,15 @@ func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 			logging.For(logging.Git).Infof("cancelled by client: %s", req.GitURL)
 			return
 		}
-		sendEvent(map[string]any{"type": "error", "message": "git clone failed: " + strings.TrimSpace(out)})
+		sendEvent(map[string]any{"type": string(types.SSETypeError), "message": "git clone failed: " + strings.TrimSpace(out)})
 		return
 	}
 
 	req.Path = targetPath
 	if p, _, msg := h.createProjectFromRequest(req); p != nil {
-		sendEvent(map[string]any{"type": "done", "project": p})
+		sendEvent(map[string]any{"type": string(types.SSETypeDone), "project": p})
 	} else {
-		sendEvent(map[string]any{"type": "error", "message": msg})
+		sendEvent(map[string]any{"type": string(types.SSETypeError), "message": msg})
 	}
 }
 
@@ -469,10 +470,6 @@ func buildWantsNoCache(r *http.Request) bool {
 // ?no_cache=1 skips the layer cache for this build only.
 func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("projectID")
-	if r.Method != http.MethodPost {
-		httputil.JSONError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
 	noCache := buildWantsNoCache(r)
 
 	// Get the project to find the Dockerfile path
@@ -544,219 +541,246 @@ func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Reque
 }
 
 // HandleByID handles GET, PUT, DELETE for a single project.
+// HandleByID is one route answering three verbs. Each verb gets its own method below because the work
+// behind them does not overlap: a read, a partial update that must validate before it writes anything,
+// and a delete whose cleanup has to finish before the row goes.
 func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("projectID")
 	switch r.Method {
 	case http.MethodGet:
-		p, err := h.store.GetProject(id)
-		if err != nil {
-			httputil.Fail(w, err, "get project", "project not found")
-			return
-		}
-		// Add active terminal ports from project-level terminal
-		if h.terminalMgr != nil {
-			p.ActiveTerminalPorts = h.terminalMgr.GetProjectPorts(id)
-		}
-		httputil.JSONResponse(w, http.StatusOK, p)
+		h.handleGetProject(w, r, id)
 
 	case http.MethodPut:
-		var req types.UpdateProjectRequest
-		if !httputil.DecodeJSON(w, r, &req) {
-			return
-		}
-		// Partial update: apply only provided fields
-		if req.Name != "" {
-			if err := sandboxruntime.ValidateProjectName(req.Name); err != nil {
-				httputil.JSONError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-			if _, updateErr := h.store.UpdateProject(id, req.Name); updateErr != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to update project")
-				return
-			}
-		}
-		// Validate before writing any sandbox field, so a rejected value can't leave the project
-		// half-updated.
-		if req.SandboxImage != nil {
-			if err := sandboxruntime.ValidateConfiguredImageRef(*req.SandboxImage); err != nil {
-				httputil.JSONError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-		}
-		var forwardPorts []types.PortForward
-		if req.SandboxForwardPorts != nil {
-			normalized, err := types.NormalizeSandboxForwardPorts(req.SandboxForwardPorts)
-			if err != nil {
-				httputil.JSONError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-			forwardPorts = normalized
-		}
-		// Validate before anything is written or any task is stopped: a refused request
-		// must leave the project as it was.
-		if req.SandboxMounts != nil || req.SandboxCapabilities != nil {
-			if err := types.ValidateSandboxAdditions(req.SandboxMounts, req.SandboxCapabilities); err != nil {
-				httputil.JSONError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-		}
-		if req.SandboxDockerfilePath != nil {
-			if err := h.checkHostPath(*req.SandboxDockerfilePath); err != nil {
-				httputil.JSONError(w, http.StatusForbidden, "sandbox_dockerfile_path: "+err.Error())
-				return
-			}
-		}
-		// Block sandbox setting changes while tasks are running in the project.
-		// Modifying sandbox settings during execution would kill bridge processes
-		// mid-tool-call, causing "broken pipe" errors.
-		hasSandboxChange := req.SandboxEnabled != nil || req.SandboxNetworkIsolation != nil ||
-			req.SandboxImage != nil || req.SandboxDockerfilePath != nil ||
-			req.SandboxMemoryLimit != nil || req.SandboxForwardPorts != nil ||
-			req.SandboxMounts != nil || req.SandboxEnvs != nil ||
-			req.SandboxCapabilities != nil
-
-		// Block sandbox setting changes if any task that is actually "In Progress" is running.
-		// If no "In Progress" tasks are running, we can safely stop any other running executors
-		// (which are stale) and apply the settings.
-		if hasSandboxChange && h.executor != nil {
-			if h.executor.HasRunningTasks(id) {
-				httputil.JSONError(w, http.StatusConflict, "cannot modify sandbox settings while tasks are running — stop all tasks first")
-				return
-			}
-			stopped := h.executor.StopProjectTasks(id)
-			if stopped > 0 {
-				logging.For(logging.Managers).Infof("stopped %d stale running tasks in project %s due to sandbox settings change", stopped, id)
-			}
-		}
-		if req.SandboxEnabled != nil {
-			// Block disabling sandbox unless DANGER_ZONE=1
-			if !*req.SandboxEnabled && !sandbox.DangerZoneAllows() {
-				httputil.JSONError(w, http.StatusForbidden, "cannot disable sandbox isolation — set DANGER_ZONE=1 to allow")
-				return
-			}
-			if updateErr := h.store.UpdateProjectSandboxEnabled(id, *req.SandboxEnabled); updateErr != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox setting")
-				return
-			}
-		}
-		if req.SandboxNetworkIsolation != nil {
-			if updateErr := h.store.UpdateProjectSandboxNetworkIsolation(id, *req.SandboxNetworkIsolation); updateErr != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox network isolation setting")
-				return
-			}
-		}
-		if req.SandboxImage != nil {
-			if updateErr := h.store.UpdateProjectSandboxImage(id, *req.SandboxImage); updateErr != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox image setting")
-				return
-			}
-		}
-		if req.SandboxDockerfilePath != nil {
-			if updateErr := h.store.UpdateProjectSandboxDockerfilePath(id, *req.SandboxDockerfilePath); updateErr != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox dockerfile path setting")
-				return
-			}
-		}
-		if req.SandboxMemoryLimit != nil {
-			limit := *req.SandboxMemoryLimit
-			if limit < 0 {
-				limit = 0
-			}
-			if updateErr := h.store.UpdateProjectSandboxMemoryLimit(id, limit); updateErr != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox memory limit setting")
-				return
-			}
-		}
-		if req.SandboxForwardPorts != nil {
-			if updateErr := h.store.UpdateProjectSandboxForwardPorts(id, forwardPorts); updateErr != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox forward ports setting")
-				return
-			}
-		}
-		if req.SandboxMounts != nil {
-			if updateErr := h.store.UpdateProjectSandboxMounts(id, req.SandboxMounts); updateErr != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox mounts setting")
-				return
-			}
-		}
-		if req.SandboxEnvs != nil {
-			if updateErr := h.store.UpdateProjectSandboxEnvs(id, req.SandboxEnvs); updateErr != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox envs setting")
-				return
-			}
-		}
-		if req.SandboxCapabilities != nil {
-			if updateErr := h.store.UpdateProjectSandboxCapabilities(id, req.SandboxCapabilities); updateErr != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox capabilities setting")
-				return
-			}
-		}
-		// When sandbox settings change, stop all containers so they'll be
-		// recreated with the new settings on next use.
-		if hasSandboxChange {
-			tasks, _ := h.store.GetTasksByProject(id)
-			taskIDs := make([]string, 0, len(tasks))
-			for _, task := range tasks {
-				taskIDs = append(taskIDs, task.ID)
-			}
-			if h.sandboxMgr != nil {
-				h.sandboxMgr.StopProjectContainers(id, taskIDs)
-			}
-			if h.terminalMgr != nil {
-				h.terminalMgr.RemoveProjectSessions(id)
-			}
-		}
-		// Fetch latest state
-		p, err := h.store.GetProject(id)
-		if err != nil {
-			httputil.Fail(w, err, "get project", "project not found")
-			return
-		}
-		httputil.JSONResponse(w, http.StatusOK, p)
+		h.handleUpdateProject(w, r, id)
 
 	case http.MethodDelete:
-		// Clean up worktrees and terminal sessions for all tasks before deleting the project
-		tasks, err := h.store.GetTasksByProject(id)
-		if err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, "failed to list tasks for cleanup")
-			return
-		}
-		for _, task := range tasks {
-			if h.worktreeMgr != nil && task.Branch != "" {
-				_ = h.worktreeMgr.RemoveWorktree(id, task.ID, task.Branch)
-				// Clean up fork thread branches (thread/<threadID>)
-				threads, _ := h.store.GetThreadsByTask(task.ID)
-				for _, th := range threads {
-					if th.GitBranch != "" {
-						h.worktreeMgr.GitRunInProject(id, "branch", "-D", th.GitBranch)
-					}
-				}
-			}
-			if h.terminalMgr != nil {
-				h.terminalMgr.RemoveSession(task.ID)
-			}
-		}
-		// Clean up project-level terminal session
-		if h.terminalMgr != nil {
-			h.terminalMgr.RemoveSession("proj:" + id)
-		}
-		// Clean up any project-level worktree directory (safety check)
-		if h.worktreeMgr != nil {
-			cfg, cfgErr := h.configStore.GetConfig()
-			if cfgErr == nil {
-				worktreesDir := cfg.WorkspaceDir
-				_ = os.RemoveAll(filepath.Join(worktreesDir, id))
-			}
-		}
-		if err := h.store.DeleteProject(id); err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, "failed to delete project")
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
+		h.handleDeleteProject(w, r, id)
 
 	default:
 		httputil.MethodNotAllowed(w)
 	}
+}
+
+// handleGetProject answers the project row plus the ports its terminal sessions are holding open, which is
+// live state the row does not own.
+func (h *ProjectHandler) handleGetProject(w http.ResponseWriter, r *http.Request, id string) {
+	p, err := h.store.GetProject(id)
+	if err != nil {
+		httputil.Fail(w, err, "get project", "project not found")
+		return
+	}
+	// Add active terminal ports from project-level terminal
+	if h.terminalMgr != nil {
+		p.ActiveTerminalPorts = h.terminalMgr.GetProjectPorts(id)
+	}
+	httputil.JSONResponse(w, http.StatusOK, p)
+}
+
+// handleUpdateProject is a partial update: a field that is absent is left alone, and every value is
+// validated before the first write, so a refused request leaves the project as it was.
+func (h *ProjectHandler) handleUpdateProject(w http.ResponseWriter, r *http.Request, id string) {
+	var req types.UpdateProjectRequest
+	if !httputil.DecodeJSON(w, r, &req) {
+		return
+	}
+	// Partial update: apply only provided fields
+	if req.Name != "" {
+		if err := sandboxruntime.ValidateProjectName(req.Name); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if _, updateErr := h.store.UpdateProject(id, req.Name); updateErr != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, "failed to update project")
+			return
+		}
+	}
+	// Validate before writing any sandbox field, so a rejected value can't leave the project
+	// half-updated.
+	if req.SandboxImage != nil {
+		if err := sandboxruntime.ValidateConfiguredImageRef(*req.SandboxImage); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	var forwardPorts []types.PortForward
+	if req.SandboxForwardPorts != nil {
+		normalized, err := types.NormalizeSandboxForwardPorts(req.SandboxForwardPorts)
+		if err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		forwardPorts = normalized
+	}
+	// Validate before anything is written or any task is stopped: a refused request
+	// must leave the project as it was.
+	if req.SandboxMounts != nil || req.SandboxCapabilities != nil {
+		if err := types.ValidateSandboxAdditions(req.SandboxMounts, req.SandboxCapabilities); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if req.SandboxDockerfilePath != nil {
+		if err := h.checkHostPath(*req.SandboxDockerfilePath); err != nil {
+			httputil.JSONError(w, http.StatusForbidden, "sandbox_dockerfile_path: "+err.Error())
+			return
+		}
+	}
+	// Block sandbox setting changes while tasks are running in the project.
+	// Modifying sandbox settings during execution would kill bridge processes
+	// mid-tool-call, causing "broken pipe" errors.
+	hasSandboxChange := req.SandboxEnabled != nil || req.SandboxNetworkIsolation != nil ||
+		req.SandboxImage != nil || req.SandboxDockerfilePath != nil ||
+		req.SandboxMemoryLimit != nil || req.SandboxForwardPorts != nil ||
+		req.SandboxMounts != nil || req.SandboxEnvs != nil ||
+		req.SandboxCapabilities != nil
+
+	// Block sandbox setting changes if any task that is actually "In Progress" is running.
+	// If no "In Progress" tasks are running, we can safely stop any other running executors
+	// (which are stale) and apply the settings.
+	if hasSandboxChange && h.executor != nil {
+		if h.executor.HasRunningTasks(id) {
+			httputil.JSONError(w, http.StatusConflict, "cannot modify sandbox settings while tasks are running — stop all tasks first")
+			return
+		}
+		stopped := h.executor.StopProjectTasks(id)
+		if stopped > 0 {
+			logging.For(logging.Managers).Infof("stopped %d stale running tasks in project %s due to sandbox settings change", stopped, id)
+		}
+	}
+	// A policy refusal is answered before any write, not in the middle of the writes it exists to
+	// prevent: disabling sandboxing is the operator's decision and needs DANGER_ZONE=1.
+	if req.SandboxEnabled != nil && !*req.SandboxEnabled && !h.dangerZone.Allows() {
+		httputil.JSONError(w, http.StatusForbidden, "cannot disable sandbox isolation — set DANGER_ZONE=1 to allow")
+		return
+	}
+	if err := h.applySandboxFields(id, req, forwardPorts); err != nil {
+		httputil.Fail(w, err, "update project", "project not found")
+		return
+	}
+
+	// When sandbox settings change, stop all containers so they'll be
+	// When sandbox settings change, stop all containers so they'll be
+	// recreated with the new settings on next use.
+	if hasSandboxChange {
+		tasks, _ := h.store.GetTasksByProject(id)
+		taskIDs := make([]string, 0, len(tasks))
+		for _, task := range tasks {
+			taskIDs = append(taskIDs, task.ID)
+		}
+		if h.sandboxMgr != nil {
+			h.sandboxMgr.StopProjectContainers(id, taskIDs)
+		}
+		if h.terminalMgr != nil {
+			h.terminalMgr.RemoveProjectSessions(id)
+		}
+	}
+	// Fetch latest state
+	p, err := h.store.GetProject(id)
+	if err != nil {
+		httputil.Fail(w, err, "get project", "project not found")
+		return
+	}
+	httputil.JSONResponse(w, http.StatusOK, p)
+}
+
+// applySandboxFields writes the sandbox fields the request provided, one store statement each. Every value
+// was validated by the caller before the first write, so a failure here is the store refusing, not the
+// caller: each returns an operation-classified fault naming the field, which the transport answers as a
+// server fault with the store's error in the log — none of these logged anything before.
+func (h *ProjectHandler) applySandboxFields(id string, req types.UpdateProjectRequest, forwardPorts []types.PortForward) error {
+	if req.SandboxEnabled != nil {
+		if updateErr := h.store.UpdateProjectSandboxEnabled(id, *req.SandboxEnabled); updateErr != nil {
+			return errs.Operation("update sandbox setting", updateErr)
+		}
+	}
+	if req.SandboxNetworkIsolation != nil {
+		if updateErr := h.store.UpdateProjectSandboxNetworkIsolation(id, *req.SandboxNetworkIsolation); updateErr != nil {
+			return errs.Operation("update sandbox network isolation setting", updateErr)
+		}
+	}
+	if req.SandboxImage != nil {
+		if updateErr := h.store.UpdateProjectSandboxImage(id, *req.SandboxImage); updateErr != nil {
+			return errs.Operation("update sandbox image setting", updateErr)
+		}
+	}
+	if req.SandboxDockerfilePath != nil {
+		if updateErr := h.store.UpdateProjectSandboxDockerfilePath(id, *req.SandboxDockerfilePath); updateErr != nil {
+			return errs.Operation("update sandbox dockerfile path setting", updateErr)
+		}
+	}
+	if req.SandboxMemoryLimit != nil {
+		limit := *req.SandboxMemoryLimit
+		if limit < 0 {
+			limit = 0
+		}
+		if updateErr := h.store.UpdateProjectSandboxMemoryLimit(id, limit); updateErr != nil {
+			return errs.Operation("update sandbox memory limit setting", updateErr)
+		}
+	}
+	if req.SandboxForwardPorts != nil {
+		if updateErr := h.store.UpdateProjectSandboxForwardPorts(id, forwardPorts); updateErr != nil {
+			return errs.Operation("update sandbox forward ports setting", updateErr)
+		}
+	}
+	if req.SandboxMounts != nil {
+		if updateErr := h.store.UpdateProjectSandboxMounts(id, req.SandboxMounts); updateErr != nil {
+			return errs.Operation("update sandbox mounts setting", updateErr)
+		}
+	}
+	if req.SandboxEnvs != nil {
+		if updateErr := h.store.UpdateProjectSandboxEnvs(id, req.SandboxEnvs); updateErr != nil {
+			return errs.Operation("update sandbox envs setting", updateErr)
+		}
+	}
+	if req.SandboxCapabilities != nil {
+		if updateErr := h.store.UpdateProjectSandboxCapabilities(id, req.SandboxCapabilities); updateErr != nil {
+			return errs.Operation("update sandbox capabilities setting", updateErr)
+		}
+	}
+	return nil
+}
+
+// handleDeleteProject removes the checkout, the branches and the sessions before the row, not after: a
+// project whose row is gone but whose worktree directory remains is a directory no route can reach again.
+func (h *ProjectHandler) handleDeleteProject(w http.ResponseWriter, r *http.Request, id string) {
+	// Clean up worktrees and terminal sessions for all tasks before deleting the project
+	tasks, err := h.store.GetTasksByProject(id)
+	if err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "failed to list tasks for cleanup")
+		return
+	}
+	for _, task := range tasks {
+		if h.worktreeMgr != nil && task.Branch != "" {
+			_ = h.worktreeMgr.RemoveWorktree(id, task.ID, task.Branch)
+			// Clean up fork thread branches (thread/<threadID>)
+			threads, _ := h.store.GetThreadsByTask(task.ID)
+			for _, th := range threads {
+				if th.GitBranch != "" {
+					h.worktreeMgr.GitRunInProject(id, "branch", "-D", th.GitBranch)
+				}
+			}
+		}
+		if h.terminalMgr != nil {
+			h.terminalMgr.RemoveSession(task.ID)
+		}
+	}
+	// Clean up project-level terminal session
+	if h.terminalMgr != nil {
+		h.terminalMgr.RemoveSession("proj:" + id)
+	}
+	// Clean up any project-level worktree directory (safety check)
+	if h.worktreeMgr != nil {
+		cfg, cfgErr := h.configStore.GetConfig()
+		if cfgErr == nil {
+			worktreesDir := cfg.WorkspaceDir
+			_ = os.RemoveAll(filepath.Join(worktreesDir, id))
+		}
+	}
+	if err := h.store.DeleteProject(id); err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "failed to delete project")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // validateGitCloneURL validates a clone source before it reaches `git clone`.

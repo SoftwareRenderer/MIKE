@@ -402,17 +402,23 @@ export interface ProjectStats {
     total_cost: number; // USD (API + electricity)
 }
 
+// A lock a click is waiting on, named by its domain. Rendered by QueueIndicator.
+export interface LockWait {
+    domain: 'worktree' | 'stash' | string;
+    seconds: number;
+}
+
 // Stream events
 export type StreamEventType =
     | 'token'
     | 'reasoning'
-    | 'reasoning_end'
     | 'tool_call'
     | 'tool_result'
     | 'tool_progress'
     | 'tool_output'
     | 'status'
     | 'queue'
+    | 'lock_wait'
     | 'complete'
     | 'error'
     | 'user_message'

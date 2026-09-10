@@ -9,14 +9,13 @@ import (
 	"testing"
 )
 
-// jail points the policy at a home directory the test owns and returns the policy.
-// Every case here runs jailed: the widening variable is only ever set inside
-// TestHostRootWideningIsTheExactValueOne, which restores it through t.Setenv.
+// jail points a jailed policy at a home directory the test owns and returns it. The widening is a
+// constructor argument, so no case here needs or touches the variable.
 func jail(t *testing.T, declared ...string) *HostRoot {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	return NewHostRoot(declared...)
+	return NewHostRoot(false, declared...)
 }
 
 // mustWrite makes a file under base and returns its path.
@@ -290,60 +289,53 @@ func TestStdlibRootRefusesAnInsideSymlinkAndOursReadsIt(t *testing.T) {
 	}
 
 	t.Setenv("HOME", home)
-	if _, err := NewHostRoot().Stat(filepath.Join(home, "go")); err != nil {
+	if _, err := NewHostRoot(false).Stat(filepath.Join(home, "go")); err != nil {
 		t.Errorf("HostRoot.Stat must read through the in-root symlink, got %v", err)
 	}
 }
 
-func TestHostRootWideningIsTheExactValueOne(t *testing.T) {
+// The widening a policy has is the decision it was constructed with. The rule that only the exact
+// value "1" produces that decision is startup's (TestOptInSwitchesAreTheExactValueOne), including the
+// values someone types believing they widen it ("true", "yes", "on", " 1").
+func TestHostRootWideningIsTheDecisionItWasBuiltWith(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	elsewhere := t.TempDir()
 
-	for _, v := range []string{"1"} {
-		t.Setenv(AllowRootFSEnv, v)
-		h := NewHostRoot()
-		if !h.Unrestricted() {
-			t.Fatalf("%q must widen the jail", v)
-		}
-		if h.Jailed() {
-			t.Errorf("%q: Jailed() = true while unrestricted", v)
-		}
-		if err := h.MkdirAll(filepath.Join(elsewhere, "widened"), 0o700); err != nil {
-			t.Errorf("%q: MkdirAll outside every root = %v, want success", v, err)
-		}
-		if _, err := h.ReadDir("/etc"); err != nil {
-			t.Errorf("%q: ReadDir(/etc) = %v, want success", v, err)
-		}
-		if h.IsRoot("/etc") {
-			t.Error("unrestricted mode has no roots, so .. must stay available everywhere")
-		}
+	wide := NewHostRoot(true)
+	if !wide.Unrestricted() {
+		t.Fatal("a policy built widened is not unrestricted")
+	}
+	if wide.Jailed() {
+		t.Error("Jailed() = true while unrestricted")
+	}
+	if err := wide.MkdirAll(filepath.Join(elsewhere, "widened"), 0o700); err != nil {
+		t.Errorf("MkdirAll outside every root = %v, want success", err)
+	}
+	if _, err := wide.ReadDir("/etc"); err != nil {
+		t.Errorf("ReadDir(/etc) = %v, want success", err)
+	}
+	if wide.IsRoot("/etc") {
+		t.Error("unrestricted mode has no roots, so .. must stay available everywhere")
 	}
 
-	// Everything else keeps the jail, including values someone types believing they widen it.
-	for _, v := range []string{"", "0", "true", "yes", " 1", "1 ", "11", "on"} {
-		t.Setenv(AllowRootFSEnv, v)
-		h := NewHostRoot()
-		if h.Unrestricted() {
-			t.Errorf("%q must NOT widen the jail", v)
-		}
-		if !h.Jailed() {
-			t.Errorf("%q: Jailed() = false while jailed", v)
-		}
-		if _, err := h.ReadDir(elsewhere); !errors.Is(err, ErrHostRoot) {
-			t.Errorf("%q: ReadDir outside the roots = %v, want ErrHostRoot", v, err)
-		}
+	jailed := NewHostRoot(false)
+	if jailed.Unrestricted() {
+		t.Error("a policy built jailed is unrestricted")
+	}
+	if !jailed.Jailed() {
+		t.Error("Jailed() = false while jailed")
+	}
+	if _, err := jailed.ReadDir(elsewhere); !errors.Is(err, ErrHostRoot) {
+		t.Errorf("ReadDir outside the roots = %v, want ErrHostRoot", err)
 	}
 
-	// Read per call, not frozen at construction, so a test can flip it without rebuilding.
-	t.Setenv(AllowRootFSEnv, "")
-	h := NewHostRoot()
-	if !h.Jailed() {
-		t.Fatal("precondition: the policy must start jailed")
-	}
+	// The decision cannot be changed under a policy that is in use. Two calls of one request must be
+	// measured against the same jail, and the roots quoted in a refusal must be the roots that
+	// refused — which is why this reads an argument and not the environment.
 	t.Setenv(AllowRootFSEnv, "1")
-	if !h.Unrestricted() {
-		t.Error("an existing policy must see a later change to the variable")
+	if !jailed.Jailed() || jailed.Unrestricted() {
+		t.Error("a policy in use widened itself from the environment after construction")
 	}
 }
 
@@ -351,7 +343,7 @@ func TestHostRootWideningIsTheExactValueOne(t *testing.T) {
 // closed rather than falling back to the whole filesystem.
 func TestHostRootFailsClosedWithoutAHome(t *testing.T) {
 	t.Setenv("HOME", "")
-	h := NewHostRoot(t.TempDir())
+	h := NewHostRoot(false, t.TempDir())
 
 	if len(h.Roots()) != 1 {
 		t.Errorf("Roots() = %v, want only the declared dir", h.Roots())
@@ -364,9 +356,9 @@ func TestHostRootFailsClosedWithoutAHome(t *testing.T) {
 	if _, err := h.ReadDir(declared); err != nil {
 		t.Errorf("ReadDir(declared root) = %v, want success", err)
 	}
-	// The widening variable still works, which is how the test suites run.
-	t.Setenv(AllowRootFSEnv, "1")
-	if _, err := NewHostRoot().ReadDir("/etc"); err != nil {
+	// The widening still works on a policy built with it, which is how the test suites run: the
+	// missing home costs only home.
+	if _, err := NewHostRoot(true).ReadDir("/etc"); err != nil {
 		t.Errorf("widened ReadDir(/etc) = %v, want success", err)
 	}
 }
@@ -375,12 +367,12 @@ func TestHostRootFailsClosedWithoutAHome(t *testing.T) {
 // so.
 func TestHostRootReportsAUniversalRoot(t *testing.T) {
 	t.Setenv("HOME", "/")
-	h := NewHostRoot()
+	h := NewHostRoot(false)
 	if !h.HasUniversalRoot() {
 		t.Errorf("HasUniversalRoot() = false for HOME=/, Roots()=%v", h.Roots())
 	}
 	t.Setenv("HOME", t.TempDir())
-	if NewHostRoot().HasUniversalRoot() {
+	if NewHostRoot(false).HasUniversalRoot() {
 		t.Error("HasUniversalRoot() = true for an ordinary home")
 	}
 }
@@ -414,7 +406,7 @@ func TestHostRootMissingRootDirectoryIsAnError(t *testing.T) {
 	if err := os.MkdirAll(gone, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	h := NewHostRoot(gone)
+	h := NewHostRoot(false, gone)
 	if err := os.RemoveAll(gone); err != nil {
 		t.Fatal(err)
 	}

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -31,15 +30,27 @@ type AgentProviderLister interface {
 // --worktrees-dir flag or MIKE_WORKTREES_DIR env var is provided.
 const DefaultWorkspaceDir = "./.worktrees"
 
-// RegistryURL returns the extension registry index URL. It is sourced
-// exclusively from the MIKE_REGISTRY_URL environment variable (which takes
-// precedence) and otherwise falls back to the hosted online registry. It is no
-// longer persisted to the database.
-func RegistryURL() string {
-	if v := os.Getenv("MIKE_REGISTRY_URL"); v != "" {
-		return v
+// DefaultRegistryURL is the hosted extension registry index, used when MIKE_REGISTRY_URL names
+// another index (a local fixture, an offline mirror).
+const DefaultRegistryURL = "https://getmike.dev/extensions/registry.json"
+
+// SetRegistryURL wires the resolved registry index (startup.Config.RegistryURL) into the store.
+// Wiring-time, before the server serves: the index is sourced exclusively from that variable and is
+// never persisted to the database, so a per-call environment read was the only other way to learn it.
+func (cs *ConfigStore) SetRegistryURL(url string) {
+	if url == "" {
+		url = DefaultRegistryURL
 	}
-	return "https://getmike.dev/extensions/registry.json"
+	cs.registryURL = url
+}
+
+// RegistryURL returns the extension registry index URL this store was wired with. It is no longer
+// persisted to the database.
+func (cs *ConfigStore) RegistryURL() string {
+	if cs.registryURL == "" {
+		return DefaultRegistryURL
+	}
+	return cs.registryURL
 }
 
 // configDB is config's whole persistence need: its own key/value table, plus the typed
@@ -61,6 +72,7 @@ type ConfigStore struct {
 	workspaceDirOverride string              // set at startup via --worktrees-dir / MIKE_WORKTREES_DIR
 	llmAdapter           *llmadapter.Adapter // optional — set via SetLLMAdapter
 	tlsCAAvailable       bool                // set at startup via SetTLSCAAvailable
+	registryURL          string              // set at startup via SetRegistryURL; empty means DefaultRegistryURL
 }
 
 // SetLLMAdapter helps map outgoing LLM API requests to the provider's expected format
@@ -267,7 +279,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	registryURL := RegistryURL()
+	registryURL := cs.RegistryURL()
 	defaultAutoCommitRaw, _ := cs.db.GetConfigValue("default_auto_commit")
 	defaultAutoMergeRaw, _ := cs.db.GetConfigValue("default_auto_merge")
 	defaultSubtasksAutoMergeRaw, _ := cs.db.GetConfigValue("default_subtasks_auto_merge")
@@ -700,7 +712,6 @@ func (cs *ConfigStore) SaveModelContextWindow(modelName, providerURL string, con
 		}
 	}
 
-	// Persist
 	providersJSON, _ := json.Marshal(cfg.Providers)
 	_ = cs.db.SetConfigValue("providers", string(providersJSON))
 }

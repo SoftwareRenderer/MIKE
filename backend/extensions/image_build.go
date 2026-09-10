@@ -3,6 +3,7 @@ package extensions
 import (
 	"fmt"
 	"io"
+	"kanban/pkg/subproc"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,14 +21,14 @@ import (
 //   - The Dockerfile comes from a registry. With the repo root as context, COPY data/kanban.db or
 //     COPY .git would succeed, stopped only by .dockerignore lines written for a different build.
 const (
-	// extensionBuildContextBridge is the path inside the context that extension Dockerfiles copy.
-	// It is a contract with published extensions, not a layout choice.
+	// extensionBuildContextBridge is the in-context path extension Dockerfiles COPY — a
+	// contract with published extensions, not a layout choice.
 	extensionBuildContextBridge = "sandbox/sandbox-bridge"
 	// extensionBuildContextDirPrefix prefixes the temp directory holding the context.
 	extensionBuildContextDirPrefix = "kanban-ext-build-"
 )
 
-// buildExtensionImageArgs is the podman argv for an extension build. Pure, so tests can pin the shape.
+// buildExtensionImageArgs is pure, so tests can pin the argv shape.
 func buildExtensionImageArgs(imageRef, contextDir string) []string {
 	return []string{"build", "-t", imageRef, "-f", filepath.Join(contextDir, "Dockerfile"), contextDir}
 }
@@ -63,7 +64,11 @@ func (rc *RegistryClient) BuildExtensionImage(dockerfileContent, imageRef string
 	}
 
 	cmd := sandboxruntime.PodmanCommand(buildExtensionImageArgs(imageRef, contextDir)...)
+	// An extension Dockerfile may install a toolchain, so minutes of silence is the ordinary path. The
+	// report exists for the case where buildah is wedged and the SSE progress stream has stopped moving.
+	stop := subproc.Watch("podman build "+imageRef, buildSlowReport, warnSlowPodman)
 	output, err := cmd.CombinedOutput()
+	stop()
 	if err != nil {
 		return fmt.Errorf("build image %s: %w (output: %s)", imageRef, err, string(output))
 	}

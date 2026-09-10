@@ -22,11 +22,9 @@ const (
 	ExtensionTypeCSS   = "css"
 	ExtensionTypeAgent = "agent"
 	ExtensionTypeLLM   = "llm"
-	// ExtensionTypeI18N is a translation pack: a catalog file the frontend loads
-	// to render the UI in the pack's locale, plus optionally translated prompt
-	// templates. It executes nothing — its whole surface is static files served
-	// from its own directory, which is why it gets no sandbox, no mounts, no
-	// network and no permissions.
+	// ExtensionTypeI18N is a translation pack: a catalog file the frontend loads to render the UI in the
+	// pack's locale, plus optionally translated prompt templates. It executes nothing — static files
+	// served from its own directory — so it gets no sandbox, no mounts, no network, no permissions.
 	ExtensionTypeI18N = "i18n"
 )
 
@@ -450,8 +448,8 @@ func (s *ConfigSchema) resolveTemplate(value string) string {
 	return value
 }
 
-// ConfigSchema is a JSON Schema subset for dynamic form rendering.
-// Properties is an array to preserve insertion order from manifest.json.
+// ConfigSchema is the JSON Schema subset rendered as a form. Properties is an array to keep
+// manifest.json's insertion order.
 type ConfigSchema struct {
 	Properties []SchemaProp `json:"properties,omitempty"`
 }
@@ -556,15 +554,9 @@ type SandboxConfig struct {
 	DependencyHostPath string `json:"dependency_host_path,omitempty"`
 }
 
-// DependencyCache is a language server declaring where it looks for resolved dependencies: a
-// path inside its own container and the variable that names it. It says nothing about the host —
-// which directory fills that path is the user's choice, made once in Settings → Extensions.
-//
-// A location, not a command: a declared command would mean running extension-supplied code in
-// the core, and a location discovered by asking the toolchain would mean starting a server per
-// workspace on every restart just to learn where to point it. A location plus an environment
-// gate (see EnvironmentGate) closes the loop: the core assigns, the server's own loader says
-// whether it was enough.
+// DependencyCache is a language server declaring where it looks for resolved dependencies inside its
+// own container. It says nothing about the host: which directory fills that path is chosen by a person
+// in Settings, and a manifest that carries it is refused rather than stripped.
 type DependencyCache struct {
 	// ContainerPath is where the cache appears inside the extension's container. Shadowing a path
 	// the server keeps its own state in is checked at bind time, where the real paths are known.

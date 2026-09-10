@@ -19,14 +19,14 @@ import (
 // plus the declared directories, or MIKE_ALLOW_ROOT_FS=1 — and a refused clone leaves nothing.
 
 // jailedProjectHandler builds a handler whose jail is a home directory the test owns, plus a
-// second directory outside every root. HOME and the widening variable are pinned here so
-// neither a developer's shell nor the suite's widened environment decides the outcome.
+// second directory outside every root. HOME is pinned here so neither a developer's shell nor the
+// suite's environment decides the outcome, and the jail is built jailed: the widening is a
+// constructor decision in production, so a test that wants the other side says so with widenHostRoot.
 func jailedProjectHandler(t *testing.T) (h *ProjectHandler, s *store.Store, home, outside string) {
 	t.Helper()
 	home = t.TempDir()
 	outside = t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv(fsutil.AllowRootFSEnv, "")
 
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
@@ -40,10 +40,15 @@ func jailedProjectHandler(t *testing.T) (h *ProjectHandler, s *store.Store, home
 		store:       st,
 		configStore: config.NewConfigStore(st, dbPath, "test"),
 		// Home only: no declared directory, so "inside home" is the whole jail.
-		hostRoot: fsutil.NewHostRoot(),
+		hostRoot: fsutil.NewHostRoot(false),
 	}
 	return h, st, home, outside
 }
+
+// widenHostRoot swaps a handler's jail to the widened one. It exists because production decides the
+// widening once, at construction: a test that pins both directions needs the second construction, and
+// this file is the only place that reaches the field — production cannot swap a jail under a handler.
+func widenHostRoot(h *ProjectHandler) { h.hostRoot = fsutil.NewHostRoot(true) }
 
 // repoProjectRequest is the body a create request carries for an existing repository.
 func repoProjectRequest(t *testing.T, path string) []byte {
@@ -95,7 +100,7 @@ func TestCreateProjectIsJailedToTheHostRoots(t *testing.T) {
 	}
 
 	// Widened: the same request goes through, which is how the suites run.
-	t.Setenv(fsutil.AllowRootFSEnv, "1")
+	widenHostRoot(h)
 	rr = httptest.NewRecorder()
 	h.HandleCreate(rr, httptest.NewRequest(http.MethodPost, "/api/projects", strings.NewReader(string(repoProjectRequest(t, elsewhere)))))
 	if rr.Code != http.StatusCreated {
@@ -161,7 +166,7 @@ func TestCloneTargetIsJailedBeforeAnyBytesMove(t *testing.T) {
 	}
 
 	// Widened: the outside parent is reachable again.
-	t.Setenv(fsutil.AllowRootFSEnv, "1")
+	widenHostRoot(h)
 	if events := readSSEEvents(t, clone(jailedParent).Body); len(events) == 0 || events[len(events)-1]["type"] != "done" {
 		t.Errorf("widened clone outside = %v, want it to finish", events)
 	}

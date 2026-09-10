@@ -1,0 +1,40 @@
+# frozen violations, regenerated with -update.
+# ctxroot: every base context in production Go, classified. key = file|function|reason|x<count>.
+# root = a genuine entry point (nothing above it to cancel from). detached = a state-leaving write that
+# must outlive the request that began it (Decision 6). legacy = a caller has a context and does not pass
+# one; that count is the debt. See scripts/archgate/rules_ctxroot.go.
+# A key is <file>|<detail>; no line numbers, so unrelated edits do not churn this file.
+# Shrink it by fixing a violation, never by adding to it.
+backend/agent/loader.go|loadWasmAdapter|root|x1
+backend/agent/loader.go|wasmAdapter.Close|legacy|x3
+backend/agent/loader.go|wasmAdapter.allocString|legacy|x1
+backend/agent/loader.go|wasmAdapter.freeString|legacy|x1
+backend/agent/runner.go|AgentRunner.Close|legacy|x1
+backend/agent/runner.go|Prepared.Start|legacy|x1
+backend/auth/session.go|NewSessionManager|legacy|x1
+backend/auth/session.go|SessionManager.Login|legacy|x1
+backend/auth/session.go|SessionManager.Logout|legacy|x1
+backend/auth/session.go|SessionManager.Validate|legacy|x2
+backend/exec/executor.go|TaskExecutor.SelectSubtaskToStart|legacy|x1
+backend/exec/executor.go|TaskExecutor.prepareTaskExecution|legacy|x1
+backend/exec/loop_agent.go|TaskExecutor.handleAgentTurnComplete|detached|x2
+backend/exec/merge.go|mergeOrchestrator.StreamCommitMessage|detached|x1
+backend/exec/summarize.go|summarizeOrchestrator.HandleSummarize|root|x2
+backend/extensions/registry.go|RegistryClient.CheckoutExtension|root|x1
+backend/lsp/environment.go|ExtensionLSPManager.runEnvCheck|legacy|x1
+backend/lsp/handler.go|LSPHandler.BroadcastLSPReset|detached|x1
+backend/lsp/handler.go|LSPHandler.failInitialize|detached|x1
+backend/lsp/handler.go|LSPHandler.routeNotification|root|x1
+backend/lsp/handler.go|LSPHandler.routeResponse|root|x3
+backend/managers/task.go|TaskHandler.startTitleGeneration|detached|x1
+backend/server/server.go|NewServer|root|x1
+backend/server/shutdown.go|runShutdownWithDeadline|root|x1
+backend/stream/app_stream.go|AppStreamManager.HandleStream|root|x1
+backend/stream/app_stream.go|AppStreamManager.subscribeTask|root|x2
+backend/stream/app_stream.go|AppStreamManager.writeFrame|detached|x1
+backend/term/terminal.go|TerminalManager.handleTerminalWSWithSetup|root|x2
+backend/term/terminal.go|taskTerminal.readLoop|root|x2
+pkg/bridge/agent/lsp.go|handler.handleLSPNotify|root|x1
+pkg/bridge/agent/lsp.go|handler.handleLSP|root|x1
+pkg/logging/logging.go|Logger.logf|root|x2
+pkg/sandboxruntime/runtime.go|Runtime.CleanupStaleContainers|legacy|x1

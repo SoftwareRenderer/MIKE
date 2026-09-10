@@ -243,7 +243,7 @@ async function installLocal(page: Page): Promise<void> {
     const localRes = await fetch('/api/extensions/local');
     const local = await localRes.json();
     // A non-array here means the server could not scan its extensions directory at all
-    // (500 "failed to scan extensions directory") — say so instead of dying in .find().
+    // (500 "scan the extensions directory failed") — say so instead of dying in .find().
     if (!Array.isArray(local)) throw new Error(`/api/extensions/local -> ${localRes.status}: ${JSON.stringify(local).slice(0, 300)}`);
     const entry = local.find((e: any) => e.name === 'html-preview');
     if (!entry) return { status: 404, text: 'html-preview not in local extensions list' };
@@ -497,7 +497,6 @@ test.describe.serial('HTML Preview extension', () => {
         () => egressRequests.filter(req => STATIC_REFS.some(ref => req.includes(ref))).length,
         { timeout: 15000 },
     ).toBe(baseline + STATIC_REFS.length);
-    // And no request may carry dynamic data.
     expect(egressRequests, 'no request may carry dynamic data').not.toContainEqual(expect.stringContaining('leak='));
 
     // Toggle off → code view restored.
@@ -686,7 +685,6 @@ test.describe.serial('HTML Preview extension', () => {
     // Dismiss it.
     await modal.locator('button').click();
     await expect(modal).toHaveCount(0);
-    // The editor is back.
     await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
   });
 

@@ -7,10 +7,8 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,11 +18,11 @@ import (
 	"kanban/backend/fsutil"
 	"kanban/backend/store"
 	"kanban/backend/types"
+	"kanban/pkg/keylock"
 	"kanban/pkg/logging"
 )
 
-// EmptyTreeHash is the SHA-1 of an empty git tree object.
-// It's a git internal constant (SHA-1 of "tree 0\0").
+// EmptyTreeHash is git's SHA-1 of "tree 0\0" — the empty tree object.
 const EmptyTreeHash = "4b825dc642cb6eb9a060e54bf899d69f826635b6"
 
 // hexRe matches a string of exactly 40 hex characters (a git SHA-1).
@@ -186,80 +184,59 @@ func IsInternalFile(path string) bool {
 type WorktreeManager struct {
 	store       *store.Store
 	configStore *config.ConfigStore
-	worktreeMu  sync.Map // per-project mutex for worktree creation
-	stashMu     sync.Map // per-project mutex for stash operations
-	mergeMu     sync.Map // per-project mutex for merges using the project's main checkout
 
+	// Three lock domains, all keyed by project. Distinct named types, and each one its own table: with
+	// one shared table, fusing two domains would compile, and the keys cannot be trusted to tell them
+	// apart because a task ID and a project ID are drawn from the same alphabet (F16). With a type per
+	// domain, that mistake does not compile.
+	worktree worktreeLocks // worktree creation
+	stash    stashLocks    // the one stash stack, shared by every worktree and by the user's own entries
+	merge    mergeLocks    // the main checkout, which has a single HEAD and index
+}
+
+// Embedded by value, not by pointer: a domain built this way is usable at its zero value the way the
+// sync.Map it replaced was, and a copy of the owning struct is refused by `go vet` copylocks instead of
+// silently giving two callers two guards over one map.
+type (
+	worktreeLocks struct{ keylock.Table }
+	stashLocks    struct{ keylock.Table }
+	mergeLocks    struct{ keylock.Table }
+)
+
+// worktreeLockTimeout is how long a caller waits for a project's worktree lock. Creating a worktree
+// runs a handful of git commands, so a longer wait means something is wedged. It is the one bounded
+// git wait, and the number is unchanged: it predates this package and was chosen for the operation it
+// guards, which is the only git-family section that does not wait on anything else.
+const worktreeLockTimeout = 30 * time.Second
+
+// gitSlowWait is when a lock wait is worth a log line. A bound is not the right instrument for the
+// stash and merge locks because both sections can legitimately wait on a task's worktree lock —
+// `exec/merge.go:654` takes mergeMu and then waits for the task's own tool lock at `:672`, and that one
+// is held across a whole tool call (`bash` runs up to 300 s) — so a seconds-scale timeout there would
+// fail the merges and checkpoints it is meant to protect. The wait is reported instead.
+const gitSlowWait = 2 * time.Second
+
+// slowWaitReporter names the domain in the slow-wait line, because a project can be contended on any of
+// the three locks and "which one" is the first question the answer needs.
+func slowWaitReporter(domain string) keylock.WaitReport {
+	return func(projectID string, waited time.Duration) {
+		logging.For(logging.Git).With(logging.ProjectID, projectID).Warnf(
+			"waited %s for the project's %s lock - another git operation holds it",
+			waited.Round(time.Millisecond), domain)
+	}
 }
 
 func NewWorktreeManager(store *store.Store, configStore *config.ConfigStore) *WorktreeManager {
-	return &WorktreeManager{store: store, configStore: configStore}
+	wm := &WorktreeManager{store: store, configStore: configStore}
+	wm.worktree.Configure(gitSlowWait, slowWaitReporter("worktree"))
+	wm.stash.Configure(gitSlowWait, slowWaitReporter("stash"))
+	wm.merge.Configure(gitSlowWait, slowWaitReporter("merge"))
+	return wm
 }
 
 // GetTaskByID retrieves a task by its globally-unique ID (without project ID).
 func (wm *WorktreeManager) GetTaskByID(taskID string) (*types.Task, error) {
 	return wm.store.GetTaskByID(taskID)
-}
-
-// getProjectWorktreeMu returns the per-project worktree mutex. Private on purpose: a mutex that
-// leaves this package can be stored or copied, and copying a WorktreeManager (which the executor's
-// tests do) swaps which locks callers find - two callers then serialize on different locks while
-// both believe they hold one.
-func (wm *WorktreeManager) getProjectWorktreeMu(projectID string) *sync.Mutex {
-	mu, _ := wm.worktreeMu.LoadOrStore(projectID, &sync.Mutex{})
-	return mu.(*sync.Mutex)
-}
-
-// worktreeLockTimeout is how long a caller waits for a project's worktree lock. Creating a worktree
-// runs a handful of git commands, so a longer wait means something is wedged.
-const worktreeLockTimeout = 30 * time.Second
-
-// tryLockProjectWorktree waits up to timeout for the project's worktree lock and returns its
-// release function. On timeout it returns (nil, false) without leaving the mutex held: a goroutine
-// abandoned here eventually wins the lock and never releases it.
-func (wm *WorktreeManager) tryLockProjectWorktree(projectID string, timeout time.Duration) (func(), bool) {
-	m := wm.getProjectWorktreeMu(projectID)
-	got := make(chan struct{})
-	go func() {
-		m.Lock()
-		close(got)
-	}()
-
-	select {
-	case <-got:
-		return m.Unlock, true
-	case <-time.After(timeout):
-		go func() {
-			<-got
-			m.Unlock()
-		}()
-		return nil, false
-	}
-}
-
-// LockProjectStash acquires the per-project stash lock and returns the function that releases it.
-// Stash is repo-wide - one stack for every worktree, holding the user's own entries - so stash
-// operations must not interleave. Call it as `defer wm.LockProjectStash(projectID)()` when the
-// critical section is the enclosing block; capture the release function when it is not.
-func (wm *WorktreeManager) LockProjectStash(projectID string) func() {
-	return wm.projectLock(&wm.stashMu, projectID)
-}
-
-// LockProjectMerge acquires the per-project merge lock and returns the function that releases it.
-// The main checkout has a single HEAD and index, so interleaved merges clobber each other's checkout,
-// stashes and restore. Lock order: always acquired BEFORE (never after) the project stash lock.
-func (wm *WorktreeManager) LockProjectMerge(projectID string) func() {
-	return wm.projectLock(&wm.mergeMu, projectID)
-}
-
-// projectLock is the one implementation of the per-project lock table. The *sync.Map is taken by
-// pointer so the three tables stay distinct - an accidental wm.stashMu = wm.mergeMu would merge two
-// lock domains.
-func (wm *WorktreeManager) projectLock(table *sync.Map, projectID string) func() {
-	mu, _ := table.LoadOrStore(projectID, &sync.Mutex{})
-	m := mu.(*sync.Mutex)
-	m.Lock()
-	return m.Unlock
 }
 
 // WorktreePath returns the filesystem path for a task's worktree.
@@ -382,60 +359,6 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 	return worktreePath, baseRef, nil
 }
 
-// ensureWorktreesExcluded idempotently appends the worktrees dir to .git/info/exclude
-// when it's inside the project, keeping untracked worktree files out of git status.
-// Best-effort: never blocks worktree creation.
-func (wm *WorktreeManager) ensureWorktreesExcluded(project *types.Project, worktreesDir string) {
-	cleanRoot := filepath.Clean(project.Path)
-	cleanWT := filepath.Clean(worktreesDir)
-	rel, err := filepath.Rel(cleanRoot, cleanWT)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return // worktrees dir is not inside the project
-	}
-
-	// Locate the repo's exclude file. A project that is itself a git worktree
-	// has a .git file (pointing at the real git dir) rather than a directory.
-	gitDir := filepath.Join(cleanRoot, ".git")
-	if info, err := os.Stat(gitDir); err == nil && !info.IsDir() {
-		if data, err := os.ReadFile(gitDir); err == nil {
-			line := strings.TrimSpace(string(data))
-			if strings.HasPrefix(line, "gitdir: ") {
-				dir := strings.TrimSpace(strings.TrimPrefix(line, "gitdir: "))
-				if !filepath.IsAbs(dir) {
-					dir = filepath.Join(cleanRoot, dir)
-				}
-				gitDir = dir
-			}
-		}
-	}
-	excludePath := filepath.Join(gitDir, "info", "exclude")
-
-	// Escape git-exclude glob characters in the path.
-	entry := strings.NewReplacer(`*`, `\*`, `?`, `\?`, `[`, `\[`).Replace(rel) + string(filepath.Separator)
-
-	data, err := os.ReadFile(excludePath)
-	if err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.TrimSpace(line) == entry {
-				return // already excluded
-			}
-		}
-	}
-	if err := os.MkdirAll(filepath.Join(gitDir, "info"), 0o755); err != nil {
-		logging.For(logging.Worktree).With(logging.ProjectID, project.ID).Warnf("failed to create info dir: %v", err)
-		return
-	}
-	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		logging.For(logging.Worktree).With(logging.ProjectID, project.ID).Warnf("failed to open info/exclude: %v", err)
-		return
-	}
-	defer f.Close()
-	if _, err := f.WriteString("\n# kanban worktrees (kept out of project status)\n" + entry + "\n"); err != nil {
-		logging.For(logging.Worktree).With(logging.ProjectID, project.ID).Warnf("failed to write info/exclude: %v", err)
-	}
-}
-
 // RemoveWorktree removes a task's worktree and its branch.
 func (wm *WorktreeManager) RemoveWorktree(projectID, taskID, branchName string) error {
 	project, err := wm.store.GetProject(projectID)
@@ -457,427 +380,6 @@ func (wm *WorktreeManager) RemoveWorktree(projectID, taskID, branchName string) 
 	}
 
 	return nil
-}
-
-// GarbageCollect removes worktree directories that have no matching task in the database.
-func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
-	cfg, err := wm.configStore.GetConfig()
-	if err != nil {
-		return 0, fmt.Errorf("get config: %w", err)
-	}
-
-	worktreesDir := cfg.WorkspaceDir
-	if !filepath.IsAbs(worktreesDir) {
-		if abs, err := filepath.Abs(worktreesDir); err == nil {
-			worktreesDir = abs
-		}
-	}
-
-	if _, err := os.Stat(worktreesDir); os.IsNotExist(err) {
-		return 0, nil
-	}
-
-	activeTaskIDs, err := wm.store.GetAllTaskIDs()
-	if err != nil {
-		return 0, fmt.Errorf("get task IDs: %w", err)
-	}
-	activeSet := make(map[string]bool, len(activeTaskIDs))
-	for _, id := range activeTaskIDs {
-		activeSet[id] = true
-	}
-
-	// Also build a set of all branch names referenced by tasks.
-	// Branches with slugified names (e.g., task/count-lines-in-hello-c) won't
-	// match any task ID but are still in use.
-	activeBranches, err := wm.store.GetAllTaskBranches()
-	if err != nil {
-		logging.For(logging.Worktree).Warnf("error getting task branches: %v", err)
-	}
-	activeBranchSet := make(map[string]bool, len(activeBranches))
-	for _, b := range activeBranches {
-		activeBranchSet[b] = true
-	}
-
-	// Get all active thread IDs for orphaned thread branch detection
-	activeThreadIDs, err := wm.store.GetAllThreadIDs()
-	if err != nil {
-		logging.For(logging.Worktree).Warnf("error getting thread IDs: %v", err)
-	}
-	activeThreadSet := make(map[string]bool, len(activeThreadIDs))
-	for _, id := range activeThreadIDs {
-		activeThreadSet[id] = true
-	}
-
-	projects, err := wm.store.ListProjects()
-	if err != nil {
-		logging.For(logging.Worktree).Warnf("error listing projects: %v", err)
-		return 0, nil
-	}
-
-	// Build project ID set for scanning worktrees directory
-	projectSet := make(map[string]bool, len(projects))
-	for _, p := range projects {
-		projectSet[p.ID] = true
-	}
-
-	// Scan worktrees directory for orphaned task worktrees.
-	// Path structure: worktreesDir/projectID/taskID
-	removed := 0
-	if entries, err := os.ReadDir(worktreesDir); err == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() || entry.Name()[0] == '.' {
-				continue
-			}
-			projectID := entry.Name()
-			if !projectSet[projectID] {
-				continue // skip unknown project dirs (e.g., stale or test artifacts)
-			}
-			projectDir := filepath.Join(worktreesDir, projectID)
-			taskEntries, err := os.ReadDir(projectDir)
-			if err != nil {
-				continue
-			}
-			for _, taskEntry := range taskEntries {
-				if !taskEntry.IsDir() || taskEntry.Name()[0] == '.' {
-					continue
-				}
-				taskName := taskEntry.Name()
-				if !activeSet[taskName] {
-					orphanPath := filepath.Join(projectDir, taskName)
-					if dryRun {
-						logging.For(logging.Worktree).Infof("would remove orphaned worktree: %s", orphanPath)
-						removed++
-					} else {
-						logging.For(logging.Worktree).Infof("removing orphaned worktree: %s", orphanPath)
-						if err := os.RemoveAll(orphanPath); err != nil {
-							logging.For(logging.Worktree).Warnf("error removing %s: %v", orphanPath, err)
-						} else {
-							removed++
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Prune git worktree registrations and orphaned branches per project
-	for _, p := range projects {
-		// The same lock CreateWorktree takes: prune rewrites the repository's .git/worktrees/ registry while
-		// add writes into it. Scoped to the prune, not the whole GC body, because that body continues and a
-		// lock released on some paths only is how a permanently-locked project is born.
-		if unlockWorktree, locked := wm.tryLockProjectWorktree(p.ID, worktreeLockTimeout); locked {
-			wm.gitRun(p.Path, "worktree", "prune")
-			unlockWorktree()
-		} else {
-			// Branch GC is skipped with it: this project is busy, and the next GC round covers it.
-			logging.For(logging.Worktree).Infof("skipping project %s this round: a worktree operation holds the lock", p.Name)
-			continue
-		}
-		// Keep slug-named Main branches of active titled tasks: once a fork becomes the
-		// active branch, the slug branch leaves activeBranchSet and would be GC'd.
-		slugPrefixes := taskSlugPrefixSet(wm.store, p.ID)
-		// Prune orphaned task branches (task/<id> with no matching task in DB)
-		branchesOut, err := wm.gitRunOutput(p.Path, "branch", "--list", "task/*")
-		if err != nil {
-			continue
-		}
-		for line := range strings.SplitSeq(branchesOut, "\n") {
-			branch := strings.TrimSpace(line)
-			if branch == "" || !strings.HasPrefix(branch, "task/") {
-				continue
-			}
-			taskID := strings.TrimPrefix(branch, "task/")
-			if !activeSet[taskID] && !activeBranchSet[branch] && !slugPrefixes[types.TaskBranchSlugPrefix(branch)] {
-				if dryRun {
-					logging.For(logging.Worktree).Infof("would delete orphaned branch %s in project %s", branch, p.Name)
-				} else {
-					logging.For(logging.Worktree).Infof("deleting orphaned branch %s in project %s", branch, p.Name)
-					wm.gitRun(p.Path, "branch", "-D", branch)
-				}
-			}
-		}
-		// Prune orphaned thread branches (thread/<threadID> with no matching thread in DB)
-		threadBranchesOut, err := wm.gitRunOutput(p.Path, "branch", "--list", "thread/*")
-		if err != nil {
-			continue
-		}
-		for line := range strings.SplitSeq(threadBranchesOut, "\n") {
-			branch := strings.TrimSpace(line)
-			if branch == "" || !strings.HasPrefix(branch, "thread/") {
-				continue
-			}
-			threadID := strings.TrimPrefix(branch, "thread/")
-			if !activeThreadSet[threadID] {
-				if dryRun {
-					logging.For(logging.Worktree).Infof("would delete orphaned thread branch %s in project %s", branch, p.Name)
-				} else {
-					logging.For(logging.Worktree).Infof("deleting orphaned thread branch %s in project %s", branch, p.Name)
-					wm.gitRun(p.Path, "branch", "-D", branch)
-				}
-			}
-		}
-	}
-
-	// Drop kanban-labeled stashes whose task ID is no longer in the active set.
-	// Label-based match (permissive), hash-based drop.
-	for _, p := range projects {
-		entries, err := wm.listStashEntries(p.Path)
-		if err != nil {
-			continue
-		}
-		var dropRefs []StashEntry
-		for _, e := range entries {
-			if !hasKanbanLabel(e.Subject) {
-				continue
-			}
-			belongsToActiveTask := false
-			for taskID := range activeSet {
-				if matchKanbanTaskID(e.Subject, taskID) {
-					belongsToActiveTask = true
-					break
-				}
-			}
-			if !belongsToActiveTask {
-				dropRefs = append(dropRefs, e)
-			}
-		}
-		unlockStash := wm.LockProjectStash(p.ID)
-		// Reverse order: highest stash index first so refs don't shift.
-		for i := len(dropRefs) - 1; i >= 0; i-- {
-			e := dropRefs[i]
-			if dryRun {
-				logging.For(logging.Worktree).Infof("would drop stale stash entry %s in project %s", e.Hash[:8], p.Name)
-			} else {
-				logging.For(logging.Worktree).Infof("dropping stale stash entry %s in project %s", e.Hash[:8], p.Name)
-				_ = wm.gitRun(p.Path, "stash", "drop", e.Ref)
-			}
-		}
-		unlockStash()
-	}
-
-	if dryRun {
-		logging.For(logging.Worktree).Infof("dry-run complete: %d orphaned worktrees would be removed", removed)
-	} else {
-		logging.For(logging.Worktree).Infof("complete: %d orphaned worktrees removed", removed)
-	}
-
-	return removed, nil
-}
-
-// branchExistsInProject reports whether a git branch exists in a project's repo.
-func (wm *WorktreeManager) branchExistsInProject(projectID, branch string) bool {
-	_, err := wm.GitRunInProjectOutput(projectID, "rev-parse", "--verify", "--quiet", branch)
-	return err == nil
-}
-
-// ResolveMainBranch returns the branch to use for a task's Main thread. A titled
-// task's Main branch is slug-named (task/<slug>-<random6>), not task/<taskID>; if the
-// canonical branch is missing, recover the slug branch. Falls back to canonicalBranch.
-func (wm *WorktreeManager) ResolveMainBranch(projectID, taskID, title, canonicalBranch string) string {
-	if canonicalBranch == "" {
-		canonicalBranch = types.TaskBranchPrefix + taskID
-	}
-	if wm.branchExistsInProject(projectID, canonicalBranch) {
-		return canonicalBranch
-	}
-	slug := types.SlugifyBranchName(title)
-	if slug == "" {
-		return canonicalBranch
-	}
-	prefix := types.TaskBranchPrefix + slug + "-"
-	out, err := wm.GitRunInProjectOutput(projectID, "branch", "--list", prefix+"*")
-	if err != nil {
-		return canonicalBranch
-	}
-	var matches []string
-	for line := range strings.SplitSeq(out, "\n") {
-		b := strings.TrimSpace(line)
-		b = strings.TrimPrefix(b, " + ")
-		b = strings.TrimPrefix(b, "+ ")
-		if b != "" && b != canonicalBranch {
-			matches = append(matches, b)
-		}
-	}
-	if len(matches) == 0 {
-		return canonicalBranch
-	}
-	// Multiple slug matches (e.g. re-created tasks): pick the most recent commit.
-	best := matches[0]
-	var bestTS int64 = -1
-	for _, b := range matches {
-		tsOut, err := wm.GitRunInProjectOutput(projectID, "log", "-1", "--format=%ct", b)
-		if err != nil {
-			continue
-		}
-		var ts int64
-		if _, err := fmt.Sscanf(strings.TrimSpace(tsOut), "%d", &ts); err == nil && ts > bestTS {
-			bestTS = ts
-			best = b
-		}
-	}
-	return best
-}
-
-// taskSlugPrefixSet returns the task-branch slug prefixes ("task/<slug>-") of a project's active
-// titled tasks, so the GC keeps a slug-named Main branch even when a fork is the active branch.
-// The slug comes from types.SlugifyBranchName, the same function that named the branch: a GC
-// parsing a different shape deletes a live branch.
-func taskSlugPrefixSet(store *store.Store, projectID string) map[string]bool {
-	set := make(map[string]bool)
-	tasks, err := store.GetTasksByProject(projectID)
-	if err != nil {
-		return set
-	}
-	for i := range tasks {
-		if slug := types.SlugifyBranchName(tasks[i].Title); slug != "" {
-			set[types.TaskBranchPrefix+slug+"-"] = true
-		}
-	}
-	return set
-}
-
-// PruneOrphanedBranches removes task/* and thread/* branches from a single project
-// that no longer have matching entries in the database. This is a targeted version of
-// the branch cleanup logic in GarbageCollect, suitable for calling after task deletion.
-// Returns the number of branches removed.
-func (wm *WorktreeManager) PruneOrphanedBranches(projectID string) int {
-	project, err := wm.store.GetProject(projectID)
-	if err != nil {
-		logging.For(logging.Worktree).Warnf("error getting project %s: %v", projectID, err)
-		return 0
-	}
-
-	activeTaskIDs, err := wm.store.GetAllTaskIDs()
-	if err != nil {
-		logging.For(logging.Worktree).Warnf("error getting task IDs: %v", err)
-		return 0
-	}
-	activeTaskSet := make(map[string]bool, len(activeTaskIDs))
-	for _, id := range activeTaskIDs {
-		activeTaskSet[id] = true
-	}
-
-	// Also check branch names referenced by tasks (slugified names won't match task IDs)
-	activeBranches, err := wm.store.GetAllTaskBranches()
-	if err != nil {
-		logging.For(logging.Worktree).Warnf("error getting task branches: %v", err)
-	}
-	activeBranchSet := make(map[string]bool, len(activeBranches))
-	for _, b := range activeBranches {
-		activeBranchSet[b] = true
-	}
-
-	activeThreadIDs, err := wm.store.GetAllThreadIDs()
-	if err != nil {
-		logging.For(logging.Worktree).Warnf("error getting thread IDs: %v", err)
-	}
-	activeThreadSet := make(map[string]bool, len(activeThreadIDs))
-	for _, id := range activeThreadIDs {
-		activeThreadSet[id] = true
-	}
-
-	removed := 0
-
-	// Prune orphaned task branches (task/<id> with no matching task in DB)
-	branchesOut, err := wm.gitRunOutput(project.Path, "branch", "--list", "task/*")
-	if err == nil {
-		for line := range strings.SplitSeq(branchesOut, "\n") {
-			branch := strings.TrimSpace(line)
-			if branch == "" || !strings.HasPrefix(branch, "task/") {
-				continue
-			}
-			taskID := strings.TrimPrefix(branch, "task/")
-			if !activeTaskSet[taskID] && !activeBranchSet[branch] {
-				logging.For(logging.Worktree).Infof("deleting orphaned branch %s in project %s", branch, project.Name)
-				wm.gitRun(project.Path, "branch", "-D", branch)
-				removed++
-			}
-		}
-	}
-
-	// Prune orphaned thread branches (thread/<threadID> with no matching thread in DB)
-	threadBranchesOut, err := wm.gitRunOutput(project.Path, "branch", "--list", "thread/*")
-	if err == nil {
-		for line := range strings.SplitSeq(threadBranchesOut, "\n") {
-			branch := strings.TrimSpace(line)
-			if branch == "" || !strings.HasPrefix(branch, "thread/") {
-				continue
-			}
-			threadID := strings.TrimPrefix(branch, "thread/")
-			if !activeThreadSet[threadID] {
-				logging.For(logging.Worktree).Infof("deleting orphaned thread branch %s in project %s", branch, project.Name)
-				wm.gitRun(project.Path, "branch", "-D", branch)
-				removed++
-			}
-		}
-	}
-
-	if removed > 0 {
-		logging.For(logging.Worktree).Infof("project %s: removed %d orphaned branches", project.Name, removed)
-	}
-
-	return removed
-}
-
-// UntrackedReadTarget resolves a worktree-relative path to the host file whose content may go
-// into a diff, plus its size, and refuses anything that is not a regular file inside the
-// worktree. git status lists a symlink the way it lists a file, so without this a
-// `key -> ../../.ssh/id_rsa` planted in a task worktree puts a private key in the task diff.
-func UntrackedReadTarget(worktreePath, rel string) (string, int64, error) {
-	if rel == "" || filepath.IsAbs(rel) {
-		return "", 0, fmt.Errorf("path %q must be relative to the worktree", rel)
-	}
-	resolved, err := fsutil.Contained(filepath.Join(worktreePath, rel), []string{filepath.Clean(worktreePath)})
-	if err != nil {
-		return "", 0, err
-	}
-	info, err := os.Lstat(resolved)
-	if err != nil {
-		return "", 0, err
-	}
-	if !info.Mode().IsRegular() {
-		return "", 0, fmt.Errorf("%s is not a regular file", rel)
-	}
-	return resolved, info.Size(), nil
-}
-
-// walkUntrackedEntries expands git status --porcelain "?? " entries into individual file paths.
-// When a whole directory is untracked, git status returns "?? dir/" — this function walks
-// the directory and returns all regular file paths (relative to worktreePath).
-func walkUntrackedEntries(worktreePath, path string) []string {
-	fullPath := filepath.Join(worktreePath, path)
-	// Lstat, not Stat: a symlink is neither a regular file nor a directory, so it is listed
-	// neither here nor walked into. UntrackedReadTarget judges its target.
-	info, err := os.Lstat(fullPath)
-	if err != nil {
-		return nil
-	}
-	if info.Mode().IsRegular() {
-		if ShouldIgnoreFile(path) {
-			return nil
-		}
-		return []string{path}
-	}
-	if !info.IsDir() {
-		return nil
-	}
-	// It's a directory — walk it recursively
-	var files []string
-	_ = filepath.Walk(fullPath, func(fp string, info os.FileInfo, err error) error {
-		if err != nil || info == nil || !info.Mode().IsRegular() {
-			return nil
-		}
-		rel, err := filepath.Rel(worktreePath, fp)
-		if err != nil {
-			return nil
-		}
-		if ShouldIgnoreFile(rel) {
-			return nil
-		}
-		files = append(files, rel)
-		return nil
-	})
-	return files
 }
 
 // GitStatus returns the git status --porcelain output for a task's worktree.
@@ -920,18 +422,7 @@ func ParseStatusPaths(out string) []string {
 	return files
 }
 
-// HasWorktreeChanges returns true if the worktree has uncommitted changes
-// (modified, staged, or untracked files). Uses git status --porcelain.
-func (wm *WorktreeManager) HasWorktreeChanges(taskID string) bool {
-	out, err := wm.GitStatus(taskID)
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(out) != ""
-}
-
-// UntrackedFile holds the path and content lines for an untracked (new) file.
-// Since untracked files are always new, we store raw lines instead of a unified diff.
+// UntrackedFile carries raw content lines: an untracked file is always new, so there is no diff.
 type UntrackedFile struct {
 	Path      string   `json:"path"`
 	Lines     []string `json:"lines,omitempty"`      // file content lines (set for text files)
@@ -968,9 +459,8 @@ type TrackedDiffFile struct {
 	OrigRemoved   int       `json:"origRemoved,omitempty"`
 }
 
-// TaskDiff holds the diff output and list of untracked files for a task.
-// Tracked is a per-file map for incremental updates. Diff is the legacy
-// monolithic unified diff string (kept for backward compatibility).
+// TaskDiff carries two shapes: Tracked is a per-file map, for incremental updates, and Diff is the
+// legacy monolithic unified diff string.
 type TaskDiff struct {
 	Diff          string                      `json:"diff"`
 	CommittedDiff string                      `json:"-"` // raw diff of committed changes since baseRef (for hash computation)
@@ -1005,11 +495,6 @@ func ComputeFileHash(f *TrackedDiffFile) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(sb.String())))
 }
 
-// ComputeUntrackedHash computes a SHA-256 hash for an untracked file based on its lines.
-func ComputeUntrackedHash(u UntrackedFile) string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(u.Path+strings.Join(u.Lines, "\n"))))
-}
-
 // GetPerFileHashes returns a map of file path → hash for all tracked and untracked files.
 // Tracked entries take priority — untracked files already in the tracked section are skipped.
 func (d *TaskDiff) GetPerFileHashes() map[string]string {
@@ -1027,140 +512,6 @@ func (d *TaskDiff) GetPerFileHashes() map[string]string {
 
 // Default maximum number of change lines per file before truncation.
 const defaultMaxChangeLines = 60
-
-// truncateDiffLines truncates a unified diff so each file has at most maxChangeLines change
-// lines. Lines are dropped from the end of a hunk and the @@ header counts are updated to stay
-// valid. Returns the truncated diff and the paths that were cut.
-func truncateDiffLines(diff string, maxChangeLines int) (string, []string) {
-	if !strings.Contains(diff, "\n") {
-		return diff, nil
-	}
-
-	lines := strings.Split(diff, "\n")
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-
-	// Split into per-file blocks
-	type fileBlock struct {
-		path  string
-		lines []string
-	}
-	var blocks []fileBlock
-	var cur *fileBlock
-
-	for _, line := range lines {
-		if strings.HasPrefix(line, "diff --git ") {
-			if cur != nil {
-				blocks = append(blocks, *cur)
-			}
-			match := fileRe.FindStringSubmatch(line)
-			path := "unknown"
-			if match != nil {
-				path = match[1]
-			}
-			cur = &fileBlock{path: path, lines: []string{line}}
-			continue
-		}
-		if cur != nil {
-			cur.lines = append(cur.lines, line)
-		}
-	}
-	if cur != nil {
-		blocks = append(blocks, *cur)
-	}
-
-	var result []string
-	var truncatedFiles []string
-
-	for _, block := range blocks {
-		// Count total change lines
-		totalChanges := 0
-		for _, line := range block.lines {
-			if len(line) > 0 && (line[0] == '+' || line[0] == '-') &&
-				!strings.HasPrefix(line, "+++") && !strings.HasPrefix(line, "---") {
-				totalChanges++
-			}
-		}
-
-		needsTruncation := totalChanges > maxChangeLines
-		if needsTruncation {
-			truncatedFiles = append(truncatedFiles, block.path)
-		}
-
-		if !needsTruncation {
-			result = append(result, block.lines...)
-			continue
-		}
-
-		// Truncate: walk lines, keep first maxChangeLines changes.
-		// When limit is hit mid-hunk, update the @@ header counts and stop.
-		keptChanges := 0
-		inHunk := false
-		var hunkResultIdx int
-		var hunkOldStart, hunkNewStart int
-		var hunkContext string
-		var hunkOldLines, hunkNewLines int
-
-		for _, line := range block.lines {
-			if strings.HasPrefix(line, "@@") {
-				// If we already hit the limit in a previous hunk, stop
-				if keptChanges >= maxChangeLines {
-					break
-				}
-				inHunk = true
-				hunkResultIdx = len(result)
-				hunkOldLines = 0
-				hunkNewLines = 0
-				if m := hunkRe.FindStringSubmatch(line); m != nil {
-					hunkOldStart, _ = strconv.Atoi(m[1])
-					hunkNewStart, _ = strconv.Atoi(m[3])
-					hunkContext = m[5]
-				}
-				result = append(result, line)
-				continue
-			}
-			if !inHunk {
-				result = append(result, line)
-				continue
-			}
-
-			// Track old/new line counts
-			if len(line) > 0 {
-				if line[0] == ' ' || line[0] == '-' {
-					hunkOldLines++
-				}
-				if line[0] == ' ' || line[0] == '+' {
-					hunkNewLines++
-				}
-			}
-
-			isChange := len(line) > 0 && (line[0] == '+' || line[0] == '-')
-			if isChange {
-				keptChanges++
-				if keptChanges > maxChangeLines {
-					// Remove overflow line from counts (it won't be appended),
-					// then break to continue with the next file block.
-					if line[0] == '-' {
-						hunkOldLines--
-					} else {
-						hunkNewLines--
-					}
-					break
-				}
-			}
-			result = append(result, line)
-		}
-
-		// Update header for last hunk (counts may differ from original)
-		if inHunk {
-			result[hunkResultIdx] = fmt.Sprintf("@@ -%d,%d +%d,%d %s@@",
-				hunkOldStart, hunkOldLines, hunkNewStart, hunkNewLines, hunkContext)
-		}
-	}
-
-	return strings.Join(result, "\n"), truncatedFiles
-}
 
 // countFileChanges scans a unified diff and returns per-file added/removed counts.
 func countFileChanges(diff string) map[string]FileChangeStats {
@@ -1193,255 +544,6 @@ func countFileChanges(diff string) map[string]FileChangeStats {
 		}
 	}
 	return stats
-}
-
-// ParseUnifiedDiff parses raw git diff output into per-file entries, sorted by path. This is the one
-// diff grammar in the product - the frontend used to carry a second one over the same text, and they
-// drifted. backend/git/diff_parse_parity_test.go holds the cases the old browser parser had.
-func ParseUnifiedDiff(patch string) []TrackedDiffFile {
-	return SortedParsedFiles(parseUnifiedDiffToFiles(patch, nil, nil, nil))
-}
-
-// SortedParsedFiles flattens a parsed map into path order, so a response never inherits Go's map
-// iteration order.
-func SortedParsedFiles(tracked map[string]*TrackedDiffFile) []TrackedDiffFile {
-	out := make([]TrackedDiffFile, 0, len(tracked))
-	for _, f := range tracked {
-		if f != nil {
-			out = append(out, *f)
-		}
-	}
-	slices.SortFunc(out, func(a, b TrackedDiffFile) int {
-		return strings.Compare(a.Path, b.Path)
-	})
-	return out
-}
-
-// parseUnifiedDiffToFiles parses a unified diff into per-file TrackedDiffFile entries.
-// This mirrors the frontend parseUnifiedDiff but runs on the backend for caching.
-// annotations provides metadata for binary/large files whose hunks were replaced.
-func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map[string]FileChangeStats, annotations map[string]*fileAnnotation) map[string]*TrackedDiffFile {
-	if diff == "" || !strings.Contains(diff, "\n") {
-		// Even with empty diff, annotations may have binary/large file entries
-		if len(annotations) > 0 {
-			return annotationsToFiles(annotations)
-		}
-		return nil
-	}
-
-	truncatedSet := make(map[string]bool, len(truncatedFiles))
-	for _, f := range truncatedFiles {
-		truncatedSet[f] = true
-	}
-
-	files := make(map[string]*TrackedDiffFile)
-	var current *TrackedDiffFile
-	var oldLine, newLine int
-	var inHunk bool
-
-	lines := strings.Split(diff, "\n")
-	// Remove trailing empty line
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-
-	for _, line := range lines {
-		if strings.HasPrefix(line, "diff --git ") {
-			_, bPath := extractDiffPaths(line)
-			// If the file already exists (e.g. from a previous diff segment),
-			// merge the new hunks into the existing entry instead of overwriting.
-			if existing, ok := files[bPath]; ok {
-				current = existing
-			} else {
-				current = &TrackedDiffFile{Path: bPath, Rows: nil}
-				files[bPath] = current
-			}
-			inHunk = false
-			oldLine = 0
-			newLine = 0
-			continue
-		}
-		if strings.HasPrefix(line, "new file mode ") {
-			if current != nil {
-				current.IsNew = true
-			}
-			continue
-		}
-		if strings.HasPrefix(line, "deleted file mode ") {
-			if current != nil {
-				current.IsDeleted = true
-			}
-			continue
-		}
-		// A file that did not exist before has no old side to diff against. git normally also writes
-		// `new file mode`, but not always — the frontend parser read /dev/null as a signal of its own,
-		// and a brand-new file shown as modified is a badge lie rather than a cosmetic miss.
-		if line == "--- /dev/null" {
-			if current != nil {
-				current.IsNew = true
-			}
-			continue
-		}
-		if line == "+++ /dev/null" {
-			if current != nil {
-				current.IsDeleted = true
-			}
-			continue
-		}
-		// git's own verdict that the file cannot be diffed as text. Without this the notice was dropped
-		// on the floor: a binary file in a commit-to-commit diff (which has no annotations — only the
-		// task-diff pipeline produces those) came back with no size, no flag and no rows, so the panel
-		// rendered an empty file that looks like a bug rather than a file git refuses to diff.
-		if strings.HasPrefix(line, "Binary files ") {
-			if current != nil {
-				current.IsBinary = true
-				// The row is emitted only when there is no annotation for this file. filterLargeBinaryDiffs
-				// keeps this line AND appends `# binary-file: N`, and the task panel renders such a file
-				// from FileSize/IsBinary — adding a row there would print the notice as prose under the
-				// size label. With no annotation, this line is the only explanation the file will get.
-				if annotations[current.Path] == nil {
-					current.Rows = append(current.Rows, DiffRow{LineNumber: nil, Variant: "context", Text: line})
-				}
-			}
-			inHunk = false
-			continue
-		}
-		if strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
-			continue
-		}
-		// Check for binary/large file annotation
-		if strings.HasPrefix(line, "# binary-file: ") || strings.HasPrefix(line, "# large-file: ") {
-			if current != nil {
-				isBinary := strings.HasPrefix(line, "# binary-file: ")
-				sizeStr := strings.TrimPrefix(line, "# binary-file: ")
-				if !isBinary {
-					sizeStr = strings.TrimPrefix(line, "# large-file: ")
-				}
-				if size, err := strconv.ParseInt(strings.TrimSpace(sizeStr), 10, 64); err == nil {
-					current.FileSize = &size
-					current.IsBinary = isBinary
-					// Enrich with annotation metadata (origPath for renames)
-					if ann := annotations[current.Path]; ann != nil && ann.origPath != "" {
-						current.OrigPath = ann.origPath
-					}
-				}
-			}
-			inHunk = false
-			continue
-		}
-		if strings.HasPrefix(line, "@@") {
-			inHunk = true
-			if m := hunkRe.FindStringSubmatch(line); m != nil {
-				oldLine, _ = strconv.Atoi(m[1])
-				newLine, _ = strconv.Atoi(m[3])
-			}
-			continue
-		}
-		if !inHunk || current == nil {
-			continue
-		}
-
-		if line == "\\ No newline at end of file" {
-			continue
-		}
-
-		var variant string
-		if len(line) > 0 && line[0] == '+' {
-			variant = "added"
-			current.Added++
-		} else if len(line) > 0 && line[0] == '-' {
-			variant = "removed"
-			current.Removed++
-		} else if len(line) > 0 && line[0] == ' ' {
-			variant = "context"
-		} else {
-			continue
-		}
-
-		ln := newLine
-		if variant == "removed" {
-			ln = oldLine
-		}
-		row := DiffRow{
-			LineNumber: &ln,
-			Variant:    variant,
-			Text:       line[1:],
-		}
-		current.Rows = append(current.Rows, row)
-
-		if variant == "context" || variant == "removed" {
-			oldLine++
-		}
-		if variant == "context" || variant == "added" {
-			newLine++
-		}
-	}
-
-	// Enrich with truncation metadata + annotation data
-	for path, f := range files {
-		if len(f.Rows) == 0 && f.FileSize == nil && !f.IsNew && !f.IsDeleted {
-			// Skip files with no diff content, but preserve new/deleted files
-			// (a new or deleted blank file has a diff header but no hunk rows).
-			delete(files, path)
-			continue
-		}
-		if truncatedSet[path] {
-			f.Truncated = true
-			if s, ok := origStats[path]; ok {
-				f.OrigAdded = s.Added
-				f.OrigRemoved = s.Removed
-			}
-		}
-		// Enrich with annotation metadata for renames
-		if f.FileSize != nil {
-			if ann := annotations[path]; ann != nil && ann.origPath != "" {
-				f.OrigPath = ann.origPath
-			}
-		}
-	}
-
-	return files
-}
-
-// annotationsToFiles creates TrackedDiffFile entries from annotations (for empty diffs with binary files).
-func annotationsToFiles(annotations map[string]*fileAnnotation) map[string]*TrackedDiffFile {
-	files := make(map[string]*TrackedDiffFile, len(annotations))
-	for path, ann := range annotations {
-		f := &TrackedDiffFile{
-			Path:     ann.path,
-			FileSize: &ann.size,
-			IsBinary: ann.isBinary,
-		}
-		if ann.origPath != "" {
-			f.OrigPath = ann.origPath
-		}
-		files[path] = f
-	}
-	return files
-}
-
-// shortStatFromDiff computes a git-style shortstat: "X file(s) changed, Y insertion(s)(+),
-// Z deletion(s)(-)", omitting zero-value parts.
-func shortStatFromDiff(diff string) string {
-	stats := countFileChanges(diff)
-	files := len(stats)
-	var totalAdded, totalRemoved int
-	for _, s := range stats {
-		totalAdded += s.Added
-		totalRemoved += s.Removed
-	}
-	if files == 0 {
-		return ""
-	}
-	parts := make([]string, 0, 3)
-	parts = append(parts, fmt.Sprintf("%d file%s changed", files, PluralS(files)))
-	if totalAdded > 0 {
-		parts = append(parts, fmt.Sprintf("%d insertion%s(+)", totalAdded, PluralS(totalAdded)))
-	}
-	if totalRemoved > 0 {
-		parts = append(parts, fmt.Sprintf("%d deletion%s(-)", totalRemoved, PluralS(totalRemoved)))
-	}
-	return strings.Join(parts, ", ")
 }
 
 // PluralS returns "s" if count is not 1, empty string otherwise.
@@ -1506,27 +608,6 @@ func matchKanbanTaskID(subject, taskID string) bool {
 	return false
 }
 
-// dropMatchingStashes lists stashes in the project, filters by predicate, and drops by ref.
-// Drops in reverse order (highest index first) so refs don't shift mid-loop.
-// The caller must hold the project stash mutex.
-func (wm *WorktreeManager) dropMatchingStashes(projectID string, filter func(subject string) bool) error {
-	project, err := wm.store.GetProject(projectID)
-	if err != nil {
-		return fmt.Errorf("get project: %w", err)
-	}
-	entries, err := wm.listStashEntries(project.Path)
-	if err != nil {
-		return nil
-	}
-	// Reverse order: highest stash index first so refs don't shift.
-	for i := len(entries) - 1; i >= 0; i-- {
-		if filter(entries[i].Subject) {
-			_ = wm.gitRun(project.Path, "stash", "drop", entries[i].Ref)
-		}
-	}
-	return nil
-}
-
 // DropStashEntriesForTask removes kanban-labeled stash entries for the given task.
 // Drops by commit hash — no index renumbering issues.
 func (wm *WorktreeManager) DropStashEntriesForTask(projectID, taskID string) error {
@@ -1534,262 +615,6 @@ func (wm *WorktreeManager) DropStashEntriesForTask(projectID, taskID string) err
 	return wm.dropMatchingStashes(projectID, func(subject string) bool {
 		return matchKanbanTaskID(subject, taskID)
 	})
-}
-
-// DropStashEntriesForBranch removes stash entries for the given branch.
-// Drops by commit hash — no index renumbering issues.
-func (wm *WorktreeManager) DropStashEntriesForBranch(projectID string, branchName string) error {
-	defer wm.LockProjectStash(projectID)()
-	branchMarker := " " + branchName + ":"
-	return wm.dropMatchingStashes(projectID, func(subject string) bool {
-		return strings.Contains(subject, branchMarker)
-	})
-}
-
-// GetTaskDiff returns the git diff for a task's worktree.
-// baseRef is the branch/ref to diff against (e.g., "master"). If empty, uses HEAD.
-// headRef is an optional second ref for comparing two commits (git diff baseRef..headRef).
-// When headRef is set, untracked files are omitted (commit-to-commit diff).
-// If skipTruncate is true, the diff is not truncated (used for ?full=1 API requests).
-func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTruncate ...bool) (*TaskDiff, error) {
-	worktreePath, err := wm.WorktreePath(taskID)
-	if err != nil {
-		return nil, err
-	}
-
-	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		return nil, ErrWorktreeNotFound
-	}
-
-	// Reject invalid baseRef values (e.g. git error messages like "fatal: ...")
-	if strings.HasPrefix(baseRef, "fatal:") {
-		baseRef = ""
-	}
-
-	var diffOut, shortStat string
-	var untracked []UntrackedFile
-	var annotations map[string]*fileAnnotation
-
-	if headRef != "" {
-		// Two-ref diff: compare baseRef..headRef (commit-to-commit)
-		target := baseRef
-		if target == "" {
-			target = "HEAD"
-		}
-		diffOut, err = wm.gitRunOutput(worktreePath, "diff", fmt.Sprintf("%s..%s", target, headRef))
-		if err != nil {
-			return nil, fmt.Errorf("git diff: %w", err)
-		}
-		shortStat = shortStatFromDiff(diffOut)
-		diffOut, annotations = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
-		// No untracked files for commit-to-commit diff
-	} else {
-		// Working tree vs HEAD: only uncommitted changes, since committed ones are handled
-		// separately below. Checkpoints use stash create+store, so changes stay visible here.
-		diffOut, err = wm.gitRunOutput(worktreePath, "diff", "HEAD")
-		if err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-				// Changes exist, diffOut has the output — continue
-			} else {
-				return nil, fmt.Errorf("git diff: %w", err)
-			}
-		}
-		shortStat = shortStatFromDiff(diffOut)
-		diffOut, annotations = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
-
-		// Get untracked files from git status --porcelain (lines starting with "?? ")
-		statusOut, err := wm.gitRunOutput(worktreePath, "status", "--porcelain")
-		if err != nil {
-			return nil, fmt.Errorf("git status: %w", err)
-		}
-
-		const maxDiffSize = 1 << 20 // 1MB
-		for line := range strings.SplitSeq(statusOut, "\n") {
-			if len(line) >= 4 && strings.HasPrefix(line, "?? ") {
-				path := strings.TrimSpace(line[3:])
-				if path == "" {
-					continue
-				}
-				// Expand directories into individual file paths
-				filePaths := walkUntrackedEntries(worktreePath, path)
-				for _, filePath := range filePaths {
-					// Skip files in ignored directories (safety net for tracked files)
-					if ShouldIgnorePath(filePath) {
-						continue
-					}
-					// The read target, not the status path: an untracked symlink names a file
-					// somewhere else, and "somewhere else" may be a private key.
-					fullPath, fileSize, err := UntrackedReadTarget(worktreePath, filePath)
-					if err != nil {
-						logging.For(logging.Git).Debugf("untracked %s: skipped: %v", filePath, err)
-						continue
-					}
-					// Skip content for large files or binary files.
-					// Binary detection: extension check first (O(1)), null-byte scan as fallback.
-					isBin := isBinaryExtension(filePath) || isBinaryContent(fullPath, fileSize)
-					if fileSize > maxDiffSize || isBin {
-						untracked = append(untracked, UntrackedFile{
-							Path:     filePath,
-							FileSize: fileSize,
-							IsBinary: isBin,
-						})
-						continue
-					}
-					// Read file content directly (untracked = new file, all lines are additions)
-					data, err := os.ReadFile(fullPath)
-					if err != nil {
-						continue
-					}
-					fileLines := SplitLines(string(data))
-					untracked = append(untracked, UntrackedFile{Path: filePath, Lines: fileLines})
-				}
-			}
-		}
-	}
-
-	doTruncate := len(skipTruncate) == 0 || !skipTruncate[0]
-	var truncatedFiles []string
-	var originalStats map[string]FileChangeStats
-	if doTruncate {
-		originalStats = countFileChanges(diffOut)
-		diffOut, truncatedFiles = truncateDiffLines(diffOut, defaultMaxChangeLines)
-		// Truncate untracked file lines (all additions for new files)
-		for i := range untracked {
-			if len(untracked[i].Lines) == 0 {
-				continue
-			}
-			if len(untracked[i].Lines) > defaultMaxChangeLines {
-				untracked[i].OrigAdded = len(untracked[i].Lines)
-				untracked[i].Lines = untracked[i].Lines[:defaultMaxChangeLines]
-				untracked[i].Truncated = true
-			}
-		}
-	}
-
-	// Compute staged hash so the diff hash changes on git add/reset.
-	// Always compare against HEAD (current commit), NOT baseRef.
-	// baseRef may be a different branch (e.g. "develop") and comparing
-	// index vs develop would show ALL branch divergence as "staged".
-	var stagedHash string
-	var stagedPaths map[string]struct{}
-	if headRef == "" {
-		// git diff exits 1 when changes exist — output is still valid.
-		stagedOut, stagedErr := wm.gitRunOutput(worktreePath, "diff", "--cached", "HEAD")
-		if stagedErr != nil {
-			if exitErr, ok := stagedErr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-				stagedHash = fmt.Sprintf("%x", sha256.Sum256([]byte(stagedOut)))
-			}
-		} else {
-			stagedHash = fmt.Sprintf("%x", sha256.Sum256([]byte(stagedOut)))
-		}
-		// Get set of staged file paths to mark Staged on tracked entries.
-		stagedNames, namesErr := wm.gitRunOutput(worktreePath, "diff", "--cached", "--name-only", "HEAD")
-		if namesErr != nil {
-			if exitErr, ok := namesErr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-				// Changes exist, output is valid
-			} else {
-				stagedNames = ""
-			}
-		}
-		if stagedNames != "" {
-			stagedPaths = make(map[string]struct{})
-			for line := range strings.SplitSeq(stagedNames, "\n") {
-				p := strings.TrimSpace(line)
-				if p != "" {
-					stagedPaths[p] = struct{}{}
-				}
-			}
-		}
-	}
-
-	tracked := parseUnifiedDiffToFiles(diffOut, truncatedFiles, originalStats, annotations)
-	if tracked == nil {
-		tracked = make(map[string]*TrackedDiffFile)
-	}
-	var committedDiff string
-	if baseRef != "" {
-		committedOut, err := wm.gitRunOutput(worktreePath, "diff", fmt.Sprintf("%s..HEAD", baseRef))
-		if err == nil && committedOut != "" {
-			committedDiff = committedOut
-			committedOut, committedAnnotations := wm.filterLargeBinaryDiffs(worktreePath, committedOut)
-			committedFiles := parseUnifiedDiffToFiles(committedOut, nil, nil, committedAnnotations)
-			for path, cf := range committedFiles {
-				if tf, ok := tracked[path]; ok {
-					tf.CommittedRows = cf.Rows
-				} else {
-					tracked[path] = &TrackedDiffFile{
-						Path:          path,
-						Rows:          nil,
-						CommittedRows: cf.Rows,
-						Added:         cf.Added,
-						Removed:       cf.Removed,
-						FileSize:      cf.FileSize,
-						IsBinary:      cf.IsBinary,
-						Truncated:     cf.Truncated,
-						OrigAdded:     cf.OrigAdded,
-						OrigRemoved:   cf.OrigRemoved,
-					}
-				}
-			}
-		}
-	}
-
-	// Convert to sorted slice for deterministic WebSocket broadcast.
-	var stagedPathsList []string
-	if stagedPaths != nil {
-		stagedPathsList = make([]string, 0, len(stagedPaths))
-		for p := range stagedPaths {
-			stagedPathsList = append(stagedPathsList, p)
-		}
-	}
-
-	return &TaskDiff{
-		Diff:              diffOut,
-		CommittedDiff:     committedDiff,
-		Tracked:           tracked,
-		Untracked:         untracked,
-		ShortStat:         shortStat,
-		TruncatedFiles:    truncatedFiles,
-		OriginalFileStats: originalStats,
-		StagedHash:        stagedHash,
-		StagedPaths:       stagedPathsList,
-	}, nil
-}
-
-// TaskDiffFromRepo computes a commit-to-commit TaskDiff
-func (wm *WorktreeManager) TaskDiffFromRepo(repoPath, baseRef, headRef string, skipTruncate ...bool) (*TaskDiff, error) {
-	if repoPath == "" || headRef == "" {
-		return nil, fmt.Errorf("TaskDiffFromRepo: repoPath and headRef are required")
-	}
-	target := baseRef
-	if target == "" {
-		target = "HEAD"
-	}
-	diffOut, err := wm.gitRunOutput(repoPath, "diff", fmt.Sprintf("%s..%s", target, headRef))
-	if err != nil {
-		return nil, fmt.Errorf("git diff: %w", err)
-	}
-	shortStat := shortStatFromDiff(diffOut)
-	diffOut, annotations := wm.filterLargeBinaryDiffs(repoPath, diffOut)
-
-	var truncatedFiles []string
-	var originalStats map[string]FileChangeStats
-	if doTruncate := len(skipTruncate) == 0 || !skipTruncate[0]; doTruncate {
-		originalStats = countFileChanges(diffOut)
-		diffOut, truncatedFiles = truncateDiffLines(diffOut, defaultMaxChangeLines)
-	}
-	tracked := parseUnifiedDiffToFiles(diffOut, truncatedFiles, originalStats, annotations)
-	if tracked == nil {
-		tracked = make(map[string]*TrackedDiffFile)
-	}
-	return &TaskDiff{
-		Diff:              diffOut,
-		Tracked:           tracked,
-		Untracked:         []UntrackedFile{},
-		ShortStat:         shortStat,
-		TruncatedFiles:    truncatedFiles,
-		OriginalFileStats: originalStats,
-	}, nil
 }
 
 // -- Helper functions --
@@ -1800,102 +625,6 @@ type fileAnnotation struct {
 	origPath string // a/ path (empty if same as path)
 	size     int64
 	isBinary bool
-}
-
-// filterLargeBinaryDiffs replaces diff hunks for binary or >1MB files with size annotations.
-// Returns the filtered diff and a map of file annotations for the parser to consume.
-// Binary detection uses git's own "Binary files a/X and b/Y differ" marker.
-// Large-file detection uses os.Stat() (>1MB text files).
-func (wm *WorktreeManager) filterLargeBinaryDiffs(worktreePath, diffText string) (string, map[string]*fileAnnotation) {
-	if diffText == "" {
-		return diffText, nil
-	}
-	const maxDiffSize = 1 << 20 // 1MB
-	annotations := make(map[string]*fileAnnotation)
-	var result strings.Builder
-	lines := strings.Split(diffText, "\n")
-	i := 0
-	for i < len(lines) {
-		line := lines[i]
-		if strings.HasPrefix(line, "diff --git ") {
-			// Extract a/ and b/ paths from "diff --git a/X b/Y"
-			aPath, bPath := extractDiffPaths(line)
-
-			// Scan header lines for "Binary files a/X and b/Y differ" marker
-			// and the index line for blob hashes (fallback size lookup).
-			isBinary := false
-			var binarySize int64
-			var blobHash string
-			// Write the "diff --git" line and advance past it
-			result.WriteString(line + "\n")
-			i++
-			for i < len(lines) {
-				l := lines[i]
-				if strings.HasPrefix(l, "@@ ") || strings.HasPrefix(l, "diff --git ") {
-					break
-				}
-				if strings.HasPrefix(l, "Binary files ") {
-					isBinary = true
-					binarySize = extractBinarySize(l)
-				}
-				if strings.HasPrefix(l, "index ") && blobHash == "" {
-					// index abc123..def456 mode — grab the second hash (new blob)
-					blobHash = extractBlobHash(l)
-				}
-				result.WriteString(l + "\n")
-				i++
-			}
-
-			if isBinary {
-				// Git confirmed binary — resolve size.
-				if binarySize == 0 {
-					checkPath := bPath
-					if checkPath == "" || strings.Contains(line, "/dev/null") {
-						checkPath = aPath
-					}
-					if size, ok := getFileSize(worktreePath, checkPath, blobHash, wm); ok {
-						binarySize = size
-					}
-				}
-				result.WriteString(fmt.Sprintf("# binary-file: %d\n", binarySize))
-				for i < len(lines) && !strings.HasPrefix(lines[i], "diff --git ") {
-					i++
-				}
-				annotations[bPath] = &fileAnnotation{
-					path:     bPath,
-					origPath: aPath,
-					size:     binarySize,
-					isBinary: true,
-				}
-				continue
-			}
-
-			// Not binary — check if it's a large text file.
-			if size, ok := getFileSize(worktreePath, bPath, "", wm); ok && size > maxDiffSize {
-				result.WriteString(fmt.Sprintf("# large-file: %d\n", size))
-				for i < len(lines) && !strings.HasPrefix(lines[i], "diff --git ") {
-					i++
-				}
-				annotations[bPath] = &fileAnnotation{
-					path:     bPath,
-					origPath: aPath,
-					size:     size,
-					isBinary: false,
-				}
-				continue
-			}
-			// Normal text file — headers already written by inner loop.
-			// Continue outer loop to process hunk lines from current i position.
-			continue
-		}
-		result.WriteString(line + "\n")
-		i++
-	}
-	out := result.String()
-	if len(out) > 0 && out[len(out)-1] == '\n' {
-		out = out[:len(out)-1]
-	}
-	return out, annotations
 }
 
 // getFileSize tries os.Stat() first, falls back to git cat-file -s for blob hash.
@@ -1928,53 +657,6 @@ func (wm *WorktreeManager) gitCatFileSize(hash string) (int64, error) {
 // The caller must resolve the size via os.Stat() or git cat-file.
 func extractBinarySize(_ string) int64 {
 	return 0
-}
-
-// extractBlobHash extracts the second (new) hash from "index abc..def mode" line.
-func extractBlobHash(line string) string {
-	line = strings.TrimPrefix(line, "index ")
-	parts := strings.SplitN(line, "..", 2)
-	if len(parts) == 2 {
-		// Second hash may be followed by " mode..."
-		hash := strings.SplitN(parts[1], " ", 2)[0]
-		return hash
-	}
-	return ""
-}
-
-// extractDiffPaths pulls both a/ and b/ paths from "diff --git a/X b/Y" header.
-func extractDiffPaths(line string) (aPath, bPath string) {
-	rest := strings.TrimPrefix(line, "diff --git ")
-
-	// git C-quotes a path containing a double quote, backslash or control character, so the header
-	// arrives as `diff --git "a/quo\"te.ts" "b/quo\"te.ts"`. Unhandled, the `a/` test fails and the
-	// ` b/` separator sits inside the quoting, so every such file in a diff merges into one "" entry.
-	if strings.HasPrefix(rest, `"`) {
-		aTok, bTok := splitQuotedPathPair(rest)
-		// The a/ and b/ prefixes are INSIDE the quoting (git quotes the whole `b/path` token), so they
-		// are stripped after unquoting, not before.
-		return stripDiffSide(unquoteGitPath(aTok), "a/"), stripDiffSide(unquoteGitPath(bTok), "b/")
-	}
-
-	// Parse "a/path b/path"
-	if !strings.HasPrefix(rest, "a/") {
-		return "", ""
-	}
-	path := rest[2:] // strip "a/"
-	aPath = path
-	// Find " b/" separator
-	if idx := strings.Index(path, " b/"); idx >= 0 {
-		aPath = path[:idx]
-		bPath = path[idx+3:] // strip " b/"
-	} else {
-		bPath = aPath
-	}
-	return aPath, bPath
-}
-
-// stripDiffSide removes a leading "a/" or "b/" diff-side prefix.
-func stripDiffSide(path, side string) string {
-	return strings.TrimPrefix(path, side)
 }
 
 // splitQuotedPathPair divides `"a/x" "b/x"` into its two raw quoted tokens, honoring backslash escapes
@@ -2072,9 +754,9 @@ func (wm *WorktreeManager) gitRun(dir string, args ...string) error {
 	return err
 }
 
-// gitRunInGitDir runs git against dir's own gitdir and returns what git printed: git's reason for
-// refusing is on stderr, and an exit code alone tells the user nothing. GIT_DIR is an Env extra,
-// not an assignment to cmd.Env, which would replace the allowlist and the hook fence.
+// gitRunInGitDir runs git against dir's own gitdir and returns what git printed, because git writes
+// its reason for refusing to stderr and an exit code alone tells the user nothing. GIT_DIR goes in as
+// an Env extra rather than an assignment to cmd.Env, which would replace the allowlisted environment.
 func (wm *WorktreeManager) gitRunInGitDir(dir string, args ...string) (string, error) {
 	cmd := Command(dir, args...)
 	cmd.Env = Env("GIT_DIR=" + filepath.Join(dir, ".git"))
@@ -2086,34 +768,6 @@ func (wm *WorktreeManager) gitRunOutput(dir string, args ...string) (string, err
 	cmd := Command(dir, args...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
-}
-
-func (wm *WorktreeManager) gitCurrentBranch(dir string) (string, error) {
-	out, err := wm.gitRunOutput(dir, "rev-parse", "--abbrev-ref", "HEAD")
-	return strings.TrimSpace(out), err
-}
-
-// DivergenceBase returns the commit at which taskBranch diverged from the project's main branch
-func (wm *WorktreeManager) DivergenceBase(projectPath, mainBranch, taskBranch string) string {
-	if projectPath == "" || taskBranch == "" {
-		return ""
-	}
-	if mainBranch == "" {
-		var err error
-		mainBranch, err = wm.gitCurrentBranch(projectPath)
-		if err != nil {
-			return ""
-		}
-	}
-	if mainBranch == "" || mainBranch == "HEAD" {
-		// Detached HEAD — no main branch to measure divergence from.
-		return ""
-	}
-	out, err := wm.gitRunOutput(projectPath, "merge-base", taskBranch, mainBranch)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(out)
 }
 
 // baselineUsable reports whether a recorded baseline ref is a meaningful
@@ -2238,34 +892,6 @@ func (wm *WorktreeManager) GetTaskCommits(taskID, baseRef string) (*TaskCommitsR
 	return TaskCommitsIn(worktreePath, baseRef, "")
 }
 
-// ResolveDiffBaseline computes the ref to diff a task against: baseRef for the original thread, the
-// merge-base of forkBranch and taskBranch for a fork, and baseRef again when the task branch *is*
-// the thread branch, because all its changes live there.
-func (wm *WorktreeManager) ResolveDiffBaseline(taskID, baseRef, taskBranch, forkBranch string) (string, error) {
-	// Reject invalid baseRef values (e.g. git error messages like "fatal: ...")
-	if strings.HasPrefix(baseRef, "fatal:") {
-		baseRef = ""
-	}
-	if forkBranch == "" {
-		// Original thread — diff against base_ref
-		return baseRef, nil
-	}
-	if forkBranch == taskBranch {
-		// Task branch was switched to thread branch — diff against original baseline
-		return baseRef, nil
-	}
-	// Forked thread — find the divergence point via merge-base
-	worktreePath, err := wm.WorktreePath(taskID)
-	if err != nil {
-		return baseRef, err
-	}
-	mb, err := wm.gitRunOutput(worktreePath, "merge-base", forkBranch, taskBranch)
-	if err != nil {
-		return baseRef, fmt.Errorf("git merge-base: %w", err)
-	}
-	return strings.TrimSpace(mb), nil
-}
-
 // IsAncestor reports whether `ancestor` is an ancestor of (or equal to) `descendant`.
 func (wm *WorktreeManager) IsAncestor(taskID, ancestor, descendant string) bool {
 	worktreePath, err := wm.WorktreePath(taskID)
@@ -2273,17 +899,6 @@ func (wm *WorktreeManager) IsAncestor(taskID, ancestor, descendant string) bool 
 		return false
 	}
 	cmd := Command("", "-C", worktreePath, "merge-base", "--is-ancestor", ancestor, descendant)
-	return cmd.Run() == nil
-}
-
-// IsMergedInto checks if the task branch has been merged into the target branch.
-// Uses git merge-base --is-ancestor to check if taskBranch is an ancestor of targetBranch.
-// Returns true if merged, false if not merged or if check fails.
-func (wm *WorktreeManager) IsMergedInto(projectPath, taskBranch, targetBranch string) bool {
-	if taskBranch == "" || targetBranch == "" {
-		return false
-	}
-	cmd := Command("", "-C", projectPath, "merge-base", "--is-ancestor", taskBranch, targetBranch)
 	return cmd.Run() == nil
 }
 
@@ -2325,100 +940,11 @@ func (wm *WorktreeManager) ResetWorktreeTo(taskID, hash string) error {
 	return nil
 }
 
-// stashUntrackedCommit returns the commit holding a stash entry's untracked files, when hash names a
-// stash commit made with -u. Git keeps those files only in the third parent, so reading the stash
-// commit's own tree would lose them.
-func (wm *WorktreeManager) stashUntrackedCommit(dir, hash string) (string, bool) {
-	out, err := wm.gitRunOutput(dir, "rev-list", "--parents", "-n1", hash)
-	if err != nil {
-		return "", false
-	}
-	ancestors := strings.Fields(out)
-	if len(ancestors) != 4 {
-		return "", false // not a stash commit with an untracked parent
-	}
-	candidate := ancestors[3]
-	files, err := wm.gitRunOutput(dir, "ls-tree", "-r", "--name-only", candidate)
-	if err != nil || strings.TrimSpace(files) == "" {
-		return "", false // nothing to overlay
-	}
-	return candidate, true
-}
-
-// branchExistsInRepo checks if a branch exists in the given git repo.
-func (wm *WorktreeManager) branchExistsInRepo(repoPath, branchName string) bool {
-	_, err := wm.gitRunOutput(repoPath, "rev-parse", "--verify", branchName)
-	return err == nil
-}
-
 // StashEntry holds a parsed stash list entry.
 type StashEntry struct {
 	Ref     string // stash@{N}
 	Hash    string // commit hash
 	Subject string // reflog subject
-}
-
-// listStashEntries parses "git stash list --format=%gd%x00%H%x00%gs" output.
-func (wm *WorktreeManager) listStashEntries(repoPath string) ([]StashEntry, error) {
-	out, err := wm.gitRunOutput(repoPath, "stash", "list", "--format=%gd%x00%H%x00%gs")
-	if err != nil {
-		return nil, err
-	}
-	var entries []StashEntry
-	for line := range strings.SplitSeq(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "\x00", 3)
-		if len(parts) < 3 {
-			continue
-		}
-		entries = append(entries, StashEntry{
-			Ref:     parts[0],
-			Hash:    strings.TrimSpace(parts[1]),
-			Subject: parts[2],
-		})
-	}
-	return entries, nil
-}
-
-// PushStash stashes the worktree changes under `message` and returns the hash of the entry it
-// created, found by diffing the stash list across the push: the stack is one per repository and
-// holds the user's own entries, so the entry on top is not necessarily ours.
-// The caller must hold the project stash mutex.
-func (wm *WorktreeManager) PushStash(repoPath, message string) (string, error) {
-	before, err := wm.stashHashSet(repoPath)
-	if err != nil {
-		return "", fmt.Errorf("stash list: %w", err)
-	}
-	if out, err := wm.gitRunInGitDir(repoPath, "stash", "push", "-u", "-m", message); err != nil {
-		return "", fmt.Errorf("stash push: %s", gitMessage(out, err))
-	}
-	entries, err := wm.listStashEntries(repoPath)
-	if err != nil {
-		return "", fmt.Errorf("stash list: %w", err)
-	}
-	var fresh []StashEntry
-	for _, e := range entries { // newest first
-		if !before[e.Hash] {
-			fresh = append(fresh, e)
-		}
-	}
-	for _, e := range fresh {
-		if strings.Contains(e.Subject, message) {
-			return e.Hash, nil
-		}
-	}
-	switch len(fresh) {
-	case 0:
-		return "", ErrNothingToStash
-	case 1:
-		// git rewrapped the label; the one entry that appeared during our push is ours.
-		return fresh[0].Hash, nil
-	default:
-		return "", fmt.Errorf("stash push: %d entries appeared and none carries %q", len(fresh), message)
-	}
 }
 
 // stashHashSet snapshots the stash list as a set of commit hashes, so a later list can be diffed against
@@ -2435,92 +961,12 @@ func (wm *WorktreeManager) stashHashSet(repoPath string) (map[string]bool, error
 	return set, nil
 }
 
-// DropStashByHash drops the stash entry with this commit hash. An entry not in the list is treated
-// as already gone and returns nil — never a fallback to stash@{0}, which when ours has vanished is
-// somebody else's state. The caller must hold the project stash mutex.
-func (wm *WorktreeManager) DropStashByHash(repoPath, hash string) error {
-	if hash == "" {
-		return nil
-	}
-	hash = strings.TrimSpace(hash)
-	entries, err := wm.listStashEntries(repoPath)
-	if err != nil {
-		return nil
-	}
-	for _, e := range entries {
-		if e.Hash == hash || strings.HasPrefix(e.Hash, hash) {
-			return wm.gitRun(repoPath, "stash", "drop", e.Ref)
-		}
-	}
-	return nil
-}
-
-// PopStashByHash restores the stash entry with this commit hash into dir's working tree and drops
-// it, returning whether the entry was found. `git stash pop` pops stash@{0} with no idea who pushed
-// it, so on a shared stack one merge restores another's work and keeps its own entry, with no error
-// on either side — hence identity by hash. A failed apply leaves the entry on the stack: dropping
-// what could not be applied turns a resolvable conflict into lost work.
-// The caller must hold the project stash mutex.
-func (wm *WorktreeManager) PopStashByHash(dir, hash string) (bool, error) {
-	if hash == "" {
-		return false, nil
-	}
-	hash = strings.TrimSpace(hash)
-
-	found := false
-	entries, err := wm.listStashEntries(dir)
-	if err != nil {
-		return false, fmt.Errorf("stash list: %w", err)
-	}
-	for _, e := range entries {
-		if e.Hash == hash || strings.HasPrefix(e.Hash, hash) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		// Not an error: the entry was already dropped or swept. Callers use the result to decide
-		// whether to say so, because silently continuing is how lost work stays lost.
-		return false, nil
-	}
-
-	if out, err := wm.gitRunInGitDir(dir, "stash", "apply", hash); err != nil {
-		// Deliberately not dropped — see the doc comment.
-		return true, fmt.Errorf("stash apply %s: %s", shortHash(hash), gitMessage(out, err))
-	}
-	if err := wm.DropStashByHash(dir, hash); err != nil {
-		// The work is already restored; a leftover entry is cosmetic, not data loss.
-		return true, fmt.Errorf("stash applied but the entry could not be dropped: %w", err)
-	}
-	return true, nil
-}
-
 // shortHash renders a commit hash for a log line or error message.
 func shortHash(hash string) string {
 	if len(hash) <= 8 {
 		return hash
 	}
 	return hash[:8]
-}
-
-// NewestStashHashForMessage returns the hash of the newest entry whose reflog subject carries
-// label, for restores that happen in code that never saw the push; labels embed the task ID. Weaker
-// than a hash — a caller still holding one should use PopStashByHash.
-// The caller must hold the project stash mutex.
-func (wm *WorktreeManager) NewestStashHashForMessage(dir, label string) (string, bool, error) {
-	if label == "" {
-		return "", false, nil
-	}
-	entries, err := wm.listStashEntries(dir)
-	if err != nil {
-		return "", false, err
-	}
-	for _, e := range entries { // newest first
-		if strings.Contains(e.Subject, label) {
-			return e.Hash, true, nil
-		}
-	}
-	return "", false, nil
 }
 
 // RestoreStashForTask restores the stash entry pushed under `label` (a StashMessageFor* value), if
@@ -2567,15 +1013,6 @@ func StashMessageForSwitch(taskID string) string {
 // StashMessageForFork returns a stash message for a thread fork.
 func StashMessageForFork(taskID string) string {
 	return stashMessageWithPrefix(stashLabelFork, taskID)
-}
-
-func StashMessageForSyncMerge(taskID string) string {
-	return stashMessageWithPrefix(stashLabelSyncMerge, taskID)
-}
-
-// StashMessageForAutoMerge returns a stash message for an auto-merge operation.
-func StashMessageForAutoMerge(taskID string) string {
-	return stashMessageWithPrefix(stashLabelAutoMerge, taskID)
 }
 
 var fileRe = regexp.MustCompile(`^diff --git a/(.+?) b/`)

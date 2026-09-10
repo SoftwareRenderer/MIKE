@@ -45,8 +45,7 @@ func TestBuildExtensionImageArgs_NeverReadsStdinOrTheWorkingDirectory(t *testing
 
 func TestBuildExtensionImage_StagesTheBridgeIntoTheContext(t *testing.T) {
 	fake := fakePodmanOK(t)
-	setBridgeEnv(t)
-	rc := NewRegistryClient()
+	rc := NewRegistryClientWithBoot(bridgeBoot(t))
 
 	const ref = "localhost/kanban-ext-gopls:0.7.0"
 	dockerfile := "FROM docker.io/library/alpine:latest\nCOPY sandbox/sandbox-bridge /usr/local/bin/sandbox-bridge\n"
@@ -105,8 +104,7 @@ func TestBuildExtensionImage_IgnoresADockerignoreInTheWorkingDirectory(t *testin
 	t.Chdir(cwd)
 
 	fake := fakePodmanOK(t)
-	setBridgeEnv(t)
-	rc := NewRegistryClient()
+	rc := NewRegistryClientWithBoot(bridgeBoot(t))
 	if err := rc.BuildExtensionImage("FROM docker.io/library/alpine:latest\nCOPY sandbox/sandbox-bridge /usr/local/bin/sandbox-bridge\n", "localhost/kanban-ext-gopls:0.7.0"); err != nil {
 		t.Fatalf("BuildExtensionImage: %v", err)
 	}
@@ -140,7 +138,7 @@ func TestBuildExtensionImage_IgnoresADockerignoreInTheWorkingDirectory(t *testin
 // The same claim against real buildah: the only test here that shows the fix works rather than that the
 // assertion changed. Gated on a local base image - it never reaches the network.
 func TestBuildExtensionImage_RealBuildSurvivesADockerignoreBelow(t *testing.T) {
-	rt := sandboxruntime.NewRuntime()
+	rt := sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{})
 	if testing.Short() || !rt.ImageExists("docker.io/library/alpine:latest") {
 		t.Skip("needs a local alpine and a working podman/buildah")
 	}
@@ -149,9 +147,7 @@ func TestBuildExtensionImage_RealBuildSurvivesADockerignoreBelow(t *testing.T) {
 		t.Fatalf("write .dockerignore: %v", err)
 	}
 	t.Chdir(cwd)
-	setBridgeEnv(t)
-
-	rc := NewRegistryClient()
+	rc := NewRegistryClientWithBoot(bridgeBoot(t))
 	ref := "localhost/kanban-ext-build-test:1"
 	t.Cleanup(func() { _, _ = rt.PodmanExec("rmi", "-f", ref) })
 
@@ -166,13 +162,12 @@ func TestBuildExtensionImage_RealBuildSurvivesADockerignoreBelow(t *testing.T) {
 
 func TestBuildExtensionImage_RefusesWithoutABridge(t *testing.T) {
 	fake := fakePodmanOK(t)
-	// MIKE_AGENT_PATH unset to a missing file, with no bridge beside the test binary or in the CWD.
-	t.Setenv("MIKE_AGENT_PATH", filepath.Join(t.TempDir(), "not-a-bridge"))
+	// The wired path names a missing file, with no bridge beside the test binary or in the CWD.
+	rc := NewRegistryClientWithBoot(sandboxruntime.Boot{AgentPath: filepath.Join(t.TempDir(), "not-a-bridge")})
 	if _, err := os.Stat("sandbox/sandbox-bridge"); err == nil {
 		t.Skip("a sandbox-bridge sits under the working directory; nothing to refuse")
 	}
 
-	rc := NewRegistryClient()
 	err := rc.BuildExtensionImage("FROM docker.io/library/alpine:latest\n", "localhost/kanban-ext-gopls:0.7.0")
 	if err == nil {
 		t.Fatal("BuildExtensionImage with no bridge = nil, want an error naming sandbox-bridge")
@@ -187,8 +182,7 @@ func TestBuildExtensionImage_RefusesWithoutABridge(t *testing.T) {
 
 func TestBuildExtensionImage_FailureCarriesPodmanOutput(t *testing.T) {
 	fake := fakePodmanFails(t, 1, `Error: building at STEP "COPY": no items matching glob`)
-	setBridgeEnv(t)
-	rc := NewRegistryClient()
+	rc := NewRegistryClientWithBoot(bridgeBoot(t))
 
 	err := rc.BuildExtensionImage("FROM docker.io/library/alpine:latest\n", "localhost/kanban-ext-gopls:0.7.0")
 	if err == nil {
@@ -207,8 +201,7 @@ func TestBuildExtensionImage_FailureCarriesPodmanOutput(t *testing.T) {
 
 func TestBuildExtensionImage_RejectsAnEmptyDockerfileAndABadRef(t *testing.T) {
 	fake := fakePodmanOK(t)
-	setBridgeEnv(t)
-	rc := NewRegistryClient()
+	rc := NewRegistryClientWithBoot(bridgeBoot(t))
 
 	if err := rc.BuildExtensionImage("  \n\t\n", "localhost/kanban-ext-gopls:0.7.0"); err == nil {
 		t.Error("BuildExtensionImage(empty Dockerfile) = nil, want an error")

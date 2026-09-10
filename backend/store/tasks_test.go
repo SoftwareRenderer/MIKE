@@ -188,7 +188,6 @@ func TestUpdateTaskExecutionState(t *testing.T) {
 	if got.ExecutionState != types.ExecStateRunning {
 		t.Fatalf("unexpected status state: %s", got.ExecutionState)
 	}
-	// Status should be unchanged
 	if got.Status != types.StatusBacklog {
 		t.Fatalf("status should be unchanged: %s", got.Status)
 	}
@@ -528,7 +527,6 @@ func TestClearTaskBranch(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	// Set a branch
 	set, err := s.SetTaskBranchIfEmpty("task-1", "proj-1", "task/branch-1")
 	if err != nil || !set {
 		t.Fatalf("set branch: set=%v, err=%v", set, err)

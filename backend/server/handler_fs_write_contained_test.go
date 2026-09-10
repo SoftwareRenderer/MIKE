@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"kanban/backend/startup"
 )
 
 // TestFSWriteRefusesSymlinkedParent (security): a task owns its worktree and can swap a
@@ -60,11 +62,11 @@ func TestFSWriteCreatesNewDirectoriesInsideProject(t *testing.T) {
 	}
 }
 
-// TestFSWriteIsNotWidenedByAllowRootFS: MIKE_ALLOW_ROOT_FS widens the picker, never a
-// project-scoped write.
+// TestFSWriteIsNotWidenedByAllowRootFS: the widening that reaches the picker never reaches a
+// project-scoped write — the server below was built widened, and the write is still jailed to the
+// roots the request resolution named.
 func TestFSWriteIsNotWidenedByAllowRootFS(t *testing.T) {
-	t.Setenv("MIKE_ALLOW_ROOT_FS", "1")
-	s := testServer(t)
+	s := testServerWith(t, func(c *startup.Config) { c.AllowRootFS = true })
 	projectDir := t.TempDir()
 	outside := t.TempDir()
 	if err := os.Symlink(outside, filepath.Join(projectDir, "swapped")); err != nil {

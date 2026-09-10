@@ -2,7 +2,6 @@ package server
 
 import (
 	"net/http"
-	"os"
 	"testing"
 )
 
@@ -330,17 +329,8 @@ func TestProjectUpdateSandboxNetworkIsolation(t *testing.T) {
 }
 
 func TestProjectToggleSandboxWithTasks(t *testing.T) {
-	// Allow disabling sandbox in this test
-	oldVal := os.Getenv("DANGER_ZONE")
-	os.Setenv("DANGER_ZONE", "1")
-	t.Cleanup(func() {
-		if oldVal != "" {
-			os.Setenv("DANGER_ZONE", oldVal)
-		} else {
-			os.Unsetenv("DANGER_ZONE")
-		}
-	})
-
+	// The fixture server carries the DANGER_ZONE grant, which is what lets a project be switched to
+	// unsandboxed here; the refusal is pinned by the managers suite.
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -453,7 +443,6 @@ func TestProjectCounts(t *testing.T) {
 		t.Fatalf("move to in_progress failed: %d %s", moveRR.Code, moveRR.Body.String())
 	}
 
-	// Move one to review
 	reviewTaskID := createTestTask(t, s, projID, "Review task")
 	moveReq2 := testRequest("POST", "/api/projects/"+projID+"/tasks/"+reviewTaskID+"/move", map[string]any{
 		"status": "review",
@@ -522,7 +511,6 @@ func TestClearDone(t *testing.T) {
 	backlogTask := createTestTask(t, s, projID, "Backlog task")
 	doneTask := createTestTask(t, s, projID, "Done task")
 
-	// Move one to done
 	moveReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+doneTask+"/move", map[string]any{
 		"status": "done",
 	})
@@ -646,7 +634,6 @@ func TestProjectUpdateSandboxMemoryLimit(t *testing.T) {
 func TestProjectUpdateSandboxForwardPorts(t *testing.T) {
 	s := testServer(t)
 
-	// Create project
 	projID := createTestProject(t, s)
 
 	// Update forward ports (container ports only, host ports are auto-assigned)
@@ -706,7 +693,6 @@ func TestProjectUpdateSandboxForwardPorts(t *testing.T) {
 func TestProjectUpdateSandboxMounts(t *testing.T) {
 	s := testServer(t)
 
-	// Create project
 	projID := createTestProject(t, s)
 
 	// Update mounts
@@ -772,7 +758,6 @@ func TestProjectUpdateSandboxMounts(t *testing.T) {
 func TestProjectUpdateSandboxEnvs(t *testing.T) {
 	s := testServer(t)
 
-	// Create project
 	projID := createTestProject(t, s)
 
 	// Update envs

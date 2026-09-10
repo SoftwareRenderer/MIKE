@@ -144,7 +144,6 @@ import { slide } from 'svelte/transition';
         await saveCollapsedDiffFiles(collapsed);
     }
 
-    // Clean up stale entries: remove paths that no longer exist in the current diff
     $effect(() => {
         const _committedFiles = committedFiles;
         const _stagedFiles = stagedFiles;

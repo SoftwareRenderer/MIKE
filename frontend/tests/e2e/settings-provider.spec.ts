@@ -386,7 +386,6 @@ test.describe.serial('Reasoning effort setting', () => {
         // Wait for details to appear (replaces waitForTimeout(200))
         await expect(page.locator('.provider-details')).toBeVisible({ timeout: 3000 });
 
-        // Add a new model
         await page.click('.btn-add-model');
         // Wait for new model input to appear (replaces waitForTimeout(200))
         const modelInputs = page.locator('.model-input');
@@ -437,7 +436,6 @@ test.describe.serial('Reasoning effort setting', () => {
             await page.locator('.reasoning-effort-list .reasoning-effort-option', { hasText: 'High' }).click();
             await expect(effortInput).toHaveValue('high');
 
-            // Save
             await page.click('button:has-text("Save")');
             // Wait for modal to close (replaces waitForTimeout(1000))
             await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
@@ -498,7 +496,6 @@ test.describe.serial('Reasoning effort setting', () => {
         await expect(reasoningInputs.first()).toHaveValue('xhigh');
         await expect(page.locator('.reasoning-effort-list')).toBeHidden();
 
-        // Save
         await page.click('button:has-text("Save")');
         await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
 

@@ -33,14 +33,7 @@ export function lspClientConfig({ extensions, rootUri, getFile, onMessage }: Lsp
         // hook: our grammars are all named `mike-declared`, so the renderer's "fence tag equals the
         // editor's language name" rule matches nothing and every signature would be monochrome.
         highlightLanguage: (tag: string) => getGrammarForFence(tag, getFile()),
-        // The package writes a server's rendered documentation into `innerHTML` in two places this
-        // repository cannot see with html-sinks.py — the completion info panel (`renderDocInfo`) and
-        // the signature-help docs element — and this hook is the only control it offers: without it
-        // the markup a server returned is the markup the page gets. Documentation is the least
-        // trustworthy text in the editor: gopls lifts it out of a comment in whatever repository is
-        // open, so it is the same content class the chat sanitizer exists for. Core's own hover card
-        // sanitizes separately (`hoverDocsHTML` in lsp-hover-actions), which is exactly why this one
-        // was easy to miss — the visible hover path was always clean.
+        // @codemirror/lsp-client writes server docs to innerHTML in two files html-sinks.py cannot scan; this hook is the control.
         sanitizeHTML: (html: string) => sanitizeHTML(html),
     };
 }

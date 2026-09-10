@@ -53,8 +53,8 @@ func (h *GitHandler) SetProjectMutex(fn func(projectID string) func()) {
 	h.getProjectMutex = fn
 }
 
-// UpdateDiffCache stores a precomputed TaskDiff in the cache.
-// Called by the worktree watcher so that on-demand file fetches work without a full /diff call.
+// UpdateDiffCache is called by the worktree watcher so on-demand file fetches work without a full
+// /diff call.
 func (h *GitHandler) UpdateDiffCache(taskID string, taskDiff *git.TaskDiff) {
 	h.diffCache.Store(taskID, taskDiff)
 }
@@ -103,7 +103,7 @@ func (h *GitHandler) writeFullGitLog(w http.ResponseWriter, dir, branch, path st
 	}
 	out, err := git.Command("", args...).CombinedOutput()
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
+		httputil.Fault(w, "git log", err)
 		return
 	}
 
@@ -224,7 +224,7 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 	c := git.Command("", args...)
 	out, err := c.CombinedOutput()
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
+		httputil.Fault(w, "git log", err)
 		return
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
@@ -308,7 +308,7 @@ func (h *GitHandler) HandleBranches(w http.ResponseWriter, r *http.Request) {
 	}
 	branches, err := gitBranchNames(project.Path, "branch", "-a", "--format=%(refname:short)")
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git branches failed: %v", err))
+		httputil.Fault(w, "git branches", err)
 		return
 	}
 	httputil.JSONResponse(w, http.StatusOK, branches)
@@ -371,7 +371,7 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			// Changes exist, output is valid
 		} else {
-			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git diff failed: %v", err))
+			httputil.Fault(w, "git diff", err)
 			return
 		}
 	}
@@ -401,7 +401,7 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	c := git.Command("", "-C", project.Path, "status", "--porcelain")
 	out, err := c.CombinedOutput()
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git status failed: %v", err))
+		httputil.Fault(w, "git status", err)
 		return
 	}
 	clean := len(strings.TrimSpace(string(out))) == 0
@@ -432,10 +432,6 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 // project root), staged (true = index diff, omitted = working tree), and meta=true for
 // metadata only (line_count, file_size, is_binary) — the cheap way to list untracked files.
 func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
@@ -471,7 +467,7 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			// Changes exist, output is valid
 		} else {
-			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git diff failed: %v", err))
+			httputil.Fault(w, "git diff", err)
 			return
 		}
 	}
@@ -643,10 +639,6 @@ func gitErrorSummary(out []byte) string {
 // handleGitRemote runs a project-level remote git command (pull/push),
 // serialized by the per-project mutex. op must be "pull" or "push".
 func (h *GitHandler) handleGitRemote(w http.ResponseWriter, r *http.Request, op string) {
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
@@ -726,7 +718,7 @@ func (h *GitHandler) HandleTaskCommits(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
+			httputil.Fault(w, "git log", err)
 			return
 		}
 	}
@@ -864,7 +856,7 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git diff failed: %v", err))
+			httputil.Fault(w, "git diff", err)
 			return
 		}
 	}
@@ -929,8 +921,7 @@ type diffManifestFile struct {
 	Staged      bool   `json:"staged,omitempty"`     // true if file is staged in the index
 }
 
-// diffManifest is the lightweight manifest returned by GET /diff.
-// Contains per-file metadata (hashes, stats) without the actual diff content.
+// diffManifest is GET /diff's per-file metadata (hashes, stats) without diff content.
 type diffManifest struct {
 	Files     map[string]diffManifestFile `json:"files"`
 	ShortStat string                      `json:"short_stat"`
@@ -1032,10 +1023,6 @@ func buildDiffManifest(d *git.TaskDiff, stagedPaths map[string]struct{}, baseRef
 // Query params: path (file path relative to worktree).
 // Returns 404 if the task's diff is not cached or the file is not found.
 func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	taskID := r.PathValue("taskID")
 	filePath := r.URL.Query().Get("path")
 	fullFile := r.URL.Query().Get("full") == "1"
@@ -1217,10 +1204,6 @@ func stageActionName(stage bool) string {
 // Body: {"path": "file.c", "stage": true}
 func (h *GitHandler) HandleStageFile(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodPost {
-		httputil.JSONError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
 	var req struct {
 		Path  string `json:"path"`
 		Stage bool   `json:"stage"`
@@ -1364,7 +1347,7 @@ func (h *GitHandler) HandleTaskLog(w http.ResponseWriter, r *http.Request) {
 	c := git.Command("", args...)
 	out, err := c.CombinedOutput()
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
+		httputil.Fault(w, "git log", err)
 		return
 	}
 	var commits []types.GitCommit

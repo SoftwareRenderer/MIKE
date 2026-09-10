@@ -344,7 +344,6 @@ func TestBashCancel(t *testing.T) {
 		h.mu.Unlock()
 	}
 
-	// Cleanup
 	h.closed.Store(true)
 	testToAgentPw.Close()
 	agentToTestPw.Close()

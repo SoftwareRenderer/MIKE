@@ -221,8 +221,8 @@ type SandboxManager struct {
 }
 
 // NewSandboxManager creates a new SandboxManager and checks gVisor availability.
-func NewSandboxManager() *SandboxManager {
-	rt := sandboxruntime.NewRuntime()
+func NewSandboxManager(boot sandboxruntime.Boot) *SandboxManager {
+	rt := sandboxruntime.NewRuntimeWithBoot(boot)
 	sm := &SandboxManager{
 		rt:            rt,
 		active:        make(map[string]string),
@@ -236,9 +236,9 @@ func NewSandboxManager() *SandboxManager {
 	sm.available = sm.checkAvailable()
 	if sm.available {
 		logging.For(logging.Sandbox).Info("gVisor available, sandboxing enabled")
-		// Skip cleanup if MIKE_SANDBOX_SKIP_STARTUP_CLEANUP is set (e.g. during tests
-		// where TestMain handles cleanup once to avoid races between parallel tests).
-		if !sandboxruntime.SkipStartupCleanup() {
+		// The sweep is a host-wide delete, so it happens only when this process claimed that
+		// authority at startup (server.NewServer does; a test binary's zero Boot does not).
+		if boot.SweepStaleContainersAtBoot {
 			sm.cleanupStaleContainers()
 		}
 	} else {
@@ -631,8 +631,7 @@ func (sm *SandboxManager) ExecWithInput(taskID, command string, stdin []byte, en
 	return sm.execInternal(taskID, command, stdin, env)
 }
 
-// execInternal is the shared implementation for Exec and ExecWithInput.
-// When stdin is non-nil, it is piped to the command's standard input.
+// execInternal is Exec and ExecWithInput's shared body; a non-nil stdin is piped to the command.
 func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env []types.SandboxEnv) (string, error) {
 	// Validated before the container lookup: a malformed declaration is the caller's bug and should
 	// report itself as one whether or not a container happens to be running.

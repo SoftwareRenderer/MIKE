@@ -1,3 +1,5 @@
+import { t } from '$lib/i18n';
+
 const API_BASE = '/api';
 
 /** Generate a unique ID. Falls back to timestamp-based ID if crypto.randomUUID is unavailable. */
@@ -100,8 +102,66 @@ export function registerSetOffline(fn: (offline: boolean) => void): void {
     _setOfflineStatus = fn;
 }
 
-/** Wrapper around fetch that includes credentials (cookies) and CSRF token on every request.
- * If init.signal is provided, it is used directly (no default timeout). */
+/**
+ * A request this app cancelled itself: the view unmounted, the user navigated away, or Stop/Cancel was
+ * pressed. It is a different fact from "the server did not answer", and conflating the two is what made a
+ * cancelled commit mark the whole app offline — which then queued every later write into IndexedDB.
+ *
+ * `name` stays `AbortError` on purpose, and **the name is the test**: `instanceof DOMException` is not,
+ * because this is an `Error` that carries the name. Call `isAborted(err)` rather than either. A check that
+ * misses it turns a silent cancellation into a loud error toast; a check that over-matches turns a real
+ * outage into silence, so the check belongs on the cancellation and nowhere else.
+ */
+export class RequestAborted extends Error {
+    readonly name = 'AbortError';
+
+    constructor(url: string, options?: ErrorOptions) {
+        super(`${t('api.requestCancelled')}: ${url}`, options);
+    }
+}
+
+/** True when the failure is this app cancelling its own request — stay silent, the user asked for this. */
+export function isAborted(err: unknown): boolean {
+    return err instanceof RequestAborted || (err as any)?.name === 'AbortError';
+}
+
+/**
+ * A request that got no answer at all: the connection failed, so the server is not running, not reachable,
+ * or restarted mid-request. The message is for the toast at the top of the screen, so it names what to
+ * check instead of quoting a `TypeError` the user cannot act on.
+ *
+ * `name` stays `TypeError`, for the same reason `RequestAborted` keeps `AbortError`: the checks this
+ * codebase already has (`isTransientError`, `isDisconnectedError`, the offline queue) read the DOM name, and
+ * a class they do not recognise silently turns "queue it, the server never saw it" into "the user's request
+ * failed". The original error is on `cause`.
+ */
+export class ConnectionFailure extends Error {
+    readonly name = 'TypeError';
+
+    constructor(options?: ErrorOptions) {
+        super(t('api.noAnswer'), options);
+    }
+}
+
+/**
+ * Wrapper around fetch that includes credentials (cookies) and CSRF token on every request.
+ *
+ * **No implicit deadline.** Every call used to be aborted at 15 s unless the caller passed a signal, which
+ * is a decision on the work rather than on the queue: a big task's diff, a merge on commit-and-done, or a
+ * clone replayed from the offline queue simply failed at 15 s while the server carried on with it — and the
+ * abort was then counted as going offline. `ensureCsrfToken` keeps its 5 s bound because it is best-effort
+ * and swallows its failure.
+ *
+ * Callers that have something to cancel pass `init.signal` (the component's lifetime, or a Stop button).
+ * Two outcomes are reported, and they are not the same:
+ *
+ *   - aborted → `RequestAborted`, and the offline flag is **not** touched;
+ *   - no connection → `ConnectionFailure` and the offline flag goes up, which is what the queue wants.
+ *
+ * A server that accepts a request and never answers is the case the old timeout existed for. It now shows
+ * up as a request that keeps waiting — which is what the user asked for by starting the operation — and the
+ * server reports its own stalls (`subproc.Watch`, the lock slow-wait reports) instead of the client guessing.
+ */
 export async function apiFetch(url: string, init?: RequestInit & { signal?: AbortSignal }): Promise<Response> {
     const headers = new Headers(init?.headers);
     // Skip CSRF for login endpoint (public)
@@ -109,24 +169,16 @@ export async function apiFetch(url: string, init?: RequestInit & { signal?: Abor
         const token = await ensureCsrfToken();
         if (token) headers.set('X-CSRF-Token', token);
     }
-    if (init?.signal) {
-        // External signal provided — use it directly (caller manages timeout/cancel)
-        const res = await fetch(url, { ...init, credentials: 'include', headers, signal: init.signal });
-        return res;
-    }
-    // Add timeout to prevent hanging requests when server is unreachable
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
     try {
-        return await fetch(url, { ...init, credentials: 'include', headers, signal: controller.signal });
+        return await fetch(url, { ...init, credentials: 'include', headers, signal: init?.signal });
     } catch (e: any) {
-        // If request fails, mark as offline so subsequent calls use the queue
-        if (e?.name === 'TypeError' || e?.name === 'AbortError') {
-            _setOfflineStatus?.(true);
+        if (e?.name === 'AbortError') {
+            // Somebody cancelled this request. That is not an outage, and marking one is how a cancelled
+            // dialog used to start queueing every later write to IndexedDB, where it outlives the tab.
+            throw new RequestAborted(url, { cause: e });
         }
-        throw e;
-    } finally {
-        clearTimeout(timeoutId);
+        _setOfflineStatus?.(true);
+        throw new ConnectionFailure({ cause: e });
     }
 }
 

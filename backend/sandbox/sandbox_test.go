@@ -16,16 +16,15 @@ import (
 	"kanban/pkg/sandboxruntime"
 )
 
-// TestMain runs cleanup of stale containers before the test suite starts.
-// This handles the case where a previous interrupted test run left containers
-// behind with overlay filesystem issues that prevent normal podman rm -f.
-// It also disables the per-NewSandboxManager cleanup to avoid races when
-// tests run in parallel (each test creates its own SandboxManager).
+// TestMain sweeps stale containers before and after the suite: an interrupted run can leave containers
+// whose overlay storage blocks a normal `podman rm -f`, and the next run would inherit them.
+//
+// The sweep is this package's own, made explicitly. No manager started here sweeps: every
+// NewSandboxManager call gets the zero Boot, which declines the host sweep, and that is what keeps
+// parallel tests from deleting each other's containers. Under the old MIKE_SANDBOX_SKIP_STARTUP_CLEANUP
+// switch the same safety depended on this file remembering to set a variable.
 func TestMain(m *testing.M) {
 	cleanupStaleTestContainers()
-	// Disable per-instance cleanup in NewSandboxManager() to prevent tests
-	// from removing each other's containers when running in parallel.
-	os.Setenv("MIKE_SANDBOX_SKIP_STARTUP_CLEANUP", "1")
 	code := m.Run()
 	cleanupStaleTestContainers()
 	os.Exit(code)
@@ -78,15 +77,21 @@ func cleanOverlayMergedDirs() {
 }
 
 // findAgentBinary locates the sandbox-bridge binary for tests.
-// Checks MIKE_AGENT_PATH env var, then project root, then build directory.
+// bootWithBridge is the boot a sandbox test runs under: the bridge override pointed at the committed
+// binary, and no claim on the host's container namespace (a unit test must never sweep the host it is
+// running on). The override is a Boot field rather than MIKE_AGENT_PATH, so it cannot change underneath
+// a manager that was already built.
+func bootWithBridge(t *testing.T) sandboxruntime.Boot {
+	t.Helper()
+	return sandboxruntime.Boot{AgentPath: findAgentBinary(t)}
+}
+
+// findAgentBinary locates the committed bridge beside the source tree. It reads no environment: the
+// binary a test exercises is the one in this checkout, so a MIKE_AGENT_PATH exported in the shell cannot
+// point an integration test at some other build (production takes its override through startup.Config).
 func findAgentBinary(t *testing.T) string {
 	t.Helper()
-	if p := os.Getenv("MIKE_AGENT_PATH"); p != "" {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	// Check project root (go test runs from package dir)
+	// go test runs from the package directory, so the first candidate is the project root.
 	candidates := []string{
 		"../../sandbox/sandbox-bridge",
 		"../../sandbox-bridge",
@@ -104,7 +109,7 @@ func findAgentBinary(t *testing.T) string {
 }
 
 func TestIsAvailable(t *testing.T) {
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 
 	// runsc should be available (installed by install-gvisor.sh)
 	if _, err := exec.LookPath("runsc"); err != nil {
@@ -116,11 +121,8 @@ func TestIsAvailable(t *testing.T) {
 }
 
 func TestCreateAndStop(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -148,11 +150,8 @@ func TestCreateAndStop(t *testing.T) {
 }
 
 func TestExec(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -201,11 +200,8 @@ func TestExec(t *testing.T) {
 }
 
 func TestExecNotAllowed(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -233,11 +229,8 @@ func TestExecNotAllowed(t *testing.T) {
 }
 
 func TestExecWithInput(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -287,11 +280,8 @@ func TestExecWithInput(t *testing.T) {
 }
 
 func TestCleanupStaleContainers(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -345,7 +335,7 @@ func TestCleanupStaleContainers(t *testing.T) {
 }
 
 func TestCleanupStaleContainers_NoneExist(t *testing.T) {
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -355,11 +345,8 @@ func TestCleanupStaleContainers_NoneExist(t *testing.T) {
 }
 
 func TestCreate_OverridesImageEntrypoint(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -399,7 +386,7 @@ func TestCreateWithoutGVisor(t *testing.T) {
 	// Simulate unavailable gVisor by creating a manager and forcing unavailable
 	sm := &SandboxManager{
 		active:    make(map[string]string),
-		rt:        sandboxruntime.NewRuntime(),
+		rt:        sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}),
 		available: false,
 	}
 
@@ -415,7 +402,7 @@ func TestCreateWithoutGVisor(t *testing.T) {
 func TestCreate_RejectsInvalidImageRef(t *testing.T) {
 	sm := &SandboxManager{
 		active:    make(map[string]string),
-		rt:        sandboxruntime.NewRuntime(),
+		rt:        sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}),
 		available: false,
 	}
 
@@ -441,7 +428,7 @@ func TestCreate_RejectsInvalidImageRef(t *testing.T) {
 func TestCreate_ValidImageRefPassesValidation(t *testing.T) {
 	sm := &SandboxManager{
 		active:    make(map[string]string),
-		rt:        sandboxruntime.NewRuntime(),
+		rt:        sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}),
 		available: false,
 	}
 
@@ -502,10 +489,8 @@ func TestCreateContainerArgs(t *testing.T) {
 }
 
 func TestCreate_MissingImageIsActionable(t *testing.T) {
-	os.Setenv("MIKE_AGENT_PATH", findAgentBinary(t))
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -641,7 +626,7 @@ func TestStopProjectContainers_NoContainers(t *testing.T) {
 }
 
 func TestImageReady(t *testing.T) {
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping image test")
 	}
@@ -662,7 +647,7 @@ func TestImageReady(t *testing.T) {
 }
 
 func TestBuildImage(t *testing.T) {
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping build test")
 	}
@@ -693,7 +678,7 @@ func TestBuildImage(t *testing.T) {
 }
 
 func TestBuildImage_InvalidDockerfile(t *testing.T) {
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping build test")
 	}
@@ -713,7 +698,7 @@ func TestBuildImage_InvalidDockerfile(t *testing.T) {
 }
 
 func TestBuildImage_MissingFile(t *testing.T) {
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping build test")
 	}
@@ -754,7 +739,7 @@ func TestBuildImageWithProgress_InvalidImageRef(t *testing.T) {
 	// ever emptied or projectName produces an invalid image ref.
 	sm := &SandboxManager{
 		active:    make(map[string]string),
-		rt:        sandboxruntime.NewRuntime(),
+		rt:        sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}),
 		available: true,
 	}
 
@@ -804,11 +789,8 @@ func TestProjectImageName(t *testing.T) {
 }
 
 func TestBinaryAvailable(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -840,11 +822,8 @@ func TestBinaryAvailable(t *testing.T) {
 }
 
 func TestStartProcess(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -867,7 +846,6 @@ func TestStartProcess(t *testing.T) {
 	}
 	defer ph.Close()
 
-	// Write to stdin
 	testInput := []byte("hello from process")
 	n, err := ph.Stdin.Write(testInput)
 	if err != nil {
@@ -889,7 +867,6 @@ func TestStartProcess(t *testing.T) {
 		t.Fatalf("unexpected output: %q (expected %q)", string(output), string(testInput))
 	}
 
-	// Close stdout
 	ph.Stdout.Close()
 
 	// Wait for process to exit
@@ -897,7 +874,7 @@ func TestStartProcess(t *testing.T) {
 }
 
 func TestStartProcess_NonexistentTask(t *testing.T) {
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -910,11 +887,8 @@ func TestStartProcess_NonexistentTask(t *testing.T) {
 }
 
 func TestCreateWithMemoryLimit(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -970,11 +944,8 @@ func TestCreateWithMemoryLimit(t *testing.T) {
 // a process that allocates past the limit is OOM-killed by the kernel cgroup
 // OOM killer (exit 137) while the sandbox container itself survives.
 func TestMemoryLimitEnforced(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -1017,11 +988,8 @@ func TestMemoryLimitEnforced(t *testing.T) {
 // cgroup: a running container reports usage and the applied limit, and the
 // task reports not-running once untracked.
 func TestGetMemoryStats(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -1088,11 +1056,8 @@ func TestGetMemoryStats(t *testing.T) {
 }
 
 func TestCreateWithCapabilities(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -1131,11 +1096,8 @@ func TestCreateWithCapabilities(t *testing.T) {
 }
 
 func TestExecProject_FullConfig(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -1176,11 +1138,8 @@ func TestExecProject_FullConfig(t *testing.T) {
 }
 
 func TestExecProjectWithInput_FullConfig(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -1211,11 +1170,8 @@ func TestExecProjectWithInput_FullConfig(t *testing.T) {
 }
 
 func TestExecTask_FullConfig(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -1243,11 +1199,8 @@ func TestExecTask_FullConfig(t *testing.T) {
 }
 
 func TestEnsureProjectContainer_RecreatesWhenStopped(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -1286,11 +1239,8 @@ func TestEnsureProjectContainer_RecreatesWhenStopped(t *testing.T) {
 }
 
 func TestEnsureProjectContainer_RecreatesWhenMountStale(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -1344,11 +1294,8 @@ func TestEnsureProjectContainer_RecreatesWhenMountStale(t *testing.T) {
 }
 
 func TestCreate_CustomMountCreatesHostDir(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -1386,11 +1333,8 @@ func TestCreate_CustomMountCreatesHostDir(t *testing.T) {
 }
 
 func TestCreate_PlanModeReadonlyMount(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -1481,11 +1425,8 @@ func firstGlobalIPv4(t *testing.T) string {
 // has to show, since it is also where the port answers. A stored 0.0.0.0 means the same
 // thing as no address and must not read back as an address.
 func TestCreate_PublishesOnConfiguredInterface(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}

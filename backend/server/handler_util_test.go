@@ -105,7 +105,6 @@ func TestShellQuoteSafety(t *testing.T) {
 				}
 			}
 
-			// Cleanup
 			_ = exec.Command("rm", "-f", "/tmp/shellquote_pwned_canary").Run()
 		})
 	}

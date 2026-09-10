@@ -150,7 +150,6 @@ test.describe('Pause / Resume', () => {
     await expect(pauseBtn).toBeVisible({ timeout: 15000 });
     await expect(card.locator(CARD_BADGE)).toHaveText('Running', { timeout: 15000 });
 
-    // Pause via card ⏸.
     await clickCardAction(page, card, pauseBtn, taskId, 'In Progress', 'button[aria-label="Pause task"]');
 
     // Server truth: stays in In Progress, execution_state = paused.

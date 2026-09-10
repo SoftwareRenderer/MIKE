@@ -10,22 +10,24 @@ import (
 
 	"kanban/backend/fsutil"
 	"kanban/backend/types"
+
+	"kanban/backend/startup"
 )
 
 // The host-root jail on the three no-project file endpoints: the picker (GET /api/fs), its mkdir,
 // and git init. A request naming a project is jailed to that project by validateFSPath instead.
 // HOME is set before the server is built, because NewServer decides the roots once.
 
-// jailedHostRootServer returns a server whose home is home, plus a logged-in
-// session. outside is a second directory that is outside every root.
+// jailedHostRootServer returns a server whose home is home and whose jail is closed, plus a
+// logged-in session. outside is a second directory that is outside every root. HOME is set before the
+// server is built because NewServer decides the roots once, and the widening is refused in the
+// configuration rather than in the environment, so a developer's own shell cannot decide the outcome.
 func jailedHostRootServer(t *testing.T) (s *Server, home, outside, cookie, csrf string) {
 	t.Helper()
 	home = t.TempDir()
 	outside = t.TempDir()
 	t.Setenv("HOME", home)
-	// Explicit, so a developer's own shell cannot decide the outcome of a jail test.
-	t.Setenv(fsutil.AllowRootFSEnv, "")
-	srv := testServer(t)
+	srv := testServerWith(t, func(c *startup.Config) { c.AllowRootFS = false })
 	c, tok := loginTestCSRF(t, srv)
 	return srv, home, outside, c, tok
 }
@@ -103,7 +105,7 @@ func TestFSBrowseIsJailedToTheHostRoots(t *testing.T) {
 	}
 
 	// Widened: the same requests succeed, which is how the test suites run.
-	t.Setenv(fsutil.AllowRootFSEnv, "1")
+	widenHostRoot(s)
 	if rr := getFS(t, s, cookie, csrf, "path=/etc"); rr.Code != http.StatusOK {
 		t.Errorf("widened listing /etc = %d, want 200: %s", rr.Code, rr.Body.String())
 	}
@@ -171,7 +173,7 @@ func TestFSMkdirIsJailedToTheHostRoots(t *testing.T) {
 		t.Error("mkdir followed a symlink out of the jail")
 	}
 
-	t.Setenv(fsutil.AllowRootFSEnv, "1")
+	widenHostRoot(s)
 	if rr := mkdir(filepath.Join(outside, "widened")); rr.Code != http.StatusOK {
 		t.Errorf("widened mkdir outside = %d, want 200: %s", rr.Code, rr.Body.String())
 	}
@@ -211,7 +213,7 @@ func TestFSInitGitIsJailedToTheHostRoots(t *testing.T) {
 
 	// Widened: the outside directory is reachable again (200, or a 400 from git
 	// itself — either way the jail let it through).
-	t.Setenv(fsutil.AllowRootFSEnv, "1")
+	widenHostRoot(s)
 	other := t.TempDir()
 	if rr := initGit(other); rr.Code == http.StatusForbidden {
 		t.Errorf("widened init-git outside = 403, want the jail out of the way: %s", rr.Body.String())
@@ -269,7 +271,7 @@ func TestHomeEndpointReportsTheJail(t *testing.T) {
 		t.Errorf("the widening variable must be reported: %s", body)
 	}
 
-	t.Setenv(fsutil.AllowRootFSEnv, "1")
+	widenHostRoot(s)
 	req = testRequest(http.MethodGet, "/api/home", nil)
 	withAuthCSRF(req, cookie, csrf)
 	rr = testResponse(t, s, req)

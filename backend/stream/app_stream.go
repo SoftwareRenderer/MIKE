@@ -19,6 +19,7 @@ import (
 	"kanban/backend/httputil"
 	"kanban/backend/store"
 	"kanban/backend/types"
+	"kanban/pkg/keylock"
 
 	"github.com/coder/websocket"
 	"kanban/pkg/logging"
@@ -427,14 +428,43 @@ func (asm *AppStreamManager) sendBoardPayload(projectID string, payload any) {
 	asm.bufferRaw(frame)
 }
 
+// appFrame builds one app-stream frame. The "type" key and the event name are written here and nowhere
+// else in this package: a name spelled inline is a second spelling of the types.WSType constant, and the
+// parity rule that compares the vocabulary against what the browser reads only sees the constants. Keys
+// are marshalled sorted, so this changes no byte on the wire.
+func appFrame(event types.WSMessageType, fields map[string]any) map[string]any {
+	frame := make(map[string]any, len(fields)+1)
+	frame["type"] = string(event)
+	for k, v := range fields {
+		frame[k] = v
+	}
+	return frame
+}
+
 // TaskEventPayload builds the flat task_event envelope shared by SendTaskEvent
 // and on-subscribe replays (e.g. the latest sandbox stats).
 func TaskEventPayload(taskID string, event types.StreamEvent) map[string]any {
-	return map[string]any{
-		"type":    "task_event",
+	return appFrame(types.WSTypeTaskEvent, map[string]any{
 		"task_id": taskID,
 		"event":   string(event.Type),
 		"data":    event.Data,
+	})
+}
+
+// LockWaitNoticeEvery is how often a waiting caller repeats itself: three seconds is where "still going"
+// stops looking like a pause and starts looking like a wait someone is deciding about.
+const LockWaitNoticeEvery = 3 * time.Second
+
+// LockWaitNotifier returns the keylock notice that tells a task's clients why they are still waiting and
+// clears it when the lock is taken. The table already logs a slow wait for the operator; this is the half
+// for the person who clicked, so it belongs only on an acquisition a click is waiting on.
+func (asm *AppStreamManager) LockWaitNotifier(projectID, taskID, domain string) keylock.WaitNotice {
+	return func(waited time.Duration, acquired bool) {
+		asm.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeLockWait, Data: map[string]any{
+			"domain":         domain,
+			"waited_seconds": int(waited.Seconds()),
+			"acquired":       acquired,
+		}})
 	}
 }
 
@@ -489,10 +519,7 @@ func (asm *AppStreamManager) BroadcastProjectCounts() {
 		return
 	}
 	counts := asm.store.GetAllProjectCounts()
-	msg, _ := json.Marshal(map[string]any{
-		"type": "project_counts",
-		"data": counts,
-	})
+	msg, _ := json.Marshal(appFrame(types.WSTypeProjectCounts, map[string]any{"data": counts}))
 	asm.BroadcastAll(msg)
 }
 
@@ -500,25 +527,23 @@ func (asm *AppStreamManager) BroadcastProjectCounts() {
 
 // Broadcast sends a board_refresh event to a project and project_counts to all clients.
 func (asm *AppStreamManager) Broadcast(projectID string) {
-	asm.sendBoardPayload(projectID, map[string]string{"type": "board_refresh"})
+	asm.sendBoardPayload(projectID, appFrame(types.WSTypeBoardRefresh, nil))
 	asm.BroadcastProjectCounts()
 }
 
 // BroadcastCommitStatus sends a commit_status event to all clients of a project.
 func (asm *AppStreamManager) BroadcastCommitStatus(projectID, taskID, status string) {
-	asm.sendBoardPayload(projectID, map[string]string{
-		"type":    "commit_status",
+	asm.sendBoardPayload(projectID, appFrame(types.WSTypeCommitStatus, map[string]any{
 		"task_id": taskID,
 		"status":  status,
-	})
+	}))
 }
 
 // BroadcastBranch sends a project_branch event to all clients of a project.
 func (asm *AppStreamManager) BroadcastBranch(projectID, branch string) {
-	asm.sendBoardPayload(projectID, map[string]any{
-		"type":   "project_branch",
+	asm.sendBoardPayload(projectID, appFrame(types.WSTypeProjectBranch, map[string]any{
 		"branch": branch,
-	})
+	}))
 }
 
 // shouldSkipFsEvent reports whether an fs_event for the given path should not be
@@ -541,11 +566,10 @@ func (asm *AppStreamManager) BroadcastFsEvent(projectID, repoRoot, op, path stri
 	if shouldSkipFsEvent(repoRoot, path) {
 		return
 	}
-	asm.sendBoardPayload(projectID, map[string]any{
-		"type": "fs_event",
+	asm.sendBoardPayload(projectID, appFrame(types.WSTypeFsEvent, map[string]any{
 		"op":   op,
 		"path": path,
-	})
+	}))
 }
 
 // SetDiffCacheUpdate sets a callback to update the GitHandler's diff cache.
@@ -557,8 +581,7 @@ func (asm *AppStreamManager) SetDiffCacheUpdate(fn func(taskID string, taskDiff 
 
 // BroadcastDiffStats sends compact diff stats to all clients of a project.
 func (asm *AppStreamManager) BroadcastDiffStats(event DiffStatsEvent) {
-	asm.sendBoardPayload(event.ProjectID, map[string]any{
-		"type":                  "task_diff_stats",
+	asm.sendBoardPayload(event.ProjectID, appFrame(types.WSTypeTaskDiffStats, map[string]any{
 		"task_id":               event.TaskID,
 		"hash":                  event.DiffHash,
 		"short_stat":            event.ShortStat,
@@ -572,7 +595,7 @@ func (asm *AppStreamManager) BroadcastDiffStats(event DiffStatsEvent) {
 		"staged_paths":          filterInternalPathsFromList(event.StagedPaths),
 		"has_committed_changes": event.HasCommittedChanges,
 		"already_merged":        event.AlreadyMerged,
-	})
+	}))
 }
 
 // ComputeDiffHash computes a SHA-256 hash of the diff, committed diff, untracked files, and staged state.
@@ -590,11 +613,14 @@ func ComputeDiffHash(diff string, committedDiff string, untracked []git.Untracke
 }
 
 // BroadcastTaskUpdated sends a task_updated event and project_counts to all clients.
-func (asm *AppStreamManager) BroadcastTaskUpdated(projectID string, task any) {
-	asm.sendBoardPayload(projectID, map[string]any{
-		"type": "task_updated",
+//
+// The task is typed rather than `any` because the frame's whole contract is "the browser may take this row
+// at face value": with `any`, a caller could hand it a dereferenced row, a DTO, or a map and every one of
+// them marshals into something the client reads as a task.
+func (asm *AppStreamManager) BroadcastTaskUpdated(projectID string, task *types.Task) {
+	asm.sendBoardPayload(projectID, appFrame(types.WSTypeTaskUpdated, map[string]any{
 		"task": task,
-	})
+	}))
 	asm.BroadcastProjectCounts()
 }
 
@@ -605,10 +631,9 @@ func (asm *AppStreamManager) BroadcastTaskDeleted(projectID, taskID string) {
 	// cleared by terminal status/complete events, but deletion bypasses the
 	// executor lifecycle.
 	asm.clearTaskBuffer(projectID + ":" + taskID)
-	asm.sendBoardPayload(projectID, map[string]any{
-		"type":    "task_deleted",
+	asm.sendBoardPayload(projectID, appFrame(types.WSTypeTaskDeleted, map[string]any{
 		"task_id": taskID,
-	})
+	}))
 	asm.BroadcastProjectCounts()
 }
 
@@ -616,18 +641,16 @@ func (asm *AppStreamManager) BroadcastTaskDeleted(projectID, taskID string) {
 // belongs to the project rather than to a task — building its sandbox image while the file explorer
 // waits, where there is no task chat to carry the progress.
 func (asm *AppStreamManager) SendProjectEvent(projectID string, event types.StreamEvent) {
-	asm.sendBoardPayload(projectID, map[string]any{
-		"type": string(event.Type),
+	asm.sendBoardPayload(projectID, appFrame(event.Type, map[string]any{
 		"data": event.Data,
-	})
+	}))
 }
 
 // BroadcastProjectPorts sends a project_ports event to all clients of a project.
 func (asm *AppStreamManager) BroadcastProjectPorts(projectID string, ports []types.AssignedPort) {
-	asm.sendBoardPayload(projectID, map[string]any{
-		"type":  "project_ports",
+	asm.sendBoardPayload(projectID, appFrame(types.WSTypeProjectPorts, map[string]any{
 		"ports": ports,
-	})
+	}))
 }
 
 // BroadcastExtensionChange sends an extension_change event to all connected clients.
@@ -816,7 +839,7 @@ func (asm *AppStreamManager) sendDoneTaskInitialDiff(ctx context.Context, client
 	// already_merged is deliberately not snapshotted: it can flip (target
 	// branch advances) without the diff changing, so it's recomputed fresh.
 	statsFields["already_merged"] = asm.computeAlreadyMerged(projectID, task)
-	frame := map[string]any{"type": "task_diff_stats", "task_id": task.ID}
+	frame := appFrame(types.WSTypeTaskDiffStats, map[string]any{"task_id": task.ID})
 	for k, v := range statsFields {
 		frame[k] = v
 	}
@@ -978,8 +1001,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			filesN := stats.VisibleTracked + stats.VisibleUntracked
 			// Check if task branch commits are already merged into the target branch.
 			stats.AlreadyMerged = asm.computeAlreadyMerged(projectID, task)
-			statsMsg, _ := json.Marshal(map[string]any{
-				"type":                  "task_diff_stats",
+			statsMsg, _ := json.Marshal(appFrame(types.WSTypeTaskDiffStats, map[string]any{
 				"task_id":               task.ID,
 				"hash":                  hash,
 				"short_stat":            diffResult.ShortStat,
@@ -992,7 +1014,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 				"staged_paths":          filterInternalPathsFromList(diffResult.StagedPaths),
 				"has_committed_changes": diffResult.CommittedDiff != "",
 				"already_merged":        stats.AlreadyMerged,
-			})
+			}))
 			client.writeMu.Lock()
 			conn.Write(ctx, websocket.MessageText, statsMsg)
 			client.writeMu.Unlock()
@@ -1004,10 +1026,9 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 	branch, _ := asm.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
 	branch = strings.TrimSpace(branch)
 	if branch != "" {
-		msg, _ := json.Marshal(map[string]any{
-			"type":   "project_branch",
+		msg, _ := json.Marshal(appFrame(types.WSTypeProjectBranch, map[string]any{
 			"branch": branch,
-		})
+		}))
 		client.writeMu.Lock()
 		conn.Write(ctx, websocket.MessageText, msg)
 		client.writeMu.Unlock()

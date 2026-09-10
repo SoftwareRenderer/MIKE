@@ -43,7 +43,6 @@ test.describe.serial('Sandbox Environment Variables', () => {
         await page.waitForFunction(() => false, {}, { timeout: 1000, polling: 1000 }).catch(() => {});
       }
 
-      // Now enable sandbox
       const putResult = await csrfFetch(page, `/api/projects/${projectId}`, {
         method: 'PUT',
         body: { sandbox_enabled: true, sandbox_network_isolation: false },
@@ -154,7 +153,6 @@ test.describe.serial('Sandbox Environment Variables', () => {
     // Verify env var appears
     await expect(page.locator('.env-item')).toHaveCount(1);
 
-    // Save
     await page.click('button:has-text("Save")');
     await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
 
@@ -168,7 +166,6 @@ test.describe.serial('Sandbox Environment Variables', () => {
     expect(saved.sandbox_envs[0].key).toBe('DB_HOST');
     expect(saved.sandbox_envs[0].value).toBe('localhost');
 
-    // Clean up
     await csrfFetch(page, `/api/projects/${projectId}`, {
       method: 'PUT',
       body: { sandbox_envs: [] },
@@ -209,7 +206,6 @@ test.describe.serial('Sandbox Environment Variables', () => {
     expect(project.sandbox_envs[0].key).toBe('EDITED_KEY');
     expect(project.sandbox_envs[0].value).toBe('edited_value');
 
-    // Clean up
     await csrfFetch(page, `/api/projects/${projectId}`, {
       method: 'PUT',
       body: { sandbox_envs: [] },
@@ -259,7 +255,6 @@ test.describe.serial('Sandbox Environment Variables', () => {
     await page.click('.overlay', { position: { x: 10, y: 10 } });
     await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
 
-    // Clean up
     await csrfFetch(page, `/api/projects/${projectId}`, {
       method: 'PUT',
       body: { sandbox_envs: [] },

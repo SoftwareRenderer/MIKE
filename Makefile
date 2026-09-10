@@ -58,7 +58,9 @@ GO_SCOPE := ./backend/... ./pkg/... .
 # Every Go file this repo owns, and only those. Not `.`: that also walks extensions/ (a pulled
 # artifact from another module) and node_modules/, and would recurse into backend/ and pkg/ and
 # report each violation twice.
-GOFMT_DIRS := backend pkg scripts main.go startup_config.go
+# The root package is listed file by file: `.` would walk extensions/ (pulled artifacts that do not
+# format) and frontend/. Every file in it belongs here — a root file left out drifts while this step prints clean.
+GOFMT_DIRS := backend pkg scripts $(wildcard *.go)
 
 # ---------------------------------------------------------------------------
 # Test
@@ -102,6 +104,20 @@ test-e2e: ## Run e2e tests (Playwright, manages its own server)
 i18n-parity: ## Check a locale pack against the English contract (make i18n-parity PACK=../MIKE-extensions/i18n/fr)
 	go run ./scripts/i18nparity $(if $(PACK),--pack $(PACK),) $(if $(STRICT),--strict,)
 
+# Structural debt, measured rather than argued about: HTTP decisions outside the transport packages,
+# environment reads below startup, hand-written keyed lock tables, routes registered without a
+# method, a state write on a cancellable GET, and the app-stream event vocabulary. Every rule runs
+# against a frozen baseline, so the count only shrinks and a fixed violation must be shrunk out of
+# the register. scripts/archgate holds the reasons; docs/architecture-review.md holds the numbers
+# that justified them.
+.PHONY: archgate
+archgate: ## Report structural debt against its frozen baselines (~0.2s)
+	@go run ./scripts/archgate $(if $(RULE),--rule $(RULE),) $(if $(UPDATE),-update,)
+
+.PHONY: test-archgate
+test-archgate: ## Test the structural gate itself, both directions (~0.2s)
+	@go test ./scripts/archgate/ -count=1
+
 .PHONY: test-i18n-parity
 test-i18n-parity: ## Run the i18n parity checker's own tests (~0.2s)
 	go test ./scripts/i18nparity/ -count=1
@@ -119,10 +135,13 @@ test-i18n-parity: ## Run the i18n parity checker's own tests (~0.2s)
 .PHONY: lint
 lint: ## gofmt + scoped vet + staticcheck (all checks) + deadcode (both roots)
 	@echo "==> gofmt"
-	@unformatted=$$(gofmt -l $(GOFMT_DIRS)); \
+	@# stderr is folded in on purpose: gofmt reports an unreadable path on stderr and exits non-zero,
+	@# while the list on stdout stays empty — so a deleted or renamed entry used to leave this step
+	@# printing nothing and passing, with that path unchecked. Anything gofmt prints is a failure.
+	@unformatted=$$(gofmt -l $(GOFMT_DIRS) 2>&1); \
 	if [ -n "$$unformatted" ]; then \
-		echo "not gofmt-clean:"; echo "$$unformatted" | sed 's/^/    /'; \
-		echo "    fix with: gofmt -w \$$(gofmt -l $(GOFMT_DIRS))"; \
+		echo "gofmt reported:"; echo "$$unformatted" | sed 's/^/    /'; \
+		echo "    fix with: gofmt -w <the paths listed> (a path it cannot read is a GOFMT_DIRS entry that no longer exists)"; \
 		exit 1; \
 	fi
 	@echo "==> go vet"
@@ -135,6 +154,9 @@ lint: ## gofmt + scoped vet + staticcheck (all checks) + deadcode (both roots)
 .PHONY: check
 check: ## THE GATE: lint + bridge-check + build + Go tests + frontend gates
 	@$(MAKE) --no-print-directory lint
+	@echo "==> archgate (structural debt against its baselines)"
+	@$(MAKE) --no-print-directory archgate
+	@$(MAKE) --no-print-directory test-archgate
 	@echo "==> bridge-check (a stale sandbox-bridge is an edit that never runs)"
 	@$(MAKE) --no-print-directory bridge-check
 	@echo "==> build"

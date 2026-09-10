@@ -41,7 +41,6 @@ func TestIsMergeInProgress_ReturnsTrueWhenMergeHeadExists(t *testing.T) {
 		t.Fatal("expected isMergeInProgress to return true during merge conflict")
 	}
 
-	// Clean up
 	runGit(t, tmpDir, "merge", "--abort")
 }
 
@@ -173,7 +172,6 @@ func TestGetMergeStatusOutput_ReturnsDiagnostics(t *testing.T) {
 	runGit(t, tmpDir, "add", "file.txt")
 	runGit(t, tmpDir, "commit", "-m", "Initial")
 
-	// Clean working tree
 	output := getMergeStatusOutput(tmpDir)
 	if output != "(working tree clean)" {
 		t.Fatalf("expected '(working tree clean)', got %q", output)
@@ -316,7 +314,6 @@ func TestMergeConflictFallback_NoMergeHead(t *testing.T) {
 		t.Fatal("expected merge in progress before abort")
 	}
 
-	// Abort merge
 	runGit(t, tmpDir, "merge", "--abort")
 
 	if isMergeInProgress(tmpDir) {

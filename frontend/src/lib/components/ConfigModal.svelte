@@ -198,15 +198,7 @@
         if (utilityProvider && gone.includes(utilityProvider) && !findProviderByRef(utilityProvider)) { utilityProvider = ''; utilityModel = ''; }
     }
 
-    // Sync the form from the config **once per dialog open**. Everything in this form is the
-    // user's to edit, and re-syncing mid-edit discards their work — a half-typed provider
-    // disappears and an API key comes back masked.
-    //
-    // The exception is the set of agent rows, which is not user-owned: it is the set of
-    // installed and enabled agent extensions, and the server appends it to the provider list
-    // per request. So while the dialog is open only those rows reconcile — installing Pi on
-    // the Extensions tab puts it under Providers immediately (no page reload), without
-    // discarding the LLM card being edited beside it.
+    // Sync the form once per dialog open: re-syncing mid-edit discards what the user typed, including a new API key.
     let formSynced = false;
     let agentRows = '';
     $effect(() => {

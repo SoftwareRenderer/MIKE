@@ -3184,7 +3184,6 @@ func TestBuildMessagesFromDB_KeepsReasoningSeparate(t *testing.T) {
 		t.Fatalf("expected 5 messages (system + 4), got %d", len(messages))
 	}
 
-	// User message
 	if messages[1].Role != "user" || messages[1].Content != "Build a feature" {
 		t.Errorf("user message wrong: role=%s, content=%s", messages[1].Role, messages[1].Content)
 	}
@@ -3200,7 +3199,6 @@ func TestBuildMessagesFromDB_KeepsReasoningSeparate(t *testing.T) {
 		t.Errorf("expected ReasoningContent='Let me think about the approach...', got %q", messages[2].ReasoningContent)
 	}
 
-	// Assistant without reasoning
 	if messages[3].Content != "Done!" || messages[3].ReasoningContent != "" {
 		t.Errorf("assistant without reasoning wrong: Content=%q, ReasoningContent=%q", messages[3].Content, messages[3].ReasoningContent)
 	}

@@ -302,49 +302,16 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 				close(setup.finished)
 			}
 		}()
-		// Persist accumulated session cost for this task run
-		if lc != nil {
-			setup.task.SessionCost = lc.sessionCost
-			_ = te.store.UpdateTaskSessionCost(setup.task.ID, lc.sessionCost)
-		}
+		// Steps 2-6 of the ordered cleanup in loop_cleanup.go, which states why this order and no other.
+		te.persistSessionCost(setup, lc)
 		// Release the running-task slot if still held (no-op when released at
 		// an idle transition or never acquired — agent providers skip it).
 		te.releaseTaskSlot(setup)
-
 		if r := recover(); r != nil {
-			logging.For(logging.Recovery).With(logging.TaskID, setup.task.ID).Errorf("recovered from panic: %v", r)
-			te.sendAndPersistError(setup.task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
-			// Transition the task out of its in-flight state (in_progress →
-			// paused) so a panic can't leave a stale "running" row.
-			te.handleCancelledTask(setup.task.ID, setup.projectID)
+			te.recoverTaskFromPanic(setup, r)
 		}
-		// Only remove from tasks map if we're still the active executor
-		// (prevents old executor from deleting a replacement during type switch).
-		// For Pi executors, keep the setup.task alive for on-demand compaction.
-		te.taskMu.Lock()
-		if state, exists := te.tasks[setup.task.ID]; exists && state.ctx == setup.ctx {
-			if state.executorType != "agent" {
-				delete(te.tasks, setup.task.ID)
-			} else {
-				// Clear status so HasRunningTasks doesn't count completed agent tasks
-				state.taskStatus = ""
-			}
-		}
-		te.taskMu.Unlock()
-		// Clear assigned ports when the run ends, with a column-only write: the task may
-		// already be stopped, and a full-row write would put "running" back. Ask the ROW
-		// whether to clear — a terminal that forwarded a port mid-run writes that column
-		// directly, so this loop's copy can be behind and a stale copy would leave a live
-		// host port bound to a stopped task. The in-memory check is only the fallback for a
-		// failed read.
-		if row, err := te.store.GetTaskByID(setup.task.ID); (err == nil && len(row.AssignedPorts) > 0) || len(setup.task.AssignedPorts) > 0 {
-			setup.task.AssignedPorts = nil
-			_ = te.store.SetTaskAssignedPorts(setup.task.ID, setup.projectID, nil)
-			te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-		}
-		// Don't remove the stream here — the broadcaster lives as long as clients are connected.
-		// It's removed only when the setup.task is deleted (via RemoveStream in cleanupTask).
-		// Sandbox container is also kept alive until setup.task deletion.
+		te.forgetTaskSetup(setup)
+		te.releaseAssignedPorts(setup)
 	}()
 
 	// Acquire the per-provider running-task slot BEFORE sandbox setup so a
@@ -403,19 +370,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 	}
 	apiKey := te.configStore.GetProviderAPIKey(setup.serverURL)
 	client := te.newLlamaClient(setup.serverURL, setup.modelName, reasoningEffort, apiKey)
-	// Select tools based on operating mode
-	var tools []types.ChatTool
-	if setup.task.IsPlanMode() {
-		tools = llama.GetPlanModeToolDefinitions()
-	} else if setup.task.IsExploreMode() {
-		tools = llama.GetExploreModeToolDefinitions()
-	} else {
-		tools = llama.GetToolDefinitions()
-	}
-	// Append LSP tools if any LSP extension has tool calls enabled
-	if te.lspMgr != nil && te.lspMgr.GetRegistry().HasAnyLSPToolCallsExtension() {
-		tools = append(tools, llama.GetLSPToolDefinitions()...)
-	}
+	tools := te.toolDefinitionsFor(setup.task)
 	taskMsgs, _ := te.store.GetTaskMessages(setup.task.ID, setup.task.CurrentThreadID)
 	messages := buildMessagesFromDB(setup.task, taskMsgs, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
 
@@ -519,18 +474,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 					}
 					// Update setup.task reference with latest mode
 					setup.task.OperatingMode = updatedTask.OperatingMode
-					// Update tools if mode affects them
-					if updatedTask.IsExploreMode() {
-						tools = llama.GetExploreModeToolDefinitions()
-					} else if updatedTask.IsPlanMode() {
-						tools = llama.GetPlanModeToolDefinitions()
-					} else {
-						tools = llama.GetToolDefinitions()
-					}
-					// Append LSP tools if any LSP extension has tool calls enabled
-					if te.lspMgr != nil && te.lspMgr.GetRegistry().HasAnyLSPToolCallsExtension() {
-						tools = append(tools, llama.GetLSPToolDefinitions()...)
-					}
+					tools = te.toolDefinitionsFor(updatedTask)
 					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": fmt.Sprintf("Sandbox recreated for mode change (%s)", newOperatingMode)}})
 				}
 			}
@@ -901,6 +845,27 @@ const (
 	// reason is already persisted and broadcast by the branch that decided it.
 	turnStop
 )
+
+// toolDefinitionsFor answers which tools a task exposes: the operating mode chooses the acting set — plan
+// and explore replace it rather than add to it — and the LSP tools an installed extension has enabled are
+// appended to whichever set the mode chose, because a language server that answers tool calls is useful in
+// every mode. Both the loop's start and a mid-run mode change call this; the two used to spell the rule in
+// opposite orders, which was harmless only while the modes stay exclusive.
+func (te *TaskExecutor) toolDefinitionsFor(task *types.Task) []types.ChatTool {
+	var tools []types.ChatTool
+	switch {
+	case task.IsPlanMode():
+		tools = llama.GetPlanModeToolDefinitions()
+	case task.IsExploreMode():
+		tools = llama.GetExploreModeToolDefinitions()
+	default:
+		tools = llama.GetToolDefinitions()
+	}
+	if te.lspMgr != nil && te.lspMgr.GetRegistry().HasAnyLSPToolCallsExtension() {
+		tools = append(tools, llama.GetLSPToolDefinitions()...)
+	}
+	return tools
+}
 
 // finalizeTurn handles what follows one LLM call: persist the assistant message and run its tool calls,
 // settle on a text answer, or record a reasoning-only turn.
@@ -1288,7 +1253,6 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, stat
 				return turnStop
 			}
 		} else {
-			// Valid turn: remove previously injected hints from context
 			lc.messages = lc.detector.removeHints(lc.messages)
 		}
 

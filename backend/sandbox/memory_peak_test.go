@@ -59,7 +59,7 @@ func peakRecorder() (func() []peakRecord, func(taskID string, peakMB int64)) {
 func newPeakManager(usage sandboxruntime.MemoryUsageMB, sink func(taskID string, peakMB int64)) (*SandboxManager, *fakeMem) {
 	fm := &fakeMem{usage: usage}
 	sm := &SandboxManager{
-		rt:     sandboxruntime.NewRuntime(),
+		rt:     sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}),
 		active: map[string]string{"task-1": "kanban-sandbox-peak-test"},
 		mem:    fm,
 	}

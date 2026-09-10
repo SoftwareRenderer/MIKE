@@ -17,25 +17,26 @@ import (
 func (te *TaskExecutor) HandleRetry(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	if err := te.RetryTask(projectID, taskID); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		// Fail, not Fault: RetryTask propagates StartTask, which refuses with ErrTaskAlreadyRunning,
+		// and that is the caller's own doing (409), not a server fault.
+		httputil.Fail(w, err, "retry task", "task not found")
 		return
 	}
-	task, _ := te.store.GetTask(projectID, taskID)
+	// Read again with the error kept: this is the response body, and a retried task the store cannot
+	// answer is not a 200 carrying null — the client's onTaskUpdated(null) would blank the card it just
+	// asked to retry.
+	task, err := te.store.GetTask(projectID, taskID)
+	if err != nil {
+		httputil.Fail(w, err, "get task", "task not found")
+		return
+	}
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
 // HandleResume resumes a paused task (delegates to HandleRetry).
 func (te *TaskExecutor) HandleResume(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	te.HandleRetry(w, r)
 }
 
@@ -43,10 +44,6 @@ func (te *TaskExecutor) HandleResume(w http.ResponseWriter, r *http.Request) {
 func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	var req struct {
 		Content         string `json:"content"`
 		ModelName       string `json:"model_name"`
@@ -166,10 +163,6 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	task, err := te.store.GetTask(projectID, taskID)
 	if err != nil {
@@ -184,7 +177,7 @@ func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 	// Ensure we have an active agent runner.
 	runner, err := te.getAgentRunner(r.Context(), projectID, taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.Fail(w, err, "start agent", "task not found")
 		return
 	}
 
@@ -193,7 +186,7 @@ func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 	compactResult, err := runner.Compact(compactCtx)
 	compactCancel()
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "Compaction failed: "+err.Error())
+		httputil.Fault(w, "compact", err)
 		return
 	}
 	httputil.JSONResponse(w, http.StatusOK, map[string]any{"status": "compacted", "summary": compactResult.Summary})

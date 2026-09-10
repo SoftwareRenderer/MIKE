@@ -5,10 +5,9 @@ import (
 	"strings"
 )
 
-// Attachment is one file attached to a user message — the element type of the
-// JSON array stored in TaskMessage.Attachments. The field names follow what the
-// frontend sends (camelCase mimeType), which is why they differ from the usual
-// snake_case JSON tags.
+// Attachment is one file attached to a user message — the element type of the JSON array stored in
+// TaskMessage.Attachments. Its JSON tags are camelCase (`mimeType`) because they follow what the
+// frontend sends, not the usual snake_case.
 type Attachment struct {
 	MimeType string `json:"mimeType"`
 	Data     string `json:"data"` // base64, optionally a data: URL
@@ -111,10 +110,8 @@ type ToolDef struct {
 	Parameters  map[string]any `json:"parameters"`
 }
 
-// ChatToolCall represents a tool call (or delta) from the model.
-// In streaming responses, each chunk has an Index field to identify
-// which tool call the delta belongs to. The client must merge deltas
-// by index to reconstruct complete tool calls.
+// ChatToolCall carries the Index that says which tool call a streaming delta belongs to; the client
+// merges by index, not by arrival order.
 type ChatToolCall struct {
 	Index    int    `json:"index"`
 	ID       string `json:"id"`
@@ -125,9 +122,8 @@ type ChatToolCall struct {
 	Type string `json:"type"`
 }
 
-// ChatChoiceDelta is the delta in a streaming response.
-// Reasoning arrives as reasoning_content (llama.cpp, cloud providers) or
-// reasoning (vLLM); the llama client folds the latter into ReasoningContent.
+// ChatChoiceDelta takes reasoning as reasoning_content (llama.cpp, cloud providers) or reasoning
+// (vLLM); the llama client folds the latter into ReasoningContent.
 type ChatChoiceDelta struct {
 	Content          *string        `json:"content"`
 	ReasoningContent *string        `json:"reasoning_content,omitempty"`
@@ -135,8 +131,7 @@ type ChatChoiceDelta struct {
 	ToolCalls        []ChatToolCall `json:"tool_calls,omitempty"`
 }
 
-// ChatChoiceMessage is the full message in a non-streaming response.
-// Reasoning follows the same two-name rule as ChatChoiceDelta.
+// ChatChoiceMessage takes reasoning under the same two names as ChatChoiceDelta.
 type ChatChoiceMessage struct {
 	Content          *string `json:"content"`
 	ReasoningContent *string `json:"reasoning_content,omitempty"`

@@ -143,16 +143,7 @@ func CloneEnv() []string {
 	return Env("GIT_ALLOW_PROTOCOL=" + strings.Join(CloneAllowedProtocols, ":"))
 }
 
-// CloneContext runs `git clone --progress src dst` under ctx, restricted to CloneAllowedProtocols, and
-// calls onProgress with the "Receiving objects" percentage whenever it strictly increases (nil is fine).
-// It returns git's stderr and the process error.
-//
-// The context matters: a clone is the longest git operation this server does - minutes on a real remote -
-// and it used to run to completion whatever the client did, so closing a tab left a server-side git
-// holding the disk for its full duration. On cancel the caller's failure path removes the partial clone.
-//
-// There is no context-less twin on purpose: every clone here is triggered by a request that can be
-// abandoned. Detached callers pass context.Background() and say why.
+// CloneContext clones under ctx on the allowed transports, reporting the percentage whenever it increases.
 func CloneContext(ctx context.Context, src, dst string, onProgress func(percent int)) (string, error) {
 	// `git clone` is silent on stdout — stderr carries both progress and
 	// errors, so discarding stdout is safe.

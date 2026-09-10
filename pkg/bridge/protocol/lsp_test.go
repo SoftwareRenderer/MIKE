@@ -101,7 +101,6 @@ func TestParseRequest_LSP(t *testing.T) {
 		t.Fatalf("WriteFrame: %v", err)
 	}
 
-	// Read back
 	f, err := ReadFrame(&buf)
 	if err != nil {
 		t.Fatalf("ReadFrame: %v", err)

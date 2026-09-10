@@ -57,7 +57,6 @@ func TestCommitQueue_ConcurrentDifferentProjectsParallel(t *testing.T) {
 	var order atomic.Int64
 	var wg sync.WaitGroup
 
-	// First acquire on proj-1
 	release1 := cq.Acquire("proj-1")
 
 	// Concurrent acquire on proj-2 — should NOT block
@@ -100,53 +99,46 @@ func TestCommitQueue_MultipleSequential(t *testing.T) {
 	}
 }
 
-// worktreeLockFor reaches the task's mutex directly, for tests that must observe lock identity or that a
-// lock was released. Production has no such accessor on purpose (see LockWorktree).
-func worktreeLockFor(te *TaskExecutor, taskID string) *sync.Mutex {
-	mu, _ := te.worktreeMu.LoadOrStore(taskID, &sync.Mutex{})
-	return mu.(*sync.Mutex)
-}
+// lockTestExecutor is a TaskExecutor with only the worktree lock table built, for the tests below that
+// exercise the lock and nothing else. A zero TaskExecutor would carry a nil table.
+func lockTestExecutor() *TaskExecutor { return &TaskExecutor{} }
 
-func TestWorktreeLockFor_SameTaskReturnsSameMutex(t *testing.T) {
-	te := &TaskExecutor{}
-
-	mu1 := worktreeLockFor(te, "task-1")
-	mu2 := worktreeLockFor(te, "task-1")
-
-	if mu1 != mu2 {
-		t.Fatal("expected same mutex for same task ID")
-	}
-}
-
-func TestWorktreeLockFor_DifferentTasksReturnDifferentMutexes(t *testing.T) {
-	te := &TaskExecutor{}
-
-	mu1 := worktreeLockFor(te, "task-1")
-	mu2 := worktreeLockFor(te, "task-2")
-
-	if mu1 == mu2 {
-		t.Fatal("expected different mutexes for different task IDs")
-	}
-}
-
-// TestLockWorktreeSerializesSameTask is the same property reached the way production reaches it.
-func TestLockWorktreeSerializesSameTask(t *testing.T) {
-	te := &TaskExecutor{}
-
-	release := te.LockWorktree("task-1")
-	if worktreeLockFor(te, "task-1").TryLock() {
-		release()
-		t.Fatal("LockWorktree returned without holding the task's mutex")
+// taskLockIsHeld asks the question the old test-only mutex accessor answered — is this task's lock held
+// — without handing a lock to the test. The bounded form is used so the probe cannot itself block the
+// suite if the behaviour it is checking has regressed.
+func taskLockIsHeld(te *TaskExecutor, taskID string) bool {
+	release, got := te.worktreeMu.TryLock(taskID, 10*time.Millisecond)
+	if !got {
+		return true
 	}
 	release()
-	if !worktreeLockFor(te, "task-1").TryLock() {
-		t.Fatal("the release function did not release the mutex")
-	}
-	worktreeLockFor(te, "task-1").Unlock()
+	return false
 }
 
-func TestWorktreeLockFor_ConcurrentAccess(t *testing.T) {
-	te := &TaskExecutor{}
+// TestLockWorktreeIsPerTask is the table's reason for existing: one task's worktree work must not stop
+// another's, and two calls for the same task must land on the same lock.
+func TestLockWorktreeIsPerTask(t *testing.T) {
+	te := lockTestExecutor()
+
+	release := te.LockWorktree("task-1")
+	if !taskLockIsHeld(te, "task-1") {
+		release()
+		t.Fatal("LockWorktree returned without holding the task's lock")
+	}
+	if taskLockIsHeld(te, "task-2") {
+		release()
+		t.Fatal("a second task's lock is the first task's — the table is keyed on something else")
+	}
+	release()
+	if taskLockIsHeld(te, "task-1") {
+		t.Fatal("the release function did not release")
+	}
+}
+
+// TestLockWorktreeConcurrentWaitersQueue is the same property reached the way production reaches it,
+// with a third task proving the table does not become a global lock under load.
+func TestLockWorktreeConcurrentWaitersQueue(t *testing.T) {
+	te := lockTestExecutor()
 
 	var observed int
 	var mu sync.Mutex

@@ -80,7 +80,6 @@ test.describe('Login', () => {
         await expect(loginDialog(page)).toBeVisible();
     });
         test('should logout and show login modal again', async ({ page }) => {
-        // Login first
         await expect(loginDialog(page)).toBeVisible({ timeout: 10000 });
         await page.context().request.post('/api/auth/login', {
             data: { password: 'test-password-1234' },

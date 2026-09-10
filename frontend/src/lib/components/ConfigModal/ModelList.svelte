@@ -90,7 +90,6 @@
         return Number.isNaN(n) ? null : n;
     }
 
-    // '' → null
     function parseIntOrNull(v: string): number | null {
         if (v.trim() === '') return null;
         const n = parseInt(v, 10);

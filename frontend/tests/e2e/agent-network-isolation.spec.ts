@@ -48,7 +48,10 @@ test.describe.serial('Agent + Network Isolation', () => {
       { method: 'POST' }
     );
     expect(startResult.ok).toBe(false);
-    expect(startResult.status).toBe(500);
+    // 409, not 500: the refusal is a condition of the project the user configured (an agent provider with
+    // network isolation on), not a server fault. `apiError` reads `body.error` whatever the status, so the
+    // sentence reaching the toast is unchanged — the number is what got fixed.
+    expect(startResult.status).toBe(409);
     expect(startResult.data?.error).toContain('agent requires network to be enabled');
 
     // Verify task is still in backlog (not started)

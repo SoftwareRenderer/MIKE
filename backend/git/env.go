@@ -11,10 +11,11 @@ package git
 
 import (
 	"context"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"kanban/pkg/subproc"
 )
 
 // gitBinary is a variable so a test can point a subprocess at a stub.
@@ -88,23 +89,7 @@ func isGitSafeEnv(name string) bool {
 	return false
 }
 
-// HookFence returns the config that stops a repository of this server's checkout running code on
-// this machine, as environment entries.
-//
-// Env-based rather than a flag, because --no-verify does not exist for every code-running
-// operation: `git worktree add` has no such flag and runs post-checkout. And hooks are not the
-// whole surface — a repository's own config can start a process with no hook in sight:
-// core.fsmonitor is executed by `git status`, which this server runs continuously in every
-// registered checkout (measured on git 2.43: with only core.hooksPath fenced, a repo carrying
-// core.fsmonitor=<cmd> ran <cmd>). GIT_CONFIG_COUNT/KEY_n/VALUE_n is git's own config-as-environment,
-// so it has -c's precedence, is applied by every caller through Env, and cannot be forgotten at a
-// call site. The count must equal the number of KEY_n entries: git refuses the whole set on a
-// mismatch, which fails closed rather than reading as "the fence is fine".
-//
-// Still uncovered, for whoever hardens the next transfer: core.sshCommand, core.gitProxy,
-// core.askPass, credential.helper and filter.<driver>.clean|smudge. Each needs either a remote
-// transfer this server starts or a config entry plus a matching .gitattributes, and `git clone`
-// does not copy [core] out of the source — a repo that arrives by copy, restore or archive does.
+// HookFence pins core.hooksPath to /dev/null; --no-verify has no effect on post-checkout, which worktree add runs.
 func HookFence() []string {
 	return []string{
 		"GIT_CONFIG_COUNT=2",
@@ -115,26 +100,9 @@ func HookFence() []string {
 	}
 }
 
-// Env returns the environment for a git subprocess: the allowlisted part of the server's, then
-// extras, then policy.
-//
-// Policy comes last because os/exec keeps the LAST occurrence of a duplicated key, so a caller
-// cannot weaken the hook fence by passing its own core.hooksPath. That ordering is the security
-// Env returns the environment for a git subprocess: the allowlisted part of the server's, then
-// extras, then policy. Policy comes last because os/exec keeps the LAST occurrence of a
-// duplicate key, so a caller cannot weaken the hook fence with its own core.hooksPath.
-//
-// Variables the server lacks or has set empty are omitted, not emitted as VAR=: SSH_AUTH_SOCK=
-// reads as a configured but broken agent instead of falling back to the key files.
+// Env puts policy last: os/exec keeps the last occurrence of a duplicated key, so a caller cannot weaken the fence.
 func Env(extra ...string) []string {
-	env := make([]string, 0, 32+len(extra))
-	for _, kv := range os.Environ() {
-		name, value, ok := strings.Cut(kv, "=")
-		if !ok || name == "" || value == "" || !isGitSafeEnv(name) {
-			continue
-		}
-		env = append(env, kv)
-	}
+	env := subproc.Inherit(isGitSafeEnv, subproc.DropEmpty)
 	env = append(env, extra...)
 	// Policy last. GIT_TERMINAL_PROMPT=0 goes with the fence: an unattended server that hits a
 	// credential prompt hangs the request forever.
@@ -171,7 +139,5 @@ const GitWaitDelay = 30 * time.Second
 // a context so Command can share it without passing a nil context.
 func configureGit(cmd *exec.Cmd, dir string) *exec.Cmd {
 	cmd.Dir = dir
-	cmd.Env = Env()
-	cmd.WaitDelay = GitWaitDelay
-	return cmd
+	return subproc.Bind(cmd, Env(), GitWaitDelay)
 }

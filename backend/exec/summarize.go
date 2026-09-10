@@ -368,7 +368,7 @@ func (s *summarizeOrchestrator) applySummarization(setup *taskExecSetup, ctx con
 	// The summary reaches the model through messages[0] only, never through the marker row.
 	messages = setSystemPrompt(messages, composeSystemPrompt(task, setup.worktreePath, setup.projectName(), setup.sandboxEnabled, sumResult.summary))
 
-	s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: "summarization", Data: map[string]any{
+	s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeSummarization, Data: map[string]any{
 		"id":               summaryMsgID,
 		"summary":          sumResult.summary,
 		"created_at":       summaryCreatedAt.Format(time.RFC3339),
@@ -435,10 +435,6 @@ func (s *summarizeOrchestrator) cancelSummarize(taskID, projectID string) {
 func (s *summarizeOrchestrator) HandleSummarize(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	task, err := s.store.GetTask(projectID, taskID)
 	if err != nil {
@@ -498,7 +494,7 @@ func (s *summarizeOrchestrator) HandleSummarize(w http.ResponseWriter, r *http.R
 			select {
 			case err := <-resultCh:
 				if err != nil {
-					httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+					httputil.Fault(w, "summarize", err)
 					return
 				}
 			case <-reqCtx.Done():
@@ -592,7 +588,7 @@ func (s *summarizeOrchestrator) HandleSummarize(w http.ResponseWriter, r *http.R
 			CreatedAt:       summaryCreatedAt,
 		})
 
-		s.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: "summarization", Data: map[string]any{
+		s.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeSummarization, Data: map[string]any{
 			"id":               summaryMsgID,
 			"summary":          sumResult.summary,
 			"created_at":       time.Now().UTC().Format(time.RFC3339),

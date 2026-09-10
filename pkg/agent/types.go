@@ -6,8 +6,8 @@ package agent
 
 import "context"
 
-// Event represents a generic agent event, JSON-serialized across the WASM boundary.
-// The adapter (extension) produces Events; the runner (backend) streams them to the executor.
+// Event is a generic agent event, JSON-serialized across the WASM boundary: the adapter (extension)
+// produces them, the runner (backend) streams them to the executor.
 type Event struct {
 	Type           string           `json:"type"`
 	Text           string           `json:"text,omitempty"`            // for EventTypeToken
@@ -54,8 +54,8 @@ type SessionStatsData struct {
 	Cost            float64 `json:"cost"`
 }
 
-// PersistEntry is a pre-parsed message for DB persistence.
-// The adapter fills these at turn-end; the executor persists them generically.
+// PersistEntry is a pre-parsed message the adapter fills at turn-end and the executor persists
+// generically.
 type PersistEntry struct {
 	Role             string  `json:"role"` // "assistant" or "tool_call"
 	Content          string  `json:"content,omitempty"`
@@ -99,8 +99,7 @@ const (
 	CommandAbort         = "abort"
 )
 
-// SubprocessConfig describes the agent process to spawn.
-// Returned by the adapter; consumed by the runner.
+// SubprocessConfig names the agent process to spawn: returned by the adapter, consumed by the runner.
 type SubprocessConfig struct {
 	Binary string   `json:"binary"`
 	Args   []string `json:"args"`
@@ -113,9 +112,9 @@ type AgentModel struct {
 	ContextWindow *int   `json:"context_window,omitempty"`
 }
 
-// AgentAdapter is the interface between the runner (backend) and the adapter (WASM extension).
-// The runner loads a WASM module and wraps its exports behind this interface.
-// The adapter owns ALL protocol logic: command encoding, output parsing, state management.
+// AgentAdapter is the boundary between the runner (backend) and a WASM adapter: the runner loads the
+// module and wraps its exports, the adapter owns ALL protocol logic — command encoding, output
+// parsing, state management.
 type AgentAdapter interface {
 	// Init initializes the adapter with extension config JSON.
 	// ctx is used for cancellation during initialization.

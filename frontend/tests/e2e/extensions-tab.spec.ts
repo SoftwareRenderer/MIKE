@@ -77,7 +77,6 @@ test.describe('Extensions Tab', () => {
     await page.click('.icon-btn[aria-label="Settings"]');
     await page.waitForSelector('.modal, [role="dialog"]', { timeout: 5000 });
 
-    // Click Extensions tab
     await page.click('text=Extensions');
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 
@@ -100,11 +99,9 @@ test.describe('Extensions Tab', () => {
     await page.click('.icon-btn[aria-label="Settings"]');
     await page.waitForSelector('.modal, [role="dialog"]', { timeout: 5000 });
 
-    // Click Extensions tab
     await page.click('text=Extensions');
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 
-    // Click Browse tab
     await page.click('.view-tab:has-text("Browse")');
 
     // Should show registry URL input or browse view
@@ -116,7 +113,6 @@ test.describe('Extensions Tab', () => {
     await page.click('.icon-btn[aria-label="Settings"]');
     await page.waitForSelector('.modal, [role="dialog"]', { timeout: 5000 });
 
-    // Click Extensions tab
     await page.click('text=Extensions');
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 

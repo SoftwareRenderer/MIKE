@@ -46,8 +46,8 @@ type SubscribeParams struct {
 	File      string `json:"file"`
 }
 
-// ClientSession holds the state for a single WebSocket client connected to the LSP handler.
-// Workspace and language are tracked per-channel via _workspace/_lang hints, not per-session.
+// ClientSession is one WebSocket client of the LSP handler. Workspace and language are tracked
+// per-channel via _workspace/_lang hints, not per-session.
 type ClientSession struct {
 	conn     *websocket.Conn
 	clientID uint64
@@ -163,10 +163,6 @@ func (h *LSPHandler) Close() {
 // HandleSandboxMemory serves GET /api/lsp/memory: the cgroup memory usage of the sandbox
 // running the language server for a workspace+file (query params: workspace, file).
 func (h *LSPHandler) HandleSandboxMemory(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	workspace := r.URL.Query().Get("workspace")
 	file := r.URL.Query().Get("file")
@@ -1033,7 +1029,6 @@ func itoa(n int64) string {
 	if neg {
 		buf = append(buf, '-')
 	}
-	// Reverse
 	for i, j := 0, len(buf)-1; i < j; i, j = i+1, j-1 {
 		buf[i], buf[j] = buf[j], buf[i]
 	}

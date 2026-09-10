@@ -203,7 +203,6 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
         await waitForConfig(page, c => c.keyboard_shortcuts?.create_task_submit === 'shift+enter');
 
-        // Open the dialog: Shift+Enter submits, the old default does not
         await page.locator(BOARD_BTN).first().click();
         await expect(page.locator(CREATE_MODAL)).toBeVisible({ timeout: 5000 });
         const prompt = `submit-rebind-${Date.now()}`;
@@ -322,7 +321,6 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
         await waitForConfig(page, c => c.keyboard_shortcuts?.open_terminal === 'shift+alt+t');
 
-        // The old default no longer opens the terminal; the new binding does
         await page.keyboard.press('Control+`');
         await page.waitForTimeout(300);
         await expect(page.locator('.terminal-panel')).not.toBeVisible();
@@ -401,7 +399,6 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
         await waitForConfig(page, c => c.keyboard_shortcuts?.toggle_fullscreen === 'shift+alt+f');
 
-        // The old default no longer toggles; the new binding does
         await page.keyboard.press('Control+`');
         await expect(page.locator(TERMINAL_PANEL)).toBeVisible({ timeout: 10000 });
         await page.keyboard.press('Control+ArrowUp');

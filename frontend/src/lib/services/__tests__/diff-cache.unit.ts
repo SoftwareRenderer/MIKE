@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DiffCache, type DiffCacheApis, type DiffApiResponse } from '$lib/services/diff-cache.svelte';
 import type { DiffRow } from '$lib/types/diff';
+import { ConnectionFailure, RequestAborted } from '$lib/api/helpers';
 
 function makeApis(overrides: Partial<DiffCacheApis> = {}): DiffCacheApis {
     return {
@@ -251,6 +252,38 @@ describe('DiffCache', () => {
         await Promise.resolve();
         await Promise.resolve();
         expect(getDiffFile).toHaveBeenCalledWith('proj-1', 'task-1', 'a.ts', expect.anything());
+    });
+
+    // A file fetch the cache cancelled itself (the user moved to another file) is not a failure, and
+    // logging it is how a quick switch fills the console with errors for requests nobody awaits any more.
+    // The pair is tested because silencing everything would pass the same way: a connection failure for the
+    // very same file has to stay visible.
+    it('drops a cancelled file fetch silently and still logs a connection failure', async () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const getDiffFile = vi.fn((proj: string, task: string, path: string) =>
+            path === 'a.ts'
+                ? Promise.reject(new RequestAborted('/api/diff/file'))
+                : Promise.reject(new ConnectionFailure({ cause: new TypeError('Failed to fetch') })),
+        );
+        const cache = new DiffCache(makeApis({ getDiffFile }), () => 'proj-1', () => 'task-1');
+        cache.fileHashes = { 'a.ts': 'h-old', 'b.ts': 'h-old' };
+        cache.state.files = {
+            'a.ts': { path: 'a.ts', rows: [{ lineNumber: 1, variant: 'added', text: 'x' }], added: 1, removed: 0 },
+            'b.ts': { path: 'b.ts', rows: [{ lineNumber: 1, variant: 'added', text: 'y' }], added: 1, removed: 0 },
+        };
+        cache.tracker.hash = 'old-hash';
+
+        cache.processStats(
+            { hash: 'new-hash', files: 2, additions: 0, deletions: 0, file_hashes: { 'a.ts': 'h-new', 'b.ts': 'h-new' } },
+            false,
+        );
+
+        await vi.waitFor(() => expect(getDiffFile).toHaveBeenCalledTimes(2));
+        await vi.waitFor(() => expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('b.ts'), expect.anything()));
+
+        const loggedForCancelled = errorSpy.mock.calls.filter((args) => String(args[0]).includes('a.ts'));
+        expect(loggedForCancelled).toEqual([]);
+        errorSpy.mockRestore();
     });
 
     it('fetchFullManifest drops untracked entries that transitioned to tracked (staging)', async () => {

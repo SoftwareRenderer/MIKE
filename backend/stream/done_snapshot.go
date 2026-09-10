@@ -10,12 +10,9 @@ import (
 	"kanban/pkg/logging"
 )
 
-// DoneTaskDiff is the materialized, immutable diff payload for a done task.
-// A done task's canonical diff is BaseRef..HeadRef — two pinned commit refs —
-// so once computed it never changes until the task is re-run (new refs).
-// This is the single source of truth behind both the task_diff_stats
-// WebSocket frame and the REST GET /tasks/{id}/diff response for the
-// canonical done diff, avoiding repeated `git diff` runs per connection.
+// DoneTaskDiff is a done task's materialized diff. Its canonical diff is BaseRef..HeadRef — two pinned
+// refs — so once computed it never changes until the task is re-run. It backs both the task_diff_stats
+// frame and GET /tasks/{id}/diff instead of a `git diff` per connection.
 type DoneTaskDiff struct {
 	StatsJSON  string // JSON object of task_diff_stats frame fields (no type/task_id/already_merged)
 	DiffJSON   string // exact JSON body of the REST task-diff response

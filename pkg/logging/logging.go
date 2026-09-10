@@ -151,6 +151,11 @@ func (l *Logger) Errorf(format string, args ...any) { l.logf(slog.LevelError, fo
 // Info logs a message with no formatting.
 func (l *Logger) Info(msg string) { l.inner.Info(msg) }
 
+// Warn takes a message with no format and no args, for a string that is already the sentence — a
+// resolved-configuration warning, say. The f-suffixed form is what go vet checks; this one exists so
+// a caller does not write Warnf("%s", x) to get the same line.
+func (l *Logger) Warn(msg string) { l.inner.Warn(msg) }
+
 // ParseLevel reports an error for a name that is not a level, so startup can refuse instead of
 // quietly changing how much of the log the operator sees.
 func ParseLevel(name string) (slog.Level, error) {
@@ -201,8 +206,8 @@ func TestSink() (buf *SafeBuffer, restore func()) {
 	return b, setOutput(b)
 }
 
-// SafeBuffer is a buffer safe for concurrent writes. The log is written from the exec loop,
-// websocket goroutines and shutdown steps, which overlap at shutdown.
+// SafeBuffer is written concurrently: the exec loop, websocket goroutines and shutdown steps overlap
+// at shutdown.
 type SafeBuffer struct {
 	mu  sync.Mutex
 	buf strings.Builder

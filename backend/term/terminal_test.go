@@ -177,13 +177,17 @@ func newTestConfigStore(t *testing.T) (*store.Store, *config.ConfigStore) {
 
 // A sandbox terminal must not open on a missing image: the user would get an empty shell whose
 // every command fails, so the failure is reported instead.
+// dangerZoneForTest is the grant a terminal test runs under: the host-terminal environment is the operator's own,
+// which is what the suite exercises. The refusal branch is pinned in host_shell_env_test.go.
+var dangerZoneForTest = sandbox.DangerZone(true)
+
 func TestTerminalReportsImageFailure(t *testing.T) {
 	dir := t.TempDir()
 	s, cs := newTestConfigStore(t)
 	mock := newMockSandbox(t)
 	imageErr := errors.New("project Dockerfile /srv/Dockerfile is not readable: no such file or directory")
 	mock.imageErr = imageErr
-	tm := NewTerminalManager(s, cs, mock, nil)
+	tm := NewTerminalManager(s, cs, mock, nil, dangerZoneForTest)
 
 	proj := &types.Project{ID: "test-proj-image", Name: "Image Project", Path: dir, SandboxEnabled: true}
 	if err := s.CreateProject(proj); err != nil {
@@ -223,7 +227,7 @@ func TestProjectTerminalStopsContainerOnExit(t *testing.T) {
 	dir := t.TempDir()
 	s, cs := newTestConfigStore(t)
 	mock := newMockSandbox(t)
-	tm := NewTerminalManager(s, cs, mock, nil)
+	tm := NewTerminalManager(s, cs, mock, nil, dangerZoneForTest)
 
 	projID := "test-proj-stop"
 	proj := &types.Project{
@@ -288,7 +292,7 @@ func TestMultiClientResizeSmallestWidthWins(t *testing.T) {
 	dir := t.TempDir()
 	s, cs := newTestConfigStore(t)
 	mock := newMockSandbox(t)
-	tm := NewTerminalManager(s, cs, mock, nil)
+	tm := NewTerminalManager(s, cs, mock, nil, dangerZoneForTest)
 
 	projID := "test-proj-resize"
 	proj := &types.Project{
@@ -359,7 +363,7 @@ func TestMultiClientResizeMultipleClients(t *testing.T) {
 	dir := t.TempDir()
 	s, cs := newTestConfigStore(t)
 	mock := newMockSandbox(t)
-	tm := NewTerminalManager(s, cs, mock, nil)
+	tm := NewTerminalManager(s, cs, mock, nil, dangerZoneForTest)
 
 	projID := "test-proj-multi"
 	proj := &types.Project{
@@ -440,7 +444,7 @@ func TestTaskTerminalDoesNotStopContainerOnExit(t *testing.T) {
 	dir := t.TempDir()
 	s, cs := newTestConfigStore(t)
 	mock := newMockSandbox(t)
-	tm := NewTerminalManager(s, cs, mock, nil)
+	tm := NewTerminalManager(s, cs, mock, nil, dangerZoneForTest)
 
 	// Create a project with sandbox enabled
 	projID := "test-proj-no-stop"
@@ -504,7 +508,7 @@ func TestTaskTerminalDoesNotStopContainerOnExit(t *testing.T) {
 func TestHandleTerminal_RejectsUnknownOrTraversalTask(t *testing.T) {
 	s, cs := newTestConfigStore(t)
 	mock := newMockSandbox(t)
-	tm := NewTerminalManager(s, cs, mock, nil)
+	tm := NewTerminalManager(s, cs, mock, nil, dangerZoneForTest)
 
 	// A non-existent task (including path-traversal strings) must return 404
 	// before any shell/websocket is created, so a traversal taskID cannot be
@@ -524,7 +528,7 @@ func TestHandleTerminal_RejectsUnknownOrTraversalTask(t *testing.T) {
 func TestHandleTerminal_RejectsTaskFromAnotherProject(t *testing.T) {
 	s, cs := newTestConfigStore(t)
 	mock := newMockSandbox(t)
-	tm := NewTerminalManager(s, cs, mock, nil)
+	tm := NewTerminalManager(s, cs, mock, nil, dangerZoneForTest)
 
 	// A task that exists but belongs to a different project must be rejected.
 	projID := "project-a"
@@ -603,7 +607,7 @@ func wsUpgradeStatus(t *testing.T, urlStr, origin string) int {
 func TestHandleTerminal_OriginVerification(t *testing.T) {
 	s, cs := newTestConfigStore(t)
 	mock := newMockSandbox(t)
-	tm := NewTerminalManager(s, cs, mock, nil)
+	tm := NewTerminalManager(s, cs, mock, nil, dangerZoneForTest)
 
 	projID := "origin-proj"
 	if err := s.CreateProject(&types.Project{ID: projID, Name: "OriginProj", Path: t.TempDir(), SandboxEnabled: true}); err != nil {
@@ -662,7 +666,7 @@ func TestTerminalShellOptsCarryTheProjectConfiguration(t *testing.T) {
 		SandboxNetworkIsolation: true,
 	}
 
-	tm := NewTerminalManager(nil, nil, nil, nil)
+	tm := NewTerminalManager(nil, nil, nil, nil, dangerZoneForTest)
 	got := tm.shellSandboxOpts("localhost/sandbox-example.com", proj, nil)
 
 	if got.BaseImage != "localhost/sandbox-example.com" {
@@ -684,7 +688,7 @@ func TestTerminalShellOptsCarryTheProjectConfiguration(t *testing.T) {
 func TestTerminalManagerClose(t *testing.T) {
 	dir := t.TempDir()
 	s, cs := newTestConfigStore(t)
-	tm := NewTerminalManager(s, cs, newMockSandbox(t), nil)
+	tm := NewTerminalManager(s, cs, newMockSandbox(t), nil, dangerZoneForTest)
 	projID := "close-proj"
 	if err := s.CreateProject(&types.Project{ID: projID, Name: "Close Project", Path: dir}); err != nil {
 		t.Fatalf("create project: %v", err)

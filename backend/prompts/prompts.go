@@ -61,16 +61,13 @@ func FuncMap() template.FuncMap {
 	return fm
 }
 
-// promptDir is a function variable that returns the absolute path to the prompts directory.
-// It can be overridden in tests. By default it tries the executable directory first,
-// then falls back to the current working directory.
+// promptDir resolves the prompts directory. Tests override it.
 var promptDir = func() string {
 	return resolvePromptDir()
 }
 
-// resolvePromptDir is the default implementation of promptDir.
-// Tries the executable directory first (compiled binary), then falls back
-// to the current working directory (go run).
+// resolvePromptDir is promptDir's default: the executable's directory first (installed binary),
+// then the current working directory (go run).
 func resolvePromptDir() string {
 	candidates := []string{}
 

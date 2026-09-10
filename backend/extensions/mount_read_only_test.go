@@ -11,6 +11,8 @@ import (
 
 	"kanban/backend/store"
 	"kanban/backend/types"
+
+	"kanban/pkg/sandboxruntime"
 )
 
 // jailManager builds a manager over a fresh database with one registered project, so the policy
@@ -31,7 +33,7 @@ func jailManager(t *testing.T, workspace, projectPath, extDir string) *Extension
 	}); err != nil {
 		t.Fatalf("register project: %v", err)
 	}
-	sm := NewExtensionSandboxManager(NewRegistryClient(), es)
+	sm := NewExtensionSandboxManager(NewRegistryClient(), es, sandboxruntime.Boot{})
 	sm.SetWorkspaceDir(workspace)
 	sm.SetExtensionsDir(extDir)
 	return sm

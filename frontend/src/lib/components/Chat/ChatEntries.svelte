@@ -1,5 +1,5 @@
 <script lang="ts">
-    import type { Thread, ChatEntry } from '$lib/types';
+    import type { Thread, ChatEntry, LockWait } from '$lib/types';
     import { advisoryLabel, type EntryMeta } from '$lib/utils/chat-entries';
     import { computeStickyHeader, STICKY_LINE_FALLBACK, type StickyUserMessage } from '$lib/utils/chat-sticky-header';
     import { scrollToLine } from '$lib/utils/settle-scroll';
@@ -18,6 +18,7 @@
         activeThreadId,
         threads,
         awaitingResponse,
+        lockWait = null,
         connected,
         queuePosition,
         queueEstimatedWait,
@@ -50,6 +51,7 @@
         activeThreadId: string;
         threads: Thread[];
         awaitingResponse: boolean;
+        lockWait?: LockWait | null;
         connected: boolean;
         queuePosition: number;
         queueEstimatedWait: number;
@@ -95,9 +97,8 @@
         follow.attach(chatScrollEl, chatContentEl);
     });
 
-    // Edit diff expand/collapse overrides — lives here so the state survives
-    // entry re-renders (and off-screen content-visibility skips).
-    // Keyed by toolId; undefined = use default (auto-expand for trivial diffs).
+    // Edit diff expand/collapse overrides, keyed by toolId; undefined = the default (auto-expand for
+    // trivial diffs). Here so the state survives entry re-renders and content-visibility skips.
     let editDiffOverrides = $state<Record<string, boolean>>({});
 
     const BUILD_LOG_BOTTOM_PX = 50; // same tolerance as the build log in SandboxConfigModal
@@ -427,11 +428,11 @@
             </button>
         {/if}
 
-        <!-- Shown while a running task waits on a request slot, or while a
-             started task (in_progress + idle = "Pending" badge) waits on a
-             running-task slot (provider task concurrency queue). -->
-        {#if awaitingResponse && connected && (taskExecutionState === 'running' || (taskStatus === 'in_progress' && taskExecutionState === 'idle'))}
+        <!-- The wait line. Without a lock wait it shows on the provider's request/task slots, which is what
+             awaitingResponse means; a lock wait shows on its own, since nothing of ours is in flight. -->
+        {#if lockWait || (awaitingResponse && connected && (taskExecutionState === 'running' || (taskStatus === 'in_progress' && taskExecutionState === 'idle')))}
             <QueueIndicator
+                {lockWait}
                 {queuePosition}
                 {queueEstimatedWait}
                 {promptProgress}

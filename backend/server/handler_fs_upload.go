@@ -3,7 +3,6 @@ package server
 import (
 	"errors"
 	"io"
-	"kanban/backend/httputil"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,8 +21,8 @@ const (
 	// hand beside the constant it describes and pinned to it by a test, because a
 	// cap raised without its sentence tells the user a lie about the cap.
 	uploadTooLargeMessage = "file too large (max 20MB)"
-	// uploadBoundaryOverhead is the multipart framing around a file at the cap.
-	// MaxBytesReader counts the whole body, so it gets the cap plus this.
+	// uploadBoundaryOverhead covers the multipart framing MaxBytesReader counts on top of
+	// the file body.
 	uploadBoundaryOverhead = 8 << 10
 	// uploadFormMemory is how much of the body stays in memory before the rest
 	// spills to temporary files.
@@ -37,10 +36,6 @@ const (
 // and the `file` part. The relative path needs its own field because Go strips directories from
 // a part's filename. An existing name is answered 409 unless overwrite=1.
 func (s *Server) handleFSUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 	project, err := s.optionalProject(r)
 	if err != nil {
 		JSONError(w, http.StatusBadRequest, err.Error())

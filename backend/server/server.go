@@ -35,11 +35,26 @@ import (
 	"kanban/backend/term"
 	"kanban/backend/tls"
 	"kanban/backend/types"
+	"kanban/pkg/keylock"
 	"kanban/pkg/logging"
+
+	"kanban/backend/startup"
+
+	"kanban/pkg/sandboxruntime"
 )
 
-// Server is the main HTTP server.
 type Server struct {
+	// base is the parent of every detached operation: work the user started that leaves server state
+	// behind and must not die because a browser tab closed. It is cancelled by the first shutdown stage
+	// and by nothing else — a request that goes away cancels its own context, never this one.
+	base context.Context
+	// baseCancel is what the detached-work stage calls; kept beside the context so the pair is never split.
+	baseCancel context.CancelFunc
+
+	// shutdown holds the step registered for each stage, in the order Shutdown walks them. A component
+	// registers where it is built (lifecycle.go), so a step that was never registered simply never runs.
+	shutdown [stageCount]func()
+
 	store               *store.Store
 	configStore         *config.ConfigStore
 	sessionMgr          *auth.SessionManager
@@ -66,23 +81,42 @@ type Server struct {
 	addr                string
 	frontendDist        string
 	tlsConfig           *tls.Config
-	allowedHosts        string // extra accepted Host values (--allowed-hosts, else MIKE_ALLOWED_HOSTS)
+	// settings is read instead of the environment: no request can observe a different process than
+	// the one that started.
+	settings startup.Config
 
 	// hostRoot jails the no-project file endpoints (picker, mkdir, git init, add-project path).
 	// Built once and shared with the project handler so the two cannot disagree.
 	hostRoot *fsutil.HostRoot
 
-	// worktreeMux prevents concurrent stash/checkout/branch/reset operations that would corrupt
-	// worktree state if interleaved (e.g., fork+switch, delete+switch).
-	worktreeMux   map[string]*sync.Mutex // taskID -> per-task mutex
-	worktreeMuxMu sync.RWMutex           // protects worktreeMux map
+	// Two more git lock domains, for the git work this process starts from a browser tab rather than the
+	// exec loop. Separate tables behind named types: a task ID and a project ID come from the same
+	// alphabet, so only the type can tell the two domains apart.
+	//
+	// gitTask serializes stash/checkout/branch/reset on one task, which corrupts its worktree when they
+	// interleave (fork+switch, delete+switch).
+	gitTask gitTaskLocks
 
-	// projectMux serializes project-level git operations (stash, checkout, pull, push)
-	// that touch shared state like .git/refs/stash. Multiple tasks in the same
-	// project share the same stash ref, so concurrent stash push/rev-parse/drop
-	// would clobber each other's commit hashes.
-	projectMux   map[string]*sync.Mutex // projectID -> per-project mutex
-	projectMuxMu sync.RWMutex           // protects projectMux map
+	// gitProject serializes project-level git operations (stash, checkout, pull, push): every task in
+	// the project shares .git/refs/stash, so concurrent push/rev-parse/drop clobbers the hashes.
+	gitProject gitProjectLocks
+}
+
+type (
+	gitTaskLocks    struct{ keylock.Table }
+	gitProjectLocks struct{ keylock.Table }
+)
+
+// requestLockSlowWait is the threshold for a wait a person is watching. It is not a deadline: a push to
+// a slow remote holds the project lock for as long as that push takes, and answering "busy" then would
+// be worse than waiting.
+const requestLockSlowWait = 5 * time.Second
+
+func requestWaitReporter(kind, idAttr string) keylock.WaitReport {
+	return func(id string, waited time.Duration) {
+		logging.For(logging.Git).With(idAttr, id).Warnf(
+			"waited %s for the %s's git operations - another one is still running", waited.Round(time.Second), kind)
+	}
 }
 
 // sandboxMemoryPeakSink is the sandbox manager's receiver for a container's final peak memory:
@@ -95,15 +129,44 @@ func sandboxMemoryPeakSink(st *store.Store) func(taskID string, peakMB int64) {
 	}
 }
 
-// NewServer builds the server. allowedHosts adds to the accepted Host values; empty falls back
-// to MIKE_ALLOWED_HOSTS (see effectiveAllowedHosts). frontendDist empty skips static serving.
-func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tlsCfg *tls.Config) (*Server, error) {
+// reg returns the registration for one shutdown stage: it attaches the step to s and hands back a
+// function reporting a registration failure. A step that silently went unregistered would surface months
+// later as a shutdown that never returns.
+func (s *Server) reg(st stage, name string, run func()) func() error {
+	if st < 0 || st >= stageCount {
+		return func() error { return fmt.Errorf("server: shutdown stage %d is outside the declared sequence", int(st)) }
+	}
+	if run == nil {
+		// A method value read off a component that is not assigned yet is a nil func: the panic would
+		// land inside Shutdown, long after the construction that caused it.
+		return func() error {
+			return fmt.Errorf("server: shutdown stage %s (%d) was registered with no step", stageNames[st], int(st))
+		}
+	}
+	if s.shutdown[st] != nil {
+		return func() error {
+			return fmt.Errorf("server: shutdown stage %s (%d) registered twice", stageNames[st], int(st))
+		}
+	}
+	s.shutdown[st] = func() {
+		logging.For(logging.HTTP).Infof("shutdown: %s", name)
+		run()
+	}
+	return func() error { return nil }
+}
+
+// NewServer opens the database, wires every component, and registers a teardown step beside each
+// component that needs one.
+func NewServer(settings startup.Config, tlsCfg *tls.Config) (*Server, error) {
+	dbPath, addr, frontendDist := settings.DBPath, settings.Addr, settings.FrontendDist
+	worktreesDir := settings.WorktreesOverride
 	store, err := store.NewStore(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("create store: %w", err)
 	}
 
 	cfgStore := config.NewConfigStore(store, dbPath, Version)
+	cfgStore.SetRegistryURL(settings.RegistryURL)
 	if err := cfgStore.MigrateProviderIDs(); err != nil {
 		return nil, fmt.Errorf("migrate provider IDs: %w", err)
 	}
@@ -129,18 +192,34 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	s := &Server{
 		store:        store,
 		configStore:  cfgStore,
+		settings:     settings,
 		addr:         addr,
 		frontendDist: frontendDist,
 		tlsConfig:    tlsCfg,
-		allowedHosts: allowedHosts,
-		worktreeMux:  make(map[string]*sync.Mutex),
-		projectMux:   make(map[string]*sync.Mutex),
-		loginLimiter: newLoginRateLimiter(),
+		loginLimiter: newLoginRateLimiter(settings.LoginRateLimit),
 	}
+	// Built before any step can reference it: a registration reads the method value now, so a component
+	// assigned later would register a nil step, which reg refuses.
+	s.base, s.baseCancel = context.WithCancel(context.Background())
+	defer s.reg(stageLoginRateLimiter, "login rate limiter", s.loginLimiter.Stop)()
+	// Cancelled before any resource a detached operation might still be writing through is taken away.
+	defer s.reg(stageDetachedWork, "detached work", s.baseCancel)()
+	// First thing built, last thing closed: every step above reads or writes through it. The pool's wait
+	// count is logged on the way out: a zero is the evidence the single connection is not the constraint.
+	defer s.reg(stageDatabase, "database", func() {
+		stats := store.DBStats()
+		logging.For(logging.HTTP).Infof("database pool over this run: %d connection waits totalling %s (open=%d, inUse=%d, maxOpen=%d)", stats.WaitCount, stats.WaitDuration.Round(time.Millisecond), stats.OpenConnections, stats.InUse, stats.MaxOpenConnections)
+		if err := store.Close(); err != nil {
+			logging.For(logging.HTTP).Infof("shutdown: closing database: %v", err)
+		}
+	})()
+	s.gitTask.Configure(requestLockSlowWait, requestWaitReporter("task", logging.TaskID))
+	s.gitProject.Configure(requestLockSlowWait, requestWaitReporter("project", logging.ProjectID))
 	s.previewStore = newPreviewStore()
 	s.previewStore.startSweeper()
+	defer s.reg(stagePreviewSweeper, "preview sweeper", s.previewStore.stopSweeper)()
 
-	sessionMgr, err := auth.NewSessionManager(store)
+	sessionMgr, err := auth.NewSessionManager(store, settings.MasterPassword)
 	if err != nil {
 		return nil, fmt.Errorf("create session manager: %w\nSet MIKE_LOGIN_PASSWORD environment variable to enable authentication", err)
 	}
@@ -148,15 +227,29 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.appStreamMgr = stream.NewAppStreamManager(store, worktreeMgr)
-	s.sandboxMgr = sandbox.NewSandboxManager()
-	// Samples running tasks and pushes sandbox_stats task events when usage changes.
+	// First to close: a watcher runs git and container work on its own goroutines, and everything it
+	// can reach is torn down below it.
+	defer s.reg(stageWebsocketWatchers, "websocket watchers", s.appStreamMgr.Close)()
+	// The boot decisions both sandbox managers share: whether this process claimed the host's
+	// container namespace, and where the bridge binary lives.
+	boot := sandboxruntime.Boot{
+		SweepStaleContainersAtBoot: settings.SweepStaleContainersAtBoot,
+		AgentPath:                  settings.AgentPath,
+	}
+	s.sandboxMgr = sandbox.NewSandboxManager(boot)
+	defer s.reg(stageSandboxContainers, "sandbox containers", s.sandboxMgr.Cleanup)()
+	// Emits a sandbox_stats task event only when usage changes.
 	s.sandboxStatsSampler = stream.NewSandboxStatsSampler(s.sandboxMgr, store, s.appStreamMgr, stream.DefaultSandboxStatsInterval)
 	s.appStreamMgr.SetSandboxStatsProvider(s.sandboxStatsSampler.LatestStatsProvider())
 	s.sandboxStatsSampler.Start()
+	defer s.reg(stageSandboxStatsSampler, "sandbox stats sampler", s.sandboxStatsSampler.Stop)()
 	// The sampler only sees a live container; this sink is what outlives it.
 	s.sandboxMgr.SetMemoryPeakSink(sandboxMemoryPeakSink(store))
 	s.boardHandler = managers.NewBoardHandler(store, s.appStreamMgr, cfgStore, s.sandboxMgr)
-	s.terminalMgr = term.NewTerminalManager(store, cfgStore, s.sandboxMgr, nil) // agentRegistry wired after creation
+	s.terminalMgr = term.NewTerminalManager(store, cfgStore, s.sandboxMgr, nil, sandbox.DangerZone(settings.DangerZone)) // agentRegistry wired after creation
+	// Before the sandbox containers: killing a session's shell after its container is gone leaves the
+	// shell running.
+	defer s.reg(stageTerminalSessions, "terminal sessions", s.terminalMgr.Close)()
 	s.terminalMgr.SetOnPortsAssigned(func(taskID, projectID string, ports []types.AssignedPort) {
 		// Column-only write: a full-row write from a row read a moment ago could
 		// undo a concurrent status or execution_state change.
@@ -181,15 +274,18 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 		return nil, fmt.Errorf("init extension schema: %w", err)
 	}
 
-	// agent:// URLs are providers; the registry maps them to enabled agent extensions.
+	// agent:// URLs are providers; the registry maps them to enabled agent extensions, and configStore
+	// merges them into the /api/config response.
 	agentRegistry := agent.NewAgentRegistry(s.extStore, cfgStore)
 	s.agentRegistry = agentRegistry
-	// So agent:// providers appear in the /api/config response.
 	cfgStore.SetAgentRegistry(agentRegistry)
 
 	extRegistry := extensions.NewRegistryClient()
-	s.extSandboxMgr = extensions.NewExtensionSandboxManager(extRegistry, s.extStore)
+	s.extSandboxMgr = extensions.NewExtensionSandboxManager(extRegistry, s.extStore, boot)
+	defer s.reg(stageExtensionSandboxManager, "extension sandbox manager", s.extSandboxMgr.Close)()
+	s.extSandboxMgr.SetExtraMountRoots(settings.ExtMountRoots)
 	s.extLSPMgr = lsp.NewExtensionLSPManager(s.extStore, s.extSandboxMgr, store)
+	defer s.reg(stageExtensionLSPManager, "extension lsp manager", s.extLSPMgr.Close)()
 
 	// Enabled `llm` extensions rewrite MIKE's provider requests; their mappings files are
 	// re-collected on every extension change below.
@@ -197,8 +293,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	s.extensionsDir = extCfg.ExtensionsDirOrDefault()
 	// The no-project jail: home plus the directories declared at startup, which no request can
 	// carry. The data directory is deliberately absent — it holds kanban.db and the TLS keys.
-	s.hostRoot = fsutil.NewHostRoot(cfg.WorkspaceDir, extCfg.ExtensionsDirOrDefault())
-	// Roots of the extension mount allowlist.
+	s.hostRoot = fsutil.NewHostRoot(settings.AllowRootFS, cfg.WorkspaceDir, extCfg.ExtensionsDirOrDefault())
 	s.extSandboxMgr.SetWorkspaceDir(cfg.WorkspaceDir)
 	s.extSandboxMgr.SetExtensionsDir(extCfg.ExtensionsDirOrDefault())
 	s.llmAdapter = llmadapter.NewAdapter()
@@ -219,7 +314,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	s.executor.SetLLMAdapter(s.llmAdapter)
 	s.executor.RecoverStaleTasks()
 	s.terminalMgr.SetAgentRegistry(agentRegistry)
-	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor, s.hostRoot)
+	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor, s.hostRoot, sandbox.DangerZone(settings.DangerZone))
 	s.taskHandler = managers.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, commitQueue, s.sandboxMgr)
 	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())
 	s.gitHandler.SetWorktreeMutex(s.lockWorktree)
@@ -238,6 +333,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	})
 	extLSPRegistry := lsp.NewExtensionRegistry(s.extStore)
 	s.lspHandler = lsp.NewLSPHandler(extLSPRegistry, s.extLSPMgr)
+	defer s.reg(stageLSPHandler, "lsp handler", s.lspHandler.Close)()
 	// The LSP workspace becomes the bind-mount source of the language server's container, so it
 	// answers to the same jail as every other host path the server opens. See lspWorkspaceAllowed.
 	s.lspHandler.SetWorkspaceValidator(s.lspWorkspaceAllowed)
@@ -256,7 +352,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	// On-demand file fetches read through the watcher's diff cache.
 	s.appStreamMgr.SetDiffCacheUpdate(s.gitHandler.UpdateDiffCache)
 
-	dryRun := os.Getenv("MIKE_GC_DRY_RUN") == "1"
+	dryRun := settings.GCDryRun
 	if removed, err := s.executor.WorktreeMgr().GarbageCollect(dryRun); err != nil {
 		logging.For(logging.Worktree).Warnf("startup error: %v", err)
 	} else if removed > 0 {
@@ -275,12 +371,9 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	return s, nil
 }
 
-// refreshPromptLocale derives the prompt language from the enabled i18n pack and installs it as
-// the template overlay, at startup and on every extension change. The enabled pack *is* the
-// language (extensions.ActiveI18N is the one rule), so there is no setting to reconcile.
-//
-// A list that cannot be read leaves the current language in place rather than resetting to
-// English.
+// refreshPromptLocale derives the prompt language from the enabled i18n pack and installs it as the
+// template overlay, at startup and on every extension change (docs/i18n.md). A list that cannot be read
+// leaves the current language in place rather than resetting to English.
 func (s *Server) refreshPromptLocale() {
 	ov, err := extensions.ActivePromptOverlay(s.extStore, s.extensionsDir)
 	if err != nil {
@@ -299,10 +392,6 @@ func (s *Server) refreshPromptLocale() {
 }
 
 func (s *Server) handleFetchModels(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		httputil.MethodNotAllowed(w)
-		return
-	}
 
 	var req config.FetchModelsRequest
 	if !httputil.DecodeJSON(w, r, &req) {
@@ -330,7 +419,7 @@ func (s *Server) handleFetchModels(w http.ResponseWriter, r *http.Request) {
 
 		adapter, err := agent.LoadAdapter(ext)
 		if err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to load agent adapter: %v", err))
+			httputil.Fault(w, "load agent adapter", err)
 			return
 		}
 		defer adapter.Close()
@@ -344,7 +433,7 @@ func (s *Server) handleFetchModels(w http.ResponseWriter, r *http.Request) {
 			"config":         ext.Config,
 		})
 		if err := adapter.Init(ctx, initCfg); err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to init agent adapter: %v", err))
+			httputil.Fault(w, "initialize agent adapter", err)
 			return
 		}
 
@@ -376,7 +465,7 @@ func (s *Server) RedirectHTTPSMiddleware(next http.Handler) http.Handler {
 
 		// Only trust X-Forwarded-Proto when explicitly behind a trusted proxy.
 		// Otherwise an attacker can set it to "https" to bypass the redirect.
-		if requestIsHTTPS(r) {
+		if requestIsHTTPS(r, s.settings.TrustProxy) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -435,7 +524,7 @@ const tlsRecordTypeHandshake = 0x16
 type hybridListener struct {
 	net.Listener
 	stdTLSConfig *stdtls.Config
-	// sniffTimeout bounds the first-byte read. Zero means defaultSniffTimeout.
+	// Zero means defaultSniffTimeout.
 	sniffTimeout time.Duration
 	drops        *sniffDropLogger
 
@@ -446,15 +535,10 @@ type hybridListener struct {
 	last  error // why the accept loop stopped, if a real failure caused it
 }
 
-// Accept hands net/http a connection whose protocol is already known. The first byte decides TLS
-// vs plain HTTP and net/http only looks at the concrete type Accept returns, so that read cannot
-// be deferred — but it must not happen inside Accept: net/http accepts serially, so a peer that
-// connects and sends nothing would delay every later handshake, and its EOF or ECONNRESET would
-// reach Serve as a dead listener and end it.
-//
-// So Accept never touches a socket — acceptLoop sniffs each connection in its own goroutine and
-// queues the result. No worker pool: a pool of N only moves the stall to the Nth silent peer. Only
-// the listener's own error is returned, since it is the only one that can end Serve.
+// Accept hands net/http a connection whose protocol is already known. The first byte decides TLS vs
+// plain HTTP and net/http only inspects the type Accept returns, so that read cannot be deferred - but
+// it must not happen inside Accept, because net/http accepts one connection at a time: a peer that
+// connects and sends nothing would stall every handshake queued behind it and read as a dead server.
 func (l *hybridListener) Accept() (net.Conn, error) {
 	select {
 	case conn := <-l.ready:
@@ -567,14 +651,12 @@ const sniffLogInterval = time.Minute
 // maxSniffHosts bounds the rate-limit map. Past it, new hosts are simply suppressed.
 const maxSniffHosts = 256
 
-// sniffDropLogger rate-limits drop logging per remote host, like tlsTrustNoiseFilter
-// does for handshake noise.
+// sniffDropLogger rate-limits drop logging per remote host.
 type sniffDropLogger struct {
 	mu   sync.Mutex
 	last map[string]time.Time
 }
 
-// note logs the drop unless this host was reported within the last sniffLogInterval.
 func (l *sniffDropLogger) note(addr net.Addr, cause error) {
 	if l == nil || addr == nil || !l.allowed(addr) {
 		return
@@ -582,7 +664,6 @@ func (l *sniffDropLogger) note(addr net.Addr, cause error) {
 	logging.For(logging.Startup).Infof("dropped connection from %s before its first byte: %v (further drops from this host are suppressed for %s)", addr, cause, sniffLogInterval)
 }
 
-// allowed stamps addr's host and reports whether it may be logged now.
 func (l *sniffDropLogger) allowed(addr net.Addr) bool {
 	host, _, err := net.SplitHostPort(addr.String())
 	if err != nil {
@@ -623,7 +704,6 @@ func (p *peekConn) Read(b []byte) (n int, err error) {
 	return p.Conn.Read(b)
 }
 
-// AddMiddleware wraps successive middleware within each other
 func AddMiddleware(h http.Handler, middleware ...Middleware) http.Handler {
 
 	for _, m := range slices.Backward(middleware) {
@@ -663,13 +743,8 @@ func (s *Server) tlsConfigToStd() *stdtls.Config {
 }
 
 // RepairExtensionFiles restores installed extensions whose files are gone, each from the commit its own
-// record pins. An extension with no files is not a disabled extension — it is an enabled one that does
-// nothing, invisibly: a UI extension's iframe 404s, so its document never boots and never registers the
-// button or overlay it exists for.
-//
-// Called from main at process start rather than from Serve or NewServer, so no Go test can reach a git
-// clone. The caller runs it off the boot path and never joins it: a clone that outlives the deadline is
-// not allowed to be the reason a shutdown waits.
+// record pins. A missing directory is not a disabled extension: it is an enabled one that does nothing,
+// invisibly, while the API still reports it installed.
 func (s *Server) RepairExtensionFiles(ctx context.Context) {
 	if _, _, err := s.extHandler.RepairMissingFiles(ctx); err != nil {
 		logging.For(logging.Extensions).Warnf("repair: could not check installed extension files: %v", err)
@@ -715,19 +790,13 @@ func (s *Server) Serve() error {
 	return srv.ListenAndServe()
 }
 
-// logHostRootPolicy echoes the host-directory jail, otherwise invisible until it refuses
-// something. Both misconfigurations are silent: a variable set to anything but "1" leaves the
-// picker jailed, and a root of "/" constrains nothing.
+// logHostRootPolicy echoes the host-directory jail, otherwise invisible until it refuses something.
+// A set-but-not-1 variable is already reported at boot by startup's warnings.
 func (s *Server) logHostRootPolicy() {
 	if s.hostRoot.Unrestricted() {
 		logging.For(logging.Host).Warnf("%s=1: the file endpoints, project creation and clone may reach any host path",
 			fsutil.AllowRootFSEnv)
 		return
-	}
-	// A set-but-empty variable means "unset" in this config ladder, so it stays silent here too.
-	if v := os.Getenv(fsutil.AllowRootFSEnv); v != "" && v != "1" {
-		logging.For(logging.Host).Warnf("%s=%q is not the exact value 1, so the host directory jail stays in force (allowed: %s)",
-			fsutil.AllowRootFSEnv, v, strings.Join(s.hostRoot.Roots(), ", "))
 	}
 	if s.hostRoot.HasUniversalRoot() {
 		logging.For(logging.Host).Warnf("the host directory jail includes the filesystem root (roots: %s), which constrains nothing: "+
@@ -736,10 +805,9 @@ func (s *Server) logHostRootPolicy() {
 }
 
 // lspWorkspaceAllowed answers "may an LSP client open a language server at this directory?". The
-// workspace string arrives in a browser message and becomes the `-v` source of the language
-// server's container, so it goes through fsutil.Contained rather than a prefix comparison: a
-// symlink planted inside a worktree a task can write to resolves against the host, and a lexical
-// check reads straight through it into, say, the operator's ~/.ssh.
+// workspace string arrives in a browser message and becomes the `-v` source of the container, so it
+// goes through fsutil.Contained rather than a prefix comparison: a symlink planted in a worktree a task
+// can write to resolves against the host, and a lexical check reads straight through it.
 func (s *Server) lspWorkspaceAllowed(workspace string) bool {
 	cfg, err := s.configStore.GetConfig()
 	if err != nil {
@@ -777,73 +845,3 @@ func newHybridListener(l net.Listener, stdCfg *stdtls.Config, sniffTimeout time.
 
 // Shutdown runs every teardown step. Each is best-effort and none can be interrupted, so the
 // order below is the dependency order, not a preference.
-func (s *Server) Shutdown(ctx context.Context) error {
-	// Logged before it runs: none of these can be interrupted, so when the shutdown deadline fires
-	// the last line here is the only thing that names what hung.
-	shutdownStep := func(name string, run func()) {
-		if run == nil {
-			return
-		}
-		logging.For(logging.HTTP).Infof("shutdown: %s", name)
-		run()
-	}
-	shutdownStep("preview sweeper", func() {
-		if s.previewStore != nil {
-			s.previewStore.stopSweeper()
-		}
-	})
-	// First, because they run git and container work on their own goroutines and everything they
-	// can reach is torn down below.
-	shutdownStep("websocket watchers", func() {
-		if s.appStreamMgr != nil {
-			s.appStreamMgr.Close()
-		}
-	})
-	// Before "sandbox containers": killing a session's shell after its container is gone leaves the
-	// shell running.
-	shutdownStep("terminal sessions", func() {
-		if s.terminalMgr != nil {
-			s.terminalMgr.Close()
-		}
-	})
-	shutdownStep("lsp handler", func() {
-		if s.lspHandler != nil {
-			s.lspHandler.Close()
-		}
-	})
-	shutdownStep("extension lsp manager", func() {
-		if s.extLSPMgr != nil {
-			s.extLSPMgr.Close()
-		}
-	})
-	shutdownStep("extension sandbox manager", func() {
-		if s.extSandboxMgr != nil {
-			s.extSandboxMgr.Close()
-		}
-	})
-	shutdownStep("sandbox stats sampler", func() {
-		if s.sandboxStatsSampler != nil {
-			s.sandboxStatsSampler.Stop()
-		}
-	})
-	shutdownStep("sandbox containers", func() {
-		if s.sandboxMgr != nil {
-			s.sandboxMgr.Cleanup()
-		}
-	})
-	shutdownStep("login rate limiter", func() {
-		if s.loginLimiter != nil {
-			s.loginLimiter.Stop()
-		}
-	})
-	// Logged once on the way out: a zero wait count is the evidence the single-connection
-	// pool is not the constraint, and a large one is the trigger to widen it.
-	stats := s.store.DBStats()
-	logging.For(logging.HTTP).Infof("database pool over this run: %d connection waits totalling %s (open=%d, inUse=%d, maxOpen=%d)", stats.WaitCount, stats.WaitDuration.Round(time.Millisecond), stats.OpenConnections, stats.InUse, stats.MaxOpenConnections)
-	shutdownStep("database", func() {
-		if err := s.store.Close(); err != nil {
-			logging.For(logging.HTTP).Infof("shutdown: closing database: %v", err)
-		}
-	})
-	return nil
-}

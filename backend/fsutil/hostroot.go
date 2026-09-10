@@ -9,7 +9,9 @@ import (
 	"strings"
 )
 
-// AllowRootFSEnv widens the host-directory jail. Only the exact value "1" does; it is read
+// AllowRootFSEnv names the variable whose resolution widens the host-directory jail. The rule
+// ("only the exact value 1", and a set-but-other value warns) is startup's; this constant is the
+// name the refusal quotes. It is read
 // per call, not cached at startup.
 const AllowRootFSEnv = "MIKE_ALLOW_ROOT_FS"
 
@@ -37,19 +39,26 @@ type hostRoot struct {
 // link fall back to Contained, and creation walks the components itself.
 type HostRoot struct {
 	roots []hostRoot
-	// envWidens marks the no-project jail; a root set built around a project never widens.
-	envWidens bool
+	// widened is the resolved MIKE_ALLOW_ROOT_FS decision. It arrives resolved because a jail that
+	// re-read the variable per call could widen between two calls of one request, and because the
+	// rule "only the exact value 1 widens" then lives in two places. A root set built around a
+	// project passes false: the widening is never project-scoped.
+	widened bool
 }
 
 // NewHostRoot builds the jail from the operator's home plus declaredDirs — directories named
 // at startup (workspace dir, extensions dir) that a request cannot carry. They are made
 // absolute against the working directory: the extensions dir defaults to "extensions".
-func NewHostRoot(declaredDirs ...string) *HostRoot {
+//
+// allowRootFS is the widened-jail decision (startup.Config.AllowRootFS). It belongs to the
+// constructor because the jail is one object with one policy: a request that could change the
+// answer mid-flight would make the roots listed in a refusal not the roots that refused.
+func NewHostRoot(allowRootFS bool, declaredDirs ...string) *HostRoot {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = ""
 	}
-	return &HostRoot{roots: normalizeHostRoots(append([]string{home}, declaredDirs...)...), envWidens: true}
+	return &HostRoot{roots: normalizeHostRoots(append([]string{home}, declaredDirs...)...), widened: allowRootFS}
 }
 
 // NewContainedRoots builds the same walk over exactly the directories given, with no implicit
@@ -90,10 +99,8 @@ func normalizeHostRoots(dirs ...string) []hostRoot {
 	return out
 }
 
-// unrestricted reads the environment on every call. A nil policy is never unrestricted.
-func (h *HostRoot) unrestricted() bool {
-	return h != nil && h.envWidens && os.Getenv(AllowRootFSEnv) == "1"
-}
+// unrestricted reports the widening granted at construction. A nil policy is never unrestricted.
+func (h *HostRoot) unrestricted() bool { return h != nil && h.widened }
 
 // Unrestricted reports whether host-wide access was granted by the environment.
 func (h *HostRoot) Unrestricted() bool { return h.unrestricted() }

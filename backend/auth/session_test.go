@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -31,12 +30,7 @@ func testManagerWithStore(t *testing.T) (*SessionManager, *store.Store) {
 	}
 	t.Cleanup(func() { s.Close() })
 
-	// Set password env var for the duration of the test
-	old := os.Getenv("MIKE_LOGIN_PASSWORD")
-	t.Cleanup(func() { os.Setenv("MIKE_LOGIN_PASSWORD", old) })
-	os.Setenv("MIKE_LOGIN_PASSWORD", "test-password")
-
-	m, err := NewSessionManager(s)
+	m, err := NewSessionManager(s, testPassword)
 	if err != nil {
 		t.Fatalf("create manager: %v", err)
 	}
@@ -59,11 +53,11 @@ func lastSeenOf(t *testing.T, db *store.Store, id string) int64 {
 	return v
 }
 
-func TestNewSessionManagerNoPassword(t *testing.T) {
-	old := os.Getenv("MIKE_LOGIN_PASSWORD")
-	t.Cleanup(func() { os.Setenv("MIKE_LOGIN_PASSWORD", old) })
-	os.Unsetenv("MIKE_LOGIN_PASSWORD")
+// An empty master password is refused rather than accepted as a shared secret of nothing.
+// testPassword is the master password the fixture manager is built with.
+const testPassword = "test-password"
 
+func TestNewSessionManagerNoPassword(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.NewStore(filepath.Join(dir, "test.db"))
 	if err != nil {
@@ -71,9 +65,9 @@ func TestNewSessionManagerNoPassword(t *testing.T) {
 	}
 	t.Cleanup(func() { s.Close() })
 
-	_, err = NewSessionManager(s)
+	_, err = NewSessionManager(s, "")
 	if err == nil {
-		t.Fatal("expected error when MIKE_LOGIN_PASSWORD is not set")
+		t.Fatal("NewSessionManager accepted an empty master password")
 	}
 }
 
@@ -188,7 +182,6 @@ func TestMultipleSessions(t *testing.T) {
 		t.Fatalf("login 2: %v", err)
 	}
 
-	// Both should be valid
 	if _, _, err := m.Validate(token1); err != nil {
 		t.Errorf("token1 should be valid: %v", err)
 	}
@@ -356,11 +349,7 @@ func TestStartupBackfillsLegacySessions(t *testing.T) {
 		t.Fatalf("seed legacy row: %v", err)
 	}
 
-	old := os.Getenv(passwordEnv)
-	t.Cleanup(func() { os.Setenv(passwordEnv, old) })
-	os.Setenv(passwordEnv, "test-password")
-
-	if _, err := NewSessionManager(s); err != nil {
+	if _, err := NewSessionManager(s, testPassword); err != nil {
 		t.Fatalf("NewSessionManager: %v", err)
 	}
 

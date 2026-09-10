@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"kanban/pkg/sandboxruntime"
 )
 
 func deleteFixture(t *testing.T) (*ExtensionHandler, *ExtensionStore, string) {
@@ -20,7 +22,7 @@ func deleteFixture(t *testing.T) (*ExtensionHandler, *ExtensionStore, string) {
 	reg := NewRegistryClient()
 	dir := t.TempDir()
 	cfg := &ExtensionConfig{ExtensionsDir: dir}
-	return NewExtensionHandler(extStore, NewExtensionSandboxManager(reg, extStore), reg, cfg), extStore, dir
+	return NewExtensionHandler(extStore, NewExtensionSandboxManager(reg, extStore, sandboxruntime.Boot{}), reg, cfg), extStore, dir
 }
 
 func storedExtension(t *testing.T, store *ExtensionStore, id, author, name, source string) *Extension {

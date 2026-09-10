@@ -43,12 +43,10 @@ func setupCommitAndMergeTest(t *testing.T) (*TaskExecutor, string, string, strin
 	cfgStore := config.NewConfigStore(s, dbPath, "test")
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 
-	// Create project
 	projectID := "test-project"
 	proj := &types.Project{ID: projectID, Name: "test", Path: repoDir}
 	s.CreateProject(proj)
 
-	// Create task
 	taskID := "test-task"
 	task := &types.Task{
 		ID:        taskID,

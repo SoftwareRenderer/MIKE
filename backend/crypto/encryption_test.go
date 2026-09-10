@@ -126,27 +126,6 @@ func TestDecryptInvalidBase64(t *testing.T) {
 	}
 }
 
-func TestValidateKey(t *testing.T) {
-	tests := []struct {
-		name    string
-		envVal  string
-		wantErr bool
-	}{
-		{"valid key", "some-secret-key", false},
-		{"empty", "", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("MIKE_ENCRYPTION_KEY", tt.envVal)
-			err := ValidateKey()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateKey() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
 func TestEncryptDifferentValuesProduceDifferentCiphertext(t *testing.T) {
 	setEncryptionKey(t)
 

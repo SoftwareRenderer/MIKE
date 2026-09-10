@@ -12,7 +12,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"kanban/backend/store"
@@ -42,10 +41,10 @@ type SessionManager struct {
 	passwordHash [sha256.Size]byte
 }
 
-// NewSessionManager creates a new SessionManager.
-// Returns an error if MIKE_LOGIN_PASSWORD is not set.
-func NewSessionManager(s *store.Store) (*SessionManager, error) {
-	password := os.Getenv(passwordEnv)
+// NewSessionManager creates a new SessionManager from the resolved master password (the value
+// startup.Config.MasterPassword holds). Returns an error if it is empty: an empty password would make
+// every session a share of nothing.
+func NewSessionManager(s *store.Store, password string) (*SessionManager, error) {
 	if password == "" {
 		return nil, fmt.Errorf("%s environment variable is not set", passwordEnv)
 	}

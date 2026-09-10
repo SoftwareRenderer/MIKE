@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"kanban/backend/types"
 	"kanban/pkg/logging"
 )
@@ -136,37 +137,24 @@ func (s *Store) AccumulateProjectStats(projectID, modelName, providerName string
 // DeleteProjectStats zeros out the cumulative stats for a specific model/provider in a project.
 // If providerName is empty, it matches any provider for that model.
 // This does NOT delete messages from task_messages.
+// DeleteProjectStats zeroes a model's cumulative counters and drops the per-task rows behind them. One
+// transaction: counters zeroed with their task rows still present is a table that adds up to nothing, and
+// the two statements take the same predicate, so they either both apply or neither does.
 func (s *Store) DeleteProjectStats(projectID, modelName, providerName string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	where := `project_id = ? AND model_name = ?`
+	args := []any{projectID, modelName}
 	if providerName != "" {
-		_, err := s.db.Exec(`
+		where += ` AND provider_name = ?`
+		args = append(args, providerName)
+	}
+	return s.tx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`
 			UPDATE project_token_stats
 			SET prompt_tokens = 0, cache_tokens = 0, predicted_tokens = 0, prompt_ms = 0, predicted_ms = 0, cost = 0
-			WHERE project_id = ? AND model_name = ? AND provider_name = ?`,
-			projectID, modelName, providerName)
-		if err != nil {
+			WHERE `+where, args...); err != nil {
 			return err
 		}
-		_, err = s.db.Exec(`
-			DELETE FROM project_token_tasks
-			WHERE project_id = ? AND model_name = ? AND provider_name = ?`,
-			projectID, modelName, providerName)
+		_, err := tx.Exec(`DELETE FROM project_token_tasks WHERE `+where, args...)
 		return err
-	}
-
-	_, err := s.db.Exec(`
-		UPDATE project_token_stats
-		SET prompt_tokens = 0, cache_tokens = 0, predicted_tokens = 0, prompt_ms = 0, predicted_ms = 0, cost = 0
-		WHERE project_id = ? AND model_name = ?`,
-		projectID, modelName)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`
-		DELETE FROM project_token_tasks
-		WHERE project_id = ? AND model_name = ?`,
-		projectID, modelName)
-	return err
+	})
 }

@@ -2,18 +2,14 @@ package sandbox
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"kanban/backend/types"
 )
 
 func TestAgentClient(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
 
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(bootWithBridge(t))
 	if !sm.IsAvailable() {
 		t.Skip("gVisor not available, skipping integration test")
 	}
@@ -33,7 +29,6 @@ func TestAgentClient(t *testing.T) {
 	}
 	defer client.Close()
 
-	// Write a file
 	n, err := client.WriteFile(context.Background(), "hello.txt", "world")
 	if err != nil {
 		t.Fatalf("write file: %v", err)
@@ -42,7 +37,6 @@ func TestAgentClient(t *testing.T) {
 		t.Errorf("write returned %d bytes, want 5", n)
 	}
 
-	// Read it back
 	content, size, err := client.ReadFile(context.Background(), "hello.txt")
 	if err != nil {
 		t.Fatalf("read file: %v", err)

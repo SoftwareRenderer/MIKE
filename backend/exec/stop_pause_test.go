@@ -164,7 +164,6 @@ func TestStopRunningTaskMidStream(t *testing.T) {
 	mock.waitForArrival(t, 2)
 	waitTaskState(t, s, "stop-live-2", isRunning)
 
-	// Cleanup.
 	mock.Release()
 	mock.Release()
 	te.StopTask("stop-live-2")
@@ -230,7 +229,6 @@ func TestPauseResumeCycle(t *testing.T) {
 	mock.waitForArrival(t, 1)
 	waitTaskState(t, s, "pause-resume-1", isRunning)
 
-	// Pause.
 	if err := te.StopTask("pause-resume-1"); err != nil {
 		t.Fatalf("StopTask: %v", err)
 	}

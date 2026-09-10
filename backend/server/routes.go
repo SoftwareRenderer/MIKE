@@ -3,7 +3,6 @@ package server
 import (
 	"io/fs"
 	"kanban/backend/fsutil"
-	"kanban/backend/httputil"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,12 +13,12 @@ func (s *Server) setupRoutes() {
 	s.mux = http.NewServeMux()
 
 	// Health & auth
-	s.mux.HandleFunc("/api/health", s.handleHealth)
+	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	// Rate limit login attempts (5/min per IP by default; MIKE_LOGIN_RATE_LIMIT can
 	// raise or lower it, but no longer turn it off).
-	s.mux.Handle("/api/auth/login", RateLimitMiddleware(s.loginLimiter, http.HandlerFunc(s.handleAuthLogin)))
-	s.mux.HandleFunc("/api/auth/logout", s.handleAuthLogout)
-	s.mux.HandleFunc("/api/auth/session", s.handleAuthSession)
+	s.mux.Handle("POST /api/auth/login", RateLimitMiddleware(s.loginLimiter, s.settings.TrustProxy, http.HandlerFunc(s.handleAuthLogin)))
+	s.mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
+	s.mux.HandleFunc("GET /api/auth/session", s.handleAuthSession)
 
 	// Session management (signed-in user only — no public path, so
 	// SessionMiddleware auths these and CSRFMiddleware guards the non-GET ones).
@@ -30,18 +29,18 @@ func (s *Server) setupRoutes() {
 	// The local CA behind the server's default certificate, for Settings → About.
 	s.mux.HandleFunc("GET /api/tls/ca", s.HandleTLSCA)
 
-	// Config
-	s.mux.HandleFunc("/api/config/test-connection", s.configStore.HandleTestConnection)
-	s.mux.HandleFunc("/api/config/fetch-models", s.handleFetchModels)
-	s.mux.HandleFunc("/api/config", s.configStore.HandleConfig)
+	s.mux.HandleFunc("POST /api/config/test-connection", s.configStore.HandleTestConnection)
+	s.mux.HandleFunc("POST /api/config/fetch-models", s.handleFetchModels)
+	s.mux.HandleFunc("GET /api/config", s.configStore.HandleConfig)
+	s.mux.HandleFunc("PUT /api/config", s.configStore.HandleConfig)
 
 	// WebSocket stream
-	s.mux.HandleFunc("/api/stream", s.appStreamMgr.HandleStream)
+	s.mux.HandleFunc("GET /api/stream", s.appStreamMgr.HandleStream)
 
 	// LSP WebSocket
-	s.mux.HandleFunc("/api/lsp", s.lspHandler.HandleLSP)
+	s.mux.HandleFunc("GET /api/lsp", s.lspHandler.HandleLSP)
 	// LSP sandbox memory stats (for the editor LSP status tooltip)
-	s.mux.HandleFunc("/api/lsp/memory", s.lspHandler.HandleSandboxMemory)
+	s.mux.HandleFunc("GET /api/lsp/memory", s.lspHandler.HandleSandboxMemory)
 
 	// HTML/SVG preview documents (served to sandboxed preview iframes)
 	s.mux.HandleFunc("POST /api/preview", s.HandlePreviewServe)
@@ -51,28 +50,34 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/preview/{token}/nav", s.HandlePreviewNav)
 	s.mux.HandleFunc("DELETE /api/preview/{token}", s.HandlePreviewDelete)
 
-	// Extensions
 	s.mux.HandleFunc("GET /api/extensions", s.extHandler.HandleList)
-	s.mux.HandleFunc("/api/extensions/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		switch r.Method {
-		case http.MethodGet:
-			s.extHandler.HandleGet(w, r, id)
-		case http.MethodPut, http.MethodPatch:
-			s.extHandler.HandleUpdate(w, r, id)
-		case http.MethodDelete:
-			s.extHandler.HandleDelete(w, r, id)
-		default:
-			httputil.MethodNotAllowed(w)
-		}
+	// The mux resolves the method, so the switch that used to live in this closure is gone: four
+	// registrations, each naming the one handler it reaches.
+	s.mux.HandleFunc("GET /api/extensions/{id}", func(w http.ResponseWriter, r *http.Request) {
+		s.extHandler.HandleGet(w, r, r.PathValue("id"))
 	})
-	s.mux.HandleFunc("/api/extensions/{id}/enabled", func(w http.ResponseWriter, r *http.Request) {
+	s.mux.HandleFunc("PUT /api/extensions/{id}", func(w http.ResponseWriter, r *http.Request) {
+		s.extHandler.HandleUpdate(w, r, r.PathValue("id"))
+	})
+	s.mux.HandleFunc("PATCH /api/extensions/{id}", func(w http.ResponseWriter, r *http.Request) {
+		s.extHandler.HandleUpdate(w, r, r.PathValue("id"))
+	})
+	s.mux.HandleFunc("DELETE /api/extensions/{id}", func(w http.ResponseWriter, r *http.Request) {
+		s.extHandler.HandleDelete(w, r, r.PathValue("id"))
+	})
+	s.mux.HandleFunc("PATCH /api/extensions/{id}/enabled", func(w http.ResponseWriter, r *http.Request) {
+		s.extHandler.HandleSetEnabled(w, r, r.PathValue("id"))
+	})
+	s.mux.HandleFunc("PUT /api/extensions/{id}/enabled", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleSetEnabled(w, r, r.PathValue("id"))
 	})
 	// The user's grant of a host directory to one extension's language server, for its resolved
 	// dependencies. Separate from PUT /api/extensions/{id} because an empty value must mean
 	// "revoke" and because applying it stops the sandbox.
-	s.mux.HandleFunc("/api/extensions/{id}/dependency-cache", func(w http.ResponseWriter, r *http.Request) {
+	s.mux.HandleFunc("PUT /api/extensions/{id}/dependency-cache", func(w http.ResponseWriter, r *http.Request) {
+		s.extHandler.HandleSetDependencyCache(w, r, r.PathValue("id"))
+	})
+	s.mux.HandleFunc("PATCH /api/extensions/{id}/dependency-cache", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleSetDependencyCache(w, r, r.PathValue("id"))
 	})
 	s.mux.HandleFunc("GET /api/extensions/registry", s.extHandler.HandleRegistryIndex)
@@ -86,70 +91,86 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/extensions/{id}/proxy", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleProxy(w, r, r.PathValue("id"))
 	})
-	s.mux.HandleFunc("/api/extensions/{id}/storage", func(w http.ResponseWriter, r *http.Request) {
+	// HandleStorage keeps its own switch: the three verbs share a path and differ only in which
+	// namespaced KV operation they run, which is a choice the path cannot express.
+	s.mux.HandleFunc("GET /api/extensions/{id}/storage", func(w http.ResponseWriter, r *http.Request) {
+		s.extHandler.HandleStorage(w, r, r.PathValue("id"))
+	})
+	s.mux.HandleFunc("PUT /api/extensions/{id}/storage", func(w http.ResponseWriter, r *http.Request) {
+		s.extHandler.HandleStorage(w, r, r.PathValue("id"))
+	})
+	s.mux.HandleFunc("DELETE /api/extensions/{id}/storage", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleStorage(w, r, r.PathValue("id"))
 	})
 
 	// Global utilities
-	s.mux.HandleFunc("/api/home", s.handleHome)
-	s.mux.HandleFunc("/api/fs/read", s.handleFSRead)
-	s.mux.HandleFunc("/api/fs/write", s.handleFSWrite)
-	s.mux.HandleFunc("/api/fs/upload", s.handleFSUpload)
-	s.mux.HandleFunc("/api/fs/init-git", s.handleFSInitGit)
-	s.mux.HandleFunc("/api/fs/mkdir", s.handleFSMkdir)
-	s.mux.HandleFunc("/api/fs/search", s.handleFSSearch)
-	s.mux.HandleFunc("/api/fs", s.handleFS)
+	s.mux.HandleFunc("GET /api/home", s.handleHome)
+	s.mux.HandleFunc("GET /api/fs/read", s.handleFSRead)
+	s.mux.HandleFunc("POST /api/fs/write", s.handleFSWrite)
+	s.mux.HandleFunc("POST /api/fs/upload", s.handleFSUpload)
+	s.mux.HandleFunc("POST /api/fs/init-git", s.handleFSInitGit)
+	s.mux.HandleFunc("POST /api/fs/mkdir", s.handleFSMkdir)
+	s.mux.HandleFunc("GET /api/fs/search", s.handleFSSearch)
+	s.mux.HandleFunc("GET /api/fs", s.handleFS)
 
-	// Projects
 	s.mux.HandleFunc("GET /api/projects", s.projectHandler.HandleList)
 	s.mux.HandleFunc("POST /api/projects", s.projectHandler.HandleCreate)
 	s.mux.HandleFunc("POST /api/projects/clone", s.projectHandler.HandleClone)
 	s.mux.HandleFunc("GET /api/projects/counts", s.projectHandler.HandleCounts)
-	s.mux.HandleFunc("/api/projects/{projectID}", s.projectHandler.HandleByID)
-	s.mux.HandleFunc("/api/projects/{projectID}/board", s.boardHandler.HandleBoard)
-	s.mux.HandleFunc("/api/projects/{projectID}/stats", s.projectHandler.HandleStats)
-	s.mux.HandleFunc("/api/projects/{projectID}/sandbox/build", s.projectHandler.HandleSandboxBuild)
-	s.mux.HandleFunc("/api/projects/{projectID}/terminal", s.terminalMgr.HandleProjectTerminal)
+	s.mux.HandleFunc("GET /api/projects/{projectID}", s.projectHandler.HandleByID)
+	s.mux.HandleFunc("PUT /api/projects/{projectID}", s.projectHandler.HandleByID)
+	s.mux.HandleFunc("DELETE /api/projects/{projectID}", s.projectHandler.HandleByID)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/board", s.boardHandler.HandleBoard)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/stats", s.projectHandler.HandleStats)
+	s.mux.HandleFunc("DELETE /api/projects/{projectID}/stats", s.projectHandler.HandleStats)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/sandbox/build", s.projectHandler.HandleSandboxBuild)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/terminal", s.terminalMgr.HandleProjectTerminal)
 
-	// Tasks
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks", s.taskHandler.HandleList)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/done", s.taskHandler.HandleClearDone)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}", s.taskHandler.HandleByID)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/move", s.taskHandler.HandleMove)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/init", s.taskHandler.HandleInit)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/start", s.taskHandler.HandleStart)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/start-subtask", s.taskHandler.HandleStartSubtask)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/stop", s.taskHandler.HandleStop)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/retry", s.executor.HandleRetry)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/resume", s.executor.HandleResume)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/send", s.executor.HandleSend)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/summarize", s.executor.HandleSummarize)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/compact", s.executor.HandleCompact)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks", s.taskHandler.HandleList)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks", s.taskHandler.HandleList)
+	s.mux.HandleFunc("DELETE /api/projects/{projectID}/tasks/done", s.taskHandler.HandleClearDone)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}", s.taskHandler.HandleByID)
+	s.mux.HandleFunc("PUT /api/projects/{projectID}/tasks/{taskID}", s.taskHandler.HandleByID)
+	s.mux.HandleFunc("DELETE /api/projects/{projectID}/tasks/{taskID}", s.taskHandler.HandleByID)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/move", s.taskHandler.HandleMove)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/init", s.taskHandler.HandleInit)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", s.taskHandler.HandleStart)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start-subtask", s.taskHandler.HandleStartSubtask)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/stop", s.taskHandler.HandleStop)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/retry", s.executor.HandleRetry)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/resume", s.executor.HandleResume)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/send", s.executor.HandleSend)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/summarize", s.executor.HandleSummarize)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/compact", s.executor.HandleCompact)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/diff", s.gitHandler.HandleTaskDiff)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/diff/file", s.gitHandler.HandleTaskDiffFile)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/diff/stage", s.gitHandler.HandleStageFile)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/commits", s.gitHandler.HandleTaskCommits)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/commits", s.gitHandler.HandleTaskCommits)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/commit-preview", s.taskHandler.HandleCommitPreview)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/commit-preview/stream", s.taskHandler.HandleCommitPreviewStream)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/commit", s.taskHandler.HandleCommitAndDone)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/terminal", s.terminalMgr.HandleTerminal)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/commit", s.taskHandler.HandleCommitAndDone)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/terminal", s.terminalMgr.HandleTerminal)
 
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/messages", s.handleTaskMessages)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/messages/{messageID}", s.handleTaskMessageByID)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/messages", s.handleTaskMessages)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/messages", s.handleTaskMessages)
+	s.mux.HandleFunc("DELETE /api/projects/{projectID}/tasks/{taskID}/messages", s.handleTaskMessages)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/messages/{messageID}", s.handleTaskMessageByID)
+	s.mux.HandleFunc("PATCH /api/projects/{projectID}/tasks/{taskID}/messages/{messageID}", s.handleTaskMessageByID)
 
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/threads", s.handleThreads)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/threads/fork", s.handleThreadFork)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/threads/switch", s.handleThreadSwitch)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/threads", s.handleThreads)
+	s.mux.HandleFunc("DELETE /api/projects/{projectID}/tasks/{taskID}/threads", s.handleThreads)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/threads/fork", s.handleThreadFork)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/threads/switch", s.handleThreadSwitch)
 
 	// Git operations
-	s.mux.HandleFunc("/api/projects/{projectID}/git/log", s.gitHandler.HandleLog)
-	s.mux.HandleFunc("/api/projects/{projectID}/git/branches", s.gitHandler.HandleBranches)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/git/log", s.gitHandler.HandleLog)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/git/branches", s.gitHandler.HandleBranches)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/git/diff", s.gitHandler.HandleDiff)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/git/diff/file", s.gitHandler.HandleProjectDiffFile)
-	s.mux.HandleFunc("/api/projects/{projectID}/git/status", s.gitHandler.HandleStatus)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/git/status", s.gitHandler.HandleStatus)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/git/stage", s.gitHandler.HandleProjectStageFile)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/git/commit", s.gitHandler.HandleProjectCommit)
-	s.mux.HandleFunc("/api/projects/{projectID}/git/checkout", s.gitHandler.HandleCheckout)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/git/checkout", s.gitHandler.HandleCheckout)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/git/pull", s.gitHandler.HandlePull)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/git/push", s.gitHandler.HandlePush)
 

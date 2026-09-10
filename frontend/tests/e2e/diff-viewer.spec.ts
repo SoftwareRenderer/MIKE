@@ -1186,7 +1186,6 @@ test.describe.serial('Done-task diff shows committed changes', () => {
         expect(diffData.diff).toContain(testFile);
         expect(diffData.diff).toContain('Committed content for done task diff test');
 
-        // Cleanup
         rmSync(join(worktreePath, testFile), { force: true });
     });
 
@@ -1255,7 +1254,6 @@ test.describe.serial('Done-task diff shows committed changes', () => {
             expect(diffText).toContain('UI test content for done task');
         }).toPass({ timeout: 10000 });
 
-        // Cleanup
         rmSync(join(worktreePath, testFile), { force: true });
     });
 });

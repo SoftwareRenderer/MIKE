@@ -56,7 +56,6 @@ func TestConfigEncryption_RoundTrip(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Read back
 	got, err := es.GetByID("enc-ext")
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
@@ -408,7 +407,6 @@ func TestMaskConfig_NoSchema(t *testing.T) {
 	config := map[string]any{"token": "secret"}
 	masked := maskConfig(config, nil)
 
-	// Without schema, no masking
 	if masked["token"] != "secret" {
 		t.Errorf("token = %v, want secret (no masking without schema)", masked["token"])
 	}

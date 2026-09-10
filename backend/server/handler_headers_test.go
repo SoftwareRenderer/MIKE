@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"kanban/backend/startup"
 )
 
 // TestSessionCookieSecureFlag pins what decides the Secure flag. A TLS-terminating proxy is the
@@ -17,7 +19,7 @@ func TestSessionCookieSecureFlag(t *testing.T) {
 		name       string
 		tls        bool // the request arrived over TLS terminated here
 		forwarded  string
-		trustProxy string
+		trustProxy bool
 		wantSecure bool
 	}{
 		{name: "TLS terminated here", tls: true, wantSecure: true},
@@ -31,7 +33,7 @@ func TestSessionCookieSecureFlag(t *testing.T) {
 		{
 			name:       "a TLS-terminating proxy that says so, under MIKE_TRUST_PROXY",
 			forwarded:  "https",
-			trustProxy: "1",
+			trustProxy: true,
 			wantSecure: true,
 		},
 		{
@@ -46,17 +48,16 @@ func TestSessionCookieSecureFlag(t *testing.T) {
 		{
 			name:       "a proxy forwarding http under MIKE_TRUST_PROXY",
 			forwarded:  "http",
-			trustProxy: "1",
+			trustProxy: true,
 			wantSecure: false,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.trustProxy != "" {
-				t.Setenv("MIKE_TRUST_PROXY", tc.trustProxy)
-			}
-			s := testServer(t)
+			// Proxy trust is the resolved decision the server was built with, so the case says which
+			// process it is pretending to have booted rather than editing this one.
+			s := testServerWith(t, func(c *startup.Config) { c.TrustProxy = tc.trustProxy })
 
 			req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{"password": testPassword})
 			req.Host = "localhost"

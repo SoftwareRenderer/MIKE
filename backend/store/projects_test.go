@@ -422,7 +422,6 @@ func TestProjectSandboxImage(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	// Verify it was saved
 	got, err := s.GetProject("proj-image")
 	if err != nil {
 		t.Fatalf("get project: %v", err)
@@ -431,7 +430,6 @@ func TestProjectSandboxImage(t *testing.T) {
 		t.Fatalf("expected ubuntu:22.04, got %q", got.SandboxImage)
 	}
 
-	// Update the sandbox image
 	if err := s.UpdateProjectSandboxImage("proj-image", "docker.io/library/alpine:3.19"); err != nil {
 		t.Fatalf("update sandbox image: %v", err)
 	}
@@ -440,7 +438,6 @@ func TestProjectSandboxImage(t *testing.T) {
 		t.Fatalf("expected alpine:3.19, got %q", got.SandboxImage)
 	}
 
-	// Clear the sandbox image
 	if err := s.UpdateProjectSandboxImage("proj-image", ""); err != nil {
 		t.Fatalf("clear sandbox image: %v", err)
 	}
@@ -479,7 +476,6 @@ func TestProjectSandboxDockerfilePath(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	// Verify it was saved
 	got, err := s.GetProject("proj-df")
 	if err != nil {
 		t.Fatalf("get project: %v", err)
@@ -488,7 +484,6 @@ func TestProjectSandboxDockerfilePath(t *testing.T) {
 		t.Fatalf("expected /tmp/repo-df/Dockerfile, got %q", got.SandboxDockerfilePath)
 	}
 
-	// Update the Dockerfile path
 	if err := s.UpdateProjectSandboxDockerfilePath("proj-df", "/tmp/repo-df/Dockerfile.prod"); err != nil {
 		t.Fatalf("update dockerfile path: %v", err)
 	}
@@ -497,7 +492,6 @@ func TestProjectSandboxDockerfilePath(t *testing.T) {
 		t.Fatalf("expected Dockerfile.prod, got %q", got.SandboxDockerfilePath)
 	}
 
-	// Clear the Dockerfile path
 	if err := s.UpdateProjectSandboxDockerfilePath("proj-df", ""); err != nil {
 		t.Fatalf("clear dockerfile path: %v", err)
 	}
@@ -548,7 +542,6 @@ func TestProjectSandboxMemoryLimit(t *testing.T) {
 		t.Fatalf("expected default memory limit 1024, got %d", got.SandboxMemoryLimit)
 	}
 
-	// Update to 2GB
 	if err := s.UpdateProjectSandboxMemoryLimit("proj-mem", 2048); err != nil {
 		t.Fatalf("update memory limit: %v", err)
 	}
@@ -604,7 +597,6 @@ func TestProjectSandboxForwardPorts(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	// Verify it was saved
 	got, err := s.GetProject("proj-ports")
 	if err != nil {
 		t.Fatalf("get project: %v", err)
@@ -637,7 +629,6 @@ func TestProjectSandboxForwardPorts(t *testing.T) {
 		t.Fatalf("expected container port 8080, got %d", got.ForwardPorts[0].ContainerPort)
 	}
 
-	// Clear forward ports
 	if err := s.UpdateProjectSandboxForwardPorts("proj-ports", nil); err != nil {
 		t.Fatalf("clear forward ports: %v", err)
 	}
@@ -681,7 +672,6 @@ func TestProjectSandboxMounts(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	// Verify it was saved
 	got, err := s.GetProject("proj-mounts")
 	if err != nil {
 		t.Fatalf("get project: %v", err)
@@ -720,7 +710,6 @@ func TestProjectSandboxMounts(t *testing.T) {
 		t.Fatalf("expected host path /logs, got %s", got.SandboxMounts[0].HostPath)
 	}
 
-	// Clear mounts
 	if err := s.UpdateProjectSandboxMounts("proj-mounts", nil); err != nil {
 		t.Fatalf("clear mounts: %v", err)
 	}
@@ -765,7 +754,6 @@ func TestProjectSandboxEnvs(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	// Verify it was saved
 	got, err := s.GetProject("proj-envs")
 	if err != nil {
 		t.Fatalf("get project: %v", err)
@@ -804,7 +792,6 @@ func TestProjectSandboxEnvs(t *testing.T) {
 		t.Fatalf("expected key NEW_VAR, got %s", got.SandboxEnvs[0].Key)
 	}
 
-	// Clear envs
 	if err := s.UpdateProjectSandboxEnvs("proj-envs", nil); err != nil {
 		t.Fatalf("clear envs: %v", err)
 	}
@@ -845,7 +832,6 @@ func TestProjectSandboxCapabilities(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	// Verify it was saved
 	got, err := s.GetProject("proj-caps")
 	if err != nil {
 		t.Fatalf("get project: %v", err)
@@ -876,7 +862,6 @@ func TestProjectSandboxCapabilities(t *testing.T) {
 		t.Fatalf("expected CAP_SYS_PTRACE, got %s", got.SandboxCapabilities[0])
 	}
 
-	// Clear capabilities
 	if err := s.UpdateProjectSandboxCapabilities("proj-caps", nil); err != nil {
 		t.Fatalf("clear capabilities: %v", err)
 	}

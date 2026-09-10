@@ -31,7 +31,6 @@
      * $lib/utils/extension-identity, which the e2e Browse-composition helper shares.
      */
 
-    // State
     let extensions = $state<Extension[]>([]);
     let registryEntries = $state<RegistryEntry[]>([]);
     let localExtensions = $state<RegistryEntry[]>([]);
@@ -79,7 +78,6 @@
         'createTask': t('settings.extensions.point.createTask'),
     });
 
-    // Capability descriptions
     const CAPABILITY_DESCRIPTIONS = $derived<Record<string, { label: string; description: string }>>({
         network: {
             label: t('settings.extensions.cap.network.label'),

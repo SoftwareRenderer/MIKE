@@ -211,8 +211,7 @@ type AssignedPort struct {
 	HostIP string `json:"host_ip,omitempty"`
 }
 
-// SandboxMemoryStats is the live memory usage of a task's sandbox container.
-// LimitMB 0 means no enforced limit
+// SandboxMemoryStats reports a task's live sandbox memory; LimitMB 0 means no enforced limit.
 type SandboxMemoryStats struct {
 	Running   bool   `json:"running"`
 	CurrentMB int64  `json:"memory_current_mb"`

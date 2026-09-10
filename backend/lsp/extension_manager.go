@@ -487,15 +487,7 @@ func reloadNeeded(reloadFiles []string, changed string) bool {
 	return false
 }
 
-// FilesChanged ends the language-server connection of this workspace whenever the turn changed a
-// file its extension declared in `reload_files` (a go.mod, a lockfile), and reports whether any
-// connection was ended.
-//
-// Recycling means retiring the connection, not restarting the process inside it: the agent kills
-// its language server when the connection ends, which is the only thing that reaps the server,
-// and the next request re-attaches to a fresh process that loads the graph again. An in-place
-// restart would need a new wire call to stop a server and would still leave the holder attached
-// to a process that had forgotten `initialize` and every document it was told about.
+// FilesChanged ends the workspace's LSP connection when a turn changed a file listed in reload_files.
 func (m *ExtensionLSPManager) FilesChanged(workspacePath string, changed []string) bool {
 	if len(changed) == 0 {
 		return false

@@ -11,6 +11,8 @@ import (
 	"kanban/backend/extensions"
 	"kanban/backend/store"
 	"kanban/backend/types"
+
+	"kanban/pkg/sandboxruntime"
 )
 
 func planFixture(t *testing.T, grant string, projectMounts []types.SandboxMount) (*ExtensionLSPManager, *extensions.Extension, string) {
@@ -42,7 +44,7 @@ func planFixture(t *testing.T, grant string, projectMounts []types.SandboxMount)
 		t.Fatal(err)
 	}
 
-	mgr := NewExtensionLSPManager(extStore, extensions.NewExtensionSandboxManager(extensions.NewRegistryClient(), extStore), projDB)
+	mgr := NewExtensionLSPManager(extStore, extensions.NewExtensionSandboxManager(extensions.NewRegistryClient(), extStore, sandboxruntime.Boot{}), projDB)
 	stored, err := extStore.GetByID("go-gopls")
 	if err != nil {
 		t.Fatal(err)

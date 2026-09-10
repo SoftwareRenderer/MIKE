@@ -131,6 +131,7 @@
     let checkpointCommitHashes = $derived(stream.state.checkpointCommitHashes);
     let checkpointHashesVersion = $derived(stream.state.checkpointHashesVersion);
     let awaitingResponse = $derived(stream.state.awaitingResponse);
+    let lockWait = $derived(stream.state.lockWait);
     let queuePosition = $derived(stream.state.queuePosition);
     let queueEstimatedWait = $derived(stream.state.queueEstimatedWait);
     let promptProgress = $derived(stream.state.promptProgress);
@@ -156,7 +157,6 @@
     let taskEventContext = getTaskEventContext();
     let queueStatus = $derived($commitQueueStatus[projectId]?.taskID === taskId ? $commitQueueStatus[projectId].status : null);
 
-    // Thread state
     let threads: Thread[] = $state([]);
     let activeThreadId = $state('');
 
@@ -1423,6 +1423,7 @@
         {activeThreadId}
         {threads}
         {awaitingResponse}
+        {lockWait}
         {connected}
         {queuePosition}
         {queueEstimatedWait}

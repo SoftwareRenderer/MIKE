@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"errors"
 	"kanban/backend/config"
+	"kanban/backend/errs"
 	"kanban/backend/git"
 	"kanban/backend/store"
 	"kanban/backend/stream"
@@ -53,7 +55,6 @@ func setupExecutorWithGit(t *testing.T) (*TaskExecutor, string, string, string) 
 	cfgStore := config.NewConfigStore(s, dbPath, "test")
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 
-	// Create project
 	projectID := "test-project"
 	proj := &types.Project{ID: projectID, Name: "test", Path: repoDir}
 	s.CreateProject(proj)
@@ -133,7 +134,6 @@ func TestPrepareTaskExecution_PreservesBaseRefOnRestart(t *testing.T) {
 		t.Errorf("BaseRef should be a 40-char SHA, got %q (len=%d)", setup.task.BaseRef, len(setup.task.BaseRef))
 	}
 
-	// Cleanup
 	setup.cancel()
 	te.StopTask(taskID)
 }
@@ -176,7 +176,6 @@ func TestPrepareTaskExecution_SetsBaseRefOnFirstRun(t *testing.T) {
 		t.Errorf("BaseRef should be a branch name, not a 40-char SHA, got %q", setup.task.BaseRef)
 	}
 
-	// Cleanup
 	setup.cancel()
 	te.StopTask(taskID)
 }
@@ -313,12 +312,10 @@ func TestInitTask_ThenPrepareTaskExecution(t *testing.T) {
 		t.Error("BaseRef should be set")
 	}
 
-	// BaseCommit should be preserved
 	if setup.task.BaseCommit != initialSHA {
 		t.Errorf("BaseCommit should be preserved: expected %q, got %q", initialSHA, setup.task.BaseCommit)
 	}
 
-	// Cleanup
 	setup.cancel()
 	te.StopTask(taskID)
 }
@@ -474,7 +471,6 @@ func TestHasRunningTasks_NoTasks(t *testing.T) {
 func TestHasRunningTasks_InvalidProject(t *testing.T) {
 	te, _, _, _ := setupExecutorWithGit(t)
 
-	// Non-existent project
 	if te.HasRunningTasks("nonexistent-project") {
 		t.Error("HasRunningTasks should return false for non-existent project")
 	}
@@ -803,7 +799,7 @@ func TestInitTask_ClearsOrphanedBranchOnWorktreeFailure(t *testing.T) {
 // lock: a tool_call left without a result renders as "Running" forever, and the
 // stranded lock deadlocks every later write for the task.
 func TestRunToolProtected_PanicBecomesFailedResult(t *testing.T) {
-	te := &TaskExecutor{}
+	te := lockTestExecutor()
 
 	result, ok := te.runToolProtected("task-panic", "bash", func() (string, bool) {
 		panic("boom")
@@ -816,23 +812,22 @@ func TestRunToolProtected_PanicBecomesFailedResult(t *testing.T) {
 		t.Errorf("result = %q, want an internal-error message naming the tool", result)
 	}
 
-	mu := worktreeLockFor(te, "task-panic")
-	if !mu.TryLock() {
+	// The reason the panic guard exists alongside the lock: a stranded worktree lock deadlocks every
+	// later write for the task, in this process, until restart.
+	if taskLockIsHeld(te, "task-panic") {
 		t.Fatal("worktree lock still held after a panicking tool — later tools would deadlock")
 	}
-	mu.Unlock()
 }
 
 func TestRunToolProtected_PassesResultThroughUnderLock(t *testing.T) {
-	te := &TaskExecutor{}
+	te := lockTestExecutor()
 
 	var heldInside bool
 	result, ok := te.runToolProtected("task-ok", "read_file", func() (string, bool) {
-		mu := worktreeLockFor(te, "task-ok")
-		heldInside = !mu.TryLock() // fails only because we already hold it
-		if !heldInside {
-			mu.Unlock()
-		}
+		// Same goroutine, and the lock is a semaphore rather than an owner-checked mutex, so this
+		// reports "held" by failing to take it a second time — which is exactly the property: one tool
+		// call at a time per worktree.
+		heldInside = taskLockIsHeld(te, "task-ok")
 		return "file contents", true
 	})
 
@@ -842,8 +837,50 @@ func TestRunToolProtected_PassesResultThroughUnderLock(t *testing.T) {
 	if !heldInside {
 		t.Error("the worktree lock was not held while the tool ran")
 	}
-	if !worktreeLockFor(te, "task-ok").TryLock() {
+	if taskLockIsHeld(te, "task-ok") {
 		t.Fatal("worktree lock still held after a successful tool")
 	}
-	worktreeLockFor(te, "task-ok").Unlock()
+}
+
+// TestPrepareTaskExecutionRefusesARunningTaskWithTheSentinel: a second start of a task this process is
+// already running is the caller's own doing, not a server fault, so it has to arrive as the sentinel the
+// transport maps to 409. It was returned as a bare fmt.Errorf("task already running"), which answered 500
+// and left the handler's errors.Is branch — and its 409 — unreachable.
+func TestPrepareTaskExecutionRefusesARunningTaskWithTheSentinel(t *testing.T) {
+	te, _, projectID, _ := setupExecutorWithGit(t)
+	taskID := "task-already-running"
+	if err := te.store.CreateTask(&types.Task{
+		ID:             taskID,
+		ProjectID:      projectID,
+		Title:          "Already running",
+		Status:         types.StatusInProgress,
+		ExecutionState: types.ExecStateRunning,
+		LlamaServerURL: "http://localhost:8080",
+		ModelName:      "test-model",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm", taskStatus: types.StatusInProgress}
+	t.Cleanup(func() { cancel() })
+
+	setup, err := te.prepareTaskExecution(projectID, taskID, "", "", true)
+	if setup != nil {
+		t.Error("a task that is actively running was prepared anyway")
+	}
+	if !errors.Is(err, ErrTaskAlreadyRunning) {
+		t.Errorf("err = %v, want it to wrap ErrTaskAlreadyRunning (the API maps that to 409)", err)
+	}
+}
+
+// TestErrTaskAlreadyRunningClassifiesAsConflict holds the sentinel to what its comment claims: the
+// transport answers 409 because the error declares a conflict, not because a handler recognised its text.
+func TestErrTaskAlreadyRunningClassifiesAsConflict(t *testing.T) {
+	if !errs.IsConflict(ErrTaskAlreadyRunning) {
+		t.Error("ErrTaskAlreadyRunning does not classify as errs.ErrConflict, so the API answers 500")
+	}
+	if got := ErrTaskAlreadyRunning.Error(); got != "task already running" {
+		t.Errorf("message = %q, want %q — it is the browser's text", got, "task already running")
+	}
 }

@@ -18,7 +18,7 @@ import (
 // without gVisor: "runsc is missing" would hide the configuration error underneath it,
 // which is exactly the kind of false green this repository has been bitten by.
 func TestCreateRefusesUnsafeSandboxAdditions(t *testing.T) {
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(sandboxruntime.Boot{})
 	project := &types.Project{ID: "p-args", Name: "args-proj", Path: t.TempDir()}
 	worktree := t.TempDir()
 
@@ -106,7 +106,7 @@ func TestTaskSandboxIsolatesWhatACapabilityGrantAssumes(t *testing.T) {
 	// The shape rule still refuses, and still refuses before the availability probe, so a
 	// host without runsc reports the configuration error instead of hiding it under
 	// "gVisor not available".
-	sm := NewSandboxManager()
+	sm := NewSandboxManager(sandboxruntime.Boot{})
 	project := &types.Project{ID: "p-caps", Name: "caps-proj", Path: t.TempDir()}
 	_, err := sm.Create("task-caps", t.TempDir(), project, SandboxOpts{Capabilities: []string{"--privileged"}})
 	if err == nil {

@@ -21,10 +21,6 @@ const (
 // Accepts {"password": "..."}, validates against MIKE_LOGIN_PASSWORD,
 // sets SESSION cookie on success.
 func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
 
 	var req struct {
 		Password string `json:"password"`
@@ -34,7 +30,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, token, csrfToken, err := s.sessionMgr.Login(req.Password, clientIP(r), r.UserAgent())
+	_, token, csrfToken, err := s.sessionMgr.Login(req.Password, clientIP(r, s.settings.TrustProxy), r.UserAgent())
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidPassword) {
 			JSONError(w, http.StatusUnauthorized, "invalid password")
@@ -52,10 +48,6 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 // handleAuthLogout handles POST /api/auth/logout.
 // Requires a valid session. Deletes the session and clears the cookie.
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
 
 	cookie, err := r.Cookie(sessionCookieName)
 	if err != nil {
@@ -76,10 +68,6 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 // handleAuthSession handles GET /api/auth/session.
 // Returns the current authentication status.
 func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		JSONError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
 
 	cookie, err := r.Cookie(sessionCookieName)
 	if err == nil && s.sessionMgr != nil {
@@ -103,7 +91,7 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token 
 		MaxAge:   maxAge,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   requestIsHTTPS(r),
+		Secure:   requestIsHTTPS(r, s.settings.TrustProxy),
 	})
 }
 
@@ -118,6 +106,6 @@ func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   requestIsHTTPS(r),
+		Secure:   requestIsHTTPS(r, s.settings.TrustProxy),
 	})
 }

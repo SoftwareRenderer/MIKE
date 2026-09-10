@@ -70,7 +70,6 @@ func TestAcquireRelease_ConcurrencyLimit(t *testing.T) {
 		t.Fatal("timed out waiting for blocked Acquire to unblock")
 	}
 
-	// Clean up
 	g.Release("http://p")
 	g.Release("http://p")
 }
@@ -237,7 +236,6 @@ func TestAcquireRelease_CancelledEntrySkipped(t *testing.T) {
 		t.Fatal("timed out waiting for second waiter to be served")
 	}
 
-	// Clean up
 	g.Release("http://p")
 }
 
@@ -268,7 +266,6 @@ func TestEstimateWait_NoHistory(t *testing.T) {
 		t.Fatalf("expected default estimate 30, got %d", est)
 	}
 
-	// Clean up
 	g.Release("http://p")
 	<-done
 	g.Release("http://p")
@@ -309,7 +306,6 @@ func TestEstimateWait_WithHistory(t *testing.T) {
 		t.Fatalf("expected non-negative estimate, got %d", est)
 	}
 
-	// Clean up
 	g.Release("http://p")
 	g.Release("http://p")
 	<-done
@@ -430,7 +426,6 @@ func TestMinConcurrency_One(t *testing.T) {
 		// Expected — it's blocked
 	}
 
-	// Clean up
 	g.Release("http://p")
 	<-done
 	g.Release("http://p")

@@ -234,3 +234,24 @@ func walkGoFiles(t *testing.T, root, sub string, visit func(path, line string)) 
 		t.Fatalf("walk %s: %v", sub, err)
 	}
 }
+
+// The slow-child report is the only thing an operator sees when podman wedges, so the name it prints has
+// to identify the operation. Flags and image references are excluded: the first verbs are what a human
+// scans for, and the long arguments are already in the caller's own error text.
+func TestPodmanLabelNamesTheOperation(t *testing.T) {
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"inspect", "kanban-sandbox-frost-amber-quartz"}, "podman inspect kanban-sandbox-frost-amber-quartz"},
+		{[]string{"rm", "-f", "kanban-sandbox-x"}, "podman rm kanban-sandbox-x"},
+		{[]string{"create", "--runtime", "runsc", "--name", "c", "img"}, "podman create runsc"},
+		{[]string{"runsc", "--version"}, "podman runsc"},
+		{[]string{"--version"}, "podman"},
+	}
+	for _, tt := range tests {
+		if got := podmanLabel(tt.args); got != tt.want {
+			t.Errorf("podmanLabel(%q) = %q, want %q", tt.args, got, tt.want)
+		}
+	}
+}

@@ -51,14 +51,12 @@ func setupTestRepo(t *testing.T) (string, string, *store.Store, *config.ConfigSt
 		t.Fatalf("update config: %v", err)
 	}
 
-	// Create project
 	projID := "test-project"
 	proj := &types.Project{ID: projID, Name: "test", Path: repoDir}
 	if err := s.CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 
-	// Create task
 	taskID := "test-task"
 	task := &types.Task{
 		ID:        taskID,
@@ -1053,7 +1051,6 @@ func TestIsBinaryExtension(t *testing.T) {
 			t.Errorf("expected %s to NOT be detected as binary extension", ext)
 		}
 	}
-	// No extension
 	if isBinaryExtension("Makefile") {
 		t.Error("expected Makefile (no extension) to NOT be detected as binary")
 	}
@@ -1435,7 +1432,6 @@ func TestResetWorktreeTo_StashHash(t *testing.T) {
 
 	worktreePath, _ := wm.WorktreePath(taskID)
 
-	// Write a file.
 	writeFile(t, worktreePath, "hello.c", "// hello\nint main() { return 0; }\n")
 
 	// Stash worktree, extract hash, drop stash (simulates fork handler).
@@ -1606,7 +1602,6 @@ func TestPushStash_MultipleEntries(t *testing.T) {
 		t.Error("stash entry B should have been dropped")
 	}
 
-	// Clean up
 	_ = wm.gitRun(worktreePath, "stash", "clear")
 }
 
@@ -2345,7 +2340,6 @@ func TestDropStashEntriesForTask_RemovesMatchingStashes(t *testing.T) {
 		t.Error("stash for other task should remain")
 	}
 
-	// Clean up
 	_ = wm.gitRun(repoDir, "stash", "clear")
 }
 
@@ -2392,7 +2386,6 @@ func TestDropStashEntriesForBranch_RemovesMatchingStashes(t *testing.T) {
 		t.Errorf("stash for master branch should remain, got:\n%s", listOut)
 	}
 
-	// Clean up
 	_ = wm.gitRun(repoDir, "stash", "clear")
 }
 
@@ -2447,7 +2440,6 @@ func TestDropStashEntriesForTask_RemovesSyncMergeAndAutoMergeStashes(t *testing.
 		t.Error("sync-merge stash for other task should remain")
 	}
 
-	// Clean up
 	_ = wm.gitRun(repoDir, "stash", "clear")
 }
 
@@ -2499,7 +2491,6 @@ func TestGarbageCollect_DropsStaleSyncMergeAndAutoMergeStashes(t *testing.T) {
 		t.Errorf("active sync-merge stash for %s should remain, got:\n%s", taskID, listOut)
 	}
 
-	// Clean up
 	_ = wm.gitRun(repoDir, "stash", "clear")
 	_ = s.Close()
 }

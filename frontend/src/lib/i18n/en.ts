@@ -722,6 +722,10 @@ const catalog = {
     // ═══ api.* — request-failure fallback text ═══
 
     // What shows when a response carried no message. Never wrap server text in t().
+    // The request got no answer at all: server not running, unreachable, or restarted mid-request.
+    // Named as the thing to check, because the toast is the only feedback that path gives.
+    'api.noAnswer': 'MIKE did not answer — check the server is still running',
+    'api.requestCancelled': 'Request cancelled',
     'api.fetchConfig': 'Failed to fetch config',
     'api.testConnection': 'Failed to test connection',
     'api.fetchModels': 'Failed to fetch models',
@@ -1069,6 +1073,9 @@ const catalog = {
     'chat.queue.connectionIssue': 'Connection issue{errPart} — retry {count}',
     'chat.queue.promptProgress': 'Awaiting {target}... Processing Prompt: {percent}%',
     'chat.queue.awaiting': 'Awaiting {target}...',
+    'chat.queue.lockWorktree': 'Waiting — this task is still working ({seconds}s)...',
+    'chat.queue.lockStash': 'Waiting — another git operation has this project open ({seconds}s)...',
+    'chat.queue.lockOther': 'Waiting — the project is busy ({seconds}s)...',
 
     // ── Chat/ContextUsage.svelte (donut tooltip; the suffix keeps its leading separator) ──
     'chat.context.usage': '{used} / {limit} tokens · {percent}%',
@@ -1357,9 +1364,9 @@ const catalog = {
     // ═══ time.* — relative time and timestamps ═══
 
     // ── Relative time ──
-    // format-time prefers Intl.RelativeTimeFormat and falls back to these keys, which
-    // is why they read as abbreviations. A pack can override them for a locale whose
-    // narrow style reads badly (French narrow gives "-5 min").
+    // format-time prefers Intl.RelativeTimeFormat and falls back to these keys, so they read as
+    // abbreviations. A pack can override them for a locale whose narrow style reads badly (French
+    // narrow gives "-5 min").
     'time.justNow': 'just now',
     'time.minuteAgo': '{n}m ago',
     'time.hourAgo': '{n}h ago',

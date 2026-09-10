@@ -164,7 +164,6 @@ test.describe('Explorer Git History Refresh After Commit', () => {
         expect(stagedCount).toBeGreaterThan(0);
       }).toPass({ timeout: 5000 });
 
-      // Commit
       await page.locator('.panel-commit-btn').click();
       const commitDialog = page.locator('[role="dialog"]').filter({ has: page.locator('.commit-textarea') });
       await expect(commitDialog).toBeVisible({ timeout: 10000 });

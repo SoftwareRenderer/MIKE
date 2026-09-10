@@ -2,18 +2,18 @@ package main
 
 // Plural form sets, and what a counted message owes which language.
 //
-// English counts: `{one, other}`. A pack mirrors the *counting*, not English's forms, because
-// the forms are what the language has — `Intl.PluralRules` answers `other` for Turkish, always,
-// and answers `one`/`few`/`many` for Russian depending on the number. That is why
-// `validatePluralForms` (backend/extensions/manifest_validate.go) requires `other` and calls it
-// sufficient: a table missing the selected category degrades to it, so a language with two forms
-// shipping `other` alone is complete, not lazy.
+// English counts `{one, other}`. A pack mirrors the counting, not English's forms, because the forms
+// are what the language has: `Intl.PluralRules` answers `other` for Turkish always, and
+// `one`/`few`/`many` for Russian depending on the number. So the Go validator beside the manifest
+// rules requires `other` and calls it sufficient — a table missing
+// the selected category degrades to it, so a language with two forms shipping `other` alone is
+// complete, not lazy.
 //
-// Which makes the two rules worth enforcing here:
+// Hence the two rules enforced here:
 //
-//  1. `other` must be there — it is the only form guaranteed to be selectable;
-//  2. a form the language never answers with is dead text — a `one` in a Turkish pack is a
-//     string no runtime path can ever reach, which is a translation written into a drawer.
+//  1. `other` must be there — the only form guaranteed to be selectable;
+//  2. a form the language never answers with is dead text — a `one` in a Turkish pack is a string no
+//     runtime path can reach.
 //
 // A form English has that the pack folds into `other` is neither: it is the correct shape for a
 // language with fewer forms, and it is counted and reported, never failed.

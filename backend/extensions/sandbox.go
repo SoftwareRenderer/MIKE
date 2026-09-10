@@ -20,8 +20,7 @@ import (
 const (
 	// ExtensionContainerPrefix is the prefix for extension sandbox container names.
 	ExtensionContainerPrefix = "kanban-ext"
-	// DefaultExtensionMemory is the default memory limit for extension sandboxes (MB).
-	// 0 means no limit — extension sandboxes run unlimited unless the user sets one.
+	// DefaultExtensionMemory 0 leaves extension sandboxes unlimited unless the user sets one.
 	DefaultExtensionMemory = 0
 	// ExtensionLivenessTTL is how long to cache a liveness check result.
 	ExtensionLivenessTTL = 5 * time.Minute
@@ -42,6 +41,21 @@ type ExtensionSandboxManager struct {
 	available     bool
 	extensionsDir string
 	workspaceDir  string
+	// extraMountRoots is the resolved MIKE_EXT_MOUNT_ROOTS list, wired once by NewServer. The mount
+	// set is fixed when a container is created, so reading the variable per policy would let a later
+	// container disagree with an earlier one about what the operator declared.
+	extraMountRoots []string
+}
+
+// SetExtraMountRoots wires the resolved MIKE_EXT_MOUNT_ROOTS extras. Wiring-time, before any sandbox
+// starts; an empty list is the ordinary case.
+func (sm *ExtensionSandboxManager) SetExtraMountRoots(roots []string) {
+	if sm == nil {
+		return
+	}
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.extraMountRoots = append([]string(nil), roots...)
 }
 
 // extensionSandboxState tracks the runtime state of an extension sandbox.
@@ -71,8 +85,8 @@ type extensionSandboxState struct {
 	envs []string
 }
 
-func NewExtensionSandboxManager(reg *RegistryClient, store *ExtensionStore) *ExtensionSandboxManager {
-	rt := sandboxruntime.NewRuntime()
+func NewExtensionSandboxManager(reg *RegistryClient, store *ExtensionStore, boot sandboxruntime.Boot) *ExtensionSandboxManager {
+	rt := sandboxruntime.NewRuntimeWithBoot(boot)
 	sm := &ExtensionSandboxManager{
 		rt:            rt,
 		refs:          make(map[string]int),
@@ -88,10 +102,10 @@ func NewExtensionSandboxManager(reg *RegistryClient, store *ExtensionStore) *Ext
 	} else {
 		logging.For(logging.Sandbox).Info("gVisor not available, extension sandboxing disabled")
 	}
-	// Clean up stale containers from previous runs — except when this process is a test binary
-	// that has no business touching the host's sandboxes (see SkipStartupCleanup), and except
-	// when there is no gVisor to sweep for in the first place.
-	if sm.available && !sandboxruntime.SkipStartupCleanup() {
+	// Clean up stale containers from previous runs — only when this process claimed that authority at
+	// startup (the same Boot the task sandbox manager gets), and only when there is a gVisor to sweep
+	// for in the first place.
+	if sm.available && boot.SweepStaleContainersAtBoot {
 		sm.cleanupStaleContainers()
 	}
 	return sm
@@ -164,12 +178,16 @@ func (sm *ExtensionSandboxManager) mountPolicy(grantHostPath string) *MountPolic
 	var (
 		workspaceDir  string
 		extensionsDir string
+		extraRoots    []string
 		projectPaths  []string
 		projectMounts []string
 	)
 	if sm != nil {
 		workspaceDir = sm.workspaceDir
 		extensionsDir = sm.extensionsDir
+		// Snapshot of the wired extras, taken under the same lock as the other fields: SetExtraMountRoots
+		// writes it under the lock, so reading it outside would be an unsynchronized read.
+		extraRoots = append(extraRoots, sm.extraMountRoots...)
 		var err error
 		if projectPaths, err = sm.store.ListProjectPaths(); err != nil {
 			logging.For(logging.Sandbox).Infof("WARNING: cannot list project paths for the mount allowlist: %v", err)
@@ -181,7 +199,7 @@ func (sm *ExtensionSandboxManager) mountPolicy(grantHostPath string) *MountPolic
 		}
 	}
 
-	roots := append(mountRoots(extensionsDir, workspaceDir, projectPaths), projectMounts...)
+	roots := append(mountRoots(extensionsDir, workspaceDir, projectPaths, extraRoots), projectMounts...)
 	readOnlyRoots := append([]string{workspaceDir}, projectPaths...)
 	readOnlyRoots = append(readOnlyRoots, projectMounts...)
 	if grantHostPath != "" {
@@ -695,10 +713,8 @@ func (sm *ExtensionSandboxManager) Destroy(extID string) error {
 	sm.mu.Unlock()
 
 	if state != nil {
-		// Stop
 		sm.Stop(extID)
 
-		// Remove container
 		if err := sm.rt.RemoveContainer(state.containerName); err != nil {
 			return fmt.Errorf("remove container: %w", err)
 		}
