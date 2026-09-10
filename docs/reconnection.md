@@ -15,9 +15,26 @@ When the WebSocket drops and reconnects, the current view (board, task view) upd
   `online` flushes the queue and calls `reconnectNow()` to skip backoff.
 - Board refresh on `visibilitychange` handles phone-sleep cases.
 
-**Tests:** e2e `reconnect-refresh.spec.ts`. Since `page.route` doesn't intercept WebSockets in
+**Tests:** e2e `reconnect-refresh.spec.ts`; the merge above is held by
+`src/lib/utils/__tests__/chat-history-merge.unit.ts`, which drives the real stream handler and the real
+message builder. Since `page.route` doesn't intercept WebSockets in
 Playwright, the spec wraps the `WebSocket` constructor via `addInitScript` and uses `serverApi()` to
 advance state.
+
+## The reload meets the replay buffer
+
+`loadHistory` runs on reconnect, on task switch and after a stop, and it joins two incomplete views of
+one conversation: the DB rows, which lag the running turn (`finalizeTurn` writes the assistant row when
+an LLM call ends and each `tool_call` row just before its tool starts, so a multi-call turn reaches the
+DB one tool at a time), and the frames the server's per-task buffer kept. `mergeLoadedHistory`
+(`src/lib/utils/chat-entries.ts`) owns the rule and states it at its definition; the fact it is built on
+is that a `tool_call` event is broadcast once, so an entry discarded before its row exists loses that
+card until the page is reloaded — discarding on an approximation is what used to show a task with its
+reasoning and none of its tool calls.
+
+Being in progress is what separates a pending `tool_call` row that is work from one that is a leftover:
+a stopped task will never write the missing result, so that card is hidden while the message around it —
+its text, its thinking, the cards that did finish — stays.
 
 ## Behaviour in full (moved from AGENTS.md)
 ### Reconnection & Offline
