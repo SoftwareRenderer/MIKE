@@ -745,6 +745,7 @@
             <div class="explorer-right-column" class:hidden={(symbols.length === 0 && !isMobileCtx.isMobile) || (isMobileCtx.isMobile && activeTab !== 'symbols') || !!diffCommit} style="width: {rightWidth}px">
                 <BranchSymbols
                     symbols={symbols}
+                    filePath={activeFilePath}
                     onSymbolClick={(line: number) => {
                         if (isMobileCtx.isMobile) {
                             activeTab = 'editor';

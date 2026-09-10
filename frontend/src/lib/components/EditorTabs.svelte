@@ -5,6 +5,7 @@
     import type { LSPSymbol } from '$lib/utils/lsp-symbols';
     import { appStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
+    import { untrack } from 'svelte';
 
     let { projectId, projectPath, taskId, openFiles, activeFilePath, unsavedFiles, pinnedFiles, onFocused, onSymbolsUpdate, onHasChanges,
         onSelectTab, onCloseTab, onPinTab, onSave, saving, onToggleFullscreen, mobileFullscreen, pendingFsEvent = null,
@@ -18,6 +19,7 @@
         pinnedFiles: Set<string>;
         pendingFsEvent?: { op: 'create' | 'delete'; path: string } | null;
         onFocused: (focused: boolean) => void;
+        /** The outline of the **active** file only — never another tab's. */
         onSymbolsUpdate: (symbols: LSPSymbol[]) => void;
         onHasChanges: (filePath: string, hasChanges: boolean) => void;
         onSelectTab: (path: string) => void;
@@ -66,10 +68,28 @@
         }
     }
 
+    const NO_OUTLINE: LSPSymbol[] = [];
+    let outlineByFile = $state.raw(new Map<string, LSPSymbol[]>());
+    const activeOutline = $derived(outlineByFile.get(activeFilePath) ?? NO_OUTLINE);
+
+    $effect(() => {
+        const outline = activeOutline;
+        untrack(() => onSymbolsUpdate(outline));
+    });
+
+    $effect(() => {
+        const open = new Set(openFiles.map(f => f.path));
+        const stale = [...untrack(() => outlineByFile).keys()].filter(p => !open.has(p));
+        if (stale.length === 0) return;
+        const next = new Map(outlineByFile);
+        for (const p of stale) next.delete(p);
+        outlineByFile = next;
+    });
+
     function handleSymbolsUpdate(filePath: string, symbols: LSPSymbol[]) {
-        if (filePath === activeFilePath) {
-            onSymbolsUpdate(symbols);
-        }
+        const next = new Map(outlineByFile);
+        next.set(filePath, symbols);
+        outlineByFile = next;
     }
 
     function handleHasChanges(filePath: string, hasChanges: boolean) {

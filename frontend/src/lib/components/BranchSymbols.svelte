@@ -13,8 +13,11 @@
         children?: Sym[];
     }
 
-    let { symbols, onSymbolClick }: {
+    const NO_COLLAPSED: Set<string> = new Set();
+
+    let { symbols, filePath, onSymbolClick }: {
         symbols: Sym[];
+        filePath: string;
         onSymbolClick: (line: number) => void;
     } = $props();
 
@@ -34,14 +37,22 @@
         saveAppSetting('symbols-sort-alpha', sortAlpha);
     }
 
-    // Collapsed nodes tracking
-    let collapsedIds = $state(new Set<string>());
+    /**
+     * Collapsed nodes per file: a node id is a position in the sorted tree, so it names a
+     * different symbol in every file. `NO_COLLAPSED` is copied, never mutated.
+     */
+    let collapsedByFile = $state.raw(new Map<string, Set<string>>());
+    const collapsedIds = $derived(collapsedByFile.get(filePath) ?? NO_COLLAPSED);
     function toggleCollapse(id: string) {
-        if (collapsedIds.has(id)) {
-            collapsedIds.delete(id);
+        const next = new Set(collapsedIds);
+        if (next.has(id)) {
+            next.delete(id);
         } else {
-            collapsedIds.add(id);
+            next.add(id);
         }
+        const byFile = new Map(collapsedByFile);
+        byFile.set(filePath, next);
+        collapsedByFile = byFile;
     }
 
     // Icon mapping for symbol kinds — single-glyph badges (ƒ/C/S/…), derived from the
