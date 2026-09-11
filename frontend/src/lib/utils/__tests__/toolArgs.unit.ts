@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatToolArgs, normalizeEdits } from '$lib/utils/toolArgs';
+import { formatToolArgs, normalizeEdits, rawArgsComplete, streamedPath } from '$lib/utils/toolArgs';
 
 describe('normalizeEdits', () => {
     it('passes well-formed edits through', () => {
@@ -174,6 +174,44 @@ describe('formatToolArgs - write_file', () => {
         const args = {};
         expect(formatToolArgs('write_file', args, '')).toBe('');
         expect(formatToolArgs('write_file', args, undefined)).toBe('');
+    });
+
+    it('does not use a non-string path as a display string', () => {
+        expect(formatToolArgs('write_file', { path: { named: 'x' } })).toBe('');
+    });
+});
+
+describe('streamedPath', () => {
+    it('takes the path the tool event carries first', () => {
+        expect(streamedPath({ path: 'args.go' }, '{"path":"raw.go"}', 'event.go')).toBe('event.go');
+    });
+
+    it('reads a path out of arguments that are still streaming', () => {
+        expect(streamedPath({}, '{"path":"src/file.go","content":"pack', '')).toBe('src/file.go');
+    });
+
+    it('unescapes the path read out of streaming arguments', () => {
+        expect(streamedPath({}, '{"path":"a \\"quoted\\" name.go","content":', '')).toBe('a "quoted" name.go');
+    });
+
+    it('answers empty when no source names a file', () => {
+        expect(streamedPath({}, '{"content":"pack')).toBe('');
+        expect(streamedPath(null)).toBe('');
+    });
+
+    it('does not use a non-string path', () => {
+        expect(streamedPath({ path: 7 })).toBe('');
+    });
+});
+
+describe('rawArgsComplete', () => {
+    it('is false while the arguments are still arriving', () => {
+        expect(rawArgsComplete('{"path":"a.go","content":"hel')).toBe(false);
+        expect(rawArgsComplete(undefined)).toBe(false);
+    });
+
+    it('is true once the arguments are the whole object', () => {
+        expect(rawArgsComplete('{"path":"a.go","content":"x"}')).toBe(true);
     });
 });
 
