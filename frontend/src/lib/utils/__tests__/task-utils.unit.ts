@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { filterTopLevelTaskIds, resolveBoardLandingColumn } from '$lib/utils/task-utils';
+import { filterTopLevelTaskIds, resolveBoardLandingColumn, taskIsInFlight } from '$lib/utils/task-utils';
 import type { Task } from '$lib/types';
 
 function makeTask(id: string, parentId?: string): Task {
@@ -103,5 +103,26 @@ describe('resolveBoardLandingColumn', () => {
         const parent = { ...makeTask('parent'), status: 'in_progress' } as Task;
         const child = { ...makeTask('child', 'parent'), status: 'review' } as Task;
         expect(resolveBoardLandingColumn([parent, child])).toBe('review');
+    });
+});
+
+describe('taskIsInFlight', () => {
+    // The whole vocabulary of backend/types/exec_state.go is pinned: a state added there and
+    // missed here leaves a stale card spinning.
+    it('is in flight only in the states whose turn can still send a frame', () => {
+        expect(taskIsInFlight('running')).toBe(true);
+        expect(taskIsInFlight('pulling_image')).toBe(true);
+        expect(taskIsInFlight('idle')).toBe(false);
+        expect(taskIsInFlight('paused')).toBe(false);
+        expect(taskIsInFlight('completed')).toBe(false);
+        expect(taskIsInFlight('failed')).toBe(false);
+        expect(taskIsInFlight('')).toBe(false);
+    });
+
+    it('says a stopped task is NOT in flight, which is why it cannot be asked by status', () => {
+        // The premise: stopping does not move status.
+        const stopped = { status: 'in_progress', execution_state: 'paused' } as Task;
+        expect(stopped.status).toBe('in_progress');
+        expect(taskIsInFlight(stopped.execution_state)).toBe(false);
     });
 });

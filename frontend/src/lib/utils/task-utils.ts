@@ -7,6 +7,16 @@ export function mergeQueuedUpdate(task: Task, updated: Partial<Task>): Task {
     return (updated as any).queued ? { ...task, ...updated } : updated as Task;
 }
 
+/**
+ * True while the executor can still write to this task's transcript. The vocabulary is
+ * `backend/types/exec_state.go`'s (mirrored server-side by `terminalTurnStates`), and a
+ * task's `status` is never the answer: stopping one keeps `in_progress` and only moves
+ * `execution_state` to `paused`.
+ */
+export function taskIsInFlight(executionState: string): boolean {
+    return executionState === 'running' || executionState === 'pulling_image';
+}
+
 /** Recursively count a task and all its descendants that match the given status. */
 export function countWithDescendants(taskId: string, status: string, childrenMap: Map<string, Task[]>): number {
     const children = childrenMap.get(taskId) ?? [];

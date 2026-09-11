@@ -271,3 +271,68 @@ describe('lockWait lifetime', () => {
         expect(s.state.lockWait).toBeNull();
     });
 });
+
+function toolEntry(id: string, calls: Array<{ toolId: string; isPending: boolean; result?: string }>): ChatEntry {
+    return {
+        id, role: 'assistant', content: '', isStreaming: false, createdAt: new Date().toISOString(),
+        toolCalls: calls.map(c => ({ toolId: c.toolId, toolName: 'bash', args: {}, isPending: c.isPending, result: c.result })),
+    };
+}
+
+describe('dropUnresolvedToolCalls', () => {
+    it('drops the card the server never answered, and the entry that carries it alone', () => {
+        const s = new StreamState();
+        s.state.entries = [
+            { id: 'u1', role: 'user', content: 'do it', isStreaming: false, createdAt: 'now' },
+            toolEntry('tc-entry', [{ toolId: 'call-1', isPending: true }]),
+        ];
+        s.state.activeToolCalls = new Map([['call-1', { entryId: 'tc-entry', toolCall: s.state.entries[1].toolCalls![0]! }]]);
+
+        s.dropUnresolvedToolCalls();
+
+        expect(s.state.entries.map(e => e.id)).toEqual(['u1']);
+        expect(s.state.activeToolCalls.size).toBe(0);
+    });
+
+    it('keeps every answered call, however the entry mixes them', () => {
+        const s = new StreamState();
+        s.state.entries = [
+            toolEntry('done', [{ toolId: 'call-1', isPending: false, result: 'ok' }]),
+            toolEntry('mixed', [
+                { toolId: 'call-2', isPending: false, result: 'ok' },
+                { toolId: 'call-3', isPending: true },
+            ]),
+        ];
+
+        s.dropUnresolvedToolCalls();
+
+        // The entry goes whole: the turn that abandoned the call persisted neither its text row nor the tool row.
+        expect(s.state.entries.map(e => e.id)).toEqual(['done']);
+    });
+
+    it('is inert with nothing pending — the entry list keeps its identity', () => {
+        const s = new StreamState();
+        s.state.entries = [toolEntry('done', [{ toolId: 'call-1', isPending: false, result: 'ok' }])];
+        const before = s.state.entries;
+
+        s.dropUnresolvedToolCalls();
+
+        expect(s.state.entries).toBe(before);
+    });
+
+    it('leaves a resolved call\'s ref alone — only the vanished call\'s ref is dropped', () => {
+        const s = new StreamState();
+        s.state.entries = [
+            toolEntry('kept', [{ toolId: 'call-1', isPending: false, result: 'ok' }]),
+            toolEntry('gone', [{ toolId: 'call-2', isPending: true }]),
+        ];
+        s.state.activeToolCalls = new Map([
+            ['call-1', { entryId: 'kept', toolCall: s.state.entries[0].toolCalls![0]! }],
+            ['call-2', { entryId: 'gone', toolCall: s.state.entries[1].toolCalls![0]! }],
+        ]);
+
+        s.dropUnresolvedToolCalls();
+
+        expect([...s.state.activeToolCalls.keys()]).toEqual(['call-1']);
+    });
+});

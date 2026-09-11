@@ -421,6 +421,58 @@ func TestTaskBufferClearedOnTaskDeleted(t *testing.T) {
 	}
 }
 
+// TestTaskBufferClearedOnTerminalStatus: the buffer survives only while the turn can still
+// write — a frame left behind by an ended turn is replayed to the next subscriber.
+func TestTaskBufferClearedOnTerminalStatus(t *testing.T) {
+	for _, state := range []string{"paused", "idle", "completed", "failed", "cancelled"} {
+		t.Run(state, func(t *testing.T) {
+			asm := NewAppStreamManager(nil, nil)
+			asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]string{"tool_id": "call-1", "tool_name": "bash"}})
+			if got := len(asm.getTaskBuffer("proj-1:task-1")); got != 1 {
+				t.Fatalf("buffer before the status frame = %d frames, want 1", got)
+			}
+
+			asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": state}})
+
+			if got := len(asm.getTaskBuffer("proj-1:task-1")); got != 0 {
+				t.Fatalf("buffer after state %q = %d frames, want 0", state, got)
+			}
+		})
+	}
+
+	for _, state := range []string{"running", "pulling_image", "building_image", "starting_container"} {
+		t.Run(state+"_keeps", func(t *testing.T) {
+			asm := NewAppStreamManager(nil, nil)
+			asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "x"}})
+			asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": state}})
+			if got := len(asm.getTaskBuffer("proj-1:task-1")); got != 2 {
+				t.Fatalf("buffer after state %q = %d frames, want 2", state, got)
+			}
+		})
+	}
+}
+
+// TestEveryExecStateEndsOrContinuesTheTurn: an ExecutionState that is neither in flight
+// nor terminal leaves its frames replayable forever, and no compiler error announces it.
+func TestEveryExecStateEndsOrContinuesTheTurn(t *testing.T) {
+	// Mirrors taskIsInFlight on the client.
+	inFlight := map[string]bool{
+		string(types.ExecStateRunning):      true,
+		string(types.ExecStatePullingImage): true,
+	}
+	for _, state := range []types.ExecutionState{
+		types.ExecStateIdle, types.ExecStateRunning, types.ExecStatePullingImage,
+		types.ExecStatePaused, types.ExecStateCompleted, types.ExecStateFailed,
+	} {
+		if _, known := types.ParseExecutionState(string(state)); !known {
+			t.Fatalf("%q is no longer a known execution state — exec_state.go changed", state)
+		}
+		if !terminalTurnStates[string(state)] && !inFlight[string(state)] {
+			t.Fatalf("execution state %q neither ends the turn nor continues it", state)
+		}
+	}
+}
+
 // TestNilStoreStaysNilAfterConstruction: a store-less manager must stay store-less, or
 // every `asm.store == nil` guard in this package reads as "a store exists". The guarded
 // path must stay callable with none.

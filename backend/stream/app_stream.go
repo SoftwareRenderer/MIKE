@@ -475,16 +475,21 @@ func (asm *AppStreamManager) SendTaskEvent(projectID, taskID string, event types
 	// Clear per-task buffer when a streaming turn ends, so reconnecting clients
 	// don't get stale tokens from a previous turn.
 	if event.Type == types.WSTypeStatus {
-		if state, ok := event.Data.(map[string]string)["state"]; ok {
-			if state == "failed" || state == "completed" ||
-				state == "idle" || state == "cancelled" {
-				asm.clearTaskBuffer(projectID + ":" + taskID)
-			}
+		if state, ok := event.Data.(map[string]string)["state"]; ok && terminalTurnStates[state] {
+			asm.clearTaskBuffer(projectID + ":" + taskID)
 		}
 	}
 	if event.Type == types.WSTypeComplete {
 		asm.clearTaskBuffer(projectID + ":" + taskID)
 	}
+}
+
+var terminalTurnStates = map[string]bool{
+	"failed":    true,
+	"completed": true,
+	"idle":      true,
+	"cancelled": true, // wire-only: a response replaced by a new message, not an execution state
+	"paused":    true,
 }
 
 func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, payload any) {

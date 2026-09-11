@@ -14,7 +14,7 @@
         uiInjector.refreshSlot(INJECTION_POINTS.TASK_CHAT, { component: 'TaskChat', taskId, projectId });
     });
     import { DRAFT_SAVE_DEBOUNCE_MS } from '$lib/constants';
-    import { mergeQueuedUpdate } from '$lib/utils/task-utils';
+    import { mergeQueuedUpdate, taskIsInFlight } from '$lib/utils/task-utils';
     import { effectiveStartTaskKey, matchShortcut } from '$lib/utils/keyboard';
     import { reselectProvider, getProviderDisplayName } from '$lib/utils/providers';
     import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
@@ -153,6 +153,15 @@
     // For in_progress tasks, buffer events are legitimate and must be replayed.
     let suppressEvents = $state(true);
     $effect(() => { suppressEvents = taskStatus !== 'in_progress'; });
+
+    let lastExecutionState: string | undefined;
+    $effect(() => {
+        const was = lastExecutionState;
+        lastExecutionState = taskExecutionState;
+        // The value at mount is not a stop: a task opened while it runs has live calls.
+        if (was === undefined || taskIsInFlight(taskExecutionState) || !taskIsInFlight(was)) return;
+        stream.dropUnresolvedToolCalls();
+    });
     let commitQueueStatus = getCommitQueueContext();
     let taskEventContext = getTaskEventContext();
     let queueStatus = $derived($commitQueueStatus[projectId]?.taskID === taskId ? $commitQueueStatus[projectId].status : null);
@@ -530,11 +539,8 @@
                 seenIds.add(e.id);
                 return true;
             });
-            // Remove entries with pending tool calls from non-running tasks.
-            // For running tasks (in_progress), pending tool calls are in-flight and should be kept.
-            // For stopped/completed tasks, pending calls are stale leftovers.
-            if (taskStatus !== 'in_progress') {
-                stream.state.entries = stream.state.entries.filter(e => !e.toolCalls?.some(tc => tc.isPending));
+            if (!taskIsInFlight(taskExecutionState)) {
+                stream.dropUnresolvedToolCalls();
             }
             // These are new entry objects, so refs captured while streaming are now
             // detached; re-point them before more events for this turn arrive.
@@ -898,10 +904,9 @@
         // Save the streaming assistant ID before clearing
         const streamingId = currentAssistantId;
         stream.closeCurrentAssistant();
-        // Remove the streaming assistant entry and entries with pending tool calls.
-        stream.state.entries = stream.state.entries.filter(e => e.id !== streamingId && !(e.toolCalls?.some(tc => tc.isPending)));
-        // Clear active tool calls (immediate UI update)
-        stream.state.activeToolCalls = new Map();
+        // An explicit stop answers every open call now — no waiting for the transition the effect above reads.
+        stream.dropUnresolvedToolCalls();
+        stream.state.entries = stream.state.entries.filter(e => e.id !== streamingId);
         stream.state.processedToolIds = new Set();
         try {
             await stopTask(projectId, taskId);

@@ -49,6 +49,7 @@ const toolCallSummarize = loadFixture('tool_call_summarize');
 const textResponseReasoning = loadFixture('text_response_reasoning');
 const toolCallSandboxSleep = loadFixture('tool_call_sandbox_sleep');
 const toolCallBashLong = loadFixture('tool_call_bash_long');
+const toolCallSlow = loadFixture('tool_call_slow');
 const toolCallSandboxMemhog = loadFixture('tool_call_sandbox_memhog');
 
 let requestCount = 0;
@@ -191,6 +192,14 @@ function selectResponse(parsed) {
         return hasToolResults
             ? { chunks: toolCallComplete, chunkDelay: 1 }
             : { chunks: toolCallBashLong, chunkDelay: 1 };
+    }
+
+    // Slow tool-call stream probe: streamed argument-slice by argument-slice (~4s) so a stop lands
+    // while the call is still being generated. Follow-up (tool result present): plain text.
+    if (hasTools && /slow-tool-probe/i.test(lastUserMsg)) {
+        return hasToolResults
+            ? { chunks: toolCallComplete, chunkDelay: 1 }
+            : { chunks: toolCallSlow, chunkDelay: 300 };
     }
 
     // Sandbox memory e2e probes (keyword-gated to the probe tasks' prompts).

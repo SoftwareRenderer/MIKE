@@ -85,6 +85,18 @@ export class StreamState {
         this.state.activeToolCalls = next;
     }
 
+    /**
+     * Drop the entries holding a tool call the server never answered. Correct only once the
+     * task is out of flight (`taskIsInFlight`). The entry goes with the card: the turn that
+     * abandoned the call was cancelled before `finalizeTurn`, which is what persists the
+     * assistant text and the `tool_call` row, so a rebuild from the DB shows neither.
+     */
+    dropUnresolvedToolCalls() {
+        if (!this.state.entries.some(e => e.toolCalls?.some(tc => tc.isPending))) return;
+        this.state.entries = this.state.entries.filter(e => !e.toolCalls?.some(tc => tc.isPending));
+        this.reconcileActiveToolCalls();
+    }
+
     /** Reset streaming state (thread switch). */
     resetStreaming() {
         this.closeCurrentAssistant();
