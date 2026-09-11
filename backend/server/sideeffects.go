@@ -53,6 +53,11 @@ var detachedOperations = []sideEffectEntry{
 	{"POST /api/fs/init-git", "creates a repository"},
 	{"POST /api/projects/{projectID}/tasks/{taskID}/init", "creates the worktree and the task branch"},
 	{"POST /api/projects/{projectID}/tasks/{taskID}/messages", "persists the message, then the turn's answer arrives beside it"},
+	{
+		"POST /api/projects/{projectID}/tasks/{taskID}/uploads",
+		"writes into the task's environment; the guest is not cancellable, so the write completes " +
+			"whatever the tab does",
+	},
 	{"POST /api/projects/{projectID}/tasks/{taskID}/send", "a turn: messages, tool calls and tool results are written as they happen"},
 	{"POST /api/projects/{projectID}/tasks/{taskID}/compact", "rewrites the conversation with a summary; half a compaction loses turns"},
 	{"POST /api/projects/{projectID}/tasks/{taskID}/summarize", "the title and summary are stored on the task and shown on the board"},

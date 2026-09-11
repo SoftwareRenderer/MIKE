@@ -5,16 +5,11 @@
     import ContextUsage from './ContextUsage.svelte';
     import FileMentionDropdown from '../FileMentionDropdown.svelte';
     import { useFileMention } from '$lib/composables/use-file-mention.svelte';
-    import { dialogStore } from '$lib/stores';
-    import { classifyImages, describeRejectedImages, readImageDataUrl, MAX_IMAGES } from '$lib/utils/attachments';
+    import { uploadTaskFile } from '$lib/api';
+    import { ATTACHABLE_IMAGE_ACCEPT } from '$lib/utils/attachments';
+    import type { DraftAttachment } from '$lib/storage';
+    import { useImageAttachments } from '$lib/composables/use-image-attachments.svelte';
     import { t } from '$lib/i18n';
-
-    interface ImageAttachment {
-        file: File;
-        preview: string;
-        mimeType: string;
-        base64: string;
-    }
 
     interface Props {
         value?: string;
@@ -29,7 +24,7 @@
         contextLimit?: number;
         sessionCost?: number;
         operatingMode?: string;
-        attachments?: ImageAttachment[];
+        attachments?: DraftAttachment[];
         projectId?: string;
         taskId?: string;
         onSubmit?: (message: string, attachments?: Array<{ mimeType: string; data: string }>) => void;
@@ -56,7 +51,7 @@
         contextLimit = 0,
         sessionCost = 0,
         operatingMode = 'act',
-        attachments = $bindable<ImageAttachment[]>([]),
+        attachments = $bindable<DraftAttachment[]>([]),
         projectId = '',
         taskId = '',
         onSubmit,
@@ -148,36 +143,16 @@
         }
     }
 
-    async function handleFileSelect(e: Event) {
-        const target = e.target as HTMLInputElement;
-        const files = target.files;
-        if (!files || files.length === 0) return;
-
-        const { readable, ...rejected } = classifyImages(files, MAX_IMAGES - attachments.length);
-        for (const file of readable) void addAttachment(file);
-        const problem = describeRejectedImages(rejected);
-        if (problem) dialogStore.showToast(problem, 'error');
-
-        // Reset input so the same file can be selected again
-        target.value = '';
-    }
-
-    async function addAttachment(file: File) {
-        try {
-            const preview = await readImageDataUrl(file);
-            attachments = [...attachments, {
-                file,
-                preview,
-                mimeType: file.type,
-                base64: preview.split(',')[1] || preview,
-            }];
-            autoResize();
-        } catch (err) {
-            console.error('FileReader error:', err);
-            dialogStore.showToast(t('chat.form.couldNotRead', { name: file.name }), 'error');
-        }
-    }
-
+    const intake = useImageAttachments({
+        getTextarea: () => textareaEl,
+        getValue: () => value,
+        setValue: (v) => { value = v; },
+        held: () => attachments.length,
+        addImages: (accepted) => { attachments = [...attachments, ...accepted]; },
+        uploadFile: (file) => uploadTaskFile(projectId, taskId, file),
+        hasTask: () => !!projectId && !!taskId,
+        onChanged: autoResize,
+    });
     function removeAttachment(index: number) {
         attachments = attachments.filter((_, i) => i !== index);
     }
@@ -185,10 +160,7 @@
     function handleSubmit() {
         if (!canSend) return;
         const msg = value.trim();
-        const imageAttachments = attachments.map(a => ({
-            mimeType: a.mimeType,
-            data: a.base64,
-        }));
+        const imageAttachments = attachments.map(a => ({ mimeType: a.mimeType, data: a.data }));
 
         value = '';
         attachments = [];
@@ -260,7 +232,7 @@
         <div class="attachment-preview">
             {#each attachments as att, i}
                 <div class="attachment-thumb">
-                    <img src={att.preview} alt="" />
+                    <img src={att.data} alt="" />
                     <button type="button" class="attachment-remove" onclick={() => removeAttachment(i)} aria-label={t('chat.form.removeImage')} title={t('chat.common.remove')}>
                         <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                     </button>
@@ -268,7 +240,15 @@
             {/each}
         </div>
     {/if}
-    <div class="chat-form-inner">
+    <div
+        class="chat-form-inner image-drop-target"
+        class:is-drop-target={intake.isOver}
+        role="presentation"
+        ondragenter={intake.handleDragEnter}
+        ondragover={intake.handleDragOver}
+        ondragleave={intake.handleDragLeave}
+        ondrop={intake.handleDrop}
+    >
         <label for="chat-message-input" class="sr-only">{t('chat.form.input')}</label>
         <textarea
             id="chat-message-input"
@@ -279,6 +259,7 @@
             aria-label={t('chat.form.input')}
             rows="1"
             onkeydown={handleKeydown}
+            onpaste={intake.handlePaste}
             oninput={(e) => { autoResize(); mention.handleInput(); }}
             onfocus={handleFocus}
         ></textarea>
@@ -287,7 +268,7 @@
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
             </svg>
         </button>
-        <input type="file" bind:this={fileInputEl} class="file-input-hidden" accept="image/png,image/jpeg,image/gif,image/webp" multiple onchange={handleFileSelect} />
+        <input type="file" bind:this={fileInputEl} class="file-input-hidden" accept={ATTACHABLE_IMAGE_ACCEPT} multiple onchange={intake.handlePicked} />
         {#if isLoading && (!value.trim() && attachments.length === 0)}
             <button type="button" class="btn-stop" onclick={handleStop} aria-label={t('chat.form.stop')} title={t('chat.form.stop')}>
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">

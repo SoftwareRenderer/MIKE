@@ -20,7 +20,7 @@
     import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { wsConnection } from '$lib/stores/connection';
-    import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments } from '$lib/storage';
+    import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments, type DraftAttachment } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { t } from '$lib/i18n';
     import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
@@ -39,7 +39,7 @@
     // True while the initial conversation history is being fetched
     let historyLoading = $state(false);
     let inputValue = $state('');
-    let draftAttachments = $state<Array<{ file: File; preview: string; mimeType: string; base64: string }>>([]);
+    let draftAttachments = $state<DraftAttachment[]>([]);
 
     // Load draft text from IndexedDB on init
     $effect(() => {
@@ -54,12 +54,7 @@
     $effect(() => {
         loadDraftAttachments(taskId).then(atts => {
             if (atts.length > 0) {
-                draftAttachments = atts.filter(a => a && a.mimeType && a.data).map(a => ({
-                    file: new File([], '', { type: a.mimeType }),
-                    preview: `data:${a.mimeType};base64,${a.data}`,
-                    mimeType: a.mimeType,
-                    base64: a.data,
-                }));
+                draftAttachments = atts.filter(a => a && a.mimeType && a.data);
             }
         }).catch(() => {});
     });
@@ -87,7 +82,7 @@
     $effect(() => {
         const atts = draftAttachments;
         if (atts.length > 0) {
-            saveDraftAttachments(taskId, atts.map(a => ({ mimeType: a.mimeType, data: a.base64 })));
+            saveDraftAttachments(taskId, atts);
         }
     });
 

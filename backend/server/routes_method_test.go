@@ -35,6 +35,7 @@ var methodContract = []struct {
 	{"/api/projects/p1/tasks/t1/start", []string{"POST"}, "GET", ""},
 	{"/api/projects/p1/tasks/t1/commit", []string{"POST"}, "GET", ""},
 	{"/api/projects/p1/tasks/t1/diff", []string{"GET"}, "POST", ""},
+	{"/api/projects/p1/tasks/t1/uploads", []string{"POST"}, "GET", ""},
 	{"/api/projects/p1/git/checkout", []string{"POST"}, "GET", `{"branch":"main"}`},
 	{"/api/projects/p1/git/status", []string{"GET"}, "POST", ""},
 	{"/api/projects/p1/git/pull", []string{"POST"}, "GET", ""},

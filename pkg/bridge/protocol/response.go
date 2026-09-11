@@ -109,6 +109,16 @@ type WriteParams struct {
 	Content string `json:"content"`
 }
 
+// WriteBytesParams holds the parsed parameters for a write_bytes request.
+//
+// Data is []byte, not a string, and that is the whole reason this type exists: JSON base64s a
+// []byte and gives the same bytes back, while a Go string carrying arbitrary bytes goes through
+// encoding/json as UTF-8 and comes out with every invalid sequence replaced by U+FFFD.
+type WriteBytesParams struct {
+	Path string `json:"path"`
+	Data []byte `json:"data"`
+}
+
 // BashParams holds the parsed parameters for a bash request.
 type BashParams struct {
 	Command string `json:"command"`

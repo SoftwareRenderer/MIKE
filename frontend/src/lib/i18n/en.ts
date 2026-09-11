@@ -810,6 +810,7 @@ const catalog = {
     'api.loadExtensions': 'Failed to load extensions',
     'api.loadRegistry': 'Failed to load registry',
     'api.installExtension': 'Failed to install extension',
+    'api.uploadFile': 'Failed to upload file',
 
     // ═══ sandbox.* — sandbox surface ═══
 
@@ -999,6 +1000,14 @@ const catalog = {
     'attachments.couldNotRead': 'Could not read {name}',
     'attachments.tooLarge': { one: '{count} image too large (max {limit} MB)', other: '{count} images too large (max {limit} MB)' },
     'attachments.onlyN': 'Only {max} images per message',
+    'attachments.inlinedFile': 'Pasted {name}:',
+    'attachments.truncatedText': '… {kb} KB of {name} not included',
+    'attachments.uploadedFile': 'Uploaded {name} to {path}',
+    'attachments.uploadFailed': 'Could not upload {name}',
+    'attachments.fileNeedsTask': {
+        one: '{count} file needs a running task to be attached to',
+        other: '{count} files need a running task to be attached to',
+    },
 
 
     // ═══ chat.* — chat surface ═══

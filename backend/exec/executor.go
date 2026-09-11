@@ -1619,6 +1619,7 @@ func (te *TaskExecutor) StopSandbox(taskID string) {
 			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("stop error: %v", err)
 		}
 	}
+	te.removeTaskUploads(taskID)
 }
 
 // RetryTask retries a failed task.

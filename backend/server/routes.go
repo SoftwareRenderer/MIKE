@@ -142,6 +142,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/send", s.executor.HandleSend)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/summarize", s.executor.HandleSummarize)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/compact", s.executor.HandleCompact)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/uploads", s.handleTaskUpload)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/diff", s.gitHandler.HandleTaskDiff)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/diff/file", s.gitHandler.HandleTaskDiffFile)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/diff/stage", s.gitHandler.HandleStageFile)

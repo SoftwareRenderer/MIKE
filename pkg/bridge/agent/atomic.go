@@ -8,6 +8,11 @@ import (
 
 // Replaces a file in one visible step: temp in the same directory, chmod, rename over the target.
 func writeAtomic(path, content string) (int, error) {
+	return writeAtomicBytes(path, []byte(content))
+}
+
+// writeAtomicBytes is writeAtomic for bytes the guest must not interpret.
+func writeAtomicBytes(path string, content []byte) (int, error) {
 	tmpFile, err := os.CreateTemp(filepath.Dir(path), ".kanban-tmp-*")
 	if err != nil {
 		return 0, fmt.Errorf("create temp file: %w", err)
@@ -17,7 +22,7 @@ func writeAtomic(path, content string) (int, error) {
 	// Every failure removes the temp file. A leftover `.kanban-tmp-*` is not invisible
 	// housekeeping: it shows up in the task's own `git status` and a `git add -A` would
 	// commit it.
-	n, err := tmpFile.WriteString(content)
+	n, err := tmpFile.Write(content)
 	if err != nil {
 		_ = tmpFile.Close()
 		_ = os.Remove(tmpName)

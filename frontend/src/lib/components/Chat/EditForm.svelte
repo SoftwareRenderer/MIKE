@@ -1,8 +1,10 @@
 <script lang="ts">
     import FileMentionDropdown from '../FileMentionDropdown.svelte';
     import { useFileMention } from '$lib/composables/use-file-mention.svelte';
-    import { dialogStore } from '$lib/stores';
-    import { readImageAttachments, describeRejectedImages, MAX_IMAGES } from '$lib/utils/attachments';
+    import { useImageAttachments } from '$lib/composables/use-image-attachments.svelte';
+    import { uploadTaskFile } from '$lib/api';
+    import { ATTACHABLE_IMAGE_ACCEPT, imageSrc } from '$lib/utils/attachments';
+    import type { DraftAttachment } from '$lib/storage';
     import { t } from '$lib/i18n';
 
     interface Props {
@@ -23,7 +25,7 @@
 
     let editContent = $state('');
     let textareaEl: HTMLTextAreaElement | null = $state(null);
-    let editAttachments = $state<Array<{ mimeType: string; data: string }>>([]);
+    let editAttachments = $state<DraftAttachment[]>([]);
 
     $effect(() => { editContent = content; });
     $effect(() => { editAttachments = attachments ? [...attachments] : []; });
@@ -39,16 +41,15 @@
         getTextarea: () => textareaEl,
     });
 
-    async function handleEditFileSelect(e: Event) {
-        const input = e.target as HTMLInputElement;
-        const files = input.files;
-        if (!files || files.length === 0) return;
-        const picked = await readImageAttachments(files, MAX_IMAGES - editAttachments.length);
-        if (picked.accepted.length > 0) editAttachments = [...editAttachments, ...picked.accepted];
-        const problem = describeRejectedImages(picked);
-        if (problem) dialogStore.showToast(problem, 'error');
-        if (editFileInput) editFileInput.value = '';
-    }
+    const intake = useImageAttachments({
+        getTextarea: () => textareaEl,
+        getValue: () => editContent,
+        setValue: (v) => { editContent = v; },
+        held: () => editAttachments.length,
+        addImages: (accepted) => { editAttachments = [...editAttachments, ...accepted]; },
+        uploadFile: (file) => uploadTaskFile(projectId, taskId, file),
+        hasTask: () => !!projectId && !!taskId,
+    });
 
     function removeEditAttachment(index: number) {
         editAttachments = editAttachments.filter((_, i) => i !== index);
@@ -88,27 +89,38 @@
     });
 </script>
 
-<div class="edit-form">
+<div
+    class="edit-form image-drop-target"
+    class:is-drop-target={intake.isOver}
+    role="presentation"
+    ondragenter={intake.handleDragEnter}
+    ondragover={intake.handleDragOver}
+    ondragleave={intake.handleDragLeave}
+    ondrop={intake.handleDrop}
+>
     {#if editAttachments.length > 0}
         <div class="edit-attachments">
             {#each editAttachments as att, i}
                 <div class="edit-attachment-chip">
-                    <img src={att.data.startsWith('data:') ? att.data : `data:${att.mimeType};base64,${att.data}`} alt={t('chat.common.attachment')} />
+                    <img src={imageSrc(att)} alt={t('chat.common.attachment')} />
                     <button class="remove-attachment" onclick={() => removeEditAttachment(i)} title={t('chat.common.remove')}>&times;</button>
                 </div>
             {/each}
         </div>
     {/if}
+    <!-- The ring lights this box, so this box takes the drop; the paste belongs to the field
+         the caret is in. -->
     <textarea
         bind:this={textareaEl}
         bind:value={editContent}
         onkeydown={handleKeydown}
+        onpaste={intake.handlePaste}
         oninput={() => mention.handleInput()}
         rows="3"
         aria-label={t('chat.edit.contentAria')}
     ></textarea>
     <div class="edit-actions">
-        <input type="file" accept="image/*" multiple bind:this={editFileInput} onchange={handleEditFileSelect} style="display:none" />
+        <input type="file" accept={ATTACHABLE_IMAGE_ACCEPT} multiple bind:this={editFileInput} onchange={intake.handlePicked} style="display:none" />
         <button class="btn-edit-attach" onclick={() => editFileInput?.click()} title={t('chat.common.attachImage')}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>

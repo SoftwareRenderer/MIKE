@@ -80,6 +80,39 @@ remaining fix for that, and for the cross-project read surface (`collectProjectM
 registered project). This is open work, not a TODO.md item — `TODO.md` is a recycled per-plan
 scratchpad.
 
+## Where a pasted or dropped file lands
+
+A file the user pastes or drops into a message is neither an image (which travels inside the
+message as base64) nor text (which is inlined into it), so it has to become a file the agent
+opens. `POST /api/projects/{projectID}/tasks/{taskID}/uploads` hands it to
+`TaskExecutor.WriteTaskFile` (`backend/exec/task_files.go`), which writes it **where that task's
+actions run** and answers with the path the message then names:
+
+- `project.sandbox_enabled` decides the filesystem, never the message. A sandboxed task is reached
+  through its own bridge connection with `write_bytes`; an unsandboxed one gets a host directory,
+  because for that task the host is where its `bash` and `read_file` run. A sandboxed task with no
+  running container is **refused** rather than written on the host — the same rule `hostGuard`
+  enforces for the tools (see AGENTS.md, "A sandboxed task gets no host fallback"), because a path
+  the agent cannot open is a worse answer than an error.
+- **Bringing a container up is not this call's side effect.** Preparing an execution environment
+  creates the worktree, its branch and task-row writes; a paste into a running task must do none of
+  that, so an idle task gets the conflict and the user starts the task first.
+- **Each upload gets a directory of its own.** Two gestures can carry `report.pdf`, and the message
+  that named the first must keep naming the bytes it was written for; the host cannot probe the
+  guest's directory for a free name without another round trip, so the collision is made
+  impossible by construction instead of resolved after the fact.
+- **The guest is not cancellable**, so the handler waits for the answer (`context.WithoutCancel`,
+  bounded by `writeTaskFileTimeout`) rather than dropping a write that completes anyway.
+- **The file's lifetime is the container's.** The guest's `/tmp` is a tmpfs, the container is
+  removed when the task is deleted (`StopSandbox`) and `kanban-sandbox-*` families are swept at
+  boot; the host directories are removed from the same `StopSandbox`. A message naming an upload
+  can therefore outlive its bytes — which is what choosing the task's own environment as the
+  destination means, and is why the message says what the path is rather than promising it forever.
+
+Tests: `backend/exec/task_files_test.go` (where the bytes land, the name rule, no host fallback),
+`backend/server/handler_task_upload_test.go` (verbs, CSRF, 413/400/404/200, the path answered is
+the path written), `pkg/bridge/agent/write_bytes_test.go` (the bytes that land are the bytes sent).
+
 ## Invariants to preserve (moved from AGENTS.md)
 Invariants to preserve (the why, and the open work, are in `docs/sandbox-bridge.md`):
 - A task sandbox has exactly one connection for its lifetime; an **extension sandbox has one per LSP session**. `ExtensionSandboxManager.StartSession`/`ReleaseSession` (`backend/extensions/sandbox.go`) own it and `retire` (`backend/lsp/extension_manager.go`) hands it back — the connection *is* the sandbox reference.
@@ -88,7 +121,7 @@ Invariants to preserve (the why, and the open work, are in `docs/sandbox-bridge.
 - The host treats a closed `LSPNotificationCh()` as "this server is gone" (`sandboxClient.dead` → `usable()` → retire), since the connection outlives the process.
 - **A client request is always answered:** `forwardRequest` (`backend/lsp/handler.go`) reports a failed send *and* answers the browser with a JSON-RPC error; a failed first `initialize` clears the workspace's pending marker and answers everyone queued behind it.
 - Absent diagnostics while a file is unloaded are **unknown, not clean**: `backend/exec/diagnostics.go` refuses to read loader-state entries as findings and counts the file `unloaded`.
-- Wire method IDs `0x05`-`0x08` are retired (they were `shell_open`/`shell_io`/`shell_resize`/`shell_close`) and **must not be reused** — a stale bridge binary must get a clean "unknown method" error, not a wrong handler.
+- Wire method IDs `0x05`-`0x08` are retired (they were `shell_open`/`shell_io`/`shell_resize`/`shell_close`) and **must not be reused** — a stale bridge binary must get a clean "unknown method" error, not a wrong handler. **A params change is a new ID, never a new field**, for the same reason: a guest that does not know a field answers success anyway. `MethodWriteBytes` (0x0B) is therefore its own method rather than `WriteParams.Data`, because a bridge that ignored that field would write base64 text and report the byte count of it. `Data` is `[]byte` for the matching reason — `encoding/json` base64s a `[]byte` and gives the same bytes back, while a Go `string` carrying them is re-encoded as UTF-8 and returns with every invalid sequence replaced by U+FFFD. `protocol.MaxWriteBytes` (20 MiB) is enforced in `handleWriteBytes` *and* in `Client.WriteFileBytes` before the send, like the read cap. Tests: `pkg/bridge/agent/write_bytes_test.go`, `pkg/bridge/protocol/protocol_test.go`, `pkg/bridge/client_limit_test.go`.
 - **Every byte crossing the bridge is bounded where it is captured.** `protocol.MaxFramePayload` (64 MiB) is checked in `ReadFrame` *before* it allocates: the length is a 4-byte field, so a peer that announces a payload it never sends otherwise costs the host the whole claim. `protocol.MaxReadBytes` (16 MiB) is enforced twice — `handleRead` refuses the file in the guest and `waitForCtx` stops counting chunks on the host — because a bound living only inside the container is not a bound, since a stale bridge keeps streaming. Sandbox `bash` output accumulates through `toolresult.Capture` (`captureOutput` and the streaming callback), the 1 MiB the host bash path already used. Both numbers sit far above anything the model can use: `read_file` shows 50 KB, the tool preview 1 KB. Tests: `pkg/bridge/protocol/frame_limit_test.go`, `pkg/bridge/client_limit_test.go`, `pkg/bridge/agent/read_limit_test.go`, `pkg/bridge/agent/committed_bridge_test.go`, `backend/exec/output_limits_test.go`.
 - **A streamed answer is never partial.** The readLoop closes `chunkCh` before dispatching the Result, and `waitForCtx` drains what is still queued before taking it — taking the answer on its own returned a random prefix of the stream as a success. A chunk that cannot be queued fails the request (`ErrStreamOverflow`) rather than being dropped, because `ReadFile` cannot tell a short body from a complete one.
 - The only `-p` publishing on a sandbox container is **user-configured** forwarded ports (`forwardPortSpec` passes the entry's bind address through; see "Why the bridge never gets a port"), never the bridge; container ports outside 1-65535 are skipped.

@@ -216,6 +216,7 @@ func TestMethodString(t *testing.T) {
 		{MethodBash, "bash"},
 		{MethodBashCancel, "bash_cancel"},
 		{MethodLSP, "lsp"},
+		{MethodWriteBytes, "write_bytes"},
 		// 0x05-0x08 were the retired shell methods; they must stay unassigned.
 		{0x05, "unknown(5)"},
 		{0x08, "unknown(8)"},
@@ -261,5 +262,36 @@ func TestLargePayload(t *testing.T) {
 	}
 	if got.Payload[len(got.Payload)-1] != 0xFF {
 		t.Error("end byte corrupted")
+	}
+}
+
+// The control case is the shape the text write keeps: the same bytes through WriteParams are
+// where the corruption happens.
+func TestWriteBytesParamsHoldBytesThatAreNotText(t *testing.T) {
+	raw := []byte{0x89, 'P', 'N', 'G', 0xff, 0xfe, 0x00, 0x80, 0xc3, 0x28, 0xa0}
+
+	payload, err := json.Marshal(WriteBytesParams{Path: "/tmp/shot.png", Data: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bytesBack WriteBytesParams
+	if err := json.Unmarshal(payload, &bytesBack); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(bytesBack.Data, raw) {
+		t.Errorf("params changed the bytes:\n got %x\nwant %x", bytesBack.Data, raw)
+	}
+
+	text, err := json.Marshal(WriteParams{Path: "/tmp/shot.png", Content: string(raw)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var textBack WriteParams
+	if err := json.Unmarshal(text, &textBack); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal([]byte(textBack.Content), raw) {
+		t.Error("encoding/json no longer rewrites invalid UTF-8 in a string, which is the whole " +
+			"reason MethodWriteBytes is a method and not a field on MethodWrite — re-read both")
 	}
 }
