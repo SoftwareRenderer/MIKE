@@ -87,3 +87,22 @@ and the client has to notice it:
 Tests: `frontend/src/lib/stores/__tests__/app-store-refresh-config.unit.ts`,
 `frontend/src/lib/components/__tests__/config-modal-live-agent-provider.unit.svelte.ts`,
 `reselectProvider` in `frontend/src/lib/utils/__tests__/providers.unit.ts`.
+
+## Naming the binary, and the agent as a provider
+
+- `SubprocessConfig().Binary` is the only home for the executable's name — never a manifest field (a second
+  source of truth that can disagree) and never a literal in the backend. A sandboxed task's
+  `BinaryAvailable` check runs on the resolved name **after** the adapter is loaded and validated
+  (`exec.prepareAgent` over `agent.PrepareAgent`/`Prepared.Start`; `NewAgentRunner` is the two in
+  sequence), because a hard-coded `"pi"` refused every other agent in sandboxed projects only, and reported
+  the extension rather than the binary it probed. The refusal keeps the code `agent_not_available`,
+  distinct from `agent_start_failed`, and names the binary it looked for.
+  Test: `backend/exec/agent_preflight_test.go`.
+- The URL scheme `agent://<name>` is emitted and parsed in one place — `types.AgentProviderURL` /
+  `types.ParseAgentURL` / `types.IsAgentURL` on `types.AgentURLPrefix` (`backend/types/agent_url.go`),
+  which every reader calls including `backend/config` — which can never import `backend/agent`, since
+  `agent → extensions → git → config`. The browser mirrors the prefix as `AGENT_URL_PREFIX`.
+- An enabled agent extension **is a provider** with that URL: `GET /api/config` merges it per request and
+  never persists it, so the client re-reads the config on the `extension_change` broadcast
+  (`appStore.refreshConfig()` in `frontend/src/lib/stores/app.svelte.ts`). An agent that only shows up after
+  a browser refresh is a bug.

@@ -20,3 +20,30 @@ the host directory, and what the mount must never reach. Read before touching
 ## Retired knobs - do not reintroduce them
 - **`read_only` on the declaration** does not exist: the mount is read-only by definition, and the mode is decided in core, not offered. A stale manifest or stored record that still carries the key decodes and the key is ignored.
 - **`detect`, `sandbox_probe` and the `LSPParams.Env` wire field were removed** with the "discover the cache path" design. A discovered path needs a container to ask it in, and puts extension-supplied stdout on the host command line; the grant replaced both.
+
+## The two fields, and why a declaration is optional but loud
+
+The extension declares `capabilities.lsp.sandbox.dependency_cache: {container_path, env}`; the host
+directory is a **human's** choice, configured in that extension's Edit dialog and stored beside the
+declaration as `sandbox_config.dependency_host_path`. Two fields, because the two origins are the security
+argument, and a manifest carrying it is **refused**, not stripped.
+
+- **Never discover where the cache lives.** A discovered path needs a container to ask it in, so the first
+  turn of every workspace pays for a server started to answer `go env GOMODCACHE` — and it puts
+  extension-supplied stdout on the host command line.
+- **Core's container path is not borrowable** (`isReservedContainerPath`), because two `-v` specs on one
+  path make podman refuse the whole create.
+- **A grant is revoked by an empty string** on `PUT /{id}/dependency-cache`, which also stops the sandbox
+  (the mount set is fixed at creation).
+- **A declaration is optional, and its absence is loud.** The sandbox runs `--network none` with no cache,
+  so without a grant a workspace with third-party imports cannot be resolved and every turn argues with
+  phantom errors.
+- `environment: {check, suppress_codes, note}` is **declared but not enforced** — nothing calls
+  `ExtensionLSPManager.Environment`, so the field always answers healthy; a check must be able to fail
+  (gopls: `GOPROXY=off go list -deps ./...`). `reload_files` **is** wired.
+- Tests: `dependency_manifest_test.go`, `dependency_grant_test.go`, `dependency_policy_test.go`,
+  `dependency_mount_test.go`, `bundled_manifests_test.go`, `reload_env_test.go`,
+  `backend/sandbox/containerenv_test.go`, `backend/exec/sandbox_create_opts_test.go`,
+  `backend/term/terminal_test.go`; UI states in
+  `frontend/src/lib/utils/__tests__/extension-permissions.unit.ts` and
+  `frontend/src/lib/components/ConfigModal/__tests__/extensions-dependency-cache.unit.svelte.ts`.

@@ -17,7 +17,12 @@ const (
 	MethodBash       uint8 = 0x04
 	MethodBashCancel uint8 = 0x09
 	MethodLSP        uint8 = 0x0A
+	MethodWriteBytes uint8 = 0x0B
 )
+
+// MethodWriteBytes is a method of its own rather than an `encoding` field on MethodWrite: a bridge
+// that predates the change must answer "unknown method", where a new field parses happily and it
+// writes base64 text over the user's file. Its params are ordinary JSON, so it is not isBinaryMethod.
 
 func methodString(m uint8) string {
 	switch m {
@@ -33,6 +38,8 @@ func methodString(m uint8) string {
 		return "bash_cancel"
 	case MethodLSP:
 		return "lsp"
+	case MethodWriteBytes:
+		return "write_bytes"
 	default:
 		return fmt.Sprintf("unknown(%d)", m)
 	}

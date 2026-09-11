@@ -117,6 +117,9 @@ export { createTerminal, createProjectTerminal, isTerminalStale } from './termin
 // -- LSP --
 export { fetchLSPSandboxMemory } from './lsp';
 
+// -- Pasted/dropped files written into the task's own environment --
+export { uploadTaskFile } from './task-upload';
+
 // -- Sessions (login sessions, Settings → About) --
 export {
     listSessions,

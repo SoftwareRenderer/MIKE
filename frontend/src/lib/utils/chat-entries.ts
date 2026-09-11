@@ -288,6 +288,94 @@ export function buildEntriesFromMessages(
     return { entries, checkpointHashes };
 }
 
+/**
+ * Combine the DB rows of a task with the entries the browser is already showing. Neither is
+ * complete — the DB lags the running turn, the replay buffer holds only the frames it kept — so the
+ * DB wins for every row it has and a live entry keeps only what the DB provably lacks: a tool_call
+ * event is broadcast once, so an entry dropped before its row exists loses that card until reload.
+ *
+ * The rows carry the identity: a tool_call row exists from the moment its tool starts and holds the
+ * tool_id the event carried, and a turn's assistant row is written before any of its tools run — so
+ * a shared tool id means the DB's copy of that turn is on screen with its text, thinking and stats.
+ *
+ * `dbMessageIds` is every row id the response carried, including tool_call rows that never became
+ * entry ids. `taskIsRunning` decides whether a pending tool call is work or a leftover, and it comes
+ * from `taskIsInFlight(execution_state)` — never from the task's status, which stays `in_progress`
+ * when a task is stopped.
+ */
+export function mergeLoadedHistory(
+    dbEntries: ChatEntry[],
+    dbMessageIds: Iterable<string>,
+    liveEntries: ChatEntry[],
+    taskIsRunning: boolean,
+): ChatEntry[] {
+    // A stopped task never writes the result a pending row waits for. Hide that card, not the
+    // message: tool calls live inside the assistant entry, so dropping the entry would take the
+    // turn's text, thinking and finished cards with it.
+    const settled = taskIsRunning ? dbEntries : dbEntries.map(withoutStalePendingCards).filter((e): e is ChatEntry => e !== null);
+
+    const dbIds = new Set(dbMessageIds);
+    // Over dbEntries, not settled: a hidden card is still a row that describes the call, so a live
+    // copy of it is a duplicate.
+    const dbToolIds = new Set<string>();
+    for (const e of dbEntries) {
+        for (const tc of e.toolCalls ?? []) dbToolIds.add(tc.toolId);
+    }
+    const lastDb = dbEntries[dbEntries.length - 1];
+
+    const merged: ChatEntry[] = [...settled];
+    for (const e of liveEntries) {
+        // The complete event renames a streaming entry to its row id.
+        if (dbIds.has(e.id)) continue;
+
+        const calls = e.toolCalls ?? [];
+        if (calls.length > 0) {
+            if (!taskIsRunning && calls.some(tc => tc.isPending)) continue;
+            const missing = calls.filter(tc => !dbToolIds.has(tc.toolId));
+            if (missing.length === calls.length) {
+                merged.push(e);
+                continue;
+            }
+            if (missing.length === 0) continue;
+            // Join the DB's copy of the turn instead of opening a second one: that entry keeps the
+            // row id, which the checkpoint divider and its "view changes" link are keyed on.
+            const shared = new Set(calls.map(tc => tc.toolId));
+            const host = merged.findIndex(x => x.toolCalls?.some(tc => shared.has(tc.toolId)));
+            if (host === -1) {
+                merged.push({ ...e, toolCalls: missing, content: '', reasoningContent: undefined, hasReasoning: false, stats: undefined });
+            } else {
+                merged[host] = { ...merged[host]!, toolCalls: [...merged[host]!.toolCalls!, ...missing] };
+            }
+            continue;
+        }
+
+        // No shared id here. Text is the one field the response never redacts or truncates, so an
+        // exact match with the newest row proves persistence — proof a streaming entry cannot give,
+        // since its text grows into that match while its row is unwritten.
+        if (!e.isStreaming && e.role === 'assistant' && e.content && lastDb?.role === 'assistant' && lastDb.content === e.content) continue;
+
+        merged.push(e);
+    }
+
+    const seenIds = new Set<string>();
+    return merged.filter(e => {
+        if (seenIds.has(e.id)) return false;
+        seenIds.add(e.id);
+        return true;
+    });
+}
+
+/** The entry without the pending tool calls a stopped task will never resolve; null if nothing renders. */
+function withoutStalePendingCards(entry: ChatEntry): ChatEntry | null {
+    const pending = entry.toolCalls?.filter(tc => tc.isPending) ?? [];
+    if (pending.length === 0) return entry;
+    const settledCalls = entry.toolCalls!.filter(tc => !tc.isPending);
+    const rendersAnything = settledCalls.length > 0 || !!entry.content || entry.hasReasoning || !!entry.reasoningContent
+        || !!entry.attachments?.length || !!entry.buildLog;
+    if (!rendersAnything) return null;
+    return { ...entry, toolCalls: settledCalls.length > 0 ? settledCalls : undefined };
+}
+
 // collapseRepeatErrors drops an error entry that repeats the one right before it.
 // Databases written before the server became the only writer of errors hold one
 // copy of a failure per page view.

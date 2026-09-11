@@ -13,16 +13,9 @@ import (
 
 // GarbageCollect removes worktree directories that have no matching task in the database.
 func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
-	cfg, err := wm.configStore.GetConfig()
+	worktreesDir, err := wm.worktreesRoot()
 	if err != nil {
-		return 0, fmt.Errorf("get config: %w", err)
-	}
-
-	worktreesDir := cfg.WorkspaceDir
-	if !filepath.IsAbs(worktreesDir) {
-		if abs, err := filepath.Abs(worktreesDir); err == nil {
-			worktreesDir = abs
-		}
+		return 0, err
 	}
 
 	if _, err := os.Stat(worktreesDir); os.IsNotExist(err) {

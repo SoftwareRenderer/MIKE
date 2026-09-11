@@ -17,10 +17,10 @@
     import { mergeQueuedUpdate, taskIsInFlight } from '$lib/utils/task-utils';
     import { effectiveStartTaskKey, matchShortcut } from '$lib/utils/keyboard';
     import { reselectProvider, getProviderDisplayName } from '$lib/utils/providers';
-    import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
+    import { getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, mergeLoadedHistory, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { wsConnection } from '$lib/stores/connection';
-    import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments } from '$lib/storage';
+    import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments, type DraftAttachment } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { t } from '$lib/i18n';
     import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
@@ -39,7 +39,7 @@
     // True while the initial conversation history is being fetched
     let historyLoading = $state(false);
     let inputValue = $state('');
-    let draftAttachments = $state<Array<{ file: File; preview: string; mimeType: string; base64: string }>>([]);
+    let draftAttachments = $state<DraftAttachment[]>([]);
 
     // Load draft text from IndexedDB on init
     $effect(() => {
@@ -54,12 +54,7 @@
     $effect(() => {
         loadDraftAttachments(taskId).then(atts => {
             if (atts.length > 0) {
-                draftAttachments = atts.filter(a => a && a.mimeType && a.data).map(a => ({
-                    file: new File([], '', { type: a.mimeType }),
-                    preview: `data:${a.mimeType};base64,${a.data}`,
-                    mimeType: a.mimeType,
-                    base64: a.data,
-                }));
+                draftAttachments = atts.filter(a => a && a.mimeType && a.data);
             }
         }).catch(() => {});
     });
@@ -87,7 +82,7 @@
     $effect(() => {
         const atts = draftAttachments;
         if (atts.length > 0) {
-            saveDraftAttachments(taskId, atts.map(a => ({ mimeType: a.mimeType, data: a.base64 })));
+            saveDraftAttachments(taskId, atts);
         }
     });
 
@@ -497,51 +492,7 @@
             const { entries: mergedDbEntries, checkpointHashes } = buildEntriesFromMessages(messages);
             stream.state.checkpointCommitHashes = checkpointHashes;
 
-            // Merge with existing entries (e.g., from buffer replay).
-            // DB entries have backend UUIDs; buffer entries have random genId() IDs.
-            // Preserve buffer entries whose IDs are NOT in the DB (not yet persisted).
-            const dbIds = new Set(messages.map(m => m.id));
-            const existingNonDb = stream.state.entries.filter(e => !dbIds.has(e.id));
-            // Collect tool_ids from DB entries to deduplicate buffer entries.
-            const dbToolIds = new Set<string>();
-            for (const e of mergedDbEntries) {
-                if (e.toolCalls) {
-                    for (const tc of e.toolCalls) {
-                        dbToolIds.add(tc.toolId);
-                    }
-                }
-            }
-            // Remove buffer entries whose tool calls are already in the DB.
-            // Also remove buffer assistant entries that are duplicates of DB entries:
-            // - Buffer entry has tool calls with IDs matching DB → removed by tool_id check
-            // - Buffer entry has reasoning but no tool calls (tool_call events evicted from buffer)
-            //   and DB has assistant with tool calls → removed as reasoning-only duplicate
-            // - Buffer entry has both reasoning AND tool calls but same tool IDs as DB → removed
-            const dbHasToolCalls = dbToolIds.size > 0;
-            const dedupedNonDb = existingNonDb.filter(e => {
-                if (e.toolCalls && e.toolCalls.length > 0) {
-                    return !e.toolCalls.some(tc => dbToolIds.has(tc.toolId));
-                }
-                // Remove buffer assistant with reasoning (and optionally empty toolCalls)
-                // if DB has assistant entries with tool calls for the same turn.
-                if (dbHasToolCalls && e.role === 'assistant' && e.reasoningContent) {
-                    return false;
-                }
-                return true;
-            });
-            stream.state.entries = [...mergedDbEntries, ...dedupedNonDb];
-            // Deduplicate by ID — keeps first occurrence (DB entries come first and are authoritative).
-            // Catches edge cases where a streaming entry's temp ID was swapped to a backend ID
-            // that already exists in the DB (e.g., complete event arrives after loadHistory).
-            const seenIds = new Set<string>();
-            stream.state.entries = stream.state.entries.filter(e => {
-                if (seenIds.has(e.id)) return false;
-                seenIds.add(e.id);
-                return true;
-            });
-            if (!taskIsInFlight(taskExecutionState)) {
-                stream.dropUnresolvedToolCalls();
-            }
+            stream.state.entries = mergeLoadedHistory(mergedDbEntries, messages.map(m => m.id), stream.state.entries, taskIsInFlight(taskExecutionState));
             // These are new entry objects, so refs captured while streaming are now
             // detached; re-point them before more events for this turn arrive.
             stream.reconcileActiveToolCalls();

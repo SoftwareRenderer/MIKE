@@ -776,12 +776,10 @@ func countRegistrations(t *testing.T, root string) int {
 func TestMeasuredNumbersAgreeWithTheReview(t *testing.T) {
 	root := repoRoot(t)
 
-	// 105 registrations is the count after every route declared its method (Phase 2a); it was 87
-	// before, when 54 routes were methodless and several of them served more than one verb from a
-	// single registration. Splitting those added the difference. `grep -c 's\.mux\.Handle'
-	// backend/server/routes.go` says the same thing today: 105. The verb split is 44 GET, 38 POST,
-	// 10 DELETE, 7 PUT, 4 PATCH and 2 methodless — the two file servers, left as subtrees on purpose.
-	const routeRegistrations = 105
+	// The count `grep -c 's\.mux\.Handle' backend/server/routes.go` answers today: 106. The verb
+	// split is 44 GET, 39 POST, 10 DELETE, 7 PUT, 4 PATCH and 2 methodless — the two file servers,
+	// left as subtrees on purpose. A new registration moves this number and nothing else here.
+	const routeRegistrations = 106
 	if routes, checked, err := scanRoutes(root); err != nil {
 		t.Fatalf("scanRoutes: %v", err)
 	} else if checked != routeRegistrations {

@@ -121,3 +121,25 @@ func TestReadFileReturnsAStreamWithinTheLimit(t *testing.T) {
 		t.Errorf("got %d bytes (size %d), want %d", len(content), size, len(body))
 	}
 }
+
+// The client's connection is closed here, so a send attempted anyway answers with the
+// connection's own error rather than the limit.
+func TestWriteFileBytesRefusesPastTheLimitBeforeTheSend(t *testing.T) {
+	agentReadPr, agentReadPw := io.Pipe()   // client → agent
+	clientReadPr, clientReadPw := io.Pipe() // agent → client
+	defer agentReadPr.Close()
+	defer clientReadPw.Close()
+
+	client := NewClient(agentReadPw, clientReadPr)
+	if err := client.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := client.WriteFileBytes(context.Background(), "shot.png", make([]byte, protocol.MaxWriteBytes+1))
+	if !errors.Is(err, protocol.ErrResponseTooLarge) {
+		t.Fatalf("error = %v, want the limit refusal rather than the dead connection's own", err)
+	}
+	if !strings.Contains(err.Error(), strconv.Itoa(protocol.MaxWriteBytes)) {
+		t.Errorf("the refusal must name the limit, got: %v", err)
+	}
+}

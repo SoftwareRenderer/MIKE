@@ -62,6 +62,11 @@ const MaxFramePayload = 64 << 20
 // no bound, because an older bridge keeps streaming.
 const MaxReadBytes = 16 << 20
 
+// MaxWriteBytes bounds one write_bytes payload, held to MaxReadBytes' rule: the guest refuses
+// before it touches the filesystem, the client refuses before it sends. Base64 crosses the frame at
+// 4/3 of the bytes, so this stays inside MaxFramePayload; it is server.MaxUploadSize.
+const MaxWriteBytes = 20 << 20
+
 var (
 	ErrFrameTooLarge    = errors.New("frame payload exceeds the bridge limit")
 	ErrResponseTooLarge = errors.New("response exceeds the bridge limit")

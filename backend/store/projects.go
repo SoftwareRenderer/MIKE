@@ -208,7 +208,6 @@ func (s *Store) UpdateProjectSandboxCapabilities(id string, capabilities []strin
 	return s.updateProjectColumn(id, "sandbox_capabilities", marshalColumnJSON(capabilities))
 }
 
-// DeleteProject deletes every dependent row itself; CASCADE is the backstop, not the mechanism.
 func (s *Store) DeleteProject(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

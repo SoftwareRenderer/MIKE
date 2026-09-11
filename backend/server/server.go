@@ -314,8 +314,9 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config) (*Server, error) {
 	s.executor.SetLLMAdapter(s.llmAdapter)
 	s.executor.RecoverStaleTasks()
 	s.terminalMgr.SetAgentRegistry(agentRegistry)
-	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor, s.hostRoot, sandbox.DangerZone(settings.DangerZone))
+
 	s.taskHandler = managers.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, commitQueue, s.sandboxMgr)
+	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor, s.hostRoot, sandbox.DangerZone(settings.DangerZone), s.taskHandler)
 	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())
 	s.gitHandler.SetWorktreeMutex(s.lockWorktree)
 

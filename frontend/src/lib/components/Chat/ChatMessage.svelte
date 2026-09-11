@@ -8,8 +8,9 @@
     import { formatTimestamp } from '$lib/utils/format-time';
     import { computeInterleavedLayout } from '$lib/utils/chat-layout';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
-    import { dialogStore } from '$lib/stores';
-    import { readImageAttachments, describeRejectedImages, MAX_IMAGES } from '$lib/utils/attachments';
+    import { ATTACHABLE_IMAGE_ACCEPT, imageSrc } from '$lib/utils/attachments';
+    import { useImageAttachments } from '$lib/composables/use-image-attachments.svelte';
+    import { uploadTaskFile } from '$lib/api';
     import { t } from '$lib/i18n';
 
     interface ToolCallInfo {
@@ -208,16 +209,15 @@
 
     let mobileFileInput: HTMLInputElement | null = $state(null);
 
-    async function handleMobileFileSelect(e: Event) {
-        const input = e.target as HTMLInputElement;
-        const files = input.files;
-        if (!files || files.length === 0) return;
-        const picked = await readImageAttachments(files, MAX_IMAGES - mobileEditAttachments.length);
-        if (picked.accepted.length > 0) mobileEditAttachments = [...mobileEditAttachments, ...picked.accepted];
-        const problem = describeRejectedImages(picked);
-        if (problem) dialogStore.showToast(problem, 'error');
-        if (mobileFileInput) mobileFileInput.value = '';
-    }
+    const intake = useImageAttachments({
+        getTextarea: () => mobileEditTextarea,
+        getValue: () => mobileEditContent,
+        setValue: (v) => { mobileEditContent = v; },
+        held: () => mobileEditAttachments.length,
+        addImages: (accepted) => { mobileEditAttachments = [...mobileEditAttachments, ...accepted]; },
+        uploadFile: (file) => uploadTaskFile(projectId, msgTaskId, file),
+        hasTask: () => !!projectId && !!msgTaskId,
+    });
 
     function removeMobileAttachment(index: number) {
         mobileEditAttachments = mobileEditAttachments.filter((_, i) => i !== index);
@@ -244,8 +244,15 @@
             </div>
             <textarea
                 bind:this={mobileEditTextarea}
+                class="image-drop-target"
+                class:is-drop-target={intake.isOver}
                 bind:value={mobileEditContent}
                 onkeydown={handleMobileKeydown}
+                onpaste={intake.handlePaste}
+                ondragenter={intake.handleDragEnter}
+                ondragover={intake.handleDragOver}
+                ondragleave={intake.handleDragLeave}
+                ondrop={intake.handleDrop}
                 rows="8"
                 aria-label={t('chat.edit.contentAria')}
             ></textarea>
@@ -253,14 +260,14 @@
                 <div class="edit-attachments-preview">
                     {#each mobileEditAttachments as att, i}
                         <div class="edit-attachment-chip">
-                            <img src={att.data.startsWith('data:') ? att.data : `data:${att.mimeType};base64,${att.data}`} alt={t('chat.common.attachment')} />
+                            <img src={imageSrc(att)} alt={t('chat.common.attachment')} />
                             <button type="button" class="remove-attachment" onclick={() => removeMobileAttachment(i)} title={t('chat.common.remove')}>&times;</button>
                         </div>
                     {/each}
                 </div>
             {/if}
             <div class="edit-modal-footer">
-                <input type="file" accept="image/*" multiple bind:this={mobileFileInput} onchange={handleMobileFileSelect} style="display:none" />
+                <input type="file" accept={ATTACHABLE_IMAGE_ACCEPT} multiple bind:this={mobileFileInput} onchange={intake.handlePicked} style="display:none" />
                 <button type="button" class="edit-attach-btn" onclick={() => mobileFileInput?.click()} title={t('chat.common.attachImage')} aria-label={t('chat.common.attachImage')}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
@@ -309,7 +316,7 @@
             {#if attachments && attachments.length > 0}
                 <div class="message-images">
                     {#each attachments as att}
-                        <img src={att.data.startsWith('data:') ? att.data : `data:${att.mimeType};base64,${att.data}`} alt="" class="message-image" />
+                        <img src={imageSrc(att)} alt="" class="message-image" />
                     {/each}
                 </div>
             {/if}

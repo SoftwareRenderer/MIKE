@@ -206,3 +206,91 @@ Specs in `frontend/tests/e2e/` (helpers in `helpers.ts`); **mock LLM by default*
 - **`[role="dialog"]` is never a unique locator** (BaseModal, both explorer views, `TerminalPanel`, `CommitDiffOverlay`, and every ChatMessage's `<dialog>` all have it) — filter by the content that identifies the dialog you mean. Selector-by-component and the commit/review-bar rules: `docs/testing.md`.
 - **A spec exists only if it needs a browser or the real backend** (DnD, real focus/keyboard, scroll/CSS geometry, iframes + CSP, git/worktrees, WS reconnect). Component state belongs in vitest — 2.1k tests in ~23 s versus a page-load tax per spec. And **never write a `readFileSync('../Foo.svelte')` + `toContain(...)` "test"**: it cannot fail a real bug and breaks on renames. The suite is budgeted at a few minutes for a full run; keep it there.
 
+
+## Test environment (moved from AGENTS.md)
+
+Two dedicated test servers with isolated databases plus one shared mock LLM, fully managed by
+`frontend/tests/global-setup.ts` (torn down and rebuilt each run):
+
+| Server | Port | Data dir | Purpose |
+|--------|------|----------|---------|
+| Main | 3000 | `/tmp/kanban-test-data` | `chromium` Playwright project (default tests) |
+| Isolated | 3001 | `/tmp/kanban-test-data-isolated` | `isolated` project (serialized, 1 worker) — config-modifying suites; see `ISOLATED_SPECS` in `frontend/playwright.config.ts` |
+| Mock LLM | 9999 | — | shared; `frontend/tests/mock-llm.js` |
+
+Test repos live at `/tmp/kanban-test-repo` (+ `-2`), worktrees at `/tmp/kanban-test-worktrees/`.
+
+The registry is pinned to a local fixture (`frontend/tests/registry-fixture.json`) so registry e2e never
+hits the hosted registry — but the servers read `/tmp/kanban-test-registry.json`, which setup writes from
+that fixture with the i18n pack's `__I18N_PACK_COMMIT__` placeholder resolved to the HEAD of the local git
+repo it builds from `tests/fixtures/i18n-pack-repo`, because a git-pinned install needs a commit that
+exists. A spec that installs a **published** extension with `install-local` needs its directory on disk,
+and the product is what removes it — **deleting an extension deletes its directory** — so setup seeds the
+published sources from `../MIKE-extensions` where absent and refuses the run naming the path when the
+sibling checkout is missing; otherwise the run after an uninstall reports
+`install-local failed (404): <name> not in local extensions list`, which reads as a code regression.
+
+Test servers are spawned via `go run .` and **inherit your shell environment** — export
+`MIKE_ENCRYPTION_KEY` before running e2e, or global-setup fails with "Server on port 3000 did not start
+within 15000ms".
+
+### A run must leave nothing behind
+
+`globalTeardown` is `tests/global-teardown.ts`, whose default export is *only* teardown — naming
+`global-setup.ts` there re-runs setup at the end of every run and leaves a server pair, lock and database
+nothing will stop. Verify after any change to setup/teardown: `pgrep -xc kanban` → 0, nothing listening on
+3000/3001/9999, no `/tmp/kanban-test-data*`. Teardown stops servers by **identity** (`--data-dir <dir>`):
+they are `setsid go run .` grandchildren, so the port owner is not the process that should stop, and
+`lsof -ti:PORT` also answers with clients.
+
+If a prior run was interrupted, clean stale state first (stale processes hold the ports — symptom
+`ERR_CONNECTION_REFUSED`, or a stale TLS server answering a `--no-tls` test — and a stale lock makes
+global-setup run teardown instead of setup):
+
+```bash
+lsof -ti:3000,3001,9999 | xargs kill 2>/dev/null
+rm -f /tmp/kanban-test-setup.lock
+rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-worktrees
+```
+
+### Playwright tuning
+
+`workers: 4` is measured: 6 is ~10% faster and buys 1-4 rotating turn-queue failures per run.
+
+## Go unit test environment (moved from AGENTS.md)
+
+- **`MIKE_ENCRYPTION_KEY` must be set in the shell** for `go test ./backend/...`: the config tests that
+  store a provider API key encrypt it on the way in, and `backend/config` fails with
+  `crypto: MIKE_ENCRYPTION_KEY environment variable is not set` — not with a test failure you can read
+  past.
+- A few tests shell out to a real `git commit` without `-c user.*` flags (e.g. the `backend/managers`
+  remote-fixture tests), so the machine needs a git identity (`git config --global user.email …`) or they
+  fail with `Committer identity unknown`. Do **not** also set `init.defaultBranch` to `main` globally:
+  fixture repos then collide with their own `git worktree add -B main` and a batch of managers tests fails
+  in setup, which looks exactly like a regression.
+- Sandbox tests need `runsc` **and** a working podman storage: under a nested/overlayfs root they all fail
+  with `'overlay' is not supported over overlayfs, a mount_program is required` (podman exit status 125).
+  That is environmental, not a regression — verify with `podman info` before reading anything into it.
+  The converse error is a bare `podman run --runtime=runsc ubuntu:latest echo ok` answering failure on a
+  host that runs MIKE's sandboxes fine: that command dies on SELinux and on
+  `cgroup.subtree_control: permission denied`, both of which `sandboxruntime.GVisorCreateArgs` already
+  answers (`--security-opt label=disable` and its two `--runtime-flag` values). Ask the question with that
+  preface — not with `go test ./backend/sandbox/`, whose `TestMain` deletes a live server's sandboxes
+  (`docs/sandbox-runtime.md`). A graph-driver refusal is a different question, and no runtime flag reaches
+  it.
+- The Pi agent adapter's unit tests live in `../MIKE-extensions/agent/pi` and are run there — they are
+  **not** part of `./backend/... ./pkg/...`.
+
+## Tests that fail only under load
+
+- **`backend/extensions`' `TestHandleInstall_BuildFailureLeavesNoRowAndNoFiles`** fails on roughly 1 in 3
+  `make check` / `-parallel 8` runs **on a CPU-loaded machine** and never alone or unloaded, so a red
+  `test-go` naming it is not necessarily your regression. Re-run it alone; if it passes, read the mtime
+  line the failure prints (`describeTree` in `handler_test.go`) before believing either conclusion.
+  Established: the rollback runs and logs the right path, the surviving tree carries the original
+  checkout's mtimes, and `RepairMissingFiles` and the fake podman's fail-once budget are ruled out.
+  Unestablished: who leaves the tree behind.
+- **`backend/sandbox`'s `TestMemoryLimitEnforced`** fails roughly 2 in 8 with two container suites running
+  concurrently and 6/6 alone. It asserts the guest OOM-killed one process, and under host pressure the
+  **host** memcg killer takes the whole runsc sandbox instead (exit 128 plus `WaitPID … EOF`, container
+  gone). A red naming it is a reading about the machine, not about a memory limit that stopped working.

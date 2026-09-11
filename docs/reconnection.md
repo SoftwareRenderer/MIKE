@@ -15,9 +15,26 @@ When the WebSocket drops and reconnects, the current view (board, task view) upd
   `online` flushes the queue and calls `reconnectNow()` to skip backoff.
 - Board refresh on `visibilitychange` handles phone-sleep cases.
 
-**Tests:** e2e `reconnect-refresh.spec.ts`. Since `page.route` doesn't intercept WebSockets in
+**Tests:** e2e `reconnect-refresh.spec.ts`; the merge above is held by
+`src/lib/utils/__tests__/chat-history-merge.unit.ts`, which drives the real stream handler and the real
+message builder. Since `page.route` doesn't intercept WebSockets in
 Playwright, the spec wraps the `WebSocket` constructor via `addInitScript` and uses `serverApi()` to
 advance state.
+
+## The reload meets the replay buffer
+
+`loadHistory` runs on reconnect, on task switch and after a stop, and it joins two incomplete views of
+one conversation: the DB rows, which lag the running turn (`finalizeTurn` writes the assistant row when
+an LLM call ends and each `tool_call` row just before its tool starts, so a multi-call turn reaches the
+DB one tool at a time), and the frames the server's per-task buffer kept. `mergeLoadedHistory`
+(`src/lib/utils/chat-entries.ts`) owns the rule and states it at its definition; the fact it is built on
+is that a `tool_call` event is broadcast once, so an entry discarded before its row exists loses that
+card until the page is reloaded — discarding on an approximation is what used to show a task with its
+reasoning and none of its tool calls.
+
+Being in progress is what separates a pending `tool_call` row that is work from one that is a leftover:
+a stopped task will never write the missing result, so that card is hidden while the message around it —
+its text, its thinking, the cards that did finish — stays.
 
 ## Behaviour in full (moved from AGENTS.md)
 ### Reconnection & Offline
@@ -73,6 +90,36 @@ and "a cancellation does not call itself an outage"), `src/lib/api/__tests__/sen
 classification) and `backend/httputil/httputil_test.go` (the sentence answers, the cause is logged, a host path
 never reaches the body).
 
+### A tool call reads as running only while its task is in flight
+
+An unanswered `tool_call` is in-progress work in exactly the states a turn can still send a frame from, so
+`taskIsInFlight` (`$lib/utils/task-utils.ts`) names `running` and `pulling_image` and nothing else. Its
+server-side mirror is `terminalTurnStates` (`backend/stream/app_stream.go`), which drops a task's replay
+buffer on the states that end a turn: a `tool_call` replayed to a later subscriber is a card that reads as
+running and nothing will ever answer it.
+
+**The task's status is never the answer to "is it still running".** Stopping an in-progress task keeps
+`status = in_progress` and only moves `execution_state` to `paused` (`applyStopTransition`), so a check
+written as `taskStatus !== 'in_progress'` cannot fire for the stopped task. `TaskChat` reacts instead to
+`execution_state` **leaving** flight — not on mount, because a task opened while it runs has live cards, and
+not on the `status` frame, because a duplicate message is answered with `state: "idle"` while the turn is
+still running (`backend/exec/handler_http.go`).
+
+What disappears depends on where the card came from. A live entry whose call was never persisted goes whole:
+the turn was cancelled before `finalizeTurn` (`backend/exec/loop.go`), which writes both the assistant row
+and the `tool_call` row, so a rebuild from the DB shows neither. A persisted row keeps its message and loses
+only the card (`withoutStalePendingCards` in `$lib/utils/chat-entries.ts`) — the turn's finished text and
+thinking are on screen whatever its tool did.
+
+Known gap: an executor that outlives `executorExitGrace` can still stream a `tool_call` frame after the
+transition, and that frame re-adds a pending card until its own `tool_result` lands.
+
+Tests: e2e `stop-tool-status.spec.ts` (a stop the chat did not start, the chat's own Stop, and the live card
+that must survive); `chat-history-merge.unit.ts` (both values of the running flag); `stream-state.unit.svelte.ts`
+(`dropUnresolvedToolCalls`); `task-utils.unit.ts` (the state partition, including `status: in_progress` with
+`execution_state: paused`); `backend/stream/app_stream_test.go` (which status frames clear the buffer, and
+that a new `ExecutionState` cannot join the vocabulary undecided).
+
 ### A lock wait repeats, so a lost frame cannot strand the line
 
 `lock_wait` is the one task event whose *repetition* is the contract. While a click is queued behind a lock,
@@ -85,3 +132,18 @@ client saw the frames: there is no state to get out of step.
 
 Tests: `backend/stream/lock_wait_test.go` (both frames), `frontend/src/lib/services/__tests__/stream-handler.unit.ts`
 (the acquisition clears it, an unknown domain still names a wait).
+
+## What refuses the queue rather than joining it
+
+The queue is persisted to IndexedDB, so a queued value outlives the tab and the session. Two requests are
+therefore **refused**, not stripped — refusing keeps a request from quietly becoming something else:
+
+- a `PUT /api/config` carrying a provider key that is not the server's masked placeholder
+  (`carriesPlaintextAPIKey` in `api/config.ts`);
+- a clone URL carrying credentials (`gitUrlCarriesCredentials` in `utils/git-url.ts`). The scp-style
+  `git@host:org/repo` form carries no secret and still queues.
+
+Both failure classes keep the DOM `name` (`AbortError`, `TypeError`) because a check that misses one
+silently turns a cancellation into an error toast, or a queueable write into a failure — and **the name is
+the test, never `instanceof DOMException`**: these are `Error`s that carry the name, so the call is
+`isAborted(e)`. Tests: `api/__tests__/fetch-failure.unit.ts`, `api/__tests__/send-queue.unit.ts`.

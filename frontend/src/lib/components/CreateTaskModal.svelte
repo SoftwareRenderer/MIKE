@@ -14,7 +14,8 @@
     import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId, startTask, isTransientError } from '$lib/api';
     import { appStore, uiStore, dialogStore, removeTaskFromBoard } from '$lib/stores';
     import { t } from '$lib/i18n';
-    import { readImageAttachments, describeRejectedImages, MAX_IMAGES } from '$lib/utils/attachments';
+    import { ATTACHABLE_IMAGE_ACCEPT, imageSrc } from '$lib/utils/attachments';
+    import { useImageAttachments } from '$lib/composables/use-image-attachments.svelte';
     import BaseModal from './BaseModal.svelte';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import FileMentionDropdown from './FileMentionDropdown.svelte';
@@ -136,20 +137,14 @@
         mention.handleKeydown(e);
     }
 
-    async function handlePaste(e: ClipboardEvent) {
-        // Handled by UI extension
-    }
-
-    async function handleFileSelect(e: Event) {
-        const input = e.target as HTMLInputElement;
-        const files = input.files;
-        if (!files || files.length === 0) return;
-        const picked = await readImageAttachments(files, MAX_IMAGES - attachments.length);
-        if (picked.accepted.length > 0) attachments = [...attachments, ...picked.accepted];
-        const problem = describeRejectedImages(picked);
-        if (problem) dialogStore.showToast(problem, 'error');
-        if (fileInput) fileInput.value = '';
-    }
+    const intake = useImageAttachments({
+        getTextarea: () => promptTextarea,
+        getValue: () => prompt,
+        setValue: (v) => { prompt = v; },
+        held: () => attachments.length,
+        addImages: (accepted) => { attachments = [...attachments, ...accepted]; },
+        hasTask: () => false,
+    });
 
     function removeAttachment(index: number) {
         attachments = attachments.filter((_, i) => i !== index);
@@ -442,17 +437,17 @@
             <div class="task-attachments">
                 {#each attachments as att, i}
                     <div class="task-attachment-chip">
-                        <img src={att.data} alt="Attachment" />
+                        <img src={imageSrc(att)} alt="Attachment" />
                         <button class="remove-attachment" onclick={() => removeAttachment(i)} title="Remove">&times;</button>
                     </div>
                 {/each}
             </div>
         {/if}
-        <textarea bind:this={promptTextarea} id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required oninput={() => { handlePromptInput(); mention.handleInput(); }} onkeydown={handlePromptKeydown} onpaste={handlePaste}></textarea>
+        <textarea bind:this={promptTextarea} id="task-description" class="image-drop-target" class:is-drop-target={intake.isOver} bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required oninput={() => { handlePromptInput(); mention.handleInput(); }} onkeydown={handlePromptKeydown} onpaste={intake.handlePaste} ondragenter={intake.handleDragEnter} ondragover={intake.handleDragOver} ondragleave={intake.handleDragLeave} ondrop={intake.handleDrop}></textarea>
         <!-- Anchor for sandboxed UI extensions (e.g. GitHub issue importer) -->
         <div bind:this={extAnchor} class="ext-anchor"></div>
     </label>
-    <input type="file" accept="image/*" multiple bind:this={fileInput} onchange={handleFileSelect} style="display:none" />
+    <input type="file" accept={ATTACHABLE_IMAGE_ACCEPT} multiple bind:this={fileInput} onchange={intake.handlePicked} style="display:none" />
     {#if hasProviders}
         <div class="model-select-row">
             <span id="model-label" class="model-label" style="margin:0">{t('app.task.model')}</span>

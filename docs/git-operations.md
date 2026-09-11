@@ -1,0 +1,116 @@
+# Git: argument construction, stash identity, transport
+
+The rules are in `AGENTS.md → Git`. This is the mechanism behind each fence.
+
+## One command constructor, and repo content never executes
+
+- `git.Command(dir, args…)` / `git.CommandContext(ctx, dir, args…)` are the only way this repo starts
+  git, and `TestNoGitSubprocessSpawnsOutsideGit` walks `backend/`, `pkg/` and `scripts/` to keep that
+  true. Both set `Dir`, `Env: Env()` and `WaitDelay` in one place, so the allowlist and the hook fence
+  cannot be forgotten at a call site. `_test.go` is exempt for a stated reason, not for churn: the
+  control-case test must be able to spawn an **unfenced** git.
+- `git.HookFence()` pins `core.hooksPath=/dev/null` via `GIT_CONFIG_COUNT`/`KEY_0`/`VALUE_0`, appended
+  *after* the extras so `os/exec`'s last-wins makes it unforgeable. `--no-verify` is not equivalent — it
+  has no effect on `post-checkout`, which `git worktree add` runs. Accepted user-visible consequence: a
+  `pre-push` hook no longer runs when someone clicks Push.
+- Bounds: a **cancelled context** bounds the child, a **WaitDelay** bounds the output pipes after the
+  kill, and neither substitutes for the other. `WithStash`'s bracket and the worktree watcher both
+  involve processes that can outlive their caller (see `docs/locking.md`).
+
+## The worktree layout
+
+`<worktreesDir>/<projectID>/<taskID>`, derived in `backend/git` only: `worktreesRoot` →
+`projectWorktreesDir` → `WorktreePath`, used by `CreateWorktree`, `RemoveWorktree`,
+`RemoveProjectWorktrees` and `GarbageCollect`. `RemoveWorktree` takes a task's own directory;
+`RemoveProjectWorktrees` takes the parent, which is what clears a directory a failed per-task removal
+left behind. `--worktrees-dir` overrides `WorkspaceDir` at runtime and is not persisted to the DB
+(`docs/configuration.md`).
+
+## Stash: the bracket and the identity
+
+- Work that must run against a temporarily clean tree goes through `WithStash`
+  (`backend/git/stash_bracket.go`) — the only home for the push/run/restore bracket, which the merge
+  paths take rather than writing the sequence themselves. A bracketed section begins with
+  `git checkout -f`, which silently reverts tracked modifications to HEAD when the tree is dirty, so
+  `WithStash` **refuses to run the work when `PushStash` fails** (`ErrNothingToStash` is the one
+  tolerated failure — there was nothing to take), and `fn` returns `ErrKeepStash` to leave the entry
+  stacked for the turn that later resolves a merge conflict. The stash mutex is taken around the push and
+  around the restore and held across neither, so `fn` may take the merge lock.
+- **A stash entry is identified by hash, never by position.** `git stash pop` pops `stash@{0}` and has no
+  idea who pushed it; the stack is shared by every worktree of the project *and holds the user's own
+  entries*. Measured with MIKE's own labels: A pushes, B pushes, A pops → **A's worktree receives B's work
+  and A's entry is left for B**, with no error on either side.
+  - `PushStash` returns the created entry's hash (diffing the list); `PopStashByHash` applies by hash and
+    **leaves an entry it could not apply** rather than destroying unapplied work.
+  - Callers that never saw the push find it through `RestoreStashForTask`/`DropStashForTask`, whose
+    identity is the `StashMessageFor*` label because it embeds the task ID.
+  - Never a bare `git stash drop` (it discards `stash@{0}`, possibly the user's) and never a fallback to
+    position when a hash cannot be found.
+  - `git stash push` exits 0 having created nothing on a clean tree — `PushStash` returns
+    `ErrNothingToStash` when `err == nil` and nothing was created.
+- Two stash uses stay outside `WithStash` deliberately: `stashWorktreeState`
+  (`backend/server/handler_thread.go`) hands the hash back for a later thread switch to restore, which a
+  bracket scoped to one call cannot express, and `loop_agent.go` restores by label with no push of its
+  own.
+- Tests: `backend/git/stash_identity_test.go`, `push_stash_test.go`, `stash_bracket_test.go`,
+  `backend/exec/sync_merge_test.go` (`…_KeepsUnstagedWorkWhenTheStashFails` — its stash-ref injection is
+  used instead of an index lock because a locked index blocks the forced checkout too, so the loss never
+  happens and the test passes vacuously).
+
+## Client-supplied refs are validated, then fenced
+
+`types.ValidateGitRef` (`backend/types/validate.go`) is deliberately tighter than `ValidateBranchName`
+(no `~ ^ : ? * [ \`, space, leading `-`). `GET /api/fs` validates `?ref=` **and** passes
+`--end-of-options` (git ≥ 2.24) before `<ref>:<path>` in `git show`, so a ref can never parse as an
+option (`--output=/tmp/pwn` would create/truncate a file anywhere the server user can write).
+
+## Clones speak only allowed transports
+
+- `git.CloneArgs` puts `-c protocol.ext.allow=never` *before* `clone` (so the process parsing the URL
+  gets it) and `git.CloneEnv` sets `GIT_ALLOW_PROTOCOL=http:https:git:ssh:file` +
+  `GIT_TERMINAL_PROMPT=0` — enforced by git, independent of the user's `git config`.
+- `git.ValidateCloneURL` mirrors it host-side: no leading `-`, no control characters, no remote-helper
+  `::` transport (`ext::sh -c 'id'`), and a **case-sensitive** scheme check because git's own is
+  (`HTTPS://` is refused as transport `HTTPS`).
+- **Every** clone of a caller-supplied source goes through both halves — project creation
+  (`managers.validateGitCloneURL`) and the extension install (`extensions.CheckoutExtension`). Git's own
+  refusal of `ext::` is a host default, not a defence (a host with `protocol.ext.allow=always` would run
+  the payload as the server user). Use `git.CloneProtocolArgs()` for a clone that needs a bespoke flag —
+  never drop the fence.
+- Tests: `backend/git/clone_test.go`.
+
+## A `commit_hash` is an object id, not a rev
+
+`types.ValidateCommitHash` accepts 4–64 hex characters and nothing else, and is checked **where the value
+is accepted** — `PATCH /projects/{id}/tasks/{id}/messages/{id}` stores `git_commit_hash` only after the
+check — because that stored value is what the message-deletion path later hands to `ResetWorktreeTo`'s
+`rev-parse --verify <hash>^{tree}` / `read-tree --reset -u <hash>` without re-checking it. Every hash MIKE
+writes is `git stash create` output, so the rule costs no real request; without it
+`{"git_commit_hash":"HEAD"}` discarded a task's work to restore a branch, and an option-shaped value
+reached git as an option. Tests: `backend/server/handler_message_commit_hash_test.go`,
+`backend/types/validate_test.go`.
+
+## One slugifier for every name derived from user text
+
+`types.Slugify` / `types.SlugifyBranchName` (`backend/types/slug.go`, `MaxBranchName` /
+`BranchSlugMaxLen`) back task branch names, the branch GC and Main-thread recovery, and project IDs. The
+matching *parser* `types.TaskBranchSlugPrefix` (with `TaskBranchSuffixLen`, the random tail `exec`
+appends) lives beside them — a GC that parses a different shape than the executor writes deletes live
+branches. Never add a second copy of either. Non-ASCII letters are dropped, not transliterated.
+Tests: `backend/types/slug_test.go`, `backend/server/handler_fs_test.go`,
+`backend/managers/project_test.go`, `backend/extensions/registry_test.go`.
+
+## Which git calls carry a context
+
+`git.GitWaitDelay` is the `cmd.WaitDelay` every constructor sets. What it buys is specific: after a child is
+killed, `cmd.Wait` still waits on its **output pipes**, and a child that dies holding them (or a grandchild
+that inherited them) would otherwise park the caller forever — the WaitDelay closes them and lets `Wait`
+return. It does **not** stop a child that never gets killed, so a context-less `git` call hangs the request
+to the completion of the TCP timeout, not of MIKE's patience.
+
+A cancelled context therefore exists only where a caller has something worth cancelling: `git clone`
+(`CloneContext`, on the request context, so closing the tab stops it), pull/push (`handleGitRemote`, which
+used to hold the per-project mutex for the full ssh timeout), and the extension install's
+`clone`/`checkout`/`rev-parse`. The other ~61 local git call sites behind the three helpers (`gitRun`,
+`gitRunInGitDir`, `gitRunOutput`) are deliberately context-less: they run against a local repository, and
+threading a context through them buys nothing at the sites that never block on a network.
