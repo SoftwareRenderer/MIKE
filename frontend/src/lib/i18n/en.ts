@@ -231,6 +231,15 @@ const catalog = {
     'settings.saving': 'Saving...',
     'settings.saveHint': 'Save settings',
     'settings.aboutTitle': 'MIKE: Integrated Kanban Environment',
+    // Settings → About: the one place the update check speaks. Automatic updates are silent
+    // (services/app-update.ts); a check the user started has to answer.
+    'settings.assetsBuildHint': 'The frontend build this page is running',
+    'settings.checkUpdates': 'Check for updates',
+    'settings.checkUpdatesHint': 'Ask this server whether the browser is still running the current frontend build',
+    'settings.checking': 'Checking…',
+    'settings.upToDate': 'Up to date',
+    'settings.updateApplying': 'Update available — reloading',
+    'settings.updateCheckFailed': 'Could not determine',
     'settings.pwa': 'Progress Web App',
     'settings.pwaInstall': 'Install as PWA',
     'settings.pwaInstallHint': 'Install as a Progressive Web App',
@@ -1534,7 +1543,7 @@ const catalog = {
     'task.sandboxTip.peakReachedLimit': ' · peak reached limit',
     'task.sandboxTip.clickForDetails': '{title} (click for details)',
 
-    // ── the small namespaces filed here: storage, tool, effort, memory, swUpdate,
+    // ── the small namespaces filed here: storage, tool, effort, memory,
     //    host, and app.copyright ──
     'storage.unavailable': 'IndexedDB not available',
     // Tool badges on a persisted message: the ids above them are wire names, these are
@@ -1557,8 +1566,6 @@ const catalog = {
     'memory.noLimit': 'No limit',
     'memory.notRunning': 'Not running',
     'memory.currentNoLimit': '{mb} MB (no limit)',
-    'swUpdate.available': 'New version available',
-    'swUpdate.reload': 'Reload',
     // The two status strings core renders itself, not the ones an extension passes
     // to host.setError.
     'host.loading': 'Loading…',

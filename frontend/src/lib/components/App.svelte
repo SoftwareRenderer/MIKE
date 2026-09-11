@@ -41,7 +41,6 @@
     import TaskExplorerView from './TaskExplorerView.svelte';
     import Sidebar from './App/Sidebar.svelte';
     import TopBar from './App/TopBar.svelte';
-    import SWUpdateBanner from './SWUpdateBanner.svelte';
     import LocaleOffer from './LocaleOffer.svelte';
 
     function loadTerminalPanel(): void {
@@ -1585,7 +1584,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     <ConfirmationDialog />
     <CommitDialog />
     <CompressContextDialog />
-    <SWUpdateBanner />
     <LocaleOffer />
 </div>
 {/if}

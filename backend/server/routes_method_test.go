@@ -45,6 +45,7 @@ var methodContract = []struct {
 	{"/api/fs", []string{"GET"}, "POST", ""},
 	{"/api/fs/write", []string{"POST"}, "GET", ""},
 	{"/api/health", []string{"GET"}, "POST", ""},
+	{"/api/version", []string{"GET"}, "POST", ""},
 	{"/api/extensions", []string{"GET"}, "DELETE", ""},
 	{"/api/sessions", []string{"GET"}, "PUT", ""},
 }
