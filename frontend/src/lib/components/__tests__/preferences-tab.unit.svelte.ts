@@ -158,6 +158,18 @@ describe('PreferencesTab create-task row', () => {
         expect(chip.textContent).toBe('5');
     });
 
+    it('drops the rejection hint once a valid key is captured', async () => {
+        const { create, queryByText } = renderTab();
+        const chip = create.getByRole('button', { name: /create task shortcut/i });
+        await fireEvent.click(chip);
+        await fireEvent.keyDown(window, { key: 'F5' });
+        expect(queryByText(/invalid/i)).toBeTruthy();
+
+        await fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+        expect(chip.textContent).toBe('Ctrl+K');
+        expect(queryByText(/invalid/i)).toBeNull();
+    });
+
     it('resets to the default binding', async () => {
         const { create, onDirty } = renderTab({ createTaskKey: 'control+k' });
         await fireEvent.click(create.getByRole('button', { name: 'Reset to default' }));
@@ -497,6 +509,32 @@ describe('PreferencesTab multi-select click row', () => {
         expect(chip.textContent).toBe('Now modifier+click...');
         expect(getByText(/invalid combo/i)).toBeTruthy();
         expect(onDirty).not.toHaveBeenCalled();
+    });
+
+    it('drops the rejection hint once a valid click binding is captured', async () => {
+        const { multiSelect, queryByText } = renderTab();
+        const chip = chipOf(multiSelect);
+        await fireEvent.click(chip);
+        await fireEvent.mouseDown(window, { button: 0 });
+        expect(queryByText(/invalid/i)).toBeTruthy();
+
+        await fireEvent.mouseDown(window, { button: 0, ctrlKey: true, shiftKey: true });
+        expect(chip.textContent).toBe('Ctrl+Shift+Click');
+        expect(queryByText(/invalid/i)).toBeNull();
+    });
+
+    it('never shows the keyboard sentence for a rejected mouse click', async () => {
+        const { multiSelect, queryByText } = renderTab();
+        const chip = chipOf(multiSelect);
+        await fireEvent.click(chip);
+        await fireEvent.mouseDown(window, { button: 0 });
+        expect(queryByText(/invalid combo/i)).toBeTruthy();
+        expect(queryByText(/invalid key/i)).toBeNull();
+
+        // The hint must not change wording when the capture it belongs to ends.
+        await fireEvent.keyDown(window, { key: 'Escape' });
+        expect(chip.textContent).not.toBe('Now modifier+click...');
+        expect(queryByText(/invalid key/i)).toBeNull();
     });
 
     it('ignores non-primary buttons (middle click belongs to the browser)', async () => {

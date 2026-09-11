@@ -372,8 +372,13 @@ Apache-2.0, and a dependency's license is not changed by ours.
 - Each extension carries its own `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES.md`; bundled third-party
   files keep their own notice.
 - Regenerate the notices whenever a dependency is added, removed or upgraded: `go mod tidy` +
-  `go list -m all` (or `go-licenses report ./...`), `npx license-checker --production --summary`, then
-  update `THIRD_PARTY_NOTICES.md` and `NOTICE`.
+  `go list -deps -f '{{if .Module}}{{.Module.Path}}{{end}}' ./backend/... ./pkg/... . | sort -u`
+  (or `go-licenses report ./...`), `npx license-checker --production --summary`, then update
+  `THIRD_PARTY_NOTICES.md` and `NOTICE`. Both commands over-claim — `go list -m all` answers the
+  module graph, which is larger than the binary, and `license-checker` counts a package a dependency
+  imports as types only — so what is listed is what is compiled or bundled into the shipped binaries.
+- **The GPL/AGPL rule is about what MIKE links.** The programs the runtime image installs (podman,
+  crun, runsc, git) are separate executables the server runs, not dependencies of its code.
 
 ## Debugging
 

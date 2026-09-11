@@ -85,6 +85,11 @@
     /** The row currently capturing a binding — tells a mouse row from a keyboard row. */
     const capturingRow = $derived(rows.find(r => r.id === capturingId));
     let invalidFlash = $state(false);
+    /**
+     * Which sentence the flash shows. The hint outlives the capture that caused it, so it cannot
+     * be derived from `capturingRow`, which is `undefined` the moment capture ends.
+     */
+    let invalidKind = $state<'key' | 'click'>('key');
     let invalidTimer: ReturnType<typeof setTimeout> | undefined;
 
     function assign(id: string, value: string | undefined) {
@@ -100,17 +105,31 @@
     function startCapture(id: string) {
         // Click again to cancel.
         capturingId = capturingId === id ? null : id;
+        clearFlash();
+    }
+
+    /**
+     * Hide the rejection hint and cancel its expiry together — the flag is only ever reset by that
+     * timer, so clearing one half leaves the hint on screen for good.
+     */
+    function clearFlash() {
+        if (invalidTimer) clearTimeout(invalidTimer);
+        invalidTimer = undefined;
         invalidFlash = false;
     }
 
-    function flashInvalid() {
-        invalidFlash = true;
+    function flashInvalid(kind: 'key' | 'click') {
         if (invalidTimer) clearTimeout(invalidTimer);
+        invalidKind = kind;
+        invalidFlash = true;
         invalidTimer = setTimeout(() => {
             invalidFlash = false;
             invalidTimer = undefined;
         }, 1500);
     }
+
+    // The flash runs on its own clock and survives the capture that caused it, so only unmount cancels it.
+    $effect(() => () => clearTimeout(invalidTimer));
 
     $effect(() => {
         const id = capturingId;
@@ -125,15 +144,16 @@
                 return;
             }
             if (clickRow) {
-                flashInvalid();
+                flashInvalid('click');
                 return;
             }
             const normalized = normalizeKey(e);
             if (!normalized) {
-                flashInvalid();
+                flashInvalid('key');
                 return;
             }
             assign(id, normalized);
+            clearFlash();
             capturingId = null;
         };
         const handleMousedown = (e: MouseEvent) => {
@@ -144,10 +164,11 @@
             e.stopPropagation();
             const normalized = normalizeClick(e);
             if (!normalized) {
-                flashInvalid();
+                flashInvalid('click');
                 return;
             }
             assign(id, normalized);
+            clearFlash();
             capturingId = null;
         };
         window.addEventListener('keydown', handleKeydown, true);
@@ -155,7 +176,6 @@
         return () => {
             window.removeEventListener('keydown', handleKeydown, true);
             window.removeEventListener('mousedown', handleMousedown, true);
-            if (invalidTimer) clearTimeout(invalidTimer);
         };
     });
 </script>
@@ -213,7 +233,7 @@
     {/each}
 
     {#if invalidFlash}
-        <p class="invalid-hint" role="alert">{capturingRow?.click ? t('settings.preferences.invalidClick') : t('settings.preferences.invalidKey')}</p>
+        <p class="invalid-hint" role="alert">{invalidKind === 'click' ? t('settings.preferences.invalidClick') : t('settings.preferences.invalidKey')}</p>
     {/if}
 </section>
 
