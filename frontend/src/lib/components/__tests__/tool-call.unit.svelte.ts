@@ -93,16 +93,55 @@ describe('ToolCall - pending status text', () => {
         expect(container.querySelector('.progress-text')?.textContent).toBe('Editing...');
     });
 
-    it('shows "Writing..." for pending write_file', () => {
+    it('shows "Writing..." for a pending write_file with no filename yet', () => {
         const { container } = render(ToolCall, {
             ...baseProps,
             toolCall: makeToolCall({
                 toolName: 'write_file',
-                args: { path: 'src/file.go' },
+                args: {},
                 isPending: true,
             }),
         });
         expect(container.querySelector('.progress-text')?.textContent).toBe('Writing...');
+    });
+
+    it('names the file a write_file is still generating its content for', () => {
+        const { container } = render(ToolCall, {
+            ...baseProps,
+            toolCall: makeToolCall({
+                toolName: 'write_file',
+                args: {},
+                raw_args: '{"path":"src/file.go","content":"package ma',
+                isPending: true,
+            }),
+        });
+        expect(container.querySelector('.progress-text')?.textContent).toBe('Writing: src/file.go');
+    });
+
+    it('names the file from the tool event when the arguments do not carry it yet', () => {
+        const { container } = render(ToolCall, {
+            ...baseProps,
+            toolCall: makeToolCall({
+                toolName: 'write_file',
+                args: {},
+                raw_args: '{"content":"package ma',
+                path: 'src/file.go',
+                isPending: true,
+            }),
+        });
+        expect(container.querySelector('.progress-text')?.textContent).toBe('Writing: src/file.go');
+    });
+
+    it('names the file while the write itself runs', () => {
+        const { container } = render(ToolCall, {
+            ...baseProps,
+            toolCall: makeToolCall({
+                toolName: 'write_file',
+                args: { path: 'src/file.go', content: 'package main' },
+                isPending: true,
+            }),
+        });
+        expect(container.querySelector('.progress-text')?.textContent).toBe('Writing: src/file.go');
     });
 
     it('shows "Preparing: path" for pending read_file', () => {
@@ -160,13 +199,28 @@ describe('ToolCall - pending status text', () => {
             ...baseProps,
             toolCall: makeToolCall({
                 toolName: 'write_file',
-                args: { path: 'src/file.go' },
+                args: { path: 'src/file.go', content: 'package main' },
                 isPending: true,
                 startedAt,
             }),
         });
         const text = container.querySelector('.progress-text')?.textContent;
         expect(text).toContain('Running for');
+    });
+
+    it('names the file instead of the elapsed time while the write is still generating', () => {
+        const startedAt = Date.now() - 10000;
+        const { container } = render(ToolCall, {
+            ...baseProps,
+            toolCall: makeToolCall({
+                toolName: 'write_file',
+                args: {},
+                raw_args: '{"path":"src/file.go","content":"package ma',
+                isPending: true,
+                startedAt,
+            }),
+        });
+        expect(container.querySelector('.progress-text')?.textContent).toBe('Writing: src/file.go');
     });
 });
 

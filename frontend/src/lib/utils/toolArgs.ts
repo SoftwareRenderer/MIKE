@@ -31,6 +31,50 @@ export function normalizeEdits(edits: unknown): EditDiffEntry[] {
     return out;
 }
 
+/**
+ * The file a tool names, as far as its arguments have arrived.
+ *
+ * `eventPath` leads: it is the path the server read out of the arguments as they streamed, so it is
+ * known before the client has collected them. The arguments follow, whole first and then as a
+ * partial JSON body — the `path` key is generated long before the object around it parses.
+ */
+export function streamedPath(
+    args: Record<string, unknown> | null | undefined,
+    rawArgs?: string,
+    eventPath?: string,
+): string {
+    if (eventPath) return eventPath;
+    const fromArgs = args?.path;
+    if (typeof fromArgs === 'string' && fromArgs) return fromArgs;
+    if (!rawArgs) return '';
+    try {
+        const parsed = JSON.parse(rawArgs) as { path?: unknown };
+        return typeof parsed.path === 'string' ? parsed.path : '';
+    } catch {
+        const m = rawArgs.match(/"path"\s*:\s*"((?:[^"\\]|\\.)*)/);
+        return m ? m[1].replace(/\\"/g, '"') : '';
+    }
+}
+
+/**
+ * True once the streamed arguments are the whole object. While the model is still generating
+ * them the JSON does not parse, which is how a card tells generation from execution.
+ */
+export function rawArgsComplete(rawArgs?: string): boolean {
+    if (!rawArgs) return false;
+    try {
+        JSON.parse(rawArgs);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/** A path as the chat displays it: rooted at the project. */
+function dotPath(p: string): string {
+    return p && !p.startsWith('./') ? `./${p}` : p;
+}
+
 export function formatToolArgs(toolName: string, args: Record<string, unknown> | null, rawArgs?: string): string {
     if (!args) return '';
     switch (toolName) {
@@ -54,42 +98,28 @@ export function formatToolArgs(toolName: string, args: Record<string, unknown> |
         case 'read_file': {
             const p = args.path as string;
             if (!p) return '';
-            return p.startsWith('./') ? p : `./${p}`;
+            return dotPath(p);
         }
         case 'write_file': {
-            let p = args.path as string;
-            // During streaming, args may be empty but rawArgs has the JSON.
-            if (!p && rawArgs) {
-                try {
-                    const parsed = JSON.parse(rawArgs);
-                    p = parsed.path as string;
-                } catch {
-                    const m = rawArgs.match(/"path"\s*:\s*"((?:[^"\\]|\\.)*)/);
-                    if (m) p = m[1].replace(/\\"/g, '"');
-                }
-            }
+            const p = streamedPath(args, rawArgs);
             if (!p) return '';
-            return p.startsWith('./') ? p : `./${p}`;
+            return dotPath(p);
         }
         case 'edit_file': {
-            let p = args.path as string;
+            const p = streamedPath(args, rawArgs);
             let edits: unknown = args.edits;
-            // During streaming, args may be empty but rawArgs has the JSON.
-            // Try full parse first, then regex fallback for partial JSON.
-            if (!p && rawArgs) {
+            // Edits are countable only once the whole array has streamed; a partial body is left
+            // alone, so the path shows on its own while the edits are still arriving.
+            if (!Array.isArray(edits) && rawArgs) {
                 try {
-                    const parsed = JSON.parse(rawArgs);
-                    p = parsed.path as string;
-                    edits = parsed.edits;
+                    edits = (JSON.parse(rawArgs) as { edits?: unknown }).edits;
                 } catch {
-                    // Partial JSON (e.g. "{\"path\":\"src/file.go\",\"edits\":[{\"oldText\":\"hel")
-                    const m = rawArgs.match(/"path"\s*:\s*"((?:[^"\\]|\\.)*)/);
-                    if (m) p = m[1].replace(/\\"/g, '"');
+                    /* still streaming */
                 }
             }
             if (!p) return '';
             const editCount = normalizeEdits(edits).length;
-            const pathDisplay = p.startsWith('./') ? p : `./${p}`;
+            const pathDisplay = dotPath(p);
             if (editCount <= 0) return pathDisplay;
             // The path is data; only the parenthetical is copy, so it is translated whole.
             return `${pathDisplay} (${t('chat.args.editCount', { count: editCount })})`;

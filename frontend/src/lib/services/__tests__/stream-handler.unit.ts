@@ -319,6 +319,17 @@ describe('createStreamHandler', () => {
         expect(entry.toolCalls![0].isPending).toBe(true);
     });
 
+    it('a tool_call or tool_progress frame that names no file keeps the file already known', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'tool_call', data: { tool_id: 'wf1', tool_name: 'write_file', args: null, path: 'src/file.go', raw_args: '{"path":"src/file.go","content":' } }, false);
+        // What the server sends while the content is still generating: an empty path, then a frame
+        // with no path key at all.
+        handleEvent({ type: 'tool_progress', data: { tool_id: 'wf1', bytes_written: 512, path: '' } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'wf1', tool_name: 'write_file', args: null, raw_args_delta: 'more content' } }, false);
+
+        expect(stream.state.entries[0].toolCalls![0].path).toBe('src/file.go');
+    });
+
     it('tool_result event resolves pending tool call', () => {
         const { stream, handleEvent } = setup();
         handleEvent({ type: 'token', data: { text: '' } }, false);
