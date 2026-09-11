@@ -6,6 +6,7 @@
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     import { boardEdgeCard } from '$lib/composables/use-board-arrow-nav';
+    import { useStandaloneDisplay } from '$lib/composables/use-standalone-display.svelte';
     // UI extension injection point — re-render when extensions change
     $effect(() => {
         const _v = uiInjector.getPointVersion(INJECTION_POINTS.PROJECT_SIDEBAR);
@@ -74,6 +75,8 @@
         next.click();
         next.focus();
     }
+
+    const standaloneCtx = useStandaloneDisplay();
 
     // Sort projects alphabetically (case-insensitive) for display — without mutating the source array
     const sortedProjects = $derived(
@@ -189,12 +192,15 @@
     </nav>
     <!-- Mobile sidebar menu (hidden on desktop via CSS) -->
     <div class="sidebar-menu">
+        {#if !(isMobile && standaloneCtx.standalone)}
+        <!-- An installed window has no browser chrome left to hide. -->
         <button class="sidebar-menu-item" onclick={onToggleFullScreen} aria-label="Toggle full screen" title="Toggle full screen">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
             </svg>
             {t('app.sidebar.fullScreen')}
         </button>
+        {/if}
         <button class="sidebar-menu-item" onclick={onShowStats} aria-label="Token usage stats" title="Token usage stats">
             <svg width="20" height="20" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <rect x="1" y="8" width="3" height="6" rx="0.5" fill="currentColor"/>
