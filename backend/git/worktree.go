@@ -5,6 +5,7 @@ package git
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -385,7 +386,10 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 	return worktreePath, baseRef, nil
 }
 
-// RemoveWorktree removes a task's worktree and its branch.
+// RemoveWorktree removes a task's worktree directory, its registration, and its branch.
+//
+// The order matters: the .git/worktrees/ registration, not the directory, is what stops git deleting
+// the branch, and a prune before the directory is gone prunes nothing.
 func (wm *WorktreeManager) RemoveWorktree(projectID, taskID, branchName string) error {
 	project, err := wm.store.GetProject(projectID)
 	if err != nil {
@@ -397,15 +401,19 @@ func (wm *WorktreeManager) RemoveWorktree(projectID, taskID, branchName string) 
 		return err
 	}
 
-	// Always delete the branch from the project repo, even if worktree dir is gone
-	wm.gitRun(project.Path, "branch", "-D", branchName)
-	wm.gitRun(project.Path, "worktree", "prune")
-
+	// The prune and branch delete run even when the directory could not be removed, so a directory
+	// this process cannot delete does not strand the branch.
+	var errs []error
 	if err := os.RemoveAll(worktreePath); err != nil {
-		return fmt.Errorf("remove worktree dir: %w", err)
+		errs = append(errs, fmt.Errorf("remove worktree dir: %w", err))
 	}
-
-	return nil
+	_ = wm.gitRun(project.Path, "worktree", "prune")
+	if branchName != "" {
+		if err := wm.deleteBranch(project.Path, branchName); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // GitStatus returns the git status --porcelain output for a task's worktree.

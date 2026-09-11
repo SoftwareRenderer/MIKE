@@ -26,6 +26,31 @@ The rules are in `AGENTS.md → Git`. This is the mechanism behind each fence.
 left behind. `--worktrees-dir` overrides `WorkspaceDir` at runtime and is not persisted to the DB
 (`docs/configuration.md`).
 
+### Removing a worktree: directory, prune, branch
+
+The registration in the project's `.git/worktrees/`, not the directory, is what makes a branch
+undeletable: `git branch -D` answers `cannot delete branch 'task/x' used by worktree at …` while a
+registration names the branch, and a `worktree prune` run while the directory is still on disk prunes
+nothing. So `RemoveWorktree` goes directory → prune → branch, and no other order deletes anything.
+The branch delete runs even when the directory could not be removed, and a refusal is returned with
+what git printed (`deleteBranch`) — git writes its reason to stderr, and the caller's log line is the
+only place it can surface. `PruneOrphanedBranches` prunes first too, under the project's worktree
+lock (the one `CreateWorktree` takes, busy-skip-and-log like `GarbageCollect`), because the branches
+it is looking for are the ones a worktree removed moments ago still holds. `GarbageCollect` runs only
+at startup, so nothing else sweeps: a leftover is not self-healing.
+
+Branch names come back from `listBranchNames`/`ListProjectBranches` (`backend/git/branches.go`),
+which reads `refs/heads/<prefix>*` with `for-each-ref`. `git branch --list` decorates its output —
+`+ ` on a branch a linked worktree holds, `* ` on the current one — and anything compared against
+that output misses both, which is how the branches the refusal produced stayed invisible to the sweep
+meant to catch them. The glob is one path segment wide, the shape this repo writes (`task/<id>`,
+`task/<slug>-<random6>`, `thread/<id>`), so a nested branch a person made under the same namespace is
+never read as an orphan.
+
+**Tests:** `backend/git/worktree_removal_test.go` (the three-part removal, the decorated orphan,
+live branches kept), `backend/git/branch_listing_test.go` (both markers, slug prefix, one segment),
+`backend/server/task_delete_branches_test.go` (single delete, Clear-all, fork thread branch).
+
 ## Stash: the bracket and the identity
 
 - Work that must run against a temporarily clean tree goes through `WithStash`

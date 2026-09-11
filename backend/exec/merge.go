@@ -207,18 +207,14 @@ func (m *mergeOrchestrator) recoverMissingBranch(projectID, taskID, missingBranc
 		return ""
 	}
 
-	branchesOut, err := m.worktreeMgr.GitRunInProjectOutput(projectID, "branch", "--list", slugPrefix+"*")
+	branches, err := m.worktreeMgr.ListProjectBranches(projectID, slugPrefix)
 	if err != nil {
 		return ""
 	}
 
 	var matches []string
-	for line := range strings.SplitSeq(branchesOut, "\n") {
-		b := strings.TrimSpace(line)
-		// git branch --list marks the checked-out branch with " + ".
-		b = strings.TrimPrefix(b, " + ")
-		b = strings.TrimPrefix(b, "+ ")
-		if b != "" && b != missingBranch {
+	for _, b := range branches {
+		if b != missingBranch {
 			matches = append(matches, b)
 		}
 	}
