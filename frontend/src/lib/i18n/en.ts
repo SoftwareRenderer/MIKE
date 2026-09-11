@@ -1220,6 +1220,7 @@ const catalog = {
     'chat.tool.expandArgs': 'Expand arguments',
     'chat.tool.collapseArgs': 'Collapse arguments',
     'chat.tool.wroteTo': 'Wrote {bytes} to:',
+    'chat.tool.openInExplorer': 'Open in the task explorer',
     'chat.tool.unknownPath': '(unknown)',
     'chat.tool.createdTask': 'Created task',
     'chat.tool.openTask': 'Open task',

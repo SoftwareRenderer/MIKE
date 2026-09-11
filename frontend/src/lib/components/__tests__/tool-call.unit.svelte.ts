@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render } from '@testing-library/svelte';
+import { render, fireEvent } from '@testing-library/svelte';
 import ToolCall from '$lib/components/Chat/ToolCall.svelte';
 
 // Mock dependencies
@@ -277,6 +277,93 @@ describe('ToolCall - write_file result', () => {
         });
         expect(container.querySelector('.write-result-text')?.textContent).toContain('Wrote');
         expect(container.querySelector('.write-result-path')?.textContent).toBe('src/file.go');
+    });
+
+    it('offers the written file as a jump into the task explorer', async () => {
+        const received: unknown[] = [];
+        const listener = (e: Event) => received.push((e as CustomEvent).detail);
+        window.addEventListener('open-file', listener);
+        try {
+            const { container } = render(ToolCall, {
+                ...baseProps,
+                taskId: 'frost-amber-quartz',
+                toolCall: makeToolCall({
+                    toolName: 'write_file',
+                    args: { path: 'src/file.go' },
+                    path: 'src/file.go',
+                    bytesWritten: 2048,
+                    success: true,
+                    isPending: false,
+                }),
+            });
+            const link = container.querySelector('button.write-result-path');
+            expect(link?.textContent).toBe('src/file.go');
+            await fireEvent.click(link as HTMLElement);
+            expect(received).toEqual([{ path: 'src/file.go', taskId: 'frost-amber-quartz' }]);
+        } finally {
+            window.removeEventListener('open-file', listener);
+        }
+    });
+
+    it('takes the path from the tool arguments when the result carries none', () => {
+        const { container } = render(ToolCall, {
+            ...baseProps,
+            taskId: 'frost-amber-quartz',
+            toolCall: makeToolCall({
+                toolName: 'write_file',
+                args: { path: 'hello.bas' },
+                bytesWritten: 82,
+                success: true,
+                isPending: false,
+            }),
+        });
+        expect(container.querySelector('button.write-result-path')?.textContent).toBe('hello.bas');
+    });
+
+    it('is plain text with no task to open the file in', () => {
+        const { container } = render(ToolCall, {
+            ...baseProps,
+            toolCall: makeToolCall({
+                toolName: 'write_file',
+                args: { path: 'src/file.go' },
+                path: 'src/file.go',
+                bytesWritten: 2048,
+                success: true,
+                isPending: false,
+            }),
+        });
+        expect(container.querySelector('button.write-result-path')).toBeFalsy();
+        expect(container.querySelector('span.write-result-path')?.textContent).toBe('src/file.go');
+    });
+
+    it('is plain text when the write named no file', () => {
+        const { container } = render(ToolCall, {
+            ...baseProps,
+            taskId: 'frost-amber-quartz',
+            toolCall: makeToolCall({
+                toolName: 'write_file',
+                args: {},
+                bytesWritten: 12,
+                success: true,
+                isPending: false,
+            }),
+        });
+        expect(container.querySelector('button.write-result-path')).toBeFalsy();
+        expect(container.querySelector('span.write-result-path')?.textContent).toBe('(unknown)');
+    });
+
+    it('is not a jump while the write is still streaming', () => {
+        const { container } = render(ToolCall, {
+            ...baseProps,
+            taskId: 'frost-amber-quartz',
+            toolCall: makeToolCall({
+                toolName: 'write_file',
+                args: { path: 'src/file.go' },
+                path: 'src/file.go',
+                isPending: true,
+            }),
+        });
+        expect(container.querySelector('.write-result-path')).toBeFalsy();
     });
 });
 
