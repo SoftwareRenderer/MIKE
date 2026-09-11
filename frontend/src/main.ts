@@ -3,6 +3,7 @@ import { mount } from 'svelte';
 import App from './lib/components/App.svelte';
 import { appStore } from './lib/stores';
 import { applyCachedCatalog } from './lib/i18n/boot';
+import { startAppUpdate } from './lib/services/app-update';
 
 // Centralized unhandled promise rejection handler
 // Catches errors from fire-and-forget async operations (storage init, etc.)
@@ -45,6 +46,8 @@ async function boot(): Promise<void> {
     mount(App, {
         target: document.getElementById('app')!,
     });
+    // After the mount: a reload is only silent if there is nothing on screen to yank away.
+    startAppUpdate();
 }
 
 void boot();

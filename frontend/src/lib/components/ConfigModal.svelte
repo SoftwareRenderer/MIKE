@@ -17,6 +17,7 @@
     import ExtensionsTab from './ConfigModal/ExtensionsTab.svelte';
     import SessionsSection from './ConfigModal/SessionsSection.svelte';
     import pwaIcon from '$lib/assets/icons/pwa-icon.svg?raw';
+    import { checkNow, type UpdateOutcome } from '$lib/services/app-update';
 
     let { config, onClose, onSaved, onSignOut }: { config: Config | null; onClose: () => void; onSaved: () => void; onSignOut?: () => void | Promise<void> } = $props();
 
@@ -639,6 +640,26 @@
             appStore.pwaInstallPrompt = null;
         }
     }
+
+    // Automatic updates are silent; a check this button started has to answer.
+    let updateOutcome = $state<UpdateOutcome | null>(null);
+    let checkingUpdates = $state(false);
+    const updateOutcomeText = $derived(
+        updateOutcome === 'current' ? t('settings.upToDate')
+            : updateOutcome === 'applying' ? t('settings.updateApplying')
+            : t('settings.updateCheckFailed'),
+    );
+
+    async function handleCheckUpdates() {
+        if (checkingUpdates) return;
+        checkingUpdates = true;
+        updateOutcome = null;
+        try {
+            updateOutcome = await checkNow();
+        } finally {
+            checkingUpdates = false;
+        }
+    }
 </script>
 
 {#snippet customHeader({ title }: { title: string })}
@@ -829,6 +850,18 @@
                             <a href="https://github.com/SoftwareRenderer" target="_blank" rel="noopener noreferrer">
                                 <span>github.com/SoftwareRenderer</span>
                             </a>
+                        </p>
+                        <p class="about-update">
+                            <button
+                                type="button"
+                                class="btn-check-updates"
+                                onclick={handleCheckUpdates}
+                                disabled={checkingUpdates}
+                                title={t('settings.checkUpdatesHint')}
+                            >{checkingUpdates ? t('settings.checking') : t('settings.checkUpdates')}</button>
+                            {#if updateOutcome !== null}
+                                <span class="about-update-outcome" role="status">{updateOutcomeText}</span>
+                            {/if}
                         </p>
                     </div>
                 </div>
@@ -1223,6 +1256,39 @@
     .btn-ca-download:hover {
         background: var(--color-accent-dark);
         color: white;
+    }
+
+    .btn-check-updates {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 12px;
+        border-radius: var(--radius-md);
+        background: var(--color-surface-3);
+        color: var(--color-accent);
+        font-size: 0.8125rem;
+        font-weight: 500;
+        font-family: inherit;
+        cursor: pointer;
+        border: 1px solid var(--color-accent);
+        transition: background 0.15s, color 0.15s;
+    }
+    .btn-check-updates:hover {
+        background: var(--color-accent-dark);
+        color: white;
+    }
+    .btn-check-updates:disabled {
+        opacity: 0.6;
+        cursor: default;
+    }
+    .about-update {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 10px 0 0;
+    }
+    .about-update-outcome {
+        font-size: 0.8125rem;
+        color: var(--color-text-secondary);
     }
 
     /* About MIKE section */

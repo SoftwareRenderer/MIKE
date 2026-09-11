@@ -438,4 +438,5 @@ deliberately omits.
 | `docs/navigation.md` | board + task-view arrow-key resolution |
 | `docs/link-rows.md` | project-row/task-card markup, click routing, known limitation |
 | `docs/reconnection.md` | WS reconnect/offline queue mechanism |
+| `docs/frontend-updates.md` | stale-asset detection, the build-id tag contract, prompt-mode worker, the day gate |
 | `docs/adding-a-preference.md` | the recipes for a shortcut or a `*bool` preference |

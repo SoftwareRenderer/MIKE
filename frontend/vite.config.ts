@@ -2,11 +2,15 @@ import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
+import { buildIdPlugin } from './scripts/build-id';
 
 export default defineConfig({
     plugins: [
         svelte(),
+        buildIdPlugin(),
         VitePWA({
+            // No `autoUpdate`: that would set skipWaiting/clientsClaim and let the browser pick when a
+            // new build takes over. services/app-update.ts releases a waiting worker itself.
             injectRegister: null,
             // Icons are in public/ — Vite auto-copies them to dist root
             includeAssets: [],
