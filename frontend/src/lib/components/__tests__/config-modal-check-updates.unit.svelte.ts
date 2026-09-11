@@ -126,24 +126,4 @@ describe('Settings → About → check for updates', () => {
         await waitFor(() => expect(button.disabled).toBe(false));
         expect(checkNow).toHaveBeenCalledTimes(1);
     });
-
-    it('names the frontend build the page is running, when the document carries one', async () => {
-        const meta = document.createElement('meta');
-        meta.setAttribute('name', 'app-build');
-        meta.setAttribute('content', '0a1b2c3d4e5f');
-        document.head.appendChild(meta);
-
-        const { container } = await openAbout();
-
-        const chips = Array.from(container.querySelectorAll('.about-version')).map((n) => n.textContent);
-        expect(chips).toContain('0a1b2c3d4e5f');
-    });
-
-    it('shows no build chip for a document that predates the stamp', async () => {
-        const { container } = await openAbout();
-
-        const chips = Array.from(container.querySelectorAll('.about-version')).map((n) => n.textContent);
-        expect(chips).not.toContain('');
-        expect(chips).toContain('1.0.0');
-    });
 });

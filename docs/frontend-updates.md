@@ -29,7 +29,7 @@ the join, and writes the first 12 hex characters into `<meta name="app-build" co
   the stamp did not exist yet.
 
 The binary's `version` is beside it and is not a substitute: `make frontend` replaces `dist` without
-rebuilding the binary. Settings → About shows both for that reason.
+rebuilding the binary, so the two move apart and only `assets` says what the browser is running.
 
 ## Two authorities, one per client
 
@@ -121,7 +121,7 @@ three cases, including `unknown`.
   one check), the stamp-before-request rule, every empty-identity guard, the initial-worker
   no-reload rule, and that a failure never reloads.
 * `src/lib/components/__tests__/config-modal-check-updates.unit.svelte.ts` — the About row's three
-  outcomes, the disabled-while-running rule, and the build chip's presence.
+  outcomes and the disabled-while-running rule.
 * `backend/server/version_handler_test.go` — the stamp is read out of the built document, and every
   dist that cannot be named answers `""` with a 200. `routes_method_test.go` holds the verb.
 * `vite build` is the only thing that proves the plugin stamps the document, and the id it wrote is

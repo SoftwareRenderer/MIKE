@@ -14,7 +14,6 @@ func (s *Server) setupRoutes() {
 
 	// Health & auth
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
-	// Session-authed: no reason to tell an anonymous browser what build this install runs.
 	s.mux.HandleFunc("GET /api/version", s.handleVersion)
 	// Rate limit login attempts (5/min per IP by default; MIKE_LOGIN_RATE_LIMIT can
 	// raise or lower it, but no longer turn it off).

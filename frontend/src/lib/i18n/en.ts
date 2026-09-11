@@ -233,7 +233,6 @@ const catalog = {
     'settings.aboutTitle': 'MIKE: Integrated Kanban Environment',
     // Settings → About: the one place the update check speaks. Automatic updates are silent
     // (services/app-update.ts); a check the user started has to answer.
-    'settings.assetsBuildHint': 'The frontend build this page is running',
     'settings.checkUpdates': 'Check for updates',
     'settings.checkUpdatesHint': 'Ask this server whether the browser is still running the current frontend build',
     'settings.checking': 'Checking…',

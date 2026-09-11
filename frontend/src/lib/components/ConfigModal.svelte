@@ -644,8 +644,6 @@
     // Automatic updates are silent; a check this button started has to answer.
     let updateOutcome = $state<UpdateOutcome | null>(null);
     let checkingUpdates = $state(false);
-    // The build of the assets; the chip beside the title is the binary's version, and those move apart.
-    const runningBuildId = document.querySelector('meta[name="app-build"]')?.getAttribute('content') ?? '';
     const updateOutcomeText = $derived(
         updateOutcome === 'current' ? t('settings.upToDate')
             : updateOutcome === 'applying' ? t('settings.updateApplying')
@@ -846,7 +844,7 @@
                 <div class="about-header">
                     <div class="about-icon">{@html pwaIcon}</div>
                     <div>
-                        <h3 class="section-label">{t('settings.aboutTitle')} <span class="about-version">{config?.version || 'dev'}</span>{#if runningBuildId}<span class="about-version" title={t('settings.assetsBuildHint')}>{runningBuildId}</span>{/if}</h3>
+                        <h3 class="section-label">{t('settings.aboutTitle')} <span class="about-version">{config?.version || 'dev'}</span></h3>
                         <p class="about-description">{t('app.copyright', { year: 2026, name: 'Mike Wren' })}</p>
                         <p class="about-description">
                             <a href="https://github.com/SoftwareRenderer" target="_blank" rel="noopener noreferrer">

@@ -188,12 +188,6 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
 - **Shortcuts and UI preferences** ride the shared Settings Save/Cancel flow; `PUT /api/config` replaces
   the whole `keyboard_shortcuts` object, so always send all bindings. `docs/adding-a-preference.md`.
 - **CJK typography is scoped to `:lang()`.** `docs/typography.md`.
-- **The frontend update path is silent, and the worker stays prompt-mode.** One build is named by
-  `<meta name="app-build">` in `dist/index.html`, which the Vite plugin writes and `GET /api/version`
-  reads — never recompute that digest in Go. No `autoUpdate`: the page calls `skipWaiting` itself, only
-  when the app is opened and at most once per local day, and an empty identity answers "cannot tell",
-  never "current". `Settings → About` is the only place the outcome is shown. Mechanism, and the
-  assumptions that make an unasked reload safe: **`docs/frontend-updates.md`**.
 - Chat: never disguise a system message as a user message; streaming cursor only during an active
   response; stats are `X tokens · Ys · Z tok/s` (completion tokens).
 - Diff text is parsed once in `$lib/utils/diff-parser.ts` (pure, unit-tested) and the diff badges come from
