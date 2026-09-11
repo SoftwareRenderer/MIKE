@@ -12,7 +12,7 @@
     import editIcon from '$lib/assets/icons/edit.svg?raw';
     import checkCircleIcon from '$lib/assets/icons/check-circle.svg?raw';
     import questionIcon from '$lib/assets/icons/question.svg?raw';
-    import { formatToolArgs, normalizeEdits, HIDE_ARGS_FOR_TOOLS, SANDBOXABLE_TOOLS, ARGS_MAX_LEN, EDIT_DIFF_MAX_LINES } from '$lib/utils/toolArgs';
+    import { formatToolArgs, rawArgsComplete, streamedPath, normalizeEdits, HIDE_ARGS_FOR_TOOLS, SANDBOXABLE_TOOLS, ARGS_MAX_LEN, EDIT_DIFF_MAX_LINES } from '$lib/utils/toolArgs';
     import type { EditDiffEntry } from '$lib/utils/toolArgs';
     import { formatElapsed, formatDuration } from '$lib/utils/format-time';
     import { formatBytes } from '$lib/utils/format';
@@ -56,9 +56,20 @@
     // Streaming: raw_args is partial JSON. Executing: raw_args is complete JSON (or args.command set).
     let isBashExecuting = $derived(
         tc.toolName === 'bash' && tc.isPending && (
-            !!tc.args.command ||
-            (tc.raw_args && (() => { try { JSON.parse(tc.raw_args); return true; } catch { return false; } })())
+            !!tc.args.command || rawArgsComplete(tc.raw_args)
         )
+    );
+
+    // A pending write_file whose arguments have not all arrived: the model is still generating the
+    // content, so nothing is being written yet.
+    let isWriteGenerating = $derived(
+        tc.toolName === 'write_file' && tc.isPending &&
+        !tc.args.content && !rawArgsComplete(tc.raw_args)
+    );
+
+    // The filename as soon as the tool event or the arguments still arriving carry one.
+    let writeStreamPath = $derived(
+        tc.toolName === 'write_file' ? streamedPath(tc.args, tc.raw_args, tc.path) : ''
     );
 
     // Elapsed time for pending tool calls — updates every second via timer.
@@ -102,11 +113,15 @@
     // that puts them elsewhere can say so. `bash` before its command is complete deliberately
     // falls through to the generic "Writing" branch, exactly as the original condition chain did.
     let progressText = $derived.by(() => {
-        if (elapsedText) return elapsedText;
+        // The elapsed line measures the tool running, so it waits for the tool: while a write is
+        // still generating its content, the filename is what the line has to say.
+        if (elapsedText && !isWriteGenerating) return elapsedText;
         if (tc.toolName === 'request_review') return t('chat.tool.writingSummary');
         if (tc.toolName === 'ask_question') return t('chat.tool.writingQuestion');
         if (tc.toolName === 'edit_file') return t('chat.tool.editing');
-        if (tc.toolName === 'write_file') return t('chat.tool.writingFile');
+        if (tc.toolName === 'write_file') {
+            return writeStreamPath ? t('chat.tool.writingPath', { path: writeStreamPath }) : t('chat.tool.writingFile');
+        }
         if (tc.toolName === 'bash' && isBashExecuting) {
             return tc.path ? t('chat.tool.runningPath', { path: tc.path }) : t('chat.tool.running');
         }

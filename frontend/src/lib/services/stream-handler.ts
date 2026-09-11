@@ -140,7 +140,9 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     const newRawArgs = data.raw_args_delta ? (existing.tc.raw_args || '') + data.raw_args_delta : data.raw_args;
                     existing.tc.raw_args = newRawArgs;
                     existing.tc.sandbox = data.sandbox;
-                    existing.tc.path = data.path;
+                    // A frame that names no file says nothing about which file this is — the one
+                    // already known came from the arguments as they streamed.
+                    if (data.path) existing.tc.path = data.path;
                     if (data.lines_added !== undefined) existing.tc.linesAdded = data.lines_added;
                     if (data.lines_removed !== undefined) existing.tc.linesRemoved = data.lines_removed;
                     pointToolCallRef(s, data.tool_id, existing);
@@ -222,7 +224,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     if (data.bytes_written !== undefined) tc.bytesWritten = data.bytes_written;
                     if (data.lines_added !== undefined) tc.linesAdded = data.lines_added;
                     if (data.lines_removed !== undefined) tc.linesRemoved = data.lines_removed;
-                    if (data.path !== undefined) tc.path = data.path;
+                    if (data.path) tc.path = data.path;
                 };
                 if (data.tool_id) {
                     applyProgress(data.tool_id, s.activeToolCalls.get(data.tool_id)?.toolCall);
