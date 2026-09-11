@@ -12,7 +12,8 @@
     import { dragCarriesFiles } from '$lib/utils/file-drop';
     import { timeAgo } from '$lib/utils/format-time';
     import { resolveBoardLandingColumn } from '$lib/utils/task-utils';
-    import { getBoardCache, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, clearAll } from '$lib/storage';
+    import { resolveLandingProject } from '$lib/utils/project-landing';
+    import { getBoardCache, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, clearAll, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
     import { useBoardArrowNav } from '$lib/composables/use-board-arrow-nav';
@@ -23,6 +24,8 @@
     import { extensionManager } from '$lib/services/extension-manager.svelte';
     import { localeOffer } from '$lib/services/locale-offer.svelte';
     import { sandboxImageStatus } from '$lib/services/sandbox-image-status.svelte';
+    const LAST_PROJECT_KEY = 'lastProjectId';
+
     let TerminalPanelComponent: typeof import('./TerminalPanel.svelte').default | null = $state(null);
     let terminalLoading = $state(false);
     import CreateTaskModal from './CreateTaskModal.svelte';
@@ -333,7 +336,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     });
 
     // Handle browser back/forward
-    function handlePopState() {
+    async function handlePopState() {
         const params = new URLSearchParams(location.search);
         const projectId = params.get('project');
         const taskId = params.get('task');
@@ -348,8 +351,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             (fileSandboxMount && fileParam.startsWith(fileSandboxMount));
         urlFileId = fileParam && fileInBounds ? fileParam : '';
 
-        // If URL has no project param, go back to project list
         if (!projectId && currentProject) {
+            const landing = await landingProject();
+            if (landing) {
+                await selectProject(landing, false);
+                window.dispatchEvent(new CustomEvent('urlchanged'));
+                return;
+            }
             currentProject = null;
             appStore.selectedProject = null;
             tasks = [];
@@ -365,7 +373,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         if (projectId && currentProject && projectId !== currentProject.id) {
             const targetProject = projects.find(p => p.id === projectId);
             if (targetProject) {
-                selectProject(targetProject);
+                await selectProject(targetProject, false);
                 // After board loads, restoreTaskFromUrl will handle the task
                 window.dispatchEvent(new CustomEvent('urlchanged'));
                 return;
@@ -609,13 +617,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             projects = projs || [];
             appStore.projects = projects;
             if (projects.length > 0) {
-                // Check URL for project param to restore previous project
                 const urlParams = new URLSearchParams(location.search);
                 const urlProjectId = urlParams.get('project');
-                const targetProject = urlProjectId
-                    ? projects.find(p => p.id === urlProjectId)
-                    : null;
-                await selectProject(targetProject || projects[0]);
+                const targetProject = (urlProjectId ? projects.find(p => p.id === urlProjectId) : null)
+                    ?? await landingProject();
+                if (targetProject) {
+                    await selectProject(targetProject, false);
+                }
                 // Replay queued actions onto cached board so UI reflects user's last actions
                 tasks = applyQueuedActionsToBoard(tasks);
                 appStore.board = { ...appStore.board!, tasks };
@@ -1007,7 +1015,17 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         uiStore.showCardDetail = false;
     }
 
-    async function selectProject(p: Project) {
+    async function landingProject(): Promise<Project | null> {
+        const last = await loadAppSetting(LAST_PROJECT_KEY, '').catch(() => '');
+        return resolveLandingProject(projects, last);
+    }
+
+    /**
+     * Make `p` the current project. `push` is false where the URL is not a new navigation — the
+     * launch selection and every popstate — so no board-less URL is left under the app for the back
+     * button to land on. In an installed PWA that entry is the launch entry itself.
+     */
+    async function selectProject(p: Project, push = true) {
         disconnectBoardStream();
         const wasExplorerViewOpen = showExplorerViewVal;
         const wasTaskExplorerOpen = showTaskExplorerVal;
@@ -1018,6 +1036,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         if (wasDifferentProject) sandboxImageStatus.clear();
         currentBranch = '';
         appStore.selectedProject = p;
+        saveAppSetting(LAST_PROJECT_KEY, p.id).catch(() => {});
         // Re-mount explorer view for the new project (only on project switch, not initial load)
         if (wasProjectSwitch && wasExplorerViewOpen) {
             showExplorerViewVal = false;
@@ -1032,7 +1051,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         const urlTaskId = new URLSearchParams(location.search).get('task');
         const viewParam = wasExplorerViewOpen ? (urlChangesOpen ? 'review' : 'explorer')
             : (wasTaskExplorerOpen ? (urlChangesOpen ? 'task-review' : 'task-explorer') : null);
-        updateUrl({ project: p.id, task: appStore.selectedTask?.id || urlTaskId, view: viewParam, file: urlFileId || null }, false, true);
+        updateUrl({ project: p.id, task: appStore.selectedTask?.id || urlTaskId, view: viewParam, file: urlFileId || null }, false, push);
         if (wasProjectSwitch && wasExplorerViewOpen) {
             queueMicrotask(() => { showExplorerViewVal = true; });
         }
