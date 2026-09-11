@@ -13,6 +13,7 @@
         hideHints = $bindable(false),
         hideModelBadge = $bindable(false),
         sortOldestFirst = $bindable(false),
+        autoMaximizeChat = $bindable(true),
         onDirty,
     }: {
         createTaskKey?: string | undefined;
@@ -24,6 +25,7 @@
         hideHints?: boolean;
         hideModelBadge?: boolean;
         sortOldestFirst?: boolean;
+        autoMaximizeChat?: boolean;
         onDirty?: () => void;
     } = $props();
 
@@ -257,6 +259,15 @@
         </div>
         <div class="shortcut-controls">
             <ToggleSwitch bind:checked={sortOldestFirst} ariaLabel={t('settings.preferences.oldestFirst')} ariaDescribedby="sort-oldest-first-desc" onChange={() => onDirty?.()} />
+        </div>
+    </div>
+    <div class="shortcut-row">
+        <div class="shortcut-info">
+            <span class="shortcut-name">{t('settings.preferences.autoMaximizeChat')}</span>
+            <span id="auto-maximize-chat-desc" class="shortcut-desc">{t('settings.preferences.autoMaximizeChatDesc')}</span>
+        </div>
+        <div class="shortcut-controls">
+            <ToggleSwitch bind:checked={autoMaximizeChat} ariaLabel={t('settings.preferences.autoMaximizeChat')} ariaDescribedby="auto-maximize-chat-desc" onChange={() => onDirty?.()} />
         </div>
     </div>
 </section>

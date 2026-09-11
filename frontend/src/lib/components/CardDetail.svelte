@@ -7,6 +7,7 @@
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile, toDiffFiles } from '$lib/api';
     import { enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
     import { shouldAutoFullscreenDiffEditor } from '$lib/utils/diff-editor-layout';
+    import { chatBlurState, chatCollapseState, chatFocusState, chatManualToggleState, type ChatAutoMaximizeRules, type ChatMaximizeState } from '$lib/utils/chat-auto-maximize';
     import { filterTopLevelTaskIds } from '$lib/utils/task-utils';
     import { clearHighlightCache } from '$lib/highlighter';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
@@ -181,7 +182,7 @@
     // Diff viewer fullscreen
     let diffFullscreen = $state(false);
     // Chat fullscreen
-    let chatFullscreen = $state(false);
+    let chatMaximize = $state<ChatMaximizeState>({ fullscreen: false, autoMaximized: false });
 
     function toggleEditorFullscreen() {
         editorFullscreen = !editorFullscreen;
@@ -192,7 +193,7 @@
     }
 
     function toggleChatFullscreen() {
-        chatFullscreen = !chatFullscreen;
+        chatMaximize = chatManualToggleState(chatMaximize);
     }
 
     function resolveFilePath(relativePath: string): string | null {
@@ -399,6 +400,22 @@
     // Floating mode reuses the mobile single-column layout.
     const mobile = $derived(floating || isMobileCtx.isMobile);
 
+    // The floating window floats over the board, so it keeps its own size even though
+    // it shares the mobile layout.
+    const chatAutoMaximizeRules = $derived<ChatAutoMaximizeRules>({
+        enabled: appStore.config?.auto_maximize_chat_mobile !== false,
+        isMobile: isMobileCtx.isMobile,
+        floating,
+    });
+
+    function handleChatInputFocus() {
+        chatMaximize = chatFocusState(chatAutoMaximizeRules, chatMaximize);
+    }
+
+    function handleChatInputBlur() {
+        chatMaximize = chatBlurState(chatMaximize);
+    }
+
     // Subtask hierarchy (extracted composable)
     let hierarchy = useSubtaskHierarchy(() => allTasks, expandedTasksContext, () => task.parent_task_id);
 
@@ -571,8 +588,8 @@
                 if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
                 if (diffFullscreen) {
                     diffFullscreen = false;
-                } else if (chatFullscreen) {
-                    chatFullscreen = false;
+                } else if (chatMaximize.fullscreen) {
+                    chatMaximize = chatCollapseState();
                 } else if (checkpointDiffOpen) {
                     closeCheckpointDiff();
                 } else if (multiSelect.hasSelection) {
@@ -665,7 +682,7 @@
                     blocked: isBlocked(),
                     editingFile: !!editingFile,
                     diffFullscreen,
-                    chatFullscreen,
+                    chatFullscreen: chatMaximize.fullscreen,
                     isEditable: active instanceof HTMLElement && isEditableTarget(active),
                 })) return;
                 if (!detailEl) return;
@@ -881,7 +898,7 @@
 
 </script>
 
-    <div class="task-detail-page" class:floating={floating} class:fullscreen={editorFullscreen || diffFullscreen} class:chat-fullscreen={chatFullscreen} bind:this={detailEl} tabindex="-1" aria-label="Task detail">
+    <div class="task-detail-page" class:floating={floating} class:fullscreen={editorFullscreen || diffFullscreen} class:chat-fullscreen={chatMaximize.fullscreen} bind:this={detailEl} tabindex="-1" aria-label="Task detail">
         <!-- Header -->
         <TaskHeader
             {workspaceDir}
@@ -954,7 +971,9 @@
                             taskSummarizing={task.summarizing}
                             hasStagedChanges={hasStagedChanges}
                             onToggleFullscreen={toggleChatFullscreen}
-                            isChatFullscreen={chatFullscreen}
+                            isChatFullscreen={chatMaximize.fullscreen}
+                            onChatInputFocus={handleChatInputFocus}
+                            onChatInputBlur={handleChatInputBlur}
                             onRefreshDiff={(data) => {
                                 // Skip update while loadDiff() is in progress to prevent
                                 // WS diff_changed events from overwriting the cache with

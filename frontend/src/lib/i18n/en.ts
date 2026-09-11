@@ -283,6 +283,8 @@ const catalog = {
     'settings.preferences.hideModelBadgeDesc': 'Hide the model badge shown on task cards',
     'settings.preferences.oldestFirst': 'Oldest Task on top',
     'settings.preferences.oldestFirstDesc': 'Put the least recently moved task at the top of each column',
+    'settings.preferences.autoMaximizeChat': 'Auto maximize chat visibility on mobile',
+    'settings.preferences.autoMaximizeChatDesc': 'Maximize the chat panel while the chat input has focus',
 
     // ── ConfigModal/TaskDefaults.svelte ──
     // autoMergeDesc is split around the inline branch badge; the halves keep their spaces.

@@ -237,6 +237,7 @@ export interface Config {
     hide_model_badge?: boolean; // hide the model badge on task cards
     run_siblings_parallel?: boolean; // start all of a parent's subtasks at once (default off)
     sort_oldest_first?: boolean; // put the least recently moved card on top of a column (default off)
+    auto_maximize_chat_mobile?: boolean; // maximize the chat while its input has focus (default on)
     encryption_enabled?: boolean;
     tls_ca_available?: boolean; // server runs its own cert signed by its local CA → GET /api/tls/ca offers it
     keyboard_shortcuts?: KeyboardShortcuts;

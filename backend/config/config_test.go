@@ -101,6 +101,12 @@ func TestUIFlagPreferences(t *testing.T) {
 			set:  func(c *types.Config, v *bool) { c.SortOldestFirst = v },
 			get:  func(c *types.Config) *bool { return c.SortOldestFirst },
 		},
+		{
+			// The client default is ON, so a stored false is the only thing that turns it off.
+			name: "auto_maximize_chat_mobile",
+			set:  func(c *types.Config, v *bool) { c.AutoMaximizeChatMobile = v },
+			get:  func(c *types.Config) *bool { return c.AutoMaximizeChatMobile },
+		},
 	}
 
 	for _, f := range flags {

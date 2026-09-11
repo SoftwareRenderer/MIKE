@@ -50,6 +50,11 @@ Example in-repo: `hide_model_badge` gates `.model-badge` in `Card.svelte`
 4. Toggle row in `ConfigModal/PreferencesTab.svelte` (UI section).
 5. Consume from `appStore.config` in the target component.
 
+**A flag that is on by default** (`auto_maximize_chat_mobile`) is the same plumbing read the other
+way: nil means on, so the client consumes `!== false`, hydrates `!== false` and defaults the tab
+prop to `true`. Only a stored `false` turns it off — which is why the round-trip row that catches
+its regression is the explicit-false one, not the unset one.
+
 **Tests to add/update:** `backend/config/config_test.go` (round-trip + omitted-when-nil),
 `preferences-tab.unit.svelte.ts`, a component test for the gated widget (e.g.
 `card-model-badge.unit.svelte.ts`), e2e `preferences-hide-model-badge.spec.ts` (isolated).

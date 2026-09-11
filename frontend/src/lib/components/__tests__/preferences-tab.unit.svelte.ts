@@ -97,6 +97,35 @@ describe('PreferencesTab hide-model-badge toggle', () => {
     });
 });
 
+describe('PreferencesTab auto-maximize-chat toggle', () => {
+    const TOGGLE = 'button[aria-label="Auto maximize chat visibility on mobile"]';
+
+    function renderAutoMaximizeTab(props: { autoMaximizeChat?: boolean } = {}) {
+        const onDirty = vi.fn();
+        const utils = render(PreferencesTab, {
+            props: { createTaskKey: undefined, createTaskSubmitKey: undefined, onDirty, ...props },
+        });
+        return { ...utils, onDirty, toggle: () => utils.container.querySelector(TOGGLE) as HTMLButtonElement };
+    }
+
+    it('is on when nothing is stored for it', () => {
+        const { toggle } = renderAutoMaximizeTab();
+        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('reflects a stored false', () => {
+        const { toggle } = renderAutoMaximizeTab({ autoMaximizeChat: false });
+        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
+    });
+
+    it('toggles and reports dirty', async () => {
+        const { toggle, onDirty } = renderAutoMaximizeTab();
+        await fireEvent.click(toggle()!);
+        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
+        expect(onDirty).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe('PreferencesTab create-task row', () => {
     it('shows the default key "C" when no binding is stored', () => {
         const { create } = renderTab();

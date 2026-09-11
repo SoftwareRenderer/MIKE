@@ -29,7 +29,7 @@
     import ReviewBar from './ReviewBar.svelte';
     import StartPanel from './StartPanel.svelte';
 
-    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', disabled = false, taskSummarizing = false, hasStagedChanges: hasStagedChangesProp, onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff, onToggleFullscreen, isChatFullscreen }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; taskExecutionState?: string; disabled?: boolean; taskSummarizing?: boolean; hasStagedChanges?: boolean; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void; onToggleFullscreen?: () => void; isChatFullscreen?: boolean } = $props();
+    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', disabled = false, taskSummarizing = false, hasStagedChanges: hasStagedChangesProp, onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff, onToggleFullscreen, isChatFullscreen, onChatInputFocus, onChatInputBlur }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; taskExecutionState?: string; disabled?: boolean; taskSummarizing?: boolean; hasStagedChanges?: boolean; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void; onToggleFullscreen?: () => void; isChatFullscreen?: boolean; /** Focus entered / left the chat form — the owner of the maximize decides what that means. */ onChatInputFocus?: () => void; onChatInputBlur?: () => void } = $props();
 
     let connected = $state(false);
     let connecting = $state(true);
@@ -1461,6 +1461,8 @@
             projectId={projectId}
             taskId={taskId}
             onInput={handleInputSave}
+            onInputFocus={onChatInputFocus}
+            onInputBlur={onChatInputBlur}
             onClearDraft={handleClearDraft}
             onSubmit={handleSend}
             onStop={handleStop}

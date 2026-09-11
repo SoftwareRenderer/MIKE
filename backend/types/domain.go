@@ -102,8 +102,11 @@ type Config struct {
 	RunSiblingsParallel *bool `json:"run_siblings_parallel,omitempty"`
 	// SortOldestFirst puts the least recently moved card at the top of a board
 	// column. Nil = off (newest move on top, the default).
-	SortOldestFirst   *bool              `json:"sort_oldest_first,omitempty"`
-	KeyboardShortcuts *KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
+	SortOldestFirst *bool `json:"sort_oldest_first,omitempty"`
+	// AutoMaximizeChatMobile maximizes the task chat while its input holds focus on
+	// the mobile layout. Nil = on (default).
+	AutoMaximizeChatMobile *bool              `json:"auto_maximize_chat_mobile,omitempty"`
+	KeyboardShortcuts      *KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
 }
 
 // KeyboardShortcuts holds user-customizable keyboard shortcut bindings.

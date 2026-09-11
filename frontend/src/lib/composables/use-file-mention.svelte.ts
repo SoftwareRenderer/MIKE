@@ -39,6 +39,11 @@ export class FileMention {
         this.opts = opts;
     }
 
+    /** The suggestion list is on screen. It holds focus while a row is tapped, then hands it back. */
+    get isOpen(): boolean {
+        return this.position !== null && this.results.length > 0;
+    }
+
     /** Call from the textarea's `oninput`. Detects a trigger and searches. */
     handleInput() {
         const textarea = this.opts.getTextarea();

@@ -47,6 +47,7 @@
     let keyboardHideHints = $state(false);
     let hideModelBadge = $state(false);
     let sortOldestFirst = $state(false);
+    let autoMaximizeChat = $state(true);
     let loading = $state(false);
     let error = $state('');
 
@@ -225,6 +226,7 @@
             keyboardHideHints = config.keyboard_shortcuts?.hide_hints === true;
             hideModelBadge = config.hide_model_badge === true;
             sortOldestFirst = config.sort_oldest_first === true;
+            autoMaximizeChat = config.auto_maximize_chat_mobile !== false;
             providers = buildProviders(config);
             hasChanges = false;
             agentRows = agentRowSignature(config);
@@ -578,6 +580,7 @@
                 run_siblings_parallel: runSiblingsParallel,
                 hide_model_badge: hideModelBadge,
                 sort_oldest_first: sortOldestFirst,
+                auto_maximize_chat_mobile: autoMaximizeChat,
                 keyboard_shortcuts: { create_task: keyboardCreateTask, create_task_submit: keyboardCreateTaskSubmit, open_terminal: keyboardOpenTerminal, start_task: keyboardStartTask, toggle_fullscreen: keyboardToggleFullscreen, multi_select_click: keyboardMultiSelectClick, hide_hints: keyboardHideHints },
             } as Config);
             appStore.config = cfg;
@@ -806,7 +809,7 @@
 
         <!-- Preferences Tab -->
         {#if activeTab === 'preferences'}
-            <PreferencesTab bind:createTaskKey={keyboardCreateTask} bind:createTaskSubmitKey={keyboardCreateTaskSubmit} bind:openTerminalKey={keyboardOpenTerminal} bind:startTaskKey={keyboardStartTask} bind:toggleFullscreenKey={keyboardToggleFullscreen} bind:multiSelectClickKey={keyboardMultiSelectClick} bind:hideHints={keyboardHideHints} bind:hideModelBadge={hideModelBadge} bind:sortOldestFirst={sortOldestFirst} onDirty={markDirty} />
+            <PreferencesTab bind:createTaskKey={keyboardCreateTask} bind:createTaskSubmitKey={keyboardCreateTaskSubmit} bind:openTerminalKey={keyboardOpenTerminal} bind:startTaskKey={keyboardStartTask} bind:toggleFullscreenKey={keyboardToggleFullscreen} bind:multiSelectClickKey={keyboardMultiSelectClick} bind:hideHints={keyboardHideHints} bind:hideModelBadge={hideModelBadge} bind:sortOldestFirst={sortOldestFirst} bind:autoMaximizeChat={autoMaximizeChat} onDirty={markDirty} />
         {/if}
 
         <!-- Extensions Tab -->

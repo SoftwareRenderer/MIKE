@@ -289,6 +289,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	hideModelBadgeRaw, _ := cs.db.GetConfigValue("hide_model_badge")
 	runSiblingsParallelRaw, _ := cs.db.GetConfigValue("run_siblings_parallel")
 	sortOldestFirstRaw, _ := cs.db.GetConfigValue("sort_oldest_first")
+	autoMaximizeChatMobileRaw, _ := cs.db.GetConfigValue("auto_maximize_chat_mobile")
 	keyboardShortcutsRaw, _ := cs.db.GetConfigValue("keyboard_shortcuts")
 
 	cfg := &types.Config{
@@ -341,6 +342,9 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	}
 	if v, err := parseBoolPtr(sortOldestFirstRaw); err == nil && v != nil {
 		cfg.SortOldestFirst = v
+	}
+	if v, err := parseBoolPtr(autoMaximizeChatMobileRaw); err == nil && v != nil {
+		cfg.AutoMaximizeChatMobile = v
 	}
 	cfg.KeyboardShortcuts = normalizeKeyboardShortcuts(cfg.KeyboardShortcuts)
 	return cfg, nil
@@ -441,6 +445,11 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			return err
 		}
 	}
+	if c.AutoMaximizeChatMobile != nil {
+		if err := cs.db.SetConfigValue("auto_maximize_chat_mobile", fmt.Sprintf("%t", *c.AutoMaximizeChatMobile)); err != nil {
+			return err
+		}
+	}
 	if c.SortOldestFirst != nil {
 		if err := cs.db.SetConfigValue("sort_oldest_first", fmt.Sprintf("%t", *c.SortOldestFirst)); err != nil {
 			return err
@@ -477,6 +486,7 @@ type configResponse struct {
 	HideModelBadge                *bool                    `json:"hide_model_badge,omitempty"`
 	RunSiblingsParallel           *bool                    `json:"run_siblings_parallel,omitempty"`
 	SortOldestFirst               *bool                    `json:"sort_oldest_first,omitempty"`
+	AutoMaximizeChatMobile        *bool                    `json:"auto_maximize_chat_mobile,omitempty"`
 	KeyboardShortcuts             *types.KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
 	EncryptionEnabled             bool                     `json:"encryption_enabled"`
 	// TLSCAAvailable tells the UI to offer the CA download (GET /api/tls/ca). The
@@ -554,6 +564,7 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		HideModelBadge:                cfg.HideModelBadge,
 		RunSiblingsParallel:           cfg.RunSiblingsParallel,
 		SortOldestFirst:               cfg.SortOldestFirst,
+		AutoMaximizeChatMobile:        cfg.AutoMaximizeChatMobile,
 		KeyboardShortcuts:             normalizeKeyboardShortcuts(cfg.KeyboardShortcuts),
 		EncryptionEnabled:             crypto.IsEnabled(),
 		TLSCAAvailable:                cs.tlsCAAvailable,
@@ -605,6 +616,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		current.HideModelBadge = updates.boolPtrOr("hide_model_badge", current.HideModelBadge)
 		current.RunSiblingsParallel = updates.boolPtrOr("run_siblings_parallel", current.RunSiblingsParallel)
 		current.SortOldestFirst = updates.boolPtrOr("sort_oldest_first", current.SortOldestFirst)
+		current.AutoMaximizeChatMobile = updates.boolPtrOr("auto_maximize_chat_mobile", current.AutoMaximizeChatMobile)
 		current.DefaultMaxFailedTurns = updates.intPtrOr("default_max_failed_turns", current.DefaultMaxFailedTurns)
 		current.DefaultAutoSummarizeThreshold = updates.intPtrOr("default_auto_summarize_threshold", current.DefaultAutoSummarizeThreshold)
 		if threshold := current.DefaultAutoSummarizeThreshold; threshold != nil {

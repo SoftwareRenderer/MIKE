@@ -36,6 +36,13 @@
         onSummarizeCancel?: () => void;
         isSummarizing?: boolean;
         onInput?: (value: string) => void;
+        /**
+         * Focus entered / left the chat form as a whole — one call each way. The sender is
+         * the form (input, attach, send, model bar), not the textarea alone. See
+         * handleFormFocusOut.
+         */
+        onInputFocus?: () => void;
+        onInputBlur?: () => void;
     }
 
     let {
@@ -63,6 +70,8 @@
         isSummarizing = false,
         onInput,
         onClearDraft,
+        onInputFocus,
+        onInputBlur,
     }: Props = $props();
     let canSend = $derived((value.trim().length > 0 || attachments.length > 0) && !disabled && !(providers.length > 0 && !selectedModel));
     let isAgent = $derived(selectedUrl.startsWith(AGENT_URL_PREFIX));
@@ -80,6 +89,7 @@
 
     let textareaEl: HTMLTextAreaElement | undefined;
     let fileInputEl: HTMLInputElement | undefined;
+    let formEl: HTMLFormElement | undefined;
 
     // @ file mention — shared state machine (see use-file-mention.svelte.ts)
     const mention = useFileMention({
@@ -115,6 +125,24 @@
         if (textareaEl) {
             textareaEl.scrollIntoView({ block: 'end', behavior: 'instant' });
         }
+    }
+
+    function handleFormFocusIn(e: FocusEvent) {
+        const from = e.relatedTarget as Node | null;
+        if (from && formEl?.contains(from)) return;
+        onInputFocus?.();
+    }
+
+    /**
+     * Focus leaving the chat form for good. Landing on one of the form's own controls is
+     * a move, and so is the @ mention list: it renders outside the form and hands focus
+     * back to the textarea as soon as a row is picked.
+     */
+    function handleFormFocusOut(e: FocusEvent) {
+        const next = e.relatedTarget as Node | null;
+        if (next && formEl?.contains(next)) return;
+        if (mention.isOpen) return;
+        onInputBlur?.();
     }
 
     /**
@@ -187,7 +215,7 @@
 
     </script>
 
-<form class="chat-form" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+<form class="chat-form" bind:this={formEl} onfocusin={handleFormFocusIn} onfocusout={handleFormFocusOut} onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
     <!-- Model selector bar -->
     {#if showModelSelector}
         <div class="model-bar">
