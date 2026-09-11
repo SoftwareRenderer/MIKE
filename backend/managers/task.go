@@ -365,9 +365,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			httputil.Fail(w, err, "get task", "task not found")
 			return
 		}
-		h.broadcastTaskDeleted(projectID, taskID)
-		h.cleanupTask(taskID)
-		h.boardStreamMgr.Broadcast(projectID)
+		h.deleteTaskTrees(projectID, taskID)
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		httputil.MethodNotAllowed(w)
@@ -384,7 +382,7 @@ func (h *TaskHandler) HandleClearDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var deleted int
+	var cleared []string
 	for _, task := range tasks {
 		if task.Status != types.StatusDone {
 			continue
@@ -396,13 +394,11 @@ func (h *TaskHandler) HandleClearDone(w http.ResponseWriter, r *http.Request) {
 			logging.For(logging.Managers).With(logging.TaskID, taskID).Infof("not cleared: %d descendant(s) still unfinished", unfinished)
 			continue
 		}
-		h.broadcastTaskDeleted(projectID, taskID)
-		h.cleanupTask(taskID)
-		deleted++
+		cleared = append(cleared, taskID)
 	}
 
-	h.boardStreamMgr.Broadcast(projectID)
-	httputil.JSONResponse(w, http.StatusOK, map[string]any{"deleted": deleted})
+	h.deleteTaskTrees(projectID, cleared...)
+	httputil.JSONResponse(w, http.StatusOK, map[string]any{"deleted": len(cleared)})
 }
 
 // HandleMove moves a task to a different column.
@@ -1001,29 +997,48 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
+// taskTreeDeleter is the normal task-delete path, handed to the project handler so a project's
+// deletion is its tasks' deletions.
+type taskTreeDeleter interface {
+	deleteTaskTrees(projectID string, taskIDs ...string)
+}
+
+// deleteTaskTrees is the whole of deleting a task: the deleted-events, the teardown of each task in the
+// subtree, then one prune and one board broadcast for the batch. Every task deletion goes through here,
+// so a caller cannot report a deletion without carrying out its teardown.
+func (h *TaskHandler) deleteTaskTrees(projectID string, taskIDs ...string) {
+	for _, taskID := range taskIDs {
+		// Read before anything is deleted: the descendants go with their root by CASCADE, so a list
+		// taken afterwards would answer empty.
+		descendants, _ := h.store.GetAllDescendants(taskID)
+		h.broadcastTaskDeleted(projectID, taskID, descendants)
+		h.cleanupTask(taskID, descendants)
+	}
+	// Once for the batch, not once per task: PruneOrphanedBranches scans the whole project (three table
+	// reads plus a git run) and sees the branches the batch orphaned only once all of its rows are gone.
+	if len(taskIDs) > 0 && h.worktreeMgr != nil {
+		h.worktreeMgr.PruneOrphanedBranches(projectID)
+	}
+	h.boardStreamMgr.Broadcast(projectID)
+}
+
 // broadcastTaskDeleted sends a task_deleted event for the given task and all its descendants.
-func (h *TaskHandler) broadcastTaskDeleted(projectID, taskID string) {
+func (h *TaskHandler) broadcastTaskDeleted(projectID, taskID string, descendants []types.Task) {
 	if h.boardStreamMgr == nil {
 		return
 	}
-	// Collect all descendants first
-	descendants, _ := h.store.GetAllDescendants(taskID)
 	for _, d := range descendants {
 		h.boardStreamMgr.BroadcastTaskDeleted(projectID, d.ID)
 	}
 	h.boardStreamMgr.BroadcastTaskDeleted(projectID, taskID)
 }
 
-// cleanupTask performs all cleanup steps for a deleted task,
-// including recursively cleaning up all descendant subtasks.
-func (h *TaskHandler) cleanupTask(taskID string) {
-	// Collect all descendants first (before any deletions)
-	descendants, _ := h.store.GetAllDescendants(taskID)
-	// Clean up descendants deep-first (reverse order ensures children before parents)
+// cleanupTask tears down a deleted task and the descendants the caller read beforehand.
+func (h *TaskHandler) cleanupTask(taskID string, descendants []types.Task) {
+	// Reverse of the depth-first order: subtasks before their parent.
 	for i := len(descendants) - 1; i >= 0; i-- {
 		h.cleanupSingleTask(descendants[i].ID)
 	}
-	// Clean up the parent task last
 	h.cleanupSingleTask(taskID)
 }
 
@@ -1052,17 +1067,10 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 	h.terminalMgr.RemoveSession(taskID)
 	// Drop the cached done-task diff snapshot (the FK cascade is a backstop).
 	_ = h.store.DeleteTaskDiffSnapshot(taskID)
-	// Delete from database - find project first
 	var projectID string
 	if taskErr == nil {
 		projectID = task.ProjectID
-		_ = h.store.DeleteTask(task.ProjectID, taskID)
-	} else {
-		task, taskErr = h.store.GetTaskByID(taskID)
-		if taskErr == nil {
-			projectID = task.ProjectID
-			_ = h.store.DeleteTask(task.ProjectID, taskID)
-		}
+		_ = h.store.DeleteTask(projectID, taskID)
 	}
 	// Clean up stash entries for all branches associated with this task.
 	// A task may have stashes on its original branch (task/<taskID>), its current
@@ -1087,12 +1095,6 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 		for _, branch := range branchesToClean {
 			_ = h.worktreeMgr.DropStashEntriesForBranch(projectID, branch)
 		}
-	}
-	// Prune any orphaned git branches (task/*, thread/*) that no longer have
-	// matching entries in the database after the task and its CASCADE-deleted
-	// threads/messages are removed.
-	if h.worktreeMgr != nil && projectID != "" {
-		h.worktreeMgr.PruneOrphanedBranches(projectID)
 	}
 }
 

@@ -33,8 +33,9 @@ type ProjectHandler struct {
 	configStore *config.ConfigStore
 	worktreeMgr *git.WorktreeManager
 	terminalMgr *term.TerminalManager
-	sandboxMgr  *sandbox.SandboxManager
+	sandboxMgr  projectSandboxOps
 	executor    *exec.TaskExecutor
+	tasks       taskTreeDeleter
 	// hostRoot is the jail the file endpoints use, injected so "which directories did the
 	// operator declare" has one answer. A nil policy fails closed: nothing is inside a jail
 	// with no roots.
@@ -45,8 +46,15 @@ type ProjectHandler struct {
 	dangerZone sandbox.DangerZone
 }
 
-func NewProjectHandler(store *store.Store, configStore *config.ConfigStore, worktreeMgr *git.WorktreeManager, terminalMgr *term.TerminalManager, sandboxMgr *sandbox.SandboxManager, taskExecutor *exec.TaskExecutor, hostRoot *fsutil.HostRoot, dangerZone sandbox.DangerZone) *ProjectHandler {
-	return &ProjectHandler{store: store, configStore: configStore, worktreeMgr: worktreeMgr, terminalMgr: terminalMgr, sandboxMgr: sandboxMgr, executor: taskExecutor, hostRoot: hostRoot, dangerZone: dangerZone}
+// projectSandboxOps is the sandbox work a project owns rather than a task. These are the only two
+// methods ProjectHandler calls, so a test can check that the containers were stopped.
+type projectSandboxOps interface {
+	BuildImageWithOptions(projectName, dockerfilePath string, opts sandbox.BuildOptions, onProgress func(line string)) error
+	StopProjectContainers(projectID string, taskIDs []string)
+}
+
+func NewProjectHandler(store *store.Store, configStore *config.ConfigStore, worktreeMgr *git.WorktreeManager, terminalMgr *term.TerminalManager, sandboxMgr projectSandboxOps, taskExecutor *exec.TaskExecutor, hostRoot *fsutil.HostRoot, dangerZone sandbox.DangerZone, tasks taskTreeDeleter) *ProjectHandler {
+	return &ProjectHandler{store: store, configStore: configStore, worktreeMgr: worktreeMgr, terminalMgr: terminalMgr, sandboxMgr: sandboxMgr, executor: taskExecutor, hostRoot: hostRoot, dangerZone: dangerZone, tasks: tasks}
 }
 
 // HandleList returns all projects.
@@ -518,17 +526,7 @@ func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Stop all containers and terminal sessions so they pick up the new image
-	tasks, _ := h.store.GetTasksByProject(id)
-	taskIDs := make([]string, 0, len(tasks))
-	for _, task := range tasks {
-		taskIDs = append(taskIDs, task.ID)
-	}
-	if h.sandboxMgr != nil {
-		h.sandboxMgr.StopProjectContainers(id, taskIDs)
-	}
-	if h.terminalMgr != nil {
-		h.terminalMgr.RemoveProjectSessions(id)
-	}
+	h.stopProjectSandbox(id)
 
 	// Final result as JSON
 	result, _ := json.Marshal(map[string]string{
@@ -658,21 +656,9 @@ func (h *ProjectHandler) handleUpdateProject(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// When sandbox settings change, stop all containers so they'll be
-	// When sandbox settings change, stop all containers so they'll be
-	// recreated with the new settings on next use.
+	// Containers and sessions are recreated with the new settings on next use.
 	if hasSandboxChange {
-		tasks, _ := h.store.GetTasksByProject(id)
-		taskIDs := make([]string, 0, len(tasks))
-		for _, task := range tasks {
-			taskIDs = append(taskIDs, task.ID)
-		}
-		if h.sandboxMgr != nil {
-			h.sandboxMgr.StopProjectContainers(id, taskIDs)
-		}
-		if h.terminalMgr != nil {
-			h.terminalMgr.RemoveProjectSessions(id)
-		}
+		h.stopProjectSandbox(id)
 	}
 	// Fetch latest state
 	p, err := h.store.GetProject(id)
@@ -740,40 +726,45 @@ func (h *ProjectHandler) applySandboxFields(id string, req types.UpdateProjectRe
 	return nil
 }
 
-// handleDeleteProject removes the checkout, the branches and the sessions before the row, not after: a
-// project whose row is gone but whose worktree directory remains is a directory no route can reach again.
+// stopProjectSandbox stops a project's own sandbox container and its terminal sessions. Both are
+// needed: that container is keyed "proj:"+projectID, and a file-browser listing creates it with no
+// task and no terminal open, so closing sessions alone leaves it running on the project's checkout.
+func (h *ProjectHandler) stopProjectSandbox(projectID string) {
+	tasks, _ := h.store.GetTasksByProject(projectID)
+	taskIDs := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		taskIDs = append(taskIDs, task.ID)
+	}
+	if h.sandboxMgr != nil {
+		h.sandboxMgr.StopProjectContainers(projectID, taskIDs)
+	}
+	if h.terminalMgr != nil {
+		h.terminalMgr.RemoveProjectSessions(projectID)
+	}
+}
+
+// handleDeleteProject deletes a project by deleting its tasks, so each task's executor, sandbox
+// container and uploaded files go before its row does. Nothing removes a container once its task row is
+// gone: the startup sweep skips containers that are running.
 func (h *ProjectHandler) handleDeleteProject(w http.ResponseWriter, r *http.Request, id string) {
-	// Clean up worktrees and terminal sessions for all tasks before deleting the project
 	tasks, err := h.store.GetTasksByProject(id)
 	if err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, "failed to list tasks for cleanup")
 		return
 	}
-	for _, task := range tasks {
-		if h.worktreeMgr != nil && task.Branch != "" {
-			_ = h.worktreeMgr.RemoveWorktree(id, task.ID, task.Branch)
-			// Clean up fork thread branches (thread/<threadID>)
-			threads, _ := h.store.GetThreadsByTask(task.ID)
-			for _, th := range threads {
-				if th.GitBranch != "" {
-					h.worktreeMgr.GitRunInProject(id, "branch", "-D", th.GitBranch)
-				}
-			}
-		}
-		if h.terminalMgr != nil {
-			h.terminalMgr.RemoveSession(task.ID)
-		}
+	if h.tasks == nil {
+		// Nothing else reports this: the project row is deleted and its tasks' containers keep running.
+		logging.For(logging.Managers).Warnf("project %s deleted with no task delete path wired: %d task(s) not torn down", id, len(tasks))
+	} else if roots := rootTaskIDs(tasks); len(roots) > 0 {
+		h.tasks.deleteTaskTrees(id, roots...)
 	}
-	// Clean up project-level terminal session
-	if h.terminalMgr != nil {
-		h.terminalMgr.RemoveSession("proj:" + id)
-	}
-	// Clean up any project-level worktree directory (safety check)
+	// Deleting the tasks does not cover what belongs to the project itself: its sandbox container, its
+	// terminal session, and its worktree directory. The directory is removed again here because a task
+	// whose worktree removal failed would otherwise leave it behind.
+	h.stopProjectSandbox(id)
 	if h.worktreeMgr != nil {
-		cfg, cfgErr := h.configStore.GetConfig()
-		if cfgErr == nil {
-			worktreesDir := cfg.WorkspaceDir
-			_ = os.RemoveAll(filepath.Join(worktreesDir, id))
+		if err := h.worktreeMgr.RemoveProjectWorktrees(id); err != nil {
+			logging.For(logging.Managers).Warnf("project %s: worktree directory cleanup failed: %v", id, err)
 		}
 	}
 	if err := h.store.DeleteProject(id); err != nil {
@@ -781,6 +772,18 @@ func (h *ProjectHandler) handleDeleteProject(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// rootTaskIDs returns the tasks whose deletion covers the whole set. Deleting a task deletes its
+// subtree, and parent_task_id is a foreign key, so every parent is a row in the same list.
+func rootTaskIDs(tasks []types.Task) []string {
+	var roots []string
+	for _, t := range tasks {
+		if t.ParentTaskID == "" {
+			roots = append(roots, t.ID)
+		}
+	}
+	return roots
 }
 
 // validateGitCloneURL validates a clone source before it reaches `git clone`.

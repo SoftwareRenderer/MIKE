@@ -103,15 +103,21 @@ actions run** and answers with the path the message then names:
   impossible by construction instead of resolved after the fact.
 - **The guest is not cancellable**, so the handler waits for the answer (`context.WithoutCancel`,
   bounded by `writeTaskFileTimeout`) rather than dropping a write that completes anyway.
-- **The file's lifetime is the container's.** The guest's `/tmp` is a tmpfs, the container is
-  removed when the task is deleted (`StopSandbox`) and `kanban-sandbox-*` families are swept at
-  boot; the host directories are removed from the same `StopSandbox`. A message naming an upload
-  can therefore outlive its bytes — which is what choosing the task's own environment as the
-  destination means, and is why the message says what the path is rather than promising it forever.
+- **The file's lifetime is the container's.** The guest's `/tmp` is a tmpfs, and the container is
+  removed when its task is deleted or marked done (`StopSandbox`) — and when its **project** is
+  deleted, because deleting a project deletes its tasks (`TaskHandler.deleteTaskTrees`) rather than
+  only their rows; the host directories are removed from the same `StopSandbox`. The startup sweep is
+  not the backstop: `staleContainerNames` keeps *running* containers, so a container that outlives
+  its task's row has nothing left that would ever remove it. A message naming an upload can therefore
+  outlive its bytes — which is what choosing the task's own environment as the destination means, and
+  is why the message says what the path is rather than promising it forever.
 
 Tests: `backend/exec/task_files_test.go` (where the bytes land, the name rule, no host fallback),
 `backend/server/handler_task_upload_test.go` (verbs, CSRF, 413/400/404/200, the path answered is
-the path written), `pkg/bridge/agent/write_bytes_test.go` (the bytes that land are the bytes sent).
+the path written), `pkg/bridge/agent/write_bytes_test.go` (the bytes that land are the bytes sent),
+`backend/server/project_delete_teardown_test.go` (a deleted project releases each task's worktree
+and upload directory), `backend/sandbox/stop_retry_test.go` (a container that refused `podman rm`
+stays tracked, so a later stop can still remove it).
 
 ## Invariants to preserve (moved from AGENTS.md)
 Invariants to preserve (the why, and the open work, are in `docs/sandbox-bridge.md`):
@@ -126,3 +132,24 @@ Invariants to preserve (the why, and the open work, are in `docs/sandbox-bridge.
 - **A streamed answer is never partial.** The readLoop closes `chunkCh` before dispatching the Result, and `waitForCtx` drains what is still queued before taking it — taking the answer on its own returned a random prefix of the stream as a success. A chunk that cannot be queued fails the request (`ErrStreamOverflow`) rather than being dropped, because `ReadFile` cannot tell a short body from a complete one.
 - The only `-p` publishing on a sandbox container is **user-configured** forwarded ports (`forwardPortSpec` passes the entry's bind address through; see "Why the bridge never gets a port"), never the bridge; container ports outside 1-65535 are skipped.
 - **Build:** `make bridge` — `CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o sandbox/sandbox-bridge ./pkg/bridge/agent`. The artifact is **committed**, and it is what a source checkout hands to a container, so an edit under `pkg/` that is not re-built is an edit that never runs: `make bridge-check` fails when the committed binary is not a build of this tree. **Discovery** (`pkg/sandboxruntime/runtime.go`, `GetAgentBinaryPath`): the path the process was started with (`sandboxruntime.Boot.AgentPath`, resolved once by `backend/startup` from `MIKE_AGENT_PATH` — the runtime itself never reads the environment), then `sandbox-bridge` / `sandbox/sandbox-bridge` next to the executable, then the same paths in the CWD; container creation fails if not found. **Protocol:** binary framing — 9-byte header (MsgID + Type + Length) + typed payload, Chunk frames stream before the final Result/Error, `MethodLSP` (0x0A) is the JSON-RPC passthrough.
+
+## Wire IDs and the committed binary
+
+Wire IDs `0x05`-`0x08` are **retired and must not be reused**: a stale bridge must get "unknown method", not
+a wrong handler. For the same reason **a params change is a new ID, never a new field** — a guest that
+ignores a field answers success anyway (`0x0B write_bytes` exists because of exactly that).
+
+`sandbox-bridge` is rebuilt from source and the artifact is committed: an edit under `pkg/` that is not
+rebuilt is an edit that never runs, and `make bridge-check` fails when the committed binary is not a build
+of this tree. Note that `deadcode .` (server binary only) reports `protocol.NewResult`, `NewChunk`,
+`ParseRequest` and the rest of `pkg/bridge/protocol` as unreachable — they are reached from
+`./pkg/bridge/agent`, the module's other main. Run both roots before believing a hit.
+
+## Forwarded ports
+
+The only `-p` publishing on a sandbox container is **user-configured** forwarded ports, never the bridge.
+Each entry may name a host interface (`types.PortForward.HostIP`); empty — like `0.0.0.0` and `::` — is
+published with no bind address, which is what podman wants for every interface. The address is passed
+through untouched, and it is not cosmetic: pasta derives the forward *target* from it, and a gVisor guest
+owns only the namespace's public address, so a loopback bind maps a port nothing answers. A forwarded port
+therefore answers on the **machine address, not `localhost`**.

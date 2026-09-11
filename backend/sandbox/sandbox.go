@@ -968,6 +968,18 @@ func (sm *SandboxManager) recordFinalPeak(taskID, containerName string) {
 	mem.Forget(containerName)
 }
 
+// retainContainer keeps a task mapped to its container when `podman rm -f` fails. Stop drops the
+// mapping first, so without this a later Stop finds nothing to remove, and the startup sweep skips
+// running containers: the container survives until the server shuts down cleanly. The mapping is
+// restored only while the task still names this container.
+func (sm *SandboxManager) retainContainer(taskID, containerName string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if cur, tracked := sm.active[taskID]; !tracked || cur == containerName {
+		sm.active[taskID] = containerName
+	}
+}
+
 // Stop removes the sandbox container for a task.
 func (sm *SandboxManager) Stop(taskID string) error {
 	sm.mu.Lock()
@@ -1009,6 +1021,7 @@ func (sm *SandboxManager) Stop(taskID string) error {
 	err := sm.rt.RemoveContainer(containerName)
 	if err != nil {
 		logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("warning: failed to remove container: %v", err)
+		sm.retainContainer(taskID, containerName)
 		return fmt.Errorf("remove container: %w", err)
 	}
 

@@ -102,3 +102,18 @@ client saw the frames: there is no state to get out of step.
 
 Tests: `backend/stream/lock_wait_test.go` (both frames), `frontend/src/lib/services/__tests__/stream-handler.unit.ts`
 (the acquisition clears it, an unknown domain still names a wait).
+
+## What refuses the queue rather than joining it
+
+The queue is persisted to IndexedDB, so a queued value outlives the tab and the session. Two requests are
+therefore **refused**, not stripped — refusing keeps a request from quietly becoming something else:
+
+- a `PUT /api/config` carrying a provider key that is not the server's masked placeholder
+  (`carriesPlaintextAPIKey` in `api/config.ts`);
+- a clone URL carrying credentials (`gitUrlCarriesCredentials` in `utils/git-url.ts`). The scp-style
+  `git@host:org/repo` form carries no secret and still queues.
+
+Both failure classes keep the DOM `name` (`AbortError`, `TypeError`) because a check that misses one
+silently turns a cancellation into an error toast, or a queueable write into a failure — and **the name is
+the test, never `instanceof DOMException`**: these are `Error`s that carry the name, so the call is
+`isAborted(e)`. Tests: `api/__tests__/fetch-failure.unit.ts`, `api/__tests__/send-queue.unit.ts`.

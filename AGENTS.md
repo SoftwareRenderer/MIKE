@@ -1,477 +1,433 @@
 # AGENTS.md
 
-Design narratives and mechanism walkthroughs live in `docs/` — read the pointer before touching that subsystem. When you learn something new here, *replace* the stale sentence rather than appending.
+This file holds **rules**. Mechanism, measurements, tables and test lists live in `docs/` — read the
+pointer before touching that subsystem, and add new detail there rather than here. When you learn
+something, *replace* the stale sentence; do not append.
 
 ## Repo Map
+
 - `backend/` — Go server: API handlers, exec loop, LLM client, git/worktrees, sandbox, extensions.
-- `frontend/` — Svelte 5 SPA (Vite). Built to `frontend/dist/`, served as static files by the Go server. No dev server in the normal workflow.
-- `pkg/bridge/` — sandbox-bridge protocol/client. `pkg/sandboxruntime/` — podman/gVisor runtime + bridge binary discovery.
-- `extensions/` — **installed** extensions (`<author>/<name>`), materialized by the registry installer and **deleted with the extension** (see *Extensions*). Don't hand-edit except when a custom extension is requested. Source is `../MIKE-extensions/`, not this directory.
-- `../MIKE-extensions/` — source repo for published extensions (`<type>/<name>/`). Its `registry.json` is **generated** — never edit by hand.
-- `scripts/gen-registry.py` — regenerates `../MIKE-extensions/registry.json` from extension manifests (`--check` verifies).
-- `docs/` — subsystem detail extracted from this file (see the index at the bottom).
-- `Makefile` — build/run/test entry points. `data/` — SQLite DB, TLS certs, trace files. `prompts/` — LLM prompt templates.
-- `Dockerfile` + `compose.yaml` + `.env.example` — deployment. The app image carries podman and `runsc` and drives them **nested** (`privileged`), so neither is a host prerequisite there; `README.md → Quick Start` owns the run/deploy story and `.env` is the only source of the master password, encryption key and `MIKE_ALLOWED_HOSTS`.
+- `frontend/` — Svelte 5 SPA (Vite), built to `frontend/dist/` and served by the Go server. No dev server
+  in the normal workflow.
+- `pkg/bridge/` — sandbox-bridge protocol/client. `pkg/sandboxruntime/` — podman/gVisor runtime, bridge
+  binary discovery.
+- `extensions/` — **installed** extensions (`<author>/<name>`), materialized by the installer and
+  **deleted with the extension**. Don't hand-edit unless asked for a custom extension. Source is
+  `../MIKE-extensions/`, whose `registry.json` is **generated** (`scripts/gen-registry.py`; `--check`
+  verifies) — never edit it by hand.
+- `Makefile` — build/run/test entry points. `data/` — SQLite DB, TLS certs, trace files. `prompts/` — LLM
+  prompt templates.
+- `Dockerfile` + `compose.yaml` + `.env.example` — deployment. The image carries podman and `runsc` and
+  drives them nested (`privileged`), so neither is a host prerequisite there. `README.md → Quick Start`
+  owns the run/deploy story; `.env` is the only source of the master password, encryption key and
+  `MIKE_ALLOWED_HOSTS`.
 
 ## Non-Negotiables
-- **NEVER commit.** The user will commit manually.
-- **Never leave the server running** after a crash or panic — stop the server first.
-- **Test-driven:** validate against established facts before calling a change done. A subsystem's tests are the fast loop and `make check` is the gate** — `lint` (`gofmt` — its stderr fails the step, because a `GOFMT_DIRS` entry that no longer exists prints nothing on stdout and the step would still say "ok" → `go vet` → `staticcheck -checks=all` → `deadcode`, both roots) → `bridge-check` → build → the Go suite → `svelte-check` → the frontend gates (i18n no-language, the literal count, the HTML-sink allowlist). There is no CI file, so this is the only thing that catches a regression: a change to `backend/exec/` can pass `go test ./backend/exec/` and still panic in `./backend/server/`, where a task actually runs. Run `make check` before claiming done, and `make check-race` on whatever you touched (its `RACE_PKGS` covers git/exec/server/stream/managers — the lock tables are under test there, and a green `./backend/exec/` alone proves nothing about `executionState`). `make lint` is the same static half without the tests.
-- **E2E runs kill your dev server** (global-setup owns ports 3000/3001/9999) — restart with `make run` afterwards.
-- **Background mode** (`&`) for development.
+
+- **Never commit.** The user commits manually.
+- **Never leave the server running** after a crash or panic — stop it first.
+- **`make check` is the gate** and there is no CI file, so it is the only thing that catches a
+  regression: `lint` (gofmt → vet → staticcheck → deadcode, both roots) → `bridge-check` → build → the Go
+  suite → `svelte-check` → the frontend gates. Run it before claiming done, and `make check-race` on
+  whatever you touched (`RACE_PKGS`: git, exec, server, stream, managers) — a package's own green tests
+  prove nothing about code that only runs when a task does. `make lint` is the static half alone.
+- **E2E runs kill your dev server** (global-setup owns ports 3000/3001/9999) — restart with `make run`
+  afterwards.
+- Run the dev server in **background** (`&`).
 
 ### Workflow
-- **Frontend:** edit `frontend/src/` → `cd frontend && npm run check` (svelte-check; keep the codebase **TS-clean**) → `npm run build` → hard refresh. **No server restart needed.**
-- **Backend:** edit `backend/`/`pkg/` → `gofmt -w` the touched files → `go build -trimpath -o kanban .` (or `make build`) → restart. Config persists in SQLite (`data/kanban.db`).
 
-### Verify the tool output, not the expectation
-The most common way this repo produces a **false "done"** is an agent believing a tool call that agreed with what it expected. Re-run the measuring command after the change and let the claim be the command, not the summary: the `grep` that still counts matches, the script that rewrote two files of five, the file believed read that is not on disk. `TODO.md` records this per task, with a "**not done**" list that is deliberately kept visible.
+- **Frontend:** edit `frontend/src/` → `npm run check` (svelte-check; stay TS-clean) → `npm run build` →
+  hard refresh. No server restart.
+- **Backend:** edit `backend/`/`pkg/` → `gofmt -w` the touched files → `go build -trimpath -o kanban .`
+  (or `make build`) → restart. Config persists in SQLite.
 
-### Comments: one home, plain words, only what the code cannot say
-A comment earns its lines by holding something the code cannot: an **invariant** (a state that must never be reached, so that the next writer checks the cases before adding one), a **non-obvious why** (the reason a branch answers the way it does, when the code only shows that it does), or a **cross-boundary contract** (a rule one language owns and another mirrors, which must keep agreeing case for case). Delete on sight:
-- **The change's history and defence** — what the code used to do, which input used to be refused, why the new behaviour is reasonable. The commit message and `TODO.md` own that story; parked in source it can only go stale, and stale comments get *believed*. A doc comment naming a test that no longer exists is the same bug.
-- **The rule restated per call site.** A rule is written once, at its definition, and every other site gets one line pointing there. Every extra copy is free to drift away from the others and from the code.
-- **Paraphrase of the code.** If the next line says it, the comment says nothing.
-Write them flat: no advocacy for the change, no adjectives doing the arguing, no narrative longer than the rule it explains — design stories go to `docs/`. A test title is a specification: name what breaks if the behaviour regresses, never what the change fixed. Measure the pile: `git diff HEAD -- <files> | grep '^+' | grep -cE '^\+[[:space:]]*(//|/\*|\*)'` counts added comment lines, and when it rivals the added-code count the change is arguing with itself.
+## Verify the tool output, not the expectation
 
-### Known gaps - do not trust these
-- **`go build ./...` and `go vet ./...` fail at HEAD** on the installed extensions under `extensions/`, which are pulled artifacts, not this tree. Scope every command: `go build ./backend/... ./pkg/... .`, `go vet ./backend/... ./pkg/... .`, `staticcheck -checks=all ./backend/... ./pkg/... .`. A red `./...` is not your regression until you've seen it survive the scoping.
-- **A `WaitDelay` bounds the pipes, not the child; only a context bounds the child.** Every git and podman
-  subprocess comes from a constructor that sets `cmd.WaitDelay` (`git.Command`/`git.CommandContext` +
-  `git.GitWaitDelay`, `sandboxruntime.PodmanCommand`/`PodmanCommandContext` + `PodmanWaitDelay`). What that
-  buys is specific: after a child is killed, `cmd.Wait` still waits on its **output pipes**, and a child that
-  dies holding them (or a grandchild that inherits them) would otherwise park the caller forever — `WaitDelay`
-  closes them and lets `Wait` return. It does **not** stop a child that never gets killed: a context-less
-  constructor bounds neither the child nor anything else, so a hung `git` hangs the request to completion of
-  the TCP timeout, not of MIKE's patience. A *cancelled context* therefore exists only where a caller has
-  something worth cancelling — `git clone` (`CloneContext`, on the request context, so closing the tab stops
-  it), `pull`/`push` (`handleGitRemote`, which used to hold the per-project mutex for the full ssh timeout),
-  and the extension install's `clone`/`checkout`/`rev-parse`. The other **61 local git call sites behind the
-  three `gitRun*` helpers** (`gitRun`, `gitRunInGitDir`, `gitRunOutput`) are deliberately context-less: they
-  run against a local repository, and threading a context through them for those callers is a ~61-site diff that
-  buys nothing at the sites that never block on a network. If you add a
-  long-running subprocess, give it `CommandContext` *plus* a `WaitDelay` — one bounds the child, the other
-  bounds the pipes after the kill, and neither is a substitute for the other.
-- **`environment` on an LSP extension always answers "healthy"** - declared, validated, documented, and never called (`ExtensionLSPManager.Environment` has no caller). See `docs/extension-dependency-cache.md`.
-- **A translation pack overlays `*.tmpl` prompt templates, not `prompts/skills/`.** `prompts_dir` is read at startup and on every extension change (`extensions.ActivePromptOverlay` → `prompts.SetOverlay`) and resolved per template with core English behind it; skill bodies stay English whatever pack is enabled. See `docs/i18n.md`.
-- **A green `./backend/exec/` is not proof.** The package's own tests never start a task, so locking bugs in `executionState` only surface under `-race` in `./backend/server/`.
-- **`backend/extensions` has one load-sensitive test — `TestHandleInstall_BuildFailureLeavesNoRowAndNoFiles`.** It fails on roughly 1 in 3 `make check`/`-parallel 8` runs **on a CPU-loaded machine** and never alone or unloaded, so a red `test-go` naming it is not necessarily your regression: re-run it alone, and if it passes, read the mtime line the failure prints (`describeTree` in `handler_test.go`) before believing either conclusion. Established: the rollback runs and logs the right path, the surviving tree carries the original checkout's mtimes, and `RepairMissingFiles` and the fake podman's fail-once budget are ruled out. Unestablished: who leaves the tree behind. Numbers and next hypotheses: `TODO.md`, Phase 3.
-- **`deadcode` needs both roots or it calls live bridge code dead.** `deadcode .` walks only the server binary, so it reports `protocol.NewResult`, `NewChunk`, `ParseRequest` and the rest of `pkg/bridge/protocol` as unreachable — they are reached from `./pkg/bridge/agent`, the module's other main. Run both roots before believing a hit: deleting one of those breaks the committed `sandbox-bridge` (`make bridge-check`).
+The commonest false "done" here is an agent believing a tool call that agreed with what it expected.
+Re-run the measuring command after the change and let the command make the claim: the `grep` that still
+counts matches, the script that rewrote two files of five, the file believed read that is not on disk.
+Keep a visible "not done" list in `TODO.md` — note it is gitignored, so a plan worth keeping belongs in
+`docs/`.
 
-## Required Dependencies
+## Comments: one home, plain words, only what the code cannot say
 
-### gVisor
-gVisor (`runsc`) is required for project sandboxing — task tool calls and terminal sessions run in gVisor-isolated containers, rootless, via `podman --runtime runsc`. Without it sandboxed projects refuse to start tasks (hard error, no fallback); sandbox unit tests need `runsc` + working podman storage (see *Testing → Go Unit Tests*).
+A comment earns its lines by holding something the code cannot: an **invariant**, a **non-obvious why**,
+or a **cross-boundary contract** (a rule one language owns and another mirrors, which must keep agreeing
+case for case). Delete on sight:
 
-- **The boot decisions are one injected value.** `sandboxruntime.Boot{SweepStaleContainersAtBoot, AgentPath}` is built once in `server.NewServer` from `startup.Config` and handed to `NewSandboxManager`, `NewExtensionSandboxManager`, `NewRegistryClientWithBoot` and `sandboxruntime.NewRuntimeWithBoot` — the last is the **only** Runtime constructor; there is no boot-less form to forget. The zero `Boot` **declines** the host sweep, so a test binary or an ad-hoc caller cannot delete a live server's containers by forgetting a variable. An image build needs the bridge path too (the registry client stages it into the build context), which is why the boot reaches `NewRegistryClientWithBoot` and not only the two managers. Tests: `pkg/sandboxruntime/runtime_test.go` (`TestBootDeclinesTheHostSweepByDefault`, `TestGetAgentBinaryPathPrefersTheWiredPath`).
-- **One availability probe, one stale-container sweep.** `sandboxruntime.GVisorAvailable(tag)` backs both `SandboxManager.checkAvailable` and the extension manager's probe — they must agree, or a task sandbox and an extension sandbox disagree about whether the host can run gVisor at all. `Runtime.CleanupStaleContainers(tag, nameFilter)` is the shared best-effort, 15 s-bounded startup sweep (prefixes `kanban-sandbox-` / `kanban-ext-`); neither manager may re-implement the list/parse/remove loop. Tests: `pkg/sandboxruntime/runtime_test.go`.
-- **The container environment is only what was configured.** `containerEnvArgs` (`backend/sandbox/sandbox.go`) turns the project's Sandbox Configuration envs plus an agent extension's declared `sandbox_env` into `-e` flags, project config appended last so it wins a clash, and **a bare `-e NAME` is now unrepresentable**: every assignment comes from `types.SandboxEnvArgs([]types.SandboxEnv)` (`backend/types/env.go`), which can only emit `KEY=VALUE` and errors on a malformed key, so `Exec`/`ExecWithInput`/`execInternal` take `[]types.SandboxEnv` rather than `[]string`. That closes a real leak: `podman -e NAME` copies the *client's* value of `NAME` into the container, so a project that declared a variable's name without a value exported whatever the server had. `Create` refuses the container on a malformed declaration, and `Exec` validates before the container lookup so the cause is named. Invent nothing else — no hardcoded `PATH` (an `-e` overrides the image's `ENV PATH`, which dropped a custom image's tooling) and no container-wide `TERM` (the terminal sets `TERM` on its own `podman exec`, `shellExecArgs`: it belongs to the TTY session, not the sandbox). Tests: `backend/sandbox/containerenv_test.go`, `backend/sandbox/hostenv_test.go` (the last runs a real gVisor container and asserts a host variable reaches it **only** if allowlisted to the podman client — the probe variable must be one a host could set, or the test passes vacuously).
-- **Where a task runs is one column, and it is not re-checked.** `project.sandbox_enabled` is the whole answer: **on** means every LLM-initiated action (`read_file`/`write_file`/`edit_file`/`bash`, the LSP tools, the agent adapter) runs in the container and a missing bridge is an error rather than a host fallback; **off** means those actions run on the host, because turning a project's sandbox off *is* the operator's decision about that project. `DANGER_ZONE=1` is the permission to make that decision — creating a project with sandboxing disabled, or switching one to unsandboxed, is 403 without it (`cannot create project with sandbox disabled — set DANGER_ZONE=1 to allow`, `backend/managers/project.go` against the `sandbox.DangerZone` value injected at construction — never a `Getenv` at the gate). It never gates execution. One second meaning is deliberate: the flag also decides what a host terminal is *given* (`term.hostShellEnv`) — `os.Environ()` with it, because that terminal is the operator's own shell and a scrubbed one cannot run their ssh-agent/registry logins; `agent.SafeAgentEnv` without it, because a project row is not a grant of `MIKE_LOGIN_PASSWORD` and `MIKE_ENCRYPTION_KEY` to a shell. Tests: `backend/term/host_shell_env_test.go`, `backend/exec/sandbox_file_access_test.go`, `backend/managers/project_test.go`.
-- **A sandboxed task gets no host fallback, and that is the boundary.** `hostGuard` (`backend/exec/tools.go`) refuses `read_file`/`write_file`/`edit_file`/`bash` when a sandboxed task's sandbox callback is missing, because a missing bridge is an outage and not a licence to work on the host behind the container. The LSP tools resolve their symbol through the same reader (`resolveRead`), never a direct `os.ReadFile` of the worktree path. Nothing jails an *unsandboxed* task: its worktree join is the host, so `..` and absolute paths go where they name, by design — which is why the refusal above is the whole rule and is pinned for every tool by one table, `TestSandboxedTaskWithoutBridgeRefusesEveryHostTool`.
-- **The terminal WebSocket verifies `Origin`** — in `httputil.AcceptWS` (`backend/httputil/ws.go`), which every WebSocket route in this server upgrades through, so the rule is stated once and is not inherited from `coder/websocket`'s `authenticateOrigin` (that one answers "allowed" the moment the header is empty, so "the library checks Origin" is really "a browser always sends one"). `SameSite=Lax` blocks the cross-site request first; this is the second lock on an endpoint that hands out a shell. A request with **no** Origin is still accepted: only a non-browser client omits it, and that client can set the session cookie by hand anyway. Test: `backend/httputil/ws_origin_test.go`.
-- **Extension sandboxes obey a mount/capability allowlist** (`backend/extensions/mount_policy.go`): host mounts must resolve inside the policy's roots (workspace dir, registered project paths, extensions dir, system temp dir, `MIKE_EXT_MOUNT_ROOTS`), and **only the extensions dir, the temp dir and the `MIKE_EXT_MOUNT_ROOTS` extras may be mounted read-write** — the workspace dir, the registered checkouts and anything borrowed from a project's Sandbox Configuration come out `ro` however the manifest asks (`MountPolicy.ForceReadOnly`), because a manifest is registry text and the workspace holds every task's worktree; container paths must match `^/[A-Za-z0-9._/-]+$` (`:` or `,` would rewrite the podman mount spec); a requested capability is judged by its **shape**, never its name — it lands in a gVisor guest that started from `--cap-drop ALL`, so `SYS_ADMIN` is as harmless a name as `CHOWN`, while `--privileged` is an *argument* and is refused at install and on `PUT /api/extensions/{id}`. Enforced on `PUT /api/extensions/{id}` **and** at install time — a manifest that self-grants a bad sandbox is rejected, not persisted. Tests: `backend/extensions/mount_read_only_test.go`.
-- **The podman-argument rules are one package, and a project answers to them too.** `ValidateContainerPath`, `ValidateCapability`/`ValidateCapabilities`, `GVisorIsolationForCaps` and the `GVisorCreateArgs`/`AppendCapabilities` pair live in `pkg/sandboxruntime`, next to `ValidateProjectName`, and are applied by every caller that builds container arguments: `extensions/mount_policy.go` delegates to them, `sandbox.Create` refuses before the container exists, and `types.ValidateSandboxMount`/`ValidateSandboxAdditions` check a project's Sandbox Configuration on create and `PUT` (400 naming the field). **There is no capability denylist** (measured on runsc release-20260721.0: a guest with `SYS_ADMIN` cannot write through an `ro` bind mount — its remount flips its own mount table to `rw` and the gofer still refuses — sees only its own PIDs, and its `mount --bind / x` exposes its own overlay, not the host tree). What replaced it is the pairing that made those true, and neither half is left to a call site: `sandboxruntime.GVisorCreateArgs` is the one copy of the posture both builders begin from (byte-identical up to their own `--workdir` / `--network none`), and `sandboxruntime.AppendCapabilities` is the only way to append a `--cap-add` — it runs `GVisorIsolationForCaps` (runsc **and** `--cap-drop ALL`) first and refuses the whole grant otherwise, so no ordering mistake can reach podman. Name shape stays the caller's and is answered differently on purpose: a task refuses its whole capability list (a project row is operator configuration), an extension sandbox skips the one malformed name and grants the rest. `TestTaskSandboxIsolatesWhatACapabilityGrantAssumes` / `TestBuildExtensionCreateArgs_CapabilityPosture` hold both arg builders to it, and each builder's `…BeginWithTheSharedPreface` test fails the day one re-inlines the posture. Note `podman build` takes no `--runtime` flag (`backend/extensions/image_build.go`), so an extension Dockerfile runs on the host runtime with podman's default caps — the one place "gVisor runs it" is not true. Because a project row can predate the rule, `Create` refuses again at container creation rather than trusting stored config. Tests: `pkg/sandboxruntime/podman_args_test.go`, `backend/sandbox/create_args_test.go`, `backend/extensions/sandbox_test.go`, `backend/managers/project_sandbox_settings_test.go`.
-- **Plan mode's bash restriction is advisory by design** (prompt text in `prompts/plan-mode.tmpl`, not executor-enforced): the read-only worktree mount + sandbox is what actually holds a planning turn, so don't add a fake allowlist.
+- **History and defence** — what the code used to do, which input used to be refused, why the new
+  behaviour is reasonable. The commit message and `TODO.md` own that story; in source it can only go
+  stale, and stale comments get believed.
+- **A rule restated per call site** — write it once, at its definition; every other site gets one line
+  pointing there.
+- **Paraphrase of the code** — if the next line says it, the comment says nothing.
 
-### Sandbox Bridge
-`sandbox-bridge` is a static Go binary that runs inside each sandbox container and services tool calls (read, write, edit, bash — plus a `bash_cancel` notification and the LSP JSON-RPC passthrough) over **the stdin/stdout of one `podman exec -i … /sandbox-bridge` per connection**. There is **no listener and no port** (`stdioConn` in `pkg/bridge/agent/main.go` ↔ `bridge.NewClient(stdin, stdout)`), nothing in the repo calls `net.Dial`, and logging goes to stderr only. Interactive terminals bypass the bridge entirely (host-side PTY, `backend/term/terminal.go`).
+Write them flat: no advocacy, no adjectives doing the arguing, no narrative longer than the rule. A test
+title names what breaks if the behaviour regresses, never what the change fixed. Measure the pile with
+`git diff HEAD -- <files> | grep '^+' | grep -cE '^\+[[:space:]]*(//|/\*|\*)'`; when it rivals the added
+code, the change is arguing with itself.
 
-Invariants that must not break (each one's mechanism, history and open work: `docs/sandbox-bridge.md`):
+## Known gaps — do not trust these
 
-- One connection per task sandbox for its lifetime; **one per LSP session** for an extension sandbox - the connection *is* the sandbox reference.
-- A repeated `start` of the same command+args is **idempotent**; a different one is **refused, never replaced**. Nothing auto-restarts a server.
-- **A client request is always answered** - a failed send must still answer the browser with a JSON-RPC error - and a streamed answer is **never partial**: queued chunks are drained before the Result is taken, and a chunk that cannot be queued fails the request instead of being dropped.
-- A closed `LSPNotificationCh()` means "this server is gone" -> retire.
-- **Absent diagnostics while a file is unloaded are unknown, not clean** (`backend/exec/diagnostics.go` refuses to read loader-state entries as findings).
-- Wire IDs `0x05`-`0x08` are **retired and must not be reused** - a stale bridge must get "unknown method", not a wrong handler - and for the same reason **a params change is a new ID, never a new field**: a guest that ignores a field answers success anyway (`0x0B` `write_bytes` exists because of exactly that; see `docs/sandbox-bridge.md`).
-- The only `-p` publishing on a sandbox container is **user-configured** forwarded ports, never the bridge. Each entry may name a **host interface** (`types.PortForward.HostIP`); empty — like `0.0.0.0` and `::` — is published with no bind address, which is what podman wants for every interface. The address is passed through untouched, and it is not cosmetic: pasta derives the forward *target* from it, and a gVisor guest owns only the namespace's public address, so a loopback bind maps a port nothing answers. A forwarded port therefore answers on the **machine address, not `localhost`**.
-- `sandbox-bridge` is **rebuilt from source and the artifact is committed** - an edit under `pkg/` that is not re-built is an edit that never runs: `make bridge-check` fails when the committed binary is not a build of this tree.
-
-`executionState` locking: `sandboxMu` is a **leaf lock** - it may be taken under `taskMu`, and `taskMu` must never be taken under it. Fields guarded by it are read as a **snapshot** (`sandbox()`) and written through `setSandbox`, never captured piecemeal: `executeTask`'s wait reads some of them after a `StopTask` can have run and would assemble a mix of old and new. `sandboxRecreate.underLock` takes `*sandboxState` for the same reason - it runs while `sandboxMu` is held. Tests: `backend/exec/tools_test.go`.
+- **Scope every Go command**: `./backend/... ./pkg/... .`. `go build ./...` and `go vet ./...` fail at
+  HEAD on the installed extensions under `extensions/`, which are pulled artifacts. A red `./...` is not
+  your regression until you've seen it survive the scoping.
+- **A green package is not proof.** `backend/exec`'s tests never start a task, so `executionState` locking
+  bugs only surface under `-race` in `./backend/server/`.
+- **`deadcode` needs both roots** (`. ` and `./pkg/bridge/agent`) or it calls live bridge code dead.
+- **Some tests fail only under load.** Read `docs/testing.md → Tests that fail only under load` before
+  believing a red that names them.
+- **A `WaitDelay` bounds a subprocess's output pipes, not the child; only a cancelled context bounds the
+  child.** Every git and podman subprocess comes from a constructor that sets one. A context exists only
+  where a caller has something worth cancelling (clone, pull/push, extension install); local git calls are
+  deliberately context-less. If you add a long-running subprocess, give it both.
+- **`environment` on an LSP extension always answers "healthy"** — declared, validated, never called.
+- **A translation pack overlays `*.tmpl` prompt templates, not `prompts/skills/`** — skill bodies stay
+  English whatever pack is enabled (`docs/i18n.md`).
 
 ## Server Management
 
 ```bash
-make run    # background dev server, no TLS (dev defaults: password=test, dev-only MIKE_ENCRYPTION_KEY)
+make run    # background dev server, no TLS (dev defaults: password=test, dev-only key)
 make stop   # pkill the server
-curl -sk https://localhost:3000/api/config   # verify (401 JSON = up); use http:// with --no-tls
+curl -sk https://localhost:3000/api/config   # 401 JSON = up; use http:// with --no-tls
 ```
-Or manually: `./kanban &` (requires `MIKE_ENCRYPTION_KEY` and `MIKE_LOGIN_PASSWORD` exported). `make run`'s defaults are overridable by exporting your own vars — export your real `MIKE_ENCRYPTION_KEY` if stored secrets in `data/kanban.db` must decrypt.
 
-### HTTPS / TLS
-TLS is **on by default**: a local CA in `data/tls/` (`mike-ca.crt`/`.key`) signs a server leaf (`mike.crt`/`.key`). Cert details, SAN set, distribution and the reverse-proxy/`Host` interaction: `docs/tls.md`.
+- TLS is on by default; a local CA in `data/tls/` signs a server leaf. The CA never rotates and there is
+  no expiry-based renewal — refresh an expired leaf by deleting the leaf and restarting. **A certificate
+  is not the gate**: reachability is the listen address plus Host pinning. `docs/tls.md`.
+- **Never `log.Fatalf` on a `Serve()` error** — run the signal cleanup path, then exit 1.
+- **Shutdown is a declared stage list.** A component registers its stop step in `server.Registrar`
+  *where it is constructed*, so construction order is shutdown order; duplicate or nil steps are refused at
+  registration, and the first stage cancels the server's base context. SIGTERM must end the process: a
+  wedged shutdown keeps the data directory open, so the next run boots on the previous run's database.
+  **`docs/lifecycle.md`**.
+- **Every base context in the tree is registered with a reason** (`root`, `detached`, `legacy`) by the
+  `ctxroot` archgate rule; `backend/server/sideeffects.go` states the same classification for HTTP
+  handlers. `docs/lifecycle.md`.
+- **The TLS/plain first-byte sniff must not run inside `Accept()`** — `net/http` accepts serially, so one
+  silent peer stalls every later handshake and reads as a dead listener. Queue and per-connection reader:
+  `docs/lifecycle.md`.
 
-- **The CA never rotates** and there is **no expiry-based renewal** — refresh an expired leaf by deleting `mike.crt`/`mike.key` and restarting (keep the CA). The leaf is re-issued only when the host's names change.
-- **The TLS-vs-plain first-byte sniff must not run inside `hybridListener.Accept()`** - `net/http` accepts **serially**, so one peer that connects and sends nothing stalls every later handshake, and returning that peer's EOF reads as a dead listener, ends `Serve` and kills the process. `Accept()` waits on a queue a per-connection goroutine fills. Silent peers are closed and logged per host, never handed to `net/http`. Tests: `backend/server/listener_test.go`.
-- **Never `log.Fatalf` on a `Serve()` error** (`main.go`): run the signal cleanup path (flight recorder, `srv.Shutdown`) and then exit 1 — `log.Fatalf` skips that cleanup and makes any listener error an abrupt exit.
-- **Shutdown is a declared stage list, not a hardcoded sequence.** A component registers its stop step in `server.Registrar` (`backend/server/lifecycle.go`) **where it is constructed**, so construction order *is* shutdown order and `NewServer` reads as the list of things that need stopping. Registering the same stage twice is a panic at startup, and a **nil step is refused at registration** — a nil step would panic only at shutdown, long after the construction that misplaced it. The first stage cancels the server's base context (`Server.Detached()`), before any resource a detached operation still writes through is taken away; what sets the rest of the order is the pipe/`WaitDelay` rule in the podman bullet of this section. Tests: `backend/server/lifecycle_test.go` (`TestNewServerRegistersEveryStage` refuses a step that moved out of `NewServer`), `backend/server/shutdown_test.go`.
-- **Every base context in the tree is registered, with its reason.** `context.Background()`/`TODO()` in production Go is one archgate rule (`ctxroot`): baseline entries are `file|function|reason|x<count>`, reason **root** (nothing above it to cancel from), **detached** (a write whose point is to leave state behind — it must outlive the request that began it, `Server.Detached()`) or **legacy** (a caller has a context and does not pass one). The count is part of the key, so a second base context inside an already-classified function is a finding; the rule refuses a baseline line it cannot parse rather than silently un-classifying that site. `backend/server/sideeffects.go` is the same idea as data for HTTP — detached operations, request-scoped reads, and the idempotent writes allowed on a read — held by `sideeffects_test.go` against the real route table.
-- ****`srv.Detached()` is the only parent for work that outlives a request.** A detached operation descends from the server's base context, so shutdown cancels it in the one place that knows when to stop, and a test or ad-hoc caller cannot start detached work that no shutdown will ever reach.
-- **SIGTERM must end the process.** `srv.Shutdown` runs under `server.RunShutdownWithDeadline` (`backend/server/shutdown.go`, 15s). Every step waits on something uninterruptible (a container not answering podman, an LSP bridge whose peer died), and a shutdown that hangs leaves the process **holding the data directory open** — it re-creates `kanban.db`/`-wal` after whatever deleted them, so the next run boots on the previous run's database. A bounded *context* bounds nothing here; the deadline is enforced by leaving anyway. Each step logs `shutdown: <name>` before running, so the last line names what wedged. Tests: `backend/server/shutdown_test.go`.
-- **Every podman subprocess comes from `sandboxruntime.PodmanCommand`/`PodmanCommandContext`**, which set `Env: PodmanEnv()` and `cmd.WaitDelay` (`PodmanWaitDelay`, 10s) together; `TestPodmanCommandIsTheOnlySpawnPoint` walks the tree and fails on any other podman spawn, because a spawn outside it has neither the WaitDelay nor the scrubbed environment. The pipe half of the rule is in *Known gaps*; it bites here because the bridge connection's LSP child inherits those very pipes. **And where no caller can cancel, `subproc.Watch` reports instead of bounding** (30 s for container management, 2 min for `pull`, 5 min for `build`; the long-lived bridge `podman exec` is not watched, because a connection open for hours is not a slow operation): a wedged rootless podman holding its own database lock is otherwise a caller that never returns with nothing in the log naming what it waits on. This is the same instrument the git-family locks use: report, keep waiting. No podman operation has a deadline. Shutdown order follows from it: websocket watchers → terminal sessions → lsp → extensions → sandbox containers → database, so a session's shell is killed while its container can still receive it. Tests: `backend/sandbox/podman_wait_test.go`, `TestTerminalManagerClose`, `pkg/subproc/subproc_test.go`, `TestPodmanLabelNamesTheOperation`.
-- **A certificate is not the gate** — reachability is `MIKE_LISTEN` + Host pinning (`MIKE_ALLOWED_HOSTS`), not the SAN set. Weak-password/non-loopback startup rules: `docs/tls.md`.
-- Tests: `backend/tls/tls_test.go`, `backend/server/handler_tls_test.go` (the CA download offered by Settings → About).
+## Configuration
 
-### Required Environment Variables
-**Nine** variables have a `--flag` twin named after them (`--port`/`MIKE_PORT`, `--listen`, `--data-dir`/`MIKE_DATA_DIR`, `--no-tls`, `--tls-cert`/`--tls-key`, `--allowed-hosts`, `--worktrees-dir`, `--log-level`/`MIKE_LOG_LEVEL`) and **flags take priority over env vars**; the rest of the table is env-only — a switch that widens a permission or points at a host path has one spelling, so it cannot arrive by a route the operator did not read about. The flag → env → default ladder is resolved **once**, in `backend/startup` (`startup.Resolve` → an immutable `startup.Config`, and `startup.Flags` for the command line) — a new variable is added there and its **decision** is injected into the consumer, never re-read where it is used. **A malformed value fails startup naming the variable**, and the refusal happens before any side effect, so a refused boot leaves no data directory, no trace file and no TLS material. A set-but-empty variable means *unset*: the two readings of `MIKE_LISTEN=` are "loopback" and "every interface". An opt-in switch is the **exact value `1`** (`startup.isOne`) — `true`, `yes`, `on` and ` 1` do nothing and get a boot warning saying so, which is why `fsutil.HostRoot` and `sandbox.DangerZone` take a bool instead of reading the variable. The one switch held to a different shape is `MIKE_SANDBOX_SKIP_STARTUP_CLEANUP`: it only ever turns a destructive sweep **off**, so any non-empty value suppresses it and no warning is owed (a truthy typo there costs a stale container, not a live sandbox). Every variable in the table below resolves in `backend/startup`; a consumer receives the decision (`startup.Config`, plus `startup.Config.Warnings` for the soft refusals the boot prints once). `main.go` and `backend/startup` are the only readers of `MIKE_*` in a boot or request path; the `env` archgate rule holds that (4 exceptions baselined: the encryption key, read per crypto operation because its PBKDF2 salt is per value, and `term`'s two reads of the *operator's own* shell environment, which is the sanctioned widening). The one non-obvious flag: `--worktrees-dir` (`MIKE_WORKTREES_DIR`) is a runtime override that is **not** persisted to the DB `workspace_dir`.
-
-| Env Var | Description |
-|---------|-------------|
-| `MIKE_ENCRYPTION_KEY` | Non-blank; derives the AES-256-GCM key for sensitive data. Server refuses to start without it. |
-| `MIKE_LOGIN_PASSWORD` | Master password for auth/sessions. Server refuses to start without it. Only its `sha256` digest is kept in memory; a weak one (< 8 chars, or a known default) additionally refuses a non-loopback listen address. |
-| `MIKE_REGISTRY_URL` | Extension registry index URL. Sourced **exclusively** from this env var (not DB-backed); falls back to `https://getmike.dev/extensions/registry.json`. A bare path (no `http(s)://`/`file://` scheme) is a local file resolved against the CWD. |
-| `MIKE_TRUST_PROXY` | Set to `1` only behind a trusted reverse proxy that strips forwarding headers. Only then are `X-Forwarded-For` (rate-limit IP) and `X-Forwarded-Proto` (HTTPS redirect) honored; unset = ignored so they can't be spoofed. |
-| `MIKE_LISTEN` | Which socket the API is reachable on — it **never authorizes a `Host` header**. **Defaults to `127.0.0.1`**: the API is RCE-complete (terminal WS, git ops, file writes), so it is never public by accident. `0.0.0.0`/`::` are the explicit all-interfaces values; any other address listens on that interface only. (Renamed from `--bind`/`MIKE_BIND` — the old names do nothing; a stale `MIKE_BIND=0.0.0.0` comes up loopback-only.) |
-| `MIKE_ALLOWED_HOSTS` | Comma-separated extra hostnames accepted in the `Host` header (DNS-rebinding pinning, `HostPinMiddleware`). Accepted without listing: `localhost`, `127.0.0.1`, `::1`, the listen host. Anything else — a proxy's public domain, `hostname.local`, a LAN IP — gets **HTTP 421** until listed here; a missing/empty `Host` is rejected too. Ports are stripped on both sides. `--allowed-hosts` **overrides** (not extends); `Serve()` logs the effective value and every rejection names both. |
-| `MIKE_LOGIN_RATE_LIMIT` | Login budget per client IP per minute (default `5`). **Cannot be disabled:** `0`, negative or unparsable values fall back to `5` with a startup warning, so a typo can't silently drop brute-force protection. |
-| `MIKE_EXT_MOUNT_ROOTS` | `os.PathList`-separated list of **extra** host roots an extension sandbox may bind-mount, beyond the implicit ones (workspace dir, registered project paths, extensions dir, system temp dir). Still an allowlist — anything outside it is rejected. |
-| `MIKE_LOG_LEVEL` | Log verbosity: `debug`, `info` (default), `warn` or `error`. A value that is not one of those **refuses the boot** naming the variable — running with a silent log because of a typo is discovered only when there was something to see. Levels are filtered by `pkg/logging`; see *Logging*. |
-| `MIKE_AGENT_PATH` | Absolute path to the `sandbox-bridge` binary, tried before the executable-relative searches. Read **once** at startup and handed to the runtime as `sandboxruntime.Boot.AgentPath`; a wired path that does not exist falls back to the search instead of failing the task. |
-| `MIKE_SANDBOX_SKIP_STARTUP_CLEANUP` | Suppresses the boot sweep that deletes stale `kanban-sandbox-*` / `kanban-ext-*` container families — a host-wide delete. Any non-empty value suppresses it. The server sweeps; `sandboxruntime.Boot{}` declines, so a test binary never wipes the host it runs on. |
-| `MIKE_GC_DRY_RUN` | Set to `1` to report the branch GC's decisions without deleting anything. Exact-value-1, with the boot warning for a truthy typo. |
-| `MIKE_PPROF` | Set to `1` to serve `net/http/pprof` on `localhost:6060`. A profile can contain API keys and passwords, so it is never on by default and never off the loopback interface. |
-| `MIKE_FRONTEND_DIST` | Where the built SPA is served from (default `./frontend/dist`). Env-only: there is no `--frontend-dist` flag to reach for. |
-| `MIKE_TLS` | Set to `0` to serve over plain HTTP — the env spelling of `--no-tls`, and only the exact value `0` turns it off. Development and the e2e harness; anything else keeps TLS. |
-| `DANGER_ZONE` | Set to `1` to allow **disabling** sandboxing: a project may then be created with sandboxing disabled, or switched to it; without the flag both are 403. It does not gate execution. Resolved once into `startup.Config.DangerZone` and injected as `sandbox.DangerZone` into the two places that decide; its second meaning (what a host terminal is *given*) is under *gVisor → Where a task runs is one column*. |
-| `MIKE_ALLOW_ROOT_FS` | Set to `1` to let the **no-project** file endpoints — the directory picker, its `mkdir`, `git init`, and the add-project/clone target — reach any host path. Unset = they are jailed to `$HOME` plus the workspace and extensions directories declared at startup, and the refusal says so and names this variable. **Only the exact value `1` widens**: `true`, `yes`, `0` and a set-but-empty value all keep the jail, and a set-but-not-`1` value gets a startup warning, because a flag that silently does nothing is discovered only when the picker refuses the directory it was set for. Never widens anything project-scoped — those stay jailed to their own project whatever this is set to, and the data directory is not a root either way. The decision is taken once by `startup.Resolve` and handed to `fsutil.NewHostRoot(allowRootFS, …)`: a jail that re-read the variable per call could widen between two calls of one request, and the roots quoted in a refusal would not be the roots that refused (`backend/fsutil/hostroot.go`). |
+- Flags take priority over env vars, which take priority over defaults, and the whole ladder resolves
+  **once** in `backend/startup` into an immutable `startup.Config`. A consumer receives the decision; it
+  never re-reads a variable where it is used.
+- A malformed value **refuses the boot naming the variable**, before any side effect. A set-but-empty
+  variable means unset. An opt-in switch is the exact value `1`, and a set-but-not-`1` value warns.
+- Only `main.go` and `backend/startup` read `MIKE_*`; the `env` archgate rule holds that.
+- Every variable, the flag twins, and the exceptions: **`docs/configuration.md`**.
 
 ## Testing
 
-### Commands
 ```bash
-cd frontend && npx playwright test                       # e2e (auto-starts test servers + mock LLM)
-npx playwright test task-message-actions                 # one spec file
-npx playwright test --grep "should edit message"         # one test by name
-cd frontend && npm test                                  # frontend unit (vitest, ~10s); `make test-frontend` also runs the gates: i18n no-language, the literal count, and `frontend/html-sinks.py` (lists every `{@html}`/`innerHTML` sink in core, with the mechanism each one relies on — checked by `html-sinks_test.py`)
-go test ./backend/... ./pkg/... -count=1 -parallel 8     # Go unit (~60s)
-make test | make test-go | make test-frontend | make test-e2e
-make check                                             # THE gate: gofmt, vet, staticcheck, deadcode, Go suite, frontend gates, bridge-check
-make lint                                              # the static half only (~40s), no tests
-make check-race                                        # -race over git/exec/server/stream/managers — required for any concurrency change
-make i18n-parity PACK=../MIKE-extensions/i18n/fr         # one pack against the English contract: keys, plurals, placeholders, prompt templates, registry pin
-python3 scripts/gen-registry.py --check                  # ../MIKE-extensions/registry.json matches the manifests (packs must be committed there to be pinned)
+make check | make lint | make check-race                 # gate / static half / -race over the lock packages
+go test ./backend/... ./pkg/... -count=1 -parallel 8     # Go unit
+cd frontend && npm test                                  # vitest (+ the frontend gates via make test-frontend)
+cd frontend && npx playwright test [spec|--grep name]    # e2e (mock LLM, own servers)
+python3 scripts/gen-registry.py --check                  # registry.json matches the manifests
 ```
 
-### Test Environment
-Two dedicated test servers with isolated databases plus one shared mock LLM, fully managed by `frontend/tests/global-setup.ts` (torn down and rebuilt each run):
+- **A spec exists only if it needs a browser or the real backend.** Component state belongs in vitest.
+  Never write a `readFileSync('../Foo.svelte')` + `toContain(...)` "test".
+- **Config-modifying specs run in the `isolated` project** (`ISOLATED_SPECS`), and **any spec that runs an
+  executor turn owns its project** — turns are queued per project, so a shared project makes you wait
+  behind every other worker. Specs on the global view must not.
+- **`[role="dialog"]` is never a unique locator** — filter by content.
+- Go tests are deterministic: `testServer(t)` for an isolated server, `t.TempDir()` for files, no network.
+- A frontend test file that imports a module using Svelte compiler macros (`$state`, `$derived`, `$effect`)
+  **must** be `.svelte.ts` (or `.unit.svelte.ts`); plain `.ts` does not see the macros.
+- The e2e harness must leave nothing behind — verify processes, ports and `/tmp` state after touching
+  setup or teardown.
+- Environment prerequisites, the port table, teardown by identity, and the load-sensitive tests:
+  **`docs/testing.md`**.
 
-| Server | Port | Data dir | Purpose |
-|--------|------|----------|---------|
-| Main | 3000 | `/tmp/kanban-test-data` | `chromium` Playwright project (default tests) |
-| Isolated | 3001 | `/tmp/kanban-test-data-isolated` | `isolated` project (serialized, 1 worker) — config-modifying suites; see `ISOLATED_SPECS` in `frontend/playwright.config.ts` |
-| Mock LLM | 9999 | — | shared; `frontend/tests/mock-llm.js` |
+## API
 
-Test repos live at `/tmp/kanban-test-repo` (+ `-2`), worktrees at `/tmp/kanban-test-worktrees/`. The registry is pinned to a local fixture (`frontend/tests/registry-fixture.json`) so registry e2e never hits the hosted registry - but the servers read `/tmp/kanban-test-registry.json`, which setup writes from that fixture with the i18n pack's `__I18N_PACK_COMMIT__` placeholder resolved to the HEAD of the local git repo it builds from `tests/fixtures/i18n-pack-repo`, because a git-pinned install needs a commit that exists. A spec that installs a **published** extension with `install-local` needs its directory on disk, and the product is what removes it — **deleting an extension deletes its directory** — so setup seeds the published sources from `../MIKE-extensions` where absent and refuses the run naming the path when the sibling checkout is missing; otherwise the run after an uninstall reports `install-local failed (404): <name> not in local extensions list`, which reads as a code regression.
+- The frontend talks **only** to the Go server; all LLM traffic is proxied. Realtime is WebSocket
+  through Go.
+- Inbound frames are typed; outbound frames are flat maps built where they are broadcast — read
+  `msg.task_id`, not `msg.data.task_id`. A frame that is not a JSON object is dropped and reported once:
+  a throw inside `onmessage` is swallowed and leaves the app believing it is current.
+- **Every `/api` route declares its verb in the pattern.** Handlers don't check `r.Method`, and a
+  methodless route also escapes the CSRF middleware. Exemptions and consequences: `docs/api-contract.md`.
+- **A partial update decodes into pointer fields, never a `map[string]any` behind type assertions**:
+  absent = leave alone, present = write (including `""`/`false`), null = absent; a wrong type is a 400
+  naming the field, validated before anything is written.
+- **`?parsed=1` is a contract every diff path must honour** — `git.ParseUnifiedDiff` is the only diff
+  grammar, and the panel never re-parses patch text.
+- **A server fault answers MIKE's own sentence; the cause goes to the log.** `httputil.Fail` is the only
+  place a status code is chosen, and an `Operation` does not unwrap its cause.
+- Full frame shapes, route exemptions, headers, error vocabulary: **`docs/api-contract.md`**.
 
-Test servers are spawned via `go run .` and **inherit your shell environment** — export `MIKE_ENCRYPTION_KEY` before running e2e, or global-setup fails with "Server on port 3000 did not start within 15000ms".
+## Frontend
 
-**A run must leave nothing behind** — an enforced property, not a nicety. `globalTeardown` is `tests/global-teardown.ts`, whose default export is *only* teardown — naming `global-setup.ts` there re-runs setup at the end of every run and leaves a server pair, lock and database nothing will stop. Verify after any change to setup/teardown: `pgrep -xc kanban` → 0, nothing listening on 3000/3001/9999, no `/tmp/kanban-test-data*`. Teardown stops servers by **identity** (`--data-dir <dir>`): they are `setsid go run .` grandchildren, so the port owner is not the process that should stop, and `lsof -ti:PORT` also answers with clients.
+- **Everything the app did not write goes through `$lib/utils/sanitize`** — including LSP hover,
+  completion and signature documentation, which reaches an `innerHTML` sink in a dependency that no gate
+  scans. `html-sinks.py` lists every `{@html}`/`innerHTML` sink in core with the mechanism each one relies
+  on, and audits the claim; what the sanitizer refuses and why is in `docs/markup-sanitizing.md`.
+- **Formatting follows the active locale; sorting never does.** Pass `activeLocale()` to every `Intl.*`
+  call and never a literal tag or `undefined`; never cache a locale-derived value at module scope;
+  `document.documentElement.lang` has exactly one writer (the i18n runtime); `localeCompare` keeps its
+  current arguments so file, branch, symbol, session and model lists stay stable whatever the UI language.
+  Phrases are catalog keys in `$lib/i18n/en.ts`, never literals in components — `i18n-gate.py` and
+  `i18n-count.py` measure it.
+- **All client-side storage goes through `frontend/src/lib/storage.ts`** (one IndexedDB store).
+  Never touch IndexedDB from a component; `gc()` is called only from `Board.svelte`. Sign-out erases
+  everything — `clearQueue()` then `clearAll()` — because a queue left in memory is written back into the
+  emptied database by the next enqueue, and `gc()` prunes only entries whose task no longer exists.
+- **Svelte 5:** `$state`/`$derived`/`$derived.by`/`$props`, and `get` from `svelte/store` for the Svelte 4
+  stores still in use; runes work inside classes in `.svelte.ts` — no version bumpers or `$effect` mirrors.
+  `$lib/services/` (reactive services), `$lib/composables/`, `$lib/utils/` (pure functions).
+- **Keyboard navigation moves real DOM focus** — targets come from pure resolvers, never a parallel
+  "highlighted" store. `docs/navigation.md`.
+- **Project rows and task cards are real links** so the browser's own link actions work; never fake the
+  context menu, and keep selectors tag-agnostic. `docs/link-rows.md`.
+- **Shortcuts and UI preferences** ride the shared Settings Save/Cancel flow; `PUT /api/config` replaces
+  the whole `keyboard_shortcuts` object, so always send all bindings. `docs/adding-a-preference.md`.
+- **CJK typography is scoped to `:lang()`.** `docs/typography.md`.
+- Chat: never disguise a system message as a user message; streaming cursor only during an active
+  response; stats are `X tokens · Ys · Z tok/s` (completion tokens).
+- Diff text is parsed once in `$lib/utils/diff-parser.ts` (pure, unit-tested) and the diff badges come from
+  there (`getStatusBadge`); `GitStatusPanel.svelte` keeps its own for git entries. Sticky section headers
+  use `position: sticky` with an opaque background.
 
-If a prior run was interrupted, clean stale state first (stale processes hold the ports — symptom `ERR_CONNECTION_REFUSED`, or a stale TLS server answering a `--no-tls` test — and a stale lock makes global-setup run teardown instead of setup):
-```bash
-lsof -ti:3000,3001,9999 | xargs kill 2>/dev/null
-rm -f /tmp/kanban-test-setup.lock
-rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-worktrees
-```
+## Storage
 
-### Frontend Unit Tests
-- vitest + @testing-library/svelte, jsdom. Files: `src/**/*.unit.ts` / `src/**/*.unit.svelte.ts`, colocated in `__tests__/` dirs.
-- Any test file importing a module that uses Svelte 5 compiler macros (`$state`, `$derived`, `$effect`) **must** use the `.svelte.ts` extension.
-- Deterministic — no external dependencies (LLM, network, server).
+- SQLite, one connection, one serialisation point. **A multi-statement write that must land entirely runs
+  in `Store.tx`** — with one connection and the store mutex, that buys failure atomicity, not isolation.
+  Anything outside `tx` states its reason at its definition.
+- **CASCADE is the row story only.** One `DELETE FROM projects` removes the rows; a task's container,
+  worktree, branches and uploads are stopped by the deletion path, not by the schema. See *Deletion*.
+- **`PRAGMA user_version` gates the schema.** Adding a migration extends the probe chain *and* raises the
+  version, leaving the earlier idempotent steps in place; a step that must run exactly once needs its own
+  marker.
+- Tests induced mid-write use SQLite `RAISE(ABORT)` triggers, never a production seam.
+- Permissions, ID generation, what is in and out of `tx`: **`docs/storage.md`**.
 
-### Go Unit Tests
-- Use the `testServer(t)` helper for an isolated server with a temp DB; `t.TempDir()` for files. Deterministic — no external dependencies.
-- **`MIKE_ENCRYPTION_KEY` must be set in the shell** for `go test ./backend/...`: the config tests that store a provider API key encrypt it on the way in (`backend/config` fails with `crypto: MIKE_ENCRYPTION_KEY environment variable is not set`, not with a test failure you can read past).
-- A few tests shell out to a real `git commit` without `-c user.*` flags (e.g. the `backend/managers` remote-fixture tests), so the machine needs a git identity (`git config --global user.email …`) or they fail with `Committer identity unknown`. Do **not** also set `init.defaultBranch` to `main` globally: fixture repos then collide with their own `git worktree add -B main` and a batch of managers tests fails in setup, which looks exactly like a regression.
-- Sandbox tests need `runsc` **and** a working podman storage: under a nested/overlayfs root they all fail with `'overlay' is not supported over overlayfs, a mount_program is required` (podman exit status 125). That is environmental, not a regression — verify with `podman info` before reading anything into it.
-- The Pi agent adapter's unit tests live in `../MIKE-extensions/agent/pi` and are run there — they are **not** part of `./backend/... ./pkg/...`.
+## Sessions & Auth
 
-### E2E Tests
-Specs in `frontend/tests/e2e/` (helpers in `helpers.ts`); **mock LLM by default** (port 9999). Conventions that bite:
+One master password. `SessionManager` keeps only its `sha256` digest and compares in constant time;
+session tokens come from `crypto/rand` and are stored hashed, so a copied database can't be replayed.
+The session cookie's `Secure` flag is decided **per request** (TLS terminated here, or the forwarding
+header under `MIKE_TRUST_PROXY`) and there is deliberately no variable for it; logout clears with the
+flag it set. `/api/sessions*` are session-authed, CSRF-guarded, never public, and their responses carry
+no token of any kind. Storage shape, endpoint shapes and the Settings UI: `docs/sessions.md`.
 
-- **Config-modifying specs must run in the `isolated` project** - add the spec name to `ISOLATED_SPECS` in `frontend/playwright.config.ts` (one array; the chromium lane's `testMatch` is derived from it, so the two lanes cannot drift).
-- **Every spec that runs an executor TURN owns its own project** via `isolatedProject()` + `gotoProject()`. Turns are queued per project, so on the shared project your fork's answer waits behind every other worker's task and the spec times out waiting for idle. Same for anything that mutates the project (`git add`/`commit`, or its **sandbox configuration**). Specs asserting on the **global** view (sidebar list, file browser, add-project flow) must NOT use it, and must never do `.project-item` + `.first()`.
-- **`[role="dialog"]` is never a unique locator** (BaseModal, both explorer views, `TerminalPanel`, `CommitDiffOverlay`, and every ChatMessage's `<dialog>`) - filter by content.
-- **A spec exists only if it needs a browser or the real backend.** Component state belongs in vitest (2.1k tests in ~23s versus a page-load tax per spec). And **never** write a `readFileSync('../Foo.svelte')` + `toContain(...)` "test": it cannot fail a real bug and breaks on renames.
+## Sandboxing
 
-Pin the mock LLM's fixture with `llm-fixture:<name>` in the prompt - keyword routing is unreachable from an ordinary task prompt, because the plan-first skill is in every system prompt. `workers: 4` is measured: 6 is ~10% faster and buys 1-4 rotating turn-queue failures per run.
+gVisor (`runsc`) is required: task tool calls and terminal sessions run in gVisor containers, rootless,
+via podman. Without it, sandboxed projects refuse to start tasks — hard error, no fallback.
 
-Full conventions, fixture format, the dedicated-repo recipe, and ad-hoc `.mjs` probes: `docs/testing.md`.
+- **Where a task runs is one column, `project.sandbox_enabled`, and it is not re-checked.** A sandboxed
+  task with a missing bridge gets an error, never a host fallback — that refusal is the whole boundary.
+  `DANGER_ZONE=1` permits *disabling* sandboxing; it never gates execution.
+- **Boot decisions are one injected value** (`sandboxruntime.Boot`), and the zero value **declines** the
+  host-wide stale-container sweep, so a test binary can't delete a live server's containers by forgetting
+  a variable. One availability probe, one sweep, shared by both managers.
+- **The container environment is only what was configured** — every `-e` is a `KEY=VALUE` assignment from
+  one builder; a bare `-e NAME` would copy the server's value into the guest. Invent no defaults: no
+  hardcoded `PATH`, no container-wide `TERM`.
+- **Container arguments come from one package.** `pkg/sandboxruntime` owns path/capability validation, the
+  create-argument preface, and the only way to add a capability (which refuses unless the isolation
+  posture is already there). Extensions delegate to it; a project's own Sandbox Configuration is checked by
+  the same rules, and again at container creation because a row can predate them.
+- **Extension sandbox mounts are an allowlist, and borrowed roots are read-only** however the manifest
+  asks: a manifest is registry text. A capability is judged by its shape, never its name; `--privileged`
+  is an argument and is refused.
+- **The bridge is stdio-only**: one `podman exec` per connection, no listener and no port. Interactive
+  terminals bypass it. Rebuild the committed `sandbox-bridge` after any edit under `pkg/` —
+  `make bridge-check` fails when the artifact is not a build of this tree.
+- **Plan mode's bash restriction is prompt text, not executor-enforced.** What holds a planning turn is
+  the read-only worktree mount plus the sandbox — don't add a fake allowlist.
+- Invariants that must not break (connections as sandbox references, idempotent `start`, every request
+  answered, retired wire IDs never reused, unknown-not-clean diagnostics, forwarded ports): the list and
+  each mechanism in **`docs/sandbox-bridge.md`**.
+- Boot injection, the sweep's running-container rule, environment construction, capability measurements,
+  the mount allowlist, podman subprocess rules: **`docs/sandbox-runtime.md`**.
 
-## Architecture
+## Confinement (host side)
 
-### Client-Server Boundary
-- **The frontend ONLY talks to the Go server** (`/api/...`) — it never calls an LLM endpoint directly; all LLM traffic (chat, model listing, `POST /api/config/fetch-models`) is proxied through Go.
-- All realtime is WebSocket through Go. Inbound frames are `stream.AppStreamMessage` (`Data` is `json.RawMessage`); **outbound** frames are flat maps built where they're broadcast (no shared envelope struct in Go) — a `task_event` carries `task_id`/`event` beside `data`, so the client reads `msg.task_id`, **not** `msg.data.task_id`. Use optimistic UI for user messages (add immediately, skip the echo).
-- Model/provider changes ride a `user_message` with optional `model_name`/`llama_server_url`.
-- **Provider routing:** `PUT /api/config` is a partial update. Two required pairs: `worker_provider`/`worker_model` (chat; resolved frontend-side by `resolveWorker` in `$lib/utils/providers.ts`) and `utility_provider`/`utility_model` (titles, summaries, commit messages, checkpoint labels — `utilityTarget()` in `backend/exec/executor.go`, falling back to the task's own URL/model).
-- **A partial update decodes into pointer fields, never a `map[string]any` read behind type assertions.** `PUT /api/projects/{projectID}/tasks/{taskID}` uses `taskUpdateRequest` (`backend/managers/task_update.go`) and `PUT /api/config` uses `configUpdates` (`backend/config/updates.go`): absent key = leave alone, present key = write (including `""` and `false`), JSON null = absent. A single-value assertion (`v.(string)`) panics and the recovered panic reaches the browser as a 500; the `, ok` form silently drops the value and answers 200, so the UI believes its own save. Wrong types are a 400 naming the field, and validation runs before anything is written. Tests: `backend/managers/task_update_test.go`, `backend/config/updates_test.go`.
-- **Every `/api` route declares its verb in the pattern** (`s.mux.HandleFunc("POST /api/…")`), so the mux answers 405 with an `Allow` header before any handler runs, and handlers do not check `r.Method` to refuse. Exemptions are few and each has a reason: the two file-server subtrees (`/`, `/extensions/`), the two WebSocket upgrades (`/api/stream`, `/api/lsp` — they upgrade on GET and never inspect the verb), `handler_preview.go`'s two `r.Method != http.MethodHead` checks (they suppress a HEAD *body*, not a request), and `handleTaskMessages` (three verbs through one function). A new methodless `/api` route is an archgate `routes` violation, so it fails `make check` rather than being noticed in review. Two consequences to know: net/http matches the **most specific path first**, so `GET .../tasks/done` reaches the `{taskID}` handler and answers 404, not 405; and a `GET` pattern also matches `HEAD`. Tests: `backend/server/routes_method_test.go`, gate: `scripts/archgate` `routes` rule. A methodless route also escapes `CSRFMiddleware`, which guards non-GET only.
-- **A WebSocket frame that is not a JSON object is dropped and reported once** (`parseStreamFrame` in `api/helpers.ts`, the one reader of both sockets' `onmessage`). A `JSON.parse` throw inside `onmessage` is swallowed by the event loop: the frame is lost, the socket stays open, and the app believes it is current. Tests: `api/__tests__/ws-frame.unit.ts`.
-- **`?parsed=1` is a contract every path on `/tasks/{id}/diff` must honour, including the fast ones.** The panel renders `parsed_files` and never re-parses patch text, so `git.ParseUnifiedDiff` (`backend/git/worktree.go`, served through `git.SortedParsedFiles`) is the only diff grammar in the product. The immutable done-task snapshot therefore stores its body *as the parsed body* (`doneDiffResponse.ParsedFiles`) and stays a byte-for-byte write: a response missing that key renders "No changes since last commit" over a diff it still carries. Tests: `backend/stream/done_snapshot_test.go`, `backend/managers/git_diff_parsed_test.go`.
+Enforced by the server process, so it holds for non-sandboxed projects too.
 
-### Untrusted Markup in the Browser
-- **Everything the app did not write goes through `$lib/utils/sanitize`** (`sanitizeHTML` / `markdownToSafeHTML`): chat and tool-call markdown (an LLM's words plus the output of tools that read an untrusted repository), an agent manifest's description, language-server hover documentation, **and the language server's completion/signature documentation** - which reaches `innerHTML` inside `@codemirror/lsp-client` (`renderDocInfo`, the signature-help docs element), a dependency `html-sinks.py` does not scan, so the only control is the `sanitizeHTML` field of `lspClientConfig`, and a config object that omits it is an unsanitized sink that no gate notices (`__tests__/lsp-doc-sanitize.unit.svelte.ts` holds the omission open by asserting the payload survives without the hook). Its three deliberate differences from DOMPurify's defaults: it drops the `style` **attribute** (the defaults keep `<p style="position:fixed;inset:0">…` byte for byte, and nothing above a chat bubble establishes a containing block, so model-authored markup would otherwise paint a full-screen fake dialog in the app's own theme), it drops the `style` **element** (the defaults refuse a *bare* `<style>` and keep one nested inside anything, and `marked` wraps block HTML in a container on the way through — so the attribute refusal alone left the same layout power available in a different syntax, and an LLM's `<div><style>…</style></div>` installed a page-wide stylesheet from a chat bubble), and it refuses `<form>` (the defaults keep `<form action=…><input><button>` whole and `marked` passes an inline one through, which leaves a live submit control inside a chat bubble; `input` stays because `marked` emits a disabled checkbox for every `- [ ]`). `class` stays — the LSP plugin colors fenced code with `tok-*`. The tests are written as the payload list plus a control case for each refusal proving it is this config and not DOMPurify's, each control written against the shape the defaults **keep** — a refusal tested only on the shape they already refuse proves nothing: `src/lib/utils/__tests__/sanitize.unit.ts`, scanned by the shared `__tests__/html-hazards.ts`, which reports a `<style>` element rather than assuming it away.
-- **`html-sinks.py` lists every HTML sink with the mechanism that keeps it safe**, and rule 4 checks the claim: a file saying `sanitizer` must import the module, `guard:<Ident>` must still contain that check, `escaped-by:<module>` must import a helper that still escapes. `html-sinks_test.py` holds each rule in both directions, because a sink check that stopped matching prints the same clean line as a sink that is safe.
-- **`Icon.svelte` accepts a lone sanitized `<svg>` root and nothing else** (`singleSvgMarkup`). Its `{@html src}` was only ever safe because of what its call sites pass — a build-time `*.svg?raw` import — and a component cannot see its call sites, so it checks the shape itself.
+- **File endpoints are jailed to the project plus the task the request names** — never the workspace dir.
+  `?project=` and `?task=` must be correlated before either is honoured, and containment checks the
+  lexical **and** the symlink-resolved path. Writes go through the one helper that runs the steps in order;
+  a handler that drops a step must not compile.
+- **The no-project file flow is jailed to `$HOME` plus the declared directories**, decided once at startup
+  and injected, so the picker and the create path can never disagree about what was declared.
+- **Two host reads sit outside the tool path** (LSP document sync, a project's Dockerfile) and are jailed
+  where the path is accepted, because the stored value is what the later read trusts.
+- **Nothing is read or captured unbounded**, and the cap runs before the bytes: request bodies, proxied
+  responses, subprocess output, file reads and bridge frames each have one. Bound output where it is
+  captured, not where it is shown.
+- **No subprocess inherits the server environment.** Exactly three allowlists, one per family (git,
+  podman, agent), each returning the whole environment with extras last. `os.Environ()` survives in one
+  sanctioned place: the operator's own host terminal under `DANGER_ZONE=1`.
+- **The git author identity is accessor-only** and process-wide.
+- Mechanisms, helpers and tests: **`docs/confinement.md`**.
 
-### Store & Migrations
-SQLite, one connection (`SetMaxOpenConns(1)`) so the `PRAGMA`s apply everywhere; `store.Store.mu` is the serialisation point. Tests: `backend/store/` (`store_test.go`, `migrations_test.go`, `sessions_test.go`).
+## Concurrency
 
-- **A multi-statement store write is one transaction, and `ctx` is deliberately absent from it.** `Store.tx` (`backend/store/store.go`) is the only way a section that must land *entirely* runs — `SetActiveThread`, `DeleteThreadWithMessages`, `CopyMessagesToThread`, `DeleteTaskMessagesAfter`, `DeleteProjectStats` — with `execer` (same file, satisfied by both `*sql.DB` and `*sql.Tx`) so a helper's query text exists once. Because the pool is one connection and `s.mu` is held across the section, a transaction buys **failure atomicity, not isolation** — without it a `SetActiveThread` whose second statement failed leaves a task with **no active thread at all**. **`DeleteProject` is one statement**, because the schema already says so — every child table declares `ON DELETE CASCADE` and `PRAGMA foreign_keys = ON`. Hand-written child deletes each ignore their own error, so a failure on the project row leaves the messages, threads, tasks and snapshots gone and still reports failure — and a project ID is the slug of its path, so re-adding the path finds its rows gone. What stays outside `tx` states its reason at its definition (`TransitionInFlightTask` is one statement; `CreateTaskMessage` must not lose a turn's message because a token counter failed; `GetSessionByToken`'s second statement is a throttled `last_seen` touch; the schema probe chain *is* the recovery mechanism for a half-applied migration). Mid-section faults are induced with SQLite `RAISE(ABORT)` triggers — never a production seam for tests. Tests: `backend/store/atomic_writes_test.go`.
-- **`PRAGMA user_version` gates the schema.** SQLite has no `ADD COLUMN IF NOT EXISTS`, so 52 columns are each probed before their `ALTER` (`hasColumn`/`addColumn`/`renameColumn`, `backend/store/migrations.go`). `initSchema` returns early when the database is already at `schemaVersion`, and refuses to touch one stamped **newer** than this build. Adding a migration means extending the probe chain *and* raising `schemaVersion`, leaving the earlier steps in place — they must stay idempotent, and a step that must run exactly once needs its own marker (the config-row guard on the backfill) rather than trusting the number.
+- **Keyed locks come from `pkg/keylock`, one named domain type per domain**, embedded by value. Distinct
+  types and distinct tables are both required: task IDs and project IDs come from the same alphabet, so a
+  shared table fuses two domains in silence.
+- **Lock tables never leave their package** — accessors return a release function, never a mutex.
+- **Lock order: merge before stash, never after.** Never hold a mutex across a `Wait` for a goroutine that
+  takes it. A goroutine that wins a lock after its caller timed out must release it.
+- **Do not add a seconds-scale bound to a git-family lock** — the wait is usually legitimate; wedged
+  sections are surfaced by a slow-wait report instead. A wait a person is watching announces itself; a
+  wait nobody watches stays in the log.
+- `executionState.sandboxMu` is a **leaf lock**: it may be taken under `taskMu`, never the reverse, and its
+  fields are read as a snapshot.
+- Domain names, timeouts, watched-wait wiring: **`docs/locking.md`**.
 
-### Sessions & Auth
-One master password (`MIKE_LOGIN_PASSWORD`). Storage shape, endpoint shapes and the Settings UI: `docs/sessions.md`.
+## Git
 
-- `SessionManager` (`backend/auth/session.go`) keeps **only `sha256(password)`** and compares with `subtle.ConstantTimeCompare` — both sides always 32 bytes (a length mismatch would make the constant-time compare short-circuit and leak).
-- **Tokens:** 32 bytes from `crypto/rand`, 30-day TTL. The raw token exists only in the response/cookie; the DB stores `hex(sha256(token))`, so a copied `kanban.db` can't be replayed as a session.
-- **The session cookie's `Secure` flag is decided per request** (`requestIsHTTPS(r, trustProxy)`, the resolved `MIKE_TRUST_PROXY` handed in): TLS terminated here, or `X-Forwarded-Proto: https` under that flag - the same reading `RedirectHTTPSMiddleware` uses, so the redirect and the cookie cannot disagree. There is deliberately **no variable for it**: a TLS-terminating proxy used to need `MIKE_SECURE_COOKIES=1`, which nobody set, so the flag was off in exactly the deployment it existed for. The one answer that stays unencrypted is `--no-tls` with no proxy (development, and the e2e harness), where a `Secure` cookie would never be stored and nobody could log in. Logout clears with the flag it set, or the browser keeps the session.
-- **Every response carries `Permissions-Policy`** (camera/microphone/geolocation/usb/serial/hid/bluetooth/payment/display-capture/wake-lock/idle-detection/keyboard-map/window-management denied - everything with no caller in `src/`; the clipboard stays, the terminal pastes with it) **and `Cross-Origin-Resource-Policy: same-origin`**, except the two trees an opaque-origin frame loads as subresources: `/extensions/` and `/api/preview/{token}/{path...}` (`isOpaqueOriginAsset`). Marking those breaks the extension iframe and the preview's own assets.
-- **`last_seen` writes stay throttled** (60 s, `lastSeenInterval`) — the store serialises on one connection, so an unthrottled write makes every authenticated request a DB write.
-- **Files are owner-only:** data dir `0700`; `kanban.db` + `-wal`/`-shm` `0600` (`backend/store/store.go`); `kanban.trace` `0600` (`main.go`).
-- **Task/thread IDs** (`backend/types/idgen.go`) draw dictionary words through `crypto/rand` (`secureIndex`), never clock-seeded `math/rand` — they surface in URLs, branch names and worktree paths; a failing system source panics rather than issuing a guessable ID.
-- `/api/sessions`, `DELETE /api/sessions/{id}`, `POST /api/sessions/revoke-others` are session-authed + CSRF-guarded and **never** in `publicPaths`; the list response type has **no token / token-hash / CSRF field at all**. Tests: `backend/auth/session_test.go`, `backend/store/sessions_test.go`, `backend/server/handler_sessions_test.go`, `backend/types/idgen_test.go`, e2e `settings-sessions.spec.ts` (isolated).
+- **`git.Command`/`git.CommandContext` are the only way this repo starts git**; they set directory,
+  environment and `WaitDelay` together, and the hook fence that stops repo content executing cannot be
+  forged from a call site.
+- **A stash entry is identified by hash, never by position** — the stack is shared by every worktree of the
+  project and holds the user's own entries. Work needing a temporarily clean tree goes through `WithStash`,
+  which refuses to run when the push failed.
+- **Client-supplied refs are validated and fenced** (`--end-of-options`), **clones speak only allowed
+  transports** (validated host-side *and* by git's protocol config), and **a stored `commit_hash` is an
+  object id** validated where it is accepted, because the later reset never re-checks it.
+- **One slugifier** for every name derived from user text, with its matching parser beside it — a GC that
+  parses a different shape than the executor writes deletes live branches.
+- Fences, the stash bracket, and the accepted user-visible consequences: **`docs/git-operations.md`**.
 
-### Execution Containment (host side)
-Enforced by the server process itself, so it holds for **non-sandboxed** projects too:
+## Commit and Done
 
-- **The git author identity is process-wide and accessor-only.** Use `git.SetAuthorIdentity` / `git.AuthorIdentity` (`backend/git/worktree.go`); there are deliberately no exported `GitAuthorName`/`GitAuthorEmail` variables, because the add-project flow writes the identity while tasks are committing. Making it per-`WorktreeManager` is still open.
-- **Agent subprocesses get an environment allowlist.** `SafeAgentEnv` (`backend/agent/env.go`) is the only source of `cmd.Env` for an adapter's subprocess (`runner.go`) and its `--list-models` probe (`loader.go`): `PATH`/`HOME`/user/term/locale/proxy/trust-store (+ `LC_*`) plus the adapter's own extras (extras last — `os/exec` keeps the last occurrence). `os.Environ()` leaked `MIKE_LOGIN_PASSWORD` and `MIKE_ENCRYPTION_KEY` via `/proc/self/environ` to an extension-supplied binary, so **never** `cmd.Env = os.Environ()` here; add a variable only if an agent genuinely needs it.
-- **No subprocess inherits the server environment any more.** There are exactly three allowlists and each belongs to one subprocess family: `git.Env` (keeps `HOME`/`SSH_AUTH_SOCK`/`GIT_*`/`LC_*`/proxy/trust-store, because git needs the operator's own configuration and credentials to reach their remotes), `sandboxruntime.PodmanEnv` (the XDG/DBUS trio rootless podman genuinely reads, plus `CONTAINERS_*`), and `SafeAgentEnv`. Assigning a bare list to `cmd.Env` **replaces** rather than extends, which is why the allowlists return the whole environment and extras are appended last. `os.Environ()` survives in exactly one sanctioned place, `term.hostShellEnv` under `DANGER_ZONE=1`, because there the shell is the operator's own.
-- **File endpoints are jailed to the project plus the task the request names.** `validateFSPath` (`backend/server/handler_fs.go`) takes the worktree root `fsWorktreeRoot` resolved and allows exactly that directory and the project checkout — **never the workspace dir**, which holds every project's task worktrees, so a workspace root would let one project-scoped read, write or mkdir reach any task on the host. `?project=` and `?task=` arrive uncorrelated, so `requireTaskOwnership` ties them (`store.GetTask(project.ID, taskID)`) before either is honoured, and `resolveWorktreeForFile` calls it too, because the preview asset root is derived from the same resolution and a preview token is read without a session. Both jails go through `fsutil.Contained`, which requires the lexical path *and* the symlink-resolved path to sit inside a root — a task with an rw bind mount can plant `link -> /etc` in its own worktree, and a lexical prefix check reads right through it. **A write goes through `fsWriteTarget` then `writeContainedFile`** (same file) instead of repeating the steps: `fsWorktreeRoot` → `requireSandboxAvailable` → `ContainerToHost` → `validateFSPath` are each the jail for the next, so a handler that drops one — or passes `""` where the worktree root belongs — writes outside the project and still compiles. The preview asset root uses the same `fsutil.Contained` call rather than resolving both sides by hand. The `GET /api/fs`/`mkdir`/`init-git` flow that carries **no** `project` — the directory picker, and with it adding a project or cloning into a path — is jailed by `fsutil.HostRoot` (`backend/fsutil/hostroot.go`) instead: `$HOME` plus the directories the operator declared at startup (workspace dir, extensions dir), or any host path with `MIKE_ALLOW_ROOT_FS=1`. It is built **once** in `NewServer` and injected into `managers.NewProjectHandler`, so the picker and project create cannot disagree about what was declared — the same reason the lock accessors are injected. **The two workspace rules are not one**: the workspace dir is never a root for a project-scoped request (above), and it **is** a root for the no-project host jail, where there is no project to protect against. Deliberately absent from the roots: the data directory (it holds `kanban.db` and `data/tls/*.key`, so browsing it is a private-key read) and the registered project paths (human-typed locations in the DB; including them would let one session browse every path this install ever touched). The jail uses `os.Root` for open/stat — `..` and a symlink resolving outside are refused in the kernel, with no check-then-use window — and creation goes through a per-component `Lstat`+`Mkdir` walk rather than `(*os.Root).MkdirAll`, because **os.Root refuses every path involving a symlink and its `*PathError` is not the jail's 403**; the walk refuses with `ErrHostRoot` and names the link. Reads fall back to `fsutil.Contained` on that same refusal, which is what keeps an inside-root link (`~/go -> ~/storage/go`) browsable. A clone refusal happens in `prepareCloneTarget`, **before** any byte is fetched, so a refused request leaves no partial checkout; `GET /api/home` answers `jailed` and `jail_env` so the picker states the limit before the first 403 rather than letting the user find it. Same rule on the git side, at both of its working-tree reads: `repoFilePath` (`backend/managers/git.go`) jails `GET /projects/{id}/git/diff/file`, whose working-tree read follows a link committed into the repo even though `git diff` itself answers from the object database, and `git.UntrackedReadTarget` jails the `?full=1` re-read behind `GET /projects/{id}/tasks/{id}/diff/file`, whose path came from `git status` — which lists `key -> ~/.ssh/id_rsa` exactly the way it lists a file. Both reads are size-capped at `maxDiffFileBytes` as well: an unbounded `os.ReadFile` of a path a task chose is the request that finally kills the server, and past the cap the cached window plus `truncated` is the answer. Tests: `backend/server/handler_fs_sandbox_test.go`, `backend/server/handler_fs_upload_test.go`, `backend/managers/git_diff_file_path_test.go`, `backend/managers/git_diff_file_full_test.go`, `backend/managers/git_diff_size_cap_test.go`, `backend/git/untracked_symlink_test.go`, `backend/fsutil/hostroot_test.go`, `backend/server/handler_fs_hostroot_test.go`, `backend/server/server_hostroot_test.go`, `backend/managers/project_hostroot_test.go`.
-- **Two host reads sit outside the tool path and are jailed separately.** `ensureDocSync` (`backend/lsp/extension_manager.go`) reads the file it is about to `didOpen`/`didChange` **with the server's own privileges** — the one host read left after `hostGuard` refused the tool's own — and its `filePath` is a tool argument joined to the workspace, so `docSyncPath` runs it through `fsutil.Contained` before `os.ReadFile`; without it a `..`-escaping `path` on an LSP tool call or a diagnostics pass reads any file the server user can open. A project's `sandbox_dockerfile_path` is read at build time the same way, and is checked **where it is accepted** (`checkHostPath` on create and `PUT`), against the jail the Dockerfile picker browses, for the same reason as `types.ValidateCommitHash`: the stored value is what the later read trusts and never re-checks. Tests: `backend/lsp/docsync_test.go`, `backend/managers/project_dockerfile_jail_test.go`.
-- **No request body is read unbounded, and the cap runs before the bytes.** `MaxBodyMiddleware(httputil.MaxRequestBodyBytes)` in `Server.middlewareChain` bounds every non-GET body (GET is skipped so the WebSocket upgrades stay upgrades) — a declared length over the cap is refused up front, a chunked one by the wrapped reader — because most handlers (`git`, `fs`, `task`, `thread`) decode `r.Body` directly rather than through `httputil.DecodeJSON`, which has its own limit and answers **413** rather than "invalid request body" when the body was simply big. Outbound reads are capped too: the extension proxy (`maxProxyResponseBytes`) buffers a bounded response and answers it with a type of MIKE's own (`proxyContentType`), never the upstream's. **A subprocess's output is bounded where it is captured, not where it is shown** — `toolresult.Capture` (`backend/toolresult/capture.go`) is the writer a sandboxed `Exec` hands its command, and `streamLineWriter` does the same job for the host bash path, both at `MaxCaptureBytes` with a trailing marker naming what was dropped, because `toolresult.Truncate` runs *after* the whole output is already in memory and `find /` would have cost the server the run. A capture writer always reports the full byte count: a short one makes `io.Copy` stop and lose the rest silently. Inbound, `GET /api/fs/read` checks size **before** reading — `os.Stat` for the working tree, `git cat-file -s` (`gitBlobSize`) for `?ref=` — so a request for a 4 GB file costs one subprocess instead of 4 GB. **What crosses the sandbox bridge is bounded the same way** — `protocol.MaxFramePayload` is checked before `ReadFrame` allocates from the declared length, `protocol.MaxReadBytes` is enforced in the guest *and* on the host's chunk collector (a stale bridge must not be able to stream past it), and a sandboxed `bash` captures through `toolresult.Capture` exactly like the host path. Rule and numbers: `docs/sandbox-bridge.md`. Tests: `backend/server/body_limit_test.go` (which drives `middlewareChain`, because an unwired middleware protects nothing), `backend/httputil/decode_json_test.go`, `backend/extensions/proxy_limit_test.go`, `backend/toolresult/capture_test.go`, `backend/exec/bash_stream_cap_test.go`, `backend/server/handler_fs_size_test.go`, `pkg/bridge/protocol/frame_limit_test.go`, `pkg/bridge/agent/committed_bridge_test.go`, `backend/exec/output_limits_test.go`.
-- **Per-project and per-task locks never leave their package.** `WorktreeManager` exposes `LockProjectStash(id) func()` / `LockProjectMerge(id) func()`, `TaskExecutor` exposes `LockWorktree(id) func()`, and `managers.GitHandler` is injected with `func(string) func()` — a returned `*sync.Mutex` can be stored, copied and passed on, and a caller holding a copy serializes on a *different* lock while believing it holds the one that protects the repository. `TestNoExportedMutexAccessor` fails on any exported method returning `*sync.Mutex`. **And no mutex is ever held across a `WaitGroup.Wait` for a goroutine that takes it** — `WorktreeWatcher.Close` stops the timers and closes `doneCh` under `ww.mu`, releases it, and only then waits for the pool, because `computeAndBroadcast` locks the same mutex in its deferred in-flight cleanup; a compute in flight a second after a file write is the ordinary case, so holding the mutex across the wait deadlocks `Close` — and with it the shutdown step that closes the watchers. Pinned by `TestCloseDoesNotWaitHoldingTheLock`. Lock order is **merge before stash, never after** — which is why a release is written out explicitly (not deferred) wherever the enclosing function later calls `MergeBranch`. `CreateWorktree`'s bounded wait (`tryLockProjectWorktree`) hands a late lock win straight back: a goroutine that acquires after its caller gave up must release, or the project stays uncreatable until restart. **A wait a person is watching announces itself; a wait nobody watches stays in the log.** `keylock.Table.LockWatched`
-is the mechanism: it repeats a notice every `every` while the caller waits and once more when the lock is taken, and
-says nothing at all when the lock was free — a line that flashes for a 2 ms acquisition is a line that gets ignored.
-The owning packages expose watched twins (`LockProjectStashWatched`, `LockWorktreeWatched`) that take the notice as a
-parameter, because the table must still not leave the package; the caller supplies `stream.LockWaitNotifier(projectID,
-taskID, domain)`, which is the one place the frame is shaped, and `QueueIndicator` renders it as the top rung of the
-line that already says "Awaiting LLM provider…". It is wired where a click is the waiter (Commit & Done behind a tool
-call, a thread switch behind a stash) and deliberately not where it is not (merges from turns, GC) — the split is
-`Lock` versus `TryLock` in the same package, expressed in UI terms. Tests: `pkg/keylock/lockwatch_test.go`,
-`backend/exec/lock_watch_test.go`, `backend/git/lock_watch_test.go`, `backend/stream/lock_wait_test.go`,
-`frontend/src/lib/components/__tests__/queue-indicator.unit.svelte.ts`.
-- **Keyed locks come from `pkg/keylock`, one named domain type per lock domain.** A domain is `type stashLocks struct{ keylock.Table }` in the package that owns it — `stashLocks`/`mergeLocks`/`worktreeLocks` in `git`, `taskWorktreeLocks` in `exec`, `gitTaskLocks`/`gitProjectLocks` in `server` — and the table is embedded **by value**, so a zero-value owner still works and `go vet` copylocks refuses copying an owner struct. Two forms: `Lock(key)` waits indefinitely, `TryLock(key, timeout)` gives up. **Distinct types and distinct tables are both required**: a task ID and a project ID are drawn from the same alphabet, so a shared table would fuse two domains in silence; `TestLockProjectStashAndMergeAreDistinctTables` holds behaviour, table identity and type identity. No hand-rolled key→mutex tables in `backend/`: archgate's `locks` rule keeps it that way (its baseline is the bridge's `fileLocks`, the one deliberate exception: a different process, and migrating it re-signs a committed binary for nothing). **Do not add a seconds-scale bound to a git-family lock:** `mergeMu` and `stashMu` are both reachable while a goroutine waits on the task's tool lock (`exec/merge.go:654`→`:672`, `exec/context.go:249`→`:254`), which is held across an entire tool call (`bash` ≤ 300 s), so the wait is usually legitimate; wedged sections are surfaced by the per-domain slow-wait report (`gitSlowWait` 2 s, `requestLockSlowWait` 5 s, `taskLockSlowWait` 60 s) instead. The one bounded git wait is `worktreeLockTimeout` (30 s) on worktree creation, which waits on nothing else. A timed-out `TryLock` acquires nothing later: a goroutine that wins the lock after its caller gave up has to release it, or the lock is stolen for an instant. Tests: `pkg/keylock/keylock_test.go`, `backend/git/locks_test.go`.
-- **Tests:** `backend/exec/tools_test.go`, `backend/agent/env_test.go`, `backend/git/env_test.go`, `backend/git/locks_test.go`, `backend/git/cancel_test.go`, `backend/stream/worktree_watcher_close_test.go`, `pkg/sandboxruntime/podmanenv_test.go`, `pkg/shlex/shlex_test.go`.
+- **Only staged changes are committed.** Untracked files stay in the worktree and are discarded when the
+  task is deleted — never copied into the main checkout or merged. A conflict-resolution commit stages with
+  `git add -u`, **not** `git add -A`.
+- **A merge conflict interrupts the click, it does not cancel it.** The turn that finishes resolving merges
+  and marks Done whatever `auto_merge` says, but only the recorded click (`ArmCommitAndDone`) authorizes
+  that merge, and it is spent by the resolution it waited for.
+- **Nothing is marked Done that did not reach the target branch.** `docs/commit-and-done.md`.
 
-### Git Argument & Transport Hardening
-- **`git.Command(dir, args…)` / `git.CommandContext(ctx, dir, args…)` are the only way this repo starts git**, and `TestNoGitSubprocessSpawnsOutsideGit` walks `backend/`, `pkg/` and `scripts/` to keep that true. Both set `Dir`, `Env: Env()` and `WaitDelay` in one place, so the allowlist and the hook fence cannot be forgotten at a call site. `_test.go` is exempt for a stated reason, not for churn: the control-case test must be able to spawn an **unfenced** git. **Repo content never executes**: `git.HookFence()` pins `core.hooksPath=/dev/null` via `GIT_CONFIG_COUNT`/`KEY_0`/`VALUE_0`, appended *after* the extras so `os/exec`'s last-wins makes it unforgeable. `--no-verify` is not equivalent — it has no effect on `post-checkout`, which `git worktree add` runs. The accepted user-visible consequence: a `pre-push` hook no longer runs when someone clicks Push.
-- **Work that must run against a temporarily clean tree goes through `WithStash`** (`backend/git/stash_bracket.go`) — the only home for the push/run/restore bracket, which the merge paths take rather than writing the sequence themselves. A bracketed section begins with `git checkout -f`, which silently reverts tracked modifications to HEAD when the tree is dirty, so `WithStash` **refuses to run the work when `PushStash` fails** (`ErrNothingToStash` is the one tolerated failure — there was nothing to take), and `fn` returns `ErrKeepStash` to leave the entry stacked for the turn that later resolves a merge conflict. The stash mutex is taken around the push and around the restore and held across neither, so `fn` may take the merge lock.
-- **A stash entry inside that bracket is identified by hash, never by position** — the rule `WithStash` enforces, and the one the two out-of-bracket callers must keep by hand. `git stash pop` pops `stash@{0}` and has no idea who pushed it; the stack is shared by every worktree of the project *and holds the user's own entries*. Measured with MIKE's own labels: A pushes, B pushes, A pops → **A's worktree receives B's work and A's entry is left for B**, with no error on either side. The primitives it is built from: `PushStash` (returns the created entry's hash, diffing the list) with `PopStashByHash` (apply-by-hash, and it **leaves an entry it could not apply** rather than destroying unapplied work); the callers that never saw the push find it through `RestoreStashForTask`/`DropStashForTask`, whose identity is the `StashMessageFor*` label because it embeds the task ID. Never a bare `git stash drop` (it discards `stash@{0}`, possibly the user's) and never a fallback to position when a hash cannot be found. And `git stash push` exits 0 having created nothing on a clean tree — `PushStash` returns `ErrNothingToStash` when `err == nil` and nothing was created. Two stash uses stay outside `WithStash` deliberately: `stashWorktreeState` (`backend/server/handler_thread.go`) hands the hash back for a later thread switch to restore, which a bracket scoped to one call cannot express, and `loop_agent.go` restores by label with no push of its own. Tests: `backend/git/stash_identity_test.go`, `backend/git/push_stash_test.go`, `backend/git/stash_bracket_test.go`, `backend/exec/sync_merge_test.go` (`…_KeepsUnstagedWorkWhenTheStashFails` — its stash-ref injection is used instead of an index lock because a locked index blocks the forced checkout too, so the loss never happens and the test passes vacuously).
-- **Client-supplied refs are validated, then fenced.** `types.ValidateGitRef` (`backend/types/validate.go`) is deliberately tighter than `ValidateBranchName` (no `~ ^ : ? * [ \`, space, leading `-`). `GET /api/fs` validates `?ref=` **and** passes `--end-of-options` (git ≥ 2.24) before `<ref>:<path>` in `git show`, so a ref can never parse as an option (`--output=/tmp/pwn` would create/truncate a file anywhere the server user can write).
-- **Clones speak only allowed transports.** `git.CloneArgs` puts `-c protocol.ext.allow=never` *before* `clone` (so the process parsing the URL gets it) and `git.CloneEnv` sets `GIT_ALLOW_PROTOCOL=http:https:git:ssh:file` + `GIT_TERMINAL_PROMPT=0` — enforced by git, independent of the user's `git config`. `git.ValidateCloneURL` mirrors it host-side: no leading `-`, no control characters, no remote-helper `::` transport (`ext::sh -c 'id'`), and a **case-sensitive** scheme check because git's own is (`HTTPS://` is refused as transport `HTTPS`). **Every** clone of a caller-supplied source goes through both halves — project creation (`managers.validateGitCloneURL`) and the extension install (`extensions.CheckoutExtension`). Git's own refusal of `ext::` is a host default, not a defence (a host with `protocol.ext.allow=always` would run the payload as the server user). Use `git.CloneProtocolArgs()` for a clone that needs a bespoke flag — never drop the fence.
-- **A `commit_hash` is an object id, not a rev.** `types.ValidateCommitHash` (`backend/types/validate.go`) accepts 4–64 hex characters and nothing else. It is checked where the value is **accepted** — `PATCH /projects/{id}/tasks/{id}/messages/{id}` stores `git_commit_hash` only after the check — because that stored value is what the message-deletion path later hands to `ResetWorktreeTo`'s `rev-parse --verify <hash>^{tree}` / `read-tree --reset -u <hash>` without re-checking it. Every hash MIKE writes is `git stash create` output, so the rule costs no real request; without it `{"git_commit_hash":"HEAD"}` discarded a task's work to restore a branch, and an option-shaped value reached git as an option.
-- **One slugifier for every name derived from user text.** `types.Slugify` / `types.SlugifyBranchName` (`backend/types/slug.go`, `MaxBranchName` / `BranchSlugMaxLen`) back task branch names, the branch GC and Main-thread recovery, and project IDs; the matching *parser* `types.TaskBranchSlugPrefix` (with `TaskBranchSuffixLen`, the random tail `exec` appends) lives beside them — a GC that parses a different shape than the executor writes deletes live branches. Never add a second copy of either. Non-ASCII letters are dropped, not transliterated.
-- **Tests:** `backend/types/validate_test.go`, `backend/types/slug_test.go`, `backend/server/handler_fs_test.go`, `backend/server/handler_fs_size_test.go`, `backend/git/clone_test.go`, `backend/managers/project_test.go`, `backend/server/handler_message_commit_hash_test.go`, `backend/extensions/registry_test.go`.
+## Deletion
 
-### Keyboard Shortcuts / UI Preferences (Settings)
-Both ride the shared Settings Save/Cancel flow. **`PUT /api/config` replaces the whole `keyboard_shortcuts` object - always send all bindings**; omitting one resets it to default. Absent = default, `""` = disabled. Capture (`normalizeKey`) rejects modifier-only presses, Escape, unmodified named keys and browser-reserved `Ctrl+W/Q/N/T`. Platform-aware defaults are `default*()` functions, **not** `DEFAULT_SHORTCUTS` entries. A key may be the pseudo-key `click` for a mouse binding - only the primary button is bindable, and an unmodified click is never a binding. UI preferences are top-level `*bool` fields (`parseBoolPtr` in `GetConfig`, `omitempty` in `configResponse`).
-
-Detail and tests: `docs/adding-a-preference.md`.
-
-### Keyboard Navigation (board + task view)
-Arrow keys move **real DOM focus** (the global `:focus-visible` ring) - never a separate "highlighted" store. Targets come from pure resolvers (`resolveArrowTarget`, `resolveDetailColumn`, ...) - don't inline target logic in components. The project focus ring is an **inset box-shadow** (ancestors clip outlines).
-
-Detail and tests: `docs/navigation.md`.
-
-### Link-like Rows (projects & task cards)
-Sidebar project rows and task cards are **real links**, so the browser's own link actions work (open in new tab, middle click, copy link address). **Never** re-tune these rows with `<button>`/`<div>` + a faked context menu - the link menu is DOM-level and unsynthesizable. Keep selectors tag-agnostic (`.project-item`, not `button.project-item`). A card's root stays a `div` (nested subtask `Card`s would mean anchor-in-anchor) with a full-cover `aria-hidden` overlay link; the stacking contract matters: `.card-title` is deliberately NOT lifted above it.
-
-Detail and tests: `docs/link-rows.md`.
-
-### Reconnection & Offline
-`onConnected(true)` in `App.svelte` runs `silentRefresh()` once `initialLoadComplete`; `TaskChat` reloads history from the DB on reconnect because **turns completed while offline are never replayed** (buffer cleared at turn end). `offline` queues writes immediately — except a `PUT /api/config` carrying a provider key that is not the server's masked placeholder, and a clone URL carrying credentials, both **refused** rather than queued: the queue is persisted to IndexedDB, so a queued value outlives the tab and the session, and refusing (not stripping) keeps the request from quietly becoming something else (`carriesPlaintextAPIKey` in `api/config.ts`, `gitUrlCarriesCredentials` in `utils/git-url.ts`; the scp-style `git@host:org/repo` form carries no secret and still queues). `online` flushes the queue and calls `reconnectNow()` to skip backoff.
-
-**`apiFetch` distinguishes the two ways a request ends, and neither is a deadline.** There is no implicit deadline (the caller's `signal` is the only one): an abort at 15 s read as "offline", so a big task diff, a merge on commit-and-done or a replayed clone failed in the browser while the server finished the work, and every later write queued to IndexedDB because of it. A cancellation becomes `RequestAborted` and **never** touches the offline flag, and no-connection becomes `ConnectionFailure` which does. A server that accepts a request and answers nothing is surfaced by the WebSocket going down (`setOfflineStatus(!connected)` in `App.svelte`), which is the state `offline` was always meant to track, not by the client guessing at a stopwatch. Both classes keep the DOM `name` (`AbortError`, `TypeError`) because a check that misses one silently turns a cancellation into an error toast, or a queueable write into a failure — and **the name is the test, never `instanceof DOMException`**: these are `Error`s that carry the name, so the call is `isAborted(e)`. The server answers the same pair: `httputil.Fail` maps `context.Canceled` to 499 at debug — no fault to report, and an operator's log is not a transcript of every closed tab — and everything else to 500 at error. **Nothing in the product puts a deadline on a wait for this server**: a subprocess or a protocol round-trip may carry its own, and a long wait gets a report naming what it is still waiting on instead (`subproc.Watch`, the keylock slow-wait). Tests: `api/__tests__/fetch-failure.unit.ts`, `api/__tests__/send-queue.unit.ts`.
-
-**A server fault answers MIKE's own sentence; the cause goes to the log.** `errs.Operation(operation, cause)` +
-`httputil.Fault(w, operation, err)` is that classification, and `httputil.Fail` is the only place a status code
-is chosen. Echoing `err.Error()` hands the browser git's stderr, a driver message or an absolute worktree path,
-and logs nothing: the person who could act on the cause sees a path and the operator sees silence. Two consequences to keep: an `Operation` does
-not unwrap its cause (`IsNotFound` must not inherit from a failed lookup, or a broken repository answers 404
-"task not found" about a task that exists), and a handler whose callee can refuse with a
-`errs.Conflict`/`ErrNotFound` sentinel uses `Fail`, not `Fault` — `RetryTask` propagates `ErrTaskAlreadyRunning`, so retrying a running task answers 409. Tests:
-`backend/errs/errs_test.go`, `backend/httputil/httputil_test.go`; the ratchet is `status500` (0 violations across
-248 examined).
-
-Detail and tests: `docs/reconnection.md`.
+- **Deleting a task is one path** — the deleted-events, every teardown step for its subtree, then one
+  prune and one board broadcast for the batch. No caller states a subset of those steps.
+- **Deleting a project deletes its tasks**, root by root, and then the project's own container, terminal
+  session and worktree directory. A second list of "what a task needs when it goes" is how containers get
+  left running: the startup sweep skips running containers, so nothing else will ever remove them.
+- **Cleanup failures are reported, not fatal.** A project that cannot be deleted cannot be re-added under
+  its own ID, and the leftover is logged by name.
 
 ## Extensions
 
-Types: `lsp` (language servers in gVisor sandboxes), `ui` (frontend injection), `css` (a global stylesheet), `i18n` (translation packs - the enabled pack *is* the active language), `agent` (AI agents as subprocesses via WASM adapters), `llm` (provider request adaptation).
+Types: `lsp`, `ui`, `css`, `i18n`, `agent`, `llm`.
 
-**Key files:**
-- `backend/extensions/` — domain types, `store.go` (SQLite), `registry.go` (FetchIndex/FetchManifest/PullImage/BuildImage), `sandbox.go` (refcount lifecycle), `handler.go` (REST), `changelog.go`, `manifest_validate.go`
-- `backend/lsp/extension_manager.go` — extension-driven LSP discovery (LSP availability = installed extensions)
-- `frontend/src/lib/services/extension-manager.svelte.ts`, `ui-injector.svelte.ts`; `$lib/api/extensions.ts`; `ConfigModal/ExtensionsTab.svelte`
+- **An installed extension's directory *is* the install.** Deleting the row deletes the directory, and
+  both directions are derived from the stored record, never from a request field. A row whose files are
+  gone is repaired at startup from its own pin — never a newer commit.
+- **Install is atomic and answers as a stream**; the image is built before the row exists, a failure
+  removes the checkout, and the terminal event is emitted last.
+- **An extension sandbox has no default image**, and an image is built in a context this package creates —
+  never the working directory, which is both a `.dockerignore` accident and a jail break.
+- **An extension's only egress is the proxy route**, which enforces the manifest's domain allowlist,
+  refuses redirects, caps the response and never echoes the upstream's content type. Never build an
+  `http.Client` at a call site.
+- **A dependency-cache grant is two fields with two origins** — the manifest declares the container path,
+  a human configures the host path — reaches one extension's sandbox, and is always read-only. Never
+  discover where a toolchain's cache lives. `docs/extension-dependency-cache.md`.
+- **Language knowledge lives in extensions.** The core holds no language names, keyword lists, comment
+  markers or bracket tables, in either language; both sides read the manifest through one helper each, and
+  a syntax is data, never code. `docs/languages.md`.
+- **The UI language is whichever `i18n` extension is enabled** — there is no language setting and nothing
+  stored. Any load failure means whole-catalog English plus a report. `docs/i18n.md`.
+- Agent extensions: the backend knows nothing about agent protocols; `EventTypePersist` is the only path
+  to the database; the adapter names its binary; an enabled agent extension *is* a provider, merged into
+  the config per request and never persisted. `docs/agent-extensions.md`.
+- UI extension modules are plain JS, not Svelte components, and the postMessage channel is armed by the
+  frame's `exthello` echo. `docs/ui-extensions.md`. The preview token is a credential and its asset root
+  is the jail: `docs/preview.md`.
+- Install/build/delete/repair mechanics, REST surface, capability gates, changelogs:
+  **`docs/extension-lifecycle.md`**.
 
-**REST:** `/api/extensions` (list/get/update/delete), `PATCH /{id}/enabled`, `GET /registry`, `GET /local`, `GET /check-updates`, `GET|PUT|DELETE /{id}/storage` (the namespaced KV store behind `extHost.storage.*`), `PUT /api/extensions/{id}/dependency-cache` (the one host directory an LSP extension reads its resolved dependencies from — see *Mount a language server's dependencies*), `POST /{id}/proxy` (the **only** extension egress path; enforces the manifest's domain allowlist, refuses redirects, caps the response at `maxProxyResponseBytes` and never echoes the upstream's `Content-Type` — `proxyContentType` keeps `application/json` because that is what the client branches on and answers `text/plain` for everything else, since the bytes are served from MIKE's own origin). The three long-running operations (`POST /install`, `POST /install-local`, `POST /{id}/update`) answer as **SSE** streams (`streamOperation`); there is **no** build-progress route — build/update output reaches the browser as `build_progress` **task WebSocket** events (`types.WSTypeBuildProgress`, from `exec/loop_helpers.go`). `streamOperation` **keeps draining the operation's channel after the client goes away**: the work runs in its own goroutine, so a reader that stops reading strands it mid-flight — no row is ever written and the name stays claimed in `inFlightOps`, which answers "install already in progress" to every later attempt with nothing in the UI able to say why. Tests: `stream_client_gone_test.go`. `installInBackground` emits its **terminal event last**, after the rollback of its own checkout and after `inFlightOps.end`, because a client told "install failed" immediately re-lists or retries: with the event first, `GET /api/extensions/local` offers the ghost folder the rollback has not deleted yet and the retry is refused as already in progress. Held: `install_report_order_test.go` (20 rounds — one round passes whenever the removal happens to win).
-- **Outbound HTTP goes through `backend/httputil/client.go`**: `NewClient` follows redirects, `NewSingleAttemptClient` refuses them. The refusal is the security control — the domain allowlist is checked against the URL the caller asked for, so following a redirect reaches a host nothing validated. Don't build an `http.Client` at a call site. Tests: `backend/httputil/client_test.go`.
+## Reconnection & Offline
 
-**Deleting an extension deletes its directory.** `extensions/<author>/<name>` is not a cache: UI code is served from it, agent adapters' WASM and binaries load from it, and `GET /api/extensions/local` lists it as installable. The browser half of that rule is the service worker: extension assets are cached `NetworkFirst` as the offline fallback, so `uiInjector.registerFromExtensions` drops the `kanban-extensions` cache whenever the installed set moved (`services/sw-cache.ts`) - a cached body is the extension's *previous* code, running in a frame the host armed and granted. A deleted row with its files still present is a deleted extension that keeps executing and returns under its own name with the manifest it was installed with. `removeExtensionFiles` (`backend/extensions/remove.go`) derives the path from the **stored record** through `extensionDir` — never from a request field — and the delete is contained twice: lexically inside the extensions root, and again with symlinks resolved (an `extensions/<author>` that links elsewhere must not delete what it points at). Because every reader derives the directory that way, `install-local` **refuses** a folder it cannot read back: a local install is materialized in place while the record stores the *slugged* author, so an author folder that is not its own slug would install "successfully" and then 404 every asset it serves (a translation catalog, a stylesheet, a UI module) with the extension installed and enabled. An emptied author folder goes too. Removal runs **after** the row delete, so an unremovable directory cannot make an extension undeletable; a failure is reported as `leftover` in the response (rendered by `ExtensionsTab`) and a `LEFTOVER FILES` log line, because invisible files are still served. Updates are unaffected - `CheckoutExtension` removes the destination first. Tests: `backend/extensions/delete_files_test.go`. Plus the preview endpoints below.
-
-**A row that outlived its files is repaired at startup, from its own pin.** The reverse case: a missing directory with its row present is an enabled extension that silently does nothing - a UI extension's iframe 404s, so its document never boots or registers what it exists for, while `GET /api/extensions` still reports it installed and enabled. `RepairMissingFiles` (`backend/extensions/repair.go`) runs once at startup from `main.go` (off the boot path, never joined to shutdown), derives each directory through the same `extensionDir`, reads "no readable `manifest.json`" as missing (a half-written checkout has a directory), and re-checks out **the record's** pinned commit via `CheckoutExtensionContext` - never a newer one, which is an update the user asks for. A row with no `repo`+`commit` (`local` installs are materialized in place, so their files *were* the install) or a name that is not a directory name is logged, not fetched. Detection is startup-only, so files deleted while the server runs stay broken until the next start. Tests: `backend/extensions/repair_test.go`.
-
-**An extension image is built in a context this package creates, and there is no default image.** `BuildExtensionImage` (`backend/extensions/image_build.go`) stages a temp context holding the Dockerfile and the bridge at `sandbox/sandbox-bridge`, then runs `podman build -t <ref> -f <ctx>/Dockerfile <ctx>`. It never uses the server's working directory as the context. Both published extension Dockerfiles `COPY sandbox/sandbox-bridge`, so the context must contain that path — and building from the CWD lets an unrelated `.dockerignore` filter the bridge out of it (`no items matching glob … 1 filtered out using .dockerignore`), which breaks every language server at once. The context is also the jail: a Dockerfile fetched from a registry must not be able to `COPY data/kanban.db` or `COPY .git`, which the repo root as context would have allowed but for ignore rules written for a different build. Nothing may build against the CWD; `TestBuildExtensionImage_RealBuildSurvivesADockerignoreBelow` holds that against real buildah.
-
-An extension sandbox has **no default image**: the image is either what the record declares or what a successful build of the extension's own Dockerfile produces, and anything else is an error from `extensionImageSource` (`backend/extensions/sandbox.go`) with no container created. `ubuntu:latest` behind an empty `image_ref` produces the worst failure a language server can have: a container that starts, reports running and holds no server, so the editor's LSP never resolves and nothing says why. Install is therefore atomic: the image is built **before** `store.Create` (`installInBackground`), a `type: lsp` entry with neither image nor Dockerfile is refused (`installNeedsImage`) — which is why a **local folder may declare `"image"` in its manifest** (`ExtensionManifest.Image`, carried by the one mapping `localRegistryEntry` that feeds both the browse listing and the install, since a folder has no registry index entry to carry one; never pulled at install, only on first sandbox start), and a failure after `CheckoutExtension` deletes the checkout through a deferred guard — a directory with no row is listed by `GET /api/extensions/local` as installable under the manifest it shipped with. `installDockerfile` treats a read failure as an error, never as "no Dockerfile". The update path refuses an LSP whose new commit ships neither, instead of keeping the previous commit's image under new code. A record that predates the rule is repaired lazily at `Create` (`persistDerivedImage` → `ExtensionStore.SetImageRef`). Tests: `backend/extensions/image_build_test.go`, `local_install_image_test.go`, `fake_podman_test.go`.
-
-**The LSP sandbox borrows host directories read-only; only its own are writable.** `ExtensionSandboxManager.MountPolicy()` adds the host paths every project declares in its own Sandbox Configuration (`ListProjectSandboxMountPaths`) as roots, and `MountPolicy.ForceReadOnly` pins anything under one of them — plus the workspace dir and every registered project path — to `ro` even when the stored config or the extension's manifest asks for `rw`: neither decided that path exists. `withExtraRoots` carries those pins, so widening the root set for one handler cannot un-pin another root. `MountPolicyForExtension` adds a grant only for its own extension, so an extension cannot self-grant one; install and `PUT /api/extensions/{id}` validate against a policy that never contains anyone's grant (but does contain the borrowed roots, which is why the read-only pin, not the root list, is what stops a manifest turning one into a write). `adaptProjectMounts` mirrors the *union* over projects (global paths like `/go` for everyone, task-root-relative ones only for their owning workspace), so a new project changes the mount set once instead of on every switch. Tests: `backend/extensions/mount_read_only_test.go`.
-
-**Mount a language server's dependencies; never discover where they live.** An extension declares `capabilities.lsp.sandbox.dependency_cache: {container_path, env}`; the host directory is a **human's** choice, configured in that extension's Edit dialog and stored beside the declaration as `sandbox_config.dependency_host_path` - two fields, because the two origins are the security argument, and a manifest carrying it is **refused**, not stripped. The rules that keep it honest:
-
-- **The grant reaches that one extension's sandbox and nothing else** - `SandboxOpts` has **no field for it**, so a task, a sandboxed terminal and the project container never bind it. It is always `:ro`: a grant is a text field in a web form, and a read-write bind of a toolchain cache onto every sandboxed project's container is the widest write surface in the product.
-- **A grant is a root for one extension only.** `MountPolicyForExtension(ext)` adds it; the policy that install and `PUT /api/extensions/{id}` validate against never contains anyone's grant, so an extension cannot self-grant.
-- **Never discover where the cache lives.** A discovered path needs a container to ask it in, so the first turn of every workspace pays for a server started to answer `go env GOMODCACHE` - and it puts extension-supplied stdout on the host command line.
-- **Core's container path is not borrowable** (`isReservedContainerPath`), because two `-v` specs on one path make podman refuse the whole create. Anything borrowed from a project's Sandbox Configuration is pinned read-only (`ForceReadOnly`) - the extension did not decide that path exists.
-- **A grant is revoked by an empty string** on `PUT /{id}/dependency-cache`, which also stops the sandbox (the mount set is fixed at creation).
-- **A declaration is optional, and its absence is loud.** The sandbox runs `--network none` with no cache, so without a grant a workspace with third-party imports cannot be resolved and every turn argues with phantom errors.
-
-Full rules - one derivation for both the create and the `MountsCompatible` snapshot, revocation, the two declaration shapes the UI reads, and why `ro` is not a favour: `docs/extension-dependency-cache.md`.
-
-`environment: {check, suppress_codes, note}` is **declared but not enforced** - nothing calls `ExtensionLSPManager.Environment`, so the field always answers healthy; a check must be able to fail (gopls: `GOPROXY=off go list -deps ./...`). `reload_files` **is** wired.
-
-Tests: `backend/extensions/dependency_manifest_test.go`, `dependency_grant_test.go`, `dependency_policy_test.go`, `dependency_mount_test.go`, `bundled_manifests_test.go`, `reload_env_test.go`, `backend/sandbox/containerenv_test.go`, `backend/exec/sandbox_create_opts_test.go`, `backend/term/terminal_test.go`; UI states in `frontend/src/lib/utils/__tests__/extension-permissions.unit.ts` and `frontend/src/lib/components/ConfigModal/__tests__/extensions-dependency-cache.unit.svelte.ts`.
-
-**LSP capability gates** (`manifest.capabilities.lsp`, both default to enabled, both toggled per extension in Settings → Extensions, and **independent** of each other): `editor_enabled` gates the *browser's* LSP features — the server only stores and serves the flag, while `extension-manager.getEditorLSPExtensions()` filters and `lsp-connection-manager.isLSPAvailable()` decides whether a channel opens. **It is not a highlighting gate**: `editor-language.resolveFile()` answers the file type, wire id and syntax profile from `getEnabledLSPExtensions()` (installed and switched on, gate or no gate), because a grammar is data the manifest shipped and the toggle is sold as "diagnostics, completions, go-to-definition, and hover". The gate reaches the rest of the editor as the single `ResolvedFile.editorLSP` field, which nothing but `isLSPAvailable` reads — an extension whose editor features are off used to answer `spec: null`, and every `.ts`/`.py` file (editor and diff alike) opened as plain text. `tool_calls_enabled` gates the *agent's* LSP tools and is enforced server-side (`ExtensionRegistry.IsToolCallsEnabledForFile`, checked before an LSP tool runs).
-
-**UI injection:** extensions activate per scope; components call `renderSlot(scope, context)` on mount. Scopes → components: `task-card`→Card, `file-editor`→FileEditor, `project-board`→Board, `task-chat`→TaskChat, `project-sidebar`→Sidebar, `file-browser`→dir picker modal, `create-task`→CreateTaskModal.
-
-### Language Knowledge Lives in Extensions
-The core holds **no** language names, keyword lists, comment markers or bracket tables - neither in Go nor in the frontend. `file_types[]` is the routing table *and* the source of the `didOpen` languageId; `language` routes the file to a server and `language_id` is per file type - collapsing them breaks routing or the parse. Both sides read it through exactly one helper (`extensions.LSPConfig.fileTypeFor` in Go, `editor-language.ts::resolveFile` in the browser), **never** a local map. `syntax{}` is a grammar as **data, never code** (a shipped module would run in the app's realm). A bad manifest is **refused, not stored** (`manifest_validate.go`); legacy manifests are normalized at load, not migrated. The one language table left in core is `frontend/src/lib/utils/fallback-languages.ts`, consulted only when no extension declares the type.
-
-Detail and tests: `docs/languages.md`.
-
-### The UI Language Is Derived From the Enabled i18n Extension
-The active language **is** whichever `i18n` extension is enabled - English when none. There is **no** `language` config field, no `PUT /api/config` path for one, and nothing stored: a setting would have to be reconciled with the extension list forever, and the two would disagree. `extensions.ActiveI18N` (Go) and `resolveI18NPack` (TS) apply one rule - skip disabled packs, keep those **declaring `capabilities.i18n`** (the declaration, not the inferred `type`), first by `priority` then `name` - and the server's prompt locale calls that Go side rather than re-deriving it: `(*Server).refreshPromptLocale` (startup + `SetOnExtensionChanged`) resolves the winner's `prompts_dir` through `extensions.ActivePromptOverlay` and installs it with `prompts.SetOverlay`, so **the prompt templates follow the pack live**. The overlay resolves **per template, pack first then core** - a pack shipping one file keeps core's for the rest, and a pack template that cannot parse or execute loses only its own template to core's English one and is reported once, because a translation must never fail a turn. `prompts` receives the answer through a setter and **must not import `extensions`** (extensions already imports `prompts` for `FuncMap()`, so the dependency is injected, not imported). The directory is contained twice - lexical `packFilePath` then symlink-resolved - so neither `../` nor a symlinked pack directory reaches a template directory the pack was not granted. `PromptData.Locale` is filled by the renderer, and `base.tmpl` asks for the answer in `{tag}` **verbatim** only when a pack is active: core names no language, and no pack is byte-for-byte today's English prompt. A pack is a css pack with different bytes: the catalog URL is `resolveAssetURL` over **`ext.served_url`** - the directory the server derives from the installed record through the same `extensionDir` it reads and deletes through, because a client-side guess from `manifest.author` 404s the catalog of any extension not laid down at `<author-slug>/<name>` (a flat local install is served at `/extensions/<name>`), which reads as an installed, enabled pack that never translated anything. `''` for a scheme, a `//`, **or any path that leaves that directory once `..` is resolved** is the fence - the browser normalizes dot segments before it sends, so an unresolved concatenation of the base and `../../../../api/config` is an authenticated same-origin request for `/api/config`, made by the app with its own cookie; the answer is contained against the base's own normalized form, and `isPrepaintableThemeURL` (plus its hand-copied twin in `index.html`, which runs before any module can) refuses dot segments, `%2e%2e`/`%2F`, `?` and `#`. `capabilities.css.css_url` and `capabilities.i18n.messages_url` are held to the same shape server-side by `validateAssetRelPath` (`manifest_validate.go`), and there is **no new route**, no iframe, no channel, no permission. Any load failure means **whole-catalog English plus a report**, never a half-applied catalog or a UI of raw key ids; a key the pack lacks falls back per key to English. Core gains zero translated strings and zero language names - measured by `cd frontend && python3 i18n-gate.py`, which fails on a locale tag, a non-Latin codepoint, an `Intl.DisplayNames` call or a `locale === 'xx'` branch anywhere in `src/` outside a test fixture (the `:lang(…)` typography selectors in `app.css` are the one allowance, because a selector targets a language without naming one). `en.ts` holds the English of every key the UI renders; a locale tag is carried through verbatim, and a pack's display name is the pack's own `display_name`, never a core-derived endonym. Zero core-owned user-facing literals remain - measured by `cd frontend && python3 i18n-count.py`, the whole-tree gate: it exits non-zero on any genuine UI string still written as a literal, and `i18n-count_test.py` pins each exclusion rule in both directions so the gate cannot go blind to real copy. A catalog value is a translated **string or a plural table** (`{"one": …, "other": …}`, `other` required), and **both halves validate that shape** - `parseCatalog` (TS) and `validateCatalogValue` (`manifest_validate.go`) - because refusing a pack for a form the runtime would render, or accepting one for a form it would silently drop, is the same bug facing the other way. The pre-paint cache anticipates the round-trip and never outranks it: the catalog lives in IndexedDB `app-settings` and the tag in `localStorage`, and both are **deleted together** whenever the live list says English - unconditionally, because a guess about what is already cleared left a stale language behind, and the reset covers the **tag** too, since `runtime.svelte.ts` *adopts* the tag `index.html` painted (stamping `en` back over it at module load is the flash the cache exists to prevent). A non-English browser with no pack enabled is **offered** the registry pack whose projected `capabilities.i18n.locale` matches it (`lib/utils/locale-offer.ts` decides, `services/locale-offer.svelte.ts` installs over the existing git-pinned SSE path): four conditions must hold, a `dismissed`/`installed`/`failed` record in `app-settings` ends it, and **no match is silence, never an error** - so a registry that will not answer says nothing.
-
-Detail and tests: `docs/i18n.md`.
-
-### UI Extensions
-UI extensions are **plain JavaScript modules, not Svelte components** (external bundles carry their own Svelte runtime -> `effect_orphan`). A module default-exports `init({ component, config, ...scopeContext })` and returns a cleanup function; no Svelte imports, DOM + `createElement('style')` only. **The host CSP blocks inline `<script>`** - load code as external files. **`/host-client.js` must stay unmarked by `Cross-Origin-Resource-Policy: same-origin`** (`isOpaqueOriginAsset`, `backend/server/middleware.go`): the frame is `sandbox="allow-scripts"` *without* `allow-same-origin`, so the document that fetches its bridge out of the app root has no origin to name - mark it and every UI extension dies on `ReferenceError: extHost is not defined`. **The channel is armed by the document's `exthello` echo**: `origin === 'null'` + `ev.source` identify the *frame*, not the mounted document, so post nothing before arming (except `exthello-request`) and never tear the frame down on a 2nd `load`. A hand-rolled client that doesn't answer `exthello` hangs at `extHost.ready()`.
-
-Detail and tests: `docs/ui-extensions.md`.
-
-### Preview capability
-Host support for UI extensions that render the open file (`html-preview`: overlay + live refresh). **The token is the credential** - 128-bit from `crypto/rand`, and `newPreviewToken` is fail-hard: a guessable token is an unauthenticated read of the document plus every sibling under its asset root. **That root is the jail**, because the GET is public: the project checkout plus the worktree of the task the request named (`resolveFSFilePath`), never the workspace dir — it holds every project's task worktrees, so serving a workspace-only path made one token read another task's siblings. `project`/`path`/`task` come from the **host's own injection context**, never from extension arguments, so an extension cannot point the server at arbitrary directories, and `task` is honoured only when it belongs to `project` (`requireTaskOwnership`). `GET /api/preview/{token}/...` is public and the doc carries its OWN CSP that `CORSMiddleware` skips — and that CSP ends in `sandbox allow-scripts` in **both** postures, because the URL is same-origin with the app and `GET /api/auth/session` hands the CSRF token to any cookie-carrying same-origin document: the extension's `<iframe sandbox>` attribute is the second lock, not what the session rests on, and `allow-same-origin` must never appear there. See `docs/preview.md`.
-
-Detail and tests: `docs/preview.md`.
-
-### Changelogs
-An extension may ship `CHANGELOG.jsonl` next to its manifest (one JSON object per line, oldest→newest: `{"hash", "version", "description"}`), published to `<registry-base>/<author-slug>/<name>`. `GET /api/extensions/check-updates` returns entries newer than the installed commit (anchored on the first hash match); no match / no file / fetch error → empty `changelog` (best-effort, never blocks update detection). UI: `.update-changelog` in the "Updates Available" section of `ExtensionsTab.svelte`. Key files: `backend/extensions/changelog.go`, `FetchChangelog` (`registry.go`), `HandleCheckUpdates`, e2e `extension-changelog.spec.ts`.
-
-### Agent Extensions
-Agent extensions run AI agents (e.g. Pi) as subprocesses: `Backend (executor) ←→ AgentRunner (I/O bridge) ←→ WASM Adapter (protocol) ←→ Agent Process`. The backend knows **nothing** about agent protocols — all of it lives in the adapter. Adapter interface + event types, the zero-buffer WASM memory model, and the file-by-file recipe for a new adapter: **`docs/agent-extensions.md`**.
-
-- **Persistence:** `EventTypePersist` (carrying `[]PersistEntry`) is the **only** path to the DB — the executor iterates entries generically; never add agent-specific persistence to the backend.
-- **The adapter names the binary, and the container probe asks *it*.** `SubprocessConfig().Binary` is the only home for the executable's name — never a manifest field (a second source of truth that can disagree) and never a literal in the backend. A sandboxed task's `BinaryAvailable` check runs on the resolved name **after** the adapter is loaded and validated (`exec.prepareAgent` over `agent.PrepareAgent`/`Prepared.Start`; `NewAgentRunner` is the two in sequence), because the old hard-coded `"pi"` refused every other agent in sandboxed projects only, and reported the extension rather than the binary it probed. The refusal keeps the code `agent_not_available`, distinct from `agent_start_failed`, and names the binary it looked for. Tests: `backend/exec/agent_preflight_test.go`.
-- **URL scheme** `agent://<name>`, emitted and parsed in one place — `types.AgentProviderURL` / `types.ParseAgentURL` / `types.IsAgentURL` on `types.AgentURLPrefix` (`backend/types/agent_url.go`), which every reader calls including `backend/config` (which can never import `backend/agent`, since `agent → extensions → git → config`); the browser mirrors the prefix as `AGENT_URL_PREFIX`. An enabled agent extension **is a provider** with that URL — `GET /api/config` merges it per request and never persists it — so the client re-reads the config on the `extension_change` broadcast (`appStore.refreshConfig()`): an agent that only shows up after a browser refresh is a bug. Key files: `backend/agent/` (interface, runner, wazero loader with `WithStartFunctions("_initialize")`, registry), `backend/exec/loop_agent.go`, `frontend/src/lib/stores/app.svelte.ts`.
-
-## Common Patterns
-
-### Logging (`pkg/logging`)
-
-Every diagnostic goes through `pkg/logging` — there are **zero** `log.Printf` calls left in non-test code, and adding one is a regression. Text handler to stderr, so the log file stays greppable.
-
-`logging.For(logging.Merge).With(logging.TaskID, task.ID).Infof("merged into %s", branch)`
-→ `time=… level=INFO component=merge task_id=frost-amber-quartz msg="merged into main"`
-
-- **`component` is the subsystem, not a per-call invention.** "Which component is this" must have one answer. `logging.Components` is the whole vocabulary and records the merges it replaced (merge/sync-merge/commit-and-done → `merge`, gc/prune/worktree → `worktree`). There is deliberately **no `sub` attribute** — a second per-call label re-forms the hand-typed-tag problem.
-- **`task_id` / `project_id` are attributes, lifted with `With`.** Filtering a task's lines is impossible while the id is inside a sentence. Lift a **leading** `task=%s`; leave a mid-sentence one, which needs prose re-flowed by hand.
-- **Level policy** (in the package comment, ask in order): `Error` = the fault reaches the user (error event, HTTP error response, failed start, panic recovery); `Warn` = operator-recoverable and the run continued; `Info` = a state change worth keeping (default, and what everything printed before levels); `Debug` = per-event chatter (`logging.Debugf` exists for it — the LSP client subscribe/lazy-init path is what uses it, because that is what an operator needs when "the editor's LSP never resolves"). Do not raise a line to `Error` because it says "failed": raise it because someone has to know.
-- **The printf shape is the safety net.** `Infof/Warnf/Errorf/Debugf` are `f`-suffixed wrappers over `fmt.Sprintf`, so `go vet` infers them as printf wrappers and checks every call site. `logging.Info(msg)` has no format and no args for exactly that reason: keep it.
-- **Tests capture with `logging.TestSink()`, never `log.SetOutput`** — that idiom now captures nothing, and a test that asserts on an empty buffer passes. `TestSink` returns a `*SafeBuffer` (mutex-guarded: the exec loop, websocket goroutines and shutdown steps write concurrently).
-- Tests: `pkg/logging/logging_test.go` (component/attribute rendering, threshold behaviour, typo→info, restore, concurrent writers under `-race`).
-
-### Locale and Formatting (frontend)
-Formatting follows the **active locale** (`$lib/i18n/runtime.svelte` → `activeLocale()`); **sorting never does**.
-
-- `activeLocale()` is what every `Intl.*` / `toLocale*` call passes — `undefined` means "no locale chosen, use the browser's", which is the pre-i18n behaviour, so a user with no language pack installed sees no change. Never pass `undefined`, `[]` or a literal tag at a call site: `grep -nE "new Intl\.[A-Za-z]+Format\(\s*(undefined|\[\])?\s*[,)]|toLocale(A|S|D)[A-Za-z]*\(\s*(undefined|\[\])?\s*[,)]" frontend/src` must stay empty outside `__tests__`.
-- **Never cache anything derived from the locale at module scope.** One `let` computed at module load pins the first value for the whole session, whatever the user switches to; locale-dependent values are either computed per call or memoised **keyed by the locale they came from** (`usdSymbolByLocale`).
-- **`document.documentElement.lang` has exactly one writer**: the i18n runtime. `index.html`'s `lang="en"` is the initial value only. It describes the language of the *rendered strings* (the active pack, else `en`), not the browser's language — putting the browser's tag there would restyle English chrome through the `:lang()` rules below.
-- **Sorting is locale-independent on purpose.** Every `localeCompare` keeps its current arguments (`Sidebar`, `BranchFileBrowser`, `BranchSymbols`, `Chat/ModelSelector`, `DiffViewer`, `GitStatusPanel`): file, branch, symbol, session and model lists must stay stably ordered whatever the UI language is. Model *grouping* groups by provider, never by collation.
-- Phrases are catalog KEYS (`$lib/i18n/en.ts` - the English catalog of record, and the only place core holds UI text), never translated strings in core; relative time uses `Intl.RelativeTimeFormat(locale, { style: 'narrow' })` — `narrow` is what yields `5m ago`/`2mo ago`, and `long` would print `5 minutes ago` and break the shape the chat stats line and the unit tests pin. `formatElapsed`/`formatDuration` stay unlocalised for the same reason.
-- **`packText()` answers nothing for a chosen locale that has no pack - and that is not English.** The gap is what lets `Intl` render the number in the locale the user is in instead of an English phrase in the wrong language; `t()` keeps the English fallback because a caller with no better answer must still print something. Both read the same runtime as the packs, which stays the only writer of the active locale: `setLocale()` is an in-memory test/preview seam and persists nothing.
-
-Tests: `frontend/src/lib/i18n/__tests__/runtime.unit.ts` (resolution: interpolation, per-locale plurals, the fallback ladder and its warnings, `<html lang>`), `runtime.unit.svelte.ts` (reactivity and the runtime contract), `frontend/src/lib/utils/__tests__/format-time.unit.ts`, `format.unit.ts`; the no-language-in-core rule is its own command - `python3 i18n-gate.py` in `frontend/`.
-
-### CJK Typography
-`--font-sans` has no CJK coverage in its Latin base, so Chinese/Japanese/Korean gets its chain from a `:lang()` block at the end of `frontend/src/app.css` (`zh-Hans`/`zh-Hant`/`ja`/`ko`). Keep it scoped to `:lang()`: a global rule restyles English chrome, and `--font-mono` must stay CJK-free (code must not pick up a CJK face). Three rules about the chains:
-
-- **A generic family ends a font list.** `sans-serif` matches every script, so every family written after it is unreachable; `--font-sans-latin` stops before it and each chain carries its own copy last.
-- **CJK faces come FIRST, before the Latin base.** A Latin alias (`Arial`, `Helvetica`) resolves through fontconfig to something that already covers the CJK run, so the platform answers the missing script from its own language fallback and never reads further down the list — a CJK face written after the Latin base is decorative. The accepted cost: Latin in a CJK locale renders with the CJK face's own Latin glyphs, which is what a Chinese or Japanese site does anyway.
-- **`html:lang(…)` selects, and it overrides the `--font-sans` VARIABLE** (not `font-family`), because components read the variable directly (StatsModal, SandboxConfigModal) as well as inheriting from `body`; the higher specificity also stops an installed theme's `:root { --font-sans }` from dropping the chain.
-
-The CJK block adds no `white-space` override: measured on a CJK board, the 36 `nowrap` rules with no overflow contract produced zero overflowing boxes and no row-height change. If a translation does push a label past its box, give that rule the `overflow: hidden; text-overflow: ellipsis` pair rather than a scoped `white-space: normal`, which trades a clip for a ragged row.
-
-**Verifying typography needs pixels.** Glyph advance cannot tell faces apart (CJK glyphs are em-width, so every face measures the same) and `document.fonts.check()` answers `true` for a family that is not installed, because *a* fallback can render the text. Rasterize the same string into a canvas under both stacks and compare the bytes.
-
-### Client-Side Storage
-All client-side storage goes through `frontend/src/lib/storage.ts` (async functions; single IndexedDB `kanban-storage`). Never access IndexedDB directly in components. `gc()` (stale-entry sweep, incl. offline message/diff caches for a project) is called only from `Board.svelte` after the board loads — components should NOT call it.
-- **Sign-out erases everything**: `handleLogout` calls `clearQueue()` then `clearAll()` — every store plus the `kanban-*` `localStorage` hints. The in-memory queue must go with the stores, or the next `enqueue` writes the old array back into the emptied database. `gc()` is not a substitute: it prunes only entries whose task no longer exists, so without the sweep the next person to open the browser inherits this user's messages, diffs, drafts and queued writes. Tests: `src/lib/__tests__/storage-clear-all.unit.ts`.
-
-### Svelte 5 Reactivity
-- `$state()` (deep reactive), `$derived()` / `$derived.by()`, `$props()`; Svelte 4 stores via `get` from `svelte/store`.
-- Runes work inside classes in `.svelte.ts` files — no version bumpers or `$effect` mirrors; assigning a `$state` field notifies every reader.
-- Directories: `$lib/services/` (plain/reactive services), `$lib/composables/` (reactive helpers), `$lib/utils/` (pure functions).
-
-### Diff & Status Badges
-Diff text is parsed in `$lib/utils/diff-parser.ts` (pure, unit-tested); the diff UI lives in `CardDetail.svelte` (task diff rows) and `DiffViewer.svelte` (staged/unstaged file browser). `getStatusBadge` for diff files is shared from `diff-parser`; `GitStatusPanel.svelte` keeps its own for git entries. Sticky section headers use `position: sticky; top: 0; z-index: 10` + an opaque background.
-
-### Task IDs
-`word-word-word` (e.g. `frost-amber-quartz`) from the dictionary in `backend/types/idgen.go`; thread IDs are 2 words via `GenerateThreadID()`; URL: `/?task=frost-amber-quartz`.
-
-### Chat UI Rules
-- Never disguise system messages as user messages.
-- Streaming cursor only during an active LLM response; a `complete` event is sent when the LLM finishes (text-only or tool calls).
-- User messages: right-aligned bubbles; action icons (copy/edit/delete) always visible; editing replaces the message and discards the conversation tree.
-- Stats format: `X tokens · Ys · Z tok/s` (completion tokens, not total).
-
-### Commit and Move to Done
-`HandleCommitAndDone` commits **only staged** changes: untracked (never-staged) files stay in the worktree and are discarded when the task is deleted - never copied into the main checkout or merged. The conflict-resolution commit stages with `git add -u`, **NOT** `git add -A`. **A merge conflict interrupts the click, it does not cancel it** - the turn that finishes resolving merges and marks Done whatever `auto_merge` says, but only the recorded click (`ArmCommitAndDone`, in memory) authorizes that merge, and it is spent by the resolution it waited for. **Nothing is marked Done that did not reach the target branch.**
-
-Detail and tests: `docs/commit-and-done.md`.
+The client distinguishes a cancellation from a lost connection and treats neither as a deadline: an abort
+never marks the app offline, and a long wait gets a report naming what it waits on rather than a timeout.
+Nothing in the product puts a deadline on a wait for this server. Writes queue while offline **except** a
+request carrying a plaintext secret, which is refused rather than queued — the queue is persisted, so a
+queued value outlives the tab and the session. Mechanisms: `docs/reconnection.md`.
 
 ## Licensing
 
-Apache-2.0 (`LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`). A dependency's license is **not** changed by ours — each library keeps its own license and copyright.
+Apache-2.0, and a dependency's license is not changed by ours.
 
-- **Never remove** a dependency's license/copyright header or NOTICE. **No GPL/AGPL** dependencies (incompatible with Apache-2.0); MPL-2.0 is OK (don't modify MPL-2.0 files). Apache-2.0 deps shipping a `NOTICE` require its content in ours (currently: wazero). `lightningcss` (MPL-2.0) and `caniuse-lite` (CC-BY-4.0) are build/dev-only — keep them out of the distributed runtime artifact.
-- **Extensions are independently-licensed projects:** each extension directory carries its own `LICENSE` (Apache-2.0), `NOTICE` and `THIRD_PARTY_NOTICES.md`; new extensions get all three.
-- **Bundled third-party files** (e.g. an extension's IIFE library) keep **their own** notice — never put an Apache-2.0 header on them.
-- **Regenerate notices whenever a dependency is added/removed/upgraded:** `go mod tidy` + `go list -m all` (or `go-licenses report ./...`), `cd frontend && npx license-checker --production --summary`, then update `THIRD_PARTY_NOTICES.md` (incl. "Last updated") and `NOTICE`.
+- Never remove a dependency's header or NOTICE. **No GPL/AGPL dependencies**; MPL-2.0 is fine (don't
+  modify MPL-2.0 files); an Apache-2.0 dependency with a NOTICE requires its content in ours (currently
+  wazero). Build/dev-only dependencies stay out of the distributed artifact (`lightningcss`,
+  `caniuse-lite`).
+- Each extension carries its own `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES.md`; bundled third-party
+  files keep their own notice.
+- Regenerate the notices whenever a dependency is added, removed or upgraded: `go mod tidy` +
+  `go list -m all` (or `go-licenses report ./...`), `npx license-checker --production --summary`, then
+  update `THIRD_PARTY_NOTICES.md` and `NOTICE`.
 
 ## Debugging
 
-- **Logs:** server stdout or `/tmp/kanban.log`, through `pkg/logging` (see *Logging*). Lines are `time=… level=… msg="…" component=… task_id=…` — filter with `grep 'component=merge'` and `grep 'task_id=<id>'`. **Worktrees:** `ls .worktrees/`. **Frontend stale?** rebuild + hard refresh.
-- **E2E can't connect / wrong-protocol response:** stale processes hold 3000/3001/9999 — run the cleanup block in *Testing → Test Environment*.
-- **`waiting for locator('.project-item')`:** test project not created (check global-setup logs). **`waiting for locator('.card')`:** no tasks exist. **Mock LLM routing wrong:** keyword matching in `mock-llm.js`.
-- **Go tests:** `unable to open database file` → use `testServer(t)`. `context deadline exceeded` → raise the timeout or optimize. Sandbox failures → `runsc --version` then `podman info` (the overlayfs failure is environmental, see *Testing → Go Unit Tests*).
-- **Ad-hoc browser probes:** standalone Playwright `.mjs` scripts in `frontend/tests/` against a live `make run` server — recipe in `docs/testing.md`.
+Logs go to server stdout or `/tmp/kanban.log` through `pkg/logging` (see below) and are greppable by
+`component=` and `task_id=`. Worktrees live under `.worktrees/`. A stale frontend is a rebuild plus a hard
+refresh. E2E connection failures are stale processes on 3000/3001/9999 — see `docs/testing.md`. The flight
+recorder is always on, writing `data/kanban.trace` and rotating the previous file to `kanban.trace.old`
+every 30 s: `go tool trace -http=:8080 data/kanban.trace`. Ad-hoc browser probes: `docs/testing.md`.
 
-### Crash Debugging (Flight Recorder)
-The Go flight recorder is always-on (~1% overhead), writing to `data/kanban.trace`, rotated every 30 s (previous file → `data/kanban.trace.old`) — on crash it holds ~30 s of pre-crash data. Analyze: `go tool trace -http=:8080 data/kanban.trace`.
+### Logging
+
+Every diagnostic goes through `pkg/logging`; a `log.Printf` in non-test code is a regression.
+
+- `component` is the subsystem, taken from the fixed vocabulary in `logging.Components` — never invented
+  per call, and there is no second label attribute. `task_id`/`project_id` are attributes lifted with
+  `With`, not text inside a sentence: lift a leading `task=%s`, and re-flow the prose by hand when the id
+  sits mid-sentence.
+- Level policy: `Error` when the fault reaches a person, `Warn` when the operator can recover and the run
+  continued, `Info` for a state change worth keeping, `Debug` (`logging.Debugf`) for per-event chatter.
+  Don't raise a line to `Error` because it says "failed".
+- `Infof/Warnf/Errorf/Debugf` are printf wrappers so `go vet` checks every call site; `logging.Info(msg)`
+  has no format and no args for that reason.
+- Tests capture with `logging.TestSink()` (a mutex-guarded buffer — exec, websocket and shutdown goroutines
+  write concurrently), never `log.SetOutput`: that idiom captures nothing, and a test asserting on an empty
+  buffer passes.
 
 ## Docs Index
-Read the file before editing that subsystem — each holds the detail and history this file deliberately omits.
+
+Read the file before editing that subsystem — each holds the mechanism, history and tests this file
+deliberately omits.
 
 | File | Subsystem |
 |---|---|
-| `docs/sandbox-bridge.md` | bridge connections, LSP session binding, per-(extension, project) open work |
-| `docs/threads-checkpoints.md` | branch vs snapshot layers, checkpoint pinning/restore, fork inheritance |
-| `docs/tls.md` | certs/SANs, distribution, proxy + `Host`, weak-password startup rule |
+| `docs/configuration.md` | every env var, the flag twins, startup resolution and the archgate exceptions |
+| `docs/sandbox-runtime.md` | boot injection, the stale sweep, container environment, podman args, capabilities, mount policy, podman subprocesses |
+| `docs/sandbox-bridge.md` | bridge connections, LSP session binding, wire IDs, payload limits, upload lifetime |
+| `docs/confinement.md` | path jails, the no-project host jail, size and output caps, subprocess environments |
+| `docs/locking.md` | keylock domains, accessor shape, lock order, watched waits, `sandboxMu` |
+| `docs/storage.md` | what is in `tx`, migrations and `user_version`, file permissions, ID generation |
+| `docs/git-operations.md` | command construction and hook fence, worktree layout, stash identity, ref/clone/hash fences, slugify |
+| `docs/lifecycle.md` | construction order = shutdown order, the base-context registry, the TLS listener |
+| `docs/api-contract.md` | frame shapes, route verbs, partial updates, diff contract, error vocabulary, headers |
+| `docs/markup-sanitizing.md` | sanitizer deltas from DOMPurify's defaults, the sink audit, `Icon.svelte` |
+| `docs/extension-lifecycle.md` | install/build/delete/repair, SSE ordering, egress, capability gates, changelogs |
+| `docs/extension-dependency-cache.md` | the `dependency_cache` grant, `ro` mounts, `environment` check |
+| `docs/typography.md` | CJK font chains and how to verify them with pixels |
+| `docs/testing.md` | test environment, teardown, e2e conventions, mock-LLM fixtures, load-sensitive tests |
+| `docs/tls.md` | certs/SANs, distribution, proxy + `Host`, weak-password and cookie rules |
 | `docs/sessions.md` | session storage shape, `/api/sessions*` responses, Settings → About UI |
-| `docs/languages.md` | `language` vs `language_id`, `syntax` as data, identifier shape rules, bracket levels, dependency-set trade-offs |
-| `docs/ui-extensions.md` | `/extensions` serving + CSP, channel handshake, install model |
-| `docs/preview.md` | preview routes, ref rewriting, nav record, iframe isolation, known residuals |
-| `docs/agent-extensions.md` | adapter interface + events, WASM memory model, new-adapter recipe, agent-as-provider live refresh |
-| `docs/link-rows.md` | project-row/task-card markup, click routing, known limitation |
-| `docs/navigation.md` | board + task-view arrow-key resolution |
-| `docs/reconnection.md` | WS reconnect/offline queue mechanism |
-| `docs/testing.md` | e2e conventions, mock-LLM fixtures/recording, `.mjs` probe scripts, failure patterns |
-| `docs/extension-dependency-cache.md` | the `dependency_cache` grant, `ro` mounts, `environment` check, one derivation |
+| `docs/threads-checkpoints.md` | branch vs snapshot layers, checkpoint pinning/restore, fork inheritance |
 | `docs/commit-and-done.md` | what the click does, conflict arming, which files never get committed |
-| `docs/adding-a-preference.md` | the 7-layer recipes for a shortcut or a `*bool` preference |
-| `docs/i18n.md` | the derived-language rule (one rule, two ends), the catalog load + failure policy, the pre-paint cache vs reality, the first-run offer's four conditions |
+| `docs/languages.md` | `language` vs `language_id`, `syntax` as data, identifier shapes |
+| `docs/i18n.md` | the derived-language rule, catalog load and failure policy, pre-paint cache, locale offer |
+| `docs/ui-extensions.md` | `/extensions` serving + CSP, channel handshake, install model |
+| `docs/preview.md` | preview routes, ref rewriting, nav record, iframe isolation |
+| `docs/agent-extensions.md` | adapter interface + events, WASM memory model, new-adapter recipe |
+| `docs/navigation.md` | board + task-view arrow-key resolution |
+| `docs/link-rows.md` | project-row/task-card markup, click routing, known limitation |
+| `docs/reconnection.md` | WS reconnect/offline queue mechanism |
+| `docs/adding-a-preference.md` | the recipes for a shortcut or a `*bool` preference |
