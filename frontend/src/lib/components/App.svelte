@@ -11,14 +11,14 @@
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
     import { dragCarriesFiles } from '$lib/utils/file-drop';
     import { timeAgo } from '$lib/utils/format-time';
-    import { resolveBoardLandingColumn } from '$lib/utils/task-utils';
+    import { resolveBoardLandingColumn, mergeTaskUpdateIntoBoard } from '$lib/utils/task-utils';
     import { resolveLandingProject } from '$lib/utils/project-landing';
     import { getBoardCache, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, clearAll, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
     import { useBoardArrowNav } from '$lib/composables/use-board-arrow-nav';
     import kanbanIcon from '$lib/assets/icons/kanban.svg';
-    import type { Project, Task, Config, StreamEvent, SandboxMemoryStats, DiffStatsEntry } from '$lib/types';
+    import type { Project, Task, Config, StreamEvent, SandboxMemoryStats, DiffStatsEntry, Board as BoardData } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
     import { setAppStreamRef } from '$lib/stream-ref';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
@@ -158,6 +158,18 @@
     let staleTimeText = $state(''); // "Data from X ago" text, updated every second while disconnected
     let staleTimer: ReturnType<typeof setInterval> | null = null;
     let visibilityRetryTimer: ReturnType<typeof setTimeout> | null = null; // retry refresh after network stabilizes
+
+    /**
+     * Put a board on screen, if the project it was fetched for is still the one being looked at.
+     * Each async board path captures the id before its awaits and hands it here, so a response for
+     * a project the user has switched away from cannot replace the board they are now on.
+     */
+    function applyBoard(board: BoardData, projectId: string): boolean {
+        if (!board || currentProject?.id !== projectId) return false;
+        tasks = board.tasks || [];
+        appStore.board = board;
+        return true;
+    }
 
     function startCountdown() {
         stopCountdown();
@@ -469,18 +481,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 }
             },
             onTaskUpdated: (updatedTask: Task) => {
-                const idx = tasks.findIndex(t => t.id === updatedTask.id);
-                if (idx >= 0) {
-                    tasks = tasks.map((t, i) => i === idx ? updatedTask : t);
-                } else {
-                    tasks = [...tasks.filter(t => t.id !== updatedTask.id), updatedTask];
-                }
-                appStore.board = { ...appStore.board!, tasks };
-                if (appStore.selectedTask?.id === updatedTask.id) {
-                    appStore.selectedTask = updatedTask;
-                }
                 // Leaving Done invalidates the cached done-diff stats (the task
-                // is about to accumulate new work).
+                // is about to accumulate new work) — whichever project is on screen,
+                // since the cache is keyed by project and task.
                 if (updatedTask.status !== 'done' && updatedTask.project_id) {
                     const key = `${updatedTask.project_id}:${updatedTask.id}`;
                     if (doneStatsCache[key]) {
@@ -490,10 +493,22 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         removeBoardCache(doneStatsCacheKey(updatedTask.project_id, updatedTask.id)).catch(() => {});
                     }
                 }
+                const merged = mergeTaskUpdateIntoBoard(tasks, updatedTask, currentProject?.id ?? '');
+                if (!merged) return;
+                tasks = merged;
+                appStore.board = { ...appStore.board!, tasks };
+                if (appStore.selectedTask?.id === updatedTask.id) {
+                    appStore.selectedTask = updatedTask;
+                }
             },
             onTaskDeleted: (task_id: string) => {
-                tasks = tasks.filter(t => t.id !== task_id);
-                appStore.board = { ...appStore.board!, tasks };
+                const remaining = tasks.filter(t => t.id !== task_id);
+                // A frame naming a task this board never held belongs to another project; there is
+                // nothing here to take away.
+                if (remaining.length !== tasks.length) {
+                    tasks = remaining;
+                    appStore.board = { ...appStore.board!, tasks };
+                }
                 sandboxStatsStore.remove(task_id);
                 if (appStore.selectedTask && appStore.selectedTask.id === task_id) {
                     clearTaskDetail();
@@ -516,7 +531,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             },
             onCommitStatus: (task_id: string, status: 'queued' | 'processing') => {
                 const proj = currentProject;
-                if (proj) {
+                // The frame names no project, so the board on screen decides whether the task is
+                // ours — the slot is one per project, and another project's task would occupy it.
+                if (proj && tasks.some(t => t.id === task_id)) {
                     commitQueueStatusContext.update(map => ({ ...map, [proj.id]: { taskID: task_id, status } }));
                 }
             },
@@ -624,9 +641,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 if (targetProject) {
                     await selectProject(targetProject, false);
                 }
-                // Replay queued actions onto cached board so UI reflects user's last actions
-                tasks = applyQueuedActionsToBoard(tasks);
-                appStore.board = { ...appStore.board!, tasks };
+                // Replay queued actions onto cached board so UI reflects user's last actions —
+                // this project's actions only; the queue holds every project's writes.
+                if (currentProject) {
+                    tasks = applyQueuedActionsToBoard(tasks, currentProject.id);
+                    appStore.board = { ...appStore.board!, tasks };
+                }
                 // Check if data was served from cache
                 servingFromCache = isFromCache(projs);
             }
@@ -869,19 +889,22 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         const params = new URLSearchParams(location.search);
         const taskId = params.get('task');
         if (!taskId || !currentProject) return;
+        const projectId = currentProject.id;
         let task = tasks.find(t => t.id === taskId);
         if (!task) {
             try {
                 // Refresh board to pick up tasks created via API
-                const b = await getBoard(currentProject.id);
-                tasks = b.tasks || [];
-                appStore.board = b;
+                const b = await getBoard(projectId);
+                if (!applyBoard(b, projectId)) return;
                 task = tasks.find(t => t.id === taskId);
                 if (!task) {
-                    // Task truly doesn't exist — clear task param
+                    // The task belongs to another project, so the detail on screen is not the URL's:
+                    // clearing the param alone leaves it rendered under the project the URL names.
                     const url = new URL(location.href);
                     url.searchParams.delete('task');
                     history.replaceState(null, '', location.pathname + url.search);
+                    appStore.selectedTask = null;
+                    uiStore.showCardDetail = false;
                     return;
                 }
             } catch {
@@ -904,7 +927,17 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         if (currentProject && appStream) {
             appStream.unsubscribeProject(currentProject.id);
         }
-        // Task unsubscribe is handled by the $effect cleanup when appStore.selectedTask changes
+        // The tracked task subscription belongs to the project being left, so it goes with it.
+        if (lastSubKey) {
+            const [subProjectId, subTaskId] = lastSubKey.split(':');
+            // The floating chat subscribed the same key itself and nothing re-subscribes after an
+            // unsubscribe, so a chat still open on screen keeps its stream.
+            if (uiStore.floatingTask?.taskId !== subTaskId) {
+                lastSubStream?.unsubscribeTask(subProjectId, subTaskId);
+                lastSubKey = '';
+            }
+        }
+        // Task unsubscribe on closing the detail is handled by the subscription effect.
     }
 
     /** Hydrate cached done-task stats (IndexedDB) into the in-memory cache and
@@ -941,16 +974,33 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
     }
 
+    /** The board of the project just opened, as IndexedDB last saw it, applied while its live board
+     * is in flight. Dropped if that project is no longer the one on screen, or if a live board for
+     * it has landed in the meantime (`appStore.board` is set by every board write). */
+    async function showCachedBoard(projectId: string): Promise<void> {
+        let cached: BoardData | null = null;
+        try {
+            cached = await getBoardCache<BoardData>(boardCacheKey(projectId));
+        } catch {
+            return; // no cache to show — the live board is the first paint
+        }
+        if (!cached || appStore.board || currentProject?.id !== projectId) return;
+        if (!applyBoard(cached, projectId)) return;
+        // The banner says "this is the newest copy there is", which is only true with no socket to
+        // bring the live board in; a slow-but-connected switch must not flash it.
+        servingFromCache = !wsConnected;
+    }
+
     async function refreshBoard() {
         if (!currentProject || boardRefreshPending) return;
+        const projectId = currentProject.id;
         boardRefreshPending = true;
         try {
             // Wait for pending queue flush
             await waitForFlush();
-            const b = await getBoard(currentProject.id);
-            tasks = b.tasks || [];
-            appStore.board = b;
-            void hydrateDoneTaskStats(currentProject.id, tasks);
+            const b = await getBoard(projectId);
+            if (!applyBoard(b, projectId)) return;
+            void hydrateDoneTaskStats(projectId, tasks);
             // Update selected task reference to point to fresh object from API
             const task = appStore.selectedTask;
             if (task) {
@@ -960,9 +1010,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 }
             }
             // Live data received — clear cache indicator
-            servingFromCache = false;
+            servingFromCache = isFromCache(b);
             if (wsConnected) lastSyncedAt = Date.now();
         } catch (e) {
+            if (currentProject?.id !== projectId) return;
             // When offline, sync tasks from appStore (has optimistic updates)
             const b = appStore.board;
             if (b?.tasks) {
@@ -987,16 +1038,17 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             projects = projs || [];
             appStore.projects = projects;
             if (currentProject) {
-                const b = await getBoard(currentProject.id);
-                tasks = b.tasks || [];
-                appStore.board = b;
-                // Update selected task reference
-                { const sel = appStore.selectedTask; if (sel) {
-                    const fresh = tasks.find(t => t.id === sel.id);
-                    if (fresh) {
-                        appStore.selectedTask = fresh;
-                    }
-                }}
+                const projectId = currentProject.id;
+                const b = await getBoard(projectId);
+                if (applyBoard(b, projectId)) {
+                    // Update selected task reference
+                    { const sel = appStore.selectedTask; if (sel) {
+                        const fresh = tasks.find(t => t.id === sel.id);
+                        if (fresh) {
+                            appStore.selectedTask = fresh;
+                        }
+                    }}
+                }
             }
             const c = await getConfig();
             cfg = c;
@@ -1036,6 +1088,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         if (wasDifferentProject) sandboxImageStatus.clear();
         currentBranch = '';
         appStore.selectedProject = p;
+        // The list on screen belongs to the project the user left; the new project's own cached copy
+        // replaces it, never the old project's cards.
+        if (wasDifferentProject) {
+            tasks = [];
+            appStore.board = null;
+            void showCachedBoard(p.id);
+        }
         saveAppSetting(LAST_PROJECT_KEY, p.id).catch(() => {});
         // Re-mount explorer view for the new project (only on project switch, not initial load)
         if (wasProjectSwitch && wasExplorerViewOpen) {
@@ -1060,31 +1119,32 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
         try {
             const b = await getBoard(p.id);
-            tasks = b.tasks || [];
-            appStore.board = b;
+            if (!applyBoard(b, p.id)) return;
+            const boardTasks = tasks;
             // Mobile: land the board on the column that has work
             if (wasDifferentProject && isMobileCtx.isMobile) {
-                boardFocus = { projectId: p.id, column: resolveBoardLandingColumn(tasks) };
+                boardFocus = { projectId: p.id, column: resolveBoardLandingColumn(boardTasks) };
             }
             lastSyncedAt = Date.now();
+            servingFromCache = isFromCache(b);
             // Restore task from URL after board loads (await so task detail renders before return)
             await restoreTaskFromUrl();
             // Hydrate cached done-task stats BEFORE subscribing so the
             // known_stats handshake is in place when the server builds the
             // initial payload (skips re-sending stats we already have).
-            await hydrateDoneTaskStats(p.id, tasks);
+            await hydrateDoneTaskStats(p.id, boardTasks);
             // Subscribe to project for real-time updates
             if (appStream) {
                 appStream.subscribeProject(p.id);
             }
         } catch (e) {
             console.error('Failed to load board:', e);
+            if (currentProject?.id !== p.id) return;
             // Fallback: load board from cache if available
             try {
-                const cachedBoard = await getBoardCache<{ tasks: Task[] }>(boardCacheKey(p.id));
-                if (cachedBoard) {
-                    tasks = cachedBoard.tasks || [];
-                    appStore.board = cachedBoard;
+                const cachedBoard = await getBoardCache<BoardData>(boardCacheKey(p.id));
+                if (cachedBoard && applyBoard(cachedBoard, p.id)) {
+                    servingFromCache = true;
                     await restoreTaskFromUrl();
                 }
             } catch {

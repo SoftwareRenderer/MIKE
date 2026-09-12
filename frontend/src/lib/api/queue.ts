@@ -268,11 +268,15 @@ async function flushQueue() {
  * Apply pending queue actions to a copy of the cached board data.
  * Returns a new tasks array with optimistic updates applied.
  *
- * @param tasks  Cached tasks from the board (server state)
- * @returns      New tasks array with queued actions applied
+ * @param tasks    Cached tasks from the board (server state)
+ * @param forProject  The project the list belongs to. Every board-shaped action names its own
+ *                    project, and one from another project belongs to that project's board —
+ *                    replaying it here would add a card that is not this project's.
+ * @returns         New tasks array with queued actions applied
  */
 export function applyQueuedActionsToBoard(
     tasks: Task[],
+    forProject?: string,
 ): Task[] {
     // Map optimistic task IDs → real task IDs (resolved during flush)
     const optIdMap = new Map<string, string>();
@@ -282,6 +286,7 @@ export function applyQueuedActionsToBoard(
         const p = action.params;
         const taskId = p.taskId;
         const projectId = p.projectId;
+        if (forProject && projectId && projectId !== forProject) continue;
 
         switch (action.type) {
             case 'createTask': {

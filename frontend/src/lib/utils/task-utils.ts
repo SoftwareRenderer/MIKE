@@ -49,3 +49,19 @@ export function filterTopLevelTaskIds(taskIds: string[], tasks: Task[]): string[
         return !selected.has(task.parent_task_id);
     });
 }
+
+/**
+ * Apply a `task_updated` frame to the board on screen, or return null when there is nothing to apply.
+ *
+ * A task the board has never held is appended only when the frame names this project: the server
+ * replays the board frames it buffered for this connection, and those include projects the client
+ * switched away from. A task already on the board is updated whatever the frame claims, and one whose
+ * project the frame does not name is never appended — refreshing a row we already hold is safe,
+ * adding a card of unknown ownership is not.
+ */
+export function mergeTaskUpdateIntoBoard(tasks: Task[], updated: Task, projectId: string): Task[] | null {
+    const idx = tasks.findIndex(t => t.id === updated.id);
+    if (idx < 0) return updated.project_id === projectId ? [...tasks, updated] : null;
+    if (tasks[idx] === updated) return null;
+    return tasks.map((t, i) => (i === idx ? updated : t));
+}

@@ -36,6 +36,32 @@ Being in progress is what separates a pending `tool_call` row that is work from 
 a stopped task will never write the missing result, so that card is hidden while the message around it —
 its text, its thinking, the cards that did finish — stays.
 
+## The board on screen belongs to one project
+
+`App.svelte` holds one task list, and it is the board of the project named in the URL. Three things can
+hand it a task that belongs to another project, and each is answered where it arrives:
+
+- **A board response that lost the race.** `refreshBoard`, `silentRefresh`, `restoreTaskFromUrl` and
+  `selectProject` capture the project id before their awaits and write through `applyBoard(board,
+  projectId)`, which drops the write when that project is no longer on screen.
+- **A board frame from a project the client left.** `task_updated` and friends go only to that
+  project's subscribers, but the per-client ring buffer (`bufferRaw` in `backend/stream/app_stream.go`)
+  holds every frame the connection was ever sent and replays all of it on a `?sync=1` reconnect, and a
+  frame already in flight outlives `unsubscribe_project`. So the client checks what the frame names:
+  `mergeTaskUpdateIntoBoard` (`src/lib/utils/task-utils.ts`) appends an unknown task only when its
+  `project_id` is the project on screen. `commit_status` and `task_deleted` name no project, so those
+  are matched against the tasks the board already holds.
+- **A queued write of another project.** The offline queue is global; `applyQueuedActionsToBoard(tasks,
+  projectId)` replays onto one board only the actions that name it.
+
+While a switched-to project's live board is in flight the screen holds that project's own cached copy
+(`showCachedBoard`, from `board:` + the project id), never the previous project's list — which is why
+the list is emptied before the switch is painted. The cache banner stays off unless the socket is down,
+so a slow but live switch does not claim to be stale.
+
+**Tests:** `src/lib/utils/__tests__/task-utils.unit.ts` (a frame of another project never appends) and
+`src/lib/api/__tests__/queue-board-scope.unit.ts` (a queued action of another project never replays).
+
 ## Behaviour in full (moved from AGENTS.md)
 ### Reconnection & Offline
 `onConnected(true)` in `App.svelte` runs `silentRefresh()` once `initialLoadComplete`; `TaskChat` reloads history from the DB on reconnect because **turns completed while offline are never replayed** (buffer cleared at turn end). `offline` queues writes immediately, except a value that carries a secret — an unmasked provider key, or a clone URL with credentials in it — which is refused because the queue is persisted; `online` flushes the queue and calls `reconnectNow()` to skip backoff; `visibilitychange` refreshes the board (phone-sleep). Project re-subscription forces a re-send of `task_diff_stats`. Mechanism + test approach: `docs/reconnection.md`.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { filterTopLevelTaskIds, resolveBoardLandingColumn, taskIsInFlight } from '$lib/utils/task-utils';
+import { filterTopLevelTaskIds, mergeTaskUpdateIntoBoard, resolveBoardLandingColumn, taskIsInFlight } from '$lib/utils/task-utils';
 import type { Task } from '$lib/types';
 
 function makeTask(id: string, parentId?: string): Task {
@@ -124,5 +124,52 @@ describe('taskIsInFlight', () => {
         const stopped = { status: 'in_progress', execution_state: 'paused' } as Task;
         expect(stopped.status).toBe('in_progress');
         expect(taskIsInFlight(stopped.execution_state)).toBe(false);
+    });
+});
+
+describe('mergeTaskUpdateIntoBoard', () => {
+    // A task_updated frame names its own project, and the server replays the board frames it
+    // buffered for this connection — including ones from a project the client has switched away
+    // from. Appending such a frame plants a foreign card on the board, where it stays until the
+    // next board fetch.
+    it('refuses a task of another project, which is what mixed two projects onto one board', () => {
+        const board = [makeTask('mine')];
+        const foreign = { ...makeTask('theirs'), project_id: 'proj-2' };
+
+        expect(mergeTaskUpdateIntoBoard(board, foreign, 'proj-1')).toBeNull();
+        expect(board.map(t => t.id)).toEqual(['mine']);
+    });
+
+    it('refuses a task whose project the frame does not name', () => {
+        const board = [makeTask('mine')];
+        const unknown = { ...makeTask('newcomer'), project_id: '' };
+
+        expect(mergeTaskUpdateIntoBoard(board, unknown, 'proj-1')).toBeNull();
+        expect(board).toHaveLength(1);
+    });
+
+    it('adds a task of the project on screen, so a task created elsewhere still arrives', () => {
+        const board = [makeTask('mine')];
+        const arrived = makeTask('created-on-another-tab');
+
+        const next = mergeTaskUpdateIntoBoard(board, arrived, 'proj-1');
+
+        expect(next?.map(t => t.id)).toEqual(['mine', 'created-on-another-tab']);
+    });
+
+    it('refreshes a task already on the board, whatever project the frame claims', () => {
+        const board = [{ ...makeTask('mine'), status: 'backlog' }];
+        const moved = { ...makeTask('mine'), status: 'review', project_id: 'proj-2' };
+
+        const next = mergeTaskUpdateIntoBoard(board, moved, 'proj-1');
+
+        expect(next?.[0]?.status).toBe('review');
+        expect(next).toHaveLength(1);
+    });
+
+    it('answers null when the frame repeats the row already on the board', () => {
+        const row = makeTask('mine');
+
+        expect(mergeTaskUpdateIntoBoard([row], row, 'proj-1')).toBeNull();
     });
 });
