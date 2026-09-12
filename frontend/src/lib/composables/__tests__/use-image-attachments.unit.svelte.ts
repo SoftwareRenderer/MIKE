@@ -52,7 +52,7 @@ function setup(options: { upload?: boolean; hasTask?: boolean; held?: number } =
         addImages: (accepted) => { images.push(...accepted); },
         uploadFile: options.upload === false
             ? undefined
-            : async (file) => { uploaded.push(file.name); return `/tmp/kanban-uploads/t1/ab12/${file.name}`; },
+            : async (file) => { uploaded.push(file.name); return `/home/sandbox/p1/.mike-uploads/${file.name}`; },
         hasTask: () => options.hasTask !== false,
     });
 
@@ -127,7 +127,7 @@ describe('paste', () => {
         h.intake.handlePaste(pasteOf([archive()]));
 
         await vi.waitFor(() => expect(h.uploaded).toEqual(['bundle.zip']));
-        expect(h.textarea.value).toContain('/tmp/kanban-uploads/t1/ab12/bundle.zip');
+        expect(h.textarea.value).toContain('/home/sandbox/p1/.mike-uploads/bundle.zip');
     });
 
     it('reports an upload that failed instead of dropping the file quietly', async () => {

@@ -45,6 +45,11 @@ projects too because the server process enforces them.
   `fsWorktreeRoot` → `requireSandboxAvailable` → `ContainerToHost` → `validateFSPath` are each the jail
   for the next, so a handler that drops one — or passes `""` where the worktree root belongs — writes
   outside the project and still compiles.
+- **A task's uploaded file is a host write into that task's worktree** (`exec.WriteTaskFile`, landing in
+  `.mike-uploads/`), so it is not the path above — there is no container to translate a guest path through.
+  It runs the same `fsutil.Contained` check against the worktree root before the bytes go, because the task's
+  own actions can plant a symlink at that name, and writes `0600` into a `0700` directory.
+  `docs/sandbox-bridge.md`.
 
 ## The no-project host jail
 

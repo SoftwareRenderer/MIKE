@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// Deleting a project has to give up each task's environment — worktree, branch, sandbox container, or
-// for an unsandboxed task its host upload directory — because CASCADE takes the rows and leaves all of
-// that running.
+// Deleting a project has to give up each task's environment — worktree, branch, sandbox container —
+// because CASCADE takes the rows and leaves all of that running. The uploads inside a worktree go with it:
+// that is the whole of an upload's lifecycle, an upload is deleted with its task and with nothing else.
 func TestProjectDeleteTearsDownEveryTaskEnvironment(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
@@ -38,19 +38,18 @@ func TestProjectDeleteTearsDownEveryTaskEnvironment(t *testing.T) {
 		worktrees[taskID] = path
 	}
 
-	// The directory name mirrors exec.writeHostUpload, and os.TempDir reads the TMPDIR set below.
-	temp := t.TempDir()
-	t.Setenv("TMPDIR", temp)
+	// One dropped file per task, in the directory the upload path writes.
 	uploads := map[string]string{}
 	for _, taskID := range []string{parentID, childID} {
-		dir := filepath.Join(temp, "kanban-uploads-"+taskID+"-deadbeef")
+		dir := filepath.Join(worktrees[taskID], ".mike-uploads")
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "dropped.pdf"), []byte("payload"), 0o600); err != nil {
+		file := filepath.Join(dir, "dropped.pdf")
+		if err := os.WriteFile(file, []byte("payload"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		uploads[taskID] = dir
+		uploads[taskID] = file
 	}
 
 	req := testRequest("DELETE", "/api/projects/"+projID, nil)
@@ -61,7 +60,7 @@ func TestProjectDeleteTearsDownEveryTaskEnvironment(t *testing.T) {
 
 	for _, taskID := range []string{parentID, childID} {
 		if _, err := os.Stat(uploads[taskID]); !os.IsNotExist(err) {
-			t.Errorf("%s: the task's upload directory survived its project (%v)", taskID, err)
+			t.Errorf("%s: the task's upload survived its project (%v)", taskID, err)
 		}
 		if _, err := os.Stat(worktrees[taskID]); !os.IsNotExist(err) {
 			t.Errorf("%s: the worktree directory survived its project (%v)", taskID, err)

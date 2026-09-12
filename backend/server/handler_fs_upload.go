@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"kanban/backend/exec"
 	"kanban/backend/fsutil"
 	"kanban/pkg/logging"
 )
@@ -15,8 +16,9 @@ import (
 // Uploads are the only fs write whose body is not JSON: /api/fs/write's `content`
 // is a string field capped at 1 MB, so it cannot carry binary data.
 const (
-	// MaxUploadSize bounds one uploaded file.
-	MaxUploadSize = 20 << 20
+	// MaxUploadSize bounds one uploaded file. The number is the write's own, so the size the request is
+	// refused at and the size the write refuses cannot disagree.
+	MaxUploadSize = exec.MaxUploadBytes
 	// uploadTooLargeMessage is the answer both upload size checks give. Written by
 	// hand beside the constant it describes and pinned to it by a test, because a
 	// cap raised without its sentence tells the user a lie about the cap.

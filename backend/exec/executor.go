@@ -1635,14 +1635,14 @@ func (te *TaskExecutor) NotifyContextChanged(projectID, taskID string) {
 	}
 }
 
-// StopSandbox removes the sandbox container for a task (called on task deletion).
+// StopSandbox removes the sandbox container for a task (called on task deletion). It takes nothing that
+// lives in the task's worktree: an upload is deleted with its task, not with its container.
 func (te *TaskExecutor) StopSandbox(taskID string) {
 	if te.sandboxMgr != nil {
 		if err := te.sandboxMgr.Stop(taskID); err != nil {
 			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("stop error: %v", err)
 		}
 	}
-	te.removeTaskUploads(taskID)
 }
 
 // RetryTask retries a failed task.
