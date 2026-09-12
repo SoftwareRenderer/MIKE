@@ -130,3 +130,34 @@ a name as `CHOWN` — while `--privileged` is an *argument* and is refused at in
   containers → database, so a session's shell is killed while its container can still receive it.
 - Tests: `backend/sandbox/podman_wait_test.go`, `TestTerminalManagerClose`, `pkg/subproc/subproc_test.go`,
   `TestPodmanLabelNamesTheOperation`, `pkg/sandboxruntime/podmanenv_test.go`.
+
+## A container's memory record, and what the user is told
+
+- Usage is read from the container's cgroup v2 files by `sandboxruntime.MemoryTracker` — the resolved
+  cgroup directory is cached per container and dropped on a failed read — and pushed as the
+  task-scoped `sandbox_stats` event while the task is `in_progress` (`backend/stream/sandbox_stats.go`).
+  Idle tasks keep their last sample server-side and get it again on subscribe.
+- `memory.peak` and the `oom_kill` counter die with the container, so `Stop` hands both to
+  `Store.RecordTaskSandboxMemory` before the removal: the one writer of `tasks.sandbox_memory_peak_mb`
+  and `tasks.sandbox_oom_kills`. An ID naming no row (the `proj:` container, a task deleted mid-run) is a
+  no-op, and a reading that produced neither number reports nothing rather than erasing a previous run.
+  `UpdateTask` owns neither column but reads both back, so broadcasting the row it just wrote cannot
+  clear a measurement taken during it.
+- What needs a person's attention is decided once, in `frontend/src/lib/utils/memory-stats.ts`: an OOM
+  kill, or a peak that reached the limit. Running near the limit is pressure, not an alert — it colours
+  the bar and the shield dot orange and asks for nothing. Red is the alert, and it outlives the run
+  because the numbers that produced it do.
+- A dismissal is a column on the task row, not a record in the browser that clicked: one operator with a
+  phone and a laptop sees one answer. `POST …/memory-alert-ack` writes it through
+  `Store.DismissTaskMemoryAlert` and broadcasts the task, which is how the other devices find out — the
+  same path a status change travels. The ack keeps the three numbers the alert showed and covers an
+  alert when the limit matches and neither counter is worse, so a worse run announces itself again; the
+  comparison is by numbers rather than a timestamp because a container's counters only rise and
+  `sandbox_stats` carries no time. Known nuance: a task that hits an identical cap in a *later* run
+  stays dismissed, because nothing on the row distinguishes the runs — a per-container run token, on the
+  row and in the `sandbox_stats` frame, is what would re-arm it.
+- Tests: `backend/sandbox/memory_peak_test.go`, `backend/store/tasks_test.go`,
+  `backend/managers/task_memory_alert_test.go`,
+  `frontend/src/lib/utils/__tests__/memory-stats.unit.ts`,
+  `frontend/src/lib/api/__tests__/queue-board-scope.unit.ts`,
+  `frontend/src/lib/components/__tests__/{task-header-sandbox-dot,sandbox-panel-memory,card-memory-pill}.unit.svelte.ts`.

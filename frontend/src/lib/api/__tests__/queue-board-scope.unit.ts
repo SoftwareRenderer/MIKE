@@ -70,4 +70,20 @@ describe('applyQueuedActionsToBoard project scope', () => {
 
         expect(unscoped.map(t => t.title)).toEqual(['from p1']);
     });
+
+    // A board rebuilt while a dismissal waits must still look dismissed.
+    it('keeps a queued dismissal on the row the board shows', async () => {
+        const { enqueueAction, applyQueuedActionsToBoard } = await queueModule();
+        const ack = { peak_mb: 1024, oom_kills: 2, limit_mb: 1024 };
+        await enqueueAction({ type: 'dismissMemoryAlert', params: { projectId: 'p2', taskId: 'mine', ack } });
+        await enqueueAction({ type: 'dismissMemoryAlert', params: { projectId: 'p1', taskId: 'theirs', ack } });
+
+        const board = applyQueuedActionsToBoard(
+            [boardTask('mine', 'in_progress'), boardTask('theirs', 'in_progress', 'p1')],
+            'p2',
+        );
+
+        expect(board.find(t => t.id === 'mine')?.memory_alert_ack).toEqual(ack);
+        expect(board.find(t => t.id === 'theirs')?.memory_alert_ack).toBeUndefined();
+    });
 });

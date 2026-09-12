@@ -776,10 +776,10 @@ func countRegistrations(t *testing.T, root string) int {
 func TestMeasuredNumbersAgreeWithTheReview(t *testing.T) {
 	root := repoRoot(t)
 
-	// The count `grep -c 's\.mux\.Handle' backend/server/routes.go` answers today: 107. The verb
-	// split is 45 GET, 39 POST, 10 DELETE, 7 PUT, 4 PATCH and 2 methodless — the two file servers,
+	// The count `grep -c 's\.mux\.Handle' backend/server/routes.go` answers today: 108. The verb
+	// split is 45 GET, 40 POST, 10 DELETE, 7 PUT, 4 PATCH and 2 methodless — the two file servers,
 	// left as subtrees on purpose. A new registration moves this number and nothing else here.
-	const routeRegistrations = 107
+	const routeRegistrations = 108
 	if routes, checked, err := scanRoutes(root); err != nil {
 		t.Fatalf("scanRoutes: %v", err)
 	} else if checked != routeRegistrations {

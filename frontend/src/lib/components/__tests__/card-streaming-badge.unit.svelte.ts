@@ -34,6 +34,7 @@ const appStore = vi.hoisted(() => ({
     current: {
         selectedTask: null,
         board: null as { tasks: Array<{ id: string; execution_state?: string; has_merge_conflict?: boolean }> } | null,
+        projects: [] as Array<{ id: string; sandbox_memory_limit?: number }>,
         config: { providers: [] },
         editTaskData: null,
         showEditTask: false,

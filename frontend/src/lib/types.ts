@@ -81,6 +81,13 @@ export interface Project {
     updated_at: string;
 }
 
+/** A dismissed memory alert and the numbers it showed, as the task row carries them. */
+export interface MemoryAlertAckPayload {
+    peak_mb: number;
+    oom_kills: number;
+    limit_mb: number;
+}
+
 export interface Task {
     id: string;
     project_id: string;
@@ -116,6 +123,10 @@ export interface Task {
     session_cost?: number;
     /** Peak container memory (MB) of the last sandbox run; absent when no run recorded one. */
     sandbox_memory_peak_mb?: number;
+    /** Processes the OOM killer took from that same container; absent when none were recorded. */
+    sandbox_oom_kills?: number;
+    /** The alert dismissed and its numbers; null when nobody dismissed one. */
+    memory_alert_ack?: MemoryAlertAckPayload | null;
 }
 
 export interface Thread {

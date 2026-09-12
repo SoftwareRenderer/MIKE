@@ -47,6 +47,7 @@ vi.mock('$lib/stores', () => ({
     appStore: {
         selectedTask: null,
         board: null,
+        projects: [],
         config: {
             providers: [
                 {

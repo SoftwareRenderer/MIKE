@@ -49,6 +49,18 @@ running containers — nothing else would ever remove them.
 - Adding a migration means extending the probe chain *and* raising `schemaVersion`, leaving the earlier
   steps in place — they must stay idempotent, and a step that must run exactly once needs its own marker
   (the config-row guard on the backfill) rather than trusting the number.
+- Two task columns have exactly one writer each and are absent from `UpdateTask`: `memory_supervisor_paused`
+  (`SetMemorySupervisorPaused`) and the pair `sandbox_memory_peak_mb` / `sandbox_oom_kills`
+  (`RecordTaskSandboxMemory`), which the sandbox layer writes as a container is removed. A task copy read
+  before that write is alive during most runs, so `UpdateTask` returns those columns and puts them back
+  into the struct it hands to the broadcast — otherwise the write would erase a measurement, and a card
+  would lose the alert the user has not seen yet.
+- `memory_alert_acked` and its three numbers have one writer too, `DismissTaskMemoryAlert`, and the same
+  read-back: a dismissal arriving while an executor holds a task copy must survive the copy's next
+  `UpdateTask`. Neither writer touches `updated_at`, so neither a teardown nor a dismissal reorders the
+  queues that read those columns. The flag is what says "someone dismissed it": `{peak 0, kills 2,
+  limit 0}` is a real dismissal on a kernel without `memory.peak`, so the three numbers alone cannot
+  carry it.
 
 ## File permissions
 

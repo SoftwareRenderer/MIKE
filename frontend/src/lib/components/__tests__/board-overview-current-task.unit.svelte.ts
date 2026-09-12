@@ -29,7 +29,7 @@ vi.mock('$lib/context', () => {
 });
 
 vi.mock('$lib/stores', () => ({
-    appStore: { selectedTask: null, board: null, config: { providers: [] }, editTaskData: null, showEditTask: false, selectedProject: null },
+    appStore: { selectedTask: null, board: null, config: { providers: [] }, editTaskData: null, showEditTask: false, selectedProject: null, projects: [] },
     uiStore: {},
     dialogStore: { showToast: vi.fn(), showConfirm: vi.fn() },
     updateTaskInBoard: vi.fn(),

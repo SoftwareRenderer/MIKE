@@ -1043,7 +1043,7 @@ func TestGetMemoryStats(t *testing.T) {
 	// After Stop the task is untracked → not-running, and the peak has been handed off with the
 	// cgroup it was read from.
 	var reported []int64
-	sm.SetMemoryPeakSink(func(_ string, peakMB int64) { reported = append(reported, peakMB) })
+	sm.SetMemoryPeakSink(func(_ string, peakMB int64, _ int64) { reported = append(reported, peakMB) })
 	if err := sm.Stop(taskID); err != nil {
 		t.Fatalf("stop sandbox: %v", err)
 	}

@@ -145,12 +145,11 @@ func readTotalMemMB() int64 {
 	return 0
 }
 
-// sandboxMemoryPeakSink is the sandbox manager's receiver for a container's final peak memory:
-// the task row, the only thing that outlives the cgroup it was read from.
-func sandboxMemoryPeakSink(st *store.Store) func(taskID string, peakMB int64) {
-	return func(taskID string, peakMB int64) {
-		if err := st.UpdateTaskSandboxMemoryPeak(taskID, peakMB); err != nil {
-			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("recording peak sandbox memory %d MB: %v", peakMB, err)
+// The task row is the only thing that outlives the cgroup these numbers were read from.
+func sandboxMemoryPeakSink(st *store.Store) func(taskID string, peakMB int64, oomKills int64) {
+	return func(taskID string, peakMB int64, oomKills int64) {
+		if err := st.RecordTaskSandboxMemory(taskID, peakMB, oomKills); err != nil {
+			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("recording peak sandbox memory %d MB with %d OOM kills: %v", peakMB, oomKills, err)
 		}
 	}
 }

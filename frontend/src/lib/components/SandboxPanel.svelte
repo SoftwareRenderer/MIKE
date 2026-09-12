@@ -4,7 +4,8 @@
     import { getProject } from '$lib/api';
     import Icon from '$lib/components/Icon.svelte';
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
-    import { isNearMemoryLimit, isMemoryLimitReached, formatSandboxMemory, formatMemoryLimitMB, taskSandboxMemoryFallback } from '$lib/utils/memory-stats';
+    import { isNearMemoryLimit, isMemoryLimitReached, formatSandboxMemory, formatMemoryLimitMB, memoryAlertSentences, projectMemoryLimitMB, taskSandboxMemoryFallback } from '$lib/utils/memory-stats';
+    import { useMemoryAlert } from '$lib/composables/use-memory-alert.svelte';
     import { formatAssignedHost } from '$lib/utils/sandbox-ports';
 import BaseModal from './BaseModal.svelte';
 import { t } from '$lib/i18n';
@@ -31,9 +32,12 @@ import { t } from '$lib/i18n';
     let error = $state('');
 
     // The limit the settings row states and the peak is drawn against are one number.
-    const limitMB = $derived(project?.sandbox_memory_limit ?? 1024);
+    const limitMB = $derived(projectMemoryLimitMB(project));
     // Live usage while the container runs; afterwards, the peak recorded on the task row.
-    const shownStats = $derived(stats ?? (project ? taskSandboxMemoryFallback(task, limitMB) : null));
+    const shownStats = $derived(stats ?? (project && limitMB !== null ? taskSandboxMemoryFallback(task, limitMB) : null));
+    // The same alert the dot and the board card show; the OOM line below it stays once acknowledged.
+    const memory = useMemoryAlert(() => task, () => limitMB, () => stats);
+    const alert = $derived(memory.alert);
 
     $effect(() => {
         async function load() {
@@ -80,7 +84,16 @@ import { t } from '$lib/i18n';
                     {#if shownStats.memory_peak_mb > 0}
                         <div class="memory-peak" class:reached={isMemoryLimitReached(shownStats)}>{t('sandbox.peakMemory', { mb: shownStats.memory_peak_mb })}</div>
                     {/if}
-                    {#if shownStats.oom_kills > 0}
+                    {#if alert}
+                        <div class="memory-alert" role="alert">
+                            <div class="memory-alert-title">{t('memory.alert.title')}</div>
+                            {#each memoryAlertSentences(alert.alert) as line}
+                                <div class="memory-alert-line">{line}</div>
+                            {/each}
+                            <div class="memory-alert-line">{t('memory.alert.action')}</div>
+                            <button class="memory-alert-dismiss" onclick={() => { void memory.dismiss(); }}>{t('memory.alert.dismiss')}</button>
+                        </div>
+                    {:else if shownStats.oom_kills > 0}
                         <div class="oom-warning" role="alert">
                             <span class="oom-warning-count">{shownStats.oom_kills}</span> {t('sandbox.oomKilled', { count: shownStats.oom_kills })}
                         </div>
@@ -103,7 +116,7 @@ import { t } from '$lib/i18n';
                     <!-- Memory limit -->
                     <div class="setting-row">
                         <span class="setting-label">{t('sandbox.memoryLimit')}</span>
-                        <span class="setting-value">{formatMemoryLimitMB(limitMB)}</span>
+                        <span class="setting-value">{formatMemoryLimitMB(limitMB ?? undefined)}</span>
                     </div>
 
                     <!-- Image -->
@@ -296,6 +309,44 @@ import { t } from '$lib/i18n';
 
     .oom-warning-count {
         font-weight: 700;
+    }
+
+    .memory-alert {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 10px 12px;
+        background: rgba(248, 81, 73, 0.1);
+        border: 1px solid rgba(248, 81, 73, 0.3);
+        border-radius: var(--radius-md);
+    }
+
+    .memory-alert-title {
+        color: var(--color-status-red);
+        font-size: 0.8125rem;
+        font-weight: 600;
+    }
+
+    .memory-alert-line {
+        color: var(--color-text-secondary);
+        font-size: 0.75rem;
+        line-height: 1.4;
+    }
+
+    .memory-alert-dismiss {
+        align-self: flex-start;
+        margin-top: 4px;
+        padding: 4px 10px;
+        font-size: 0.75rem;
+        color: var(--color-text-primary);
+        background: var(--color-surface-3);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+    }
+
+    .memory-alert-dismiss:hover {
+        border-color: var(--color-text-tertiary);
     }
 
     .loading {

@@ -44,9 +44,12 @@ type Task struct {
 	MovedAt       time.Time      `json:"moved_at"`
 	AssignedPorts []AssignedPort `json:"assigned_ports,omitempty"`
 	SessionCost   float64        `json:"session_cost"`
-	// SandboxMemoryPeakMB is the peak container memory of the task's most recent sandbox run,
-	// recorded as that container was removed. Written only by Store.UpdateTaskSandboxMemoryPeak.
+	// SandboxMemoryPeakMB is the last run's peak. Written only by Store.RecordTaskSandboxMemory.
 	SandboxMemoryPeakMB int64 `json:"sandbox_memory_peak_mb,omitempty"`
+	// Processes the OOM killer took from that same container. Same single writer.
+	SandboxOOMKills int64 `json:"sandbox_oom_kills,omitempty"`
+	// Nil when nobody dismissed the alert. Written only by Store.DismissTaskMemoryAlert.
+	MemoryAlertAck *MemoryAlertAck `json:"memory_alert_ack"`
 	// MemorySupervisorPaused is set when the memory supervisor pauses the task.
 	// Any user-initiated start or stop clears it, so the supervisor never resumes a task the user moved.
 	MemorySupervisorPaused bool `json:"memory_supervisor_paused,omitempty"`
@@ -224,6 +227,14 @@ type SandboxMemoryStats struct {
 	LimitMB   int64  `json:"memory_limit_mb"`
 	PeakMB    int64  `json:"memory_peak_mb"`
 	OOMKills  uint64 `json:"oom_kills"`
+}
+
+// MemoryAlertAck is a dismissed alert and the numbers it showed. Counters only rise,
+// so numbers replace a timestamp.
+type MemoryAlertAck struct {
+	PeakMB   int64 `json:"peak_mb"`
+	OOMKills int64 `json:"oom_kills"`
+	LimitMB  int64 `json:"limit_mb"`
 }
 
 // SandboxMount specifies a custom host path bind mount for sandbox containers.

@@ -27,7 +27,7 @@ func marshalAssignedPorts(ports []types.AssignedPort) string {
 // (and for CreateTask's INSERT). The mapping is positional, so a column added to
 // the schema but not to this list — or listed in a different order than scanTask
 // expects — breaks at scan time rather than at compile time.
-const taskColumns = `id, project_id, title, prompt, status, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, moved_at, assigned_ports, session_cost, sandbox_memory_peak_mb, memory_supervisor_paused`
+const taskColumns = `id, project_id, title, prompt, status, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, moved_at, assigned_ports, session_cost, sandbox_memory_peak_mb, sandbox_oom_kills, memory_supervisor_paused, memory_alert_acked, memory_alert_ack_peak_mb, memory_alert_ack_oom_kills, memory_alert_ack_limit_mb`
 
 func (s *Store) CreateTask(t *types.Task) error {
 	s.mu.Lock()
@@ -38,14 +38,34 @@ func (s *Store) CreateTask(t *types.Task) error {
 	if movedAt.IsZero() {
 		movedAt = t.CreatedAt
 	}
-	_, err := s.db.Exec(
-		`INSERT INTO tasks (`+taskColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	args := []any{
 		t.ID, t.ProjectID, t.Title, t.Prompt, t.Status, t.SessionID, t.Branch, ptrStr(t.BaseRef), ptrStr(t.BaseCommit), ptrStr(t.BranchTip), t.Output, t.ExecutionState, B2I(t.HasMergeConflict),
 		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, B2I(t.AutoCommit), B2I(t.AutoMerge), B2I(t.SubtasksAutoMerge), t.OperatingMode,
-		ptrStr(t.ParentTaskID), B2I(t.Autostarted), B2I(t.TitleGenerating), B2I(t.Summarizing), ptrStr(t.CurrentThreadID), t.CreatedAt.Format(time.RFC3339), t.UpdatedAt.Format(time.RFC3339), movedAt.UTC().Format(time.RFC3339), assignedPortsJSON, t.SessionCost, t.SandboxMemoryPeakMB, B2I(t.MemorySupervisorPaused),
+		ptrStr(t.ParentTaskID), B2I(t.Autostarted), B2I(t.TitleGenerating), B2I(t.Summarizing), ptrStr(t.CurrentThreadID), t.CreatedAt.Format(time.RFC3339), t.UpdatedAt.Format(time.RFC3339), movedAt.UTC().Format(time.RFC3339), assignedPortsJSON, t.SessionCost, t.SandboxMemoryPeakMB, t.SandboxOOMKills, B2I(t.MemorySupervisorPaused),
+	}
+	args = append(args, ackValues(t.MemoryAlertAck)...)
+	_, err := s.db.Exec(
+		`INSERT INTO tasks (`+taskColumns+`)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		args...,
 	)
 	return err
+}
+
+// ackValues stores a task nobody dismissed as the flag off.
+func ackValues(a *types.MemoryAlertAck) []any {
+	if a == nil {
+		return []any{0, 0, 0, 0}
+	}
+	return []any{1, a.PeakMB, a.OOMKills, a.LimitMB}
+}
+
+// memoryAlertAck is the inverse of ackValues.
+func memoryAlertAck(acked int, peakMB, oomKills, limitMB int64) *types.MemoryAlertAck {
+	if acked == 0 {
+		return nil
+	}
+	return &types.MemoryAlertAck{PeakMB: peakMB, OOMKills: oomKills, LimitMB: limitMB}
 }
 
 // GetTask retrieves a task by ID within a project.
@@ -124,20 +144,27 @@ func (s *Store) UpdateTaskSessionCost(taskID string, cost float64) error {
 	return err
 }
 
-// UpdateTaskSandboxMemoryPeak records the peak container memory of a task's last sandbox run. It
-// is the only writer of the column — UpdateTask does not carry it, so a task copy read before the
-// run cannot erase a peak recorded during it. An ID naming no row (a project-level container, a
-// task deleted mid-run) is a no-op, not a failure; updated_at stays put, so a teardown cannot
-// reorder the queue GetPendingIdleTasks reads out of that column.
-func (s *Store) UpdateTaskSandboxMemoryPeak(taskID string, peakMB int64) error {
+// RecordTaskSandboxMemory is the only writer of a run's peak and OOM count. An unknown ID is a no-op.
+func (s *Store) RecordTaskSandboxMemory(taskID string, peakMB int64, oomKills int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.db.Exec(`UPDATE tasks SET sandbox_memory_peak_mb = ? WHERE id = ?`, peakMB, taskID)
+	// updated_at stays out: a teardown must not reorder the pending queue.
+	_, err := s.db.Exec(`UPDATE tasks SET sandbox_memory_peak_mb = ?, sandbox_oom_kills = ? WHERE id = ?`, peakMB, oomKills, taskID)
 	return err
 }
 
-// SetMemorySupervisorPaused writes the flag directly. UpdateTask must not carry this column
-// (same rule as sandbox_memory_peak_mb), so the only writers are the supervisor and prepareTaskExecution.
+// DismissTaskMemoryAlert is the only writer of the four acknowledgement columns, and leaves updated_at alone.
+func (s *Store) DismissTaskMemoryAlert(taskID string, peakMB int64, oomKills int64, limitMB int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(
+		`UPDATE tasks SET memory_alert_acked = 1, memory_alert_ack_peak_mb = ?, memory_alert_ack_oom_kills = ?, memory_alert_ack_limit_mb = ? WHERE id = ?`,
+		peakMB, oomKills, limitMB, taskID)
+	return err
+}
+
+// SetMemorySupervisorPaused writes the flag directly: UpdateTask must not carry this column, so
+// only the supervisor and prepareTaskExecution write it.
 func (s *Store) SetMemorySupervisorPaused(taskID string, paused bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -151,7 +178,7 @@ func (s *Store) GetRunningSandboxedTasks() ([]types.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	// Bare column names would be ambiguous after the JOIN with projects.
-	const tcols = "t.id, t.project_id, t.title, t.prompt, t.status, t.session_id, t.branch, t.base_ref, t.base_commit, t.branch_tip, t.output, t.execution_state, t.has_merge_conflict, t.llama_server_url, t.model_name, t.reasoning_effort, t.max_consecutive_failed_turns, t.auto_commit, t.auto_merge, t.subtasks_auto_merge, t.operating_mode, t.parent_task_id, t.autostarted, t.title_generating, t.summarizing, t.current_thread_id, t.created_at, t.updated_at, t.moved_at, t.assigned_ports, t.session_cost, t.sandbox_memory_peak_mb, t.memory_supervisor_paused"
+	const tcols = "t.id, t.project_id, t.title, t.prompt, t.status, t.session_id, t.branch, t.base_ref, t.base_commit, t.branch_tip, t.output, t.execution_state, t.has_merge_conflict, t.llama_server_url, t.model_name, t.reasoning_effort, t.max_consecutive_failed_turns, t.auto_commit, t.auto_merge, t.subtasks_auto_merge, t.operating_mode, t.parent_task_id, t.autostarted, t.title_generating, t.summarizing, t.current_thread_id, t.created_at, t.updated_at, t.moved_at, t.assigned_ports, t.session_cost, t.sandbox_memory_peak_mb, t.sandbox_oom_kills, t.memory_supervisor_paused, t.memory_alert_acked, t.memory_alert_ack_peak_mb, t.memory_alert_ack_oom_kills, t.memory_alert_ack_limit_mb"
 	rows, err := s.db.Query(
 		`SELECT ` + tcols + ` FROM tasks t JOIN projects p ON p.id = t.project_id` +
 			` WHERE p.sandbox_enabled = 1 AND t.execution_state IN ` + inFlightStates +
@@ -214,11 +241,13 @@ func (s *Store) updateTask(t *types.Task, claim bool) error {
 	// The row answers with the state it actually holds; typing the scan target keeps
 	// the assignment below from accepting anything the database happened to contain.
 	var storedExec types.ExecutionState
-	// The peak is read back because the sandbox sink writes that column while this copy is alive.
+	// Both writers can run while this copy lives: the sandbox sink and the dismiss route.
+	var memAlerted int
+	var ackPeak, ackKills, ackLimit int64
 	err := s.db.QueryRow(
-		`UPDATE tasks SET moved_at = CASE WHEN status <> ? THEN ? ELSE moved_at END, title = ?, prompt = ?, status = ?, session_id = ?, branch = ?, base_ref = ?, base_commit = ?, branch_tip = ?, output = ?, `+execSet+`, has_merge_conflict = ?, llama_server_url = ?, model_name = ?, reasoning_effort = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_merge = ?, subtasks_auto_merge = ?, operating_mode = ?, parent_task_id = ?, autostarted = ?, title_generating = ?, current_thread_id = ?, assigned_ports = ?, session_cost = ?, updated_at = ? WHERE id = ? RETURNING moved_at, execution_state, sandbox_memory_peak_mb`,
+		`UPDATE tasks SET moved_at = CASE WHEN status <> ? THEN ? ELSE moved_at END, title = ?, prompt = ?, status = ?, session_id = ?, branch = ?, base_ref = ?, base_commit = ?, branch_tip = ?, output = ?, `+execSet+`, has_merge_conflict = ?, llama_server_url = ?, model_name = ?, reasoning_effort = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_merge = ?, subtasks_auto_merge = ?, operating_mode = ?, parent_task_id = ?, autostarted = ?, title_generating = ?, current_thread_id = ?, assigned_ports = ?, session_cost = ?, updated_at = ? WHERE id = ? RETURNING moved_at, execution_state, sandbox_memory_peak_mb, sandbox_oom_kills, memory_alert_acked, memory_alert_ack_peak_mb, memory_alert_ack_oom_kills, memory_alert_ack_limit_mb`,
 		args...,
-	).Scan(&movedAt, &storedExec, &t.SandboxMemoryPeakMB)
+	).Scan(&movedAt, &storedExec, &t.SandboxMemoryPeakMB, &t.SandboxOOMKills, &memAlerted, &ackPeak, &ackKills, &ackLimit)
 	if err != nil {
 		// No row matched (task deleted concurrently): same outcome as the 0-rows-affected
 		// case the previous Exec-based update returned without error for.
@@ -229,6 +258,7 @@ func (s *Store) updateTask(t *types.Task, claim bool) error {
 	}
 	t.MovedAt = scanTime(movedAt)
 	t.ExecutionState = storedExec
+	t.MemoryAlertAck = memoryAlertAck(memAlerted, ackPeak, ackKills, ackLimit)
 	return nil
 }
 

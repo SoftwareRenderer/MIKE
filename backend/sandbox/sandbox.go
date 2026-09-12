@@ -209,9 +209,8 @@ type SandboxManager struct {
 	clients       map[string]*bridge.Client // taskID -> agent client (cached)
 	livenessCache map[string]time.Time      // taskID -> last time running was confirmed
 	mem           memoryUsage               // taskID -> container memory, via containerName
-	// peakSink receives a container's final peak memory from Stop. Read under mu, never called
-	// with mu held: the sink writes to SQLite.
-	peakSink func(taskID string, peakMB int64)
+	// Set under mu; never called with mu held — the sink writes to SQLite.
+	peakSink func(taskID string, peakMB int64, oomKills int64)
 	// imageOps holds in-flight image builds/pulls by image ref, so concurrent sandbox starts share
 	// one build. imageOpsMu is separate from mu: a build runs for minutes and must not block the
 	// container maps.
@@ -247,8 +246,8 @@ func NewSandboxManager(boot sandboxruntime.Boot) *SandboxManager {
 	return sm
 }
 
-// SetMemoryPeakSink registers the receiver of a container's final peak memory.
-func (sm *SandboxManager) SetMemoryPeakSink(sink func(taskID string, peakMB int64)) {
+// SetMemoryPeakSink registers the receiver of a container's final memory record.
+func (sm *SandboxManager) SetMemoryPeakSink(sink func(taskID string, peakMB int64, oomKills int64)) {
 	sm.mu.Lock()
 	sm.peakSink = sink
 	sm.mu.Unlock()
@@ -951,18 +950,17 @@ func (sm *SandboxManager) BinaryAvailable(taskID, binaryName string) bool {
 	return err == nil
 }
 
-// recordFinalPeak hands a container's peak memory to the registered sink and drops its cached
-// cgroup path. Stop calls it before the removal: memory.peak dies with the container, and a
-// removal that fails must not cost the run its measurement. A cgroup it cannot read, or a peak
-// of 0, reports nothing rather than erasing a recorded run. The caller holds no lock.
+// recordFinalPeak gives the sink the container's last memory numbers. Stop calls it before
+// removal: memory.peak dies with the container.
 func (sm *SandboxManager) recordFinalPeak(taskID, containerName string) {
 	sm.mu.Lock()
 	sink := sm.peakSink
 	sm.mu.Unlock()
 	mem := sm.memory()
 	if sink != nil {
-		if usage := mem.Usage(containerName); usage.Known && usage.Peak > 0 {
-			sink(taskID, usage.Peak)
+		// Reporting neither number records nothing, so a run cannot erase a previous one.
+		if usage := mem.Usage(containerName); usage.Known && (usage.Peak > 0 || usage.OOMKills > 0) {
+			sink(taskID, usage.Peak, int64(usage.OOMKills))
 		}
 	}
 	mem.Forget(containerName)

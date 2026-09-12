@@ -8,7 +8,8 @@
     import type { Task } from '$lib/types';
     import { appStore } from '$lib/stores';
     import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
-    import { isSandboxMemoryWarning, isMemoryLimitReached } from '$lib/utils/memory-stats';
+    import { isNearMemoryLimit, isMemoryLimitReached, memoryAlertSentences, projectMemoryLimitMB, taskMemoryStats } from '$lib/utils/memory-stats';
+    import { useMemoryAlert } from '$lib/composables/use-memory-alert.svelte';
     import { openTerminalTitle } from '$lib/utils/keyboard';
     import { t } from '$lib/i18n';
 
@@ -43,12 +44,15 @@
 
     let showSandboxPanel = $state(false);
 
-    // Live sandbox memory stats for this task (WS-pushed; the most recent
-    // value persists while the task is idle).
-    const stats = $derived(sandboxStatsStore.get(task.id));
-    const memWarning = $derived(isSandboxMemoryWarning(stats));
+    const project = $derived(appStore.projects.find(p => p.id === task.project_id));
+    const limitMB = $derived(projectMemoryLimitMB(project));
+    const stats = $derived(taskMemoryStats(task, limitMB, sandboxStatsStore.get(task.id)));
+    const memory = useMemoryAlert(() => task, () => limitMB);
+    const memAlert = $derived(memory.alert);
+    // Red means act or dismiss; orange is live pressure, which ends with the number.
+    const memDot = $derived(memAlert ? 'alert' : (isNearMemoryLimit(stats) ? 'warning' : null));
 
-    // Sandbox button tooltip — live usage + OOM kills when known.
+    // Sandbox button tooltip — live usage, and what this task's run cost it.
     const sandboxTitle = $derived.by(() => {
         let title = 'Sandbox enabled';
         if (stats?.running) {
@@ -56,10 +60,9 @@
                 ? ` · ${stats.memory_current_mb} / ${stats.memory_limit_mb} MB`
                 : ` · ${stats.memory_current_mb} MB`;
         }
-        if (stats && stats.oom_kills > 0) {
-            title += t('task.sandboxTip.oomKills', { count: stats.oom_kills });
-        }
-        if (isMemoryLimitReached(stats)) {
+        if (memAlert) {
+            title += memoryAlertSentences(memAlert.alert).map(s => ` · ${s}`).join('');
+        } else if (isMemoryLimitReached(stats)) {
             title += t('task.sandboxTip.peakReachedLimit');
         }
         return t('task.sandboxTip.clickForDetails', { title });
@@ -208,8 +211,8 @@
                 {#if sandboxEnabled}
                     <button class="icon-btn sandbox-btn" onclick={() => { showSandboxPanel = true; }} title={sandboxTitle} aria-label={sandboxTitle}>
                         <Icon src={shieldIcon} width={14} height={14} />
-                        {#if memWarning}
-                            <span class="mem-dot" aria-hidden="true"></span>
+                        {#if memDot}
+                            <span class="mem-dot" class:mem-dot-alert={memDot === 'alert'} class:mem-dot-warn={memDot === 'warning'} aria-hidden="true"></span>
                         {/if}
                     </button>
                 {:else}
@@ -363,8 +366,13 @@
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: var(--color-status-red);
         pointer-events: none;
+    }
+    .mem-dot-alert {
+        background: var(--color-status-red);
+    }
+    .mem-dot-warn {
+        background: var(--color-status-orange);
     }
     .header-actions {
         display: flex;

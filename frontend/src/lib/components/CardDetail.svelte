@@ -49,6 +49,8 @@
         }).catch(() => { fileEditorLoading = false; });
     }
     import MobileTabBar from './CardDetail/MobileTabBar.svelte';
+    import { useMemoryAlert } from '$lib/composables/use-memory-alert.svelte';
+    import { memoryAlertSentences, projectMemoryLimitMB } from '$lib/utils/memory-stats';
     import TaskHeader from './CardDetail/TaskHeader.svelte';
     import BoardOverview from './CardDetail/BoardOverview.svelte';
     import MultiSelectBar from './MultiSelectBar.svelte';
@@ -59,6 +61,10 @@
     floating?: boolean } = $props();
 
     let allTasks = $derived(tasks || appStore.board?.tasks || []);
+
+    const memLimitMB = $derived(projectMemoryLimitMB(appStore.projects.find(p => p.id === task.project_id)));
+    const memory = useMemoryAlert(() => task, () => memLimitMB);
+    const memAlert = $derived(memory.alert);
 
     /**
      * Section `id`s are status data (compared, sent to the API); `title` is the English
@@ -919,6 +925,20 @@
             onDelete={handleDelete}
         />
 
+        <!-- Stated once above every tab, and it stays until the user acknowledges it. -->
+        {#if memAlert}
+            <div class="memory-alert-bar" role="alert">
+                <span class="memory-alert-text">
+                    <span class="memory-alert-title">{t('memory.alert.title')}</span>
+                    {#each memoryAlertSentences(memAlert.alert) as line}<span class="memory-alert-line">{line}</span>{/each}
+                    <span class="memory-alert-line">{t('memory.alert.action')}</span>
+                </span>
+                <button class="memory-alert-dismiss" onclick={() => { void memory.dismiss(); }}>
+                    {t('memory.alert.dismiss')}
+                </button>
+            </div>
+        {/if}
+
         <!-- Mobile Tab Bar (visibility controlled by CSS media query; omitted in
              the floating view — it is chat-only, no column switching) -->
         {#if !floating}
@@ -1096,6 +1116,43 @@
         flex-direction: column;
         overflow: hidden;
         height: 100%;
+    }
+    .memory-alert-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 14px;
+        background: rgba(248, 81, 73, 0.1);
+        border-bottom: 1px solid rgba(248, 81, 73, 0.3);
+    }
+    .memory-alert-text {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2px 10px;
+        min-width: 0;
+    }
+    .memory-alert-title {
+        color: var(--color-status-red);
+        font-size: 0.8125rem;
+        font-weight: 600;
+    }
+    .memory-alert-line {
+        color: var(--color-text-secondary);
+        font-size: 0.75rem;
+    }
+    .memory-alert-dismiss {
+        flex-shrink: 0;
+        padding: 4px 10px;
+        font-size: 0.75rem;
+        color: var(--color-text-primary);
+        background: var(--color-surface-3);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+    }
+    .memory-alert-dismiss:hover {
+        border-color: var(--color-text-tertiary);
     }
     /* Floating task view: narrow mobile-style window over the current view.
        bottom: 44px sits above the editor footer (≈28px) + gap. */

@@ -1,4 +1,4 @@
-import type { Task, TaskMessage } from '../types';
+import type { MemoryAlertAckPayload, Task, TaskMessage } from '../types';
 import { API_BASE, apiFetch, apiError, generateId } from './helpers';
 import { setBoardCache, getBoardCache, messagesCacheKey, messageFullCacheKey } from '../storage';
 import { markCached } from './cache';
@@ -11,6 +11,7 @@ import {
     updateTaskRaw,
     deleteTaskRaw,
     moveTaskRaw,
+    dismissMemoryAlertRaw,
     commitAndDoneRaw,
     clearDoneTasksRaw,
     initTaskRaw,
@@ -76,6 +77,14 @@ export async function commitAndDone(projectId: string, taskId: string, commitMes
         return await queueWrite('commitAndDone', { projectId, taskId }, { id: taskId, status: 'done', moved_at: new Date().toISOString() } as Task);
     }
     return commitAndDoneRaw(projectId, taskId, commitMessage);
+}
+
+/** Dismiss this task's memory alert. Queued when offline, like any other write. */
+export async function dismissMemoryAlert(projectId: string, taskId: string, ack: MemoryAlertAckPayload): Promise<Task> {
+    if (getOfflineStatus()) {
+        return await queueWrite('dismissMemoryAlert', { projectId, taskId, ack }, { id: taskId, memory_alert_ack: ack } as Task);
+    }
+    return dismissMemoryAlertRaw(projectId, taskId, ack);
 }
 
 /** Delete all done tasks in a project. Queued when offline. */

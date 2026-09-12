@@ -9,6 +9,8 @@
     import Card from './Card.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
     import { mergeQueuedUpdate } from '$lib/utils/task-utils';
+    import { useMemoryAlert } from '$lib/composables/use-memory-alert.svelte';
+    import { memoryAlertSentences, projectMemoryLimitMB } from '$lib/utils/memory-stats';
     import { effectiveMultiSelectClick, matchesClickBinding, isBrowserLinkClick } from '$lib/utils/keyboard';
     import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
     import Icon from './Icon.svelte';
@@ -476,6 +478,11 @@
         return null;
     });
 
+    // A board card shows the alert too, so an out-of-memory run is visible before it is opened.
+    const memLimitMB = $derived(projectMemoryLimitMB(appStore.projects.find(p => p.id === task.project_id)));
+    const memory = useMemoryAlert(() => task, () => memLimitMB);
+    let memAlert = $derived(memory.alert);
+
     // Settings → Preferences → UI: hide the model badge on board cards.
     let hideModelBadge = $derived(appStore.config?.hide_model_badge === true);
 
@@ -891,11 +898,17 @@
             draggable="false"
         ></a>
     {/if}
-    {#if statusBadge || modelBadge.text || subtaskProgress}
+    {#if statusBadge || memAlert || modelBadge.text || subtaskProgress}
         <div class="badges-row">
             {#if statusBadge}
                 <div class="badge" style="background: {statusBadge.color}11; color: {statusBadge.color}">
                     {statusBadge.text}
+                </div>
+            {/if}
+            {#if memAlert}
+                <!-- The card is a link, so this badge tells only: dismissing happens in the task view. -->
+                <div class="badge oom-badge" title={memoryAlertSentences(memAlert.alert).join(' · ')}>
+                    {t('board.badge.outOfMemory')}
                 </div>
             {/if}
             {#if modelBadge.text && !hideModelBadge}
@@ -1193,6 +1206,11 @@
         border-radius: var(--radius-sm);
         font-weight: 500;
         font-family: inherit;
+    }
+    .oom-badge {
+        color: var(--color-status-red);
+        background: rgba(248, 81, 73, 0.12);
+        border: 1px solid rgba(248, 81, 73, 0.3);
     }
     .model-badge {
         max-width: 100%;

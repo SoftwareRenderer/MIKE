@@ -135,9 +135,10 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			task.ID = types.GenerateTaskID()
 		}
 		task.ProjectID = projectID
-		// The peak is the sandbox layer's to record as a container is removed; one from the body
-		// would be a number no container ever produced.
+		// The sandbox layer records these as a container is removed; a body cannot produce them.
 		task.SandboxMemoryPeakMB = 0
+		task.SandboxOOMKills = 0
+		task.MemoryAlertAck = nil
 		if task.Status == "" {
 			task.Status = types.StatusBacklog
 		}
@@ -1337,6 +1338,46 @@ func (h *TaskHandler) HandleStop(w http.ResponseWriter, r *http.Request) {
 
 	task, _ := h.store.GetTask(projectID, taskID)
 	h.refreshTaskPorts(task)
+	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+	httputil.JSONResponse(w, http.StatusOK, task)
+}
+
+// HandleDismissMemoryAlert stores the dismissal on the task row; the broadcast reaches every device.
+func (h *TaskHandler) HandleDismissMemoryAlert(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
+	// Decode before touching a task. A missing number would under-cover the alert, so all three are required.
+	var raw fieldsPresent
+	if !httputil.DecodeJSON(w, r, &raw) {
+		return
+	}
+	var ack types.MemoryAlertAck
+	for _, f := range []struct {
+		key    string
+		target *int64
+	}{{"peak_mb", &ack.PeakMB}, {"oom_kills", &ack.OOMKills}, {"limit_mb", &ack.LimitMB}} {
+		sent, err := raw.decode(f.key, f.target)
+		switch {
+		case err != nil:
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		case !sent:
+			httputil.JSONError(w, http.StatusBadRequest, f.key+" is required")
+			return
+		case *f.target < 0:
+			httputil.JSONError(w, http.StatusBadRequest, f.key+" must not be negative")
+			return
+		}
+	}
+	task, ok := resolveTask(w, r, h.store)
+	if !ok {
+		return
+	}
+	if err := h.store.DismissTaskMemoryAlert(taskID, ack.PeakMB, ack.OOMKills, ack.LimitMB); err != nil {
+		httputil.Fail(w, err, "dismiss memory alert", "task not found")
+		return
+	}
+	task.MemoryAlertAck = &ack
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }

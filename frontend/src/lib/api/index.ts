@@ -49,6 +49,7 @@ export {
     updateTask,
     deleteTask,
     moveTask,
+    dismissMemoryAlert,
     commitAndDone,
     clearDoneTasks,
     initTask,

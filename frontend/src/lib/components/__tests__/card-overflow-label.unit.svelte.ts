@@ -45,6 +45,7 @@ vi.mock('$lib/stores', () => ({
     appStore: {
         selectedTask: null,
         board: null,
+        projects: [],
         config: { providers: [], worker_provider: '', worker_model: '' },
         editTaskData: null,
         showEditTask: false,

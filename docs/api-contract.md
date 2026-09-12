@@ -34,6 +34,17 @@ reaches the browser as a 500; the `, ok` form silently drops the value and answe
 its own save. Wrong types are a 400 naming the field, and validation runs before anything is written.
 Tests: `backend/managers/task_update_test.go`, `backend/config/updates_test.go`.
 
+## The acknowledged memory alert
+
+`tasks.memory_alert_ack` is on every task payload: `null` when nobody dismissed the alert, an object
+`{peak_mb, oom_kills, limit_mb}` when someone did — the numbers it showed at the time, which is what
+decides whether it comes back (`memoryAlertAckCovers` in `$lib/utils/memory-stats.ts`; the client owns
+that rule and the server stores only what it is told). It is a column on the row, so one dismissal
+serves every device, and the route that writes it broadcasts the task the way any other task change
+does: `POST /api/projects/{projectID}/tasks/{taskID}/memory-alert-ack`. All three fields are required —
+an ack covering less than the alert dismissed would leave it standing on the device that did not click —
+and each is a 400 naming itself when absent, wrongly typed, or negative.
+
 ## Route verbs
 
 Every `/api` route declares its verb in the pattern (`s.mux.HandleFunc("POST /api/…")`), so the mux

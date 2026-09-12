@@ -1,5 +1,13 @@
-import { describe, it, expect } from 'vitest';
-import { MEMORY_WARNING_RATIO, isNearMemoryLimit, isMemoryLimitReached, isSandboxMemoryWarning, formatSandboxMemory, parseMemoryLimitMB, memoryLimitToInput, formatMemoryLimitMB, noMemoryLimitLabel, taskSandboxMemoryFallback } from '$lib/utils/memory-stats';
+import { describe, expect, it } from 'vitest';
+import {
+    memoryAlert,
+    memoryAlertAckCovers,
+    memoryAlertPayloadOf,
+    memoryDotSeverity,
+    taskMemoryAlert,
+    taskMemoryStats,
+    visibleMemoryAlert,
+} from '../memory-stats';
 import type { SandboxMemoryStats } from '$lib/types';
 
 function stats(overrides: Partial<SandboxMemoryStats> = {}): SandboxMemoryStats {
@@ -13,223 +21,160 @@ function stats(overrides: Partial<SandboxMemoryStats> = {}): SandboxMemoryStats 
     };
 }
 
-describe('isNearMemoryLimit', () => {
-    it('is false for null/undefined', () => {
-        expect(isNearMemoryLimit(null)).toBe(false);
-        expect(isNearMemoryLimit(undefined)).toBe(false);
+describe('memoryAlert', () => {
+    it('fires when the peak reaches the limit', () => {
+        expect(memoryAlert(stats({ memory_peak_mb: 1024 }))).toEqual({ peakMB: 1024, oomKills: 0, limitMB: 1024 });
     });
 
-    it('is false when not running', () => {
-        expect(isNearMemoryLimit(stats({ running: false, memory_current_mb: 1024 }))).toBe(false);
+    it('stays silent while the peak is below the limit', () => {
+        expect(memoryAlert(stats({ memory_peak_mb: 1023 }))).toBeNull();
     });
 
-    it('is false when the limit is unknown (0)', () => {
-        expect(isNearMemoryLimit(stats({ memory_limit_mb: 0, memory_current_mb: 999999 }))).toBe(false);
+    it('fires on an OOM kill even with no enforced limit', () => {
+        expect(memoryAlert(stats({ memory_limit_mb: 0, memory_peak_mb: 0, oom_kills: 2 }))).toEqual(
+            { peakMB: 0, oomKills: 2, limitMB: 0 },
+        );
     });
 
-    it('is false when the usage is unknown (0)', () => {
-        expect(isNearMemoryLimit(stats({ memory_current_mb: 0 }))).toBe(false);
+    it('answers null for a task with no stats at all', () => {
+        expect(memoryAlert(null)).toBeNull();
+        expect(memoryAlert(undefined)).toBeNull();
+        expect(memoryAlert(stats())).toBeNull();
     });
 
-    it('is false below the threshold', () => {
-        expect(isNearMemoryLimit(stats({ memory_current_mb: 700, memory_limit_mb: 1024 }))).toBe(false);
-    });
-
-    it('is true at and above the threshold (integer-MB boundary)', () => {
-        // 1024 MB limit → threshold is 819.2 MB: 819 MB is below, 820 MB is at/above.
-        const atThreshold = Math.ceil(1024 * MEMORY_WARNING_RATIO);
-        expect(isNearMemoryLimit(stats({ memory_current_mb: atThreshold - 1 }))).toBe(false);
-        expect(isNearMemoryLimit(stats({ memory_current_mb: atThreshold }))).toBe(true);
-        expect(isNearMemoryLimit(stats({ memory_current_mb: 1024 }))).toBe(true);
+    it('does not fire at full tilt below the limit — that is pressure, not an alert', () => {
+        expect(memoryAlert(stats({ memory_current_mb: 1000, memory_peak_mb: 1000 }))).toBeNull();
     });
 });
 
-describe('isMemoryLimitReached', () => {
-    it('is false for null/undefined', () => {
-        expect(isMemoryLimitReached(null)).toBe(false);
-        expect(isMemoryLimitReached(undefined)).toBe(false);
+describe('memoryAlertAckCovers', () => {
+    const alert = { peakMB: 1024, oomKills: 2, limitMB: 1024 };
+
+    it('covers the alert it was taken at', () => {
+        expect(memoryAlertAckCovers({ peakMB: 1024, oomKills: 2, limitMB: 1024 }, alert)).toBe(true);
     });
 
-    it('is false when there is no enforced limit (0)', () => {
-        expect(isMemoryLimitReached(stats({ memory_limit_mb: 0, memory_peak_mb: 999999 }))).toBe(false);
+    it('is covering only for the limit it was taken against', () => {
+        expect(memoryAlertAckCovers({ peakMB: 1024, oomKills: 2, limitMB: 2048 }, alert)).toBe(false);
     });
 
-    it('is false when the peak is unknown (0)', () => {
-        expect(isMemoryLimitReached(stats({ memory_peak_mb: 0 }))).toBe(false);
+    it('re-arms on a fresh container that hits a smaller limit than the one dismissed', () => {
+        const ack = { peakMB: 1024, oomKills: 0, limitMB: 1024 };
+        expect(memoryAlertAckCovers(ack, { peakMB: 512, oomKills: 0, limitMB: 512 })).toBe(false);
     });
 
-    it('is false just below the limit', () => {
-        expect(isMemoryLimitReached(stats({ memory_peak_mb: 1023, memory_limit_mb: 1024 }))).toBe(false);
+    it('re-arms when another process was killed', () => {
+        expect(memoryAlertAckCovers({ peakMB: 1024, oomKills: 1, limitMB: 1024 }, alert)).toBe(false);
     });
 
-    it('is true when the peak reached the limit', () => {
-        expect(isMemoryLimitReached(stats({ memory_peak_mb: 1024, memory_limit_mb: 1024 }))).toBe(true);
+    it('re-arms when the peak climbed past the acknowledged one', () => {
+        expect(memoryAlertAckCovers({ peakMB: 900, oomKills: 2, limitMB: 1024 }, alert)).toBe(false);
     });
 
-    it('is true when the peak exceeds the limit', () => {
-        expect(isMemoryLimitReached(stats({ memory_peak_mb: 2048, memory_limit_mb: 1024 }))).toBe(true);
+    it('re-arms on the same peak once the limit has been changed under it', () => {
+        expect(memoryAlertAckCovers({ peakMB: 1024, oomKills: 2, limitMB: 512 }, alert)).toBe(false);
     });
 
-    it('is true while not running (peak persists for the most recent idle stats)', () => {
-        expect(isMemoryLimitReached(stats({ running: false, memory_current_mb: 0, memory_peak_mb: 1024, memory_limit_mb: 1024 }))).toBe(true);
-    });
-});
-
-describe('isSandboxMemoryWarning', () => {
-    it('is false for null/undefined', () => {
-        expect(isSandboxMemoryWarning(null)).toBe(false);
-        expect(isSandboxMemoryWarning(undefined)).toBe(false);
-    });
-
-    it('is false for healthy running usage', () => {
-        expect(isSandboxMemoryWarning(stats({ memory_current_mb: 100 }))).toBe(false);
-    });
-
-    it('is true near the limit', () => {
-        expect(isSandboxMemoryWarning(stats({ memory_current_mb: 1024 }))).toBe(true);
-    });
-
-    it('is true on OOM kills even at low usage (cumulative counter persists)', () => {
-        expect(isSandboxMemoryWarning(stats({ memory_current_mb: 10, oom_kills: 1 }))).toBe(true);
-        expect(isSandboxMemoryWarning(stats({ memory_current_mb: 10, oom_kills: 3 }))).toBe(true);
-    });
-
-    it('is true on OOM kills while not running (most recent stats after the task went idle)', () => {
-        expect(isSandboxMemoryWarning(stats({ running: false, memory_current_mb: 0, oom_kills: 1 }))).toBe(true);
-    });
-
-    it('is true when the peak reached the limit even at low usage (persistent)', () => {
-        expect(isSandboxMemoryWarning(stats({ memory_current_mb: 10, memory_peak_mb: 1024, memory_limit_mb: 1024 }))).toBe(true);
-    });
-
-    it('is true when the peak reached the limit while not running (most recent idle stats)', () => {
-        expect(isSandboxMemoryWarning(stats({ running: false, memory_current_mb: 0, memory_peak_mb: 1024, memory_limit_mb: 1024 }))).toBe(true);
-    });
-
-    it('is false when the peak is just below the limit and nothing else triggers', () => {
-        expect(isSandboxMemoryWarning(stats({ memory_current_mb: 100, memory_peak_mb: 1023, memory_limit_mb: 1024 }))).toBe(false);
+    it('covers nothing when there is no acknowledgement', () => {
+        expect(memoryAlertAckCovers(null, alert)).toBe(false);
+        expect(memoryAlertAckCovers(undefined, alert)).toBe(false);
     });
 });
 
-describe('parseMemoryLimitMB', () => {
-    it('treats blank and missing as unlimited (0)', () => {
-        expect(parseMemoryLimitMB('')).toBe(0);
-        expect(parseMemoryLimitMB(null)).toBe(0);
-        expect(parseMemoryLimitMB(undefined)).toBe(0);
-        expect(parseMemoryLimitMB('   ')).toBe(0);
+describe('memoryDotSeverity', () => {
+    it('warns at the ratio, in red only once the limit is reached', () => {
+        expect(memoryDotSeverity(stats({ memory_current_mb: 820 }))).toBe('warning');
+        expect(memoryDotSeverity(stats({ memory_current_mb: 819 }))).toBeNull();
+        expect(memoryDotSeverity(stats({ memory_current_mb: 820, memory_peak_mb: 1024 }))).toBe('alert');
     });
 
-    it('treats non-numeric as unlimited (0)', () => {
-        expect(parseMemoryLimitMB('abc')).toBe(0);
-        expect(parseMemoryLimitMB(NaN)).toBe(0);
-        expect(parseMemoryLimitMB(Infinity)).toBe(0);
+    it('keeps alerting while the task sits idle with nowhere to go', () => {
+        expect(memoryDotSeverity(stats({ running: false, memory_current_mb: 0, memory_peak_mb: 1024 }))).toBe('alert');
     });
 
-    it('maps 0 to unlimited', () => {
-        expect(parseMemoryLimitMB(0)).toBe(0);
-        expect(parseMemoryLimitMB('0')).toBe(0);
+    it('drops to no dot once the alert is acknowledged', () => {
+        const ack = { peakMB: 1024, oomKills: 0, limitMB: 1024 };
+        expect(memoryDotSeverity(stats({ memory_peak_mb: 1024 }), ack)).toBeNull();
     });
 
-    it('clamps negatives to unlimited (0)', () => {
-        expect(parseMemoryLimitMB(-512)).toBe(0);
-        expect(parseMemoryLimitMB('-512')).toBe(0);
+    it('shows live pressure under an acknowledged alert', () => {
+        const ack = { peakMB: 1024, oomKills: 0, limitMB: 1024 };
+        expect(memoryDotSeverity(stats({ memory_current_mb: 900, memory_peak_mb: 1024 }), ack)).toBe('warning');
     });
 
-    it('keeps a positive limit as an integer number of MB', () => {
-        expect(parseMemoryLimitMB(2048)).toBe(2048);
-        expect(parseMemoryLimitMB('256')).toBe(256);
-        expect(parseMemoryLimitMB(1.9)).toBe(1);
-    });
-
-    it('never returns null — an omitted field must not mean "keep the limit"', () => {
-        expect(parseMemoryLimitMB('')).not.toBeNull();
+    it('answers null for a task that never ran sandboxed', () => {
+        expect(memoryDotSeverity(null)).toBeNull();
     });
 });
 
-describe('memoryLimitToInput', () => {
-    it('blanks the field when unlimited', () => {
-        expect(memoryLimitToInput(0)).toBeNull();
-        expect(memoryLimitToInput(-512)).toBeNull();
+describe('taskMemoryStats', () => {
+    it('prefers the live container over what the row remembers', () => {
+        const live = stats({ memory_current_mb: 5 });
+        expect(taskMemoryStats({ sandbox_memory_peak_mb: 999 }, 1024, live)).toBe(live);
     });
 
-    it('passes a positive limit through', () => {
-        expect(memoryLimitToInput(1024)).toBe(1024);
-    });
-});
-
-describe('formatMemoryLimitMB', () => {
-    // Pinned to the English bytes rather than to the constant they came from: the
-    // assertions used to compare the output against `NO_MEMORY_LIMIT_LABEL` itself,
-    // so they could not fail however wrong the words were. Tests run in the no-pack
-    // state, so English is what renders here.
-    it('renders "No limit" for unlimited and missing values', () => {
-        expect(formatMemoryLimitMB(0)).toBe('No limit');
-        expect(formatMemoryLimitMB(-512)).toBe('No limit');
-        expect(formatMemoryLimitMB(null)).toBe('No limit');
-        expect(formatMemoryLimitMB(undefined)).toBe('No limit');
-    });
-
-    it('answers "No limit" from the same words the read-only label uses', () => {
-        expect(formatMemoryLimitMB(0)).toBe(noMemoryLimitLabel());
-    });
-
-    it('renders MB for an enforced limit', () => {
-        expect(formatMemoryLimitMB(512)).toBe('512 MB');
-    });
-});
-
-describe('formatSandboxMemory', () => {
-    it('renders an em dash for null/undefined (no data / fetch failed)', () => {
-        expect(formatSandboxMemory(null)).toBe('—');
-        expect(formatSandboxMemory(undefined)).toBe('—');
-    });
-
-    it('renders "Not running" when the sandbox is not running', () => {
-        expect(formatSandboxMemory(stats({ running: false }))).toBe('Not running');
-    });
-
-    it('renders "current / limit MB" when a limit is known', () => {
-        expect(formatSandboxMemory(stats({ memory_current_mb: 128, memory_limit_mb: 256 }))).toBe('128 / 256 MB');
-        expect(formatSandboxMemory(stats({ memory_current_mb: 0, memory_limit_mb: 256 }))).toBe('0 / 256 MB');
-    });
-
-    it('renders "current MB (no limit)" when the limit is unknown (0)', () => {
-        expect(formatSandboxMemory(stats({ memory_current_mb: 42, memory_limit_mb: 0 }))).toBe('42 MB (no limit)');
-    });
-});
-
-describe('taskSandboxMemoryFallback', () => {
-    function taskWithPeak(peak?: number) {
-        return { sandbox_memory_peak_mb: peak };
-    }
-
-    it('answers null for a task with no recorded peak', () => {
-        expect(taskSandboxMemoryFallback(null, 1024)).toBeNull();
-        expect(taskSandboxMemoryFallback(undefined, 1024)).toBeNull();
-        expect(taskSandboxMemoryFallback(taskWithPeak(), 1024)).toBeNull();
-        expect(taskSandboxMemoryFallback(taskWithPeak(0), 1024)).toBeNull();
-    });
-
-    it('keeps the recorded peak and nothing else once the container is gone', () => {
-        expect(taskSandboxMemoryFallback(taskWithPeak(742), 1024)).toEqual({
+    it('falls back to the recorded peak once the container is gone', () => {
+        expect(taskMemoryStats({ sandbox_memory_peak_mb: 1024 }, 1024, null)).toEqual({
             running: false,
             memory_current_mb: 0,
             memory_limit_mb: 1024,
-            memory_peak_mb: 742,
+            memory_peak_mb: 1024,
             oom_kills: 0,
         });
     });
 
-    it('draws the peak against the project limit it will be shown with', () => {
-        // A project saved as unlimited reports 0, and stays 0: no invented limit for the run.
-        expect(taskSandboxMemoryFallback(taskWithPeak(742), 0)?.memory_limit_mb).toBe(0);
-        expect(taskSandboxMemoryFallback(taskWithPeak(742), 2048)?.memory_limit_mb).toBe(2048);
+    it('waits for the project before measuring the recorded peak against a limit', () => {
+        expect(taskMemoryStats({ sandbox_memory_peak_mb: 1024 }, null, null)).toBeNull();
+    });
+});
+
+describe('taskMemoryAlert', () => {
+    it('reports the alert the row recorded, unacknowledged', () => {
+        expect(taskMemoryAlert({ sandbox_memory_peak_mb: 1024 }, 1024, null)).toEqual({
+            alert: { peakMB: 1024, oomKills: 0, limitMB: 1024 },
+            acked: false,
+        });
     });
 
-    it('still reports a run that hit its limit after the container is gone', () => {
-        const fallback = taskSandboxMemoryFallback(taskWithPeak(1024), 1024);
-        expect(isMemoryLimitReached(fallback)).toBe(true);
-        // Near-the-limit needs a running container, so a finished run never claims it.
-        expect(isNearMemoryLimit(fallback)).toBe(false);
+    it('reports it acknowledged once the headroom on the row matches', () => {
+        const task = { sandbox_memory_peak_mb: 1024, memory_alert_ack: { peak_mb: 1024, oom_kills: 0, limit_mb: 1024 } };
+        expect(taskMemoryAlert(task, 1024, null)?.acked).toBe(true);
+    });
+
+    it('reports it unacknowledged when the ack belongs to another limit', () => {
+        const task = { sandbox_memory_peak_mb: 1024, memory_alert_ack: { peak_mb: 1024, oom_kills: 0, limit_mb: 2048 } };
+        expect(taskMemoryAlert(task, 1024, null)?.acked).toBe(false);
+    });
+
+    it('says nothing about a task that never touched its limit', () => {
+        expect(taskMemoryAlert({ sandbox_memory_peak_mb: 512 }, 1024, null)).toBeNull();
+        expect(taskMemoryAlert({}, 1024, stats())).toBeNull();
+    });
+});
+
+describe('visibleMemoryAlert', () => {
+    const reached = { sandbox_memory_peak_mb: 1024 };
+
+    it('answers the alert nobody has dismissed', () => {
+        expect(visibleMemoryAlert(reached, 1024, null)).toEqual({
+            alert: { peakMB: 1024, oomKills: 0, limitMB: 1024 },
+            acked: false,
+        });
+    });
+
+    it('answers nothing once the task carries a dismissal that covers it, on any device', () => {
+        const dismissed = { ...reached, memory_alert_ack: { peak_mb: 1024, oom_kills: 0, limit_mb: 1024 } };
+        expect(visibleMemoryAlert(dismissed, 1024, null)).toBeNull();
+    });
+
+    it('answers nothing for a task with no alert to dismiss', () => {
+        expect(visibleMemoryAlert({ sandbox_memory_peak_mb: 512 }, 1024, null)).toBeNull();
+    });
+});
+
+describe('memoryAlertPayloadOf', () => {
+    it('sends the alert\'s own three numbers back', () => {
+        expect(memoryAlertPayloadOf({ peakMB: 1024, oomKills: 2, limitMB: 1024 }))
+            .toEqual({ peak_mb: 1024, oom_kills: 2, limit_mb: 1024 });
     });
 });

@@ -36,27 +36,28 @@ func (f *fakeMem) counts() (reads int, forgot []string) {
 }
 
 type peakRecord struct {
-	taskID string
-	peakMB int64
+	taskID   string
+	peakMB   int64
+	oomKills int64
 }
 
-func peakRecorder() (func() []peakRecord, func(taskID string, peakMB int64)) {
+func peakRecorder() (func() []peakRecord, func(taskID string, peakMB int64, oomKills int64)) {
 	var mu sync.Mutex
 	var got []peakRecord
 	return func() []peakRecord {
 			mu.Lock()
 			defer mu.Unlock()
 			return append([]peakRecord(nil), got...)
-		}, func(taskID string, peakMB int64) {
+		}, func(taskID string, peakMB int64, oomKills int64) {
 			mu.Lock()
 			defer mu.Unlock()
-			got = append(got, peakRecord{taskID, peakMB})
+			got = append(got, peakRecord{taskID, peakMB, oomKills})
 		}
 }
 
 // newPeakManager builds a manager tracking one container that exists nowhere: what is under test
 // is what Stop reads and reports before the removal, not podman's answer.
-func newPeakManager(usage sandboxruntime.MemoryUsageMB, sink func(taskID string, peakMB int64)) (*SandboxManager, *fakeMem) {
+func newPeakManager(usage sandboxruntime.MemoryUsageMB, sink func(taskID string, peakMB int64, oomKills int64)) (*SandboxManager, *fakeMem) {
 	fm := &fakeMem{usage: usage}
 	sm := &SandboxManager{
 		rt:     sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}),
@@ -85,9 +86,36 @@ func TestStopReportsFinalPeakToSink(t *testing.T) {
 	}
 }
 
-// A stopped-early container has no cgroup to read, and a kernel without memory.peak has no peak.
-// Neither may overwrite the number a previous run recorded.
-func TestStopReportsNothingWithoutAPeak(t *testing.T) {
+// A task that lost processes must still say how many once its container is gone.
+func TestStopReportsFinalOOMKillsWithThePeak(t *testing.T) {
+	seen, sink := peakRecorder()
+	sm, _ := newPeakManager(sandboxruntime.MemoryUsageMB{Known: true, Current: 1000, Limit: 1024, Peak: 1024, OOMKills: 3}, sink)
+
+	_ = sm.Stop("task-1")
+
+	got := seen()
+	if len(got) != 1 {
+		t.Fatalf("Stop reported %d peaks, want 1: %+v", len(got), got)
+	}
+	if got[0] != (peakRecord{taskID: "task-1", peakMB: 1024, oomKills: 3}) {
+		t.Errorf("reported %+v, want task-1 / 1024 MB / 3 kills", got[0])
+	}
+}
+
+// A host with no memory.peak has only the kill counter, so a zero peak must not silence it.
+func TestStopReportsOOMKillsWithoutAPeak(t *testing.T) {
+	seen, sink := peakRecorder()
+	sm, _ := newPeakManager(sandboxruntime.MemoryUsageMB{Known: true, Limit: 1024, OOMKills: 1}, sink)
+
+	_ = sm.Stop("task-1")
+
+	if got := seen(); len(got) != 1 || got[0].oomKills != 1 || got[0].peakMB != 0 {
+		t.Errorf("reported %+v, want one record with the kill count and no peak", got)
+	}
+}
+
+// No peak and no kill: neither may overwrite a previous run's numbers.
+func TestStopReportsNothingWithoutAPeakOrAKill(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		usage sandboxruntime.MemoryUsageMB

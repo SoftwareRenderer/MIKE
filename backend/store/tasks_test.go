@@ -1,7 +1,9 @@
 package store
 
 import (
+	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1064,7 +1066,7 @@ func TestSandboxMemoryPeakSurvivesFullRowUpdate(t *testing.T) {
 		t.Fatalf("a new task must start with no recorded peak, got %d", stale.SandboxMemoryPeakMB)
 	}
 
-	if err := s.UpdateTaskSandboxMemoryPeak("task-peak", 742); err != nil {
+	if err := s.RecordTaskSandboxMemory("task-peak", 742, 2); err != nil {
 		t.Fatalf("record peak: %v", err)
 	}
 
@@ -1082,10 +1084,16 @@ func TestSandboxMemoryPeakSurvivesFullRowUpdate(t *testing.T) {
 	if got.SandboxMemoryPeakMB != 742 {
 		t.Errorf("peak = %d after a full-row UpdateTask, want 742 — UpdateTask must not own this column", got.SandboxMemoryPeakMB)
 	}
+	if got.SandboxOOMKills != 2 {
+		t.Errorf("OOM kills = %d after a full-row UpdateTask, want 2 — UpdateTask must not own this column either", got.SandboxOOMKills)
+	}
 	// The caller broadcasts the struct it just wrote, so it must come back holding the peak the
 	// sink recorded in the meantime.
 	if stale.SandboxMemoryPeakMB != 742 {
 		t.Errorf("the written-back copy carries peak %d, want 742", stale.SandboxMemoryPeakMB)
+	}
+	if stale.SandboxOOMKills != 2 {
+		t.Errorf("the written-back copy carries %d OOM kills, want 2 — a broadcast of it would clear the alert", stale.SandboxOOMKills)
 	}
 	if got.Title != "renamed after the run" {
 		t.Errorf("the peak column must not block the rest of UpdateTask, title = %q", got.Title)
@@ -1104,7 +1112,7 @@ func TestSandboxMemoryPeakPersistsAcrossReopen(t *testing.T) {
 	if err := s.CreateTask(newTask("task-reopen", "proj-reopen")); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if err := s.UpdateTaskSandboxMemoryPeak("task-reopen", 900); err != nil {
+	if err := s.RecordTaskSandboxMemory("task-reopen", 900, 1); err != nil {
 		t.Fatalf("record peak: %v", err)
 	}
 	s.Close()
@@ -1122,13 +1130,150 @@ func TestSandboxMemoryPeakPersistsAcrossReopen(t *testing.T) {
 	if got.SandboxMemoryPeakMB != 900 {
 		t.Errorf("peak after reopen = %d, want 900", got.SandboxMemoryPeakMB)
 	}
+	if got.SandboxOOMKills != 1 {
+		t.Errorf("OOM kills after reopen = %d, want 1", got.SandboxOOMKills)
+	}
 }
 
 // The teardown path also carries the project-level container's "proj:…" key and any task
 // deleted mid-run. Neither is a teardown failure.
-func TestUpdateTaskSandboxMemoryPeakIgnoresAnUnknownTask(t *testing.T) {
+func TestRecordTaskSandboxMemoryIgnoresAnUnknownTask(t *testing.T) {
 	s := testStore(t)
-	if err := s.UpdateTaskSandboxMemoryPeak("proj:gone", 512); err != nil {
+	if err := s.RecordTaskSandboxMemory("proj:gone", 512, 4); err != nil {
 		t.Errorf("recording a peak for an unknown task: %v", err)
+	}
+}
+
+// One dismissal must serve every device: it lands, it replaces, and a stale row write keeps it.
+func TestDismissTaskMemoryAlertLandsOnTheRow(t *testing.T) {
+	s := testStore(t)
+	if err := s.CreateProject(newProject("proj-ack", "ack", "/tmp/ack")); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(newTask("task-ack", "proj-ack")); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	untouched, err := s.GetTaskByID("task-ack")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if untouched.MemoryAlertAck != nil {
+		t.Fatalf("a task nobody dismissed must read as no acknowledgement, got %+v", untouched.MemoryAlertAck)
+	}
+	encoded, err := json.Marshal(untouched)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"memory_alert_ack":null`) {
+		t.Errorf("an undismissed alert serialises as null so the client sees one shape: %s", encoded)
+	}
+
+	before := untouched.UpdatedAt
+	if err := s.DismissTaskMemoryAlert("task-ack", 1024, 2, 1024); err != nil {
+		t.Fatalf("dismiss alert: %v", err)
+	}
+	got, err := s.GetTaskByID("task-ack")
+	if err != nil {
+		t.Fatalf("get task after dismiss: %v", err)
+	}
+	if got.MemoryAlertAck == nil || *got.MemoryAlertAck != (types.MemoryAlertAck{PeakMB: 1024, OOMKills: 2, LimitMB: 1024}) {
+		t.Fatalf("ack = %+v, want {1024 2 1024}", got.MemoryAlertAck)
+	}
+	// The board sorts on updated_at; dismissing is no reason to move a card.
+	if !got.UpdatedAt.Equal(before) {
+		t.Errorf("updated_at moved from %s to %s", before, got.UpdatedAt)
+	}
+
+	// A worse run re-armed the alert, so this replaces the numbers just stored.
+	if err := s.DismissTaskMemoryAlert("task-ack", 2048, 5, 1024); err != nil {
+		t.Fatalf("dismiss the re-armed alert: %v", err)
+	}
+	again, err := s.GetTaskByID("task-ack")
+	if err != nil {
+		t.Fatalf("get task after second dismiss: %v", err)
+	}
+	if again.MemoryAlertAck == nil || *again.MemoryAlertAck != (types.MemoryAlertAck{PeakMB: 2048, OOMKills: 5, LimitMB: 1024}) {
+		t.Fatalf("ack = %+v, want the second dismissal to replace the first", again.MemoryAlertAck)
+	}
+
+	// A stale copy that never saw the click must not erase it.
+	stale := untouched
+	stale.Title = "renamed after the dismissal"
+	if err := s.UpdateTask(stale); err != nil {
+		t.Fatalf("full-row update from a stale copy: %v", err)
+	}
+	if stale.MemoryAlertAck == nil || stale.MemoryAlertAck.OOMKills != 5 {
+		t.Errorf("the written-back copy carries ack %+v, want the stored one — its broadcast would clear an unseen alert", stale.MemoryAlertAck)
+	}
+	kept, err := s.GetTaskByID("task-ack")
+	if err != nil {
+		t.Fatalf("get task after the stale update: %v", err)
+	}
+	if kept.MemoryAlertAck == nil || *kept.MemoryAlertAck != (types.MemoryAlertAck{PeakMB: 2048, OOMKills: 5, LimitMB: 1024}) {
+		t.Fatalf("ack after a stale full-row update = %+v", kept.MemoryAlertAck)
+	}
+}
+
+// The flag says "someone dismissed", not the numbers: zeros can be a real dismissal.
+func TestDismissTaskMemoryAlertRecordsADismissalOfNothingButKills(t *testing.T) {
+	s := testStore(t)
+	if err := s.CreateProject(newProject("proj-ack-zero", "ack zero", "/tmp/ack-zero")); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(newTask("task-ack-zero", "proj-ack-zero")); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := s.DismissTaskMemoryAlert("task-ack-zero", 0, 2, 0); err != nil {
+		t.Fatalf("dismiss alert: %v", err)
+	}
+	got, err := s.GetTaskByID("task-ack-zero")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.MemoryAlertAck == nil {
+		t.Fatal("a dismissal at {peak 0, 2 kills, no limit} is a real one and must not read as never dismissed")
+	}
+	if *got.MemoryAlertAck != (types.MemoryAlertAck{PeakMB: 0, OOMKills: 2, LimitMB: 0}) {
+		t.Errorf("ack = %+v, want {0 2 0}", got.MemoryAlertAck)
+	}
+}
+
+func TestDismissTaskMemoryAlertIgnoresAnUnknownTask(t *testing.T) {
+	s := testStore(t)
+	if err := s.DismissTaskMemoryAlert("proj:gone", 512, 1, 1024); err != nil {
+		t.Errorf("dismissing an unknown task's alert: %v", err)
+	}
+}
+
+func TestMemoryAlertAckPersistsAcrossReopen(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "ack.db")
+	s, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := s.CreateProject(newProject("proj-ack-reopen", "ack reopen", "/tmp/ack-reopen")); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(newTask("task-ack-reopen", "proj-ack-reopen")); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := s.DismissTaskMemoryAlert("task-ack-reopen", 700, 0, 700); err != nil {
+		t.Fatalf("dismiss alert: %v", err)
+	}
+	s.Close()
+
+	s2, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer s2.Close()
+
+	got, err := s2.GetTask("proj-ack-reopen", "task-ack-reopen")
+	if err != nil {
+		t.Fatalf("get task after reopen: %v", err)
+	}
+	if got.MemoryAlertAck == nil || *got.MemoryAlertAck != (types.MemoryAlertAck{PeakMB: 700, OOMKills: 0, LimitMB: 700}) {
+		t.Fatalf("ack after reopen = %+v, want {700 0 700}", got.MemoryAlertAck)
 	}
 }

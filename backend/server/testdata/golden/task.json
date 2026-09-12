@@ -8,6 +8,7 @@
   "id": "task-golden",
   "llama_server_url": "",
   "max_consecutive_failed_turns": 0,
+  "memory_alert_ack": null,
   "model_name": "",
   "moved_at": "\u003cVOLATILE\u003e",
   "operating_mode": "",

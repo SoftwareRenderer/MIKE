@@ -3,7 +3,7 @@
     import { slide } from 'svelte/transition';
     import type { Project, Task } from '$lib/types';
     import { updateProject, buildSandboxImageStream, getBoard, getProject } from '$lib/api';
-    import { formatMemoryLimitMB, memoryLimitToInput, parseMemoryLimitMB } from '$lib/utils/memory-stats';
+    import { DEFAULT_MEMORY_LIMIT_MB, formatMemoryLimitMB, memoryLimitToInput, parseMemoryLimitMB } from '$lib/utils/memory-stats';
     import { bindForInput, formatAssignedHost, formatForwardPort, formatForwardPorts, normalizeBind, portRowError } from '$lib/utils/sandbox-ports';
     import { dialogStore } from '$lib/stores';
     import type { PortForward, AssignedPort, SandboxMount, SandboxEnv } from '$lib/types';
@@ -37,7 +37,6 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
     let sandboxEnabled = $state(false);
     let networkIsolation = $state(false);
-    const DEFAULT_MEMORY_LIMIT_MB = 1024;
     let sandboxMemoryLimit = $state<number | null>(DEFAULT_MEMORY_LIMIT_MB);
     let sandboxImage = $state('');
     let sandboxDockerfilePath = $state('');

@@ -19,7 +19,7 @@ vi.mock('$lib/api', () => ({
 }));
 
 vi.mock('$lib/stores', () => ({
-    appStore: { config: null },
+    appStore: { config: null, projects: [] },
 }));
 
 import TaskHeader from '$lib/components/CardDetail/TaskHeader.svelte';

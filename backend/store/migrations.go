@@ -10,7 +10,7 @@ import (
 // unconditional ALTERs and discard their errors - 34 of which can do nothing except fail
 // with "duplicate column name". Asking first makes a logged failure a real failure.
 //
-// The cost is a probe per column, 53 per start, each one a no-op on a current database.
+// The cost is a probe per column, 58 per start, each one a no-op on a current database.
 // schemaVersion is what lets a database that has been through the chain skip it.
 
 // schemaVersion is the value PRAGMA user_version carries once initSchema has brought a database up
@@ -20,7 +20,7 @@ import (
 // steps in place. A database stamped N has been through 1..N; an older one reads 0 and runs the
 // whole chain. So the steps must stay idempotent, and one that must run exactly once needs its own
 // marker (see the config-row guard on the backfill) rather than trusting this number.
-const schemaVersion = doneMemSupervisorStamp
+const schemaVersion = doneMemoryAlertAckStamp
 
 // doneDiffParsedStamp is the stamp from which a stored done-task diff body carries parsed_files.
 // Older bodies are served byte for byte and cannot grow the key, so initSchema drops those rows.
@@ -28,6 +28,12 @@ const doneDiffParsedStamp = 3
 
 // doneMemSupervisorStamp is the stamp from which tasks carry memory_supervisor_paused.
 const doneMemSupervisorStamp = 4
+
+// doneOOMKillStamp is the stamp from which tasks carry the OOM-kill count of their last sandbox run.
+const doneOOMKillStamp = doneMemSupervisorStamp + 1
+
+// doneMemoryAlertAckStamp is the stamp from which a task carries its dismissed memory alert.
+const doneMemoryAlertAckStamp = doneOOMKillStamp + 1
 
 // userVersion reads PRAGMA user_version. A read failure answers 0, which reruns the probe chain:
 // slow, but it cannot leave a column missing. The caller holds s.mu.
@@ -305,8 +311,15 @@ func (s *Store) addMissingColumns() {
 	s.addColumn("tasks", "summarizing", "INTEGER NOT NULL DEFAULT 0")
 	// Accumulated API cost (USD) for the last task run
 	s.addColumn("tasks", "session_cost", "REAL NOT NULL DEFAULT 0")
-	// Peak container memory (MB) of the last sandbox run; owned by UpdateTaskSandboxMemoryPeak.
+	// Peak container memory (MB) of the last sandbox run; owned by RecordTaskSandboxMemory.
 	s.addColumn("tasks", "sandbox_memory_peak_mb", "INTEGER NOT NULL DEFAULT 0")
+	// Recorded with the peak: both die with the container.
+	s.addColumn("tasks", "sandbox_oom_kills", "INTEGER NOT NULL DEFAULT 0")
+	// The flag carries "nobody dismissed anything": {peak 0, 2 kills, no limit} is a real dismissal.
+	s.addColumn("tasks", "memory_alert_acked", "INTEGER NOT NULL DEFAULT 0")
+	s.addColumn("tasks", "memory_alert_ack_peak_mb", "INTEGER NOT NULL DEFAULT 0")
+	s.addColumn("tasks", "memory_alert_ack_oom_kills", "INTEGER NOT NULL DEFAULT 0")
+	s.addColumn("tasks", "memory_alert_ack_limit_mb", "INTEGER NOT NULL DEFAULT 0")
 	// Records whether the task execution was auto-started from a parent (sibling continuation)
 	s.addColumn("tasks", "autostarted", "INTEGER NOT NULL DEFAULT 0")
 	// Set by the memory supervisor when it pauses a task; cleared by any user action.

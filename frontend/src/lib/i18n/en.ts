@@ -779,6 +779,7 @@ const catalog = {
     'api.updateTask': 'Failed to update task',
     'api.deleteTask': 'Failed to delete task',
     'api.moveTask': 'Failed to move task',
+    'api.dismissMemoryAlert': 'Failed to dismiss the memory alert',
     'api.commitAndDone': 'Failed to commit and mark as done',
     'api.clearDoneTasks': 'Failed to clear done tasks',
     'api.initializeTask': 'Failed to initialize task',
@@ -1331,6 +1332,7 @@ const catalog = {
     'board.badge.pullingImage': 'Pulling image',
     'board.badge.resolvingConflict': 'Resolving conflict',
     'board.badge.paused': 'Paused',
+    'board.badge.outOfMemory': 'Out of memory',
     'board.badge.pending': 'Pending',
     'board.badge.failed': 'Failed',
     'board.card.createSubtask': 'Create subtask',
@@ -1538,7 +1540,6 @@ const catalog = {
     'lsp.definitionOutsideProject': 'Definition is outside this project workspace',
 
     // The sandbox-memory tooltip the task header builds for its own title attribute.
-    'task.sandboxTip.oomKills': { one: ' · {count} OOM kill', other: ' · {count} OOM kills' },
     'task.sandboxTip.peakReachedLimit': ' · peak reached limit',
     'task.sandboxTip.clickForDetails': '{title} (click for details)',
 
@@ -1565,6 +1566,14 @@ const catalog = {
     'memory.noLimit': 'No limit',
     'memory.notRunning': 'Not running',
     'memory.currentNoLimit': '{mb} MB (no limit)',
+    // The out-of-memory alert, shared by the task's alert bar, the Sandbox panel and the board card.
+    'memory.alert.title': 'This task\u2019s sandbox ran out of memory',
+    'memory.alert.peakOfLimit': 'Peak {peak} MB against a {limit} MB limit',
+    'memory.alert.peakNoLimit': 'Peak {peak} MB with no limit enforced',
+    'memory.alert.kills': { one: '{count} process was killed', other: '{count} processes were killed' },
+    'memory.alert.action': 'Raise or remove the limit in the project\u2019s Sandbox settings, or give this task less to hold in memory.',
+    'memory.alert.dismiss': 'Dismiss',
+    'memory.alert.dismissFailed': 'The alert was not dismissed on the server: {error}',
     // The two status strings core renders itself, not the ones an extension passes
     // to host.setError.
     'host.loading': 'Loading…',

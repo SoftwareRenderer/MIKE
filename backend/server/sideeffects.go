@@ -63,6 +63,11 @@ var detachedOperations = []sideEffectEntry{
 	{"POST /api/projects/{projectID}/tasks/{taskID}/summarize", "the title and summary are stored on the task and shown on the board"},
 	{"POST /api/projects/{projectID}/tasks/{taskID}/move", "status and parent are the board's content"},
 	{
+		"POST /api/projects/{projectID}/tasks/{taskID}/memory-alert-ack",
+		"the acknowledgement is a column on the row: every device reads the alert's visibility off it, so a " +
+			"dismissal that stopped half-way is a bar back up on the other device",
+	},
+	{
 		"DELETE /api/projects/{projectID}/tasks/{taskID}/messages",
 		"deletes messages and resets the worktree to the stored commit hash — a half-run leaves a tree that does not match the thread",
 	},

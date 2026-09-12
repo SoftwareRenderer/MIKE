@@ -1,6 +1,6 @@
 import { API_BASE, apiFetch, apiError, ensureCsrfToken, generateId, isAborted, registerSetOffline } from './helpers';
 import { loadQueue as loadQueueFromStorage, saveQueue as saveQueueToStorage, type QueuedAction as StoredQueuedAction } from '../storage';
-import type { Config, Project, Task, TaskMessage, Thread } from '../types';
+import type { Config, MemoryAlertAckPayload, Project, Task, TaskMessage, Thread } from '../types';
 import { t } from '$lib/i18n';
 
 // Re-export helpers for direct imports
@@ -26,7 +26,7 @@ type QueuedAction = StoredQueuedAction;
 export type ActionType =
     // Task CRUD
     | 'createTask' | 'updateTask' | 'deleteTask' | 'moveTask'
-    | 'commitAndDone' | 'clearDoneTasks'
+    | 'commitAndDone' | 'clearDoneTasks' | 'dismissMemoryAlert'
     // Task execution
     | 'initTask' | 'startTask' | 'startSubtask' | 'stopTask' | 'retryTask' | 'resumeTask'
     // Messages
@@ -339,6 +339,13 @@ export function applyQueuedActionsToBoard(
                 break;
             }
 
+            case 'dismissMemoryAlert': {
+                const resolvedId = optIdMap.get(taskId) || taskId;
+                const task = result.find(t => t.id === resolvedId);
+                if (task) task.memory_alert_ack = p.ack;
+                break;
+            }
+
             case 'initTask': {
                 const resolvedId = optIdMap.get(taskId) || taskId;
                 const task = result.find(t => t.id === resolvedId);
@@ -432,6 +439,9 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
             break;
         case 'moveTask':
             await moveTaskRaw(p.projectId, taskId, p.status);
+            break;
+        case 'dismissMemoryAlert':
+            await dismissMemoryAlertRaw(p.projectId, taskId, p.ack);
             break;
         case 'commitAndDone':
             await commitAndDoneRaw(p.projectId, taskId);
@@ -633,6 +643,17 @@ async function moveTaskRaw(projectId: string, taskId: string, status: string): P
     return res.json();
 }
 
+/** Record the dismissal of a task's out-of-memory alert on its row, where every device reads it. */
+async function dismissMemoryAlertRaw(projectId: string, taskId: string, ack: MemoryAlertAckPayload): Promise<Task> {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/memory-alert-ack`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ack),
+    });
+    if (!res.ok) throw await apiError(res, t('api.dismissMemoryAlert'));
+    return res.json();
+}
+
 async function commitAndDoneRaw(projectId: string, taskId: string, commitMessage?: string): Promise<Task> {
     const body: Record<string, string> = {};
     if (commitMessage) body.commit_message = commitMessage;
@@ -797,6 +818,7 @@ export {
     updateTaskRaw,
     deleteTaskRaw,
     moveTaskRaw,
+    dismissMemoryAlertRaw,
     commitAndDoneRaw,
     clearDoneTasksRaw,
     initTaskRaw,

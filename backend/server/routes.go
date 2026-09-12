@@ -138,6 +138,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", s.taskHandler.HandleStart)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start-subtask", s.taskHandler.HandleStartSubtask)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/stop", s.taskHandler.HandleStop)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/memory-alert-ack", s.taskHandler.HandleDismissMemoryAlert)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/retry", s.executor.HandleRetry)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/resume", s.executor.HandleResume)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/send", s.executor.HandleSend)
