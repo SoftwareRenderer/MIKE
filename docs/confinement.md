@@ -45,6 +45,11 @@ projects too because the server process enforces them.
   `fsWorktreeRoot` → `requireSandboxAvailable` → `ContainerToHost` → `validateFSPath` are each the jail
   for the next, so a handler that drops one — or passes `""` where the worktree root belongs — writes
   outside the project and still compiles.
+- **A task's uploaded file is a host write into that task's worktree** (`exec.WriteTaskFile`, landing in
+  `.mike-uploads/`), so it is not the path above — there is no container to translate a guest path through.
+  It runs the same `fsutil.Contained` check against the worktree root before the bytes go, because the task's
+  own actions can plant a symlink at that name, and writes `0600` into a `0700` directory.
+  `docs/sandbox-bridge.md`.
 
 ## The no-project host jail
 
@@ -67,8 +72,8 @@ path with `MIKE_ALLOW_ROOT_FS=1`.
   `fsutil.Contained` on that same refusal, which is what keeps an inside-root link
   (`~/go -> ~/storage/go`) browsable.
 - A clone refusal happens in `prepareCloneTarget`, **before** any byte is fetched, so a refused request
-  leaves no partial checkout. `GET /api/home` answers `jailed` and `jail_env` so the picker states the
-  limit before the first 403.
+  leaves no partial checkout. The jail reaches the picker only through a refusal: `GET /api/home` answers
+  the home it opens at and nothing about the jail.
 - Tests: `backend/fsutil/hostroot_test.go`, `backend/server/handler_fs_hostroot_test.go`,
   `backend/server/server_hostroot_test.go`, `backend/managers/project_hostroot_test.go`,
   `backend/server/handler_fs_sandbox_test.go`, `backend/server/handler_fs_upload_test.go`.

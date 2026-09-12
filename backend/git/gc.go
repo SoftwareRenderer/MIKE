@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -317,56 +318,71 @@ func (wm *WorktreeManager) HasWorktreeChanges(taskID string) bool {
 	return strings.TrimSpace(out) != ""
 }
 
-// ensureWorktreesExcluded idempotently appends the worktrees dir to .git/info/exclude
-// when it's inside the project, keeping untracked worktree files out of git status.
-// Best-effort: never blocks worktree creation.
+// ensureWorktreesExcluded keeps untracked worktree files out of the project's git status by excluding the
+// worktrees dir when it is inside the project. Best-effort: never blocks worktree creation.
 func (wm *WorktreeManager) ensureWorktreesExcluded(project *types.Project, worktreesDir string) {
 	cleanRoot := filepath.Clean(project.Path)
-	cleanWT := filepath.Clean(worktreesDir)
-	rel, err := filepath.Rel(cleanRoot, cleanWT)
+	rel, err := filepath.Rel(cleanRoot, filepath.Clean(worktreesDir))
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return // worktrees dir is not inside the project
 	}
 
-	// Locate the repo's exclude file. A project that is itself a git worktree
-	// has a .git file (pointing at the real git dir) rather than a directory.
-	gitDir := filepath.Join(cleanRoot, ".git")
-	if info, err := os.Stat(gitDir); err == nil && !info.IsDir() {
-		if data, err := os.ReadFile(gitDir); err == nil {
-			line := strings.TrimSpace(string(data))
-			if strings.HasPrefix(line, "gitdir: ") {
-				dir := strings.TrimSpace(strings.TrimPrefix(line, "gitdir: "))
-				if !filepath.IsAbs(dir) {
-					dir = filepath.Join(cleanRoot, dir)
-				}
-				gitDir = dir
-			}
-		}
-	}
-	excludePath := filepath.Join(gitDir, "info", "exclude")
-
 	// Escape git-exclude glob characters in the path.
 	entry := strings.NewReplacer(`*`, `\*`, `?`, `\?`, `[`, `\[`).Replace(rel) + string(filepath.Separator)
+	if err := EnsureExcluded(cleanRoot, entry, "# kanban worktrees (kept out of project status)"); err != nil {
+		logging.For(logging.Worktree).With(logging.ProjectID, project.ID).Warnf("failed to exclude the worktrees dir: %v", err)
+	}
+}
+
+// EnsureExcluded appends one gitignore pattern to the repository's local .git/info/exclude, once.
+//
+// That file belongs to the clone rather than the tree: it is never committed, and every worktree of the
+// repository shares it, so a pattern written here covers every task's checkout without editing the
+// project's own .gitignore. Patterns are relative to the checkout root given here, so a pattern meant to
+// match inside a worktree must stay unanchored — `.mike-uploads/` matches at any depth, `/.mike-uploads/`
+// matches only this root.
+func EnsureExcluded(projectRoot, pattern, header string) error {
+	excludePath, err := repoExcludeFile(projectRoot)
+	if err != nil {
+		return err
+	}
 
 	data, err := os.ReadFile(excludePath)
-	if err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.TrimSpace(line) == entry {
-				return // already excluded
-			}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", excludePath, err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == pattern {
+			return nil // already excluded
 		}
 	}
-	if err := os.MkdirAll(filepath.Join(gitDir, "info"), 0o755); err != nil {
-		logging.For(logging.Worktree).With(logging.ProjectID, project.ID).Warnf("failed to create info dir: %v", err)
-		return
+
+	infoDir := filepath.Dir(excludePath)
+	if err := os.MkdirAll(infoDir, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", infoDir, err)
 	}
 	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		logging.For(logging.Worktree).With(logging.ProjectID, project.ID).Warnf("failed to open info/exclude: %v", err)
-		return
+		return fmt.Errorf("open %s: %w", excludePath, err)
 	}
 	defer f.Close()
-	if _, err := f.WriteString("\n# kanban worktrees (kept out of project status)\n" + entry + "\n"); err != nil {
-		logging.For(logging.Worktree).With(logging.ProjectID, project.ID).Warnf("failed to write info/exclude: %v", err)
+	if _, err := f.WriteString("\n" + header + "\n" + pattern + "\n"); err != nil {
+		return fmt.Errorf("write %s: %w", excludePath, err)
 	}
+	return nil
+}
+
+// repoExcludeFile locates the repository's local exclude file. It lives in the **common** git dir: a
+// checkout made by `git worktree add` has a gitdir of its own, and git reads exclude from the shared one,
+// so a pattern written under the per-checkout gitdir is a silent no-op.
+func repoExcludeFile(projectRoot string) (string, error) {
+	out, err := runGitInDir(projectRoot, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", fmt.Errorf("find the git dir of %s: %w (%s)", projectRoot, err, strings.TrimSpace(out))
+	}
+	common := strings.TrimSpace(out)
+	if !filepath.IsAbs(common) {
+		return "", fmt.Errorf("find the git dir of %s: git answered %q", projectRoot, common)
+	}
+	return filepath.Join(common, "info", "exclude"), nil
 }

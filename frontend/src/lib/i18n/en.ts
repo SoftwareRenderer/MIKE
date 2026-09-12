@@ -147,7 +147,6 @@ const catalog = {
     'explorer.fileBrowser.cloning': 'Cloning...',
     'explorer.fileBrowser.cloneIntoDirTitle': 'Clone repository into the current directory',
     'explorer.fileBrowser.cloneNeedUrl': 'Please enter a git repository URL',
-    'explorer.fileBrowser.jailedHint': 'Limited to {home} and the directories MIKE was configured with. Set {env}=1 in the server’s environment to browse anywhere.',
 
     // ── TaskFileBrowser.svelte — the file tree of one task's worktree ──
     'explorer.taskFiles.empty': 'Empty folder',
@@ -1066,6 +1065,7 @@ const catalog = {
     'chat.common.close': 'Close',
     'chat.common.remove': 'Remove',
     'chat.common.attachImage': 'Attach image',
+    'chat.common.attachFile': 'Attach file',
     'chat.common.attachment': 'Attachment',
     'chat.common.loading': 'Loading...',
     'chat.common.newThread': 'New Thread',

@@ -44,11 +44,6 @@
     let cloneLoading = $state(false);
     let cloneError = $state('');
 
-    /** The host jail as `/api/home` reports it; the variable name comes from the server. */
-    let homeDir = $state('');
-    let jailed = $state(false);
-    let jailEnv = $state('');
-
     /**
      * Request sequence for `loadDir`: loads overlap and responses have no ordering guarantee,
      * so without this a stale reply lands last and the list (and `isGitRepo`, hence the
@@ -193,15 +188,12 @@
 
     onMount(() => { goHome(); });
 
-    /** The home button and the mount share this, so the hint matches the directory on screen. */
+    /** The home button and the mount share this, so both land on the same directory. */
     async function goHome() {
         try {
             const res = await fetch('/api/home');
             const data = await res.json();
-            homeDir = data.home || '';
-            jailed = data.jailed === true;
-            jailEnv = data.jail_env || '';
-            await loadDir(homeDir || '/home');
+            await loadDir(data.home || '/home');
         } catch {
             await loadDir('/home');
         }
@@ -281,12 +273,6 @@
             {#if activeTab === 'browse'}
                 {#if error}
                     <div class="error">{error}</div>
-                {/if}
-
-                {#if jailed}
-                    <div class="jailed-hint" role="note">
-                        {t('explorer.fileBrowser.jailedHint', { home: homeDir, env: jailEnv })}
-                    </div>
                 {/if}
 
                 {#if loading}
@@ -493,16 +479,6 @@
         text-align: center;
         color: var(--color-text-secondary);
         padding: 24px;
-    }
-    .jailed-hint {
-        color: var(--color-text-secondary);
-        font-size: 0.75rem;
-        line-height: 1.4;
-        padding: 8px;
-        background: var(--color-bg-secondary);
-        border-left: 2px solid var(--color-border);
-        border-radius: var(--radius-sm);
-        overflow-wrap: anywhere;
     }
     .git-indicator {
         color: var(--color-status-green);

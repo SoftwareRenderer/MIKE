@@ -4,10 +4,8 @@ import FileBrowser from '$lib/components/FileBrowser.svelte';
 
 /**
  * The directory picker takes a path on the SERVER's filesystem, so it is jailed to the home
- * directory plus the declared ones. Two things are pinned: the limit is stated before it
- * bites (a note naming the directory and the widening variable, both read from /api/home),
- * and the server's own refusal is what the user sees — it is the only message that names both
- * the roots and the variable.
+ * directory plus the declared ones. What it shows of that limit is the server's own refusal,
+ * unchanged — it is the only message that names both the roots and the widening variable.
  *
  * `onMount` is a no-op under vitest (see vitest-setup.ts), so each case drives the home button,
  * which goes through the same load.
@@ -27,15 +25,15 @@ beforeAll(() => {
     }));
 });
 
-/** `jailed` and `jail_env` are what /api/home reports; the fs route refuses OUTSIDE. */
-function stubServer(jailed: boolean) {
+/** The fs route refuses OUTSIDE. */
+function stubServer() {
     vi.stubGlobal('fetch', vi.fn(async (input: string) => {
         const url = new URL(String(input), 'http://localhost');
         const json = (body: unknown, status = 200) =>
             new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
         if (url.pathname === '/api/home') {
-            return json({ home: HOME, jailed, jail_env: ENV_VAR });
+            return json({ home: HOME });
         }
         if (url.pathname === '/api/fs') {
             const path = url.searchParams.get('path') || '';
@@ -65,30 +63,14 @@ async function goToPath(container: HTMLElement, path: string) {
     await fireEvent.keyDown(input, { key: 'Enter' });
 }
 
-describe('FileBrowser — the host directory jail is stated, and its refusal is shown', () => {
+describe('FileBrowser — the host directory jail is shown by its refusal', () => {
     afterEach(() => {
         cleanup();
         vi.unstubAllGlobals();
     });
 
-    it('says which directory the picker is limited to, and what widens it', async () => {
-        stubServer(true);
-        const { container } = await openPickerAtHome();
-
-        const hint = container.querySelector('.jailed-hint');
-        expect(hint, 'a jailed server must say so before the first 403').toBeTruthy();
-        expect(hint?.textContent).toContain(HOME);
-        expect(hint?.textContent).toContain(ENV_VAR);
-    });
-
-    it('says nothing when the operator widened the jail', async () => {
-        stubServer(false);
-        const { container } = await openPickerAtHome();
-        expect(container.querySelector('.jailed-hint')).toBeNull();
-    });
-
     it('shows the server refusal, unchanged, for a directory outside the jail', async () => {
-        stubServer(true);
+        stubServer();
         const { container } = await openPickerAtHome();
 
         await goToPath(container, OUTSIDE);

@@ -4,7 +4,6 @@ package server
 // backend/exec/task_files.go's story.
 
 import (
-	"context"
 	"io"
 	"net/http"
 
@@ -52,9 +51,9 @@ func (s *Server) handleTaskUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The guest is not cancellable: dropping the context here would stop waiting on a write that
-	// completes anyway. WriteTaskFile bounds the wait.
-	path, err := s.executor.WriteTaskFile(context.WithoutCancel(r.Context()), projectID, taskID, header.Filename, data)
+	// The bytes land on the host, in the task's worktree, so there is no guest to wait for and nothing for a
+	// disconnected browser to leave half-written.
+	path, err := s.executor.WriteTaskFile(projectID, taskID, header.Filename, data)
 	if err != nil {
 		// Fail, not Fault: a task that is gone is a 404 and a sandbox that is not running is the
 		// caller's situation to fix, not a server fault.

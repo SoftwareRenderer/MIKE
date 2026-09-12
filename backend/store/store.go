@@ -247,13 +247,13 @@ func scanTime(s string) time.Time {
 
 // scanTask scans a row into a Task, handling bool/time conversions.
 func scanTask(s scanner, t *types.Task) error {
-	var autoCommit, autoMerge, subtasksAutoMerge, titleGenerating, summarizing, hasMergeConflict, autostarted int
+	var autoCommit, autoMerge, subtasksAutoMerge, titleGenerating, summarizing, hasMergeConflict, autostarted, memSupPaused int
 	var createdAt, updatedAt, movedAt string
 	var parentTaskID, currentThreadID, reasoningEffort, baseRef, baseCommit, branchTip, assignedPortsJSON sql.NullString
 	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status,
 		&t.SessionID, &t.Branch, &baseRef, &baseCommit, &branchTip, &t.Output, &t.ExecutionState, &hasMergeConflict,
 		&t.LlamaServerURL, &t.ModelName, &reasoningEffort, &t.MaxConsecutiveFailedTurns,
-		&autoCommit, &autoMerge, &subtasksAutoMerge, &t.OperatingMode, &parentTaskID, &autostarted, &titleGenerating, &summarizing, &currentThreadID, &createdAt, &updatedAt, &movedAt, &assignedPortsJSON, &t.SessionCost, &t.SandboxMemoryPeakMB)
+		&autoCommit, &autoMerge, &subtasksAutoMerge, &t.OperatingMode, &parentTaskID, &autostarted, &titleGenerating, &summarizing, &currentThreadID, &createdAt, &updatedAt, &movedAt, &assignedPortsJSON, &t.SessionCost, &t.SandboxMemoryPeakMB, &memSupPaused)
 	if err != nil {
 		return err
 	}
@@ -265,6 +265,7 @@ func scanTask(s scanner, t *types.Task) error {
 	t.Autostarted = I2B(autostarted)
 	t.TitleGenerating = I2B(titleGenerating)
 	t.Summarizing = I2B(summarizing)
+	t.MemorySupervisorPaused = I2B(memSupPaused)
 	t.CurrentThreadID = currentThreadID.String
 	t.ReasoningEffort = reasoningEffort.String
 	t.BaseRef = baseRef.String

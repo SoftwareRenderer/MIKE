@@ -24,7 +24,10 @@ patch and never by moving `HEAD`.** The restore is `checkout -f HEAD` + `clean -
 <snapshot>` + (if the snapshot is a 3-parent stash commit) `checkout <p3> -- .` to overlay the untracked
 files git kept off that tree. Reading a tree cannot fail halfway the way `git apply` can, and the only
 `git reset` in it is the no-op index refresh. Branches are moved exclusively by checkout/merge inside
-`ResetToBranch` and `CreateWorktree`.
+`ResetToBranch` and `CreateWorktree`. The `clean -fd` step reaches untracked files only, so a task's
+`.mike-uploads/` — excluded through the repository's local `info/exclude`, see `docs/git-operations.md` —
+survives a restore with its attachments in it; `TestExcludedUploadsSurviveACleanAndARestore` holds that,
+including the control that the same restore does discard an ordinary untracked file.
 
 **Deleting a thread moves the worktree off its branch before deleting that branch, and the checkout is
 forced.** git refuses to delete a checked-out branch, and a checkpoint restored into the worktree counts as

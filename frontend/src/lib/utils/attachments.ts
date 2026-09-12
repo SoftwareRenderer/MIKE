@@ -33,7 +33,13 @@ export interface ClassifiedImages {
  */
 const ATTACHABLE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
-/** The same set in the form a picker's `accept` takes. */
+/**
+ * The same set in the form a picker's `accept` takes. Only a surface that can carry *nothing else* uses
+ * it: a message input classifies whatever arrives (image, inlined text, or a file written into the task's
+ * environment), so restricting its picker would grey out entries the handler already knows what to do
+ * with. A surface with no task environment — the create-task modal — has nothing to upload into, so its
+ * picker offers images and stops there.
+ */
 export const ATTACHABLE_IMAGE_ACCEPT = [...ATTACHABLE_IMAGE_TYPES].join(',');
 
 /** `application/*` types whose bytes are text. Anything else under `application/` is a file. */

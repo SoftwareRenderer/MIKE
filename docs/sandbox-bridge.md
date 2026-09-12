@@ -88,35 +88,43 @@ opens. `POST /api/projects/{projectID}/tasks/{taskID}/uploads` hands it to
 `TaskExecutor.WriteTaskFile` (`backend/exec/task_files.go`), which writes it **where that task's
 actions run** and answers with the path the message then names:
 
-- `project.sandbox_enabled` decides the filesystem, never the message. A sandboxed task is reached
-  through its own bridge connection with `write_bytes`; an unsandboxed one gets a host directory,
-  because for that task the host is where its `bash` and `read_file` run. A sandboxed task with no
-  running container is **refused** rather than written on the host — the same rule `hostGuard`
-  enforces for the tools (see AGENTS.md, "A sandboxed task gets no host fallback"), because a path
-  the agent cannot open is a worse answer than an error.
-- **Bringing a container up is not this call's side effect.** Preparing an execution environment
-  creates the worktree, its branch and task-row writes; a paste into a running task must do none of
-  that, so an idle task gets the conflict and the user starts the task first.
-- **Each upload gets a directory of its own.** Two gestures can carry `report.pdf`, and the message
-  that named the first must keep naming the bytes it was written for; the host cannot probe the
-  guest's directory for a free name without another round trip, so the collision is made
-  impossible by construction instead of resolved after the fact.
-- **The guest is not cancellable**, so the handler waits for the answer (`context.WithoutCancel`,
-  bounded by `writeTaskFileTimeout`) rather than dropping a write that completes anyway.
-- **The file's lifetime is the container's.** The guest's `/tmp` is a tmpfs, and the container is
-  removed when its task is deleted or marked done (`StopSandbox`) — and when its **project** is
-  deleted, because deleting a project deletes its tasks (`TaskHandler.deleteTaskTrees`) rather than
-  only their rows; the host directories are removed from the same `StopSandbox`. The startup sweep is
-  not the backstop: `staleContainerNames` keeps *running* containers, so a container that outlives
-  its task's row has nothing left that would ever remove it. A message naming an upload can therefore
-  outlive its bytes — which is what choosing the task's own environment as the destination means, and
-  is why the message says what the path is rather than promising it forever.
+- **The destination is the task's own worktree, `<worktree>/.mike-uploads/`, written on the host.**
+  `project.sandbox_enabled` decides only the path handed back: `sandbox.MountPath(project.Name)` plus
+  `.mike-uploads/` for a sandboxed task, because that mount *is* its worktree, and the host path for an
+  unsandboxed one. One write, two views of the same bytes, so there is no host fallback to refuse — the rule
+  in AGENTS.md ("a sandboxed task gets no host fallback") is about paths the agent cannot open, and it can
+  open either of these.
+- **No container has to be running.** A paused, idle or not-yet-started task accepts an attachment, and a
+  plan-mode task's read-only mount does not stop one: that mount is the guest's and the write is the host's.
+  What must exist is the worktree, because **bringing an environment up is not this call's side effect** —
+  preparing one creates the worktree, its branch and the task-row writes that go with them. A task with no
+  worktree gets the conflict and starts the task first.
+- **A second upload of one name gets `-1`, then `-2`** (`report.pdf`, `report-1.pdf`). Two gestures can carry
+  the same name and the message that named the first must keep naming the bytes it was written for, so the
+  conflict is settled where the bytes land. `Lstat`, not `Stat`: a symlink holding the name is the name being
+  taken.
+- **The jail runs before the write.** `fsutil.Contained` on the lexical *and* the symlink-resolved path
+  against the worktree root, because the task's own actions can replace `.mike-uploads` with a symlink. The
+  directory is `0700`, the file `0600`.
+- **The upload is invisible to git, which is what makes the placement safe.** The first write appends
+  `.mike-uploads/` to the repository's local `.git/info/exclude` (`git.EnsureExcluded`, and
+  `docs/git-operations.md`), which keeps it out of `git status`, out of `git add -A`, out of `git stash -u`
+  and out of reach of the `git clean -fd` that a checkpoint restore runs. Without that line the file is git's
+  to discard.
+- **The file's lifetime is the task's.** It goes with the worktree, and the worktree goes with the task and
+  with nothing else: `RemoveWorktree` holds the only `os.RemoveAll` of a worktree directory, and its callers
+  are the task-deletion path and one merge rollback that undoes a worktree made moments earlier. Stop, pause,
+  mark-done, a model or mode switch and a server restart all leave the file where the message says it is —
+  `StopSandbox` takes the container and nothing in the worktree, where it used to take the task's uploads
+  with it. A message naming an upload therefore outlives its bytes only when the task itself is gone.
 
-Tests: `backend/exec/task_files_test.go` (where the bytes land, the name rule, no host fallback),
-`backend/server/handler_task_upload_test.go` (verbs, CSRF, 413/400/404/200, the path answered is
-the path written), `pkg/bridge/agent/write_bytes_test.go` (the bytes that land are the bytes sent),
+Tests: `backend/exec/task_files_test.go` (where the bytes land, the name rule, the mount path answered to a
+sandboxed task, the symlink refusal, the refusal with no worktree),
+`backend/server/handler_task_upload_test.go` (verbs, CSRF, 413/400/404/409/200, the path answered is
+the path written, the upload surviving everything but its task's deletion),
+`backend/git/exclude_test.go` (the exclude line and what git then cannot do to the upload),
 `backend/server/project_delete_teardown_test.go` (a deleted project releases each task's worktree
-and upload directory), `backend/sandbox/stop_retry_test.go` (a container that refused `podman rm`
+and the uploads inside it), `backend/sandbox/stop_retry_test.go` (a container that refused `podman rm`
 stays tracked, so a later stop can still remove it).
 
 ## Invariants to preserve (moved from AGENTS.md)

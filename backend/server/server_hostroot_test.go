@@ -27,13 +27,13 @@ func widenHostRoot(s *Server) { s.hostRoot = fsutil.NewHostRoot(true) }
 // truthy-looking values lives there (startup.TestOptInSwitchesAreTheExactValueOne).
 func TestJailFollowsTheDecisionNotTheEnvironment(t *testing.T) {
 	s, _, _, _, _ := jailedHostRootServer(t)
-	if !s.hostRoot.Jailed() {
+	if s.hostRoot.Unrestricted() {
 		t.Fatal("precondition: this server was built jailed")
 	}
 
 	for _, v := range []string{"true", "yes", "0", "", "1", " 1"} {
 		t.Setenv(fsutil.AllowRootFSEnv, v)
-		if !s.hostRoot.Jailed() || s.hostRoot.Unrestricted() {
+		if s.hostRoot.Unrestricted() {
 			t.Fatalf("%s=%q widened the jail of a server that was built jailed", fsutil.AllowRootFSEnv, v)
 		}
 	}

@@ -249,7 +249,7 @@ func TestProjectScopedListingIgnoresTheHostJail(t *testing.T) {
 	}
 }
 
-func TestHomeEndpointReportsTheJail(t *testing.T) {
+func TestHomeEndpointReportsTheHome(t *testing.T) {
 	s, home, _, cookie, csrf := jailedHostRootServer(t)
 
 	req := testRequest(http.MethodGet, "/api/home", nil)
@@ -261,21 +261,5 @@ func TestHomeEndpointReportsTheJail(t *testing.T) {
 	}
 	if !strings.Contains(body, `"home"`) || !strings.Contains(body, home) {
 		t.Errorf("home must still be reported: %s", body)
-	}
-	if !strings.Contains(body, `"jailed":true`) {
-		t.Errorf("jailed must be true while jailed: %s", body)
-	}
-	// The picker quotes the variable it tells the user to set, so the server names it instead
-	// of the frontend keeping a second copy.
-	if !strings.Contains(body, `"jail_env":"`+fsutil.AllowRootFSEnv+`"`) {
-		t.Errorf("the widening variable must be reported: %s", body)
-	}
-
-	widenHostRoot(s)
-	req = testRequest(http.MethodGet, "/api/home", nil)
-	withAuthCSRF(req, cookie, csrf)
-	rr = testResponse(t, s, req)
-	if !strings.Contains(rr.Body.String(), `"jailed":false`) {
-		t.Errorf("jailed must be false when widened: %s", rr.Body.String())
 	}
 }
