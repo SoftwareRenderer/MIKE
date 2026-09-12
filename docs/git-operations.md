@@ -26,6 +26,27 @@ The rules are in `AGENTS.md → Git`. This is the mechanism behind each fence.
 left behind. `--worktrees-dir` overrides `WorkspaceDir` at runtime and is not persisted to the DB
 (`docs/configuration.md`).
 
+### `.git/info/exclude`: what the repository hides from itself
+
+Two things are MIKE's own and must never show in a project's status or be swept into a stash: the worktrees
+directory when it lives inside the project, and a task's `.mike-uploads/`. Both are declared by appending a
+pattern to the repository's **local** `.git/info/exclude` through `EnsureExcluded` (`backend/git/gc.go`),
+which writes each pattern once and never touches the project's own `.gitignore`.
+
+Two facts about that file, both measured:
+
+- **It lives in the common git dir.** A checkout made by `git worktree add` has a gitdir of its own, and git
+  reads `info/exclude` from the shared one only — a pattern written under the per-checkout gitdir is a silent
+  no-op, which is what the first version of this did for a project that is itself a worktree.
+  `repoExcludeFile` asks git instead (`rev-parse --path-format=absolute --git-common-dir`);
+  `TestEnsureExcludedFollowsAGitdirPointerToTheSharedGitDir` fails against reading the `.git` file by hand.
+- **Patterns are relative to the checkout root, so they stay unanchored.** A task's worktree lives *below*
+  that root, so `.mike-uploads/` — which matches at any depth — is the form that reaches it, and
+  `/.mike-uploads/` would match the project root alone.
+
+Tests: `backend/git/exclude_test.go` (idempotence, the shared git dir, and what git can and cannot do to an
+excluded upload: `status`, `add -A`, `stash -u`, `clean -fd`, a checkpoint restore).
+
 ### Removing a worktree: directory, prune, branch
 
 The registration in the project's `.git/worktrees/`, not the directory, is what makes a branch

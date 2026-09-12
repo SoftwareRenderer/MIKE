@@ -2,221 +2,259 @@ package exec
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"kanban/backend/config"
 	"kanban/backend/errs"
+	"kanban/backend/git"
+	"kanban/backend/sandbox"
 	"kanban/backend/store"
 	"kanban/backend/types"
-	"kanban/pkg/bridge/protocol"
 )
 
-// uploadStore seeds one project and one task, with TMPDIR redirected so a host upload lands in the
-// test's own directory instead of the machine's /tmp.
-func uploadStore(t *testing.T, sandboxed bool) *store.Store {
+// uploadFixture seeds a real git repository, a project (sandboxed or not), a task and its worktree. The
+// repository has to be real: where an upload lands and what git makes of it is the behaviour under test.
+func uploadFixture(t *testing.T, sandboxed bool) (*TaskExecutor, string, string) {
 	t.Helper()
-	t.Setenv("TMPDIR", t.TempDir())
 
-	s, err := store.NewStore(filepath.Join(t.TempDir(), "uploads.db"))
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+	worktreesDir := filepath.Join(tmpDir, "worktrees")
+	os.MkdirAll(repoDir, 0o755)
+	os.MkdirAll(worktreesDir, 0o755)
+
+	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "config", "user.email", "test@test.com")
+	runGit(t, repoDir, "config", "user.name", "Test")
+	os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n"), 0o644)
+	runGit(t, repoDir, "add", "README.md")
+	runGit(t, repoDir, "commit", "-m", "Initial")
+
+	dbPath := filepath.Join(tmpDir, "uploads.db")
+	s, err := store.NewStore(dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { s.Close() })
 
+	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore.SetWorkspaceDirOverride(worktreesDir)
+
 	now := time.Now().UTC()
 	if err := s.CreateProject(&types.Project{
-		ID: "p1", Name: "p1", Path: "/tmp/p1", SandboxEnabled: sandboxed, CreatedAt: now, UpdatedAt: now,
+		ID: "p1", Name: "p1", Path: repoDir, SandboxEnabled: sandboxed, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	if err := s.CreateTask(&types.Task{
-		ID: "t1", ProjectID: "p1", Title: "t1", Prompt: "prompt", Status: types.StatusBacklog,
-		ExecutionState: types.ExecStateIdle, CurrentThreadID: "main", CreatedAt: now, UpdatedAt: now,
+		ID: "t1", ProjectID: "p1", Title: "t1", Prompt: "prompt", Status: types.StatusInProgress,
+		ExecutionState: types.ExecStatePaused, CurrentThreadID: "main", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if err := s.CreateThread(&types.TaskThread{ID: "main", TaskID: "t1", Name: "Main", CreatedAt: now}); err != nil {
-		t.Fatalf("create thread: %v", err)
+
+	wm := git.NewWorktreeManager(s, cfgStore)
+	wtPath, _, err := wm.CreateWorktree("p1", "t1", "task/t1", "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
 	}
-	return s
+	// The fixture builds no sandbox manager at all: the write is host-side, so no container is involved.
+	return &TaskExecutor{store: s, worktreeMgr: wm}, repoDir, wtPath
 }
 
-func uploadHostRoot(t *testing.T) string {
+func hostUpload(t *testing.T, wtPath, name string) string {
 	t.Helper()
-	root := os.TempDir()
-	if root == "/tmp" {
-		t.Fatal("TMPDIR was not redirected: this test would write to the machine's /tmp")
+	return filepath.Join(wtPath, uploadsDirName, name)
+}
+
+func gitStatus(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exCmd(t, dir, "status", "--porcelain")
+	return strings.TrimSpace(cmd)
+}
+
+// exCmd runs git and hands back what it printed. The package's runGit fails on a non-zero exit, which is not
+// what a status check wants.
+func exCmd(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %s: %v", args, string(out), err)
 	}
-	return root
+	return string(out)
 }
 
 func TestWriteTaskFilePutsTheBytesWhereTheTasksActionsRun(t *testing.T) {
-	te := &TaskExecutor{store: uploadStore(t, false)}
+	te, _, wtPath := uploadFixture(t, false)
 
-	path, err := te.WriteTaskFile(t.Context(), "p1", "t1", "report.pdf", []byte("%PDF-1.7\x00\xff"))
+	path, err := te.WriteTaskFile("p1", "t1", "report.pdf", []byte("%PDF-1.7\x00\xff"))
 	if err != nil {
 		t.Fatalf("WriteTaskFile: %v", err)
 	}
-	if filepath.Base(path) != "report.pdf" {
-		t.Errorf("path = %q, want the file under the name the user dropped it under", path)
-	}
-	if !strings.HasPrefix(path, uploadHostRoot(t)) {
-		t.Errorf("path %q is outside the environment this task's actions run in", path)
+	if path != hostUpload(t, wtPath, "report.pdf") {
+		t.Errorf("path = %q, want the file under the name the user dropped it under, in the task's worktree", path)
 	}
 	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("the agent cannot open the path it was given: %v", err)
 	}
 	if string(got) != "%PDF-1.7\x00\xff" {
-		t.Errorf("bytes changed: %q", got)
+		t.Errorf("bytes = %q, want the bytes that were sent", got)
 	}
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mode := info.Mode(); mode&0o077 != 0 {
-		t.Errorf("mode = %v, want owner-only: one person's clipboard in a shared /tmp", mode)
+	if info.Mode().Perm()&0o077 != 0 {
+		t.Errorf("uploaded file mode = %v, want no group or other access", info.Mode().Perm())
+	}
+}
+
+// The task's environment for a sandboxed project is the bind mount, not the host path: the message has to
+// name the path the tools open. The fixture builds no sandbox manager, so this also proves no container is
+// needed to write through — the bytes go to the host path that mount is backed by.
+func TestWriteTaskFileAnswersASandboxedTaskWithItsOwnMountPath(t *testing.T) {
+	te, _, wtPath := uploadFixture(t, true)
+
+	path, err := te.WriteTaskFile("p1", "t1", "archive.zip", []byte("PK\x03\x04"))
+	if err != nil {
+		t.Fatalf("WriteTaskFile: %v", err)
+	}
+	want := filepath.Join(sandbox.MountPath("p1"), uploadsDirName, "archive.zip")
+	if path != want {
+		t.Errorf("path = %q, want the guest path %q", path, want)
+	}
+	if _, err := os.Stat(hostUpload(t, wtPath, "archive.zip")); err != nil {
+		t.Errorf("the mount path was answered but nothing is on the host for the guest to read: %v", err)
 	}
 }
 
 func TestWriteTaskFileGivesTwoUploadsOfOneNameTheirOwnPaths(t *testing.T) {
-	te := &TaskExecutor{store: uploadStore(t, false)}
+	te, _, wtPath := uploadFixture(t, false)
 
-	first, err := te.WriteTaskFile(t.Context(), "p1", "t1", "data.csv", []byte("a,b\n1,2\n"))
+	first, err := te.WriteTaskFile("p1", "t1", "data.csv", []byte("a,b\n1,2\n"))
 	if err != nil {
 		t.Fatalf("first upload: %v", err)
 	}
-	second, err := te.WriteTaskFile(t.Context(), "p1", "t1", "data.csv", []byte("c,d\n3,4\n"))
+	second, err := te.WriteTaskFile("p1", "t1", "data.csv", []byte("c,d\n3,4\n"))
 	if err != nil {
 		t.Fatalf("second upload: %v", err)
 	}
 	if first == second {
-		t.Fatalf("both uploads answered %q; the first message would name the second file's bytes", first)
+		t.Fatalf("both uploads answered %q: the second would overwrite the bytes the first message names", first)
 	}
-	for _, want := range []struct {
-		path, body string
-	}{{first, "a,b\n1,2\n"}, {second, "c,d\n3,4\n"}} {
-		got, err := os.ReadFile(want.path)
+	if second != hostUpload(t, wtPath, "data-1.csv") {
+		t.Errorf("second = %q, want the suffixed name in the same directory", second)
+	}
+	for path, want := range map[string]string{first: "a,b\n1,2\n", second: "c,d\n3,4\n"} {
+		got, err := os.ReadFile(path)
 		if err != nil {
-			t.Fatalf("read %s: %v", want.path, err)
+			t.Fatalf("read %s: %v", path, err)
 		}
-		if string(got) != want.body {
-			t.Errorf("%s holds %q, want %q", want.path, got, want.body)
+		if string(got) != want {
+			t.Errorf("%s holds %q, want %q", path, got, want)
 		}
+	}
+}
+
+// One write declares the exclusion, which is what keeps the upload out of the task's status. What git then
+// cannot do to an excluded directory — `add -A`, `stash -u`, `clean -fd`, a restore — is owned by
+// backend/git's exclude tests, which assert it against the pattern directly.
+func TestWriteTaskFileKeepsTheUploadOutOfGit(t *testing.T) {
+	te, _, wtPath := uploadFixture(t, false)
+
+	if _, err := te.WriteTaskFile("p1", "t1", "payload.bin", []byte("x")); err != nil {
+		t.Fatalf("WriteTaskFile: %v", err)
+	}
+	if out := gitStatus(t, wtPath); out != "" {
+		t.Errorf("the upload shows in the task's git status:\n%s", out)
 	}
 }
 
 func TestWriteTaskFileRefusesANameThatIsNotASingleFileName(t *testing.T) {
-	te := &TaskExecutor{store: uploadStore(t, false)}
+	te, _, wtPath := uploadFixture(t, false)
 
-	for _, name := range []string{
-		"../escape", "a/b.txt", "/etc/passwd", `back\slash`, "new\nline", "", ".", "..",
-		strings.Repeat("x", 300) + ".txt",
-	} {
-		if path, err := te.WriteTaskFile(t.Context(), "p1", "t1", name, []byte("x")); err == nil {
+	for _, name := range []string{"../../etc/passwd", "../escape.txt", "a/b.txt", "/abs/path.txt", "."} {
+		if path, err := te.WriteTaskFile("p1", "t1", name, []byte("x")); err == nil {
 			t.Errorf("WriteTaskFile(%q) answered %q with no error", name, path)
 		}
 	}
-
-	entries, err := os.ReadDir(uploadHostRoot(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 0 {
-		t.Errorf("a refused upload still wrote: %v", entries)
+	if _, err := os.Stat(uploadsDir(wtPath)); err == nil {
+		t.Error("a refused name still created the uploads directory")
 	}
 }
 
-func TestWriteTaskFileRefusesAnEmptyFileAndOneOverTheBridgesLimit(t *testing.T) {
-	te := &TaskExecutor{store: uploadStore(t, false)}
+func TestWriteTaskFileRefusesAnEmptyFileAndOneOverTheLimit(t *testing.T) {
+	te, _, _ := uploadFixture(t, false)
 
-	if _, err := te.WriteTaskFile(t.Context(), "p1", "t1", "empty.bin", nil); err == nil {
+	if _, err := te.WriteTaskFile("p1", "t1", "empty.bin", nil); err == nil {
 		t.Error("an empty upload was accepted")
 	}
-
-	oversize := make([]byte, protocol.MaxWriteBytes+1)
-	if _, err := te.WriteTaskFile(t.Context(), "p1", "t1", "big.bin", oversize); err == nil {
-		t.Error("an upload over the bridge's frame limit was accepted")
-	}
-	entries, err := os.ReadDir(uploadHostRoot(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 0 {
-		t.Errorf("a refused upload still wrote: %v", entries)
+	oversize := make([]byte, MaxUploadBytes+1)
+	if _, err := te.WriteTaskFile("p1", "t1", "big.bin", oversize); err == nil {
+		t.Error("an upload over the limit was accepted")
 	}
 }
 
 func TestWriteTaskFileNamesAMissingTaskAsNotFound(t *testing.T) {
-	te := &TaskExecutor{store: uploadStore(t, false)}
+	te, _, _ := uploadFixture(t, false)
 
-	if _, err := te.WriteTaskFile(t.Context(), "p1", "no-such-task", "note.txt", []byte("x")); !errs.IsNotFound(err) {
-		t.Errorf("error = %v, want it to still answer not-found", err)
+	if _, err := te.WriteTaskFile("p1", "no-such-task", "note.txt", []byte("x")); !errs.IsNotFound(err) {
+		t.Errorf("error = %v, want not-found for a task that is not there", err)
 	}
 }
 
-func TestSandboxedUploadWithoutARunningContainerWritesNothingOnTheHost(t *testing.T) {
-	te := &TaskExecutor{store: uploadStore(t, true)}
+// A task without a worktree is refused rather than served by preparing one, which would create a branch and
+// rewrite the task row as a side effect of a paste.
+func TestWriteTaskFileRefusesATaskWithoutAWorktree(t *testing.T) {
+	te, _, wtPath := uploadFixture(t, true)
 
-	_, err := te.WriteTaskFile(t.Context(), "p1", "t1", "archive.zip", []byte("PK\x03\x04"))
-	if err == nil {
-		t.Fatal("a sandboxed task with no sandbox answered a path")
+	if err := os.RemoveAll(wtPath); err != nil {
+		t.Fatal(err)
 	}
+	_, err := te.WriteTaskFile("p1", "t1", "report.pdf", []byte("x"))
 	if !errs.IsConflict(err) {
-		t.Errorf("error = %v, want a conflict the browser can act on", err)
+		t.Fatalf("error = %v, want a conflict naming the task's environment", err)
 	}
-	if strings.Contains(err.Error(), "/tmp/") {
-		t.Errorf("the refusal leaks a path: %v", err)
-	}
-	entries, readErr := os.ReadDir(uploadHostRoot(t))
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	if len(entries) != 0 {
-		t.Errorf("a sandboxed upload wrote to the host: %v", entries)
+	if !strings.Contains(errs.Message(err), "start the task") {
+		t.Errorf("message = %q, want the sentence that says what to do", errs.Message(err))
 	}
 }
 
-func TestRemoveTaskUploadsTakesOnlyTheDeletedTasks(t *testing.T) {
-	te := &TaskExecutor{store: uploadStore(t, false)}
-	root := uploadHostRoot(t)
+// An executor built as a struct literal has no worktree manager; the answer is the same refusal, not a panic.
+func TestWriteTaskFileRefusesWhenThereIsNoWorktreeManager(t *testing.T) {
+	te, _, _ := uploadFixture(t, false)
+	te.worktreeMgr = nil
 
-	if _, err := te.writeHostUpload("t1", "one.txt", []byte("1")); err != nil {
+	if _, err := te.WriteTaskFile("p1", "t1", "report.pdf", []byte("x")); !errs.IsConflict(err) {
+		t.Errorf("error = %v, want a conflict, not a panic over a nil manager", err)
+	}
+}
+
+// A symlink planted where the uploads directory belongs must not be followed out of the worktree — the
+// task's own actions can create it.
+func TestWriteTaskFileDoesNotWriteThroughASymlinkedUploadsDir(t *testing.T) {
+	te, _, wtPath := uploadFixture(t, false)
+
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.MkdirAll(outside, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := te.writeHostUpload("t12", "two.txt", []byte("2")); err != nil {
+	if err := os.Symlink(outside, uploadsDir(wtPath)); err != nil {
 		t.Fatal(err)
 	}
 
-	te.removeTaskUploads("t1")
-
-	for _, want := range []struct{ task, missing string }{{"t1", ""}, {"t12", "two.txt"}} {
-		dirs, err := filepath.Glob(filepath.Join(root, "kanban-uploads-"+want.task+"-*"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if want.missing == "" {
-			if len(dirs) != 0 {
-				t.Errorf("task %s still has %v after its deletion", want.task, dirs)
-			}
-			continue
-		}
-		if len(dirs) != 1 {
-			t.Fatalf("task %s should have kept its upload directory, found %v", want.task, dirs)
-		}
-		if _, err := os.Stat(filepath.Join(dirs[0], want.missing)); err != nil {
-			t.Errorf("the other task's upload was taken too: %v", err)
-		}
+	path, err := te.WriteTaskFile("p1", "t1", "report.pdf", []byte("x"))
+	if err == nil {
+		t.Fatalf("the write followed the symlink and answered %q", path)
 	}
-
-	te.removeTaskUploads("*")
-	remaining, err := os.ReadDir(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(remaining) != 1 {
-		t.Errorf("an ID that is a pattern reached every task's uploads: %v", remaining)
+	if _, err := os.Stat(filepath.Join(outside, "report.pdf")); err == nil {
+		t.Error("bytes landed outside the task's worktree")
 	}
 }

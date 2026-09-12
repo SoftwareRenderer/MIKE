@@ -27,6 +27,8 @@ const (
 	stageLSPHandler
 	stageExtensionLSPManager
 	stageExtensionSandboxManager
+	// stageMemorySupervisor before the containers it can start.
+	stageMemorySupervisor
 	// stageSandboxStatsSampler before the containers it samples, or it samples a container that is
 	// already gone and reports a sandbox that no longer exists.
 	stageSandboxStatsSampler
@@ -47,6 +49,7 @@ var stageNames = [stageCount]string{
 	stageLSPHandler:              "lsp handler",
 	stageExtensionLSPManager:     "extension lsp manager",
 	stageExtensionSandboxManager: "extension sandbox manager",
+	stageMemorySupervisor:        "memory supervisor",
 	stageSandboxStatsSampler:     "sandbox stats sampler",
 	stageSandboxContainers:       "sandbox containers",
 	stageLoginRateLimiter:        "login rate limiter",

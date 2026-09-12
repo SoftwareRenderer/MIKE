@@ -20,11 +20,14 @@ import (
 // steps in place. A database stamped N has been through 1..N; an older one reads 0 and runs the
 // whole chain. So the steps must stay idempotent, and one that must run exactly once needs its own
 // marker (see the config-row guard on the backfill) rather than trusting this number.
-const schemaVersion = doneDiffParsedStamp
+const schemaVersion = doneMemSupervisorStamp
 
 // doneDiffParsedStamp is the stamp from which a stored done-task diff body carries parsed_files.
 // Older bodies are served byte for byte and cannot grow the key, so initSchema drops those rows.
 const doneDiffParsedStamp = 3
+
+// doneMemSupervisorStamp is the stamp from which tasks carry memory_supervisor_paused.
+const doneMemSupervisorStamp = 4
 
 // userVersion reads PRAGMA user_version. A read failure answers 0, which reruns the probe chain:
 // slow, but it cannot leave a column missing. The caller holds s.mu.
@@ -306,6 +309,8 @@ func (s *Store) addMissingColumns() {
 	s.addColumn("tasks", "sandbox_memory_peak_mb", "INTEGER NOT NULL DEFAULT 0")
 	// Records whether the task execution was auto-started from a parent (sibling continuation)
 	s.addColumn("tasks", "autostarted", "INTEGER NOT NULL DEFAULT 0")
+	// Set by the memory supervisor when it pauses a task; cleared by any user action.
+	s.addColumn("tasks", "memory_supervisor_paused", "INTEGER NOT NULL DEFAULT 0")
 	// moved_at orders the board: it changes only when a task moves column (see UpdateTask).
 	// The backfill belongs to the moment the column first appears, so this one probes.
 	if !s.hasColumn("tasks", "moved_at") {

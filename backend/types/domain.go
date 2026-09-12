@@ -47,6 +47,9 @@ type Task struct {
 	// SandboxMemoryPeakMB is the peak container memory of the task's most recent sandbox run,
 	// recorded as that container was removed. Written only by Store.UpdateTaskSandboxMemoryPeak.
 	SandboxMemoryPeakMB int64 `json:"sandbox_memory_peak_mb,omitempty"`
+	// MemorySupervisorPaused is set when the memory supervisor pauses the task.
+	// Any user-initiated start or stop clears it, so the supervisor never resumes a task the user moved.
+	MemorySupervisorPaused bool `json:"memory_supervisor_paused,omitempty"`
 }
 
 // IsPlanMode returns true if the task is in plan mode.

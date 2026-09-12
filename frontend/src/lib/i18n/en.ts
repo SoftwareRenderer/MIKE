@@ -1065,6 +1065,7 @@ const catalog = {
     'chat.common.close': 'Close',
     'chat.common.remove': 'Remove',
     'chat.common.attachImage': 'Attach image',
+    'chat.common.attachFile': 'Attach file',
     'chat.common.attachment': 'Attachment',
     'chat.common.loading': 'Loading...',
     'chat.common.newThread': 'New Thread',

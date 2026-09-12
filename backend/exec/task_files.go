@@ -1,49 +1,56 @@
 package exec
 
 import (
-	"context"
-	"crypto/rand"
-	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
-	"time"
 
 	"kanban/backend/errs"
 	"kanban/backend/fsutil"
-	"kanban/pkg/bridge/protocol"
-	"kanban/pkg/logging"
+	"kanban/backend/git"
+	"kanban/backend/sandbox"
 )
 
-// A pasted or dropped file that is neither an image nor text lands in the environment where this
-// task's actions run, and the message names that path. Out of the worktree: a file the agent did
-// not create would show up in `git status` and land in a `git add -A`.
+// A pasted or dropped file that is neither an image nor text lands in the environment where this task's
+// actions run, and the message names that path. That environment is the task's worktree: a sandboxed task
+// reaches it through the bind mount at `/home/sandbox/<project.Name>`, an unsandboxed one walks it directly.
 //
-// Each upload gets a directory of its own. Two gestures can carry the name `report.pdf` and the
-// message that named the first must keep naming the bytes it was written for; the host cannot see
-// the guest's directory, so "is that name taken?" has no answer without a second round trip.
+// The directory is excluded through the repository's local `.git/info/exclude`, and that line is what makes
+// the placement safe: without it the upload is untracked in git's eyes, and the next `git add -A`,
+// `git stash -u` or the `git clean -fd` inside a checkpoint restore decides what happens to it.
+//
+// It goes away with the worktree, which goes away with the task and with nothing else. Stopping, pausing,
+// marking done, switching model or mode and restarting the server all leave the file where the message says
+// it is.
+//
+// An upload keeps the name it was dropped under; a second upload of that name gets `-1`, then `-2`. The
+// conflict is settled by looking at the directory, because that is where the bytes land.
 
-// guestUploadsRoot is the uploads root inside a task's sandbox container.
-const guestUploadsRoot = "/tmp/kanban-uploads"
+// uploadsDirName is where a pasted or dropped file lands inside the task's own worktree. The name is
+// MIKE's own namespace so the line in the repo's local `.git/info/exclude` that hides it cannot also hide a
+// file the agent or the user made, and it is deleted with the worktree — which is deleted with the task, and
+// with nothing else.
+const uploadsDirName = ".mike-uploads"
 
-// hostUploadsPrefix names the per-task uploads directory when the task runs on the host. The
-// directory comes from os.MkdirTemp rather than being assembled: /tmp is shared, and a fixed name
-// there can be claimed by someone else first.
-const hostUploadsPrefix = "kanban-uploads"
+// uploadsExcludeHeader labels the exclude line this package writes, the way the worktrees line is labeled.
+const uploadsExcludeHeader = "# mike uploads (kept out of task status)"
 
-// Read from crypto/rand rather than counted, for the same reason: a name another process can guess
-// is a name it can own first.
-const uploadDirIDBytes = 4
+// noUploadEnvironmentMessage is answered when the task has no worktree yet. Preparing an environment creates
+// the worktree, its branch and the task-row writes that go with them, and that is not this call's side
+// effect.
+const noUploadEnvironmentMessage = "the task's environment is not prepared — start the task, then attach the file again"
 
-// writeTaskFileTimeout bounds one upload's write. The bridge client carries no deadline of its own
-// (see bridge.lspCallCtx, the one call that does), so a guest that stopped reading would otherwise
-// park this request handler for as long as its container lives.
-const writeTaskFileTimeout = 60 * time.Second
+// MaxUploadBytes bounds one upload, and is the one number for it: server.MaxUploadSize is defined from
+// here, because the HTTP layer imports this package and not the reverse, so the handler cannot own the size
+// this write enforces.
+const MaxUploadBytes = 20 << 20
 
-// TaskUploadsMaxBytes is the bridge's own limit, so the number a user is refused for is the one
-// that would have been refused anyway.
-const TaskUploadsMaxBytes = protocol.MaxWriteBytes
+// maxUploadSuffixTries bounds the `-N` search: one stat per try, and a directory holding this many files of
+// one name is a mistake rather than a queue.
+const maxUploadSuffixTries = 1000
 
 // UploadName is the rule the file-upload endpoint already enforces (fsutil.ValidateRelPath) plus
 // one segment, so a drop cannot build a directory tree inside the task's uploads.
@@ -57,24 +64,63 @@ func UploadName(raw string) (string, error) {
 	return raw, nil
 }
 
-func uploadDirID() (string, error) {
-	var b [uploadDirIDBytes]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("name the upload directory: %w", err)
+// uploadsDir is the uploads directory of one task's worktree.
+func uploadsDir(worktreePath string) string { return filepath.Join(worktreePath, uploadsDirName) }
+
+// ensureUploadsDir makes a worktree's uploads directory. 0700: it holds one person's files inside a
+// checkout other people may read.
+func ensureUploadsDir(worktreePath string) (string, error) {
+	dir := uploadsDir(worktreePath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create the task's uploads directory: %w", err)
 	}
-	return hex.EncodeToString(b[:]), nil
+	return dir, nil
 }
 
-// WriteTaskFile writes one pasted or dropped file into the environment where this task's actions
-// run, and answers with the path the agent opens it at.
+// uploadStemExt splits a name for the `-N` suffix. filepath.Ext answers a dotfile's whole name as its
+// extension, which would leave no stem to carry the suffix, so such a name keeps all of it as the stem:
+// `.env` becomes `.env-1`.
+func uploadStemExt(name string) (stem, ext string) {
+	ext = filepath.Ext(name)
+	if ext == name {
+		return name, ""
+	}
+	return strings.TrimSuffix(name, ext), ext
+}
+
+// firstFreeUploadPath picks the name one upload gets in dir: `report.pdf`, then `report-1.pdf`, … The
+// conflict is settled against the directory the bytes land in. name must have come from UploadName.
+func firstFreeUploadPath(dir, name string) (string, error) {
+	stem, ext := uploadStemExt(name)
+	for try := 0; try < maxUploadSuffixTries; try++ {
+		candidate := name
+		if try > 0 {
+			candidate = stem + "-" + strconv.Itoa(try) + ext
+		}
+		path := filepath.Join(dir, candidate)
+		// Lstat, not Stat: a symlink holding the name is the name being taken, and following it would
+		// write through the jail to whatever it points at.
+		switch _, err := os.Lstat(path); {
+		case errors.Is(err, os.ErrNotExist):
+			return path, nil
+		case err != nil:
+			// A directory this cannot search is not a directory with a free name.
+			return "", fmt.Errorf("check %s: %w", candidate, err)
+		}
+	}
+	return "", fmt.Errorf("no free name for %q in %d tries", name, maxUploadSuffixTries)
+}
+
+// WriteTaskFile writes one pasted or dropped file into the environment where this task's actions run, and
+// answers with the path the agent opens it at.
 //
-// A sandboxed task is reached through the bridge connection its own write_file tool uses. That
-// connection exists only while its container is up, and bringing one up is not a side effect this
-// call may take: preparing an execution environment creates the worktree and its branch and
-// rewrites the task row. The refusal when no container is running is therefore the honest answer
-// rather than a fallback to the host, which would name a path the agent cannot see (see
-// exec.hostGuard).
-func (te *TaskExecutor) WriteTaskFile(ctx context.Context, projectID, taskID, rawName string, data []byte) (string, error) {
+// The write is host-side even for a sandboxed task: the bytes land in the worktree and the guest reaches them
+// through the bind mount. So no container has to be running for a file to be attached — a paused or idle
+// task accepts one — and a plan-mode task's read-only mount does not refuse it. What must exist is the
+// worktree; see noUploadEnvironmentMessage for what happens when it does not.
+//
+// A sandboxed task is answered with the path its own environment reads, not the host's.
+func (te *TaskExecutor) WriteTaskFile(projectID, taskID, rawName string, data []byte) (string, error) {
 	name, err := UploadName(rawName)
 	if err != nil {
 		return "", err
@@ -82,8 +128,8 @@ func (te *TaskExecutor) WriteTaskFile(ctx context.Context, projectID, taskID, ra
 	if len(data) == 0 {
 		return "", fmt.Errorf("uploaded file is empty")
 	}
-	if len(data) > TaskUploadsMaxBytes {
-		return "", fmt.Errorf("file is %d bytes, the limit is %d", len(data), TaskUploadsMaxBytes)
+	if len(data) > MaxUploadBytes {
+		return "", fmt.Errorf("file is %d bytes, the limit is %d", len(data), MaxUploadBytes)
 	}
 
 	task, err := te.store.GetTask(projectID, taskID)
@@ -95,65 +141,57 @@ func (te *TaskExecutor) WriteTaskFile(ctx context.Context, projectID, taskID, ra
 		return "", err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, writeTaskFileTimeout)
-	defer cancel()
-
-	if project.SandboxEnabled {
-		return te.writeSandboxedUpload(ctx, task.ID, name, data)
-	}
-	return te.writeHostUpload(task.ID, name, data)
-}
-
-func (te *TaskExecutor) writeSandboxedUpload(ctx context.Context, taskID, name string, data []byte) (string, error) {
-	if te.sandboxMgr == nil || !te.sandboxMgr.IsAvailable() {
-		return "", errs.Conflict("sandboxing is not available on this host")
-	}
-	client, err := te.sandboxMgr.GetClient(taskID)
-	if err != nil {
-		return "", errs.Conflict("the task's sandbox is not running — start the task, then attach the file again")
-	}
-	id, err := uploadDirID()
+	worktreePath, err := te.taskWorktreePath(task.ID)
 	if err != nil {
 		return "", err
 	}
-	path := fmt.Sprintf("%s/%s/%s/%s", guestUploadsRoot, taskID, id, name)
-	if _, err := client.WriteFileBytes(ctx, path, data); err != nil {
-		return "", fmt.Errorf("write %s: %w", path, err)
+
+	// The exclude line goes in before the bytes: an upload that lands unprotected can be discarded by a
+	// checkpoint restore, which is worse than refusing the attachment.
+	if err := git.EnsureExcluded(project.Path, uploadsDirName+"/", uploadsExcludeHeader); err != nil {
+		return "", errs.Operation("keep the task's uploads out of git", err)
 	}
-	return path, nil
+
+	dir, err := ensureUploadsDir(worktreePath)
+	if err != nil {
+		return "", errs.Operation("create the task's uploads directory", err)
+	}
+	path, err := firstFreeUploadPath(dir, name)
+	if err != nil {
+		return "", errs.Operation("name the uploaded file", err)
+	}
+	// The jail runs before the write. The task's own actions can replace `.mike-uploads` with a symlink,
+	// and the bytes must not follow it out of the worktree.
+	safe, err := fsutil.Contained(path, []string{worktreePath})
+	if err != nil {
+		return "", errs.Operation("keep the uploaded file inside the task's worktree", err)
+	}
+	if err := os.WriteFile(safe, data, 0o600); err != nil {
+		return "", errs.Operation("write the uploaded file", err)
+	}
+
+	if !project.SandboxEnabled {
+		return safe, nil
+	}
+	return filepath.Join(sandbox.MountPath(project.Name), uploadsDirName, filepath.Base(safe)), nil
 }
 
-// writeHostUpload: for an unsandboxed task the host *is* the environment its actions run in.
-func (te *TaskExecutor) writeHostUpload(taskID, name string, data []byte) (string, error) {
-	dir, err := os.MkdirTemp(os.TempDir(), hostUploadsPrefix+"-"+taskID+"-")
+// taskWorktreePath answers where one task's actions run, refusing when the environment is not prepared:
+// WorktreePath builds the path from the store and the workspace dir, so the directory itself is the answer
+// to whether it exists.
+func (te *TaskExecutor) taskWorktreePath(taskID string) (string, error) {
+	if te.worktreeMgr == nil {
+		return "", errs.Conflict(noUploadEnvironmentMessage)
+	}
+	worktreePath, err := te.worktreeMgr.WorktreePath(taskID)
 	if err != nil {
-		return "", fmt.Errorf("create the task's upload directory: %w", err)
-	}
-	target := filepath.Join(dir, name)
-	// One person's clipboard, into a directory on a shared machine.
-	if err := os.WriteFile(target, data, 0o600); err != nil {
-		return "", fmt.Errorf("write %s: %w", target, err)
-	}
-	return target, nil
-}
-
-// removeTaskUploads drops what a deleted task left behind. The sandboxed half needs nothing — the
-// guest directory dies with its container — so this is the host's, found by the task's own prefix
-// rather than by a map this process remembers: a directory written before a restart is still that
-// task's.
-func (te *TaskExecutor) removeTaskUploads(taskID string) {
-	// Task IDs come out of the store, which makes this a check and not a jail.
-	if taskID == "" || strings.ContainsAny(taskID, `*?[\`) {
-		return
-	}
-	dirs, err := filepath.Glob(filepath.Join(os.TempDir(), hostUploadsPrefix+"-"+taskID+"-*"))
-	if err != nil {
-		return
-	}
-	for _, dir := range dirs {
-		if err := os.RemoveAll(dir); err != nil {
-			// Not worth failing a deletion over: it is 0700 and the host's tmp policy takes it.
-			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("upload cleanup failed: %v", err)
+		if errs.IsNotFound(err) {
+			return "", err // a task that is gone is the caller's answer, not a server fault
 		}
+		return "", errs.Operation("find the task's worktree", err)
 	}
+	if info, statErr := os.Stat(worktreePath); statErr != nil || !info.IsDir() {
+		return "", errs.Conflict(noUploadEnvironmentMessage)
+	}
+	return worktreePath, nil
 }

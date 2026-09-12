@@ -27,7 +27,7 @@ func marshalAssignedPorts(ports []types.AssignedPort) string {
 // (and for CreateTask's INSERT). The mapping is positional, so a column added to
 // the schema but not to this list — or listed in a different order than scanTask
 // expects — breaks at scan time rather than at compile time.
-const taskColumns = `id, project_id, title, prompt, status, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, moved_at, assigned_ports, session_cost, sandbox_memory_peak_mb`
+const taskColumns = `id, project_id, title, prompt, status, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, moved_at, assigned_ports, session_cost, sandbox_memory_peak_mb, memory_supervisor_paused`
 
 func (s *Store) CreateTask(t *types.Task) error {
 	s.mu.Lock()
@@ -40,10 +40,10 @@ func (s *Store) CreateTask(t *types.Task) error {
 	}
 	_, err := s.db.Exec(
 		`INSERT INTO tasks (`+taskColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.ProjectID, t.Title, t.Prompt, t.Status, t.SessionID, t.Branch, ptrStr(t.BaseRef), ptrStr(t.BaseCommit), ptrStr(t.BranchTip), t.Output, t.ExecutionState, B2I(t.HasMergeConflict),
 		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, B2I(t.AutoCommit), B2I(t.AutoMerge), B2I(t.SubtasksAutoMerge), t.OperatingMode,
-		ptrStr(t.ParentTaskID), B2I(t.Autostarted), B2I(t.TitleGenerating), B2I(t.Summarizing), ptrStr(t.CurrentThreadID), t.CreatedAt.Format(time.RFC3339), t.UpdatedAt.Format(time.RFC3339), movedAt.UTC().Format(time.RFC3339), assignedPortsJSON, t.SessionCost, t.SandboxMemoryPeakMB,
+		ptrStr(t.ParentTaskID), B2I(t.Autostarted), B2I(t.TitleGenerating), B2I(t.Summarizing), ptrStr(t.CurrentThreadID), t.CreatedAt.Format(time.RFC3339), t.UpdatedAt.Format(time.RFC3339), movedAt.UTC().Format(time.RFC3339), assignedPortsJSON, t.SessionCost, t.SandboxMemoryPeakMB, B2I(t.MemorySupervisorPaused),
 	)
 	return err
 }
@@ -134,6 +134,40 @@ func (s *Store) UpdateTaskSandboxMemoryPeak(taskID string, peakMB int64) error {
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(`UPDATE tasks SET sandbox_memory_peak_mb = ? WHERE id = ?`, peakMB, taskID)
 	return err
+}
+
+// SetMemorySupervisorPaused writes the flag directly. UpdateTask must not carry this column
+// (same rule as sandbox_memory_peak_mb), so the only writers are the supervisor and prepareTaskExecution.
+func (s *Store) SetMemorySupervisorPaused(taskID string, paused bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE tasks SET memory_supervisor_paused = ? WHERE id = ?`, B2I(paused), taskID)
+	return err
+}
+
+// GetRunningSandboxedTasks returns running/pulling_image tasks in sandbox-enabled projects,
+// ordered by sandbox_memory_peak_mb ascending — the pause order the supervisor uses.
+func (s *Store) GetRunningSandboxedTasks() ([]types.Task, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	// Bare column names would be ambiguous after the JOIN with projects.
+	const tcols = "t.id, t.project_id, t.title, t.prompt, t.status, t.session_id, t.branch, t.base_ref, t.base_commit, t.branch_tip, t.output, t.execution_state, t.has_merge_conflict, t.llama_server_url, t.model_name, t.reasoning_effort, t.max_consecutive_failed_turns, t.auto_commit, t.auto_merge, t.subtasks_auto_merge, t.operating_mode, t.parent_task_id, t.autostarted, t.title_generating, t.summarizing, t.current_thread_id, t.created_at, t.updated_at, t.moved_at, t.assigned_ports, t.session_cost, t.sandbox_memory_peak_mb, t.memory_supervisor_paused"
+	rows, err := s.db.Query(
+		`SELECT ` + tcols + ` FROM tasks t JOIN projects p ON p.id = t.project_id` +
+			` WHERE p.sandbox_enabled = 1 AND t.execution_state IN ` + inFlightStates +
+			` ORDER BY t.sandbox_memory_peak_mb ASC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return scanRows(rows, scanInto(scanTask))
+}
+
+// GetMemorySupervisorPausedTasks returns supervisor-paused tasks still startable, ascending by peak.
+func (s *Store) GetMemorySupervisorPausedTasks() ([]types.Task, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.queryTasks(`memory_supervisor_paused = 1 AND status = 'in_progress' AND execution_state = 'paused' ORDER BY sandbox_memory_peak_mb ASC`)
 }
 
 // inFlightStates are the execution_state values that mean a run is live.

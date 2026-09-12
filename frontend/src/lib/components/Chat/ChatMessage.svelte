@@ -8,7 +8,7 @@
     import { formatTimestamp } from '$lib/utils/format-time';
     import { computeInterleavedLayout } from '$lib/utils/chat-layout';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
-    import { ATTACHABLE_IMAGE_ACCEPT, imageSrc } from '$lib/utils/attachments';
+    import { imageSrc } from '$lib/utils/attachments';
     import { useImageAttachments } from '$lib/composables/use-image-attachments.svelte';
     import { uploadTaskFile } from '$lib/api';
     import { t } from '$lib/i18n';
@@ -267,8 +267,8 @@
                 </div>
             {/if}
             <div class="edit-modal-footer">
-                <input type="file" accept={ATTACHABLE_IMAGE_ACCEPT} multiple bind:this={mobileFileInput} onchange={intake.handlePicked} style="display:none" />
-                <button type="button" class="edit-attach-btn" onclick={() => mobileFileInput?.click()} title={t('chat.common.attachImage')} aria-label={t('chat.common.attachImage')}>
+                <input type="file" multiple bind:this={mobileFileInput} onchange={intake.handlePicked} style="display:none" />
+                <button type="button" class="edit-attach-btn" onclick={() => mobileFileInput?.click()} title={t('chat.common.attachFile')} aria-label={t('chat.common.attachFile')}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
                     </svg>

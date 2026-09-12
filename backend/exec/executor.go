@@ -69,6 +69,7 @@ type TaskExecutor struct {
 	commitQueue   *CommitQueue
 	gate          *ConcurrencyGate // per-LLM-request in-flight limit (incl. utility calls)
 	taskGate      *ConcurrencyGate // per-provider running-task limit
+	memGate       *MemoryGate      // sandbox memory budget gate; capacity 0 = disabled
 	taskMu        sync.Mutex
 	llmAdapter    *llmadapter.Adapter // provider request adaptation (llm extensions); nil = none
 	tasks         map[string]*executionState
@@ -90,6 +91,18 @@ func (te *TaskExecutor) AgentRegistry() *agent.AgentRegistry {
 // requests to provider-specific formats. Nil = no adaptation.
 func (te *TaskExecutor) SetLLMAdapter(a *llmadapter.Adapter) {
 	te.llmAdapter = a
+}
+
+// MemGate returns the sandbox memory budget gate. Server wiring calls SetCapacity on it at startup.
+func (te *TaskExecutor) MemGate() *MemoryGate { return te.memGate }
+
+// memorySupervisorActions: each method passes autostarted=true — a supervisor resume is not a user action.
+func (te *TaskExecutor) stopTask(taskID string) error { return te.StopTask(taskID) }
+func (te *TaskExecutor) startTask(projectID, taskID string) error {
+	return te.StartTask(projectID, taskID, true)
+}
+func (te *TaskExecutor) startSubtask(projectID, taskID string) error {
+	return te.StartSubtask(projectID, taskID, true)
 }
 
 // newLlamaClient creates a LlamaClient with the provider request adapter
@@ -304,6 +317,7 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStr
 		commitQueue:   commitQueue,
 		gate:          NewConcurrencyGate(),
 		taskGate:      NewConcurrencyGate(),
+		memGate:       &MemoryGate{},
 		tasks:         make(map[string]*executionState),
 	}
 	te.worktreeMu.Configure(taskLockSlowWait, func(taskID string, waited time.Duration) {
@@ -1021,6 +1035,9 @@ type taskExecSetup struct {
 	// currently holds ("" = not held). LLM providers only; agent providers
 	// manage their own concurrency.
 	taskSlotURL string
+	// memAcquiredMB is the amount held in the MemoryGate by this execution (0 = not held).
+	// executeTask releases exactly this amount so an estimate change mid-run cannot over-release.
+	memAcquiredMB int64
 }
 
 // projectName returns the project name used for prompt assembly. Tolerates a nil
@@ -1131,6 +1148,9 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	waitForExecutorExit(taskID, te.cancelExistingExecutor(taskID), executorExitGrace)
 
 	if updateStatus {
+		// A user-initiated start always clears the flag so the supervisor won't resume a task the user restarted.
+		task.MemorySupervisorPaused = false
+		_ = te.store.SetMemorySupervisorPaused(taskID, false)
 		task.ExecutionState = types.ExecStateRunning
 		task.Status = types.StatusInProgress
 		if err := te.storeTaskClaiming(task, projectID); err != nil {
@@ -1374,6 +1394,9 @@ func (te *TaskExecutor) StopTask(taskID string) error {
 	// executor (state is nil).
 	waitForExecutorExit(taskID, state, executorExitGrace)
 
+	// Any explicit stop drops the flag; the supervisor re-sets it after its own stopTask call.
+	_ = te.store.SetMemorySupervisorPaused(taskID, false)
+
 	task, err := te.store.GetTaskByID(taskID)
 	if err != nil {
 		return err
@@ -1612,14 +1635,14 @@ func (te *TaskExecutor) NotifyContextChanged(projectID, taskID string) {
 	}
 }
 
-// StopSandbox removes the sandbox container for a task (called on task deletion).
+// StopSandbox removes the sandbox container for a task (called on task deletion). It takes nothing that
+// lives in the task's worktree: an upload is deleted with its task, not with its container.
 func (te *TaskExecutor) StopSandbox(taskID string) {
 	if te.sandboxMgr != nil {
 		if err := te.sandboxMgr.Stop(taskID); err != nil {
 			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("stop error: %v", err)
 		}
 	}
-	te.removeTaskUploads(taskID)
 }
 
 // RetryTask retries a failed task.
