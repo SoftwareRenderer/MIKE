@@ -912,6 +912,40 @@ func TestHandleMove_ParentWithGatedChildren_KeepsThemInPlace(t *testing.T) {
 	}
 }
 
+// TestHandleMove_PausedToBacklogRestsIdle: a task paused mid-turn and moved to Backlog
+// leaves no turn behind — it rests like a row nobody started, the state a running task
+// lands in when it is dragged out of In Progress.
+func TestHandleMove_PausedToBacklogRestsIdle(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	createChainTask(t, s, projID, "move-paused", "Paused", "in_progress", "paused", "", "thread-move-paused", false)
+	task, err := s.GetTaskByID("move-paused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.Output = "Paused by user"
+	if err := s.UpdateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/move", h.HandleMove)
+	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/move-paused/move", map[string]any{"status": "backlog"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("HandleMove status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	moved, err := s.GetTaskByID("move-paused")
+	if err != nil {
+		t.Fatalf("get moved task: %v", err)
+	}
+	if moved.Status != types.StatusBacklog || moved.ExecutionState != types.ExecStateIdle {
+		t.Errorf("a paused row moved to Backlog must rest idle: status=%q state=%q", moved.Status, moved.ExecutionState)
+	}
+	if moved.Output != "" {
+		t.Errorf("the pause text outlived the turn it described: output=%q", moved.Output)
+	}
+}
+
 // heldTitleLLM is an httptest LLM server that holds every chat request open
 // until Release() is called, simulating a slow (or provider-gate-queued)
 // title generation call. After release it answers with a JSON completion.

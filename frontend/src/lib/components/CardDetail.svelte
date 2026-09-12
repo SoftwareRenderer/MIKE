@@ -737,9 +737,14 @@
             const updated = await moveTask(task.project_id, task.id, status);
             task = updated;
             updateTaskInBoard(appStore, task!.id, updated);
+            if (status === 'done') closeOnDone();
         } catch (e) {
             dialogStore.showToast(t('task.toast.moveFailed', { error: String(e) }), 'error');
         }
+    }
+
+    function closeOnDone(): void {
+        onClose('done');
     }
 
     async function handleDelete() {
@@ -981,6 +986,7 @@
                                 if (!diffLoading) diffCache.updateDiff(data);
                             }}
                             onMoveTask={handleMove}
+                            onTaskDone={closeOnDone}
                             onThreadSwitch={() => {
                                 // Reset the diff cache synchronously so stale rows from
                                 // the previous thread can't leak into the new thread's view

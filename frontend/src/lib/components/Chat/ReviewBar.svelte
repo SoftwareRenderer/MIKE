@@ -47,12 +47,20 @@
 
     // Paused: the task was stopped while in progress. It stays in the In
     // Progress column — Resume continues the conversation from where it left
-    // off (the chat input below stays enabled for sending a new message).
+    // off (the chat input below stays enabled for sending a new message), and
+    // Backlog sends it back with its branch, worktree and history intact.
     let isPaused = $derived(taskExecutionState === 'paused');
 </script>
 
 {#if isPaused}
     <div class="chat-review-bar">
+        {#if onMoveTask}
+            <div class="move-buttons">
+                <button class="btn-move" onclick={() => onMoveTask('backlog')} title={t('chat.review.moveToBacklogTip')}>
+                    {t('chat.review.moveToBacklog')}
+                </button>
+            </div>
+        {/if}
         <button class="btn-commit-done" onclick={onStartTask} disabled={isStarting || disabled} title={t('chat.review.resumePausedTip')}>
             {#if isStarting}
                 <span class="spinner-inline"></span> {t('chat.review.resuming')}
