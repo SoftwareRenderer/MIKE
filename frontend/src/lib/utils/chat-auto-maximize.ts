@@ -1,7 +1,7 @@
 /**
  * When the task chat maximizes itself, extracted from CardDetail.svelte for unit tests.
  *
- * Three layers agree here: ChatForm decides what counts as focus leaving the chat form,
+ * Three layers agree here: ChatForm decides what counts as focus leaving the chat input,
  * CardDetail owns the maximize state the sticky toggle and shortcut also drive, and this
  * file decides which focus event moves that state and which of those moves blur may undo.
  */
@@ -28,7 +28,7 @@ export function chatCollapseState(): ChatMaximizeState {
     return { fullscreen: false, autoMaximized: false };
 }
 
-/** Focus entered the chat form. */
+/** Focus entered the chat input. */
 export function chatFocusState(rules: ChatAutoMaximizeRules, state: ChatMaximizeState): ChatMaximizeState {
     if (!rules.enabled || !rules.isMobile || rules.floating) return state;
     // Already maximized: whoever maximized it keeps the right to minimize it.
@@ -36,7 +36,7 @@ export function chatFocusState(rules: ChatAutoMaximizeRules, state: ChatMaximize
     return { fullscreen: true, autoMaximized: true };
 }
 
-/** Focus left the chat form — only the maximize this rule applied is reversed. */
+/** Focus left the chat input — only the maximize this rule applied is reversed. */
 export function chatBlurState(state: ChatMaximizeState): ChatMaximizeState {
     return state.autoMaximized ? chatCollapseState() : state;
 }
