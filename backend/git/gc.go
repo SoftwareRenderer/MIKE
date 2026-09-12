@@ -11,6 +11,9 @@ import (
 	"kanban/pkg/logging"
 )
 
+// threadBranchNamespace is the fork branch namespace; server/handler_thread.go writes the same name.
+const threadBranchNamespace = "thread/"
+
 // GarbageCollect removes worktree directories that have no matching task in the database.
 func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	worktreesDir, err := wm.worktreesRoot()
@@ -122,42 +125,34 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 		// active branch, the slug branch leaves activeBranchSet and would be GC'd.
 		slugPrefixes := taskSlugPrefixSet(wm.store, p.ID)
 		// Prune orphaned task branches (task/<id> with no matching task in DB)
-		branchesOut, err := wm.gitRunOutput(p.Path, "branch", "--list", "task/*")
+		branches, err := wm.listBranchNames(p.Path, types.TaskBranchPrefix)
 		if err != nil {
 			continue
 		}
-		for line := range strings.SplitSeq(branchesOut, "\n") {
-			branch := strings.TrimSpace(line)
-			if branch == "" || !strings.HasPrefix(branch, "task/") {
-				continue
-			}
-			taskID := strings.TrimPrefix(branch, "task/")
+		for _, branch := range branches {
+			taskID := strings.TrimPrefix(branch, types.TaskBranchPrefix)
 			if !activeSet[taskID] && !activeBranchSet[branch] && !slugPrefixes[types.TaskBranchSlugPrefix(branch)] {
 				if dryRun {
 					logging.For(logging.Worktree).Infof("would delete orphaned branch %s in project %s", branch, p.Name)
 				} else {
 					logging.For(logging.Worktree).Infof("deleting orphaned branch %s in project %s", branch, p.Name)
-					wm.gitRun(p.Path, "branch", "-D", branch)
+					wm.deleteBranch(p.Path, branch)
 				}
 			}
 		}
 		// Prune orphaned thread branches (thread/<threadID> with no matching thread in DB)
-		threadBranchesOut, err := wm.gitRunOutput(p.Path, "branch", "--list", "thread/*")
+		threadBranches, err := wm.listBranchNames(p.Path, threadBranchNamespace)
 		if err != nil {
 			continue
 		}
-		for line := range strings.SplitSeq(threadBranchesOut, "\n") {
-			branch := strings.TrimSpace(line)
-			if branch == "" || !strings.HasPrefix(branch, "thread/") {
-				continue
-			}
-			threadID := strings.TrimPrefix(branch, "thread/")
+		for _, branch := range threadBranches {
+			threadID := strings.TrimPrefix(branch, threadBranchNamespace)
 			if !activeThreadSet[threadID] {
 				if dryRun {
 					logging.For(logging.Worktree).Infof("would delete orphaned thread branch %s in project %s", branch, p.Name)
 				} else {
 					logging.For(logging.Worktree).Infof("deleting orphaned thread branch %s in project %s", branch, p.Name)
-					wm.gitRun(p.Path, "branch", "-D", branch)
+					wm.deleteBranch(p.Path, branch)
 				}
 			}
 		}
@@ -249,38 +244,40 @@ func (wm *WorktreeManager) PruneOrphanedBranches(projectID string) int {
 		activeThreadSet[id] = true
 	}
 
+	// Prune before listing: a branch a registration still holds is one git refuses to delete
+	// (RemoveWorktree). The prune takes the lock CreateWorktree takes, as in GarbageCollect.
+	unlockWorktree, locked := wm.tryLockProjectWorktree(projectID, worktreeLockTimeout)
+	if !locked {
+		logging.For(logging.Worktree).Infof("skipping branch sweep for project %s: a worktree operation holds the lock", project.Name)
+		return 0
+	}
+	_ = wm.gitRun(project.Path, "worktree", "prune")
+	unlockWorktree()
+
 	removed := 0
 
 	// Prune orphaned task branches (task/<id> with no matching task in DB)
-	branchesOut, err := wm.gitRunOutput(project.Path, "branch", "--list", "task/*")
-	if err == nil {
-		for line := range strings.SplitSeq(branchesOut, "\n") {
-			branch := strings.TrimSpace(line)
-			if branch == "" || !strings.HasPrefix(branch, "task/") {
-				continue
-			}
-			taskID := strings.TrimPrefix(branch, "task/")
+	if branches, err := wm.listBranchNames(project.Path, types.TaskBranchPrefix); err == nil {
+		for _, branch := range branches {
+			taskID := strings.TrimPrefix(branch, types.TaskBranchPrefix)
 			if !activeTaskSet[taskID] && !activeBranchSet[branch] {
 				logging.For(logging.Worktree).Infof("deleting orphaned branch %s in project %s", branch, project.Name)
-				wm.gitRun(project.Path, "branch", "-D", branch)
-				removed++
+				if wm.deleteBranch(project.Path, branch) == nil {
+					removed++
+				}
 			}
 		}
 	}
 
 	// Prune orphaned thread branches (thread/<threadID> with no matching thread in DB)
-	threadBranchesOut, err := wm.gitRunOutput(project.Path, "branch", "--list", "thread/*")
-	if err == nil {
-		for line := range strings.SplitSeq(threadBranchesOut, "\n") {
-			branch := strings.TrimSpace(line)
-			if branch == "" || !strings.HasPrefix(branch, "thread/") {
-				continue
-			}
-			threadID := strings.TrimPrefix(branch, "thread/")
+	if threadBranches, err := wm.listBranchNames(project.Path, threadBranchNamespace); err == nil {
+		for _, branch := range threadBranches {
+			threadID := strings.TrimPrefix(branch, threadBranchNamespace)
 			if !activeThreadSet[threadID] {
 				logging.For(logging.Worktree).Infof("deleting orphaned thread branch %s in project %s", branch, project.Name)
-				wm.gitRun(project.Path, "branch", "-D", branch)
-				removed++
+				if wm.deleteBranch(project.Path, branch) == nil {
+					removed++
+				}
 			}
 		}
 	}

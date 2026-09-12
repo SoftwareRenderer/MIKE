@@ -1824,13 +1824,11 @@ func TestPruneOrphanedBranches_RemovesBothTaskAndThreadBranches(t *testing.T) {
 
 func getBranches(t *testing.T, dir string) []string {
 	t.Helper()
-	out := runGitOutput(t, dir, "branch")
+	// --format, not the decorated listing - see listBranchNames.
+	out := runGitOutput(t, dir, "branch", "--format=%(refname:short)")
 	var branches []string
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		b := strings.TrimSpace(line)
-		if b != "" && !strings.HasPrefix(b, "*") {
-			// Strip leading "* " for active branch
-			b = strings.TrimPrefix(b, "* ")
+		if b := strings.TrimSpace(line); b != "" {
 			branches = append(branches, b)
 		}
 	}

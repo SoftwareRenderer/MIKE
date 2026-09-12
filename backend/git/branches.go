@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"kanban/backend/types"
+	"kanban/pkg/logging"
 )
 
 // ResolveMainBranch returns the branch to use for a task's Main thread. A titled
@@ -22,16 +23,13 @@ func (wm *WorktreeManager) ResolveMainBranch(projectID, taskID, title, canonical
 		return canonicalBranch
 	}
 	prefix := types.TaskBranchPrefix + slug + "-"
-	out, err := wm.GitRunInProjectOutput(projectID, "branch", "--list", prefix+"*")
+	all, err := wm.ListProjectBranches(projectID, prefix)
 	if err != nil {
 		return canonicalBranch
 	}
 	var matches []string
-	for line := range strings.SplitSeq(out, "\n") {
-		b := strings.TrimSpace(line)
-		b = strings.TrimPrefix(b, " + ")
-		b = strings.TrimPrefix(b, "+ ")
-		if b != "" && b != canonicalBranch {
+	for _, b := range all {
+		if b != canonicalBranch {
 			matches = append(matches, b)
 		}
 	}
@@ -53,6 +51,49 @@ func (wm *WorktreeManager) ResolveMainBranch(projectID, taskID, title, canonical
 		}
 	}
 	return best
+}
+
+// ListProjectBranches lists a project's branch names under a prefix, such as "task/" or one task's
+// slug prefix. The rule about listings is in listBranchNames.
+func (wm *WorktreeManager) ListProjectBranches(projectID, prefix string) ([]string, error) {
+	project, err := wm.store.GetProject(projectID)
+	if err != nil {
+		return nil, fmt.Errorf("get project: %w", err)
+	}
+	return wm.listBranchNames(project.Path, prefix)
+}
+
+// listBranchNames lists refs/heads/<prefix>*, one path segment deep - the shape this repo writes.
+// It reads refs with for-each-ref because `git branch --list` prefixes entries with "+ " or "* ".
+func (wm *WorktreeManager) listBranchNames(dir, prefix string) ([]string, error) {
+	// A plain for-each-ref pattern matches only up to a slash boundary, so the glob is needed for a
+	// slug prefix to match anything.
+	pattern := "refs/heads/" + prefix
+	if !strings.HasSuffix(pattern, "*") {
+		pattern += "*"
+	}
+	out, err := wm.gitRunOutput(dir, "for-each-ref", "--format=%(refname:short)", pattern)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for line := range strings.SplitSeq(out, "\n") {
+		if name := strings.TrimSpace(line); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
+// deleteBranch force-deletes a branch and puts what git printed in the error, since git gives its
+// reason on stderr. -D, not -d: the row that owned the branch is already gone.
+func (wm *WorktreeManager) deleteBranch(dir, branch string) error {
+	out, err := wm.gitRunOutput(dir, "branch", "-D", branch)
+	if err == nil {
+		return nil
+	}
+	logging.For(logging.Worktree).Warnf("deleting branch %s failed: %s", branch, strings.TrimSpace(out))
+	return fmt.Errorf("delete branch %s: %s", branch, strings.TrimSpace(out))
 }
 
 // branchExistsInProject reports whether a git branch exists in a project's repo.

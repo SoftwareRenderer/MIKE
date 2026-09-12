@@ -271,6 +271,45 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
     expect(page.url()).toContain(`project=${projectId}`);
     expect(page.url()).not.toContain('task=');
   });
+
+  // The installed PWA launches at the bare root (`start_url: '/'` in the manifest), so the launch
+  // entry is the one a back press leaves the app on: landing on a project must rewrite that entry,
+  // never add one, or the entry underneath is a board-less URL.
+  test('launch at the bare root rewrites its own history entry', async ({ page }) => {
+    await expect(page.locator('.board')).toBeVisible({ timeout: 10000 });
+    expect(new URL(page.url()).searchParams.get('project')).toBeTruthy();
+    // A Playwright page starts on about:blank, so one goto is already entry 2; the app must have
+    // added nothing on top of it. Landing with a push made this 3.
+    expect(await page.evaluate(() => history.length)).toBe(2);
+  });
+
+  test('back twice from a task keeps the project board', async ({ page }) => {
+    await expect(page.locator('.board')).toBeVisible({ timeout: 10000 });
+    const landedProject = new URL(page.url()).searchParams.get('project');
+    expect(landedProject).toBeTruthy();
+
+    const taskTitle = `nav-double-back-${Date.now()}`;
+    await createTaskViaApi(page, landedProject as string, taskTitle);
+    await page.waitForSelector(`.card-title-text:has-text("${taskTitle}")`, { timeout: 10000 });
+    await page.click(`.card-title-text:has-text("${taskTitle}")`);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+
+    await page.goBack();
+    await expect(async () => {
+      expect(page.url()).not.toContain('task=');
+    }).toPass({ timeout: 5000 });
+    await expect(page.locator('.board')).toBeVisible({ timeout: 5000 });
+
+    // Nothing is left under the app's own entries: in an installed PWA back closes the window,
+    // here it lands on the blank page the context started with. Either way, never the board-less
+    // panel while projects exist.
+    await page.goBack().catch(() => {});
+    await expect(page.locator('#main-content > .empty-state')).toHaveCount(0);
+    if (await page.locator('#main-content').count() > 0) {
+        await expect(page.locator('.board')).toBeVisible();
+        expect(new URL(page.url()).searchParams.get('project')).toBe(landedProject);
+    }
+  });
 });
 
 // ─── Offline Cache (serial — route interceptions and IndexedDB state) ───
