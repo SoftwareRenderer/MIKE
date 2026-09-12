@@ -1,7 +1,6 @@
 package server
 
 import (
-	"kanban/backend/fsutil"
 	"kanban/pkg/logging"
 	"net/http"
 	"os"
@@ -19,11 +18,8 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	// `jailed` lets the picker state the limit up front instead of the user finding it in a 403.
 	JSONResponse(w, http.StatusOK, map[string]any{
-		"home":     homeDir,
-		"jailed":   s.hostRoot.Jailed(),
-		"jail_env": fsutil.AllowRootFSEnv,
+		"home": homeDir,
 	})
 }
 

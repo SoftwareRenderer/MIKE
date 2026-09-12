@@ -67,8 +67,8 @@ path with `MIKE_ALLOW_ROOT_FS=1`.
   `fsutil.Contained` on that same refusal, which is what keeps an inside-root link
   (`~/go -> ~/storage/go`) browsable.
 - A clone refusal happens in `prepareCloneTarget`, **before** any byte is fetched, so a refused request
-  leaves no partial checkout. `GET /api/home` answers `jailed` and `jail_env` so the picker states the
-  limit before the first 403.
+  leaves no partial checkout. The jail reaches the picker only through a refusal: `GET /api/home` answers
+  the home it opens at and nothing about the jail.
 - Tests: `backend/fsutil/hostroot_test.go`, `backend/server/handler_fs_hostroot_test.go`,
   `backend/server/server_hostroot_test.go`, `backend/managers/project_hostroot_test.go`,
   `backend/server/handler_fs_sandbox_test.go`, `backend/server/handler_fs_upload_test.go`.

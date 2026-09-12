@@ -105,9 +105,6 @@ func (h *HostRoot) unrestricted() bool { return h != nil && h.widened }
 // Unrestricted reports whether host-wide access was granted by the environment.
 func (h *HostRoot) Unrestricted() bool { return h.unrestricted() }
 
-// Jailed is the inverse of Unrestricted.
-func (h *HostRoot) Jailed() bool { return !h.unrestricted() }
-
 // Roots returns the distinct directories the jail allows, as declared.
 func (h *HostRoot) Roots() []string {
 	if h == nil {

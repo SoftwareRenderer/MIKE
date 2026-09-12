@@ -306,9 +306,6 @@ func TestHostRootWideningIsTheDecisionItWasBuiltWith(t *testing.T) {
 	if !wide.Unrestricted() {
 		t.Fatal("a policy built widened is not unrestricted")
 	}
-	if wide.Jailed() {
-		t.Error("Jailed() = true while unrestricted")
-	}
 	if err := wide.MkdirAll(filepath.Join(elsewhere, "widened"), 0o700); err != nil {
 		t.Errorf("MkdirAll outside every root = %v, want success", err)
 	}
@@ -323,9 +320,6 @@ func TestHostRootWideningIsTheDecisionItWasBuiltWith(t *testing.T) {
 	if jailed.Unrestricted() {
 		t.Error("a policy built jailed is unrestricted")
 	}
-	if !jailed.Jailed() {
-		t.Error("Jailed() = false while jailed")
-	}
 	if _, err := jailed.ReadDir(elsewhere); !errors.Is(err, ErrHostRoot) {
 		t.Errorf("ReadDir outside the roots = %v, want ErrHostRoot", err)
 	}
@@ -334,7 +328,7 @@ func TestHostRootWideningIsTheDecisionItWasBuiltWith(t *testing.T) {
 	// measured against the same jail, and the roots quoted in a refusal must be the roots that
 	// refused — which is why this reads an argument and not the environment.
 	t.Setenv(AllowRootFSEnv, "1")
-	if !jailed.Jailed() || jailed.Unrestricted() {
+	if jailed.Unrestricted() {
 		t.Error("a policy in use widened itself from the environment after construction")
 	}
 }
@@ -380,9 +374,6 @@ func TestHostRootReportsAUniversalRoot(t *testing.T) {
 // A nil policy is valid and fails closed, the way MountPolicy already is.
 func TestNilHostRootFailsClosed(t *testing.T) {
 	var h *HostRoot
-	if !h.Jailed() {
-		t.Error("a nil policy must report itself jailed")
-	}
 	if h.Unrestricted() {
 		t.Error("a nil policy must never report itself unrestricted")
 	}
