@@ -436,9 +436,10 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	// Stop the executor if the task is moved out of In Progress.
 	// This ensures the goroutine exits and HasRunningTasks() reflects the new state.
 	if originalStatus == types.StatusInProgress && targetStatus != types.StatusInProgress && h.executor != nil {
-		wasInFlight := task.ExecutionState == types.ExecStateRunning || task.ExecutionState == types.ExecStatePullingImage
+		wasTurn := task.ExecutionState == types.ExecStateRunning || task.ExecutionState == types.ExecStatePullingImage ||
+			task.ExecutionState == types.ExecStatePaused
 		_ = h.executor.StopTask(taskID)
-		if wasInFlight {
+		if wasTurn {
 			task.ExecutionState = types.ExecStateIdle
 			task.Output = ""
 		}
