@@ -35,11 +35,6 @@
         onSummarizeCancel?: () => void;
         isSummarizing?: boolean;
         onInput?: (value: string) => void;
-        /**
-         * Focus entered / left the chat form as a whole — one call each way. The sender is
-         * the form (input, attach, send, model bar), not the textarea alone. See
-         * handleFormFocusOut.
-         */
         onInputFocus?: () => void;
         onInputBlur?: () => void;
     }
@@ -118,26 +113,16 @@
         }
     }
 
-    function handleFocus() {
+    function handleInputFocus() {
         // On mobile, scroll the textarea into view when the keyboard appears.
         // This is a fallback for browsers with limited visualViewport support (e.g., Firefox Android).
         if (textareaEl) {
             textareaEl.scrollIntoView({ block: 'end', behavior: 'instant' });
         }
-    }
-
-    function handleFormFocusIn(e: FocusEvent) {
-        const from = e.relatedTarget as Node | null;
-        if (from && formEl?.contains(from)) return;
         onInputFocus?.();
     }
 
-    /**
-     * Focus leaving the chat form for good. Landing on one of the form's own controls is
-     * a move, and so is the @ mention list: it renders outside the form and hands focus
-     * back to the textarea as soon as a row is picked.
-     */
-    function handleFormFocusOut(e: FocusEvent) {
+    function handleInputBlur(e: FocusEvent) {
         const next = e.relatedTarget as Node | null;
         if (next && formEl?.contains(next)) return;
         if (mention.isOpen) return;
@@ -214,7 +199,7 @@
 
     </script>
 
-<form class="chat-form" bind:this={formEl} onfocusin={handleFormFocusIn} onfocusout={handleFormFocusOut} onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+<form class="chat-form" bind:this={formEl} onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
     <!-- Model selector bar -->
     {#if showModelSelector}
         <div class="model-bar">
@@ -288,7 +273,8 @@
             onkeydown={handleKeydown}
             onpaste={intake.handlePaste}
             oninput={(e) => { autoResize(); mention.handleInput(); }}
-            onfocus={handleFocus}
+            onfocus={handleInputFocus}
+            onblur={handleInputBlur}
         ></textarea>
         <button type="button" class="btn-attach" onclick={() => fileInputEl?.click()} aria-label={t('chat.common.attachFile')} title={t('chat.common.attachFile')} disabled={disabled || isLoading}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
