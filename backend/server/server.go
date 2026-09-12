@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -117,6 +118,31 @@ func requestWaitReporter(kind, idAttr string) keylock.WaitReport {
 		logging.For(logging.Git).With(idAttr, id).Warnf(
 			"waited %s for the %s's git operations - another one is still running", waited.Round(time.Second), kind)
 	}
+}
+
+// readTotalMemMB reads MemTotal from /proc/meminfo and returns it in MB.
+// Returns 0 on any read error, which disables the memory gate.
+func readTotalMemMB() int64 {
+	data, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		logging.For(logging.Startup).Warnf("reading /proc/meminfo: %v — memory gate disabled", err)
+		return 0
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "MemTotal:") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			return 0
+		}
+		kb, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil {
+			return 0
+		}
+		return kb / 1024 // kB → MB
+	}
+	return 0
 }
 
 // sandboxMemoryPeakSink is the sandbox manager's receiver for a container's final peak memory:
@@ -313,6 +339,16 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config) (*Server, error) {
 	s.executor = kanbanexec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr, agentRegistry, s.extLSPMgr, commitQueue)
 	s.executor.SetLLMAdapter(s.llmAdapter)
 	s.executor.RecoverStaleTasks()
+	// Wire the sandbox memory budget: 90% of total physical memory; 0 total disables the gate.
+	if totalMB := readTotalMemMB(); totalMB > 0 {
+		const memPct = 90
+		s.executor.MemGate().SetCapacity(totalMB * memPct / 100)
+		memSup := kanbanexec.NewMemorySupervisor(store, s.executor.MemGate(), s.executor, kanbanexec.DefaultMemSupervisorInterval)
+		memSup.Start()
+		defer s.reg(stageMemorySupervisor, "memory supervisor", memSup.Stop)()
+		logging.For(logging.Startup).Infof("memory supervisor: gate capacity %d MB (%d%% of %d MB total)",
+			totalMB*memPct/100, memPct, totalMB)
+	}
 	s.terminalMgr.SetAgentRegistry(agentRegistry)
 
 	s.taskHandler = managers.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, commitQueue, s.sandboxMgr)

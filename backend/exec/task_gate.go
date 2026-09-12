@@ -67,6 +67,46 @@ func (te *TaskExecutor) releaseTaskSlot(setup *taskExecSetup) {
 	setup.taskSlotURL = ""
 }
 
+// acquireMemSlot blocks until the memory budget has room for this task's estimate.
+// While blocked the task shows as Pending (in_progress+idle). Returns false when
+// the context was cancelled. Non-sandboxed tasks and a disabled gate are pass-through.
+func (te *TaskExecutor) acquireMemSlot(setup *taskExecSetup) bool {
+	if !setup.sandboxEnabled || te.memGate.Capacity() == 0 {
+		return true
+	}
+
+	running, _ := te.store.GetRunningSandboxedTasks()
+	avgPeak := computeAvgPeakMB(running)
+	estimate := estimateTaskMemory(*setup.task, avgPeak)
+	if estimate == 0 {
+		return true
+	}
+
+	setup.task.Status = types.StatusInProgress
+	setup.task.ExecutionState = types.ExecStateIdle
+	te.persistTask(setup)
+	te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
+
+	if err := te.memGate.Acquire(setup.ctx, estimate, nil); err != nil {
+		return false
+	}
+	setup.memAcquiredMB = estimate
+
+	setup.task.ExecutionState = types.ExecStateRunning
+	te.persistTaskClaiming(setup)
+	te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
+	return true
+}
+
+// releaseMemSlot returns this execution's memory budget (no-op when nothing was acquired).
+func (te *TaskExecutor) releaseMemSlot(setup *taskExecSetup) {
+	if setup.memAcquiredMB == 0 {
+		return
+	}
+	te.memGate.Release(setup.memAcquiredMB)
+	setup.memAcquiredMB = 0
+}
+
 // syncTaskSlot ensures the execution holds a slot for wantURL: a no-op when
 // already holding it, otherwise releases any slot on another provider and
 // acquires wantURL (blocking, with queue status — the task may show as

@@ -307,6 +307,8 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		// Release the running-task slot if still held (no-op when released at
 		// an idle transition or never acquired — agent providers skip it).
 		te.releaseTaskSlot(setup)
+		// Return after releaseTaskSlot so the supervisor sees the memory freed on the next tick.
+		te.releaseMemSlot(setup)
 		if r := recover(); r != nil {
 			te.recoverTaskFromPanic(setup, r)
 		}
@@ -322,6 +324,12 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			te.handleCancelledTask(setup.task.ID, setup.projectID)
 			return
 		}
+	}
+
+	// Acquire after the task slot and before sandbox setup so a queued task holds no container.
+	if !te.acquireMemSlot(setup) {
+		te.handleCancelledTask(setup.task.ID, setup.projectID)
+		return
 	}
 
 	// Create sandbox if enabled
