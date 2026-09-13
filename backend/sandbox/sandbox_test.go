@@ -30,49 +30,18 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// cleanupStaleTestContainers removes all kanban-sandbox-* containers,
-// handling overlay filesystem issues that can block normal podman rm -f.
+// cleanupStaleTestContainers removes every kanban-sandbox-* container through the production path,
+// so a test run cannot reach a merged directory its own containers do not own.
 func cleanupStaleTestContainers() {
-	out, err := exec.Command("podman", "ps", "-a",
+	rt := sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{})
+	out, err := rt.PodmanExec("ps", "-a",
 		"--filter", "name=kanban-sandbox-",
-		"--format", "{{.Names}}").CombinedOutput()
+		"--format", "{{.Names}}")
 	if err != nil {
 		return
 	}
-	names := strings.Fields(strings.TrimSpace(string(out)))
-	if len(names) == 0 {
-		return
-	}
-	for _, name := range names {
-		_, rmErr := exec.Command("podman", "rm", "-f", name).CombinedOutput()
-		if rmErr != nil {
-			// Overlay merged dirs can have stale files that block rm -f.
-			// Try cleaning them and retrying.
-			cleanOverlayMergedDirs()
-			_, _ = exec.Command("podman", "rm", "-f", name).CombinedOutput()
-		}
-	}
-}
-
-// cleanOverlayMergedDirs removes stale files from podman overlay merged directories.
-// In rootless mode these are not real mount points — just directories that can
-// accumulate stale files when containers are killed abruptly.
-func cleanOverlayMergedDirs() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	overlayBase := filepath.Join(home, ".local", "share", "containers", "storage", "overlay")
-	entries, err := os.ReadDir(overlayBase)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		mergedDir := filepath.Join(overlayBase, entry.Name(), "merged")
-		files, _ := os.ReadDir(mergedDir)
-		for _, f := range files {
-			_ = os.RemoveAll(filepath.Join(mergedDir, f.Name()))
-		}
+	for _, name := range strings.Fields(strings.TrimSpace(string(out))) {
+		_ = rt.RemoveContainer(name)
 	}
 }
 

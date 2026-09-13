@@ -193,15 +193,13 @@ func podmanLabel(args []string) string {
 	return strings.TrimSpace("podman " + strings.Join(verbs, " "))
 }
 
-// RemoveContainer force-removes a container, handling overlay filesystem issues
-// that can block normal podman rm -f in rootless mode.
+// RemoveContainer force-removes a container, clearing the stale overlay files that can block `rm -f`.
 func (r *Runtime) RemoveContainer(name string) error {
 	_, err := r.PodmanExec("rm", "-f", name)
 	if err == nil {
 		return nil
 	}
-	// Overlay merged dirs can have stale files that block rm -f.
-	r.cleanOverlayMergedDirs()
+	r.cleanOverlayMergedDir(name)
 	_, err = r.PodmanExec("rm", "-f", name)
 	if err == nil {
 		return nil
@@ -209,23 +207,44 @@ func (r *Runtime) RemoveContainer(name string) error {
 	return fmt.Errorf("podman rm -f %s: %w", name, err)
 }
 
-// cleanOverlayMergedDirs removes stale files from podman overlay merged directories.
-func (r *Runtime) cleanOverlayMergedDirs() {
-	home, err := os.UserHomeDir()
+// containerMergedDir returns the merged directory podman reports for one container. The caller
+// deletes what it returns, so an answer that is not one is an error.
+func (r *Runtime) containerMergedDir(name string) (string, error) {
+	if running, err := r.IsRunning(name); err == nil && running {
+		return "", fmt.Errorf("container %s is running", name)
+	}
+	out, err := r.PodmanExec("inspect", "-f", "{{.GraphDriver.Data.MergedDir}}", name)
+	if err != nil {
+		return "", fmt.Errorf("inspect %s: %w", name, err)
+	}
+	return mergedDirFromInspect(name, string(out))
+}
+
+// mergedDirFromInspect judges the inspect answer before anything is deleted from it. A field podman
+// does not have prints "<no value>" rather than failing, so the shape is what does the checking.
+func mergedDirFromInspect(name, inspectOut string) (string, error) {
+	merged := strings.TrimSpace(inspectOut)
+	if !filepath.IsAbs(merged) || merged != filepath.Clean(merged) || filepath.Base(merged) != "merged" {
+		return "", fmt.Errorf("container %s has no overlay merged directory (inspect said %q)", name, merged)
+	}
+	return merged, nil
+}
+
+// cleanOverlayMergedDir empties the one merged directory that can keep `rm -f` from finishing. It
+// comes from inspect, never from a walk of the storage root: the other merged directories there belong
+// to containers this server does not own, and are live mounts.
+func (r *Runtime) cleanOverlayMergedDir(name string) {
+	merged, err := r.containerMergedDir(name)
+	if err != nil {
+		logging.For(logging.Runtime).Infof("overlay cleanup skipped for %s: %v", name, err)
+		return
+	}
+	files, err := os.ReadDir(merged)
 	if err != nil {
 		return
 	}
-	overlayBase := filepath.Join(home, ".local", "share", "containers", "storage", "overlay")
-	entries, err := os.ReadDir(overlayBase)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		mergedDir := filepath.Join(overlayBase, entry.Name(), "merged")
-		files, _ := os.ReadDir(mergedDir)
-		for _, f := range files {
-			_ = os.RemoveAll(filepath.Join(mergedDir, f.Name()))
-		}
+	for _, f := range files {
+		_ = os.RemoveAll(filepath.Join(merged, f.Name()))
 	}
 }
 
