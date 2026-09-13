@@ -1242,9 +1242,9 @@ func TestHandleCommitAndDone_CommitsTheParentsOwnWorkAfterASubtaskMerge(t *testi
 	}
 }
 
-// TestHandleCommitAndDone_RefusesWorktreeWithUnresolvedConflict: staging a conflicted file marks
-// it resolved, so the click must refuse.
-func TestHandleCommitAndDone_RefusesWorktreeWithUnresolvedConflict(t *testing.T) {
+// TestHandleCommitAndDone_HandsWorktreeConflictToTheResolver: the click finds the worktree
+// conflicted by a subtask merge, so the model resolves it and the armed click completes.
+func TestHandleCommitAndDone_HandsWorktreeConflictToTheResolver(t *testing.T) {
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	h.commitQueue = exec.NewCommitQueue()
 	proj, err := s.GetProject(projID)
@@ -1275,16 +1275,37 @@ func TestHandleCommitAndDone_RefusesWorktreeWithUnresolvedConflict(t *testing.T)
 	}
 
 	rr := postCommitAndDone(t, h, projID, parent.ID)
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("commit-and-done status = %d, want 409; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("commit-and-done status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
+
 	updated, err := s.GetTask(projID, parent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !updated.HasMergeConflict {
+		t.Error("the conflict must be flagged for the resolving turn")
+	}
 	if updated.Status == types.StatusDone {
 		t.Error("a task whose work could not be committed must not be Done")
 	}
+	if !h.executor.CommitAndDonePending(parent.ID) {
+		t.Error("the click must stay armed so the resolving turn completes it")
+	}
+	var handedToModel bool
+	msgs, err := h.store.GetTaskMessages(parent.ID, parent.CurrentThreadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range msgs {
+		if m.Role == "user" && strings.Contains(m.Content, "conflict") {
+			handedToModel = true
+		}
+	}
+	if !handedToModel {
+		t.Error("the conflict was never handed to the model")
+	}
+
 	wtPath, err := h.worktreeMgr.WorktreePath(parent.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -1296,7 +1317,6 @@ func TestHandleCommitAndDone_RefusesWorktreeWithUnresolvedConflict(t *testing.T)
 	if !strings.Contains(string(onDisk), "the parent's edit") {
 		t.Errorf("the parent's own edit was discarded instead of left to resolve: %q", onDisk)
 	}
-
 	onBranch := gitOutput(t, proj.Path, "show", parent.Branch+":README.md")
 	if strings.Contains(onBranch, "<<<<<<<") {
 		t.Errorf("conflict markers were committed onto the branch: %q", onBranch)

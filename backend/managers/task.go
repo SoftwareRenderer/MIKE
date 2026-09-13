@@ -816,6 +816,80 @@ func (h *TaskHandler) HandleCommitPreviewStream(w http.ResponseWriter, r *http.R
 
 // HandleCommitAndDone commits the worktree changes, merges into the origin branch, and moves the task to Done.
 // Operations are serialized per project to prevent git race conditions.
+// handConflictToAgent is what the click does with a conflict instead of refusing it: flag the
+// task, arm the click so the resolving turn finishes it, and hand the conflicted files to the model.
+func (h *TaskHandler) handConflictToAgent(w http.ResponseWriter, projectID, taskID string, task *types.Task) {
+	if h.executor != nil {
+		h.executor.ArmCommitAndDone(taskID)
+	}
+	// Already resolving a merge conflict — don't add duplicate messages
+	if task.ExecutionState == types.ExecStateRunning {
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("already resolving merge conflict, skipping")
+		h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+		httputil.JSONResponse(w, http.StatusOK, task)
+		return
+	}
+	// Merge conflict — trigger LLM to resolve via user message (handleLazyStart)
+	logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("merge conflict detected, triggering LLM resolution")
+
+	// Get conflicted files for the prompt
+	worktreePath, _ := h.worktreeMgr.WorktreePath(taskID)
+	conflictedFiles := exec.GetConflictedFiles(worktreePath)
+
+	// Render merge conflict prompt template
+	userContent, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
+		TaskBranch:      task.Branch,
+		TargetBranch:    h.executor.ResolveMergeTarget(projectID, task),
+		TaskTitle:       task.Title,
+		TaskDescription: task.Prompt,
+		ConflictedFiles: conflictedFiles,
+	})
+	if pErr != nil {
+		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to render merge conflict prompt: %v", pErr)
+		userContent = "Resolve the merge conflicts and complete the task"
+	}
+
+	// Persist system message in chat.
+	// The executor loop's HasMergeConflict path handles the post-resolution
+	// merge (stage resolved files, commit, pop stash, MergeBranch, mark done).
+	h.store.CreateTaskMessage(&types.TaskMessage{
+		ID:        uuid.New().String(),
+		TaskID:    taskID,
+		ThreadID:  task.CurrentThreadID,
+		Role:      "system",
+		Content:   "Merge conflict detected during commit — resolving with agent",
+		CreatedAt: time.Now().UTC(),
+	})
+
+	// Persist user message with conflict context
+	h.store.CreateTaskMessage(&types.TaskMessage{
+		ID:        uuid.New().String(),
+		TaskID:    taskID,
+		ThreadID:  task.CurrentThreadID,
+		Role:      "user",
+		Content:   userContent,
+		CreatedAt: time.Now().UTC(),
+	})
+
+	// Move task to In Progress so the board reflects the LLM is working
+	task.Status = types.StatusInProgress
+	task.UpdatedAt = time.Now()
+	_ = h.store.UpdateTask(task)
+
+	// Release commit lock BEFORE starting LLM (defer release handles this on return)
+	// Start LLM to resolve — handleLazyStart will set executionState=running
+	if h.executor != nil {
+		h.executor.ForwardUserMessage(projectID, taskID, stream.UserMessage{
+			Content:   userContent,
+			ModelName: task.ModelName,
+			ServerURL: task.LlamaServerURL,
+		})
+	}
+
+	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+	httputil.JSONResponse(w, http.StatusOK, task)
+}
+
 func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -848,13 +922,24 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	if !worktreeExists {
 		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("worktree does not exist, skipping commit")
 	}
-	// Answered before the commit message is generated; see StageIndexedFiles for the rule.
+	// A conflict left in the worktree is work the click asked for, not a reason to say no. It goes to
+	// the resolver like any other; committing it instead would mean `git add`, which marks it resolved.
 	var commitOut string
 	var commitErr error
 	if worktreeExists {
 		if unmerged := h.worktreeMgr.StageIndexedFiles(taskID); len(unmerged) > 0 {
 			unlockWorktree()
-			httputil.Fail(w, errs.Conflict("the worktree has an unresolved conflict"), "commit staged work", "task not found")
+			logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("worktree has %d unmerged file(s) at commit: %s", len(unmerged), strings.Join(unmerged, ", "))
+			if err := h.store.SetTaskMergeConflict(taskID, projectID, true); err != nil {
+				httputil.Fail(w, err, "flag merge conflict", "task not found")
+				return
+			}
+			conflicted, err := h.store.GetTask(projectID, taskID)
+			if err != nil {
+				httputil.Fail(w, err, "reload task", "task not found")
+				return
+			}
+			h.handConflictToAgent(w, projectID, taskID, conflicted)
 			return
 		}
 		commitMsg := body.CommitMessage
@@ -915,77 +1000,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	// Reload task — MergeBranch may have set merge conflict flag
 	task, _ = h.store.GetTask(projectID, taskID)
 	if task.HasMergeConflict {
-		// The turn that resolves this conflict has to finish the click that produced it, and only here
-		// do we learn the click did. Armed ahead of the hand-off and the early return below.
-		if h.executor != nil {
-			h.executor.ArmCommitAndDone(taskID)
-		}
-		// Already resolving a merge conflict — don't add duplicate messages
-		if task.ExecutionState == types.ExecStateRunning {
-			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("already resolving merge conflict, skipping")
-			h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-			httputil.JSONResponse(w, http.StatusOK, task)
-			return
-		}
-		// Merge conflict — trigger LLM to resolve via user message (handleLazyStart)
-		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("merge conflict detected, triggering LLM resolution")
-
-		// Get conflicted files for the prompt
-		worktreePath, _ := h.worktreeMgr.WorktreePath(taskID)
-		conflictedFiles := exec.GetConflictedFiles(worktreePath)
-
-		// Render merge conflict prompt template
-		userContent, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
-			TaskBranch:      task.Branch,
-			TargetBranch:    h.executor.ResolveMergeTarget(projectID, task),
-			TaskTitle:       task.Title,
-			TaskDescription: task.Prompt,
-			ConflictedFiles: conflictedFiles,
-		})
-		if pErr != nil {
-			logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to render merge conflict prompt: %v", pErr)
-			userContent = "Resolve the merge conflicts and complete the task"
-		}
-
-		// Persist system message in chat.
-		// The executor loop's HasMergeConflict path handles the post-resolution
-		// merge (stage resolved files, commit, pop stash, MergeBranch, mark done).
-		h.store.CreateTaskMessage(&types.TaskMessage{
-			ID:        uuid.New().String(),
-			TaskID:    taskID,
-			ThreadID:  task.CurrentThreadID,
-			Role:      "system",
-			Content:   "Merge conflict detected during commit — resolving with agent",
-			CreatedAt: time.Now().UTC(),
-		})
-
-		// Persist user message with conflict context
-		h.store.CreateTaskMessage(&types.TaskMessage{
-			ID:        uuid.New().String(),
-			TaskID:    taskID,
-			ThreadID:  task.CurrentThreadID,
-			Role:      "user",
-			Content:   userContent,
-			CreatedAt: time.Now().UTC(),
-		})
-
-		// Move task to In Progress so the board reflects the LLM is working
-		task.Status = types.StatusInProgress
-		task.UpdatedAt = time.Now()
-		_ = h.store.UpdateTask(task)
-
-		// Release commit lock BEFORE starting LLM (defer release handles this on return)
-		// Start LLM to resolve — handleLazyStart will set executionState=running
-		if h.executor != nil {
-			h.executor.ForwardUserMessage(projectID, taskID, stream.UserMessage{
-				Content:   userContent,
-				ModelName: task.ModelName,
-				ServerURL: task.LlamaServerURL,
-			})
-		}
-
-		h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-		httputil.JSONResponse(w, http.StatusOK, task)
+		h.handConflictToAgent(w, projectID, taskID, task)
 		return
 	}
 
