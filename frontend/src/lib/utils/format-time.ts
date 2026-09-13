@@ -164,3 +164,12 @@ export function formatTimestamp(isoStr: string): { display: string; tooltip: str
         return { display: t('time.onDateAt', { date: shortDate, time: timeStr }), tooltip: fullDate };
     }
 }
+
+/**
+ * The age of what is on screen, for the banner that admits there is no live stream.
+ * `null` — nothing has landed since this client opened — answers empty, not "just now".
+ */
+export function dataAgeText(lastSyncedAt: number | null): string {
+    if (lastSyncedAt === null || !Number.isFinite(lastSyncedAt)) return '';
+    return timeAgo(lastSyncedAt);
+}

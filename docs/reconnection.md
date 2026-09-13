@@ -13,13 +13,38 @@ When the WebSocket drops and reconnects, the current view (board, task view) upd
   (the exceptions are a config carrying a real provider API key and a clone URL carrying credentials —
   both refused, never persisted);
   `online` flushes the queue and calls `reconnectNow()` to skip backoff.
-- Board refresh on `visibilitychange` handles phone-sleep cases.
+- Board refresh on `visibilitychange` handles phone-sleep cases. The listener is on `window`, which
+  is where the browser's own event bubbles to from `document` — a synthetic `new Event(...)` fired at
+  `document` does not bubble and reaches nothing.
 
 **Tests:** e2e `reconnect-refresh.spec.ts`; the merge above is held by
 `src/lib/utils/__tests__/chat-history-merge.unit.ts`, which drives the real stream handler and the real
 message builder. Since `page.route` doesn't intercept WebSockets in
 Playwright, the spec wraps the `WebSocket` constructor via `addInitScript` and uses `serverApi()` to
-advance state.
+advance state. `ws-stale-reconnect.spec.ts` drops a live socket the same way for the banner and the
+wake-up fetch.
+
+## What a reconnect brings back, and what the client must fetch
+
+`?sync=1` replays the ring buffer of the **connection** that asks (`bufferRaw` → `clientState.ringBuffer`
+in `backend/stream/app_stream.go`), and a reconnect is a new connection with an empty one — so a
+reconnected app stream receives `project_counts` and whatever its own `subscribe_project` answers, and
+nothing that happened while it was down. That is why `onConnected(true)` runs `silentRefresh()`, why the
+wake-up path refetches the board over HTTP, and why `TaskChat` reloads history from the DB. The replay
+that does survive a reconnect is the **per-task** one (`getTaskBuffer`, replayed on `subscribe_task`),
+which is why a task's buffer is cleared the moment its turn ends.
+
+## The boot offer and one stream per page
+
+`/api/auth/session` decides whether the app or the offline mirror is on screen. A 2 s timer *offers*
+the mirror (`hasLocalCache`) when a request has not answered and the mirror holds projects; the answer
+that arrives afterwards retracts the offer (`hasLocalCache = false`) and the copy says the wait is slow,
+not that the server is unreachable. Only one `/api/stream` is open at a time (`closeAppStream()` in
+`App.svelte`): the field holding it is a single reference, so a second `createAppStream` leaves the
+first connected, still firing handlers, and unreachable to close — the exact shape the boot race took
+when the user clicked Offline Mode and the session then answered.
+
+**Tests:** e2e `boot-slow-session.spec.ts` (the offer comes down by itself; one live stream afterwards).
 
 ## The reload meets the replay buffer
 
@@ -45,9 +70,9 @@ hand it a task that belongs to another project, and each is answered where it ar
   `selectProject` capture the project id before their awaits and write through `applyBoard(board,
   projectId)`, which drops the write when that project is no longer on screen.
 - **A board frame from a project the client left.** `task_updated` and friends go only to that
-  project's subscribers, but the per-client ring buffer (`bufferRaw` in `backend/stream/app_stream.go`)
-  holds every frame the connection was ever sent and replays all of it on a `?sync=1` reconnect, and a
-  frame already in flight outlives `unsubscribe_project`. So the client checks what the frame names:
+  project's subscribers, but a frame already in flight outlives `unsubscribe_project`, and the
+  per-task replay buffer (`getTaskBuffer`) answers a `subscribe_task` on a *new* connection. So the
+  client checks what the frame names:
   `mergeTaskUpdateIntoBoard` (`src/lib/utils/task-utils.ts`) appends an unknown task only when its
   `project_id` is the project on screen. `commit_status` and `task_deleted` name no project, so those
   are matched against the tasks the board already holds.
@@ -58,6 +83,26 @@ While a switched-to project's live board is in flight the screen holds that proj
 (`showCachedBoard`, from `board:` + the project id), never the previous project's list — which is why
 the list is emptied before the switch is painted. The cache banner stays off unless the socket is down,
 so a slow but live switch does not claim to be stale.
+
+## The age line measures data, not the socket
+
+While there is no stream, the banner adds "Data from {age}". The clock it counts from is the moment
+data **landed** — `refreshBoard`, `silentRefresh` and `selectProject` write it, and a board read from
+the mirror keeps the mirror's own `cachedAt`. `null` (nothing has landed since this client opened)
+answers an empty string, and the line is left out: never "just now".
+
+Two things used to make the line unable to leave "just now", and neither is a clock any more: it was
+re-zeroed on every `onclose` (the retry gap is at most 30 s against a 60 s floor), and a board served
+from the cache stamped itself as arriving now. `dataAgeText` (`$lib/utils/format-time.ts`) holds the
+rule and `timeAgo` holds the rungs.
+
+The countdown and the age are not in an announced region: they change every second. The banner is
+plain markup and `App.svelte`'s `sr-only` region carries the transitions only (down, back) — one
+sentence per change instead of ~29 a minute.
+
+**Tests:** `src/lib/utils/__tests__/format-time.unit.ts` (unknown ≠ just now); e2e
+`ws-stale-reconnect.spec.ts` (a drop announces one sentence with no digits in it, and the way back is
+announced).
 
 **Tests:** `src/lib/utils/__tests__/task-utils.unit.ts` (a frame of another project never appends) and
 `src/lib/api/__tests__/queue-board-scope.unit.ts` (a queued action of another project never replays).
@@ -173,3 +218,18 @@ Both failure classes keep the DOM `name` (`AbortError`, `TypeError`) because a c
 silently turns a cancellation into an error toast, or a queueable write into a failure — and **the name is
 the test, never `instanceof DOMException`**: these are `Error`s that carry the name, so the call is
 `isAborted(e)`. Tests: `api/__tests__/fetch-failure.unit.ts`, `api/__tests__/send-queue.unit.ts`.
+
+## A refused queued write is not a delivered one
+
+A queued action leaves the queue for two reasons: the server applied it, or it refused it outright
+(404, 403 — a task deleted while the tab was shut, a project that no longer exists). `getQueuedTaskIds()`
+answers "no" for both, so a UI that clears a "queued" marker on that answer reports a refusal as a
+delivery. `doFlush` therefore records what it dropped (`getDroppedTaskIds()` / `getDroppedActions()` in
+`api/queue.ts`), the record belongs to one flush, and a fresh write about a task retires its verdict.
+
+On top of that: `App.svelte` toasts the count from `onQueueFlushed`, and `TaskChat` rewrites the
+queued notice under its own code (`send_refused`) rather than deleting it — a notice still wearing
+`send_queued` would be cleared by the *next* flush's reading.
+
+**Tests:** `api/__tests__/queue-refused.unit.ts` (refused ≠ flushed, reported once, retired by a new
+write).

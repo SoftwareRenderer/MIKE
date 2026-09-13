@@ -19,7 +19,6 @@
         threads,
         awaitingResponse,
         lockWait = null,
-        connected,
         queuePosition,
         queueEstimatedWait,
         promptProgress,
@@ -31,7 +30,6 @@
         projectId,
         taskId,
         onDismissError,
-        onRetryConnect,
         onThreadSwitch,
         isSwitching,
         onMsgDelete,
@@ -52,7 +50,6 @@
         threads: Thread[];
         awaitingResponse: boolean;
         lockWait?: LockWait | null;
-        connected: boolean;
         queuePosition: number;
         queueEstimatedWait: number;
         promptProgress: number;
@@ -64,7 +61,6 @@
         projectId: string;
         taskId: string;
         onDismissError: (messageId: string) => Promise<void>;
-        onRetryConnect: () => void;
         onThreadSwitch: (threadId: string) => Promise<void>;
         isSwitching?: boolean;
         onMsgDelete: (entry: ChatEntry) => void;
@@ -296,9 +292,6 @@
                                     <line x1="12" y1="17" x2="12.01" y2="17"/>
                                 </svg>
                                 <span class="error-code">{entry.error?.code || 'error'}</span>
-                                {#if entry.error?.code === 'ws_disconnected'}
-                                    <span class="error-reconnecting"><span class="spinner"></span> {t('chat.entries.reconnecting')}</span>
-                                {/if}
                                 <button class="btn-dismiss" onclick={() => onDismissError(entry.id)} title={t('chat.entries.dismissError')} aria-label={t('chat.entries.dismissError')}>
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                         <line x1="18" y1="6" x2="6" y2="18"/>
@@ -307,15 +300,6 @@
                                 </button>
                             </div>
                             <div class="error-message">{entry.content}</div>
-                            {#if entry.error?.code === 'ws_disconnected'}
-                                <button class="btn-retry" onclick={onRetryConnect} title={t('chat.entries.retryTip')}>
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                        <polyline points="23 4 23 10 17 10"/>
-                                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-                                    </svg>
-                                    {t('chat.entries.retryNow')}
-                                </button>
-                            {/if}
                         </div>
                     </div>
                 {:else if entry.role === 'summarization'}
@@ -430,7 +414,7 @@
 
         <!-- The wait line. Without a lock wait it shows on the provider's request/task slots, which is what
              awaitingResponse means; a lock wait shows on its own, since nothing of ours is in flight. -->
-        {#if lockWait || (awaitingResponse && connected && (taskExecutionState === 'running' || (taskStatus === 'in_progress' && taskExecutionState === 'idle')))}
+        {#if lockWait || (awaitingResponse && (taskExecutionState === 'running' || (taskStatus === 'in_progress' && taskExecutionState === 'idle')))}
             <QueueIndicator
                 {lockWait}
                 {queuePosition}
@@ -614,14 +598,6 @@
         text-transform: uppercase;
         letter-spacing: 0.3px;
     }
-    .error-reconnecting {
-        font-size: 0.75rem;
-        color: var(--color-status-yellow);
-        margin-left: 4px;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-    }
     .error-message {
         font-size: 0.8125rem;
         color: var(--color-text-secondary);
@@ -629,23 +605,6 @@
         white-space: pre-wrap;
         word-break: break-word;
     }
-    .btn-retry {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        margin-top: 8px;
-        padding: 4px 10px;
-        border-radius: var(--radius-sm);
-        font-size: 0.75rem;
-        font-weight: 500;
-        background: var(--color-status-red-dark);
-        color: white;
-        border: none;
-        cursor: pointer;
-        transition: all 0.15s ease;
-    }
-    .btn-retry:hover { opacity: 0.85; }
-
     .summarization-entry {
         padding: 8px 0;
     }

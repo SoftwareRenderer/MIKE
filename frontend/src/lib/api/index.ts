@@ -19,6 +19,8 @@ export {
     isTransientError,
     getQueuedTaskIds,
     getQueuedDeleteTaskIds,
+    getDroppedTaskIds,
+    getDroppedActions,
     flushQueueNow,
     waitForFlush,
     applyQueuedActionsToBoard,

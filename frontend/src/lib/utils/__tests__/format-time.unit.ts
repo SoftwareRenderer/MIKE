@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { formatRelativeTime, formatTimestamp, formatElapsed, formatDuration, timeAgo } from '$lib/utils/format-time';
+import { formatRelativeTime, formatTimestamp, formatElapsed, formatDuration, timeAgo, dataAgeText } from '$lib/utils/format-time';
 import { registerCatalog, setLocale } from '$lib/i18n/runtime.svelte';
 
 const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
@@ -60,6 +60,21 @@ describe('timeAgo', () => {
         expect(timeAgo('not-a-date')).toBe('');
         expect(timeAgo('')).toBe('');
         expect(timeAgo(NaN)).toBe('');
+    });
+});
+
+describe('dataAgeText', () => {
+    it('answers nothing when nothing has landed — never synced is not "just now"', () => {
+        // The banner only shows this with no live stream, so "just now" is the one claim it cannot make.
+        expect(dataAgeText(null)).toBe('');
+        expect(dataAgeText(NaN)).toBe('');
+        expect(dataAgeText(Infinity)).toBe('');
+    });
+
+    it('ages a board that landed a while ago instead of holding it at "just now"', () => {
+        expect(dataAgeText(Date.now() - 30_000)).toBe('just now');
+        expect(dataAgeText(Date.now() - 3 * HOUR)).toBe('3h ago');
+        expect(dataAgeText(ago(2 * DAY).getTime())).toBe('2d ago');
     });
 });
 

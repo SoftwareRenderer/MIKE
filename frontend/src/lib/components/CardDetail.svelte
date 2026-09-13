@@ -31,7 +31,7 @@
             DiffViewerComponent = mod.default;
             diffViewerLoading = false;
         }).catch((e) => {
-            console.error('[diff] Failed to load DiffViewer:', e);
+            reportChunkFailure(e);
             diffViewerLoading = false;
         });
     }
@@ -46,10 +46,14 @@
         import('./FileEditor.svelte').then((mod) => {
             FileEditorComponent = mod.default;
             fileEditorLoading = false;
-        }).catch(() => { fileEditorLoading = false; });
+        }).catch((e) => {
+            reportChunkFailure(e);
+            fileEditorLoading = false;
+        });
     }
     import MobileTabBar from './CardDetail/MobileTabBar.svelte';
     import { useMemoryAlert } from '$lib/composables/use-memory-alert.svelte';
+    import { reportChunkFailure } from '$lib/services/chunk-failure';
     import { memoryAlertSentences, projectMemoryLimitMB } from '$lib/utils/memory-stats';
     import TaskHeader from './CardDetail/TaskHeader.svelte';
     import BoardOverview from './CardDetail/BoardOverview.svelte';

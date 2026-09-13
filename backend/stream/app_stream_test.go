@@ -452,6 +452,34 @@ func TestTaskBufferClearedOnTerminalStatus(t *testing.T) {
 	}
 }
 
+// TestSyncReplayIsPerConnection: `?sync=1` replays the connection's own ring buffer, and a reconnect
+// is a new connection with an empty one, so the client must refetch the board over HTTP.
+func TestSyncReplayIsPerConnection(t *testing.T) {
+	asm := NewAppStreamManager(nil, nil)
+	before := &websocket.Conn{}
+	after := &websocket.Conn{}
+	register := func(conn *websocket.Conn) {
+		asm.mu.Lock()
+		defer asm.mu.Unlock()
+		asm.clients[conn] = &clientState{conn: conn, bufSize: DefaultBufferSize}
+	}
+	register(before)
+
+	asm.bufferRaw([]byte(`{"type":"task_updated","task_id":"task-1"}`))
+	if got := len(asm.getBuffer(before)); got != 1 {
+		t.Fatalf("buffer for the connection that was open = %d frames, want 1", got)
+	}
+
+	// The reconnect: same client, new connection, nothing to replay.
+	asm.mu.Lock()
+	delete(asm.clients, before)
+	asm.mu.Unlock()
+	register(after)
+	if got := len(asm.getBuffer(after)); got != 0 {
+		t.Fatalf("buffer for a reconnecting connection = %d frames, want 0", got)
+	}
+}
+
 // TestEveryExecStateEndsOrContinuesTheTurn: an ExecutionState that is neither in flight
 // nor terminal leaves its frames replayable forever, and no compiler error announces it.
 func TestEveryExecStateEndsOrContinuesTheTurn(t *testing.T) {

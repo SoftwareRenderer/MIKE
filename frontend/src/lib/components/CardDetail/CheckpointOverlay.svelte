@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { DiffFile } from '$lib/types/diff';
     import { t } from '$lib/i18n';
-
+    import { reportChunkFailure } from '$lib/services/chunk-failure';
     // DiffViewer is lazy-loaded by CardDetail — use dynamic import here too
     let DiffViewerComponent: typeof import('../DiffViewer.svelte').default | null = $state(null);
     let diffViewerLoading = $state(false);
@@ -11,7 +11,10 @@
         import('../DiffViewer.svelte').then((mod) => {
             DiffViewerComponent = mod.default;
             diffViewerLoading = false;
-        }).catch(() => { diffViewerLoading = false; });
+        }).catch((e) => {
+            reportChunkFailure(e);
+            diffViewerLoading = false;
+        });
     }
 
     $effect(() => {

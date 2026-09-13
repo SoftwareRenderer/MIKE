@@ -4,11 +4,16 @@ import App from './lib/components/App.svelte';
 import { appStore } from './lib/stores';
 import { applyCachedCatalog } from './lib/i18n/boot';
 import { startAppUpdate } from './lib/services/app-update';
+import { isChunkLoadFailure, reportChunkFailure } from './lib/services/chunk-failure';
 
 // Centralized unhandled promise rejection handler
 // Catches errors from fire-and-forget async operations (storage init, etc.)
 window.addEventListener('unhandledrejection', (event) => {
     const err = event.reason;
+    if (isChunkLoadFailure(err)) {
+        reportChunkFailure(err);
+        return;
+    }
     if (err && err.stack) {
         console.warn('[Unhandled Promise Rejection] Suppressed. Stack:', err.stack);
     } else {

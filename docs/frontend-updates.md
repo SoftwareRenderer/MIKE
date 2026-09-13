@@ -61,6 +61,20 @@ safe document.
 A `waiting` worker that appears on the browser's own initiative (its check on navigation, its 24-hour
 one) is **left waiting**. The open-time check is the only moment anything reloads.
 
+## The chunk that is already gone
+
+The sentence above is also a promise about the click that happens *before* the reload: the panel the
+user asked for is being imported from a URL the new install deleted. Vite's preload helper and the
+engine's import both fail, `main.ts` used to suppress that class of rejection, and what was left was a
+button that did nothing twice. `$lib/services/chunk-failure.ts` is the one place that reports it — one
+toast naming a reload, per page life — and its rule for callers is that the failure must not leave a
+"loading" flag set, because that is what turns one failed fetch into a panel that can never open.
+It classifies the three engine phrasings and nothing else: a `TypeError: Failed to fetch` is a data
+request, and "reload" is the wrong instruction for it.
+
+**Tests:** e2e `stale-chunk-reload.spec.ts` (the notice, and the next click reaching the panel);
+`src/lib/services/__tests__/chunk-failure.unit.svelte.ts` (the classification, one report).
+
 **A new worker only reaches `waiting` when the old one controls a client.** On the first session after
 install — the page loaded before any worker existed, and the worker has no `clientsClaim` — the page is
 not controlled, so the next worker activates instead of waiting. `update()` then answers `current`, no

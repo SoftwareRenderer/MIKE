@@ -2,7 +2,7 @@
     import { onMount, onDestroy, untrack } from 'svelte';
     import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getQueuedTaskIds, getTask } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getQueuedTaskIds, getDroppedTaskIds, getTask } from '$lib/api';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
     import { StreamState } from '$lib/services/stream-state.svelte';
@@ -31,8 +31,6 @@
 
     let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', disabled = false, taskSummarizing = false, hasStagedChanges: hasStagedChangesProp, onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff, onToggleFullscreen, isChatFullscreen, onChatInputFocus, onChatInputBlur, onTaskDone }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; taskExecutionState?: string; disabled?: boolean; taskSummarizing?: boolean; hasStagedChanges?: boolean; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void; onToggleFullscreen?: () => void; isChatFullscreen?: boolean; /** Focus entered / left the chat input — the owner of the maximize decides what that means. */ onChatInputFocus?: () => void; onChatInputBlur?: () => void; /** A Done click in the review bar succeeded — the view that owns navigation decides what happens next. Fires on a commit deferred to a conflict-resolution turn too, where the task stays in progress: the click still meant "I'm finished with it". */ onTaskDone?: () => void } = $props();
 
-    let connected = $state(false);
-    let connecting = $state(true);
     // Owns everything about "follow the latest message" (scroll container,
     // atBottom, pinning). Shared with ChatEntries, which renders both.
     const follow = createChatFollow();
@@ -140,7 +138,6 @@
     let lastSentEntryId: string | null = $state(null); // temp ID of last optimistic entry
     let isStarting = $state(false);
     let isRegenerating = $state(false); // true between regenerate delete and echo arrival
-    let firstConnectDone = $state(false); // track if initial onopen has fired
     let isCommitting = $state(false);
 
     let threadSwitching = $state(false); // true while a thread switch is in-flight
@@ -350,7 +347,7 @@
     }
 
     /** Error codes that are client-side only — never persisted to the DB. */
-    const LOCAL_ERROR_CODES = new Set(['send_queued', 'ws_disconnected']);
+    const LOCAL_ERROR_CODES = new Set(['send_queued', 'send_refused']);
 
     /** Append a client-side error entry (visible but never persisted to the DB). */
     function appendErrorEntry(code: string, message: string) {
@@ -403,7 +400,6 @@
         updateThreadUrl,
         onNewError: () => {
             isRegenerating = false;
-            connected = false;
         },
     });
 
@@ -1071,17 +1067,6 @@
         scroll(true);
     }
 
-    function connect(skipSync = false) {
-        if (connected) return;
-        connecting = true;
-        connected = true;
-        connecting = false;
-        if (!firstConnectDone) {
-            firstConnectDone = true;
-            stream.state.entries = entries.filter(e => !(e.role === 'error' && e.error?.code === 'ws_disconnected'));
-        }
-    }
-
     /** Dismiss a single error message without affecting other messages. */
     async function handleDismissError(messageId: string) {
         const entry = entries.find(e => e.id === messageId);
@@ -1097,14 +1082,6 @@
         } catch (e) {
             console.error('Failed to dismiss error:', e);
         }
-    }
-
-    /** Force immediate reconnection. */
-    function handleRetryConnect() {
-        connected = false;
-        // Remove existing connection lost errors
-        stream.state.entries = entries.filter(e => !(e.role === 'error' && e.error?.code === 'ws_disconnected'));
-        connect();
     }
 
     let destroyed = $state(false);
@@ -1237,7 +1214,6 @@
             } catch {
                 // Task may not exist yet
             }
-            connect();
             // Scroll to bottom after history is loaded and rendered.
             // pin() re-pins for a few frames, so the list need not be final yet.
             scroll();
@@ -1318,15 +1294,21 @@
     let unsubQueue: (() => void) | null = null;
     onMount(() => {
         unsubQueue = onQueueChanged(() => {
-            const queuedIds = getQueuedTaskIds();
-            // Only when nothing is queued for this task anymore was the queued
-            // message actually flushed — clear its queued indicator and drop the
-            // client-side notice (the notice is local-only, never persisted).
-            if (!queuedIds.has(taskId)) {
-                stream.state.entries = stream.state.entries
-                    .map(e => e.queued ? { ...e, queued: false } : e)
-                    .filter(e => !(e.role === 'error' && e.error?.code === 'send_queued'));
+            // Two different reasons for an empty queue: an applied action, or one the server
+            // refused. Only the first means the notice can go away.
+            if (getQueuedTaskIds().has(taskId)) return;
+            const cleared = stream.state.entries.map(e => (e.queued ? { ...e, queued: false } : e));
+            if (!getDroppedTaskIds().has(taskId)) {
+                stream.state.entries = cleared.filter(e => !(e.role === 'error' && e.error?.code === 'send_queued'));
+                return;
             }
+            // Its own code: a refusal keeps its notice even after the next flush clears the record.
+            const message = t('chat.task.sendRefused');
+            stream.state.entries = cleared.map(e =>
+                e.role === 'error' && e.error?.code === 'send_queued'
+                    ? { ...e, content: message, error: { ...e.error, code: 'send_refused', message } }
+                    : e
+            );
         });
     });
 
@@ -1370,9 +1352,9 @@
 </script>
 
 <div class="task-chat">
-    <!-- Live region for screen reader announcements -->
+    <!-- Only the turn itself is announced; a state that never changes is noise twice per reply. -->
     <div class="sr-only" aria-live="polite" aria-atomic="true">
-        {#if isLoading && !connected}{t('chat.task.connecting')}{:else if isLoading}{t('chat.task.responding')}{:else if connected}{t('chat.task.connected')}{/if}
+        {#if isLoading}{t('chat.task.responding')}{/if}
     </div>
     <ChatEntries
         {entries}
@@ -1382,7 +1364,6 @@
         {threads}
         {awaitingResponse}
         {lockWait}
-        {connected}
         {queuePosition}
         {queueEstimatedWait}
         {promptProgress}
@@ -1395,7 +1376,6 @@
         {taskId}
         {follow}
         onDismissError={handleDismissError}
-        onRetryConnect={handleRetryConnect}
         onThreadSwitch={handleThreadSwitch}
         isSwitching={threadSwitching}
         onMsgDelete={handleMsgDelete}
