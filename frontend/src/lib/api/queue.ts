@@ -43,6 +43,9 @@ export type ActionType =
 let isOffline = false;
 let actionQueue: QueuedAction[] = [];
 let flushPromise: Promise<void> | null = null;
+// Actions the server refused outright (404, 403, …) during the most recent flush. They are out of
+// the queue, so "is this task still queued?" answers no for them exactly as for an applied action.
+let droppedActions: QueuedAction[] = [];
 
 /** Wait for any in-flight flush to complete. Resolves immediately if none. */
 export async function waitForFlush(): Promise<void> {
@@ -117,6 +120,7 @@ async function saveQueue() {
  */
 export function clearQueue(): void {
     actionQueue = [];
+    droppedActions = [];
     notifyQueueChanged();
 }
 
@@ -127,9 +131,28 @@ export async function enqueueAction(action: { type: ActionType; params: Record<s
         id: generateId(),
         timestamp: Date.now(),
     };
+    // A fresh write about a task supersedes the last flush's verdict on it.
+    if (action.params.taskId) {
+        droppedActions = droppedActions.filter(a => a.params.taskId !== action.params.taskId);
+    }
     actionQueue.push(item);
     await saveQueue();
     return item;
+}
+
+/** Task IDs whose queued write the server refused in the most recent flush. A UI that clears a
+ * "queued" marker on "no longer queued" has to ask this first. */
+export function getDroppedTaskIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const action of droppedActions) {
+        if (action.params.taskId) ids.add(action.params.taskId);
+    }
+    return ids;
+}
+
+/** Every write the server refused — the count a report needs. */
+export function getDroppedActions(): QueuedAction[] {
+    return [...droppedActions];
 }
 
 /** Get set of task IDs that have pending queued actions. */
@@ -193,6 +216,7 @@ function trackResult(action: QueuedAction, result: any, idMap: Map<string, strin
 async function doFlush(onTransientError?: (e: unknown) => boolean): Promise<Map<string, any>> {
     const idMap = new Map<string, string>();
     const resolvedTasks = new Map<string, any>();
+    droppedActions = [];
 
     while (queueLength() > 0) {
         const action = actionQueue[0];
@@ -208,7 +232,10 @@ async function doFlush(onTransientError?: (e: unknown) => boolean): Promise<Map<
                     break; // stop flushing on transient error
                 }
             } else {
-                // Permanent errors (404, 403, etc.) — skip this action, don't block the rest
+                // Permanent errors (404, 403, etc.) — skip this action, don't block the rest.
+                // Recorded before it leaves the queue, so the UI can say "refused" rather than
+                // reading its absence as "applied".
+                droppedActions.push(action);
                 actionQueue.shift();
                 await saveQueue();
             }
