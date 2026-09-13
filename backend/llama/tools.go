@@ -196,7 +196,7 @@ var toolAskQuestion = types.ChatTool{
 	Function: &types.ToolDef{
 		Name:        ToolAskQuestion,
 		DisplayName: "Question",
-		Description: "Ask the user a question. Use this when clarification is needed or when asking for approval.",
+		Description: "Ask the user a question. This must be used when clarification or approval is needed.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": askQuestionProps{
@@ -212,7 +212,7 @@ var toolRequestReview = types.ChatTool{
 	Function: &types.ToolDef{
 		Name:        ToolRequestReview,
 		DisplayName: "Done",
-		Description: "Request the user to review completed changes",
+		Description: "Request review of completed work. This must be used if the work has been completed.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": requestReviewProps{
@@ -229,7 +229,7 @@ var toolRequestReviewPlan = types.ChatTool{
 	Function: &types.ToolDef{
 		Name:        ToolRequestReview,
 		DisplayName: "Done",
-		Description: "If the task is complete, use this tool.",
+		Description: "Request review of completed work. This must be used if the work has been completed.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": requestReviewProps{
