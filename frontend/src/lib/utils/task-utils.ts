@@ -29,6 +29,102 @@ export function countWithDescendants(taskId: string, status: string, childrenMap
     return count;
 }
 
+/** True while some ancestor of this task sits in In Progress. The server refuses the same shape
+ * per request (`checkAncestorInProgress` in `backend/managers/task.go`). */
+export function ancestorInProgress(tasks: Task[], taskId: string): boolean {
+    const byId = new Map(tasks.map(t => [t.id, t]));
+    const seen = new Set<string>([taskId]);
+    let currentId = byId.get(taskId)?.parent_task_id ?? '';
+    while (currentId && !seen.has(currentId)) {
+        seen.add(currentId);
+        const ancestor = byId.get(currentId);
+        if (!ancestor) break;
+        if (ancestor.status === 'in_progress') return true;
+        currentId = ancestor.parent_task_id ?? '';
+    }
+    return false;
+}
+
+/** True when a subtask moved to `targetStatus` joins the column its parent is already in, and is
+ * folded into the parent's card. An optimistic board update must skip it or the card vanishes
+ * mid-action. */
+export function willConsolidateIntoParent(task: Task, tasks: Task[], targetStatus: string): boolean {
+    return !!task.parent_task_id && tasks.some(t => t.id === task.parent_task_id && t.status === targetStatus);
+}
+
+export interface BulkMovePlan {
+    /** The moves to send, ancestors before their descendants. */
+    movable: string[];
+    /** Selected tasks the server would refuse; reported to the user instead of sent. */
+    blocked: string[];
+    alreadyThere: number;
+}
+
+/**
+ * Which of a batch move's selections to send, and in what order. Nothing already in the target column
+ * is sent; the rest is ordered ancestors-first because the server answers each request from the state
+ * the previous one left behind, so an ancestor this batch moves out of In Progress stops blocking.
+ */
+export function planBulkMove(tasks: Task[], taskIds: string[], targetStatus: string): BulkMovePlan {
+    const byId = new Map(tasks.map(t => [t.id, t]));
+    const candidates: string[] = [];
+    let alreadyThere = 0;
+    for (const id of taskIds) {
+        const task = byId.get(id);
+        if (!task) continue;
+        if (task.status === targetStatus) {
+            alreadyThere++;
+            continue;
+        }
+        candidates.push(id);
+    }
+
+    const decided = new Map<string, boolean>();
+    const movable: string[] = [];
+    const blocked: string[] = [];
+    const depth = (id: string): number => {
+        const seen = new Set<string>([id]);
+        let current = byId.get(id);
+        let d = 0;
+        while (current?.parent_task_id && !seen.has(current.parent_task_id) && byId.has(current.parent_task_id)) {
+            seen.add(current.parent_task_id);
+            current = byId.get(current.parent_task_id);
+            d++;
+        }
+        return d;
+    };
+
+    // Ordering by depth puts every ancestor before its descendants.
+    const depthOf = new Map(candidates.map(id => [id, depth(id)]));
+    for (const id of [...candidates].sort((a, b) => (depthOf.get(a) ?? 0) - (depthOf.get(b) ?? 0))) {
+        const task = byId.get(id)!;
+        const moves = targetStatus !== 'backlog' || !task.parent_task_id ||
+            !heldByInProgressAncestor(task, byId, decided);
+        decided.set(id, moves);
+        (moves ? movable : blocked).push(id);
+    }
+    return { movable, blocked, alreadyThere };
+}
+
+/** Whether an ancestor keeps this subtask out of Backlog: it is In Progress, and this batch does not
+ * move it out of there. An id the batch never decided keeps its status, so it holds. */
+function heldByInProgressAncestor(
+    task: Task,
+    byId: Map<string, Task>,
+    decided: Map<string, boolean>,
+): boolean {
+    const seen = new Set<string>([task.id]);
+    let currentId = task.parent_task_id ?? '';
+    while (currentId && !seen.has(currentId)) {
+        seen.add(currentId);
+        const ancestor = byId.get(currentId);
+        if (!ancestor) break;
+        if (ancestor.status === 'in_progress' && !decided.get(currentId)) return true;
+        currentId = ancestor.parent_task_id ?? '';
+    }
+    return false;
+}
+
 /** Column the mobile board shows after switching projects: the one with the most urgent
  * work — Review, else In Progress, else Backlog. Tasks hidden inside a collapsed parent
  * card still count. */

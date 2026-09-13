@@ -8,7 +8,7 @@
     import { enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
     import { shouldAutoFullscreenDiffEditor } from '$lib/utils/diff-editor-layout';
     import { chatBlurState, chatCollapseState, chatFocusState, chatManualToggleState, type ChatAutoMaximizeRules, type ChatMaximizeState } from '$lib/utils/chat-auto-maximize';
-    import { filterTopLevelTaskIds } from '$lib/utils/task-utils';
+    import { filterTopLevelTaskIds, willConsolidateIntoParent } from '$lib/utils/task-utils';
     import { clearHighlightCache } from '$lib/highlighter';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { loadAppSetting, saveAppSetting, loadCollapsedSections, saveCollapsedSections } from '$lib/storage';
@@ -127,6 +127,11 @@
             done: 'var(--color-column-done)',
         };
         return colors[id] || 'var(--color-border)';
+    }
+
+    /** The column's label in the active language. */
+    function statusLabel(status: string): string {
+        return t(overviewSections.find(s => s.id === status)?.labelKey ?? 'board.column.done');
     }
 
     // Diff state — managed by DiffCache service (reactive via $state())
@@ -479,6 +484,25 @@
             }
             if (started > 0) {
                 dialogStore.showToast(t('board.toast.started', { count: started }), 'success');
+            }
+        },
+        async onMove(taskIds, status) {
+            let moved = 0;
+            for (const id of taskIds) {
+                const selected = allTasks.find(t => t.id === id);
+                if (!selected) continue;
+                try {
+                    const updated = await moveTask(task.project_id, id, status);
+                    if (!willConsolidateIntoParent(selected, allTasks, status)) {
+                        updateTaskInBoard(appStore, id, updated);
+                    }
+                    moved++;
+                } catch (err) {
+                    dialogStore.showToast(t('board.toast.moveFailed', { error: String(err) }), 'error');
+                }
+            }
+            if (moved > 0) {
+                dialogStore.showToast(t('board.toast.movedCount', { count: moved, status: statusLabel(status) }), 'success');
             }
         },
         async onModelChange(taskIds, providerUrl, modelName, reasoningEffort) {

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, findProviderByRef, isolatedProject, gotoProject, clearBoardExcept } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, findProviderByRef, isolatedProject, gotoProject, clearBoardExcept, getTaskData, waitForTaskState } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -296,6 +296,72 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     // Cards should still be in the board overview
     await expect(card2).toBeVisible();
     await expect(card3).toBeVisible();
+  });
+
+  test('should move the selection only after asking', async ({ browserName, page }) => {
+    if (browserName === 'webkit') test.skip();
+
+    const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
+    const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);
+    await card2.click({ modifiers: ['Control'] });
+    await card3.click({ modifiers: ['Control'] });
+
+    await page.locator('.multi-select-bar .bar-btn-move').click();
+    await page.locator('.move-item', { hasText: 'Review' }).click();
+
+    const dialog = page.locator('.modal');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Move 2 tasks to Review?');
+
+    await page.locator('.modal-footer .btn-cancel').click();
+    await expect(dialog).not.toBeVisible();
+
+    // Server truth: nothing moved
+    expect((await getTaskData(page, projectId, taskId2)).status).toBe('backlog');
+    expect((await getTaskData(page, projectId, taskId3)).status).toBe('backlog');
+  });
+
+  test('should say that moving to In Progress starts the tasks', async ({ browserName, page }) => {
+    if (browserName === 'webkit') test.skip();
+
+    const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
+    const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);
+    await card2.click({ modifiers: ['Control'] });
+    await card3.click({ modifiers: ['Control'] });
+
+    await page.locator('.multi-select-bar .bar-btn-move').click();
+    await page.locator('.move-item', { hasText: 'In Progress' }).click();
+
+    const dialog = page.locator('.modal');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Move 2 tasks to In Progress? This starts them.');
+
+    // Cancelling started nothing.
+    await page.locator('.modal-footer .btn-cancel').click();
+    for (const id of [taskId2, taskId3]) {
+      const t = await getTaskData(page, projectId, id);
+      expect(t.status).toBe('backlog');
+      expect(t.execution_state).not.toBe('running');
+    }
+  });
+
+  test('should move the selected tasks to the chosen column on confirm', async ({ browserName, page }) => {
+    if (browserName === 'webkit') test.skip();
+
+    const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
+    const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);
+    await card2.click({ modifiers: ['Control'] });
+    await card3.click({ modifiers: ['Control'] });
+
+    await page.locator('.multi-select-bar .bar-btn-move').click();
+    await page.locator('.move-item', { hasText: 'Review' }).click();
+    await page.locator('.modal-footer .btn-confirm').click();
+
+    await waitForTaskState(page, projectId, taskId2, t => t.status === 'review');
+    await waitForTaskState(page, projectId, taskId3, t => t.status === 'review');
+
+    // The selection is gone with the batch.
+    await expect(page.locator('.multi-select-bar')).not.toBeVisible();
   });
 
   test('should delete selected tasks on confirmation', async ({ browserName, page }) => {

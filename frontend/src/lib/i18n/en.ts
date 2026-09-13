@@ -1294,6 +1294,7 @@ const catalog = {
     'board.confirm.delete': 'Delete',
     'board.confirm.cancel': 'Cancel',
     'board.confirm.start': 'Start',
+    'board.confirm.move': 'Move',
     'board.untitled': '(untitled)',
 
     // ── column labels ──
@@ -1305,6 +1306,7 @@ const catalog = {
 
     // ── Board.svelte — move / start / model / clear-done feedback ──
     'board.toast.moved': 'Task moved to {status}',
+    'board.toast.movedCount': { one: 'Moved {count} task to {status}', other: 'Moved {count} tasks to {status}' },
     'board.toast.moveFailed': 'Failed to move task: {error}',
     'board.toast.cannotMoveToStatus': 'Cannot move to {targetStatus}: parent task is {parentStatus}',
     'board.toast.deleteFailed': 'Failed to delete task: {error}',
@@ -1331,6 +1333,20 @@ const catalog = {
     'board.multiSelect.deleteCount': { one: 'Delete {count} task', other: 'Delete {count} tasks' },
     'board.multiSelect.startTitle': 'Start Tasks',
     'board.multiSelect.startMessage': { one: 'Start {count} task?', other: 'Start {count} tasks?' },
+    'board.multiSelect.move': 'Move to…',
+    'board.multiSelect.moveTitle': 'Move Tasks',
+    'board.multiSelect.moveMessage': {
+        one: 'Move {count} task to {status}?',
+        other: 'Move {count} tasks to {status}?',
+    },
+    'board.multiSelect.moveStartsMessage': {
+        one: 'Move {count} task to {status}? This starts it.',
+        other: 'Move {count} tasks to {status}? This starts them.',
+    },
+    'board.multiSelect.moveAlreadyThere': {
+        one: '{count} selected task is already in {status}',
+        other: '{count} selected tasks are already in {status}',
+    },
 
     // ── Card.svelte — overflow menu, badges, card actions, counters ──
     'board.badge.running': 'Running',

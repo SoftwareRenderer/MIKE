@@ -17,6 +17,8 @@ export interface MultiSelectActionsOptions {
     onStart: (taskIds: string[]) => Promise<void>;
     /** Called when the user changes the model for selected tasks in the floating bar. */
     onModelChange?: (taskIds: string[], providerUrl: string, modelName: string | undefined, reasoningEffort: string | undefined) => Promise<void>;
+    /** Called when the user confirms a bulk move to one of the board's columns. */
+    onMove?: (taskIds: string[], status: string) => Promise<void>;
 }
 
 export function useMultiSelectActions(options: MultiSelectActionsOptions) {
@@ -50,15 +52,27 @@ export function useMultiSelectActions(options: MultiSelectActionsOptions) {
         }
     }
 
+    function handleMove(e: CustomEvent) {
+        const taskIds = e.detail.taskIds as string[];
+        const status = e.detail.status as string;
+        if (options.onMove) {
+            options.onMove(taskIds, status).finally(() => {
+                multiSelect.clear();
+            });
+        }
+    }
+
     /** Wire up window event listeners. Returns a cleanup function. */
     function setup(): () => void {
         window.addEventListener('multi-select-delete', handleDelete as EventListener);
         window.addEventListener('multi-select-start', handleStart as EventListener);
         window.addEventListener('multi-select-model', handleModelChange as EventListener);
+        window.addEventListener('multi-select-move', handleMove as EventListener);
         return () => {
             window.removeEventListener('multi-select-delete', handleDelete as EventListener);
             window.removeEventListener('multi-select-start', handleStart as EventListener);
             window.removeEventListener('multi-select-model', handleModelChange as EventListener);
+            window.removeEventListener('multi-select-move', handleMove as EventListener);
         };
     }
 
