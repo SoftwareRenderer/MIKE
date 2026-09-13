@@ -4,7 +4,8 @@
     import { appStore, dialogStore } from '$lib/stores';
     import { fade } from 'svelte/transition';
     import ChangeModelModal from './ChangeModelModal.svelte';
-    import { t } from '$lib/i18n';
+    import { planBulkMove } from '$lib/utils/task-utils';
+    import { t, type MessageKey } from '$lib/i18n';
 
     let { multiSelect, tasks, onClear }: {
         multiSelect: MultiSelect;
@@ -14,7 +15,6 @@
 
     let visible = $derived(multiSelect.hasSelection);
 
-    // Build a task lookup for the selected tasks
     const selectedTasks = $derived.by(() => {
         const taskMap = new Map(tasks.map(t => [t.id, t]));
         return [...multiSelect.selectedIds]
@@ -22,23 +22,96 @@
             .filter((t): t is Task => t != null);
     });
 
-    // Task titles for the model change modal
     const selectedTaskTitles = $derived(selectedTasks.map(task => task.title || t('board.untitled')));
 
-    // Check if all selected tasks are in Backlog
     const allInBacklog = $derived(
         selectedTasks.length > 0 && selectedTasks.every(t => t.status === 'backlog')
     );
 
-    // Check if any selected task is running
     const hasRunning = $derived(
         selectedTasks.some(t => t.execution_state === 'running' || t.execution_state === 'pulling_image')
     );
 
-    // Bar positioning (fixed at bottom of viewport, centered)
+    /** Board order and board ids; only `labelKey` is copy. */
+    const columns: { id: string; labelKey: MessageKey }[] = [
+        { id: 'backlog', labelKey: 'board.column.backlog' },
+        { id: 'in_progress', labelKey: 'board.column.inProgress' },
+        { id: 'review', labelKey: 'board.column.review' },
+        { id: 'done', labelKey: 'board.column.done' },
+    ];
+
+    function statusLabel(status: string): string {
+        return t(columns.find(c => c.id === status)?.labelKey ?? 'board.column.done');
+    }
+
+    let moveMenuOpen = $state(false);
+    let moveWrapEl: HTMLDivElement | null = $state(null);
+
+    $effect(() => {
+        if (!moveMenuOpen) return;
+        function handleOutside(e: MouseEvent) {
+            if (moveWrapEl && !moveWrapEl.contains(e.target as Node)) {
+                moveMenuOpen = false;
+            }
+        }
+        document.addEventListener('mousedown', handleOutside);
+        return () => document.removeEventListener('mousedown', handleOutside);
+    });
+
+    /** With the menu open, Escape belongs to the menu: the board and the task view clear the
+     * selection on that keystroke. */
+    function handleMenuKey(e: KeyboardEvent) {
+        if (e.key === 'Escape' && moveMenuOpen) {
+            moveMenuOpen = false;
+            e.stopPropagation();
+        }
+    }
+
+    function titlesFor(ids: string[]): string[] {
+        const byId = new Map(selectedTasks.map(task => [task.id, task]));
+        return ids.map(id => byId.get(id)?.title || t('board.untitled'));
+    }
+
+    /** Plan the move against the live selection, report what cannot go, then ask. */
+    async function chooseStatus(status: string) {
+        moveMenuOpen = false;
+        const plan = planBulkMove(tasks, multiSelect.toArray(), status);
+        if (plan.blocked.length > 0) {
+            dialogStore.showToast(
+                t('board.toast.cannotMoveToStatus', {
+                    targetStatus: statusLabel('backlog'),
+                    parentStatus: statusLabel('in_progress'),
+                }),
+                'error',
+            );
+        }
+        if (plan.movable.length === 0) {
+            if (plan.alreadyThere > 0) {
+                dialogStore.showToast(
+                    t('board.multiSelect.moveAlreadyThere', { count: plan.alreadyThere, status: statusLabel(status) }),
+                    'error',
+                );
+            }
+            return;
+        }
+        const params = { count: plan.movable.length, status: statusLabel(status) };
+        const confirmed = await dialogStore.showConfirm({
+            title: t('board.multiSelect.moveTitle'),
+            // The In Progress column starts what it receives, and the question says so.
+            message: t(status === 'in_progress' ? 'board.multiSelect.moveStartsMessage' : 'board.multiSelect.moveMessage', params),
+            items: titlesFor(plan.movable),
+            confirmText: t('board.confirm.move'),
+            cancelText: t('board.confirm.cancel'),
+            variant: 'default',
+        });
+        if (!confirmed) return;
+        window.dispatchEvent(new CustomEvent('multi-select-move', {
+            detail: { taskIds: plan.movable, status }
+        }));
+    }
+
     let barRef: HTMLDivElement | null = $state(null);
 
-    // Model change modal
     let showModelModal = $state(false);
     let providers = $derived(appStore.config?.providers || []);
 
@@ -110,6 +183,38 @@
                 {t('board.multiSelect.startCount', { count: multiSelect.count })}
             </button>
         {/if}
+
+        <div class="move-wrap" bind:this={moveWrapEl}>
+            <button
+                type="button"
+                class="bar-btn bar-btn-move"
+                onclick={() => { moveMenuOpen = !moveMenuOpen; }}
+                onkeydown={handleMenuKey}
+                aria-label="Move {multiSelect.count} tasks"
+                aria-haspopup="menu"
+                aria-expanded={moveMenuOpen}
+            >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M2 8h10M9 5l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M2 2.5v11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+                {t('board.multiSelect.move')}
+            </button>
+            {#if moveMenuOpen}
+                <div class="move-menu" role="menu" tabindex="-1" onkeydown={handleMenuKey}>
+                    {#each columns as col (col.id)}
+                        <button
+                            type="button"
+                            class="move-item"
+                            role="menuitem"
+                            onclick={() => { chooseStatus(col.id); }}
+                        >
+                            {t(col.labelKey)}
+                        </button>
+                    {/each}
+                </div>
+            {/if}
+        </div>
 
         <button
             type="button"
@@ -202,6 +307,48 @@
     .bar-btn-model:hover {
         background: var(--color-surface-3);
         opacity: 1;
+    }
+
+    .move-wrap {
+        position: relative;
+    }
+
+    .bar-btn-move {
+        background: var(--color-surface-4);
+        color: var(--color-text-primary);
+    }
+
+    /* The bar is fixed to the bottom of the viewport, so its menu opens upward; the offset clears
+     * the bar's own padding and border. */
+    .move-menu {
+        position: absolute;
+        bottom: calc(100% + 17px);
+        left: 0;
+        display: flex;
+        flex-direction: column;
+        min-width: 140px;
+        padding: 4px;
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+
+    .move-item {
+        padding: 6px 10px;
+        border: none;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--color-text-primary);
+        font-family: inherit;
+        font-size: 0.8125rem;
+        text-align: left;
+        white-space: nowrap;
+        cursor: pointer;
+    }
+
+    .move-item:hover {
+        background: var(--color-surface-4);
     }
 
     .bar-btn-delete {

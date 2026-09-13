@@ -1,6 +1,7 @@
 import type { Task } from '$lib/types';
 import { appStore, dialogStore, updateTaskInBoard } from '$lib/stores';
 import { moveTask } from '$lib/api';
+import { ancestorInProgress, willConsolidateIntoParent } from '$lib/utils/task-utils';
 import { t } from '$lib/i18n';
 
 /** Reactive state for board section drag-and-drop. */
@@ -15,23 +16,10 @@ export interface SectionDragState {
 export function useBoardDnd(getAllTasks: () => Task[], getProjectId: () => string) {
     let sectionDragState = $state<Map<string, SectionDragState>>(new Map());
 
-    /** Walk up the ancestor chain to check if any ancestor is In Progress. */
-    function hasAncestorInProgress(task: Task): boolean {
-        const taskMap = new Map(getAllTasks().map(t => [t.id, t]));
-        let current = task;
-        while (current.parent_task_id) {
-            const parent = taskMap.get(current.parent_task_id);
-            if (!parent) break;
-            if (parent.status === 'in_progress') return true;
-            current = parent;
-        }
-        return false;
-    }
-
     function canDrop(taskId: string, targetStatus: string): boolean {
         const task = getAllTasks().find(t => t.id === taskId);
         if (!task) return false;
-        if (targetStatus === 'backlog' && task.parent_task_id && hasAncestorInProgress(task)) return false;
+        if (targetStatus === 'backlog' && task.parent_task_id && ancestorInProgress(getAllTasks(), task.id)) return false;
         return true;
     }
 
@@ -73,9 +61,7 @@ export function useBoardDnd(getAllTasks: () => Task[], getProjectId: () => strin
             }
             try {
                 const updated = await moveTask(getProjectId(), taskId, targetStatus);
-                const willConsolidate = task.parent_task_id &&
-                    getAllTasks().some(t => t.id === task.parent_task_id && t.status === targetStatus);
-                if (!willConsolidate) {
+                if (!willConsolidateIntoParent(task, getAllTasks(), targetStatus)) {
                     updateTaskInBoard(appStore, taskId, updated);
                 }
             } catch (err) {

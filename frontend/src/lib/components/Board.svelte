@@ -8,7 +8,7 @@
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { getExpandedTasksContext } from '$lib/context';
     import { gc } from '$lib/storage';
-    import { mergeQueuedUpdate, filterTopLevelTaskIds } from '$lib/utils/task-utils';
+    import { mergeQueuedUpdate, filterTopLevelTaskIds, ancestorInProgress, willConsolidateIntoParent } from '$lib/utils/task-utils';
     import { useMultiSelectActions } from '$lib/composables/use-multi-select-actions.svelte';
     import { useSubtaskHierarchy } from '$lib/composables/use-subtask-hierarchy.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
@@ -66,6 +66,20 @@
             }
             if (started > 0) {
                 dialogStore.showToast(t('board.toast.started', { count: started }), 'success');
+            }
+        },
+        async onMove(taskIds, status) {
+            let moved = 0;
+            for (const id of taskIds) {
+                const task = tasks.find(t => t.id === id);
+                if (!task) continue;
+                if (await applyMove(task, status)) moved++;
+            }
+            if (moved > 0) {
+                dialogStore.showToast(
+                    t('board.toast.movedCount', { count: moved, status: statusLabel(status) }),
+                    'success',
+                );
             }
         },
         async onModelChange(taskIds, providerUrl, modelName, reasoningEffort) {
@@ -146,9 +160,6 @@
         return labelKey ? t(labelKey) : status;
     }
 
-    /** Pre-built task lookup map (shared by hasAncestorInProgress and other functions). */
-    const taskMap = $derived(new Map(tasks.map(t => [t.id, t])));
-
     /** Card direction from Settings → Preferences: true = least recently moved on top. */
     const sortOldestFirst = $derived(appStore.config?.sort_oldest_first === true);
 
@@ -173,16 +184,28 @@
         return columnTasks[status] || [];
     }
 
-    /** Walk up the ancestor chain to check if any ancestor is In Progress. Uses shared taskMap. */
-    function hasAncestorInProgress(task: Task): boolean {
-        let current = task;
-        while (current.parent_task_id) {
-            const parent = taskMap.get(current.parent_task_id);
-            if (!parent) break;
-            if (parent.status === 'in_progress') return true;
-            current = parent;
+    /** Send one move and land the result on the board. False when the server refused it. */
+    async function applyMove(task: Task, targetStatus: string): Promise<boolean> {
+        try {
+            const updated = await moveTask(projectId, task.id, targetStatus);
+            // The WebSocket broadcast is what lands a consolidating subtask.
+            const willConsolidate = willConsolidateIntoParent(task, tasks, targetStatus);
+            if (!willConsolidate) {
+                // When offline, updated is a partial optimistic result — merge with existing task
+                const merged = mergeQueuedUpdate(task, updated);
+                // Update tasks array directly (Board renders from this prop, not boardStore)
+                const idx = tasks.findIndex(t => t.id === task.id);
+                if (idx !== -1) {
+                    tasks[idx] = merged;
+                }
+                appStore.board = { ...appStore.board!, tasks: [...tasks] };
+            }
+            return true;
+        } catch (e) {
+            console.error('Failed to move task:', e);
+            dialogStore.showToast(t('board.toast.moveFailed', { error: String(e) }), 'error');
+            return false;
         }
-        return false;
     }
 
     async function handleDrop(taskId: string, targetStatus: string) {
@@ -190,7 +213,7 @@
         const task = tasks.find(t => t.id === taskId);
         if (!task || task.status === targetStatus) return;
         // Block subtasks from moving to Backlog when an ancestor is In Progress.
-        if (targetStatus === 'backlog' && task.parent_task_id && hasAncestorInProgress(task)) {
+        if (targetStatus === 'backlog' && task.parent_task_id && ancestorInProgress(tasks, task.id)) {
             dialogStore.showToast(
                 t('board.toast.cannotMoveToStatus', {
                     targetStatus: statusLabel(targetStatus),
@@ -200,29 +223,8 @@
             );
             return;
         }
-        try {
-            const updated = await moveTask(projectId, taskId, targetStatus);
+        if (await applyMove(task, targetStatus)) {
             announce(t('board.toast.moved', { status: statusLabel(targetStatus) }));
-            // Skip optimistic update if this subtask will be consolidated into its parent.
-            // The immediate status change triggers consolidatedSubtaskIds to recalculate,
-            // which hides the card mid-drop and makes the drag appear to fail.
-            // Let the WebSocket broadcast handle the full board refresh instead.
-            const willConsolidate = task.parent_task_id &&
-                tasks.some(t => t.id === task.parent_task_id && t.status === targetStatus);
-            if (!willConsolidate) {
-                // When offline, updated is a partial optimistic result — merge with existing task
-                const merged = mergeQueuedUpdate(task, updated);
-                // Update tasks array directly (Board renders from this prop, not boardStore)
-                const idx = tasks.findIndex(t => t.id === taskId);
-                if (idx !== -1) {
-                    tasks[idx] = merged;
-                }
-                // Also sync boardStore
-                appStore.board = { ...appStore.board!, tasks: [...tasks] };
-            }
-        } catch (e) {
-            console.error('Failed to move task:', e);
-            dialogStore.showToast(t('board.toast.moveFailed', { error: String(e) }), 'error');
         }
     }
 
@@ -319,7 +321,7 @@
             canDrop={(taskId: string, colId: string) => {
                 const task = tasks.find(t => t.id === taskId);
                 if (!task || !task.parent_task_id || colId !== 'backlog') return true;
-                return !hasAncestorInProgress(task);
+                return !ancestorInProgress(tasks, task.id);
             }}
             onAddTask={col.id === 'backlog' ? onAddTask : undefined}
             onCreateChildTask={onCreateChildTask}
