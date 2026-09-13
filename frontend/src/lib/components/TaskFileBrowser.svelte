@@ -612,11 +612,36 @@
 
     .loading, .error, .empty {
         padding: 12px;
-        font-size: 0.8125rem;
+        font-size: 0.75rem;
         color: var(--color-text-tertiary);
         text-align: center;
     }
+
     .error {
         color: var(--color-status-red);
+    }
+
+    @media (max-width: 768px) {
+        .file-browser-header {
+            padding: 10px 12px;
+        }
+        .file-browser-label {
+            font-size: 0.8125rem;
+        }
+        .new-file-btn {
+            width: 32px;
+            height: 32px;
+        }
+        .breadcrumb {
+            font-size: 0.8125rem;
+        }
+        .file-entry {
+            padding: 8px 12px;
+            font-size: 0.9375rem;
+            gap: 10px;
+        }
+        .loading, .error, .empty {
+            font-size: 0.875rem;
+        }
     }
 </style>
