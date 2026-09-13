@@ -1153,3 +1153,191 @@ func TestTaskHandler_POST_DoesNotSeedAMeasuredPeak(t *testing.T) {
 		t.Errorf("created task carries peak %d MB, want 0", stored.SandboxMemoryPeakMB)
 	}
 }
+
+// parentWithStagedWork builds the ordinary Review state: work staged but not committed.
+func parentWithStagedWork(t *testing.T, h *TaskHandler, projID, repoDir, id string) (*types.Task, string) {
+	t.Helper()
+	base := strings.TrimSpace(gitOutput(t, repoDir, "rev-parse", "--abbrev-ref", "HEAD"))
+	task := &types.Task{
+		ID: id, ProjectID: projID, Title: "parent " + id, Prompt: "work",
+		Status: types.StatusReview, Branch: "task/" + id, BaseRef: base, CurrentThreadID: "thread-" + id,
+	}
+	if err := h.store.CreateTask(task); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	wtPath, _, err := h.worktreeMgr.CreateWorktree(projID, task.ID, task.Branch, "")
+	if err != nil {
+		t.Fatalf("parent worktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "README.md"), []byte("# Test\nthe parent's edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "parent_note.md"), []byte("written by the parent\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, wtPath, "add", "README.md", "parent_note.md")
+	return task, base
+}
+
+// subtaskMergedInto commits one file on a branch cut from the parent, and merges it.
+func subtaskMergedInto(t *testing.T, h *TaskHandler, projID string, parent *types.Task, childID, file string) error {
+	t.Helper()
+	child := &types.Task{
+		ID: childID, ProjectID: projID, Title: "child " + childID, Prompt: "work",
+		Status: types.StatusReview, Branch: "task/" + childID, ParentTaskID: parent.ID, CurrentThreadID: "thread-" + childID,
+	}
+	if err := h.store.CreateTask(child); err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+	childWT, _, err := h.worktreeMgr.CreateWorktree(projID, child.ID, child.Branch, parent.Branch)
+	if err != nil {
+		t.Fatalf("child worktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(childWT, file), []byte("written by the subtask\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, childWT, "add", file)
+	gitRun(t, childWT, "commit", "-m", "subtask work")
+	return h.executor.MergeBranch(projID, child.ID, child)
+}
+
+func postCommitAndDone(t *testing.T, h *TaskHandler, projID, taskID string) *httptest.ResponseRecorder {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/commit", h.HandleCommitAndDone)
+	body, _ := json.Marshal(map[string]string{"commit_message": "the parent's commit"})
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projID+"/tasks/"+taskID+"/commit", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	return rr
+}
+
+// TestHandleCommitAndDone_CommitsTheParentsOwnWorkAfterASubtaskMerge: a restore that comes back
+// unstaged commits part of the task and deletes the rest with its worktree.
+func TestHandleCommitAndDone_CommitsTheParentsOwnWorkAfterASubtaskMerge(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	h.commitQueue = exec.NewCommitQueue()
+	proj, err := s.GetProject(projID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	parent, base := parentWithStagedWork(t, h, projID, proj.Path, "parent-merge-click")
+	if err := subtaskMergedInto(t, h, projID, parent, "child-disjoint", "child_work.txt"); err != nil {
+		t.Fatalf("subtask merge: %v", err)
+	}
+
+	rr := postCommitAndDone(t, h, projID, parent.ID)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("commit-and-done status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	readme := gitOutput(t, proj.Path, "show", base+":README.md")
+	if !strings.Contains(readme, "the parent's edit") {
+		t.Errorf("the parent's own edit never reached %s; it reads %q", base, readme)
+	}
+	if out := gitOutput(t, proj.Path, "ls-tree", "--name-only", base); !strings.Contains(out, "child_work.txt") {
+		t.Errorf("the subtask's work never reached %s: %q", base, out)
+	}
+}
+
+// TestHandleCommitAndDone_RefusesWorktreeWithUnresolvedConflict: staging a conflicted file marks
+// it resolved, so the click must refuse.
+func TestHandleCommitAndDone_RefusesWorktreeWithUnresolvedConflict(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	h.commitQueue = exec.NewCommitQueue()
+	proj, err := s.GetProject(projID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	parent, _ := parentWithStagedWork(t, h, projID, proj.Path, "parent-clash-click")
+	// The same file as the parent's uncommitted edit: the merge lands, the restore cannot.
+	child := &types.Task{
+		ID: "child-clash", ProjectID: projID, Title: "clashing child", Prompt: "work",
+		Status: types.StatusReview, Branch: "task/child-clash", ParentTaskID: parent.ID, CurrentThreadID: "thread-clash",
+	}
+	if err := h.store.CreateTask(child); err != nil {
+		t.Fatal(err)
+	}
+	childWT, _, err := h.worktreeMgr.CreateWorktree(projID, child.ID, child.Branch, parent.Branch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childWT, "README.md"), []byte("# Test\nthe subtask's edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, childWT, "add", "README.md")
+	gitRun(t, childWT, "commit", "-m", "subtask edit to the same file")
+	if err := h.executor.MergeBranch(projID, child.ID, child); err == nil {
+		t.Fatal("the fixture must leave the parent's worktree with a conflict to resolve")
+	}
+
+	rr := postCommitAndDone(t, h, projID, parent.ID)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("commit-and-done status = %d, want 409; body=%s", rr.Code, rr.Body.String())
+	}
+	updated, err := s.GetTask(projID, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status == types.StatusDone {
+		t.Error("a task whose work could not be committed must not be Done")
+	}
+	wtPath, err := h.worktreeMgr.WorktreePath(parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	onDisk, err := os.ReadFile(filepath.Join(wtPath, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(onDisk), "the parent's edit") {
+		t.Errorf("the parent's own edit was discarded instead of left to resolve: %q", onDisk)
+	}
+
+	onBranch := gitOutput(t, proj.Path, "show", parent.Branch+":README.md")
+	if strings.Contains(onBranch, "<<<<<<<") {
+		t.Errorf("conflict markers were committed onto the branch: %q", onBranch)
+	}
+}
+
+// TestHandleCommitAndDone_ReportsACommitThatGitRefused: a refusal must end the request, not
+// merge, mark the task Done and delete the worktree that holds the work.
+func TestHandleCommitAndDone_ReportsACommitThatGitRefused(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	h.commitQueue = exec.NewCommitQueue()
+	proj, err := s.GetProject(projID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	parent, base := parentWithStagedWork(t, h, projID, proj.Path, "parent-locked")
+	wtPath, err := h.worktreeMgr.WorktreePath(parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Another git process holding this worktree's index: the ordinary way a commit is refused.
+	wtName := filepath.Base(strings.TrimSpace(gitOutput(t, wtPath, "rev-parse", "--git-dir")))
+	lock := filepath.Join(proj.Path, ".git", "worktrees", wtName, "index.lock")
+	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(lock) })
+
+	rr := postCommitAndDone(t, h, projID, parent.ID)
+	if rr.Code == http.StatusOK {
+		t.Fatal("a refused commit answered OK: the task would be merged, marked Done and its worktree deleted")
+	}
+	updated, err := s.GetTask(projID, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status == types.StatusDone {
+		t.Error("the task reached Done on a commit that never happened")
+	}
+	if out := gitOutput(t, proj.Path, "ls-tree", "--name-only", base); strings.Contains(out, "parent_note.md") {
+		t.Error("the uncommitted work was merged to the target branch anyway")
+	}
+}

@@ -860,26 +860,47 @@ func (wm *WorktreeManager) GitRunInWorktreeOutput(taskID string, args ...string)
 // working tree, so post-staging manual edits are included in the next commit
 // instead of being silently dropped. Never-staged files stay untouched.
 // Best-effort: logs failures, never blocks the commit.
-func (wm *WorktreeManager) StageIndexedFiles(taskID string) {
+//
+// An unmerged path is skipped: `git add` is how git is told a conflict is resolved. The paths it left
+// alone are returned so the caller can refuse the commit.
+func (wm *WorktreeManager) StageIndexedFiles(taskID string) []string {
 	out, err := wm.GitRunInWorktreeOutput(taskID, "diff", "--staged", "--name-only", "-z", "HEAD")
 	if err != nil {
 		logging.For(logging.Worktree).With(logging.TaskID, taskID).Warnf("failed to list staged files: %v", err)
-		return
+		return nil
+	}
+	unmerged, err := wm.GitRunInWorktreeOutput(taskID, "diff", "--name-only", "--diff-filter=U", "-z")
+	if err != nil {
+		logging.For(logging.Worktree).With(logging.TaskID, taskID).Warnf("failed to list unmerged files: %v", err)
+		return nil
+	}
+	skip := map[string]bool{}
+	var unmergedList []string
+	for _, p := range strings.Split(unmerged, "\x00") {
+		if p != "" {
+			skip[p] = true
+			unmergedList = append(unmergedList, p)
+		}
 	}
 	// Output is NUL-separated; the final token after the trailing NUL is empty.
 	var paths []string
 	for _, p := range strings.Split(out, "\x00") {
-		if p != "" {
-			paths = append(paths, p)
+		if p == "" || skip[p] {
+			continue
 		}
+		paths = append(paths, p)
+	}
+	if len(unmergedList) > 0 {
+		logging.For(logging.Worktree).With(logging.TaskID, taskID).Warnf("left %d unmerged file(s) unstaged: %s", len(unmergedList), strings.Join(unmergedList, ", "))
 	}
 	if len(paths) == 0 {
-		return
+		return unmergedList
 	}
 	args := append([]string{"add", "--"}, paths...)
 	if err := wm.GitRunInWorktree(taskID, args...); err != nil {
 		logging.For(logging.Worktree).With(logging.TaskID, taskID).Warnf("failed to re-stage %d file(s): %v", len(paths), err)
 	}
+	return unmergedList
 }
 
 // GitRunInProject runs a git command in the project's main directory.

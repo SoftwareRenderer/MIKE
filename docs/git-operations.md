@@ -98,6 +98,13 @@ live branches kept), `backend/git/branch_listing_test.go` (both markers, slug pr
   (`backend/server/handler_thread.go`) hands the hash back for a later thread switch to restore, which a
   bracket scoped to one call cannot express, and `loop_agent.go` restores by label with no push of its
   own.
+- **The restore keeps the work's staged/unstaged split.** A plain `git stash apply` brings a
+  modification back unstaged (a new file stays staged), and commit-and-done commits the index only, so a
+  task whose own worktree was merged into — a subtask landing in its parent — loses its edits to
+  existing files from its own commit and then loses the worktree. `PopStashByHash` restores with
+  `--index` and falls back to a plain apply only when the refused attempt changed nothing: measured, git
+  answers `conflicts in index. Try without --index.` and leaves the tree untouched, so the retry cannot
+  double-apply. A retry that also fails keeps the entry on the stack and the worktree conflicted.
 - Tests: `backend/git/stash_identity_test.go`, `push_stash_test.go`, `stash_bracket_test.go`,
   `backend/exec/sync_merge_test.go` (`…_KeepsUnstagedWorkWhenTheStashFails` — its stash-ref injection is
   used instead of an index lock because a locked index blocks the forced checkout too, so the loss never
