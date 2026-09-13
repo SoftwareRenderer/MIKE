@@ -142,3 +142,34 @@ func TestLoopDetector_CheckStreamingText(t *testing.T) {
 		}
 	})
 }
+
+func TestAsksInLastParagraph(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{"QuestionInSingleParagraph", "Should I use React or Vue for this project?", true},
+		{"QuestionMidParagraph", "What framework would you recommend? Let me know your preference.", true},
+		{"StatementOnly", "I have analyzed the code and updated the tests.", false},
+		{"QuestionInEarlierParagraphOnly", "Should I use React or Vue?\n\nI'll go with React and start now.", false},
+		{"QuestionInFinalParagraphAfterProse", "I analyzed the code and updated the tests.\n\nShall I merge it into main?", true},
+		{"TrailingBlankLines", "Work is done.\n\nWant me to push it?\n\n\n", true},
+		{"TrailingWhitespace", "Do you want the long version?   \t", true},
+		{"TrailingStatementAfterQuestionList", "Options:\n- React\n- Vue\n\nI'll pick React.", false},
+		{"CRLFLineEndings", "I finished the change.\r\n\r\nShould I commit it?\r\n", true},
+		{"Empty", "", false},
+		{"OnlyWhitespace", "\n\n   \n\t\n", false},
+		{"FullwidthQuestionMark", "これを先に実装しますか。それとも確認しますか？", true},
+		{"ArabicQuestionMark", "هل تريد المتابعة؟", true},
+		{"SmallPresentationForm", "Should we keep this marker\uFE56", true},
+		{"QuestionMarkInsideCodeFence", "The check is:\n\n```go\nif ok {\n\tfmt.Println(\"done?\")\n}\n```", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := asksInLastParagraph(tc.text); got != tc.want {
+				t.Errorf("asksInLastParagraph(%q) = %v, want %v", tc.text, got, tc.want)
+			}
+		})
+	}
+}

@@ -766,7 +766,7 @@ func TestLoopDetector_StatementOnlyWhenLLMDone(t *testing.T) {
 func TestLoopDetector_QuestionDoesNotTriggerStatement(t *testing.T) {
 	d := newLoopDetector()
 
-	// Text containing a question mark should NOT trigger LoopStatement
+	// Text whose final paragraph asks a question should NOT trigger LoopStatement
 	questions := []string{
 		"Should I use React or Vue for this project?",
 		"What framework would you recommend? Let me know your preference.",
@@ -781,6 +781,54 @@ func TestLoopDetector_QuestionDoesNotTriggerStatement(t *testing.T) {
 	// loopStreak should be reset to 0
 	if d.loopStreak != 0 {
 		t.Errorf("expected loopStreak=0 after question, got %d", d.loopStreak)
+	}
+}
+
+func TestLoopDetector_QuestionInEarlierParagraphStillStatement(t *testing.T) {
+	d := newLoopDetector()
+	d.loopStreak = 2
+
+	// Only the closing paragraph can be waiting for the user, so an earlier question does
+	// not spare a response that ends in a statement.
+	ended := "Should I use React or Vue for this project?\n\nI'll go with React and wire up the router."
+	if loopType, _, _ := d.recordTurn(nil, ended, "stop"); loopType != LoopStatement {
+		t.Errorf("expected LoopStatement when only an earlier paragraph asks, got %v", loopType)
+	}
+	if d.loopStreak != 2 {
+		t.Errorf("expected loopStreak=2 (preserved by LoopStatement), got %d", d.loopStreak)
+	}
+
+	asks := "I'll go with React and wire up the router.\n\nWant me to add tests too?"
+	if loopType, _, _ := d.recordTurn(nil, asks, "stop"); loopType != LoopNone {
+		t.Errorf("expected LoopNone when the last paragraph asks, got %v", loopType)
+	}
+	if d.loopStreak != 0 {
+		t.Errorf("expected loopStreak=0 after a closing question, got %d", d.loopStreak)
+	}
+}
+
+func TestLoopDetector_NonASCIIQuestionMarkDoesNotTriggerStatement(t *testing.T) {
+	asks := []string{
+		"Should I merge this now\uff1f", // fullwidth
+		"Should I merge this now\u061f", // Arabic
+		"Should I merge this now\uFE56", // small presentation form
+	}
+	for _, text := range asks {
+		d := newLoopDetector()
+		if loopType, _, _ := d.recordTurn(nil, text, "stop"); loopType != LoopNone {
+			t.Errorf("expected LoopNone for %q, got %v", text, loopType)
+		}
+	}
+}
+
+// finish_reason is examined before the paragraph: a response that did not end by choice is
+// not penalised however it ends.
+func TestLoopDetector_MultiParagraphNotPenalisedWhenNotDone(t *testing.T) {
+	d := newLoopDetector()
+	for _, reason := range []string{"tool_calls", "length", ""} {
+		if loopType, _, _ := d.recordTurn(nil, "Analyzing the module.\n\nNext I'll rewrite it.", reason); loopType != LoopNone {
+			t.Errorf("expected LoopNone for finish_reason %q, got %v", reason, loopType)
+		}
 	}
 }
 

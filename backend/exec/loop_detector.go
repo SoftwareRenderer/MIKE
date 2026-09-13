@@ -153,6 +153,43 @@ func (d *loopDetector) resetText() {
 	d.textWindow = d.textWindow[:0]
 }
 
+// asksInLastParagraph reports whether a question mark appears in the final paragraph of a
+// text-only response, paragraphs being the blank-line-separated blocks of markdown text.
+// Only the closing paragraph can be waiting for the user: a response that asked something
+// two paragraphs ago and ends in a statement is a statement. A fenced code block is text
+// like any other.
+func asksInLastParagraph(text string) bool {
+	lines := strings.Split(text, "\n")
+	inParagraph := false
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimRight(lines[i], " \t\r")
+		if line == "" {
+			if inParagraph {
+				break // the blank line above the paragraph is the separator
+			}
+			continue // the response's trailing whitespace
+		}
+		inParagraph = true
+		for _, r := range line {
+			if isQuestionMark(r) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isQuestionMark covers the question-mark code points rather than ASCII alone: a response
+// written in another script asks with its own mark.
+func isQuestionMark(r rune) bool {
+	switch r {
+	case '?', '\u00BF', '\u037E', '\u055E', '\u061F', '\u109E',
+		'\u2047', '\u2048', '\u2049', '\uFE16', '\uFE56', '\uFF1F':
+		return true
+	}
+	return false
+}
+
 // recordTurn records an LLM turn and returns the loop type if detected.
 // toolCalls: the tool calls made this turn (nil or empty for text-only).
 // assistantText: the text content of the response.
@@ -195,7 +232,7 @@ func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText,
 			d.loopStreak = 0
 			return LoopNone, "", ""
 		}
-		if strings.Contains(assistantText, "?") {
+		if asksInLastParagraph(assistantText) {
 			d.loopStreak = 0
 			return LoopNone, "", ""
 		}
