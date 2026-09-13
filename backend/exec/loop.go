@@ -360,6 +360,9 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			})
 		}
 		state.setSandbox(func(dst *sandboxState) { *dst = sb })
+		// The container exists now, so the budget counts it directly and the reservation made before
+		// the create is no longer needed.
+		te.confirmMemReservation(setup)
 	}
 
 	// Check if this setup.task uses an agent provider

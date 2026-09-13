@@ -2,7 +2,8 @@ import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
-import { buildIdPlugin } from './scripts/build-id';
+// The extension is load-bearing: `configLoader: 'native'` resolves specifiers verbatim.
+import { buildIdPlugin } from './scripts/build-id.ts';
 
 export default defineConfig({
     plugins: [

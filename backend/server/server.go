@@ -120,29 +120,140 @@ func requestWaitReporter(kind, idAttr string) keylock.WaitReport {
 	}
 }
 
-// readTotalMemMB reads MemTotal from /proc/meminfo and returns it in MB.
-// Returns 0 on any read error, which disables the memory gate.
-func readTotalMemMB() int64 {
+// meminfoMB parses the host's total and available RAM from /proc/meminfo, in MB. ok is false when a
+// line is missing or unparsable, so a caller never receives a 0 and reads it as an empty host.
+func meminfoMB(contents string) (totalMB, availableMB int64, ok bool) {
+	wanted := map[string]*int64{"MemTotal:": &totalMB, "MemAvailable:": &availableMB}
+	found := map[string]bool{}
+	for _, line := range strings.Split(contents, "\n") {
+		for prefix, dst := range wanted {
+			if found[prefix] || !strings.HasPrefix(line, prefix) {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			if kb, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+				*dst = kb / 1024 // the file reports kB
+				found[prefix] = true
+			}
+		}
+	}
+	if len(found) != len(wanted) {
+		return 0, 0, false
+	}
+	return totalMB, availableMB, true
+}
+
+// readMeminfoMB is the only reader of /proc/meminfo in this process.
+func readMeminfoMB() (totalMB, availableMB int64, ok bool) {
 	data, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
-		logging.For(logging.Startup).Warnf("reading /proc/meminfo: %v — memory gate disabled", err)
+		logging.For(logging.Startup).Warnf("reading /proc/meminfo: %v", err)
+		return 0, 0, false
+	}
+	return meminfoMB(string(data))
+}
+
+// readTotalMemMB returns the host's total RAM in MB, or 0 when /proc/meminfo cannot be read.
+func readTotalMemMB() int64 {
+	totalMB, _, ok := readMeminfoMB()
+	if !ok {
+		logging.For(logging.Startup).Warn("reading /proc/meminfo: MemTotal unavailable — memory gate disabled")
 		return 0
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if !strings.HasPrefix(line, "MemTotal:") {
+	return totalMB
+}
+
+// selfRSSMB lifts VmRSS out of a /proc/self/status body. The parse is separate from the read for the
+// same reason meminfoMB is: the numbers the budget decides with are testable without a procfs.
+func selfRSSMB(contents string) (int64, bool) {
+	for _, line := range strings.Split(contents, "\n") {
+		rest, ok := strings.CutPrefix(line, "VmRSS:")
+		if !ok {
 			continue
 		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			return 0
+		fields := strings.Fields(rest)
+		if len(fields) == 0 {
+			return 0, false
 		}
-		kb, err := strconv.ParseInt(fields[1], 10, 64)
+		kb, err := strconv.ParseInt(fields[0], 10, 64)
 		if err != nil {
-			return 0
+			return 0, false
 		}
-		return kb / 1024 // kB → MB
+		return kb / 1024, true
 	}
-	return 0
+	return 0, false
+}
+
+// readSelfRSSMB is this process's resident set in MB, and the only /proc/self read in the tree. A
+// value that cannot be read answers false rather than zero, because "no reading" and "MIKE holds
+// nothing" are different claims.
+func readSelfRSSMB() (int64, bool) {
+	data, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		return 0, false
+	}
+	return selfRSSMB(string(data))
+}
+
+// selfProcessAccountant is MIKE's own process inside the memory budget: the server's resident set is
+// RAM MIKE started and holds, with no cgroup and no limit, so held and charge are the same number.
+// Host-side agent CLIs are not here — they book their own reservation through the gate.
+type selfProcessAccountant struct {
+	read func() (int64, bool)
+	warn sync.Once
+}
+
+func (a *selfProcessAccountant) MemoryAccounting() (heldMB, chargeMB int64) {
+	read := a.read
+	if read == nil {
+		read = readSelfRSSMB
+	}
+	rss, ok := read()
+	if !ok {
+		a.warn.Do(func() {
+			logging.For(logging.Exec).Warn("reading /proc/self/status: VmRSS unavailable — MIKE's own process is left out of the memory budget")
+		})
+		return 0, 0
+	}
+	return rss, rss
+}
+
+// memoryBudget answers the exec memory budget from a single instant: how much of the host's RAM is
+// in use and how much is free, and how much MIKE's containers hold and could still take. Every
+// container belongs to exactly one of the two managers, so none of them is counted twice; the third
+// accountant is the server process, which is no one's container.
+type memoryBudget struct {
+	accountants []memoryAccountant
+	// meminfo overrides the host memory read; nil reads the real /proc/meminfo.
+	meminfo func() (totalMB, availableMB int64, ok bool)
+}
+
+// memoryAccountant is the part of a container manager that the memory budget calls.
+type memoryAccountant interface {
+	MemoryAccounting() (heldMB, chargeMB int64)
+}
+
+// Measure implements stream.BudgetMeasure: what MIKE costs the ceiling, what it actually holds, and the
+// two host figures the pause floor needs. What the rest of the host holds is in no sum the budget
+// decides with, so it is not computed here.
+func (b *memoryBudget) Measure() (mikeMB, heldMB, availableMB, totalMB int64, ok bool) {
+	read := b.meminfo
+	if read == nil {
+		read = readMeminfoMB
+	}
+	total, available, memOK := read()
+	if !memOK {
+		return 0, 0, 0, 0, false
+	}
+	for _, a := range b.accountants {
+		held, charge := a.MemoryAccounting()
+		heldMB += held
+		mikeMB += charge
+	}
+	return mikeMB, heldMB, available, total, true
 }
 
 // The task row is the only thing that outlives the cgroup these numbers were read from.
@@ -264,7 +375,8 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config) (*Server, error) {
 	s.sandboxMgr = sandbox.NewSandboxManager(boot)
 	defer s.reg(stageSandboxContainers, "sandbox containers", s.sandboxMgr.Cleanup)()
 	// Emits a sandbox_stats task event only when usage changes.
-	s.sandboxStatsSampler = stream.NewSandboxStatsSampler(s.sandboxMgr, store, s.appStreamMgr, stream.DefaultSandboxStatsInterval)
+	s.sandboxStatsSampler = stream.NewSandboxStatsSampler(s.sandboxMgr, store, s.appStreamMgr,
+		stream.DefaultSandboxSampleInterval, stream.DefaultSandboxStatsInterval)
 	s.appStreamMgr.SetSandboxStatsProvider(s.sandboxStatsSampler.LatestStatsProvider())
 	s.sandboxStatsSampler.Start()
 	defer s.reg(stageSandboxStatsSampler, "sandbox stats sampler", s.sandboxStatsSampler.Stop)()
@@ -337,16 +449,30 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config) (*Server, error) {
 
 	s.executor = kanbanexec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr, agentRegistry, s.extLSPMgr, commitQueue)
 	s.executor.SetLLMAdapter(s.llmAdapter)
+	// The budget is measured on the same tick that samples the containers it counts, and reports
+	// straight to the gate: MIKE's own cost, what it holds, and the host figures its pause floor needs.
+	s.sandboxStatsSampler.SetBudget(
+		&memoryBudget{accountants: []memoryAccountant{s.sandboxMgr, s.extSandboxMgr, &selfProcessAccountant{}}},
+		s.executor.MemGate().SetMeasurements)
 	s.executor.RecoverStaleTasks()
-	// Wire the sandbox memory budget: 90% of total physical memory; 0 total disables the gate.
+	// Wire the sandbox memory budget: MIKE_MEMORY_BUDGET_PCT of total physical memory; 0 total
+	// disables the gate.
 	if totalMB := readTotalMemMB(); totalMB > 0 {
-		const memPct = 90
-		s.executor.MemGate().SetCapacity(totalMB * memPct / 100)
-		memSup := kanbanexec.NewMemorySupervisor(store, s.executor.MemGate(), s.executor, kanbanexec.DefaultMemSupervisorInterval)
+		memPct := settings.MemoryBudgetPct
+		capacityMB := totalMB * int64(memPct) / 100
+		s.executor.MemGate().SetCapacity(capacityMB)
+		// About states a ceiling only where one was resolved. A hand-built startup.Config leaves the
+		// percentage at 0, and publishing "0 % of this machine's RAM" would print a figure no operator
+		// chose — and one that differs on every host.
+		if memPct > 0 {
+			cfgStore.SetMemoryBudget(capacityMB, totalMB, memPct)
+		}
+		memSup := kanbanexec.NewMemorySupervisor(store, s.executor.MemGate(), s.sandboxMgr, s.executor,
+			kanbanexec.DefaultMemSupervisorInterval)
 		memSup.Start()
 		defer s.reg(stageMemorySupervisor, "memory supervisor", memSup.Stop)()
-		logging.For(logging.Startup).Infof("memory supervisor: gate capacity %d MB (%d%% of %d MB total)",
-			totalMB*memPct/100, memPct, totalMB)
+		logging.For(logging.Startup).Infof("memory supervisor: gate capacity %d MB (%d%% of %d MB total, %s)",
+			capacityMB, memPct, totalMB, startup.EnvMemoryBudgetPct)
 	}
 	s.terminalMgr.SetAgentRegistry(agentRegistry)
 

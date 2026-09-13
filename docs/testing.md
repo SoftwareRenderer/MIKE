@@ -281,6 +281,18 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
 - The Pi agent adapter's unit tests live in `../MIKE-extensions/agent/pi` and are run there — they are
   **not** part of `./backend/... ./pkg/...`.
 
+### Memory in a test
+
+A test that needs a container to hold memory builds its allocation with one command substitution
+(`x=$(head -c 67108864 /dev/zero | tr "\0" a)`), not a doubling loop. Doubling holds the old copy and the
+new one while copying, so it reaches well past its target — measured, a loop targeting 200 MB peaked at
+525 MB — and every cap in the test has to be raised to survive it. The cap matters twice over: a container
+is charged its cap by the memory budget, so a test that asks for 2 GB occupies 2 GB of the budget while it
+runs and can hold another task's start in the gate queue. The gVisor tests that allocate now ask for a
+192 MB cap and a 64 MB string, which is enough to make the recorded peak several times the idle reading.
+`TestMemoryLimitEnforced` keeps a 128 MB cap because that is the smallest cap measured to kill the process
+and leave the sandbox up; see `docs/sandbox-runtime.md`.
+
 ## Tests that fail only under load
 
 - **`backend/extensions`' `TestHandleInstall_BuildFailureLeavesNoRowAndNoFiles`** fails on roughly 1 in 3
@@ -290,7 +302,20 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
   Established: the rollback runs and logs the right path, the surviving tree carries the original
   checkout's mtimes, and `RepairMissingFiles` and the fake podman's fail-once budget are ruled out.
   Unestablished: who leaves the tree behind.
+- **`backend/server`'s `TestTaskMoveUpdatesUpdatedAt`** was seen failing once, under `make check-race` over
+  five packages, and not since: 10 `-count=10 -race` runs on the branch and 10 on `HEAD` came back clean.
+  It asserts that two backlog tasks the test never writes come back ordered by `updated_at`, so the likeliest
+  reading is a timestamp tie broken differently under load — *likeliest*, not established. A single
+  unreproduced red naming it is not evidence of anything; neither is a green run proof it cannot recur.
 - **`backend/sandbox`'s `TestMemoryLimitEnforced`** fails roughly 2 in 8 with two container suites running
   concurrently and 6/6 alone. It asserts the guest OOM-killed one process, and under host pressure the
   **host** memcg killer takes the whole runsc sandbox instead (exit 128 plus `WaitPID … EOF`, container
   gone). A red naming it is a reading about the machine, not about a memory limit that stopped working.
+- **`backend/server`'s `TestTaskOperatingModeRemount/does not remount when running`** failed once in a full
+  `make check` run with `expected sandbox to be created after start`, and passed alone and in two further
+  full runs. **Mechanism inferred, not proven — and the inference no longer holds**: it was read as the task
+  waiting in the memory gate because the suite was consuming the machine's RAM, and the gate no longer looks
+  at what the host's other users hold (`docs/sandbox-runtime.md → The memory budget`). No supervisor pause
+  was logged and the refusal path logs nothing, so the observation stands with no explanation. What remains
+  established is that a test which starts a sandboxed task and expects a container depends on the gate
+  admitting it.

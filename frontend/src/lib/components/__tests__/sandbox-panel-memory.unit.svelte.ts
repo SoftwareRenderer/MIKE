@@ -116,7 +116,7 @@ describe('SandboxPanel memory section', () => {
         const tick = container.querySelector('.memory-bar-peak') as HTMLElement;
         expect(tick).not.toBeNull();
         expect(tick.style.left).toBe('49%');
-        expect(tick.title).toBe('Peak 500 MB');
+        expect(tick.title).toBe('Held 500 MB at peak');
     });
 
     it('does not render a peak tick when the peak is unknown', () => {
@@ -139,13 +139,13 @@ describe('SandboxPanel memory section', () => {
 
     it('shows the peak when known', () => {
         const { container } = renderPanel(stats({ memory_peak_mb: 500 }));
-        expect(container.querySelector('.memory-peak')?.textContent).toContain('Peak 500 MB');
+        expect(container.querySelector('.memory-peak')?.textContent).toContain('Held 500 MB at peak');
     });
 
     it('marks the peak red when it reached the limit', () => {
         const { container } = renderPanel(stats({ memory_current_mb: 412, memory_peak_mb: 1024, memory_limit_mb: 1024 }));
         const peak = container.querySelector('.memory-peak') as HTMLElement;
-        expect(peak.textContent).toContain('Peak 1024 MB');
+        expect(peak.textContent).toContain('Held 1024 MB at peak');
         expect(peak.classList.contains('reached')).toBe(true);
     });
 
@@ -181,7 +181,7 @@ describe('SandboxPanel memory section', () => {
             });
             const text = container.querySelector('.memory-alert')!.textContent!;
             expect(text).toContain('ran out of memory');
-            expect(text).toContain('Peak 1024 MB against a 1024 MB limit');
+            expect(text).toContain('Held 1024 MB at its peak, against a 1024 MB limit');
             expect(text).toContain('Raise or remove the limit');
         });
 
@@ -277,7 +277,7 @@ describe('SandboxPanel memory section', () => {
                 if (!el) throw new Error('no peak rendered');
                 return el;
             });
-            expect(peak.textContent).toContain('Peak 742 MB');
+            expect(peak.textContent).toContain('Held 742 MB at peak');
             expect(container.querySelector('.memory-value')?.textContent).toContain('Not running');
         });
 

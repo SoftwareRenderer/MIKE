@@ -464,38 +464,36 @@ func (r *Runtime) ContainerCgroupDir(name string) (string, error) {
 
 // CgroupMemory holds memory statistics read from a cgroup v2 memory controller.
 type CgroupMemory struct {
-	CurrentBytes int64  // memory.current — current usage
-	PeakBytes    int64  // memory.peak — high-water mark (0 when the file is absent)
-	MaxBytes     int64  // memory.max — limit in bytes (0 when unlimited ("max") or absent)
-	OOMKills     uint64 // oom_kill counter from memory.events
+	AnonBytes  int64  // memory.stat "anon": host-side heaps of the processes in the cgroup
+	ShmemBytes int64  // memory.stat "shmem": tmpfs, shared memory, and the RAM behind a gVisor guest
+	MaxBytes   int64  // memory.max, 0 when unlimited or absent
+	OOMKills   uint64 // memory.events oom_kill counter
 }
 
-// ReadCgroupMemory reads the memory controller statistics from a cgroup v2
-// directory. Optional files are tolerated: memory.peak does not exist on older
-// kernels (reported as 0), and a missing memory.max/memory.events simply yields
-// zero/absent values. A missing or malformed memory.current — the one file
-// that must be present in a live cgroup — is an error.
+// HeldBytes is the memory the sandbox is holding. gVisor backs the guest's RAM with a file, so the
+// memory a task allocates is charged to the cgroup as shmem rather than anon. The host's page cache
+// is not held memory, because the kernel can reclaim it.
+func (m CgroupMemory) HeldBytes() int64 { return m.AnonBytes + m.ShmemBytes }
+
+// ReadCgroupMemory reads one container's memory controller files. A missing anon line is an error,
+// because every caller's number depends on it; every other missing or unparsable value reads as zero.
 func ReadCgroupMemory(dir string) (CgroupMemory, error) {
 	var m CgroupMemory
 
-	cur, err := os.ReadFile(filepath.Join(dir, "memory.current"))
+	stat, err := os.ReadFile(filepath.Join(dir, "memory.stat"))
 	if err != nil {
-		return m, fmt.Errorf("read memory.current: %w", err)
+		return m, fmt.Errorf("read memory.stat: %w", err)
 	}
-	m.CurrentBytes, err = strconv.ParseInt(strings.TrimSpace(string(cur)), 10, 64)
-	if err != nil {
-		return m, fmt.Errorf("parse memory.current: %w", err)
+	statContents := string(stat)
+	if m.AnonBytes, err = cgroupStatValue(statContents, "anon"); err != nil {
+		return m, err
+	}
+	if shmem, serr := cgroupStatValue(statContents, "shmem"); serr == nil {
+		m.ShmemBytes = shmem
 	}
 
-	if peak, err := os.ReadFile(filepath.Join(dir, "memory.peak")); err == nil {
-		if p, perr := strconv.ParseInt(strings.TrimSpace(string(peak)), 10, 64); perr == nil {
-			m.PeakBytes = p
-		}
-	}
-
-	// A numeric memory.max is the enforced limit; "max" (unlimited) and a
-	// missing file both leave MaxBytes at 0 — the only distinction downstream
-	// needs is "limit known" vs. "no enforced limit".
+	// An unlimited "max" and a missing file both read as 0, because callers only ask whether the
+	// container is limited at all.
 	if maxData, err := os.ReadFile(filepath.Join(dir, "memory.max")); err == nil {
 		if s := strings.TrimSpace(string(maxData)); s != "max" {
 			if v, verr := strconv.ParseInt(s, 10, 64); verr == nil {
@@ -518,6 +516,23 @@ func ReadCgroupMemory(dir string) (CgroupMemory, error) {
 	return m, nil
 }
 
+// cgroupStatValue reads one "<key> <bytes>" line from memory.stat. The key is matched with a
+// trailing space so that "anon" cannot match the "anon_thp" line.
+func cgroupStatValue(contents, key string) (int64, error) {
+	for _, line := range strings.Split(contents, "\n") {
+		value, ok := strings.CutPrefix(strings.TrimSpace(line), key+" ")
+		if !ok {
+			continue
+		}
+		v, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("parse memory.stat %s: %w", key, err)
+		}
+		return v, nil
+	}
+	return 0, fmt.Errorf("memory.stat has no %s line", key)
+}
+
 // ApplyMemoryLimit enforces a hard memory limit on a running container by writing into its
 // cgroup, because runsc — which needs --runtime-flag ignore-cgroups under rootless — ignores the
 // OCI spec's linux.resources, so podman's --memory alone is never enforced. It writes
@@ -525,17 +540,30 @@ func ReadCgroupMemory(dir string) (CgroupMemory, error) {
 // reclaims the overshoot instead of OOM-killing, which would make the limit soft. On error the
 // caller decides whether to fail open or closed.
 func (r *Runtime) ApplyMemoryLimit(name string, limitMB int) error {
-	if limitMB <= 0 {
-		return fmt.Errorf("memory limit must be positive, got %d", limitMB)
-	}
 	dir, err := r.ContainerCgroupDir(name)
 	if err != nil {
 		return err
 	}
+	return applyMemoryLimitAt(dir, name, limitMB)
+}
+
+// applyMemoryLimitAt writes the cap into an already-resolved cgroup directory. It takes the directory
+// so that the writes can be tested without a container.
+func applyMemoryLimitAt(dir, name string, limitMB int) error {
+	if limitMB <= 0 {
+		return fmt.Errorf("memory limit must be positive, got %d", limitMB)
+	}
 	maxBytes := int64(limitMB) << 20
+	// memory.high is set to "max", which disables it. A throttle cannot work here: the guest's memory
+	// is unreclaimable while swap is off, so writing it stalls the guest and then kills it anyway. This
+	// write also clears a value left by an older build.
+	if err := os.WriteFile(filepath.Join(dir, "memory.high"), []byte("max"), 0); err != nil {
+		logging.For(logging.Runtime).Warnf("%s: could not clear memory.high: %v", name, err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "memory.max"), []byte(strconv.FormatInt(maxBytes, 10)), 0); err != nil {
 		return fmt.Errorf("set memory.max in %s: %w", dir, err)
 	}
+
 	if err := os.WriteFile(filepath.Join(dir, "memory.swap.max"), []byte("0"), 0); err != nil {
 		// Non-fatal: hosts without a swap controller still enforce memory.max
 		// as a hard cap (there is no swap to absorb the overshoot).
@@ -557,9 +585,12 @@ func (r *Runtime) ClearMemoryLimit(name string) error {
 	return clearCgroupMemoryLimit(dir)
 }
 
-// clearCgroupMemoryLimit writes "max" into the cgroup's memory.max and
+// clearCgroupMemoryLimit writes "max" into the cgroup's memory.max, memory.high and
 // memory.swap.max files, removing any memory limit.
 func clearCgroupMemoryLimit(dir string) error {
+	if err := os.WriteFile(filepath.Join(dir, "memory.high"), []byte("max"), 0); err != nil {
+		logging.For(logging.Runtime).Warnf("could not clear memory.high in %s: %v", dir, err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "memory.max"), []byte("max"), 0); err != nil {
 		return fmt.Errorf("clear memory.max in %s: %w", dir, err)
 	}

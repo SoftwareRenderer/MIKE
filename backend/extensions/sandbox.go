@@ -20,8 +20,10 @@ import (
 const (
 	// ExtensionContainerPrefix is the prefix for extension sandbox container names.
 	ExtensionContainerPrefix = "kanban-ext"
-	// DefaultExtensionMemory 0 leaves extension sandboxes unlimited unless the user sets one.
-	DefaultExtensionMemory = 0
+	// DefaultExtensionMemory is the memory limit for an extension sandbox when neither its manifest
+	// nor the user sets one. It is above the peaks measured for the language servers, and a negative
+	// limit in a manifest means no bound at all.
+	DefaultExtensionMemory = 2048
 	// ExtensionLivenessTTL is how long to cache a liveness check result.
 	ExtensionLivenessTTL = 5 * time.Minute
 	// ExtensionStopGracePeriod is how long to keep a sandbox alive after the last
@@ -29,13 +31,33 @@ const (
 	ExtensionStopGracePeriod = 15 * time.Minute
 )
 
+// memoryUsage is the part of the memory tracker this manager calls. Declaring it here lets the
+// accounting be tested without a container; backend/sandbox declares the same shape.
+type memoryUsage interface {
+	Usage(containerName string) sandboxruntime.MemoryUsageMB
+	Forget(containerName string)
+}
+
+// noMemory is used when a manager has no tracker, and answers that there is no data.
+type noMemory struct{}
+
+func (noMemory) Usage(string) sandboxruntime.MemoryUsageMB { return sandboxruntime.MemoryUsageMB{} }
+func (noMemory) Forget(string)                             {}
+
+func (sm *ExtensionSandboxManager) memory() memoryUsage {
+	if sm.mem == nil {
+		return noMemory{}
+	}
+	return sm.mem
+}
+
 // ExtensionSandboxManager manages gVisor sandbox containers for extensions.
 type ExtensionSandboxManager struct {
 	mu            sync.Mutex
 	rt            *sandboxruntime.Runtime
 	refs          map[string]int                    // extID -> active bridge-connection count
 	states        map[string]*extensionSandboxState // extID -> runtime state
-	mem           *sandboxruntime.MemoryTracker     // extID -> container memory, via containerName
+	mem           memoryUsage                       // each container's memory, looked up by containerName
 	registry      *RegistryClient
 	store         *ExtensionStore
 	available     bool
@@ -83,6 +105,9 @@ type extensionSandboxState struct {
 	// environment is fixed at creation, so an env change needs a recreate — including
 	// the granted dependency assignment, so revoking a grant recycles the sandbox.
 	envs []string
+	// memLimitMB is the limit this container was created with, in MB, or 0 when it is unlimited. It is
+	// recorded here because the manifest's own limit can change while the container is running.
+	memLimitMB int64
 }
 
 func NewExtensionSandboxManager(reg *RegistryClient, store *ExtensionStore, boot sandboxruntime.Boot) *ExtensionSandboxManager {
@@ -532,6 +557,7 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 	// Store state
 	sm.states[ext.ID] = &extensionSandboxState{
 		containerName:   containerName,
+		memLimitMB:      int64(extensionMemoryLimit(ext)),
 		createdAt:       time.Now(),
 		lastCheckedAt:   time.Now(),
 		isAlive:         true,
@@ -693,7 +719,7 @@ func (sm *ExtensionSandboxManager) stopLocked(extID string) {
 
 	delete(sm.refs, extID)
 	delete(sm.states, extID)
-	sm.mem.Forget(state.containerName)
+	sm.memory().Forget(state.containerName)
 
 	logging.For(logging.Sandbox).Infof("ext=%s stopped", extID)
 }
@@ -771,6 +797,26 @@ func (sm *ExtensionSandboxManager) ApplyMemoryLimit(extID string, limitMB int) e
 	return sm.rt.ApplyMemoryLimit(state.containerName, limitMB)
 }
 
+// MemoryAccounting returns, in MB, what the live extension sandboxes hold and what they cost the
+// memory budget. The cost of one container is sandboxruntime.ChargeMB.
+func (sm *ExtensionSandboxManager) MemoryAccounting() (heldMB, chargeMB int64) {
+	sm.mu.Lock()
+	names := make(map[string]int64, len(sm.states))
+	for _, state := range sm.states {
+		if state != nil {
+			names[state.containerName] = state.memLimitMB
+		}
+	}
+	sm.mu.Unlock()
+
+	for name, cap := range names {
+		used, charge := sandboxruntime.ChargeMB(sm.memory().Usage(name), cap)
+		heldMB += used
+		chargeMB += charge
+	}
+	return heldMB, chargeMB
+}
+
 // GetMemoryStats reads the extension sandbox's cgroup v2 memory controller, returning zero stats
 // (Running: false) when it was never created, isn't running, or can't be read.
 //
@@ -788,7 +834,7 @@ func (sm *ExtensionSandboxManager) GetMemoryStats(extID string) *types.SandboxMe
 		return &types.SandboxMemoryStats{}
 	}
 
-	usage := sm.mem.Usage(containerName)
+	usage := sm.memory().Usage(containerName)
 	return &types.SandboxMemoryStats{
 		Running:   usage.Known,
 		CurrentMB: usage.Current,

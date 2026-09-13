@@ -251,6 +251,12 @@ export interface Config {
     auto_maximize_chat_mobile?: boolean; // maximize the chat while its input has focus (default on)
     encryption_enabled?: boolean;
     tls_ca_available?: boolean; // server runs its own cert signed by its local CA → GET /api/tls/ca offers it
+    // Everything MIKE started may share this ceiling, in MB; memory_total_mb is the installed RAM it
+    // was computed from and memory_budget_pct the configured percentage. Absent (or 0) when the gate is
+    // off, which is the case a config written by such a server leaves behind.
+    memory_budget_mb?: number;
+    memory_total_mb?: number;
+    memory_budget_pct?: number;
     keyboard_shortcuts?: KeyboardShortcuts;
 }
 

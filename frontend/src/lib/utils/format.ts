@@ -47,6 +47,17 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
+ * Memory in whole megabytes, grouped per the active locale: 13624 → "13,624 MB".
+ *
+ * Distinct from formatBytes, which compacts to one decimal for file sizes, and from
+ * memory-stats' formatMemoryLimitMB, which answers "No limit" for 0 and prints a project's cap
+ * ungrouped — a ceiling an operator compares against installed RAM is neither of those.
+ */
+export function formatMB(mb: number): string {
+    return new Intl.NumberFormat(activeLocale(), { maximumFractionDigits: 0 }).format(mb) + ' MB';
+}
+
+/**
  * A number rendered in the active locale WITHOUT digit grouping, at `digits` decimals.
  *
  * This is what makes `formatTokens`/`formatBytes` locale-aware without changing their

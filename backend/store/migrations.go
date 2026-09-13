@@ -20,7 +20,7 @@ import (
 // steps in place. A database stamped N has been through 1..N; an older one reads 0 and runs the
 // whole chain. So the steps must stay idempotent, and one that must run exactly once needs its own
 // marker (see the config-row guard on the backfill) rather than trusting this number.
-const schemaVersion = doneMemoryAlertAckStamp
+const schemaVersion = doneLegacyPeakClearedStamp
 
 // doneDiffParsedStamp is the stamp from which a stored done-task diff body carries parsed_files.
 // Older bodies are served byte for byte and cannot grow the key, so initSchema drops those rows.
@@ -34,6 +34,10 @@ const doneOOMKillStamp = doneMemSupervisorStamp + 1
 
 // doneMemoryAlertAckStamp is the stamp from which a task carries its dismissed memory alert.
 const doneMemoryAlertAckStamp = doneOOMKillStamp + 1
+
+// doneLegacyPeakClearedStamp is the schema version from which tasks.sandbox_memory_peak_mb stores
+// held memory, as sandboxruntime.CgroupMemory.HeldBytes defines it.
+const doneLegacyPeakClearedStamp = doneMemoryAlertAckStamp + 1
 
 // userVersion reads PRAGMA user_version. A read failure answers 0, which reruns the probe chain:
 // slow, but it cannot leave a column missing. The caller holds s.mu.
@@ -396,6 +400,29 @@ func (s *Store) migrateTokenStats() {
 		WHERE tm.role IN ('assistant', 'title')
 	`)
 		_, _ = s.db.Exec(`INSERT OR IGNORE INTO config (key, value) VALUES ('migration_cumulative_stats', '1')`)
+	}
+}
+
+// zeroLegacySandboxPeaks sets to zero the peaks stored under the old definition, which counted the
+// host's page cache. Such a number can sit above the project's limit and no later run can bring it
+// down, so it would alert forever. The dismissal the user acknowledged against it is cleared too,
+// because it would otherwise cover every smaller alert. The step is guarded by its own config row
+// rather than by schemaVersion, because running it a second time would erase honest numbers.
+func (s *Store) zeroLegacySandboxPeaks() {
+	var done int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM config WHERE key = 'migration_sandbox_peak_definition'`).Scan(&done)
+	if done > 0 {
+		return
+	}
+	if _, err := s.db.Exec(`UPDATE tasks SET sandbox_memory_peak_mb = 0,
+		memory_alert_acked = 0, memory_alert_ack_peak_mb = 0, memory_alert_ack_oom_kills = 0,
+		memory_alert_ack_limit_mb = 0`); err != nil {
+		// No marker is written, so the next start tries again.
+		logging.For(logging.Store).Warnf("zeroing pre-held-memory sandbox peaks failed: %v", err)
+		return
+	}
+	if _, err := s.db.Exec(`INSERT OR IGNORE INTO config (key, value) VALUES ('migration_sandbox_peak_definition', '1')`); err != nil {
+		logging.For(logging.Store).Warnf("stamping the sandbox peak migration failed: %v", err)
 	}
 }
 

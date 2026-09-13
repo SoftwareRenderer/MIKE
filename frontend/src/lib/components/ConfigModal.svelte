@@ -5,7 +5,7 @@
     import { isAgentProvider } from '$lib/types';
     import { getModelName, getProviderDisplayName } from '$lib/utils/providers';
     import { t } from '$lib/i18n';
-    import { usdSymbol } from '$lib/utils/format';
+    import { formatMB, usdSymbol } from '$lib/utils/format';
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
     import { appStore, uiStore, dialogStore } from '$lib/stores';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
@@ -891,6 +891,18 @@
                     <div class="readonly-value">{config?.database_path || '\u2014'}</div>
                     <span class="field-help">{t('settings.databaseHelp')}</span>
                 </div>
+                {#if config?.memory_budget_mb}
+                    <!-- 0 means the gate is off (no installed RAM read), and a config written by such a
+                         server has nothing to say about memory. -->
+                    <div class="field-label">
+                        <span class="field-label-inline">{t('settings.maxMemory')}</span>
+                        <div class="readonly-value">{formatMB(config.memory_budget_mb)}</div>
+                        <span class="field-help">{t('settings.maxMemoryHelp', {
+                            pct: config.memory_budget_pct ?? 0,
+                            total: formatMB(config.memory_total_mb ?? 0),
+                        })}</span>
+                    </div>
+                {/if}
                 {#if config?.tls_ca_available}
                     <!-- Only when the server signed its own certificate. A plain link,
                          not apiFetch: the route is a session-authed GET, so the

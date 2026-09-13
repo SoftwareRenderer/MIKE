@@ -922,7 +922,10 @@ func TestMemoryLimitEnforced(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-mem-enforced"
 
-	// 128MB limit; the memhog below allocates ~512MB.
+	// The smallest cap that kills the process and not the sandbox. The sandbox holds ~23MB idle, and at
+	// a 64MB cap the cgroup was measured killing runsc itself instead of the over-allocating guest
+	// process (exit 128, `WaitPID failed: EOF`, container gone, 3 runs out of 3). The memhog's 512MB
+	// target is never reached: the limit stops it on the way.
 	if _, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{MemoryLimit: 128}); err != nil {
 		t.Fatalf("create sandbox with memory limit: %v", err)
 	}
@@ -966,11 +969,10 @@ func TestGetMemoryStats(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-memstats-task"
 
-	// 512MB limit; the background hog below allocates ~200MB and holds it.
-	// The limit sits far above the ~200MB hog so the cgroup OOM killer can't
-	// truncate the allocation before the usage assertion below (the container
-	// baseline varies with host load).
-	if _, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{MemoryLimit: 512}); err != nil {
+	// A cap above the 64MB the test holds plus the sandbox's own ~23MB, so the allocation is never
+	// truncated before the reading below. It is also what the memory budget charges this container, so
+	// a wider cap would only cost more. TestMemoryLimitEnforced is the one that asserts the kill.
+	if _, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{MemoryLimit: 192}); err != nil {
 		t.Fatalf("create sandbox with memory limit: %v", err)
 	}
 	t.Cleanup(func() {
@@ -982,8 +984,9 @@ func TestGetMemoryStats(t *testing.T) {
 		t.Error("expected not-running for untracked task")
 	}
 
-	// Background hog: allocate ~200MB (209715200 bytes) and hold it for 30s.
-	const hog = `( x=a; while [ ${#x} -lt 209715200 ]; do x="$x$x"; done; sleep 30 ) & echo hog-started`
+	// Background hog: hold a 64MB string for 30s, built by one command substitution so that it does
+	// not grow past what it asks for the way a doubling loop does.
+	const hog = `( x=$(head -c 67108864 /dev/zero | tr "\0" a); sleep 30 ) & echo hog-started`
 	out, err := sm.Exec(taskID, hog, nil)
 	if err != nil {
 		t.Fatalf("start background memhog: %v (%s)", err, out)
@@ -994,7 +997,7 @@ func TestGetMemoryStats(t *testing.T) {
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		stats = sm.GetMemoryStats(taskID)
-		if stats.Running && stats.CurrentMB >= 150 {
+		if stats.Running && stats.CurrentMB >= 60 {
 			break
 		}
 		time.Sleep(200 * time.Millisecond)
@@ -1002,11 +1005,11 @@ func TestGetMemoryStats(t *testing.T) {
 	if stats == nil || !stats.Running {
 		t.Fatalf("expected running container, got %+v", stats)
 	}
-	if stats.LimitMB != 512 {
-		t.Errorf("LimitMB = %d, want 512", stats.LimitMB)
+	if stats.LimitMB != 192 {
+		t.Errorf("LimitMB = %d, want the 192 the container was created with", stats.LimitMB)
 	}
-	if stats.CurrentMB < 150 {
-		t.Errorf("CurrentMB = %d, want >= 150 (hog allocated ~200MB)", stats.CurrentMB)
+	if stats.CurrentMB < 60 {
+		t.Errorf("CurrentMB = %d, want >= 60 (the hog holds a 64MB string)", stats.CurrentMB)
 	}
 
 	// After Stop the task is untracked → not-running, and the peak has been handed off with the
@@ -1019,8 +1022,8 @@ func TestGetMemoryStats(t *testing.T) {
 	if stats := sm.GetMemoryStats(taskID); stats.Running {
 		t.Error("expected not-running after Stop")
 	}
-	if len(reported) != 1 || reported[0] < 150 {
-		t.Errorf("peak reported at teardown = %v, want one reading of >= 150 MB — without it the sandbox panel has no memory number once the task leaves In Progress", reported)
+	if len(reported) != 1 || reported[0] < 60 {
+		t.Errorf("peak reported at teardown = %v, want one reading of >= 60 MB — without it the sandbox panel has no memory number once the task leaves In Progress", reported)
 	}
 }
 

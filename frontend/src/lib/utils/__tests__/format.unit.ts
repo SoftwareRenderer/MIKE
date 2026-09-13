@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { escapeHtml, formatTokens, formatBytes, formatCost, usdSymbol } from '$lib/utils/format';
+import { escapeHtml, formatTokens, formatBytes, formatCost, formatMB, usdSymbol } from '$lib/utils/format';
 import { setLocale } from '$lib/i18n/runtime.svelte';
 
 // Pins the outputs established by the pre-consolidation copies in
@@ -13,6 +13,27 @@ describe('escapeHtml', () => {
 
     it('does not double-escape ampersands it introduces', () => {
         expect(escapeHtml(`&'"`)).toBe('&amp;&#39;&quot;');
+    });
+});
+
+describe('formatMB', () => {
+    it('prints a memory amount in full, grouped per the active locale', () => {
+        // A ceiling an operator compares against installed RAM: compacting it to "13.6K MB" would
+        // hide the figure the gate was actually started with.
+        setLocale('en');
+        expect(formatMB(13624)).toBe('13,624 MB');
+        expect(formatMB(900)).toBe('900 MB');
+        setLocale('de');
+        expect(formatMB(13624)).toBe('13.624 MB');
+        setLocale('en');
+    });
+
+    it('rounds a fraction rather than printing decimals', () => {
+        for (const locale of ['en', 'de'] as const) {
+            setLocale(locale);
+            expect(formatMB(1023.6)).toBe(new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(1023.6) + ' MB');
+        }
+        setLocale('en');
     });
 });
 

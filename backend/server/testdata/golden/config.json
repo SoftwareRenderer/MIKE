@@ -9,6 +9,9 @@
   "keyboard_shortcuts": {
     "create_task": ""
   },
+  "memory_budget_mb": 0,
+  "memory_budget_pct": 0,
+  "memory_total_mb": 0,
   "providers": [
     {
       "api_key": "••••••••••",

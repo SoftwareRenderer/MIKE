@@ -173,6 +173,7 @@ func (s *Store) initSchema() error {
 
 	s.addMissingColumns()
 	s.migrateTokenStats()
+	s.zeroLegacySandboxPeaks()
 	s.clearDoneDiffSnapshotsIfOlderThan(stored)
 	s.setUserVersion(schemaVersion)
 	return nil

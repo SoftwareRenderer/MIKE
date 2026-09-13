@@ -81,10 +81,19 @@ func seedRunningTask(t *testing.T, s *store.Store, id string, peakMB int64) {
 	}
 }
 
-func TestSupervisorPausesLowestUsageTask(t *testing.T) {
+// fixedCharges answers the current cost of each container, keyed by task ID.
+type fixedCharges map[string]int64
+
+func (f fixedCharges) Charges() map[string]int64 { return f }
+
+// TestSupervisorPausesSmallestLiveChargeFirst gives the two tasks a live cost the opposite way round
+// to their stored peaks, so a decision that read the task rows would pause the wrong one.
+func TestSupervisorPausesSmallestLiveChargeFirst(t *testing.T) {
 	s := newMemSupTestStore(t)
-	seedRunningTask(t, s, "task-low", 200)
-	seedRunningTask(t, s, "task-high", 800)
+	seedRunningTask(t, s, "task-heavy", 120) // last run's peak is the small one
+	seedRunningTask(t, s, "task-light", 900) // …and this one's is the big one
+
+	charges := fixedCharges{"task-heavy": 950, "task-light": 120}
 
 	gate := &MemoryGate{}
 	gate.SetCapacity(900)
@@ -96,23 +105,72 @@ func TestSupervisorPausesLowestUsageTask(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	actions := &recordingSupervisorActions{}
-	NewMemorySupervisor(s, gate, actions, time.Second).TickOnce()
+	NewMemorySupervisor(s, gate, charges, actions, time.Second).TickOnce()
 
 	stopped := actions.stoppedIDs()
-	if len(stopped) != 1 || stopped[0] != "task-low" {
-		t.Fatalf("expected task-low paused (lowest peak, first in ascending order), got %v", stopped)
+	if len(stopped) != 1 || stopped[0] != "task-light" {
+		t.Fatalf("expected task-light paused (120 MB live, smallest), got %v", stopped)
 	}
 
-	got, err := s.GetTaskByID("task-low")
+	got, err := s.GetTaskByID("task-light")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !got.MemorySupervisorPaused {
 		t.Error("MemorySupervisorPaused must be true on the paused task")
 	}
-	gotHigh, _ := s.GetTaskByID("task-high")
-	if gotHigh.MemorySupervisorPaused {
+	gotHeavy, _ := s.GetTaskByID("task-heavy")
+	if gotHeavy.MemorySupervisorPaused {
 		t.Error("MemorySupervisorPaused must be false on the non-paused task")
+	}
+}
+
+// With no container reading, a task is costed at its reserve, never at zero.
+func TestSupervisorFallsBackToReserveWithoutContainerCharges(t *testing.T) {
+	s := newMemSupTestStore(t)
+	narrow := newNarrowMemProject(t, s, "proj-narrow", 256)
+	_ = narrow
+	seedRunningTask(t, s, "task-wide", 10) // same 1024 MB project as the store's default
+	seedRunningTaskIn(t, s, "task-narrow", "proj-narrow", 999)
+
+	gate := &MemoryGate{}
+	gate.SetCapacity(900)
+	if err := gate.Acquire(context.Background(), 800, nil); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = gate.Acquire(context.Background(), 300, nil) }()
+	time.Sleep(50 * time.Millisecond)
+
+	actions := &recordingSupervisorActions{}
+	NewMemorySupervisor(s, gate, nil, actions, time.Second).TickOnce()
+
+	stopped := actions.stoppedIDs()
+	if len(stopped) != 1 || stopped[0] != "task-narrow" {
+		t.Fatalf("expected the 256 MB reserve paused, got %v", stopped)
+	}
+}
+
+// A host under its free-memory floor pauses tasks even with nothing queued.
+func TestSupervisorPausesOnHostMemoryFloorWithEmptyQueue(t *testing.T) {
+	s := newMemSupTestStore(t)
+	seedRunningTask(t, s, "task-a", 500)
+
+	gate := &MemoryGate{}
+	gate.SetCapacity(900)
+	// 90 MB free of 2000 total is under the 5 % floor; nothing is queued. MIKE's own charge is well
+	// inside its ceiling, which is the point: the floor pauses on the host, not on the budget.
+	gate.SetMeasurements(500, 500, 90, 2000)
+
+	actions := &recordingSupervisorActions{}
+	NewMemorySupervisor(s, gate, fixedCharges{"task-a": 500}, actions, time.Second).TickOnce()
+
+	stopped := actions.stoppedIDs()
+	if len(stopped) != 1 || stopped[0] != "task-a" {
+		t.Fatalf("the free-memory floor must pause a task with an empty queue, got %v", stopped)
+	}
+	got, _ := s.GetTaskByID("task-a")
+	if !got.MemorySupervisorPaused {
+		t.Error("MemorySupervisorPaused must be true on the paused task")
 	}
 }
 
@@ -127,7 +185,7 @@ func TestSupervisorNoPauseWhenQueueEmpty(t *testing.T) {
 	}
 
 	actions := &recordingSupervisorActions{}
-	NewMemorySupervisor(s, gate, actions, time.Second).TickOnce()
+	NewMemorySupervisor(s, gate, nil, actions, time.Second).TickOnce()
 
 	if len(actions.stoppedIDs()) > 0 {
 		t.Errorf("empty queue must not cause a pause, got %v", actions.stoppedIDs())
@@ -139,7 +197,7 @@ func TestSupervisorDisablesWhenZeroCapacity(t *testing.T) {
 	seedRunningTask(t, s, "task-x", 9999)
 
 	actions := &recordingSupervisorActions{}
-	NewMemorySupervisor(s, &MemoryGate{}, actions, time.Second).TickOnce()
+	NewMemorySupervisor(s, &MemoryGate{}, nil, actions, time.Second).TickOnce()
 
 	if len(actions.stoppedIDs()) > 0 {
 		t.Errorf("zero capacity must disable the supervisor, got %v", actions.stoppedIDs())
@@ -167,14 +225,38 @@ func TestSupervisorResumesLowestPausedTask(t *testing.T) {
 	}
 
 	gate := &MemoryGate{}
-	gate.SetCapacity(1000)
+	// Above the project's 1024 MB reserve, otherwise no task could ever resume.
+	gate.SetCapacity(2000)
 
 	actions := &recordingSupervisorActions{}
-	NewMemorySupervisor(s, gate, actions, time.Second).TickOnce()
+	NewMemorySupervisor(s, gate, nil, actions, time.Second).TickOnce()
 
 	started := actions.startedIDs()
 	if len(started) != 1 || started[0] != "proj-mem/task-b" {
-		t.Fatalf("expected lowest-peak task-b resumed first, got %v", started)
+		t.Fatalf("expected task-b resumed first (equal reserves, recorded peak breaks the tie), got %v", started)
+	}
+}
+
+// A task whose own cap exceeds the ceiling is never resumed.
+func TestSupervisorNeverResumesTaskWhoseCapExceedsCapacity(t *testing.T) {
+	s := newMemSupTestStore(t) // proj-mem caps a sandbox at 1024 MB
+	now := time.Now().UTC()
+	if err := s.CreateTask(&types.Task{
+		ID: "task-wide", ProjectID: "proj-mem", Title: "wide",
+		Status: types.StatusInProgress, ExecutionState: types.ExecStatePaused,
+		MemorySupervisorPaused: true, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	gate := &MemoryGate{}
+	gate.SetCapacity(1000)
+
+	actions := &recordingSupervisorActions{}
+	NewMemorySupervisor(s, gate, nil, actions, time.Second).TickOnce()
+
+	if started := actions.startedIDs(); len(started) > 0 {
+		t.Errorf("must not resume a task that cannot fit its own cap, got %v", started)
 	}
 }
 
@@ -198,10 +280,10 @@ func TestSupervisorResumesSubtaskViaStartSubtask(t *testing.T) {
 	}
 
 	gate := &MemoryGate{}
-	gate.SetCapacity(1000)
+	gate.SetCapacity(2000)
 
 	actions := &recordingSupervisorActions{}
-	NewMemorySupervisor(s, gate, actions, time.Second).TickOnce()
+	NewMemorySupervisor(s, gate, nil, actions, time.Second).TickOnce()
 
 	started := actions.startedIDs()
 	if len(started) != 1 || started[0] != "proj-mem/sub-1:parent" {
@@ -228,7 +310,7 @@ func TestSupervisorDoesNotResumeWhenWouldRequeue(t *testing.T) {
 	}
 
 	actions := &recordingSupervisorActions{}
-	NewMemorySupervisor(s, gate, actions, time.Second).TickOnce()
+	NewMemorySupervisor(s, gate, nil, actions, time.Second).TickOnce()
 
 	if len(actions.startedIDs()) > 0 {
 		t.Errorf("must not resume a task that immediately re-queues, got %v", actions.startedIDs())
@@ -240,9 +322,33 @@ func TestSupervisorStartAndStop(t *testing.T) {
 	gate := &MemoryGate{}
 	gate.SetCapacity(1000)
 	// Short interval so Start exercises the ticker.
-	sup := NewMemorySupervisor(s, gate, &recordingSupervisorActions{}, 50*time.Millisecond)
+	sup := NewMemorySupervisor(s, gate, nil, &recordingSupervisorActions{}, 50*time.Millisecond)
 	sup.Start()
 	time.Sleep(150 * time.Millisecond)
 	sup.Stop()
 	sup.Stop() // idempotent
+}
+
+// newNarrowMemProject adds a second project with its own memory limit.
+func newNarrowMemProject(t *testing.T, s *store.Store, id string, limitMB int) string {
+	t.Helper()
+	if err := s.CreateProject(&types.Project{
+		ID: id, Name: id, Path: t.TempDir(),
+		SandboxEnabled: true, SandboxMemoryLimit: limitMB,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func seedRunningTaskIn(t *testing.T, s *store.Store, id, projectID string, peakMB int64) {
+	t.Helper()
+	now := time.Now().UTC()
+	if err := s.CreateTask(&types.Task{
+		ID: id, ProjectID: projectID, Title: id,
+		Status: types.StatusInProgress, ExecutionState: types.ExecStateRunning,
+		SandboxMemoryPeakMB: peakMB, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
 }

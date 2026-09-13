@@ -209,6 +209,9 @@ type SandboxManager struct {
 	clients       map[string]*bridge.Client // taskID -> agent client (cached)
 	livenessCache map[string]time.Time      // taskID -> last time running was confirmed
 	mem           memoryUsage               // taskID -> container memory, via containerName
+	// capsMB is each live container's limit in MB as it was created, or 0 when it is unlimited. It is
+	// recorded here because the project's configured limit can change while the container is running.
+	capsMB map[string]int64
 	// Set under mu; never called with mu held — the sink writes to SQLite.
 	peakSink func(taskID string, peakMB int64, oomKills int64)
 	// imageOps holds in-flight image builds/pulls by image ref, so concurrent sandbox starts share
@@ -606,6 +609,10 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	}
 
 	sm.active[taskID] = containerName
+	if sm.capsMB == nil {
+		sm.capsMB = map[string]int64{}
+	}
+	sm.capsMB[taskID] = int64(opts.MemoryLimit)
 	sm.mountPaths[taskID] = mountPath
 	sm.agents[taskID] = &agentConn{cmd: agentCmd, stdin: stdin, stdout: stdout}
 
@@ -978,12 +985,53 @@ func (sm *SandboxManager) retainContainer(taskID, containerName string) {
 	}
 }
 
+// Charges returns what each live container costs the memory budget, in MB, keyed by the task ID it
+// was created for. The cost of one container is sandboxruntime.ChargeMB.
+func (sm *SandboxManager) Charges() map[string]int64 {
+	charges, _ := sm.memoryCharges()
+	return charges
+}
+
+// MemoryAccounting returns, in MB, what this manager's live containers hold and what they cost the
+// memory budget.
+func (sm *SandboxManager) MemoryAccounting() (heldMB, chargeMB int64) {
+	charges, heldMB := sm.memoryCharges()
+	for _, charge := range charges {
+		chargeMB += charge
+	}
+	return heldMB, chargeMB
+}
+
+// memoryCharges returns what each live container costs the budget, keyed by task ID, and what they hold
+// in total.
+func (sm *SandboxManager) memoryCharges() (map[string]int64, int64) {
+	sm.mu.Lock()
+	containers := make(map[string]string, len(sm.active))
+	caps := make(map[string]int64, len(sm.active))
+	for id, name := range sm.active {
+		containers[id] = name
+		caps[id] = sm.capsMB[id]
+	}
+	sm.mu.Unlock()
+
+	charges := make(map[string]int64, len(containers))
+	var heldMB int64
+	mem := sm.memory()
+	for id, name := range containers {
+		used, charge := sandboxruntime.ChargeMB(mem.Usage(name), caps[id])
+		heldMB += used
+		charges[id] = charge
+	}
+	return charges, heldMB
+}
+
 // Stop removes the sandbox container for a task.
 func (sm *SandboxManager) Stop(taskID string) error {
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]
 	if ok {
 		delete(sm.active, taskID)
+		delete(sm.capsMB, taskID)
 	}
 	client := sm.clients[taskID]
 	if client != nil {

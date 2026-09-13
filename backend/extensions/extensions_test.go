@@ -622,10 +622,10 @@ func TestSandboxConfigFromManifest(t *testing.T) {
 	if !def.NetworkIsolation {
 		t.Error("default NetworkIsolation should be true")
 	}
-	// Pinned explicitly: the contract is 0 = no limit (LSP sandboxes run
-	// unlimited unless the user sets a limit).
-	if def.MemoryLimit != 0 {
-		t.Errorf("default MemoryLimit = %d, want 0 (no limit)", def.MemoryLimit)
+	// An extension sandbox is bounded by default, so the memory budget can see its growth before it
+	// happens.
+	if def.MemoryLimit != DefaultExtensionMemory {
+		t.Errorf("default MemoryLimit = %d, want %d", def.MemoryLimit, DefaultExtensionMemory)
 	}
 
 	// Manifest envs/mounts are carried over; defaults preserved.
@@ -639,6 +639,14 @@ func TestSandboxConfigFromManifest(t *testing.T) {
 	}
 	if sc.MemoryLimit != 512 {
 		t.Errorf("MemoryLimit = %d, want 512", sc.MemoryLimit)
+	}
+	// A negative limit is the manifest asking for no bound, and the default must not swallow it.
+	negative := sandboxConfigFromManifest(&SandboxConfig{MemoryLimit: -1})
+	if negative.MemoryLimit >= 0 {
+		t.Errorf("MemoryLimit = %d, want the manifest's unlimited request preserved", negative.MemoryLimit)
+	}
+	if got := extensionMemoryLimit(&Extension{SandboxConfig: negative}); got != 0 {
+		t.Errorf("extensionMemoryLimit = %d, want 0 (no write, no bound)", got)
 	}
 	if len(sc.Envs) != 1 || sc.Envs[0].Key != "XDG_CACHE_HOME" {
 		t.Errorf("envs not carried over: %+v", sc.Envs)

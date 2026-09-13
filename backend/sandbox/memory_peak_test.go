@@ -3,7 +3,9 @@ package sandbox
 import (
 	"sync"
 	"testing"
+	"time"
 
+	"kanban/backend/types"
 	"kanban/pkg/sandboxruntime"
 )
 
@@ -166,5 +168,81 @@ func TestStopWithoutSinkReadsNothing(t *testing.T) {
 	}
 	if len(forgot) != 1 {
 		t.Errorf("Forget calls = %d, want 1", len(forgot))
+	}
+}
+
+// TestStopRecordsHighWaterNotLastSample: a run records the most its sandbox ever held, not what it
+// held when the container stopped. Held RAM falls back between samples, so these differ.
+func TestStopRecordsHighWaterNotLastSample(t *testing.T) {
+	sm := NewSandboxManager(bootWithBridge(t))
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	taskID := "test-peak-highwater"
+	// The smallest cap that leaves room for the 64 MB below plus the sandbox's own ~23 MB and the copy
+	// the shell makes while building the string. A container is charged its cap by the memory budget, so
+	// asking for 2 GB here would cost the budget 2 GB that is never used.
+	if _, err := sm.Create(taskID, t.TempDir(), &types.Project{Name: "test-proj"}, SandboxOpts{MemoryLimit: 192}); err != nil {
+		t.Fatalf("create sandbox: %v", err)
+	}
+	t.Cleanup(func() { _ = sm.Stop(taskID) })
+
+	// Hold a 64 MB string in a background shell, built by one command substitution. Doubling a string
+	// reaches twice its target because the old copy and the new one are alive while copying: a 200 MB
+	// doubling loop was measured peaking at 525 MB for no extra signal. Ending the exec session is what
+	// ends the allocation.
+	const hog = `( x=$(head -c 67108864 /dev/zero | tr "\0" a); sleep 30 ) & echo hog-started`
+	if out, err := sm.Exec(taskID, hog, nil); err != nil {
+		t.Fatalf("start memhog: %v (%s)", err, out)
+	}
+
+	waitFor := func(want func(*types.SandboxMemoryStats) bool, within time.Duration, why string) *types.SandboxMemoryStats {
+		t.Helper()
+		deadline := time.Now().Add(within)
+		var stats *types.SandboxMemoryStats
+		for time.Now().Before(deadline) {
+			stats = sm.GetMemoryStats(taskID)
+			if want(stats) {
+				return stats
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		t.Fatalf("timed out waiting for %s (last sample %+v)", why, stats)
+		return nil
+	}
+
+	held := waitFor(func(s *types.SandboxMemoryStats) bool { return s.Running && s.CurrentMB >= 60 },
+		30*time.Second, "the 64 MB allocation to be sampled")
+	t.Logf("held: current=%d MB peak=%d MB", held.CurrentMB, held.PeakMB)
+
+	// The RAM is returned. The comparison is against the peak this run reached rather than a fixed MB
+	// count, because an idle sandbox holds memory for its own processes and that floor differs between
+	// containers.
+	t2 := waitFor(func(s *types.SandboxMemoryStats) bool { return s.PeakMB > 0 && s.CurrentMB*2 <= s.PeakMB },
+		45*time.Second, "the guest to free the allocation")
+	t.Logf("freed: running=%v current=%d MB peak=%d MB", t2.Running, t2.CurrentMB, t2.PeakMB)
+
+	var reported []peakRecord
+	record, sink := peakRecorder()
+	sm.SetMemoryPeakSink(func(taskID string, peakMB int64, oomKills int64) {
+		sink(taskID, peakMB, oomKills)
+	})
+	if err := sm.Stop(taskID); err != nil {
+		t.Fatalf("stop sandbox: %v", err)
+	}
+
+	reported = record()
+	if len(reported) != 1 {
+		t.Fatalf("peak sink calls = %d, want 1: %+v", len(reported), reported)
+	}
+	t.Logf("sink reported: %+v", reported)
+	got := reported[0]
+	if got.taskID != taskID || got.peakMB < 60 {
+		t.Errorf("recorded %s peak=%d MB, want this task's peak >= 60 MB (the 64 MB it held)", got.taskID, got.peakMB)
+	}
+	if got.oomKills != 0 {
+		t.Errorf("recorded %d OOM kills, want 0 — the peak must come from the sandbox growing, "+
+			"not from the cgroup killing it", got.oomKills)
 	}
 }

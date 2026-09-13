@@ -3,6 +3,7 @@ package sandboxruntime
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -177,58 +178,77 @@ func TestReadCgroupMemory(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "full cgroup with limit and oom kills",
+			name: "anon, guest RAM, limit and oom kills",
 			files: map[string]string{
-				"memory.current": "104857600\n", // 100 MB
-				"memory.peak":    "209715200\n", // 200 MB
-				"memory.max":     "536870912\n", // 512 MB
-				"memory.events":  "high 0\nmax 1\nlow 0\noom 0\noom_kill 3\n",
+				"memory.stat":   "anon 104857600\nfile 157286400\nshmem 52428800\nkernel 4194304\n",
+				"memory.max":    "536870912\n",
+				"memory.events": "high 0\nmax 1\nlow 0\noom 0\noom_kill 3\n",
 			},
-			want: CgroupMemory{CurrentBytes: 100 * mb, PeakBytes: 200 * mb, MaxBytes: 512 * mb, OOMKills: 3},
+			// 100 MB of host heaps plus 50 MB of guest RAM, under a 512 MB limit.
+			want: CgroupMemory{AnonBytes: 100 * mb, ShmemBytes: 50 * mb, MaxBytes: 512 * mb, OOMKills: 3},
+		},
+		{
+			// cgroup v2 counts shmem as part of file, so the file line says nothing about held memory.
+			name: "host page cache does not enter what the sandbox holds",
+			files: map[string]string{
+				"memory.stat": "anon " + strconv.FormatInt(mb, 10) +
+					"\nfile " + strconv.FormatInt(251*mb, 10) +
+					"\nshmem " + strconv.FormatInt(200*mb, 10) + "\n",
+			},
+			want: CgroupMemory{AnonBytes: 1 * mb, ShmemBytes: 200 * mb},
 		},
 		{
 			// "max" (unlimited) behaves like an absent limit: MaxBytes stays 0.
 			name: "unlimited memory.max",
 			files: map[string]string{
-				"memory.current": "4194304\n", // 4 MB
-				"memory.max":     "max\n",
+				"memory.stat": "anon 4194304\n", // 4 MB
+				"memory.max":  "max\n",
 			},
-			want: CgroupMemory{CurrentBytes: 4 * mb},
-		},
-		{
-			name: "missing memory.peak is tolerated",
-			files: map[string]string{
-				"memory.current": "1048576\n", // 1 MB
-				"memory.max":     "1073741824\n",
-			},
-			want: CgroupMemory{CurrentBytes: 1 * mb, MaxBytes: 1024 * mb},
+			want: CgroupMemory{AnonBytes: 4 * mb},
 		},
 		{
 			name: "missing memory.max and memory.events are tolerated",
 			files: map[string]string{
-				"memory.current": "1048576\n",
+				"memory.stat": "anon 1048576\n",
 			},
-			want: CgroupMemory{CurrentBytes: 1 * mb},
+			want: CgroupMemory{AnonBytes: 1 * mb},
 		},
 		{
 			name: "events without oom_kill line",
 			files: map[string]string{
-				"memory.current": "1048576\n",
-				"memory.events":  "high 0\nmax 0\nlow 0\noom 0\n",
+				"memory.stat":   "anon 1048576\n",
+				"memory.events": "high 0\nmax 0\nlow 0\noom 0\n",
 			},
-			want: CgroupMemory{CurrentBytes: 1 * mb},
+			want: CgroupMemory{AnonBytes: 1 * mb},
 		},
 		{
-			name:    "missing memory.current",
-			files:   map[string]string{},
-			wantErr: true,
-		},
-		{
-			name: "malformed memory.current",
+			// Every caller's number rests on anon, so its absence is no data rather than 0 MB.
+			name: "memory.stat without an anon line",
 			files: map[string]string{
-				"memory.current": "garbage\n",
+				"memory.stat": "file 1048576\nslab 4096\n",
 			},
 			wantErr: true,
+		},
+		{
+			name:    "missing memory.stat",
+			files:   map[string]string{"memory.max": "1048576\n"},
+			wantErr: true,
+		},
+		{
+			name: "malformed anon",
+			files: map[string]string{
+				"memory.stat": "anon garbage\n",
+			},
+			wantErr: true,
+		},
+		{
+			// An oom_kill line that is not a number reads as zero rather than inventing a count.
+			name: "malformed oom_kill keeps the counter at zero",
+			files: map[string]string{
+				"memory.stat":   "anon 1048576\n",
+				"memory.events": "oom_kill nope\n",
+			},
+			want: CgroupMemory{AnonBytes: 1 * mb},
 		},
 	}
 
@@ -257,6 +277,16 @@ func TestReadCgroupMemory_MissingDir(t *testing.T) {
 	}
 }
 
+// TestCgroupMemoryHeldBytes checks the definition of held memory: what the sandbox itself holds,
+// which is not the same as the file total the cgroup reports.
+func TestCgroupMemoryHeldBytes(t *testing.T) {
+	const mb = int64(1024 * 1024)
+	mem := CgroupMemory{AnonBytes: 17 * mb, ShmemBytes: 200 * mb}
+	if got := mem.HeldBytes(); got != 217*mb {
+		t.Errorf("HeldBytes() = %d MB, want 217 MB", got/mb)
+	}
+}
+
 func TestClearCgroupMemoryLimit(t *testing.T) {
 	dir := t.TempDir()
 	// Simulate a cgroup with a 512 MB limit and no swap.
@@ -266,7 +296,11 @@ func TestClearCgroupMemoryLimit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "memory.swap.max"), []byte("0"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "memory.current"), []byte("1048576"), 0o644); err != nil {
+	// A real cgroup has a memory.high file whether or not a limit was set, so the fixture has one.
+	if err := os.WriteFile(filepath.Join(dir, "memory.high"), []byte("536870912"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "memory.stat"), []byte("anon 1048576\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -274,7 +308,7 @@ func TestClearCgroupMemoryLimit(t *testing.T) {
 		t.Fatalf("clearCgroupMemoryLimit() = %v", err)
 	}
 
-	for _, f := range []string{"memory.max", "memory.swap.max"} {
+	for _, f := range []string{"memory.max", "memory.high", "memory.swap.max"} {
 		data, err := os.ReadFile(filepath.Join(dir, f))
 		if err != nil {
 			t.Fatalf("read %s: %v", f, err)
@@ -291,6 +325,43 @@ func TestClearCgroupMemoryLimit(t *testing.T) {
 	}
 	if mem.MaxBytes != 0 {
 		t.Errorf("MaxBytes = %d, want 0 (unlimited)", mem.MaxBytes)
+	}
+}
+
+// The limit and memory.swap.max are what enforce the cap; memory.high is cleared rather than set.
+func TestApplyMemoryLimitAt(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"memory.max", "memory.high", "memory.swap.max"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("536870912"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := applyMemoryLimitAt(dir, "kanban-task-x", 512); err != nil {
+		t.Fatalf("applyMemoryLimitAt() = %v", err)
+	}
+
+	const mb = int64(1) << 20
+	read := func(f string) string {
+		data, err := os.ReadFile(filepath.Join(dir, f))
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		return string(data)
+	}
+	if got := read("memory.max"); got != strconv.FormatInt(512*mb, 10) {
+		t.Errorf("memory.max = %s, want %d", got, 512*mb)
+	}
+	if got := read("memory.swap.max"); got != "0" {
+		t.Errorf("memory.swap.max = %q, want 0", got)
+	}
+	if got := read("memory.high"); got != "max" {
+		t.Errorf("memory.high = %q, want max — a throttle line stalls an unreclaimable guest", got)
+	}
+
+	// A limit of zero is the caller's "no limit" signal, not a write of zero bytes.
+	if err := applyMemoryLimitAt(dir, "kanban-task-x", 0); err == nil {
+		t.Error("expected an error for a non-positive limit")
 	}
 }
 

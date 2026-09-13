@@ -73,6 +73,12 @@ type ConfigStore struct {
 	llmAdapter           *llmadapter.Adapter // optional — set via SetLLMAdapter
 	tlsCAAvailable       bool                // set at startup via SetTLSCAAvailable
 	registryURL          string              // set at startup via SetRegistryURL; empty means DefaultRegistryURL
+	// The memory budget the gate was given, set at startup via SetMemoryBudget: the ceiling in MB, the
+	// installed RAM in MB it was computed from, and the configured percentage. Facts about the running
+	// process, never stored preferences.
+	memoryBudgetMB  int64
+	memoryTotalMB   int64
+	memoryBudgetPct int
 }
 
 // SetLLMAdapter helps map outgoing LLM API requests to the provider's expected format
@@ -91,6 +97,14 @@ func (cs *ConfigStore) SetWorkspaceDirOverride(dir string) {
 // running process, never a stored preference.
 func (cs *ConfigStore) SetTLSCAAvailable(available bool) {
 	cs.tlsCAAvailable = available
+}
+
+// SetMemoryBudget records the memory ceiling the gate was started with, so the About tab can state
+// what everything MIKE starts is allowed to occupy. A capacity of 0 means the gate is disabled.
+func (cs *ConfigStore) SetMemoryBudget(capacityMB, totalMB int64, pct int) {
+	cs.memoryBudgetMB = capacityMB
+	cs.memoryTotalMB = totalMB
+	cs.memoryBudgetPct = pct
 }
 
 // WorkspaceDir returns the effective worktrees directory: the startup override
@@ -492,6 +506,12 @@ type configResponse struct {
 	// TLSCAAvailable tells the UI to offer the CA download (GET /api/tls/ca). The
 	// CA's path is not published: the route already knows where it lives.
 	TLSCAAvailable bool `json:"tls_ca_available"`
+	// MemoryBudgetMB is the ceiling every sandbox MIKE started shares, MemoryTotalMB the installed RAM
+	// it was computed from and MemoryBudgetPct the configured percentage. A budget of 0 means the gate
+	// is disabled and the UI says nothing about memory.
+	MemoryBudgetMB  int64 `json:"memory_budget_mb"`
+	MemoryTotalMB   int64 `json:"memory_total_mb"`
+	MemoryBudgetPct int   `json:"memory_budget_pct"`
 }
 
 // storedAPIKey returns the decrypted key saved for the provider whose URL matches
@@ -568,6 +588,9 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		KeyboardShortcuts:             normalizeKeyboardShortcuts(cfg.KeyboardShortcuts),
 		EncryptionEnabled:             crypto.IsEnabled(),
 		TLSCAAvailable:                cs.tlsCAAvailable,
+		MemoryBudgetMB:                cs.memoryBudgetMB,
+		MemoryTotalMB:                 cs.memoryTotalMB,
+		MemoryBudgetPct:               cs.memoryBudgetPct,
 	}
 }
 

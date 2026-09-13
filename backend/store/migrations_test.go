@@ -431,3 +431,89 @@ func TestMigration_ClearsDoneTaskDiffSnapshotsWrittenBeforeParsedFiles(t *testin
 		t.Errorf("snapshot written at the current stamp was deleted: %d rows left", got)
 	}
 }
+
+// The stored peaks written under the old definition counted the host's page cache and no later run
+// can lower them, so they are cleared once. A peak written by this build must survive a later start.
+func TestZeroLegacySandboxPeaks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "peak.db")
+
+	seed := func() {
+		s, err := NewStore(path)
+		if err != nil {
+			t.Fatalf("NewStore: %v", err)
+		}
+		defer func() { _ = s.Close() }()
+		if err := s.CreateProject(&types.Project{ID: "peak-proj", Name: "peak-proj", Path: "/tmp/peak-proj"}); err != nil {
+			t.Fatalf("create project: %v", err)
+		}
+		if err := s.CreateTask(&types.Task{ID: "peak-task", ProjectID: "peak-proj", Title: "t", Status: "done"}); err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+		if err := s.RecordTaskSandboxMemory("peak-task", 4990, 2); err != nil {
+			t.Fatalf("seed peak: %v", err)
+		}
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatalf("open db: %v", err)
+		}
+		defer func() { _ = db.Close() }()
+		if _, err := db.Exec(`UPDATE tasks SET memory_alert_acked = 1, memory_alert_ack_peak_mb = 4990,
+			memory_alert_ack_oom_kills = 2, memory_alert_ack_limit_mb = 1024 WHERE id = 'peak-task'`); err != nil {
+			t.Fatalf("seed dismissal: %v", err)
+		}
+		if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, doneLegacyPeakClearedStamp-1)); err != nil {
+			t.Fatalf("stamp user_version: %v", err)
+		}
+		// The store opened above stamped its own marker; an old database does not have it.
+		if _, err := db.Exec(`DELETE FROM config WHERE key = 'migration_sandbox_peak_definition'`); err != nil {
+			t.Fatalf("clear migration marker: %v", err)
+		}
+	}
+
+	read := func() (peak, acked int64) {
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatalf("open db: %v", err)
+		}
+		defer func() { _ = db.Close() }()
+		if err := db.QueryRow(`SELECT sandbox_memory_peak_mb, memory_alert_acked FROM tasks WHERE id = 'peak-task'`).
+			Scan(&peak, &acked); err != nil {
+			t.Fatalf("read peak: %v", err)
+		}
+		return peak, acked
+	}
+
+	seed()
+	s, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if peak, acked := read(); peak != 0 || acked != 0 {
+		t.Fatalf("after the migration: peak=%d acked=%d, want 0/0", peak, acked)
+	}
+
+	// A peak recorded by this build is a measurement, not legacy text: the next start must leave it.
+	s2, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if err := s2.RecordTaskSandboxMemory("peak-task", 300, 0); err != nil {
+		t.Fatalf("record peak: %v", err)
+	}
+	if err := s2.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	s3, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if err := s3.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if peak, _ := read(); peak != 300 {
+		t.Errorf("peak after a second start = %d, want 300 — the migration must run exactly once", peak)
+	}
+}

@@ -148,13 +148,13 @@ describe('TaskHeader sandbox memory dot', () => {
         const { container } = renderHeader();
         sandboxStatsStore.set('task-1', stats({ memory_current_mb: 10, memory_peak_mb: 1024, oom_kills: 2 }));
         await vi.waitFor(() => expect(titleOf(container)).toBe(
-            'Sandbox enabled · 10 / 1024 MB · Peak 1024 MB against a 1024 MB limit · 2 processes were killed (click for details)',
+            'Sandbox enabled · 10 / 1024 MB · Held 1024 MB at its peak, against a 1024 MB limit · 2 processes were killed (click for details)',
         ));
     });
 
     it('appends the peak-reached clause to the button title when there is no alert to show', async () => {
         const { container } = renderHeader(task({ memory_alert_ack: ack({ peak_mb: 2048 }) }));
         sandboxStatsStore.set('task-1', stats({ memory_current_mb: 10, memory_peak_mb: 2048, memory_limit_mb: 1024 }));
-        await vi.waitFor(() => expect(titleOf(container)).toContain('peak reached limit'));
+        await vi.waitFor(() => expect(titleOf(container)).toContain('its peak reached the limit'));
     });
 });

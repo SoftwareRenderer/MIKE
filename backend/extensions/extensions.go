@@ -638,12 +638,15 @@ func lspSandboxFromManifest(m *ExtensionManifest) *SandboxConfig {
 func sandboxConfigFromManifest(m *SandboxConfig) SandboxConfig {
 	sc := SandboxConfig{
 		NetworkIsolation: true,
-		MemoryLimit:      DefaultExtensionMemory, // 0 = no limit
+		MemoryLimit:      DefaultExtensionMemory,
 	}
 	if m == nil {
 		return sc
 	}
-	if m.MemoryLimit > 0 {
+	// A limit of 0 means the manifest has no opinion and takes the default, a positive limit is that
+	// bound, and a negative limit asks for no bound at all. Only the 0 case is replaced here, so a
+	// manifest that declares a limit never loses it to the default.
+	if m.MemoryLimit != 0 {
 		sc.MemoryLimit = m.MemoryLimit
 	}
 	sc.Mounts = m.Mounts

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"kanban/backend/store"
+	"kanban/backend/types"
 
 	"kanban/pkg/logging"
 )
@@ -21,14 +22,17 @@ type memorySupervisorActions interface {
 	startSubtask(projectID, taskID string) error
 }
 
-// MemorySupervisor keeps estimated sandbox memory within the gate capacity.
-// When the gate queue is non-empty it pauses the lowest-estimate running task;
-// when the queue drains and a paused task would fit it resumes that task.
-// A user-initiated start or stop clears the supervisor flag, so only supervisor-paused
-// tasks are ever auto-resumed.
+// MemorySupervisor keeps sandbox memory inside the budget. With a non-empty gate queue it pauses the
+// running task whose pause frees the least, one per tick, and resumes a paused task once the budget
+// admits it. Only supervisor-paused tasks are auto-resumed: any user action clears the flag.
+//
+// The smallest pause is deliberate: stopping a task discards the turn it is working on and its
+// container's files, and the largest task is the one most likely to finish soon and free its own
+// memory.
 type MemorySupervisor struct {
 	store    *store.Store
 	gate     *MemoryGate
+	charges  liveCharges // the cost of each live container; nil when no container manager is wired
 	actions  memorySupervisorActions
 	interval time.Duration
 
@@ -38,11 +42,19 @@ type MemorySupervisor struct {
 	started  atomic.Bool
 }
 
-// NewMemorySupervisor builds a supervisor bound to the given gate and action set.
-func NewMemorySupervisor(store *store.Store, gate *MemoryGate, actions memorySupervisorActions, interval time.Duration) *MemorySupervisor {
+// liveCharges reports what each live container costs the memory budget. It is implemented by
+// *sandbox.SandboxManager.
+type liveCharges interface {
+	Charges() map[string]int64
+}
+
+// NewMemorySupervisor builds a supervisor. A nil charges means there are no container readings, so
+// every task is costed at the reserve the budget holds for it.
+func NewMemorySupervisor(store *store.Store, gate *MemoryGate, charges liveCharges, actions memorySupervisorActions, interval time.Duration) *MemorySupervisor {
 	return &MemorySupervisor{
 		store:    store,
 		gate:     gate,
+		charges:  charges,
 		actions:  actions,
 		interval: interval,
 		stopCh:   make(chan struct{}),
@@ -89,23 +101,38 @@ func (s *MemorySupervisor) TickOnce() {
 		logging.For(logging.Exec).Warnf("memory supervisor: reading running tasks: %v", err)
 		return
 	}
-	avgPeak := computeAvgPeakMB(running)
+	budget := s.gate.Budget()
+	// Held sits beside the charge on purpose: a container capped at 2 GB holds 2 GB of the ceiling while
+	// holding 25 MB of RAM, and the two figures side by side is what makes that readable from the log.
+	logging.For(logging.Exec).Debugf(
+		"memory budget: %d/%d MB (MIKE %d, held %d, reservations %d), host free %d, measured=%t, running %d, queued %d",
+		budget.InUseMB, budget.CapacityMB, budget.MikeMB, budget.HeldMB, budget.ReservationsMB,
+		budget.AvailableMB, budget.Measured, len(running), s.gate.QueueLen())
 
-	// Pause path: queue non-empty means a task cannot start.
-	if s.gate.QueueLen() > 0 && len(running) > 0 {
-		lowest := running[0] // store returns ascending by peak
-		estMB := estimateTaskMemory(lowest, avgPeak)
-		if err := s.actions.stopTask(lowest.ID); err != nil {
-			logging.For(logging.Exec).With(logging.TaskID, lowest.ID).Warnf("memory supervisor: pause failed: %v", err)
+	// A queue usually means tasks waiting for one to finish, and a task finishing frees memory, so
+	// waiting is the right response. A host below its free-RAM floor is different: nothing finishing
+	// soon is why it is tight, so the supervisor has to free memory now.
+	queueBlocked := s.gate.QueueLen() > 0
+	emergency := s.gate.HostMemoryTight()
+	if (queueBlocked || emergency) && len(running) > 0 {
+		victim, cost := s.smallestReserve(running)
+		if err := s.actions.stopTask(victim.ID); err != nil {
+			logging.For(logging.Exec).With(logging.TaskID, victim.ID).Warnf("memory supervisor: pause failed: %v", err)
 			return
 		}
 		// Set after stopTask returns: StopTask waits for the executor to exit, so a
 		// concurrent user start during the stop window won't be overwritten.
-		if err := s.store.SetMemorySupervisorPaused(lowest.ID, true); err != nil {
-			logging.For(logging.Exec).With(logging.TaskID, lowest.ID).Warnf("memory supervisor: setting paused flag: %v", err)
+		if err := s.store.SetMemorySupervisorPaused(victim.ID, true); err != nil {
+			logging.For(logging.Exec).With(logging.TaskID, victim.ID).Warnf("memory supervisor: setting paused flag: %v", err)
 		}
-		logging.For(logging.Exec).With(logging.TaskID, lowest.ID).Infof(
-			"memory supervisor: paused (est %d MB) to free memory for queued task(s)", estMB)
+		if emergency {
+			logging.For(logging.Exec).With(logging.TaskID, victim.ID).Warnf(
+				"memory supervisor: host has %d MB free, under %d%% of its RAM — paused (frees %d MB), waiting on the host itself, queued %d",
+				budget.AvailableMB, memoryAvailableFloorPct, cost, s.gate.QueueLen())
+		} else {
+			logging.For(logging.Exec).With(logging.TaskID, victim.ID).Infof(
+				"memory supervisor: paused (frees %d MB) to free memory for queued task(s)", cost)
+		}
 		return
 	}
 
@@ -118,9 +145,9 @@ func (s *MemorySupervisor) TickOnce() {
 	if len(paused) == 0 {
 		return
 	}
-	used := s.gate.Used()
+	used := s.gate.InUse()
 	candidate := paused[0]
-	candEst := estimateTaskMemory(candidate, avgPeak) // same estimate acquireMemSlot would use
+	candEst := reserveForTask(s.store, candidate) // the same reserve that acquireMemSlot would make
 	if used+candEst > capacity {
 		return // would immediately re-queue
 	}
@@ -141,5 +168,28 @@ func (s *MemorySupervisor) TickOnce() {
 		return
 	}
 	logging.For(logging.Exec).With(logging.TaskID, candidate.ID).Infof(
-		"memory supervisor: resumed (est %d MB, used %d/%d MB)", candEst, used, capacity)
+		"memory supervisor: resumed (reserve %d MB, used %d/%d MB)", candEst, used, capacity)
+}
+
+// smallestReserve picks the running task whose pause costs the memory budget least. A task with no
+// live container is costed at the reserve the budget holds for it rather than at zero, so it cannot
+// become the permanent first choice. Tasks of equal cost keep the order the store returns.
+func (s *MemorySupervisor) smallestReserve(running []types.Task) (types.Task, int64) {
+	var charges map[string]int64
+	if s.charges != nil {
+		charges = s.charges.Charges()
+	}
+
+	var best types.Task
+	var bestCost int64
+	for i, task := range running {
+		cost, live := charges[task.ID]
+		if !live {
+			cost = reserveForTask(s.store, task)
+		}
+		if i == 0 || cost < bestCost {
+			best, bestCost = task, cost
+		}
+	}
+	return best, bestCost
 }

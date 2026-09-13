@@ -246,6 +246,8 @@ const catalog = {
     'settings.worktreesDirHelp': 'Directory where task worktrees are created',
     'settings.database': 'Database',
     'settings.databaseHelp': "Path to the server's SQLite database",
+    'settings.maxMemory': 'Maximum Sandbox Memory',
+    'settings.maxMemoryHelp': 'Shared by every sandbox MIKE started: {pct}% of this machine\'s {total} of RAM. Set it with MIKE_MEMORY_BUDGET_PCT.',
     'settings.caCert': 'CA Certificate',
     'settings.caCertDownload': 'Download CA Certificate',
     'settings.caCertHint': "Download the CA certificate that signed this server's certificate",
@@ -847,8 +849,8 @@ const catalog = {
     'sandbox.networkIsolationAria': 'Network isolation',
     'sandbox.networkIsolationDesc': 'Block all network access',
     'sandbox.memoryLimit': 'Memory Limit',
-    'sandbox.memoryLimitDesc': 'Max container memory (MB) — blank = no limit',
-    'sandbox.memoryLimitAria': 'Maximum container memory in MB',
+    'sandbox.memoryLimitDesc': 'Memory a task’s sandbox may hold (MB) — blank = no limit',
+    'sandbox.memoryLimitAria': 'Maximum memory a task’s sandbox may hold, in MB',
     'sandbox.noLimit': 'No limit',
     'sandbox.image': 'Image',
     'sandbox.forwardedPorts': 'Forwarded Ports',
@@ -983,8 +985,8 @@ const catalog = {
     'sandbox.infoTitle': 'Sandbox Info',
     'sandbox.sandboxedTask': 'Sandboxed Task',
     'sandbox.isolationEnabled': 'Sandbox Isolation is enabled for this project',
-    'sandbox.memoryUsage': 'Memory Usage',
-    'sandbox.peakMemory': 'Peak {mb} MB',
+    'sandbox.memoryUsage': 'Memory In Use',
+    'sandbox.peakMemory': 'Held {mb} MB at peak',
     // The count is marked up in the panel, so it only selects the plural form
     'sandbox.oomKilled': { one: 'process OOM-killed — memory limit reached', other: 'processes OOM-killed — memory limit reached' },
     'sandbox.loadingSettings': 'Loading settings...',
@@ -1543,7 +1545,7 @@ const catalog = {
     'lsp.definitionOutsideProject': 'Definition is outside this project workspace',
 
     // The sandbox-memory tooltip the task header builds for its own title attribute.
-    'task.sandboxTip.peakReachedLimit': ' · peak reached limit',
+    'task.sandboxTip.peakReachedLimit': ' · its peak reached the limit',
     'task.sandboxTip.clickForDetails': '{title} (click for details)',
 
     // ── the small namespaces filed here: storage, tool, effort, memory,
@@ -1571,8 +1573,8 @@ const catalog = {
     'memory.currentNoLimit': '{mb} MB (no limit)',
     // The out-of-memory alert, shared by the task's alert bar, the Sandbox panel and the board card.
     'memory.alert.title': 'This task\u2019s sandbox ran out of memory',
-    'memory.alert.peakOfLimit': 'Peak {peak} MB against a {limit} MB limit',
-    'memory.alert.peakNoLimit': 'Peak {peak} MB with no limit enforced',
+    'memory.alert.peakOfLimit': 'Held {peak} MB at its peak, against a {limit} MB limit',
+    'memory.alert.peakNoLimit': 'Held {peak} MB at its peak with no limit enforced',
     'memory.alert.kills': { one: '{count} process was killed', other: '{count} processes were killed' },
     'memory.alert.action': 'Raise or remove the limit in the project\u2019s Sandbox settings, or give this task less to hold in memory.',
     'memory.alert.dismiss': 'Dismiss',

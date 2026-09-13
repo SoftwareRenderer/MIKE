@@ -26,6 +26,8 @@ backend/agent/loader.go:RegisterAdapterFactory
 backend/extensions/i18n_prompts.go:none
 backend/llama/tools_names.go:AllToolNames
 backend/prompts/overlay.go:ActiveOverlay
+backend/stream/sandbox_stats.go:TickOnce
+backend/server/server.go:Measure
 backend/term/terminal.go:activeSessionCount
 backend/exec/merge.go:CommitAndDonePending
 pkg/logging/logging.go:TestSink
@@ -46,6 +48,12 @@ pkg/logging/logging.go:Lines
 # backend/agent: RegisterAdapterFactory is the mock-adapter seam backend/exec uses to hold that a
 # sandboxed task probes the binary its own adapter named. Production always loads WASM, so no
 # production path reaches it - and deleting it would put that test out of reach.
+#
+# backend/stream + backend/server, two shapes a call graph cannot walk:
+#   TickOnce  drives one sample and one broadcast in lockstep, which is how every sampler test steps
+#             the ticker; production runs the same two halves on their own intervals.
+#   Measure   satisfies stream.BudgetMeasure. The sampler holds the interface and the server wires the
+#             implementation, so no direct call site exists to find.
 #
 # backend/exec: CommitAndDonePending is how backend/managers holds that a "Commit and move to done"
 # click armed the merge. Callers inside the package ask the merge orchestrator directly, so no

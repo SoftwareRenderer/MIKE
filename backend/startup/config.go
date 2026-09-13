@@ -35,6 +35,7 @@ const (
 	EnvDangerZone       = "DANGER_ZONE"
 	EnvGCDryRun         = "MIKE_GC_DRY_RUN"
 	EnvPProf            = "MIKE_PPROF"
+	EnvMemoryBudgetPct  = "MIKE_MEMORY_BUDGET_PCT"
 )
 
 // DefaultPort and DefaultListenAddr are the built-in defaults of the ladder. Loopback by default
@@ -55,6 +56,11 @@ const (
 	// MinSecretLength is both the minimum master password length accepted on an exposed
 	// (non-loopback) listen address and the length below which a secret is reported as weak at boot.
 	MinSecretLength = 8
+
+	// DefaultMemoryBudgetPct is the share of installed RAM the memory budget admits against. The
+	// numerator is what MIKE's own containers and processes cost, so the percentage is MIKE's share
+	// of the machine rather than a margin kept over everyone else's usage.
+	DefaultMemoryBudgetPct = 90
 )
 
 // weakPasswords are master passwords that must never guard a non-loopback listen address.
@@ -122,6 +128,10 @@ type Config struct {
 	TrustProxy bool
 	// LoginRateLimit is requests per minute per client IP. Always > 0.
 	LoginRateLimit int
+
+	// MemoryBudgetPct is the percentage of installed RAM the memory budget may be spent out of.
+	// Always 1-100; the gate multiplies it by MemTotal once, at startup.
+	MemoryBudgetPct int
 
 	// DangerZone is the operator's permission to turn sandboxing off. It is not a permission to
 	// execute anywhere: a project's sandbox_enabled column answers that.
@@ -194,6 +204,13 @@ func Resolve(f Flags) (Config, error) {
 	c.PProf = isOne(EnvPProf)
 
 	c.LoginRateLimit = resolveRateLimit(os.Getenv(EnvLoginRateLimit), &c.Warnings)
+
+	// A budget percentage that does not parse would silently decide how much of the machine MIKE
+	// takes, so it is refused outright rather than warned into the default.
+	c.MemoryBudgetPct, err = resolvePercent(os.Getenv(EnvMemoryBudgetPct))
+	if err != nil {
+		return Config{}, err
+	}
 
 	// A switch set to anything but "1" stays closed, and says so: an operator who typed
 	// MIKE_ALLOW_ROOT_FS=true and got the jail would otherwise discover it by being refused.
@@ -295,6 +312,23 @@ func resolveRateLimit(raw string, warnings *[]string) int {
 		return DefaultLoginRateLimit
 	}
 	return n
+}
+
+// resolvePercent resolves a 1-100 percentage of installed RAM. An unset or empty variable is the
+// default; anything else that does not parse, or parses outside the range, refuses the boot: the
+// number decides how much of the machine MIKE may occupy, and a typo would decide it silently.
+func resolvePercent(raw string) (int, error) {
+	if raw == "" {
+		return DefaultMemoryBudgetPct, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s=%q is not a percentage", EnvMemoryBudgetPct, raw)
+	}
+	if n < 1 || n > 100 {
+		return 0, fmt.Errorf("%s: %d is outside 1-100", EnvMemoryBudgetPct, n)
+	}
+	return n, nil
 }
 
 // isOne is the shape of an opt-in switch: only the exact value "1" turns it on. A truthy-looking

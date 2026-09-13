@@ -24,7 +24,7 @@ vi.mock('$lib/api', async (importOriginal) => {
 import SandboxConfigModal from '$lib/components/SandboxConfigModal.svelte';
 import type { Project } from '$lib/types';
 
-const INPUT_SELECTOR = 'input[aria-label="Maximum container memory in MB"]';
+const INPUT_SELECTOR = 'input[aria-label="Maximum memory a task’s sandbox may hold, in MB"]';
 
 function projectWith(overrides: Partial<Project> = {}): Project {
     return {

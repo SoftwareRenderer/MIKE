@@ -1192,3 +1192,42 @@ func TestWorkspaceDirRelativeOverrideIsAbsolute(t *testing.T) {
 		t.Errorf("WorkspaceDir() = %q, want %q", got, want)
 	}
 }
+
+// About reads the ceiling the gate was started with, so the operator can see what every sandbox MIKE
+// started has to share. A store that was never told answers 0 rather than inventing a figure.
+func TestConfigResponseReportsTheMemoryBudget(t *testing.T) {
+	marshal := func(t *testing.T, cs *ConfigStore) map[string]any {
+		t.Helper()
+		cfg, err := cs.GetConfig()
+		if err != nil {
+			t.Fatalf("get config: %v", err)
+		}
+		raw, err := json.Marshal(cs.buildConfigResponse(cfg))
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var out map[string]any
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return out
+	}
+
+	t.Run("unset answers zero", func(t *testing.T) {
+		out := marshal(t, testConfigStore(t))
+		if out["memory_budget_mb"] != float64(0) || out["memory_total_mb"] != float64(0) || out["memory_budget_pct"] != float64(0) {
+			t.Errorf("a store never told the budget reads %v/%v/%v, want 0/0/0",
+				out["memory_budget_mb"], out["memory_total_mb"], out["memory_budget_pct"])
+		}
+	})
+
+	t.Run("the startup decision is reported", func(t *testing.T) {
+		cs := testConfigStore(t)
+		cs.SetMemoryBudget(13624, 15138, 90)
+		out := marshal(t, cs)
+		if out["memory_budget_mb"] != float64(13624) || out["memory_total_mb"] != float64(15138) || out["memory_budget_pct"] != float64(90) {
+			t.Errorf("budget read %v/%v/%v, want 13624/15138/90",
+				out["memory_budget_mb"], out["memory_total_mb"], out["memory_budget_pct"])
+		}
+	})
+}

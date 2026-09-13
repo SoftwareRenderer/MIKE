@@ -301,6 +301,47 @@ func TestLoginRateLimitCannotBeDisabled(t *testing.T) {
 	})
 }
 
+// The memory budget percentage decides how much of the machine MIKE may occupy, so a value that does
+// not parse refuses the boot naming the variable rather than quietly taking the default share.
+func TestMemoryBudgetPctRefusesAnythingButAPercentage(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want int
+	}{
+		{"", DefaultMemoryBudgetPct},
+		{"42", 42},
+		{"1", 1},
+		{"100", 100},
+	} {
+		t.Run("MIKE_MEMORY_BUDGET_PCT="+tc.raw, func(t *testing.T) {
+			t.Setenv(EnvMemoryBudgetPct, tc.raw)
+			if got := mustResolve(t, Flags{}).MemoryBudgetPct; got != tc.want {
+				t.Errorf("pct = %d, want %d", got, tc.want)
+			}
+		})
+	}
+	for _, raw := range []string{"0", "101", "-3", "ninety", "90.5"} {
+		t.Run("refuses "+raw, func(t *testing.T) {
+			if msg := mustFailResolve(t, raw); !strings.Contains(msg, EnvMemoryBudgetPct) {
+				t.Errorf("error %q must name %s", msg, EnvMemoryBudgetPct)
+			}
+		})
+	}
+}
+
+// mustFailResolve resolves with MIKE_MEMORY_BUDGET_PCT=raw and returns the error text, failing the
+// test when the boot was accepted.
+func mustFailResolve(t *testing.T, raw string) string {
+	t.Helper()
+	t.Setenv(EnvEncryptionKey, "a-long-enough-test-key")
+	t.Setenv(EnvMemoryBudgetPct, raw)
+	_, err := Resolve(Flags{})
+	if err == nil {
+		t.Fatalf("Resolve accepted %s=%q", EnvMemoryBudgetPct, raw)
+	}
+	return err.Error()
+}
+
 // Resolve is the only place the ladder runs, so the fields a consumer reads must come from it —
 // including the ones whose default is not obvious (loopback, ./data, the login budget).
 func TestResolveDefaults(t *testing.T) {
@@ -316,6 +357,9 @@ func TestResolveDefaults(t *testing.T) {
 	}
 	if c.LoginRateLimit != DefaultLoginRateLimit {
 		t.Errorf("LoginRateLimit = %d, want %d", c.LoginRateLimit, DefaultLoginRateLimit)
+	}
+	if c.MemoryBudgetPct != DefaultMemoryBudgetPct {
+		t.Errorf("MemoryBudgetPct = %d, want %d", c.MemoryBudgetPct, DefaultMemoryBudgetPct)
 	}
 	if c.DangerZone || c.AllowRootFS || c.TrustProxy || c.PProf || c.GCDryRun {
 		t.Error("every widening switch must default to closed")

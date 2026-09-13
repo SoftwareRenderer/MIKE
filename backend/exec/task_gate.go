@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"kanban/backend/store"
 	"strings"
 
 	"kanban/backend/types"
@@ -67,20 +68,38 @@ func (te *TaskExecutor) releaseTaskSlot(setup *taskExecSetup) {
 	setup.taskSlotURL = ""
 }
 
-// acquireMemSlot blocks until the memory budget has room for this task's estimate.
-// While blocked the task shows as Pending (in_progress+idle). Returns false when
-// the context was cancelled. Non-sandboxed tasks and a disabled gate are pass-through.
+// memoryReserveMB is what the memory budget reserves for one sandboxed task: the limit its project
+// configures, which is the cap its container is created with. Zero means the project is unlimited.
+func memoryReserveMB(limitMB int) int64 {
+	if limitMB <= 0 {
+		return 0
+	}
+	return int64(limitMB)
+}
+
+// reserveForTask answers the same question from a task row, for callers holding no sandbox options.
+func reserveForTask(st *store.Store, task types.Task) int64 {
+	project, err := st.GetProject(task.ProjectID)
+	if err != nil || project == nil {
+		return 0
+	}
+	return memoryReserveMB(project.SandboxMemoryLimit)
+}
+
+// acquireMemSlot blocks until the memory budget has room for this task. While blocked the task shows
+// as Pending (in_progress+idle). Returns false when the context was cancelled; a disabled gate is a
+// pass-through.
+//
+// The reservation is the limit the sandbox is about to be created with. A non-sandboxed run books the
+// same number and keeps it for the whole run: its agent CLI runs on the host with no cgroup to
+// measure, and the memory it takes is memory MIKE started.
 func (te *TaskExecutor) acquireMemSlot(setup *taskExecSetup) bool {
-	if !setup.sandboxEnabled || te.memGate.Capacity() == 0 {
+	// An executor with no gate wired decides nothing about memory, exactly as one whose capacity is 0.
+	if te.memGate == nil || te.memGate.Capacity() == 0 {
 		return true
 	}
 
-	running, _ := te.store.GetRunningSandboxedTasks()
-	avgPeak := computeAvgPeakMB(running)
-	estimate := estimateTaskMemory(*setup.task, avgPeak)
-	if estimate == 0 {
-		return true
-	}
+	estimate := memoryReserveMB(setup.sandboxOpts.MemoryLimit)
 
 	setup.task.Status = types.StatusInProgress
 	setup.task.ExecutionState = types.ExecStateIdle
@@ -96,6 +115,16 @@ func (te *TaskExecutor) acquireMemSlot(setup *taskExecSetup) bool {
 	te.persistTaskClaiming(setup)
 	te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 	return true
+}
+
+// confirmMemReservation ends the reservation once the sandbox container exists, because the budget
+// counts that container directly from then on. A non-sandboxed run never reaches this: it keeps the
+// reservation until the run ends, where the ordered cleanup returns it.
+func (te *TaskExecutor) confirmMemReservation(setup *taskExecSetup) {
+	if !setup.sandboxEnabled {
+		return
+	}
+	te.releaseMemSlot(setup)
 }
 
 // releaseMemSlot returns this execution's memory budget (no-op when nothing was acquired).
