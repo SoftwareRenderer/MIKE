@@ -48,6 +48,9 @@ func (wm *WorktreeManager) PushStash(repoPath, message string) (string, error) {
 // it, so on a shared stack one merge restores another's work and keeps its own entry, with no error
 // on either side — hence identity by hash. A failed apply leaves the entry on the stack: dropping
 // what could not be applied turns a resolvable conflict into lost work.
+//
+// The restore keeps the pushed work's staged/unstaged split: a plain apply returns a modification
+// unstaged, and commit-and-done commits the index only.
 // The caller must hold the project stash mutex.
 func (wm *WorktreeManager) PopStashByHash(dir, hash string) (bool, error) {
 	if hash == "" {
@@ -72,7 +75,13 @@ func (wm *WorktreeManager) PopStashByHash(dir, hash string) (bool, error) {
 		return false, nil
 	}
 
-	if out, err := wm.gitRunInGitDir(dir, "stash", "apply", hash); err != nil {
+	// A refused --index leaves the tree untouched, which is what makes the retry below safe.
+	before, beforeOK := wm.porcelainStatus(dir)
+	out, err := wm.gitRunInGitDir(dir, "stash", "apply", "--index", hash)
+	if after, afterOK := wm.porcelainStatus(dir); err != nil && beforeOK && afterOK && before == after {
+		out, err = wm.gitRunInGitDir(dir, "stash", "apply", hash)
+	}
+	if err != nil {
 		// Deliberately not dropped — see the doc comment.
 		return true, fmt.Errorf("stash apply %s: %s", shortHash(hash), gitMessage(out, err))
 	}
@@ -81,6 +90,12 @@ func (wm *WorktreeManager) PopStashByHash(dir, hash string) (bool, error) {
 		return true, fmt.Errorf("stash applied but the entry could not be dropped: %w", err)
 	}
 	return true, nil
+}
+
+// porcelainStatus fingerprints dir's working tree, to tell a refused apply from a partial one.
+func (wm *WorktreeManager) porcelainStatus(dir string) (string, bool) {
+	out, err := wm.gitRunOutput(dir, "status", "--porcelain")
+	return out, err == nil
 }
 
 // listStashEntries parses "git stash list --format=%gd%x00%H%x00%gs" output.

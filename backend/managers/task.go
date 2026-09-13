@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"kanban/backend/config"
+	"kanban/backend/errs"
 	"kanban/backend/exec"
 	"kanban/backend/git"
 	"kanban/backend/httputil"
@@ -847,17 +848,30 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	if !worktreeExists {
 		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("worktree does not exist, skipping commit")
 	}
+	// Answered before the commit message is generated; see StageIndexedFiles for the rule.
+	var commitOut string
+	var commitErr error
 	if worktreeExists {
+		if unmerged := h.worktreeMgr.StageIndexedFiles(taskID); len(unmerged) > 0 {
+			unlockWorktree()
+			httputil.Fail(w, errs.Conflict("the worktree has an unresolved conflict"), "commit staged work", "task not found")
+			return
+		}
 		commitMsg := body.CommitMessage
 		if commitMsg == "" {
 			commitMsg = h.executor.GenerateCommitMessage(r.Context(), task)
 		}
-		// Refresh staged files from the working tree so post-staging manual
-		// edits are included in the commit; unstaged files stay out.
-		h.worktreeMgr.StageIndexedFiles(taskID)
-		_ = h.worktreeMgr.GitRunInWorktree(taskID, append(git.GitAuthorFlags(), "commit", "-m", commitMsg, "--allow-empty")...)
+		// --allow-empty is what lets a task whose work is already committed still reach Done.
+		commitOut, commitErr = h.worktreeMgr.GitRunInWorktreeOutput(taskID, append(git.GitAuthorFlags(), "commit", "-m", commitMsg, "--allow-empty")...)
 	}
 	unlockWorktree()
+
+	// A refused commit is not a no-op: merging on past it marks the task Done and deletes the
+	// worktree holding the work.
+	if commitErr != nil {
+		httputil.Fail(w, errs.Operation("commit staged work", fmt.Errorf("%s (%v)", strings.TrimSpace(commitOut), commitErr)), "commit staged work", "task not found")
+		return
+	}
 
 	// Capture branch tip before merge (for post-commit diff comparison)
 	if task.Branch != "" {
