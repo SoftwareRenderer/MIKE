@@ -8,6 +8,7 @@
     import { uploadTaskFile } from '$lib/api';
     import type { DraftAttachment } from '$lib/storage';
     import { useImageAttachments } from '$lib/composables/use-image-attachments.svelte';
+    import { imageSrc } from '$lib/utils/attachments';
     import { t } from '$lib/i18n';
 
     interface Props {
@@ -244,7 +245,7 @@
         <div class="attachment-preview">
             {#each attachments as att, i}
                 <div class="attachment-thumb">
-                    <img src={att.data} alt="" />
+                    <img src={imageSrc(att)} alt="" />
                     <button type="button" class="attachment-remove" onclick={() => removeAttachment(i)} aria-label={t('chat.form.removeImage')} title={t('chat.common.remove')}>
                         <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                     </button>

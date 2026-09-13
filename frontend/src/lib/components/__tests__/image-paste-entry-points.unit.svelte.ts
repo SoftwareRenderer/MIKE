@@ -35,6 +35,15 @@ afterEach(() => {
 
 const png = (name = 'shot.png') => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], name, { type: 'image/png' });
 
+/**
+ * `DraftAttachment.data` is bare base64, so a preview that renders it straight into `src` is an
+ * empty box — the chip and its remove button still render, which is why counting them is not enough.
+ */
+function expectPreviewImage(scope: Element | Document, chip: string) {
+    const src = scope.querySelector(`${chip} img`)?.getAttribute('src') ?? '';
+    expect(src.startsWith('data:image/png;base64,')).toBe(true);
+}
+
 function pasteInto(el: Element, files: File[], text = '') {
     const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
     Object.defineProperty(event, 'clipboardData', {
@@ -45,7 +54,7 @@ function pasteInto(el: Element, files: File[], text = '') {
 }
 
 describe('the task description', () => {
-    it('attaches a pasted image', async () => {
+    it('attaches a pasted image and shows it', async () => {
         const { container } = render(CreateTaskModal, { props: { projectId: 'p1', onClose: () => {} } });
         const textarea = await waitFor(() => {
             const t = container.querySelector('#task-description');
@@ -56,6 +65,7 @@ describe('the task description', () => {
         pasteInto(textarea, [png()]);
 
         await waitFor(() => expect(container.querySelectorAll('.task-attachment-chip')).toHaveLength(1));
+        expectPreviewImage(container, '.task-attachment-chip');
     });
 
     it('still forwards a text-bearing paste to a granted createTask.events.paste extension', async () => {
@@ -81,7 +91,7 @@ describe('the task description', () => {
 });
 
 describe('the chat input', () => {
-    it('attaches a pasted image', async () => {
+    it('attaches a pasted image and shows it', async () => {
         const { container } = render(ChatForm, { props: { projectId: 'p1', taskId: 't1' } });
         const textarea = await waitFor(() => {
             const t = container.querySelector('textarea');
@@ -92,6 +102,7 @@ describe('the chat input', () => {
         pasteInto(textarea, [png()]);
 
         await waitFor(() => expect(container.querySelectorAll('.attachment-thumb')).toHaveLength(1));
+        expectPreviewImage(container, '.attachment-thumb');
     });
 
     it('rings the field while a file is dragged over it', async () => {
@@ -111,7 +122,7 @@ describe('the chat input', () => {
 });
 
 describe('the message edit form', () => {
-    it('attaches a pasted image', async () => {
+    it('attaches a pasted image and shows it', async () => {
         const { container } = render(EditForm, {
             props: { content: 'the message', messageId: 'm1', projectId: 'p1', taskId: 't1' },
         });
@@ -124,11 +135,12 @@ describe('the message edit form', () => {
         pasteInto(textarea, [png()]);
 
         await waitFor(() => expect(container.querySelectorAll('.edit-attachment-chip')).toHaveLength(1));
+        expectPreviewImage(container, '.edit-attachment-chip');
     });
 });
 
 describe('the mobile message editor', () => {
-    it('attaches a pasted image to the message being edited', async () => {
+    it('attaches a pasted image to the message being edited and shows it', async () => {
         stubMatchMedia(true);
         const { container } = render(ChatMessage, {
             props: { role: 'user', content: 'the message', messageId: 'm1', projectId: 'p1', taskId: 't1' },
@@ -152,5 +164,6 @@ describe('the mobile message editor', () => {
         await waitFor(() =>
             expect(document.querySelectorAll('dialog.edit-dialog .edit-attachment-chip')).toHaveLength(1),
         );
+        expectPreviewImage(document, 'dialog.edit-dialog .edit-attachment-chip');
     });
 });
