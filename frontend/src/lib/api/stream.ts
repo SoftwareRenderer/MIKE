@@ -29,6 +29,8 @@ export interface AppStreamCallbacks {
 export interface AppStream {
     close: () => void;
     checkStale: () => void;
+    /** ms since a frame arrived, counting from the last close when that was more recent. */
+    msSinceFrame: () => number;
     reconnectNow: () => void;
     subscribeProject: (projectId: string) => void;
     unsubscribeProject: (projectId: string) => void;
@@ -220,6 +222,8 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
         ws.onclose = () => {
             if (gen !== connectGen) return; // stale connection, skip
             stopHeartbeat();
+            // No frames can arrive after this, so the silence clock starts here.
+            lastActivityAt = Date.now();
             currentWs = null;
             if (isClosed) return;
             // Signal offline on any disconnect (including initial connection failure)
@@ -258,6 +262,7 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
             connect();
         },
         checkStale,
+        msSinceFrame: () => Date.now() - lastActivityAt,
         subscribeProject: (projectId: string) => {
             if (subscribedProjects.has(projectId)) return;
             subscribedProjects.add(projectId);

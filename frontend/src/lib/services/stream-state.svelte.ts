@@ -20,6 +20,12 @@ export class StreamState {
         currentAssistantId: null as string | null,
         activeToolCalls: new Map<string, { entryId: string; toolCall: ToolCallInfo }>(),
         processedToolIds: new Set<string>(),
+        /**
+         * A tool call this screen has seen but holds no answered card for — pending, or answered with
+         * no card to land on. A `tool_call` is broadcast once, so such a card is gone until the
+         * transcript is read from the database again.
+         */
+        unresolvedToolIds: new Set<string>(),
         awaitingResponse: false,
         queuePosition: 0,
         queueEstimatedWait: 0,
@@ -114,6 +120,7 @@ export class StreamState {
         this.closeCurrentAssistant();
         this.state.activeToolCalls = new Map();
         this.state.processedToolIds = new Set();
+        this.state.unresolvedToolIds = new Set();
         this.state.streamTokenCount = 0;
         this.state.awaitingResponse = false;
         // Note: sessionCost is NOT reset here — it reflects the task's accumulated

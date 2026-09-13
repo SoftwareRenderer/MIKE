@@ -55,7 +55,9 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
     // rAF batching for scroll — coalesces rapid calls during token bursts
     let scrollRaf: number | null = null;
     function scheduleScroll() {
-        if (scrollRaf) return;
+        // rAF is paused in a hidden tab, so a latch set there fires one stale scroll on return; the
+        // follow tracker re-pins then.
+        if (scrollRaf || document.hidden) return;
         scrollRaf = requestAnimationFrame(() => {
             scrollRaf = null;
             scroll();
@@ -158,6 +160,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 if (!entry.toolCalls) entry.toolCalls = [];
 
                 s.processedToolIds = new Set([...s.processedToolIds, data.tool_id]);
+                s.unresolvedToolIds = new Set([...s.unresolvedToolIds, data.tool_id]);
                 const ci = entry.content.length;
                 const ri = (entry.reasoningContent || '').length;
                 const newTc = {
@@ -206,6 +209,15 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     if (data.original_lines !== undefined) tc.originalLines = data.original_lines;
                     if (data.original_bytes !== undefined) tc.originalBytes = data.original_bytes;
                     if (data.message_id) tc.messageId = data.message_id;
+                }
+                // An answer with no card to land on means the announcement was lost with it, and
+                // only a rebuild from the database can put the card back.
+                const owed = !found;
+                if (s.unresolvedToolIds.has(data.tool_id) !== owed) {
+                    const nextOwed = new Set(s.unresolvedToolIds);
+                    if (owed) nextOwed.add(data.tool_id);
+                    else nextOwed.delete(data.tool_id);
+                    s.unresolvedToolIds = nextOwed;
                 }
                 if (s.activeToolCalls.size === 0) {
                     stream.closeCurrentAssistant();

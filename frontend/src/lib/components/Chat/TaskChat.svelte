@@ -24,6 +24,7 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { t } from '$lib/i18n';
     import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
+    import { createTabReturn } from '$lib/composables/use-tab-return';
     import ChatForm from './ChatForm.svelte';
     import ChatEntries from './ChatEntries.svelte';
     import ReviewBar from './ReviewBar.svelte';
@@ -143,8 +144,10 @@
     let threadSwitching = $state(false); // true while a thread switch is in-flight
     // Suppress buffer replay for non-running tasks to avoid flicker from stale entries.
     // For in_progress tasks, buffer events are legitimate and must be replayed.
+    // `isLoading` joins in because the board's status lags the turn: the ungated `status: running`
+    // frame opens the gate for the turn it announces.
     let suppressEvents = $state(true);
-    $effect(() => { suppressEvents = taskStatus !== 'in_progress'; });
+    $effect(() => { suppressEvents = taskStatus !== 'in_progress' && !isLoading; });
 
     let lastExecutionState: string | undefined;
     $effect(() => {
@@ -481,14 +484,16 @@
         stream.state.contextState = { ...stream.state.contextState, limit: (model as { context_window?: number })?.context_window || 0 };
     }
 
-    async function loadHistory(scrollAfter = false) {
+    /** `executionState` decides whether a pending tool call is work or a leftover. A caller that just
+     * read the task row passes it; the board copy can be a turn behind. */
+    async function loadHistory(scrollAfter = false, executionState = taskExecutionState) {
         try {
             const messages = await getTaskMessages(projectId, taskId);
             // Build entries from DB messages using shared utility
             const { entries: mergedDbEntries, checkpointHashes } = buildEntriesFromMessages(messages);
             stream.state.checkpointCommitHashes = checkpointHashes;
 
-            stream.state.entries = mergeLoadedHistory(mergedDbEntries, messages.map(m => m.id), stream.state.entries, taskIsInFlight(taskExecutionState));
+            stream.state.entries = mergeLoadedHistory(mergedDbEntries, messages.map(m => m.id), stream.state.entries, taskIsInFlight(executionState));
             // These are new entry objects, so refs captured while streaming are now
             // detached; re-point them before more events for this turn arrive.
             stream.reconcileActiveToolCalls();
@@ -1228,31 +1233,17 @@
             }
         })();
 
-        // Reconcile stale streaming state on tab return.
-        // Mobile browsers suspend JS while hidden; the 'complete' event may be missed
-        // (per-task buffer is cleared on the server when the turn ends).
-        const handleTabVisibility = async () => {
-            if (!document.hidden && isLoading) {
-                try {
-                    const task = await getTask(projectId, taskId);
-                    if (task.status !== 'in_progress') {
-                        // The turn finished while the tab was hidden — drop
-                        // stale streaming state and reload from the DB.
-                        dropStaleStreamingState();
-                        await loadHistory();
-                    }
-                } catch {
-                    // task deleted — ignore
-                }
-            }
-        };
-        window.addEventListener('visibilitychange', handleTabVisibility);
+        const returnWatcher = createTabReturn({
+            mayBeBehind,
+            msSinceFrame: () => getAppStreamRef()?.msSinceFrame() ?? null,
+            onReturn: () => { void reconcileAfterAbsence(); },
+        });
 
         return () => {
             window.removeEventListener('urlchanged', handleUrlChange);
             unsubViewport?.();
             unsubTaskEvent?.();
-            window.removeEventListener('visibilitychange', handleTabVisibility);
+            returnWatcher.destroy();
         };
     });
 
@@ -1320,11 +1311,37 @@
         let wasDisconnected = false;
         unsubWsConn = wsConnection.subscribe((connected) => {
             if (connected && wasDisconnected) {
-                void handleWsReconnect();
+                void reconcileAfterAbsence();
             }
             wasDisconnected = !connected;
         });
     });
+
+    /** True while this screen could be showing work the server has moved past. Read at the moment of
+     * the event — a value kept from earlier is the stale view itself. */
+    function mayBeBehind(): boolean {
+        return isLoading
+            || taskIsInFlight(taskExecutionState)
+            || entries.some(e => e.toolCalls?.some(tc => tc.isPending))
+            || stream.state.unresolvedToolIds.size > 0;
+    }
+
+    /**
+     * Rebuild the transcript from the database after a stretch this screen was not being read. Turns
+     * completed while away are never replayed, and a frame lost to a suspended tab has no other way back.
+     */
+    async function reconcileAfterAbsence(): Promise<void> {
+        let executionState = taskExecutionState;
+        try {
+            executionState = (await getTask(projectId, taskId)).execution_state;
+        } catch {
+            // Deleted or unreachable: the state on screen is the best reading available.
+        }
+        if (!taskIsInFlight(executionState)) dropStaleStreamingState();
+        await loadHistory(false, executionState);
+        // The rows are authoritative now: nothing is owed a card any more.
+        stream.state.unresolvedToolIds = new Set();
+    }
 
     // Drop stale streaming entries and reset streaming UI. Turns finished
     // while offline aren't replayed by the server, so the DB is the source
@@ -1336,18 +1353,6 @@
         // resetStreaming already drops every ref — no reconcile needed here.
         stream.resetStreaming();
         markNotStreaming();
-    }
-
-    async function handleWsReconnect() {
-        try {
-            const task = await getTask(projectId, taskId);
-            if (task.status !== 'in_progress') {
-                dropStaleStreamingState();
-            }
-            await loadHistory();
-        } catch {
-            // Task may have been deleted — ignore (same as handleTabVisibility)
-        }
     }
 </script>
 

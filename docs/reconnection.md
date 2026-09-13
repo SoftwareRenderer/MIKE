@@ -13,9 +13,10 @@ When the WebSocket drops and reconnects, the current view (board, task view) upd
   (the exceptions are a config carrying a real provider API key and a clone URL carrying credentials —
   both refused, never persisted);
   `online` flushes the queue and calls `reconnectNow()` to skip backoff.
-- Board refresh on `visibilitychange` handles phone-sleep cases. The listener is on `window`, which
-  is where the browser's own event bubbles to from `document` — a synthetic `new Event(...)` fired at
-  `document` does not bubble and reaches nothing.
+- A window coming back refreshes the board, the open task's chat and its diff — phone-sleep included — on
+  the same signal as the window's own `focus` and a bfcache `pageshow`. See *The tab that comes back*. The
+  listener is on `window`, which is where the browser's own event bubbles to from `document` — a synthetic
+  `new Event(...)` fired at `document` does not bubble and reaches nothing.
 
 **Tests:** e2e `reconnect-refresh.spec.ts`; the merge above is held by
 `src/lib/utils/__tests__/chat-history-merge.unit.ts`, which drives the real stream handler and the real
@@ -60,6 +61,50 @@ reasoning and none of its tool calls.
 Being in progress is what separates a pending `tool_call` row that is work from one that is a leftover:
 a stopped task will never write the missing result, so that card is hidden while the message around it —
 its text, its thinking, the cards that did finish — stays.
+
+## The tab that comes back
+
+`createTabReturn` (`$lib/composables/use-tab-return.ts`) is the one listener set for "this window has come
+back", and `needsReturnReconcile` (`$lib/utils/tab-return.ts`) is the one rule. Three signals answer for one
+gesture — `visibilitychange`→visible, the window's own `focus`, and `pageshow` from the back/forward cache —
+and the rule collapses them to a single call, never twice inside `RETURN_DEDUPE_MS`.
+
+| view | what says it could be behind | what it refetches |
+|---|---|---|
+| board (`App.svelte`) | always — a stale list looks current whatever the socket did | `refreshBoard()`, plus `checkStale()` / `reconnectNow()` for the socket |
+| chat (`TaskChat.svelte`) | in flight, a card still pending, or a call it owes a card for | the task row, then the messages |
+| diff (`CardDetail.svelte`) | in flight or streaming | `loadDiff()` |
+
+`visibilitychange` reconciles whenever the view says it could be behind; `focus` and `pageshow` only after
+the stream has been silent for `WAKE_FRAME_GAP_MS`, read from `AppStream.msSinceFrame()` (which restarts its
+clock at the last close, so a dead socket counts as silence). A window that merely lost focus keeps
+receiving frames, so silence is the only evidence the machine slept or the socket went zombie without the
+tab ever going hidden — and with two windows open on one app, `document.hidden` never becomes true at all.
+
+**The chat's gate is `StreamState.unresolvedToolIds`, not the task's status.** `isLoading` and
+`task.status !== 'in_progress'` were the gate, and both fail in the direction that matters: a stopped task
+stays `in_progress` (see *A tool call reads as running only while its task is in flight*), and both are
+false once the turn has ended, which is exactly when the missed frames have already taken the card with
+them — `dropUnresolvedToolCalls` removes the entry whose call was never answered. `unresolvedToolIds` is
+the evidence that survives the card: a tool call this screen saw announced and holds no answered card for,
+settled when an answer lands on a card (an answer with **no** card to land on is itself the evidence, which
+is how a lost `tool_call` frame is caught), and cleared by any rebuild from the rows.
+
+`reconcileAfterAbsence` then decides work-vs-leftover from the row it just read — `getTask().execution_state`
+through `taskIsInFlight` — and passes that into `loadHistory`, never the board copy. The merge drops live
+pending cards when told the task is not in flight, and the board can carry an `idle` from a
+duplicate-message answer (`backend/exec/handler_http.go`) while the call is still running.
+
+A turn's first frames are not part of this story: `suppressEvents` is a board-status rule and lags the turn
+it gates, so `isLoading` joins it — the `status: running` frame is not gated by that flag and so opens the
+gate for the turn it announces. `scheduleScroll` likewise does nothing while the tab is hidden (rAF is
+paused there; the follow tracker re-pins on return).
+
+**Tests:** e2e `tab-return-chat.spec.ts` swallows `tool_result` task events at the socket (a listener added
+in the wrapped constructor runs before the app's `onmessage`, so `stopImmediatePropagation` is where the
+frame can be removed) and asserts they really were swallowed; the turn ends with the card gone, and one
+`visibilitychange` must bring it back holding the stored output. `tab-return.unit.ts` holds the gate rule
+itself.
 
 ## The board on screen belongs to one project
 
@@ -109,7 +154,7 @@ announced).
 
 ## Behaviour in full (moved from AGENTS.md)
 ### Reconnection & Offline
-`onConnected(true)` in `App.svelte` runs `silentRefresh()` once `initialLoadComplete`; `TaskChat` reloads history from the DB on reconnect because **turns completed while offline are never replayed** (buffer cleared at turn end). `offline` queues writes immediately, except a value that carries a secret — an unmasked provider key, or a clone URL with credentials in it — which is refused because the queue is persisted; `online` flushes the queue and calls `reconnectNow()` to skip backoff; `visibilitychange` refreshes the board (phone-sleep). Project re-subscription forces a re-send of `task_diff_stats`. Mechanism + test approach: `docs/reconnection.md`.
+`onConnected(true)` in `App.svelte` runs `silentRefresh()` once `initialLoadComplete`; `TaskChat` reloads history from the DB on reconnect because **turns completed while offline are never replayed** (buffer cleared at turn end). `offline` queues writes immediately, except a value that carries a secret — an unmasked provider key, or a clone URL with credentials in it — which is refused because the queue is persisted; `online` flushes the queue and calls `reconnectNow()` to skip backoff; `visibilitychange` refreshes the board (phone-sleep), and the open task's chat and diff answer the same signal together with the window's own `focus` and a bfcache `pageshow` — gated on the screen being able to be behind, never on the task's status. Project re-subscription forces a re-send of `task_diff_stats`. Mechanism + test approach: `docs/reconnection.md`.
 
 ### How a request ends: cancelled, or unanswered
 

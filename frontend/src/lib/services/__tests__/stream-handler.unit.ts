@@ -1139,3 +1139,43 @@ describe('lock_wait — a click queued behind work it cannot see', () => {
         expect(stream.state.lockWait).toEqual({ domain: 'other', seconds: 4 });
     });
 });
+
+describe('unresolvedToolIds — what this screen owes a card for', () => {
+    function setup() {
+        const stream = new StreamState();
+        const handleEvent = createStreamHandler(stream, makeCallbacks());
+        return { stream, handleEvent };
+    }
+
+    it('settles a call when its answer lands on the card', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'bash', args: {} } }, false);
+        expect([...stream.state.unresolvedToolIds]).toEqual(['tc1']);
+
+        handleEvent({ type: 'tool_result', data: { tool_id: 'tc1', success: true, output: 'ok', duration: 5 } }, false);
+        expect(stream.state.unresolvedToolIds.size).toBe(0);
+    });
+
+    it('keeps the call owed when the pending card is cleared from under it', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'bash', args: {} } }, false);
+        // The card goes; the announcement is still something this screen saw and cannot show.
+        handleEvent({ type: 'status', data: { state: 'running' } }, false);
+        expect([...stream.state.unresolvedToolIds]).toEqual(['tc1']);
+    });
+
+    it('counts an answer that arrived with no card as a missing card', () => {
+        const { stream, handleEvent } = setup();
+        // The tool_call frame was never delivered — only its result was.
+        handleEvent({ type: 'tool_result', data: { tool_id: 'tc1', success: true, output: 'ok', duration: 5 } }, false);
+        expect([...stream.state.unresolvedToolIds]).toEqual(['tc1']);
+    });
+
+    it('is empty again after a thread switch, whose reload rebuilds from the database', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'bash', args: {} } }, false);
+        stream.resetStreaming();
+        expect(stream.state.unresolvedToolIds.size).toBe(0);
+    });
+});

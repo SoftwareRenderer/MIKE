@@ -17,6 +17,7 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
     import { useBoardArrowNav } from '$lib/composables/use-board-arrow-nav';
+    import { createTabReturn } from '$lib/composables/use-tab-return';
     import kanbanIcon from '$lib/assets/icons/kanban.svg';
     import type { Project, Task, Config, StreamEvent, SandboxMemoryStats, DiffStatsEntry, Board as BoardData } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
@@ -759,25 +760,14 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
     });
 
-    // Detect when the tab becomes visible again (e.g. phone wakes from sleep).
-    // Check the WebSocket for zombie connections, force reconnect if stale,
-    // try immediate reconnect if disconnected, and always refresh board data.
-    // Always refresh on wake because the per-connection event buffer is lost
-    // when the WebSocket drops — any task_updated/project_counts events during
-    // the disconnect window are missed and must be recovered via HTTP fetch.
-    // If the first refresh fails (network still recovering from suspension),
-    // retry once after a short delay to give the network stack time to stabilize.
-    function handleVisibilityChange() {
-        if (document.hidden || !appStream) return;
-        appStream.checkStale();
-        if (!wsConnected) {
-            appStream.reconnectNow();
+    // What this window missed comes back over HTTP: the per-connection event buffer is gone once the
+    // socket drops.
+    function reconcileAfterAbsence(): void {
+        if (appStream) {
+            appStream.checkStale();
+            if (!wsConnected) appStream.reconnectNow();
         }
-        // Always refresh on tab-visible — WebSocket events may have been lost
-        // during sleep/disconnect (per-connection buffer is evicted on reconnect).
         refreshBoard().catch(() => {
-            // First refresh failed — network may still be recovering.
-            // Retry once after a short delay.
             if (visibilityRetryTimer) return; // already retrying
             visibilityRetryTimer = setTimeout(() => {
                 visibilityRetryTimer = null;
@@ -785,7 +775,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             }, 1000);
         });
     }
-    window.addEventListener('visibilitychange', handleVisibilityChange);
+
+    const returnWatcher = createTabReturn({
+        mayBeBehind: () => true,
+        msSinceFrame: () => appStream?.msSinceFrame() ?? null,
+        onReturn: reconcileAfterAbsence,
+    });
 
     // Browser network signals. 'offline' queues writes immediately;
     // 'online' flushes the queue and skips the reconnect backoff.
@@ -814,7 +809,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             clearTimeout(visibilityRetryTimer);
             visibilityRetryTimer = null;
         }
-        window.removeEventListener('visibilitychange', handleVisibilityChange);
+        returnWatcher.destroy();
         window.removeEventListener('online', handleBrowserOnline);
         window.removeEventListener('offline', handleBrowserOffline);
         window.removeEventListener('dragover', rejectStrayFileDrop);

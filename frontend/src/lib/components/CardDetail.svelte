@@ -8,8 +8,10 @@
     import { enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
     import { shouldAutoFullscreenDiffEditor } from '$lib/utils/diff-editor-layout';
     import { chatBlurState, chatCollapseState, chatFocusState, chatManualToggleState, type ChatAutoMaximizeRules, type ChatMaximizeState } from '$lib/utils/chat-auto-maximize';
-    import { filterTopLevelTaskIds, willConsolidateIntoParent } from '$lib/utils/task-utils';
+    import { filterTopLevelTaskIds, willConsolidateIntoParent, taskIsInFlight } from '$lib/utils/task-utils';
     import { clearHighlightCache } from '$lib/highlighter';
+    import { getAppStreamRef } from '$lib/stream-ref';
+    import { createTabReturn } from '$lib/composables/use-tab-return';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { loadAppSetting, saveAppSetting, loadCollapsedSections, saveCollapsedSections } from '$lib/storage';
     import { useBoardDnd } from '$lib/composables/use-board-dnd.svelte';
@@ -747,9 +749,19 @@
             }
         }
         window.addEventListener('keydown', handleKey);
+
+        // The diff is as frame-driven as the chat, and only a task doing work can move under it, so
+        // an idle one is not re-fetched — a full diff reload is not free.
+        const returnWatcher = createTabReturn({
+            mayBeBehind: () => taskIsInFlight(task.execution_state) || streamingIds.has(task.id),
+            msSinceFrame: () => getAppStreamRef()?.msSinceFrame() ?? null,
+            onReturn: () => { void loadDiff(); },
+        });
+
         return () => {
             unsubDiff();
             unsubsMultiSelect();
+            returnWatcher.destroy();
             window.removeEventListener('keydown', handleKey);
         };
     });
