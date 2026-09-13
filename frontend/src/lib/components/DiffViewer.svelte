@@ -1,10 +1,12 @@
 <script lang="ts">
-    import type { DiffFile, DiffRow } from '$lib/types/diff';
+    import type { DiffFile, DiffRow, DiffImageRequest, DiffImageSection, DiffImageSource } from '$lib/types/diff';
     import type { DiffDisplayItem, CollapsedBlock } from '$lib/utils/diff-parser';
     import { buildDisplayItems, truncatePath, getStatusBadge } from '$lib/utils/diff-parser';
+    import { isDisplayableImage, imageSides } from '$lib/utils/diff-image';
     import { highlightLinesAsync } from '$lib/highlighter';
     import { formatBytes } from '$lib/utils/format';
     import { t } from '$lib/i18n';
+    import ImageDiffModal from './ImageDiffModal.svelte';
     import { loadCollapsedDiffFiles, saveCollapsedDiffFiles } from '$lib/storage';
 import { slide } from 'svelte/transition';
     import '$lib/styles/diff-viewer.css';
@@ -13,7 +15,7 @@ import { slide } from 'svelte/transition';
     import '$lib/styles/token-colors.css';
 
 
-    let { committedFiles = [], stagedFiles = [], unstagedFiles = [], stagedUntracked = [], unstagedUntracked = [], loading = false, onExpandFile, onExpandUntracked, onLineClick, onStageFile, onStageAll, onUnstageAll, selectedPath, mergedLabel = t('task.diff.mergedFromSubtasks') }: { committedFiles?: DiffFile[]; stagedFiles: DiffFile[]; unstagedFiles: DiffFile[]; stagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; unstagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; loading?: boolean; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void; onStageFile?: (path: string, stage: boolean) => void; onStageAll?: () => void; onUnstageAll?: () => void; selectedPath?: string; mergedLabel?: string } = $props();
+    let { committedFiles = [], stagedFiles = [], unstagedFiles = [], stagedUntracked = [], unstagedUntracked = [], loading = false, onExpandFile, onExpandUntracked, onLineClick, onStageFile, onStageAll, onUnstageAll, selectedPath, mergedLabel = t('task.diff.mergedFromSubtasks'), imageSource }: { committedFiles?: DiffFile[]; stagedFiles: DiffFile[]; unstagedFiles: DiffFile[]; stagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; unstagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; loading?: boolean; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void; onStageFile?: (path: string, stage: boolean) => void; onStageAll?: () => void; onUnstageAll?: () => void; selectedPath?: string; mergedLabel?: string; imageSource?: DiffImageSource } = $props();
     let hasContent = $derived(committedFiles.length > 0 || stagedFiles.length > 0 || unstagedFiles.length > 0 || stagedUntracked.length > 0 || unstagedUntracked.length > 0);
 
     // Sort files: directories first (by path), then root files
@@ -308,11 +310,35 @@ import { slide } from 'svelte/transition';
         }
     }
 
+    /**
+     * What one binary file's "View image" button asks for, or null when there is nothing to ask: no
+     * project named by the host, a format no browser paints, or a file this change removed.
+     *
+     * The host decides which commits each side is read from, because only it knows what the panel is
+     * comparing. The defaults are what each section means when it says nothing.
+     */
+    function imageRequest(path: string, file: { isNewFile?: boolean; isDeleted?: boolean; origPath?: string }, section: DiffImageSection): DiffImageRequest | null {
+        if (!imageSource || !isDisplayableImage(path)) return null;
+        const sides = imageSides(file);
+        if (!sides) return null;
+        const refs = (section === 'committed' ? (imageSource.committed ?? imageSource.working) : imageSource.working) ?? {};
+        return {
+            path,
+            displayPath: file.origPath ? `${file.origPath} → ${path}` : path,
+            oldPath: file.origPath ?? '',
+            oldRef: sides === 'compare' ? (refs.old ?? 'HEAD') : '',
+            newRef: refs.new ?? (section === 'committed' ? 'HEAD' : ''),
+        };
+    }
+
+    let imageModal = $state<DiffImageRequest | null>(null);
+
 </script>
 
-{#snippet diffFileEntry(file: DiffFile, isStaged: boolean, showStageBtn: boolean = true)}
+{#snippet diffFileEntry(file: DiffFile, isStaged: boolean, showStageBtn: boolean = true, section: DiffImageSection = 'working')}
     {@const isFileExpanded = isFileOpen(file.path)}
     {@const badge = getStatusBadge(file)}
+    {@const image = imageRequest(file.path, file, section)}
     <section class="diff-file-section diff-file-enter" use:registerFileSection={file.path}>
         <div class="diff-file-header-row">
             <button
@@ -361,6 +387,9 @@ import { slide } from 'svelte/transition';
                                     <path d="M6 6l4 4M10 6l-4 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                                 </svg>
                                 <span>{t('diff.binaryWithSize', { size: formatBytes(file.fileSize) })}</span>
+                                {#if image}
+                                    <button type="button" class="diff-view-image-btn" onclick={() => { imageModal = image }}>{t('diff.viewImage')}</button>
+                                {/if}
                             </div>
                             {:else}
                             <div class="diff-large-file-notice">
@@ -529,6 +558,7 @@ import { slide } from 'svelte/transition';
     {@const isUntrackedExpanded = isFileOpen(entry.path)}
     {@const isLarge = entry.fileSize !== undefined}
     {@const isBin = !!entry.isBinary}
+    {@const image = isBin ? imageRequest(entry.path, { isNewFile: true }, 'working') : null}
     <section class="diff-file-section diff-file-section-untracked diff-file-enter" use:registerFileSection={entry.path}>
         <div class="diff-file-header-row">
             <button
@@ -575,6 +605,9 @@ import { slide } from 'svelte/transition';
                                     <path d="M6 6l4 4M10 6l-4 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                                 </svg>
                                 <span>{t('diff.binaryWithSize', { size: formatBytes(entry.fileSize ?? 0) })}</span>
+                                {#if image}
+                                    <button type="button" class="diff-view-image-btn" onclick={() => { imageModal = image }}>{t('diff.viewImage')}</button>
+                                {/if}
                             </div>
                             {:else}
                             <div class="diff-large-file-notice">
@@ -864,7 +897,7 @@ import { slide } from 'svelte/transition';
             </button>
             <div class="diff-section-body">
                 {#each sortedCommittedFiles as file (file.path)}
-                    {@render diffFileEntry({ ...file, rows: file.committedRows || file.rows }, false, false)}
+                    {@render diffFileEntry({ ...file, rows: file.committedRows || file.rows }, false, false, 'committed')}
                 {/each}
             </div>
         </div>
@@ -872,6 +905,19 @@ import { slide } from 'svelte/transition';
 
         </div>
     </div>
+{/if}
+
+{#if imageModal && imageSource}
+    <ImageDiffModal
+        project={imageSource.project}
+        task={imageSource.task ?? ''}
+        path={imageModal.path}
+        displayPath={imageModal.displayPath}
+        oldPath={imageModal.oldPath}
+        oldRef={imageModal.oldRef}
+        newRef={imageModal.newRef}
+        onClose={() => { imageModal = null; }}
+    />
 {/if}
 
 <style>

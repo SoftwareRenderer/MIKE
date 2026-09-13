@@ -809,6 +809,10 @@ func projectFSRoots(project *types.Project, worktreeRoot string) []string {
 
 // validateFSPath returns the form of path that is safe to open, jailed to projectFSRoots.
 // Callers MUST open the returned path.
+//
+// A refusal is logged with both paths and returned as fsutil.ErrOutside alone, because every
+// caller answers the browser with err.Error(): the host path a symlink committed into a
+// repository resolves to is the server's to read, not the requester's.
 func (s *Server) validateFSPath(project *types.Project, worktreeRoot, path string) (string, error) {
 	if project == nil {
 		return path, nil // no project constraint
@@ -825,7 +829,12 @@ func (s *Server) validateFSPath(project *types.Project, worktreeRoot, path strin
 		return "", fmt.Errorf("path outside allowed project directory")
 	}
 
-	return fsutil.Contained(cleanPath, projectFSRoots(project, worktreeRoot))
+	resolved, err := fsutil.Contained(cleanPath, projectFSRoots(project, worktreeRoot))
+	if err != nil {
+		logging.For(logging.HTTP).Warnf("file path refused: %v", err)
+		return "", fsutil.ErrOutside
+	}
+	return resolved, nil
 }
 
 // fsTarget is a contained write destination and the roots its parent creation stays inside.

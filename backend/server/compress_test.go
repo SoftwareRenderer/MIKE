@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -293,6 +294,67 @@ func TestCompressMiddleware_ContentLengthRemoved(t *testing.T) {
 		t.Errorf("expected Content-Encoding: br, got: %q", resp.Header.Get("Content-Encoding"))
 	}
 }
+
+// TestGetImageResponseIsPassedThrough: the GET buffer exists to hash an ETag, and an image is
+// already-compressed bytes, so holding one costs several times the file in memory for a body that
+// cannot shrink. This is what keeps a large binary response's own size cap the real bound.
+func TestGetImageResponseIsPassedThrough(t *testing.T) {
+	s := testServer(t)
+	chunk := bytes.Repeat([]byte{0x89}, 256<<10)
+	chunks := 8
+	s.mux.HandleFunc("GET /test/img", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Content-Length", strconv.Itoa(len(chunk)*chunks))
+		w.Header().Set("Cache-Control", "no-store")
+		for range chunks {
+			w.Write(chunk)
+		}
+	})
+
+	rec := &chunkRecordingWriter{header: http.Header{}}
+	req := httptest.NewRequest(http.MethodGet, "/test/img", nil)
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	CompressMiddleware(s.mux).ServeHTTP(rec, req)
+
+	if got := rec.header.Get("Content-Encoding"); got != "" {
+		t.Errorf("Content-Encoding = %q, want none", got)
+	}
+	if got := rec.header.Get("Content-Length"); got != strconv.Itoa(len(chunk)*chunks) {
+		t.Errorf("Content-Length = %q, want the handler's own %d", got, len(chunk)*chunks)
+	}
+	if got := rec.header.Get("ETag"); got != "" {
+		t.Errorf("ETag = %q, want none — a no-store body is never revalidated", got)
+	}
+	if rec.writes < chunks {
+		t.Errorf("body left in %d write(s) of a max %d bytes: the whole response was buffered", rec.writes, rec.largest)
+	}
+	if rec.bytes != len(chunk)*chunks {
+		t.Errorf("%d bytes reached the client, want %d", rec.bytes, len(chunk)*chunks)
+	}
+}
+
+// chunkRecordingWriter counts writes instead of keeping a body, so a buffering writer is visible.
+type chunkRecordingWriter struct {
+	header  http.Header
+	writes  int
+	largest int
+	bytes   int
+}
+
+func (w *chunkRecordingWriter) Header() http.Header { return w.header }
+
+func (w *chunkRecordingWriter) WriteHeader(int) {}
+
+func (w *chunkRecordingWriter) Write(p []byte) (int, error) {
+	w.writes++
+	w.bytes += len(p)
+	if len(p) > w.largest {
+		w.largest = len(p)
+	}
+	return len(p), nil
+}
+
+func (w *chunkRecordingWriter) Flush() {}
 
 // --- ETag tests ---
 
