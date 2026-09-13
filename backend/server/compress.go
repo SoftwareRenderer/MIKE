@@ -177,9 +177,11 @@ func (c *compressWriter) Write(p []byte) (int, error) {
 		return c.ResponseWriter.Write(p)
 	}
 
-	// Skip compression for streaming content types (SSE) — they need real-time flushes.
-	if c.headers.Get("Content-Type") == "text/event-stream" {
-		c.commitNoCompress()
+	// Bodies that must leave as the handler wrote them. An SSE stream needs real-time
+	// flushes; an image is bytes the browser already compressed, so the GET buffer below
+	// would hold several times the file to hash an ETag, then brotli it for nothing.
+	if ct := c.headers.Get("Content-Type"); ct == "text/event-stream" || strings.HasPrefix(ct, "image/") {
+		c.passThrough()
 		return c.ResponseWriter.Write(p)
 	}
 
@@ -204,10 +206,10 @@ func (c *compressWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func (c *compressWriter) commitNoCompress() {
+// passThrough sends the response exactly as the handler wrote it — headers and Content-Length
+// included — and sends every later write straight to the socket.
+func (c *compressWriter) passThrough() {
 	c.committed = true
-	c.headers.Del("Content-Length")
-
 	for k, vv := range c.headers {
 		for _, v := range vv {
 			c.ResponseWriter.Header().Add(k, v)
@@ -215,9 +217,9 @@ func (c *compressWriter) commitNoCompress() {
 	}
 	c.ResponseWriter.Header().Set("Vary", "Accept-Encoding")
 	c.ResponseWriter.WriteHeader(c.code)
-	// Write any buffered data uncompressed
 	if c.body.Len() > 0 {
-		c.ResponseWriter.Write(c.body.Bytes())
+		_, _ = c.ResponseWriter.Write(c.body.Bytes())
+		c.body.Reset()
 	}
 }
 

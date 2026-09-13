@@ -45,6 +45,19 @@ projects too because the server process enforces them.
   `fsWorktreeRoot` → `requireSandboxAvailable` → `ContainerToHost` → `validateFSPath` are each the jail
   for the next, so a handler that drops one — or passes `""` where the worktree root belongs — writes
   outside the project and still compiles.
+- **`GET /api/fs/raw` takes a repository-relative path, so it jails the join.** The diff surfaces hold
+  paths relative to the repository root and pass those; the handler refuses an absolute or `..`-stepping
+  path, joins what is left to `fsWorktreeRoot`'s tree, and hands the result to the same `validateFSPath`.
+  Its own rule is what a response may *be* — one map of image extensions, which is the permission and the
+  `Content-Type` at once — so a request cannot aim the route at a file that would run in the browser.
+  Two things follow from reading a file a task is alive next to: the name is `lstat`ed and compared with
+  the opened file, because the task owns the directory the check just resolved, and `ref` reads from
+  **`project.Path`** — the tree the request names is the project's, not the task's, since worktrees share
+  one object database and a done task has no worktree left to name. `docs/api-contract.md → Raw file bytes`.
+- **A containment refusal answers `fsutil.ErrOutside` and nothing else**, because every file handler
+  answers with `err.Error()` and `fsutil.Contained` names both the path it refused and the path a
+  symlink resolved to. The two paths go to the log. A repository can carry a symlink, so repeating its
+  target would let the requester read the server's directory layout out of a 400.
 - **A task's uploaded file is a host write into that task's worktree** (`exec.WriteTaskFile`, landing in
   `.mike-uploads/`), so it is not the path above — there is no container to translate a guest path through.
   It runs the same `fsutil.Contained` check against the worktree root before the bytes go, because the task's

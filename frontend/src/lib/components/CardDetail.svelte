@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import type { Task, TaskCommit } from '$lib/types';
-    import type { DiffFile } from '$lib/types/diff';
+    import type { DiffFile, DiffImageSource } from '$lib/types/diff';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext, getExpandedTasksContext } from '$lib/context';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile, toDiffFiles } from '$lib/api';
@@ -180,6 +180,7 @@
     // Checkpoint diff overlay (overlays the diff panel)
     let checkpointDiffOpen = $state(false);
     let checkpointDiffHash = $state(''); // which checkpoint hash is currently shown
+    let checkpointDiffBaseRef = $state(''); // what that checkpoint was compared against
     let checkpointDiffFiles: DiffFile[] = $state([]);
     let checkpointDiffUntracked: { path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number }[] = $state([]);
     let checkpointDiffLoading = $state(false);
@@ -198,6 +199,23 @@
     let editorFullscreen = $state(false);
     // Diff viewer fullscreen
     let diffFullscreen = $state(false);
+
+    // What each half of the diff panel is comparing. The panel can name a binary file but not what it
+    // changed *from*, and two identical sides in the viewer would be a lie.
+    let diffImageSource = $derived<DiffImageSource>({
+        project: task.project_id,
+        task: task.id,
+        working: { old: 'HEAD' },
+        committed: isDoneTask
+            ? { old: task.base_commit || undefined, new: task.branch_tip || task.branch || undefined }
+            : { old: diffFrom || diffCache.state.baseRef || undefined, new: diffTo === 'working' ? 'HEAD' : diffTo },
+    });
+    // A checkpoint's tree against the baseline it was compared with.
+    let checkpointImageSource = $derived<DiffImageSource>({
+        project: task.project_id,
+        task: task.id,
+        working: { old: checkpointDiffBaseRef || 'HEAD', new: checkpointDiffHash || 'HEAD' },
+    });
     // Chat fullscreen
     let chatMaximize = $state<ChatMaximizeState>({ fullscreen: false, autoMaximized: false });
 
@@ -317,11 +335,13 @@
         checkpointDiffOpen = true;
         checkpointDiffHash = commitHash;
         checkpointDiffLoading = true;
+        checkpointDiffBaseRef = '';
         checkpointDiffFiles = [];
         checkpointDiffUntracked = [];
         try {
             const headRef = commitHash || undefined;
             const result = await getTaskDiff(task.project_id, task.id, { headRef, checkpointIndex, parsed: true });
+            checkpointDiffBaseRef = result.base_ref || '';
             const truncatedSet = new Set(result.truncated_files || []);
             const origStats = result.original_file_stats || {};
             checkpointDiffFiles = toDiffFiles(result.parsed_files ?? []).filter(f => !f.path.split('/').pop()?.match(/\..*\.swp$/)).map(f => ({
@@ -347,6 +367,7 @@
     function closeCheckpointDiff() {
         checkpointDiffOpen = false;
         checkpointDiffHash = '';
+        checkpointDiffBaseRef = '';
         if (mobile && activeTab === 'checkpoint') {
             activeTab = 'diff';
             onActiveTabChange?.('diff');
@@ -1117,7 +1138,7 @@
                                 />
                                 {#if DiffViewerComponent}
                                     {@const DiffViewer = DiffViewerComponent}
-                                    <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} loading={diffLoading} mergedLabel={isDoneTask ? t('task.diff.merged') : hasMergedSubtasks ? t('task.diff.mergedFromSubtasks') : t('task.diff.committedInTask')} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
+                                    <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} loading={diffLoading} mergedLabel={isDoneTask ? t('task.diff.merged') : hasMergedSubtasks ? t('task.diff.mergedFromSubtasks') : t('task.diff.committedInTask')} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} imageSource={diffImageSource} />
                                 {:else}
                                     <div class="diff-viewer-loading">{t('task.loadingDiffViewer')}</div>
                                 {/if}
@@ -1132,6 +1153,7 @@
                                 files={checkpointDiffFiles}
                                 untracked={checkpointDiffUntracked}
                                 loading={checkpointDiffLoading}
+                                imageSource={checkpointImageSource}
                                 onClose={closeCheckpointDiff}
                                 onExpandFile={handleExpandDiff}
                                 onLineClick={handleDiffLineClick}

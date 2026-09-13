@@ -107,6 +107,7 @@ func (s *Server) setupRoutes() {
 	// Global utilities
 	s.mux.HandleFunc("GET /api/home", s.handleHome)
 	s.mux.HandleFunc("GET /api/fs/read", s.handleFSRead)
+	s.mux.HandleFunc("GET /api/fs/raw", s.handleFSRaw)
 	s.mux.HandleFunc("POST /api/fs/write", s.handleFSWrite)
 	s.mux.HandleFunc("POST /api/fs/upload", s.handleFSUpload)
 	s.mux.HandleFunc("POST /api/fs/init-git", s.handleFSInitGit)

@@ -1,8 +1,10 @@
 <script lang="ts">
     import type { GitCommit } from '$lib/types';
-    import type { DiffFile, DiffRow } from '$lib/types/diff';
+    import type { DiffFile, DiffRow, DiffImageRequest } from '$lib/types/diff';
     import { buildSideBySideRows, truncatePath } from '$lib/utils/diff-parser';
     import type { SideBySideRow } from '$lib/utils/diff-parser';
+    import { isDisplayableImage, imageSides } from '$lib/utils/diff-image';
+    import ImageDiffModal from './ImageDiffModal.svelte';
     import { highlightLinesAsync } from '$lib/highlighter';
     // Token colors for the highlighted spans below. This overlay's side-by-side columns put that HTML
     // straight in .diff-line-content (no .diff-text wrapper), so it reads the shared table rather than
@@ -20,6 +22,10 @@
         files: DiffFile[];
         loading: boolean;
         projectPath: string;
+        /** Where a binary file's bytes are read from. */
+        projectId: string;
+        /** Task whose worktree the commit came from. */
+        taskId?: string;
         onClose: () => void;
         onNavigate: (direction: 'prev' | 'next') => void;
         onFileSelected: (path: string) => void;
@@ -28,8 +34,28 @@
         isMobile?: boolean;
     }
 
-    let { commit, files: diffFiles, loading, projectPath, onClose, onNavigate, onFileSelected, hasPrev, hasNext, isMobile }: Props = $props();
+    let { commit, files: diffFiles, loading, projectPath, projectId, taskId, onClose, onNavigate, onFileSelected, hasPrev, hasNext, isMobile }: Props = $props();
     let hasContent = $derived(diffFiles.length > 0);
+
+    /**
+     * What a binary file's "View image" asks for, or null when there is nothing to ask. The two sides
+     * are the commit's own two ends: its parent against it for a file it changed, one side for a file it
+     * created, nothing for one it deleted.
+     */
+    function imageRequest(file: DiffFile, cleanPath: string): DiffImageRequest | null {
+        if (!projectId || !isDisplayableImage(cleanPath)) return null;
+        const sides = imageSides(file);
+        if (!sides) return null;
+        return {
+            path: cleanPath,
+            displayPath: cleanPath,
+            oldPath: file.origPath ? formatPath(file.origPath) : '',
+            oldRef: sides === 'compare' ? (commit.parents?.[0] ?? '') : '',
+            newRef: commit.hash,
+        };
+    }
+
+    let imageModal = $state<DiffImageRequest | null>(null);
 
     // Syntax highlight cache: path -> Map<lineText, highlightedHtml>
     // Populated asynchronously via $effect (language packages loaded lazily).
@@ -383,6 +409,7 @@
                 {#each diffFiles as file}
                     {@const collapsed = isFileCollapsed(file.path)}
                     {@const cleanPath = formatPath(file.path)}
+                    {@const image = imageRequest(file, cleanPath)}
                     <section class="diff-file-section">
                         <!-- File header (collapsible, sticky) -->
                         <button
@@ -410,13 +437,23 @@
                             <div class="diff-file-slide" transition:slide={{ duration: 200 }}>
                                 {#if file.rows.length === 0}
                                 {#if file.isBinary}
-                                    <div class="diff-binary-notice">{t('diff.binaryFile')}</div>
+                                    <div class="diff-binary-notice">
+                                        {t('diff.binaryFile')}
+                                        {#if image}
+                                            <button type="button" class="diff-view-image-btn" onclick={() => { imageModal = image }}>{t('diff.viewImage')}</button>
+                                        {/if}
+                                    </div>
                                 {:else if file.isDeleted}
                                     <div class="diff-deleted-notice">{t('diff.deletedFile')}</div>
                                 {:else if file.isNewFile}
                                     <div class="diff-empty-file-notice">{t('diff.emptyFile')}</div>
                                 {:else}
-                                    <div class="diff-binary-notice">{t('diff.binaryFile')}</div>
+                                    <div class="diff-binary-notice">
+                                        {t('diff.binaryFile')}
+                                        {#if image}
+                                            <button type="button" class="diff-view-image-btn" onclick={() => { imageModal = image }}>{t('diff.viewImage')}</button>
+                                        {/if}
+                                    </div>
                                 {/if}
                             {:else if useUnifiedView}
                                 <!-- Unified diff view (mobile) -->
@@ -506,6 +543,19 @@
         {/if}
     </div>
 </div>
+
+{#if imageModal}
+    <ImageDiffModal
+        project={projectId}
+        task={taskId ?? ''}
+        path={imageModal.path}
+        displayPath={imageModal.displayPath}
+        oldPath={imageModal.oldPath}
+        oldRef={imageModal.oldRef}
+        newRef={imageModal.newRef}
+        onClose={() => { imageModal = null; }}
+    />
+{/if}
 
 <style>
     @import '$lib/styles/shared.css';
