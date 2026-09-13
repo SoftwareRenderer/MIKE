@@ -49,7 +49,7 @@ func unstageNewBinaryFiles(wm *git.WorktreeManager, taskID string) {
 
 // Retry bounds for LLM streaming.
 const (
-	rateLimitRetryAttempts = 3
+	llmRetryAttempts = 3
 )
 
 // backoffFor returns the duration to wait before the next LLM retry attempt
@@ -61,20 +61,24 @@ func backoffFor(attempt int, err error) time.Duration {
 	return time.Duration(1<<attempt) * 2 * time.Second // 2s, 4s, 8s, ...
 }
 
-// sendRetryHint persists the "Connection interrupted" retry notification and
-// broadcasts it with role "system" so the frontend renders a system card.
-func (te *TaskExecutor) sendRetryHint(projectID, taskID string, task *types.Task, streamErr error, attempt int) {
-	retryMsg := fmt.Sprintf("Connection interrupted (%v), retrying... (attempt %d/%d)", streamErr, attempt, rateLimitRetryAttempts)
-	logging.For(logging.Exec).With(logging.TaskID, taskID).Infof("%s", retryMsg)
+// sendRetryHint records an interrupted LLM call and that the executor is calling it again. It is
+// called once per LLM call, not once per attempt.
+func (te *TaskExecutor) sendRetryHint(projectID, taskID string, task *types.Task, streamErr error) {
+	retryMsg := "Connection interrupted, retrying the request."
+	logging.For(logging.Exec).With(logging.TaskID, taskID).Warnf("LLM call interrupted: %v", streamErr)
 	retryMsgID := uuid.New().String()
-	te.store.CreateTaskMessage(&types.TaskMessage{
+	if err := te.store.CreateTaskMessage(&types.TaskMessage{
 		ID: retryMsgID, TaskID: taskID, ThreadID: task.CurrentThreadID, Role: "system",
 		Content: retryMsg, CreatedAt: time.Now().UTC(),
-	})
+	}); err != nil {
+		logging.For(logging.Exec).With(logging.TaskID, taskID).Warnf("retry note not stored: %v", err)
+	}
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeHint, Data: map[string]any{
 		"id":         retryMsgID,
 		"role":       "system",
 		"content":    retryMsg,
+		"kind":       "retry",
+		"error":      streamErr.Error(),
 		"created_at": time.Now().UTC().Format(time.RFC3339),
 	}})
 }
@@ -664,7 +668,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 
 			// Retry on transient errors (skip if cancelled by user message)
 			if streamErr != nil && callCtx.Err() == nil {
-				for i := range rateLimitRetryAttempts {
+				for i := range llmRetryAttempts {
 					select {
 					case <-callCtx.Done():
 						flusher.flush()
@@ -672,8 +676,10 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 						return
 					case <-time.After(backoffFor(i, streamErr)):
 					}
-					// Notify user of retry attempt
-					te.sendRetryHint(setup.projectID, setup.task.ID, setup.task, streamErr, i+1)
+					if i == 0 {
+						te.sendRetryHint(setup.projectID, setup.task.ID, setup.task, streamErr)
+					}
+					logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Warnf("LLM call retry %d/%d after: %v", i+1, llmRetryAttempts, streamErr)
 					// Flush any remaining buffered events before retry.
 					flusher.flush()
 					// Reset builders so retry doesn't concatenate partial content.
@@ -1440,6 +1446,14 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, stat
 		te.summarize.maybeAutoSummarize(setup, lc, activeModel, true)
 
 		return turnNextLLMCall
+	} else {
+		// The provider finished the call and said nothing. An assistant row is what marks its prompt
+		// as answered, so none is written, and the run cannot settle quietly here: the task would
+		// stay running with no answer and no event to send.
+		logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Warnf("LLM call produced no response (finish_reason=%q)", lc.finishReason)
+		te.releaseTaskSlot(setup)
+		te.failTask(setup.task, setup.projectID, "LLM provider returned no response", "llm_empty_response")
+		return turnStop
 	}
 
 	// Unreachable in practice: every branch above either returns or continues the loop. Kept so

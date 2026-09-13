@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -40,6 +41,11 @@ func (e *LlamaError) Error() string {
 func (e *LlamaError) IsRateLimit() bool {
 	return e.StatusCode == http.StatusTooManyRequests
 }
+
+// ErrStreamAborted is a stream that ended before its terminal frame: `data: [DONE]`, or a
+// non-empty finish_reason on the last choice. Reaching EOF is not an error, so without this a
+// provider that died mid-request reads as one that answered with nothing.
+var ErrStreamAborted = errors.New("llama stream ended before completion")
 
 // errorBody is what a LlamaError carries for a non-200: the body, or the failure to hold it.
 func errorBody(resp *http.Response) string {
@@ -282,6 +288,8 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	var metrics *types.VllmMetrics
 	var usageChanged bool // usage or timings updated on this frame
 	var firstTokenTime time.Time
+	var sawDone, sawFinish bool
+	var dataFrames int
 	scanner := bufio.NewScanner(resp.Body)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
@@ -307,8 +315,10 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 		}
 		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
+			sawDone = true
 			break
 		}
+		dataFrames++
 
 		var cr types.ChatResponse
 		if err := json.Unmarshal([]byte(data), &cr); err != nil {
@@ -351,6 +361,9 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 		}
 
 		for i := range cr.Choices {
+			if cr.Choices[i].FinishReason != "" {
+				sawFinish = true
+			}
 			normalizeReasoning(&cr.Choices[i])
 			if firstTokenTime.IsZero() && hasContent(cr.Choices[i]) {
 				firstTokenTime = time.Now()
@@ -362,6 +375,13 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 
 	if timedOut.Load() {
 		return usage, context.DeadlineExceeded
+	}
+
+	if err := scanner.Err(); err != nil {
+		return usage, err
+	}
+	if !sawDone && !sawFinish {
+		return usage, fmt.Errorf("%w: %d frame(s) read", ErrStreamAborted, dataFrames)
 	}
 
 	// Fill missing timings: provider metrics first, then wall-clock.
@@ -386,7 +406,7 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	} else {
 		logging.For(logging.LLM).Infof("no usage data received")
 	}
-	return usage, scanner.Err()
+	return usage, nil
 }
 
 // ChatCompletionOptions holds optional parameters for ChatCompletion.

@@ -620,7 +620,7 @@ func TestSendRetryHint_SystemRole(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	e.sendRetryHint(proj.ID, task.ID, task, errors.New("EOF"), 1)
+	e.sendRetryHint(proj.ID, task.ID, task, errors.New("EOF"))
 
 	// The retry message must be persisted with role=system.
 	msgs, err := e.store.GetTaskMessages(task.ID, task.CurrentThreadID)
@@ -636,8 +636,9 @@ func TestSendRetryHint_SystemRole(t *testing.T) {
 	if !strings.Contains(msgs[0].Content, "Connection interrupted") {
 		t.Errorf("unexpected retry content: %q", msgs[0].Content)
 	}
-	if !strings.Contains(msgs[0].Content, "attempt 1/3") {
-		t.Errorf("expected attempt 1/3 in content, got %q", msgs[0].Content)
+	// One notification covers the whole retry sequence, so it names no attempt number.
+	if strings.Contains(msgs[0].Content, "/3") || strings.Contains(msgs[0].Content, "attempt") {
+		t.Errorf("retry notification reads as one attempt (%q); it is sent once per call, not once per attempt", msgs[0].Content)
 	}
 
 	// The broadcast frame must carry the same message ID plus role "system".

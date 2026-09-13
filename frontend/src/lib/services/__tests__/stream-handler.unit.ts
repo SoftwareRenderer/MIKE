@@ -388,7 +388,7 @@ describe('createStreamHandler', () => {
 
     it('hint event with role system creates a system entry (not a user bubble)', () => {
         const { stream, handleEvent } = setup();
-        handleEvent({ type: 'hint', data: { id: 'retry-msg-1', role: 'system', content: 'Connection interrupted (EOF), retrying... (attempt 1/3)', created_at: '2026-01-01T00:00:00Z' } }, false);
+        handleEvent({ type: 'hint', data: { id: 'retry-msg-1', role: 'system', content: 'Connection interrupted, retrying the request.', created_at: '2026-01-01T00:00:00Z' } }, false);
         expect(stream.state.entries).toHaveLength(1);
         expect(stream.state.entries[0].role).toBe('system');
         expect(stream.state.entries[0].id).toBe('retry-msg-1');
@@ -529,12 +529,35 @@ describe('createStreamHandler', () => {
         expect(stream.state.awaitingResponse).toBe(true);
     });
 
-    it('status:running with retry activity also arms awaitingResponse', () => {
+    it('a retry hint arms awaitingResponse and names the interruption without reading its text', () => {
         const { stream, handleEvent } = setup();
-        handleEvent({ type: 'status', data: { state: 'running', activity: 'Connection interrupted (timeout), retrying... (attempt 2/3)' } }, false);
+        handleEvent({ type: 'hint', data: { id: 'retry-1', role: 'system', content: 'Connection interrupted, retrying the request.', kind: 'retry', error: 'timeout' } }, false);
         expect(stream.state.awaitingResponse).toBe(true);
-        expect(stream.state.retryCount).toBe(2);
+        expect(stream.state.retryCount).toBe(1);
         expect(stream.state.retryError).toBe('timeout');
+        expect(stream.state.entries).toHaveLength(1);
+    });
+
+    it('a retry discards the half-written turn the dead call streamed', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: 'half a sent' } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'bash', args: {} } }, false);
+        expect(stream.state.activeToolCalls.size).toBe(1);
+        handleEvent({ type: 'hint', data: { id: 'retry-1', role: 'system', content: 'Connection interrupted, retrying the request.', kind: 'retry', error: 'EOF' } }, false);
+        const partial = stream.state.entries.filter(e => e.role === 'assistant');
+        expect(partial).toHaveLength(0);
+        expect(stream.state.activeToolCalls.size).toBe(0);
+    });
+
+    it('the answer that arrives on the retry replaces the discarded text and clears the retry line', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: 'half a sent' } }, false);
+        handleEvent({ type: 'hint', data: { id: 'retry-1', role: 'system', content: 'Connection interrupted, retrying the request.', kind: 'retry', error: 'EOF' } }, false);
+        handleEvent({ type: 'token', data: { text: 'The full answer.' } }, false);
+        expect(stream.state.entries.filter(e => e.role === 'assistant').map(e => e.content)).toEqual(['The full answer.']);
+        expect(stream.state.retryCount).toBe(0);
+        expect(stream.state.retryError).toBe('');
+        expect(stream.state.awaitingResponse).toBe(false);
     });
 
     it('first token after status:running clears awaitingResponse', () => {
@@ -582,13 +605,21 @@ describe('createStreamHandler', () => {
         expect(stream.state.awaitingResponse).toBe(false);
     });
 
-    it('status:running with retry activity still arms awaitingResponse even mid-stream', () => {
+    it('a retry hint arms awaitingResponse even while a response is streaming', () => {
         const { stream, handleEvent } = setup();
         handleEvent({ type: 'token', data: { text: 'Hello' } }, false);
         // A retried LLM call is a genuinely pending request — arm unconditionally.
-        handleEvent({ type: 'status', data: { state: 'running', activity: 'Connection interrupted (timeout), retrying... (attempt 2/3)' } }, false);
+        handleEvent({ type: 'hint', data: { id: 'retry-1', role: 'system', content: 'Connection interrupted, retrying the request.', kind: 'retry', error: 'timeout' } }, false);
         expect(stream.state.awaitingResponse).toBe(true);
-        expect(stream.state.retryCount).toBe(2);
+        expect(stream.state.retryCount).toBe(1);
+    });
+
+    it('complete clears a retry line the turn never recovered from', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'hint', data: { id: 'retry-1', role: 'system', content: 'Connection interrupted, retrying the request.', kind: 'retry', error: 'EOF' } }, false);
+        handleEvent({ type: 'complete', data: { state: 'idle' } }, false);
+        expect(stream.state.retryCount).toBe(0);
+        expect(stream.state.retryError).toBe('');
     });
 
     it('tool_result resolves pending tool call via activeToolCalls lookup', () => {

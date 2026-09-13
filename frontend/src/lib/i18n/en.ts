@@ -1099,7 +1099,7 @@ const catalog = {
     'chat.queue.targetLlm': 'LLM provider',
     'chat.queue.position': 'Awaiting {target} — position {position} in queue, ~{wait}s',
     'chat.queue.errorParen': ' ({error})',
-    'chat.queue.connectionIssue': 'Connection issue{errPart} — retry {count}',
+    'chat.queue.connectionIssue': 'Connection issue{errPart} — retrying',
     'chat.queue.promptProgress': 'Awaiting {target}... Processing Prompt: {percent}%',
     'chat.queue.awaiting': 'Awaiting {target}...',
     'chat.queue.lockWorktree': 'Waiting — this task is still working ({seconds}s)...',

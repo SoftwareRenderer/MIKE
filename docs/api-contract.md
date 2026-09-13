@@ -15,6 +15,21 @@ error vocabulary.
 - Use optimistic UI for user messages (add immediately, skip the echo).
 - Model/provider changes ride a `user_message` with optional `model_name`/`llama_server_url`.
 
+### A retried LLM call names itself in a field
+
+When the first attempt of an LLM call fails, `sendRetryHint` (`backend/exec/loop.go`) broadcasts one
+`hint` frame for the whole retry sequence — never one per attempt — carrying `role: "system"`,
+`kind: "retry"` and `error: "<cause>"` beside the stored row's id and sentence. The client marks the
+awaiting line from `kind` and takes the reason from `error`; it never reads `content` to work out what
+the frame is, because the sentence is copy and the two fields are the contract. Tests: the abort cases
+in `backend/exec/llm_crash_test.go` (one stored row for three attempts), `stream-handler.unit.ts`.
+
+The stored row is the permanent record that the provider was interrupted; the awaiting line is live
+state and clears when the retried call streams (`clearAwaiting`) or when the turn ends (`complete`,
+`error`). A turn that ran tools and then lost the provider leaves no partial assistant row — the dead
+call never reached `finalizeTurn`, which is what persists it — so the client drops the half-streamed
+text with `dropAbandonedTurn()` and the retry streams the answer in its place.
+
 ## Provider routing
 
 `PUT /api/config` is a partial update with two required pairs:

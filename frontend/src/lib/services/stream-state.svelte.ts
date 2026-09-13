@@ -97,6 +97,18 @@ export class StreamState {
         this.reconcileActiveToolCalls();
     }
 
+    /**
+     * Drop the turn the provider abandoned: the entry still streaming, and the tool calls it
+     * announced but never ran. Filter on isStreaming before closing anything — closing first clears
+     * the flag that identifies the entry.
+     */
+    dropAbandonedTurn() {
+        this.state.entries = this.state.entries.filter(e => !e.isStreaming);
+        this.state.currentAssistantId = null;
+        this.state.activeToolCalls = new Map();
+        this.state.processedToolIds = new Set();
+    }
+
     /** Reset streaming state (thread switch). */
     resetStreaming() {
         this.closeCurrentAssistant();

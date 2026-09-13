@@ -31,7 +31,7 @@
         }
         if (retryCount > 0) {
             const errPart = retryError ? t('chat.queue.errorParen', { error: retryError }) : '';
-            return t('chat.queue.connectionIssue', { errPart, count: retryCount });
+            return t('chat.queue.connectionIssue', { errPart });
         }
         if (promptProgress > 0) {
             return t('chat.queue.promptProgress', { target, percent: promptProgress });

@@ -257,6 +257,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
             case 'complete': {
                 markNotStreaming();
                 s.awaitingResponse = false;
+                stream.clearRetry();
                 const data = event.data as { state: string; model_name: string; prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number; assistant_message_id?: string };
                 if (data.assistant_message_id && s.currentAssistantId) {
                     const entry = s.entries.find(e => e.id === s.currentAssistantId);
@@ -329,29 +330,9 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     s.entries = s.entries.filter(e => !(e.toolCalls && e.toolCalls.some((tc: ToolCallInfo) => tc.isPending) && !e.content && !e.reasoningContent));
                     s.queuePosition = 0;
                     s.queueEstimatedWait = 0;
-                    // Detect LLM crash retries from activity text — skip markStreaming()
-                    // so the stop button is hidden while nothing is actually streaming.
-                    const activity = data.activity || '';
-                    const retryMatch = activity.match(/retrying\.\.\. \(attempt (\d+)\/3\)/);
-                    let isRetry = false;
-                    if (retryMatch) {
-                        isRetry = true;
-                        s.retryCount = parseInt(retryMatch[1], 10);
-                        const errMatch = activity.match(/Connection interrupted \((.+?)\),/);
-                        s.retryError = errMatch ? errMatch[1] : '';
-                        s.promptProgress = 0;
-                    } else if (activity.includes('Connection failed') && activity.includes('retrying')) {
-                        isRetry = true;
-                        s.retryCount++;
-                        const errMatch = activity.match(/Connection failed: (.+?), retrying/);
-                        s.retryError = errMatch ? errMatch[1] : '';
-                        s.promptProgress = 0;
-                    }
-                    if (!isRetry) {
-                        markStreaming();
-                    }
+                    markStreaming();
                     // Executor (re)started
-                    if (isRetry || !wasInFlight) {
+                    if (!wasInFlight) {
                         s.awaitingResponse = true;
                     }
                 } else if (data.state === 'cancelled') {
@@ -382,11 +363,21 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 break;
             }
             case 'hint': {
-                const data = event.data as { id?: string; role?: string; content: string; created_at: string };
+                const data = event.data as { id?: string; role?: string; content: string; kind?: string; error?: string; created_at: string };
                 if (data.content) {
                     // Dedupe replayed hint events (reconnect buffer replay).
                     if (data.id && s.entries.some(e => e.id === data.id)) break;
-                    stream.closeCurrentAssistant();
+                    if (data.kind === 'retry') {
+                        // The dead call is retried with the same messages, so what it streamed has no
+                        // row behind it and the retry streams the answer over it.
+                        stream.dropAbandonedTurn();
+                        s.retryCount = 1;
+                        s.retryError = data.error || '';
+                        s.promptProgress = 0;
+                        s.awaitingResponse = true;
+                    } else {
+                        stream.closeCurrentAssistant();
+                    }
                     // Use the backend message id so loadHistory() dedupes against the DB entry.
                     // Role from the backend; legacy frames without a role default to "user".
                     s.entries = [...s.entries, { id: data.id || genId(), role: data.role || 'user', content: data.content, isStreaming: false, createdAt: data.created_at || new Date().toISOString() }];

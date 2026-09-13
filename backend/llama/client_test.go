@@ -1188,3 +1188,95 @@ func TestChatStream_NoUserMessage(t *testing.T) {
 		t.Errorf("server hit %d times, want 0", got)
 	}
 }
+
+// A stream that ends without its terminal frame came from a provider that died, not one that
+// finished. Reported as a successful empty completion, it is retried by nobody.
+func TestChatStream_AbortVsCompletion(t *testing.T) {
+	tests := []struct {
+		name    string
+		frames  []string // SSE payload of each frame, without the "data: " prefix
+		wantErr bool
+	}{
+		{
+			name:    "headers then nothing",
+			frames:  nil,
+			wantErr: true,
+		},
+		{
+			name: "tokens then a quiet death",
+			frames: []string{
+				`{"choices":[{"delta":{"content":"half a sent"},"finish_reason":null}]}`,
+				`{"choices":[{"delta":{"content":"ence"}}]}`,
+			},
+			wantErr: true,
+		},
+		{
+			name: "DONE with no finish_reason",
+			frames: []string{
+				`{"choices":[{"delta":{"content":"done"},"finish_reason":null}]}`,
+				`[DONE]`,
+			},
+			wantErr: false,
+		},
+		{
+			name: "finish_reason with no DONE",
+			frames: []string{
+				`{"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}`,
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				for _, frame := range tt.frames {
+					fmt.Fprintf(w, "data: %s\n\n", frame)
+				}
+			}))
+			defer server.Close()
+
+			c := NewLlamaClient(server.URL, "test-model", "off", "")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			_, err := c.ChatStream(ctx, testMessages(), nil, func(types.ChatChoice) {}, nil, nil)
+			if tt.wantErr && !errors.Is(err, ErrStreamAborted) {
+				t.Errorf("ChatStream error = %v, want ErrStreamAborted", err)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("ChatStream error = %v, want a completed stream", err)
+			}
+		})
+	}
+}
+
+// A connection torn down mid-response stays an error of its own: the transport said something more
+// useful than ErrStreamAborted can.
+func TestChatStream_HardAbortMidStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Error("test server cannot hijack")
+			return
+		}
+		conn, bw, err := hj.Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		bw.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n")
+		bw.WriteString("27\r\ndata: {\"choices\":[{\"delta\":{\"content\":\"half\"}}]}\n\n\r\n")
+		_ = bw.Flush()
+		conn.Close()
+	}))
+	defer server.Close()
+
+	c := NewLlamaClient(server.URL, "test-model", "off", "")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := c.ChatStream(ctx, testMessages(), nil, func(types.ChatChoice) {}, nil, nil); err == nil {
+		t.Fatal("a connection closed mid-response returned no error")
+	}
+}

@@ -110,9 +110,9 @@ describe('QueueIndicator — awaiting line', () => {
 
     it('keeps the retry line when only an error is known', () => {
         const { container } = render(QueueIndicator, {
-            props: { ...props, queuePosition: 0, retryCount: 2, retryError: 'EOF' },
+            props: { ...props, queuePosition: 0, retryCount: 1, retryError: 'EOF' },
         });
-        expect(line(container)).toBe('Connection issue (EOF) — retry 2');
+        expect(line(container)).toBe('Connection issue (EOF) — retrying');
     });
 });
 
