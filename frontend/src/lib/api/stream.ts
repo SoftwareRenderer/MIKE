@@ -1,7 +1,8 @@
 import type { ProjectCounts, Task, StreamEvent } from '$lib/types';
 import type { AppStreamFrame } from './events';
 import { API_BASE, parseStreamFrame } from './helpers';
-import { STALE_THRESHOLD_MS, HEARTBEAT_INTERVAL_MS, RECONNECT_MAX_DELAY_MS } from '$lib/constants';
+import { STALE_THRESHOLD_MS, HEARTBEAT_INTERVAL_MS, RECONNECT_BASE_DELAY_MS, RECONNECT_MAX_DELAY_MS, SUSPENDED_GAP_MS } from '$lib/constants';
+import { WAKE_FRAME_GAP_MS } from '$lib/utils/tab-return';
 
 /**
  * App stream - single WebSocket for all real-time events.
@@ -28,7 +29,6 @@ export interface AppStreamCallbacks {
 
 export interface AppStream {
     close: () => void;
-    checkStale: () => void;
     /** ms since a frame arrived, counting from the last close when that was more recent. */
     msSinceFrame: () => number;
     reconnectNow: () => void;
@@ -61,6 +61,7 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
     // Client-side heartbeat — tracks last activity to detect zombie connections
     // (e.g. phone sleep: WebSocket appears OPEN but server closed its end)
     let lastActivityAt = Date.now();
+    let lastHeartbeatAt = Date.now();
     // Track active subscriptions for re-subscription on reconnect
     const subscribedProjects = new Set<string>();
     const subscribedTasks = new Set<string>(); // "projectId:taskId"
@@ -105,10 +106,12 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
 
     function startHeartbeat() {
         stopHeartbeat();
+        lastHeartbeatAt = Date.now();
         heartbeatTimer = setInterval(() => {
-            if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-                checkStale();
-            }
+            const now = Date.now();
+            const tickGap = now - lastHeartbeatAt;
+            lastHeartbeatAt = now;
+            dropIfSilent(tickGap > HEARTBEAT_INTERVAL_MS + SUSPENDED_GAP_MS ? WAKE_FRAME_GAP_MS : STALE_THRESHOLD_MS);
         }, HEARTBEAT_INTERVAL_MS);
     }
 
@@ -119,30 +122,47 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
         }
     }
 
-    /** Check if the connection is stale (zombie) and force-close if so. */
-    function checkStale() {
-        if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-            const idle = Date.now() - lastActivityAt;
-            if (idle > STALE_THRESHOLD_MS) {
-                // Connection appears open but hasn't received data in too long.
-                // Force-close to trigger the reconnect logic.
-                currentWs.close();
-            }
-        }
+    /**
+     * Close a socket that appears OPEN but has framed nothing for `maxSilentMs`: a peer that merely
+     * vanished never fires `onclose` by itself, so silence is the only thing that retires it.
+     */
+    function dropIfSilent(maxSilentMs: number): boolean {
+        if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return false;
+        if (Date.now() - lastActivityAt <= maxSilentMs) return false;
+        currentWs.close();
+        return true;
     }
 
     let hasConnectedOnce = false;
     let connectGen = 0; // incremented each connect() to stale out old onclose handlers
 
+    /** Wait out the retry ladder, then attempt. */
+    function scheduleReconnect(): void {
+        const delay = Math.min(RECONNECT_BASE_DELAY_MS * Math.pow(2, reconnectAttempts), maxDelay);
+        const dueAt = Date.now() + delay;
+        reconnectAttempts++;
+        callbacks.onReconnectScheduled?.(dueAt);
+        reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            if (Date.now() - dueAt > SUSPENDED_GAP_MS) reconnectAttempts = 0;
+            connect();
+        }, delay);
+    }
+
     function connect() {
         if (isClosed) return;
+        const gen = ++connectGen;
         // Close any in-flight WebSocket to prevent overlapping connections
         // (e.g. reconnect timer + user clicking "Connect" at the same time)
         if (currentWs) {
             currentWs.close();
         }
+
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
         stopHeartbeat(); // prevent leak when stale onclose is skipped
-        const gen = ++connectGen;
         callbacks.onConnectAttempt?.();
         // Use ?sync=1 on reconnect so the server sends the global event buffer
         const syncParam = hasConnectedOnce ? '?sync=1' : '';
@@ -228,10 +248,7 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
             if (isClosed) return;
             // Signal offline on any disconnect (including initial connection failure)
             callbacks.onConnected?.(false);
-            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxDelay);
-            reconnectAttempts++;
-            callbacks.onReconnectScheduled?.(Date.now() + delay);
-            reconnectTimer = setTimeout(() => connect(), delay);
+            scheduleReconnect();
         };
 
         ws.onerror = () => {
@@ -255,13 +272,17 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
             }
         },
         reconnectNow: () => {
-            if (reconnectTimer) {
-                clearTimeout(reconnectTimer);
-                reconnectTimer = null;
+            if (isClosed) return;
+
+            reconnectAttempts = 0;
+            const ws = currentWs;
+            if (ws) {
+                if (ws.readyState === WebSocket.CONNECTING) return; // an attempt is already under way
+                // Open and framed recently needs nothing; open and silent is a zombie.
+                if (ws.readyState === WebSocket.OPEN && !dropIfSilent(WAKE_FRAME_GAP_MS)) return;
             }
             connect();
         },
-        checkStale,
         msSinceFrame: () => Date.now() - lastActivityAt,
         subscribeProject: (projectId: string) => {
             if (subscribedProjects.has(projectId)) return;

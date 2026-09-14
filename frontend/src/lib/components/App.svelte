@@ -763,10 +763,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     // What this window missed comes back over HTTP: the per-connection event buffer is gone once the
     // socket drops.
     function reconcileAfterAbsence(): void {
-        if (appStream) {
-            appStream.checkStale();
-            if (!wsConnected) appStream.reconnectNow();
-        }
+        appStream?.reconnectNow();
         refreshBoard().catch(() => {
             if (visibilityRetryTimer) return; // already retrying
             visibilityRetryTimer = setTimeout(() => {
@@ -789,9 +786,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     }
     function handleBrowserOnline() {
         setOfflineStatus(false);
-        if (appStream && !wsConnected) {
-            appStream.reconnectNow();
-        }
+        appStream?.reconnectNow();
     }
     window.addEventListener('online', handleBrowserOnline);
     window.addEventListener('offline', handleBrowserOffline);

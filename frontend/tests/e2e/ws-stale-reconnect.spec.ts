@@ -12,17 +12,27 @@ async function watchStream(page: Page): Promise<void> {
     await page.addInitScript(() => {
         const w = window as any;
         w.__streamSockets = [];
+        w.__streamAttempts = 0;
         w.__blockStream = false;
         const RealWebSocket = window.WebSocket;
         window.WebSocket = class extends RealWebSocket {
             constructor(url: string | URL, protocols?: string | string[]) {
                 super(url, protocols);
                 if (!String(url).includes('/api/stream')) return;
+                w.__streamAttempts++;
                 if (w.__blockStream) { this.close(); return; }
                 w.__streamSockets.push(this);
             }
         };
     });
+}
+
+const streamAttempts = (page: Page) => page.evaluate(() => (window as any).__streamAttempts as number);
+
+/** The seconds the banner is counting down, or 0 when it asks for no wait. */
+async function countdownSeconds(page: Page): Promise<number> {
+    const match = (await page.locator(BANNER).innerText()).match(/Reconnecting in (\d+)s/);
+    return match ? Number(match[1]) : 0;
 }
 
 async function dropStream(page: Page): Promise<void> {
@@ -64,6 +74,39 @@ test.describe('Reconnecting banner and tab wake-up', () => {
         await page.locator('.reconnecting-btn').click();
         await expect(page.locator(ANNOUNCEMENT)).toHaveText(/Connected again/, { timeout: 30000 });
         await expect(page.locator(BANNER)).toHaveCount(0);
+    });
+
+    test('the window coming back cuts the countdown short', async ({ page }) => {
+        // The ladder is waited out on purpose: the rung being measured has to arrive on its own.
+        test.setTimeout(90000);
+        await watchStream(page);
+        await page.goto('/');
+        await expect(page.locator('.card').first()).toBeVisible({ timeout: 15000 });
+        await page.waitForFunction(() => (window as any).__streamSockets.length > 0, null, { timeout: 15000 });
+
+        // Handshakes stop answering and the live socket goes with them, so the retry ladder starts.
+        await page.evaluate(() => { (window as any).__blockStream = true; });
+        await dropStream(page);
+        await expect(page.locator(BANNER)).toBeVisible({ timeout: 15000 });
+
+        // Wait for a rung long enough to tell an interrupted wait from one that ran out.
+        await expect
+            .poll(() => countdownSeconds(page), { timeout: 20000, message: 'the countdown never climbed' })
+            .toBeGreaterThanOrEqual(4);
+
+        const before = await streamAttempts(page);
+        await page.evaluate(() => { (window as any).__blockStream = false; });
+        // The return signal, dispatched as the browser dispatches it — at `document`, bubbling to
+        // the `window` listeners the app installed.
+        await page.evaluate(() => {
+            document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
+        });
+
+        // The attempt goes out on the signal, not when the countdown runs out.
+        await expect
+            .poll(() => streamAttempts(page), { timeout: 2000, message: 'the return waited out the countdown' })
+            .toBeGreaterThan(before);
+        await expect(page.locator(BANNER)).toHaveCount(0, { timeout: 15000 });
     });
 
     test('the tab becoming visible refreshes the board', async ({ page }) => {

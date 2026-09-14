@@ -21,8 +21,17 @@ export const STALE_THRESHOLD_MS = 60_000;
 /** Interval (ms) between stale-connection heartbeat checks. */
 export const HEARTBEAT_INTERVAL_MS = 30_000;
 
-/** Maximum reconnect backoff delay (ms). */
+/** First reconnect delay (ms); every unanswered attempt doubles from here. */
+export const RECONNECT_BASE_DELAY_MS = 1_000;
+
+/** Maximum reconnect backoff delay (ms). It is the pace for a server that is genuinely down while
+ * this page's timers are running — see `SUSPENDED_GAP_MS`. */
 export const RECONNECT_MAX_DELAY_MS = 30_000;
+
+/** A gap this long between two of the stream's own timer ticks means the page was not running
+ * between them — sleep, hidden-tab throttling, a frozen page — rather than merely busy: a page that
+ * is running fires within milliseconds of the delay it asked for. */
+export const SUSPENDED_GAP_MS = 10_000;
 
 // ─── Cache Sizes ───
 
