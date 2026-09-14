@@ -10,7 +10,9 @@ isolatedProject();
 // ============================================================
 // Arrows move real DOM focus around the 5-column ring [Projects][Backlog][In Progress][Review]
 // [Done]; Down/Up wrap within a column, the first Down anchors to the first backlog card, Enter
-// opens the focused card, Alt+Arrow still moves tasks.
+// opens the focused card, Alt+Arrow still moves tasks. Enter on a control *inside* the card belongs
+// to that control — only a browser activates a button from a keypress, so that lives here, not in
+// a unit test.
 
 const colIdx = (page: Page) => page.evaluate(() => {
     const card = document.activeElement as HTMLElement | null;
@@ -109,6 +111,50 @@ test.describe.serial('Board arrow-key navigation', () => {
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     await page.keyboard.press('Escape');
     await expect(page.locator('.task-detail-page')).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('Tab reaches a card action icon and Enter runs that icon, not the card', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `kbd-action-${Date.now()}`);
+    await page.reload();
+    await page.waitForSelector('.board .column', { timeout: 10000 });
+    const card = page.locator(`.board .card[data-task-id="${taskId}"]`);
+    await expect(card).toBeVisible();
+
+    await card.focus();
+    // Walk the card's own tab stops until the edit icon holds focus, so the dialog asserted below
+    // is the one this icon owns.
+    const onEditIcon = () => page.evaluate(() =>
+        document.activeElement?.matches('.action-icon[aria-label="Edit task"]') ?? false);
+    let tabs = 0;
+    while (tabs < 6 && !(await onEditIcon())) {
+      await page.keyboard.press('Tab');
+      tabs++;
+    }
+    expect(await onEditIcon(), `the edit icon is not within ${tabs} Tab presses of the card`).toBe(true);
+
+    // The icons are painted only for a keyboard that can reach them: focus-visible must draw on the
+    // button, and the card must reveal the row without a hover. The reveal fades over 150ms, so
+    // poll it instead of measuring the frame the focus landed in.
+    await expect.poll(() => page.evaluate(() => {
+      const el = document.activeElement as HTMLElement;
+      const cs = getComputedStyle(el);
+      return {
+        focusVisible: el.matches(':focus-visible'),
+        ring: cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0,
+        actionsOpacity: getComputedStyle(el.closest('.card-actions')!).opacity,
+      };
+    }), { timeout: 3000 }).toEqual({
+      focusVisible: true, ring: true, actionsOpacity: '1',
+    });
+
+    // Enter is the icon's own activation: the edit dialog opens and the task stays closed.
+    await page.keyboard.press('Enter');
+    const editHeading = page.getByRole('heading', { name: 'Edit Task' });
+    await expect(editHeading).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.task-detail-page')).not.toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(editHeading).not.toBeVisible({ timeout: 5000 });
   });
 
   test('Alt+Arrow still moves the focused task (regression)', async ({ page }) => {
