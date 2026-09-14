@@ -99,10 +99,6 @@ func TestCommitQueue_MultipleSequential(t *testing.T) {
 	}
 }
 
-// lockTestExecutor is a TaskExecutor with only the worktree lock table built, for the tests below that
-// exercise the lock and nothing else. A zero TaskExecutor would carry a nil table.
-func lockTestExecutor() *TaskExecutor { return &TaskExecutor{} }
-
 // taskLockIsHeld asks the question the old test-only mutex accessor answered — is this task's lock held
 // — without handing a lock to the test. The bounded form is used so the probe cannot itself block the
 // suite if the behaviour it is checking has regressed.
@@ -118,7 +114,7 @@ func taskLockIsHeld(te *TaskExecutor, taskID string) bool {
 // TestLockWorktreeIsPerTask is the table's reason for existing: one task's worktree work must not stop
 // another's, and two calls for the same task must land on the same lock.
 func TestLockWorktreeIsPerTask(t *testing.T) {
-	te := lockTestExecutor()
+	te := newBareTestExecutor(t)
 
 	release := te.LockWorktree("task-1")
 	if !taskLockIsHeld(te, "task-1") {
@@ -138,7 +134,7 @@ func TestLockWorktreeIsPerTask(t *testing.T) {
 // TestLockWorktreeConcurrentWaitersQueue is the same property reached the way production reaches it,
 // with a third task proving the table does not become a global lock under load.
 func TestLockWorktreeConcurrentWaitersQueue(t *testing.T) {
-	te := lockTestExecutor()
+	te := newBareTestExecutor(t)
 
 	var observed int
 	var mu sync.Mutex

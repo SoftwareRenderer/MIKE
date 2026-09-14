@@ -113,7 +113,7 @@ func (t *Table) report(key string, waited time.Duration) {
 //
 // The map is created here rather than only in New so that a zero Table is a usable Table, which is what
 // sync.Map gave every struct literal in this repo: a lock that panics when its owner was built with
-// `&T{}` is a crash waiting in production, and the tests build executors that way today.
+// `&T{}` is a crash waiting in production.
 func (t *Table) acquire(key string) *entry {
 	t.mu.Lock()
 	defer t.mu.Unlock()

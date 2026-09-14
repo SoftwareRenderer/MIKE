@@ -10,7 +10,6 @@ import (
 	"kanban/backend/config"
 	"kanban/backend/git"
 	"kanban/backend/store"
-	"kanban/backend/stream"
 	"kanban/backend/types"
 )
 
@@ -73,17 +72,15 @@ func setupCommitAndMergeTest(t *testing.T) (*TaskExecutor, string, string, strin
 	runGitInDir(t, wtPath, "add", "feature.txt")
 
 	worktreeMgr := git.NewWorktreeManager(s, cfgStore)
-	appStreamMgr := stream.NewAppStreamManager(s, worktreeMgr)
+	appStreamMgr := newTestStreamMgr(t, s, worktreeMgr)
 
-	te := &TaskExecutor{
-		store:        s,
-		configStore:  cfgStore,
-		appStreamMgr: appStreamMgr,
-		worktreeMgr:  worktreeMgr,
-		commitQueue:  NewCommitQueue(),
-		tasks:        make(map[string]*executionState),
-	}
-	te.merge = te.newMergeOrchestrator()
+	te := newTestExecutorWith(t, Deps{
+		Store:        s,
+		ConfigStore:  cfgStore,
+		AppStreamMgr: appStreamMgr,
+		WorktreeMgr:  worktreeMgr,
+		CommitQueue:  NewCommitQueue(),
+	})
 
 	return te, repoDir, projectID, wtPath
 }

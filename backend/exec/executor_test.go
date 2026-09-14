@@ -61,20 +61,15 @@ func setupExecutorWithGit(t *testing.T) (*TaskExecutor, string, string, string) 
 
 	// Create worktree manager and executor
 	worktreeMgr := git.NewWorktreeManager(s, cfgStore)
-	appStreamMgr := stream.NewAppStreamManager(s, worktreeMgr)
+	appStreamMgr := newTestStreamMgr(t, s, worktreeMgr)
 
-	te := &TaskExecutor{
-		store:        s,
-		configStore:  cfgStore,
-		appStreamMgr: appStreamMgr,
-		worktreeMgr:  worktreeMgr,
-		commitQueue:  NewCommitQueue(),
-		gate:         NewConcurrencyGate(),
-		taskGate:     NewConcurrencyGate(),
-		tasks:        make(map[string]*executionState),
-	}
-	te.merge = te.newMergeOrchestrator()
-	te.summarize = te.newSummarizeOrchestrator()
+	te := newTestExecutorWith(t, Deps{
+		Store:        s,
+		ConfigStore:  cfgStore,
+		AppStreamMgr: appStreamMgr,
+		WorktreeMgr:  worktreeMgr,
+		CommitQueue:  NewCommitQueue(),
+	})
 
 	return te, repoDir, projectID, initialSHA
 }
@@ -799,7 +794,7 @@ func TestInitTask_ClearsOrphanedBranchOnWorktreeFailure(t *testing.T) {
 // lock: a tool_call left without a result renders as "Running" forever, and the
 // stranded lock deadlocks every later write for the task.
 func TestRunToolProtected_PanicBecomesFailedResult(t *testing.T) {
-	te := lockTestExecutor()
+	te := newBareTestExecutor(t)
 
 	result, ok := te.runToolProtected("task-panic", "bash", func() (string, bool) {
 		panic("boom")
@@ -820,7 +815,7 @@ func TestRunToolProtected_PanicBecomesFailedResult(t *testing.T) {
 }
 
 func TestRunToolProtected_PassesResultThroughUnderLock(t *testing.T) {
-	te := lockTestExecutor()
+	te := newBareTestExecutor(t)
 
 	var heldInside bool
 	result, ok := te.runToolProtected("task-ok", "read_file", func() (string, bool) {

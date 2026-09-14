@@ -4,60 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"kanban/backend/config"
 	"kanban/backend/store"
-	"kanban/backend/stream"
 	"kanban/backend/types"
 )
-
-// testStore creates a new Store with a temporary database for testing.
-func testStore(t *testing.T) *store.Store {
-	t.Helper()
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create test store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-	return s
-}
-
-// newTestExecutor creates a TaskExecutor with a test store for testing create_task.
-func newTestExecutor(t *testing.T) *TaskExecutor {
-	t.Helper()
-	te, _ := newTestExecutorWithStore(t)
-	return te
-}
-
-// newTestExecutorWithStore also returns the store, for tests that seed rows themselves.
-func newTestExecutorWithStore(t *testing.T) (*TaskExecutor, *store.Store) {
-	t.Helper()
-	s := testStore(t)
-	appStreamMgr := stream.NewAppStreamManager(s, nil)
-	cs := config.NewConfigStore(s, "", "test")
-	cs.SetWorkspaceDirOverride(t.TempDir())
-	_ = s.SetConfigValue("providers", "[]")
-	_ = s.SetConfigValue("worker_provider", "")
-	_ = s.SetConfigValue("worker_model", "")
-	_ = s.SetConfigValue("utility_provider", "")
-	_ = s.SetConfigValue("utility_model", "")
-	te := TaskExecutor{
-		store:        s,
-		appStreamMgr: appStreamMgr,
-		configStore:  cs,
-		gate:         NewConcurrencyGate(),
-		taskGate:     NewConcurrencyGate(),
-		tasks:        make(map[string]*executionState),
-	}
-	te.summarize = te.newSummarizeOrchestrator()
-	return &te, s
-}
 
 // projectSeeder is what a fixture needs to put a project in the database: a real store or
 // an executor's narrower store field both satisfy it.
@@ -649,30 +602,6 @@ func TestPlanCreatedTaskIDs_MergesHistoryAndState(t *testing.T) {
 	ids := te.planCreatedTaskIDs(plan, state)
 	if len(ids) != 2 || ids[0] != "child-a" || ids[1] != "child-b" {
 		t.Errorf("expected [child-a child-b] (deduped), got %v", ids)
-	}
-}
-
-// newTestExecutorWithConfig creates a TaskExecutor with config defaults set.
-func newTestExecutorWithConfig(t *testing.T, autoMerge, subtasksAutoMerge bool) *TaskExecutor {
-	t.Helper()
-	s := testStore(t)
-	appStreamMgr := stream.NewAppStreamManager(s, nil)
-	cs := config.NewConfigStore(s, "", "test")
-	cs.SetWorkspaceDirOverride(t.TempDir())
-	_ = s.SetConfigValue("providers", "[]")
-	_ = s.SetConfigValue("worker_provider", "")
-	_ = s.SetConfigValue("worker_model", "")
-	_ = s.SetConfigValue("utility_provider", "")
-	_ = s.SetConfigValue("utility_model", "")
-	_ = s.SetConfigValue("default_auto_merge", fmt.Sprintf("%t", autoMerge))
-	_ = s.SetConfigValue("default_subtasks_auto_merge", fmt.Sprintf("%t", subtasksAutoMerge))
-	return &TaskExecutor{
-		store:        s,
-		appStreamMgr: appStreamMgr,
-		configStore:  cs,
-		gate:         NewConcurrencyGate(),
-		taskGate:     NewConcurrencyGate(),
-		tasks:        make(map[string]*executionState),
 	}
 }
 

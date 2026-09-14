@@ -12,7 +12,6 @@ import (
 	"kanban/backend/config"
 	"kanban/backend/git"
 	"kanban/backend/store"
-	"kanban/backend/stream"
 	"kanban/backend/types"
 )
 
@@ -801,18 +800,14 @@ func setupExecutorWithGitForSubtask(t *testing.T) (*TaskExecutor, string, string
 	s.CreateProject(proj)
 
 	worktreeMgr := git.NewWorktreeManager(s, cfgStore)
-	appStreamMgr := stream.NewAppStreamManager(s, worktreeMgr)
+	appStreamMgr := newTestStreamMgr(t, s, worktreeMgr)
 
-	te := &TaskExecutor{
-		store:        s,
-		configStore:  cfgStore,
-		appStreamMgr: appStreamMgr,
-		worktreeMgr:  worktreeMgr,
-		gate:         NewConcurrencyGate(),
-		taskGate:     NewConcurrencyGate(),
-		tasks:        make(map[string]*executionState),
-	}
-	te.merge = te.newMergeOrchestrator()
+	te := newTestExecutorWith(t, Deps{
+		Store:        s,
+		ConfigStore:  cfgStore,
+		AppStreamMgr: appStreamMgr,
+		WorktreeMgr:  worktreeMgr,
+	})
 
 	return te, repoDir, projectID
 }

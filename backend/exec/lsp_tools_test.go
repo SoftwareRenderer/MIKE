@@ -11,7 +11,6 @@ import (
 	"kanban/backend/extensions"
 	"kanban/backend/lsp"
 	"kanban/backend/store"
-	"kanban/backend/stream"
 	"kanban/backend/types"
 	"time"
 )
@@ -20,14 +19,13 @@ import (
 func newLSPTestExecutor(t *testing.T, worktreePath string) *TaskExecutor {
 	t.Helper()
 	s := testStore(t)
-	appStreamMgr := stream.NewAppStreamManager(s, nil)
-	return &TaskExecutor{
-		store:        s,
-		appStreamMgr: appStreamMgr,
-		configStore:  &config.ConfigStore{},
-		tasks:        make(map[string]*executionState),
-		// lspMgr is nil — no LSP extension installed
-	}
+	appStreamMgr := newTestStreamMgr(t, s, nil)
+	// No LSPMgr: no LSP extension is installed.
+	return newTestExecutorWith(t, Deps{
+		Store:        s,
+		AppStreamMgr: appStreamMgr,
+		ConfigStore:  &config.ConfigStore{},
+	})
 }
 
 // newLSPTestExecutorWithMgr creates a TaskExecutor with an LSP manager and extensions.
@@ -44,14 +42,13 @@ func newLSPTestExecutorWithMgr(t *testing.T, worktreePath string, exts ...*exten
 		}
 	}
 	mgr := lsp.NewExtensionLSPManager(es, nil, s)
-	appStreamMgr := stream.NewAppStreamManager(s, nil)
-	return &TaskExecutor{
-		store:        s,
-		appStreamMgr: appStreamMgr,
-		configStore:  &config.ConfigStore{},
-		tasks:        make(map[string]*executionState),
-		lspMgr:       mgr,
-	}
+	appStreamMgr := newTestStreamMgr(t, s, nil)
+	return newTestExecutorWith(t, Deps{
+		Store:        s,
+		AppStreamMgr: appStreamMgr,
+		ConfigStore:  &config.ConfigStore{},
+		LSPMgr:       mgr,
+	})
 }
 
 func TestLSPTools_NoLSPManager(t *testing.T) {

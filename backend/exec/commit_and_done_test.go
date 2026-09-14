@@ -5,7 +5,7 @@ import "testing"
 // TestCommitAndDoneIntent_ArmPeekConsume covers the intent state machine: arming is idempotent,
 // peeking does not consume, and consuming happens once and reports the merge outcome it was given.
 func TestCommitAndDoneIntent_ArmPeekConsume(t *testing.T) {
-	m := &mergeOrchestrator{}
+	m := newBareTestExecutor(t).merge
 	const taskID = "arm-peek-task"
 
 	if m.CommitAndDonePending(taskID) {

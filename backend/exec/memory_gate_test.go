@@ -360,12 +360,7 @@ func TestMemoryGateBudgetReportsHeldBesideCharged(t *testing.T) {
 func memSlotFixture(t *testing.T, sandboxed bool, limitMB int) (*TaskExecutor, *taskExecSetup) {
 	t.Helper()
 	s := testStore(t)
-	te := &TaskExecutor{
-		store:        s,
-		appStreamMgr: newTestStreamMgr(s),
-		tasks:        make(map[string]*executionState),
-		memGate:      &MemoryGate{},
-	}
+	te := newTestExecutorWith(t, Deps{Store: s})
 	te.memGate.SetCapacity(1024)
 
 	now := time.Now().UTC()

@@ -203,7 +203,7 @@ func TestRecoverBridgeForTask_Tier1ClientReconnect(t *testing.T) {
 	}
 
 	// Recovery reconnects a fresh client on the live agent pipes.
-	ok := (&TaskExecutor{}).recoverBridgeForTask(f, setup, state, "img", nil)
+	ok := newBareTestExecutor(t).recoverBridgeForTask(f, setup, state, "img", nil)
 	if !ok {
 		t.Fatal("expected Tier 1 recovery to succeed")
 	}
@@ -256,7 +256,7 @@ func TestRecoverBridgeForTask_Tier2RecreateRunningContainer(t *testing.T) {
 	f.agentAlive = false
 	f.mu.Unlock()
 
-	ok := (&TaskExecutor{}).recoverBridgeForTask(f, setup, state, "img", nil)
+	ok := newBareTestExecutor(t).recoverBridgeForTask(f, setup, state, "img", nil)
 	if !ok {
 		t.Fatal("expected Tier 2 recovery to succeed")
 	}
@@ -311,7 +311,7 @@ func TestRecoverBridgeForTask_CreatesSandboxFromScratchWhenStopped(t *testing.T)
 
 	// Tier 1 cannot help (agent pipes are gone) and the container is not
 	// running — recovery must CREATE the sandbox from scratch.
-	ok := (&TaskExecutor{}).recoverBridgeForTask(f, setup, state, "img", nil)
+	ok := newBareTestExecutor(t).recoverBridgeForTask(f, setup, state, "img", nil)
 	if !ok {
 		t.Fatal("recovery should create the sandbox from scratch instead of giving up")
 	}
@@ -348,7 +348,7 @@ func TestRecoverBridgeForTask_MaxAttemptsLatch(t *testing.T) {
 	f.createErr = fmt.Errorf("podman unavailable")
 	f.mu.Unlock()
 
-	te := &TaskExecutor{}
+	te := newBareTestExecutor(t)
 	if te.recoverBridgeForTask(f, setup, state, "img", nil) {
 		t.Fatal("expected recovery attempt 1 to fail")
 	}
@@ -381,7 +381,7 @@ func TestRecoverBridgeForTask_MaxAttemptsLatch(t *testing.T) {
 // call clears the bridge-recovery failure latch, so a later transient sandbox
 // outage can still be recovered instead of being permanently stuck.
 func TestExecuteTool_SuccessResetsRecoveryLatch(t *testing.T) {
-	te := &TaskExecutor{}
+	te := newBareTestExecutor(t)
 	state := &executionState{
 		recoverBridge:          func() bool { return true },
 		bridgeRecoveryAttempts: 3, // latch previously engaged by failed recoveries

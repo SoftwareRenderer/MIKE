@@ -75,7 +75,8 @@ func TestHandleLSPRename_AppliesAllFiles(t *testing.T) {
 			}`, uriA, uriB)),
 		},
 	}
-	te := &TaskExecutor{lspMgr: fake}
+	te := newBareTestExecutor(t)
+	te.lspMgr = fake
 	read, write := osReadWrite(ws)
 
 	result, err := te.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
@@ -122,7 +123,8 @@ func TestHandleLSPRename_NotRenamable(t *testing.T) {
 			"textDocument/prepareRename": json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":null}`),
 		},
 	}
-	te := &TaskExecutor{lspMgr: fake}
+	te := newBareTestExecutor(t)
+	te.lspMgr = fake
 	read, write := osReadWrite(ws)
 
 	result, err := te.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
@@ -152,7 +154,8 @@ func TestHandleLSPRename_NullResult(t *testing.T) {
 			"textDocument/rename":        json.RawMessage(`{"jsonrpc":"2.0","id":2,"result":null}`),
 		},
 	}
-	te := &TaskExecutor{lspMgr: fake}
+	te := newBareTestExecutor(t)
+	te.lspMgr = fake
 	read, write := osReadWrite(ws)
 
 	result, err := te.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
@@ -179,7 +182,8 @@ func TestHandleLSPRename_LSPError(t *testing.T) {
 			"textDocument/rename":        json.RawMessage(`{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"name taken"}}`),
 		},
 	}
-	te := &TaskExecutor{lspMgr: fake}
+	te := newBareTestExecutor(t)
+	te.lspMgr = fake
 	read, write := osReadWrite(ws)
 
 	_, err := te.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
@@ -212,7 +216,8 @@ func TestHandleLSPRename_OutsideWorkspace(t *testing.T) {
 			}`, "file://"+outside)),
 		},
 	}
-	te := &TaskExecutor{lspMgr: fake}
+	te := newBareTestExecutor(t)
+	te.lspMgr = fake
 	read, write := osReadWrite(ws)
 
 	_, err := te.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
@@ -225,7 +230,8 @@ func TestHandleLSPRename_OutsideWorkspace(t *testing.T) {
 }
 
 func TestHandleLSPRename_RequiredArgs(t *testing.T) {
-	te := &TaskExecutor{lspMgr: &fakeLSPManager{enabled: true}}
+	te := newBareTestExecutor(t)
+	te.lspMgr = &fakeLSPManager{enabled: true}
 	read, write := osReadWrite(t.TempDir())
 	for _, args := range []map[string]any{
 		{"symbol": "foo", "new_name": "bar"},
@@ -239,7 +245,7 @@ func TestHandleLSPRename_RequiredArgs(t *testing.T) {
 }
 
 func TestHandleLSPRename_NoLSPManager(t *testing.T) {
-	te := &TaskExecutor{} // lspMgr nil
+	te := newBareTestExecutor(t) // lspMgr nil
 	read, write := osReadWrite(t.TempDir())
 	if _, err := te.handleLSPRename(context.Background(), renameArgs(), t.TempDir(), read, write); err == nil {
 		t.Error("expected error when LSP manager is nil")
@@ -247,7 +253,8 @@ func TestHandleLSPRename_NoLSPManager(t *testing.T) {
 }
 
 func TestHandleLSPRename_ToolCallsDisabled(t *testing.T) {
-	te := &TaskExecutor{lspMgr: &fakeLSPManager{enabled: false}}
+	te := newBareTestExecutor(t)
+	te.lspMgr = &fakeLSPManager{enabled: false}
 	read, write := osReadWrite(t.TempDir())
 	if _, err := te.handleLSPRename(context.Background(), renameArgs(), t.TempDir(), read, write); err == nil {
 		t.Error("expected error when LSP tool calls are disabled")
@@ -257,7 +264,8 @@ func TestHandleLSPRename_ToolCallsDisabled(t *testing.T) {
 func TestHandleLSPRename_SymbolNotFound(t *testing.T) {
 	ws := t.TempDir()
 	writeTestFile(t, filepath.Join(ws, "a.txt"), "baz := 1\n")
-	te := &TaskExecutor{lspMgr: &fakeLSPManager{enabled: true}}
+	te := newBareTestExecutor(t)
+	te.lspMgr = &fakeLSPManager{enabled: true}
 	read, write := osReadWrite(ws)
 	result, err := te.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
 	if err != nil {

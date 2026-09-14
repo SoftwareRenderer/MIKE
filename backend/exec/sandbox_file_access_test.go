@@ -186,7 +186,8 @@ func TestLSPToolReadsWorktreeFileWhenUnsandboxed(t *testing.T) {
 		enabled:   true,
 		responses: map[string]json.RawMessage{"textDocument/references": json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":[]}`)},
 	}
-	te := &TaskExecutor{lspMgr: fake}
+	te := newBareTestExecutor(t)
+	te.lspMgr = fake
 
 	result, ok := te.executeTool(context.Background(), "lsp_references", map[string]any{
 		"path":   "main.go",

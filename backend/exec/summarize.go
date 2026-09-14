@@ -51,8 +51,7 @@ type summarizeOrchestrator struct {
 	}
 }
 
-// One wiring definition, so a TaskExecutor assembled as a struct literal reaches the same
-// collaborator as one built by NewTaskExecutor.
+// One wiring definition, so every executor's summarize collaborator is wired the same way.
 func (te *TaskExecutor) newSummarizeOrchestrator() *summarizeOrchestrator {
 	s := &summarizeOrchestrator{
 		store:          te.store,

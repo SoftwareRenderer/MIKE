@@ -10,7 +10,6 @@ import (
 
 	"kanban/backend/config"
 	"kanban/backend/store"
-	"kanban/backend/stream"
 	"kanban/backend/types"
 )
 
@@ -18,13 +17,12 @@ import (
 func newReadTestExecutor(t *testing.T, worktreePath string) *TaskExecutor {
 	t.Helper()
 	s := testStore(t)
-	appStreamMgr := stream.NewAppStreamManager(s, nil)
-	return &TaskExecutor{
-		store:        s,
-		appStreamMgr: appStreamMgr,
-		configStore:  &config.ConfigStore{},
-		tasks:        make(map[string]*executionState),
-	}
+	appStreamMgr := newTestStreamMgr(t, s, nil)
+	return newTestExecutorWith(t, Deps{
+		Store:        s,
+		AppStreamMgr: appStreamMgr,
+		ConfigStore:  &config.ConfigStore{},
+	})
 }
 
 func makeTestTask(t *testing.T, s *store.Store, projectID, taskID string) *types.Task {

@@ -13,13 +13,8 @@ import (
 	"kanban/backend/git"
 	"kanban/backend/lsp"
 	"kanban/backend/store"
-	"kanban/backend/stream"
 	"kanban/backend/types"
 )
-
-func newTestStreamMgr(s *store.Store) *stream.AppStreamManager {
-	return stream.NewAppStreamManager(s, nil)
-}
 
 // The advisory channel: environment notes the model must see but the user never said.
 // They must never be persisted as role "user" (a fake user bubble, and a summarizer that
@@ -47,8 +42,7 @@ func diagTestSetup(t *testing.T, s *store.Store, projectID, taskID string) *task
 
 func TestFlushAdvisories_PersistsAdvisoryRoleAndKeepsOrder(t *testing.T) {
 	s := testStore(t)
-	te := &TaskExecutor{store: s, appStreamMgr: newTestStreamMgr(s), tasks: make(map[string]*executionState)}
-	te.merge = te.newMergeOrchestrator()
+	te := newTestExecutorWith(t, Deps{Store: s})
 	setup := diagTestSetup(t, s, "adv-proj", "adv-task")
 
 	lc := &loopContext{messages: []types.ChatMessage{
@@ -124,8 +118,7 @@ func TestFlushAdvisories_PersistsAdvisoryRoleAndKeepsOrder(t *testing.T) {
 
 func TestFlushAdvisories_EmptyAndBlank(t *testing.T) {
 	s := testStore(t)
-	te := &TaskExecutor{store: s, appStreamMgr: newTestStreamMgr(s), tasks: make(map[string]*executionState)}
-	te.merge = te.newMergeOrchestrator()
+	te := newTestExecutorWith(t, Deps{Store: s})
 	setup := diagTestSetup(t, s, "adv-proj2", "adv-task2")
 
 	lc := &loopContext{}
@@ -151,8 +144,7 @@ func TestFlushAdvisories_EmptyAndBlank(t *testing.T) {
 // would start resolving the conflict before ever being told which files conflict.
 func TestPrepareMergeConflictTurn_DeliversBeforeTheNextCall(t *testing.T) {
 	s := testStore(t)
-	te := &TaskExecutor{store: s, appStreamMgr: newTestStreamMgr(s), tasks: make(map[string]*executionState)}
-	te.merge = te.newMergeOrchestrator()
+	te := newTestExecutorWith(t, Deps{Store: s})
 	setup := diagTestSetup(t, s, "mc-proj", "mc-task")
 	lc := &loopContext{
 		messages: []types.ChatMessage{{Role: "system", Content: "sys"}, {Role: "user", Content: "merge it"}},
@@ -350,8 +342,7 @@ func TestAdvisoriesWrittenAfterToolRowsSurviveTheRebuild(t *testing.T) {
 	// between the turn's tool_call rows. The turn boundary is now the only writer, so the
 	// rows a turn produces read tool_call*, advisory — and the rebuild stays complete.
 	s := testStore(t)
-	te := &TaskExecutor{store: s, appStreamMgr: newTestStreamMgr(s), tasks: make(map[string]*executionState)}
-	te.merge = te.newMergeOrchestrator()
+	te := newTestExecutorWith(t, Deps{Store: s})
 	setup := diagTestSetup(t, s, "boundary-proj", "boundary-task")
 	lc := &loopContext{}
 
@@ -464,13 +455,12 @@ func TestCollectTurnDiagnostics_BoundedAndCancellable(t *testing.T) {
 	cs := config.NewConfigStore(s, "", "test")
 	cs.SetWorkspaceDirOverride(t.TempDir())
 	fake := &wedgedLSPManager{registry: reg, gotCtx: make(chan context.Context, 4)}
-	te := &TaskExecutor{
-		store:        s,
-		configStore:  cs,
-		appStreamMgr: newTestStreamMgr(s),
-		worktreeMgr:  git.NewWorktreeManager(s, cs),
-		lspMgr:       fake,
-	}
+	te := newTestExecutorWith(t, Deps{
+		Store:       s,
+		ConfigStore: cs,
+		WorktreeMgr: git.NewWorktreeManager(s, cs),
+	})
+	te.lspMgr = fake
 
 	setup := diagTestSetup(t, s, "diag-proj", "diag-task")
 	ctx, cancel := context.WithCancel(context.Background())

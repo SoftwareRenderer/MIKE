@@ -49,10 +49,9 @@ type mergeOrchestrator struct {
 	}
 }
 
-// One wiring definition, so a TaskExecutor assembled as a struct literal reaches the same
-// collaborator as one built by NewTaskExecutor.
+// One wiring definition, so every executor's merge collaborator is wired the same way.
 func (te *TaskExecutor) newMergeOrchestrator() *mergeOrchestrator {
-	return &mergeOrchestrator{
+	m := &mergeOrchestrator{
 		store:              te.store,
 		worktreeMgr:        te.worktreeMgr,
 		appStreamMgr:       te.appStreamMgr,
@@ -64,6 +63,8 @@ func (te *TaskExecutor) newMergeOrchestrator() *mergeOrchestrator {
 		chatCompletion:     te.ChatCompletion,
 		streamCompletion:   te.StreamCompletion,
 	}
+	m.commitDone.tasks = make(map[string]struct{})
+	return m
 }
 
 func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) error {
@@ -1083,10 +1084,6 @@ func (m *mergeOrchestrator) commitConflictResolution(projectID, taskID, worktree
 func (m *mergeOrchestrator) ArmCommitAndDone(taskID string) {
 	m.commitDone.mu.Lock()
 	defer m.commitDone.mu.Unlock()
-	// Created here, not in NewTaskExecutor: tests build a TaskExecutor as a struct literal.
-	if m.commitDone.tasks == nil {
-		m.commitDone.tasks = make(map[string]struct{})
-	}
 	m.commitDone.tasks[taskID] = struct{}{}
 }
 

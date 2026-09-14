@@ -29,7 +29,7 @@ func TestSandboxCreateOpts_CarriesEveryConfiguredField(t *testing.T) {
 		},
 	}
 
-	opts := (&TaskExecutor{}).sandboxCreateOpts(setup, "localhost/sandbox-example.com", true)
+	opts := newBareTestExecutor(t).sandboxCreateOpts(setup, "localhost/sandbox-example.com", true)
 
 	if opts.BaseImage != "localhost/sandbox-example.com" {
 		t.Errorf("BaseImage = %q, want the image the caller passed in", opts.BaseImage)
@@ -57,7 +57,7 @@ func TestSandboxCreateOpts_CarriesEveryConfiguredField(t *testing.T) {
 	}
 	// An executor with no agent registry mounts no agent sandbox — nil, not a panic. Every create path
 	// goes through this builder, so "nil" here is what an install without agent extensions gets.
-	if got := (&TaskExecutor{}).sandboxCreateOpts(setup, "img", false).AgentSandbox; got != nil {
+	if got := newBareTestExecutor(t).sandboxCreateOpts(setup, "img", false).AgentSandbox; got != nil {
 		t.Errorf("AgentSandbox = %+v, want nil without an agent registry", got)
 	}
 }

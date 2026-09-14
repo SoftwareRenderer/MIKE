@@ -180,7 +180,7 @@ func TestExecCommandStream_TrailingLineWithoutNewline(t *testing.T) {
 
 // End-to-end through executeTool: the model must be told the command timed out.
 func TestExecuteTool_Bash_DirectTimeout(t *testing.T) {
-	te := &TaskExecutor{}
+	te := newBareTestExecutor(t)
 	result, ok := te.executeTool(context.Background(), "bash", map[string]any{
 		"command": "sleep 30",
 		"timeout": float64(1),

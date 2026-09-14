@@ -11,7 +11,7 @@ import (
 )
 
 func TestLockWorktreeWatchedQueuesOnTheSameTableAsLockWorktree(t *testing.T) {
-	te := &TaskExecutor{}
+	te := newBareTestExecutor(t)
 	const taskID = "task-watched"
 
 	holder := te.LockWorktree(taskID)

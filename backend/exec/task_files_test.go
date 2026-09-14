@@ -63,7 +63,7 @@ func uploadFixture(t *testing.T, sandboxed bool) (*TaskExecutor, string, string)
 		t.Fatalf("create worktree: %v", err)
 	}
 	// The fixture builds no sandbox manager at all: the write is host-side, so no container is involved.
-	return &TaskExecutor{store: s, worktreeMgr: wm}, repoDir, wtPath
+	return newTestExecutorWith(t, Deps{Store: s, WorktreeMgr: wm}), repoDir, wtPath
 }
 
 func hostUpload(t *testing.T, wtPath, name string) string {

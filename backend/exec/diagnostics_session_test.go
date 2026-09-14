@@ -247,14 +247,12 @@ func passExecutor(t *testing.T, s *store.Store, mgr lspManager) *TaskExecutor {
 	t.Helper()
 	cs := config.NewConfigStore(s, "", "test")
 	cs.SetWorkspaceDirOverride(t.TempDir())
-	te := &TaskExecutor{
-		store:        s,
-		configStore:  cs,
-		appStreamMgr: newTestStreamMgr(s),
-		worktreeMgr:  git.NewWorktreeManager(s, cs),
-		lspMgr:       mgr,
-	}
-	te.merge = te.newMergeOrchestrator()
+	te := newTestExecutorWith(t, Deps{
+		Store:       s,
+		ConfigStore: cs,
+		WorktreeMgr: git.NewWorktreeManager(s, cs),
+	})
+	te.lspMgr = mgr
 	return te
 }
 

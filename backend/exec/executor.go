@@ -293,28 +293,44 @@ func (mc *modelConfig) set(serverURL, modelName string) {
 	mc.modelName = modelName
 }
 
-func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStreamMgr *stream.AppStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandbox.SandboxManager, agentRegistry *agent.AgentRegistry, lspMgr *lsp.ExtensionLSPManager, commitQueue *CommitQueue) *TaskExecutor {
+// Deps is everything a TaskExecutor needs from the rest of the server. AppStreamMgr is required —
+// every task reports over it — and the rest may be nil: an executor with no sandbox, no LSP manager
+// or no agent registry answers "not available" rather than starting one.
+type Deps struct {
+	Store         *store.Store
+	ConfigStore   *config.ConfigStore
+	AppStreamMgr  *stream.AppStreamManager
+	WorktreeMgr   *git.WorktreeManager
+	SandboxMgr    *sandbox.SandboxManager
+	AgentRegistry *agent.AgentRegistry
+	LSPMgr        *lsp.ExtensionLSPManager
+	CommitQueue   *CommitQueue
+}
+
+// NewTaskExecutor wires an executor and the collaborators split out of it. Every TaskExecutor in
+// the repo, tests included, is built here: the worktree lock's slow-wait report is configured here.
+func NewTaskExecutor(deps Deps) *TaskExecutor {
 	// Normalize nil concrete to a nil interface so te.lspMgr == nil guards hold.
 	var lspMgrI lspManager
-	if lspMgr != nil {
-		lspMgrI = lspMgr
+	if deps.LSPMgr != nil {
+		lspMgrI = deps.LSPMgr
 	}
 	// Same reason for the pre-flight's container question: a nil *SandboxManager stored in the
 	// interface is not nil, and the pre-flight must read "no sandbox" as "not available".
 	var binaries agentBinaries
-	if sandboxMgr != nil {
-		binaries = sandboxMgr
+	if deps.SandboxMgr != nil {
+		binaries = deps.SandboxMgr
 	}
 	te := &TaskExecutor{
-		store:         store,
-		configStore:   configStore,
-		appStreamMgr:  appStreamMgr,
-		worktreeMgr:   worktreeMgr,
-		sandboxMgr:    sandboxMgr,
-		agentRegistry: agentRegistry,
+		store:         deps.Store,
+		configStore:   deps.ConfigStore,
+		appStreamMgr:  deps.AppStreamMgr,
+		worktreeMgr:   deps.WorktreeMgr,
+		sandboxMgr:    deps.SandboxMgr,
+		agentRegistry: deps.AgentRegistry,
 		agentBinaries: binaries,
 		lspMgr:        lspMgrI,
-		commitQueue:   commitQueue,
+		commitQueue:   deps.CommitQueue,
 		gate:          NewConcurrencyGate(),
 		taskGate:      NewConcurrencyGate(),
 		memGate:       &MemoryGate{},

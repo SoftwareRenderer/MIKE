@@ -59,7 +59,8 @@ func registerStubAgent(t *testing.T) *stubAdapter {
 func TestPrepareAgentProbesTheAdaptersOwnBinary(t *testing.T) {
 	registerStubAgent(t)
 	prober := &recordingProber{available: false}
-	te := &TaskExecutor{agentBinaries: prober}
+	te := newBareTestExecutor(t)
+	te.agentBinaries = prober
 
 	prepared, err := te.prepareAgent(context.Background(), &extensions.Extension{Name: otherAgentName},
 		"task-1", t.TempDir(), "kanban-task-1", true)
@@ -81,7 +82,8 @@ func TestPrepareAgentProbesTheAdaptersOwnBinary(t *testing.T) {
 // operator guessing what the container lacked.
 func TestPrepareAgentRefusalNamesTheBinaryItMissed(t *testing.T) {
 	registerStubAgent(t)
-	te := &TaskExecutor{agentBinaries: &recordingProber{available: false}}
+	te := newBareTestExecutor(t)
+	te.agentBinaries = &recordingProber{available: false}
 
 	_, err := te.prepareAgent(context.Background(), &extensions.Extension{Name: otherAgentName},
 		"task-1", t.TempDir(), "kanban-task-1", true)
@@ -99,7 +101,8 @@ func TestPrepareAgentRefusalNamesTheBinaryItMissed(t *testing.T) {
 func TestPrepareAgentWithBinaryPresentStartsNothingEarly(t *testing.T) {
 	adapter := registerStubAgent(t)
 	prober := &recordingProber{available: true}
-	te := &TaskExecutor{agentBinaries: prober}
+	te := newBareTestExecutor(t)
+	te.agentBinaries = prober
 
 	prepared, err := te.prepareAgent(context.Background(), &extensions.Extension{Name: otherAgentName},
 		"task-1", t.TempDir(), "kanban-task-1", true)
@@ -124,7 +127,8 @@ func TestPrepareAgentWithBinaryPresentStartsNothingEarly(t *testing.T) {
 func TestPrepareAgentHostModeAsksTheContainerNothing(t *testing.T) {
 	registerStubAgent(t)
 	prober := &recordingProber{available: false}
-	te := &TaskExecutor{agentBinaries: prober}
+	te := newBareTestExecutor(t)
+	te.agentBinaries = prober
 
 	prepared, err := te.prepareAgent(context.Background(), &extensions.Extension{Name: otherAgentName},
 		"task-1", t.TempDir(), "kanban-task-1", false)
@@ -142,7 +146,7 @@ func TestPrepareAgentHostModeAsksTheContainerNothing(t *testing.T) {
 // never a silent pass and never a nil dereference.
 func TestPrepareAgentWithoutContainerRefuses(t *testing.T) {
 	registerStubAgent(t)
-	te := &TaskExecutor{}
+	te := newBareTestExecutor(t)
 
 	prepared, err := te.prepareAgent(context.Background(), &extensions.Extension{Name: otherAgentName},
 		"task-1", t.TempDir(), "kanban-task-1", true)
