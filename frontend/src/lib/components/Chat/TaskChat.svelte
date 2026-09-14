@@ -30,7 +30,7 @@
     import ReviewBar from './ReviewBar.svelte';
     import StartPanel from './StartPanel.svelte';
 
-    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', disabled = false, taskSummarizing = false, hasStagedChanges: hasStagedChangesProp, onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff, onToggleFullscreen, isChatFullscreen, onChatInputFocus, onChatInputBlur, onTaskDone }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; taskExecutionState?: string; disabled?: boolean; taskSummarizing?: boolean; hasStagedChanges?: boolean; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void; onToggleFullscreen?: () => void; isChatFullscreen?: boolean; /** Focus entered / left the chat input — the owner of the maximize decides what that means. */ onChatInputFocus?: () => void; onChatInputBlur?: () => void; /** A Done click in the review bar succeeded — the view that owns navigation decides what happens next. Fires on a commit deferred to a conflict-resolution turn too, where the task stays in progress: the click still meant "I'm finished with it". */ onTaskDone?: () => void } = $props();
+    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', disabled = false, taskSummarizing = false, hasStagedChanges: hasStagedChangesProp, onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff, onToggleFullscreen, isChatFullscreen, onChatInputFocus, onChatInputBlur, onMessageSent, onTaskDone }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; taskExecutionState?: string; disabled?: boolean; taskSummarizing?: boolean; hasStagedChanges?: boolean; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void; onToggleFullscreen?: () => void; isChatFullscreen?: boolean; /** Focus entered / left the chat input — the owner of the maximize decides what that means. */ onChatInputFocus?: () => void; onChatInputBlur?: () => void; /** A message was sent — the auto maximize ends with the send, whatever the request did next. */ onMessageSent?: () => void; /** A Done click in the review bar succeeded — the view that owns navigation decides what happens next. Fires on a commit deferred to a conflict-resolution turn too, where the task stays in progress: the click still meant "I'm finished with it". */ onTaskDone?: () => void } = $props();
 
     // Owns everything about "follow the latest message" (scroll container,
     // atBottom, pinning). Shared with ChatEntries, which renders both.
@@ -617,34 +617,40 @@
                 return;
             }
         }
-        // Remove all error entries (cleared by next user action)
-        stream.state.entries = stream.state.entries.filter(e => e.role !== 'error');
-        // Add message optimistically with current thread context
-        const entryId = genId();
-        const isOfflineNow = getOfflineStatus();
-        const isQueuedForSummarize = isSummarizing;
-        stream.state.entries = [...stream.state.entries, { id: entryId, role: 'user', content: msg, attachments: attachments || undefined, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString(), queued: isOfflineNow || isQueuedForSummarize }];
-        scroll(true);
-        // If queued for summarization, don't show awaiting spinner — executor hasn't started yet.
-        // The executor will be started after summarization completes and process this message.
-        if (isQueuedForSummarize) {
-            stream.state.awaitingResponse = false;
+        try {
+            // Remove all error entries (cleared by next user action)
+            stream.state.entries = stream.state.entries.filter(e => e.role !== 'error');
+            // Add message optimistically with current thread context
+            const entryId = genId();
+            const isOfflineNow = getOfflineStatus();
+            const isQueuedForSummarize = isSummarizing;
+            stream.state.entries = [...stream.state.entries, { id: entryId, role: 'user', content: msg, attachments: attachments || undefined, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString(), queued: isOfflineNow || isQueuedForSummarize }];
+            scroll(true);
+            // If queued for summarization, don't show awaiting spinner — executor hasn't started yet.
+            // The executor will be started after summarization completes and process this message.
+            if (isQueuedForSummarize) {
+                stream.state.awaitingResponse = false;
+            }
+            // Send with model info for lazy-start
+            const result = await sendWithTracking(msg, attachments, false, entryId);
+            if (result === null) {
+                // Permanent failure (e.g. server error) — remove the optimistic message and show an error.
+                stream.state.entries = stream.state.entries.filter(e => !(e.role === 'user' && e.content === msg));
+                appendErrorEntry('send_failed', t('chat.task.sendFailed'));
+                return;
+            }
+            if (result.queued) {
+                // Network failure — the message was queued (not lost). Keep it as an
+                // outgoing message and surface a visible, non-persisted notice.
+                handleQueuedSend(msg, entryId);
+            }
+            scroll(true);
+            chatFormComp?.focus();
+        } finally {
+            // The send is the user’s part done: the view that maximized for the input gets the room
+            // back, whatever the request did next. After the refocus, which would maximize again.
+            onMessageSent?.();
         }
-        // Send with model info for lazy-start
-        const result = await sendWithTracking(msg, attachments, false, entryId);
-        if (result === null) {
-            // Permanent failure (e.g. server error) — remove the optimistic message and show an error.
-            stream.state.entries = stream.state.entries.filter(e => !(e.role === 'user' && e.content === msg));
-            appendErrorEntry('send_failed', t('chat.task.sendFailed'));
-            return;
-        }
-        if (result.queued) {
-            // Network failure — the message was queued (not lost). Keep it as an
-            // outgoing message and surface a visible, non-persisted notice.
-            handleQueuedSend(msg, entryId);
-        }
-        scroll(true);
-        chatFormComp?.focus();
     }
 
     async function handleModelSelect(providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {

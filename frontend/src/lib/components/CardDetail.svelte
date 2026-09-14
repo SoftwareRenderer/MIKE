@@ -7,7 +7,7 @@
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile, toDiffFiles } from '$lib/api';
     import { enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
     import { shouldAutoFullscreenDiffEditor } from '$lib/utils/diff-editor-layout';
-    import { chatBlurState, chatCollapseState, chatFocusState, chatManualToggleState, type ChatAutoMaximizeRules, type ChatMaximizeState } from '$lib/utils/chat-auto-maximize';
+    import { chatBlurState, chatCollapseState, chatFocusState, chatManualToggleState, chatSendState, type ChatAutoMaximizeRules, type ChatMaximizeState } from '$lib/utils/chat-auto-maximize';
     import { filterTopLevelTaskIds, willConsolidateIntoParent, taskIsInFlight } from '$lib/utils/task-utils';
     import { clearHighlightCache } from '$lib/highlighter';
     import { getAppStreamRef } from '$lib/stream-ref';
@@ -452,6 +452,10 @@
 
     function handleChatInputBlur() {
         chatMaximize = chatBlurState(chatMaximize);
+    }
+
+    function handleChatMessageSent() {
+        chatMaximize = chatSendState(chatMaximize);
     }
 
     // Subtask hierarchy (extracted composable)
@@ -1060,6 +1064,7 @@
                             isChatFullscreen={chatMaximize.fullscreen}
                             onChatInputFocus={handleChatInputFocus}
                             onChatInputBlur={handleChatInputBlur}
+                            onMessageSent={handleChatMessageSent}
                             onRefreshDiff={(data) => {
                                 // Skip update while loadDiff() is in progress to prevent
                                 // WS diff_changed events from overwriting the cache with
