@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MODE_DESCRIPTIONS } from '$lib/constants/modes';
+import { MODE_DESCRIPTIONS, modeTip } from '$lib/constants/modes';
 
 /**
  * The descriptions render inside the operating-mode selector, and two of the three
@@ -21,5 +21,21 @@ describe('MODE_DESCRIPTIONS', () => {
 
     it('reads only the modes that exist (the catalog has no orphan key)', () => {
         expect(Object.keys(MODE_DESCRIPTIONS).sort()).toEqual(['act', 'explore', 'plan']);
+    });
+});
+
+/**
+ * The toggle's tooltip, which both chat surfaces now read from this module — so the English
+ * values each component used to carry are pinned once, here.
+ */
+describe('modeTip', () => {
+    it('answers each mode with the tooltip that shipped', () => {
+        expect(modeTip('act')).toBe('Act mode: AI is required to provide structured responses during review, and has read/write access. Click to switch.');
+        expect(modeTip('plan')).toBe('Plan mode: AI decomposes work into subtasks on the board, and only has read access. Click to switch.');
+        expect(modeTip('explore')).toBe('Explore mode: AI has read/write access. Click to switch.');
+    });
+
+    it('answers a mode it does not know with the explore tip', () => {
+        expect(modeTip('no-such-mode')).toBe(modeTip('explore'));
     });
 });
