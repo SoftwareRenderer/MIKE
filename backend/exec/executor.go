@@ -98,13 +98,23 @@ func (te *TaskExecutor) SetLLMAdapter(a *llmadapter.Adapter) {
 // MemGate returns the sandbox memory budget gate. Server wiring calls SetCapacity on it at startup.
 func (te *TaskExecutor) MemGate() *MemoryGate { return te.memGate }
 
-// memorySupervisorActions: each method passes autostarted=true — a supervisor resume is not a user action.
+// memorySupervisorActions: a resume continues the run that was paused, so it carries that run's
+// provenance instead of claiming a start of its own — see resumeProvenance.
 func (te *TaskExecutor) stopTask(taskID string) error { return te.StopTask(taskID) }
 func (te *TaskExecutor) startTask(projectID, taskID string) error {
-	return te.StartTask(projectID, taskID, true)
+	return te.StartTask(projectID, taskID, te.resumeProvenance(taskID))
 }
 func (te *TaskExecutor) startSubtask(projectID, taskID string) error {
-	return te.StartSubtask(projectID, taskID, true)
+	return te.StartSubtask(projectID, taskID, te.resumeProvenance(taskID))
+}
+
+// resumeProvenance answers "did a click name this task?" for a memory-supervisor resume with the
+// answer the paused run already recorded: the supervisor chose the task by its memory cost, which
+// says nothing about who is waiting on it. A task that cannot be read answers false, so the run
+// waits for a person rather than answering for one who may be there.
+func (te *TaskExecutor) resumeProvenance(taskID string) bool {
+	task, err := te.store.GetTaskByID(taskID)
+	return err == nil && task.Autostarted
 }
 
 // newLlamaClient creates a LlamaClient with the provider request adapter

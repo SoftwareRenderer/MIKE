@@ -1060,6 +1060,7 @@ const catalog = {
     'chat.merge.merged': 'Merged',
     'chat.advisory.diagnostics': 'Workspace diagnostics',
     'chat.advisory.mergeConflict': 'Merge conflict',
+    'chat.advisory.autoAnswer': 'Automated answer (parent context)',
     'chat.advisory.note': 'Environment note',
     'chat.stream.sandboxImage': 'sandbox image',
     'chat.stream.pullingImage': 'Pulling {name}...',

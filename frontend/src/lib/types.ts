@@ -147,7 +147,7 @@ export interface ChatEntry {
     role: string;
     content: string;
     severity?: string;
-    /** Sub-classification within a role — advisory rows: 'diagnostics' | 'merge_conflict'. */
+    /** Sub-classification within a role — advisory rows: 'diagnostics' | 'merge_conflict' | 'auto_answer'. */
     kind?: string;
     mergeLabel?: string;
     isError?: boolean;
@@ -356,7 +356,7 @@ export interface TaskMessage {
     predicted_ms?: number;
     duration?: number;
     git_commit_hash?: string;
-    /** Sub-classification within a role — advisory rows: 'diagnostics' | 'merge_conflict'. */
+    /** Sub-classification within a role — advisory rows: 'diagnostics' | 'merge_conflict' | 'auto_answer'. */
     kind?: string;
     created_at: string;
 }

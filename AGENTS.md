@@ -310,6 +310,9 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
   and marks Done whatever `auto_merge` says, but only the recorded click (`ArmCommitAndDone`) authorizes
   that merge, and it is spent by the resolution it waited for.
 - **Nothing is marked Done that did not reach the target branch.** `docs/commit-and-done.md`.
+- **A run the user did not start is not left waiting in Review on a text-only turn** — the parent's
+  context answers it, as it answers `ask_question`. Which runs that covers, and why the answer is an
+  advisory row, is `docs/auto-answer.md`; the merge flags are never consulted on the way.
 
 ## Deletion
 
@@ -432,6 +435,7 @@ deliberately omits.
 | `docs/sessions.md` | session storage shape, `/api/sessions*` responses, Settings → About UI |
 | `docs/threads-checkpoints.md` | branch vs snapshot layers, checkpoint pinning/restore, fork inheritance |
 | `docs/commit-and-done.md` | what the click does, conflict arming, which files never get committed |
+| `docs/auto-answer.md` | `Autostarted` provenance, which stops are answered from the parent, the advisory row |
 | `docs/languages.md` | `language` vs `language_id`, `syntax` as data, identifier shapes |
 | `docs/i18n.md` | the derived-language rule, catalog load and failure policy, pre-paint cache, locale offer |
 | `docs/ui-extensions.md` | `/extensions` serving + CSP, channel handshake, install model |
