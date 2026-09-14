@@ -3,7 +3,8 @@
  *
  * Three layers agree here: ChatForm decides what counts as focus leaving the chat input,
  * CardDetail owns the maximize state the sticky toggle and shortcut also drive, and this
- * file decides which focus event moves that state and which of those moves blur may undo.
+ * file decides which focus event moves that state and which of those moves blur or a send
+ * may undo.
  */
 
 /** What the preference and the layout allow. */
@@ -38,6 +39,14 @@ export function chatFocusState(rules: ChatAutoMaximizeRules, state: ChatMaximize
 
 /** Focus left the chat input — only the maximize this rule applied is reversed. */
 export function chatBlurState(state: ChatMaximizeState): ChatMaximizeState {
+    return state.autoMaximized ? chatCollapseState() : state;
+}
+
+/**
+ * A message was sent, which ends the maximize however the request turns out: the send is the
+ * user's part being done, and a refused or queued send leaves the draft where they can act again.
+ */
+export function chatSendState(state: ChatMaximizeState): ChatMaximizeState {
     return state.autoMaximized ? chatCollapseState() : state;
 }
 

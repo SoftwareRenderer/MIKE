@@ -16,7 +16,14 @@ Resolvers: `resolveArrowTarget` / `resolveOverviewArrowTarget` in
 `App/Sidebar.svelte`. The project focus ring is an **inset box-shadow** on `.project-item:focus` —
 ancestors clip outlines, and `click()+focus()` defeats `:focus-visible`.
 
-Tests: `composables/__tests__/board-arrow-nav.unit.ts`, e2e `board-arrow-nav.spec.ts`.
+`Card.svelte`'s `handleCardKeydown` takes Enter/Space **only when the event target is the card
+root**: a keydown aimed at a nested control (action icon, expand bar, subtask card) is that
+control's own activation, and `preventDefault()` on it cancels the button. Only a browser turns a
+keypress into a button click, so the activation itself is covered by e2e, its non-prevention by
+vitest.
+
+Tests: `composables/__tests__/board-arrow-nav.unit.ts`, `components/__tests__/card-actions-keyboard.unit.svelte.ts`,
+e2e `board-arrow-nav.spec.ts`.
 
 ## Task View (`CardDetail.svelte`)
 

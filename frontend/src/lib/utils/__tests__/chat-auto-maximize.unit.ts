@@ -4,6 +4,7 @@ import {
     chatCollapseState,
     chatFocusState,
     chatManualToggleState,
+    chatSendState,
     type ChatAutoMaximizeRules,
     type ChatMaximizeState,
 } from '$lib/utils/chat-auto-maximize';
@@ -55,6 +56,20 @@ describe('chatBlurState', () => {
 
     it('leaves a collapsed panel collapsed', () => {
         expect(chatBlurState(COLLAPSED)).toEqual(COLLAPSED);
+    });
+});
+
+describe('chatSendState', () => {
+    it('reverses the maximize the focus rule applied', () => {
+        expect(chatSendState(AUTO_MAXIMIZED)).toEqual(COLLAPSED);
+    });
+
+    it('leaves a manual maximize standing', () => {
+        expect(chatSendState(USER_MAXIMIZED)).toEqual(USER_MAXIMIZED);
+    });
+
+    it('leaves a collapsed panel collapsed', () => {
+        expect(chatSendState(COLLAPSED)).toEqual(COLLAPSED);
     });
 });
 
