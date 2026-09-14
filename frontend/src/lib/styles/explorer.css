@@ -1,0 +1,393 @@
+/* The explorer screens' shared styles — the markup ExplorerHeader.svelte and
+ * ExplorerWorkspace.svelte render for both the branch view and the task view.
+ *
+ * :global() for the reason file-drop.css states: a parent's scoped rule does not reach markup a
+ * child renders, and the header and the body are children of both views — so the rules live once,
+ * here, instead of one scoped copy in each of the two components that used to carry them.
+ *
+ * Every rule below the root is prefixed with .explorer-view because this file is global and other
+ * components use several of these names for their own markup that has nothing to do with an
+ * explorer (TopBar's .project-path, CardDetail's and ConfigModal's .tab-btn). The prefix also keeps
+ * a media override and its base rule at equal specificity inside one file, which file-drop.css
+ * needs and cannot have.
+ *
+ * Two rules genuinely differ between the screens and neither is a copy of the other, so each is a
+ * modifier on the shared one: the path's two shapes (`.is-ellipsis` — a project path is one line;
+ * `.is-clamped` — a task path is workspace-rooted and gets two) and `.explorer-branch-badge.is-status`
+ * (a task badge is painted from the task's status colour, which the markup passes as an inline style,
+ * so the shared rule only adds the border the colour needs). */
+
+:global(.explorer-view) {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--color-surface-0);
+    overflow: hidden;
+}
+
+:global(.explorer-view .explorer-header) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface-1);
+    flex-shrink: 0;
+}
+
+/* Fullscreen mode: hide header and tab bar, expand to cover sidebar */
+:global(.explorer-view.fullscreen) {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    margin: 0;
+    border-radius: 0;
+}
+:global(.explorer-view.fullscreen .explorer-header) {
+    display: none;
+}
+:global(.explorer-view.fullscreen .mobile-tab-bar) {
+    display: none !important;
+}
+:global(.explorer-view.fullscreen .explorer-left-column) {
+    display: none !important;
+}
+:global(.explorer-view.fullscreen .explorer-body) {
+    height: 100%;
+}
+
+:global(.explorer-view .explorer-view-icon) {
+    color: var(--color-text-secondary);
+    flex-shrink: 0;
+}
+
+:global(.explorer-view .project-path) {
+    font-size: 0.8125rem;
+    color: var(--color-text-primary);
+    line-height: var(--line-height-clipped);
+    align-self: center;
+    min-width: 0;
+    overflow: hidden;
+}
+:global(.explorer-view .project-path.is-ellipsis) {
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+:global(.explorer-view .project-path.is-clamped) {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+}
+
+:global(.explorer-view .explorer-header-spacer) {
+    flex: 1;
+}
+
+/* Unscoped, as it has always been in both views: it widens the tap target of every close button
+ * the app draws, shared.css's 4px aside. */
+:global(.close-btn) {
+    padding: 6px;
+}
+
+/* Both header buttons are the same box; Review Changes only exists in the branch view, and its
+ * markup lives in the shared header, so its selector shares the rule instead of repeating it. */
+:global(.explorer-view .terminal-btn),
+:global(.explorer-view .git-status-btn) {
+    padding: 6px 12px;
+    border-radius: var(--radius-md);
+    background: var(--color-surface-3);
+    color: var(--color-text-primary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    cursor: pointer;
+}
+:global(.explorer-view .terminal-btn:hover),
+:global(.explorer-view .git-status-btn:hover),
+:global(.explorer-view .git-status-btn.active) {
+    background: var(--color-accent-dark);
+    color: white;
+}
+
+/* Branch badge (shown when the changes panel is open, and always in the task view) */
+:global(.explorer-view .explorer-branch-badge) {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: var(--radius-md);
+    background: var(--color-surface-3);
+    color: var(--color-text-secondary);
+    font-size: 0.8125rem;
+    font-family: var(--font-mono);
+    font-weight: 500;
+    max-width: 160px;
+    overflow: hidden;
+    min-width: 0;
+}
+:global(.explorer-view .explorer-branch-badge.is-status) {
+    background: transparent;
+    border: 1px solid;
+}
+:global(.explorer-view .explorer-branch-badge svg) {
+    flex-shrink: 0;
+}
+:global(.explorer-view .branch-badge-label) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Branch selector */
+:global(.explorer-view .explorer-selector) {
+    position: relative;
+    min-width: 0;
+}
+
+:global(.explorer-view .explorer-dropdown-btn) {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 8px;
+    border-radius: var(--radius-md);
+    background: var(--color-surface-3);
+    color: var(--color-text-secondary);
+    font-size: 14px;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    border: none;
+    min-width: 0;
+    max-width: 100%;
+}
+:global(.explorer-view .explorer-dropdown-btn svg) {
+    flex-shrink: 0;
+}
+:global(.explorer-view .explorer-dropdown-btn:hover) {
+    background: var(--color-surface-4);
+    color: var(--color-text-primary);
+    opacity: 1;
+}
+:global(.explorer-view .explorer-dropdown-btn:disabled) {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+:global(.explorer-view .explorer-name) {
+    max-width: 120px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+:global(.explorer-view .explorer-dropdown-list) {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 100;
+    min-width: 160px;
+    max-width: min(320px, 100vw);
+    max-height: 240px;
+    overflow-y: auto;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    margin-top: 2px;
+}
+
+:global(.explorer-view .explorer-dropdown-item) {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 6px 10px;
+    border: none;
+    background: transparent;
+    color: var(--color-text-primary);
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+}
+:global(.explorer-view .explorer-dropdown-item:hover) {
+    background: var(--color-surface-3);
+    opacity: 1;
+}
+:global(.explorer-view .explorer-dropdown-item.active) {
+    color: var(--color-status-purple);
+}
+:global(.explorer-view .explorer-dropdown-item svg) {
+    flex-shrink: 0;
+}
+:global(.explorer-view .explorer-dropdown-name) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+:global(.explorer-view .explorer-dropdown-item.loading),
+:global(.explorer-view .explorer-dropdown-item.empty) {
+    color: var(--color-text-tertiary);
+    cursor: default;
+}
+:global(.explorer-view .explorer-check-empty) {
+    display: inline-block;
+    width: 10px;
+}
+
+:global(.explorer-view .explorer-body) {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+:global(.explorer-view .explorer-left-column) {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--color-border);
+    background: var(--color-surface-1);
+    overflow: hidden;
+}
+
+:global(.explorer-view .explorer-split-container) {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+}
+
+:global(.explorer-view .explorer-file-browser) {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+:global(.explorer-view .explorer-git-graph) {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+:global(.explorer-view .explorer-center-column) {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+:global(.explorer-view .explorer-right-column) {
+    flex-shrink: 0;
+    border-left: 1px solid var(--color-border);
+    background: var(--color-surface-1);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+:global(.explorer-view .explorer-right-column.hidden) {
+    display: none;
+}
+:global(.explorer-view .explorer-left-column.hidden) {
+    display: none;
+}
+
+:global(.explorer-view .explorer-changes-column) {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-surface-1);
+    overflow: hidden;
+    min-width: 0;
+}
+
+:global(.explorer-view .file-editor-placeholder) {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 48px 24px;
+    color: var(--color-text-tertiary);
+    font-size: 0.8125rem;
+    flex: 1;
+}
+
+:global(.explorer-view .mobile-tab-bar) {
+    display: none;
+}
+@media (max-width: 768px) {
+    :global(.explorer-view .mobile-tab-bar) {
+        display: flex;
+        border-bottom: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        flex-shrink: 0;
+    }
+    :global(.explorer-view .mobile-tab-bar .tab-btn) {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        padding: 10px 8px;
+        border: none;
+        background: none;
+        color: var(--color-text-tertiary);
+        font-size: 0.75rem;
+        font-weight: 500;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        transition: all 0.15s ease;
+    }
+    :global(.explorer-view .mobile-tab-bar .tab-btn.active) {
+        color: var(--color-accent);
+        border-bottom-color: var(--color-accent);
+    }
+    :global(.explorer-view .mobile-tab-bar .tab-btn:hover:not(.active)) {
+        color: var(--color-text-primary);
+    }
+    :global(.explorer-view .explorer-left-column) {
+        width: 100% !important;
+        border-right: none;
+        flex: 1 !important;
+        min-height: 0;
+    }
+    :global(.explorer-view .explorer-file-browser.mobile) {
+        flex: 0 0 75% !important;
+        min-height: 100px;
+    }
+    :global(.explorer-view .explorer-git-graph.mobile) {
+        flex: 1;
+        min-height: 0;
+    }
+    :global(.explorer-view .explorer-center-column) {
+        width: 100% !important;
+        flex: 1 !important;
+        min-height: 0;
+    }
+    :global(.explorer-view .explorer-right-column) {
+        width: 100% !important;
+        border-left: none;
+    }
+    :global(.explorer-view .explorer-left-column.hidden),
+    :global(.explorer-view .explorer-center-column.hidden),
+    :global(.explorer-view .explorer-right-column.hidden) {
+        display: none;
+    }
+    :global(.explorer-view .explorer-body) {
+        flex-direction: column;
+        min-height: 0;
+    }
+    :global(.explorer-view .explorer-changes-column) {
+        width: 100% !important;
+        flex: 1 !important;
+        min-height: 0;
+    }
+}
