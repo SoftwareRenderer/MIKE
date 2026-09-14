@@ -118,8 +118,6 @@
     let mountPath = $derived(sandboxEnabled ? '/home/sandbox/' + projectPath.split('/').filter(Boolean).pop() : '');
     // Current path: sandbox path when sandbox enabled, host path otherwise
     let currentPath = $state('');
-    // Reactive reference to projectPath for closures
-    let currentProjectPath = $derived(projectPath);
 
     // O(1) lookup — replaces Array.includes/some in template
     let unsavedPaths = $derived(new Set(unsavedFiles));

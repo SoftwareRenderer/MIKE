@@ -609,10 +609,7 @@
     }
 
     // Resize handlers
-    function handleLeftDragStart(_e: MouseEvent | TouchEvent, startX: number) {
-        leftDragStartX = startX;
-    }
-    let leftDragStartX = 0;
+    function handleLeftDragStart(_e: MouseEvent | TouchEvent, _startX: number) {}
     function handleLeftDragMove(pointerX: number) {
         const body = document.querySelector('.explorer-body');
         if (!body) return;
@@ -621,10 +618,7 @@
     }
     function handleLeftDragEnd() { persistExplorerLayout(); }
 
-    function handleRightDragStart(_e: MouseEvent | TouchEvent, startX: number) {
-        rightDragStartX = startX;
-    }
-    let rightDragStartX = 0;
+    function handleRightDragStart(_e: MouseEvent | TouchEvent, _startX: number) {}
     function handleRightDragMove(pointerX: number) {
         const body = document.querySelector('.explorer-body');
         if (!body) return;
@@ -633,10 +627,7 @@
     }
     function handleRightDragEnd() { persistExplorerLayout(); }
 
-    function handleSplitDragStart(_e: MouseEvent | TouchEvent, startY: number) {
-        splitDragStartY = startY;
-    }
-    let splitDragStartY = 0;
+    function handleSplitDragStart(_e: MouseEvent | TouchEvent, _startY: number) {}
     function handleSplitDragMove(pointerY: number) {
         const container = document.querySelector('.explorer-split-container');
         if (!container) return;

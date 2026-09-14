@@ -117,7 +117,6 @@
     let mountPath = $derived(sandboxEnabled ? '/home/sandbox/' + projectName : '');
     // Current path: sandbox path when sandbox enabled, host path otherwise
     let currentPath = $state('');
-    let currentTaskPath = $derived(taskPath);
 
     // O(1) lookup
     let unsavedPaths = $derived(new Set(unsavedFiles));
@@ -257,13 +256,6 @@
 
     function handleDirEnter(path: string) {
         loadDir(path);
-    }
-
-    function handleDirBack() {
-        if (currentPath !== (sandboxEnabled ? mountPath : taskPath)) {
-            const parentPath = currentPath.split('/').slice(0, -1).join('/');
-            loadDir(parentPath);
-        }
     }
 
     function getBreadcrumbParts(): string[] {

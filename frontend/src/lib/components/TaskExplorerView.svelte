@@ -33,14 +33,13 @@
             : t('explorer.shared.openTerminal');
     });
 
-    let { projectId, projectName, taskId, taskPath, taskBranch, taskStatus, currentBranch, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile, changesOpen, onChangesOpen }: {
+    let { projectId, projectName, taskId, taskPath, taskBranch, taskStatus, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile, changesOpen, onChangesOpen }: {
         projectId: string;
         projectName: string;
         taskId: string;
         taskPath: string;
         taskBranch: string;
         taskStatus: string;
-        currentBranch: string;
         sandboxEnabled: boolean;
         onClose: () => void;
         fsEventQueue: Array<{ op: 'create' | 'delete'; path: string }>;
@@ -117,7 +116,6 @@
     let openFiles = $state<OpenFileTab[]>([]);
     let activeFilePath = $state('');
     let pinnedFiles = $state(new Set<string>());
-    let initialSafeFile = $derived('');
     let unsavedFiles = $state(new Set<string>());
 
     // Load unsaved files from IndexedDB
@@ -455,10 +453,7 @@
     }
 
     // Resize handlers
-    function handleLeftDragStart(_e: MouseEvent | TouchEvent, startX: number) {
-        leftDragStartX = startX;
-    }
-    let leftDragStartX = 0;
+    function handleLeftDragStart(_e: MouseEvent | TouchEvent, _startX: number) {}
     function handleLeftDragMove(pointerX: number) {
         const body = document.querySelector('.explorer-body');
         if (!body) return;
@@ -467,10 +462,7 @@
     }
     function handleLeftDragEnd() { persistExplorerLayout(); }
 
-    function handleRightDragStart(_e: MouseEvent | TouchEvent, startX: number) {
-        rightDragStartX = startX;
-    }
-    let rightDragStartX = 0;
+    function handleRightDragStart(_e: MouseEvent | TouchEvent, _startX: number) {}
     function handleRightDragMove(pointerX: number) {
         const body = document.querySelector('.explorer-body');
         if (!body) return;
@@ -479,10 +471,7 @@
     }
     function handleRightDragEnd() { persistExplorerLayout(); }
 
-    function handleSplitDragStart(_e: MouseEvent | TouchEvent, startY: number) {
-        splitDragStartY = startY;
-    }
-    let splitDragStartY = 0;
+    function handleSplitDragStart(_e: MouseEvent | TouchEvent, _startY: number) {}
     function handleSplitDragMove(pointerY: number) {
         const container = document.querySelector('.explorer-split-container');
         if (!container) return;
