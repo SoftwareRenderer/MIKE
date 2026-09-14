@@ -42,7 +42,8 @@
     import { mount, unmount } from 'svelte';
     import { appStore, dialogStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
-    import { reconcileExternalChange } from '$lib/utils/editor-merge';
+    import { reconcileExternalChange, minimalReplace } from '$lib/utils/editor-merge';
+    import { fsEventConcernsFile, type FsEvent } from '$lib/utils/fs-event';
     import { getLanguageSupport, resolveFile } from '$lib/utils/editor-language';
     import { fileSuffix } from '$lib/utils/file-suffix';
     import { getOutline } from '$lib/utils/editor-outline';
@@ -57,6 +58,7 @@
         active = true,
         onFocused = () => {},
         onSymbolsUpdate = () => {},
+        onSymbolsPending = () => {},
         onHasChanges = () => {},
         onClose,
         // Presentation mode: 'explorer' (tab bar chrome, external) or 'diff'
@@ -85,6 +87,8 @@
         pendingFsEvent?: { op: 'create' | 'delete'; path: string } | null;
         onFocused?: (focused: boolean) => void;
         onSymbolsUpdate?: (symbols: LSPSymbol[]) => void;
+        /** Called when a symbol extraction starts, so the outline can hold what it shows. */
+        onSymbolsPending?: () => void;
         onHasChanges?: (filePath: string, hasChanges: boolean) => void;
         onClose: (saved: boolean) => void;
         mode?: 'explorer' | 'diff';
@@ -162,8 +166,19 @@
         onHasChanges(filePath, hasChanges);
     });
 
-    // On any fs_event, reconcile THIS editor's own file against disk
-    let lastHandledEvent: { op: string; path: string } | null = null;
+    // Reconcile THIS editor's own file against disk when an fs_event concerns it. An event naming
+    // another file earns a delayed reconcile: the watcher reports one path per 500 ms window and
+    // drops the rest, so it is not evidence that this file is unchanged.
+    const UNRELATED_EVENT_RECONCILE_MS = 2000;
+    let lastHandledEvent: FsEvent | null = null;
+    let unrelatedEventTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function clearUnrelatedEventTimer() {
+        if (!unrelatedEventTimer) return;
+        clearTimeout(unrelatedEventTimer);
+        unrelatedEventTimer = null;
+    }
+
     $effect(() => {
         const evt = pendingFsEvent;
         if (!evt) return;
@@ -171,7 +186,16 @@
         if (loading || !editorReady || fileNotFound || fileTooLarge) return;
         if (lastHandledEvent === evt) return;
         lastHandledEvent = evt;
-        void checkExternalChange();
+        clearUnrelatedEventTimer();
+        if (fsEventConcernsFile(evt, filePath, { projectId, taskId, rootPath: projectPath })) {
+            void checkExternalChange();
+            return;
+        }
+        unrelatedEventTimer = setTimeout(() => {
+            unrelatedEventTimer = null;
+            if (!active || loading || fileNotFound || fileTooLarge) return;
+            void checkExternalChange();
+        }, UNRELATED_EVENT_RECONCILE_MS);
     });
 
     /**
@@ -198,16 +222,46 @@
                 return;
             }
             // reload (no unsaved edits) or merged (user edits preserved)
-            applyDiskContent(result.content, theirs);
+            applyDiskContent(result.content, theirs, parseGutterMarkers(data.gutter_markers));
         } catch {
             // Transient read failure — keep the buffer untouched.
         }
     }
 
+    /** Gutter markers as the server reports them: line number to change types. Null when the
+     *  response carries none. */
+    function parseGutterMarkers(raw: unknown): Map<number, string[]> | null {
+        if (!raw || typeof raw !== 'object') return null;
+        const m = new Map<number, string[]>();
+        for (const [ln, types] of Object.entries(raw as Record<string, unknown>)) {
+            if (Array.isArray(types)) m.set(parseInt(ln, 10), types);
+        }
+        return m;
+    }
+
     /** Replace the editor buffer with reconciled content and re-baseline to disk. */
-    function applyDiskContent(newContent: string, diskContent: string) {
+    function applyDiskContent(
+        newContent: string,
+        diskContent: string,
+        markers: Map<number, string[]> | null = null,
+    ) {
+        if (mode === 'explorer') {
+            // The markers the server computed against HEAD replace ones keyed to content that no
+            // longer exists, and the baseline moves with them. Assign them before the dispatch: the
+            // gutter recomputes inside it, and only when the document changes.
+            if (markers) {
+                if (gitGutterState) gitGutterState.initialMarkers = markers;
+                gutterMarkers = markers;
+            }
+            if (gitGutterState) gitGutterState.baselineContent = diskContent;
+        }
         if (view) {
-            view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: newContent } });
+            // Only what changed is dispatched: replacing the whole document rebuilds every visible
+            // line and gutter marker.
+            const change = minimalReplace(view.state.doc.toString(), newContent);
+            if (change.from !== change.to || change.insert) {
+                view.dispatch({ changes: change });
+            }
             clearTimeout((view as any)._symbolTimer);
             (view as any)._symbolTimer = setTimeout(extractSymbols, 300);
         }
@@ -217,11 +271,6 @@
         hasChanges = content !== savedContent;
         lineCount = content ? content.split('\n').length : 0;
         charCount = content.length;
-        if (mode === 'explorer') {
-            // Stale gutter markers (vs the old baseline) no longer apply.
-            if (gitGutterState) gitGutterState.baselineContent = diskContent;
-            gutterMarkers = null;
-        }
         setEditorDraft(filePath, content).catch(() => {});
     }
 
@@ -268,6 +317,8 @@
 
     async function extractSymbols() {
         if (!view) return;
+        // The outline holds on to what it shows until this answers; see `onSymbolsPending`.
+        onSymbolsPending();
         // LSP document symbols are the primary source for both the outline panel and the sticky-scroll headers.
         const lspSymbols = await requestLSPSymbols(lspClient, lspFilePath);
         if (lspSymbols !== null) resetLspRetry();
@@ -690,17 +741,7 @@
                     baselineContent = '';
                 }
             } else {
-                // Parse gutter markers from server (diff vs HEAD)
-                const rawMarkers = data.gutter_markers;
-                if (rawMarkers && typeof rawMarkers === 'object') {
-                    const m = new Map<number, string[]>();
-                    for (const [ln, types] of Object.entries(rawMarkers)) {
-                        if (Array.isArray(types)) m.set(parseInt(ln, 10), types);
-                    }
-                    gutterMarkers = m;
-                } else {
-                    gutterMarkers = null;
-                }
+                gutterMarkers = parseGutterMarkers(data.gutter_markers);
 
                 // Use unsaved draft if available, otherwise use current file content
                 const draft = await getEditorDraft(filePath);
@@ -1480,6 +1521,7 @@
     });
 
     onDestroy(() => {
+        clearUnrelatedEventTimer();
         if (searchApp) {
             unmount(searchApp);
             searchApp = null;

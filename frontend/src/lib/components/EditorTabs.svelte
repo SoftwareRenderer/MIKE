@@ -70,26 +70,52 @@
 
     const NO_OUTLINE: LSPSymbol[] = [];
     let outlineByFile = $state.raw(new Map<string, LSPSymbol[]>());
-    const activeOutline = $derived(outlineByFile.get(activeFilePath) ?? NO_OUTLINE);
+    /** Files with a symbol extraction running. An unfinished pass has nothing to report, and
+     *  publishing that would blank the outline column for a moment. */
+    let pendingOutline = $state.raw(new Set<string>());
+
+    /** The outline to publish, or null while an extraction for this file is unfinished. */
+    const activeOutline = $derived.by(() => {
+        const outline = outlineByFile.get(activeFilePath) ?? NO_OUTLINE;
+        if (outline.length === 0 && pendingOutline.has(activeFilePath)) return null;
+        return outline;
+    });
 
     $effect(() => {
         const outline = activeOutline;
+        if (!outline) return;
         untrack(() => onSymbolsUpdate(outline));
     });
 
     $effect(() => {
         const open = new Set(openFiles.map(f => f.path));
         const stale = [...untrack(() => outlineByFile).keys()].filter(p => !open.has(p));
-        if (stale.length === 0) return;
+        const abandoned = [...untrack(() => pendingOutline)].filter(p => !open.has(p));
+        if (stale.length === 0 && abandoned.length === 0) return;
         const next = new Map(outlineByFile);
         for (const p of stale) next.delete(p);
         outlineByFile = next;
+        const nextPending = new Set(pendingOutline);
+        for (const p of abandoned) nextPending.delete(p);
+        pendingOutline = nextPending;
     });
+
+    function handleSymbolsPending(filePath: string) {
+        if (pendingOutline.has(filePath)) return;
+        const next = new Set(pendingOutline);
+        next.add(filePath);
+        pendingOutline = next;
+    }
 
     function handleSymbolsUpdate(filePath: string, symbols: LSPSymbol[]) {
         const next = new Map(outlineByFile);
         next.set(filePath, symbols);
         outlineByFile = next;
+        if (pendingOutline.has(filePath)) {
+            const nextPending = new Set(pendingOutline);
+            nextPending.delete(filePath);
+            pendingOutline = nextPending;
+        }
     }
 
     function handleHasChanges(filePath: string, hasChanges: boolean) {
@@ -185,6 +211,7 @@
                     active={file.path === activeFilePath}
                     onFocused={(focused: boolean) => handleEditorFocused(file.path, focused)}
                     onSymbolsUpdate={(symbols) => handleSymbolsUpdate(file.path, symbols)}
+                    onSymbolsPending={() => handleSymbolsPending(file.path)}
                     onHasChanges={(path: string, hasChanges: boolean) => handleHasChanges(path, hasChanges)}
                     onClose={() => onCloseTab(file.path)}
                     pendingFsEvent={pendingFsEvent}
