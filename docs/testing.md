@@ -60,6 +60,11 @@ stale-state cleanup stay in `AGENTS.md → Testing`.
   *unrelated* specs losing their `.file-browser-list` — the explorer's listing is a live
   `git status` and it does not retry after an error. Worktree git (`gitWithRetry`,
   `writeFileInWorktree`) is already per-task and needs nothing.
+- **The two file browsers are one component (`FileBrowserView`), and its listing answers to two names.**
+  Every listing is `.file-browser-list` and every row `.file-browser-item`; the task explorer's
+  listing and rows carry `file-list` / `file-entry` beside those, because that is the name its specs
+  locate them by (the props are `listingClass` / `rowClass`, and `file-drop.css` matches either).
+  Dropping the second name fails no gate — only `editor-line-task`.
 - **`[role="dialog"]` is not a selector here.** BaseModal, `CommitDiffOverlay`,
   `TerminalPanel` and BOTH explorer views carry `role="dialog"`, and every ChatMessage's
   edit `<dialog>` has it implicitly — so the bare locator is a strict-mode violation
@@ -69,8 +74,8 @@ stale-state cleanup stay in `AGENTS.md → Testing`.
 - **Which control you actually need** (each of these was a silently-wrong assertion):
   the Changes panel lists `.changes-file-row`s and the `.diff-row-clickable`s only render
   for the *selected* file — and an UNTRACKED file has no line diff until staged, so a
-  "click diff line" test must `git add` first. `BranchFileBrowser` uses class
-  `.new-file-input` for BOTH its new-file and new-folder rows (disambiguate with
+  "click diff line" test must `git add` first. `FileBrowserView` (the listing both explorers render)
+  uses class `.new-file-input` for BOTH its new-file and new-folder rows (disambiguate with
   `[aria-label="New folder name"]`; the folder button is `.new-file-btn[aria-label="Create new folder"]`,
   NOT `nth(1)`, which is New file). The review bar has three `.btn-commit-done` buttons —
   only `.btn-commit-and-done` opens the commit dialog, and it is gated on STAGED changes
