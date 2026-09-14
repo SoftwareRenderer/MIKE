@@ -108,10 +108,9 @@ i18n-parity: ## Check a locale pack against the English contract (make i18n-pari
 # environment reads below startup, hand-written keyed lock tables, routes registered without a
 # method, a state write on a cancellable GET, the app-stream event vocabulary, and the shape of the
 # executor's split: who may build it, what a collaborator may hold, how long a function may get.
-# Every rule runs
-# against a frozen baseline, so the count only shrinks and a fixed violation must be shrunk out of
-# the register. scripts/archgate holds the reasons; docs/architecture-review.md holds the numbers
-# that justified them.
+# Every rule runs against a frozen baseline, so the count only shrinks and a fixed violation must be
+# shrunk out of the register. scripts/archgate holds the reasons; docs/architecture-review.md holds the
+# numbers that justified them, and the commands that re-measure them.
 .PHONY: archgate
 archgate: ## Report structural debt against its frozen baselines (~0.2s)
 	@go run ./scripts/archgate $(if $(RULE),--rule $(RULE),) $(if $(UPDATE),-update,)
