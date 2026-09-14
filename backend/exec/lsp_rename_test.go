@@ -79,7 +79,7 @@ func TestHandleLSPRename_AppliesAllFiles(t *testing.T) {
 	te.lspMgr = fake
 	read, write := osReadWrite(ws)
 
-	result, err := te.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
+	result, err := te.tools.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
 	if err != nil {
 		t.Fatalf("handleLSPRename: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestHandleLSPRename_NotRenamable(t *testing.T) {
 	te.lspMgr = fake
 	read, write := osReadWrite(ws)
 
-	result, err := te.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
+	result, err := te.tools.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
 	if err != nil {
 		t.Fatalf("not-renamable should be an informative result, not an error: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestHandleLSPRename_NullResult(t *testing.T) {
 	te.lspMgr = fake
 	read, write := osReadWrite(ws)
 
-	result, err := te.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
+	result, err := te.tools.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
 	if err != nil {
 		t.Fatalf("null rename result should be informative, not an error: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestHandleLSPRename_LSPError(t *testing.T) {
 	te.lspMgr = fake
 	read, write := osReadWrite(ws)
 
-	_, err := te.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
+	_, err := te.tools.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
 	if err == nil {
 		t.Fatal("expected error for LSP error envelope")
 	}
@@ -220,7 +220,7 @@ func TestHandleLSPRename_OutsideWorkspace(t *testing.T) {
 	te.lspMgr = fake
 	read, write := osReadWrite(ws)
 
-	_, err := te.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
+	_, err := te.tools.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
 	if err == nil {
 		t.Fatal("expected error for edit target outside workspace")
 	}
@@ -238,7 +238,7 @@ func TestHandleLSPRename_RequiredArgs(t *testing.T) {
 		{"path": "a.txt", "new_name": "bar"},
 		{"path": "a.txt", "symbol": "foo"},
 	} {
-		if _, err := te.handleLSPRename(context.Background(), args, t.TempDir(), read, write); err == nil {
+		if _, err := te.tools.handleLSPRename(context.Background(), args, t.TempDir(), read, write); err == nil {
 			t.Errorf("expected error for args %v", args)
 		}
 	}
@@ -247,7 +247,7 @@ func TestHandleLSPRename_RequiredArgs(t *testing.T) {
 func TestHandleLSPRename_NoLSPManager(t *testing.T) {
 	te := newBareTestExecutor(t) // lspMgr nil
 	read, write := osReadWrite(t.TempDir())
-	if _, err := te.handleLSPRename(context.Background(), renameArgs(), t.TempDir(), read, write); err == nil {
+	if _, err := te.tools.handleLSPRename(context.Background(), renameArgs(), t.TempDir(), read, write); err == nil {
 		t.Error("expected error when LSP manager is nil")
 	}
 }
@@ -256,7 +256,7 @@ func TestHandleLSPRename_ToolCallsDisabled(t *testing.T) {
 	te := newBareTestExecutor(t)
 	te.lspMgr = &fakeLSPManager{enabled: false}
 	read, write := osReadWrite(t.TempDir())
-	if _, err := te.handleLSPRename(context.Background(), renameArgs(), t.TempDir(), read, write); err == nil {
+	if _, err := te.tools.handleLSPRename(context.Background(), renameArgs(), t.TempDir(), read, write); err == nil {
 		t.Error("expected error when LSP tool calls are disabled")
 	}
 }
@@ -267,7 +267,7 @@ func TestHandleLSPRename_SymbolNotFound(t *testing.T) {
 	te := newBareTestExecutor(t)
 	te.lspMgr = &fakeLSPManager{enabled: true}
 	read, write := osReadWrite(ws)
-	result, err := te.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
+	result, err := te.tools.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
 	if err != nil {
 		t.Fatalf("missing symbol should be informative, not an error: %v", err)
 	}

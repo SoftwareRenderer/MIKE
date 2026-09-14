@@ -32,7 +32,7 @@ func TestEveryDeclaredToolIsDispatched(t *testing.T) {
 
 			result, ok := te.executeTool(ctx, name, map[string]any{}, worktree, task, state, nil)
 			if strings.HasPrefix(result, "Unknown tool:") {
-				t.Errorf("%q is offered to providers but executeToolInner has no case for it: %s", name, result)
+				t.Errorf("%q is offered to providers but the dispatch table has no entry for it: %s", name, result)
 			}
 			// A failed call has to explain itself; an empty failure is indistinguishable from a
 			// call still running. (An empty result with ok is fine - bash with no command is a no-op.)

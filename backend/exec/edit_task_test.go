@@ -35,7 +35,7 @@ func TestHandleEditTask_NestingRespectsParentSubtasksAutoMerge_False(t *testing.
 
 	editTaskTarget(t, te.store, "proj-nest-1", "target-nest-1", true, true, true, "")
 
-	_, err := te.handleEditTask(map[string]any{
+	_, err := te.tools.handleEditTask(map[string]any{
 		"task_id":        "target-nest-1",
 		"parent_task_id": "parent-nest-1",
 	}, parent)
@@ -72,7 +72,7 @@ func TestHandleEditTask_NestingInheritsSubtasksAutoMergeTrue(t *testing.T) {
 
 	editTaskTarget(t, te.store, "proj-nest-2", "target-nest-2", false, false, false, "")
 
-	_, err := te.handleEditTask(map[string]any{
+	_, err := te.tools.handleEditTask(map[string]any{
 		"task_id":        "target-nest-2",
 		"parent_task_id": "parent-nest-2",
 	}, parent)
@@ -106,7 +106,7 @@ func TestHandleEditTask_UnnestResetsToConfigDefaults(t *testing.T) {
 	// own subtasks_auto_merge=true.
 	editTaskTarget(t, te.store, "proj-unnest-3", "target-unnest-3", false, false, true, "parent-unnest-3")
 
-	_, err := te.handleEditTask(map[string]any{
+	_, err := te.tools.handleEditTask(map[string]any{
 		"task_id":        "target-unnest-3",
 		"parent_task_id": "",
 	}, parent)
@@ -145,7 +145,7 @@ func TestHandleEditTask_UnchangedParentDoesNotClobberAutoMerge(t *testing.T) {
 	// parent disallowing subtask auto-merge.
 	editTaskTarget(t, te.store, "proj-same-4", "target-same-4", true, true, true, "parent-same-4")
 
-	_, err := te.handleEditTask(map[string]any{
+	_, err := te.tools.handleEditTask(map[string]any{
 		"task_id":        "target-same-4",
 		"parent_task_id": "parent-same-4", // same parent — no-op reparent
 	}, parent)
@@ -175,7 +175,7 @@ func TestHandleEditTask_UnnestWhenAlreadyIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get current task: %v", err)
 	}
-	_, err = te.handleEditTask(map[string]any{
+	_, err = te.tools.handleEditTask(map[string]any{
 		"task_id":        "target-ind-5",
 		"parent_task_id": "",
 	}, current)
@@ -203,7 +203,7 @@ func TestHandleEditTask_TitleOnlyEditKeepsAutoMerge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get current task: %v", err)
 	}
-	_, err = te.handleEditTask(map[string]any{
+	_, err = te.tools.handleEditTask(map[string]any{
 		"task_id": "target-title-6",
 		"title":   "Renamed",
 	}, current)
@@ -233,7 +233,7 @@ func TestHandleEditTask_StartedParentAccepted(t *testing.T) {
 
 	editTaskTarget(t, te.store, "proj-nb-7", "target-nb-7", true, true, true, "")
 
-	if _, err := te.handleEditTask(map[string]any{
+	if _, err := te.tools.handleEditTask(map[string]any{
 		"task_id":        "target-nb-7",
 		"parent_task_id": "parent-nb-7",
 	}, parent); err != nil {

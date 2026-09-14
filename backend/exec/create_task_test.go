@@ -65,7 +65,7 @@ func TestHandleCreateTask_Basic(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-1", "proj-1", "backlog")
 
-	result, err := te.handleCreateTask(map[string]any{
+	result, err := te.tools.handleCreateTask(map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Implement the child feature",
 		"parent_task_id": "parent-task-1",
@@ -113,7 +113,7 @@ func TestHandleCreateTask_InheritsSettings(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-2", "proj-1", "backlog")
 
-	_, err := te.handleCreateTask(map[string]any{
+	_, err := te.tools.handleCreateTask(map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Test prompt",
 		"parent_task_id": "parent-task-2",
@@ -149,7 +149,7 @@ func TestHandleCreateTask_NestedSubtask(t *testing.T) {
 	parent := createParentTask(t, te.store, "parent-task-3", "proj-1", "backlog")
 
 	// Create first child under parent
-	result1, err := te.handleCreateTask(map[string]any{
+	result1, err := te.tools.handleCreateTask(map[string]any{
 		"title":          "Level 1 Task",
 		"prompt":         "Level 1 prompt",
 		"parent_task_id": "parent-task-3",
@@ -164,7 +164,7 @@ func TestHandleCreateTask_NestedSubtask(t *testing.T) {
 
 	// Ensure parent can accept nested subtasks (parent must still be in backlog)
 	// Create a second child under the first child
-	result2, err := te.handleCreateTask(map[string]any{
+	result2, err := te.tools.handleCreateTask(map[string]any{
 		"title":          "Level 2 Task",
 		"prompt":         "Level 2 prompt",
 		"parent_task_id": level1ID,
@@ -194,7 +194,7 @@ func TestHandleCreateTask_CreatesThread(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-4", "proj-1", "backlog")
 
-	result, err := te.handleCreateTask(map[string]any{
+	result, err := te.tools.handleCreateTask(map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Test prompt",
 		"parent_task_id": "parent-task-4",
@@ -227,7 +227,7 @@ func TestHandleCreateTask_CreatesPromptMessage(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-5", "proj-1", "backlog")
 
-	result, err := te.handleCreateTask(map[string]any{
+	result, err := te.tools.handleCreateTask(map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Implement feature X",
 		"parent_task_id": "parent-task-5",
@@ -261,7 +261,7 @@ func TestHandleCreateTask_MissingTitle(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-6", "proj-1", "backlog")
 
-	_, err := te.handleCreateTask(map[string]any{
+	_, err := te.tools.handleCreateTask(map[string]any{
 		"prompt": "Test prompt",
 	}, parent, nil)
 
@@ -277,7 +277,7 @@ func TestHandleCreateTask_MissingPrompt(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-7", "proj-1", "backlog")
 
-	_, err := te.handleCreateTask(map[string]any{
+	_, err := te.tools.handleCreateTask(map[string]any{
 		"title": "Task without prompt",
 	}, parent, nil)
 
@@ -293,7 +293,7 @@ func TestHandleCreateTask_ParentNotFound(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-8", "proj-1", "backlog")
 
-	_, err := te.handleCreateTask(map[string]any{
+	_, err := te.tools.handleCreateTask(map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Test prompt",
 		"parent_task_id": "nonexistent-task",
@@ -324,7 +324,7 @@ func TestHandleCreateTask_ParentStatusPlacesChild(t *testing.T) {
 			te := newTestExecutor(t)
 			parent := createParentTask(t, te.store, fmt.Sprintf("parent-place-%d", n), "proj-1", types.Status(tc.parent))
 
-			result, err := te.handleCreateTask(map[string]any{
+			result, err := te.tools.handleCreateTask(map[string]any{
 				"title":          "Placed Child",
 				"prompt":         "Test prompt",
 				"parent_task_id": parent.ID,
@@ -357,7 +357,7 @@ func TestHandleCreateTask_AllowsInProgressParent(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-10", "proj-1", "in_progress")
 
-	result, err := te.handleCreateTask(map[string]any{
+	result, err := te.tools.handleCreateTask(map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Test prompt",
 		"parent_task_id": "parent-task-10",
@@ -382,7 +382,7 @@ func TestHandleCreateTask_MultipleSubtasks(t *testing.T) {
 
 	// Create multiple subtasks under parent
 	for i := 1; i <= 3; i++ {
-		result, err := te.handleCreateTask(map[string]any{
+		result, err := te.tools.handleCreateTask(map[string]any{
 			"title":          "Task " + string(rune('A'+i-1)),
 			"prompt":         "Prompt for task " + string(rune('A'+i-1)),
 			"parent_task_id": "parent-task-11",
@@ -414,7 +414,7 @@ func TestHandleCreateTask_TitleWithSpecialChars(t *testing.T) {
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-12", "proj-1", "backlog")
 
-	result, err := te.handleCreateTask(map[string]any{
+	result, err := te.tools.handleCreateTask(map[string]any{
 		"title":          `Task with "quotes" and \backslash`,
 		"prompt":         "Test prompt",
 		"parent_task_id": "parent-task-12",
@@ -457,7 +457,7 @@ func TestTaskComplete_PlanMode_AllowsWithSubtasks(t *testing.T) {
 
 	// Create a subtask via handleCreateTask
 	state := &executionState{}
-	result, err := te.handleCreateTask(map[string]any{
+	result, err := te.tools.handleCreateTask(map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Implement the child feature",
 		"parent_task_id": "plan-parent-1",
@@ -599,7 +599,7 @@ func TestPlanCreatedTaskIDs_MergesHistoryAndState(t *testing.T) {
 	}
 	state := &executionState{createdIDs: []string{"child-a", "child-b"}}
 
-	ids := te.planCreatedTaskIDs(plan, state)
+	ids := te.tools.planCreatedTaskIDs(plan, state)
 	if len(ids) != 2 || ids[0] != "child-a" || ids[1] != "child-b" {
 		t.Errorf("expected [child-a child-b] (deduped), got %v", ids)
 	}
@@ -612,7 +612,7 @@ func TestHandleCreateTask_UsesConfigDefaultsForAutoMerge(t *testing.T) {
 	parent := createParentTask(t, te.store, "parent-auto-merge", "proj-am", "backlog")
 
 	// Create an independent task (no parent_task_id)
-	result, err := te.handleCreateTask(map[string]any{
+	result, err := te.tools.handleCreateTask(map[string]any{
 		"title":  "Independent Task",
 		"prompt": "Test prompt",
 	}, parent, nil)
@@ -649,7 +649,7 @@ func TestHandleCreateTask_SubtaskInheritsSubtasksAutoMergeAsAutoMerge(t *testing
 	_ = te.store.UpdateTask(parent)
 
 	// Create a subtask under this parent
-	result, err := te.handleCreateTask(map[string]any{
+	result, err := te.tools.handleCreateTask(map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Test prompt",
 		"parent_task_id": "parent-inherit-am",
@@ -684,7 +684,7 @@ func TestHandleCreateTask_NoConfigDefaults_UsesZeroValues(t *testing.T) {
 	te := newTestExecutorWithConfig(t, false, false)
 	parent := createParentTask(t, te.store, "parent-no-defaults", "proj-nd", "backlog")
 
-	result, err := te.handleCreateTask(map[string]any{
+	result, err := te.tools.handleCreateTask(map[string]any{
 		"title":  "Task",
 		"prompt": "Test prompt",
 	}, parent, nil)

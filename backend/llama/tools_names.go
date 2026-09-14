@@ -1,7 +1,7 @@
 package llama
 
 // Tool names are the wire contract between three places that must agree: the definitions this
-// package publishes to the provider, the dispatch in exec.executeToolInner, and the frontend that
+// package publishes to the provider, the dispatch table in exec.toolRunner, and the frontend that
 // renders a tool call's card. They were spelled as string literals at all three sites (~90 of them).
 // A typo in one is not a compile error - it is a tool the model can call that nothing answers, which
 // renders as a call stuck on "Running" forever.

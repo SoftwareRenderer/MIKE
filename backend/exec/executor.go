@@ -77,6 +77,8 @@ type TaskExecutor struct {
 	worktreeMu taskWorktreeLocks // taskID -> the task's own worktree lock
 	// Branch and merge behaviour of a finished turn. Its lock discipline is in mergeOrchestrator.
 	merge *mergeOrchestrator
+	// The tool-call dispatcher: the table of tool handlers and the environment each call runs in.
+	tools *toolRunner
 	// The task's context window: the threshold decision, the rolling summary, the manual paths.
 	// Its lock discipline is in summarizeOrchestrator.
 	summarize *summarizeOrchestrator
@@ -148,7 +150,7 @@ type executionState struct {
 	createdIDs   []string     // task IDs created by create_task during this execution
 	executorType string       // "llm" or "agent" — tracks which executor type is active
 	taskStatus   types.Status // task status at start; cleared by StopTask so HasRunningTasks can skip it
-	// sandboxEnabled is the task's project setting, fixed for the run. executeToolInner refuses
+	// sandboxEnabled is the task's project setting, fixed for the run. toolEnv.hostGuard refuses
 	// a sandboxed task's host fallbacks with it.
 	sandboxEnabled bool
 	// lastDiffHash tracks the last broadcast diff hash to avoid duplicate broadcasts
@@ -342,6 +344,7 @@ func NewTaskExecutor(deps Deps) *TaskExecutor {
 	})
 	te.merge = te.newMergeOrchestrator()
 	te.summarize = te.newSummarizeOrchestrator()
+	te.tools = te.newToolRunner()
 	te.appStreamMgr.SetLazyStartHandler(te.handleLazyStart)
 	return te
 }
