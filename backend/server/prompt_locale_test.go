@@ -109,7 +109,7 @@ func TestRefreshPromptLocaleFollowsTheEnabledPack(t *testing.T) {
 }
 
 // TestRefreshPromptLocaleCatalogOnlyPack covers the pack that translates the UI and
-// ships no prompt templates: the directive applies, the templates stay core's.
+// ships no prompt templates: the locale is still recorded, the templates stay core's.
 func TestRefreshPromptLocaleCatalogOnlyPack(t *testing.T) {
 	s := testServer(t)
 	s.extensionsDir = t.TempDir()
@@ -127,7 +127,7 @@ func TestRefreshPromptLocaleCatalogOnlyPack(t *testing.T) {
 		t.Errorf("a pack with no prompts_dir set templates to %q", dir)
 	}
 	if locale != "fr" {
-		t.Errorf("locale = %q, want fr — the answer-language directive does not need templates", locale)
+		t.Errorf("locale = %q, want fr — the locale is recorded whether or not the pack shipped templates", locale)
 	}
 }
 

@@ -144,9 +144,9 @@ func TestNoOverlayRendersCoreBytesForEveryEntryPoint(t *testing.T) {
 	})
 }
 
-// TestNoOverlayCarriesNoDirective pins the other half of "English is the no-pack
-// state": the answer-language directive is not in the prompt, so the shipped
-// prompt is what it always was even for a user whose browser is not English.
+// TestNoOverlayCarriesNoDirective pins that core holds no language instruction at
+// all: the answer's language is something a translation pack says in its own
+// base.tmpl, never something English asks for on a pack's behalf.
 func TestNoOverlayCarriesNoDirective(t *testing.T) {
 	withRealTemplates(t)
 	resetOverlay(t)
@@ -163,34 +163,10 @@ func TestNoOverlayCarriesNoDirective(t *testing.T) {
 	}
 }
 
-// TestOverlayLocaleAddsDirectiveWithTheTagVerbatim checks the directive arrives
-// when a pack is active and carries the pack's tag, never a language name — core
-// holds none, and a name would be core's opinion about somebody's language.
-func TestOverlayLocaleAddsDirectiveWithTheTagVerbatim(t *testing.T) {
-	withRealTemplates(t)
-	resetOverlay(t)
-
-	SetOverlay("", "zh")
-	out, err := RenderSystemPrompt(baseSample())
-	if err != nil {
-		t.Fatalf("render: %v", err)
-	}
-	if !strings.Contains(out, "Answer in the user's language (`zh`)") {
-		t.Errorf("directive missing or the tag did not survive: %.400s", out)
-	}
-	// The blank line the directive sits in must not double up or vanish: it is
-	// inserted between the opening line and the tool list, each separated by one
-	// blank line, exactly as the two-paragraph prompt was before it existed.
-	if !strings.Contains(out, "plain language.\n\nAnswer in the user's language (`zh`") ||
-		!strings.Contains(out, "as the project has them.\n\nYou have access") ||
-		strings.Contains(out, "\n\n\n") {
-		t.Errorf("directive broke the spacing around the first paragraph:\n%.300s", out)
-	}
-}
-
-// TestOverlayLocaleOnlyLeavesTemplatesAlone covers the pack that translates the UI
-// and ships no templates: the directive applies, the templates do not.
-func TestOverlayLocaleOnlyLeavesTemplatesAlone(t *testing.T) {
+// TestNoCoreTemplateReadsTheLocale is the pack contract in both directions: a pack
+// that translates the UI and ships no templates leaves the render byte-for-byte English
+// core's, and no core template reads the locale the overlay carries.
+func TestNoCoreTemplateReadsTheLocale(t *testing.T) {
 	withRealTemplates(t)
 	resetOverlay(t)
 
@@ -199,19 +175,22 @@ func TestOverlayLocaleOnlyLeavesTemplatesAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	if !strings.Contains(out, "`ko`") {
-		t.Error("locale-only pack should still ask for the answer in that language")
+	if strings.Contains(out, "`ko`") {
+		t.Error("core template read the locale; English must not mention a language")
 	}
-	// …and every template is core's, because the pack shipped none.
+	// Every template is core's, because the pack shipped none — and the locale the
+	// overlay carries does not reach any of them.
 	files, _ := filepath.Glob(filepath.Join(promptDir(), "*.tmpl"))
-	want := baseSample()
-	want.Locale = "ko"
-	if out != coreRendered(t, files, "base.tmpl", want) {
-		t.Errorf("a pack with no templates changed the templates:\n got %.200q\nwant %.200q", out, coreRendered(t, files, "base.tmpl", want))
+	withLocale := baseSample()
+	withLocale.Locale = "ko"
+	if out != coreRendered(t, files, "base.tmpl", baseSample()) {
+		t.Errorf("a pack with no templates changed the templates:\n got %.200q\nwant %.200q", out, coreRendered(t, files, "base.tmpl", baseSample()))
+	}
+	if coreRendered(t, files, "base.tmpl", withLocale) != coreRendered(t, files, "base.tmpl", baseSample()) {
+		t.Error("a core template reads .Locale; English must answer identically whatever the overlay carries")
 	}
 	plan := baseSample()
 	plan.PlanMode = true
-	plan.Locale = "ko"
 	planOut, err := RenderSystemPrompt(plan)
 	if err != nil {
 		t.Fatalf("plan render: %v", err)

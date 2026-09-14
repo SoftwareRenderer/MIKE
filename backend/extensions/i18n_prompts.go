@@ -59,8 +59,6 @@ func PromptOverlayFor(exts []Extension, extensionsDir string) PromptOverlay {
 		return PromptOverlay{}
 	}
 	i18n := pack.GetI18N()
-	// The locale stands whether or not this pack translates the prompts: a pack that
-	// ships only a catalog still asks for the answer in the user's language.
 	answer := PromptOverlay{Locale: i18n.Locale}
 	if i18n.PromptsDir == "" {
 		return answer

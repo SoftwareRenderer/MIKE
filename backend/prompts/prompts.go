@@ -18,13 +18,6 @@ type PromptData struct {
 	AgentsMd     string  // contents of AGENTS.md from worktree root, empty if not found
 	Skills       []Skill // discovered skills with name, description, and location
 	Summary      string  // prior conversation summary
-	// Locale is the language the active translation pack asked the answer to be
-	// written in — a BCP-47 tag carried through verbatim, never a language name.
-	// Empty renders no directive, which is what English is.
-	//
-	// Callers leave it alone: RenderSystemPrompt fills it from the active overlay, so no
-	// call site has to know a pack exists. Set it directly only to render one specific
-	// language (tests).
 	Locale string `json:"-"`
 }
 

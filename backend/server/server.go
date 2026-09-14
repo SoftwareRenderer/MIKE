@@ -547,7 +547,7 @@ func (s *Server) refreshPromptLocale() {
 	case ov.Locale == "":
 		logging.For(logging.Prompts).Infof("locale=en (no translation pack enabled)")
 	case ov.Dir == "":
-		logging.For(logging.Prompts).Infof("locale=%s (pack ships no prompt templates — core English renders, the answer is asked for in %s)", ov.Locale, ov.Locale)
+		logging.For(logging.Prompts).Infof("locale=%s (pack ships no prompt templates — core's English prompt renders)", ov.Locale)
 	default:
 		logging.For(logging.Prompts).Infof("locale=%s templates=%s", ov.Locale, ov.Dir)
 	}
