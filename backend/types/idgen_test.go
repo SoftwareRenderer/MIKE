@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -47,15 +48,6 @@ func TestTaskWordsAreUsableInIDParts(t *testing.T) {
 	}
 }
 
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
 // TestIDGenerationUsesCryptoRand guards the entropy source: task and thread IDs
 // surface in URLs, git branch names and worktree paths, so they must not come
 // from the clock-seeded math/rand.
@@ -85,7 +77,7 @@ func TestGenerateTaskIDFormat(t *testing.T) {
 			t.Fatalf("task ID %q does not match ^[a-z]+-[a-z]+-[a-z]+$", id)
 		}
 		for _, part := range strings.Split(id, "-") {
-			if !contains(taskWords, part) {
+			if !slices.Contains(taskWords, part) {
 				t.Fatalf("task ID %q uses the word %q, which is not in the dictionary", id, part)
 			}
 		}
@@ -95,7 +87,7 @@ func TestGenerateTaskIDFormat(t *testing.T) {
 			t.Fatalf("thread ID %q does not match ^[a-z]+-[a-z]+$", thread)
 		}
 		for _, part := range strings.Split(thread, "-") {
-			if !contains(taskWords, part) {
+			if !slices.Contains(taskWords, part) {
 				t.Fatalf("thread ID %q uses the word %q, which is not in the dictionary", thread, part)
 			}
 		}

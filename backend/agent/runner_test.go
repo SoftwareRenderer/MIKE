@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -451,7 +452,7 @@ func TestAgentRunner_Compact(t *testing.T) {
 				if tt.wantErrContain == "" {
 					t.Fatalf("unexpected error: %v", err)
 				}
-				if !containsStr(err.Error(), tt.wantErrContain) {
+				if !strings.Contains(err.Error(), tt.wantErrContain) {
 					t.Errorf("error = %q, want contain %q", err.Error(), tt.wantErrContain)
 				}
 				return
@@ -558,7 +559,7 @@ func TestNewAgentRunner_BrokenAdapter(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from NewAgentRunner with broken adapter, got nil")
 	}
-	if !containsStr(err.Error(), "empty binary") {
+	if !strings.Contains(err.Error(), "empty binary") {
 		t.Errorf("expected 'empty binary' in error, got: %v", err)
 	}
 }
@@ -587,7 +588,7 @@ func TestAgentRunner_PromptNilEncode(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from Prompt with nil EncodeCommand, got nil")
 	}
-	if !containsStr(err.Error(), "nil") {
+	if !strings.Contains(err.Error(), "nil") {
 		t.Errorf("expected 'nil' in error, got: %v", err)
 	}
 }
@@ -615,19 +616,6 @@ func TestAgentRunner_CloseNilEncode(t *testing.T) {
 
 	// Double-close should also be safe
 	runner.Close()
-}
-
-// containsStr is a helper for error message checking.
-func containsStr(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && func() bool {
-			for i := 0; i <= len(s)-len(substr); i++ {
-				if s[i:i+len(substr)] == substr {
-					return true
-				}
-			}
-			return false
-		}()))
 }
 
 // TestSubprocessConfig_Serialization verifies agent.SubprocessConfig marshals correctly.

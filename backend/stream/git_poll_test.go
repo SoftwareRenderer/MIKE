@@ -80,7 +80,6 @@ func TestBranchWatcherLifecycle(t *testing.T) {
 
 	// Simulate a branch switch by writing a new HEAD file
 	headPath := filepath.Join(repoDir, ".git", "HEAD")
-	writeFile(t, "", "", "") // no-op, just get the helper
 	err = os.WriteFile(headPath, []byte("ref: refs/heads/feature-test\n"), 0o644)
 	if err != nil {
 		t.Fatalf("write HEAD: %v", err)
@@ -694,9 +693,7 @@ func runGit(t *testing.T, dir string, args ...string) {
 // writeFile writes content to a file in the specified directory.
 func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
-	if dir != "" && name != "" {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
-			t.Fatalf("write file: %v", err)
-		}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
 	}
 }

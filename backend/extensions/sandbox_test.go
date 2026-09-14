@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -63,31 +64,18 @@ func TestExtensionRuntimeStatus_MarshalJSON(t *testing.T) {
 	}
 
 	jsonStr := string(data)
-	if !contains(jsonStr, `"running":true`) {
+	if !strings.Contains(jsonStr, `"running":true`) {
 		t.Errorf("JSON missing running:true: %s", jsonStr)
 	}
-	if !contains(jsonStr, `"container":"kanban-ext-test"`) {
+	if !strings.Contains(jsonStr, `"container":"kanban-ext-test"`) {
 		t.Errorf("JSON missing container name: %s", jsonStr)
 	}
-	if !contains(jsonStr, `"ref_count":2`) {
+	if !strings.Contains(jsonStr, `"ref_count":2`) {
 		t.Errorf("JSON missing ref_count: %s", jsonStr)
 	}
-	if !contains(jsonStr, `"created_at"`) {
+	if !strings.Contains(jsonStr, `"created_at"`) {
 		t.Errorf("JSON missing created_at: %s", jsonStr)
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && findSubstr(s, substr))
-}
-
-func findSubstr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func TestExtensionContainerPrefix(t *testing.T) {
@@ -1265,8 +1253,8 @@ func TestCreate_DerivesAndRecordsTheImageForARowWithNoImage(t *testing.T) {
 					t.Errorf("build tagged %q, want %q", call[i+1], ref)
 				}
 			}
-		case containsArg(call, "create"):
-			created = containsArg(call, ref)
+		case slices.Contains(call, "create"):
+			created = slices.Contains(call, ref)
 		}
 	}
 	if !built {
@@ -1284,13 +1272,4 @@ func TestCreate_DerivesAndRecordsTheImageForARowWithNoImage(t *testing.T) {
 		t.Errorf("record after repair: image_ref=%q container_config.image=%q, want %q in both",
 			stored.ImageRef, stored.ContainerConfig.Image, ref)
 	}
-}
-
-func containsArg(args []string, want string) bool {
-	for _, a := range args {
-		if a == want {
-			return true
-		}
-	}
-	return false
 }

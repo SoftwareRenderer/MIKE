@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -104,17 +106,19 @@ func TestExtensionPackage_TypescriptLanguageServer_Dockerfile(t *testing.T) {
 	content := string(data)
 
 	// Must reference sandbox-bridge
-	if !containsAll(content, "sandbox-bridge") {
+	if !strings.Contains(content, "sandbox-bridge") {
 		t.Error("Dockerfile does not reference sandbox-bridge")
 	}
 
 	// Must have a CMD or ENTRYPOINT
-	if !containsAny(content, "CMD", "ENTRYPOINT") {
+	if !slices.ContainsFunc([]string{"CMD", "ENTRYPOINT"}, func(kw string) bool {
+		return strings.Contains(content, kw)
+	}) {
 		t.Error("Dockerfile has no CMD or ENTRYPOINT")
 	}
 
 	// Must install typescript-language-server
-	if !containsAll(content, "typescript-language-server") {
+	if !strings.Contains(content, "typescript-language-server") {
 		t.Error("Dockerfile does not install typescript-language-server")
 	}
 }
@@ -169,35 +173,4 @@ func TestExtensionPackage_TypescriptLanguageServer_RegistryEntry(t *testing.T) {
 	if found.Subdir != "lsp/typescript-language-server" {
 		t.Errorf("Subdir = %q, want %q", found.Subdir, "lsp/typescript-language-server")
 	}
-}
-
-func containsAll(s string, substrs ...string) bool {
-	for _, sub := range substrs {
-		if !containsAny(s, sub) {
-			return false
-		}
-	}
-	return true
-}
-
-func containsAny(s string, substrs ...string) bool {
-	for _, sub := range substrs {
-		if stringsContains(s, sub) {
-			return true
-		}
-	}
-	return false
-}
-
-func stringsContains(s, substr string) bool {
-	return len(s) >= len(substr) && searchSubstring(s, substr)
-}
-
-func searchSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

@@ -3,6 +3,7 @@ package git
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -31,7 +32,7 @@ func TestRemoveWorktreeClearsDirectoryRegistrationAndBranch(t *testing.T) {
 	if regs := worktreeRegistrations(t, repoDir); regs != 0 {
 		t.Errorf("%d worktree registration(s) left in .git/worktrees after removal", regs)
 	}
-	if contains(getBranches(t, repoDir), branch) {
+	if slices.Contains(getBranches(t, repoDir), branch) {
 		t.Errorf("branch %s survived RemoveWorktree - it is unreachable from the board but not from git", branch)
 	}
 }
@@ -61,7 +62,7 @@ func TestPruneOrphanedBranchesSweepsBranchHeldByStaleRegistration(t *testing.T) 
 	if removed := wm.PruneOrphanedBranches("test-project"); removed != 1 {
 		t.Errorf("PruneOrphanedBranches removed %d branches, want 1", removed)
 	}
-	if contains(getBranches(t, repoDir), branch) {
+	if slices.Contains(getBranches(t, repoDir), branch) {
 		t.Errorf("orphaned branch %s survived the sweep", branch)
 	}
 	if regs := worktreeRegistrations(t, repoDir); regs != 0 {
@@ -79,7 +80,7 @@ func TestPruneOrphanedBranchesKeepsBranchOfLiveTask(t *testing.T) {
 	if removed := wm.PruneOrphanedBranches("test-project"); removed != 0 {
 		t.Errorf("PruneOrphanedBranches removed %d branches, want 0 - the task row is alive", removed)
 	}
-	if !contains(getBranches(t, repoDir), branch) {
+	if !slices.Contains(getBranches(t, repoDir), branch) {
 		t.Errorf("the sweep deleted branch %s of a live task", branch)
 	}
 }

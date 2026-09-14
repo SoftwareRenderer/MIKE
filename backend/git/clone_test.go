@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -102,7 +103,7 @@ func TestCloneArgs(t *testing.T) {
 	if args[len(args)-2] != "https://example.com/x/y.git" || args[len(args)-1] != "/tmp/dst" {
 		t.Errorf("src/dst not passed last in order: %v", args)
 	}
-	if !containsExact(args, "--progress") {
+	if !slices.Contains(args, "--progress") {
 		t.Errorf("progress reporting lost: %v", args)
 	}
 }
@@ -113,14 +114,14 @@ func TestCloneArgs(t *testing.T) {
 func TestCloneEnv(t *testing.T) {
 	env := CloneEnv()
 
-	if !containsExact(env, "GIT_TERMINAL_PROMPT=0") {
+	if !slices.Contains(env, "GIT_TERMINAL_PROMPT=0") {
 		t.Errorf("GIT_TERMINAL_PROMPT=0 missing from clone env: %v", env)
 	}
 	want := "GIT_ALLOW_PROTOCOL=" + strings.Join(CloneAllowedProtocols, ":")
-	if !containsExact(env, want) {
+	if !slices.Contains(env, want) {
 		t.Errorf("%s missing from clone env: %v", want, env)
 	}
-	if !containsExact(env, "GIT_ALLOW_PROTOCOL=http:https:git:ssh:file") {
+	if !slices.Contains(env, "GIT_ALLOW_PROTOCOL=http:https:git:ssh:file") {
 		t.Errorf("GIT_ALLOW_PROTOCOL must be exactly http:https:git:ssh:file, got %v", env)
 	}
 	// The allowlist must not silently grow a helper transport.
@@ -154,15 +155,6 @@ func TestClone_HostileEnvironment(t *testing.T) {
 	if _, statErr := os.Stat(canary); statErr == nil {
 		t.Fatalf("ext:: transport executed a command despite the restrictions: %s", out)
 	}
-}
-
-func containsExact(xs []string, want string) bool {
-	for _, x := range xs {
-		if x == want {
-			return true
-		}
-	}
-	return false
 }
 
 func TestClone_NilCallback(t *testing.T) {

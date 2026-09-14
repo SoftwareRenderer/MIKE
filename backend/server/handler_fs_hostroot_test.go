@@ -39,12 +39,6 @@ func getFS(t *testing.T, s *Server, cookie, csrf, query string) *httptest.Respon
 	return testResponse(t, s, req)
 }
 
-// containsRootEntry reports whether a listing offered "..".
-func containsRootEntry(t *testing.T, body string) bool {
-	t.Helper()
-	return strings.Contains(body, `"name":".."`)
-}
-
 func TestFSBrowseIsJailedToTheHostRoots(t *testing.T) {
 	s, home, outside, cookie, csrf := jailedHostRootServer(t)
 	if err := os.WriteFile(filepath.Join(home, "notes.txt"), []byte("x"), 0o600); err != nil {
@@ -59,7 +53,7 @@ func TestFSBrowseIsJailedToTheHostRoots(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), "notes.txt") {
 		t.Errorf("listing home missing notes.txt: %s", rr.Body.String())
 	}
-	if containsRootEntry(t, rr.Body.String()) {
+	if strings.Contains(rr.Body.String(), `"name":".."`) {
 		t.Error("listing a jail root must not offer ..")
 	}
 
@@ -82,7 +76,7 @@ func TestFSBrowseIsJailedToTheHostRoots(t *testing.T) {
 	}
 
 	// A jail boundary offers no parent: ".." would name the outside just refused.
-	if rr := getFS(t, s, cookie, csrf, "path="+home); containsRootEntry(t, rr.Body.String()) {
+	if rr := getFS(t, s, cookie, csrf, "path="+home); strings.Contains(rr.Body.String(), `"name":".."`) {
 		t.Error("listing a jail root must not offer ..")
 	}
 	if rr := getFS(t, s, cookie, csrf, "path="+filepath.Join(home, "..")); rr.Code == http.StatusOK {
@@ -114,7 +108,7 @@ func TestFSBrowseIsJailedToTheHostRoots(t *testing.T) {
 	}
 	// And with no jail there is no boundary to hide, so .. comes back (files=1 keeps
 	// the listing non-empty, which is what makes the check mean something).
-	if rr := getFS(t, s, cookie, csrf, "path="+home+"&files=1"); !containsRootEntry(t, rr.Body.String()) {
+	if rr := getFS(t, s, cookie, csrf, "path="+home+"&files=1"); !strings.Contains(rr.Body.String(), `"name":".."`) {
 		t.Error("widened listing must offer .. again")
 	}
 }

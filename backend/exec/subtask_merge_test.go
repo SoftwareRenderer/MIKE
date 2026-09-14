@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -2167,12 +2168,7 @@ func seedThread(t *testing.T, s *store.Store, taskID, threadID, prompt string) {
 }
 
 func containsTaskID(tasks []types.Task, id string) bool {
-	for _, t := range tasks {
-		if t.ID == id {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(tasks, func(task types.Task) bool { return task.ID == id })
 }
 
 // TestFindDeepestStartableSubtasks_DeepestFirst verifies that only the

@@ -2,6 +2,7 @@ package git
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -72,7 +73,7 @@ func TestListBranchNamesSweepsOneSegmentOnly(t *testing.T) {
 			t.Errorf("listBranchNames returned a nested branch %q; the sweep would treat it as an orphan", b)
 		}
 	}
-	if !contains(got, "task/human-made-this") {
+	if !slices.Contains(got, "task/human-made-this") {
 		t.Errorf("listBranchNames = %q, want the one-segment task/human-made-this in it", got)
 	}
 }

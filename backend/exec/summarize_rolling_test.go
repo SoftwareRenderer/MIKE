@@ -18,6 +18,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -207,7 +208,9 @@ func TestMaybeAutoSummarize_SecondPassFoldsSummaryPlusTail(t *testing.T) {
 		}
 	}
 	for _, want := range []string{"Proceed", "ROUND-TWO-REQUEST-UNIQUETOKEN", "ROUND-TWO-WORK-UNIQUETOKEN"} {
-		if !containsAny(between, want) {
+		if !slices.ContainsFunc(between, func(m types.ChatMessage) bool {
+			return strings.Contains(m.Content, want)
+		}) {
 			t.Errorf("messages since the summary must be kept, missing %q", want)
 		}
 	}
@@ -240,16 +243,6 @@ func TestMaybeAutoSummarize_SecondPassFoldsSummaryPlusTail(t *testing.T) {
 			t.Errorf("folded-away message survived into the LLM context: %.80s", m.Content)
 		}
 	}
-}
-
-// containsAny reports whether any message carries the fragment.
-func containsAny(messages []types.ChatMessage, fragment string) bool {
-	for _, m := range messages {
-		if strings.Contains(m.Content, fragment) {
-			return true
-		}
-	}
-	return false
 }
 
 // TestFormatChatHistory_AdvisoryIsNotSummarized pins the decision that an advisory —

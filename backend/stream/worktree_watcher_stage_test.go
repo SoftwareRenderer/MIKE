@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -145,7 +146,7 @@ func TestWorktreeWatcherStageBroadcast(t *testing.T) {
 		t.Fatalf("git add failed: %v: %s", err, out)
 	}
 	ev := waitForBroadcast(t, broadcasts, "staging")
-	if !containsPath(ev.StagedPaths, "README.md") {
+	if !slices.Contains(ev.StagedPaths, "README.md") {
 		t.Fatalf("after stage: expected README.md in StagedPaths, got %v", ev.StagedPaths)
 	}
 
@@ -155,7 +156,7 @@ func TestWorktreeWatcherStageBroadcast(t *testing.T) {
 		t.Fatalf("git reset failed: %v: %s", err, out)
 	}
 	ev = waitForBroadcast(t, broadcasts, "unstaging")
-	if containsPath(ev.StagedPaths, "README.md") {
+	if slices.Contains(ev.StagedPaths, "README.md") {
 		t.Fatalf("after unstage: expected README.md NOT in StagedPaths, got %v", ev.StagedPaths)
 	}
 }
@@ -179,13 +180,4 @@ func drainBroadcasts(ch chan DiffStatsEvent) {
 			return
 		}
 	}
-}
-
-func containsPath(paths []string, want string) bool {
-	for _, p := range paths {
-		if p == want {
-			return true
-		}
-	}
-	return false
 }

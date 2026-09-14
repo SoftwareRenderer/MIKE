@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1638,7 +1639,7 @@ func TestGarbageCollect_PrunesOrphanedThreadBranches(t *testing.T) {
 
 	// Verify branch exists
 	branches := getBranches(t, repoDir)
-	if !contains(branches, "thread/"+threadID) {
+	if !slices.Contains(branches, "thread/"+threadID) {
 		t.Fatal("thread branch should exist before GC")
 	}
 
@@ -1656,7 +1657,7 @@ func TestGarbageCollect_PrunesOrphanedThreadBranches(t *testing.T) {
 
 	// Verify thread branch is gone
 	branches = getBranches(t, repoDir)
-	if contains(branches, "thread/"+threadID) {
+	if slices.Contains(branches, "thread/"+threadID) {
 		t.Error("orphaned thread branch should be pruned by GC")
 	}
 }
@@ -1689,7 +1690,7 @@ func TestGarbageCollect_KeepsActiveThreadBranches(t *testing.T) {
 
 	// Verify thread branch still exists
 	branches := getBranches(t, repoDir)
-	if !contains(branches, "thread/"+threadID) {
+	if !slices.Contains(branches, "thread/"+threadID) {
 		t.Error("active thread branch should be kept by GC")
 	}
 }
@@ -1705,13 +1706,13 @@ func TestPruneOrphanedBranches_RemovesOrphanedTaskBranches(t *testing.T) {
 
 	// Verify branches exist
 	branches := getBranches(t, repoDir)
-	if !contains(branches, "task/orphan-one-branch") {
+	if !slices.Contains(branches, "task/orphan-one-branch") {
 		t.Fatal("orphan-one-branch should exist before prune")
 	}
-	if !contains(branches, "task/orphan-two-branch") {
+	if !slices.Contains(branches, "task/orphan-two-branch") {
 		t.Fatal("orphan-two-branch should exist before prune")
 	}
-	if !contains(branches, "task/"+taskID) {
+	if !slices.Contains(branches, "task/"+taskID) {
 		t.Fatal("active task branch should exist before prune")
 	}
 
@@ -1729,13 +1730,13 @@ func TestPruneOrphanedBranches_RemovesOrphanedTaskBranches(t *testing.T) {
 
 	// Verify orphaned branches are gone, active branch remains
 	branches = getBranches(t, repoDir)
-	if contains(branches, "task/orphan-one-branch") {
+	if slices.Contains(branches, "task/orphan-one-branch") {
 		t.Error("orphan-one-branch should be pruned")
 	}
-	if contains(branches, "task/orphan-two-branch") {
+	if slices.Contains(branches, "task/orphan-two-branch") {
 		t.Error("orphan-two-branch should be pruned")
 	}
-	if !contains(branches, "task/"+taskID) {
+	if !slices.Contains(branches, "task/"+taskID) {
 		t.Error("active task branch should be kept")
 	}
 }
@@ -1764,10 +1765,10 @@ func TestPruneOrphanedBranches_RemovesOrphanedThreadBranches(t *testing.T) {
 
 	// Verify branches exist
 	branches := getBranches(t, repoDir)
-	if !contains(branches, "thread/orphan-thread-1") {
+	if !slices.Contains(branches, "thread/orphan-thread-1") {
 		t.Fatal("orphan thread should exist before prune")
 	}
-	if !contains(branches, "thread/"+activeThreadID) {
+	if !slices.Contains(branches, "thread/"+activeThreadID) {
 		t.Fatal("active thread branch should exist before prune")
 	}
 
@@ -1785,13 +1786,13 @@ func TestPruneOrphanedBranches_RemovesOrphanedThreadBranches(t *testing.T) {
 
 	// Verify orphaned branches are gone, active branch remains
 	branches = getBranches(t, repoDir)
-	if contains(branches, "thread/orphan-thread-1") {
+	if slices.Contains(branches, "thread/orphan-thread-1") {
 		t.Error("orphan thread branch should be pruned")
 	}
-	if contains(branches, "thread/orphan-thread-2") {
+	if slices.Contains(branches, "thread/orphan-thread-2") {
 		t.Error("orphan thread branch should be pruned")
 	}
-	if !contains(branches, "thread/"+activeThreadID) {
+	if !slices.Contains(branches, "thread/"+activeThreadID) {
 		t.Error("active thread branch should be kept")
 	}
 }
@@ -1814,10 +1815,10 @@ func TestPruneOrphanedBranches_RemovesBothTaskAndThreadBranches(t *testing.T) {
 	}
 
 	branches := getBranches(t, repoDir)
-	if contains(branches, "task/orphan-task") {
+	if slices.Contains(branches, "task/orphan-task") {
 		t.Error("orphan task branch should be pruned")
 	}
-	if contains(branches, "thread/orphan-thread") {
+	if slices.Contains(branches, "thread/orphan-thread") {
 		t.Error("orphan thread branch should be pruned")
 	}
 }
@@ -1833,15 +1834,6 @@ func getBranches(t *testing.T, dir string) []string {
 		}
 	}
 	return branches
-}
-
-func contains(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 func TestGitAuthorFlags_NoEnvVars(t *testing.T) {
@@ -2658,10 +2650,10 @@ func TestGarbageCollect_KeepsTitledTaskSlugMainBranch(t *testing.T) {
 	}
 
 	branches := getBranches(t, repoDir)
-	if !contains(branches, "task/hey-zimxpq") {
+	if !slices.Contains(branches, "task/hey-zimxpq") {
 		t.Error("titled task's slug Main branch should be kept by GC when a fork is active")
 	}
-	if contains(branches, "task/orphan-one-branch") {
+	if slices.Contains(branches, "task/orphan-one-branch") {
 		t.Error("unrelated orphaned task branch should be removed by GC")
 	}
 }
