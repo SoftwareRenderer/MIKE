@@ -593,7 +593,7 @@ test.describe('Editor gutter line selection → Create Task', () => {
     const parentTaskId = await createTaskViaApi(page, projectId, `line-task parent ${Date.now()}`);
     await navigateToTask(page, parentTaskId, projectId);
     // Open the Task Explorer (Task Header button, next to the terminal button)
-    await page.locator('button[aria-label="Open explorer"]').click();
+    await page.locator('[aria-label="Open explorer"]').click();
     await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
     // Open the file from the task worktree (initialized on mount)
     await expect(page.locator('.file-entry', { hasText: LINES_FILE })).toBeVisible({ timeout: 20000 });
