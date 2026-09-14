@@ -1445,6 +1445,8 @@ const catalog = {
     // ── Shared across the three diff surfaces ──
     'diff.shared.loading': 'Loading...',
     'diff.shared.file': { one: '{count} file', other: '{count} files' },
+    'diff.viewImage': 'View image',
+    'diff.imageUnavailable': 'Image not available',
 
     // ── DiffViewer ──
     'diff.binaryWithSize': 'Binary file — {size}',

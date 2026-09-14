@@ -12,6 +12,8 @@ package git
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -264,5 +266,88 @@ func TestPopStashByHashReportsAMissingEntryAsAbsent(t *testing.T) {
 	// An empty hash is the "nothing was stashed" case every merge path hits, and must stay silent.
 	if ok, err := wm.PopStashByHash(repoDir, ""); ok || err != nil {
 		t.Errorf("PopStashByHash(\"\") = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
+func mustReadFile(t *testing.T, dir, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(b)
+}
+
+// TestPopStashByHashKeepsTheStagedSplit: a plain apply returns a modification unstaged, and
+// commit-and-done commits the index only.
+func TestPopStashByHashKeepsTheStagedSplit(t *testing.T) {
+	repoDir, projID, _, _, _, wm := setupStashTest(t)
+	wt := stashWorktree(t, wm, repoDir, projID, "staged-split-one")
+
+	// Everything a finished turn leaves: a modification, a new file, something never staged.
+	writeFile(t, wt, "base.txt", "base\nedited by the task\n")
+	writeFile(t, wt, "created.txt", "created by the task\n")
+	writeFile(t, wt, "scratch.txt", "never staged\n")
+	runGit(t, wt, "add", "base.txt", "created.txt")
+
+	hash, err := wm.PushStash(wt, StashMessageForAutoMerge("staged-split-one"))
+	if err != nil {
+		t.Fatalf("stash push: %v", err)
+	}
+	found, err := wm.PopStashByHash(wt, hash)
+	if err != nil || !found {
+		t.Fatalf("restore: found=%v err=%v", found, err)
+	}
+
+	staged := strings.Fields(runGitOutput(t, wt, "diff", "--cached", "--name-only", "HEAD"))
+	if !slices.Contains(staged, "base.txt") {
+		t.Errorf("the task's edit came back unstaged and its own commit would skip it; staged=%q", staged)
+	}
+	if !slices.Contains(staged, "created.txt") {
+		t.Errorf("the task's new file came back unstaged; staged=%q", staged)
+	}
+	if content := mustReadFile(t, wt, "base.txt"); !strings.Contains(content, "edited by the task") {
+		t.Errorf("restored content lost: %q", content)
+	}
+	// Untracked work stays untracked: restoring it into the index would put it in the commit.
+	if status := runGitOutput(t, wt, "status", "--porcelain", "--", "scratch.txt"); !strings.HasPrefix(status, "?? ") {
+		t.Errorf("scratch.txt should still be untracked, status=%q", status)
+	}
+}
+
+// TestPopStashByHashRestoresEvenWhenTheIndexCannotBeRebuilt: git refuses --index when the tree
+// has its own claim on the file. The refusal must not cost the task its work.
+func TestPopStashByHashRestoresEvenWhenTheIndexCannotBeRebuilt(t *testing.T) {
+	repoDir, projID, _, _, _, wm := setupStashTest(t)
+	wt := stashWorktree(t, wm, repoDir, projID, "staged-clash-one")
+
+	writeFile(t, wt, "base.txt", "base\nthe task's own edit\n")
+	runGit(t, wt, "add", "base.txt")
+	hash, err := wm.PushStash(wt, StashMessageForAutoMerge("staged-clash-one"))
+	if err != nil {
+		t.Fatalf("stash push: %v", err)
+	}
+
+	// What the bracket wrapped: a different edit on the same file.
+	writeFile(t, wt, "base.txt", "base\nmerged in from a subtask\n")
+	runGit(t, wt, "commit", "-qam", "subtask work")
+
+	found, err := wm.PopStashByHash(wt, hash)
+	if !found {
+		t.Fatal("the entry was on the stack")
+	}
+	if err == nil {
+		t.Fatal("two edits to one file cannot both be applied cleanly; the caller must hear about it")
+	}
+
+	// The retry puts the work back as a conflict; without it the edit is simply gone.
+	if content := mustReadFile(t, wt, "base.txt"); !strings.Contains(content, "the task's own edit") {
+		t.Errorf("the refused --index apply swallowed the task's work; file=%q", content)
+	}
+	if status := runGitOutput(t, wt, "status", "--porcelain", "--", "base.txt"); !strings.HasPrefix(status, "UU") {
+		t.Errorf("the clash must stay visible as an unresolved conflict, status=%q", status)
+	}
+	if list := runGitOutput(t, wt, "stash", "list"); !strings.Contains(list, hash) && !strings.Contains(list, StashMessageForAutoMerge("staged-clash-one")) {
+		t.Errorf("an entry that could not be applied must stay on the stack, list=%q", list)
 	}
 }

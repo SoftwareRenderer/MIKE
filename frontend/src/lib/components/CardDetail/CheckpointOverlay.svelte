@@ -1,5 +1,5 @@
 <script lang="ts">
-    import type { DiffFile } from '$lib/types/diff';
+    import type { DiffFile, DiffImageSource } from '$lib/types/diff';
     import { t } from '$lib/i18n';
     import { reportChunkFailure } from '$lib/services/chunk-failure';
     // DiffViewer is lazy-loaded by CardDetail — use dynamic import here too
@@ -21,13 +21,15 @@
         loadDiffViewer();
     });
 
-    let { files, untracked, loading, onClose, onExpandFile, onLineClick }: {
+    let { files, untracked, loading, onClose, onExpandFile, onLineClick, imageSource }: {
         files: DiffFile[];
         untracked: { path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number }[];
         loading: boolean;
         onClose: () => void;
         onExpandFile: (path?: string) => void;
         onLineClick: (path: string, line: number) => void;
+        /** Which commits this checkpoint's diff was taken between. */
+        imageSource?: DiffImageSource;
     } = $props();
 </script>
 
@@ -55,7 +57,7 @@
         <div class="checkpoint-diff-body">
             {#if DiffViewerComponent}
                 {@const DiffViewer = DiffViewerComponent}
-                <DiffViewer stagedFiles={[]} unstagedFiles={files} stagedUntracked={[]} unstagedUntracked={untracked} onExpandFile={onExpandFile} onExpandUntracked={onExpandFile} onLineClick={onLineClick} />
+                <DiffViewer stagedFiles={[]} unstagedFiles={files} stagedUntracked={[]} unstagedUntracked={untracked} onExpandFile={onExpandFile} onExpandUntracked={onExpandFile} onLineClick={onLineClick} imageSource={imageSource} />
             {:else}
                 <div class="checkpoint-diff-loading">
                     <svg class="checkpoint-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">

@@ -86,6 +86,42 @@ product. The immutable done-task snapshot stores its body *as the parsed body*
 changes since last commit" over a diff it still carries. Tests:
 `backend/stream/done_snapshot_test.go`, `backend/managers/git_diff_parsed_test.go`.
 
+## Raw file bytes
+
+`GET /api/fs/raw?project=&task=&path=&ref=` is the only route that returns a project file's **bytes**.
+`/api/fs/read` answers JSON, and a JSON string of a PNG is that PNG with every byte that is not valid
+UTF-8 replaced, so the diff panel's "View image" cannot use it. Because the response is an `<img>`
+subresource, what it can carry is the whole permission:
+
+- `path` is **relative to the repository root** — the shape every diff surface already holds. An
+  absolute path is refused rather than translated, so the route never has to guess whether it was sent a
+  host path or a container path.
+- One map (`rawImageTypes`) is both the allowlist and the `Content-Type`. A name off it is a 415, which
+  is what keeps SVG out: SVG is markup, served inline from the app's own origin it would run, and no CSP
+  header on an image response stops that. `frontend/src/lib/utils/diff-image.ts` holds the same set.
+- `Cache-Control: no-store`, because the same URL answers differently after the next edit. `nosniff` and
+  the `img-src 'self'` CSP come from `CORSMiddleware` like everywhere else.
+- **No `Content-Disposition`.** The name comes from the repository, and putting it in a header makes a
+  crafted filename a header writer; `inline` is the default the route wants anyway.
+- **`CompressMiddleware` passes this response through without buffering it.** The middleware keeps a
+  whole GET body to hash an ETag and then compresses it, which for an image costs several times the file
+  in memory plus a brotli pass over bytes a codec already finished with, and the buffer sits outside the
+  route's cap so the cap stops being the bound. The escape is by `image/` content type, beside the SSE
+  one, and it keeps the handler's `Content-Length`. `TestGetImageResponseIsPassedThrough` and
+  `TestFSRawImageIsNotBufferedOrRecompressed` hold the two halves.
+- `ref` reads the committed object instead of the file on disk, with `types.ValidateGitRef` and
+  `--end-of-options` like every other client-supplied ref. It runs in **`project.Path`**, not the task's
+  worktree: worktrees of a project share its object database, so a done task whose worktree commit-and-done
+  deleted still answers — which is when the merged diff panel asks. A ref is any rev that database
+  resolves — a branch, a commit, a bare object id — so this half is jailed to the **project**, and is not
+  limited to commits reachable from whatever `?task=` says; `?task=` is still bound to `?project=` before
+  the read, so another project's task gets nothing.
+- Its own size cap (`maxRawFileBytes`, the upload cap) is checked before any byte is read — on the stat
+  for a working tree, on `git cat-file -s` for a `ref` — and again by the bound on the read that follows:
+  `io.CopyN` on the file, `io.LimitReader` plus a process kill on the object.
+
+Tests: `backend/server/handler_fs_raw_test.go`.
+
 ## Errors
 
 A server fault answers MIKE's own sentence; the cause goes to the log. `errs.Operation(operation, cause)`

@@ -28,6 +28,35 @@ export interface ApiDiffRow {
     segments?: Array<{ key: string; text: string; tone: string }>;
 }
 
+/**
+ * Which half of the diff panel a file came from: the working sections compare HEAD against the files on
+ * disk, the committed section compares two commits.
+ */
+export type DiffImageSection = 'working' | 'committed';
+
+/** The commits one section reads a file from. `new` omitted means the file as it stands on disk. */
+export interface DiffImageRefs {
+    old?: string;
+    new?: string;
+}
+
+/** Which project owns a binary file, and what each section of the panel compares. */
+export interface DiffImageSource {
+    project: string;
+    task?: string;
+    working?: DiffImageRefs;
+    committed?: DiffImageRefs;
+}
+
+/** One "View image" click, in the shape ImageDiffModal and GET /api/fs/raw want it. */
+export interface DiffImageRequest {
+    path: string;
+    displayPath: string;
+    oldPath: string;
+    oldRef: string;
+    newRef: string;
+}
+
 /** A parsed file group from a unified diff. */
 export interface DiffFile {
     /** File path (e.g., "src/lib/utils.ts"). */
