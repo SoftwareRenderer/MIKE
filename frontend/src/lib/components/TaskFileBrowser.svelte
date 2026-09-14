@@ -7,6 +7,7 @@
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
     import { t } from '$lib/i18n';
+    import { taskRelativeFsPath } from '$lib/utils/fs-event';
 
     let { projectId, projectName, taskId, taskPath, sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange, onToggleFind }: {
         projectId: string;
@@ -206,23 +207,12 @@
         }
     }
 
-    // Handle fs events — mirror BranchFileBrowser behavior
-    // Fs events from WorktreeWatcher are relative to the task worktree (e.g. "src/main.go")
-    // Fs events from ProjectWatcher are relative to project root (e.g. "worktrees/temp/bear-comet-lore/src/main.go")
-    function handleFsEvent(op: 'create' | 'delete', relPath: string) {
+    function handleFsEvent(op: 'create' | 'delete', eventPath: string) {
         const basePath = sandboxEnabled ? mountPath : taskPath;
         const currentPrefix = currentPath + '/';
 
-        // Convert project-relative path to task-relative path
-        // Strip "worktrees/<projectID>/<taskId>/" prefix if present (from ProjectWatcher)
-        const worktreePrefix = 'worktrees/' + projectId + '/' + taskId + '/';
-        let taskRelPath = relPath;
-        if (relPath.startsWith(worktreePrefix)) {
-            taskRelPath = relPath.substring(worktreePrefix.length);
-        } else if (relPath.startsWith('worktrees/' + projectId + '/')) {
-            // Event is in the worktrees dir but not this task — skip
-            return;
-        }
+        const taskRelPath = taskRelativeFsPath({ op, path: eventPath }, projectId, taskId);
+        if (taskRelPath === null) return;
 
         const eventFullPath = basePath + '/' + taskRelPath;
         const eventDir = eventFullPath.substring(0, eventFullPath.lastIndexOf('/'));

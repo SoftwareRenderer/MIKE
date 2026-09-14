@@ -44,6 +44,60 @@ describe('gitGutter title option (gutter hover tooltip)', () => {
     });
 });
 
+describe('gitGutter rows across a document change', () => {
+    /** An editor whose gutter is baselined against `baseline`, with the server's markers for it. */
+    function mountBaselined(doc: string, baseline: string, markers: Map<number, string[]> | null) {
+        const parent = document.createElement('div');
+        document.body.appendChild(parent);
+        const { extension, state } = gitGutter();
+        state.initialMarkers = markers;
+        state.baselineContent = baseline;
+        const view = new EditorView({
+            state: EditorState.create({ doc, extensions: [extension] }),
+            parent,
+        });
+        const row = (line: number) =>
+            parent.querySelector<HTMLElement>(`.cm-gutter.cm-gitGutter [data-line="${line}"]`);
+        return { view, row, cleanup: () => { view.destroy(); parent.remove(); } };
+    }
+
+    let cleanup: (() => void) | null = null;
+    afterEach(() => { cleanup?.(); cleanup = null; });
+
+    const doc = ['one', 'two', 'three', 'four'].join('\n');
+
+    it('keeps the rows of lines an external change did not touch', () => {
+        const mounted = mountBaselined(doc, doc, new Map([[2, ['modified']]]));
+        cleanup = mounted.cleanup;
+        const untouched = [1, 2, 3].map(mounted.row);
+        expect(untouched.every(Boolean)).toBe(true);
+
+        mounted.view.dispatch({
+            changes: { from: mounted.view.state.doc.line(4).from, to: mounted.view.state.doc.line(4).to, insert: 'four edited' },
+        });
+
+        // Only a marker that compares equal to the one it replaced keeps that row's DOM.
+        untouched.forEach((before, i) => {
+            expect(mounted.row(i + 1)).toBe(before);
+        });
+    });
+
+    it('draws the row of the line the change did touch', () => {
+        const mounted = mountBaselined(doc, doc, null);
+        cleanup = mounted.cleanup;
+        const untouched = mounted.row(1);
+
+        mounted.view.dispatch({
+            changes: { from: mounted.view.state.doc.line(3).from, to: mounted.view.state.doc.line(3).to, insert: 'three edited' },
+        });
+
+        expect(mounted.row(1)).toBe(untouched);
+        expect(mounted.row(3)).not.toBeNull();
+        // The changed line now carries an indicator, which a plain row has no place for.
+        expect(mounted.row(3)!.querySelector('span[style*="repeating-linear-gradient"], span[style*="clip-path"]')).not.toBeNull();
+    });
+});
+
 describe('scrollbarMarkerRect (fallback: 1 doc line = 1 visual row)', () => {
     it('positions the first line at the top band center', () => {
         const { y, h } = scrollbarMarkerRect(1, 10, 100);

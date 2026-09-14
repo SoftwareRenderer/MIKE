@@ -35,6 +35,38 @@ export function reconcileExternalChange(
     return { kind: 'merged', content: merged };
 }
 
+/** A single CodeMirror change that turns `before` into `after`. */
+export interface TextReplace {
+    from: number;
+    to: number;
+    insert: string;
+}
+
+/**
+ * The smallest single replace that turns `before` into `after`, by stripping what the two agree on
+ * at each end. Several separate edits collapse into one region spanning them; the text that comes
+ * out is still `after`.
+ */
+export function minimalReplace(before: string, after: string): TextReplace {
+    let prefix = 0;
+    const shared = Math.min(before.length, after.length);
+    while (prefix < shared && before[prefix] === after[prefix]) prefix++;
+    // Each bound stops at the prefix, so a pure insertion cannot overlap it.
+    let suffix = 0;
+    while (
+        suffix < before.length - prefix &&
+        suffix < after.length - prefix &&
+        before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
+    ) {
+        suffix++;
+    }
+    return {
+        from: prefix,
+        to: before.length - suffix,
+        insert: after.slice(prefix, after.length - suffix),
+    };
+}
+
 /**
  * Line-based three-way merge of `base` with two derived texts (`ours`, `theirs`).
  * Returns the merged text, or `null` if `ours` and `theirs` edit the same region
