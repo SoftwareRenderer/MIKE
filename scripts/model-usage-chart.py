@@ -297,11 +297,6 @@ def svg_chart(models, agents, meta):
         "Spellings normalized: agent prefixes (MIKE:, pi:), publisher prefixes (deepseek-ai/, deepseek/) and "
         "quantization suffixes (-Q4_K_XL) collapse onto one model.",
     ]
-    if tail:
-        footer.append(
-            "Wedges are drawn at true proportion; models under 1% share one 'Other' wedge because each is a "
-            "two-pixel sliver at this radius, and each one is still listed in the legend beneath that row."
-        )
     footer.append(
         f"Commits naming each agent: {agent_txt}. "
         f"Source: git log of this repository — {meta['commits_total']:,} commits, {meta['merges_total']:,} merges. "
@@ -334,8 +329,8 @@ def svg_chart(models, agents, meta):
         ".foot{font-size:11px;fill:#777}.ctr{font-size:22px;font-weight:600}"
         "</style>",
         f'<text class="h" x="40" y="46">Which models did the work?</text>',
-        f'<text class="sub" x="40" y="68">By model named in an <tspan font-family="ui-monospace,monospace">Assisted-by:</tspan> '
-        f'trailer — {meta["commits_with_trailer"]:,} of {meta["commits_total"]:,} commits</text>',
+        f'<text class="sub" x="40" y="68">By model referenced in an <tspan font-family="ui-monospace,monospace">Assisted-by:</tspan> '
+        f'commit trailer</text>',
     ]
 
     # Slices start at 12 o'clock and run clockwise.
