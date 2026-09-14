@@ -35,7 +35,7 @@ export interface ApiDiffRow {
 export type DiffImageSection = 'working' | 'committed';
 
 /** The commits one section reads a file from. `new` omitted means the file as it stands on disk. */
-export interface DiffImageRefs {
+interface DiffImageRefs {
     old?: string;
     new?: string;
 }

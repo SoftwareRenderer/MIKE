@@ -158,6 +158,3 @@ export function useImageAttachments(options: ImageAttachmentsOptions) {
         handleDrop,
     };
 }
-
-/** Read `isOver` through the getter, never destructured: a destructured copy is one render. */
-export type ImageAttachments = ReturnType<typeof useImageAttachments>;

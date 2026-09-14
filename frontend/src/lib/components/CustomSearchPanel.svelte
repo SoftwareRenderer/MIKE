@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount, onDestroy } from 'svelte';
+    import { onMount } from 'svelte';
     import { t } from '$lib/i18n';
     import type { EditorView } from 'codemirror';
     import { SelectionRange } from '@codemirror/state';

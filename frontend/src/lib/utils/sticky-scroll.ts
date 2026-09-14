@@ -21,7 +21,7 @@ export interface SectionHeader {
 const HEADER_DETACH_MARGIN = 3;
 
 /** Maximum number of sticky bars stacked at once (outermost → innermost). */
-export const MAX_STICKY_DEPTH = 4;
+const MAX_STICKY_DEPTH = 4;
 
 /**
  * Turn declaration scopes (LSP document symbols) into a sorted,

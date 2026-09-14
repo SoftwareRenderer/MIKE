@@ -11,6 +11,9 @@
  *
  * `AppStreamFrame` is what the app-stream socket hands its dispatcher, so a misspelled comparison is a
  * compile error rather than a silent no-op.
+ *
+ * The archgate `wsevents` rule reads this union by its declaration text (see
+ * `scripts/archgate/rules_routes.go`), so the name stays exported even though nothing outside imports it.
  */
 export type AppStreamEventType =
    'token'

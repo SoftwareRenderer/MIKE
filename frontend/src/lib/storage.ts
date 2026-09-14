@@ -677,12 +677,12 @@ export async function setBoardCache(key: string, value: unknown): Promise<void> 
 
 /** Load a value from the board cache. Returns `null` if not found. */
 export async function getBoardCache<T>(key: string): Promise<T | null> {
-    const entry = await getBoardCacheEntry<T>(key);
+    const entry = await getBoardCacheEntry(key);
     return entry ? (entry.data as T) : null;
 }
 
 /** The cached value and the moment it was written, which `getBoardCache` throws away. */
-export async function getBoardCacheEntry<T>(key: string): Promise<BoardCacheEntry | null> {
+export async function getBoardCacheEntry(key: string): Promise<BoardCacheEntry | null> {
     return (await dbGet<BoardCacheEntry>(STORE_BOARD_CACHE, key)) ?? null;
 }
 
@@ -694,7 +694,7 @@ export async function removeBoardCache(key: string): Promise<void> {
 // ─── Editor tabs (IndexedDB: editor-tabs store) ──────────────────────────────
 // Persists open file tabs, active file, and pinned files per project.
 
-export interface EditorTabFile {
+interface EditorTabFile {
     path: string;
     targetLine: number;
 }

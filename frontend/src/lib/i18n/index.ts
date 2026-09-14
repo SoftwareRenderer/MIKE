@@ -16,7 +16,5 @@ export {
     setCatalog,
     resetToEnglish,
 } from './runtime.svelte';
-// The types `t` and `setCatalog` speak. A caller typing a params bag, a plural
-// table or a catalog needs the name from the same module it calls.
-export type { MessageKey, MessageParams, MessageValue, PluralTable, PluralCategory } from './en';
-export type { Catalog } from './catalog';
+// The types `t` speaks. A caller typing a plural table needs the name from the same module it calls.
+export type { MessageKey, MessageValue, PluralTable, PluralCategory } from './en';

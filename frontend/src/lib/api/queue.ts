@@ -3,9 +3,6 @@ import { loadQueue as loadQueueFromStorage, saveQueue as saveQueueToStorage, typ
 import type { Config, MemoryAlertAckPayload, Project, Task, TaskMessage, Thread } from '../types';
 import { t } from '$lib/i18n';
 
-// Re-export helpers for direct imports
-export { generateId };
-
 // Re-export QueuedAction from storage (canonical definition)
 export type { StoredQueuedAction as QueuedAction };
 

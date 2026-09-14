@@ -16,7 +16,7 @@ export const CAP_EDITOR_GET_CONTENT = 'editor.getContent';
 export const CAP_EDITOR_SET_CONTENT = 'editor.setContent';
 export const CAP_EDITOR_SET_OVERLAY = 'editor.setOverlay';
 export const CAP_EDITOR_CONTENT_CHANGE = 'editor.contentChange';
-export const CAP_EDITOR_JUMP_TO_LINE = 'editor.jumpToLine';
+const CAP_EDITOR_JUMP_TO_LINE = 'editor.jumpToLine';
 export const CAP_EDITOR_SAVE = 'editor.save';
 
 /**

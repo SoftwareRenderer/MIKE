@@ -13,7 +13,7 @@ export interface LayoutToolCall {
 }
 
 /** A segment of the reasoning region — either reasoning text or an interleaved tool. */
-export type ChatSegment<T extends LayoutToolCall = LayoutToolCall> =
+type ChatSegment<T extends LayoutToolCall = LayoutToolCall> =
     | { type: 'reasoning'; text: string }
     | { type: 'tool'; tc: T };
 

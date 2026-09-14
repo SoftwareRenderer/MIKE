@@ -6,11 +6,10 @@
     import { getModelName, getProviderDisplayName } from '$lib/utils/providers';
     import { t } from '$lib/i18n';
     import { formatMB, usdSymbol } from '$lib/utils/format';
-    import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
-    import { appStore, uiStore, dialogStore } from '$lib/stores';
+    import { updateConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
+    import { appStore, dialogStore } from '$lib/stores';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import BaseModal from './BaseModal.svelte';
-    import ToggleSwitch from './ToggleSwitch.svelte';
     import TaskDefaults from './ConfigModal/TaskDefaults.svelte';
     import PreferencesTab from './ConfigModal/PreferencesTab.svelte';
     import ProviderCard from './ConfigModal/ProviderCard.svelte';

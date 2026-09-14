@@ -3,7 +3,7 @@
     import type { DiffFile } from '$lib/types/diff';
     import { gitStatusLabel } from '$lib/utils/git-status';
     import { t } from '$lib/i18n';
-    import { getGitStatus, getProjectDiffFiles, getCommitDiffFiles, getProjectDiffFile, stageProjectFile, commitProject, pullProject, pushProject, getGitLogFull } from '$lib/api/git';
+    import { getGitStatus, getProjectDiffFiles, getCommitDiffFiles, getProjectDiffFile, stageProjectFile, commitProject, pullProject, pushProject, getGitLogFull } from '$lib/api';
     import type { GitCommit } from '$lib/types';
     import { dialogStore } from '$lib/stores';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';

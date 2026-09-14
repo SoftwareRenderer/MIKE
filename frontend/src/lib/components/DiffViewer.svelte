@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { DiffFile, DiffRow, DiffImageRequest, DiffImageSection, DiffImageSource } from '$lib/types/diff';
-    import type { DiffDisplayItem, CollapsedBlock } from '$lib/utils/diff-parser';
+    import type { DiffDisplayItem } from '$lib/utils/diff-parser';
     import { buildDisplayItems, truncatePath, getStatusBadge } from '$lib/utils/diff-parser';
     import { isDisplayableImage, imageSides } from '$lib/utils/diff-image';
     import { highlightLinesAsync } from '$lib/highlighter';

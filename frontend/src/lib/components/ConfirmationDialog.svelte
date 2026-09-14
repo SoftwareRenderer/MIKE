@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { onDestroy } from 'svelte';
     import { dialogStore } from '$lib/stores';
     import { t } from '$lib/i18n';
     import BaseModal from './BaseModal.svelte';

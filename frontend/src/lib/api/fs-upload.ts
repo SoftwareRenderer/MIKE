@@ -9,7 +9,7 @@ import { t } from '$lib/i18n';
  * on) and an abort that stops the transfer, not only the response.
  */
 
-export type UploadStatus = 'ok' | 'conflict' | 'cancelled' | 'error';
+type UploadStatus = 'ok' | 'conflict' | 'cancelled' | 'error';
 
 export interface UploadResult {
     status: UploadStatus;

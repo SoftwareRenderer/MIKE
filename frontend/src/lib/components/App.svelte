@@ -841,7 +841,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onExtensionChange: handleExtensionChange,
         });
         setAppStreamRef(appStream);
-        const mirror = await getBoardCacheEntry<Project[]>('projects').catch(() => null);
+        const mirror = await getBoardCacheEntry('projects').catch(() => null);
         if (mirror) lastSyncedAt = mirror.cachedAt;
         await loadAppData(); // sets initialLoadComplete on completion
         isLoadingAuth = false; // hide loading screen after data is loaded
@@ -983,7 +983,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     async function showCachedBoard(projectId: string): Promise<void> {
         let entry: { data: unknown; cachedAt: number } | null = null;
         try {
-            entry = await getBoardCacheEntry<BoardData>(boardCacheKey(projectId));
+            entry = await getBoardCacheEntry(boardCacheKey(projectId));
         } catch {
             return; // no cache to show — the live board is the first paint
         }

@@ -27,7 +27,7 @@ import { extensionManager } from './extension-manager.svelte';
  */
 
 /** What the chrome renders. `idle` means "nothing to show", whatever the reason. */
-export type LocaleOfferPhase = 'idle' | 'offered' | 'installing' | 'failed';
+type LocaleOfferPhase = 'idle' | 'offered' | 'installing' | 'failed';
 
 interface LocaleOfferState {
     phase: LocaleOfferPhase;

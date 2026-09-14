@@ -26,7 +26,7 @@ import { identifierRange, pickDefinitionTarget, toLspPosition, type CharRange, t
  */
 export type HoverZone = 'token' | 'tooltip' | 'other-token' | 'outside';
 
-export type HoverPhase = 'idle' | 'arming' | 'open';
+type HoverPhase = 'idle' | 'arming' | 'open';
 
 export interface HoverMachineState {
     readonly phase: HoverPhase;

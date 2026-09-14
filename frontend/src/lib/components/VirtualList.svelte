@@ -136,9 +136,6 @@
         if (index < 0 || index >= items.length) return;
         scrollToOffset(index * itemHeight, behavior);
     }
-
-    // Expose methods and state for parent access
-    export { scrollEl as scrollElement, scrollToBottom, scrollToOffset, isNearBottom, scrollToItem };
 </script>
 
 {#if virtualized}

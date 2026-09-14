@@ -44,7 +44,7 @@ const MODIFIER_KEYS = new Set([
 ]);
 
 /** Pseudo-key used by mouse bindings (e.g. `meta+click` = Cmd+Click). */
-export const CLICK_KEY = 'click';
+const CLICK_KEY = 'click';
 
 /** Legend per named key; anything unlisted is displayed uppercased. */
 const KEY_LABEL_KEYS: Record<string, MessageKey> = {

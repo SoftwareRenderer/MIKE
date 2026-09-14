@@ -22,9 +22,9 @@ export interface InjectionContext {
     [key: string]: any;
 }
 
-export type CapabilityKind = 'call' | 'event';
+type CapabilityKind = 'call' | 'event';
 
-export type CapabilityHandler = (ctx: HostContext, args: any) => any | Promise<any>;
+type CapabilityHandler = (ctx: HostContext, args: any) => any | Promise<any>;
 
 export interface HostContext {
     extensionId: string;
