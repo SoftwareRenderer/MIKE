@@ -649,6 +649,7 @@ describe('advisoryLabel', () => {
     it('titles each known kind', () => {
         expect(advisoryLabel('diagnostics')).toBe('Workspace diagnostics');
         expect(advisoryLabel('merge_conflict')).toBe('Merge conflict');
+        expect(advisoryLabel('auto_answer')).toBe('Automated answer (parent context)');
     });
 
     it('falls back to the generic note for unknown or missing kinds', () => {
@@ -660,11 +661,13 @@ describe('advisoryLabel', () => {
         const messages = [
             { id: 'adv-1', role: 'advisory', content: 'Merge conflict in b.go', severity: 'error', kind: 'merge_conflict', created_at: '2025-01-01T00:00:00Z' },
             { id: 'adv-2', role: 'advisory', content: 'no kind row', created_at: '2025-01-01T00:00:01Z' },
+            { id: 'adv-3', role: 'advisory', content: 'Yes — the docs are in scope.', kind: 'auto_answer', created_at: '2025-01-01T00:00:02Z' },
         ];
         const { entries } = buildEntriesFromMessages(messages);
         expect(entries[0].kind).toBe('merge_conflict');
         expect(advisoryLabel(entries[0].kind)).toBe('Merge conflict');
         expect(advisoryLabel(entries[1].kind)).toBe('Environment note');
+        expect(advisoryLabel(entries[2].kind)).toBe('Automated answer (parent context)');
         // Never rendered as something the user said.
         expect(entries.every(e => e.role === 'advisory')).toBe(true);
     });

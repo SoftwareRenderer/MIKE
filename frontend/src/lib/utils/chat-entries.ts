@@ -479,6 +479,7 @@ export function advisoryLabel(kind?: string): string {
     switch (kind) {
         case 'diagnostics': return t('chat.advisory.diagnostics');
         case 'merge_conflict': return t('chat.advisory.mergeConflict');
+        case 'auto_answer': return t('chat.advisory.autoAnswer');
         default: return t('chat.advisory.note');
     }
 }

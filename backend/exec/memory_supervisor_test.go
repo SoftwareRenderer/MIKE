@@ -352,3 +352,68 @@ func seedRunningTaskIn(t *testing.T, s *store.Store, id, projectID string, peakM
 		t.Fatal(err)
 	}
 }
+
+// TestSupervisorResumeKeepsRunProvenance: the supervisor picks its victim by memory cost, so
+// resuming one answers nothing about who is waiting on it. A subtask its user started by name must
+// stay a run somebody is watching after a pause — that flag is what decides whether the parent's
+// context answers for the user.
+func TestSupervisorResumeKeepsRunProvenance(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		autostarted bool
+		asSubtask   bool
+	}{
+		{"user_started_root", false, false},
+		{"chain_started_root", true, false},
+		{"user_started_subtask", false, true},
+		{"chain_started_subtask", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			te, _, projectID := setupExecutorWithGitForSubtask(t)
+			now := time.Now().UTC()
+			const parentID = "parent-of-resumed"
+			if err := te.store.CreateTask(&types.Task{
+				ID: parentID, ProjectID: projectID, Title: "Parent", Prompt: "Parent prompt",
+				Status: types.StatusInProgress, ExecutionState: types.ExecStateIdle,
+				CurrentThreadID: "thread-parent", LlamaServerURL: "http://localhost:8080",
+				ModelName: "test-model", CreatedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatalf("create parent: %v", err)
+			}
+
+			taskID := "resumed-" + tc.name
+			task := &types.Task{
+				ID: taskID, ProjectID: projectID, Title: taskID, Prompt: "Task prompt",
+				Status: types.StatusInProgress, ExecutionState: types.ExecStateIdle,
+				CurrentThreadID: "thread-" + taskID, LlamaServerURL: "http://localhost:8080",
+				ModelName: "test-model", Autostarted: tc.autostarted, CreatedAt: now, UpdatedAt: now,
+			}
+			if tc.asSubtask {
+				task.ParentTaskID = parentID
+			}
+			if err := te.store.CreateTask(task); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+
+			var err error
+			if tc.asSubtask {
+				err = te.startSubtask(projectID, taskID)
+			} else {
+				err = te.startTask(projectID, taskID)
+			}
+			if err != nil {
+				t.Fatalf("resume: %v", err)
+			}
+			defer te.StopTask(taskID)
+
+			got, err := te.store.GetTaskByID(taskID)
+			if err != nil {
+				t.Fatalf("read task row: %v", err)
+			}
+			if got.Autostarted != tc.autostarted {
+				t.Errorf("Autostarted after resume = %v, want %v: the resume continues the paused run, "+
+					"it is not a start of its own", got.Autostarted, tc.autostarted)
+			}
+		})
+	}
+}

@@ -1406,6 +1406,11 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, stat
 		default:
 		}
 
+		// Answer from the parent's context
+		if out := te.autoAnswerTextStop(setup, lc, assistantText); out != turnWaitIdle {
+			return out
+		}
+
 		// If this is a subtask, auto-start the next sibling
 		if setup.task.ParentTaskID != "" {
 			_ = te.AutoStartNextSibling(setup.projectID, setup.task.ID, setup.task.ParentTaskID)

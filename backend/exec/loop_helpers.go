@@ -452,6 +452,7 @@ func (te *TaskExecutor) broadcastParentDiffStats(projectID, parentID string) {
 const (
 	advisoryDiagnostics   = "diagnostics"
 	advisoryMergeConflict = "merge_conflict"
+	advisoryAutoAnswer    = "auto_answer"
 )
 
 // advisory is a note about the workspace that the model must see but the user never
@@ -462,7 +463,7 @@ const (
 // remaining calls on every rebuild. They are buffered during tool execution and delivered
 // by flushAdvisories once the turn's own messages are in the conversation.
 type advisory struct {
-	kind     string // advisoryDiagnostics | advisoryMergeConflict — how the UI titles the note
+	kind     string // advisoryDiagnostics | advisoryMergeConflict | advisoryAutoAnswer — how the UI titles the note
 	severity string // mirrors TaskMessage.Severity: "" (default), "info", "error" — drives emphasis
 	text     string // what the model reads and the UI shows
 }
@@ -505,6 +506,56 @@ func (te *TaskExecutor) flushAdvisories(setup *taskExecSetup, lc *loopContext) {
 		})
 	}
 	lc.pendingAdvisories = nil
+}
+
+// autoAnswerTextStop answers a text-only turn of a run the user did not start, from the
+// parent's context — the same source ask_question's auto-answer uses — and hands the run
+// back to the LLM with the answer in the conversation.
+//
+// It returns turnNextLLMCall when the answer landed, turnStop when the slot wait was
+// cancelled (handleCancelledTask has run), and turnWaitIdle — the zero value — to leave the
+// settled turn alone, which is also what every decline does: a run the user started
+// themselves, a task with no parent to answer from, plan and explore mode, where a text
+// answer is the deliverable, and any failure of the answering call.
+//
+// The caller invokes it after the turn has already settled (Review, slot released, complete
+// frame sent) and after any queued user message was claimed, so a real message always beats
+// an automated answer and the board shows Review for the length of the answering call.
+func (te *TaskExecutor) autoAnswerTextStop(setup *taskExecSetup, lc *loopContext, assistantText string) turnOutcome {
+	if !setup.task.Autostarted || setup.task.ParentTaskID == "" || setup.task.IsPlanMode() || setup.task.IsExploreMode() {
+		return turnWaitIdle
+	}
+	if strings.TrimSpace(assistantText) == "" || setup.ctx.Err() != nil {
+		return turnWaitIdle
+	}
+
+	answers, err := te.automatedAnswers(setup.ctx, setup.task, []string{assistantText})
+	if err == nil && len(answers) != 1 {
+		err = fmt.Errorf("got %d answers for 1 question", len(answers))
+	}
+	if err != nil {
+		// A run nobody is watching still ends where a person can see it.
+		logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Warnf("automated answer to a text-only stop failed: %v, leaving the task for the user", err)
+		return turnWaitIdle
+	}
+
+	// The answer is what the user would have typed, and the user never typed it: an
+	// advisory row is the one representation that says so in both directions.
+	queueAdvisory(lc, advisory{kind: advisoryAutoAnswer, text: answers[0]})
+	te.flushAdvisories(setup, lc)
+
+	// The turn released the running-task slot on its way to idle; reclaim it before
+	// claiming the run again.
+	if curURL, _ := lc.mc.get(); curURL != "" && !te.syncTaskSlot(setup, curURL) {
+		te.handleCancelledTask(setup.task.ID, setup.projectID)
+		return turnStop
+	}
+	setup.task.Status = types.StatusInProgress
+	setup.task.ExecutionState = types.ExecStateRunning
+	te.persistTaskClaiming(setup)
+	te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Automated answer from parent context"}})
+	logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("automated answer to a text-only stop from parent context, continuing")
+	return turnNextLLMCall
 }
 
 // prepareMergeConflictTurn hands the model the instructions for resolving a conflict and
