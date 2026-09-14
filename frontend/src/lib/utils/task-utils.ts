@@ -30,7 +30,7 @@ export function countWithDescendants(taskId: string, status: string, childrenMap
 }
 
 /** True while some ancestor of this task sits in In Progress. The server refuses the same shape
- * per request (`checkAncestorInProgress` in `backend/managers/task.go`). */
+ * per request (`checkAncestorInProgress` in `backend/api/task.go`). */
 export function ancestorInProgress(tasks: Task[], taskId: string): boolean {
     const byId = new Map(tasks.map(t => [t.id, t]));
     const seen = new Set<string>([taskId]);

@@ -1,7 +1,27 @@
 # HTTP and WebSocket contract
 
-The rules are in `AGENTS.md → API`. This is the shape of the frames, the route table's exemptions, and the
-error vocabulary.
+The rules are in `AGENTS.md → API`. This is who owns an endpoint, the shape of the frames, the route
+table's exemptions, and the error vocabulary.
+
+## Which package owns an endpoint
+
+**A domain package serves its own endpoints.** `backend/api` holds the handlers for domain resources —
+`TaskHandler`, `ProjectHandler`, `BoardHandler`, `GitHandler` — so a new handler for a task, project, board
+or git route goes there, constructed in `NewServer` and registered on the `*Server`'s mux. `backend/server`
+holds the transport: the listener, TLS, session/CSRF middleware, the shutdown stage table, the detached
+base context, and therefore the endpoints that are *about the listener* — the `(*Server)` methods in
+`handler_*.go` (`handleFS…`, `handleThread…`, `handleSessions…`), which are methods on `Server` precisely
+because they call `s.broadcastTaskDiff`, `s.lockWorktree`, `s.fsWriteTarget` and take the `s.gitTask` lock.
+
+The direction is `server → api` and never back; `backend/api` imports no `backend/server`, which is why a
+handler that needs the hub or a lock is *injected* with a function value instead. That one-way edge is what
+makes two plausible refactors unavailable rather than merely deferred: folding every handler into one
+package means moving `Server` with them or taking a `server ↔ api` import cycle, and splitting
+`backend/api` by domain means inventing a shared-helper package to solve a naming problem, because
+`resolveTask`, `requireWorktreeMgr` and `resolveWorktree` (`http.go`) are shared between `task.go` and
+`git.go`. The mixed `Handle*`/`handle*` naming inside `backend/api` is the same boundary showing through,
+not drift: a handler is exported because `backend/server`'s route table names it and unexported because only
+the package calls it, so renaming one set into the other changes who may reach it.
 
 ## Frames
 
@@ -42,12 +62,12 @@ text with `dropAbandonedTurn()` and the retry streams the answer in its place.
 ## Partial updates decode into pointer fields
 
 Never a `map[string]any` read behind type assertions. `PUT /api/projects/{projectID}/tasks/{taskID}` uses
-`taskUpdateRequest` (`backend/managers/task_update.go`) and `PUT /api/config` uses `configUpdates`
+`taskUpdateRequest` (`backend/api/task_update.go`) and `PUT /api/config` uses `configUpdates`
 (`backend/config/updates.go`): absent key = leave alone, present key = write (including `""` and
 `false`), JSON null = absent. A single-value assertion (`v.(string)`) panics and the recovered panic
 reaches the browser as a 500; the `, ok` form silently drops the value and answers 200, so the UI believes
 its own save. Wrong types are a 400 naming the field, and validation runs before anything is written.
-Tests: `backend/managers/task_update_test.go`, `backend/config/updates_test.go`.
+Tests: `backend/api/task_update_test.go`, `backend/config/updates_test.go`.
 
 ## The acknowledged memory alert
 
@@ -84,7 +104,7 @@ renders `parsed_files` and never re-parses patch text, so `git.ParseUnifiedDiff`
 product. The immutable done-task snapshot stores its body *as the parsed body*
 (`doneDiffResponse.ParsedFiles`) and stays a byte-for-byte write: a response missing that key renders "No
 changes since last commit" over a diff it still carries. Tests:
-`backend/stream/done_snapshot_test.go`, `backend/managers/git_diff_parsed_test.go`.
+`backend/stream/done_snapshot_test.go`, `backend/api/git_diff_parsed_test.go`.
 
 ## Raw file bytes
 

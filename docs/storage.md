@@ -35,7 +35,7 @@ Test: `backend/store/atomic_writes_test.go`.
 row standing over the children it already deleted — and a project ID is the slug of its path, so
 re-adding the path finds its rows gone.
 
-CASCADE is the **row** story only. `managers.handleDeleteProject` deletes the project's tasks through
+CASCADE is the **row** story only. `api.handleDeleteProject` deletes the project's tasks through
 `TaskHandler.deleteTaskTrees` first, because a task owns a sandbox container, a worktree, branches and
 upload directories that keep running with no row left to name them, and `staleContainerNames` skips
 running containers — nothing else would ever remove them.

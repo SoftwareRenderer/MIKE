@@ -1,6 +1,6 @@
 // Package server is the HTTP boundary: routing, session/CSRF middleware, host pinning, the
 // WebSocket hub, static serving of the built frontend, preview and file endpoints.
-// Handlers stay thin and delegate to backend/managers, backend/exec and backend/extensions.
+// Handlers stay thin and delegate to backend/api, backend/exec and backend/extensions.
 package server
 
 import (
@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"kanban/backend/agent"
+	"kanban/backend/api"
 	"kanban/backend/auth"
 	"kanban/backend/config"
 	kanbanexec "kanban/backend/exec"
@@ -28,7 +29,6 @@ import (
 	"kanban/backend/httputil"
 	"kanban/backend/llmadapter"
 	"kanban/backend/lsp"
-	"kanban/backend/managers"
 	"kanban/backend/prompts"
 	"kanban/backend/sandbox"
 	"kanban/backend/store"
@@ -59,11 +59,11 @@ type Server struct {
 	store               *store.Store
 	configStore         *config.ConfigStore
 	sessionMgr          *auth.SessionManager
-	projectHandler      *managers.ProjectHandler
-	taskHandler         *managers.TaskHandler
-	boardHandler        *managers.BoardHandler
+	projectHandler      *api.ProjectHandler
+	taskHandler         *api.TaskHandler
+	boardHandler        *api.BoardHandler
 	appStreamMgr        *stream.AppStreamManager
-	gitHandler          *managers.GitHandler
+	gitHandler          *api.GitHandler
 	executor            *kanbanexec.TaskExecutor
 	terminalMgr         *term.TerminalManager
 	sandboxMgr          *sandbox.SandboxManager
@@ -382,7 +382,7 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config) (*Server, error) {
 	defer s.reg(stageSandboxStatsSampler, "sandbox stats sampler", s.sandboxStatsSampler.Stop)()
 	// The sampler only sees a live container; this sink is what outlives it.
 	s.sandboxMgr.SetMemoryPeakSink(sandboxMemoryPeakSink(store))
-	s.boardHandler = managers.NewBoardHandler(store, s.appStreamMgr, cfgStore, s.sandboxMgr)
+	s.boardHandler = api.NewBoardHandler(store, s.appStreamMgr, cfgStore, s.sandboxMgr)
 	s.terminalMgr = term.NewTerminalManager(store, cfgStore, s.sandboxMgr, nil, sandbox.DangerZone(settings.DangerZone)) // agentRegistry wired after creation
 	// Before the sandbox containers: killing a session's shell after its container is gone leaves the
 	// shell running.
@@ -485,9 +485,9 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config) (*Server, error) {
 	}
 	s.terminalMgr.SetAgentRegistry(agentRegistry)
 
-	s.taskHandler = managers.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, commitQueue, s.sandboxMgr)
-	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor, s.hostRoot, sandbox.DangerZone(settings.DangerZone), s.taskHandler)
-	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())
+	s.taskHandler = api.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, commitQueue, s.sandboxMgr)
+	s.projectHandler = api.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor, s.hostRoot, sandbox.DangerZone(settings.DangerZone), s.taskHandler)
+	s.gitHandler = api.NewGitHandler(store, s.executor.WorktreeMgr())
 	s.gitHandler.SetWorktreeMutex(s.lockWorktree)
 
 	// Extensions are entirely registry-driven — there is no built-in bootstrap step.

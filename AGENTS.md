@@ -29,7 +29,7 @@ something, *replace* the stale sentence; do not append.
 - **`make check` is the gate** and there is no CI file, so it is the only thing that catches a
   regression: `lint` (gofmt → vet → staticcheck → deadcode, both roots) → `bridge-check` → build → the Go
   suite → `svelte-check` → the frontend gates. Run it before claiming done, and `make check-race` on
-  whatever you touched (`RACE_PKGS`: git, exec, server, stream, managers) — a package's own green tests
+  whatever you touched (`RACE_PKGS`: git, exec, server, stream, api) — a package's own green tests
   prove nothing about code that only runs when a task does. `make lint` is the static half alone.
 - **E2E runs kill your dev server** (global-setup owns ports 3000/3001/9999) — restart with `make run`
   afterwards.
@@ -160,7 +160,8 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
   grammar, and the panel never re-parses patch text.
 - **A server fault answers MIKE's own sentence; the cause goes to the log.** `httputil.Fail` is the only
   place a status code is chosen, and an `Operation` does not unwrap its cause.
-- Full frame shapes, route exemptions, headers, error vocabulary: **`docs/api-contract.md`**.
+- Full frame shapes, route exemptions, headers, error vocabulary, and which package owns a new endpoint:
+  **`docs/api-contract.md`**.
 
 ## Frontend
 
@@ -420,7 +421,7 @@ deliberately omits.
 | `docs/storage.md` | what is in `tx`, migrations and `user_version`, file permissions, ID generation |
 | `docs/git-operations.md` | command construction and hook fence, worktree layout, stash identity, ref/clone/hash fences, slugify |
 | `docs/lifecycle.md` | construction order = shutdown order, the base-context registry, the TLS listener |
-| `docs/api-contract.md` | frame shapes, route verbs, partial updates, diff contract, error vocabulary, headers |
+| `docs/api-contract.md` | frame shapes, route verbs, partial updates, diff contract, error vocabulary, headers, endpoint ownership |
 | `docs/markup-sanitizing.md` | sanitizer deltas from DOMPurify's defaults, the sink audit, `Icon.svelte` |
 | `docs/extension-lifecycle.md` | install/build/delete/repair, SSE ordering, egress, capability gates, changelogs |
 | `docs/extension-dependency-cache.md` | the `dependency_cache` grant, `ro` mounts, `environment` check |

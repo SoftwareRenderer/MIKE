@@ -1,4 +1,4 @@
-package managers
+package api
 
 // The build reads the stored Dockerfile path itself, so the jail applies where the value is
 // accepted — the rule types.ValidateCommitHash follows for the same reason.

@@ -263,11 +263,11 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
   store a provider API key encrypt it on the way in, and `backend/config` fails with
   `crypto: MIKE_ENCRYPTION_KEY environment variable is not set` — not with a test failure you can read
   past.
-- A few tests shell out to a real `git commit` without `-c user.*` flags (e.g. the `backend/managers`
+- A few tests shell out to a real `git commit` without `-c user.*` flags (e.g. the `backend/api`
   remote-fixture tests), so the machine needs a git identity (`git config --global user.email …`) or they
   fail with `Committer identity unknown`. Do **not** also set `init.defaultBranch` to `main` globally:
-  fixture repos then collide with their own `git worktree add -B main` and a batch of managers tests fails
-  in setup, which looks exactly like a regression.
+  fixture repos then collide with their own `git worktree add -B main` and a batch of `backend/api` tests
+  fails in setup, which looks exactly like a regression.
 - Sandbox tests need `runsc` **and** a working podman storage: under a nested/overlayfs root they all fail
   with `'overlay' is not supported over overlayfs, a mount_program is required` (podman exit status 125).
   That is environmental, not a regression — verify with `podman info` before reading anything into it.

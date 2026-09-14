@@ -47,8 +47,8 @@ var reStreamEventConst = regexp.MustCompile(`types\.StreamEvent\{Type:\s*types\.
 // frameHomes are the packages that build frames, each with the vocabulary its names belong to. A frame
 // built anywhere else is either a protocol this rule has not been told about or is about to become one.
 var frameHomes = map[string]string{
-	"backend/stream/":   "WSType",  // the app-stream WebSocket, read by api/stream.ts
-	"backend/managers/": "SSEType", // the clone stream, read by api/projects.ts
+	"backend/stream/": "WSType",  // the app-stream WebSocket, read by api/stream.ts
+	"backend/api/":    "SSEType", // the clone stream, read by api/projects.ts
 }
 
 // reSSEConst collects the clone stream's vocabulary, which lives beside the WebSocket's but is not it.

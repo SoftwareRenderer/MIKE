@@ -126,7 +126,7 @@ option (`--output=/tmp/pwn` would create/truncate a file anywhere the server use
   `::` transport (`ext::sh -c 'id'`), and a **case-sensitive** scheme check because git's own is
   (`HTTPS://` is refused as transport `HTTPS`).
 - **Every** clone of a caller-supplied source goes through both halves — project creation
-  (`managers.validateGitCloneURL`) and the extension install (`extensions.CheckoutExtension`). Git's own
+  (`api.validateGitCloneURL`) and the extension install (`extensions.CheckoutExtension`). Git's own
   refusal of `ext::` is a host default, not a defence (a host with `protocol.ext.allow=always` would run
   the payload as the server user). Use `git.CloneProtocolArgs()` for a clone that needs a bespoke flag —
   never drop the fence.
@@ -151,7 +151,7 @@ matching *parser* `types.TaskBranchSlugPrefix` (with `TaskBranchSuffixLen`, the 
 appends) lives beside them — a GC that parses a different shape than the executor writes deletes live
 branches. Never add a second copy of either. Non-ASCII letters are dropped, not transliterated.
 Tests: `backend/types/slug_test.go`, `backend/server/handler_fs_test.go`,
-`backend/managers/project_test.go`, `backend/extensions/registry_test.go`.
+`backend/api/project_test.go`, `backend/extensions/registry_test.go`.
 
 ## Which git calls carry a context
 

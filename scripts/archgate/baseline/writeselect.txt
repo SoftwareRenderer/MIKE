@@ -1,5 +1,5 @@
 # archgate baseline: frozen violations, regenerated with -update.
 # A key is <file>|<detail>; no line numbers, so unrelated edits do not churn this file.
 # Shrink it by fixing a violation, never by adding to it.
-backend/managers/git.go|GET /api/projects/{projectID}/tasks/{taskID}/diff writes: .diffCache.Store(
-backend/managers/git.go|GET /api/projects/{projectID}/tasks/{taskID}/diff writes: MaterializeDoneTaskDiff(
+backend/api/git.go|GET /api/projects/{projectID}/tasks/{taskID}/diff writes: .diffCache.Store(
+backend/api/git.go|GET /api/projects/{projectID}/tasks/{taskID}/diff writes: MaterializeDoneTaskDiff(

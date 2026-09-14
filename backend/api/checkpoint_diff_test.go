@@ -1,4 +1,4 @@
-package managers
+package api
 
 // A checkpoint's diff is an ordinary commit-to-commit diff against the snapshot commit. It used to be
 // taken against a stash entry, and when that resolved to the baseline the handler searched the stash list

@@ -1,4 +1,4 @@
-package managers
+package api
 
 import (
 	"encoding/json"

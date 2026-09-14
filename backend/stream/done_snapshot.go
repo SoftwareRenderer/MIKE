@@ -166,7 +166,7 @@ func computeDoneTaskDiff(wm *git.WorktreeManager, st *store.Store, projectID str
 
 // doneDiffResponseFromTaskDiff builds the REST response body for a
 // commit-to-commit diff: untracked file lines are stripped to line counts
-// (same as stripUntrackedLines in the managers package).
+// (same as stripUntrackedLines in the api package).
 func doneDiffResponseFromTaskDiff(d *git.TaskDiff) doneDiffResponse {
 	untracked := make([]git.UntrackedFile, len(d.Untracked))
 	for i, u := range d.Untracked {

@@ -55,7 +55,7 @@ pkg/logging/logging.go:Lines
 #   Measure   satisfies stream.BudgetMeasure. The sampler holds the interface and the server wires the
 #             implementation, so no direct call site exists to find.
 #
-# backend/exec: CommitAndDonePending is how backend/managers holds that a "Commit and move to done"
+# backend/exec: CommitAndDonePending is how backend/api holds that a "Commit and move to done"
 # click armed the merge. Callers inside the package ask the merge orchestrator directly, so no
 # production path reaches the delegator - and deleting it would leave that click's arming
 # unobservable from the package that owns the HTTP handler.

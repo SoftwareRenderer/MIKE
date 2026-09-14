@@ -1,4 +1,4 @@
-package managers
+package api
 
 // Every task-scoped handler opens the same way: the {projectID}/{taskID} pair in the
 // path becomes a task, then the worktree directory that task owns. Each step answers its

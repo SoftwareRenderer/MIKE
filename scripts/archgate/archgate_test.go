@@ -132,7 +132,7 @@ func TestBaselineRoundTrip(t *testing.T) {
 func TestRuleHTTP(t *testing.T) {
 	withSmallMinGoFiles(t)
 	dirty := writeFixture(t, map[string]string{
-		"backend/managers/h.go": "package managers\n\nimport (\n\t\"net/http\"\n)\n\nvar _ = http.StatusOK\n",
+		"backend/api/h.go":      "package api\n\nimport (\n\t\"net/http\"\n)\n\nvar _ = http.StatusOK\n",
 		"backend/server/ok.go":  "package server\n\nimport \"net/http\"\n\nvar _ = http.StatusOK\n",
 		"backend/exec/clean.go": "package exec\n\nfunc Nop() {}\n",
 	})
@@ -143,7 +143,7 @@ func TestRuleHTTP(t *testing.T) {
 	if checked != 3 {
 		t.Errorf("population wrong: %d", checked)
 	}
-	if len(findings) != 1 || findings[0].File != "backend/managers/h.go" {
+	if len(findings) != 1 || findings[0].File != "backend/api/h.go" {
 		t.Fatalf("http violation in a domain package not found: %+v", findings)
 	}
 	if findings[0].Why == "" {
@@ -221,13 +221,13 @@ func (s *Server) routes() {
 `,
 		"backend/server/server.go": `package server
 
-import "kanban/backend/managers"
+import "kanban/backend/api"
 
 type Server struct {
-	gitHandler *managers.GitHandler
+	gitHandler *api.GitHandler
 }
 `,
-		"backend/managers/git.go": `package managers
+		"backend/api/git.go": `package api
 
 import "net/http"
 
@@ -331,15 +331,15 @@ func (s *Server) routes() {
 `,
 		"backend/server/server.go": `package server
 
-import "kanban/backend/managers"
+import "kanban/backend/api"
 
 type Server struct {
-	gitHandler  *managers.GitHandler
-	boardHandler *managers.BoardHandler
-	taskHandler *managers.TaskHandler
+	gitHandler  *api.GitHandler
+	boardHandler *api.BoardHandler
+	taskHandler *api.TaskHandler
 }
 `,
-		"backend/managers/git.go": `package managers
+		"backend/api/git.go": `package api
 
 import (
 	"net/http"
@@ -354,7 +354,7 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	h.diffCache.Store("x", "y")
 }
 `,
-		"backend/managers/board.go": `package managers
+		"backend/api/board.go": `package api
 
 import "net/http"
 
@@ -364,7 +364,7 @@ func (h *BoardHandler) HandleBoard(w http.ResponseWriter, r *http.Request) {
 	h.store.GetProject("x")
 }
 `,
-		"backend/managers/task.go": `package managers
+		"backend/api/task.go": `package api
 
 import "net/http"
 
@@ -561,7 +561,7 @@ func shortcut() map[string]any { return appFrame("status", nil) }
 `,
 		// The clone stream is its own protocol with its own vocabulary. Its handler builds frames too,
 		// so it is a home of this rule — and the finding must name SSEType, not the WebSocket's names.
-		"backend/managers/project.go": `package managers
+		"backend/api/project.go": `package api
 
 func c() map[string]any { return map[string]any{"type": "progress"} }
 `,
@@ -580,7 +580,7 @@ func c() map[string]any { return map[string]any{"type": "progress"} }
 	}
 	var sseNamed int
 	for _, f := range findings {
-		if strings.Contains(f.File, "managers") && strings.Contains(f.Detail, "types.SSEType constant") {
+		if strings.Contains(f.File, "backend/api") && strings.Contains(f.Detail, "types.SSEType constant") {
 			sseNamed++
 		}
 	}
@@ -1096,10 +1096,10 @@ func TestEnvAssign_RefusesToReportCleanWhenItSeesNothing(t *testing.T) {
 func TestRuleStatus500(t *testing.T) {
 	withSmallMinGoFiles(t)
 	dirty := writeFixture(t, map[string]string{
-		"backend/managers/a.go": "package managers\n\n" +
+		"backend/api/a.go": "package api\n\n" +
 			"func (h *H) A() {\n\thtputil.JSONError(w, http.StatusInternalServerError, err.Error())\n}\n\n" +
 			"func (h *H) B() {\n\thtputil.JSONError(w, http.StatusInternalServerError,\n\t\tfmt.Sprintf(\"get children: %v\", err))\n}\n",
-		"backend/managers/b.go": "package managers\n\n" +
+		"backend/api/b.go": "package api\n\n" +
 			"func (h *H) C() {\n\thtputil.JSONError(w, http.StatusInternalServerError, \"internal error\")\n}\n\n" +
 			"func (h *H) D() {\n\thtputil.JSONError(w, http.StatusBadRequest, fmt.Sprintf(\"invalid path %v\", err))\n}\n\n" +
 			"func (h *H) E() {\n\thtputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf(\"limit %v\", limit))\n}\n",
@@ -1126,7 +1126,7 @@ func TestRuleStatus500(t *testing.T) {
 func TestRuleStatus500_ReportsItsPopulation(t *testing.T) {
 	withSmallMinGoFiles(t)
 	clean := writeFixture(t, map[string]string{
-		"backend/managers/a.go": "package managers\n\nfunc (h *H) A() {\n\thtputil.Fail(w, err, \"get task\", \"task not found\")\n}\n",
+		"backend/api/a.go": "package api\n\nfunc (h *H) A() {\n\thtputil.Fail(w, err, \"get task\", \"task not found\")\n}\n",
 	})
 	findings, checked, err := scanStatusEcho(clean)
 	if err != nil {

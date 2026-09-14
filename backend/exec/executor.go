@@ -701,7 +701,7 @@ func isIncompleteForStart(t types.Task) bool {
 // one, or the LLM's choice when several tie (first on LLM failure). Empty
 // string if none is startable.
 //
-// A start path should prefer TaskHandler.subtasksToStart (backend/managers),
+// A start path should prefer TaskHandler.subtasksToStart (backend/api),
 // which honors the "run siblings in parallel" setting by returning every
 // startable subtask when that is on; use this directly only when a single pick
 // is genuinely wanted.

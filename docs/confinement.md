@@ -11,7 +11,7 @@ projects too because the server process enforces them.
   host, because turning a project's sandbox off *is* the operator's decision about that project.
 - `DANGER_ZONE=1` is the permission to make that decision — creating a project with sandboxing disabled,
   or switching one to unsandboxed, is 403 without it (`cannot create project with sandbox disabled — set
-  DANGER_ZONE=1 to allow`, checked in `backend/managers/project.go` against the injected
+  DANGER_ZONE=1 to allow`, checked in `backend/api/project.go` against the injected
   `sandbox.DangerZone` — never a `Getenv` at the gate). It never gates execution.
 - The flag has a second, deliberate meaning: it decides what a host terminal is *given*
   (`term.hostShellEnv`) — `os.Environ()` with it, because that terminal is the operator's own shell and a
@@ -24,7 +24,7 @@ projects too because the server process enforces them.
   task: its worktree join is the host, so `..` and absolute paths go where they name, by design.
 - Tests: `TestSandboxedTaskWithoutBridgeRefusesEveryHostTool` (one table, every tool),
   `backend/term/host_shell_env_test.go`, `backend/exec/sandbox_file_access_test.go`,
-  `backend/managers/project_test.go`.
+  `backend/api/project_test.go`.
 
 ## File endpoints: the project plus the task the request names
 
@@ -71,7 +71,7 @@ project or cloning into a path. `fsutil.HostRoot` (`backend/fsutil/hostroot.go`)
 plus the directories the operator declared at startup (workspace dir, extensions dir), or to any host
 path with `MIKE_ALLOW_ROOT_FS=1`.
 
-- It is built **once** in `NewServer` and injected into `managers.NewProjectHandler`, so the picker and
+- It is built **once** in `NewServer` and injected into `api.NewProjectHandler`, so the picker and
   project create cannot disagree about what was declared.
 - **The two workspace rules are not one:** the workspace dir is never a root for a project-scoped
   request, and it **is** a root for the no-project jail, where there is no project to protect against.
@@ -88,7 +88,7 @@ path with `MIKE_ALLOW_ROOT_FS=1`.
   leaves no partial checkout. The jail reaches the picker only through a refusal: `GET /api/home` answers
   the home it opens at and nothing about the jail.
 - Tests: `backend/fsutil/hostroot_test.go`, `backend/server/handler_fs_hostroot_test.go`,
-  `backend/server/server_hostroot_test.go`, `backend/managers/project_hostroot_test.go`,
+  `backend/server/server_hostroot_test.go`, `backend/api/project_hostroot_test.go`,
   `backend/server/handler_fs_sandbox_test.go`, `backend/server/handler_fs_upload_test.go`.
 
 ## Two host reads outside the tool path
@@ -102,17 +102,17 @@ path with `MIKE_ALLOW_ROOT_FS=1`.
   accepted** (`checkHostPath` on create and `PUT`), against the jail the Dockerfile picker browses, for
   the same reason as `types.ValidateCommitHash`: the stored value is what the later read trusts and never
   re-checks.
-- Tests: `backend/lsp/docsync_test.go`, `backend/managers/project_dockerfile_jail_test.go`.
+- Tests: `backend/lsp/docsync_test.go`, `backend/api/project_dockerfile_jail_test.go`.
 
 ## The git side's two working-tree reads
 
-`repoFilePath` (`backend/managers/git.go`) jails `GET /projects/{id}/git/diff/file`, whose working-tree
+`repoFilePath` (`backend/api/git.go`) jails `GET /projects/{id}/git/diff/file`, whose working-tree
 read follows a link committed into the repo even though `git diff` itself answers from the object
 database. `git.UntrackedReadTarget` jails the `?full=1` re-read behind
 `GET /projects/{id}/tasks/{id}/diff/file`, whose path came from `git status` — which lists
 `key -> ~/.ssh/id_rsa` exactly the way it lists a file. Both reads are size-capped at
 `maxDiffFileBytes`; past the cap the cached window plus `truncated` is the answer.
-Tests: `backend/managers/git_diff_file_path_test.go`, `git_diff_file_full_test.go`,
+Tests: `backend/api/git_diff_file_path_test.go`, `git_diff_file_full_test.go`,
 `git_diff_size_cap_test.go`, `backend/git/untracked_symlink_test.go`.
 
 ## Nothing is read or captured unbounded

@@ -76,7 +76,7 @@ create and `PUT` (400 naming the field).
   Dockerfile runs on the host runtime with podman's default caps — the one place "gVisor runs it" is
   not true.
 - Tests: `pkg/sandboxruntime/podman_args_test.go`, `backend/sandbox/create_args_test.go`,
-  `backend/extensions/sandbox_test.go`, `backend/managers/project_sandbox_settings_test.go`,
+  `backend/extensions/sandbox_test.go`, `backend/api/project_sandbox_settings_test.go`,
   `TestTaskSandboxIsolatesWhatACapabilityGrantAssumes`, `TestBuildExtensionCreateArgs_CapabilityPosture`,
   and each builder's `…BeginWithTheSharedPreface` test, which fails the day one re-inlines the posture.
 
@@ -260,7 +260,7 @@ a name as `CHOWN` — while `--privileged` is an *argument* and is refused at in
   `backend/exec/memory_gate_test.go`, `backend/exec/memory_supervisor_test.go`,
   `backend/server/memory_budget_test.go`, `backend/stream/sandbox_stats_test.go`,
   `backend/store/tasks_test.go`, `backend/store/migrations_test.go`,
-  `backend/managers/task_memory_alert_test.go`,
+  `backend/api/task_memory_alert_test.go`,
   `frontend/src/lib/utils/__tests__/memory-stats.unit.ts`,
   `frontend/src/lib/api/__tests__/queue-board-scope.unit.ts`,
   `frontend/src/lib/components/__tests__/{task-header-sandbox-dot,sandbox-panel-memory,card-memory-pill}.unit.svelte.ts`.

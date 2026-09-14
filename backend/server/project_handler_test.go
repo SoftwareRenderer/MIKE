@@ -330,7 +330,7 @@ func TestProjectUpdateSandboxNetworkIsolation(t *testing.T) {
 
 func TestProjectToggleSandboxWithTasks(t *testing.T) {
 	// The fixture server carries the DANGER_ZONE grant, which is what lets a project be switched to
-	// unsandboxed here; the refusal is pinned by the managers suite.
+	// unsandboxed here; the refusal is pinned by the api suite.
 	s := testServer(t)
 	projID := createTestProject(t, s)
 

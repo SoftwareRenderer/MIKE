@@ -25,7 +25,7 @@ timeouts.
 ## Accessors return a release function, never a mutex
 
 `WorktreeManager` exposes `LockProjectStash(id) func()` / `LockProjectMerge(id) func()`, `TaskExecutor`
-exposes `LockWorktree(id) func()`, and `managers.GitHandler` is injected with `func(string) func()`. A
+exposes `LockWorktree(id) func()`, and `api.GitHandler` is injected with `func(string) func()`. A
 returned `*sync.Mutex` can be stored, copied and passed on, and a caller holding a copy serializes on a
 *different* lock while believing it holds the one that protects the repository.
 `TestNoExportedMutexAccessor` fails on any exported method returning `*sync.Mutex`.

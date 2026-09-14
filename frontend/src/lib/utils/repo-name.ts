@@ -1,6 +1,6 @@
 /**
  * Derive a display name for a git clone target from the source URL —
- * mirrors the backend `repoNameFromGitURL` (backend/managers/project.go)
+ * mirrors the backend `repoNameFromGitURL` (backend/api/project.go)
  * so the sidebar placeholder matches the name the server will assign.
  *
  * Supports HTTPS (`https://host/org/repo.git`), SSH

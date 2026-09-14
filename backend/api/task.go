@@ -1,7 +1,7 @@
-// Package managers holds the request-facing domain operations the API is made of - tasks,
+// Package api holds the request-facing domain operations the API is made of - tasks,
 // projects, board state, per-project git - between backend/server and the store, git and
 // exec layers below. Long-running work belongs to backend/exec, not here.
-package managers
+package api
 
 import (
 	"context"

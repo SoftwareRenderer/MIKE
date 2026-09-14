@@ -123,7 +123,7 @@ func inlineStructBody(line string) (string, bool) {
 }
 
 // serverFieldTypes maps each Server struct field to its type name, which is how a handler is bound
-// to the right receiver. Values are like "*managers.GitHandler"; the type name is the last segment.
+// to the right receiver. Values are like "*api.GitHandler"; the type name is the last segment.
 func serverFieldTypes(root string) (map[string]string, error) {
 	lines := read(root, serverFile)
 	if lines == nil {

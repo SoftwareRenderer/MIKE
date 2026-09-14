@@ -622,7 +622,7 @@ func (s *Server) broadcastTaskDiff(taskID string) {
 
 // lockWorktree locks the per-task worktree and returns the function that releases it.
 //
-// Release function rather than mutex: these are injected into managers.GitHandler, and a mutex handed
+// Release function rather than mutex: these are injected into api.GitHandler, and a mutex handed
 // across a package boundary is a value that can be stored, copied, and unlocked by whoever holds a
 // copy — see git.WorktreeManager.LockProjectStash for the same argument.
 func (s *Server) lockWorktree(taskID string) func() {

@@ -166,7 +166,7 @@ func TestTaskUpdate(t *testing.T) {
 // PUT must reject an option-looking ref, accept a legitimate one, and ECHO the stored value
 // back in the response body (which is what the SPA re-renders). The exhaustive rejection
 // matrix for these fields lives with the validator itself, in
-// managers.TestTaskHandler_PUT_RefValidation — the row set here is deliberately small and
+// api.TestTaskHandler_PUT_RefValidation — the row set here is deliberately small and
 // adds the response-shape check that layer cannot make.
 func TestTaskUpdateRefValidation(t *testing.T) {
 	cases := []struct {

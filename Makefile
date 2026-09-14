@@ -174,7 +174,7 @@ check: ## THE GATE: lint + bridge-check + build + Go tests + frontend gates
 # sweep is ~4min and would not get run; these are where races have actually hidden. AGENTS.md: "A
 # green ./backend/exec/ is not proof" - the executor's locking bugs surface only under -race in
 # ./backend/server/, so both are here.
-RACE_PKGS := ./backend/git/ ./backend/exec/ ./backend/server/ ./backend/stream/ ./backend/managers/ ./pkg/logging/
+RACE_PKGS := ./backend/git/ ./backend/exec/ ./backend/server/ ./backend/stream/ ./backend/api/ ./pkg/logging/
 
 .PHONY: check-race
 check-race: ## -race over the executor/stream/terminal layers (~2min) — required for any concurrency change

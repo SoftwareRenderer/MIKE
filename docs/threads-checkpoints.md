@@ -162,7 +162,7 @@ of counting positions.
   branch, forces the worktree onto the replacement's branch and updates `task.Branch`.
 - `backend/server/fork_snapshot_test.go` also asserts that deleting a fork releases the pins its own rows
   held and leaves the parent's and Main's intact.
-- `backend/managers/checkpoint_diff_test.go` — the diff at a checkpoint lists the files it captured,
+- `backend/api/checkpoint_diff_test.go` — the diff at a checkpoint lists the files it captured,
   including the binary one.
 - `backend/server/thread_capture_test.go` — with git unable to write, a switch and a fork are refused and
   the work (tracked edit *and* new file) is still there, no thread changed, no stash entry appeared, no

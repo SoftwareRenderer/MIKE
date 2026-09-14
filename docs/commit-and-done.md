@@ -1,11 +1,11 @@
 # Commit and Move to Done
 
 What the click does, what a merge conflict does to it, and which files never get
-committed. Read before touching `HandleCommitAndDone` (`backend/managers/task.go`) or the
+committed. Read before touching `HandleCommitAndDone` (`backend/api/task.go`) or the
 merge/commit half of `backend/exec/merge.go`.
 
 ### Commit and Move to Done — unstaged/untracked files
-- "Commit and move to done" (`HandleCommitAndDone`, `backend/managers/task.go`) commits **only staged** changes. Untracked (never-staged) files must never be copied into the project's main checkout or merged — they stay in the worktree and are discarded when the task is deleted.
+- "Commit and move to done" (`HandleCommitAndDone`, `backend/api/task.go`) commits **only staged** changes. Untracked (never-staged) files must never be copied into the project's main checkout or merged — they stay in the worktree and are discarded when the task is deleted.
 - **A conflicted worktree is handed to the model, never refused.** `git add` is git's signal that a conflict was resolved, so `StageIndexedFiles` (`backend/git/worktree.go`) never selects an unmerged path and returns the ones it left alone: selecting them would commit the conflict markers, merge them to the target branch and mark the task Done. `HandleCommitAndDone` flags the task and enters the path a merge conflict already takes — `ArmCommitAndDone`, the conflict prompt, In Progress — so the resolving turn finishes this click. Any other commit failure ends the request through `errs.Operation`, because the merge that follows would delete the worktree holding the uncommitted work. Tests: `TestHandleCommitAndDone_HandsWorktreeConflictToTheResolver`, `…_ReportsACommitThatGitRefused`, `…_CommitsTheParentsOwnWorkAfterASubtaskMerge`.
 - The merge-conflict resolution commit `commitConflictResolution` (`backend/exec/merge.go`) stages with `git add -u` (tracked only), **NOT** `git add -A`.
 - **A merge conflict interrupts the click; it does not cancel it.** The click asked for commit + merge + Done, so the turn that finishes resolving merges into the target branch **whatever `auto_merge` says** (`auto_merge=false` is why the user clicked it) and marks the task Done.
