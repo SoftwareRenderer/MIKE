@@ -905,7 +905,6 @@
                         commit={diffCommit}
                         files={diffCommitFiles}
                         loading={diffLoading}
-                        projectPath={projectPath}
                         projectId={projectId}
                         onClose={closeCommitDiff}
                         onNavigate={handleDiffNavigate}

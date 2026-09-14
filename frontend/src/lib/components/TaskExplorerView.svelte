@@ -690,7 +690,6 @@
                         commit={diffCommit}
                         files={diffCommitFiles}
                         loading={diffLoading}
-                        projectPath={taskPath}
                         projectId={projectId}
                         taskId={taskId}
                         onClose={closeCommitDiff}

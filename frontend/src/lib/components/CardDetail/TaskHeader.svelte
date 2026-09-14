@@ -12,6 +12,7 @@
     import { useMemoryAlert } from '$lib/composables/use-memory-alert.svelte';
     import { openTerminalTitle } from '$lib/utils/keyboard';
     import { t } from '$lib/i18n';
+    import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
 
     let {
         workspaceDir,
@@ -101,28 +102,21 @@
             clearTimeout(pathCopiedTimer);
             pathCopiedTimer = null;
         }
-        document.removeEventListener('pointerdown', handleOutsidePointerDown, true);
         window.removeEventListener('resize', handlePathTipViewportChange);
         window.removeEventListener('orientationchange', handlePathTipViewportChange);
         pathTip = null;
         pathCopied = false;
     }
 
-    function handleOutsidePointerDown(e: PointerEvent) {
-        // pointerdown fires before the span's click — ignore taps on the
-        // label itself (so re-tapping toggles the tooltip off via the click
-        // handler instead of close-then-reopen) and taps inside the tooltip
-        // (so the copy button's tap lands on the button, not the dismiss
-        // handler).
-        if (e.target instanceof Node) {
-            if (pathSpanEl && pathSpanEl.contains(e.target)) return;
-            if (pathTipEl && pathTipEl.contains(e.target)) return;
-        }
-        clearPathTip();
-    }
+    // `pointerdown` captured at the document: it must run before the tap target's own default action.
+    // The label is the container because its click toggles the tooltip, and the tooltip is a second
+    // inside region so the copy button's tap reaches the button instead of dismissing it.
+    useClickOutside(() => pathSpanEl, () => clearPathTip(), {
+        event: 'pointerdown',
+        capture: true,
+        alsoInside: () => [pathTipEl],
+    });
 
-    // The tooltip is positioned with fixed pixel coordinates — any viewport
-    // change (rotation, resize) would leave it anchored to stale geometry.
     function handlePathTipViewportChange() {
         clearPathTip();
     }
@@ -143,7 +137,6 @@
         pathTip = { top: rect.bottom + 6, left };
 
         pathTipTimer = setTimeout(clearPathTip, PATH_TIP_VISIBLE_MS);
-        document.addEventListener('pointerdown', handleOutsidePointerDown, true);
         window.addEventListener('resize', handlePathTipViewportChange);
         window.addEventListener('orientationchange', handlePathTipViewportChange);
 

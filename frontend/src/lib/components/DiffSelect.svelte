@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
     interface Option {
         value: string;
         label: string;
@@ -20,20 +21,7 @@
         open = false;
     }
 
-    function handleClickOutside(e: MouseEvent) {
-        if (ref && !ref.contains(e.target as Node)) {
-            open = false;
-        }
-    }
-
-    $effect(() => {
-        if (open) {
-            document.addEventListener('click', handleClickOutside);
-        } else {
-            document.removeEventListener('click', handleClickOutside);
-        }
-        return () => document.removeEventListener('click', handleClickOutside);
-    });
+    useClickOutside(() => ref, () => { open = false; }, { event: 'click' });
 </script>
 
 <div class="diff-select-wrapper" bind:this={ref} class:open>

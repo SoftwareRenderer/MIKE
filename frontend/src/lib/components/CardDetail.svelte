@@ -9,6 +9,7 @@
     import { shouldAutoFullscreenDiffEditor } from '$lib/utils/diff-editor-layout';
     import { chatBlurState, chatCollapseState, chatFocusState, chatManualToggleState, chatSendState, type ChatAutoMaximizeRules, type ChatMaximizeState } from '$lib/utils/chat-auto-maximize';
     import { filterTopLevelTaskIds, willConsolidateIntoParent, taskIsInFlight } from '$lib/utils/task-utils';
+    import { createStatusLabel } from '$lib/utils/subtask-status';
     import { clearHighlightCache } from '$lib/highlighter';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { createTabReturn } from '$lib/composables/use-tab-return';
@@ -132,9 +133,7 @@
     }
 
     /** The column's label in the active language. */
-    function statusLabel(status: string): string {
-        return t(overviewSections.find(s => s.id === status)?.labelKey ?? 'board.column.done');
-    }
+    const statusLabel = createStatusLabel(overviewSections);
 
     // Diff state — managed by DiffCache service (reactive via $state())
     let diffCache = new DiffCache({

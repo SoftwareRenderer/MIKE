@@ -14,6 +14,7 @@
     import { activeLocale } from '$lib/i18n/runtime.svelte';
     import { t } from '$lib/i18n';
     import { slide } from 'svelte/transition';
+    import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
 
     interface Props {
         commit: GitCommit;
@@ -21,7 +22,6 @@
          * the browser's own diff grammar over raw patch text here. */
         files: DiffFile[];
         loading: boolean;
-        projectPath: string;
         /** Where a binary file's bytes are read from. */
         projectId: string;
         /** Task whose worktree the commit came from. */
@@ -34,7 +34,7 @@
         isMobile?: boolean;
     }
 
-    let { commit, files: diffFiles, loading, projectPath, projectId, taskId, onClose, onNavigate, onFileSelected, hasPrev, hasNext, isMobile }: Props = $props();
+    let { commit, files: diffFiles, loading, projectId, taskId, onClose, onNavigate, onFileSelected, hasPrev, hasNext, isMobile }: Props = $props();
     let hasContent = $derived(diffFiles.length > 0);
 
     /**
@@ -129,11 +129,6 @@
     /** Check if a file has more change lines than the threshold. */
     function isTruncated(rows: DiffRow[]): boolean {
         return rows.filter(r => r.variant === 'added' || r.variant === 'removed').length > TRUNCATE_AFTER;
-    }
-
-    /** Count remaining change lines after the threshold. */
-    function remainingChanges(rows: DiffRow[]): number {
-        return rows.filter(r => r.variant === 'added' || r.variant === 'removed').length - TRUNCATE_AFTER;
     }
 
     /** Get the index to slice rows at for unified view truncation. */
@@ -255,18 +250,7 @@
         diffMode = diffMode === 'split' ? 'unified' : 'split';
     }
 
-    // Close tooltip on outside click
-    $effect(() => {
-        function handleClick(e: MouseEvent) {
-            if (subjectBtnEl && !subjectBtnEl.contains(e.target as Node)) {
-                showFullMessage = false;
-            }
-        }
-        if (showFullMessage) {
-            document.addEventListener('click', handleClick);
-            return () => document.removeEventListener('click', handleClick);
-        }
-    });
+    useClickOutside(() => subjectBtnEl, () => { showFullMessage = false; }, { event: 'click' });
 
     // Side-by-side horizontal scroll sync (per-file)
     // Each file section has its own pair of scroll columns that must sync independently.

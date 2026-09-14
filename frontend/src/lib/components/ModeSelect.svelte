@@ -1,5 +1,6 @@
 <script lang="ts">
     import { t, type MessageKey } from '$lib/i18n';
+    import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
 
     let { value, onChange }: { value: string; onChange: (mode: string) => void } = $props();
 
@@ -15,15 +16,7 @@
     let dropdownRef: HTMLDivElement | null = null;
     let selected = $derived(modes.find(m => m.value === value) || modes[0]);
 
-    $effect(() => {
-        function handleClickOutside(e: MouseEvent) {
-            if (dropdownRef && !dropdownRef.contains(e.target as Node)) {
-                open = false;
-            }
-        }
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    });
+    useClickOutside(() => dropdownRef, () => { open = false; }, { event: 'mousedown' });
 
     function toggle() {
         open = !open;

@@ -5,7 +5,9 @@
     import { fade } from 'svelte/transition';
     import ChangeModelModal from './ChangeModelModal.svelte';
     import { planBulkMove } from '$lib/utils/task-utils';
+    import { createStatusLabel } from '$lib/utils/subtask-status';
     import { t, type MessageKey } from '$lib/i18n';
+    import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
 
     let { multiSelect, tasks, onClear }: {
         multiSelect: MultiSelect;
@@ -40,23 +42,12 @@
         { id: 'done', labelKey: 'board.column.done' },
     ];
 
-    function statusLabel(status: string): string {
-        return t(columns.find(c => c.id === status)?.labelKey ?? 'board.column.done');
-    }
+    const statusLabel = createStatusLabel(columns);
 
     let moveMenuOpen = $state(false);
     let moveWrapEl: HTMLDivElement | null = $state(null);
 
-    $effect(() => {
-        if (!moveMenuOpen) return;
-        function handleOutside(e: MouseEvent) {
-            if (moveWrapEl && !moveWrapEl.contains(e.target as Node)) {
-                moveMenuOpen = false;
-            }
-        }
-        document.addEventListener('mousedown', handleOutside);
-        return () => document.removeEventListener('mousedown', handleOutside);
-    });
+    useClickOutside(() => moveWrapEl, () => { moveMenuOpen = false; }, { event: 'mousedown' });
 
     /** With the menu open, Escape belongs to the menu: the board and the task view clear the
      * selection on that keystroke. */
@@ -110,8 +101,6 @@
         }));
     }
 
-    let barRef: HTMLDivElement | null = $state(null);
-
     let showModelModal = $state(false);
     let providers = $derived(appStore.config?.providers || []);
 
@@ -151,7 +140,6 @@
     <div
         class="multi-select-bar"
         class:has-running={hasRunning}
-        bind:this={barRef}
         transition:fade={{ duration: 150 }}
         role="toolbar"
         aria-label="Multi-select actions"

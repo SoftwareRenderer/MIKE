@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { Snippet } from 'svelte';
+    import { isAtBottom } from '$lib/composables/use-chat-follow.svelte';
 
     /**
      * Fixed-height virtual scroll list: renders visible rows plus a buffer, absolutely
@@ -124,10 +125,10 @@
     }
 
     /** Check if the scroll container is near the bottom. */
-    function isNearBottom(threshold = 32): boolean {
+    function isNearBottom(threshold?: number): boolean {
         if (!scrollEl) return true;
-        const gap = totalHeight - scrollEl.scrollTop - scrollEl.clientHeight;
-        return gap < threshold;
+        // The spacer height, not the element's: only the rendered rows have any.
+        return isAtBottom(scrollEl, { threshold, totalHeight });
     }
 
     /** Scroll to a specific item index. */

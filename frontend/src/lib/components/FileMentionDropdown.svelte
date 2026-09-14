@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount, onDestroy } from 'svelte';
+    import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
 
     interface Props {
         results: Array<{ path: string }>;
@@ -76,21 +76,7 @@
         onSelect(path);
     }
 
-    // Close on outside click
-    let handleClickOutside: ((e: MouseEvent) => void) | null = null;
-    onMount(() => {
-        handleClickOutside = (e: MouseEvent) => {
-            if (dropdownEl && !dropdownEl.contains(e.target as Node)) {
-                onClose();
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-    });
-    onDestroy(() => {
-        if (handleClickOutside) {
-            document.removeEventListener('mousedown', handleClickOutside);
-        }
-    });
+    useClickOutside(() => dropdownEl, () => onClose(), { event: 'mousedown' });
 </script>
 
 {#if visible}

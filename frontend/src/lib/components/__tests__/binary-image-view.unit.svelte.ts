@@ -104,7 +104,7 @@ describe('the commit overlay', () => {
 
     function openCommit(files: DiffFile[]) {
         return render(CommitDiffOverlay, {
-            props: { commit, files, loading: false, projectPath: '/tmp/repo', projectId: 'p1', taskId: 't1', onClose: () => {}, onNavigate: () => {}, onFileSelected: () => {}, hasPrev: false, hasNext: false },
+            props: { commit, files, loading: false, projectId: 'p1', taskId: 't1', onClose: () => {}, onNavigate: () => {}, onFileSelected: () => {}, hasPrev: false, hasNext: false },
         });
     }
 
