@@ -35,6 +35,9 @@ var rules = []Rule{
 	{Name: "envassign", Description: "cmd.Env assigned without going through an environment allowlist", Scan: scanEnvAssignment},
 	{Name: "status500", Description: "500 whose body is built from an error value instead of \"internal error\"", Scan: scanStatusEcho},
 	{Name: "ctxroot", Description: "base context (context.Background/TODO) not classified root|detached|legacy", Scan: scanContextRoots},
+	{Name: "execctor", Description: "TaskExecutor built by a composite literal outside its constructor", Scan: scanExecutorConstruction},
+	{Name: "execseam", Description: "a collaborator holds *TaskExecutor, a lock by pointer, or a lock it does not own (a release func, or a mutex the struct itself declares, are the shapes asked for)", Scan: scanExecSeam},
+	{Name: "funclen", Description: fmt.Sprintf("function over %d lines", funcLineCeiling), Scan: scanFunctionLength},
 }
 
 // selectRules resolves -rule. An unknown name is an error rather than a silent no-op: a typo in a
@@ -73,7 +76,12 @@ var skipDirs = map[string]bool{
 
 // goFiles returns the production Go files under the scanned roots — never _test.go. A rule that
 // should see tests says so by reading the file itself.
-func goFiles(root string) ([]string, error) {
+func goFiles(root string) ([]string, error) { return goFilesIncluding(root, false) }
+
+// goFilesIncluding adds _test.go when tests is true. A rule whose subject is how a type gets built
+// has to see the tests too: a hand-built struct in a test file is the same escape from the
+// constructor as one in production, and it is the shape that reappears first.
+func goFilesIncluding(root string, tests bool) ([]string, error) {
 	var out []string
 	roots := []string{
 		filepath.Join(root, "backend"),
@@ -94,7 +102,7 @@ func goFiles(root string) ([]string, error) {
 				}
 				return nil
 			}
-			if strings.HasSuffix(path, "_test.go") {
+			if !tests && strings.HasSuffix(path, "_test.go") {
 				return nil
 			}
 			if strings.HasSuffix(path, ".go") {
@@ -116,7 +124,7 @@ func goFiles(root string) ([]string, error) {
 		return nil, err
 	}
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".go") && !strings.HasSuffix(e.Name(), "_test.go") {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".go") && (tests || !strings.HasSuffix(e.Name(), "_test.go")) {
 			out = append(out, e.Name())
 		}
 	}

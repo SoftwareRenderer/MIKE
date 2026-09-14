@@ -1328,3 +1328,401 @@ func mustBaseline(t *testing.T, path string) map[string]bool {
 	}
 	return m
 }
+
+// ---------------------------------------------------------------------------
+// The executor's split protocol: execctor, execseam, funclen.
+//
+// These three are the rules that keep a split split, so each is pinned from both sides: the shape the
+// protocol forbids must be found wherever it is written, and the shapes the protocol prescribes must
+// read as clean — a rule that cries wolf on the prescribed shape is the rule someone deletes.
+// ---------------------------------------------------------------------------
+
+// executorFixture is the one construction the protocol allows: the constructor's own literal.
+const executorFixture = `package exec
+
+type TaskExecutor struct {
+	store *store.Store
+}
+
+type Deps struct {
+	store *store.Store
+}
+
+func NewTaskExecutor(deps Deps) *TaskExecutor {
+	return &TaskExecutor{store: deps.store}
+}
+`
+
+func TestRuleExecCtor_FindsALiteralOutsideTheConstructor(t *testing.T) {
+	withSmallMinGoFiles(t)
+	dirty := writeFixture(t, map[string]string{
+		"backend/exec/executor.go": executorFixture,
+		// A test that hand-builds the struct is the same bypass as one in production: it exercises a
+		// TaskExecutor the server never runs, with whatever the constructor sets left unset.
+		"backend/exec/thing_test.go": `package exec
+
+func newThing() *TaskExecutor { return &TaskExecutor{} }
+
+func newOtherThing() *TaskExecutor {
+	e := &TaskExecutor{}
+	f := &TaskExecutor{}
+	return []*TaskExecutor{e, f}[0]
+}
+`,
+		"backend/server/wire.go": `package server
+
+import "kanban/backend/exec"
+
+func wire() *exec.TaskExecutor { return &exec.TaskExecutor{} }
+`,
+	})
+	findings, checked, err := scanExecutorConstruction(dirty)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if checked != 5 {
+		t.Errorf("population is the tree's literals: got %d, want 5", checked)
+	}
+	if len(findings) != 3 {
+		t.Fatalf("literal outside the constructor not found: %+v", findings)
+	}
+	for _, want := range []string{"newThing|x1", "newOtherThing|x2", "wire|x1"} {
+		if !contains(details(findings), want) {
+			t.Errorf("missing finding %q in %v", want, details(findings))
+		}
+	}
+	for _, f := range findings {
+		if f.Why == "" {
+			t.Errorf("a new violation must name the constructor to use: %+v", f)
+		}
+	}
+	if findings[0].File == "backend/exec/executor.go" {
+		t.Errorf("the constructor itself was reported: %+v", findings)
+	}
+
+	clean := writeFixture(t, map[string]string{
+		"backend/exec/executor.go": executorFixture,
+		"backend/server/wire.go": `package server
+
+import "kanban/backend/exec"
+
+func wire() *exec.TaskExecutor { return exec.NewTaskExecutor(exec.Deps{}) }
+`,
+	})
+	findings, checked, err = scanExecutorConstruction(clean)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("the constructor and its callers are the protocol, not violations: %+v", findings)
+	}
+	if checked != 1 {
+		t.Errorf("the constructor's own literal must still be counted: got %d, want 1", checked)
+	}
+}
+
+// A tree with no literal at all is a matcher that stopped recognising one — the empty baseline would
+// otherwise read as clean code forever.
+func TestRuleExecCtor_RefusesATreeWithNoLiteral(t *testing.T) {
+	withSmallMinGoFiles(t)
+	root := writeFixture(t, map[string]string{
+		"backend/exec/executor.go": "package exec\n\ntype TaskExecutor struct {\n\tstore *store.Store\n}\n",
+		"backend/api/a.go":         "package api\n\nfunc Nop() {}\n",
+	})
+	if _, _, err := scanExecutorConstruction(root); err == nil {
+		t.Fatal("a tree with no TaskExecutor literal must fail the scan, not pass it")
+	}
+}
+
+// collaboratorFixture holds every shape the protocol prescribes, and none it forbids.
+const collaboratorFixture = `package exec
+
+import "sync"
+
+type TaskExecutor struct {
+	taskMu sync.Mutex
+	tasks  map[string]*executionState
+}
+
+func (te *TaskExecutor) runningState(taskID string) *executionState {
+	te.taskMu.Lock()
+	defer te.taskMu.Unlock()
+	return te.tasks[taskID]
+}
+
+type executionState struct {
+	sandboxMu sync.Mutex
+	sandbox   func() sandboxState
+}
+
+func (s *executionState) setSandbox(sb sandboxState) {
+	s.sandboxMu.Lock()
+	defer s.sandboxMu.Unlock()
+}
+
+type mergeOrchestrator struct {
+	store        *store.Store
+	runningState func(taskID string) *executionState
+	lockWorktree func(taskID string) func()
+	commitDone   struct {
+		mu    sync.Mutex
+		tasks map[string]struct{}
+	}
+}
+
+func newMergeOrchestrator(store *store.Store, lock func(string) func()) *mergeOrchestrator {
+	return &mergeOrchestrator{store: store, lockWorktree: lock}
+}
+
+func (m *mergeOrchestrator) withWorktreeLocked(taskID string, run func()) {
+	release := m.lockWorktree(taskID)
+	defer release()
+	run()
+}
+`
+
+func TestRuleExecSeam_FindsEachForbiddenShape(t *testing.T) {
+	root := writeFixture(t, map[string]string{
+		"backend/exec/collaborator.go": `package exec
+
+import "sync"
+
+type badCollaborator struct {
+	te         *TaskExecutor
+	shared     *sync.RWMutex
+	newRunning func(te *TaskExecutor) *executionState
+}
+
+func newBadCollaborator(te *TaskExecutor, taskMu *sync.Mutex) *badCollaborator {
+	return nil
+}
+
+func giveMeTheLock() *sync.Mutex { return nil }
+
+func (c *badCollaborator) run(taskID string) {
+	c.te.taskMu.Lock()
+	defer c.te.taskMu.Unlock()
+	_ = c.te.tasks[taskID]
+}
+
+type secondStateCopy struct {
+	sandboxMu sync.Mutex
+}
+`,
+		"backend/exec/clean.go": collaboratorFixture,
+	})
+	findings, checked, err := scanExecSeam(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if checked < 15 {
+		t.Errorf("population is the fields and parameters examined: got %d", checked)
+	}
+	got := details(findings)
+	for _, want := range []string{
+		"badCollaborator.te holds *TaskExecutor",
+		"badCollaborator.shared is a *sync.RWMutex field",
+		"badCollaborator.newRunning holds func(*TaskExecutor)",
+		"newBadCollaborator takes *TaskExecutor",
+		"newBadCollaborator takes *sync.Mutex",
+		"newBadCollaborator reaches taskMu",
+		"giveMeTheLock returns *sync.Mutex",
+		"badCollaborator.run reaches taskMu",
+		"secondStateCopy.sandboxMu is a copy of the executionState lock",
+	} {
+		if !contains(got, want) {
+			t.Errorf("forbidden shape not reported: %q (got %v)", want, got)
+		}
+	}
+	// The prescribed shapes are not violations, and one false accusation per release func is how a
+	// rule like this gets switched off.
+	for _, g := range got {
+		for _, prescribed := range []string{"lockWorktree", "commitDone", "setSandbox", "withWorktreeLocked", "runningState", "mergeOrchestrator", "store"} {
+			if strings.Contains(g, prescribed) {
+				t.Errorf("prescribed shape reported: %q (all findings %v)", g, got)
+			}
+		}
+	}
+	// One finding per shape, not one per line: the same lock taken twice in one function is one breach.
+	if len(got) != 9 {
+		t.Errorf("want one finding per forbidden shape, got %d: %v", len(got), got)
+	}
+}
+
+// The owner of a lock may take it. executionState owns sandboxMu and TaskExecutor owns taskMu, and
+// their own methods are spread over fifteen files, so the exemption follows the receiver.
+func TestRuleExecSeam_TheOwnersMayReachTheirOwnLocks(t *testing.T) {
+	root := writeFixture(t, map[string]string{"backend/exec/clean.go": collaboratorFixture})
+	findings, checked, err := scanExecSeam(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("the executor and its own state reported for using their own locks: %+v", findings)
+	}
+	if checked == 0 {
+		t.Fatal("the scan examined no fields or parameters")
+	}
+}
+
+// A package the rule cannot read must fail the run: an empty backend/exec would otherwise report the
+// two baselined exemptions as the whole truth.
+func TestRuleExecSeam_RefusesAPackageItCannotRead(t *testing.T) {
+	withSmallMinGoFiles(t)
+	missing := writeFixture(t, map[string]string{"backend/api/a.go": "package api\n\nfunc Nop() {}\n"})
+	if _, _, err := scanExecSeam(missing); err == nil {
+		t.Fatal("a tree with no backend/exec must fail the scan")
+	}
+
+	broken := writeFixture(t, map[string]string{
+		"backend/exec/clean.go":  collaboratorFixture,
+		"backend/exec/broken.go": "package exec\n\ntype oops struct {\n\tte *TaskExecutor\n",
+	})
+	if _, _, err := scanExecSeam(broken); err == nil {
+		t.Fatal("a file that does not parse must fail the scan, not be skipped")
+	}
+}
+
+func TestRuleFuncLen_FindsTheGiantOnly(t *testing.T) {
+	withSmallMinGoFiles(t)
+	saved := funcLineCeiling
+	funcLineCeiling = 10
+	t.Cleanup(func() { funcLineCeiling = saved })
+
+	root := writeFixture(t, map[string]string{
+		"backend/exec/loop.go": `package exec
+
+func (te *TaskExecutor) finalizeTurn() {
+	a := 1
+	b := 2
+	c := 3
+	d := func() {
+		e := "}{ these braces are text, not structure"
+		_ = e
+	}
+	f := 4
+	g := 5
+	h := 6
+	i := 7
+	j := 8
+	_ = a
+	_ = b
+	_ = c
+	_ = d
+	_ = f
+	_ = g
+	_ = h
+	_ = i
+	_ = j
+}
+
+func short() {
+	x := 1
+	_ = x
+}
+`,
+		"pkg/gate/gate.go": "package gate\n\nfunc Tiny() {}\n",
+	})
+	findings, checked, err := scanFunctionLength(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if checked != 3 {
+		t.Errorf("population is the functions measured: got %d, want 3", checked)
+	}
+	if len(findings) != 1 || findings[0].Detail != "TaskExecutor.finalizeTurn" {
+		t.Fatalf("the over-ceiling function not found (or a closure reported as its own function): %+v", findings)
+	}
+	if !strings.Contains(findings[0].Why, "400") && !strings.Contains(findings[0].Why, "10") {
+		t.Errorf("the finding must state the ceiling it crossed: %q", findings[0].Why)
+	}
+	if !strings.Contains(findings[0].Key(), "TaskExecutor.finalizeTurn") {
+		t.Errorf("the key must name the function, not its line: %q", findings[0].Key())
+	}
+}
+
+// A tree with no function bodies at all is a walk that broke, not a codebase of declarations.
+func TestRuleFuncLen_RefusesATreeWithNoFunctions(t *testing.T) {
+	withSmallMinGoFiles(t)
+	root := writeFixture(t, map[string]string{
+		"backend/exec/types.go": "package exec\n\ntype TaskExecutor struct {\n\tstore *store.Store\n}\n",
+	})
+	if _, _, err := scanFunctionLength(root); err == nil {
+		t.Fatal("a tree with no function declarations must fail the scan")
+	}
+}
+
+// The independent measurement: brace depth at column zero, counted by a different mechanism than the
+// AST walk, must agree about which functions in the executor's loop file are over the ceiling.
+func TestFuncLen_RealTreeAgreesWithAnIndependentCount(t *testing.T) {
+	root := repoRoot(t)
+	rel := "backend/exec/loop.go"
+	findings, _, err := scanFunctionLength(root)
+	if err != nil {
+		t.Fatalf("scanFunctionLength: %v", err)
+	}
+	scanned := map[string]bool{}
+	for _, f := range findings {
+		if f.File == rel {
+			scanned[f.Detail] = true
+		}
+	}
+	counted := longFuncsInFile(t, root, rel, funcLineCeiling)
+	if len(counted) == 0 {
+		t.Fatalf("%s holds no function over %d lines by the independent count — the fixture and the tree have drifted", rel, funcLineCeiling)
+	}
+	for _, name := range counted {
+		if !scanned[name] {
+			t.Errorf("the independent count says %s is over the ceiling; the rule did not report it (%v)", name, scanned)
+		}
+	}
+	if len(counted) != len(scanned) {
+		t.Errorf("independent count found %d long functions, the rule found %d: %v vs %v", len(counted), len(scanned), counted, scanned)
+	}
+}
+
+// longFuncsInFile measures each top-level function from its `func` line to the first `}` at column 0,
+// which is where gofmt puts the end of a top-level declaration.
+func longFuncsInFile(t *testing.T, root, rel string, ceiling int) []string {
+	t.Helper()
+	lines := read(root, rel)
+	var out []string
+	for i := 0; i < len(lines); {
+		if !strings.HasPrefix(lines[i], "func ") {
+			i++
+			continue
+		}
+		end := i
+		for end < len(lines) && lines[end] != "}" {
+			end++
+		}
+		if end-i+1 > ceiling {
+			out = append(out, signatureName(lines[i]))
+		}
+		i = end + 1
+	}
+	return out
+}
+
+// signatureName renders "func (te *TaskExecutor) finalizeTurn(...) {" as "TaskExecutor.finalizeTurn",
+// the same label the rule keys on.
+func signatureName(line string) string {
+	rest := strings.TrimPrefix(line, "func ")
+	recv := ""
+	if strings.HasPrefix(rest, "(") {
+		if end := strings.Index(rest, ")"); end >= 0 {
+			inner := strings.TrimSpace(rest[1:end])
+			if sp := strings.LastIndex(inner, " "); sp >= 0 {
+				recv = strings.TrimSpace(inner[sp+1:])
+			}
+			rest = strings.TrimSpace(rest[end+1:])
+		}
+	}
+	if paren := strings.Index(rest, "("); paren >= 0 {
+		rest = rest[:paren]
+	}
+	if recv != "" {
+		return strings.TrimPrefix(recv, "*") + "." + rest
+	}
+	return rest
+}
