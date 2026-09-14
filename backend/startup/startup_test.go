@@ -211,8 +211,26 @@ func TestLogLevelResolution(t *testing.T) {
 	}
 }
 
+// resolverEnv is every variable the ladder reads. A defaults test measures what the resolver produces
+// when nothing is set, so it must not inherit the operator's own environment; clearing a variable is the
+// documented spelling of unset.
+var resolverEnv = []string{
+	EnvPort, EnvListen, EnvDataDir, EnvWorktreesDir, EnvFrontendDist, EnvTLS, EnvAllowedHosts,
+	EnvLogLevel, EnvLoginPassword, EnvEncryptionKey, EnvRegistryURL, EnvExtMountRoots,
+	EnvAgentPath, EnvSkipSandboxSweep, EnvTrustProxy, EnvLoginRateLimit, EnvAllowRootFS,
+	EnvDangerZone, EnvGCDryRun, EnvPProf, EnvMemoryBudgetPct,
+}
+
+func clearResolverEnv(t testing.TB) {
+	t.Helper()
+	for _, name := range resolverEnv {
+		t.Setenv(name, "")
+	}
+}
+
 // mustResolve resolves with the encryption key present, which every real boot requires; a test that
-// wants the failure asks for it by name.
+// wants the failure asks for it by name. It clears nothing: a fixture that sets a variable and then
+// resolves must keep what it set.
 func mustResolve(t *testing.T, f Flags) Config {
 	t.Helper()
 	t.Setenv(EnvEncryptionKey, "a-long-enough-test-key")
@@ -345,6 +363,7 @@ func mustFailResolve(t *testing.T, raw string) string {
 // Resolve is the only place the ladder runs, so the fields a consumer reads must come from it —
 // including the ones whose default is not obvious (loopback, ./data, the login budget).
 func TestResolveDefaults(t *testing.T) {
+	clearResolverEnv(t)
 	c := mustResolve(t, Flags{})
 	if c.Addr != "127.0.0.1:3000" {
 		t.Errorf("Addr = %q, want 127.0.0.1:3000 (loopback by default: the API is RCE-complete)", c.Addr)

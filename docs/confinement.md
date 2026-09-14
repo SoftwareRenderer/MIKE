@@ -17,10 +17,10 @@ projects too because the server process enforces them.
   (`term.hostShellEnv`) — `os.Environ()` with it, because that terminal is the operator's own shell and a
   scrubbed one cannot run their ssh-agent/registry logins; `agent.SafeAgentEnv` without it, because a
   project row is not a grant of `MIKE_LOGIN_PASSWORD` and `MIKE_ENCRYPTION_KEY` to a shell.
-- `hostGuard` (`backend/exec/tools.go`) refuses `read_file`/`write_file`/`edit_file`/`bash` when a
-  sandboxed task's sandbox callback is missing: a missing bridge is an outage, not a licence to work on
-  the host behind the container. The LSP tools resolve their symbol through the same reader
-  (`resolveRead`), never a direct `os.ReadFile` of the worktree path. Nothing jails an *unsandboxed*
+- `toolEnv.hostGuard` (`backend/exec/tool_dispatch.go`) refuses `read_file`/`write_file`/`edit_file`/`bash`
+  when a sandboxed task's sandbox callback is missing: a missing bridge is an outage, not a licence to
+  work on the host behind the container. The LSP tools resolve their symbol through the same reader
+  (`toolEnv.reader`), never a direct `os.ReadFile` of the worktree path. Nothing jails an *unsandboxed*
   task: its worktree join is the host, so `..` and absolute paths go where they name, by design.
 - Tests: `TestSandboxedTaskWithoutBridgeRefusesEveryHostTool` (one table, every tool),
   `backend/term/host_shell_env_test.go`, `backend/exec/sandbox_file_access_test.go`,

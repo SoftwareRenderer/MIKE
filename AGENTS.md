@@ -27,7 +27,8 @@ something, *replace* the stale sentence; do not append.
 - **Never commit.** The user commits manually.
 - **Never leave the server running** after a crash or panic — stop it first.
 - **`make check` is the gate** and there is no CI file, so it is the only thing that catches a
-  regression: `lint` (gofmt → vet → staticcheck → deadcode, both roots) → `bridge-check` → build → the Go
+  regression: `lint` (gofmt → vet → staticcheck → deadcode, both roots) → `archgate` + `test-archgate`
+  (structural debt against its frozen baselines) → `bridge-check` → build → the Go
   suite → `svelte-check` → the frontend gates. Run it before claiming done, and `make check-race` on
   whatever you touched (`RACE_PKGS`: git, exec, server, stream, api) — a package's own green tests
   prove nothing about code that only runs when a task does. `make lint` is the static half alone.

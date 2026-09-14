@@ -1028,13 +1028,14 @@ func TestHandlePull_Success(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Advance the remote via a second clone so the local repo is behind.
+	// Advance the remote via a second clone so the local repo is behind. testgit carries the commit
+	// identity: a fresh clone has no user.* of its own.
 	clone := t.TempDir()
-	mustRun(t, "", "git", "clone", bare, clone)
+	testgit.Git(t, "", "clone", bare, clone)
 	createFile(t, clone, "remote-file.txt", "from remote\n")
-	mustRun(t, clone, "git", "add", "remote-file.txt")
-	mustRun(t, clone, "git", "commit", "-m", "remote commit")
-	mustRun(t, clone, "git", "push")
+	testgit.Git(t, clone, "add", "remote-file.txt")
+	testgit.Git(t, clone, "commit", "-m", "remote commit")
+	testgit.Git(t, clone, "push")
 
 	mux := newPullPushMux(h)
 	req := httptest.NewRequest("POST", "/api/projects/pull-success-proj/git/pull", nil)

@@ -263,14 +263,26 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
   store a provider API key encrypt it on the way in, and `backend/config` fails with
   `crypto: MIKE_ENCRYPTION_KEY environment variable is not set` — not with a test failure you can read
   past.
-- A few tests shell out to a real `git commit` without `-c user.*` flags (e.g. the `backend/api`
-  remote-fixture tests), so the machine needs a git identity (`git config --global user.email …`) or they
-  fail with `Committer identity unknown`. Do **not** also set `init.defaultBranch` to `main` globally:
-  fixture repos then collide with their own `git worktree add -B main` and a batch of `backend/api` tests
-  fails in setup, which looks exactly like a regression.
+- **No global git identity is needed**, so `make check` never depends on the developer's config: every
+  fixture commits through `backend/testutil/testgit`, which puts `-c user.name` / `-c user.email` on every
+  command. A `Committer identity unknown` failure names a
+  fixture that shelled out to raw `git commit` — fix the fixture, do not set `user.email` globally.
+  Do **not** set `init.defaultBranch` to `main` globally either: fixture repos then collide with their own
+  `git worktree add -B main` and a batch of `backend/api` tests fails in setup, which looks exactly like a
+  regression.
+- **`git stash push` with `index.lock` held answers some git versions with exit 1 and no output at all**
+  (measured on git 2.43.0, with both a tracked change and an untracked file). `backend/git`'s
+  `TestPushStashCarriesGitReason` asserts that git's own refusal reaches the error, so it fails on such a
+  host while the product is fine: `PushStash` cannot carry a reason the subprocess never printed.
+  Confirm with `git init && echo x > f && git add f && git commit -qm one && : > .git/index.lock &&
+  git stash push -m x; echo $?` before reading anything into the red.
 - Sandbox tests need `runsc` **and** a working podman storage: under a nested/overlayfs root they all fail
   with `'overlay' is not supported over overlayfs, a mount_program is required` (podman exit status 125).
   That is environmental, not a regression — verify with `podman info` before reading anything into it.
+  The reach is wider than `backend/sandbox`: `backend/server`'s `TestTaskOperatingModeRemount` fails with
+  "expected sandbox to be created after start", and `backend/extensions`' `TestExtensionImageSource` fails
+  on the short-ref case because `sandboxruntime.ResolveImageRef` asks podman whether the local build exists
+  and falls back to `docker.io/library/…` when the answer is a storage error.
   The converse error is a bare `podman run --runtime=runsc ubuntu:latest echo ok` answering failure on a
   host that runs MIKE's sandboxes fine: that command dies on SELinux and on
   `cgroup.subtree_control: permission denied`, both of which `sandboxruntime.GVisorCreateArgs` already
@@ -278,6 +290,9 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
   preface — not with `go test ./backend/sandbox/`, whose `TestMain` deletes a live server's sandboxes
   (`docs/sandbox-runtime.md`). A graph-driver refusal is a different question, and no runtime flag reaches
   it.
+- `backend/startup`'s defaults test clears every variable the ladder reads, so an exported `MIKE_DATA_DIR`
+  or `DANGER_ZONE` — the normal state of a deployed container — cannot change what it measures. Every other
+  startup test sets only what it asserts and inherits the rest.
 - The Pi agent adapter's unit tests live in `../MIKE-extensions/agent/pi` and are run there — they are
   **not** part of `./backend/... ./pkg/...`.
 

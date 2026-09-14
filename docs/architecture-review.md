@@ -13,6 +13,8 @@ Two snapshots of the same tree:
 
 A row marked **held** survived the round unchanged, which is the reason to have written it down.
 
+The five headline numbers are re-measured with one command each in **Final assembly**, below.
+
 Commands are scoped `./backend/... ./pkg/... .` — `./...` reaches the installed extensions under
 `extensions/` and fails for reasons that are not this tree's (`AGENTS.md → Known gaps`).
 
@@ -188,6 +190,66 @@ are identical before and after the rename, apart from the name.
 domain — hence `backend/api`, whose types are `TaskHandler`, `ProjectHandler`, `BoardHandler`, `GitHandler`.
 The rule, the exemptions and what a new endpoint does about `?parsed=1` are in
 `docs/api-contract.md → Which package owns an endpoint`; this file carries only the counts.
+
+## Final assembly — the five numbers re-measured
+
+Each row is re-run at the head of the round with the command beside it, and the *before* column is the
+same command run against a `git archive` of `a2a8abf56`, so the two halves cannot be measured with
+different rulers.
+
+| | Command | before | after |
+|---|---|---|---|
+| `TaskExecutor{` literals in `backend/exec` tests | `grep -rn 'TaskExecutor{' backend/exec/*_test.go \| wc -l` | 85 | **0** |
+| `executeToolInner` | the §2 `go/ast` walk | 425 ln / 87 branches / depth 7 | the name is gone: `grep -rn executeToolInner backend pkg \| wc -l` → 0 |
+| `TaskExecutor` methods | `grep -rhoE 'func \(te \*TaskExecutor\) [A-Za-z]+' backend/exec/*.go \| sort -u \| wc -l` | 125 | **117** |
+| `func contains*` / `func writeFile*` in tests | `grep -rn '^func contains\|^func writeFile' backend pkg --include='*_test.go' \| wc -l` | 18 | **7** |
+| archgate rules / baseline | `grep -c 'Name:' scripts/archgate/rules.go`; `wc -l scripts/archgate/baseline/*` | 10 rules / 10 files, 92 lines | **13 rules / 13 files, 105 lines** |
+
+- **What the 425 lines became.** `toolRunner.run` is the whole dispatcher: 8 lines, 1 branch, over a
+  13-entry handler table — one entry per name in `llama.AllToolNames()`, which declares 13 names, and
+  `TestEveryDeclaredToolIsDispatched` holds the two equal. 21 `toolRunner` methods over 3 files; the
+  largest is `handleCreateTask` at 116 ln / 15 branches / depth 2, which reproduces §2's row exactly.
+- **The helper count counts declarations, not loops.** All 7 survivors delegate: five `writeFile` are
+  `os.WriteFile` + `t.Fatalf`, `containsString` is `strings.Contains` over `strings.ToLower`,
+  `containsTaskID` is `slices.ContainsFunc`. A declaration grep cannot tell a hand-rolled scan from a
+  one-line wrapper, so the surviving 7 are not work left undone.
+- **The baseline grew by 4 entries; the other 11 lines are headers.** Non-comment entries: 58 → 62. The four
+  are `execseam`'s two and `funclen`'s two (§5); `execctor`'s file holds only its 3-line header. The rename
+  re-keyed eight entries (`backend/managers|imports "net/http"` → `backend/api|…`) without changing the
+  count, and no other entry moved — so the register grew only where a new rule started measuring.
+- **§3's two defects are checked, not assumed.** Watchdog: with `taskLockSlowWait` temporarily at 40 ms, a
+  fixture-built executor holding one task's worktree lock while a second `LockWorktree` waited logged
+  `waited 0s for the task's worktree lock - a tool call holds it` with `component=tools task_id=…`; the
+  const is back at 60 s and the probe is gone, so §3's "nothing asserts the sentence" still describes the
+  tree. Lazy map: a pass over every non-test file in `backend` and `pkg` looking for a nil test whose next
+  line creates a map finds **none** in `backend/exec`, and `commitDone.tasks` is made once at
+  `merge.go:66`.
+
+**Two fixtures measured the machine.** Both fail on a host that does not happen to provide what they
+assumed, and neither assertion changed: `backend/api`'s remote fixture committed in a fresh clone with no
+identity of its own (now through `testgit`, which carries `-c user.*` — `docs/testing.md`), and
+`backend/startup`'s defaults test read `MIKE_DATA_DIR` from an operator's exported environment (now cleared,
+and a set-but-empty variable means unset).
+
+**The gate caught something the round did not measure.** Re-running `make check` panicked the
+`backend/exec` test binary: `assignment to entry in nil map` in `stream.WorktreeWatcher`'s diff-scheduling
+callback, armed by `handleEvent` and fired while `Close` held `ww.mu`, so it ran after `Close` had released
+the maps. It predates this round — no commit here touches `worktree_watcher.go`, and the same lines are in
+`a2a8abf56` — and it is §3's second defect from the other side: a map whose lifetime belongs to
+construction and release, written by code outside both. `Close` now signals on `doneCh` before releasing
+anything, and every armed callback asks `isClosed()` under `ww.mu` before it writes; the re-arm closure
+became the method `scheduleDiff` so the path has a name a test can call. `TestClosedWorktreeWatcherRunsNoArmedWork` in `backend/stream/worktree_watcher_close_test.go` reproduces
+the panic with the guard removed, which is how the fix was verified.
+
+**Gate.** `make check` on this container: green through `lint`, `archgate` (`execctor 0 violations across
+1 checked`, `execseam 2 baselined across 1451`, `funclen 2 baselined across 2051`, no new violation in any
+of the 13), `test-archgate`, `bridge-check` and the build, and every Go package green except four whose
+tests need what the container does not have — `backend/sandbox` 25 failures, `backend/server` 3,
+`backend/extensions` 2, `backend/git` 1, all nested-overlayfs podman or git 2.43, all reproduced at
+`a2a8abf56`, each named with its cause in `docs/testing.md → Go unit test environment`. `make check` stops
+at the Go step, so the frontend half was run on its own: `npm run check` and `make test-frontend` both exit
+0. `make check-race` reports no data race and is green for `exec` (228 s), `stream`, `api` and
+`pkg/logging`; it is red on those same two host limitations.
 
 ## Corrections — do not re-derive these
 

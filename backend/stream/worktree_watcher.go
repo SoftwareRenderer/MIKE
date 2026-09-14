@@ -235,6 +235,46 @@ func (ww *WorktreeWatcher) Close() {
 	logging.For(logging.Watcher).Info("closed")
 }
 
+// isClosed reports whether Close has begun. Close stops the timers it holds, but one that already fired
+// waits on ww.mu and then writes to maps Close released; doneCh closes first, so the answer holds for
+// anything running under the lock.
+func (ww *WorktreeWatcher) isClosed() bool {
+	select {
+	case <-ww.doneCh:
+		return true
+	default:
+		return false
+	}
+}
+
+// scheduleDiff queues a diff compute for the task. It re-arms while a compute is in flight rather than
+// drop the pending change, which would leave the diff panel stale until the next filesystem event.
+func (ww *WorktreeWatcher) scheduleDiff(taskID, projectID, baseRef string) {
+	ww.mu.Lock()
+	if ww.isClosed() {
+		ww.mu.Unlock()
+		return
+	}
+	if ww.inFlight[taskID] {
+		ww.throttles[taskID] = time.AfterFunc(250*time.Millisecond, func() {
+			ww.scheduleDiff(taskID, projectID, baseRef)
+		})
+		ww.mu.Unlock()
+		return
+	}
+	delete(ww.throttles, taskID)
+	ww.inFlight[taskID] = true
+	ww.mu.Unlock()
+
+	select {
+	case ww.jobCh <- diffJob{taskID: taskID, projectID: projectID, baseRef: baseRef}:
+	default:
+		ww.mu.Lock()
+		delete(ww.inFlight, taskID)
+		ww.mu.Unlock()
+	}
+}
+
 // StartEventLoop runs the fsnotify event loop. Call in a goroutine.
 func (ww *WorktreeWatcher) StartEventLoop() {
 	runWatcherEventLoop(ww.watcher, "watcher", ww.handleEvent)
@@ -242,6 +282,10 @@ func (ww *WorktreeWatcher) StartEventLoop() {
 
 func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 	ww.mu.Lock()
+	if ww.isClosed() {
+		ww.mu.Unlock()
+		return
+	}
 
 	var taskID string
 	if tid, ok := ww.pathCache[event.Name]; ok {
@@ -332,6 +376,10 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 		ww.fsEventQueue[taskID] = fsOp + ":" + relPath
 		timer := time.AfterFunc(500*time.Millisecond, func() {
 			ww.mu.Lock()
+			if ww.isClosed() {
+				ww.mu.Unlock()
+				return
+			}
 			if t, exists := ww.fsDebounces[taskID]; exists {
 				t.Stop()
 				delete(ww.fsDebounces, taskID)
@@ -359,31 +407,9 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 	projectID := info.projectID
 	baseRef := info.baseRef
 
-	// scheduleDiff arms a diff-compute timer for the task. If a compute is in flight when the
-	// timer fires it re-arms instead of dropping the pending change, which would leave the diff
-	// panel stale until the next filesystem event.
-	// (git diff can exceed the 1s throttle on large repos.)
-	var scheduleDiff func()
-	scheduleDiff = func() {
-		ww.mu.Lock()
-		if ww.inFlight[taskID] {
-			ww.throttles[taskID] = time.AfterFunc(250*time.Millisecond, scheduleDiff)
-			ww.mu.Unlock()
-			return
-		}
-		delete(ww.throttles, taskID)
-		ww.inFlight[taskID] = true
-		ww.mu.Unlock()
-
-		select {
-		case ww.jobCh <- diffJob{taskID: taskID, projectID: projectID, baseRef: baseRef}:
-		default:
-			ww.mu.Lock()
-			delete(ww.inFlight, taskID)
-			ww.mu.Unlock()
-		}
-	}
-	ww.throttles[taskID] = time.AfterFunc(1000*time.Millisecond, scheduleDiff)
+	ww.throttles[taskID] = time.AfterFunc(1000*time.Millisecond, func() {
+		ww.scheduleDiff(taskID, projectID, baseRef)
+	})
 	ww.mu.Unlock()
 }
 

@@ -107,3 +107,30 @@ func TestCloseDoesNotWaitHoldingTheLock(t *testing.T) {
 		t.Fatal("Close deadlocked: it waited for the worker while holding the mutex the worker needs")
 	}
 }
+
+// TestClosedWorktreeWatcherRunsNoArmedWork: a timer that fires while Close runs wakes after Close
+// released the maps, and a nil map write on a timer goroutine takes the process down.
+func TestClosedWorktreeWatcherRunsNoArmedWork(t *testing.T) {
+	ww, err := NewWorktreeWatcher(nil, func(DiffStatsEvent) {}, nil, func(string, string, string, string) {})
+	if err != nil {
+		t.Skipf("skip closed-watcher test (inotify limit): %v", err)
+	}
+	ww.mu.Lock()
+	ww.worktrees["task-abc"] = worktreeInfo{projectID: "proj-1", path: "/tmp/proj-1/task-abc", baseRef: "master"}
+	ww.pathCache["/tmp/proj-1/task-abc/file.txt"] = "task-abc"
+	ww.mu.Unlock()
+
+	ww.Close()
+
+	ww.scheduleDiff("task-abc", "proj-1", "master")
+	ww.handleEvent(fsnotify.Event{Name: "/tmp/proj-1/task-abc/file.txt", Op: fsnotify.Write})
+
+	ww.mu.Lock()
+	defer ww.mu.Unlock()
+	if !ww.isClosed() {
+		t.Fatal("Close must leave the watcher answering closed")
+	}
+	if ww.throttles["task-abc"] != nil {
+		t.Error("a closed watcher armed another diff compute")
+	}
+}
