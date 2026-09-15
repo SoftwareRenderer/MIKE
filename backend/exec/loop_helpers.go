@@ -354,7 +354,7 @@ func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *ty
 	}
 	state.lastDiffHash = hash
 	fileHashes := diffResult.GetPerFileHashes()
-	stats := stream.ComputeDiffStats(diffResult, *task)
+	stats := stream.ComputeDiffStats(diffResult)
 	filesN := stats.VisibleTracked + stats.VisibleUntracked
 	// Check if task branch commits are already merged into the target branch.
 	if targetBranch, ok := stream.CheckAlreadyMerged(*task); ok {
@@ -412,7 +412,7 @@ func (te *TaskExecutor) computeTaskDiffStats(projectID, taskID string) *stream.D
 	if diffResult.Diff == "" && len(diffResult.Untracked) == 0 && diffResult.CommittedDiff == "" {
 		return nil
 	}
-	stats := stream.ComputeDiffStats(diffResult, *task)
+	stats := stream.ComputeDiffStats(diffResult)
 	// Check if task branch commits are already merged into the target branch.
 	if targetBranch, ok := stream.CheckAlreadyMerged(*task); ok {
 		stats.AlreadyMerged = te.worktreeMgr.IsMergedInto(project.Path, task.Branch, targetBranch)

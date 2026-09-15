@@ -313,7 +313,7 @@ func TestExtensionLSPManager_GetOrCreate_NoExtension(t *testing.T) {
 	sandbox := extensions.NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
 	mgr := NewExtensionLSPManager(store, sandbox, nil)
 
-	_, err := mgr.GetOrCreate(context.Background(), "/tmp/workspace", "go", nil)
+	_, err := mgr.GetOrCreate(context.Background(), "/tmp/workspace", "go")
 	if err == nil {
 		t.Error("GetOrCreate() = nil, want error (no extension)")
 	}
@@ -340,7 +340,7 @@ func TestExtensionLSPManager_GetOrCreate_ContextCancelled(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := mgr.GetOrCreate(ctx, "/tmp/workspace", "typescript", nil)
+		_, err := mgr.GetOrCreate(ctx, "/tmp/workspace", "typescript")
 		done <- err
 	}()
 

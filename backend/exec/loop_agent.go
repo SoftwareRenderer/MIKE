@@ -179,7 +179,6 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 	agentEnded := false
 	var stopReason string
 	var totalPromptTokens, totalPredictedTokens int
-	compactCh := te.getCompactCh(task.ID)
 
 	// sendAgentStats publishes a session-stats event. Every field is a cumulative
 	// session total, except cost: some agents report no cost in stats, so it falls back
@@ -263,7 +262,7 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 				firstTokenTime = time.Now()
 			}
 
-			if streamEvent := toStreamEvent(event, sandboxEnabled, runner); streamEvent.Type != "" {
+			if streamEvent := toStreamEvent(event, sandboxEnabled); streamEvent.Type != "" {
 				te.sendAgentStreamEvent(projectID, task.ID, streamEvent)
 			}
 
@@ -292,7 +291,7 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 				firstTokenTime = time.Time{} // reset for next turn
 
 				checkpointMsgID := uuid.New().String()
-				te.createCheckpoint(ctx, projectID, task.ID, worktreePath, task.CurrentThreadID, checkpointMsgID, nil, sandboxEnabled)
+				te.createCheckpoint(ctx, projectID, task.ID, checkpointMsgID)
 
 				if event.Status.State == "idle" {
 					stopReason = "stop"
@@ -322,7 +321,7 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 						}
 					}
 				default:
-					te.handleAgentTurnComplete(task, projectID, task.ID, worktreePath, runner, stopReason, &agentEnded)
+					te.handleAgentTurnComplete(task, projectID, worktreePath, runner, stopReason, &agentEnded)
 					// idle keeps the loop alive for follow-ups; a terminal state exits and
 					// sends its own complete
 					if !agentEnded {
@@ -359,19 +358,6 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 			err := runner.Prompt(ctx, um.Content, "steer")
 			if err != nil {
 				logging.For(logging.Agent).With(logging.TaskID, task.ID).Warnf("failed to forward user message: %v", err)
-			}
-
-		case resultCh := <-compactCh:
-			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("compact requested")
-			compactCtx, compactCancel := context.WithTimeout(ctx, 120*time.Second)
-			compactResult, err := runner.Compact(compactCtx)
-			compactCancel()
-			if err != nil {
-				logging.For(logging.Agent).With(logging.TaskID, task.ID).Warnf("compact failed: %v", err)
-				resultCh <- &CompactResult{Error: err}
-			} else if compactResult != nil {
-				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("compact succeeded (summary len=%d)", len(compactResult.Summary))
-				resultCh <- &CompactResult{Summary: compactResult.Summary, Error: compactResult.Err}
 			}
 		}
 	}
@@ -470,7 +456,7 @@ func (te *TaskExecutor) accumulateAgentSessionCost(projectID string, task *types
 	te.storeTask(task, projectID)
 }
 
-func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, taskID, worktreePath string, runner *agent.AgentRunner, stopReason string, agentEnded *bool) {
+func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, worktreePath string, runner *agent.AgentRunner, stopReason string, agentEnded *bool) {
 	if task.AutoCommit {
 		// A commit-and-done click merges whatever auto_merge says: read it here, consume it after.
 		commitDone := task.HasMergeConflict && te.merge.CommitAndDonePending(task.ID)
@@ -789,7 +775,7 @@ func (te *TaskExecutor) sendAgentStreamEvent(projectID, taskID string, event typ
 }
 
 // toStreamEvent converts a generic agent event to a Kanban StreamEvent for WebSocket broadcasting.
-func toStreamEvent(event pkgagent.Event, sandbox bool, runner *agent.AgentRunner) types.StreamEvent {
+func toStreamEvent(event pkgagent.Event, sandbox bool) types.StreamEvent {
 	switch event.Type {
 	case pkgagent.EventTypeToken:
 		return types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": event.Text}}
@@ -866,7 +852,7 @@ func (te *TaskExecutor) validateAgentStart(ctx context.Context, runner *agent.Ag
 				return false
 			}
 			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("startup event: %s", event.Type)
-			if streamEvent := toStreamEvent(event, sandboxEnabled, runner); streamEvent.Type != "" {
+			if streamEvent := toStreamEvent(event, sandboxEnabled); streamEvent.Type != "" {
 				te.sendAgentStreamEvent(projectID, task.ID, streamEvent)
 			}
 			switch event.Type {

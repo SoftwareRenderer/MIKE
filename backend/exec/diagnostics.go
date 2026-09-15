@@ -163,7 +163,6 @@ func groupByServerLanguage(registry *lsp.ExtensionRegistry, files []string) []la
 // file of that language in the pass. Attaching per file would let the pass's own Release be the
 // last reference, tearing down the server the next file is about to use.
 type turnLanguageServer struct {
-	proc      *lsp.LSPProcess
 	sub       chan json.RawMessage
 	workspace string
 	language  string
@@ -315,11 +314,10 @@ func (p *diagnosticsPass) run(registry *lsp.ExtensionRegistry, files []string) (
 // open attaches to one language's server and performs the handshake the whole pass shares.
 // Release happens exactly once, in close, whether the pass read one file or eight.
 func (p *diagnosticsPass) open(cfg *lsp.ServerConfig) (*turnLanguageServer, error) {
-	proc, err := p.mgr.GetOrCreate(p.passCtx, p.worktree, cfg.Language, cfg)
-	if err != nil {
+	if _, err := p.mgr.GetOrCreate(p.passCtx, p.worktree, cfg.Language); err != nil {
 		return nil, err
 	}
-	srv := &turnLanguageServer{proc: proc, sub: p.mgr.Subscribe(), workspace: p.worktree, language: cfg.Language, cfg: cfg, held: true}
+	srv := &turnLanguageServer{sub: p.mgr.Subscribe(), workspace: p.worktree, language: cfg.Language, cfg: cfg, held: true}
 	if err := p.mgr.EnsureInitialized(p.passCtx, p.worktree, cfg); err != nil {
 		srv.close(p.mgr)
 		return nil, err

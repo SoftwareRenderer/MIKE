@@ -27,9 +27,7 @@ backend/extensions/i18n_prompts.go:none
 backend/llama/tools_names.go:AllToolNames
 backend/prompts/overlay.go:ActiveOverlay
 backend/stream/sandbox_stats.go:TickOnce
-backend/server/server.go:Measure
 backend/term/terminal.go:activeSessionCount
-backend/exec/merge.go:CommitAndDonePending
 pkg/logging/logging.go:TestSink
 pkg/logging/logging.go:setOutput
 pkg/logging/logging.go:Write
@@ -49,16 +47,8 @@ pkg/logging/logging.go:Lines
 # sandboxed task probes the binary its own adapter named. Production always loads WASM, so no
 # production path reaches it - and deleting it would put that test out of reach.
 #
-# backend/stream + backend/server, two shapes a call graph cannot walk:
-#   TickOnce  drives one sample and one broadcast in lockstep, which is how every sampler test steps
-#             the ticker; production runs the same two halves on their own intervals.
-#   Measure   satisfies stream.BudgetMeasure. The sampler holds the interface and the server wires the
-#             implementation, so no direct call site exists to find.
-#
-# backend/exec: CommitAndDonePending is how backend/api holds that a "Commit and move to done"
-# click armed the merge. Callers inside the package ask the merge orchestrator directly, so no
-# production path reaches the delegator - and deleting it would leave that click's arming
-# unobservable from the package that owns the HTTP handler.
+# backend/stream: TickOnce drives one sample and one broadcast in lockstep, which is how every
+# sampler test steps the ticker; production runs the same two halves on their own intervals.
 
 is_allowed() {
 	local file="$1" name="$2" entry
@@ -79,6 +69,7 @@ test_referenced() {
 
 violations=0
 hits=0
+declare -A used=()
 
 # -test is deliberately NOT passed: it counts test callers as reachability, which would hide the
 # very case this script filters on, and would also let a function used only by a deleted
@@ -97,6 +88,7 @@ while IFS= read -r line; do
 	dir="$(dirname "$file")"
 
 	if is_allowed "$file" "$name"; then
+		used["$file:$name"]=1
 		printf '  ok   %-52s (test-only accessor)\n' "$file: $name"
 		continue
 	fi
@@ -109,7 +101,25 @@ while IFS= read -r line; do
 	violations=$((violations + 1))
 done < <("$DEADCODE" "${ROOTS[@]}" 2>/dev/null || true)
 
-echo "deadcode: $hits unreachable reported, $violations unexplained"
+# The other direction: an entry for a function deadcode no longer reports guards nothing, and it
+# will keep "explaining" a hit that a later edit makes real again. The check above only catches an
+# entry whose test was deleted; this catches an entry whose hit disappeared.
+stale=0
+for entry in $ALLOWLIST; do
+	[[ -n "${used[$entry]:-}" ]] && continue
+	printf '  STALE %-52s allowlisted, but deadcode reports it as reachable\n' "$entry"
+	stale=$((stale + 1))
+done
+
+echo "deadcode: $hits unreachable reported, $violations unexplained, $stale stale allowlist entries"
+
+if (( stale > 0 )); then
+	cat >&2 <<-EOF
+	$stale allowlist entries match no unreachable function. deadcode no longer reports them, so
+	delete them from ALLOWLIST in scripts/deadcode-check.sh (and their reason comment).
+	EOF
+	exit 1
+fi
 
 if (( violations > 0 )); then
 	cat >&2 <<-EOF

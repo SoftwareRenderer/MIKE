@@ -43,7 +43,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 			if s.executor != nil {
 				task, _ := s.store.GetTask(projectID, taskID)
 				if task != nil && task.ExecutionState == types.ExecStateRunning {
-					s.executor.NotifyContextChanged(projectID, taskID)
+					s.executor.NotifyContextChanged(taskID)
 				}
 			}
 			JSONResponse(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -76,7 +76,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 		// (The non-blocking select before each LLM call in the active loop already
 		// picks up context changes via NotifyContextChanged when the agent is running.)
 		if !req.Regenerate && s.executor != nil && task != nil && task.ExecutionState == types.ExecStateRunning {
-			s.executor.NotifyContextChanged(projectID, taskID)
+			s.executor.NotifyContextChanged(taskID)
 		}
 		// Clear buffered task events so reconnecting clients don't replay
 		// stale events (e.g., summarization for a deleted message, or old

@@ -74,9 +74,8 @@ type queuedInit struct {
 
 // workspaceState tracks per-workspace+language state in the handler.
 type workspaceState struct {
-	process  *LSPProcess
-	language string
-	cfg      *ServerConfig
+	process *LSPProcess
+	cfg     *ServerConfig
 	// clientCount counts the subscribe messages that joined this entry. It is a log line only:
 	// it went up per subscribe and down once per session, so the release decision counts
 	// sessions instead — see sessionsUsingLocked.
@@ -103,7 +102,7 @@ type lspRegistry interface {
 
 // lspManager defines the operations the LSP handler needs from the process manager.
 type lspManager interface {
-	GetOrCreate(ctx context.Context, workspacePath, language string, cfg *ServerConfig) (*LSPProcess, error)
+	GetOrCreate(ctx context.Context, workspacePath, language string) (*LSPProcess, error)
 	Release(workspacePath, language string)
 	SendToServer(ctx context.Context, process *LSPProcess, msg json.RawMessage) error
 	ServerMessageCh() <-chan json.RawMessage
@@ -446,7 +445,7 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 
 	if !ok {
 		// Spawn a new process (OUTSIDE lock to avoid blocking other operations)
-		process, err := h.manager.GetOrCreate(ctx, sub.Params.Workspace, cfg.Language, cfg)
+		process, err := h.manager.GetOrCreate(ctx, sub.Params.Workspace, cfg.Language)
 		if err != nil {
 			logging.For(logging.LSP).Warnf("client %d: failed to spawn process: %v", session.clientID, err)
 			session.conn.Close(websocket.StatusInternalError, fmt.Sprintf("spawn failed: %v", err))
@@ -464,7 +463,6 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 		} else {
 			ws = &workspaceState{
 				process:     process,
-				language:    cfg.Language,
 				cfg:         cfg,
 				clientCount: 1,
 			}
@@ -581,7 +579,7 @@ func (h *LSPHandler) lazyCreateWorkspace(ctx context.Context, session *ClientSes
 	}
 	// The workspace is already allowed: this is the call that bind-mounts it into the
 	// extension sandbox (see SetWorkspaceValidator).
-	process, err := h.manager.GetOrCreate(ctx, workspacePath, cfg.Language, cfg)
+	process, err := h.manager.GetOrCreate(ctx, workspacePath, cfg.Language)
 	if err != nil {
 		logging.For(logging.LSP).Warnf("client %d: failed to spawn process for lazy init: %v", session.clientID, err)
 		h.answerError(ctx, session, clientReqID, channelID, fmt.Sprintf("failed to start language server: %v", err))
@@ -595,7 +593,6 @@ func (h *LSPHandler) lazyCreateWorkspace(ctx context.Context, session *ClientSes
 	} else {
 		h.workspaces[workspaceKey] = &workspaceState{
 			process:     process,
-			language:    cfg.Language,
 			cfg:         cfg,
 			clientCount: 1,
 		}

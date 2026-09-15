@@ -11,7 +11,7 @@ import (
 // The concrete *lsp.ExtensionLSPManager satisfies it; tests inject fakes.
 type lspManager interface {
 	GetRegistry() *lsp.ExtensionRegistry
-	GetOrCreate(ctx context.Context, workspacePath, language string, cfg *lsp.ServerConfig) (*lsp.LSPProcess, error)
+	GetOrCreate(ctx context.Context, workspacePath, language string) (*lsp.LSPProcess, error)
 	Release(workspacePath, language string)
 	SendToServer(ctx context.Context, proc *lsp.LSPProcess, msg json.RawMessage) error
 	LSPNotify(ctx context.Context, proc *lsp.LSPProcess, msg json.RawMessage) error

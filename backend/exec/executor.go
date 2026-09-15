@@ -125,12 +125,6 @@ func (te *TaskExecutor) newLlamaClient(serverURL, modelName, reasoningEffort, ap
 	return client
 }
 
-// CompactResult holds the result of an agent compact command.
-type CompactResult struct {
-	Summary string
-	Error   error
-}
-
 // executionState is everything one running task holds between an executor taking it and its
 // defer releasing it. Locking, because these fields are read from the executor loop, HTTP
 // handlers and tool calls:
@@ -141,7 +135,7 @@ type CompactResult struct {
 //     taskMu.
 //   - activeSummarize has its own mutex, for the same one-field-one-lock reason.
 //   - taskMu (on TaskExecutor) guards everything else here together with the tasks map:
-//     runnerClosed, taskStatus, lastDiffHash, bridgeRecoveryAttempts. A method that reached
+//     runnerClosed, lastDiffHash, bridgeRecoveryAttempts. A method that reached
 //     this state through the map already holds it.
 //   - ctx, cancel and the channels are set once at construction, so they need no lock.
 type executionState struct {
@@ -153,13 +147,11 @@ type executionState struct {
 		mu      sync.Mutex
 		request *summarizeRequest // currently active summarize request (nil = none)
 	}
-	compactCh    chan chan *CompactResult // send a channel, receives result from agent compaction
-	agentRunner  *agent.AgentRunner       // Agent runner — kept alive after completion for on-demand compaction
+	agentRunner  *agent.AgentRunner // Agent runner — kept alive after completion for on-demand compaction
 	runnerClosed bool
 	projectName  string
-	createdIDs   []string     // task IDs created by create_task during this execution
-	executorType string       // "llm" or "agent" — tracks which executor type is active
-	taskStatus   types.Status // task status at start; cleared by StopTask so HasRunningTasks can skip it
+	createdIDs   []string // task IDs created by create_task during this execution
+	executorType string   // "llm" or "agent" — tracks which executor type is active
 	// sandboxEnabled is the task's project setting, fixed for the run. toolEnv.hostGuard refuses
 	// a sandboxed task's host fallbacks with it.
 	sandboxEnabled bool
@@ -355,7 +347,6 @@ func NewTaskExecutor(deps Deps) *TaskExecutor {
 	te.merge = te.newMergeOrchestrator()
 	te.summarize = te.newSummarizeOrchestrator()
 	te.tools = te.newToolRunner()
-	te.appStreamMgr.SetLazyStartHandler(te.handleLazyStart)
 	return te
 }
 
@@ -1222,7 +1213,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	}
 	doneCh := make(chan struct{})
 	finishedCh := make(chan struct{})
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, compactCh: make(chan chan *CompactResult, 16), projectName: project.Name, sandboxEnabled: project.SandboxEnabled, executorType: execType, taskStatus: task.Status, done: doneCh, finished: finishedCh}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, projectName: project.Name, sandboxEnabled: project.SandboxEnabled, executorType: execType, done: doneCh, finished: finishedCh}
 	te.taskMu.Unlock()
 
 	return &taskExecSetup{
@@ -1252,7 +1243,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 
 // getAgentRunner ensures an agent runner is active for the given task,
 // starting it if necessary. If started for compaction, it does not update task status.
-func (te *TaskExecutor) getAgentRunner(ctx context.Context, projectID, taskID string) (*agent.AgentRunner, error) {
+func (te *TaskExecutor) getAgentRunner(projectID, taskID string) (*agent.AgentRunner, error) {
 	te.taskMu.Lock()
 	state, exists := te.tasks[taskID]
 	if exists && state.agentRunner != nil && !state.runnerClosed {
@@ -1325,12 +1316,10 @@ func (te *TaskExecutor) getAgentRunner(ctx context.Context, projectID, taskID st
 		cancel:         setup.cancel,
 		userMsgChan:    setup.userMsgChan,
 		summarizeCh:    setup.summarizeCh,
-		compactCh:      make(chan chan *CompactResult, 16),
 		agentRunner:    runner,
 		projectName:    setup.project.Name,
 		sandboxEnabled: setup.sandboxEnabled,
 		executorType:   "agent",
-		taskStatus:     task.Status,
 		done:           setup.done,
 		finished:       setup.finished,
 	}
@@ -1411,7 +1400,6 @@ func (te *TaskExecutor) StopTask(taskID string) error {
 			state.agentRunner.Close()
 			state.runnerClosed = true
 		}
-		state.taskStatus = ""
 		state.cancel()
 		delete(te.tasks, taskID)
 	}
@@ -1650,7 +1638,7 @@ func (te *TaskExecutor) ForwardUserMessage(projectID, taskID string, um stream.U
 // NotifyContextChanged tells the running executor that the conversation context has changed
 // (e.g., messages were deleted). The executor will reset its loop detector and re-sync
 // messages from the DB on the next LLM call.
-func (te *TaskExecutor) NotifyContextChanged(projectID, taskID string) {
+func (te *TaskExecutor) NotifyContextChanged(taskID string) {
 	te.taskMu.Lock()
 	defer te.taskMu.Unlock()
 	state, exists := te.tasks[taskID]
@@ -1787,16 +1775,6 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 	// results right after, advisories under their own role — behind it.
 	messages = append(messages, groupTaskMessages(taskMsgs)...)
 	return messages
-}
-
-// getCompactCh returns the compact channel for a running task, or nil if not found.
-func (te *TaskExecutor) getCompactCh(taskID string) chan chan *CompactResult {
-	te.taskMu.Lock()
-	defer te.taskMu.Unlock()
-	if state, ok := te.tasks[taskID]; ok {
-		return state.compactCh
-	}
-	return nil
 }
 
 // runningState returns the executionState of a running task, or nil. Its body takes taskMu here

@@ -78,7 +78,6 @@ type summarizeRequest struct {
 
 type summarizeResult struct {
 	summary         string
-	oldLen          int
 	promptTokens    int
 	predictedTokens int
 	promptMs        int64
@@ -112,8 +111,6 @@ func contextTokensUsed(lc *loopContext) int {
 
 // summarizeContext produces the rolling summary. It never modifies the messages slice.
 func (s *summarizeOrchestrator) summarizeContext(ctx context.Context, messages []types.ChatMessage, serverURL, modelName, previousSummary string) (summarizeResult, error) {
-	oldLen := len(messages)
-
 	chatHistory := formatChatHistory(buildLLMContext(messages), previousSummary != "")
 	systemPrompt, userPrompt, err := prompts.RenderSummarizePrompt(prompts.SummarizeData{
 		ChatHistory:     chatHistory,
@@ -139,10 +136,7 @@ func (s *summarizeOrchestrator) summarizeContext(ctx context.Context, messages [
 		return summarizeResult{}, fmt.Errorf("summarization produced an empty summary")
 	}
 
-	res := summarizeResult{
-		summary: summary,
-		oldLen:  oldLen,
-	}
+	res := summarizeResult{summary: summary}
 	if usage != nil {
 		res.promptTokens = usage.PromptTokens
 		res.predictedTokens = usage.CompletionTokens
@@ -270,8 +264,7 @@ func extractPrevSummary(messages []types.ChatMessage) string {
 }
 
 // setSystemPrompt installs prompt as the system message. Index 0 is the system message wherever
-// one is built, so the normal case is an in-place replace; prepending is the fallback, and
-// because it only grows the slice no index-based reader (lc.checkpointIdx) runs past the end.
+// one is built, so the normal case is an in-place replace; prepending is the fallback.
 func setSystemPrompt(messages []types.ChatMessage, prompt string) []types.ChatMessage {
 	if len(messages) > 0 && messages[0].Role == "system" {
 		messages[0].Content = prompt
@@ -411,7 +404,7 @@ func (s *summarizeOrchestrator) maybeAutoSummarize(setup *taskExecSetup, lc *loo
 }
 
 // cancelSummarize cancels an in-progress summarization for a task.
-func (s *summarizeOrchestrator) cancelSummarize(taskID, projectID string) {
+func (s *summarizeOrchestrator) cancelSummarize(taskID string) {
 	s.dbSummarizeCancel.mu.Lock()
 	if cancel, ok := s.dbSummarizeCancel.tasks[taskID]; ok {
 		cancel()
@@ -448,7 +441,7 @@ func (s *summarizeOrchestrator) HandleSummarize(w http.ResponseWriter, r *http.R
 	// If already summarizing, cancel it (acts as the cancel endpoint).
 	if task.Summarizing {
 		logging.For(logging.Summarize).With(logging.TaskID, taskID).Infof("cancelling in-progress summarization")
-		s.cancelSummarize(taskID, projectID)
+		s.cancelSummarize(taskID)
 		task.Summarizing = false
 		_ = s.store.SetTaskSummarizing(taskID, false)
 		s.appStreamMgr.BroadcastTaskUpdated(projectID, task)

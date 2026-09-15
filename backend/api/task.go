@@ -1352,7 +1352,7 @@ func (h *TaskHandler) HandleStop(w http.ResponseWriter, r *http.Request) {
 	hasDescendants := len(descendants) > 0
 
 	if hasDescendants {
-		if err := h.StopTaskAndDescendants(projectID, taskID); err != nil {
+		if err := h.StopTaskAndDescendants(taskID); err != nil {
 			// A stop of a task that no longer exists is a 404 because the store says so; before this it
 			// was a 404 because this line said so, which reported a database fault as a missing row.
 			httputil.Fail(w, err, "stop task and descendants", "task not found")
@@ -1526,7 +1526,7 @@ func (h *TaskHandler) respondWithStartedTask(w http.ResponseWriter, projectID, t
 // via executor.StopTask (in_progress → paused, done → completed, other
 // columns → idle). Descendants that are not in-flight (pending subtasks) are
 // left untouched.
-func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
+func (h *TaskHandler) StopTaskAndDescendants(taskID string) error {
 	descendants, err := h.store.GetAllDescendants(taskID)
 	if err != nil {
 		logging.For(logging.Exec).Warnf("failed to get descendants of %s: %v", taskID, err)

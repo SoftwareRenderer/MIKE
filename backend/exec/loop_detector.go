@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"kanban/backend/llama"
 	"kanban/backend/types"
@@ -85,7 +84,6 @@ const maxLoopHints = 3
 type loopDetector struct {
 	lastReadToolName string          // tool name of the most recent read-only call
 	lastReadArgs     string          // raw args JSON of the most recent read-only call
-	lastReadTime     time.Time       // when the last read occurred
 	textWindow       []string        // recent text-only responses (content, trimmed)
 	loopStreak       int             // consecutive loop detections (reset to 0 on valid turn)
 	phraseDet        *phraseDetector // real-time phrase repetition tracker
@@ -108,7 +106,6 @@ func newLoopDetector() *loopDetector {
 func (d *loopDetector) reset() {
 	d.lastReadToolName = ""
 	d.lastReadArgs = ""
-	d.lastReadTime = time.Time{}
 	d.textWindow = d.textWindow[:0]
 	d.loopStreak = 0
 	d.phraseDet.reset()
@@ -216,12 +213,10 @@ func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText,
 				}
 				d.lastReadToolName = tc.Function.Name
 				d.lastReadArgs = tc.Function.Arguments
-				d.lastReadTime = time.Now()
 			} else {
 				// State-changing call: clear the read tracker
 				d.lastReadToolName = ""
 				d.lastReadArgs = ""
-				d.lastReadTime = time.Time{}
 			}
 		}
 	} else if strings.TrimSpace(assistantText) != "" {

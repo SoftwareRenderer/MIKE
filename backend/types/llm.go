@@ -105,7 +105,7 @@ type ChatTool struct {
 // ToolDef defines a tool's schema.
 type ToolDef struct {
 	Name        string         `json:"name"`
-	DisplayName string         // UI-only, not sent to LLM
+	DisplayName string         `json:"-"` // the UI name comes from llama.GetToolDisplayName
 	Description string         `json:"description"`
 	Parameters  map[string]any `json:"parameters"`
 }

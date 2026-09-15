@@ -693,11 +693,6 @@ func (e *Extension) IsLSP() bool {
 	return e.Type == ExtensionTypeLSP
 }
 
-// IsAgent returns true if this extension is an agent extension.
-func (e *Extension) IsAgent() bool {
-	return e.Type == ExtensionTypeAgent
-}
-
 // IsLocalInstalled returns true if this extension was installed from a local Dockerfile.
 func (e *Extension) IsLocalInstalled() bool {
 	return e.InstallSource == "local"

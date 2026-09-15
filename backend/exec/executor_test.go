@@ -329,7 +329,7 @@ func TestHasRunningTasks_InProgress(t *testing.T) {
 
 	// Manually add an entry to the tasks map (simulating a running executor)
 	ctx, cancel := context.WithCancel(context.Background())
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm", taskStatus: types.StatusInProgress}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm"}
 	t.Cleanup(func() { cancel() })
 
 	if !te.HasRunningTasks(projectID) {
@@ -351,7 +351,7 @@ func TestHasRunningTasks_BacklogStaleCleanup(t *testing.T) {
 
 	// Manually add a stale entry to the tasks map (status != in_progress)
 	ctx, cancel := context.WithCancel(context.Background())
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm", taskStatus: types.StatusBacklog}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm"}
 	t.Cleanup(func() { cancel() })
 
 	if te.HasRunningTasks(projectID) {
@@ -381,7 +381,7 @@ func TestHasRunningTasks_ReviewStaleCleanup(t *testing.T) {
 
 	// Manually add a stale entry to the tasks map (status != in_progress)
 	ctx, cancel := context.WithCancel(context.Background())
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm", taskStatus: types.StatusReview}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm"}
 	t.Cleanup(func() { cancel() })
 
 	if te.HasRunningTasks(projectID) {
@@ -422,21 +422,21 @@ func TestHasRunningTasks_MixedTasks(t *testing.T) {
 	task1 := &types.Task{ID: "task-a", ProjectID: projectID, Title: "A", Status: types.StatusInProgress}
 	te.store.CreateTask(task1)
 	ctx1, cancel1 := context.WithCancel(context.Background())
-	te.tasks["task-a"] = &executionState{ctx: ctx1, cancel: cancel1, executorType: "llm", taskStatus: types.StatusInProgress}
+	te.tasks["task-a"] = &executionState{ctx: ctx1, cancel: cancel1, executorType: "llm"}
 	t.Cleanup(func() { cancel1() })
 
-	// Task 2: backlog in map (taskStatus != in_progress) → not considered running
+	// Task 2: backlog in the map → its stored status keeps it out of the count
 	task2 := &types.Task{ID: "task-b", ProjectID: projectID, Title: "B", Status: types.StatusBacklog}
 	te.store.CreateTask(task2)
 	ctx2, cancel2 := context.WithCancel(context.Background())
-	te.tasks["task-b"] = &executionState{ctx: ctx2, cancel: cancel2, executorType: "llm", taskStatus: types.StatusBacklog}
+	te.tasks["task-b"] = &executionState{ctx: ctx2, cancel: cancel2, executorType: "llm"}
 	t.Cleanup(func() { cancel2() })
 
 	// Task 3: review + not in map → nothing to clean
 	task3 := &types.Task{ID: "task-c", ProjectID: projectID, Title: "C", Status: types.StatusReview}
 	te.store.CreateTask(task3)
 
-	// Should return true because task-a has taskStatus=in_progress
+	// Should return true because task-a is in_progress and has a map entry
 	if !te.HasRunningTasks(projectID) {
 		t.Error("HasRunningTasks should return true when at least one in_progress task is in map")
 	}
@@ -857,7 +857,7 @@ func TestPrepareTaskExecutionRefusesARunningTaskWithTheSentinel(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm", taskStatus: types.StatusInProgress}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm"}
 	t.Cleanup(func() { cancel() })
 
 	setup, err := te.prepareTaskExecution(projectID, taskID, "", "", true)

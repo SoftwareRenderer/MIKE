@@ -23,7 +23,7 @@ type DiffStats struct {
 //
 // The AlreadyMerged field is left as false by default — the caller should set it
 // after verifying via worktreeMgr.IsMergedInto(projectPath, task.Branch, targetBranch).
-func ComputeDiffStats(diffResult *git.TaskDiff, task types.Task) *DiffStats {
+func ComputeDiffStats(diffResult *git.TaskDiff) *DiffStats {
 	var untrackedLines, trackedAdd, trackedDel, visibleTracked, visibleUntracked int
 	for path, f := range diffResult.Tracked {
 		if git.IsInternalFile(path) {

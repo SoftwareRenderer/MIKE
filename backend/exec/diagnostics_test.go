@@ -408,7 +408,7 @@ func (m *wedgedLSPManager) MarkSessionInitialized(string, string)  {}
 
 func (m *wedgedLSPManager) Release(string, string) {}
 
-func (m *wedgedLSPManager) GetOrCreate(ctx context.Context, _, _ string, _ *lsp.ServerConfig) (*lsp.LSPProcess, error) {
+func (m *wedgedLSPManager) GetOrCreate(ctx context.Context, _, _ string) (*lsp.LSPProcess, error) {
 	select {
 	case m.gotCtx <- ctx:
 	default:

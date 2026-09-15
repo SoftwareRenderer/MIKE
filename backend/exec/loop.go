@@ -96,7 +96,6 @@ type streamFlusher struct {
 	toolCallDeltas map[string]toolCallDelta // tool_id -> delta info
 	projectID      string
 	taskID         string
-	sandboxEnabled bool
 	send           func(projectID, taskID string, event types.StreamEvent)
 	loopDetector   *loopDetector // for phrase repetition detection on tokens
 }
@@ -114,12 +113,11 @@ type toolCallDelta struct {
 
 const streamThrottleInterval = 100 * time.Millisecond
 
-func newStreamFlusher(projectID, taskID string, sandboxEnabled bool, send func(projectID, taskID string, event types.StreamEvent), detector *loopDetector) *streamFlusher {
+func newStreamFlusher(projectID, taskID string, send func(projectID, taskID string, event types.StreamEvent), detector *loopDetector) *streamFlusher {
 	return &streamFlusher{
 		toolCallDeltas: make(map[string]toolCallDelta),
 		projectID:      projectID,
 		taskID:         taskID,
-		sandboxEnabled: sandboxEnabled,
 		send:           send,
 		loopDetector:   detector,
 	}
@@ -141,7 +139,7 @@ func (f *streamFlusher) appendReasoning(text string) {
 }
 
 // appendToolCall buffers a tool call delta for batched sending.
-func (f *streamFlusher) appendToolCall(toolID, toolName, displayName, path, args string, argLen, prevLen int, isNew, sandbox bool) {
+func (f *streamFlusher) appendToolCall(toolID, toolName, displayName, path, args string, argLen, prevLen int, sandbox bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	existing, ok := f.toolCallDeltas[toolID]
@@ -252,7 +250,6 @@ type loopContext struct {
 	// lastDiagnosticsText suppresses re-injecting findings the model has already been shown.
 	lastDiagnosticsText string
 	sessionCost         float64 // accumulated API cost (USD) of completed calls for this task run
-	checkpointIdx       int     // messages index of last checkpoint
 }
 
 // toolResult holds one executed tool call's outcome. Incomplete calls (empty
@@ -561,7 +558,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 
 		// streamFlusher batches streaming events to reduce WebSocket write overhead.
-		flusher := newStreamFlusher(setup.projectID, setup.task.ID, lc.sandboxEnabled,
+		flusher := newStreamFlusher(setup.projectID, setup.task.ID,
 			te.appStreamMgr.SendTaskEvent, lc.detector)
 		flushDone := make(chan struct{})
 		go func() {
@@ -618,7 +615,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 					if isNew {
 						actualPrevLen = 0
 					}
-					flusher.appendToolCall(tc.ID, tc.Function.Name, llama.GetToolDisplayName(tc.Function.Name), path, tc.Function.Arguments, argLen, actualPrevLen, isNew, (lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)) || isLSPTool(tc.Function.Name))
+					flusher.appendToolCall(tc.ID, tc.Function.Name, llama.GetToolDisplayName(tc.Function.Name), path, tc.Function.Arguments, argLen, actualPrevLen, (lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)) || isLSPTool(tc.Function.Name))
 				}
 			}
 			// Throttled progress updates for write_file (1 per 2 seconds)
@@ -833,7 +830,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 
 		// Everything that follows an LLM call: persist the assistant turn and run its tool
 		// calls, settle for the text answer, or record a reasoning-only turn.
-		switch te.finalizeTurn(setup, lc, state, tools, activeModel, maxFailures) {
+		switch te.finalizeTurn(setup, lc, activeModel, maxFailures) {
 		case turnStop:
 			return
 		case turnNextLLMCall:
@@ -886,7 +883,7 @@ func (te *TaskExecutor) toolDefinitionsFor(task *types.Task) []types.ChatTool {
 
 // finalizeTurn handles what follows one LLM call: persist the assistant message and run its tool calls,
 // settle on a text answer, or record a reasoning-only turn.
-func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, state *executionState, tools []types.ChatTool, activeModel string, maxFailures int) turnOutcome {
+func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, activeModel string, maxFailures int) turnOutcome {
 	assistantText := lc.assistantContent.String()
 
 	var toolResults []toolResult
@@ -894,8 +891,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, stat
 
 	if len(lc.pendingToolCalls) > 0 {
 		// Persist assistant message BEFORE tool calls so DB ordering matches LLM output order
-		msgCountBefore := len(lc.messages)
-		promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage, lc.messages[:msgCountBefore], assistantText, lc.reasoningContent.String())
+		promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage)
 		logStatsSpeed(setup.task.ID, activeModel, promptTokens-cacheTokens, predictedTokens, promptMs, predictedMs)
 		assistantCreatedAt := time.Now().UTC()
 		assistantMsgID := uuid.New().String()
@@ -1279,9 +1275,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, stat
 		lc.finishReason = ""
 
 		// Auto-commit file changes as a checkpoint.
-		newMessages := lc.messages[lc.checkpointIdx:]
-		te.createCheckpoint(setup.ctx, setup.projectID, setup.task.ID, setup.worktreePath, setup.task.CurrentThreadID, assistantMsgID, newMessages, lc.sandboxEnabled)
-		lc.checkpointIdx = len(lc.messages)
+		te.createCheckpoint(setup.ctx, setup.projectID, setup.task.ID, assistantMsgID)
 
 		// Auto-summarize if context is approaching the limit
 		te.summarize.maybeAutoSummarize(setup, lc, activeModel, true)
@@ -1298,7 +1292,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, stat
 			assistantMsg.ReasoningContent = lc.reasoningContent.String()
 		}
 		lc.messages = append(lc.messages, assistantMsg)
-		promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage, lc.messages[:len(lc.messages)-1], assistantText, lc.reasoningContent.String())
+		promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage)
 		logStatsSpeed(setup.task.ID, activeModel, promptTokens-cacheTokens, predictedTokens, promptMs, predictedMs)
 		duration := time.Since(lc.callStartTime).Milliseconds()
 		assistantMsgID := uuid.New().String()
@@ -1421,7 +1415,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, stat
 		reasoningText := lc.reasoningContent.String()
 
 		// Persist the reasoning-only assistant message
-		promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage, lc.messages, "", reasoningText)
+		promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage)
 		logStatsSpeed(setup.task.ID, activeModel, promptTokens-cacheTokens, predictedTokens, promptMs, predictedMs)
 		te.store.CreateTaskMessage(&types.TaskMessage{
 			ID: uuid.New().String(), TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID, Role: "assistant",
@@ -1736,7 +1730,7 @@ func (te *TaskExecutor) failTask(task *types.Task, projectID, output, code strin
 	te.sendAndPersistError(task.ID, output, code)
 }
 
-func computeStats(usage *types.ChatUsage, messages []types.ChatMessage, assistantText, reasoningContent string) (promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs int) {
+func computeStats(usage *types.ChatUsage) (promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs int) {
 	if usage != nil {
 		return usage.PromptTokens, usage.CompletionTokens, usage.PromptTokensDetails.CachedTokens, int(usage.PromptMs), int(usage.PredictedMs)
 	}

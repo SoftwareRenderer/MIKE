@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"kanban/backend/agent"
 	"kanban/backend/config"
@@ -42,15 +41,14 @@ type connSize struct {
 
 // taskTerminal holds a persistent PTY session for a single task.
 type taskTerminal struct {
-	cmd        *exec.Cmd
-	ptmx       *os.File
-	shell      *sandbox.ShellProcess // non-nil when running in sandbox
-	mu         sync.Mutex
-	conns      map[*websocket.Conn]bool
-	connSizes  map[*websocket.Conn]connSize // per-client terminal dimensions
-	buf        [][]byte
-	lastActive time.Time
-	onExit     func() // called when shell process exits, to remove session from manager
+	cmd       *exec.Cmd
+	ptmx      *os.File
+	shell     *sandbox.ShellProcess // non-nil when running in sandbox
+	mu        sync.Mutex
+	conns     map[*websocket.Conn]bool
+	connSizes map[*websocket.Conn]connSize // per-client terminal dimensions
+	buf       [][]byte
+	onExit    func() // called when shell process exits, to remove session from manager
 }
 
 // defaultTermSize is the fallback PTY size when no clients have reported dimensions.
@@ -327,12 +325,11 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 			}
 		}
 		sess = &taskTerminal{
-			cmd:        shell.Cmd,
-			ptmx:       shell.Ptmx,
-			shell:      shell,
-			conns:      make(map[*websocket.Conn]bool),
-			connSizes:  make(map[*websocket.Conn]connSize),
-			lastActive: time.Now(),
+			cmd:       shell.Cmd,
+			ptmx:      shell.Ptmx,
+			shell:     shell,
+			conns:     make(map[*websocket.Conn]bool),
+			connSizes: make(map[*websocket.Conn]connSize),
 		}
 		logging.For(logging.Terminal).Infof("%s started sandbox shell with image %s", sessionKey, imageToUse)
 	}
@@ -355,11 +352,10 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		}
 
 		sess = &taskTerminal{
-			cmd:        cmd,
-			ptmx:       ptmx,
-			conns:      make(map[*websocket.Conn]bool),
-			connSizes:  make(map[*websocket.Conn]connSize),
-			lastActive: time.Now(),
+			cmd:       cmd,
+			ptmx:      ptmx,
+			conns:     make(map[*websocket.Conn]bool),
+			connSizes: make(map[*websocket.Conn]connSize),
 		}
 	}
 
@@ -602,7 +598,6 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 	// Switch to normal I/O relay
 	session.mu.Lock()
 	session.conns[conn] = true
-	session.lastActive = time.Now()
 	bufCopy := make([][]byte, len(session.buf))
 	copy(bufCopy, session.buf)
 	session.mu.Unlock()

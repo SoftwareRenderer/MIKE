@@ -382,7 +382,7 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config) (*Server, error) {
 	defer s.reg(stageSandboxStatsSampler, "sandbox stats sampler", s.sandboxStatsSampler.Stop)()
 	// The sampler only sees a live container; this sink is what outlives it.
 	s.sandboxMgr.SetMemoryPeakSink(sandboxMemoryPeakSink(store))
-	s.boardHandler = api.NewBoardHandler(store, s.appStreamMgr, cfgStore, s.sandboxMgr)
+	s.boardHandler = api.NewBoardHandler(store, cfgStore, s.sandboxMgr)
 	s.terminalMgr = term.NewTerminalManager(store, cfgStore, s.sandboxMgr, nil, sandbox.DangerZone(settings.DangerZone)) // agentRegistry wired after creation
 	// Before the sandbox containers: killing a session's shell after its container is gone leaves the
 	// shell running.

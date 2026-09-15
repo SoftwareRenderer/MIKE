@@ -9,10 +9,9 @@ import (
 	"kanban/pkg/sandboxruntime"
 )
 
-// allowedBranchChars is a lookup table for characters permitted in git branch
-// names. Only ASCII alphanumeric, hyphen, underscore, dot, slash, and plus are
-// allowed.
-var allowedBranchChars = func() [256]bool {
+// charTable marks ASCII alphanumeric plus the given extras, as a lookup table for the
+// validators below.
+func charTable(extra ...byte) [256]bool {
 	var t [256]bool
 	for c := byte('0'); c <= '9'; c++ {
 		t[c] = true
@@ -23,13 +22,15 @@ var allowedBranchChars = func() [256]bool {
 	for c := byte('A'); c <= 'Z'; c++ {
 		t[c] = true
 	}
-	t['-'] = true
-	t['_'] = true
-	t['.'] = true
-	t['/'] = true
-	t['+'] = true
+	for _, e := range extra {
+		t[e] = true
+	}
 	return t
-}()
+}
+
+// allowedBranchChars is a lookup table for characters permitted in git branch
+// names: -, _, ., / and +.
+var allowedBranchChars = charTable('-', '_', '.', '/', '+')
 
 // ValidateBranchName ensures a branch name is safe to pass as a git ref argument.
 // It rejects:
@@ -62,23 +63,7 @@ func ValidateBranchName(name string) error {
 // branch names because these refs come straight from an HTTP query parameter. SHAs,
 // `HEAD`, tags and branch names pass; anything git could read as revision syntax or
 // as an option (~ ^ : ? * [ ] backslash { } " ' $ ` ; space) does not.
-var allowedRefChars = func() [256]bool {
-	var t [256]bool
-	for c := byte('0'); c <= '9'; c++ {
-		t[c] = true
-	}
-	for c := byte('a'); c <= 'z'; c++ {
-		t[c] = true
-	}
-	for c := byte('A'); c <= 'Z'; c++ {
-		t[c] = true
-	}
-	t['-'] = true
-	t['_'] = true
-	t['.'] = true
-	t['/'] = true
-	return t
-}()
+var allowedRefChars = charTable('-', '_', '.', '/')
 
 // ValidateGitRef ensures a client-supplied ref (e.g. the `ref` query parameter of
 // /api/fs/read) is safe to pass to git inside a `ref:path` argument. It rejects an

@@ -55,8 +55,7 @@ func TestBuildCheckpointLabelMessages(t *testing.T) {
 // --- Checkpoint Context Tests ---
 
 func TestExtractLastTurns_FromSlicedMessages(t *testing.T) {
-	// Simulates what createCheckpoint does after slicing:
-	// messages[checkpointIdx:] -> ExtractLastTurns -> FormatConversationTurns
+	// The messages since the last checkpoint, as one turn's extraction sees them.
 
 	allMessages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},

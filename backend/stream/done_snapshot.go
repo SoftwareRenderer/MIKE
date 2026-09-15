@@ -84,7 +84,7 @@ func MaterializeDoneTaskDiff(st *store.Store, wm *git.WorktreeManager, projectID
 		// diff is committed work, so use it for both diff and committedDiff.
 		hash = ComputeDiffHash(diffResult.Diff, diffResult.Diff, nil, "")
 	}
-	stats := ComputeDiffStats(diffResult, *task)
+	stats := ComputeDiffStats(diffResult)
 	filesN := stats.VisibleTracked + stats.VisibleUntracked
 
 	statsObj := map[string]any{

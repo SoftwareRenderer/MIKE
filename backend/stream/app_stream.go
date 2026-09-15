@@ -76,9 +76,6 @@ type UserMessage struct {
 	ContextChanged  bool
 }
 
-// LazyStartHandler is called when a user message arrives for a task with no active executor.
-type LazyStartHandler func(projectID, taskID, content, modelName, serverURL, reasoningEffort string, regenerate bool)
-
 type clientState struct {
 	conn       *websocket.Conn
 	projectSub map[string]int
@@ -123,10 +120,6 @@ type AppStreamManager struct {
 	// Event-driven branch watcher — watches .git/HEAD for branch switches
 	branchWatcher *BranchWatcher
 
-	// Lazy start handler — called when a user message arrives for a task with no active executor
-	lazyStartHandler LazyStartHandler
-	lazyMu           sync.RWMutex
-
 	// Per-task ring buffer for reconnect sync.
 	// When a client subscribes to a task, it gets the buffered events so it can
 	// catch up on tokens/tool_calls that were streamed while it was disconnected.
@@ -170,13 +163,6 @@ func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *
 	}
 
 	return asm
-}
-
-// SetLazyStartHandler sets the callback for lazy-starting an executor.
-func (asm *AppStreamManager) SetLazyStartHandler(h LazyStartHandler) {
-	asm.lazyMu.Lock()
-	defer asm.lazyMu.Unlock()
-	asm.lazyStartHandler = h
 }
 
 // WatchWorktree starts filesystem monitoring for a task's worktree.
@@ -1002,7 +988,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 		}
 		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0 || diffResult.CommittedDiff != "") {
 			hash := ComputeDiffHash(diffResult.Diff, diffResult.CommittedDiff, diffResult.Untracked, diffResult.StagedHash)
-			stats := ComputeDiffStats(diffResult, task)
+			stats := ComputeDiffStats(diffResult)
 			filesN := stats.VisibleTracked + stats.VisibleUntracked
 			// Check if task branch commits are already merged into the target branch.
 			stats.AlreadyMerged = asm.computeAlreadyMerged(projectID, task)

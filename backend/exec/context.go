@@ -209,7 +209,7 @@ func isLSPTool(name string) bool {
 }
 
 // createCheckpoint snapshots the worktree after a turn's tool calls
-func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID, worktreePath, threadID, assistantMsgID string, newMessages []types.ChatMessage, sandboxEnabled bool) {
+func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID, assistantMsgID string) {
 	// Check for file changes
 	statusOut, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "status", "--porcelain")
 	if err != nil || len(strings.TrimSpace(statusOut)) == 0 {

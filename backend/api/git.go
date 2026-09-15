@@ -848,7 +848,7 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 		// Worktree may not exist (e.g., after commit-and-done).
 		// Fall back to project repo if task has a branch.
 		if task.Branch != "" && errors.Is(err, git.ErrWorktreeNotFound) {
-			taskDiff, err = h.getTaskDiffFromProject(projectID, taskID, task, baseRef, headRef)
+			taskDiff, err = h.getTaskDiffFromProject(projectID, task, baseRef, headRef)
 		}
 		// Orphaned worktree — return 404
 		if code, ok := git.GitExitCode(err); ok && code == 128 {
@@ -1119,7 +1119,7 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 // Uses BranchTip (captured at commit-and-done time) if available, otherwise falls back to Branch.
 // Uses BaseCommit (captured at task start time) as the base for done tasks,
 // since the base ref branch pointer may have moved forward after a merge.
-func (h *GitHandler) getTaskDiffFromProject(projectID, taskID string, task *types.Task, baseRef, headRef string) (*git.TaskDiff, error) {
+func (h *GitHandler) getTaskDiffFromProject(projectID string, task *types.Task, baseRef, headRef string) (*git.TaskDiff, error) {
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
 		return nil, err

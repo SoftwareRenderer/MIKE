@@ -57,7 +57,7 @@ func (m *recordingLSPManager) FilesChanged(_ string, changed []string) bool {
 	return false
 }
 
-func (m *recordingLSPManager) GetOrCreate(_ context.Context, _, language string, _ *lsp.ServerConfig) (*lsp.LSPProcess, error) {
+func (m *recordingLSPManager) GetOrCreate(_ context.Context, _, language string) (*lsp.LSPProcess, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.created = append(m.created, language)

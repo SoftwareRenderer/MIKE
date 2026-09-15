@@ -6,16 +6,14 @@ import (
 	"kanban/backend/config"
 	"kanban/backend/httputil"
 	"kanban/backend/store"
-	"kanban/backend/stream"
 	"kanban/backend/types"
 )
 
 // BoardHandler handles board-level operations.
 type BoardHandler struct {
-	store          *store.Store
-	boardStreamMgr *stream.AppStreamManager
-	configStore    *config.ConfigStore
-	sandboxMgr     sandboxOps
+	store       *store.Store
+	configStore *config.ConfigStore
+	sandboxMgr  sandboxOps
 }
 
 // sandboxOps is the subset of sandbox.SandboxManager methods used for port refresh.
@@ -24,8 +22,8 @@ type sandboxOps interface {
 }
 
 // NewBoardHandler creates a new BoardHandler.
-func NewBoardHandler(store *store.Store, boardStreamMgr *stream.AppStreamManager, configStore *config.ConfigStore, sandboxMgr sandboxOps) *BoardHandler {
-	return &BoardHandler{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore, sandboxMgr: sandboxMgr}
+func NewBoardHandler(store *store.Store, configStore *config.ConfigStore, sandboxMgr sandboxOps) *BoardHandler {
+	return &BoardHandler{store: store, configStore: configStore, sandboxMgr: sandboxMgr}
 }
 
 // HandleBoard returns the board (all tasks) for a project.

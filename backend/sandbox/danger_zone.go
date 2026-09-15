@@ -5,6 +5,8 @@ package sandbox
 // backend/api/project.go. It says nothing about where a running task executes — a project's
 // sandbox_enabled column is that answer, and a project with sandboxing off is the operator's own
 // decision, not re-checked where the shell or the tool call is handed out.
+// The literal is mirrored from startup.EnvDangerZone rather than shared: startup's test package
+// imports this one, so importing startup here would be an import cycle in the test build.
 const DangerZoneEnv = "DANGER_ZONE"
 
 // DangerZone is the resolved answer: did the operator grant that permission. It is a value handed to

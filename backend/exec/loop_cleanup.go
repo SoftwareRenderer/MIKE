@@ -51,9 +51,6 @@ func (te *TaskExecutor) forgetTaskSetup(setup *taskExecSetup) {
 	if state, exists := te.tasks[setup.task.ID]; exists && state.ctx == setup.ctx {
 		if state.executorType != "agent" {
 			delete(te.tasks, setup.task.ID)
-		} else {
-			// Clear status so HasRunningTasks doesn't count completed agent tasks
-			state.taskStatus = ""
 		}
 	}
 }

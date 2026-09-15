@@ -25,10 +25,10 @@ import (
 // with errors.Is, since matching the text lets a reword disable the recovery.
 var errStaleClient = errors.New("stale")
 
-// ServerConfig holds the configuration for a single language server.
+// ServerConfig holds the configuration for a single language server. The argv is not part of it:
+// the manifest is the only source of what gets executed (see startSession).
 type ServerConfig struct {
-	Command string   // binary to execute (e.g., "gopls")
-	Args    []string // args template, {workspace} replaced with workspace path
+	Command string // binary to execute (e.g., "gopls")
 	// FileTypes is what the extension declares it serves, and what its server calls each one —
 	// the source of the didOpen languageId.
 	FileTypes          []extensions.LSPFileType
@@ -298,7 +298,7 @@ func (m *ExtensionLSPManager) GetRegistry() *ExtensionRegistry {
 // GetOrCreate returns the connection for one workspace and language and takes a reference for
 // the caller; Release hands it back, and the connection dies with the last holder. ctx bounds
 // creation, including the server start — see lspStartTimeout.
-func (m *ExtensionLSPManager) GetOrCreate(ctx context.Context, workspacePath, language string, cfg *ServerConfig) (*LSPProcess, error) {
+func (m *ExtensionLSPManager) GetOrCreate(ctx context.Context, workspacePath, language string) (*LSPProcess, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -316,7 +316,7 @@ func (m *ExtensionLSPManager) GetOrCreate(ctx context.Context, workspacePath, la
 	if err != nil {
 		return nil, fmt.Errorf("no LSP extension for language %q: %w", language, err)
 	}
-	if _, err := m.startSession(ctx, ext, cfg, workspacePath, language, 1); err != nil {
+	if _, err := m.startSession(ctx, ext, workspacePath, language, 1); err != nil {
 		return nil, err
 	}
 	return &LSPProcess{
@@ -329,7 +329,7 @@ func (m *ExtensionLSPManager) GetOrCreate(ctx context.Context, workspacePath, la
 // language server has one root, so two workspaces on one connection answers one of them about
 // the other's project), plus the publish pump. A cold attach that loses the key joins the
 // installed connection and closes the bridge it opened.
-func (m *ExtensionLSPManager) startSession(ctx context.Context, ext *extensions.Extension, cfg *ServerConfig, workspacePath, language string, refs int) (*sandboxClient, error) {
+func (m *ExtensionLSPManager) startSession(ctx context.Context, ext *extensions.Extension, workspacePath, language string, refs int) (*sandboxClient, error) {
 	workspaceKey := processKey(workspacePath, language)
 	lspConfig := ext.Manifest.Capabilities.GetLSP()
 	if lspConfig == nil {
@@ -867,7 +867,7 @@ func (m *ExtensionLSPManager) LSPRequest(ctx context.Context, workspacePath, fil
 	sc := m.liveClient(workspaceKey, false)
 	if sc == nil {
 		var err error
-		sc, err = m.startSession(ctx, ext, cfg, workspacePath, language, 0)
+		sc, err = m.startSession(ctx, ext, workspacePath, language, 0)
 		if err != nil {
 			return nil, fmt.Errorf("create sandbox: %w", err)
 		}
@@ -1304,7 +1304,6 @@ func (r *ExtensionRegistry) toServerConfig(ext *extensions.Extension) *ServerCon
 	return &ServerConfig{
 		Language:           lspCfg.Language,
 		Command:            lspCfg.Command,
-		Args:               lspCfg.Args,
 		FileTypes:          lspCfg.FileTypes,
 		InitParamsOverride: lspCfg.InitParamsOverride,
 	}

@@ -32,7 +32,6 @@ func (mockRegistry) Lookup(fileOrPath string) *ServerConfig {
 	if ext == "go" {
 		return &ServerConfig{
 			Command:  "gopls",
-			Args:     []string{"serve"},
 			Language: "go",
 		}
 	}
@@ -66,7 +65,7 @@ func newMockProcessManager() *mockProcessManager {
 	}
 }
 
-func (m *mockProcessManager) GetOrCreate(_ context.Context, workspacePath, language string, cfg *ServerConfig) (*LSPProcess, error) {
+func (m *mockProcessManager) GetOrCreate(_ context.Context, workspacePath, language string) (*LSPProcess, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := processKey(workspacePath, language)

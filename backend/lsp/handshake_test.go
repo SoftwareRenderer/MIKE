@@ -225,7 +225,7 @@ func TestGetOrCreateRetriesThroughADeadConnection(t *testing.T) {
 	m.clients[key] = sc
 	_ = cl.Close() // the bridge connection died (its exec went away with the sandbox)
 
-	if _, err := m.GetOrCreate(context.Background(), "/work/tree", "go", goCfg()); err == nil {
+	if _, err := m.GetOrCreate(context.Background(), "/work/tree", "go"); err == nil {
 		t.Fatal("GetOrCreate succeeded — this fixture has no installable extension")
 	}
 	if _, ok := m.clients[key]; ok {
@@ -272,7 +272,7 @@ func TestGetOrCreateReusesTheServerItStarted(t *testing.T) {
 	sc.refs = 1
 	m.clients[key] = sc
 
-	if _, err := m.GetOrCreate(context.Background(), "/work/tree", "go", goCfg()); err != nil {
+	if _, err := m.GetOrCreate(context.Background(), "/work/tree", "go"); err != nil {
 		t.Fatalf("GetOrCreate: %v", err)
 	}
 	if m.clients[key] != sc {

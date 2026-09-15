@@ -2931,7 +2931,7 @@ func TestNotifyContextChanged_SendsToChannel(t *testing.T) {
 	te.taskMu.Unlock()
 
 	// Call NotifyContextChanged
-	te.NotifyContextChanged("proj", "test-task")
+	te.NotifyContextChanged("test-task")
 
 	// Verify the channel received the notification
 	select {
@@ -2953,7 +2953,7 @@ func TestNotifyContextChanged_NoOpWhenNoTask(t *testing.T) {
 	te := newTestExecutor(t)
 
 	// Should not panic when no task is running
-	te.NotifyContextChanged("proj", "nonexistent-task")
+	te.NotifyContextChanged("nonexistent-task")
 }
 
 // --- raw_args Delta Tests ---
@@ -3014,7 +3014,7 @@ func TestRawArgsDelta_Update(t *testing.T) {
 
 func TestStreamFlusher_TokenBatching(t *testing.T) {
 	var events []types.StreamEvent
-	flusher := newStreamFlusher("proj", "task", false, func(_, _ string, e types.StreamEvent) {
+	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
 		events = append(events, e)
 	}, newLoopDetector())
 
@@ -3044,7 +3044,7 @@ func TestStreamFlusher_TokenBatching(t *testing.T) {
 
 func TestStreamFlusher_ReasoningBatching(t *testing.T) {
 	var events []types.StreamEvent
-	flusher := newStreamFlusher("proj", "task", false, func(_, _ string, e types.StreamEvent) {
+	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
 		events = append(events, e)
 	}, newLoopDetector())
 
@@ -3067,15 +3067,15 @@ func TestStreamFlusher_ReasoningBatching(t *testing.T) {
 
 func TestStreamFlusher_ToolCallBatching(t *testing.T) {
 	var events []types.StreamEvent
-	flusher := newStreamFlusher("proj", "task", false, func(_, _ string, e types.StreamEvent) {
+	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
 		events = append(events, e)
 	}, newLoopDetector())
 
 	// Simulate streaming tool call args: {"command":"ls -la"}
 	// First chunk: new tool call with partial args
-	flusher.appendToolCall("call_1", "bash", "Run Command", "", `{"command":"ls`, 14, 0, true, false)
+	flusher.appendToolCall("call_1", "bash", "Run Command", "", `{"command":"ls`, 14, 0, false)
 	// Second chunk: args grew
-	flusher.appendToolCall("call_1", "bash", "Run Command", "", `{"command":"ls -la"}`, 20, 14, false, false)
+	flusher.appendToolCall("call_1", "bash", "Run Command", "", `{"command":"ls -la"}`, 20, 14, false)
 
 	flusher.flush()
 	if len(events) != 1 {
@@ -3096,12 +3096,12 @@ func TestStreamFlusher_ToolCallBatching(t *testing.T) {
 
 func TestStreamFlusher_ToolCallUpdateDelta(t *testing.T) {
 	var events []types.StreamEvent
-	flusher := newStreamFlusher("proj", "task", false, func(_, _ string, e types.StreamEvent) {
+	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
 		events = append(events, e)
 	}, newLoopDetector())
 
 	// Simulate existing tool call (prevLen > 0, so it's an update)
-	flusher.appendToolCall("call_2", "bash", "Run Command", "", `{"command":"ls -la /home"}`, 26, 14, false, false)
+	flusher.appendToolCall("call_2", "bash", "Run Command", "", `{"command":"ls -la /home"}`, 26, 14, false)
 
 	flusher.flush()
 	if len(events) != 1 {
@@ -3119,14 +3119,14 @@ func TestStreamFlusher_ToolCallUpdateDelta(t *testing.T) {
 
 func TestStreamFlusher_MixedEvents(t *testing.T) {
 	var events []types.StreamEvent
-	flusher := newStreamFlusher("proj", "task", false, func(_, _ string, e types.StreamEvent) {
+	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
 		events = append(events, e)
 	}, newLoopDetector())
 
 	// Mix of token, reasoning, and tool_call
 	flusher.appendToken("Hello")
 	flusher.appendReasoning("thinking...")
-	flusher.appendToolCall("call_1", "bash", "Run Command", "", `{"command":"ls"}`, 16, 0, true, false)
+	flusher.appendToolCall("call_1", "bash", "Run Command", "", `{"command":"ls"}`, 16, 0, false)
 
 	flusher.flush()
 	if len(events) != 3 {
@@ -3145,13 +3145,13 @@ func TestStreamFlusher_MixedEvents(t *testing.T) {
 
 func TestStreamFlusher_Reset(t *testing.T) {
 	var events []types.StreamEvent
-	flusher := newStreamFlusher("proj", "task", false, func(_, _ string, e types.StreamEvent) {
+	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
 		events = append(events, e)
 	}, newLoopDetector())
 
 	flusher.appendToken("Hello")
 	flusher.appendReasoning("thinking")
-	flusher.appendToolCall("call_1", "bash", "Run Command", "", `{"command":"ls"}`, 16, 0, true, false)
+	flusher.appendToolCall("call_1", "bash", "Run Command", "", `{"command":"ls"}`, 16, 0, false)
 
 	// Reset should clear all buffers
 	flusher.reset()
@@ -3165,13 +3165,13 @@ func TestStreamFlusher_Reset(t *testing.T) {
 
 func TestStreamFlusher_MultipleToolCalls(t *testing.T) {
 	var events []types.StreamEvent
-	flusher := newStreamFlusher("proj", "task", false, func(_, _ string, e types.StreamEvent) {
+	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
 		events = append(events, e)
 	}, newLoopDetector())
 
 	// Two separate tool calls
-	flusher.appendToolCall("call_1", "bash", "Run Command", "", `{"command":"ls"}`, 16, 0, true, false)
-	flusher.appendToolCall("call_2", "read_file", "Read File", "./foo.txt", `{"path":"./foo.txt"}`, 19, 0, true, false)
+	flusher.appendToolCall("call_1", "bash", "Run Command", "", `{"command":"ls"}`, 16, 0, false)
+	flusher.appendToolCall("call_2", "read_file", "Read File", "./foo.txt", `{"path":"./foo.txt"}`, 19, 0, false)
 
 	flusher.flush()
 	if len(events) != 2 {
@@ -3191,7 +3191,7 @@ func TestStreamFlusher_MultipleToolCalls(t *testing.T) {
 
 func TestStreamFlusher_SecondFlush(t *testing.T) {
 	var events []types.StreamEvent
-	flusher := newStreamFlusher("proj", "task", false, func(_, _ string, e types.StreamEvent) {
+	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
 		events = append(events, e)
 	}, newLoopDetector())
 

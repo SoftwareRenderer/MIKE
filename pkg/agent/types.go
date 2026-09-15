@@ -83,7 +83,6 @@ const (
 	EventTypeStatus       = "status"
 	EventTypeStats        = "stats"
 	EventTypeError        = "error"
-	EventTypeModels       = "models"
 	EventTypePersist      = "persist"
 	EventTypeTurnComplete = "turn_complete"
 )

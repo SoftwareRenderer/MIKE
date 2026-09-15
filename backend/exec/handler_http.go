@@ -175,7 +175,7 @@ func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Ensure we have an active agent runner.
-	runner, err := te.getAgentRunner(r.Context(), projectID, taskID)
+	runner, err := te.getAgentRunner(projectID, taskID)
 	if err != nil {
 		httputil.Fail(w, err, "start agent", "task not found")
 		return

@@ -77,7 +77,7 @@ func TestCheckpointPinsItsSnapshot(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	te.createCheckpoint(context.Background(), projectID, taskID, wtPath, threadA, msgID, nil, false)
+	te.createCheckpoint(context.Background(), projectID, taskID, msgID)
 
 	ref := git.SnapshotRef(taskID, msgID)
 	waitForSnapshot(t, "the snapshot ref "+ref, func() bool {
