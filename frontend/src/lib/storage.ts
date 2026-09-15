@@ -474,39 +474,30 @@ export async function saveCollapsedDiffFiles(ids: Set<string>): Promise<void> {
  * @param projectId  Optional current project ID; if provided, also cleans stale message/diff caches for that project
  */
 export async function gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>, allProjectIds?: Set<string>, projectId?: string): Promise<void> {
-    // 1. Clean collapsed tasks
     await cleanCollapsedTasks(allTaskIds);
 
-    // 2. Clean draft texts
     await cleanDraftTexts(allTaskIds);
 
-    // 3. Clean offline queue
     await cleanQueue(allTaskIds);
 
-    // 4. Clean draft attachments
     await cleanDraftAttachments(allTaskIds);
 
-    // 5. Clean editor drafts (if project paths provided)
     if (allProjectPaths) {
         await cleanEditorDraftsByProject(allProjectPaths);
     }
 
-    // 6. Clean editor history (if project paths provided)
     if (allProjectPaths) {
         await cleanEditorHistoryByProject(allProjectPaths);
     }
 
-    // 7. Clean board cache (if project IDs provided)
     if (allProjectIds) {
         await cleanBoardCacheByProject(allProjectIds);
     }
 
-    // 8. Clean editor tabs (if project IDs provided)
     if (allProjectIds) {
         await cleanEditorTabsByProject(allProjectIds);
     }
 
-    // 9. Clean message/diff caches for the current project (if project ID provided)
     if (projectId) {
         await cleanTaskContentCache(allTaskIds, projectId);
     }

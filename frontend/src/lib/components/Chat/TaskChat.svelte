@@ -2,7 +2,7 @@
     import { onMount, onDestroy, untrack } from 'svelte';
     import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getQueuedTaskIds, getDroppedTaskIds, getTask } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getQueuedTaskIds, getDroppedTaskIds, getTask } from '$lib/api';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
     import { StreamState } from '$lib/services/stream-state.svelte';
@@ -118,8 +118,6 @@
     // Shorthand accessors for template use
     let entries = $derived(stream.state.entries);
     let currentAssistantId = $derived(stream.state.currentAssistantId);
-    let activeToolCalls = $derived(stream.state.activeToolCalls);
-    let processedToolIds = $derived(stream.state.processedToolIds);
     let pendingCheckpoints = $derived(stream.state.pendingCheckpoints);
     let checkpointLabels = $derived(stream.state.checkpointLabels);
     let checkpointCommitHashes = $derived(stream.state.checkpointCommitHashes);
@@ -131,14 +129,10 @@
     let promptProgress = $derived(stream.state.promptProgress);
     let retryCount = $derived(stream.state.retryCount);
     let retryError = $derived(stream.state.retryError);
-    let contextState = $derived(stream.state.contextState);
-    let streamTokenCount = $derived(stream.state.streamTokenCount);
-    let lastPromptTokens = $derived(stream.state.lastPromptTokens);
 
     let lastSentMessage: string | null = $state(null);
     let lastSentEntryId: string | null = $state(null); // temp ID of last optimistic entry
     let isStarting = $state(false);
-    let isRegenerating = $state(false); // true between regenerate delete and echo arrival
     let isCommitting = $state(false);
 
     let threadSwitching = $state(false); // true while a thread switch is in-flight
@@ -308,13 +302,6 @@
         history.pushState({ task: taskId, thread: threadId }, '', url.toString());
     }
 
-    /** Remove the `thread` param from the URL. */
-    function clearThreadUrl() {
-        const url = new URL(location.href);
-        url.searchParams.delete('thread');
-        history.pushState({ task: taskId }, '', url.toString());
-    }
-
     /** Reset stream state before loading a new thread's messages. */
     function resetStreamState() {
         stream.closeCurrentAssistant();
@@ -401,9 +388,6 @@
         loadHistory,
         updateActiveThread,
         updateThreadUrl,
-        onNewError: () => {
-            isRegenerating = false;
-        },
     });
 
     /** Wrapper around stream handler with component-specific echo logic. */
@@ -414,7 +398,6 @@
             if (lastSentMessage === data.content) {
                 lastSentMessage = null;
                 lastSentEntryId = null;
-                isRegenerating = false;
                 if (data.id) {
                     // Match by optimistic entry ID when available (reliable),
                     // fall back to content match for backward compat (e.g. regenerate).
@@ -565,27 +548,6 @@
         }
     }
 
-    async function handleThreadFork(messageId: string, fromThreadId: string) {
-        if (isLoading || disabled) return;
-        try {
-            const forked = await forkTaskThread(projectId, taskId, fromThreadId, messageId);
-            // Refresh threads list from server to ensure consistency
-            threads = await getTaskThreads(projectId, taskId);
-            activeThreadId = forked.id;
-            // Clear streaming state before loading new thread's messages.
-            resetStreamState();
-            // Load messages for the new thread immediately
-            await loadHistory(true);
-            // Notify parent to refresh the diff panel for the new forked thread
-            onThreadSwitch?.();
-            // Update URL with the new fork's thread ID
-            updateThreadUrl(forked.id);
-            // No need to reconnect WebSocket — broadcaster is per-task, not per-thread.
-        } catch (e) {
-            dialogStore.showToast(String(e));
-        }
-    }
-
     /**
      * Follow the latest content. Forced only for user-initiated actions (send,
      * edit, regenerate); never for stream events, so a reader who scrolled up
@@ -653,7 +615,7 @@
         }
     }
 
-    async function handleModelSelect(providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
+    async function handleModelSelect(_providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
         selectedModel = modelName;
         selectedUrl = providerUrl;
         selectedReasoningEffort = reasoningEffort || '';
@@ -771,17 +733,15 @@
         const lastUser = entries[lastUserIdx];
         // Regenerate from backend starting after the last user message
         try {
-            await regenerateTaskMessages(projectId, taskId, lastUser.id, true);
+            await deleteTaskMessagesAfter(projectId, taskId, lastUser.id, true);
         } catch (e) {
             console.error('Failed to regenerate messages:', e);
         }
         // Trim local entries: keep everything up to and including the last user message
         stream.state.entries = trimEntriesForRegenerate(stream.state.entries, idx);
-        isRegenerating = true;
         const result = await sendWithTracking(lastUser.content, undefined, true);
         if (result === null) {
             dialogStore.showToast(t('chat.task.regenerateFailed'));
-            isRegenerating = false;
             return;
         }
         if (result.queued) {
@@ -1102,7 +1062,6 @@
 
     // Mobile keyboard: track visualViewport shrink and add padding to keep input visible
     let keyboardOffset = $state(0);
-    let chatFormRef: HTMLElement | null = $state(null);
     // svelte-ignore non_reactive_update — DOM ref via bind:this
     let chatFormComp: { focus: () => void } | null = null;
 
@@ -1371,7 +1330,6 @@
         {entries}
         {entryMetas}
         {lastEntryIdx}
-        {activeThreadId}
         {threads}
         {awaitingResponse}
         {lockWait}
@@ -1414,7 +1372,7 @@
             onStartTask={handleStartTask}
         />
     {:else}
-        <div class="chat-form-wrapper" style="padding-bottom: {keyboardOffset}px;" bind:this={chatFormRef}>
+        <div class="chat-form-wrapper" style="padding-bottom: {keyboardOffset}px;">
         <ReviewBar
             {taskStatus}
             {taskExecutionState}

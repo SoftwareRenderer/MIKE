@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
-// The attach button of every surface that takes a file, driven through the real components. What was
-// broken here is not reachable from the composable's own tests: the handler classified any file, while
-// the picker it was wired to offered images only, so the surface that could take a bundle could never
-// be asked for one. The create-task modal is in this file as the counterpart — its picker is meant to
-// stay filtered, because it has no task environment to write a file into.
+// The attach button of every surface that takes a file, driven through the real components: a picker and
+// a handler are wired together only here, so the composable's own tests cannot see the pair. The
+// create-task modal is the counterpart — its picker stays filtered, because it has no task environment to
+// write a file into.
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import { render, cleanup, fireEvent, waitFor } from '@testing-library/svelte';
 import CreateTaskModal from '$lib/components/CreateTaskModal.svelte';
@@ -84,7 +83,7 @@ describe('the chat input', () => {
 describe('the message edit form', () => {
     it('names the control for a file and offers every type', async () => {
         const { container } = render(EditForm, {
-            props: { content: 'the message', messageId: 'm1', projectId: 'p1', taskId: 't1' },
+            props: { content: 'the message', projectId: 'p1', taskId: 't1' },
         });
 
         const button = await waitFor(() => {

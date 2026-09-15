@@ -169,6 +169,42 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
   *after* the send (`.last()`, or a count you captured before), never on `.first()`.
 
 
+## Frontend cleanliness gates (run by `make check`)
+
+`make test-frontend` ends with two gates over `frontend/src`:
+
+- **`npm run check:dead`** — knip over the **production view**: unused files, exports, exported types,
+  duplicate exports, unlisted imports, unused dependencies. `ignore` in the config excludes every test
+  file, so a symbol kept alive only by its own unit test is still reported — that is the property the gate
+  exists for, and it is how a test import hid an export no product code read.
+- **`npm run check:unused`** — `frontend/scripts/check-unused.sh` runs `svelte-check` on
+  `tsconfig.unused.json`, which turns on `noUnusedLocals` and `noUnusedParameters`; `npm run check` does
+  not. The script keeps the two `is declared but …` messages, prints `file:line name`, and fails on any.
+  It covers test files too, because `tsconfig.json` includes `src/**/*.ts`.
+
+**Names starting with `_` are exempt, deliberately.** `$effect(() => { const _v = uiInjector.getPointVersion(); … })`
+subscribes by *reading*; the value is never used and the read is the whole point. TypeScript exempts
+`_`-prefixed parameters natively but not locals, so the script filters them — deleting one of those
+declarations unsubscribes the effect. An unused positional argument that must stay for its position gets
+the same prefix, which is also TypeScript's own exemption.
+
+Knip traps, each measured on this tree:
+
+- **Never pass `--production`.** It breaks module resolution, and knip then names every runtime
+  dependency (22 of them) as unused.
+- **The config lives in `frontend/`.** knip takes the workspace root from the config file's directory, so
+  `-c /tmp/knip.json` analyzes a different tree and reports different numbers.
+- **`cycles` stays out of `include`.** `src/lib/components/Card.svelte` imports itself so a subtask renders
+  with the same markup, so the cycle it reports is intended structure. (It is not a resolution artifact:
+  the self-import is on line 9 of that file, not in `components/Card/`.)
+
+**What neither gate sees.** A declaration read by something outside the JS module graph:
+`AppStreamEventType` in `src/lib/api/events.ts` is exported for the archgate `wsevents` rule, which locates
+the union by the text `export type AppStreamEventType` (`scripts/archgate/rules_routes.go`) and errors if
+that text is gone. The declaration is tagged `@knipignore` and `tags: ["-knipignore"]` in `knip.json` is the
+config's only exemption. Both gates are also blind to an object property nobody reads, a CSS class no
+template uses, and a REST route the UI stopped calling.
+
 ## Diagnostic scripts (ad-hoc investigation)
 
 For request-pattern/race investigation, write standalone Playwright scripts in `frontend/tests/` as

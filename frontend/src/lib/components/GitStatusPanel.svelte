@@ -72,7 +72,6 @@
     let compareDiff = $state<DiffFile[]>([]);
     let compareLoading = $state(false);
     let compareError = $state('');
-    // Dropdown state
     let showFromDropdown = $state(false);
     let showToDropdown = $state(false);
     // svelte-ignore non_reactive_update — DOM refs via bind:this

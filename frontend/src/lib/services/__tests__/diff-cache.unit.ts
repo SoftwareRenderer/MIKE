@@ -260,7 +260,7 @@ describe('DiffCache', () => {
     // very same file has to stay visible.
     it('drops a cancelled file fetch silently and still logs a connection failure', async () => {
         const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-        const getDiffFile = vi.fn((proj: string, task: string, path: string) =>
+        const getDiffFile = vi.fn((_proj: string, _task: string, path: string) =>
             path === 'a.ts'
                 ? Promise.reject(new RequestAborted('/api/diff/file'))
                 : Promise.reject(new ConnectionFailure({ cause: new TypeError('Failed to fetch') })),

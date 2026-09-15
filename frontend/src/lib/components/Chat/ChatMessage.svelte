@@ -81,7 +81,6 @@
     // Mobile detection
     const isMobileCtx = useIsMobile();
 
-    // Timestamp info
     let timestampInfo = $derived(timestamp ? formatTimestamp(timestamp) : { display: '', tooltip: '' });
 
     // Memoized markdown / HTML rendering — avoids re-parsing on unrelated state changes
@@ -186,7 +185,6 @@
         }
     }
 
-    // Mobile edit state
     let mobileEditContent = $state('');
     let mobileEditAttachments = $state<Array<{ mimeType: string; data: string }>>([]);
 
@@ -305,7 +303,6 @@
                 {isFirstUserMessage}
                 {isLastUserMessage}
                 {taskStatus}
-                {messageId}
                 {projectId}
                 taskId={msgTaskId}
                 {isSubmitting}
@@ -355,7 +352,6 @@
                 {isFirstUserMessage}
                 {isLastUserMessage}
                 {taskStatus}
-                {messageId}
                 {projectId}
                 taskId={msgTaskId}
                 {isSubmitting}

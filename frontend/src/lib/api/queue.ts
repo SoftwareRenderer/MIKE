@@ -181,8 +181,7 @@ export function getQueuedDeleteTaskIds(): Set<string> {
 /** Check if an error is a transient network failure (retryable). */
 export function isTransientError(e: unknown): boolean {
     // A cancellation is not a transient failure. The user stopped this request; queueing it replays
-    // something they asked to stop — later, from IndexedDB, possibly after the tab is closed. The abort
-    // used to be counted here because apiFetch produced the only aborts there were: its own 15 s timeout.
+    // something they asked to stop — later, from IndexedDB, possibly after the tab is closed.
     if (isAborted(e)) return false;
     return (e as any)?.name === 'TypeError';
 }

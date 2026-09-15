@@ -308,7 +308,6 @@
             title={col.title}
             label={t(col.labelKey)}
             color={col.color}
-            columnColor={col.color}
             tasks={getTasksForColumn(col.id)}
             childrenMap={hierarchy.childrenMap}
             expandedTasks={hierarchy.expandedTasks}

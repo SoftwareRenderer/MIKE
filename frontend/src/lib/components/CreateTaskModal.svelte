@@ -64,13 +64,8 @@
     // Branch selection
     let branchDraft = $state('');
     let branches = $state<string[]>([]);
-    // svelte-ignore non_reactive_update
-    let branchInput: HTMLInputElement | null = null;
     let branchDropdownOpen = $state(false);
     let branchActiveIndex = $state(0);
-    // svelte-ignore non_reactive_update
-    let branchDropdownRef: HTMLUListElement | null = null;
-    let branchWrapperRef: HTMLDivElement | null = null;
 
     // Filtered branches matching the current input text
     let filteredBranches = $derived.by(() => {
@@ -252,7 +247,7 @@
 
 
 
-    function handleModelSelect(providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
+    function handleModelSelect(_providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
         selectedModel = modelName;
         selectedUrl = providerUrl;
         selectedReasoningEffort = reasoningEffort || '';
@@ -485,7 +480,6 @@
             </div>
             <div class="branch-input-wrapper">
                 <input
-                    bind:this={branchInput}
                     type="text"
                     bind:value={branchDraft}
                     placeholder={targetBranch}
@@ -496,7 +490,7 @@
                     onblur={() => setTimeout(() => closeBranchDropdown(), 150)}
                 />
                 {#if branchDropdownOpen && filteredBranches.length > 0}
-                    <ul bind:this={branchDropdownRef} class="branch-dropdown" role="listbox">
+                    <ul class="branch-dropdown" role="listbox">
                         {#each filteredBranches as branch, i (branch)}
                             <li
                                 class="branch-option {i === branchActiveIndex ? 'active' : ''}"

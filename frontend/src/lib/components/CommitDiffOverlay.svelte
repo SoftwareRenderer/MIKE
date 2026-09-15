@@ -18,8 +18,7 @@
 
     interface Props {
         commit: GitCommit;
-        /** Already parsed by the server — see toDiffFiles in $lib/api/git. This component used to run
-         * the browser's own diff grammar over raw patch text here. */
+        /** Already parsed by the server — see toDiffFiles in $lib/api/git. */
         files: DiffFile[];
         loading: boolean;
         /** Where a binary file's bytes are read from. */

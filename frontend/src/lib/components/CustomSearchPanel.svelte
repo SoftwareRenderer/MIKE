@@ -31,10 +31,8 @@
     let currentMatchIndex = $state(0);
     let matches = $state<Array<{ from: number; to: number }>>([]);
     /**
-     * Read on every render rather than stored, so switching language re-labels a
-     * panel that is already open (a string cached in `$state` would keep the
-     * language it was computed in). Empty until the user has typed anything, which
-     * is what the stored string did — it was only ever written from `onInput`.
+     * Read on every render rather than stored, so switching language re-labels a panel that is already
+     * open. Empty until the user has typed something.
      */
     let matchCount = $derived(query ? t('editor.matches', { count: matches.length }) : '');
 
@@ -107,7 +105,6 @@
             const coords = view.coordsAtPos(m.from);
             if (!coords) return;
             const scroller = view.scrollDOM;
-            const panelHeight = 80; // approximate find panel height
             const viewportHeight = scroller.clientHeight;
             const matchBottom = coords.bottom - scroller.scrollTop;
             // If match is in bottom 30% of viewport, scroll up to show it above panel

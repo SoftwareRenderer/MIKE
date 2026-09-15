@@ -1,6 +1,5 @@
 <script lang="ts">
     import type { Snippet } from 'svelte';
-    import { isAtBottom } from '$lib/composables/use-chat-follow.svelte';
 
     /**
      * Fixed-height virtual scroll list: renders visible rows plus a buffer, absolutely
@@ -109,33 +108,6 @@
         }
     });
 
-    /** Scroll to the bottom of the list. */
-    function scrollToBottom() {
-        if (scrollEl) {
-            // Buffer past estimated height; browser clamps to actual max.
-            scrollEl.scrollTop = totalHeight + 10000;
-        }
-    }
-
-    /** Scroll to a specific offset. */
-    function scrollToOffset(top: number, behavior: ScrollBehavior = 'auto') {
-        if (scrollEl) {
-            scrollEl.scrollTo({ top, behavior });
-        }
-    }
-
-    /** Check if the scroll container is near the bottom. */
-    function isNearBottom(threshold?: number): boolean {
-        if (!scrollEl) return true;
-        // The spacer height, not the element's: only the rendered rows have any.
-        return isAtBottom(scrollEl, { threshold, totalHeight });
-    }
-
-    /** Scroll to a specific item index. */
-    function scrollToItem(index: number, behavior: ScrollBehavior = 'auto') {
-        if (index < 0 || index >= items.length) return;
-        scrollToOffset(index * itemHeight, behavior);
-    }
 </script>
 
 {#if virtualized}

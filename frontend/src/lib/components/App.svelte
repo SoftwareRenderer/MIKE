@@ -455,7 +455,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: 'task-explorer' }, false, true);
     }
 
-    // Route a go-to-definition jump
     async function routeDefinitionJump(event: Event): Promise<void> {
         const detail = (event as CustomEvent<{ path: string; line?: number; taskId?: string }>).detail;
         // Project jumps are heard by the project explorer, which owns the only

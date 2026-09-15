@@ -238,10 +238,6 @@
         reconcileAgentRows(config);
     });
 
-    function toggleProvider(idx: number) {
-        providers[idx].expanded = !providers[idx].expanded;
-    }
-
     async function testProviderConnection(idx: number) {
         const p = providers[idx];
         p.testingConnection = true;
@@ -347,14 +343,12 @@
         dragIndex = idx;
         dragDropIndex = -1;
 
-        // Create drag preview element
         dragPreview = document.createElement('div');
         dragPreview.className = 'drag-preview';
         dragPreview.style.left = `${e.clientX - 12}px`;
         dragPreview.style.top = `${e.clientY - 12}px`;
         document.body.appendChild(dragPreview);
 
-        const startY = e.clientY;
         const startIdx = idx;
 
         function onPointerMove(ev: PointerEvent) {

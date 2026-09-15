@@ -5,7 +5,6 @@ import {
     buildSectionHeaders,
     findLineElement,
     findStickyStack,
-    getHeaderLineHtml,
     getViewportTopLine,
     sectionHeadersField,
     stickyScroll,
@@ -359,8 +358,7 @@ describe('stickyScroll (real EditorView in jsdom)', () => {
     it('ignores headers whose line is outside the document (no RangeError)', async () => {
         mount();
         await flush();
-        // line 0 sits below the document (doc.line(0) would throw RangeError
-        // in getHeaderLineHtml); line 999 sits beyond the last line.
+        // line 0 is not a document line (doc.line(0) throws RangeError); line 999 is past the end.
         setHeaders([{ line: 0, endLine: 10, depth: 0 }, { line: 999, endLine: 999, depth: 0 }]);
         await flush();
 

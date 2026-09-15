@@ -7,7 +7,7 @@
  * dates/times go through `Intl.DateTimeFormat` on the **active locale** — never the
  * browser default, never a hardcoded English string. See `$lib/i18n/runtime.svelte`.
  */
-import { activeLocale, packText, t, type LocaleKey } from '$lib/i18n/runtime.svelte';
+import { activeLocale, packText, t } from '$lib/i18n/runtime.svelte';
 import type { MessageKey } from '$lib/i18n/en';
 
 /**

@@ -55,7 +55,7 @@ import { t } from '$lib/i18n';
 </script>
 
 <BaseModal title={t('sandbox.infoTitle')} width="480px" onClose={onClose}>
-        {#snippet header({ title })}
+        {#snippet header()}
             <div class="panel-title">
                 <Icon src={shieldIcon} width={16} height={16} />
                 <span>{t('sandbox.sandboxedTask')}</span>

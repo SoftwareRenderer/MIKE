@@ -24,10 +24,7 @@ describe('MODE_DESCRIPTIONS', () => {
     });
 });
 
-/**
- * The toggle's tooltip, which both chat surfaces now read from this module — so the English
- * values each component used to carry are pinned once, here.
- */
+/** The toggle's tooltip, read by both chat surfaces. */
 describe('modeTip', () => {
     it('answers each mode with the tooltip that shipped', () => {
         expect(modeTip('act')).toBe('Act mode: AI is required to provide structured responses during review, and has read/write access. Click to switch.');

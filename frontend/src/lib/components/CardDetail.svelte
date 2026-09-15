@@ -215,7 +215,6 @@
         task: task.id,
         working: { old: checkpointDiffBaseRef || 'HEAD', new: checkpointDiffHash || 'HEAD' },
     });
-    // Chat fullscreen
     let chatMaximize = $state<ChatMaximizeState>({ fullscreen: false, autoMaximized: false });
 
     function toggleEditorFullscreen() {
@@ -292,7 +291,7 @@
         await diffCache.unstageAll();
     }
 
-    function closeDiffEditor(saved: boolean) {
+    function closeDiffEditor(_saved: boolean) {
         editorFullscreen = false;
         editingFile = null;
     }
@@ -576,7 +575,7 @@
     // Diff takes full remaining space (checkpoint overlays on top)
     let diffWidth = $derived(`${((1 - chatRatio) * (1 - boardRatio) * 100).toFixed(1)}%`);
 
-    function handleBoardDragStart(ev: MouseEvent | TouchEvent, startX: number) {
+    function handleBoardDragStart(_ev: MouseEvent | TouchEvent, startX: number) {
         boardDragStartX = startX;
         boardDragStartRatio = boardRatio;
     }
@@ -589,7 +588,7 @@
         saveAppSetting('kanban:detail:boardRatio', boardRatio).catch(() => {});
     }
 
-    function handleChatDragStart(ev: MouseEvent | TouchEvent, startX: number) {
+    function handleChatDragStart(_ev: MouseEvent | TouchEvent, startX: number) {
         chatDragStartX = startX;
         chatDragStartRatio = chatRatio;
     }

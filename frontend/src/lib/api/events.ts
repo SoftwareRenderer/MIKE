@@ -1,20 +1,11 @@
 /**
- * The app-stream frame names, as one declared list.
+ * The app-stream frame names, as one declared list. `backend/types/ws.go` owns them; the archgate
+ * `wsevents` rule reads the declaration text below and compares the two lists in both directions, so a
+ * name only one side has is either a dead broadcast or a dispatcher branch that cannot run.
  *
- * `backend/types/ws.go` owns these and the archgate `wsevents` rule compares the two lists in both
- * directions: a name Go broadcasts that nothing reads is dead code or a panel that stopped updating, and a
- * name in this union that Go does not define is a branch of the dispatcher below that can never run. The
- * union exists so that second direction has an answer at all — the browser compares `.type` against dozens
- * of literals spread over three sockets (the app stream, the terminal, the extension channel) plus the
- * clone stream's SSE events and the offline queue's action names, and against that pile "does the frontend
- * invent an event?" is not a question with a clean answer. This file is the part of it that is.
- *
- * `AppStreamFrame` is what the app-stream socket hands its dispatcher, so a misspelled comparison is a
- * compile error rather than a silent no-op.
- *
- * The archgate `wsevents` rule reads this union by its declaration text (see
- * `scripts/archgate/rules_routes.go`), so the name stays exported even though nothing outside imports it.
+ * The `export` is that rule's locator, hence the tag on an export nothing imports.
  */
+/** @knipignore */
 export type AppStreamEventType =
    'token'
     | 'token'
@@ -55,11 +46,9 @@ export type AppStreamEventType =
     | 'fs_event'
 
 /**
- * One frame off the app-stream WebSocket: a name from the vocabulary above, plus whatever that event
- * carries beside it. The payload is deliberately not declared here — each frame's shape is known to the
- * callback that consumes it, and marking the shared keys optional only moves the assumption into five
- * places that then have to pretend to check it. What this type does hold is the name, because a
- * comparison against a name the server never sends is a dispatcher branch that cannot run.
+ * One frame off the app-stream WebSocket: a name from the vocabulary above, plus whatever it carries.
+ * The payload is deliberately undeclared — each consumer knows its own shape, and the index signature is
+ * what keeps that assumption out of every `switch`.
  */
 export interface AppStreamFrame {
     type: AppStreamEventType;

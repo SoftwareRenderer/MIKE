@@ -15,7 +15,6 @@
         entries,
         entryMetas,
         lastEntryIdx,
-        activeThreadId,
         threads,
         awaitingResponse,
         lockWait = null,
@@ -46,7 +45,6 @@
         entries: ChatEntry[];
         entryMetas: EntryMeta[];
         lastEntryIdx: number;
-        activeThreadId: string;
         threads: Thread[];
         awaitingResponse: boolean;
         lockWait?: LockWait | null;
@@ -268,7 +266,6 @@
                         <div>
                             <CheckpointDivider
                                 timestamp={entry.createdAt}
-                                threadId={entry.threadId || activeThreadId}
                                 threads={threads}
                                 activeThreadId={meta.cpThread?.id || ''}
                                 onSwitch={onThreadSwitch}

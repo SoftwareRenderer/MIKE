@@ -8,14 +8,13 @@
     import { countWithDescendants } from '$lib/utils/task-utils';
     import { t } from '$lib/i18n';
 
-    let { columnId, title, label = title, color, columnColor, tasks, childrenMap, expandedTasks, onToggleExpanded, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask, onSelect, canDrop, onRefreshBoard, multiSelect }: {
+    let { columnId, title, label = title, color, tasks, childrenMap, expandedTasks, onToggleExpanded, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask, onSelect, canDrop, onRefreshBoard, multiSelect }: {
         columnId: string;
         /** English a11y name — `aria-label` text is never translated, and Board finds a column by it. */
         title: string;
         /** Visible (translatable) column label; falls back to the English `title`. */
         label?: string;
         color: string;
-        columnColor: string;
         tasks: Task[];
         childrenMap: Map<string, Task[]>;
         expandedTasks: Set<string>;

@@ -1378,9 +1378,8 @@
         const _wsRoot = lspWorkspaceRoot;
         const _lspAvailable = lspAvailable;
 
-        // Only reconnect if we previously had a client but it's now disconnected
         if (!_lspClient || !_view || !_wsRoot || !_lspAvailable) return;
-        if (_lspReady || _lspClient.connected || _lspConnecting) return; // still connected or connecting
+        if (_lspReady || _lspClient.connected || _lspConnecting) return;
 
         async function reconnectLSP() {
             lspConnecting = true;

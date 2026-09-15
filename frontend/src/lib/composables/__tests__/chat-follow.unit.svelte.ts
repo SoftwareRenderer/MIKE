@@ -342,7 +342,7 @@ describe('createChatFollow — who is driving the viewport', () => {
 
     it('re-engages when the user scrolls back to the bottom', () => {
         const follow = createChatFollow();
-        const { el, state } = makeScroller(2000, 500);
+        const { el } = makeScroller(2000, 500);
         follow.attach(el, null);
         pinFrames();
         follow.noteUserIntent();

@@ -109,8 +109,7 @@
         return list;
     });
 
-    /** Generate a unique ID for a symbol node */
-    function symbolId(sym: typeof symbols[0], index: number, parentPath: string = ''): string {
+    function symbolId(index: number, parentPath: string = ''): string {
         return parentPath ? `${parentPath}/${index}` : `${index}`;
     }
 
@@ -126,7 +125,7 @@
             }
             for (let i = 0; i < sorted.length; i++) {
                 const sym = sorted[i];
-                const id = symbolId(sym, i, parentPath);
+                const id = symbolId(i, parentPath);
                 const hasChildren = !!(sym.children && sym.children.length > 0);
                 flat.push({ symbol: sym, depth, id, hasChildren });
                 if (hasChildren && !collapsedIds.has(id)) {

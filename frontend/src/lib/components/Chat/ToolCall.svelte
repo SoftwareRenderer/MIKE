@@ -109,10 +109,8 @@
             : ''
     );
 
-    // Pending-tool-call progress line. Every variant is one message: the `: {path}` / `: {bytes}`
-    // clauses the markup used to bolt onto a bare word are part of the copy now, so a language
-    // that puts them elsewhere can say so. `bash` before its command is complete deliberately
-    // falls through to the generic "Writing" branch, exactly as the original condition chain did.
+    // Pending-tool-call progress line: one message per variant, placeholders included, so a language
+    // that puts them elsewhere can say so. `bash` before its command is complete falls through to "Writing".
     let progressText = $derived.by(() => {
         // The elapsed line measures the tool running, so it waits for the tool: while a write is
         // still generating its content, the filename is what the line has to say.

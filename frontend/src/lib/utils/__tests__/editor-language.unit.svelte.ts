@@ -188,8 +188,8 @@ describe('getLanguageSupport — declared profile first, fallback second', () =>
     const tokens = tagged('a.ts', "interface Box { x: number } // what\nconst s = '{';");
     // The word from the original bug report is a keyword because the manifest said so.
     expect(tokens.some(([text, name]) => text === 'interface' && name === 'keyword')).toBe(true);
-    expect(tokens.some(([text, name]) => text === '// what')).toBe(true);
-    expect(tokens.some(([text, name]) => text === "'{'")).toBe(true);
+    expect(tokens.some(([text]) => text === '// what')).toBe(true);
+    expect(tokens.some(([text]) => text === "'{'")).toBe(true);
   });
 
   it('prefers an extension profile over the core fallback for the same suffix', () => {

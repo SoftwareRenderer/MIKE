@@ -18,7 +18,6 @@ const PROJECT = 'proj-1';
 const TASK = 'task-9';
 const REFUSAL = 'path is outside the allowed host directories';
 const PROJECT_PATH = '/srv/git/bear';
-const FILE = 'notes.md';
 
 /** Every request the component made, so the scoping the create path lost is visible too. */
 let calls: string[] = [];

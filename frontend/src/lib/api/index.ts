@@ -74,7 +74,6 @@ export {
     createTaskMessage,
     deleteTaskMessagesAfter,
     deleteTaskMessage,
-    regenerateTaskMessages,
     checkMessageDelete,
     updateTaskMessage,
 } from './tasks';

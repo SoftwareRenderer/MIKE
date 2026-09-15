@@ -153,7 +153,7 @@ function addFooterButton(ctx: HostContext, args: { id: string; label?: string; a
     anchors.set(anchor, () => btn.remove());
 }
 
-/** Remove a previously added footer button (no-op if absent). */
+/** Removing an absent button is a no-op. */
 function removeFooterButton(ctx: HostContext, args: { id: string }): void {
     const key = `${ctx.extensionId}:${args.id}`;
     const anchor = ctx.anchor ?? null;

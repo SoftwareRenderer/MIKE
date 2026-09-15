@@ -247,7 +247,7 @@
             rows="1"
             onkeydown={handleKeydown}
             onpaste={intake.handlePaste}
-            oninput={(e) => { autoResize(); mention.handleInput(); }}
+            oninput={() => { autoResize(); mention.handleInput(); }}
             onfocus={handleInputFocus}
             onblur={handleInputBlur}
         ></textarea>

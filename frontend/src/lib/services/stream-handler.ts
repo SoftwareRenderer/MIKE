@@ -36,7 +36,7 @@ export interface StreamHandlerCallbacks {
     updateActiveThread: (threadId: string) => void;
     updateThreadUrl: (threadId: string) => void;
     /** Reports a failure the client has not shown yet — never called for a replayed frame. */
-    onNewError: () => void;
+    onNewError?: () => void;
 }
 
 /**
@@ -303,7 +303,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 // The server stores the error before sending it and names that row in the
                 // event, so a frame that was already drawn must not be drawn a second time.
                 if (isRepeatError(s.entries, data)) break;
-                onNewError();
+                onNewError?.();
                 stream.clearAwaiting();
                 markNotStreaming();
                 stream.closeCurrentAssistant();

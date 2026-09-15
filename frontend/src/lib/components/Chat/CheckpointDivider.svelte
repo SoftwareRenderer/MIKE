@@ -5,7 +5,6 @@
 
     interface Props {
         timestamp?: string;
-        threadId: string;
         threads: Thread[];
         activeThreadId: string;
         onSwitch?: (threadId: string) => void;
@@ -17,7 +16,7 @@
         onViewChanges?: (commitHash: string, checkpointIndex?: number) => void;
     }
 
-    let { timestamp, threadId, threads, activeThreadId, onSwitch, isSwitching = false, isPending = false, commitLabel, commitHash, checkpointIndex, onViewChanges }: Props = $props();
+    let { timestamp, threads, activeThreadId, onSwitch, isSwitching = false, isPending = false, commitLabel, commitHash, checkpointIndex, onViewChanges }: Props = $props();
 
     // Filter threads to only show those relevant at this checkpoint.
     // Compare as Date values (not strings): checkpoint_message_time is stored at

@@ -159,7 +159,6 @@ class ExtensionManager {
         return this.state.extensions.find(ext => ext.name === name);
     }
 
-    /** Clear error. */
     clearError() {
         this.state.error = '';
     }
