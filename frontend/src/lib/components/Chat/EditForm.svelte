@@ -13,7 +13,6 @@
         isFirstUserMessage?: boolean;
         isLastUserMessage?: boolean;
         taskStatus?: string;
-        messageId?: string;
         projectId?: string;
         taskId?: string;
         isSubmitting?: boolean;
@@ -21,7 +20,7 @@
         onCancel?: () => void;
     }
 
-    let { content, attachments = [], isFirstUserMessage = false, isLastUserMessage = false, taskStatus = 'backlog', messageId, projectId = '', taskId = '', isSubmitting = false, onSubmit, onCancel }: Props = $props();
+    let { content, attachments = [], isFirstUserMessage = false, isLastUserMessage = false, taskStatus = 'backlog', projectId = '', taskId = '', isSubmitting = false, onSubmit, onCancel }: Props = $props();
 
     let editContent = $state('');
     let textareaEl: HTMLTextAreaElement | null = $state(null);

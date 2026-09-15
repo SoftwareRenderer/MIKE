@@ -239,7 +239,6 @@ describe('Accessibility (Section 508 / WCAG 2.1 AA)', () => {
                 columnId: 'backlog',
                 title: 'Backlog',
                 color: 'blue',
-                columnColor: 'blue',
                 tasks: [],
                 projectId: 'test-project',
                 childrenMap: new Map(),

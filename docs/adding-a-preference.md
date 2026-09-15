@@ -20,7 +20,8 @@ default.
 6. Field in the `ConfigModal.svelte` save payload (always send all bindings).
 7. Dispatch: global bindings in `use-keyboard-shortcuts.svelte.ts` (wired in `App.svelte`);
    dialog/panel-scoped bindings in the owning component (`CreateTaskModal`, `Chat/TaskChat`,
-   `TerminalPanel`, `CardDetail`, `ExplorerView`, `TaskExplorerView`).
+   `TerminalPanel`, `CardDetail`) — both explorer views share one handler, in
+   `$lib/services/explorer-core.svelte.ts`.
 
 **Capture rules** (`normalizeKey` in `$lib/utils/keyboard.ts`): rejects modifier-only presses, Escape
 (cancels capture), named keys without a modifier, and browser-reserved `Ctrl+W/Q/N/T`. A click binding

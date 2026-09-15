@@ -124,7 +124,7 @@ describe('the chat input', () => {
 describe('the message edit form', () => {
     it('attaches a pasted image and shows it', async () => {
         const { container } = render(EditForm, {
-            props: { content: 'the message', messageId: 'm1', projectId: 'p1', taskId: 't1' },
+            props: { content: 'the message', projectId: 'p1', taskId: 't1' },
         });
         const textarea = await waitFor(() => {
             const t = container.querySelector('textarea');

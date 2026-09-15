@@ -52,7 +52,7 @@ describe('timeAgo', () => {
         // A caller renders `timeAgo(x, { template }) || t('time.built', { when: raw })`;
         // a dangling "Built " with no date behind it would be non-falsy and win.
         expect(timeAgo('not-a-date', { template: 'time.built' })).toBe('');
-        expect(timeAgo(NaN, { template: 'time.saved' })).toBe('');
+        expect(timeAgo(NaN, { template: 'time.built' })).toBe('');
     });
 
     it('returns an empty string for something that is not a moment', () => {

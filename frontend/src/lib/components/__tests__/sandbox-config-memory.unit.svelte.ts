@@ -124,19 +124,19 @@ describe('SandboxConfigModal memory limit', () => {
 
     it('reports "No limit" in the read-only locked view', () => {
         const { container } = renderModal(projectWith({ sandbox_memory_limit: 0 }), 1);
-        const rows = Array.from(container.querySelectorAll('.setting-row'));
-        const memoryRow = rows.find((r) => r.querySelector('.setting-label')?.textContent?.includes('Memory Limit'));
+        const rows = Array.from(container.querySelectorAll('.sandbox-row'));
+        const memoryRow = rows.find((r) => r.querySelector('.sandbox-label')?.textContent?.includes('Memory Limit'));
 
         expect(container.querySelector('.locked-view')).not.toBeNull();
-        expect(memoryRow?.querySelector('.setting-value')?.textContent?.trim()).toBe('No limit');
+        expect(memoryRow?.querySelector('.sandbox-value')?.textContent?.trim()).toBe('No limit');
     });
 
     it('shows the enforced limit in MB in the locked view', () => {
         const { container } = renderModal(projectWith({ sandbox_memory_limit: 2048 }), 1);
-        const rows = Array.from(container.querySelectorAll('.setting-row'));
-        const memoryRow = rows.find((r) => r.querySelector('.setting-label')?.textContent?.includes('Memory Limit'));
+        const rows = Array.from(container.querySelectorAll('.sandbox-row'));
+        const memoryRow = rows.find((r) => r.querySelector('.sandbox-label')?.textContent?.includes('Memory Limit'));
 
         expect(container.querySelector('.locked-view')).not.toBeNull();
-        expect(memoryRow?.querySelector('.setting-value')?.textContent?.trim()).toBe('2048 MB');
+        expect(memoryRow?.querySelector('.sandbox-value')?.textContent?.trim()).toBe('2048 MB');
     });
 });

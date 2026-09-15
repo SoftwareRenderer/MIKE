@@ -1,0 +1,9 @@
+{
+  "include": ["files", "exports", "types", "duplicates", "dependencies", "unlisted"],
+  "exclude": ["nsExports", "nsTypes", "enumMembers"],
+  "entry": ["src/main.ts", "vite.config.ts"],
+  "project": ["src/**/*.{ts,svelte}"],
+  "ignore": ["src/**/*.unit.ts", "src/**/*.unit.svelte.ts", "src/**/__tests__/**", "tests/**", "scripts/**"],
+  "ignoreDependencies": ["@tsconfig/svelte", "@types/node", "vite-plugin-pwa"],
+  "tags": ["-knipignore"]
+}

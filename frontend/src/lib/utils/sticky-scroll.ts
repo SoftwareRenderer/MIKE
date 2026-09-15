@@ -21,7 +21,7 @@ export interface SectionHeader {
 const HEADER_DETACH_MARGIN = 3;
 
 /** Maximum number of sticky bars stacked at once (outermost → innermost). */
-export const MAX_STICKY_DEPTH = 4;
+const MAX_STICKY_DEPTH = 4;
 
 /**
  * Turn declaration scopes (LSP document symbols) into a sorted,
@@ -173,11 +173,7 @@ export function findLineElement(start: Node | null): Element | null {
     return null;
 }
 
-/**
- * Get highlighted HTML for a declaration line.
- * Clones from the editor's DOM if available; otherwise falls back to plain text.
- */
-export function getHeaderLineHtml(view: EditorView, header: SectionHeader): string {
+function getHeaderLineHtml(view: EditorView, header: SectionHeader): string {
     const line = view.state.doc.line(header.line);
     const plain = line.text.trim();
     const indent = line.text.match(/^(\s*)/)?.[1] ?? '';

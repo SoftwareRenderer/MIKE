@@ -1,6 +1,5 @@
 <script lang="ts">
     import type { Config, Provider } from '$lib/types';
-    import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import BaseModal from './BaseModal.svelte';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import { resolveWorker, getModelName } from '$lib/utils/providers';
@@ -24,12 +23,6 @@
     let selectedUrl = $state('');
     let selectedReasoningEffort = $state('');
     let hasProviders = $derived(providers.length > 0);
-    let isAgentSelected = $derived(() => {
-        if (!selectedUrl) return false;
-        if (selectedUrl.startsWith(AGENT_URL_PREFIX)) return true;
-        const p = providers.find(p => p.url === selectedUrl);
-        return p ? isAgentProvider(p) : false;
-    });
     let modalTitle = $derived(t('chat.changeModel.title', { count: taskCount }));
 
     // Pre-select the configured Worker provider/model
@@ -46,7 +39,7 @@
         }
     });
 
-    function handleModelSelect(providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
+    function handleModelSelect(_providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
         selectedModel = modelName;
         selectedUrl = providerUrl;
         selectedReasoningEffort = reasoningEffort || '';

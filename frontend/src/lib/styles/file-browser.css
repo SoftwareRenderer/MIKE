@@ -1,0 +1,277 @@
+/* The file listings' shared styles — the markup FileBrowserView.svelte renders.
+ *
+ * :global() for the reason file-drop.css states: a parent's scoped rule does not reach markup a
+ * child renders, so a component that owns the Upload button, the rows and the error row would
+ * arrive unstyled if each host kept its own <style>. One copy here replaces the two the browsers
+ * carried, rule for rule.
+ *
+ * Every rule below the root is prefixed with .file-browser because this file is global and
+ * PathPicker.svelte and FileBrowser.svelte use several of these names (.file-name, .file-icon,
+ * .file-entry) for their own listings, which this file has nothing to say about. The prefix also
+ * keeps a media override and its base rule at equal specificity inside one file, which is what
+ * file-drop.css needs and cannot have. */
+
+:global(.file-browser) {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* ── Header: the label and the four action buttons, or the name being typed ── */
+
+:global(.file-browser .file-browser-header) {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+}
+
+:global(.file-browser .file-browser-label) {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+:global(.file-browser .file-actions) {
+    margin-left: auto;
+    display: flex;
+    gap: 2px;
+}
+
+/* The Find, Upload, New file and New folder buttons. The Upload button lives with the
+   `<input type=file>` it opens, which is why both are in the shared component and why this rule
+   could not stay scoped in a host. */
+:global(.file-browser .new-file-btn) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+}
+:global(.file-browser .new-file-btn:hover) {
+    background: var(--color-surface-3);
+    color: var(--color-text-primary);
+}
+
+:global(.file-browser .new-file-input-row) {
+    margin-left: auto;
+}
+
+:global(.file-browser .new-file-input) {
+    width: 120px;
+    padding: 2px 6px;
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    color: var(--color-text-primary);
+    outline: none;
+}
+:global(.file-browser .new-file-input:focus) {
+    border-color: var(--color-accent);
+}
+
+/* ── The one error surface: a failed listing, a failed file, a failed folder ── */
+
+:global(.file-browser .file-browser-error) {
+    padding: 8px 10px;
+    color: var(--color-status-red);
+    font-size: 0.75rem;
+}
+
+:global(.file-browser .file-browser-loading) {
+    padding: 8px 10px;
+    color: var(--color-text-secondary);
+    font-size: 0.75rem;
+}
+
+:global(.file-browser .file-browser-empty) {
+    padding: 8px 10px;
+    color: var(--color-text-tertiary);
+    font-size: 0.75rem;
+}
+
+/* ── Where the listing is: a path you type, or the breadcrumb above the list ── */
+
+:global(.file-browser .file-browser-path) {
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+}
+
+:global(.file-browser .file-browser-path-input) {
+    width: 100%;
+    padding: 2px 4px;
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    color: var(--color-text-secondary);
+    outline: none;
+}
+:global(.file-browser .file-browser-path-input:focus) {
+    border-color: var(--color-accent);
+    color: var(--color-text-primary);
+}
+
+:global(.file-browser .breadcrumb) {
+    display: flex;
+    align-items: center;
+    padding: 4px 12px;
+    font-size: 0.75rem;
+    color: var(--color-text-tertiary);
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+    overflow-x: auto;
+    white-space: nowrap;
+}
+
+:global(.file-browser .breadcrumb-item) {
+    background: none;
+    border: none;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+    font-size: inherit;
+    font-family: inherit;
+}
+:global(.file-browser .breadcrumb-item:hover) {
+    background: var(--color-surface-3);
+    color: var(--color-text-primary);
+}
+:global(.file-browser .breadcrumb-item.active) {
+    color: var(--color-text-primary);
+    cursor: default;
+}
+:global(.file-browser .breadcrumb-item.active:hover) {
+    background: none;
+}
+
+:global(.file-browser .breadcrumb-sep) {
+    padding: 0 2px;
+    color: var(--color-text-tertiary);
+}
+
+/* ── The listing and its rows ── */
+
+:global(.file-browser .file-browser-list) {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 2px 0;
+}
+
+:global(.file-browser .file-browser-item) {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 3px 8px 3px 10px;
+    border: none;
+    background: transparent;
+    color: var(--color-text-primary);
+    font-size: 0.75rem;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 0;
+}
+/* opacity:1 because app.css fades every button on hover, and a tree row that fades when you point
+   at it reads as disabled. */
+:global(.file-browser .file-browser-item:hover) {
+    background: var(--color-surface-2);
+    opacity: 1;
+}
+:global(.file-browser .file-browser-item.dir) {
+    font-weight: 500;
+}
+
+:global(.file-browser .file-icon) {
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+:global(.file-browser .file-icon.folder-icon) {
+    opacity: 1;
+}
+
+:global(.file-browser .file-name) {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+:global(.file-browser .unsaved-dot) {
+    flex-shrink: 0;
+    color: var(--color-status-yellow, #f0c000);
+    display: inline-flex;
+    align-items: center;
+    margin-left: 2px;
+}
+
+/* The one-letter git status of a path, colored by `gitStatusClass`. */
+:global(.file-browser .git-status-badge) {
+    flex-shrink: 0;
+    font-size: 0.6875rem;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    line-height: 1;
+    margin-left: 2px;
+}
+:global(.file-browser .git-status-modified) { color: var(--color-status-green, #3fb950); }
+:global(.file-browser .git-status-added) { color: var(--color-status-green, #3fb950); }
+:global(.file-browser .git-status-deleted) { color: var(--color-status-red, #f85149); }
+:global(.file-browser .git-status-untracked) { color: var(--color-text-tertiary, #8b949e); }
+:global(.file-browser .git-status-renamed) { color: var(--color-status-purple, #a371f7); }
+:global(.file-browser .git-status-unmerged) { color: var(--color-status-orange, #d29922); }
+:global(.file-browser .git-status-copied) { color: var(--color-status-blue, #58a6ff); }
+
+/* Tap targets. The drop overlay in file-drop.css takes the same widening there, and for the same
+   reason: these are rows and buttons a thumb has to hit. */
+@media (max-width: 768px) {
+    :global(.file-browser .file-browser-header) {
+        padding: 10px 12px;
+    }
+    :global(.file-browser .file-browser-label) {
+        font-size: 0.8125rem;
+    }
+    :global(.file-browser .new-file-btn) {
+        width: 32px;
+        height: 32px;
+    }
+    :global(.file-browser .file-browser-path) {
+        padding: 8px 10px;
+    }
+    :global(.file-browser .file-browser-path-input) {
+        padding: 4px 8px;
+        font-size: 0.8125rem;
+    }
+    :global(.file-browser .breadcrumb) {
+        font-size: 0.8125rem;
+    }
+    :global(.file-browser .file-browser-item) {
+        padding: 8px 12px;
+        font-size: 0.9375rem;
+        gap: 10px;
+    }
+    :global(.file-browser .file-browser-error),
+    :global(.file-browser .file-browser-loading),
+    :global(.file-browser .file-browser-empty) {
+        padding: 12px;
+        font-size: 0.875rem;
+    }
+}

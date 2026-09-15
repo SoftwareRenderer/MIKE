@@ -9,6 +9,7 @@
     import { shouldAutoFullscreenDiffEditor } from '$lib/utils/diff-editor-layout';
     import { chatBlurState, chatCollapseState, chatFocusState, chatManualToggleState, chatSendState, type ChatAutoMaximizeRules, type ChatMaximizeState } from '$lib/utils/chat-auto-maximize';
     import { filterTopLevelTaskIds, willConsolidateIntoParent, taskIsInFlight } from '$lib/utils/task-utils';
+    import { createStatusLabel } from '$lib/utils/subtask-status';
     import { clearHighlightCache } from '$lib/highlighter';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { createTabReturn } from '$lib/composables/use-tab-return';
@@ -132,9 +133,7 @@
     }
 
     /** The column's label in the active language. */
-    function statusLabel(status: string): string {
-        return t(overviewSections.find(s => s.id === status)?.labelKey ?? 'board.column.done');
-    }
+    const statusLabel = createStatusLabel(overviewSections);
 
     // Diff state — managed by DiffCache service (reactive via $state())
     let diffCache = new DiffCache({
@@ -216,7 +215,6 @@
         task: task.id,
         working: { old: checkpointDiffBaseRef || 'HEAD', new: checkpointDiffHash || 'HEAD' },
     });
-    // Chat fullscreen
     let chatMaximize = $state<ChatMaximizeState>({ fullscreen: false, autoMaximized: false });
 
     function toggleEditorFullscreen() {
@@ -293,7 +291,7 @@
         await diffCache.unstageAll();
     }
 
-    function closeDiffEditor(saved: boolean) {
+    function closeDiffEditor(_saved: boolean) {
         editorFullscreen = false;
         editingFile = null;
     }
@@ -577,7 +575,7 @@
     // Diff takes full remaining space (checkpoint overlays on top)
     let diffWidth = $derived(`${((1 - chatRatio) * (1 - boardRatio) * 100).toFixed(1)}%`);
 
-    function handleBoardDragStart(ev: MouseEvent | TouchEvent, startX: number) {
+    function handleBoardDragStart(_ev: MouseEvent | TouchEvent, startX: number) {
         boardDragStartX = startX;
         boardDragStartRatio = boardRatio;
     }
@@ -590,7 +588,7 @@
         saveAppSetting('kanban:detail:boardRatio', boardRatio).catch(() => {});
     }
 
-    function handleChatDragStart(ev: MouseEvent | TouchEvent, startX: number) {
+    function handleChatDragStart(_ev: MouseEvent | TouchEvent, startX: number) {
         chatDragStartX = startX;
         chatDragStartRatio = chatRatio;
     }

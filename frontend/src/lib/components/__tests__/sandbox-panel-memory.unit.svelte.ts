@@ -52,9 +52,9 @@ function renderPanel(stats: SandboxMemoryStats | null, taskOverrides: Partial<Ta
 // The panel fetches the project for its read-only settings list.
 async function memoryRowValue(container: HTMLElement): Promise<string> {
     return vi.waitFor(async () => {
-        const row = Array.from(container.querySelectorAll('.setting-row'))
-            .find((r) => r.querySelector('.setting-label')?.textContent?.includes('Memory Limit'));
-        const value = row?.querySelector('.setting-value')?.textContent?.trim();
+        const row = Array.from(container.querySelectorAll('.sandbox-row'))
+            .find((r) => r.querySelector('.sandbox-label')?.textContent?.includes('Memory Limit'));
+        const value = row?.querySelector('.sandbox-value')?.textContent?.trim();
         if (!value) throw new Error('memory limit row not found');
         return value;
     });

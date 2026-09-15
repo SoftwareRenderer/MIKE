@@ -13,3 +13,11 @@ export const MODE_DESCRIPTIONS: Record<string, string> = {
     get plan() { return t('app.mode.plan'); },
     get explore() { return t('app.mode.explore'); },
 };
+
+/**
+ * The toggle's tooltip — the mode value is data, this is copy. A function, not a getter record like
+ * the descriptions above, because a mode the app does not know answers the explore tip.
+ */
+export function modeTip(mode: string): string {
+    return mode === 'act' ? t('chat.mode.actTip') : mode === 'plan' ? t('chat.mode.planTip') : t('chat.mode.exploreTip');
+}

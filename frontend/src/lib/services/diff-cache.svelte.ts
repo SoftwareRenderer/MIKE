@@ -1,5 +1,5 @@
 import type { ApiDiffRow, DiffFile, DiffRow } from '$lib/types/diff';
-import { toDiffFiles, type ParsedDiffFile } from '$lib/api/git';
+import { toDiffFiles, type ParsedDiffFile } from '$lib/api';
 import { isAborted } from '$lib/api/helpers';
 
 /** Metadata for untracked files. */
@@ -56,7 +56,7 @@ export interface DiffApiResponse {
 }
 
 /** Response from getDiffFile API. */
-export interface DiffFileApiResponse {
+interface DiffFileApiResponse {
     rows?: ApiDiffRow[];
     committedRows?: ApiDiffRow[];
     lines?: string[];

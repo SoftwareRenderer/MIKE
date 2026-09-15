@@ -166,7 +166,7 @@ test.describe.serial('Sandbox Mounts', () => {
     await expect(page.locator('.mount-item')).toHaveCount(1);
     await expect(page.locator('.mount-path')).toContainText('/tmp/data');
     await expect(page.locator('.mount-container')).toContainText('/mnt/data');
-    await expect(page.locator('.mount-mode')).toContainText('rw');
+    await expect(page.locator('.sandbox-mode')).toContainText('rw');
 
     await page.locator('.btn-remove-mount').first().click();
     await expect(page.locator('.mount-item')).toHaveCount(0);
@@ -252,7 +252,7 @@ test.describe.serial('Sandbox Mounts', () => {
 
     // Verify mount has ro mode
     await expect(page.locator('.mount-item')).toHaveCount(1);
-    await expect(page.locator('.mount-mode.mode-ro')).toContainText('ro');
+    await expect(page.locator('.sandbox-mode-ro')).toContainText('ro');
 
     // Close modal
     await page.click('.overlay', { position: { x: 10, y: 10 } });

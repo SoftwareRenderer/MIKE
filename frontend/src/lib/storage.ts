@@ -474,39 +474,30 @@ export async function saveCollapsedDiffFiles(ids: Set<string>): Promise<void> {
  * @param projectId  Optional current project ID; if provided, also cleans stale message/diff caches for that project
  */
 export async function gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>, allProjectIds?: Set<string>, projectId?: string): Promise<void> {
-    // 1. Clean collapsed tasks
     await cleanCollapsedTasks(allTaskIds);
 
-    // 2. Clean draft texts
     await cleanDraftTexts(allTaskIds);
 
-    // 3. Clean offline queue
     await cleanQueue(allTaskIds);
 
-    // 4. Clean draft attachments
     await cleanDraftAttachments(allTaskIds);
 
-    // 5. Clean editor drafts (if project paths provided)
     if (allProjectPaths) {
         await cleanEditorDraftsByProject(allProjectPaths);
     }
 
-    // 6. Clean editor history (if project paths provided)
     if (allProjectPaths) {
         await cleanEditorHistoryByProject(allProjectPaths);
     }
 
-    // 7. Clean board cache (if project IDs provided)
     if (allProjectIds) {
         await cleanBoardCacheByProject(allProjectIds);
     }
 
-    // 8. Clean editor tabs (if project IDs provided)
     if (allProjectIds) {
         await cleanEditorTabsByProject(allProjectIds);
     }
 
-    // 9. Clean message/diff caches for the current project (if project ID provided)
     if (projectId) {
         await cleanTaskContentCache(allTaskIds, projectId);
     }
@@ -677,12 +668,12 @@ export async function setBoardCache(key: string, value: unknown): Promise<void> 
 
 /** Load a value from the board cache. Returns `null` if not found. */
 export async function getBoardCache<T>(key: string): Promise<T | null> {
-    const entry = await getBoardCacheEntry<T>(key);
+    const entry = await getBoardCacheEntry(key);
     return entry ? (entry.data as T) : null;
 }
 
 /** The cached value and the moment it was written, which `getBoardCache` throws away. */
-export async function getBoardCacheEntry<T>(key: string): Promise<BoardCacheEntry | null> {
+export async function getBoardCacheEntry(key: string): Promise<BoardCacheEntry | null> {
     return (await dbGet<BoardCacheEntry>(STORE_BOARD_CACHE, key)) ?? null;
 }
 
@@ -694,7 +685,7 @@ export async function removeBoardCache(key: string): Promise<void> {
 // ─── Editor tabs (IndexedDB: editor-tabs store) ──────────────────────────────
 // Persists open file tabs, active file, and pinned files per project.
 
-export interface EditorTabFile {
+interface EditorTabFile {
     path: string;
     targetLine: number;
 }

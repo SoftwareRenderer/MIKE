@@ -21,9 +21,9 @@ export type Catalog = Record<string, MessageValue>;
  * static tree, but a pack that ships a 200 MB catalog or one giant value is
  * broken, and rendering that into every string lookup is not a thing to attempt.
  */
-export const MAX_CATALOG_BYTES = 1_000_000;
+const MAX_CATALOG_BYTES = 1_000_000;
 export const MAX_CATALOG_KEYS = 20_000;
-export const MAX_KEY_LEN = 200;
+const MAX_KEY_LEN = 200;
 export const MAX_VALUE_LEN = 4000;
 
 export type CatalogParse =

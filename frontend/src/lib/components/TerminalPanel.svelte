@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount, onDestroy } from 'svelte';
+    import { onMount } from 'svelte';
     import { Terminal } from '@xterm/xterm';
     import { FitAddon } from '@xterm/addon-fit';
     import { WebglAddon } from '@xterm/addon-webgl';
@@ -80,7 +80,6 @@
         sendKeyData((alt ? '\x1b' : '') + seq);
     }
 
-    /** Toggle a modifier key (ctrl/alt). */
     function toggleModifier(mod: 'ctrl' | 'alt') {
         if (mod === 'ctrl') modCtrl = !modCtrl;
         else modAlt = !modAlt;
@@ -337,9 +336,6 @@
         let draggingHandle: 'start' | 'end' | null = null;
         let docTouchMoveHandler: ((e: TouchEvent) => void) | null = null;
         let docTouchEndHandler: (() => void) | null = null;
-        let dragRefY = 0;
-        let dragRefRow = 0;
-        let dragRefCol = 0;
         let overlayEl: HTMLElement | null = null;
         let startHandleEl: HTMLElement | null = null;
         let endHandleEl: HTMLElement | null = null;

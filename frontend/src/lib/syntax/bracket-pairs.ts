@@ -38,7 +38,7 @@ export interface BracketLevel {
 }
 
 /** A range that is not code — a comment or a string. */
-export interface OpaqueRange {
+interface OpaqueRange {
   from: number;
   to: number;
 }
@@ -48,7 +48,7 @@ export interface OpaqueRange {
  * code": an editor reads through its `Text`, the diff view through a parsed string, and both must get
  * the same level for the same bracket.
  */
-export function scanBracketLevels(
+function scanBracketLevels(
   pairs: DelimiterPair[],
   from: number,
   to: number,

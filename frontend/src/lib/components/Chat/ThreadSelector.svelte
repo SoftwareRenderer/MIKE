@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { Thread } from '$lib/types';
     import { t } from '$lib/i18n';
+    import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
 
     interface Props {
         threads: Thread[];
@@ -25,21 +26,7 @@
         showMenu = !showMenu;
     }
 
-    // Close menu on outside click
-    function handleClickOutside(e: MouseEvent) {
-        if (menuRef && !menuRef.contains(e.target as Node)) {
-            showMenu = false;
-        }
-    }
-
-    $effect(() => {
-        if (showMenu) {
-            document.addEventListener('click', handleClickOutside);
-        } else {
-            document.removeEventListener('click', handleClickOutside);
-        }
-        return () => document.removeEventListener('click', handleClickOutside);
-    });
+    useClickOutside(() => menuRef, () => { showMenu = false; }, { event: 'click' });
 
     let activeThreadName = $derived(threads.find(t2 => t2.id === activeThreadId)?.name || t('chat.thread.main'));
 </script>

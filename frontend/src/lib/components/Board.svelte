@@ -9,6 +9,7 @@
     import { getExpandedTasksContext } from '$lib/context';
     import { gc } from '$lib/storage';
     import { mergeQueuedUpdate, filterTopLevelTaskIds, ancestorInProgress, willConsolidateIntoParent } from '$lib/utils/task-utils';
+    import { createStatusLabel } from '$lib/utils/subtask-status';
     import { useMultiSelectActions } from '$lib/composables/use-multi-select-actions.svelte';
     import { useSubtaskHierarchy } from '$lib/composables/use-subtask-hierarchy.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
@@ -153,12 +154,7 @@
     ];
 
     /** Visible label for a status id (ids themselves are data — see {@link columns}). */
-    function statusLabel(status: string): string {
-        const labelKey = columns.find(c => c.id === status)?.labelKey;
-        // An id this board does not know is echoed as-is rather than guessed at:
-        // calling an unknown status "Backlog" would be a lie in every locale.
-        return labelKey ? t(labelKey) : status;
-    }
+    const statusLabel = createStatusLabel(columns);
 
     /** Card direction from Settings → Preferences: true = least recently moved on top. */
     const sortOldestFirst = $derived(appStore.config?.sort_oldest_first === true);
@@ -312,7 +308,6 @@
             title={col.title}
             label={t(col.labelKey)}
             color={col.color}
-            columnColor={col.color}
             tasks={getTasksForColumn(col.id)}
             childrenMap={hierarchy.childrenMap}
             expandedTasks={hierarchy.expandedTasks}

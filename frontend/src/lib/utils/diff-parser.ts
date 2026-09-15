@@ -100,7 +100,7 @@ export function enrichRowsWithInlineSegments(rows: ApiDiffRow[]): DiffRow[] {
  * Group consecutive context lines into collapsible blocks.
  * Returns an array of display items: either a single row or a collapsible block.
  */
-export interface CollapsedBlock {
+interface CollapsedBlock {
     id: string;
     count: number;
     rows: DiffRow[];

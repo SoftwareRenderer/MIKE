@@ -6,11 +6,10 @@
     import { getModelName, getProviderDisplayName } from '$lib/utils/providers';
     import { t } from '$lib/i18n';
     import { formatMB, usdSymbol } from '$lib/utils/format';
-    import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
-    import { appStore, uiStore, dialogStore } from '$lib/stores';
+    import { updateConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
+    import { appStore, dialogStore } from '$lib/stores';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import BaseModal from './BaseModal.svelte';
-    import ToggleSwitch from './ToggleSwitch.svelte';
     import TaskDefaults from './ConfigModal/TaskDefaults.svelte';
     import PreferencesTab from './ConfigModal/PreferencesTab.svelte';
     import ProviderCard from './ConfigModal/ProviderCard.svelte';
@@ -239,10 +238,6 @@
         reconcileAgentRows(config);
     });
 
-    function toggleProvider(idx: number) {
-        providers[idx].expanded = !providers[idx].expanded;
-    }
-
     async function testProviderConnection(idx: number) {
         const p = providers[idx];
         p.testingConnection = true;
@@ -348,14 +343,12 @@
         dragIndex = idx;
         dragDropIndex = -1;
 
-        // Create drag preview element
         dragPreview = document.createElement('div');
         dragPreview.className = 'drag-preview';
         dragPreview.style.left = `${e.clientX - 12}px`;
         dragPreview.style.top = `${e.clientY - 12}px`;
         document.body.appendChild(dragPreview);
 
-        const startY = e.clientY;
         const startIdx = idx;
 
         function onPointerMove(ev: PointerEvent) {

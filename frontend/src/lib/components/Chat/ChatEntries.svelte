@@ -3,7 +3,7 @@
     import { advisoryLabel, type EntryMeta } from '$lib/utils/chat-entries';
     import { computeStickyHeader, STICKY_LINE_FALLBACK, type StickyUserMessage } from '$lib/utils/chat-sticky-header';
     import { scrollToLine } from '$lib/utils/settle-scroll';
-    import { distanceFromBottom, type ChatFollow } from '$lib/composables/use-chat-follow.svelte';
+    import { isAtBottom, type ChatFollow } from '$lib/composables/use-chat-follow.svelte';
     import ChatMessage from './ChatMessage.svelte';
     import CheckpointDivider from './CheckpointDivider.svelte';
     import QueueIndicator from './QueueIndicator.svelte';
@@ -15,7 +15,6 @@
         entries,
         entryMetas,
         lastEntryIdx,
-        activeThreadId,
         threads,
         awaitingResponse,
         lockWait = null,
@@ -46,7 +45,6 @@
         entries: ChatEntry[];
         entryMetas: EntryMeta[];
         lastEntryIdx: number;
-        activeThreadId: string;
         threads: Thread[];
         awaitingResponse: boolean;
         lockWait?: LockWait | null;
@@ -106,7 +104,7 @@
     function onBuildLogScroll(entryId: string) {
         const el = buildLogEls[entryId];
         if (!el) return;
-        buildLogAtBottom = { ...buildLogAtBottom, [entryId]: distanceFromBottom(el) < BUILD_LOG_BOTTOM_PX };
+        buildLogAtBottom = { ...buildLogAtBottom, [entryId]: isAtBottom(el, { threshold: BUILD_LOG_BOTTOM_PX }) };
     }
 
     // Auto-scroll build boxes to the bottom as new lines arrive, but only when
@@ -268,7 +266,6 @@
                         <div>
                             <CheckpointDivider
                                 timestamp={entry.createdAt}
-                                threadId={entry.threadId || activeThreadId}
                                 threads={threads}
                                 activeThreadId={meta.cpThread?.id || ''}
                                 onSwitch={onThreadSwitch}

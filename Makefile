@@ -83,6 +83,10 @@ test-go-race: ## Run Go unit tests under the race detector (~4min)
 .PHONY: test-frontend
 test-frontend: ## Run frontend unit tests + the gates (vitest, ~10s)
 	cd frontend && npm test && npm run check:i18n && npm run check:i18n-surface-test && npm run check:i18n-surface && npm run check:sinks-test && npm run check:sinks
+	@echo "==> knip (unused files, exports, types, duplicates, dependencies)"
+	cd frontend && npm run check:dead
+	@echo "==> unused declarations (noUnusedLocals + noUnusedParameters)"
+	cd frontend && npm run check:unused
 
 .PHONY: test-sinks
 test-sinks: ## Fail if an HTML sink in core is unlisted, renders a translation, or lost the mechanism it declares (~1s)
@@ -106,8 +110,9 @@ i18n-parity: ## Check a locale pack against the English contract (make i18n-pari
 
 # Structural debt, measured rather than argued about: HTTP decisions outside the transport packages,
 # environment reads below startup, hand-written keyed lock tables, routes registered without a
-# method, a state write on a cancellable GET, the app-stream event vocabulary, and the shape of the
-# executor's split: who may build it, what a collaborator may hold, how long a function may get.
+# method, a route no caller reaches, a state write on a cancellable GET, the app-stream event
+# vocabulary, and the shape of the executor's split: who may build it, what a collaborator may hold,
+# how long a function may get.
 # Every rule runs against a frozen baseline, so the count only shrinks and a fixed violation must be
 # shrunk out of the register. scripts/archgate holds the reasons; docs/architecture-review.md holds the
 # numbers that justified them, and the commands that re-measure them.

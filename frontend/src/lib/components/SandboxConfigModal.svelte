@@ -13,6 +13,7 @@
     import BaseModal from './BaseModal.svelte';
 import ToggleSwitch from './ToggleSwitch.svelte';
     import PathPicker from './PathPicker.svelte';
+    import SandboxSettingLists from './SandboxSettingLists.svelte';
     import { t } from '$lib/i18n';
     import type { MessageKey } from '$lib/i18n';
 
@@ -52,8 +53,6 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     let editingMountIndex = $state<number | null>(null);
 
     $effect(() => { sandboxEnabled = project.sandbox_enabled ?? false; });
-
-    $effect(() => { sandboxEnabled = project.sandbox_enabled ?? false; });
     $effect(() => { networkIsolation = project.sandbox_network_isolation ?? false; });
     $effect(() => { sandboxMemoryLimit = memoryLimitToInput(project.sandbox_memory_limit ?? DEFAULT_MEMORY_LIMIT_MB); });
     $effect(() => { sandboxImage = project.sandbox_image ?? ''; });
@@ -86,7 +85,6 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     let capInputValue = $state('');
     let capDropdownOpen = $state(false);
     let capSelectedIndex = $state(-1);
-    let capInputEl = $state<HTMLInputElement | null>(null);
     $effect(() => { sandboxCapabilities = project.sandbox_capabilities ?? []; });
     $effect(() => { capsExpanded = !!project.sandbox_capabilities && project.sandbox_capabilities.length > 0; });
     // Known capabilities for autocomplete suggestions
@@ -654,54 +652,54 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 <p>{t('sandbox.lockedNotice')}</p>
             </div>
 
-            <div class="settings-list">
+            <div class="sandbox-settings">
                 <!-- Sandbox enabled -->
-                <div class="setting-row">
+                <div class="sandbox-row">
                     <div class="setting-label-group">
-                        <span class="setting-label">{t('sandbox.isolation')}</span>
+                        <span class="sandbox-label">{t('sandbox.isolation')}</span>
                     </div>
-                    <span class="setting-value">{sandboxEnabled ? t('sandbox.enabled') : t('sandbox.disabled')}</span>
+                    <span class="sandbox-value">{sandboxEnabled ? t('sandbox.enabled') : t('sandbox.disabled')}</span>
                 </div>
 
                 {#if sandboxEnabled}
                 <!-- Network isolation -->
-                <div class="setting-row">
-                    <span class="setting-label">{t('sandbox.networkIsolation')}</span>
-                    <span class="setting-value">{networkIsolation ? t('sandbox.enabled') : t('sandbox.disabled')}</span>
+                <div class="sandbox-row">
+                    <span class="sandbox-label">{t('sandbox.networkIsolation')}</span>
+                    <span class="sandbox-value">{networkIsolation ? t('sandbox.enabled') : t('sandbox.disabled')}</span>
                 </div>
 
                 <!-- Memory limit -->
-                <div class="setting-row">
-                    <span class="setting-label">{t('sandbox.memoryLimit')}</span>
-                    <span class="setting-value">{formatMemoryLimitMB(sandboxMemoryLimit)}</span>
+                <div class="sandbox-row">
+                    <span class="sandbox-label">{t('sandbox.memoryLimit')}</span>
+                    <span class="sandbox-value">{formatMemoryLimitMB(sandboxMemoryLimit)}</span>
                 </div>
 
                 <!-- Image -->
-                <div class="setting-row">
-                    <span class="setting-label">{t('sandbox.image')}</span>
-                    <span class="setting-value setting-value-mono">{sandboxDockerfilePath || sandboxImage || t('sandbox.default')}</span>
+                <div class="sandbox-row">
+                    <span class="sandbox-label">{t('sandbox.image')}</span>
+                    <span class="sandbox-value sandbox-value-mono">{sandboxDockerfilePath || sandboxImage || t('sandbox.default')}</span>
                 </div>
 
                 <!-- Forward ports -->
                 {#if forwardPorts.length > 0}
-                <div class="setting-row">
-                    <span class="setting-label">{t('sandbox.forwardedPorts')}</span>
-                    <span class="setting-value">{formatForwardPorts(forwardPorts)}</span>
+                <div class="sandbox-row">
+                    <span class="sandbox-label">{t('sandbox.forwardedPorts')}</span>
+                    <span class="sandbox-value">{formatForwardPorts(forwardPorts)}</span>
                 </div>
 
                 <!-- Active port mappings -->
                 {#if hasActivePorts}
-                <div class="active-ports-section">
-                    <span class="section-label">{t('sandbox.activePortMappings')}</span>
-                    <div class="active-ports-list">
+                <div class="sandbox-section sandbox-section-bounded">
+                    <span class="sandbox-section-label">{t('sandbox.activePortMappings')}</span>
+                    <div class="sandbox-list">
                         {#each forwardPorts as port}
                         {#if activeHostPorts.has(port.container_port)}
-                        <div class="active-port-item">
-                            <span class="active-port-host" title={t('sandbox.hostPort')}>{formatAssignedHost(activeHostPorts.get(port.container_port) ?? 0, port.host_ip)}</span>
+                        <div class="sandbox-item">
+                            <span class="sandbox-item-key" title={t('sandbox.hostPort')}>{formatAssignedHost(activeHostPorts.get(port.container_port) ?? 0, port.host_ip)}</span>
                             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                                 <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
-                            <span class="active-port-container" title={t('sandbox.containerPort')}>{port.container_port}</span>
+                            <span class="sandbox-item-text" title={t('sandbox.containerPort')}>{port.container_port}</span>
                         </div>
                         {/if}
                         {/each}
@@ -710,54 +708,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 {/if}
                 {/if}
 
-                <!-- Custom mounts -->
-                {#if sandboxMounts.length > 0}
-                <div class="locked-mounts-section">
-                    <span class="section-label">{t('sandbox.customMounts')}</span>
-                    <div class="locked-mounts-list">
-                        {#each sandboxMounts as mount}
-                        <div class="locked-mount-item">
-                            <span class="locked-mount-host" title={mount.host_path}>{mount.host_path}</span>
-                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                                <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                            <span class="locked-mount-container" title={mount.container_path}>{mount.container_path}</span>
-                            <span class="locked-mount-mode" class:mode-rw={mount.mode === 'rw'} class:mode-ro={mount.mode === 'ro'} title={mount.mode === 'rw' ? t('sandbox.readWrite') : t('sandbox.readOnly')}>{mount.mode}</span>
-                        </div>
-                        {/each}
-                    </div>
-                </div>
-                {/if}
-
-                <!-- Environment variables -->
-                {#if sandboxEnvs.length > 0}
-                <div class="locked-envs-section">
-                    <span class="section-label">{t('sandbox.environmentVariables')}</span>
-                    <div class="locked-envs-list">
-                        {#each sandboxEnvs as env}
-                        <div class="locked-env-item">
-                            <span class="locked-env-key" title={env.key}>{env.key}</span>
-                            <span class="locked-env-equals">=</span>
-                            <span class="locked-env-value" title={env.value}>{env.value || t('sandbox.empty')}</span>
-                        </div>
-                        {/each}
-                    </div>
-                </div>
-                {/if}
-
-                <!-- Capabilities -->
-                {#if sandboxCapabilities.length > 0}
-                <div class="locked-caps-section">
-                    <span class="section-label">{t('sandbox.capabilities')}</span>
-                    <div class="locked-caps-list">
-                        {#each sandboxCapabilities as cap}
-                        <div class="locked-cap-item">
-                            <span class="locked-cap-value" title={cap}>{cap}</span>
-                        </div>
-                        {/each}
-                    </div>
-                </div>
-                {/if}
+                <SandboxSettingLists mounts={sandboxMounts} envs={sandboxEnvs} capabilities={sandboxCapabilities} bounded />
                 {/if}
             </div>
         </div>
@@ -850,9 +801,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         <span class="port-container" title={t('sandbox.containerPort')}>{formatForwardPort(port)}</span>
                     </span>
                     <button type="button" class="btn-remove-port" onclick={(e) => { e.stopPropagation(); removePortForward(i); }} disabled={isLocked} title={t('sandbox.remove')}>
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                            <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                        </svg>
+                        {@render closeIcon()}
                     </button>
                 </div>
                 {/each}
@@ -861,30 +810,18 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
             <!-- No active host ports notice -->
             {#if forwardPorts.length > 0 && !hasActivePorts}
-            <div class="port-no-active">{t('sandbox.portsNoActive')}</div>
+            <div class="sandbox-note port-no-active">{t('sandbox.portsNoActive')}</div>
             {/if}
 
             <!-- Add new port forward -->
             <div class="port-add-row">
                 {#if editingPortIndex !== null}
-                    <button type="button" class="btn-cancel-edit" onclick={cancelPortEdit} title={t('sandbox.cancelEdit')}>
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                            <path d="M2 2L10 10M10 2L2 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                        </svg>
-                    </button>
+                    {@render cancelEdit(cancelPortEdit)}
                 {/if}
                 <input type="text" class="port-input port-input-bind" bind:value={newHostIP} placeholder={t('sandbox.hostInterface')} spellcheck="false" autocomplete="off" disabled={isLocked} aria-label={t('sandbox.hostInterfaceAria')} />
                 <input type="number" class="port-input" bind:value={newContainerPort} placeholder={t('sandbox.containerPort')} min="1" max="65535" disabled={isLocked} aria-label={t('sandbox.containerPort')} />
                 <button type="button" class="btn-add-port" class:pending={hasPendingPort} onclick={addPortForward} disabled={isLocked} title={editingPortIndex !== null ? t('sandbox.savePort') : t('sandbox.addPort')}>
-                    {#if editingPortIndex !== null}
-                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                            <path d="M3 8L6 11L11 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                    {:else}
-                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                            <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                        </svg>
-                    {/if}
+                    {@render addIcon(editingPortIndex !== null)}
                 </button>
             </div>
 
@@ -935,11 +872,9 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         <span class="mount-container" title={mount.container_path}>{mount.container_path}</span>
                     </div>
                     <div class="mount-actions">
-                        <span class="mount-mode" class:mode-rw={mount.mode === 'rw'} class:mode-ro={mount.mode === 'ro'} title={mount.mode === 'rw' ? t('sandbox.mountReadWrite') : t('sandbox.mountReadOnly')}>{mount.mode}</span>
+                        <span class="sandbox-mode" class:sandbox-mode-rw={mount.mode === 'rw'} class:sandbox-mode-ro={mount.mode === 'ro'} title={mount.mode === 'rw' ? t('sandbox.mountReadWrite') : t('sandbox.mountReadOnly')}>{mount.mode}</span>
                         <button type="button" class="btn-remove-mount" onclick={(e) => { e.stopPropagation(); removeMount(i); }} disabled={isLocked} title={t('sandbox.remove')}>
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                            <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                        </svg>
+                        {@render closeIcon()}
                     </button>
                     </div>
                 </div>
@@ -950,11 +885,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             <!-- Add new mount -->
             <div class="mount-add-row">
                 {#if editingMountIndex !== null}
-                    <button type="button" class="btn-cancel-edit" onclick={cancelMountEdit} title={t('sandbox.cancelEdit')}>
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                            <path d="M2 2L10 10M10 2L2 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                        </svg>
-                    </button>
+                    {@render cancelEdit(cancelMountEdit)}
                 {/if}
                 <input type="text" class="mount-input mount-input-host" bind:value={newMountHostPath} placeholder="/host/path" disabled={isLocked} aria-label={t('sandbox.hostPath')} />
                 <button type="button" class="btn-browse-mount" onclick={() => showDirectoryPicker = true} disabled={isLocked} title={t('sandbox.browseHostDirectory')}>
@@ -977,15 +908,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                     </label>
                 </div>
                 <button type="button" class="btn-add-mount" class:pending={hasPendingMount} onclick={addMount} disabled={isLocked} title={editingMountIndex !== null ? t('sandbox.saveMount') : t('sandbox.addMount')}>
-                    {#if editingMountIndex !== null}
-                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                            <path d="M3 8L6 11L11 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                    {:else}
-                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                            <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                        </svg>
-                    {/if}
+                    {@render addIcon(editingMountIndex !== null)}
                 </button>
             </div>
 
@@ -1026,13 +949,11 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 <div class="env-item" class:editing={editingEnvIndex === i} onclick={() => editEnv(i)} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && editEnv(i)}>
                     <div class="env-info">
                         <span class="env-key" title={env.key}>{env.key}</span>
-                        <span class="env-equals">=</span>
+                        <span class="sandbox-eq">=</span>
                         <span class="env-value" title={env.value}>{env.value || t('sandbox.empty')}</span>
                     </div>
                     <button type="button" class="btn-remove-env" onclick={(e) => { e.stopPropagation(); removeEnv(i); }} disabled={isLocked} title={t('sandbox.remove')}>
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                            <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                        </svg>
+                        {@render closeIcon()}
                     </button>
                 </div>
                 {/each}
@@ -1042,25 +963,13 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             <!-- Add new env var -->
             <div class="env-add-row">
                 {#if editingEnvIndex !== null}
-                    <button type="button" class="btn-cancel-edit" onclick={cancelEnvEdit} title={t('sandbox.cancelEdit')}>
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                            <path d="M2 2L10 10M10 2L2 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                        </svg>
-                    </button>
+                    {@render cancelEdit(cancelEnvEdit)}
                 {/if}
                 <input type="text" class="env-input env-input-key" bind:value={newEnvKey} placeholder={t('sandbox.envKeyPlaceholder')} disabled={isLocked} aria-label={t('sandbox.envNameAria')} />
-                <span class="env-equals-sign">=</span>
+                <span class="sandbox-eq">=</span>
                 <input type="text" class="env-input" bind:value={newEnvValue} placeholder={t('sandbox.envValueInputPlaceholder')} disabled={isLocked} aria-label={t('sandbox.envValueAria')} />
                 <button type="button" class="btn-add-env" class:pending={hasPendingEnv} onclick={addEnv} disabled={isLocked} title={editingEnvIndex !== null ? t('sandbox.saveVariable') : t('sandbox.addVariable')}>
-                    {#if editingEnvIndex !== null}
-                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                            <path d="M3 8L6 11L11 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                    {:else}
-                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                            <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                        </svg>
-                    {/if}
+                    {@render addIcon(editingEnvIndex !== null)}
                 </button>
             </div>
 
@@ -1124,7 +1033,6 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         onfocus={handleCapInputFocus}
                         onblur={handleCapInputBlur}
                         onclick={handleCapInputClick}
-                        bind:this={capInputEl}
                         placeholder={sandboxCapabilities.length === 0 ? t('sandbox.capSuggestionPlaceholder') : t('sandbox.capAddMorePlaceholder')}
                         disabled={isLocked}
                         autocomplete="off"
@@ -1329,6 +1237,32 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     </div>
 {/snippet}
 
+{#snippet closeIcon()}
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+        <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+{/snippet}
+
+{#snippet addIcon(editing: boolean)}
+    {#if editing}
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path d="M3 8L6 11L11 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+    {:else}
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+    {/if}
+{/snippet}
+
+{#snippet cancelEdit(oncancel: () => void)}
+    <button type="button" class="btn-cancel-edit" onclick={oncancel} title={t('sandbox.cancelEdit')}>
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M2 2L10 10M10 2L2 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+    </button>
+{/snippet}
+
 {#if showDockerfilePicker}
     <PathPicker title={t('sandbox.selectDockerfile')} initialPath={project.path} emptyLabel={t('sandbox.noDockerfilesFound')} selectTitle={t('sandbox.selectDockerfileTitle')} fileFilter={isDockerfile} onClose={handleDockerfilePickerClose} onSelect={handleDockerfileSelected} />
 {/if}
@@ -1339,6 +1273,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
 <style>
     @import '$lib/styles/shared.css';
+    @import '$lib/styles/sandbox-settings.css';
 
     :global(.close-btn) {
         width: 28px;
@@ -1374,227 +1309,10 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         line-height: 1.4;
     }
 
-    /* Read-only settings list */
-    .settings-list {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-    }
-
-    .setting-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 6px 0;
-        border-bottom: 1px solid var(--color-border);
-    }
-
-    .setting-row:last-child {
-        border-bottom: none;
-    }
-
     .setting-label-group {
         display: flex;
         align-items: center;
         gap: 8px;
-    }
-
-    .setting-label {
-        font-size: 0.8125rem;
-        color: var(--color-text-secondary);
-    }
-
-    .setting-value {
-        font-size: 0.8125rem;
-        color: var(--color-text-primary);
-        text-align: right;
-    }
-
-    .setting-value-mono {
-        font-family: var(--font-mono, monospace);
-    }
-
-    .section-label {
-        font-size: 0.75rem;
-        font-weight: 500;
-        color: var(--color-text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.3px;
-    }
-
-    /* Active port mappings in locked view */
-    .active-ports-section {
-        margin-top: 4px;
-        padding-top: 8px;
-        border-top: 1px solid var(--color-border);
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-    }
-
-    .active-ports-list {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-    }
-
-    .active-port-item {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 4px 8px;
-        background: var(--color-surface-2);
-        border-radius: var(--radius-sm);
-        font-size: 0.75rem;
-        font-family: var(--font-mono, monospace);
-    }
-
-    .active-port-host {
-        font-weight: 600;
-        color: var(--color-accent-light);
-    }
-
-    .active-port-container {
-        color: var(--color-text-primary);
-    }
-
-    /* Custom mounts in locked view */
-    .locked-mounts-section {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        margin-top: 4px;
-        padding-top: 8px;
-        border-top: 1px solid var(--color-border);
-    }
-
-    .locked-mounts-list {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-    }
-
-    .locked-mount-item {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 4px 8px;
-        background: var(--color-surface-2);
-        border-radius: var(--radius-sm);
-        font-size: 0.75rem;
-        font-family: var(--font-mono, monospace);
-    }
-
-    .locked-mount-host {
-        font-weight: 600;
-        color: var(--color-accent-light);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .locked-mount-container {
-        color: var(--color-text-primary);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .locked-mount-mode {
-        margin-left: auto;
-        flex-shrink: 0;
-        font-size: 0.6875rem;
-        padding: 1px 5px;
-        border-radius: 3px;
-        background: var(--color-surface-3);
-        color: var(--color-text-secondary);
-        font-weight: 600;
-    }
-
-    .locked-mount-mode.mode-rw {
-        background: rgba(248, 81, 73, 0.15);
-        color: var(--color-status-red);
-    }
-
-    .locked-mount-mode.mode-ro {
-        background: rgba(210, 153, 34, 0.15);
-        color: var(--color-status-yellow, #d29922);
-    }
-
-    /* Environment variables in locked view */
-    .locked-envs-section {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        margin-top: 4px;
-        padding-top: 8px;
-        border-top: 1px solid var(--color-border);
-    }
-
-    .locked-envs-list {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-    }
-
-    .locked-env-item {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        padding: 4px 8px;
-        background: var(--color-surface-2);
-        border-radius: var(--radius-sm);
-        font-size: 0.75rem;
-        font-family: var(--font-mono, monospace);
-    }
-
-    .locked-env-key {
-        font-weight: 600;
-        color: var(--color-accent-light);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .locked-env-equals {
-        color: var(--color-text-secondary);
-        flex-shrink: 0;
-    }
-
-    .locked-env-value {
-        color: var(--color-text-primary);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    /* Capabilities in locked view */
-    .locked-caps-section {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        margin-top: 4px;
-        padding-top: 8px;
-        border-top: 1px solid var(--color-border);
-    }
-
-    .locked-caps-list {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-    }
-
-    .locked-cap-item {
-        padding: 2px 8px;
-        background: rgba(136, 192, 208, 0.12);
-        border: 1px solid rgba(136, 192, 208, 0.25);
-        border-radius: var(--radius-sm);
-        font-size: 0.75rem;
-        font-family: var(--font-mono, monospace);
-    }
-
-    .locked-cap-value {
-        color: var(--color-accent-light, #88c0d0);
     }
 
     .config-options {
@@ -1688,76 +1406,6 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         transform: rotate(180deg);
     }
 
-    .image-input {
-        flex-shrink: 0;
-        width: 160px;
-        padding: 4px 8px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-        color: var(--color-text-primary);
-        font-size: 0.75rem;
-        font-family: var(--font-mono, monospace);
-        transition: border-color 0.15s;
-    }
-
-    .image-input:focus {
-        outline: none;
-        border-color: var(--color-accent);
-    }
-
-    .image-input:disabled {
-        opacity: 0.5;
-    }
-
-    .memory-input-group {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        flex-shrink: 0;
-    }
-
-    .memory-input {
-        width: 80px;
-        padding: 4px 8px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-        color: var(--color-text-primary);
-        font-size: 0.75rem;
-        font-family: var(--font-mono, monospace);
-        transition: border-color 0.15s;
-        -moz-appearance: textfield;
-        appearance: textfield;
-    }
-
-    .memory-input::-webkit-outer-spin-button,
-    .memory-input::-webkit-inner-spin-button {
-        -webkit-appearance: none;
-        margin: 0;
-    }
-
-    .memory-input:focus {
-        outline: none;
-        border-color: var(--color-accent);
-    }
-
-    /* Blank field = unlimited; the placeholder says so instead of showing 0. */
-    .memory-input::placeholder {
-        color: var(--color-text-secondary);
-        opacity: 1;
-    }
-
-    .memory-input:disabled {
-        opacity: 0.5;
-    }
-
-    .memory-unit {
-        font-size: 0.75rem;
-        color: var(--color-text-secondary);
-        white-space: nowrap;
-    }
-
     .config-info {
         display: flex;
         align-items: center;
@@ -1792,6 +1440,112 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         font-size: 0.75rem;
         color: var(--color-text-secondary);
         margin-top: 1px;
+    }
+
+    /* Every field in this form: one box, one focus ring, one disabled look. The width each one
+       takes is the only thing that differs, so it is the only thing they declare for themselves. */
+    .image-input,
+    .memory-input,
+    .port-input,
+    .mount-input,
+    .env-input {
+        padding: 4px 8px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        color: var(--color-text-primary);
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+        transition: border-color 0.15s;
+    }
+
+    .image-input:focus,
+    .memory-input:focus,
+    .port-input:focus,
+    .mount-input:focus,
+    .env-input:focus {
+        outline: none;
+        border-color: var(--color-accent);
+    }
+
+    .image-input:disabled,
+    .memory-input:disabled,
+    .port-input:disabled,
+    .mount-input:disabled,
+    .env-input:disabled {
+        opacity: 0.5;
+    }
+
+    /* The two number fields keep no spinners. */
+    .memory-input,
+    .port-input {
+        -moz-appearance: textfield;
+        appearance: textfield;
+    }
+
+    .memory-input::-webkit-outer-spin-button,
+    .memory-input::-webkit-inner-spin-button,
+    .port-input::-webkit-outer-spin-button,
+    .port-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+
+    .image-input {
+        flex-shrink: 0;
+        width: 160px;
+    }
+
+    .memory-input {
+        width: 80px;
+    }
+
+    /* Blank field = unlimited; the placeholder says so instead of showing 0. */
+    .memory-input::placeholder {
+        color: var(--color-text-secondary);
+        opacity: 1;
+    }
+
+    .memory-input-group {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+
+    .memory-unit {
+        font-size: 0.75rem;
+        color: var(--color-text-secondary);
+        white-space: nowrap;
+    }
+
+    .port-input {
+        flex: 1;
+        min-width: 120px;
+        max-width: 200px;
+    }
+
+    .port-input-bind {
+        max-width: 170px;
+    }
+
+    .mount-input {
+        flex: 1;
+        min-width: 100px;
+        max-width: 180px;
+    }
+
+    .mount-input-host {
+        max-width: 160px;
+    }
+
+    .env-input {
+        flex: 1;
+        min-width: 80px;
+    }
+
+    .env-input-key {
+        max-width: 140px;
     }
 
     /* Radio group */
@@ -1840,6 +1594,15 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
     .radio-text {
         white-space: nowrap;
+    }
+
+    .radio-group-small {
+        border-radius: var(--radius-sm);
+    }
+
+    .radio-group-small .radio-label {
+        padding: 2px 7px;
+        font-size: 0.6875rem;
     }
 
     /* Dockerfile section */
@@ -1893,51 +1656,51 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         cursor: not-allowed;
     }
 
-    .btn-rebuild {
+    .btn-build,
+    .btn-rebuild,
+    .btn-browse {
         display: flex;
         align-items: center;
         gap: 4px;
-        padding: 3px 8px;
         border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s;
+        white-space: nowrap;
+    }
+
+    .btn-build,
+    .btn-rebuild {
+        padding: 3px 8px;
+    }
+
+    .btn-rebuild,
+    .btn-browse {
         border: 1px solid var(--color-border);
         background: var(--color-surface-1);
         color: var(--color-text-primary);
-        font-size: 0.75rem;
-        cursor: pointer;
-        transition: background 0.15s, border-color 0.15s;
-        white-space: nowrap;
-    }
-
-    .btn-rebuild:hover {
-        background: var(--color-surface-3);
-        border-color: var(--color-accent);
-    }
-
-    .btn-rebuild:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
     }
 
     .btn-build {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        padding: 3px 8px;
-        border-radius: var(--radius-sm);
         border: 1px solid var(--color-accent);
         background: var(--color-accent-dark);
         color: white;
-        font-size: 0.75rem;
-        cursor: pointer;
-        transition: background 0.15s, border-color 0.15s;
-        white-space: nowrap;
+    }
+
+    .btn-build:hover:not(:disabled),
+    .btn-browse:hover:not(:disabled),
+    .btn-rebuild:hover {
+        background: var(--color-surface-3);
+        border-color: var(--color-accent);
     }
 
     .btn-build:hover:not(:disabled) {
         background: var(--color-accent);
     }
 
-    .btn-build:disabled {
+    .btn-build:disabled,
+    .btn-rebuild:disabled,
+    .btn-browse:disabled {
         opacity: 0.5;
         cursor: not-allowed;
     }
@@ -1965,6 +1728,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         overflow: hidden;
         min-width: 0;
     }
+
     .dockerfile-path-text {
         flex: 1;
         overflow: hidden;
@@ -1985,29 +1749,8 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     }
 
     .btn-browse {
-        display: flex;
-        align-items: center;
-        gap: 4px;
         padding: 5px 10px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-        color: var(--color-text-primary);
-        font-size: 0.75rem;
-        cursor: pointer;
-        transition: background 0.15s, border-color 0.15s;
-        white-space: nowrap;
         flex-shrink: 0;
-    }
-
-    .btn-browse:hover:not(:disabled) {
-        background: var(--color-surface-3);
-        border-color: var(--color-accent);
-    }
-
-    .btn-browse:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
     }
 
     .image-tag-info {
@@ -2093,6 +1836,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     .footer-wrapper {
         display: contents;
     }
+
     @keyframes spin {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
@@ -2102,363 +1846,25 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         animation: spin 1s linear infinite;
     }
 
-    /* Expandable content block (ports + mounts) */
+    /* Expandable content block */
     .ports-content,
-    .mounts-content {
-        padding: 0 0 4px;
-    }
-
-    .port-list {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        padding-left: 36px;
-        margin-top: 4px;
-    }
-
-    .port-item {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 4px 8px;
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-sm);
-        cursor: pointer;
-        transition: background 0.15s, border-color 0.15s;
-    }
-
-    .port-item:hover:not(:disabled) {
-        background: var(--color-surface-3);
-    }
-
-    .port-item.editing {
-        border-color: var(--color-accent);
-        background: rgba(136, 192, 208, 0.05);
-    }
-
-    .port-mapping {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 0.75rem;
-        font-family: var(--font-mono, monospace);
-        color: var(--color-text-primary);
-    }
-
-    .port-host,
-    .port-container {
-        font-weight: 600;
-        color: var(--color-accent-light);
-    }
-    .port-container {
-        color: white;
-    }
-
-    /* Remove buttons (ports + mounts) */
-    .btn-remove-port,
-    .btn-remove-mount {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 20px;
-        height: 20px;
-        border: none;
-        background: transparent;
-        color: var(--color-text-secondary);
-        cursor: pointer;
-        border-radius: var(--radius-sm);
-        transition: background 0.15s, color 0.15s;
-        flex-shrink: 0;
-    }
-
-    .btn-remove-port:hover:not(:disabled),
-    .btn-remove-mount:hover:not(:disabled) {
-        background: var(--color-status-red-dark);
-        color: white;
-    }
-
-    .btn-remove-port:disabled,
-    .btn-remove-mount:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-    }
-
-    .port-add-row {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding-left: 36px;
-    }
-
-    .port-input {
-        flex: 1;
-        min-width: 120px;
-        max-width: 200px;
-        padding: 4px 8px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-        color: var(--color-text-primary);
-        font-size: 0.75rem;
-        font-family: var(--font-mono, monospace);
-        transition: border-color 0.15s;
-        -moz-appearance: textfield;
-        appearance: textfield;
-    }
-
-    .port-input::-webkit-outer-spin-button,
-    .port-input::-webkit-inner-spin-button {
-        -webkit-appearance: none;
-        margin: 0;
-    }
-
-    .port-input:focus {
-        outline: none;
-        border-color: var(--color-accent);
-    }
-
-    .port-input:disabled {
-        opacity: 0.5;
-    }
-
-    .port-input-bind {
-        max-width: 170px;
-    }
-
-    .port-hint {
-        padding: 2px 0 0 36px;
-        font-size: 0.6875rem;
-        color: var(--color-text-muted);
-    }
-
-    /* Add buttons (ports + mounts) */
-    .btn-add-port,
-    .btn-add-mount {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-        color: var(--color-text-primary);
-        cursor: pointer;
-        border-radius: var(--radius-sm);
-        transition: background 0.15s, border-color 0.15s;
-        flex-shrink: 0;
-    }
-
-    .btn-add-port:hover:not(:disabled),
-    .btn-add-mount:hover:not(:disabled) {
-        background: var(--color-surface-3);
-        border-color: var(--color-accent);
-    }
-
-    .btn-add-port.pending,
-    .btn-add-mount.pending {
-        background: rgba(34, 197, 94, 0.15);
-        border-color: rgba(34, 197, 94, 0.6);
-        color: var(--color-status-green);
-    }
-
-    .btn-add-port:disabled,
-    .btn-add-mount:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-
-    /* Error messages (ports + mounts) */
-    .port-error,
-    .mount-error {
-        padding: 4px 8px;
-        padding-left: 36px;
-        background: rgba(248, 81, 73, 0.1);
-        border: 1px solid rgba(248, 81, 73, 0.3);
-        border-radius: var(--radius-sm);
-        color: var(--color-status-red);
-        font-size: 0.75rem;
-    }
-
-    .port-no-active {
-        padding: 4px 8px;
-        padding-left: 36px;
-        color: var(--color-text-tertiary);
-        font-size: 0.75rem;
-        font-style: italic;
-    }
-
-    /* Mounts */
-    .mount-list {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        margin-top: 4px;
-        padding-left: 36px;
-    }
-
-    .mount-item {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 4px 8px;
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-sm);
-        cursor: pointer;
-        transition: background 0.15s, border-color 0.15s;
-    }
-
-    .mount-item:hover:not(:disabled) {
-        background: var(--color-surface-3);
-    }
-
-    .mount-item.editing {
-        border-color: var(--color-accent);
-        background: rgba(136, 192, 208, 0.05);
-    }
-
-    .mount-info {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 0.75rem;
-        font-family: var(--font-mono, monospace);
-        color: var(--color-text-primary);
-        min-width: 0;
-    }
-
-    .mount-path {
-        font-weight: 600;
-        color: var(--color-accent-light);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        min-width: 0;
-    }
-
-    .mount-container {
-        font-weight: 600;
-        color: var(--color-text-primary);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        min-width: 0;
-    }
-
-    .mount-actions {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        flex-shrink: 0;
-    }
-
-    .mount-mode {
-        font-size: 0.6875rem;
-        padding: 1px 5px;
-        border-radius: 3px;
-        background: var(--color-surface-3);
-        color: var(--color-text-secondary);
-        font-weight: 600;
-    }
-
-    .mount-mode.mode-ro {
-        background: rgba(210, 153, 34, 0.15);
-        color: var(--color-status-yellow, #d29922);
-    }
-
-    .mount-mode.mode-rw {
-        background: rgba(248, 81, 73, 0.15);
-        color: var(--color-status-red);
-    }
-
-    .mount-add-row {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin: 4px 2px 0;
-        padding-left: 36px;
-    }
-
-    .mount-input {
-        flex: 1;
-        min-width: 100px;
-        max-width: 180px;
-        padding: 4px 8px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-        color: var(--color-text-primary);
-        font-size: 0.75rem;
-        font-family: var(--font-mono, monospace);
-        transition: border-color 0.15s;
-    }
-
-    .mount-input-host {
-        max-width: 160px;
-    }
-
-    .btn-browse-mount {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-        color: var(--color-text-primary);
-        cursor: pointer;
-        border-radius: var(--radius-sm);
-        transition: background 0.15s, border-color 0.15s;
-        flex-shrink: 0;
-    }
-
-    .btn-browse-mount:hover:not(:disabled) {
-        background: var(--color-surface-3);
-        border-color: var(--color-accent);
-    }
-
-    .btn-browse-mount:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-
-    .mount-input:focus {
-        outline: none;
-        border-color: var(--color-accent);
-    }
-
-    .mount-input:disabled {
-        opacity: 0.5;
-    }
-
-    .mount-arrow {
-        color: var(--color-text-secondary);
-        flex-shrink: 0;
-    }
-
-    .radio-group-small {
-        border-radius: var(--radius-sm);
-    }
-
-    .radio-group-small .radio-label {
-        padding: 2px 7px;
-        font-size: 0.6875rem;
-    }
-
-    /* Environment variables */
+    .mounts-content,
     .envs-content {
         padding: 0 0 4px;
     }
 
+    .port-list,
+    .mount-list,
     .env-list {
         display: flex;
         flex-direction: column;
         gap: 4px;
-        margin-top: 4px;
         padding-left: 36px;
+        margin-top: 4px;
     }
 
+    .port-item,
+    .mount-item,
     .env-item {
         display: flex;
         align-items: center;
@@ -2471,45 +1877,171 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         transition: background 0.15s, border-color 0.15s;
     }
 
+    .port-item:hover:not(:disabled),
+    .mount-item:hover:not(:disabled),
     .env-item:hover:not(:disabled) {
         background: var(--color-surface-3);
     }
 
+    .port-item.editing,
+    .mount-item.editing,
     .env-item.editing {
         border-color: var(--color-accent);
         background: rgba(136, 192, 208, 0.05);
     }
 
+    /* The saved value inside such a row, and the halves it is written in. */
+    .port-mapping,
+    .mount-info,
     .env-info {
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 6px;
         font-size: 0.75rem;
         font-family: var(--font-mono, monospace);
         color: var(--color-text-primary);
+    }
+
+    .mount-info,
+    .env-info {
         min-width: 0;
     }
 
+    /* A key = value row spends one step of the gap on the sign. */
+    .env-info {
+        gap: 4px;
+    }
+
+    .port-host,
+    .port-container,
+    .mount-path,
+    .mount-container,
     .env-key {
         font-weight: 600;
+    }
+
+    .port-host,
+    .mount-path,
+    .env-key {
         color: var(--color-accent-light);
+    }
+
+    .mount-container,
+    .env-value {
+        color: var(--color-text-primary);
+    }
+
+    .port-container {
+        color: white;
+    }
+
+    .mount-path,
+    .mount-container,
+    .env-key,
+    .env-value {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
     }
 
-    .env-equals {
+    .mount-path,
+    .mount-container {
+        min-width: 0;
+    }
+
+    .mount-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+
+    .mount-arrow {
         color: var(--color-text-secondary);
         flex-shrink: 0;
     }
 
-    .env-value {
-        color: var(--color-text-primary);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+    .port-add-row,
+    .mount-add-row,
+    .env-add-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding-left: 36px;
     }
 
+    .mount-add-row {
+        margin: 4px 2px 0;
+    }
+
+    .env-add-row {
+        margin-top: 4px;
+    }
+
+    /* The 28px square button of every add row: confirm, add, browse, cancel. */
+    .btn-add-port,
+    .btn-add-mount,
+    .btn-add-env,
+    .btn-browse-mount,
+    .btn-cancel-edit {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        cursor: pointer;
+        border-radius: var(--radius-sm);
+        flex-shrink: 0;
+    }
+
+    .btn-add-port,
+    .btn-add-mount,
+    .btn-add-env,
+    .btn-browse-mount {
+        color: var(--color-text-primary);
+        transition: background 0.15s, border-color 0.15s;
+    }
+
+    .btn-add-port:hover:not(:disabled),
+    .btn-add-mount:hover:not(:disabled),
+    .btn-add-env:hover:not(:disabled),
+    .btn-browse-mount:hover:not(:disabled) {
+        background: var(--color-surface-3);
+        border-color: var(--color-accent);
+    }
+
+    /* Something is typed but not added yet. */
+    .btn-add-port.pending,
+    .btn-add-mount.pending,
+    .btn-add-env.pending {
+        background: rgba(34, 197, 94, 0.15);
+        border-color: rgba(34, 197, 94, 0.6);
+        color: var(--color-status-green);
+    }
+
+    .btn-add-port:disabled,
+    .btn-add-mount:disabled,
+    .btn-browse-mount:disabled,
+    .btn-cancel-edit:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .btn-cancel-edit {
+        color: var(--color-text-secondary);
+        transition: background 0.15s, color 0.15s;
+    }
+
+    .btn-cancel-edit:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+
+    /* The 20px discard control of every list row. */
+    .btn-remove-port,
+    .btn-remove-mount,
     .btn-remove-env {
         display: flex;
         align-items: center;
@@ -2525,107 +2057,28 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         flex-shrink: 0;
     }
 
+    .btn-remove-port:hover:not(:disabled),
+    .btn-remove-mount:hover:not(:disabled),
     .btn-remove-env:hover:not(:disabled) {
         background: var(--color-status-red-dark);
         color: white;
     }
 
+    .btn-remove-port:disabled,
+    .btn-remove-mount:disabled,
     .btn-remove-env:disabled {
         opacity: 0.4;
         cursor: not-allowed;
     }
 
-    .env-add-row {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin-top: 4px;
-        padding-left: 36px;
+    .port-hint {
+        padding: 2px 0 0 36px;
+        font-size: 0.6875rem;
+        color: var(--color-text-muted);
     }
 
-    .env-input {
-        flex: 1;
-        min-width: 80px;
-        padding: 4px 8px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-        color: var(--color-text-primary);
-        font-size: 0.75rem;
-        font-family: var(--font-mono, monospace);
-        transition: border-color 0.15s;
-    }
-
-    .env-input-key {
-        max-width: 140px;
-    }
-
-    .env-input:focus {
-        outline: none;
-        border-color: var(--color-accent);
-    }
-
-    .env-input:disabled {
-        opacity: 0.5;
-    }
-
-    .env-equals-sign {
-        color: var(--color-text-secondary);
-        flex-shrink: 0;
-        font-size: 0.75rem;
-    }
-
-    .btn-add-env {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-        color: var(--color-text-primary);
-        cursor: pointer;
-        border-radius: var(--radius-sm);
-        transition: background 0.15s, border-color 0.15s;
-        flex-shrink: 0;
-    }
-
-    .btn-add-env:hover:not(:disabled) {
-        background: var(--color-surface-3);
-        border-color: var(--color-accent);
-    }
-
-    .btn-add-env.pending {
-        background: rgba(34, 197, 94, 0.15);
-        border-color: rgba(34, 197, 94, 0.6);
-        color: var(--color-status-green);
-    }
-
-    .btn-cancel-edit {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-        color: var(--color-text-secondary);
-        cursor: pointer;
-        border-radius: var(--radius-sm);
-        transition: background 0.15s, color 0.15s;
-        flex-shrink: 0;
-    }
-
-    .btn-cancel-edit:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-    }
-
-    .btn-cancel-edit:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-
+    .port-error,
+    .mount-error,
     .env-error {
         padding: 4px 8px;
         padding-left: 36px;
@@ -2634,6 +2087,11 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         border-radius: var(--radius-sm);
         color: var(--color-status-red);
         font-size: 0.75rem;
+    }
+
+    .port-no-active {
+        padding: 4px 8px;
+        padding-left: 36px;
     }
 
     /* Capabilities section */

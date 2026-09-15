@@ -751,34 +751,6 @@ func resolveGitAuthor(projectID string, s interface {
 	return name, email
 }
 
-// HandleCommitPreview generates and returns the commit message that would be used
-// for a commit-and-done operation, without performing the commit.
-func (h *TaskHandler) HandleCommitPreview(w http.ResponseWriter, r *http.Request) {
-	projectID := r.PathValue("projectID")
-	task, ok := resolveTask(w, r, h.store)
-	if !ok {
-		return
-	}
-	if !requireWorktreeMgr(w, h.worktreeMgr) {
-		return
-	}
-
-	commitMsg := h.executor.GenerateCommitMessage(r.Context(), task)
-
-	// Resolve effective git author: env var override, then project git config, then defaults
-	authorName, authorEmail := resolveGitAuthor(projectID, h.store)
-
-	// Resolve merge target branch
-	mergeTarget := h.executor.ResolveMergeTarget(projectID, task)
-
-	httputil.JSONResponse(w, http.StatusOK, map[string]string{
-		"commit_message": commitMsg,
-		"author_name":    authorName,
-		"author_email":   authorEmail,
-		"merge_target":   mergeTarget,
-	})
-}
-
 // HandleCommitPreviewStream streams the commit message generation via SSE.
 // Events: "metadata" (author/merge info), "prompt_progress", "token", "done".
 func (h *TaskHandler) HandleCommitPreviewStream(w http.ResponseWriter, r *http.Request) {

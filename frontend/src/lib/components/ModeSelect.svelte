@@ -1,29 +1,23 @@
 <script lang="ts">
     import { t, type MessageKey } from '$lib/i18n';
+    import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
+    import ModeIcon from './ModeIcon.svelte';
 
     let { value, onChange }: { value: string; onChange: (mode: string) => void } = $props();
 
     // `value` is the operating_mode the server stores — data, never translated. Only
     // `labelKey` is copy, resolved in the markup so a locale change re-labels the control.
-    const modes: { value: string; labelKey: MessageKey; icon: string }[] = [
-        { value: 'act', labelKey: 'chat.mode.act', icon: 'check' },
-        { value: 'plan', labelKey: 'chat.mode.plan', icon: 'list' },
-        { value: 'explore', labelKey: 'chat.mode.explore', icon: 'bulb' },
+    const modes: { value: string; labelKey: MessageKey }[] = [
+        { value: 'act', labelKey: 'chat.mode.act' },
+        { value: 'plan', labelKey: 'chat.mode.plan' },
+        { value: 'explore', labelKey: 'chat.mode.explore' },
     ];
 
     let open = $state(false);
     let dropdownRef: HTMLDivElement | null = null;
     let selected = $derived(modes.find(m => m.value === value) || modes[0]);
 
-    $effect(() => {
-        function handleClickOutside(e: MouseEvent) {
-            if (dropdownRef && !dropdownRef.contains(e.target as Node)) {
-                open = false;
-            }
-        }
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    });
+    useClickOutside(() => dropdownRef, () => { open = false; }, { event: 'mousedown' });
 
     function toggle() {
         open = !open;
@@ -33,24 +27,11 @@
         onChange(mode);
         open = false;
     }
-
-    function renderIcon(icon: string) {
-        if (icon === 'check') {
-            return `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4L13 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-        }
-        if (icon === 'list') {
-            return `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
-        }
-        if (icon === 'bulb') {
-            return `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6a4 4 0 1 1 8 0c0 2.5-2 3.5-2 3.5v1h-4v-1s-2-1-2-3.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6 10h4v1.5H6Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6.5 12.5h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
-        }
-        return '';
-    }
 </script>
 
 <div class="mode-select" bind:this={dropdownRef}>
     <button type="button" class="mode-btn" class:open={open} onclick={toggle} onkeydown={(e) => { if (e.key === 'Escape') open = false; }} aria-label={t('chat.mode.aria')} aria-expanded={open}>
-        <span class="mode-icon active" class:act={value === 'act'} class:plan={value === 'plan'} class:explore={value === 'explore'}>{@html renderIcon(selected.icon)}</span>
+        <span class="mode-icon active" class:act={value === 'act'} class:plan={value === 'plan'} class:explore={value === 'explore'}><ModeIcon mode={value} /></span>
         <span class="mode-label">{t(selected.labelKey)}</span>
         <svg class="chevron" width="10" height="10" viewBox="0 0 10 10" fill="none">
             <path d="M2.5 4L5 6.5L7.5 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -71,7 +52,7 @@
                     onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(mode.value); } }}
                     onclick={() => select(mode.value)}
                 >
-                    <span class="mode-icon" class:active={mode.value === value} class:act={mode.value === 'act'} class:plan={mode.value === 'plan'} class:explore={mode.value === 'explore'}>{@html renderIcon(mode.icon)}</span>
+                    <span class="mode-icon" class:active={mode.value === value} class:act={mode.value === 'act'} class:plan={mode.value === 'plan'} class:explore={mode.value === 'explore'}><ModeIcon mode={mode.value} /></span>
                     <span>{t(mode.labelKey)}</span>
                 </button>
             {/each}

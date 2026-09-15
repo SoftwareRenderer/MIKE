@@ -92,18 +92,44 @@ upgrades (`/api/stream`, `/api/lsp` — they upgrade on GET and never inspect th
 `handler_preview.go`'s two `r.Method != http.MethodHead` checks (they suppress a HEAD *body*, not a
 request), and `handleTaskMessages` (three verbs through one function).
 
+A handler that switches on `r.Method` is not a methodless route and is not stale either. Nine branches
+across six files (`api/task.go`, `api/project.go`, `config/config.go`, `extensions/handler.go`,
+`server/handler_message.go`, `server/handler_thread.go`) end a verb switch in
+`httputil.MethodNotAllowed`, and because a `GET` pattern also matches `HEAD` it is that arm which answers
+HEAD — deliberately, so `HEAD /api/config` refuses while `HEAD /api/health` answers.
+`TestGETPatternAlsoAnswersHEAD` pins which side each route is on; deleting those arms would turn nine
+deliberate 405s into bodiless 200s.
+
 Two consequences: net/http matches the **most specific path first**, so `GET .../tasks/done` reaches the
 `{taskID}` handler and answers 404, not 405; and a `GET` pattern also matches `HEAD`. Tests:
 `backend/server/routes_method_test.go`; gate: `scripts/archgate` `routes` rule.
+
+One action is one verb: `/api/extensions` answers `PUT {id}`, `PATCH {id}/enabled` and
+`PUT {id}/dependency-cache` — the verb its caller sends, not that verb plus an alias — and
+`POST .../tasks/{taskID}/resume` is registered on `executor.HandleRetry` directly, because the client's
+Resume and a restart of a failed turn are the same operation.
+
+`apiroutes` asks the other half of the question: a registered `/api` pattern must match a path literal in
+`frontend/src` or in `scripts/mike-healthcheck.sh`, so a route nobody calls fails `make check` as surely as
+a route missing its verb. It is the same debt as an unheard stream event, and a route nobody reaches still
+costs a verb, a CSRF arm and a lifecycle classification. A path counts as a caller through the idiom that
+sends it — `` `${API_BASE}/x` ``, a bare `'/api/x'`, and the relative path handed to `streamOperation` in
+`api/extensions.ts` — and test files are not callers. A route whose path no literal can spell (a
+`{name...}` tail) is exempted by name, naming where the URL is written instead. Three exemptions: the two
+WebSocket upgrades, whose URL is built from `window.location.origin`, and
+`GET /api/preview/{token}/{path...}`, whose sub-resource URLs the server writes into the document it
+serves (`rewriteRootRelative`). Gate: `scripts/archgate` `apiroutes`.
 
 ## Diffs
 
 `?parsed=1` is a contract every path on `/tasks/{id}/diff` must honour, including the fast ones. The panel
 renders `parsed_files` and never re-parses patch text, so `git.ParseUnifiedDiff`
 (`backend/git/worktree.go`, served through `git.SortedParsedFiles`) is the only diff grammar in the
-product. The immutable done-task snapshot stores its body *as the parsed body*
-(`doneDiffResponse.ParsedFiles`) and stays a byte-for-byte write: a response missing that key renders "No
-changes since last commit" over a diff it still carries. Tests:
+product. `GET /api/projects/{id}/git/diff` answers that grammar unconditionally — it has no raw mode and
+reads no `parsed` flag — while `/tasks/{id}/diff` still branches on `?parsed=1`, because its manifest and
+`TaskDiff` answers carry per-file data rather than patch text. The immutable done-task snapshot stores its
+body *as the parsed body* (`doneDiffResponse.ParsedFiles`) and stays a byte-for-byte write: a response
+missing that key renders "No changes since last commit" over a diff it still carries. Tests:
 `backend/stream/done_snapshot_test.go`, `backend/api/git_diff_parsed_test.go`.
 
 ## Raw file bytes

@@ -14,6 +14,8 @@ import (
 	"kanban/pkg/logging"
 )
 
+// HandleRetry restarts a task's turn on its existing conversation tree. The route is registered as
+// `resume`: the client's Resume control and a restart of a failed turn are the same operation here.
 func (te *TaskExecutor) HandleRetry(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -33,11 +35,6 @@ func (te *TaskExecutor) HandleRetry(w http.ResponseWriter, r *http.Request) {
 	}
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
-}
-
-// HandleResume resumes a paused task (delegates to HandleRetry).
-func (te *TaskExecutor) HandleResume(w http.ResponseWriter, r *http.Request) {
-	te.HandleRetry(w, r)
 }
 
 // HandleSend accepts a user message and triggers task execution.

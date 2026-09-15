@@ -2,128 +2,37 @@
  * Signing out clears every store and the kanban-* pre-paint hints. gc() only prunes
  * tasks that no longer exist, so without this the next person to open the browser
  * inherits the last one's messages, diffs, drafts and queued writes.
- * In-memory IndexedDB mock, same pattern as storage-offline-cache.unit.ts.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { createFakeIndexedDB, fakeKeysByStore, installFakeIndexedDB } from './fake-indexeddb';
+import type { FakeIDBFactory } from './fake-indexeddb';
+import type { ActionType } from '$lib/api/queue';
 
-interface MockRequest { result: any; onsuccess: (() => void) | null; onerror: (() => void) | null }
-interface MockStore {
-    data: Map<string, any>;
-    get(key: string): MockRequest;
-    put(value: any, key: string): MockRequest;
-    delete(key: string): MockRequest;
-    getAllKeys(): MockRequest;
-}
-interface MockTransaction {
-    objectStore(name: string): MockStore;
-    oncomplete: (() => void) | null;
-    onerror: ((e: any) => void) | null;
-}
-interface MockDB {
-    objectStoreNames: DOMStringList;
-    stores: Map<string, MockStore>;
-    createObjectStore(name: string): MockStore;
-    transaction(name: string, mode: string): MockTransaction;
-}
-interface MockOpenRequest {
-    result: MockDB;
-    onupgradeneeded: ((e: any) => void) | null;
-    onsuccess: (() => void) | null;
-    onerror: (() => void) | null;
-}
-
-class MockDOMStringList {
-    private _items: string[];
-    constructor(items: string[]) { this._items = items; }
-    get length() { return this._items.length; }
-    item(index: number) { return this._items[index] ?? null; }
-    contains(s: string) { return this._items.includes(s); }
-    [Symbol.iterator]() { return this._items[Symbol.iterator](); }
-}
-
-function makeRequest(): MockRequest { return { result: null, onsuccess: null, onerror: null }; }
-function fireRequest(req: MockRequest, result: any) {
-    req.result = result;
-    queueMicrotask(() => { if (req.onsuccess) req.onsuccess(); });
-}
-
-function createMockIndexedDB(): typeof indexedDB {
-    const databases = new Map<string, MockDB>();
-    const mockIDB: any = {
-        open(name: string, version: number): MockOpenRequest {
-            const req: MockOpenRequest = { result: null as any, onupgradeneeded: null, onsuccess: null, onerror: null };
-            let db = databases.get(name);
-            const isUpgrade = !db;
-            if (!db) {
-                const stores = new Map<string, MockStore>();
-                db = {
-                    objectStoreNames: new MockDOMStringList([]) as unknown as DOMStringList,
-                    stores,
-                    createObjectStore(storeName: string): MockStore {
-                        const store: MockStore = {
-                            data: new Map(),
-                            get(key) {
-                                const r = makeRequest();
-                                fireRequest(r, stores.get(storeName)!.data.get(key) ?? undefined);
-                                return r;
-                            },
-                            put(value, key) {
-                                const r = makeRequest();
-                                stores.get(storeName)!.data.set(key, value);
-                                fireRequest(r, key);
-                                return r;
-                            },
-                            delete(key) {
-                                const r = makeRequest();
-                                stores.get(storeName)!.data.delete(key);
-                                fireRequest(r, undefined);
-                                return r;
-                            },
-                            getAllKeys() {
-                                const r = makeRequest();
-                                fireRequest(r, [...stores.get(storeName)!.data.keys()]);
-                                return r;
-                            },
-                        };
-                        stores.set(storeName, store);
-                        (db as MockDB).objectStoreNames = new MockDOMStringList([...stores.keys()]) as unknown as DOMStringList;
-                        return store;
-                    },
-                    transaction(storeName: string, _mode: string) {
-                        const store = stores.get(storeName);
-                        if (!store) throw new Error(`Unknown store: ${storeName}`);
-                        const tx: MockTransaction = {
-                            objectStore(sn) {
-                                if (sn === storeName) return store;
-                                throw new Error(`Wrong store: ${sn}`);
-                            },
-                            oncomplete: null,
-                            onerror: null,
-                        };
-                        queueMicrotask(() => { if (tx.oncomplete) tx.oncomplete(); });
-                        return tx;
-                    },
-                };
-                databases.set(name, db!);
-            }
-            req.result = db!;
-            queueMicrotask(() => {
-                if (isUpgrade && req.onupgradeneeded) {
-                    req.onupgradeneeded({ target: req, oldVersion: 0, newVersion: version } as any);
-                }
-                if (req.onsuccess) req.onsuccess();
-            });
-            return req;
-        },
-    };
-    return mockIDB;
-}
+let fakeIndexedDB: FakeIDBFactory;
+let restoreIndexedDB: (() => void) | undefined;
 
 beforeEach(() => {
     vi.resetModules();
-    vi.stubGlobal('indexedDB', createMockIndexedDB());
+    fakeIndexedDB = createFakeIndexedDB();
+    restoreIndexedDB = installFakeIndexedDB(fakeIndexedDB);
     localStorage.clear();
 });
+
+afterEach(() => restoreIndexedDB?.());
+
+/** Keys one object store holds, whichever database the fake put it in. */
+function keysIn(store: string): string[] {
+    return Object.entries(fakeKeysByStore(fakeIndexedDB))
+        .filter(([name]) => name.endsWith(`/${store}`))
+        .flatMap(([, keys]) => keys);
+}
+
+/** Every `<db>/<store>` that still holds a key. */
+function storesWithKeys(): string[] {
+    return Object.entries(fakeKeysByStore(fakeIndexedDB))
+        .filter(([, keys]) => keys.length > 0)
+        .map(([name]) => name);
+}
 
 describe('clearAll (sign-out sweep)', () => {
     it('erases every store and the pre-paint hints', async () => {
@@ -176,5 +85,51 @@ describe('clearAll (sign-out sweep)', () => {
     it('is safe when nothing was ever stored', async () => {
         const storage = await import('$lib/storage');
         await expect(storage.clearAll()).resolves.toBeUndefined();
+    });
+
+    it('empties the object stores themselves, not only the getters that read them', async () => {
+        const storage = await import('$lib/storage');
+        const { sendTaskMessage } = await import('$lib/api/tasks');
+        const networkDown = Object.assign(new Error('Failed to fetch'), { name: 'TypeError' });
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(networkDown));
+
+        const queued = await sendTaskMessage('proj-a', 'task-1', 'a send made while offline');
+        await storage.setBoardCache(storage.messagesCacheKey('proj-a', 'task-1'), [{ content: 'a cached body' }]);
+        expect(queued.queued).toBe(true);
+
+        expect(keysIn('offline-queue')).toEqual(['actions']);
+        expect(keysIn('board-cache')).toEqual(['messages:proj-a:task-1']);
+        const stores = Object.keys(fakeKeysByStore(fakeIndexedDB)).sort();
+
+        await storage.clearAll();
+
+        // The getters above answer null for a store the sweep never reached too, so the check that
+        // carries this test is the raw one: no key anywhere, and no store dropped instead of emptied.
+        expect(storesWithKeys()).toEqual([]);
+        expect(Object.keys(fakeKeysByStore(fakeIndexedDB)).sort()).toEqual(stores);
+    });
+
+    it('cannot erase a queued write the queue module still holds in memory — clearQueue must run too', async () => {
+        const storage = await import('$lib/storage');
+        const { enqueueAction, clearQueue } = await import('$lib/api/queue');
+        const send = (content: string): { type: ActionType; params: Record<string, any> } => ({
+            type: 'sendTaskMessage', params: { projectId: 'proj-a', taskId: 'task-1', content } });
+
+        await enqueueAction(send('written while offline'));
+        expect(await storage.loadQueue()).toHaveLength(1);
+
+        await storage.clearAll();
+        expect(await storage.loadQueue()).toEqual([]);
+
+        // The next enqueue persists the whole in-memory array, and the erased write came back with it.
+        await enqueueAction(send('the next write'));
+        expect((await storage.loadQueue()).map((a) => a.params.content))
+            .toEqual(['written while offline', 'the next write']);
+
+        clearQueue();
+        await storage.clearAll();
+        await enqueueAction({ type: 'stopTask', params: { projectId: 'proj-a', taskId: 'task-1' } });
+        expect((await storage.loadQueue()).map((a) => a.type)).toEqual(['stopTask']);
+        expect(keysIn('offline-queue')).toEqual(['actions']);
     });
 });

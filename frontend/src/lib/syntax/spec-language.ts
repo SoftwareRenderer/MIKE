@@ -289,7 +289,7 @@ function isRegionMarker(lineText: string, marker: string, spec: SyntaxSpec): boo
 }
 
 /** Indentation from `pairs`: one unit per unclosed opener on the previous line, one back on a closer. */
-export function specIndentService(spec: SyntaxSpec) {
+function specIndentService(spec: SyntaxSpec) {
   const pairs = spec.pairs || [];
   if (!pairs.length) return [];
   const openers = new Set(pairs.map((p) => p.open));

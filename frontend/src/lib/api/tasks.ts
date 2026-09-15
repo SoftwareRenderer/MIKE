@@ -232,9 +232,6 @@ export async function deleteTaskMessage(projectId: string, taskId: string, messa
     return deleteTaskMessageRaw(projectId, taskId, messageId);
 }
 
-/** Regenerate from a message: deletes it and all messages after it. Alias for deleteTaskMessagesAfter. */
-export const regenerateTaskMessages = deleteTaskMessagesAfter;
-
 /** Check if deleting a message would also delete a fork branch. */
 export async function checkMessageDelete(projectId: string, taskId: string, messageId: string): Promise<{ will_delete_branch: boolean; branch_name: string }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/${messageId}`);

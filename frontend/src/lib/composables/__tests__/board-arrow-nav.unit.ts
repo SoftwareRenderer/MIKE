@@ -209,7 +209,7 @@ function setupOverview(perSection: number[]): HTMLElement[] {
     ovIds = [];
     const list = document.createElement('div');
     list.className = 'task-list';
-    perSection.forEach((count, s) => {
+    perSection.forEach((count) => {
         const group = document.createElement('div');
         group.className = 'section-group';
         const body = document.createElement('div');

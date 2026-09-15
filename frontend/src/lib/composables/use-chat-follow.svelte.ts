@@ -10,14 +10,27 @@ import { SCROLL_BOTTOM_THRESHOLD } from '$lib/constants';
 const PIN_SETTLE_FRAMES = 12;
 const PIN_STABLE_FRAMES = 2;
 
-/** Distance from the current scroll position to the very bottom, in px. */
-export function distanceFromBottom(el: HTMLElement): number {
-    return el.scrollHeight - el.scrollTop - el.clientHeight;
+/**
+ * Distance from the current scroll position to the very bottom, in px.
+ *
+ * `totalHeight` is for a scrollable whose own `scrollHeight` is not the height of its content: a
+ * virtual list sizes its spacer from `rows × rowHeight` and renders only the visible rows, so the
+ * element reports less than the list is. Pass the computed height there; leave it out elsewhere.
+ */
+export function distanceFromBottom(el: HTMLElement, totalHeight: number = el.scrollHeight): number {
+    return totalHeight - el.scrollTop - el.clientHeight;
+}
+
+export interface BottomOptions {
+    /** How far above the bottom still counts as at it, in px. */
+    threshold?: number;
+    /** See {@link distanceFromBottom}. */
+    totalHeight?: number;
 }
 
 /** Whether the viewport is close enough to the bottom to keep following. */
-export function isAtBottom(el: HTMLElement): boolean {
-    return distanceFromBottom(el) < SCROLL_BOTTOM_THRESHOLD;
+export function isAtBottom(el: HTMLElement, { threshold = SCROLL_BOTTOM_THRESHOLD, totalHeight }: BottomOptions = {}): boolean {
+    return distanceFromBottom(el, totalHeight) < threshold;
 }
 
 /** Public surface of the chat follow tracker. */

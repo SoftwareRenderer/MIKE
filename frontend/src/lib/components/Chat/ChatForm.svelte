@@ -3,6 +3,7 @@
     import { AGENT_URL_PREFIX } from '$lib/types';
     import ModelSelector from './ModelSelector.svelte';
     import ContextUsage from './ContextUsage.svelte';
+    import ModeToggle from './ModeToggle.svelte';
     import FileMentionDropdown from '../FileMentionDropdown.svelte';
     import { useFileMention } from '$lib/composables/use-file-mention.svelte';
     import { uploadTaskFile } from '$lib/api';
@@ -76,11 +77,6 @@
     // The placeholder default is copy, so it cannot live in the prop default (a default is
     // evaluated with the props, not with the locale): an empty prop means "use the catalog".
     const effectivePlaceholder = $derived(placeholder || t('chat.form.placeholder'));
-
-    /** Tooltip for the mode toggle; the mode value itself is data, this is copy. */
-    function modeTip(mode: string): string {
-        return mode === 'act' ? t('chat.mode.actTip') : mode === 'plan' ? t('chat.mode.planTip') : t('chat.mode.exploreTip');
-    }
 
     let textareaEl: HTMLTextAreaElement | undefined;
     let fileInputEl: HTMLInputElement | undefined;
@@ -214,29 +210,7 @@
             />
             <ContextUsage used={contextDisplay.used} limit={contextDisplay.limit} sessionCost={sessionCost} {onSummarize} onSummarizeCancel={isAgent ? undefined : onSummarizeCancel} {isSummarizing} disabled={disabled} />
             {#if onOperatingModeToggle && !isAgent}
-                <button
-                    type="button"
-                    class="btn-plan-toggle"
-                    class:active={operatingMode === 'plan'}
-                    class:explore={operatingMode === 'explore'}
-                    onclick={onOperatingModeToggle}
-                    title={modeTip(operatingMode)}
-                    aria-label={t('chat.mode.toggleAria')}
-                    style="margin-left: auto"
-                >
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                        {#if operatingMode === 'plan'}
-                            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                        {:else if operatingMode === 'explore'}
-                            <path d="M4 6a4 4 0 1 1 8 0c0 2.5-2 3.5-2 3.5v1h-4v-1s-2-1-2-3.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-                            <path d="M6 10h4v1.5H6Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-                            <path d="M6.5 12.5h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                        {:else}
-                            <path d="M3 8l4 4L13 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                        {/if}
-                    </svg>
-                    <span>{operatingMode === 'plan' ? t('chat.mode.plan') : operatingMode === 'explore' ? t('chat.mode.explore') : t('chat.mode.act')}</span>
-                </button>
+                <ModeToggle variant="bar" mode={operatingMode} onToggle={onOperatingModeToggle} />
             {/if}
         </div>
     {/if}
@@ -273,7 +247,7 @@
             rows="1"
             onkeydown={handleKeydown}
             onpaste={intake.handlePaste}
-            oninput={(e) => { autoResize(); mention.handleInput(); }}
+            oninput={() => { autoResize(); mention.handleInput(); }}
             onfocus={handleInputFocus}
             onblur={handleInputBlur}
         ></textarea>
@@ -325,35 +299,6 @@
         align-items: center;
         gap: 8px;
         flex-wrap: wrap;
-    }
-    .btn-plan-toggle {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        padding: 3px 8px;
-        border-radius: var(--radius-md);
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-2);
-        color: var(--color-text-secondary);
-        font-size: 0.75rem;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.15s ease;
-        flex-shrink: 0;
-    }
-    .btn-plan-toggle:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-    }
-    .btn-plan-toggle.active {
-        background: color-mix(in srgb, var(--color-accent) 22%, transparent);
-        border-color: var(--color-accent);
-        color: var(--color-btn-text);
-    }
-    .btn-plan-toggle.explore {
-        background: color-mix(in srgb, var(--color-status-yellow) 15%, transparent);
-        border-color: var(--color-status-yellow);
-        color: var(--color-status-yellow);
     }
     .chat-form-inner {
         display: flex;

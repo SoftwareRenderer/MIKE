@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { parseCatalog, parseCatalogJSON, MAX_CATALOG_KEYS, MAX_VALUE_LEN } from '$lib/i18n/catalog';
 
 describe('parseCatalog (what may enter the runtime)', () => {

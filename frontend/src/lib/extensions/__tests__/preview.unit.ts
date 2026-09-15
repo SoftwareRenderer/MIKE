@@ -47,9 +47,9 @@ function makeChannel(granted: string[], context: any, anchor: HTMLElement | null
 }
 
 const deleteCalls = () =>
-    apiFetchMock.mock.calls.filter(([url, init]) => init?.method === 'DELETE');
+    apiFetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE');
 
-function send(channel: ExtensionHostChannel, contentWindow: any, msg: HostRequest, origin = 'null') {
+function send(_channel: ExtensionHostChannel, contentWindow: any, msg: HostRequest, origin = 'null') {
     window.dispatchEvent(new MessageEvent('message', { data: msg, source: contentWindow as any, origin }));
 }
 
@@ -281,7 +281,7 @@ describe('preview.release', () => {
 
     it('a second serve from the same editor implicitly releases the previous doc', async () => {
         let n = 0;
-        apiFetchMock.mockImplementation(async (url: string, init?: any) => {
+        apiFetchMock.mockImplementation(async (_url: string, init?: any) => {
             if (init?.method === 'DELETE') {
                 return { ok: true, status: 200, json: async () => ({ ok: true }) } as any;
             }
@@ -304,7 +304,7 @@ describe('preview.release', () => {
 
     it('explicit release clears implicit tracking (no duplicate release)', async () => {
         let n = 0;
-        apiFetchMock.mockImplementation(async (url: string, init?: any) => {
+        apiFetchMock.mockImplementation(async (_url: string, init?: any) => {
             if (init?.method === 'DELETE') {
                 return { ok: true, status: 200, json: async () => ({ ok: true }) } as any;
             }
@@ -331,7 +331,7 @@ describe('preview.release', () => {
         // Two overlapping serves: the OLDER one completes LAST. Without
         // generation ordering it would release the NEWER serve's doc.
         const postResolvers: Array<(v: any) => void> = [];
-        apiFetchMock.mockImplementation((url: string, init?: any) => {
+        apiFetchMock.mockImplementation((_url: string, init?: any) => {
             if (init?.method === 'DELETE') {
                 return Promise.resolve({ ok: true, status: 200, json: async () => ({ ok: true }) } as any);
             }
@@ -358,7 +358,7 @@ describe('preview.release', () => {
 
         // A third serve releases exactly the tracked doc (tokB), proving the
         // stale completion did not clobber tracking with tokA.
-        apiFetchMock.mockImplementation(async (url: string, init?: any) => {
+        apiFetchMock.mockImplementation(async (_url: string, init?: any) => {
             if (init?.method === 'DELETE') {
                 return { ok: true, status: 200, json: async () => ({ ok: true }) } as any;
             }
@@ -372,7 +372,7 @@ describe('preview.release', () => {
 
     it('different editors (anchors) do not cross-release', async () => {
         let n = 0;
-        apiFetchMock.mockImplementation(async (url: string, init?: any) => {
+        apiFetchMock.mockImplementation(async (_url: string, init?: any) => {
             if (init?.method === 'DELETE') {
                 return { ok: true, status: 200, json: async () => ({ ok: true }) } as any;
             }

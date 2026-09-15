@@ -3,9 +3,6 @@ import { loadQueue as loadQueueFromStorage, saveQueue as saveQueueToStorage, typ
 import type { Config, MemoryAlertAckPayload, Project, Task, TaskMessage, Thread } from '../types';
 import { t } from '$lib/i18n';
 
-// Re-export helpers for direct imports
-export { generateId };
-
 // Re-export QueuedAction from storage (canonical definition)
 export type { StoredQueuedAction as QueuedAction };
 
@@ -28,7 +25,7 @@ export type ActionType =
     | 'createTask' | 'updateTask' | 'deleteTask' | 'moveTask'
     | 'commitAndDone' | 'clearDoneTasks' | 'dismissMemoryAlert'
     // Task execution
-    | 'initTask' | 'startTask' | 'startSubtask' | 'stopTask' | 'retryTask' | 'resumeTask'
+    | 'startTask' | 'startSubtask' | 'stopTask' | 'resumeTask'
     // Messages
     | 'sendTaskMessage' | 'createTaskMessage' | 'deleteTaskMessagesAfter'
     | 'deleteTaskMessage' | 'updateTaskMessage'
@@ -184,8 +181,7 @@ export function getQueuedDeleteTaskIds(): Set<string> {
 /** Check if an error is a transient network failure (retryable). */
 export function isTransientError(e: unknown): boolean {
     // A cancellation is not a transient failure. The user stopped this request; queueing it replays
-    // something they asked to stop — later, from IndexedDB, possibly after the tab is closed. The abort
-    // used to be counted here because apiFetch produced the only aborts there were: its own 15 s timeout.
+    // something they asked to stop — later, from IndexedDB, possibly after the tab is closed.
     if (isAborted(e)) return false;
     return (e as any)?.name === 'TypeError';
 }
@@ -202,7 +198,7 @@ function trackResult(action: QueuedAction, result: any, idMap: Map<string, strin
         resolvedTasks.set(optId, result);
     }
     if (result && result.id && (action.type === 'startTask' || action.type === 'moveTask' ||
-        action.type === 'stopTask' || action.type === 'retryTask' || action.type === 'resumeTask' ||
+        action.type === 'stopTask' || action.type === 'resumeTask' ||
         action.type === 'commitAndDone' || action.type === 'updateTask')) {
         resolvedTasks.set(result.id, result);
     }
@@ -373,20 +369,8 @@ export function applyQueuedActionsToBoard(
                 break;
             }
 
-            case 'initTask': {
-                const resolvedId = optIdMap.get(taskId) || taskId;
-                const task = result.find(t => t.id === resolvedId);
-                if (task) {
-                    task.branch = result[0]?.branch || task.branch;
-                    task.base_ref = result[0]?.base_ref || task.base_ref;
-                    task.worktree_exists = true;
-                }
-                break;
-            }
-
             case 'startTask':
             case 'startSubtask':
-            case 'retryTask':
             case 'resumeTask': {
                 const resolvedId = optIdMap.get(taskId) || taskId;
                 const task = result.find(t => t.id === resolvedId);
@@ -476,9 +460,6 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
         case 'clearDoneTasks':
             await clearDoneTasksRaw(p.projectId);
             break;
-        case 'initTask':
-            await initTaskRaw(p.projectId, taskId);
-            break;
         case 'startTask':
             await startTaskRaw(p.projectId, taskId);
             break;
@@ -487,9 +468,6 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
             break;
         case 'stopTask':
             await stopTaskRaw(p.projectId, taskId);
-            break;
-        case 'retryTask':
-            await retryTaskRaw(p.projectId, taskId);
             break;
         case 'resumeTask':
             await resumeTaskRaw(p.projectId, taskId);
@@ -516,6 +494,8 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
             await resetProjectStatsRaw(p.projectId, p.modelName, p.providerName);
             break;
         default: {
+            // The queue is persisted, so a type deleted from ActionType in a later build can still be
+            // read from disk. It leaves the queue unexecuted rather than blocking the flush.
             const _exhaustive: never = action.type as never;
             console.warn('[Queue] Unknown action type:', _exhaustive);
         }
@@ -721,12 +701,6 @@ async function startSubtaskRaw(projectId: string, taskId: string): Promise<Task>
 async function stopTaskRaw(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/stop`, { method: 'POST' });
     if (!res.ok) throw await apiError(res, t('api.stopTask'));
-    return res.json();
-}
-
-async function retryTaskRaw(projectId: string, taskId: string): Promise<Task> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/retry`, { method: 'POST' });
-    if (!res.ok) throw await apiError(res, t('api.retryTask'));
     return res.json();
 }
 

@@ -791,7 +791,6 @@ const catalog = {
     'api.startTask': 'Failed to start task',
     'api.startSubtask': 'Failed to start subtask',
     'api.stopTask': 'Failed to stop task',
-    'api.retryTask': 'Failed to retry task',
     'api.resumeTask': 'Failed to resume task',
     'api.sendMessage': 'Failed to send message',
     'api.createMessage': 'Failed to create message',
@@ -1165,7 +1164,6 @@ const catalog = {
     'chat.form.removeImage': 'Remove image',
     'chat.form.stop': 'Stop generation',
     'chat.form.send': 'Send message',
-    'chat.form.couldNotRead': 'Could not read {name}',
 
     // ── Chat/ModelSelector.svelte ──
     // The Agent / Provider fallbacks reuse settings.provider.*Fallback — one key
@@ -1427,7 +1425,6 @@ const catalog = {
     // ── Wrapped phrases ──
     // Templates, not a "Built " prefix: the position of the date belongs to the pack.
     'time.built': 'Built {when}',
-    'time.saved': 'Saved {when}',
 
     // ── The first-run language offer ──
     'i18n.offer.question': 'Read MIKE in {language}?',

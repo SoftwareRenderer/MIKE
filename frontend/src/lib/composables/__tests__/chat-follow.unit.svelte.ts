@@ -342,7 +342,7 @@ describe('createChatFollow — who is driving the viewport', () => {
 
     it('re-engages when the user scrolls back to the bottom', () => {
         const follow = createChatFollow();
-        const { el, state } = makeScroller(2000, 500);
+        const { el } = makeScroller(2000, 500);
         follow.attach(el, null);
         pinFrames();
         follow.noteUserIntent();
@@ -381,6 +381,27 @@ describe('createChatFollow — atBottom truthfulness', () => {
         expect(isAtBottom(el)).toBe(true);
         state.top = state.scrollHeight - state.clientHeight - SCROLL_BOTTOM_THRESHOLD;
         expect(isAtBottom(el)).toBe(false);
+    });
+
+    it('takes a threshold from the caller when its pane is not the chat', () => {
+        const { el, state } = makeScroller(2000, 500);
+        state.top = state.scrollHeight - state.clientHeight - (SCROLL_BOTTOM_THRESHOLD + 20);
+        expect(isAtBottom(el)).toBe(false);
+        expect(isAtBottom(el, { threshold: SCROLL_BOTTOM_THRESHOLD + 40 })).toBe(true);
+    });
+
+    it('measures an explicit total height when the element cannot see its own content', () => {
+        // A virtual list: the spacer is rows × rowHeight, while the element's scrollHeight is only
+        // the height of the rows it rendered. Measuring the element would report the bottom always.
+        const { el, state } = makeScroller(280, 200);
+        state.top = 80;
+        expect(distanceFromBottom(el)).toBe(0);
+        expect(isAtBottom(el)).toBe(true);
+
+        const totalHeight = 5000;
+        expect(distanceFromBottom(el, totalHeight)).toBe(4720);
+        expect(isAtBottom(el, { totalHeight })).toBe(false);
+        expect(isAtBottom(el, { totalHeight, threshold: 4800 })).toBe(true);
     });
 });
 

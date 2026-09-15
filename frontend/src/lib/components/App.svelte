@@ -251,7 +251,6 @@
         }
     }
     let projectCounts: Record<string, { backlog: number; in_progress: number; review: number }> = $state({});
-    let taskDiffStats: Record<string, { hash: string; files: number; additions: number; deletions: number }> = $state({});
     // Cached done-task diff stats, keyed "<projectId>:<taskId>". Done-task diffs
     // are immutable (pinned BaseCommit..BranchTip), so entries persist in
     // IndexedDB across sessions: on project subscribe they're declared via
@@ -354,7 +353,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         appStore.persistSidebarCollapsed();
     });
     $effect(() => { const v = appStore.config; if (v) cfg = v; });
-    $effect(() => { if (taskDiffStatsContext) taskDiffStats = get(taskDiffStatsContext); });
 
     // Manage task-level WebSocket subscription for real-time streaming events.
     // Subscribes when a task is selected, unsubscribes only when switching to a
@@ -457,7 +455,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: 'task-explorer' }, false, true);
     }
 
-    // Route a go-to-definition jump
     async function routeDefinitionJump(event: Event): Promise<void> {
         const detail = (event as CustomEvent<{ path: string; line?: number; taskId?: string }>).detail;
         // Project jumps are heard by the project explorer, which owns the only
@@ -492,7 +489,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 projectCounts = counts;
             },
             onRefresh: () => refreshBoard(),
-            onDiffStats: (task_id, hash, short_stat, files_n, untracked_n, untracked_lines, tracked_add, tracked_del, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged) => {
+            onDiffStats: (task_id, hash, _short_stat, files_n, untracked_n, untracked_lines, tracked_add, tracked_del, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged) => {
                 const additions = tracked_add + (untracked_lines || 0);
                 const deletions = tracked_del;
                 const stats: DiffStatsEntry = { hash: hash || '', files: files_n, additions, deletions, untracked_n: untracked_n || 0, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged };
@@ -644,7 +641,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             // Flush queued actions via HTTP immediately (don't wait for WebSocket to connect)
             flushQueueNow();
             // After offline queue is flushed, replace optimistic tasks with real ones from HTTP responses
-            onQueueFlushed((optimisticIds, resolvedTasks) => {
+            onQueueFlushed((_optimisticIds, resolvedTasks) => {
                 // Replace optimistic tasks with their latest real state
                 // resolvedTasks has: optimisticId → createTask result, AND realId → latest update (start/move/etc.)
                 tasks = tasks.map(t => {
@@ -706,9 +703,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     // Initialize context providers
     const { taskDiffStats: taskDiffStatsContext } = createTaskDiffContext();
     const commitQueueStatusContext = createCommitQueueContext();
-    const expandedTasksContext = createExpandedTasksContext();
+    createExpandedTasksContext();
     const taskEventContext = createTaskEventContext();
-    const streamingIdsContext = createStreamingContext();
+    createStreamingContext();
 
     async function hasCachedProjects(): Promise<boolean> {
         try {
@@ -843,7 +840,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onExtensionChange: handleExtensionChange,
         });
         setAppStreamRef(appStream);
-        const mirror = await getBoardCacheEntry<Project[]>('projects').catch(() => null);
+        const mirror = await getBoardCacheEntry('projects').catch(() => null);
         if (mirror) lastSyncedAt = mirror.cachedAt;
         await loadAppData(); // sets initialLoadComplete on completion
         isLoadingAuth = false; // hide loading screen after data is loaded
@@ -985,7 +982,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     async function showCachedBoard(projectId: string): Promise<void> {
         let entry: { data: unknown; cachedAt: number } | null = null;
         try {
-            entry = await getBoardCacheEntry<BoardData>(boardCacheKey(projectId));
+            entry = await getBoardCacheEntry(boardCacheKey(projectId));
         } catch {
             return; // no cache to show — the live board is the first paint
         }
@@ -1325,7 +1322,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
     }
 
-    function openSandboxConfig(p: Project) {
+    function openSandboxConfig(_p: Project) {
         uiStore.showSandboxConfig = true;
     }
 
@@ -1471,7 +1468,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         taskPath={cfg?.workspace_dir ? `${cfg.workspace_dir}/${currentProject.id}/${appStore.selectedTask.id}` : ''}
                         taskBranch={appStore.selectedTask.branch || ''}
                         taskStatus={appStore.selectedTask.status || ''}
-                        currentBranch={currentBranch}
                         sandboxEnabled={currentProject.sandbox_enabled ?? false}
                         fsEventQueue={fsEventQueue}
                         onOpenTerminal={openTerminal}

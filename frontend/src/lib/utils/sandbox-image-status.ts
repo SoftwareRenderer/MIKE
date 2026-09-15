@@ -19,7 +19,7 @@ export interface SandboxImageStatusEvent {
 }
 
 /** What the UI shows. `working` covers both building and pulling. */
-export type SandboxImagePhase = 'idle' | 'working' | 'done' | 'failed';
+type SandboxImagePhase = 'idle' | 'working' | 'done' | 'failed';
 
 export interface SandboxImageState {
     phase: SandboxImagePhase;

@@ -1,13 +1,13 @@
 <script lang="ts">
     import type { Task } from '$lib/types';
-    import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
+    import { AGENT_URL_PREFIX } from '$lib/types';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { MultiSelect } from '$lib/composables/use-multi-select.svelte';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { resolveWorker, getModelName, getProviderDisplayName, displayModelName } from '$lib/utils/providers';
     import { getStreamingContext, getTaskDiffStatsContext } from '$lib/context';
     import Card from './Card.svelte';
-    import { moveTask, updateTask, stopTask, resumeTask, deleteTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
+    import { moveTask, stopTask, resumeTask, deleteTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
     import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     import { useMemoryAlert } from '$lib/composables/use-memory-alert.svelte';
     import { memoryAlertSentences, projectMemoryLimitMB } from '$lib/utils/memory-stats';
@@ -973,7 +973,6 @@
         cursor: grab;
         position: relative;
         transition: border-color 0.15s ease;
-        --depth: 0;
         user-select: none;
         -webkit-user-select: none;
         -webkit-user-drag: element;

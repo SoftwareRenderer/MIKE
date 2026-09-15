@@ -84,8 +84,6 @@ func (s *Store) GetProjectStats(projectID string) (*types.ProjectStats, error) {
 	if totalGenMs > 0 {
 		stats.AvgGenerationTps = float64(totalGeneratedWithTiming) * 1000.0 / float64(totalGenMs)
 	}
-	stats.TotalProcessedTokensWithTiming = int(totalProcessedWithTiming)
-	stats.TotalGeneratedTokensWithTiming = int(totalGeneratedWithTiming)
 
 	// Compute task_count per model from cumulative task tracking table.
 	taskRows, err := s.db.Query(`

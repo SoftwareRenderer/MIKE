@@ -2,7 +2,7 @@ import { t } from '$lib/i18n';
 import type { MemoryAlertAckPayload, Project, SandboxMemoryStats, Task } from '$lib/types';
 
 /** Fraction of the memory limit at which the sandbox is considered "close". */
-export const MEMORY_WARNING_RATIO = 0.8;
+const MEMORY_WARNING_RATIO = 0.8;
 
 /** The limit a project predating the field runs with, which is what its settings show. */
 export const DEFAULT_MEMORY_LIMIT_MB = 1024;
@@ -14,7 +14,7 @@ export function projectMemoryLimitMB(project: Pick<Project, 'sandbox_memory_limi
 }
 
 /** The words for "no limit enforced" — a function, since a module value freezes the language. */
-export function noMemoryLimitLabel(): string {
+function noMemoryLimitLabel(): string {
     return t('memory.noLimit');
 }
 
@@ -75,7 +75,7 @@ export interface MemoryAlertAck {
 /** A task row's memory record: its last run's numbers and the alert dismissed. */
 export type TaskMemoryRecord = Pick<Task, 'sandbox_memory_peak_mb' | 'sandbox_oom_kills' | 'memory_alert_ack'>;
 
-export function memoryAlertAckOf(task: TaskMemoryRecord | null | undefined): MemoryAlertAck | null {
+function memoryAlertAckOf(task: TaskMemoryRecord | null | undefined): MemoryAlertAck | null {
     const stored = task?.memory_alert_ack;
     if (!stored) return null;
     return { peakMB: stored.peak_mb, oomKills: stored.oom_kills, limitMB: stored.limit_mb };

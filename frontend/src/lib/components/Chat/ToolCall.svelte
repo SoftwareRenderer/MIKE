@@ -3,6 +3,7 @@
     import { getToolDisplayName } from '$lib/types';
     import { buildModifiedSegments } from '$lib/utils/diff-parser';
     import { slide } from 'svelte/transition';
+    import { isAtBottom } from '$lib/composables/use-chat-follow.svelte';
     import Icon from '$lib/components/Icon.svelte';
     import shieldGreenIcon from '$lib/assets/icons/shield-green.svg?raw';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
@@ -108,10 +109,8 @@
             : ''
     );
 
-    // Pending-tool-call progress line. Every variant is one message: the `: {path}` / `: {bytes}`
-    // clauses the markup used to bolt onto a bare word are part of the copy now, so a language
-    // that puts them elsewhere can say so. `bash` before its command is complete deliberately
-    // falls through to the generic "Writing" branch, exactly as the original condition chain did.
+    // Pending-tool-call progress line: one message per variant, placeholders included, so a language
+    // that puts them elsewhere can say so. `bash` before its command is complete falls through to "Writing".
     let progressText = $derived.by(() => {
         // The elapsed line measures the tool running, so it waits for the tool: while a write is
         // still generating its content, the filename is what the line has to say.
@@ -213,14 +212,11 @@
         }
     }
 
-    /** Check if user is near the bottom (within 60px). */
-    function isNearBottom(el: HTMLPreElement): boolean {
-        return el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-    }
-
+    // The pane is 120px of 12px mono (~6 lines), so the shared slack is about two lines: scrolled
+    // up further than that, the reader keeps their place while the streamed output grows.
     function handleResultScroll() {
         if (scrollEl) {
-            userScrolledUp = !isNearBottom(scrollEl);
+            userScrolledUp = !isAtBottom(scrollEl);
         }
     }
 

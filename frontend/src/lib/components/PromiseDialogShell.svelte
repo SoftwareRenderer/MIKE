@@ -1,0 +1,70 @@
+<script lang="ts">
+    /**
+     * The shell a promise-backed dialog draws: overlay, title, body, and a footer whose two buttons
+     * are the only two answers the dialog has. Which request is pending, and what answering it
+     * resolves, is `usePromiseDialog`'s; this component holds no state of its own.
+     *
+     * `.btn-cancel` / `.btn-confirm` stay on the buttons because the e2e specs click them by name;
+     * `modalClass` carries this shell's marker so the shared stylesheet can reach its buttons without
+     * claiming those two names for the whole app.
+     */
+    import type { Snippet } from 'svelte';
+    import BaseModal from './BaseModal.svelte';
+
+    let {
+        open,
+        title,
+        width = '320px',
+        bodyPadding = '12px 16px 0',
+        cancelLabel,
+        confirmLabel,
+        variant = 'default',
+        onConfirm,
+        onCancel,
+        children,
+    }: {
+        open: boolean;
+        title: string;
+        width?: string;
+        /** The body's own padding; the flex and overflow every one of these wants is added here. */
+        bodyPadding?: string;
+        cancelLabel: string;
+        confirmLabel: string;
+        variant?: 'default' | 'destructive';
+        onConfirm: () => void;
+        onCancel: () => void;
+        children?: Snippet;
+    } = $props();
+</script>
+
+{#if open}
+    {#snippet header({ title }: { title: string })}
+        <h2 style="font-size: 0.9375rem;">{title}</h2>
+    {/snippet}
+
+    {#snippet footer()}
+        <button type="button" class="btn-cancel" onclick={onCancel}>{cancelLabel}</button>
+        <button type="button" class="btn-confirm" class:destructive={variant === 'destructive'} onclick={onConfirm}>
+            {confirmLabel}
+        </button>
+    {/snippet}
+
+    <BaseModal
+        {title}
+        {width}
+        zIndex={1000}
+        modalClass="promise-dialog"
+        {header}
+        {footer}
+        onClose={onCancel}
+        headerStyle="padding: 12px 16px;"
+        bodyStyle="padding: {bodyPadding}; flex: 0 0 auto; overflow: visible;"
+        footerStyle="margin-top: 12px; padding: 12px 16px; gap: 6px;"
+    >
+        {@render children?.()}
+    </BaseModal>
+{/if}
+
+<style>
+    @import '$lib/styles/promise-dialog.css';
+</style>

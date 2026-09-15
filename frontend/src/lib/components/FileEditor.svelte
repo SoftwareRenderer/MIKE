@@ -307,8 +307,6 @@
         }
         lspRetryCount = 0;
     }
-    // svelte-ignore non_reactive_update — DOM ref via bind:this
-    let searchVisible = $state(false);
     let searchApp: any = null;
     // svelte-ignore non_reactive_update — focus callback registered by CustomSearchPanel
     let searchFocusFind: (() => void) | null = null;
@@ -376,7 +374,6 @@
             return;
         }
         if (!view || !searchContainerEl) return;
-        searchVisible = true;
         const editorView = view;
         requestAnimationFrame(() => {
             if (searchContainerEl && !searchApp) {
@@ -386,7 +383,6 @@
                         view: editorView,
                         onFocusFind: (fn) => { searchFocusFind = fn; },
                         onClose: () => {
-                            searchVisible = false;
                             unmount(searchApp);
                             searchApp = null;
                             searchFocusFind = null;
@@ -396,16 +392,6 @@
                 });
             }
         });
-    }
-
-    function closeSearchPanel() {
-        searchVisible = false;
-        if (searchApp) {
-            unmount(searchApp);
-            searchApp = null;
-        }
-        searchFocusFind = null;
-        view?.focus();
     }
 
     // Custom keymap to replace default search with our panel + save shortcut
@@ -558,7 +544,7 @@
                     // Only capture user edits (not programmatic changes during restore).
                     if (!(view as any).__restoring) {
                         const deltas: { from: number; to: number; insert: string }[] = [];
-                        update.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
+                        update.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
                             deltas.push({ from: fromA, to: toA, insert: inserted.toString() });
                         });
                         if (deltas.length > 0) {
@@ -1433,9 +1419,8 @@
         const _wsRoot = lspWorkspaceRoot;
         const _lspAvailable = lspAvailable;
 
-        // Only reconnect if we previously had a client but it's now disconnected
         if (!_lspClient || !_view || !_wsRoot || !_lspAvailable) return;
-        if (_lspReady || _lspClient.connected || _lspConnecting) return; // still connected or connecting
+        if (_lspReady || _lspClient.connected || _lspConnecting) return;
 
         async function reconnectLSP() {
             lspConnecting = true;

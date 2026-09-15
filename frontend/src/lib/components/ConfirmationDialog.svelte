@@ -1,109 +1,56 @@
 <script lang="ts">
-    import { onDestroy } from 'svelte';
     import { dialogStore } from '$lib/stores';
     import { t } from '$lib/i18n';
-    import BaseModal from './BaseModal.svelte';
+    import { usePromiseDialog } from '$lib/composables/use-promise-dialog.svelte';
+    import PromiseDialogShell from './PromiseDialogShell.svelte';
 
-    let open = $state(false);
     let title = $state('');
     let message = $state('');
     let items = $state<string[]>([]);
-    // null = the caller supplied no label, so the button renders the catalog
-    // default. Resolving it at render (not into state) is what lets the default
-    // follow a locale change while the dialog stays mounted.
-    let confirmText = $state<string | null>(null);
-    let cancelText = $state<string | null>(null);
     let variant = $state<'default' | 'destructive'>('destructive');
-    let resolveFn: ((value: boolean) => void) | null = $state(null);
+    // Only the absence of a caller's label is copy; usePromiseDialog says why the default resolves
+    // in a derived rather than into state.
+    let confirmOverride = $state<string | null>(null);
+    let cancelOverride = $state<string | null>(null);
+    let confirmText = $derived(confirmOverride ?? t('app.confirm.confirm'));
+    let cancelText = $derived(cancelOverride ?? t('app.cancel'));
 
-    function dismiss(value: boolean) {
-        open = false;
-        if (resolveFn) {
-            resolveFn(value);
-            resolveFn = null;
-        }
-        dialogStore.confirmation = null;
-    }
-
-    function handleConfirm() {
-        dismiss(true);
-    }
-
-    function handleCancel() {
-        dismiss(false);
-    }
-
-    function handleKeydown(e: KeyboardEvent) {
-        if (!open) return;
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            handleConfirm();
-        }
-    }
-
-    $effect(() => {
-        const value = dialogStore.confirmation;
-        if (value) {
+    const dialog = usePromiseDialog({
+        slot: {
+            get: () => dialogStore.confirmation,
+            clear: () => { dialogStore.confirmation = null; },
+        },
+        arm: (value) => {
             title = value.title;
             message = value.message;
             items = value.items ?? [];
-            confirmText = value.confirmText ?? null;
-            cancelText = value.cancelText ?? null;
+            confirmOverride = value.confirmText ?? null;
+            cancelOverride = value.cancelText ?? null;
             variant = value.variant ?? 'destructive';
-            resolveFn = value._resolve ?? null;
-            open = true;
-        }
-    });
-
-    $effect(() => {
-        window.addEventListener('keydown', handleKeydown);
-        return () => window.removeEventListener('keydown', handleKeydown);
+        },
     });
 </script>
 
-{#if open}
-    {#snippet header({ title }: { title: string })}
-        <h2 style="font-size: 0.9375rem;">{title}</h2>
-    {/snippet}
-
-    {#snippet footer()}
-        <button type="button" class="btn-cancel" onclick={handleCancel}>{cancelText ?? t('app.cancel')}</button>
-        <button type="button" class="btn-confirm" class:destructive={variant === 'destructive'} onclick={handleConfirm}>
-            {confirmText ?? t('app.confirm.confirm')}
-        </button>
-    {/snippet}
-
-    <BaseModal
-        title={title}
-        width="320px"
-        zIndex={1000}
-        header={header}
-        footer={footer}
-        onClose={handleCancel}
-        headerStyle="padding: 12px 16px;"
-        bodyStyle="padding: 12px 16px 0; flex: 0 0 auto; overflow: visible;"
-        footerStyle="margin-top: 12px; padding: 12px 16px; gap: 6px;"
-    >
-        <p class="confirm-message">{message}</p>
-        {#if items.length > 0}
-            <ul class="confirm-list">
-                {#each items as item}
-                    <li>{item}</li>
-                {/each}
-            </ul>
-        {/if}
-    </BaseModal>
-{/if}
+<PromiseDialogShell
+    open={dialog.open}
+    {title}
+    cancelLabel={cancelText}
+    confirmLabel={confirmText}
+    {variant}
+    onConfirm={dialog.confirm}
+    onCancel={dialog.cancel}
+>
+    <p class="confirm-message">{message}</p>
+    {#if items.length > 0}
+        <ul class="confirm-list">
+            {#each items as item}
+                <li>{item}</li>
+            {/each}
+        </ul>
+    {/if}
+</PromiseDialogShell>
 
 <style>
-    :global(.overlay) {
-        animation: fade-in 0.15s ease-out;
-    }
-    :global(.modal) {
-        animation: scale-in 0.15s ease-out;
-        padding: 4px;
-    }
-
     .confirm-message {
         font-size: 0.8125rem;
         color: var(--color-text-secondary);
@@ -117,56 +64,5 @@
         font-size: 0.8125rem;
         color: var(--color-text-secondary);
         line-height: 1.6;
-    }
-
-    .btn-cancel {
-        padding: 6px 14px;
-        border-radius: var(--radius-md);
-        border: none;
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        font-size: 0.875rem;
-        font-weight: 500;
-        font-family: inherit;
-        cursor: pointer;
-        transition: background 0.15s, opacity 0.15s;
-    }
-    .btn-cancel:hover {
-        background: var(--color-surface-4);
-    }
-
-    .btn-confirm {
-        padding: 6px 14px;
-        border-radius: var(--radius-md);
-        border: none;
-        background: var(--color-status-blue);
-        color: white;
-        font-size: 0.875rem;
-        font-weight: 500;
-        font-family: inherit;
-        cursor: pointer;
-        transition: background 0.15s, opacity 0.15s;
-    }
-    .btn-confirm:hover {
-        opacity: 0.85;
-    }
-    .btn-confirm.destructive {
-        background: var(--color-status-red-dark);
-    }
-
-    @keyframes fade-in {
-        from { opacity: 0; }
-        to { opacity: 1; }
-    }
-
-    @keyframes scale-in {
-        from {
-            opacity: 0;
-            transform: scale(0.95);
-        }
-        to {
-            opacity: 1;
-            transform: scale(1);
-        }
     }
 </style>

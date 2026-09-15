@@ -5,10 +5,10 @@ import { t } from '$lib/i18n';
 import { loadI18NFromExtensions } from '$lib/i18n/load-pack';
 
 /** Runtime status of an extension sandbox. */
-export type ExtensionStatus = 'running' | 'stopped' | 'error' | 'unknown';
+type ExtensionStatus = 'running' | 'stopped' | 'error' | 'unknown';
 
 /** ExtensionManager is a reactive singleton that manages extension state. */
-export class ExtensionManager {
+class ExtensionManager {
     state = $state({
         extensions: [] as Extension[],
         registry: [] as RegistryEntry[],
@@ -159,7 +159,6 @@ export class ExtensionManager {
         return this.state.extensions.find(ext => ext.name === name);
     }
 
-    /** Clear error. */
     clearError() {
         this.state.error = '';
     }

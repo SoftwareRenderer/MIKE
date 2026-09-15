@@ -34,10 +34,7 @@ export {
     CAP_UI_MODAL,
 } from './handlers/ui';
 export {
-    CAP_STORAGE_GET,
     CAP_STORAGE_SET,
-    CAP_STORAGE_DELETE,
-    CAP_STORAGE_LIST,
 } from './handlers/storage';
 export {
     CAP_EDITOR_ADD_FOOTER_BUTTON,
@@ -47,7 +44,6 @@ export {
     CAP_EDITOR_SET_CONTENT,
     CAP_EDITOR_SET_OVERLAY,
     CAP_EDITOR_CONTENT_CHANGE,
-    CAP_EDITOR_JUMP_TO_LINE,
     CAP_EDITOR_SAVE,
 } from './handlers/editor';
 export {

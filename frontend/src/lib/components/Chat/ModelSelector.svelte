@@ -3,6 +3,7 @@
     import { AGENT_URL_PREFIX } from '$lib/types';
     import { getModelName, getProviderDisplayName, providerRef, displayModelName } from '$lib/utils/providers';
     import { t } from '$lib/i18n';
+    import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
 
     interface Props {
         providers: Provider[];
@@ -232,21 +233,6 @@
         modelDropdownOpen = false;
     }
 
-    function handleClickOutside(e: MouseEvent) {
-        const target = e.target as Node;
-        if (providerDropdownOpen && providerTriggerEl && !providerTriggerEl.contains(target)) {
-            // Check if click is inside the portal dropdown
-            const portal = document.querySelector('.portal-provider-dropdown');
-            if (portal && portal.contains(target)) return;
-            providerDropdownOpen = false;
-        }
-        if (modelDropdownOpen && modelTriggerEl && !modelTriggerEl.contains(target)) {
-            const portal = document.querySelector('.portal-model-dropdown');
-            if (portal && portal.contains(target)) return;
-            modelDropdownOpen = false;
-        }
-    }
-
     function handleProviderKeydown(e: KeyboardEvent) {
         if (e.key === 'Escape') {
             providerDropdownOpen = false;
@@ -307,9 +293,14 @@
         }
     }
 
-    $effect(() => {
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
+    // Each dropdown is portalled out of this component, so its own node is a second inside region.
+    useClickOutside(() => providerTriggerEl, () => { providerDropdownOpen = false; }, {
+        event: 'mousedown',
+        alsoInside: () => [document.querySelector('.portal-provider-dropdown')],
+    });
+    useClickOutside(() => modelTriggerEl, () => { modelDropdownOpen = false; }, {
+        event: 'mousedown',
+        alsoInside: () => [document.querySelector('.portal-model-dropdown')],
     });
 
     // Measure and adjust dropdown positions after render

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { subtaskStatusFor, subtaskExecutionStateFor } from '$lib/utils/subtask-status';
+import { subtaskStatusFor, subtaskExecutionStateFor, createStatusLabel, type StatusColumn } from '$lib/utils/subtask-status';
+import { t, type MessageKey } from '$lib/i18n';
 
 // These mirror types.SubtaskStatusFor (Go), which decides the real thing. The frontend
 // copy exists so the optimistic card lands in the column the server will put it in —
@@ -34,5 +35,40 @@ describe('subtaskExecutionStateFor — the badge that goes with it', () => {
         expect(subtaskExecutionStateFor('backlog')).toBe('');
         expect(subtaskExecutionStateFor('done')).toBe('');
         expect(subtaskExecutionStateFor(undefined)).toBe('');
+    });
+});
+
+/** The board's four columns, as the board itself declares them. */
+const boardColumns: StatusColumn[] = [
+    { id: 'backlog', labelKey: 'board.column.backlog' },
+    { id: 'in_progress', labelKey: 'board.column.inProgress' },
+    { id: 'review', labelKey: 'board.column.review' },
+    { id: 'done', labelKey: 'board.column.done' },
+];
+
+describe('createStatusLabel — the word a status is shown with', () => {
+    it('names a known id with its own column heading', () => {
+        const statusLabel = createStatusLabel(boardColumns);
+        expect(statusLabel('backlog')).toBe(t('board.column.backlog'));
+        expect(statusLabel('in_progress')).toBe(t('board.column.inProgress'));
+        expect(statusLabel('review')).toBe(t('board.column.review'));
+        expect(statusLabel('done')).toBe(t('board.column.done'));
+    });
+
+    it('echoes an id the table does not know instead of naming a column for it', () => {
+        // Guessing a column for an id the view does not have would say the wrong thing in every
+        // locale; the id itself is at least what the server sent.
+        const statusLabel = createStatusLabel(boardColumns);
+        expect(statusLabel('archived')).toBe('archived');
+        expect(statusLabel('archived')).not.toBe(t('board.column.done'));
+        expect(statusLabel('')).toBe('');
+    });
+
+    it('answers from the table it was handed', () => {
+        // The task view labels the same four ids from its own section table, and a view with other
+        // ids gets its own words rather than the board's.
+        const sections = createStatusLabel([{ id: 'todo', labelKey: 'board.column.review' satisfies MessageKey }]);
+        expect(sections('todo')).toBe(t('board.column.review'));
+        expect(sections('backlog')).toBe('backlog');
     });
 });

@@ -108,36 +108,6 @@
         }
     });
 
-    /** Scroll to the bottom of the list. */
-    function scrollToBottom() {
-        if (scrollEl) {
-            // Buffer past estimated height; browser clamps to actual max.
-            scrollEl.scrollTop = totalHeight + 10000;
-        }
-    }
-
-    /** Scroll to a specific offset. */
-    function scrollToOffset(top: number, behavior: ScrollBehavior = 'auto') {
-        if (scrollEl) {
-            scrollEl.scrollTo({ top, behavior });
-        }
-    }
-
-    /** Check if the scroll container is near the bottom. */
-    function isNearBottom(threshold = 32): boolean {
-        if (!scrollEl) return true;
-        const gap = totalHeight - scrollEl.scrollTop - scrollEl.clientHeight;
-        return gap < threshold;
-    }
-
-    /** Scroll to a specific item index. */
-    function scrollToItem(index: number, behavior: ScrollBehavior = 'auto') {
-        if (index < 0 || index >= items.length) return;
-        scrollToOffset(index * itemHeight, behavior);
-    }
-
-    // Expose methods and state for parent access
-    export { scrollEl as scrollElement, scrollToBottom, scrollToOffset, isNearBottom, scrollToItem };
 </script>
 
 {#if virtualized}

@@ -3,12 +3,8 @@
     import { appStore } from '$lib/stores';
     import { effectiveStartTaskKey, formatShortcut, shortcutHintsHidden } from '$lib/utils/keyboard';
     import ModelSelector from './ModelSelector.svelte';
+    import ModeToggle from './ModeToggle.svelte';
     import { t } from '$lib/i18n';
-
-    /** Tooltip for the mode toggle; the mode value itself is data, this is copy. */
-    function modeTip(mode: string): string {
-        return mode === 'act' ? t('chat.mode.actTip') : mode === 'plan' ? t('chat.mode.planTip') : t('chat.mode.exploreTip');
-    }
 
     // Start Task shortcut hint (empty = disabled).
     const startShortcutLabel = $derived.by(() => {
@@ -56,28 +52,7 @@
             />
         {/if}
         {#if !isAgentSelected()}
-        <button
-            type="button"
-            class="btn-plan-toggle"
-            class:active={operatingMode === 'plan'}
-            class:explore={operatingMode === 'explore'}
-            onclick={onOperatingModeToggle}
-            title={modeTip(operatingMode)}
-            aria-label={t('chat.mode.toggleAria')}
-        >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                {#if operatingMode === 'plan'}
-                    <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                {:else if operatingMode === 'explore'}
-                    <path d="M4 6a4 4 0 1 1 8 0c0 2.5-2 3.5-2 3.5v1h-4v-1s-2-1-2-3.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-                    <path d="M6 10h4v1.5H6Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-                    <path d="M6.5 12.5h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                {:else}
-                    <path d="M3 8l4 4L13 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                {/if}
-            </svg>
-            <span>{operatingMode === 'plan' ? t('chat.mode.plan') : operatingMode === 'explore' ? t('chat.mode.explore') : t('chat.mode.act')}</span>
-        </button>
+        <ModeToggle variant="panel" mode={operatingMode} onToggle={onOperatingModeToggle} />
         {/if}
     </div>
     <button class="btn-start-task" onclick={onStartTask} disabled={isStarting || disabled || (providers.length > 0 && !selectedModel)} title={startShortcutLabel ? t('chat.start.titleWithShortcut', { shortcut: startShortcutLabel }) : t('chat.start.title')}>
@@ -106,34 +81,6 @@
         display: flex;
         align-items: center;
         gap: 12px;
-    }
-    .btn-plan-toggle {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 6px 12px;
-        border-radius: var(--radius-sm);
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        font-size: 0.8125rem;
-        font-weight: 500;
-        cursor: pointer;
-        border: none;
-        font-family: inherit;
-    }
-    .btn-plan-toggle:hover {
-        background: var(--color-surface-4);
-    }
-    .btn-plan-toggle.active {
-        padding: 4px 10px;
-        background: var(--color-surface-3);
-        border: 1px solid var(--color-accent-light);
-        color: var(--color-accent-light);
-    }
-    .btn-plan-toggle.explore {
-        padding: 4px 10px;
-        border: 1px solid var(--color-status-yellow);
-        color: var(--color-status-yellow);
     }
     .btn-start-task {
         display: inline-flex;

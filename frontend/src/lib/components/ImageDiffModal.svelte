@@ -1,6 +1,6 @@
 <script lang="ts">
     import BaseModal from './BaseModal.svelte';
-    import { rawFileURL } from '$lib/api/fs';
+    import { rawFileURL } from '$lib/api';
     import { t } from '$lib/i18n';
 
     /**
