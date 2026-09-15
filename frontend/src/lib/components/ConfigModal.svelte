@@ -1091,6 +1091,7 @@
         padding: 8px 12px;
         color: var(--color-text-secondary);
         user-select: all;
+        overflow-wrap: break-word;
     }
     .field-label-inline {
         font-size: 0.875rem;
