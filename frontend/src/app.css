@@ -44,18 +44,12 @@ input[type="number"] {
     --color-bg-page: #0d1117;
     --color-bg-card: #161b22;
     --color-bg-input: #0d1117;
-    --color-bg-hover: rgba(255, 255, 255, 0.04);
-    --color-bg-active: rgba(255, 255, 255, 0.08);
-    --color-bg-modal-overlay: rgba(0, 0, 0, 0.6);
-    --color-bg-dropdown: #161b22;
-    --color-bg-tooltip: #161b22;
 
     /* Borders */
     --color-border: rgba(255, 255, 255, 0.1);
     --color-border-subtle: #21262d;
     --color-border-bright: rgba(255, 255, 255, 0.2);
     --color-border-hover: #484f58;
-    --color-border-focus: #58a6ff;
 
     /* Text */
     --color-text-primary: #ECECEC;
@@ -70,7 +64,6 @@ input[type="number"] {
     --color-accent-hover: #0066DD;
     --color-accent-light: #60a5fa;
     --color-accent-bg: rgba(88, 166, 255, 0.15);
-    --color-accent-bg-hover: rgba(88, 166, 255, 0.25);
 
     /* Status colors */
     --color-status-blue: #4C9AFF;
@@ -84,12 +77,6 @@ input[type="number"] {
     --color-status-yellow: #E3B341;
     --color-status-amber: #f0c040;
     --color-warning: #d29922;
-    --color-status-bg-blue: rgba(76, 154, 255, 0.15);
-    --color-status-bg-green: rgba(63, 185, 80, 0.15);
-    --color-status-bg-orange: rgba(210, 153, 34, 0.15);
-    --color-status-bg-purple: rgba(163, 113, 247, 0.15);
-    --color-status-purple-subtle: rgba(163, 113, 247, 0.2);
-    --color-status-purple-faint: rgba(163, 113, 247, 0.07);
 
     /* Column colors */
     --color-column-backlog: #99AAB5;
@@ -101,27 +88,17 @@ input[type="number"] {
     --color-btn-primary-bg: #238636;
     --color-btn-primary-hover: #2ea043;
     --color-btn-secondary-bg: #21262d;
-    --color-btn-secondary-hover: #30363d;
-    --color-btn-danger: #f85149;
     --color-btn-text: #ffffff;
     --color-toggle-knob: #E0E0E0;
 
     /* Selection */
     --color-selection-bg: #2a4060;
 
-    /* Diff */
-    --color-diff-add-bg: rgba(63, 185, 80, 0.15);
-    --color-diff-add-text: #3fb950;
-    --color-diff-del-bg: rgba(248, 81, 73, 0.15);
-    --color-diff-del-text: #f85149;
-    --color-diff-hunk-bg: rgba(88, 166, 255, 0.1);
-
     /* CodeMirror syntax (dark) */
     --cm-keyword: #F97583;
     --cm-keyword-const: #79C0FF;
     --cm-function: #D2A8FF;
     --cm-variable: #C9D1D9;
-    --cm-property: #D2A8FF;
     --cm-string: #A5D6FF;
     --cm-number: #79C0FF;
     --cm-comment: #8B949E;
@@ -132,21 +109,10 @@ input[type="number"] {
     --cm-bracket-1: #DA70D6;
     --cm-bracket-2: #179FFF;
     --cm-class: #FFA657;
-    --cm-type: #39D2C0;
     --cm-tag: #7EE787;
     --cm-attr-name: #79C0FF;
-    --cm-attr-value: #A5D6FF;
-    --cm-gutter-bg: #161b22;
-    --cm-gutter-text: #484F58;
-    --cm-gutter-active: #8B949E;
-    --cm-indent-guide: #21252B;
-    --cm-cursor: #C9D1D9;
-    --cm-search-match: rgba(232, 164, 20, 0.25);
-    --cm-search-match-outline: rgba(232, 164, 20, 0.5);
-    --cm-search-match-selected: rgba(232, 164, 20, 0.4);
 
     /* Misc */
-    --color-overlay: rgba(0, 0, 0, 0.5);
     --color-backdrop: rgba(0, 0, 0, 0.4);
     --color-alert-bg: #550000;
     --color-alert-text: #d6d3d1;

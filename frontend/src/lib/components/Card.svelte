@@ -973,7 +973,6 @@
         cursor: grab;
         position: relative;
         transition: border-color 0.15s ease;
-        --depth: 0;
         user-select: none;
         -webkit-user-select: none;
         -webkit-user-drag: element;
