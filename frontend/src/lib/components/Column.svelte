@@ -158,6 +158,11 @@
             scroll-snap-align: center;
         }
     }
+    @media (hover: none) and (min-width: 769px) {
+        .column {
+            min-width: 340px;
+        }
+    }
     .column-header {
         display: flex;
         align-items: center;
