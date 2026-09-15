@@ -194,6 +194,17 @@ no caller in `src/`; the clipboard stays, the terminal pastes with it) **and**
 subresources: `/extensions/` and `/api/preview/{token}/{path...}` (`isOpaqueOriginAsset`). Marking those
 breaks the extension iframe and the preview's own assets.
 
+`CompressMiddleware` puts a strong ETag — a digest of the body — on every GET it buffers, and answers
+`If-None-Match` with a 304 that repeats the `ETag` and whatever `Cache-Control` the handler set. A
+handler that sets its **own** `ETag` therefore loses the 304: the middleware skips the `If-None-Match`
+check when a tag is already there. What a handler decides is the lifetime, and the extension lists
+decide `Cache-Control: no-cache` — "keep a copy, ask before showing it" — so Settings → Extensions →
+Browse can paint from a stored index only after this server agreed it has not moved
+(`HandleList`, `HandleRegistryIndex`, `HandleLocalExtensions`). An answer holding arbitrary extension
+data is not worth storing anywhere, so `GET /api/extensions/{id}/storage` declares no lifetime at all.
+SSE and `GET /api/fs/raw` image bytes are passed through unbuffered and carry no ETag.
+Tests: `backend/server/handler_headers_test.go`, `backend/server/compress_test.go`.
+
 ## WebSocket upgrades
 
 The terminal WebSocket verifies `Origin` in `httputil.AcceptWS` (`backend/httputil/ws.go`), which every

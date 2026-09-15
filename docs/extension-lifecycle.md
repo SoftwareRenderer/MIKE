@@ -64,6 +64,12 @@ load from it, and `GET /api/extensions/local` lists it as installable.
   fallback, so `uiInjector.registerFromExtensions` drops the `kanban-extensions` cache whenever the
   installed set moved (`services/sw-cache.ts`) — a cached body is the extension's *previous* code, running
   in a frame the host armed and granted.
+- That cache covers the `/extensions/` tree and nothing else. The matchers are
+  `frontend/scripts/sw-routes.ts` — workbox answers with the **first** matching route, and it reads no
+  `Cache-Control` (`cacheableResponse`'s status list is the only gate), so which URLs the worker takes
+  over is decided there and nowhere else. `/api/extensions/...` is not the tree: `NetworkFirst` answers
+  from the stored body whenever the network is slow, and an API answer about what is installed has no
+  usable old version. Tests: `src/lib/services/__tests__/sw-routes.unit.ts`.
 - A deleted row with its files still present is a deleted extension that keeps executing and returns under
   its own name with the manifest it was installed with.
 - `removeExtensionFiles` (`backend/extensions/remove.go`) derives the path from the **stored record**

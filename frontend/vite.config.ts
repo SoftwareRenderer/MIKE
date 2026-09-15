@@ -4,6 +4,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
 // The extension is load-bearing: `configLoader: 'native'` resolves specifiers verbatim.
 import { buildIdPlugin } from './scripts/build-id.ts';
+import { isAppShellAsset, isExtensionAsset } from './scripts/sw-routes.ts';
 
 export default defineConfig({
     plugins: [
@@ -49,7 +50,7 @@ export default defineConfig({
                         // shipped in an extension update reaches the client immediately,
                         // with the cache as the offline fallback (not the other way round:
                         // CacheFirst would pin a revoked/fixed extension for the whole TTL).
-                        urlPattern: ({ url }) => url.origin === self.location.origin && url.pathname.includes('/extensions/'),
+                        urlPattern: isExtensionAsset,
                         handler: 'NetworkFirst',
                         options: {
                             cacheName: 'kanban-extensions',
@@ -69,16 +70,7 @@ export default defineConfig({
                         // Same-origin only, and no opaque responses: a CacheFirst entry
                         // keyed by URL would otherwise serve a cross-origin opaque body to
                         // any later request for the same URL, for the full TTL.
-                        urlPattern: ({ url }) => {
-                            if (url.origin !== self.location.origin) return false;
-                            const href = url.href;
-                            // Never cache or intercept API requests — let them fail naturally
-                            // so the offline queue in queue.ts takes over
-                            if (href.includes('/api/')) return false;
-                            // Extension assets have their own rule above
-                            if (url.pathname.includes('/extensions/')) return false;
-                            return true;
-                        },
+                        urlPattern: isAppShellAsset,
                         handler: 'CacheFirst',
                         options: {
                             cacheName: 'kanban-app-shell',
