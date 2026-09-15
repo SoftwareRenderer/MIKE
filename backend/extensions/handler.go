@@ -165,6 +165,13 @@ func (h *ExtensionHandler) mountPolicy() *MountPolicy {
 	return newMountPolicy(mountRoots(extDir, "", nil, nil))
 }
 
+// revalidateListBeforeUse lets a client keep an extension list answer but not show it without asking
+// first. The ETag it revalidates against is `CompressMiddleware`'s digest of the body, so a handler
+// that set its own ETag would take the 304 away instead of gaining one.
+func revalidateListBeforeUse(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-cache")
+}
+
 // HandleList returns all installed extensions with runtime status.
 func (h *ExtensionHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 
@@ -189,6 +196,7 @@ func (h *ExtensionHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		result[i] = h.toResponse(&ext, statuses)
 	}
 
+	revalidateListBeforeUse(w)
 	httputil.JSONResponse(w, http.StatusOK, result)
 }
 
@@ -733,6 +741,7 @@ func (h *ExtensionHandler) HandleLocalExtensions(w http.ResponseWriter, r *http.
 		index = append(index, localRegistryEntry(le))
 	}
 
+	revalidateListBeforeUse(w)
 	httputil.JSONResponse(w, http.StatusOK, index)
 }
 
@@ -748,6 +757,7 @@ func (h *ExtensionHandler) HandleRegistryIndex(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	revalidateListBeforeUse(w)
 	httputil.JSONResponse(w, http.StatusOK, index)
 }
 

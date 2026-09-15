@@ -286,6 +286,15 @@
         }
     }
 
+    // Open Browse and refresh both of its lists. The registry is always refetched: the server answers
+    // it `no-cache`, so an index that has not moved comes back as a 304 rather than as a second fetch
+    // of the same content.
+    function openBrowse() {
+        activeView = 'browse';
+        loadLocalExtensions();
+        loadRegistry();
+    }
+
     // Remove a per-extension progress entry (reactive reassignment).
     function clearBuildProgress(name: string) {
         const next = { ...buildProgress };
@@ -682,7 +691,7 @@
                 <button
                     class="view-tab"
                     class:active={activeView === 'browse'}
-                    onclick={() => { activeView = 'browse'; loadLocalExtensions(); if (registryEntries.length === 0) loadRegistry(); }}
+                    onclick={openBrowse}
                 >
                     {t('settings.extensions.browse')}
                 </button>
@@ -775,7 +784,7 @@
                 <div class="empty-state">
                     <p>{t('settings.extensions.noneInstalled')}</p>
                     <p class="help">{t('settings.extensions.noneInstalledHelp')}</p>
-                    <button class="btn btn-primary" onclick={() => { activeView = 'browse'; loadLocalExtensions(); loadRegistry(); }}>
+                    <button class="btn btn-primary" onclick={openBrowse}>
                         {t('settings.extensions.browse')}
                     </button>
                 </div>

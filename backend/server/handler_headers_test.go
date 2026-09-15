@@ -4,6 +4,8 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -172,5 +174,57 @@ func TestIsolationHeaders(t *testing.T) {
 				t.Errorf("Permissions-Policy restricts the clipboard: %q", pp)
 			}
 		})
+	}
+}
+
+// TestExtensionListsAreStoredThenRevalidated pins the lifetime of an extension list answer, which is
+// what Settings → Extensions → Browse paints from. `Cache-Control: no-cache` is the HTTP sentence
+// "keep it, then ask before showing it", and the thing it asks with is the digest CompressMiddleware
+// computes from the body — so a handler that set its own ETag would replace a correct cache with no
+// revalidation at all. A 304 that loses either header leaves the client holding an answer whose
+// lifetime it cannot tell.
+func TestExtensionListsAreStoredThenRevalidated(t *testing.T) {
+	indexPath := filepath.Join(t.TempDir(), "registry.json")
+	if err := os.WriteFile(indexPath, []byte(`[{"name":"gopls","version":"1.0.0","type":"lsp","display_name":"gopls"}]`), 0o644); err != nil {
+		t.Fatalf("write registry index: %v", err)
+	}
+	s := testServerWith(t, func(c *startup.Config) { c.RegistryURL = "file://" + indexPath })
+	cookie := loginTest(t, s)
+
+	get := func(path, ifNoneMatch string) *httptest.ResponseRecorder {
+		req := testRequest(http.MethodGet, path, nil)
+		req.Header.Set("Cookie", cookie)
+		if ifNoneMatch != "" {
+			req.Header.Set("If-None-Match", ifNoneMatch)
+		}
+		return testResponse(t, s, req)
+	}
+
+	for _, path := range []string{"/api/extensions", "/api/extensions/registry", "/api/extensions/local"} {
+		first := get(path, "")
+		if first.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d, want 200: %s", path, first.Code, first.Body.String())
+		}
+		if got := first.Header().Get("Cache-Control"); got != "no-cache" {
+			t.Errorf("GET %s Cache-Control = %q, want %q", path, got, "no-cache")
+		}
+		etag := first.Header().Get("ETag")
+		if etag == "" {
+			t.Fatalf("GET %s carried no ETag, so nothing can revalidate a stored copy", path)
+		}
+
+		second := get(path, etag)
+		if second.Code != http.StatusNotModified {
+			t.Errorf("GET %s with If-None-Match = %d, want 304: %s", path, second.Code, second.Body.String())
+		}
+		if second.Body.Len() != 0 {
+			t.Errorf("GET %s answered 304 with %d bytes of body", path, second.Body.Len())
+		}
+		if got := second.Header().Get("ETag"); got != etag {
+			t.Errorf("GET %s 304 ETag = %q, want %q", path, got, etag)
+		}
+		if got := second.Header().Get("Cache-Control"); got != "no-cache" {
+			t.Errorf("GET %s 304 Cache-Control = %q, want %q", path, got, "no-cache")
+		}
 	}
 }
