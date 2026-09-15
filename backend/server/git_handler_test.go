@@ -36,31 +36,7 @@ func authenticatedRequest(t *testing.T, s *Server, req *http.Request) *httptest.
 	return rr
 }
 
-func TestGitLogBasic(t *testing.T) {
-	s := testServer(t)
-	projID, dir := createTestProjectWithPath(t, s)
-	// Add a second commit
-	mustRunGit(t, dir, "commit", "--allow-empty", "-m", "Second commit")
-
-	cookie, csrfToken := loginTestCSRF(t, s)
-	req := testRequest("GET", "/api/projects/"+projID+"/git/log", nil)
-	withAuthCSRF(req, cookie, csrfToken)
-	rr := authenticatedRequest(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	commits := mustJSON[[]map[string]any](t, rr.Body)
-	if len(commits) != 2 {
-		t.Fatalf("expected 2 commits, got %d", len(commits))
-	}
-	// First entry should be the most recent commit
-	if !strings.Contains(commits[0]["subject"].(string), "Second commit") {
-		t.Fatalf("unexpected subject: %s", commits[0]["subject"])
-	}
-}
-
-func TestGitLogFull(t *testing.T) {
+func TestGitLog(t *testing.T) {
 	s := testServer(t)
 	projID, dir := createTestProjectWithPath(t, s)
 	// Add more commits
@@ -84,6 +60,10 @@ func TestGitLogFull(t *testing.T) {
 
 	if len(commits) != 3 {
 		t.Fatalf("expected 3 commits, got %d", len(commits))
+	}
+	// Newest first.
+	if !strings.Contains(commits[0]["subject"].(string), "Third commit") {
+		t.Fatalf("unexpected first subject: %v", commits[0]["subject"])
 	}
 
 	// Check wrapper fields

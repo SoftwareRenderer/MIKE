@@ -7,8 +7,8 @@ package server
 // What changed for a caller: the status code is the same 405 as the deleted handler guards produced,
 // the body is now "Method Not Allowed\n" instead of "method not allowed\n", and the response carries
 // an `Allow` header naming the registered methods — it never did before. No frontend call sends a
-// wrong method, and the container healthcheck reads /api/config with a plain GET, which a GET pattern
-// still answers.
+// wrong method, and the container healthcheck reads /api/health and /api/config with plain GETs, which
+// two GET patterns still answer.
 
 import (
 	"net/http"

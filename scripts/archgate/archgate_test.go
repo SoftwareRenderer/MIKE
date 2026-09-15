@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -316,6 +317,160 @@ func (s *Server) routes() {
 	if err == nil || !strings.Contains(err.Error(), "the matcher is blind") {
 		t.Fatalf("expected a blindness failure, got %v", err)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// apiroutes: the HTTP twin of wsevents. A route nobody calls and an event nobody listens to are the same
+// debt, so both directions are held: a route no caller spells out is reported, and every URL idiom the
+// callers really use resolves to the route it reaches. An idiom this rule cannot read accuses a live
+// route, and the wrong answer to that is an exemption which then hides the next dead one.
+// ---------------------------------------------------------------------------
+
+// withSmallAPIRouteMins lets a fixture past apiroutes' two undercount guards, which production sets far
+// above what a fixture holds. Each guard test lowers one and pins the other.
+func withSmallAPIRouteMins(t *testing.T, clients, routes int) {
+	t.Helper()
+	savedClients, savedRoutes := minClientPaths, minAPIRoutes
+	minClientPaths, minAPIRoutes = clients, routes
+	t.Cleanup(func() { minClientPaths, minAPIRoutes = savedClients, savedRoutes })
+}
+
+// apiRouteFixture is one route per URL idiom the callers use, a route only a test mentions, and the
+// orphan. The two preview routes are the {mux}-variable shapes: the token one is excused by a literal,
+// the {path...} one only by the exemption register.
+var apiRouteFixture = map[string]string{
+	"backend/server/routes.go": `package server
+
+func (s *Server) routes() {
+	s.mux.HandleFunc("GET /api/orphan", s.h.HandleOrphan)
+	s.mux.HandleFunc("GET /api/templated/{id}", s.h.HandleTemplated)
+	s.mux.HandleFunc("POST /api/streamed/{id}/update", s.h.HandleUpdate)
+	s.mux.HandleFunc("GET /api/health", s.h.HandleHealth)
+	s.mux.HandleFunc("GET /api/preview/{token}", s.h.HandlePreview)
+	s.mux.HandleFunc("GET /api/preview/{token}/{path...}", s.h.HandlePreviewAsset)
+	s.mux.HandleFunc("GET /api/only-a-test-uses-this", s.h.HandleTested)
+}
+`,
+	// The template idiom, with a query string and a hole that ends a segment: the path must still
+	// resolve to the route, or every templated URL in the app reads as dead.
+	"frontend/src/lib/api/thing.ts": "import { API_BASE } from './helpers';\n" +
+		"const url = `${API_BASE}/templated/${id}?x=1`;\n" +
+		"const doc = await apiFetch(`/api/preview/${token}`);\n" +
+		"const nav = await apiFetch(`/api/preview/${token}/nav`);\n" +
+		"const nobody = await apiFetch('/api/a-path-with-no-route');\n",
+	// The helper idiom: the path handed in is prefixed by API_BASE inside streamOperation.
+	"frontend/src/lib/api/streamer.ts": "import { API_BASE } from './helpers';\n" +
+		"function streamOperation(path, body) {\n" +
+		"    const url = `${API_BASE}${path}`;\n}\n" +
+		"export function update(id) {\n" +
+		"    return streamOperation(`/streamed/${id}/update`, {});\n}\n",
+	// The healthcheck is a caller too — /api/health exists because of this line.
+	"scripts/mike-healthcheck.sh": "#!/bin/sh\ncurl -sk \"https://localhost:3000/api/health\"\n",
+	// A test is not a caller.
+	"frontend/src/lib/api/__tests__/thing.unit.ts": "const u = '/api/only-a-test-uses-this';\n",
+}
+
+func TestRuleAPIRoutes_FlagsOnlyTheRouteNobodyCalls(t *testing.T) {
+	withSmallAPIRouteMins(t, 1, 1)
+	findings, checked, err := scanAPIRoutes(writeFixture(t, apiRouteFixture))
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if checked != 7 {
+		t.Fatalf("expected 7 /api routes examined, got %d", checked)
+	}
+	got := details(findings)
+	for _, want := range []string{"GET /api/orphan", "GET /api/only-a-test-uses-this"} {
+		if !contains(got, want) {
+			t.Errorf("uncalled route %s not reported: %v", want, got)
+		}
+	}
+	for _, clean := range []string{"/api/templated", "/api/streamed", "/api/health", "/api/preview/{token}"} {
+		if contains(got, clean) {
+			t.Errorf("a route its caller spells out was accused: %s — %v", clean, got)
+		}
+	}
+	// The reverse direction: a path the frontend references with no route behind it is the frontend's
+	// problem, not a route to delete, so it must not appear here.
+	if contains(got, "a-path-with-no-route") {
+		t.Errorf("a caller path with no route was reported: %v", got)
+	}
+}
+
+func TestRuleAPIRoutes_RefusesACollapsedCallerSet(t *testing.T) {
+	withSmallAPIRouteMins(t, 40, 1)
+	// Well short of the guard. A matcher that lost an idiom comes back this small, and an empty caller
+	// set would report every route as live — the silent half.
+	callers := "import { API_BASE } from './helpers';\n"
+	for i := 0; i < 30; i++ {
+		callers += "const p" + strconv.Itoa(i) + " = `" + "${API_BASE}/p" + strconv.Itoa(i) + "`;\n"
+	}
+	root := writeFixture(t, map[string]string{
+		"backend/server/routes.go": `package server
+
+func (s *Server) routes() {
+	s.mux.HandleFunc("GET /api/one", s.h.HandleOne)
+}
+`,
+		"frontend/src/lib/api/p.ts": callers,
+	})
+	if _, _, err := scanAPIRoutes(root); err == nil || !strings.Contains(err.Error(), "caller paths") {
+		t.Fatalf("a collapsed caller set must fail the scan, got %v", err)
+	}
+}
+
+func TestRuleAPIRoutes_RefusesATreeWithNoAPIRoutes(t *testing.T) {
+	withSmallAPIRouteMins(t, 1, 40)
+	// The other blindness: routes.go rewritten so the matcher parses nothing would report a clean tree
+	// whatever the callers did.
+	registrations := "package server\n\nfunc (s *Server) routes() {\n"
+	for i := 0; i < 39; i++ {
+		registrations += "\ts.mux.HandleFunc(\"GET /api/r" + strconv.Itoa(i) + "\", s.h.Handle)\n"
+	}
+	registrations += "}\n"
+	root := writeFixture(t, map[string]string{
+		"backend/server/routes.go":  registrations,
+		"frontend/src/lib/api/p.ts": "const p = '/api/r0';\n",
+	})
+	if _, _, err := scanAPIRoutes(root); err == nil || !strings.Contains(err.Error(), "declared verb parsed") {
+		t.Fatalf("a collapsed route population must fail the scan, got %v", err)
+	}
+}
+
+func TestRuleAPIRoutes_TheRealTreeHasNoUncalledRoute(t *testing.T) {
+	root := repoRoot(t)
+	uncalled, population, err := scanAPIRoutes(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(uncalled) != 0 {
+		t.Fatalf("a registered /api route with no caller came back: %v", details(uncalled))
+	}
+	// The population is the routes carrying a verb: every registration except the two file subtrees.
+	if population < 100 {
+		t.Fatalf("the /api route population shrank to %d", population)
+	}
+	// An exemption is only honest while it names a route that is still registered: a tombstone entry
+	// would hide a future route that borrows the name, which is the debt this rule exists to catch.
+	registered := map[string]bool{}
+	for _, r := range mustRoutes(t, root) {
+		registered[r.method+" "+r.pattern] = true
+	}
+	for key, reason := range apiRouteExemptions {
+		if reason == "" || !registered[key] {
+			t.Errorf("exemption %q names no registered /api route (%q)", key, reason)
+		}
+	}
+}
+
+// mustRoutes reads the real route table for the tests that assert against it.
+func mustRoutes(t *testing.T, root string) []route {
+	t.Helper()
+	routes, err := loadRoutes(root)
+	if err != nil {
+		t.Fatalf("loadRoutes: %v", err)
+	}
+	return routes
 }
 
 func TestRuleWriteselect_FindsTheGETThatWrites(t *testing.T) {
@@ -776,10 +931,10 @@ func countRegistrations(t *testing.T, root string) int {
 func TestMeasuredNumbersAgreeWithTheReview(t *testing.T) {
 	root := repoRoot(t)
 
-	// The count `grep -c 's\.mux\.Handle' backend/server/routes.go` answers today: 109. The verb
-	// split is 46 GET, 40 POST, 10 DELETE, 7 PUT, 4 PATCH and 2 methodless — the two file servers,
+	// The count `grep -c 's\.mux\.Handle' backend/server/routes.go` answers today: 104. The verb
+	// split is 45 GET, 39 POST, 10 DELETE, 6 PUT, 2 PATCH and 2 methodless — the two file servers,
 	// left as subtrees on purpose. A new registration moves this number and nothing else here.
-	const routeRegistrations = 109
+	const routeRegistrations = 104
 	if routes, checked, err := scanRoutes(root); err != nil {
 		t.Fatalf("scanRoutes: %v", err)
 	} else if checked != routeRegistrations {
@@ -823,6 +978,20 @@ func TestMeasuredNumbersAgreeWithTheReview(t *testing.T) {
 	}
 	if len(events) != 0 {
 		t.Fatalf("drift appeared between the Go events and the frontend: %v", details(events))
+	}
+
+	// The HTTP twin of the check above: no registered /api route is uncalled. Its population is the
+	// routes carrying a verb — the 102 of the 104 registrations above that are not a file subtree.
+	uncalled, apiRoutes, err := scanAPIRoutes(root)
+	if err != nil {
+		t.Fatalf("apiroutes: %v", err)
+	}
+	if apiRoutes != routeRegistrations-2 {
+		t.Fatalf("apiroutes examined %d routes; the route table registers %d and 2 are file subtrees",
+			apiRoutes, routeRegistrations)
+	}
+	if len(uncalled) != 0 {
+		t.Fatalf("a route with no caller came back: %v", details(uncalled))
 	}
 }
 

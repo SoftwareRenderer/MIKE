@@ -73,14 +73,15 @@ export function toDiffFiles(parsed: ParsedDiffFile[]): DiffFile[] {
         .map(f => ({ ...f, rows: enrichRowsWithInlineSegments(f.rows as unknown as ApiDiffRow[]) as unknown as DiffFile['rows'] }));
 }
 
-/** Fetch a project diff already parsed by the server. */
-export async function getProjectDiffFiles(projectId: string, options?: { base?: string; head?: string; ref?: string; cached?: boolean }): Promise<DiffFile[]> {
-    const params = new URLSearchParams({ parsed: '1' });
+/** Fetch a project diff. The route answers `git.ParseUnifiedDiff`'s output unconditionally. */
+export async function getProjectDiffFiles(projectId: string, options?: { base?: string; head?: string; cached?: boolean }): Promise<DiffFile[]> {
+    const params = new URLSearchParams();
     if (options?.base) params.set('base', options.base);
     if (options?.head) params.set('head', options.head);
-    if (options?.ref) params.set('ref', options.ref);
     if (options?.cached) params.set('cached', '1');
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/diff?${params}`);
+    const query = params.toString();
+    const url = `${API_BASE}/projects/${projectId}/git/diff${query ? `?${query}` : ''}`;
+    const res = await apiFetch(url);
     if (!res.ok) throw await apiError(res, t('api.fetchProjectDiff'));
     return toDiffFiles(await res.json());
 }
@@ -123,10 +124,9 @@ export async function getGitStatus(projectId: string): Promise<{ clean: boolean;
  * When meta=true, only line_count/file_size/isBinary are returned (cheap).
  * Otherwise returns the unified diff plus the full file lines.
  * Works for tracked and untracked files. */
-export async function getProjectDiffFile(projectId: string, path: string, options?: { meta?: boolean; staged?: boolean }): Promise<{ diff?: string; lines?: string[]; line_count?: number; file_size?: number; isBinary?: boolean }> {
+export async function getProjectDiffFile(projectId: string, path: string, options?: { meta?: boolean }): Promise<{ diff?: string; lines?: string[]; line_count?: number; file_size?: number; isBinary?: boolean }> {
     const params = new URLSearchParams({ path });
     if (options?.meta) params.set('meta', '1');
-    if (options?.staged) params.set('staged', 'true');
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/diff/file?${params}`);
     if (!res.ok) throw await apiError(res, t('api.fetchFile'));
     return res.json();

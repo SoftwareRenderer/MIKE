@@ -296,11 +296,42 @@ Each of these was derived wrongly in the round that produced the findings above.
   files and handlers 4 (§7's definition answers 17 and 5); "30 of 31 packages are in-package" (34 of 36 by
   `go list`, 33 of 34 in-package); "53 `Get*` accessors" without its scope.
 
+## apiroutes — the route side of the same debt (after the round)
+
+`wsevents` has counted unheard stream events since F9; nothing counted a route no caller reaches. The rule
+added to close that gap measures, with the commands beside each number:
+
+| | Command | value |
+|---|---|---|
+| Route registrations | `grep -c 's\.mux\.Handle' backend/server/routes.go` | 104 |
+| Verb-carrying `/api` routes — the rule's population | `make archgate` → `apiroutes … checked` | 102 |
+| Routes with no caller | `make archgate` → `apiroutes … violation(s)` | **0** |
+| Caller paths collected from `frontend/src` + the healthcheck | `go test ./scripts/archgate/ -run APIRoutes -v` after lowering the guards | 102 |
+
+It landed at **0 violations across 102**, from 107 patterns, by deleting what nothing called: the
+non-stream `GET …/tasks/{taskID}/commit-preview` (the dialog calls `/commit-preview/stream`), the
+`POST …/tasks/{taskID}/retry` registration (`resume` is the client's verb and reaches `HandleRetry`
+directly, so `HandleResume`'s one-line delegator went with it), and three verb aliases on
+`/api/extensions` — `PATCH {id}`, `PUT {id}/enabled`, `PATCH {id}/dependency-cache` — each a second verb on
+a handler whose only caller sends one. The same sweep removed handler branches behind a query parameter no
+caller sends (`full=1` is hardcoded on both log routes, `staged` and `ref` had no sender), two dead offline
+queue arms (`initTask`, `retryTask`) and two `ProjectStats` aggregates no reader named. The catalog key
+`api.retryTask` went with its queue arm, and with it the line in every locale pack that translated it —
+measured: all twelve, not the three a grep over `ja`/`ko`/`fr` suggested, because `make i18n-parity` counts a
+key that exists only in a pack as an error in that pack. What the rule cannot see through a literal is
+exempted by name and holds the reason at its definition (`apiRouteExemptions`); the three exemptions are in
+`docs/api-contract.md → Route verbs`.
+
+Both blindness directions are held at 60 — a caller set that came back empty would report every route as
+live, and a route table that parsed nothing would report a clean tree — against the 102 each side measures
+today (`minClientPaths`, `minAPIRoutes`).
+
 ## Not measured here
 
 `environment` on an LSP extension (declared, validated, never called) has no number behind it yet. The other
-ten archgate rules — `http`, `env`, `envassign`, `locks`, `routes`, `writeselect`, `wsevents`, `wsframe`,
-`status500`, `ctxroot` — are documented at their definitions in `scripts/archgate/rules*.go` and in the
+eleven archgate rules — `http`, `env`, `envassign`, `locks`, `routes`, `apiroutes`, `writeselect`, `wsevents`,
+`wsframe`, `status500`, `ctxroot` — are documented at their definitions in `scripts/archgate/rules*.go` and in
+the
 subsystem docs `AGENTS.md` indexes; this file holds what was measured for the review, and what re-deriving it
 got wrong.
 

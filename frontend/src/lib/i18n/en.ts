@@ -791,7 +791,6 @@ const catalog = {
     'api.startTask': 'Failed to start task',
     'api.startSubtask': 'Failed to start subtask',
     'api.stopTask': 'Failed to stop task',
-    'api.retryTask': 'Failed to retry task',
     'api.resumeTask': 'Failed to resume task',
     'api.sendMessage': 'Failed to send message',
     'api.createMessage': 'Failed to create message',

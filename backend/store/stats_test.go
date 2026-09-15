@@ -264,13 +264,8 @@ func TestGetProjectStatsThroughputExcludesNoTimingData(t *testing.T) {
 		t.Fatalf("expected 2500 total generated tokens, got %d", stats.TotalGeneratedTokens)
 	}
 
-	// With-timing tokens only include the provider with timing data
-	if stats.TotalGeneratedTokensWithTiming != 500 {
-		t.Fatalf("expected 500 generated tokens with timing, got %d", stats.TotalGeneratedTokensWithTiming)
-	}
-
-	// Overall gen TPS should be 500 tokens / 2s = 250 tok/s
-	// NOT (500+2000) tokens / 2s = 1250 tok/s (which would be wrong)
+	// Overall gen TPS counts only the 500 tokens the provider with timing data reported, over its 2s.
+	// Including the timing-less provider would answer (500+2000)/2s = 1250.
 	if !floatEquals(stats.AvgGenerationTps, 250.0, 1.0) {
 		t.Fatalf("expected ~250 generation tok/s, got %.2f", stats.AvgGenerationTps)
 	}

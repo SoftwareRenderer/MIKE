@@ -195,7 +195,7 @@ func TestGitRefValidation(t *testing.T) {
 			setup: func(t *testing.T) (*http.ServeMux, func(string, string) string) {
 				_, mux := setupHandleLogProject(t)
 				return mux, func(_, value string) string {
-					return "/api/projects/log-char-proj/git/log?branch=" + value
+					return "/api/projects/log-char-proj/git/log?branch=" + value + "&full=1"
 				}
 			},
 			params: []string{"branch"},
@@ -238,7 +238,7 @@ func TestGitRefValidation(t *testing.T) {
 				}
 				createWorktreeAt(t, projPath, filepath.Join(worktreesDir, proj.ID, task.ID), "main")
 				return newTestGitMux(h), func(_, value string) string {
-					return "/api/projects/refval-tasklog-proj/tasks/refval-tasklog-task/git/log?branch=" + value
+					return "/api/projects/refval-tasklog-proj/tasks/refval-tasklog-task/git/log?branch=" + value + "&full=1"
 				}
 			},
 			params: []string{"branch"},
@@ -318,7 +318,7 @@ func TestHandleLog_ValidBranch(t *testing.T) {
 
 	mux := newTestGitMux(h)
 
-	rr := doRequest(t, mux, "GET", "/api/projects/log-proj-valid/git/log?branch=HEAD")
+	rr := doRequest(t, mux, "GET", "/api/projects/log-proj-valid/git/log?branch=HEAD&full=1")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200 for valid branch HEAD, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -337,7 +337,7 @@ func TestHandleLog_NoBranchDefaultsToHEAD(t *testing.T) {
 	mux := newTestGitMux(h)
 
 	// No branch param → defaults to HEAD → 200
-	rr := doRequest(t, mux, "GET", "/api/projects/log-proj-default/git/log")
+	rr := doRequest(t, mux, "GET", "/api/projects/log-proj-default/git/log?full=1")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200 when branch param is absent (defaults to HEAD), got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -436,10 +436,10 @@ func TestHandleDiffParsedEmptyIsArrayNotNull(t *testing.T) {
 	}
 }
 
-// TestHandleDiffDefaultStaysPlainText: the raw form is what every existing consumer reads, so making
-// the structured form the default would break them silently — a plain-text response is a string, and
-// a JSON array parsed as text looks like a diff of nothing.
-func TestHandleDiffDefaultStaysPlainText(t *testing.T) {
+// TestHandleDiffDefaultAnswersParsedDiff: `git diff` exits 1 when there are changes, and that exit code
+// must not be read as a failure; the answer is the parser's output, because the panel never re-parses
+// patch text.
+func TestHandleDiffDefaultAnswersParsedDiff(t *testing.T) {
 	h, s, _, _ := newTestGitHandler(t)
 
 	projPath := t.TempDir()
@@ -456,11 +456,22 @@ func TestHandleDiffDefaultStaysPlainText(t *testing.T) {
 	mux := newTestGitMux(h)
 
 	rr := doRequest(t, mux, "GET", "/api/projects/diff-plain-proj/git/diff")
-	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
-		t.Errorf("Content-Type = %q, want text/plain", ct)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (git diff exits 1 when there are changes): %s", rr.Code, rr.Body.String())
 	}
-	if !strings.HasPrefix(rr.Body.String(), "diff --git") {
-		t.Errorf("body is not a patch: %q", rr.Body.String())
+	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var files []struct {
+		Path    string `json:"path"`
+		Added   int    `json:"added"`
+		Removed int    `json:"removed"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &files); err != nil {
+		t.Fatalf("body is not the parsed diff: %v (%q)", err, rr.Body.String())
+	}
+	if len(files) != 1 || files[0].Path != "t.txt" || files[0].Added != 1 || files[0].Removed != 1 {
+		t.Fatalf("parsed diff = %+v, want one changed t.txt with 1 added and 1 removed", files)
 	}
 }
 
@@ -596,7 +607,7 @@ func TestHandleTaskLog_ValidBranch(t *testing.T) {
 	mux := newTestGitMux(h)
 	_ = wm
 
-	rr := doRequest(t, mux, "GET", "/api/projects/tasklog-proj-v/tasks/tasklog-task-v/git/log?branch=HEAD")
+	rr := doRequest(t, mux, "GET", "/api/projects/tasklog-proj-v/tasks/tasklog-task-v/git/log?branch=HEAD&full=1")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200 for valid branch HEAD, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -858,7 +869,7 @@ func TestHandleTaskLog_BranchDefaultsToTaskBranch(t *testing.T) {
 	_ = wm
 
 	// No branch param → defaults to task.Branch ("main") → 200
-	rr := doRequest(t, mux, "GET", "/api/projects/tasklog-default-proj/tasks/tasklog-default-task/git/log")
+	rr := doRequest(t, mux, "GET", "/api/projects/tasklog-default-proj/tasks/tasklog-default-task/git/log?full=1")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200 when branch param is absent (defaults to task branch), got %d: %s", rr.Code, rr.Body.String())
 	}

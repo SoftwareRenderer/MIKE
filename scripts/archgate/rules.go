@@ -29,6 +29,7 @@ var rules = []Rule{
 	{Name: "env", Description: "environment read outside the startup resolution points", Scan: scanEnv},
 	{Name: "locks", Description: "keyed mutex table written by hand", Scan: scanLockTables},
 	{Name: "routes", Description: "route registered without a method, or dispatching on r.Method", Scan: scanRoutes},
+	{Name: "apiroutes", Description: "registered /api route that no caller reaches", Scan: scanAPIRoutes},
 	{Name: "writeselect", Description: "state write reachable from a GET that is not one statement", Scan: scanCancellableWrites},
 	{Name: "wsevents", Description: "app-stream event vocabulary, Go vs TypeScript", Scan: scanWSEvents},
 	{Name: "wsframe", Description: `app-stream frame names built from a types.WSType constant, not a literal`, Scan: scanWSFrameLiterals},

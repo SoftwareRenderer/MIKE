@@ -31,8 +31,7 @@ type sideEffectEntry struct {
 var detachedOperations = []sideEffectEntry{
 	{"POST /api/projects/{projectID}/tasks/{taskID}/start", "starts a task; its turns write messages, status and worktree contents"},
 	{"POST /api/projects/{projectID}/tasks/{taskID}/start-subtask", "same, and the parent's started-but-pending state depends on the child finishing"},
-	{"POST /api/projects/{projectID}/tasks/{taskID}/retry", "restarts a failed turn; a half-applied restart is a task stuck in running with no executor"},
-	{"POST /api/projects/{projectID}/tasks/{taskID}/resume", "continues a paused turn on the existing conversation tree"},
+	{"POST /api/projects/{projectID}/tasks/{taskID}/resume", "restarts a turn on the existing conversation tree; a half-applied restart is a task stuck in running with no executor"},
 	{"POST /api/projects/{projectID}/tasks/{taskID}/stop", "the transition itself is the result: a stopped task must not be left reading as running"},
 	{"POST /api/projects/{projectID}/tasks/{taskID}/commit", "commits, merges and marks done; nothing may be half-merged"},
 	{"POST /api/projects/{projectID}/tasks/{taskID}/threads/fork", "creates a branch and a checkpoint set"},
@@ -76,11 +75,8 @@ var detachedOperations = []sideEffectEntry{
 		"rewrites a message and may store the commit hash the deletion path later restores to",
 	},
 	{"PUT /api/extensions/{id}", "persists the manifest edit, and validates its sandbox against the policy before storing"},
-	{"PATCH /api/extensions/{id}", "same, partially"},
 	{"PATCH /api/extensions/{id}/enabled", "the enabled flag decides whether the extension runs at all"},
-	{"PUT /api/extensions/{id}/enabled", "same, fully"},
-	{"PATCH /api/extensions/{id}/dependency-cache", "grants or revokes a host directory and stops the sandbox so the mount set is right"},
-	{"PUT /api/extensions/{id}/dependency-cache", "same, fully"},
+	{"PUT /api/extensions/{id}/dependency-cache", "grants or revokes a host directory and stops the sandbox so the mount set is right"},
 	{"PUT /api/extensions/{id}/storage", "writes the namespaced KV store an extension reads back"},
 	{"DELETE /api/extensions/{id}/storage", "clears it"},
 	{
