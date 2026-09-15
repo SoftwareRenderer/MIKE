@@ -18,6 +18,12 @@
     const MIN_HEIGHT = 180;
     const MAX_HEIGHT = 800;
 
+    /**
+     * The terminal-only screen (`?view=terminal`): the shell is the whole page, so the overlay,
+     * height handle, close button, focus trap and the shortcut that closes the panel all go.
+     */
+    let { standalone = false }: { standalone?: boolean } = $props();
+
     let term: Terminal | null = null;
     let container: HTMLElement | null = null;
     let kbContainer: HTMLElement | null = null;
@@ -122,6 +128,7 @@
     // phase so it wins over xterm's own keydown, which would send Ctrl+` as
     // a space to the shell.
     $effect(() => {
+        if (standalone) return;
         const handleKeydown = (e: KeyboardEvent) => {
             if (e.defaultPrevented || e.repeat) return;
             const key = effectiveOpenTerminalKey(appStore.config);
@@ -138,6 +145,7 @@
     // inside the panel; capture phase so it wins over xterm's own keydown.
     // Focus elsewhere (e.g. chat above the panel) is handled by that area.
     $effect(() => {
+        if (standalone) return;
         const handleKeydown = (e: KeyboardEvent) => {
             if (e.defaultPrevented || e.repeat) return;
             const key = effectiveToggleFullscreenKey(appStore.config);
@@ -166,7 +174,10 @@
     }
 
     // Load saved height on init
-    loadHeight().then(h => { panelHeight = h; }).catch(() => {});
+    $effect(() => {
+        if (standalone) return;
+        loadHeight().then(h => { panelHeight = h; }).catch(() => {});
+    });
 
     // Create/recreate the terminal WebSocket for the current project/task.
     function createTerminalWS(proj: import('$lib/types').Project | null, task: import('$lib/types').Task | null) {
@@ -210,7 +221,7 @@
     onMount(() => {
         if (!container) return;
         triggerEl = document.activeElement as HTMLElement;
-        if (panelEl) {
+        if (panelEl && !standalone) {
             trap = createFocusTrap(panelEl, close);
         }
 
@@ -817,9 +828,12 @@
     });
 </script>
 
+{#if !standalone}
 <button type="button" class="terminal-overlay" onclick={close} aria-label="Close terminal" title="Close terminal"></button>
-<div class="terminal-panel" class:fullscreen bind:this={panelEl} role="dialog" aria-modal="true" aria-label="Terminal" style:height={fullscreen ? undefined : panelHeight + 'px'}>
+{/if}
+<div class="terminal-panel" class:fullscreen={fullscreen || standalone} bind:this={panelEl} role={standalone ? undefined : 'dialog'} aria-modal={standalone ? undefined : 'true'} aria-label="Terminal" style:height={fullscreen || standalone ? undefined : panelHeight + 'px'}>
     <div class="terminal-header">
+        {#if !standalone}
         <ResizeHandle
             axis="horizontal"
             ariaLabel="Resize terminal"
@@ -827,6 +841,7 @@
             onDragMove={onTerminalResizeMove}
             onDragEnd={onTerminalResizeEnd}
         />
+        {/if}
         <div class="header-left">
             <span class="title">{t('terminal.title')}</span>
             {#if activePorts.length > 0}
@@ -842,6 +857,7 @@
             </span>
             {/if}
         </div>
+        {#if !standalone}
         <div class="header-actions">
             {#if !isMobileCtx.isMobile}
             <button type="button" class="icon-btn terminal-fullscreen-toggle" onclick={toggleFullscreen} title={fullscreenTitle}>
@@ -854,6 +870,7 @@
             {/if}
             <button class="close-btn" onclick={close} aria-label="Close terminal" title={closeButtonTitle}>✕</button>
         </div>
+        {/if}
     </div>
     <div class="terminal-container" bind:this={container}></div>
     <div class="mobile-keyboard" bind:this={kbContainer}>

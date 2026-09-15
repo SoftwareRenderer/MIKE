@@ -4,9 +4,10 @@
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
     import { toHomeRelative } from '$lib/utils/path';
+    import { projectTerminalHref } from '$lib/utils/app-link';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { appStore } from '$lib/stores';
-    import { openTerminalTitle } from '$lib/utils/keyboard';
+    import { openTerminalTitle, handleLinkClick, handleLinkKeydown } from '$lib/utils/keyboard';
 
     let {
         currentProject,
@@ -47,18 +48,7 @@
 
     // The same link `updateUrl` in App.svelte writes, so a tab opened from here shows what a click shows.
     const explorerHref = $derived(`${location.pathname}?project=${encodeURIComponent(currentProject.id)}&view=explorer`);
-
-    function handleExplorerClick(e: MouseEvent) {
-        if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
-        e.preventDefault();
-        onOpenExplorerView();
-    }
-
-    function handleExplorerKeydown(e: KeyboardEvent) {
-        if (e.key !== ' ') return;
-        e.preventDefault();
-        onOpenExplorerView();
-    }
+    const terminalHref = $derived(projectTerminalHref(currentProject.id));
 </script>
 
 <header class="top-bar">
@@ -87,8 +77,8 @@
             role="button"
             tabindex="0"
             draggable="false"
-            onclick={handleExplorerClick}
-            onkeydown={handleExplorerKeydown}
+            onclick={(e) => handleLinkClick(e, onOpenExplorerView)}
+            onkeydown={(e) => handleLinkKeydown(e, onOpenExplorerView)}
             aria-label="Open explorer" title="Open file explorer"
         >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -110,12 +100,21 @@
         </a>
     </span>
     <div class="actions">
-        <button class="icon-btn" onclick={onOpenTerminal} aria-label="Open terminal" title={terminalButtonTitle}>
+        <a
+            class="icon-btn terminal-btn"
+            href={terminalHref}
+            role="button"
+            tabindex="0"
+            draggable="false"
+            onclick={(e) => handleLinkClick(e, onOpenTerminal)}
+            onkeydown={(e) => handleLinkKeydown(e, onOpenTerminal)}
+            aria-label="Open terminal" title={terminalButtonTitle}
+        >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
                 <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
-        </button>
+        </a>
         <!-- Desktop-only buttons (hidden on mobile via CSS) -->
         <button class="icon-btn desktop-only-btn" onclick={onShowStats} aria-label="Token usage stats" title="Token usage stats">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -218,6 +217,10 @@
     }
     .icon-btn:hover {
         background: var(--color-accent-dark);
+    }
+    .icon-btn.terminal-btn {
+        /* Anchors take the global link colour; buttons do not. */
+        color: inherit;
     }
     .icon-btn.sandbox-config-btn {
         color: var(--color-primary);

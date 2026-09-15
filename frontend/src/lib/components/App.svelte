@@ -13,6 +13,7 @@
     import { dataAgeText } from '$lib/utils/format-time';
     import { resolveBoardLandingColumn, resolveClosedTaskColumn, mergeTaskUpdateIntoBoard } from '$lib/utils/task-utils';
     import { resolveLandingProject } from '$lib/utils/project-landing';
+    import { TERMINAL_VIEW, asksForTerminal } from '$lib/utils/app-link';
     import { getBoardCache, getBoardCacheEntry, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, clearAll, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
@@ -91,6 +92,7 @@
     function computePageTitle(): string {
         const name = currentProject?.name;
         if (!name || !currentProject) return t('app.title.default');
+        if (terminalOnlyVal) return t('app.title.terminal', { name });
         const reviewCount = projectCounts[currentProject.id]?.review ?? 0;
         // If current project has reviews, show it with count
         if (reviewCount > 0) {
@@ -260,6 +262,10 @@
     let showFileBrowserVal = $state(false);
     let showExplorerViewVal = $state(false);
     let showTaskExplorerVal = $state(false);
+    // Terminal-only screen (URL: view=terminal): the shell fills the page.
+    let terminalOnlyVal = $state(asksForTerminal(location.search));
+    /** Its target: the prepared "<projectId>:<taskId>", and whether creating that task's worktree failed. */
+    let terminalScreen = $state<{ key: string; failed: boolean }>({ key: '', failed: false });
     // Review Changes panel state (URL: view=review / view=task-review)
     let urlChangesOpen = $state(initialChangesOpen());
 
@@ -269,8 +275,10 @@
         return v === 'review' || v === 'task-review';
     }
 
-    /** Restore explorer + changes-panel state from the URL's view param. */
+    /** Restore the screen the URL's view param names: an explorer, the terminal alone, or the board. */
     function applyUrlView(viewParam: string | null) {
+        terminalOnlyVal = viewParam === TERMINAL_VIEW;
+        if (terminalOnlyVal) return;
         if (viewParam === 'explorer' || viewParam === 'review') {
             showExplorerViewVal = true;
             showTaskExplorerVal = false;
@@ -284,6 +292,38 @@
             showTaskExplorerVal = false;
             urlChangesOpen = false;
         }
+    }
+
+    /**
+     * The terminal-only screen prepares its own target: the project must be on screen, and a task
+     * terminal needs the worktree, which the board's terminal button also creates before it opens.
+     */
+    $effect(() => {
+        if (!terminalOnlyVal) {
+            terminalScreen = { key: '', failed: false };
+            return;
+        }
+        const project = currentProject;
+        if (!project) return;
+        const wantsTask = !!new URLSearchParams(location.search).get('task');
+        const task = wantsTask ? appStore.selectedTask : null;
+        if (wantsTask && !task) return;
+        const key = project.id + ':' + (task?.id ?? '');
+        if (terminalScreen.key === key) return;
+        void openTerminalScreen(key, project.id, task);
+    });
+
+    async function openTerminalScreen(key: string, projectId: string, task: Task | null): Promise<void> {
+        loadTerminalPanel();
+        if (task && !task.worktree_exists && !task.branch) {
+            try {
+                await initTask(projectId, task.id);
+            } catch {
+                terminalScreen = { key, failed: true };
+                return;
+            }
+        }
+        terminalScreen = { key, failed: false };
     }
     let cardDetailActiveTab = $state<'context' | 'chat' | 'diff' | 'checkpoint'>('chat');
 let scrollToColumn = $state<string | null>(null); // column to scroll to on mobile after task delete
@@ -315,6 +355,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     function boardShortcutsEnabled(): boolean {
         return (
             !!currentProject &&
+            !terminalOnlyVal &&
             !(uiStore.showCardDetail && appStore.selectedTask) &&
             !showExplorerViewVal &&
             !showTaskExplorerVal &&
@@ -322,7 +363,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         );
     }
     function terminalShortcutEnabled(): boolean {
-        return !!currentProject && noModalOpen();
+        return !!currentProject && !terminalOnlyVal && noModalOpen();
     }
     useKeyboardShortcuts({
         isEnabled: boardShortcutsEnabled,
@@ -916,7 +957,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         appStore.selectedTask = task;
         // Restore view state from URL
         const viewParam = params.get('view');
-        if (viewParam === 'explorer' || viewParam === 'review' || viewParam === 'task-explorer' || viewParam === 'task-review') {
+        if (viewParam === 'explorer' || viewParam === 'review' || viewParam === 'task-explorer' || viewParam === 'task-review' || viewParam === TERMINAL_VIEW) {
             applyUrlView(viewParam);
             uiStore.showCardDetail = false;
         } else {
@@ -1113,7 +1154,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         // Update URL with project param
         // Preserve task param from URL — restoreTaskFromUrl needs it after board loads
         const urlTaskId = new URLSearchParams(location.search).get('task');
-        const viewParam = wasExplorerViewOpen ? (urlChangesOpen ? 'review' : 'explorer')
+        const viewParam = terminalOnlyVal ? TERMINAL_VIEW
+            : wasExplorerViewOpen ? (urlChangesOpen ? 'review' : 'explorer')
             : (wasTaskExplorerOpen ? (urlChangesOpen ? 'task-review' : 'task-explorer') : null);
         updateUrl({ project: p.id, task: appStore.selectedTask?.id || urlTaskId, view: viewParam, file: urlFileId || null }, false, push);
         if (wasProjectSwitch && wasExplorerViewOpen) {
@@ -1405,33 +1447,50 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     {/if}
 
     <!-- Sidebar -->
-    <Sidebar
-        {projects}
-        {currentProject}
-        {projectCounts}
-        {collapsed}
-        isMobile={isMobileCtx.isMobile}
-        {mobileMenuOpen}
-        {getProjectAbbr}
-        onSelectProject={(p) => { clearTaskDetail(); selectProject(p); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
-        onRemoveProject={removeProject}
-        onToggleSidebar={toggleSidebar}
-        onShowStats={() => { uiStore.showStats = true; if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
-        onShowConfig={() => { uiStore.showConfig = true; if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
-        onToggleFullScreen={() => {
-            if (document.fullscreenElement) {
-                document.exitFullscreen().catch(() => {});
-            } else {
-                document.documentElement.requestFullscreen().catch(() => {});
-            }
-            if (isMobileCtx.isMobile) mobileMenuOpen = false;
-        }}
-        onAddProject={() => { openAddProject(); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
-    />
+    {#if !terminalOnlyVal}
+        <Sidebar
+            {projects}
+            {currentProject}
+            {projectCounts}
+            {collapsed}
+            isMobile={isMobileCtx.isMobile}
+            {mobileMenuOpen}
+            {getProjectAbbr}
+            onSelectProject={(p) => { clearTaskDetail(); selectProject(p); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
+            onRemoveProject={removeProject}
+            onToggleSidebar={toggleSidebar}
+            onShowStats={() => { uiStore.showStats = true; if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
+            onShowConfig={() => { uiStore.showConfig = true; if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
+            onToggleFullScreen={() => {
+                if (document.fullscreenElement) {
+                    document.exitFullscreen().catch(() => {});
+                } else {
+                    document.documentElement.requestFullscreen().catch(() => {});
+                }
+                if (isMobileCtx.isMobile) mobileMenuOpen = false;
+            }}
+            onAddProject={() => { openAddProject(); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
+        />
+    {/if}
 
     <!-- Main Content -->
     <main id="main-content" class="main" tabindex="-1">
-        {#if currentProject}
+        {#if terminalOnlyVal}
+            {#if terminalScreen.key !== '' && !terminalScreen.failed && TerminalPanelComponent}
+                {@const Terminal = TerminalPanelComponent}
+                {#if Terminal}
+                    <Terminal standalone />
+                {/if}
+            {:else if terminalScreen.failed}
+                <div class="loading-screen">
+                    <p class="loading-slow">{t('api.initializeTask')}</p>
+                </div>
+            {:else}
+                <div class="loading-screen">
+                    <img class="loading-icon" src={kanbanIcon} width="96" height="96" alt="Loading" />
+                </div>
+            {/if}
+        {:else if currentProject}
             {#if !(uiStore.showCardDetail && appStore.selectedTask) && !showExplorerViewVal && !showTaskExplorerVal}
             <TopBar
                 currentProject={currentProject}

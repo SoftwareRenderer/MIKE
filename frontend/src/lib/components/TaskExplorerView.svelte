@@ -2,6 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { getTaskGitLog, getTaskCommitDiffFiles, initTask } from '$lib/api';
     import { toHomeRelative, toExplorerPath } from '$lib/utils/path';
+    import { taskTerminalHref } from '$lib/utils/app-link';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { fromPersistedTabs, mergeRestoredTabs } from '$lib/utils/editor-tabs';
     import { ExplorerCore, type ExplorerProps } from '$lib/services/explorer-core.svelte';
@@ -134,6 +135,7 @@
         onChangesOpen={onChangesOpen}
         onCloseRequest={() => { core.editorFullscreen = false; core.closeCommitDiff(); onClose(); }}
         onOpenTerminal={onOpenTerminal}
+        terminalHref={taskTerminalHref(projectId, taskId)}
     />
 
     <ExplorerWorkspace

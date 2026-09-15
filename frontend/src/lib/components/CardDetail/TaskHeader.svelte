@@ -3,6 +3,7 @@
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
     import { getWorktreeDisplayPath } from '$lib/utils/path';
+    import { taskTerminalHref } from '$lib/utils/app-link';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import SandboxPanel from '../SandboxPanel.svelte';
     import type { Task } from '$lib/types';
@@ -10,7 +11,7 @@
     import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
     import { isNearMemoryLimit, isMemoryLimitReached, memoryAlertSentences, projectMemoryLimitMB, taskMemoryStats } from '$lib/utils/memory-stats';
     import { useMemoryAlert } from '$lib/composables/use-memory-alert.svelte';
-    import { openTerminalTitle } from '$lib/utils/keyboard';
+    import { openTerminalTitle, handleLinkClick, handleLinkKeydown } from '$lib/utils/keyboard';
     import { t } from '$lib/i18n';
     import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
 
@@ -78,18 +79,7 @@
     const explorerHref = $derived(
         `${location.pathname}?project=${encodeURIComponent(task.project_id)}&task=${encodeURIComponent(task.id)}&view=task-explorer`
     );
-
-    function handleExplorerClick(e: MouseEvent) {
-        if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
-        e.preventDefault();
-        onOpenExplorer?.();
-    }
-
-    function handleExplorerKeydown(e: KeyboardEvent) {
-        if (e.key !== ' ') return;
-        e.preventDefault();
-        onOpenExplorer?.();
-    }
+    const terminalHref = $derived(taskTerminalHref(task.project_id, task.id));
 
     // Full worktree display path shown in the header (CSS-ellipsized when it
     // doesn't fit; the native `title` below only appears on hover).
@@ -247,20 +237,29 @@
                 role="button"
                 tabindex="0"
                 draggable="false"
-                onclick={handleExplorerClick}
-                onkeydown={handleExplorerKeydown}
+                onclick={(e) => handleLinkClick(e, () => onOpenExplorer?.())}
+                onkeydown={(e) => handleLinkKeydown(e, () => onOpenExplorer?.())}
                 aria-label="Open explorer" title="Open explorer"
             >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M2 3h4l1.5 2H13l1.5 2.5V13a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
                 </svg>
             </a>
-            <button class="icon-btn" onclick={() => onOpenTerminal?.()} aria-label="Open terminal" title={terminalButtonTitle}>
+            <a
+                class="icon-btn terminal-btn"
+                href={terminalHref}
+                role="button"
+                tabindex="0"
+                draggable="false"
+                onclick={(e) => handleLinkClick(e, () => onOpenTerminal?.())}
+                onkeydown={(e) => handleLinkKeydown(e, () => onOpenTerminal?.())}
+                aria-label="Open terminal" title={terminalButtonTitle}
+            >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
                     <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-            </button>
+            </a>
         {/if}
         <button class="icon-btn" onclick={onDelete} aria-label="Delete task" title="Delete task">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
