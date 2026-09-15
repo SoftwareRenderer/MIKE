@@ -1,0 +1,71 @@
+/* The shell every promise-backed dialog draws (components/PromiseDialogShell.svelte) — one home for
+ * rules ConfirmationDialog and CompressContextDialog each carried as their own copy.
+ *
+ * The overlay and modal rules are `:global()` because those nodes belong to BaseModal, and a parent's
+ * scoped rule does not reach an element a child renders — svelte-check calls such a selector unused.
+ * They are unscoped below `.overlay` / `.modal` on purpose: CommitDialog and LoginModal declare the
+ * same two rules for their own modals today, so this pair's copies are app-wide already.
+ *
+ * The button rules hang off the shell's `promise-dialog` modal class, the way explorer.css hangs its
+ * rules off `.explorer-view`: `.btn-cancel` / `.btn-confirm` must stay on the buttons for the specs
+ * that click them by name, and a bare global copy of those names would restyle any other markup —
+ * including an extension's — that uses them. */
+
+:global(.overlay) {
+    animation: fade-in 0.15s ease-out;
+}
+:global(.modal) {
+    animation: scale-in 0.15s ease-out;
+    padding: 4px;
+}
+
+:global(.promise-dialog .btn-cancel) {
+    padding: 6px 14px;
+    border-radius: var(--radius-md);
+    border: none;
+    background: var(--color-surface-3);
+    color: var(--color-text-primary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+}
+:global(.promise-dialog .btn-cancel:hover) {
+    background: var(--color-surface-4);
+}
+
+:global(.promise-dialog .btn-confirm) {
+    padding: 6px 14px;
+    border-radius: var(--radius-md);
+    border: none;
+    background: var(--color-status-blue);
+    color: white;
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+}
+:global(.promise-dialog .btn-confirm:hover) {
+    opacity: 0.85;
+}
+:global(.promise-dialog .btn-confirm.destructive) {
+    background: var(--color-status-red-dark);
+}
+
+@keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes scale-in {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}

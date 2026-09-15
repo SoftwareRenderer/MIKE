@@ -1,7 +1,9 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { render, cleanup } from '@testing-library/svelte';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { render, cleanup, fireEvent } from '@testing-library/svelte';
 import CompressContextDialog from '$lib/components/Chat/CompressContextDialog.svelte';
 import { dialogStore } from '$lib/stores';
+import { i18n } from '$lib/i18n/runtime.svelte';
+import { DEFAULT_LOCALE } from '$lib/i18n/en';
 
 // Svelte 5 effects (incl. the dialog's open-effect and derived updates) flush
 // on the microtask queue, so give them a few ticks after render/mutations.
@@ -27,7 +29,16 @@ afterEach(() => {
     stats.limit = 32000;
     stats.sessionCost = 0;
     dialogStore.compressContextDialog = null;
+    i18n.setCatalog(DEFAULT_LOCALE, null);
 });
+
+// [role="dialog"] is not a unique locator, and neither is a footer: find the button by its label.
+function footerButton(container: HTMLElement, label: string): HTMLElement {
+    const found = Array.from(container.querySelectorAll('.modal-footer button'))
+        .find((b) => (b.textContent ?? '').trim() === label);
+    if (!found) throw new Error(`no footer button labelled ${label}`);
+    return found as HTMLElement;
+}
 
 describe('CompressContextDialog real-time stats', () => {
     it('updates the donut and stats in real time from live getters', async () => {
@@ -79,5 +90,47 @@ describe('CompressContextDialog real-time stats', () => {
         dialogStore.showCompressContextDialog({ used: 8000, limit: 32000, sessionCost: 100 });
         await flush();
         expect(statValues(container)).toEqual(['8.0K / 32.0K', '25%', '$100.00']);
+    });
+});
+
+describe('CompressContextDialog dismissal', () => {
+    it('empties the slot it armed from and resolves the caller', async () => {
+        const { container } = render(CompressContextDialog);
+        const answered = dialogStore.showCompressContextDialog({ used: 8000, limit: 32000 });
+        await flush();
+
+        await fireEvent.click(footerButton(container, 'Cancel'));
+        await flush();
+
+        expect(dialogStore.compressContextDialog).toBeNull();
+        await expect(answered).resolves.toBe(false);
+    });
+
+    it('re-labels the default confirm button when the locale changes while it is open', async () => {
+        // The pack translates only the two buttons, so the runtime warns about every other key;
+        // that path is covered in i18n/__tests__/runtime.unit.svelte.ts.
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const { container } = render(CompressContextDialog);
+        // The store fills both labels in, so the no-label caller is written straight into the slot.
+        let answer = false;
+        dialogStore.compressContextDialog = {
+            used: 8000,
+            limit: 32000,
+            _resolve: (value) => { answer = value; },
+        };
+        await flush();
+
+        expect(footerButton(container, 'Compress')).toBeTruthy();
+
+        i18n.setCatalog('fr', { 'chat.compress.confirm': 'Compresser', 'chat.common.cancel': 'Annuler' });
+        await flush();
+
+        expect(footerButton(container, 'Compresser')).toBeTruthy();
+        expect(footerButton(container, 'Annuler')).toBeTruthy();
+        expect(dialogStore.compressContextDialog).not.toBeNull();
+
+        await fireEvent.click(footerButton(container, 'Compresser'));
+        expect(answer).toBe(true);
+        warn.mockRestore();
     });
 });
