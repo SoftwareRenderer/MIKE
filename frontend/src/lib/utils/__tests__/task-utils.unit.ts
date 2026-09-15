@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { filterTopLevelTaskIds, mergeTaskUpdateIntoBoard, resolveBoardLandingColumn, taskIsInFlight } from '$lib/utils/task-utils';
+import { filterTopLevelTaskIds, mergeTaskUpdateIntoBoard, resolveBoardLandingColumn, resolveClosedTaskColumn, taskIsInFlight } from '$lib/utils/task-utils';
 import type { Task } from '$lib/types';
 
 function makeTask(id: string, parentId?: string): Task {
@@ -103,6 +103,32 @@ describe('resolveBoardLandingColumn', () => {
         const parent = { ...makeTask('parent'), status: 'in_progress' } as Task;
         const child = { ...makeTask('child', 'parent'), status: 'review' } as Task;
         expect(resolveBoardLandingColumn([parent, child])).toBe('review');
+    });
+});
+
+describe('resolveClosedTaskColumn', () => {
+    const withStatuses = (statuses: Record<string, string>): Task[] =>
+        Object.entries(statuses).map(([id, status]) => ({ ...makeTask(id), status } as Task));
+
+    it('lands on Review after a Done move while other review tasks remain', () => {
+        const tasks = withStatuses({ 't-1': 'review', 't-2': 'done', 't-3': 'backlog' });
+        expect(resolveClosedTaskColumn('done', tasks, 't-2')).toBe('review');
+    });
+
+    it('lands on Done when nothing else is in review', () => {
+        const tasks = withStatuses({ 't-1': 'in_progress', 't-2': 'done' });
+        expect(resolveClosedTaskColumn('done', tasks, 't-2')).toBe('done');
+    });
+
+    it('does not count the task that just closed, whose row still says review', () => {
+        const tasks = withStatuses({ 't-1': 'review' });
+        expect(resolveClosedTaskColumn('done', tasks, 't-1')).toBe('done');
+    });
+
+    it('lands on the task\'s own column for any other status', () => {
+        const tasks = withStatuses({ 't-1': 'review', 't-2': 'in_progress' });
+        expect(resolveClosedTaskColumn('in_progress', tasks, 't-2')).toBe('in_progress');
+        expect(resolveClosedTaskColumn('backlog', tasks, 't-3')).toBe('backlog');
     });
 });
 
