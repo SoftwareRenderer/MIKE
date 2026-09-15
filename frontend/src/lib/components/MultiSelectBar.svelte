@@ -256,10 +256,15 @@
     .multi-select-bar {
         position: fixed;
         bottom: 24px;
-        left: 50%;
-        transform: translateX(-50%);
+        left: 0;
+        right: 0;
+        margin-inline: auto;
+        width: max-content;
+        max-width: calc(100vw - 32px);
         display: flex;
         align-items: center;
+        justify-content: center;
+        flex-wrap: wrap;
         gap: 8px;
         padding: 8px 12px;
         background: var(--color-surface-3);
@@ -372,7 +377,8 @@
             bottom: 16px;
             left: 8px;
             right: 8px;
-            transform: none;
+            width: auto;
+            max-width: calc(100vw - 16px);
             padding: 10px 12px;
         }
 
