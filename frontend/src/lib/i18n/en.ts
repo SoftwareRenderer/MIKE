@@ -707,6 +707,7 @@ const catalog = {
 
     // ── App.svelte — page title, banners, offline screen, empty states ──
     'app.title.default': 'Board',
+    'app.title.terminal': '{name} - Terminal',
     'app.title.review': {
         one: '🟡 {name} - {count} task for review',
         other: '🟡 {name} - {count} tasks for review',

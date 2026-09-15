@@ -1,6 +1,6 @@
 <script lang="ts">
     import { appStore } from '$lib/stores';
-    import { effectiveOpenTerminalKey, formatShortcut } from '$lib/utils/keyboard';
+    import { effectiveOpenTerminalKey, formatShortcut, handleLinkClick, handleLinkKeydown } from '$lib/utils/keyboard';
     import { t } from '$lib/i18n';
     import Icon from './Icon.svelte';
     import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
@@ -11,7 +11,8 @@
      */
     let { pathLabel, pathClamped = false, closeAria, branch, statusColor = '', branches,
         branchesLoading = false, dropdownOpen = $bindable(false), checkoutLoading = false,
-        onSelectBranch, changesOpen, onChangesOpen, showReview = false, onCloseRequest, onOpenTerminal }: {
+        onSelectBranch, changesOpen, onChangesOpen, showReview = false, onCloseRequest, onOpenTerminal,
+        terminalHref }: {
         pathLabel: string;
         /** A workspace-rooted path is long by construction and gets two lines. */
         pathClamped?: boolean;
@@ -30,6 +31,8 @@
         showReview?: boolean;
         onCloseRequest: () => void;
         onOpenTerminal: () => void;
+        /** Link to the terminal-only screen; the click opens the panel here. */
+        terminalHref: string;
     } = $props();
 
     // Tooltips keep the shortcut text even when keycap hints are hidden.
@@ -136,10 +139,29 @@
             <Icon src={commitPushIcon} color="currentColor" width={14} height={14} />
         </button>
     {/if}
-    <button class="icon-btn terminal-btn" onclick={onOpenTerminal} aria-label={t('explorer.shared.openTerminal')} title={terminalButtonTitle}>
+    <a
+        class="icon-btn terminal-btn"
+        href={terminalHref}
+        role="button"
+        tabindex="0"
+        draggable="false"
+        onclick={(e) => handleLinkClick(e, onOpenTerminal)}
+        onkeydown={(e) => handleLinkKeydown(e, onOpenTerminal)}
+        aria-label={t('explorer.shared.openTerminal')} title={terminalButtonTitle}
+    >
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
             <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-    </button>
+    </a>
 </div>
+
+<style>
+    /* Anchors get neither the buttons' inherited colour nor the `button:hover` fade. */
+    .terminal-btn {
+        color: inherit;
+    }
+    .terminal-btn:hover {
+        opacity: 0.85;
+    }
+</style>

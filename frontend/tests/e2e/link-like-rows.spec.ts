@@ -3,10 +3,11 @@ import { getProjectId, createTaskViaApi, waitForTaskState, csrfFetch } from './h
 
 
 // ============================================================
-// LINK-LIKE ROWS — sidebar projects, task cards, Explorer buttons
+// LINK-LIKE ROWS — sidebar projects, task cards, Explorer buttons, Terminal buttons
 // ============================================================
 // All are anchors, so the browser's own link actions work on them. A plain click still opens the thing
-// in place, using the same ?project= / ?task= / ?view= params the app writes itself.
+// in place, using the same ?project= / ?task= / ?view= params the app writes itself. The terminal links
+// are the exception to "a tab shows what a click shows": their screen is the terminal alone.
 
 /** Stamp the current document, so a real (re)navigation can be detected. */
 async function markDocument(page: Page) {
@@ -213,7 +214,7 @@ test.describe.serial('Task cards are links', () => {
   });
 });
 
-test.describe.serial('Explorer buttons are links', () => {
+test.describe.serial('Explorer and Terminal buttons are links', () => {
   let projectId = '';
   let taskId = '';
 
@@ -294,6 +295,64 @@ test.describe.serial('Explorer buttons are links', () => {
       await tab.waitForSelector('.explorer-view', { timeout: 15000 });
       expect(tab.url()).toContain(`task=${taskId}`);
       expect(tab.url()).toContain('view=task-explorer');
+    } finally {
+      await tab.close();
+    }
+  });
+
+  test('the top-bar Terminal button links to the terminal-only screen', async ({ page }) => {
+    await page.goto(`/?project=${projectId}`);
+    const button = page.locator('.top-bar .terminal-btn');
+    await expect(button).toBeVisible({ timeout: 10000 });
+    await expect(button).toHaveAttribute('href', `/?project=${projectId}&view=terminal`);
+    await expect(button).toHaveAttribute('role', 'button');
+
+    await markDocument(page);
+    await button.click();
+    await expect(page.locator('.terminal-panel')).toBeVisible({ timeout: 15000 });
+    expect(await sameDocument(page)).toBe(true);
+    await page.locator('.terminal-panel .close-btn').click();
+    await expect(page.locator('.terminal-panel')).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('middle-clicking the top-bar Terminal button opens the terminal alone in a new tab', async ({ page, context }) => {
+    await page.goto(`/?project=${projectId}`);
+    const button = page.locator('.top-bar .terminal-btn');
+    await expect(button).toBeVisible({ timeout: 10000 });
+
+    const popupPromise = context.waitForEvent('page', { timeout: 20000 });
+    await button.click({ button: 'middle' });
+    const tab = await popupPromise;
+    try {
+      await tab.waitForSelector('.terminal-panel', { timeout: 15000 });
+      expect(tab.url()).toContain('view=terminal');
+      await expect(tab).toHaveTitle(/Terminal/);
+      await expect(tab.locator('.board-container')).toHaveCount(0);
+      await expect(tab.locator('.top-bar')).toHaveCount(0);
+      await expect(tab.locator('.project-item')).toHaveCount(0);
+      await expect(tab.locator('.terminal-overlay')).toHaveCount(0);
+      await expect(tab.locator('.terminal-panel .close-btn')).toHaveCount(0);
+    } finally {
+      await tab.close();
+    }
+  });
+
+  test('middle-clicking the task-header Terminal button opens that task’s terminal alone', async ({ page, context }) => {
+    await page.goto(`/?project=${projectId}&task=${taskId}`);
+    const button = page.locator('.task-detail-page [aria-label="Open terminal"]');
+    await expect(button).toBeVisible({ timeout: 15000 });
+    await expect(button).toHaveAttribute('href', `/?project=${projectId}&task=${taskId}&view=terminal`);
+
+    const popupPromise = context.waitForEvent('page', { timeout: 20000 });
+    await button.click({ button: 'middle' });
+    const tab = await popupPromise;
+    try {
+      // The tab restores the task and creates its worktree before the shell appears.
+      await tab.waitForSelector('.terminal-panel', { timeout: 30000 });
+      expect(tab.url()).toContain(`task=${taskId}`);
+      expect(tab.url()).toContain('view=terminal');
+      await expect(tab.locator('.task-detail-page')).toHaveCount(0);
+      await expect(tab.locator('.board-container')).toHaveCount(0);
     } finally {
       await tab.close();
     }

@@ -30,7 +30,7 @@ test.describe.serial('Open-terminal keyboard shortcut', () => {
         await page.goto('/');
         await page.waitForSelector('.card', { timeout: 10000 });
 
-        const terminalButton = page.locator('button[aria-label="Open terminal"]');
+        const terminalButton = page.locator('[aria-label="Open terminal"]');
         await expect(terminalButton).toBeVisible();
         await expect(terminalButton).toHaveAttribute('title', 'Open terminal (Ctrl+`)');
 
@@ -69,7 +69,7 @@ test.describe.serial('Open-terminal keyboard shortcut', () => {
         const projectId = await getProjectId(page);
         await page.goto(`/?project=${projectId}&view=explorer`);
 
-        const terminalButton = page.locator('button.terminal-btn[aria-label="Open terminal"]');
+        const terminalButton = page.locator('.terminal-btn[aria-label="Open terminal"]');
         await expect(terminalButton).toBeVisible();
 
         await expect(page.locator(TERMINAL_PANEL)).not.toBeVisible();
@@ -91,7 +91,7 @@ test.describe.serial('Open-terminal keyboard shortcut', () => {
         await expect(page.locator('.task-detail-page')).toBeVisible();
         // Switch to the task explorer view (same URL param as the in-app button).
         await page.goto(`/?project=${projectId}&task=${taskId}&view=task-explorer`);
-        await page.waitForSelector('button.terminal-btn[aria-label="Open terminal"]', { timeout: 10000 });
+        await page.waitForSelector('.terminal-btn[aria-label="Open terminal"]', { timeout: 10000 });
 
         await expect(page.locator(TERMINAL_PANEL)).not.toBeVisible();
         await pressOpenTerminal(page);

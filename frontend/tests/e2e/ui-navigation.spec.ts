@@ -531,7 +531,7 @@ test.describe.parallel('Terminal', () => {
 
       // 5. Find the terminal button in the task header (aria-label is stable;
       //    the title now includes the keyboard shortcut)
-      const terminalButton = page.locator('button[aria-label="Open terminal"]');
+      const terminalButton = page.locator('[aria-label="Open terminal"]');
       await expect(terminalButton).toBeVisible();
 
       // 6. Verify terminal is not visible before clicking

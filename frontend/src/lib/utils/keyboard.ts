@@ -173,6 +173,23 @@ export function isBrowserLinkClick(e: MouseEvent, binding: string): boolean {
     return hasModifier && !matchesClickBinding(binding, e);
 }
 
+/**
+ * The click of a link-like button: an unmodified click runs `action` in this document, and a
+ * modifier click is left uncancelled so the browser opens the href in a new tab or window.
+ */
+export function handleLinkClick(e: MouseEvent, action: () => void): void {
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    action();
+}
+
+/** The keydown of a link-like button: `role="button"` costs an explicit Space activation. */
+export function handleLinkKeydown(e: KeyboardEvent, action: () => void): void {
+    if (e.key !== ' ') return;
+    e.preventDefault();
+    action();
+}
+
 /** Platform default for the card multi-select click: Cmd+Click on Mac, Ctrl+Click elsewhere. */
 export function defaultMultiSelectClick(): string {
     return isMac() ? 'meta+click' : 'control+click';

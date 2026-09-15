@@ -289,7 +289,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await page.waitForSelector(BOARD_BTN, { timeout: 10000 });
 
         // Terminal button tooltip shows the shortcut
-        await expect(page.locator('button[aria-label="Open terminal"]')).toHaveAttribute('title', 'Open terminal (Ctrl+`)');
+        await expect(page.locator('[aria-label="Open terminal"]')).toHaveAttribute('title', 'Open terminal (Ctrl+`)');
 
         // Preferences row shows the default
         await page.locator(SETTINGS_BTN).first().click();

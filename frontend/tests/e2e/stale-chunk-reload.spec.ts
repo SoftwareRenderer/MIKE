@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 // The precached copy would answer for the chunk and no request would reach the network.
 test.use({ serviceWorkers: 'block' });
 
-const TERMINAL_BUTTON = 'button[aria-label="Open terminal"]';
+const TERMINAL_BUTTON = '[aria-label="Open terminal"]';
 const TERMINAL_PANEL = '.terminal-panel';
 const TOAST = '.toast';
 
