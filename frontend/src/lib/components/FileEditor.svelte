@@ -111,7 +111,7 @@
     const fullscreenTitle = $derived(fullscreenToggleTitle(appStore.config));
 
     let content = $state('');
-    let loading = $state(false);
+    let loading = $state(!!filePath);
     let saving = $state(false);
     const saveController = new SaveController();
     let error = $state('');

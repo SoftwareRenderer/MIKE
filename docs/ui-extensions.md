@@ -15,9 +15,25 @@ contract (`/extensions/<author>/<name>/`) intact. `manifest.json` carries metada
 
 **CSP:** `/extensions/...` goes through `CORSMiddleware`, so `script-src 'self' 'nonce-…'` applies —
 **inline `<script>` in an extension's HTML is blocked**; load code as external files
-(`<script src="app.js">`). `<style>`/inline styles are fine (`style-src 'unsafe-inline'`). The entry
-also lands on its **directory** URL (Go's `FileServer` 301s `/index.html` → `./`), so match a mounted
-frame by directory path, not by `index.html`.
+(`<script src="app.js">`). `<style>`/inline styles are fine (`style-src 'unsafe-inline'`).
+
+**The entry is the extension's directory URL.** The host asks for the directory, never
+`<dir>/index.html`: `FileServer` answers the file form with a 301 to `./`, and the per-mount
+`?extch=` token keeps that redirect out of every cache, so every mount would pay the extra round
+trip again. Asking for the directory is not a wider request — `noListingFS` opens a directory only
+when it holds an `index.html`. Either way, match a mounted frame by **directory** path, never by
+`index.html`.
+
+**The frame mounts when the file is open, not before.** `.ext-anchor` lives in the editor's
+loaded branch, so a UI extension registered at `fileEditor` gets an armed, granted channel only
+after `GET /api/fs/read` answered. That is a deliberate cost: mounting the anchor as soon as a path
+is known measured ~2 round trips better (Preview button 1253 ms → 670 ms at 120 ms RTT) but arms
+`editor.getContent` / `editor.setOverlay` / `preview.serve*` over a full-bleed overlay while the
+host still does not know the file is openable, and boots a frame for every open that ends in
+`fileNotFound` / `fileTooLarge`. Taking it also requires `editor.addFooterButton` to wait for
+`.editor-footer .footer-left` instead of answering `editor footer not found` — an installed
+extension stops asking after 8 tries at 250 ms (`Preview.js:250`), and that budget belongs to the
+pinned artifact, not to the host.
 
 **Cross-Origin-Resource-Policy — `/host-client.js` is an opaque-origin path like the two trees above.**
 The mounted frame is `sandbox="allow-scripts"` *without* `allow-same-origin`, so its document has no

@@ -4,7 +4,7 @@
  * installed record says, and external assets must be rejected outright.
  */
 import { describe, it, expect } from 'vitest';
-import { extBaseURL, resolveAssetURL } from '$lib/services/ui-injector.svelte';
+import { extBaseURL, extEntryURL, resolveAssetURL } from '$lib/services/ui-injector.svelte';
 import type { Extension } from '$lib/types';
 
 function makeExt(name: string, author: string): Extension {
@@ -96,6 +96,34 @@ describe('extBaseURL — the served directory the server reported', () => {
         // Absent, or the wrong type, is not a path either.
         expect(extBaseURL(withServed('pack', 'acme', undefined))).toBe(fallback);
         expect(extBaseURL(withServed('pack', 'acme', 42))).toBe(fallback);
+    });
+});
+
+describe('extEntryURL — the URL the extension iframe is mounted at', () => {
+    it('is the served directory, never the index.html file', () => {
+        // The file form is answered with a 301 by Go's FileServer, and the per-mount channel
+        // token keeps that redirect out of every cache, so each mount would pay it again.
+        const entry = extEntryURL(makeExt('html-preview', 'SoftwareRenderer'));
+        expect(entry).toBe('/extensions/softwarerenderer/html-preview/');
+        expect(entry).not.toContain('index.html');
+    });
+
+    it('is the reported directory for a flat install', () => {
+        expect(extEntryURL(withServed('probe-pack', 'acme', '/extensions/probe-pack')))
+            .toBe('/extensions/probe-pack/');
+    });
+
+    it('leaves the entry document resolving its own assets inside its directory', () => {
+        // Dropping index.html must not move the base the extension's <script src="Preview.js">
+        // resolves against — the document already arrived at this URL through the redirect.
+        const entry = extEntryURL(makeExt('html-preview', 'test'));
+        expect(new URL('Preview.js', 'https://app.local' + entry).pathname)
+            .toBe('/extensions/test/html-preview/Preview.js');
+    });
+
+    it('carries a channel token in the query without leaving the extension tree', () => {
+        const src = extEntryURL(makeExt('a?b', 'test')) + '?extch=' + '0'.repeat(32);
+        expect(new URL(src, 'https://app.local').pathname).toBe('/extensions/test/a%3Fb/');
     });
 });
 

@@ -87,6 +87,18 @@ function servedBaseURL(served: unknown): string | null {
     return EXTENSIONS_PREFIX + encoded.join('/');
 }
 
+/**
+ * The extension's entry document — the URL its iframe is mounted at.
+ *
+ * The served directory, never `<dir>/index.html`: Go's `FileServer` answers the file form with a
+ * 301 to `./`, so asking for the file puts a round trip in front of the document on every mount,
+ * and the per-mount `?extch=` token means that redirect is never a cache hit. The directory is not
+ * a wider ask — `noListingFS` opens it only when it holds an `index.html` (`backend/server/routes.go`).
+ */
+export function extEntryURL(ext: Extension): string {
+    return `${extBaseURL(ext)}/`;
+}
+
 /** Resolve `.` and `..` in an absolute path, or return '' when it climbs above the root. */
 function normalizePath(path: string): string {
     const segments: string[] = [];
@@ -211,12 +223,12 @@ export class UIInjector {
                 continue;
             }
 
-            // UI-type extensions: register injection points. The entry page is
-            // always index.html in the extension's own directory.
+            // UI-type extensions: register injection points. The entry is the extension's own
+            // directory (see extEntryURL); the iframe URL carries the channel token as a query.
             if (ext.type !== 'ui' || !ext.manifest.capabilities?.ui) continue;
             const ui = ext.manifest.capabilities.ui;
             if (!ui.injection_points) continue;
-            const moduleUrl = `${extBaseURL(ext)}/index.html`;
+            const moduleUrl = extEntryURL(ext);
 
             // Least privilege: grant only the manifest's requested capabilities
             // that exist in the catalog.
