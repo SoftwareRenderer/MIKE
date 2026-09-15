@@ -132,7 +132,7 @@
 <style>
     .column {
         flex: 1;
-        min-width: 200px;
+        min-width: 260px;
         background: var(--color-surface-1);
         border-radius: var(--radius-lg);
         display: flex;
