@@ -111,7 +111,7 @@ test.describe('Focus management for conditionally rendered inputs', () => {
 
         // The task detail header has its own explorer button (no .explorer-btn class)
         await page.getByRole('button', { name: 'Open explorer' }).click();
-        const tfb = page.locator('.task-file-browser');
+        const tfb = page.getByRole('dialog', { name: 'Task explorer view' }).locator('.file-browser');
         await tfb.locator('button[aria-label="Create new file"]').waitFor({ timeout: 10000 });
 
         const blur = () => tfb.locator('.file-browser-label').click();
