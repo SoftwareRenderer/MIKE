@@ -39,6 +39,15 @@ chances to reload for nothing:
 1. **A registered, active service worker is the authority.** `registration.update()` → the new worker
    installs and stops at `waiting` → `messageSkipWaiting()` → it activates → the `controlling` listener
    with `isUpdate: true` reloads. Nothing is fetched from `/api/version` on this path.
+
+   `update()` settling is **not** the install settling: it settles with the browser's update algorithm,
+   while the worker it just found still has the whole precache to fetch, and the `waiting` slot is only
+   filled when that finishes. Reading the slot at that moment is what made the first check answer "up to
+   date" and a click a moment later find the update. `readyToApply()` waits for the worker to leave
+   `installing` instead — safe because setting the state moves the worker into the registration's slots
+   (or activates it) before the state change fires, so `waiting` answers the truth by then. It also
+   never calls `update()` over an install the browser already started: that call is rejected, and the
+   rejection reaches a person as "could not determine".
 2. **No registered worker: the identity is.** The document's own meta tag against the server's answer;
    different → `location.reload()`, which goes to the network because nothing is intercepting it.
 
@@ -94,7 +103,9 @@ itself is a reload loop on a server whose answer never changes; and a `saveAppSe
 being wrong twice in a day is impossible.
 
 There is deliberately no timer and no timeout anywhere in this path. A long-lived tab is not polled:
-the browser's own worker check is left running and the next open collects it.
+the browser's own worker check is left running and the next open collects it. The same rule covers a
+manual check waiting out an install — it stays on "Checking…" for as long as that takes rather than
+answering early.
 
 ## Why a reload needs no confirmation
 
@@ -133,7 +144,8 @@ three cases, including `unknown`.
 
 * `src/lib/services/__tests__/app-update.unit.ts` — which authority decides, the day gate (two opens,
   one check), the stamp-before-request rule, every empty-identity guard, the initial-worker
-  no-reload rule, and that a failure never reloads.
+  no-reload rule, that a failure never reloads, and the install that finishes after `update()` answered
+  (the one-click case, and not re-asking a browser that is already installing).
 * `src/lib/components/__tests__/config-modal-check-updates.unit.svelte.ts` — the About row's three
   outcomes and the disabled-while-running rule.
 * `backend/server/version_handler_test.go` — the stamp is read out of the built document, and every

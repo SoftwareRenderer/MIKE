@@ -116,13 +116,33 @@ async function applyThroughWorker(
     registration: ServiceWorkerRegistration,
     mayApply: () => boolean,
 ): Promise<UpdateOutcome> {
-    if (!registration.waiting) await registration.update();
+    await readyToApply(registration);
     if (!registration.waiting) return 'current';
     // Asked after the wait: that gap is where a password gets typed. Only the automatic caller can
     // decline, and it discards the outcome.
     if (!mayApply()) return 'unknown';
     worker?.messageSkipWaiting();
     return 'applying';
+}
+
+async function readyToApply(registration: ServiceWorkerRegistration): Promise<void> {
+    // An in-flight install is the browser's own check having found the same build, and `update()` over
+    // it is a rejected call rather than a faster answer.
+    if (!registration.waiting && !registration.installing) await registration.update();
+    const installing = registration.installing;
+    if (!registration.waiting && installing) await untilInstalled(installing);
+}
+
+function untilInstalled(serviceWorker: ServiceWorker): Promise<void> {
+    if (serviceWorker.state !== 'installing') return Promise.resolve();
+    return new Promise((resolve) => {
+        const settle = () => {
+            if (serviceWorker.state === 'installing') return;
+            serviceWorker.removeEventListener('statechange', settle);
+            resolve();
+        };
+        serviceWorker.addEventListener('statechange', settle);
+    });
 }
 
 async function applyThroughIdentity(mayApply: () => boolean): Promise<UpdateOutcome> {

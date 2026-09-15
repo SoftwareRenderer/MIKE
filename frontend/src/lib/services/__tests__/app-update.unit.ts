@@ -31,21 +31,67 @@ vi.mock('$lib/storage', () => ({
 const mockApiFetch = vi.fn();
 vi.mock('$lib/api/helpers', () => ({ apiFetch: mockApiFetch }));
 
+type FakeWorker = {
+    state: string;
+    addEventListener: (type: string, handler: () => void) => void;
+    removeEventListener: (type: string, handler: () => void) => void;
+};
+
 type FakeRegistration = {
     active: object | null;
     waiting: object | null;
+    installing: FakeWorker | null;
     updates: number;
     update: () => Promise<void>;
+    /**
+     * End the install the browser started, the way a browser does it: the slot moves first, then the
+     * state change fires. The test decides when, because a real install finishes whenever the precache
+     * does — including after `update()` has already answered.
+     */
+    finishInstall: (as: Installs) => void;
 };
 
-function fakeRegistration({ waiting = false, appearsOnUpdate = false } = {}): FakeRegistration {
+/** `waiting` = the worker stops at installed behind the one in control; `activated` = it took over. */
+type Installs = 'waiting' | 'activated';
+
+function fakeRegistration({
+    waiting = false,
+    appearsOnUpdate = false,
+    onUpdate = false,
+    alreadyInstalling = false,
+}: {
+    waiting?: boolean;
+    appearsOnUpdate?: boolean;
+    /** `update()` finds a new build and starts installing it. */
+    onUpdate?: boolean;
+    /** The browser's own check found it before anyone asked this registration. */
+    alreadyInstalling?: boolean;
+} = {}): FakeRegistration {
+    const handlers = new Set<() => void>();
+    const worker: FakeWorker = {
+        state: 'installing',
+        addEventListener: (_type, handler) => handlers.add(handler),
+        removeEventListener: (_type, handler) => handlers.delete(handler),
+    };
     const reg: FakeRegistration = {
         active: {},
         waiting: waiting ? {} : null,
+        installing: alreadyInstalling ? worker : null,
         updates: 0,
         update: async () => {
             reg.updates++;
             if (appearsOnUpdate) reg.waiting = {};
+            if (onUpdate) reg.installing = worker;
+        },
+        finishInstall: (as) => {
+            reg.installing = null;
+            if (as === 'activated') {
+                worker.state = 'activated';
+            } else {
+                worker.state = 'installed';
+                reg.waiting = worker;
+            }
+            handlers.forEach((handler) => handler());
         },
     };
     return reg;
@@ -174,6 +220,82 @@ describe('app-update', () => {
             await new Promise((r) => setTimeout(r, 0));
 
             expect(mockMessageSkipWaiting).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    // `update()` answering is not the new build being ready: its worker still has every asset to
+    // precache. These are the clicks that used to need a retry.
+    describe('the install the check waits on', () => {
+        /**
+         * Open the app against a registration with nothing new, so the manual check under test runs on
+         * the Workbox instance the registration created but is the only one asked anything.
+         */
+        async function openApp() {
+            setServiceWorker(fakeRegistration());
+            const mod = await loadModule();
+            mod.startAppUpdate();
+            await new Promise((r) => setTimeout(r, 0));
+            mockMessageSkipWaiting.mockClear();
+            return mod;
+        }
+
+        it('releases a worker that finishes installing after the check asked', async () => {
+            const mod = await openApp();
+            const reg = fakeRegistration({ onUpdate: true });
+            setServiceWorker(reg);
+
+            const checking = mod.checkNow();
+            await new Promise((r) => setTimeout(r, 0));
+            expect(reg.updates).toBe(1);
+            expect(reg.installing).not.toBeNull();
+            expect(mockMessageSkipWaiting).not.toHaveBeenCalled();
+
+            reg.finishInstall('waiting');
+
+            expect(await checking).toBe('applying');
+            expect(mockMessageSkipWaiting).toHaveBeenCalledTimes(1);
+        });
+
+        it('asks nothing of a browser already installing a new worker', async () => {
+            // `update()` over an in-flight install is a rejected call, and a rejected call was an answer
+            // of "could not determine" on the click that was about to succeed.
+            const mod = await openApp();
+            const reg = fakeRegistration({ alreadyInstalling: true });
+            setServiceWorker(reg);
+
+            const checking = mod.checkNow();
+            await new Promise((r) => setTimeout(r, 0));
+            expect(reg.updates).toBe(0);
+
+            reg.finishInstall('waiting');
+
+            expect(await checking).toBe('applying');
+            expect(mockMessageSkipWaiting).toHaveBeenCalledTimes(1);
+        });
+
+        it('answers current when the installing worker takes over instead of waiting', async () => {
+            const mod = await openApp();
+            const reg = fakeRegistration({ onUpdate: true });
+            setServiceWorker(reg);
+
+            const checking = mod.checkNow();
+            await new Promise((r) => setTimeout(r, 0));
+            reg.finishInstall('activated');
+
+            expect(await checking).toBe('current');
+            expect(mockMessageSkipWaiting).not.toHaveBeenCalled();
+            expect(reload).not.toHaveBeenCalled();
+        });
+
+        it('answers current without waiting when nothing new was found', async () => {
+            const mod = await openApp();
+            const reg = fakeRegistration();
+            setServiceWorker(reg);
+
+            expect(await mod.checkNow()).toBe('current');
+            expect(reg.updates).toBe(1);
+            expect(mockMessageSkipWaiting).not.toHaveBeenCalled();
+            expect(reload).not.toHaveBeenCalled();
         });
     });
 
