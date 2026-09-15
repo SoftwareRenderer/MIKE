@@ -66,6 +66,26 @@ async function expectOnBoard(page: Page, taskId: string): Promise<void> {
   await expect(page.locator(cardOf(taskId))).toBeVisible();
 }
 
+/**
+ * Column the narrow board is showing: the one nearest the scroller's centre, or null while the
+ * smooth scroll is still moving.
+ */
+async function centredColumn(page: Page): Promise<string | null> {
+  return page.evaluate(() => {
+    const board = document.querySelector<HTMLElement>('.board');
+    if (!board) return null;
+    const centre = board.scrollLeft + board.clientWidth / 2;
+    let winner: { label: string; distance: number; width: number } | null = null;
+    for (const col of Array.from(document.querySelectorAll<HTMLElement>('.board > .column'))) {
+      const distance = Math.abs(col.offsetLeft + col.clientWidth / 2 - centre);
+      if (!winner || distance < winner.distance) {
+        winner = { label: col.getAttribute('aria-label') || '', distance, width: col.clientWidth };
+      }
+    }
+    return winner && winner.distance < winner.width / 2 ? winner.label.replace(' column', '') : null;
+  });
+}
+
 test.describe.serial('Done returns to the board', () => {
   let projectId: string;
 
@@ -141,5 +161,36 @@ test.describe.serial('Done returns to the board', () => {
 
     await expectOnBoard(page, taskId);
     await expect.poll(() => statusOf(page, projectId, taskId), { timeout: 30000 }).toBe('done');
+  });
+});
+
+// A Done move leaves the board on Review when another task is waiting there, rather than on the
+// Done column the card just joined.
+test.describe('Done lands on the remaining review', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await gotoProject(page);
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+  });
+
+  test('a Done move with another task in Review centres the Review column', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    const waiting = await createTaskViaApi(page, projectId, `review-waiting-${Date.now()}`);
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${waiting}/move`, {
+      method: 'POST',
+      body: { status: 'review' },
+    });
+    const finishing = await createTaskViaApi(page, projectId, `review-finishing-${Date.now()}`);
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${finishing}/move`, {
+      method: 'POST',
+      body: { status: 'review' },
+    });
+
+    await navigateToTask(page, finishing, projectId);
+    await expect(page.locator(REVIEW_BAR)).toBeVisible({ timeout: 15000 });
+    await page.locator('.btn-move', { hasText: 'Done' }).click();
+
+    await expectOnBoard(page, finishing);
+    await expect.poll(() => centredColumn(page), { timeout: 10000 }).toBe('Review');
   });
 });

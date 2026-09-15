@@ -11,7 +11,7 @@
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
     import { dragCarriesFiles } from '$lib/utils/file-drop';
     import { dataAgeText } from '$lib/utils/format-time';
-    import { resolveBoardLandingColumn, mergeTaskUpdateIntoBoard } from '$lib/utils/task-utils';
+    import { resolveBoardLandingColumn, resolveClosedTaskColumn, mergeTaskUpdateIntoBoard } from '$lib/utils/task-utils';
     import { resolveLandingProject } from '$lib/utils/project-landing';
     import { getBoardCache, getBoardCacheEntry, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, clearAll, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
@@ -1482,7 +1482,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     />
                 {:else if uiStore.showCardDetail && appStore.selectedTask}
                     <CardDetail task={appStore.selectedTask} tasks={tasks} projectPath={currentProject?.path} projectName={currentProject?.name} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} fsEventQueue={fsEventQueue} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff' | 'checkpoint') => cardDetailActiveTab = tab} onClose={(status?: string) => {
-                        if (status) scrollToColumn = status;
+                        if (status) scrollToColumn = resolveClosedTaskColumn(status, tasks, appStore.selectedTask?.id ?? '');
                         uiStore.showCardDetail = false;
                         appStore.selectedTask = null;
                         fsEventQueue = [];
