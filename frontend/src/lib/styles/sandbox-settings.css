@@ -1,0 +1,170 @@
+/* The read-only sandbox settings display — SandboxConfigModal's locked view,
+ * SandboxSettingLists and SandboxPanel all write this markup, so the rules live once here as
+ * :global() instead of a scoped copy in each of them. A parent's scoped rule does not reach an
+ * element a child renders (svelte-check calls such a selector unused), which is the same reason
+ * file-drop.css is global; here both modals would need a copy of every row either way.
+ *
+ * Every name carries the `sandbox-` prefix on purpose. `.section-label`, `.env-equals`,
+ * `.caps-list` and `.mount-mode` are already the scoped selectors of ConfigModal, its tabs,
+ * CreateTaskModal and EditTaskModal, and a global copy of a bare name would restyle them from
+ * the outside, where no gate looks. */
+
+/* One saved setting: label left, value right, ruled apart from its neighbours. */
+:global(.sandbox-settings) {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+:global(.sandbox-row) {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--color-border);
+}
+
+/* The last row of a list is not followed by anything to separate from; -flat is for a row that
+   has a section below it instead. */
+:global(.sandbox-row:last-child),
+:global(.sandbox-row-flat) {
+    border-bottom: none;
+}
+
+:global(.sandbox-label) {
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+}
+
+:global(.sandbox-value) {
+    font-size: 0.8125rem;
+    color: var(--color-text-primary);
+    text-align: right;
+}
+
+:global(.sandbox-value-mono) {
+    font-family: var(--font-mono, monospace);
+}
+
+/* A run of saved values under one heading. -bounded separates the run from the row above it,
+   which is what the locked view does and the panel does not. */
+:global(.sandbox-section-label) {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+:global(.sandbox-section) {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+:global(.sandbox-section-bounded) {
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid var(--color-border);
+}
+
+:global(.sandbox-list) {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+:global(.sandbox-list-wrap) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+/* One saved entry, on the raised surface, in the face the values are written in. */
+:global(.sandbox-item) {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background: var(--color-surface-2);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-family: var(--font-mono, monospace);
+}
+
+/* A key = value row spends one step of the gap on the sign. */
+:global(.sandbox-item-tight) {
+    gap: 4px;
+}
+
+/* The half that names the thing, and the half that is named. */
+:global(.sandbox-item-key) {
+    font-weight: 600;
+    color: var(--color-accent-light);
+    overflow-wrap: anywhere;
+}
+
+:global(.sandbox-item-text) {
+    color: var(--color-text-primary);
+}
+
+:global(.sandbox-trunc) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The sign itself, and the note that stands in for an empty list. Both carry their own size:
+   neither sits inside a row that has one. */
+:global(.sandbox-eq) {
+    color: var(--color-text-secondary);
+    flex-shrink: 0;
+    font-size: 0.75rem;
+}
+
+:global(.sandbox-note) {
+    color: var(--color-text-tertiary);
+    font-size: 0.75rem;
+    font-style: italic;
+}
+
+/* rw / ro, and the capability chip. The modifiers follow the base they override — same
+   specificity, so the file's own order is what decides. */
+:global(.sandbox-mode) {
+    font-size: 0.6875rem;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--color-surface-3);
+    color: var(--color-text-secondary);
+    font-weight: 600;
+}
+
+/* -end: the chip has no wrapper of its own, so it holds the right edge itself. */
+:global(.sandbox-mode-end) {
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+:global(.sandbox-mode-rw) {
+    background: rgba(248, 81, 73, 0.15);
+    color: var(--color-status-red);
+}
+
+:global(.sandbox-mode-ro) {
+    background: rgba(210, 153, 34, 0.15);
+    color: var(--color-status-yellow, #d29922);
+}
+
+:global(.sandbox-cap) {
+    padding: 2px 8px;
+    background: rgba(136, 192, 208, 0.12);
+    border: 1px solid rgba(136, 192, 208, 0.25);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-family: var(--font-mono, monospace);
+    color: var(--color-accent-light, #88c0d0);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

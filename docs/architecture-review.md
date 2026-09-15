@@ -298,7 +298,16 @@ Each of these was derived wrongly in the round that produced the findings above.
 
 ## Not measured here
 
-`environment` on an LSP extension (declared, validated, never called) has no number behind it yet. The other
+`environment` on an LSP extension (declared, validated, never called) has no number behind it yet. Neither
+has the CSS side of the same shape: a custom property read but never defined resolves to its fallback, or to
+nothing, silently. `python3` over `frontend/src` (`rg -oN 'var\(--[A-Za-z0-9-]+' -r '$&' --no-filename` for the
+reads, the same pattern with `\s*:` for the definitions, then set-difference) answers **6** today —
+`--color-bg-elevated`, `--color-danger`, `--color-primary`, `--color-success`, `--color-text`, `--font-ui` —
+across 18 read sites, two of them in the sandbox modals. The mirror finding, tokens defined in `app.css` with
+no reader, is a separate cleanup; a rule being added there should read the tokens the neighbouring code
+already reads rather than reach into that pile.
+
+The other
 ten archgate rules — `http`, `env`, `envassign`, `locks`, `routes`, `writeselect`, `wsevents`, `wsframe`,
 `status500`, `ctxroot` — are documented at their definitions in `scripts/archgate/rules*.go` and in the
 subsystem docs `AGENTS.md` indexes; this file holds what was measured for the review, and what re-deriving it
