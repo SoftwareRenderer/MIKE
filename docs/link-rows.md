@@ -1,13 +1,15 @@
 # Link-like Rows — Design Detail
 
-Read this before touching `App/Sidebar.svelte`, `Card.svelte`, or the click routing in
-`use-board-arrow-nav.ts` / `keyboard.ts`. The hard rules live in `AGENTS.md → Link-like Rows`.
+Read this before touching `App/Sidebar.svelte`, `Card.svelte`, `App/TopBar.svelte`,
+`CardDetail/TaskHeader.svelte`, or the click routing in `use-board-arrow-nav.ts` / `keyboard.ts`. The
+hard rules live in `AGENTS.md → Link-like Rows`.
 
-Sidebar project rows and task cards are reachable by real URLs, so the browser's own link actions
-work on them: right-click → *Open Link in New Tab/Window*, middle click, *Copy Link Address*,
-status-bar URL. Both use the same deep links the app itself writes (`?project=`, `?project=&task=`,
-canonical order from `updateUrl` in `App.svelte`), which `loadAppData` + `restoreTaskFromUrl` already
-restore — no backend route is involved (`/` is the only SPA document).
+Sidebar project rows, task cards and both Explorer buttons are reachable by real URLs, so the browser's
+own link actions work on them: right-click → *Open Link in New Tab/Window*, middle click, *Copy Link
+Address*, status-bar URL. They use the same deep links the app itself writes (`?project=`,
+`?project=&task=`, `&view=explorer`, canonical order from `updateUrl` in `App.svelte`), which
+`loadAppData` + `restoreTaskFromUrl` + `applyUrlView` already restore — no backend route is involved
+(`/` is the only SPA document).
 
 ## Project row
 
@@ -36,12 +38,29 @@ default platform Ctrl/Cmd+Click) — unbound modifier clicks reach the browser i
 **Known limitation:** on a **queued** (offline-pending) card the lifted content covers most of the
 overlay, so the link menu is only available over the card's padding.
 
+## Explorer buttons
+
+`App/TopBar.svelte` (`.explorer-btn`) and `CardDetail/TaskHeader.svelte` (the icon-only button, absent
+in the floating view) are `<a class="icon-btn" role="button" tabindex="0" draggable="false">` carrying the
+plain view link the button itself writes: `/?project=<id>&view=explorer` and
+`/?project=<id>&task=<id>&view=task-explorer`. Deliberately the plain view only — no `review` /
+`task-review` and no `file=` — so a tab opened from the button lands on the explorer, not on whatever
+file happens to be on screen.
+
+Neither button claims a modifier binding, so **every** modifier click is left uncancelled and no
+`isBrowserLinkClick()` call is needed; a middle click is an `auxclick`, which no handler sees at all.
+`role="button"` keeps them announced as buttons (`getByRole('button', { name: 'Open explorer' })` is
+used by two specs) and costs an explicit Space handler, as everywhere else that swaps a button for an
+anchor.
+`draggable="false"` keeps the text inside the top-bar button from becoming a link drag payload.
+
 ## Tests
 
 `components/__tests__/link-rows.unit.svelte.ts` (hrefs, click/modifier routing, Space, cloning,
-overlay attributes), `utils/__tests__/keyboard.unit.ts` (click bindings), e2e
+overlay attributes), `components/__tests__/explorer-buttons-are-links.unit.svelte.ts` (both Explorer
+buttons), `utils/__tests__/keyboard.unit.ts` (click bindings), e2e
 `link-like-rows.spec.ts` (middle-click opens a real tab, no document navigation on left click, drag
-source is the card not the link, second tab lands on the linked project/task), e2e
+source is the card not the link, second tab lands on the linked project/task/explorer), e2e
 `preferences-keyboard.spec.ts` (isolated; rebinding frees Ctrl+Click).
 
 ## Markup and stacking contract (moved from AGENTS.md)

@@ -3,10 +3,10 @@ import { getProjectId, createTaskViaApi, waitForTaskState, csrfFetch } from './h
 
 
 // ============================================================
-// LINK-LIKE ROWS — sidebar projects and task cards
+// LINK-LIKE ROWS — sidebar projects, task cards, Explorer buttons
 // ============================================================
-// Both are anchors, so the browser offers its link actions (right-click, middle click) while an
-// unmodified click stays inside the SPA, using the same ?project= / ?task= params the app writes.
+// All are anchors, so the browser's own link actions work on them. A plain click still opens the thing
+// in place, using the same ?project= / ?task= / ?view= params the app writes itself.
 
 /** Stamp the current document, so a real (re)navigation can be detected. */
 async function markDocument(page: Page) {
@@ -210,5 +210,92 @@ test.describe.serial('Task cards are links', () => {
 
     // …and the drop really moved the task.
     await waitForTaskState(page, projectId, taskId, t => t.status === 'review', 20000);
+  });
+});
+
+test.describe.serial('Explorer buttons are links', () => {
+  let projectId = '';
+  let taskId = '';
+
+  test.beforeAll(async ({ browser }) => {
+    const page = await browser.newPage();
+    try {
+      await page.goto('/');
+      await page.waitForSelector('.project-item', { timeout: 10000 });
+      projectId = await getProjectId(page);
+      taskId = await createTaskViaApi(page, projectId, `link-explorer-${Date.now()}`);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test.afterAll(async ({ browser }) => {
+    if (!taskId) return;
+    const page = await browser.newPage();
+    try {
+      await page.goto('/');
+      await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}`, { method: 'DELETE' });
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('the top-bar Explorer button links to the project explorer', async ({ page }) => {
+    await page.goto(`/?project=${projectId}`);
+    const button = page.locator('.explorer-btn');
+    await expect(button).toBeVisible({ timeout: 10000 });
+    await expect(button).toHaveAttribute('href', `/?project=${projectId}&view=explorer`);
+    await expect(button).toHaveAttribute('role', 'button');
+
+    await markDocument(page);
+    await button.click();
+    await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 15000 });
+    expect(await sameDocument(page)).toBe(true);
+  });
+
+  test('middle-clicking the top-bar Explorer button opens the explorer in a new tab', async ({ page, context }) => {
+    await page.goto(`/?project=${projectId}`);
+    const button = page.locator('.explorer-btn');
+    await expect(button).toBeVisible({ timeout: 10000 });
+
+    const popupPromise = context.waitForEvent('page', { timeout: 20000 });
+    await button.click({ button: 'middle' });
+    const tab = await popupPromise;
+    try {
+      await tab.waitForSelector('.explorer-view', { timeout: 15000 });
+      expect(tab.url()).toContain('view=explorer');
+    } finally {
+      await tab.close();
+    }
+  });
+
+  test('the task-header Explorer button links to that task\u2019s explorer', async ({ page }) => {
+    await page.goto(`/?project=${projectId}&task=${taskId}`);
+    const button = page.locator('.task-detail-page [aria-label="Open explorer"]');
+    await expect(button).toBeVisible({ timeout: 15000 });
+    await expect(button).toHaveAttribute('href', `/?project=${projectId}&task=${taskId}&view=task-explorer`);
+
+    await markDocument(page);
+    await button.click();
+    await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 20000 });
+    expect(await sameDocument(page)).toBe(true);
+    expect(page.url()).toContain('view=task-explorer');
+  });
+
+  test('middle-clicking the task-header Explorer button opens it in a new tab', async ({ page, context }) => {
+    await page.goto(`/?project=${projectId}&task=${taskId}`);
+    const button = page.locator('.task-detail-page [aria-label="Open explorer"]');
+    await expect(button).toBeVisible({ timeout: 15000 });
+
+    const popupPromise = context.waitForEvent('page', { timeout: 20000 });
+    await button.click({ button: 'middle' });
+    const tab = await popupPromise;
+    try {
+      await tab.waitForSelector('.explorer-view', { timeout: 15000 });
+      expect(tab.url()).toContain(`task=${taskId}`);
+      expect(tab.url()).toContain('view=task-explorer');
+    } finally {
+      await tab.close();
+    }
   });
 });

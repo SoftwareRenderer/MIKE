@@ -44,6 +44,21 @@
     // Terminal button tooltip — always shows the effective shortcut (tooltips
     // keep the shortcut text even when keycap hints are hidden).
     const terminalButtonTitle = $derived(openTerminalTitle(appStore.config));
+
+    // The same link `updateUrl` in App.svelte writes, so a tab opened from here shows what a click shows.
+    const explorerHref = $derived(`${location.pathname}?project=${encodeURIComponent(currentProject.id)}&view=explorer`);
+
+    function handleExplorerClick(e: MouseEvent) {
+        if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        onOpenExplorerView();
+    }
+
+    function handleExplorerKeydown(e: KeyboardEvent) {
+        if (e.key !== ' ') return;
+        e.preventDefault();
+        onOpenExplorerView();
+    }
 </script>
 
 <header class="top-bar">
@@ -66,9 +81,14 @@
         {/if}
     </button>
     <span class="project-title">
-        <button
+        <a
             class="icon-btn explorer-btn"
-            onclick={onOpenExplorerView}
+            href={explorerHref}
+            role="button"
+            tabindex="0"
+            draggable="false"
+            onclick={handleExplorerClick}
+            onkeydown={handleExplorerKeydown}
             aria-label="Open explorer" title="Open file explorer"
         >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -87,7 +107,7 @@
                     <span class="branch-badge-label">{currentBranch}</span>
                 </span>
             {/if}
-        </button>
+        </a>
     </span>
     <div class="actions">
         <button class="icon-btn" onclick={onOpenTerminal} aria-label="Open terminal" title={terminalButtonTitle}>
@@ -135,6 +155,7 @@
         color: var(--color-text-primary);
     }
     .icon-btn.explorer-btn {
+        text-decoration: none;
         min-width: 0;
         gap: 6px;
         padding-left: 6px;
