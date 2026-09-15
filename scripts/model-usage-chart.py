@@ -5,7 +5,11 @@ Reads the full git history of the current repository, normalizes the many
 spellings the trailer has accumulated (agent prefixes like `MIKE:`/`pi:`, vendor
 prefixes like `deepseek-ai/`, quantization suffixes like `-Q4_K_XL`), and writes
 a self-contained SVG (no scripts, no external fonts) with a donut chart plus a
-legend of raw commit counts.
+legend of raw commit counts, dated with the day it was generated. It follows the
+viewer's colour scheme through `prefers-color-scheme`, which a browser honours
+even when the SVG arrives through `<img>`. Every colour carries its light value
+as a fallback, so a renderer without `@media` or custom-property support draws
+the light chart rather than a black one.
 
 Usage:
     python3 scripts/model-usage-chart.py [-o docs/model-usage.svg] [--repo PATH] [--json]
@@ -15,6 +19,7 @@ counts once for each; a commit that names the same model twice counts once.
 """
 
 import argparse
+import colorsys
 import json
 import math
 import os
@@ -22,6 +27,7 @@ import re
 import subprocess
 import sys
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 
 # Unit separator / record separator sentinels for `git log --format`.
 RECORD_SEP = "\x01"
@@ -45,8 +51,92 @@ PALETTE = [
     "#86BCB6", "#D37295", "#A0CBE8", "#FFBE7D", "#8CD17D",
 ]
 
+# Dark mode defines each colour twice, as a custom property per theme, and
+# elements read it through `var()`. A renderer without `@media` never sees the
+# dark block; `varv` is what keeps such a renderer on the light chart.
+DARK_SURFACE = "#14171C"
+
+
+def dark_hue(color, floor=0.55, cap=0.80):
+    """The same hue with its lightness raised to `floor`, for a dark ground.
+
+    `floor` is measured: at 0.55 every hue clears 4.8:1 against DARK_SURFACE,
+    where WCAG 1.4.11 asks 3:1 of a graphical object.
+    """
+    h, l, s = colorsys.rgb_to_hls(*(int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)))
+    r, g, b = colorsys.hls_to_rgb(h, min(max(l, floor), cap), s)
+    return "#%02X%02X%02X" % tuple(round(c * 255) for c in (r, g, b))
+
+
+PALETTE_DARK = [dark_hue(c) for c in PALETTE]
+
+# name -> light, dark. `--bg` doubles as the wedge separator so the gap between
+# slices reads as the page showing through, and as the label colour on a wedge,
+# which makes a label's contrast equal that wedge's contrast against the page.
+SURFACES = [
+    ("bg", "#FFFFFF", DARK_SURFACE),
+    ("ink", "#1A1A1A", "#E6E8EA"),
+    ("muted", "#666666", "#9AA1A9"),
+    ("faint", "#777777", "#8B929A"),
+    ("out", "#555555", "#B9C0C7"),
+    ("rule", "#DDDDDD", "#3A4048"),
+    ("on-wedge", "#FFFFFF", DARK_SURFACE),
+]
+LIGHT_OF = {name: light for name, light, _ in SURFACES}
+
+
+def varv(name):
+    """`var(--x,#LIGHT)`: the light value travels inside the reference.
+
+    It cannot sit only in a `fill=""` attribute below. A `var()` whose property
+    is undefined makes the declaration invalid at computed-value time, so the
+    attribute is never consulted and `fill` falls to its initial value, black
+    (measured by rendering the file with its `<style>` removed).
+    """
+    return f"var(--{name},{LIGHT_OF[name]})"
+
+
+def theme_css(with_palette):
+    """The custom-property blocks and the rules shared by both renderers.
+
+    The `@media` block restates properties only, never an element rule: the
+    cascade is doing the theming, so a colour is still defined in one place.
+    """
+    light = "".join(f"--{n}:{a};" for n, a, _ in SURFACES)
+    dark = "".join(f"--{n}:{b};" for n, _, b in SURFACES)
+    if with_palette:
+        light += "".join(f"--c{i}:{c};" for i, c in enumerate(PALETTE))
+        dark += "".join(f"--c{i}:{c};" for i, c in enumerate(PALETTE_DARK))
+    return (
+        f":root{{{light}}}"
+        f"@media (prefers-color-scheme: dark){{:root{{{dark}}}}}"
+        f".bg{{fill:{varv('bg')}}}"
+        f".rule{{stroke:{varv('rule')}}}"
+        "text{font-family:'Inter','Helvetica Neue',Arial,sans-serif;"
+        f"fill:{varv('ink')}}}"
+        ".h{font-size:22px;font-weight:600}"
+        f".sub{{font-size:13px;fill:{varv('muted')}}}"
+    )
+
 # Donut geometry, shared by the renderer and the verifier.
 CX, CY, R_OUTER, R_INNER = 300, 340, 175, 96
+
+# The footer's generation stamp is the only text allowed to differ between two
+# runs over the same history, so `--check` masks it before comparing: a
+# byte-exact match against a wall-clock date would report a correct SVG as
+# stale at midnight. It is one line, kept out of the wrapped paragraphs so a
+# line break can never split it.
+GENERATED_RE = re.compile(r"Generated \d{4}-\d{2}-\d{2} \(UTC\)")
+
+
+def generated_stamp():
+    """Today's date in UTC, the stamp the footer is written with."""
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def mask_generated(text):
+    """Blank the generation stamp out, so two runs of one history compare equal."""
+    return GENERATED_RE.sub("Generated <date> (UTC)", text)
 
 
 def git_log(repo):
@@ -215,25 +305,26 @@ def donut_path(cx, cy, r_outer, r_inner, a0, a1):
     )
 
 
-def empty_chart(meta):
+def empty_chart(meta, generated):
     """A repository with no `Assisted-by:` trailers gets a notice, not an empty ring.
 
     A hole with nothing in it renders as a blank page, and the totals would have
     to be invented to divide by — this prints the count instead.
     """
-    width, height = 1000, 320
+    width, height = 1000, 344
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
         f'viewBox="0 0 {width} {height}" role="img"><title>'
         "Models credited in Assisted-by commit trailers</title>"
         f'<desc>No Assisted-by trailers in {meta["commits_total"]} commits.</desc>'
-        f'<rect width="{width}" height="{height}" fill="#ffffff"/>'
-        "<style>text{font-family:'Inter','Helvetica Neue',Arial,sans-serif}"
-        ".h{font-size:22px;font-weight:600}.sub{font-size:13px;fill:#666}</style>"
-        '<text class="h" x="40" y="46">Which models did the work?</text>'
+        f'<rect class="bg" width="{width}" height="{height}" fill="#ffffff"/>'
+        "<style>" + theme_css(False) + "</style>"
+        '<text class="h" x="40" y="46">LLMs credited in MIKE</text>'
         '<text class="sub" x="40" y="150">No <tspan font-family="ui-monospace,monospace">Assisted-by:</tspan> '
         f'trailer in any of the {meta["commits_total"]:,} commits of this repository.</text>'
-        '<text class="sub" x="40" y="172">Nothing to chart.</text></svg>\n'
+        '<text class="sub" x="40" y="172">Nothing to chart.</text>'
+        f'<text class="sub" x="40" y="{height - 20}">Generated {generated} (UTC).</text>'
+        "</svg>\n"
     )
 
 
@@ -276,11 +367,11 @@ def group_series(models, total, min_share=0.01):
     return series, tail
 
 
-def svg_chart(models, agents, meta):
+def svg_chart(models, agents, meta, generated):
     total = sum(m["commits"] for m in models)
     series, tail = group_series(models, total)
     if not series:
-        return empty_chart(meta), []
+        return empty_chart(meta, generated), []
     width = 1000
     cx, cy = CX, CY
     r_outer, r_inner = R_OUTER, R_INNER
@@ -302,6 +393,7 @@ def svg_chart(models, agents, meta):
         f"Source: git log of this repository — {meta['commits_total']:,} commits, {meta['merges_total']:,} merges. "
         f"Regenerate: python3 scripts/model-usage-chart.py"
     )
+    footer.append(f"Generated {generated} (UTC).")
     lines = []
     for para in footer:
         lines.extend(wrap(para, 140))
@@ -316,19 +408,17 @@ def svg_chart(models, agents, meta):
         f'{meta["commits_total"]} commits carry an Assisted-by trailer, naming '
         f'{len(models)} distinct models across {meta["trailers_total"]} trailers.'
         "</desc>",
-        f'<rect width="{width}" height="{height}" fill="#ffffff"/>',
-        '<style>'
-        "text{font-family:'Inter','Helvetica Neue',Arial,sans-serif;fill:#1a1a1a}"
-        ".h{font-size:22px;font-weight:600}.sub{font-size:13px;fill:#666}"
+        f'<rect class="bg" width="{width}" height="{height}" fill="#ffffff"/>',
         # Label colors must be CSS, not fill="" attributes: a presentation
         # attribute loses to the `text{}` rule above, so white-on-wedge labels
         # would silently render near-black (measured in a browser).
-        '.pct-in{font-size:13px;font-weight:600;fill:#ffffff}'
-        ".pct-out{font-size:13px;font-weight:600;fill:#555}"
-        ".leg{font-size:13px}.legb{font-size:13px;font-weight:600}"
-        ".foot{font-size:11px;fill:#777}.ctr{font-size:22px;font-weight:600}"
-        "</style>",
-        f'<text class="h" x="40" y="46">Which models did the work?</text>',
+        "<style>" + theme_css(True)
+        + f'.pct-in{{font-size:13px;font-weight:600;fill:{varv("on-wedge")}}}'
+        + f".pct-out{{font-size:13px;font-weight:600;fill:{varv('out')}}}"
+        + ".leg{font-size:13px}.legb{font-size:13px;font-weight:600}"
+        + f".foot{{font-size:11px;fill:{varv('faint')}}}.ctr{{font-size:22px;font-weight:600}}"
+        + "</style>",
+        '<text class="h" x="40" y="46">LLMs credited in MIKE</text>',
         f'<text class="sub" x="40" y="68">By model referenced in an <tspan font-family="ui-monospace,monospace">Assisted-by:</tspan> '
         f'commit trailer</text>',
     ]
@@ -346,6 +436,7 @@ def svg_chart(models, agents, meta):
         full = ' data-full="1"' if (a1 - a0) >= math.radians(359.999) else ""
         parts.append(
             f'<path d="{d}"{full} '
+            f'style="fill:var(--c{i % len(PALETTE)},{color});stroke:var(--bg,#FFFFFF)" '
             f'fill="{color}" stroke="#ffffff" stroke-width="2">'
             f"<title>{esc(m['name'])}: {m['commits']} commits "
             f"({m['commits'] / total * 100:.1f}%)</title></path>"
@@ -359,7 +450,7 @@ def svg_chart(models, agents, meta):
                 f'text-anchor="middle">{frac * 100:.0f}%</text>'
             )
         elif frac >= 0.012:
-            outside.append({"mid": mid, "frac": frac, "color": color})
+            outside.append({"mid": mid, "frac": frac, "color": color, "ci": i % len(PALETTE)})
         angle += sweep
 
     # Leader-line labels are placed together, not per wedge: two thin neighbouring
@@ -389,7 +480,8 @@ def svg_chart(models, agents, meta):
         elbow = cx + side * (label_r - 8)
         parts.append(
             f'<polyline points="{sx:.1f},{sy:.1f} {elbow:.1f},{item["y"]:.1f} '
-            f'{tx - side * 4:.1f},{item["y"]:.1f}" fill="none" stroke="{item["color"]}" '
+            f'{tx - side * 4:.1f},{item["y"]:.1f}" fill="none" '
+            f'style="stroke:var(--c{item["ci"]},{item["color"]})" stroke="{item["color"]}" '
             f'stroke-width="1.5"/>'
             f'<text class="pct-out" x="{tx:.1f}" y="{item["y"] + 4:.1f}" '
             f'text-anchor="{"start" if side > 0 else "end"}">'
@@ -406,12 +498,15 @@ def svg_chart(models, agents, meta):
     parts.append(f'<text class="legb" x="{lx0}" y="{ly0 - 24}">Model</text>')
     parts.append(f'<text class="legb" x="{lx0 + 260}" y="{ly0 - 24}" text-anchor="end">commits</text>')
     parts.append(f'<text class="legb" x="{lx0 + 340}" y="{ly0 - 24}" text-anchor="end">share</text>')
-    parts.append(f'<line x1="{lx0}" y1="{ly0 - 16}" x2="{lx0 + 340}" y2="{ly0 - 16}" stroke="#ddd"/>')
+    parts.append(
+        f'<line class="rule" x1="{lx0}" y1="{ly0 - 16}" x2="{lx0 + 340}" y2="{ly0 - 16}" stroke="#ddd"/>'
+    )
     y = ly0
     for i, m in enumerate(series):
         frac = m["commits"] / total * 100
         parts.append(
             f'<rect x="{lx0}" y="{y - 11}" width="12" height="12" rx="2" '
+            f'style="fill:var(--c{i % len(PALETTE)},{PALETTE[i % len(PALETTE)]})" '
             f'fill="{PALETTE[i % len(PALETTE)]}"/>'
             f'<text class="leg" x="{lx0 + 22}" y="{y}">{esc(m["name"])}</text>'
             f'<text class="leg" x="{lx0 + 260}" y="{y}" text-anchor="end">{m["commits"]:,}</text>'
@@ -530,7 +625,8 @@ def main():
     ap.add_argument("-o", "--output", default="docs/model-usage.svg")
     ap.add_argument("--json", action="store_true", help="print the aggregate table as JSON and exit")
     ap.add_argument("--check", action="store_true",
-                    help="verify the committed SVG is current and geometrically sound; change nothing")
+                    help="verify the committed SVG is current and geometrically sound, ignoring "
+                         "its generation date; change nothing")
     args = ap.parse_args()
 
     repo = os.path.abspath(args.repo)
@@ -543,7 +639,7 @@ def main():
         json.dump({"meta": meta, "agents": agents, "models": models}, sys.stdout, indent=2)
         sys.stdout.write("\n")
         return
-    svg, series = svg_chart(models, agents, meta)
+    svg, series = svg_chart(models, agents, meta, generated_stamp())
     out = os.path.abspath(args.output)
 
     if args.check:
@@ -555,7 +651,7 @@ def main():
             problems.append(f"cannot read {out}: {exc} — write it first with "
                             "python3 scripts/model-usage-chart.py")
             on_disk = None
-        if on_disk is not None and on_disk != svg:
+        if on_disk is not None and mask_generated(on_disk) != mask_generated(svg):
             problems.append(f"{os.path.relpath(out, os.getcwd())} is stale — regenerate with "
                             "python3 scripts/model-usage-chart.py")
         if on_disk is not None:
