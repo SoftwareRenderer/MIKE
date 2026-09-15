@@ -1,9 +1,9 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { VitePWA } from 'vite-plugin-pwa';
-import path from 'path';
 // The extension is load-bearing: `configLoader: 'native'` resolves specifiers verbatim.
 import { buildIdPlugin } from './scripts/build-id.ts';
+import { alias } from './scripts/aliases.js';
 import { isAppShellAsset, isExtensionAsset } from './scripts/sw-routes.ts';
 
 export default defineConfig({
@@ -90,9 +90,7 @@ export default defineConfig({
         }),
     ],
     resolve: {
-        alias: {
-            $lib: path.resolve('./src/lib'),
-        },
+        alias,
     },
     build: {
         // Performance budgets (gzipped sizes)

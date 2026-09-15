@@ -48,6 +48,14 @@ Sharing one connection across workspaces — which is what this replaced — mea
 workspace's `LSPStart` destroyed the first one's server (root, loaded packages, open documents,
 handshake) while its holder kept sending it requests.
 
+A language server's **cwd is the workspace mount root**: the `podman exec` that starts the bridge
+carries `-w <MountPath>` and `newLSPSession` sets no `cmd.Dir`, so the server never lands inside a
+sub-directory of the workspace, however deep the package it serves lives. An editor gives a language
+server the same cwd, so a project with its build config in a sub-directory has to be resolvable from
+that config's own location: `frontend/svelte.config.js` declares the `$lib` alias for its preprocessor
+rather than relying on the one in `vite.config.ts`, because Vite discovers its config file from the
+process cwd and finds none at a workspace root that keeps the frontend below it.
+
 `pkg/bridge/agent/lsp.go` also no longer auto-restarts a dead session, because a server started
 that way has never seen `initialize`, and gopls answers a document sent to it with a *warning about
 itself* (`No active builds contain …`, `addView called before server initialized` in its own log)
