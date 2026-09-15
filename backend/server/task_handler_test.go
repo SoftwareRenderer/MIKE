@@ -1,6 +1,9 @@
 package server
 
 import (
+	"bufio"
+	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -890,34 +893,94 @@ func TestCommitAndDone(t *testing.T) {
 	}
 }
 
-// Test: commit-preview endpoint returns a commit message
-func TestCommitPreview(t *testing.T) {
+// TestCommitPreviewStream is the commit-message preview's whole contract: one metadata frame naming
+// the author and merge target, then the generated message. The Commit dialog opens on the metadata
+// and fills the message as it streams, so a stream that never names them is an empty dialog.
+func TestCommitPreviewStream(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "preview-test")
 
 	// Move task to review (required for commit operations)
 	moveReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/move", map[string]any{"status": "review"})
-	moveRR := testResponseAuth(t, s, moveReq)
-	if moveRR.Code != http.StatusOK {
+	if moveRR := testResponseAuth(t, s, moveReq); moveRR.Code != http.StatusOK {
 		t.Fatalf("move to review: %d %s", moveRR.Code, moveRR.Body.String())
 	}
 
-	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/commit-preview", nil)
+	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/commit-preview/stream", nil)
 	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("commit-preview: %d %s", rr.Code, rr.Body.String())
+		t.Fatalf("commit-preview/stream: %d %s", rr.Code, rr.Body.String())
 	}
 
-	result := mustJSON[map[string]any](t, rr.Body)
-	commitMsg, ok := result["commit_message"].(string)
-	if !ok || commitMsg == "" {
-		t.Fatalf("expected non-empty commit_message, got %v", result["commit_message"])
+	var metadata map[string]any
+	var message string
+	for _, ev := range readNamedSSE(t, rr.Body) {
+		switch ev.event {
+		case "metadata":
+			if err := json.Unmarshal([]byte(ev.data), &metadata); err != nil {
+				t.Fatalf("metadata frame %q: %v", ev.data, err)
+			}
+		case "done":
+			var body map[string]any
+			if err := json.Unmarshal([]byte(ev.data), &body); err != nil {
+				t.Fatalf("done frame %q: %v", ev.data, err)
+			}
+			message, _ = body["content"].(string)
+		case "error":
+			t.Fatalf("commit-preview/stream reported an error: %s", ev.data)
+		}
 	}
-	// Message should contain the task title
-	if !strings.Contains(commitMsg, "preview-test") {
-		t.Fatalf("commit message should contain task title, got: %s", commitMsg)
+
+	if metadata == nil {
+		t.Fatal("no metadata event — the dialog opens on author_name, author_email and merge_target")
 	}
+	// The dialog reads all three keys before the first token. resolveGitAuthor always answers an
+	// identity, so the author pair is non-empty; merge_target is empty until the task has a branch to
+	// merge into, so it is held to presence.
+	for _, key := range []string{"author_name", "author_email"} {
+		if v, ok := metadata[key].(string); !ok || v == "" {
+			t.Errorf("metadata[%s] is not a non-empty string: %v", key, metadata)
+		}
+	}
+	if _, ok := metadata["merge_target"].(string); !ok {
+		t.Errorf("metadata has no merge_target key: %v", metadata)
+	}
+	// The generated message should contain the task title
+	if !strings.Contains(message, "preview-test") {
+		t.Fatalf("commit message should contain task title, got: %q", message)
+	}
+}
+
+// sseFrame is one SSE frame: the name after `event:` and the payload after `data:`.
+type sseFrame struct{ event, data string }
+
+// readNamedSSE splits an SSE body into frames keyed by event name. The clone stream's reader keys on
+// a `type` field inside the payload instead; this stream names the frame with `event:`, which is what
+// the client switches on.
+func readNamedSSE(t *testing.T, body io.Reader) []sseFrame {
+	t.Helper()
+	var frames []sseFrame
+	var frame sseFrame
+	scanner := bufio.NewScanner(body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case strings.HasPrefix(line, "event: "):
+			frame.event = line[len("event: "):]
+		case strings.HasPrefix(line, "data: "):
+			frame.data = line[len("data: "):]
+		case line == "":
+			if frame.event != "" {
+				frames = append(frames, frame)
+			}
+			frame = sseFrame{}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("read SSE: %v", err)
+	}
+	return frames
 }
 
 // Test: commit-and-done accepts custom commit message from request body

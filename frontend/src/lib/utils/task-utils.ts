@@ -134,6 +134,20 @@ export function resolveBoardLandingColumn(tasks: Pick<Task, 'status'>[]): 'revie
     return 'backlog';
 }
 
+/**
+ * Column the board lands on when a task view closes: Review if it holds work other than the closed
+ * task, else the column the task moved into. The closed task is excluded because the board list on
+ * screen still holds its pre-move status until the update lands.
+ */
+export function resolveClosedTaskColumn(
+    status: string,
+    tasks: Pick<Task, 'id' | 'status'>[],
+    closedTaskId: string,
+): string {
+    if (status !== 'done') return status;
+    return tasks.some(t => t.id !== closedTaskId && t.status === 'review') ? 'review' : status;
+}
+
 /** Reduce a set of task IDs to those whose parent is NOT also in the set.
  * Descendants are excluded because the server recursively deletes them */
 export function filterTopLevelTaskIds(taskIds: string[], tasks: Task[]): string[] {

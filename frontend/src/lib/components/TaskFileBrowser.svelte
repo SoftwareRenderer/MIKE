@@ -1,6 +1,7 @@
 <script lang="ts">
     import FileBrowserView from '$lib/components/FileBrowserView.svelte';
     import { t } from '$lib/i18n';
+    import { taskRelativeFsPath, type FsEvent } from '$lib/utils/fs-event';
 
     let { projectId, projectName, taskId, taskPath, sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange, onToggleFind }: {
         projectId: string;
@@ -9,7 +10,7 @@
         taskPath: string;
         sandboxEnabled: boolean;
         unsavedFiles: string[];
-        pendingFsEvent: { op: 'create' | 'delete'; path: string } | null;
+        pendingFsEvent: FsEvent | null;
         onFileSelected: (path: string, line?: number, pin?: boolean) => void;
         onPathChange: (path: string) => void;
         onToggleFind?: () => void;
@@ -23,11 +24,8 @@
 
     // Events reach us from two watchers with two roots: WorktreeWatcher speaks the task worktree,
     // ProjectWatcher the project root. A sibling task's change is not this listing's business.
-    function mapFsEvent(relPath: string): string | null {
-        const ownPrefix = 'worktrees/' + projectId + '/' + taskId + '/';
-        if (relPath.startsWith(ownPrefix)) return relPath.substring(ownPrefix.length);
-        if (relPath.startsWith('worktrees/' + projectId + '/')) return null;
-        return relPath;
+    function mapFsEvent(event: FsEvent): string | null {
+        return taskRelativeFsPath(event, projectId, taskId);
     }
 
     // A task explorer tab is never pinned, so a double-click is just a click.

@@ -74,6 +74,23 @@
     // top bar uses, so the shortcut sentence lives in exactly one place.
     const terminalButtonTitle = $derived(openTerminalTitle(appStore.config));
 
+    // The same link `updateUrl` in App.svelte writes, so a tab opened from here shows what a click shows.
+    const explorerHref = $derived(
+        `${location.pathname}?project=${encodeURIComponent(task.project_id)}&task=${encodeURIComponent(task.id)}&view=task-explorer`
+    );
+
+    function handleExplorerClick(e: MouseEvent) {
+        if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        onOpenExplorer?.();
+    }
+
+    function handleExplorerKeydown(e: KeyboardEvent) {
+        if (e.key !== ' ') return;
+        e.preventDefault();
+        onOpenExplorer?.();
+    }
+
     // Full worktree display path shown in the header (CSS-ellipsized when it
     // doesn't fit; the native `title` below only appears on hover).
     const fullPath = $derived(getWorktreeDisplayPath(workspaceDir || '', task.project_id, taskId));
@@ -224,11 +241,20 @@
     </div>
     <div class="header-actions">
         {#if !floating}
-            <button class="icon-btn" onclick={() => onOpenExplorer?.()} aria-label="Open explorer" title="Open explorer">
+            <a
+                class="icon-btn"
+                href={explorerHref}
+                role="button"
+                tabindex="0"
+                draggable="false"
+                onclick={handleExplorerClick}
+                onkeydown={handleExplorerKeydown}
+                aria-label="Open explorer" title="Open explorer"
+            >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M2 3h4l1.5 2H13l1.5 2.5V13a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
                 </svg>
-            </button>
+            </a>
             <button class="icon-btn" onclick={() => onOpenTerminal?.()} aria-label="Open terminal" title={terminalButtonTitle}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
@@ -383,6 +409,7 @@
         border: none;
         cursor: pointer;
         color: inherit;
+        text-decoration: none;
     }
     .icon-btn:hover:not(:disabled) {
         background: var(--color-accent-dark);

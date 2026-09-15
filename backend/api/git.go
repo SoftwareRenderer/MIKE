@@ -17,7 +17,6 @@ import (
 	"kanban/backend/httputil"
 	"kanban/backend/store"
 	"kanban/backend/stream"
-	"kanban/backend/toolresult"
 	"kanban/backend/types"
 	"kanban/pkg/logging"
 )
@@ -172,9 +171,8 @@ func (h *GitHandler) writeFullGitLog(w http.ResponseWriter, dir, branch, path st
 	})
 }
 
-// HandleLog returns commit log for a project.
-// With ?full=1 query param, returns extended fields: hash, author, date, parents, branches.
-// Also includes current_branch and origin_tip metadata.
+// HandleLog returns a project's commit log: hash, author, date, parents and branch refs per commit,
+// beside current_branch and origin_tip.
 func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
@@ -201,43 +199,9 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	full := r.URL.Query().Get("full") == "1"
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-
-	if full {
-		h.writeFullGitLog(w, project.Path, branch, path, limit, offset)
-		return
-	}
-
-	args := []string{"-C", project.Path, "log", "--oneline", "--decorate"}
-	if offset > 0 {
-		args = append(args, "--skip", strconv.Itoa(offset))
-	}
-	if limit > 0 {
-		args = append(args, "-n", strconv.Itoa(limit))
-	}
-	args = append(args, branch)
-	if path != "" {
-		args = append(args, "--", path)
-	}
-	c := git.Command("", args...)
-	out, err := c.CombinedOutput()
-	if err != nil {
-		httputil.Fault(w, "git log", err)
-		return
-	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	var commits []types.GitCommit
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, " ", 2)
-		commit := types.GitCommit{Short: parts[0], Subject: parts[1]}
-		commits = append(commits, commit)
-	}
-	httputil.JSONResponse(w, http.StatusOK, commits)
+	h.writeFullGitLog(w, project.Path, branch, path, limit, offset)
 }
 
 // getCurrentBranch returns the name of the currently checked-out branch.
@@ -314,11 +278,10 @@ func (h *GitHandler) HandleBranches(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, branches)
 }
 
-// HandleDiff returns diff between refs.
-// Supports:
-//   - ?ref=X         — git diff X (working tree vs ref, legacy)
+// HandleDiff returns a project's diff, always as the parser's output. Which diff is chosen by:
 //   - ?base=A&head=B — git diff A..B (commit-to-commit comparison)
 //   - ?cached=1      — git diff --cached (staged changes only)
+//   - neither        — git diff (working tree vs index)
 func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
@@ -375,19 +338,12 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// ?parsed=1 returns the parser's output instead of the patch text, so the wire carries the
-	// one grammar Go already parses — a second one in the browser drifted from it. Raw stays the
-	// default for ?cached=1/base/head consumers and external callers.
-	if r.URL.Query().Get("parsed") == "1" {
-		files := git.ParseUnifiedDiff(string(out))
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(files); err != nil {
-			logging.For(logging.Git).Infof("encoding parsed diff for project %s: %v", projectID, err)
-		}
-		return
+	// The wire carries the one diff grammar in the product; the panel never parses patch text.
+	files := git.ParseUnifiedDiff(string(out))
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(files); err != nil {
+		logging.For(logging.Git).Infof("encoding parsed diff for project %s: %v", projectID, err)
 	}
-	w.Header().Set("Content-Type", "text/plain")
-	w.Write(out)
 }
 
 // HandleStatus returns working tree status, current HEAD hash, and git author identity.
@@ -427,10 +383,10 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandleProjectDiffFile returns the diff for one file in the project, plus its full content
-// (working tree or index) so the frontend can render it. Query params: path (relative to the
-// project root), staged (true = index diff, omitted = working tree), and meta=true for
-// metadata only (line_count, file_size, is_binary) — the cheap way to list untracked files.
+// HandleProjectDiffFile returns the diff for one file in the project, plus its full working-tree
+// content so the frontend can render it. Query params: path (relative to the project root) and
+// meta=true for metadata only (line_count, file_size, is_binary) — the cheap way to list untracked
+// files.
 func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
@@ -451,16 +407,10 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 		httputil.JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	staged := r.URL.Query().Get("staged") == "true"
 	metaOnly := r.URL.Query().Get("meta") == "1"
 
 	// Get the diff for this file
-	var c *exec.Cmd
-	if staged {
-		c = git.Command("", "-C", project.Path, "diff", "--cached", "--", filePath)
-	} else {
-		c = git.Command("", "-C", project.Path, "diff", "--", filePath)
-	}
+	c := git.Command("", "-C", project.Path, "diff", "--", filePath)
 	out, err := c.CombinedOutput()
 	if err != nil {
 		// git diff exits 1 when there are changes — output is still valid
@@ -478,25 +428,12 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 		fileSize = st.Size()
 	}
 
-	// Get file content from working tree or index
+	// Get the file's content from the working tree. The size cap is checked before the read, which is
+	// what bounds it.
 	var fileContent string
 	var lineCount int
 	var isBinary bool
-	if staged {
-		// Read the staged version, bounded at capture.
-		c = git.Command("", "-C", project.Path, "show", ":"+filePath)
-		contentOut := toolresult.NewCapture()
-		c.Stdout = contentOut
-		c.Stderr = contentOut
-		if contentErr := c.Run(); contentErr == nil {
-			fileContent = contentOut.String()
-			lineCount = strings.Count(fileContent, "\n")
-			if fileContent != "" && fileContent[len(fileContent)-1] != '\n' {
-				lineCount++
-			}
-		}
-	} else if fileSize <= maxDiffFileBytes {
-		// Read from working tree
+	if fileSize <= maxDiffFileBytes {
 		contentOut, contentErr := os.ReadFile(worktreeFile)
 		if contentErr == nil {
 			fileContent = string(contentOut)
@@ -1302,7 +1239,8 @@ func (h *GitHandler) HandleProjectCommit(w http.ResponseWriter, r *http.Request)
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "committed"})
 }
 
-// HandleTaskLog returns commit log for a task's worktree branch.
+// HandleTaskLog returns a task's commit log, in the same shape as the project log. The branch defaults
+// to the task's own.
 func (h *GitHandler) HandleTaskLog(w http.ResponseWriter, r *http.Request) {
 	task, ok := resolveTask(w, r, h.store)
 	if !ok {
@@ -1329,37 +1267,7 @@ func (h *GitHandler) HandleTaskLog(w http.ResponseWriter, r *http.Request) {
 		branch = "HEAD"
 	}
 
-	full := r.URL.Query().Get("full") == "1"
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-
-	if full {
-		h.writeFullGitLog(w, worktreePath, branch, "", limit, offset)
-		return
-	}
-
-	// Simple log (non-full)
-	args := []string{"-C", worktreePath, "log"}
-	if limit > 0 {
-		args = append(args, "-n", strconv.Itoa(limit))
-	}
-	args = append(args, "--format=%H|%h|%s", branch)
-	c := git.Command("", args...)
-	out, err := c.CombinedOutput()
-	if err != nil {
-		httputil.Fault(w, "git log", err)
-		return
-	}
-	var commits []types.GitCommit
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "|", 3)
-		if len(parts) < 3 {
-			continue
-		}
-		commits = append(commits, types.GitCommit{Hash: parts[0], Short: parts[1], Subject: parts[2]})
-	}
-	httputil.JSONResponse(w, http.StatusOK, commits)
+	h.writeFullGitLog(w, worktreePath, branch, "", limit, offset)
 }

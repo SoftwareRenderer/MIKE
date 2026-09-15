@@ -52,15 +52,12 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("DELETE /api/preview/{token}", s.HandlePreviewDelete)
 
 	s.mux.HandleFunc("GET /api/extensions", s.extHandler.HandleList)
-	// The mux resolves the method, so the switch that used to live in this closure is gone: four
-	// registrations, each naming the one handler it reaches.
+	// Each registration names the one handler it reaches: the mux answers the 405, so no closure here
+	// inspects r.Method.
 	s.mux.HandleFunc("GET /api/extensions/{id}", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleGet(w, r, r.PathValue("id"))
 	})
 	s.mux.HandleFunc("PUT /api/extensions/{id}", func(w http.ResponseWriter, r *http.Request) {
-		s.extHandler.HandleUpdate(w, r, r.PathValue("id"))
-	})
-	s.mux.HandleFunc("PATCH /api/extensions/{id}", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleUpdate(w, r, r.PathValue("id"))
 	})
 	s.mux.HandleFunc("DELETE /api/extensions/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -69,16 +66,10 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("PATCH /api/extensions/{id}/enabled", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleSetEnabled(w, r, r.PathValue("id"))
 	})
-	s.mux.HandleFunc("PUT /api/extensions/{id}/enabled", func(w http.ResponseWriter, r *http.Request) {
-		s.extHandler.HandleSetEnabled(w, r, r.PathValue("id"))
-	})
 	// The user's grant of a host directory to one extension's language server, for its resolved
 	// dependencies. Separate from PUT /api/extensions/{id} because an empty value must mean
 	// "revoke" and because applying it stops the sandbox.
 	s.mux.HandleFunc("PUT /api/extensions/{id}/dependency-cache", func(w http.ResponseWriter, r *http.Request) {
-		s.extHandler.HandleSetDependencyCache(w, r, r.PathValue("id"))
-	})
-	s.mux.HandleFunc("PATCH /api/extensions/{id}/dependency-cache", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleSetDependencyCache(w, r, r.PathValue("id"))
 	})
 	s.mux.HandleFunc("GET /api/extensions/registry", s.extHandler.HandleRegistryIndex)
@@ -140,8 +131,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start-subtask", s.taskHandler.HandleStartSubtask)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/stop", s.taskHandler.HandleStop)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/memory-alert-ack", s.taskHandler.HandleDismissMemoryAlert)
-	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/retry", s.executor.HandleRetry)
-	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/resume", s.executor.HandleResume)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/resume", s.executor.HandleRetry)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/send", s.executor.HandleSend)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/summarize", s.executor.HandleSummarize)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/compact", s.executor.HandleCompact)
@@ -150,7 +140,6 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/diff/file", s.gitHandler.HandleTaskDiffFile)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/diff/stage", s.gitHandler.HandleStageFile)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/commits", s.gitHandler.HandleTaskCommits)
-	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/commit-preview", s.taskHandler.HandleCommitPreview)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/commit-preview/stream", s.taskHandler.HandleCommitPreviewStream)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/commit", s.taskHandler.HandleCommitAndDone)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/terminal", s.terminalMgr.HandleTerminal)

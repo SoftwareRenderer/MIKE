@@ -113,9 +113,15 @@ class GitLineMarker extends GutterMarker {
         return el;
     }
 
-    compareBeforeUpdate(other: GutterMarker): boolean {
+    /** CodeMirror rebuilds a gutter row's DOM unless the incoming marker compares equal to the one
+     *  it replaced, and recomputing the marker map makes a fresh instance for every visible line. */
+    eq(other: GutterMarker): boolean {
         if (!(other instanceof GitLineMarker)) return false;
-        if (other.lineNum !== this.lineNum || other.indicators.length !== this.indicators.length)
+        if (
+            other.lineNum !== this.lineNum ||
+            other.title !== this.title ||
+            other.indicators.length !== this.indicators.length
+        )
             return false;
         for (let i = 0; i < this.indicators.length; i++) {
             const a = this.indicators[i];
@@ -152,8 +158,12 @@ class PlainLineMarker extends GutterMarker {
         return el;
     }
 
-    compareBeforeUpdate(other: GutterMarker): boolean {
-        return other instanceof PlainLineMarker && other.lineNum === this.lineNum;
+    eq(other: GutterMarker): boolean {
+        return (
+            other instanceof PlainLineMarker &&
+            other.lineNum === this.lineNum &&
+            other.title === this.title
+        );
     }
 }
 

@@ -77,12 +77,12 @@ describe('Explorer button label', () => {
         expect(label(container)).toBe(HOME_RELATIVE);
     });
 
-    it('keeps the button the explorer shortcut and e2e specs click', () => {
+    it('keeps the element the explorer shortcut and e2e specs click', () => {
         const { container } = renderBar();
-        expect(container.querySelector('button.explorer-btn')).toBeTruthy();
+        expect(container.querySelector('.explorer-btn')).toBeTruthy();
         mediaMatches = false;
         cleanup();
         const desktop = renderBar();
-        expect(desktop.container.querySelector('button.explorer-btn')).toBeTruthy();
+        expect(desktop.container.querySelector('.explorer-btn')).toBeTruthy();
     });
 });

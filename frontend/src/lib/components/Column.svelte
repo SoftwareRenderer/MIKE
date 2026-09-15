@@ -131,7 +131,7 @@
 <style>
     .column {
         flex: 1;
-        min-width: 200px;
+        min-width: 260px;
         background: var(--color-surface-1);
         border-radius: var(--radius-lg);
         display: flex;
@@ -155,6 +155,11 @@
             max-width: none;
             width: 92vw;
             scroll-snap-align: center;
+        }
+    }
+    @media (hover: none) and (min-width: 769px) {
+        .column {
+            min-width: 340px;
         }
     }
     .column-header {

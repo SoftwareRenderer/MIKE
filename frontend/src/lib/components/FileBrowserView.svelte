@@ -7,6 +7,7 @@
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
     import { t } from '$lib/i18n';
+    import type { FsEvent } from '$lib/utils/fs-event';
 
     type Entry = { name: string; isDir: boolean; path: string };
 
@@ -56,9 +57,9 @@
         /** Double-click pins the file in the project explorer; the task explorer has no pins. */
         pinOnDblclick?: boolean;
         unsavedFiles: string[];
-        pendingFsEvent: { op: 'create' | 'delete'; path: string } | null;
+        pendingFsEvent: FsEvent | null;
         /** Resolves a watcher path to one under `rootPath`, or returns null when it belongs elsewhere. */
-        mapFsEvent?: (relPath: string) => string | null;
+        mapFsEvent?: (event: FsEvent) => string | null;
         /** A change the watcher reported, whatever this listing made of it. */
         onFsEvent?: (op: 'create' | 'delete', relPath: string) => void;
         /** This listing wrote something: a file, a folder, or an uploaded run. */
@@ -299,7 +300,7 @@
     function handleFsEvent(op: 'create' | 'delete', relPath: string) {
         onFsEvent?.(op, relPath);
 
-        const taskRelPath = mapFsEvent ? mapFsEvent(relPath) : relPath;
+        const taskRelPath = mapFsEvent ? mapFsEvent({ op, path: relPath }) : relPath;
         if (taskRelPath === null) return;
 
         const eventFullPath = rootPath + '/' + taskRelPath;
