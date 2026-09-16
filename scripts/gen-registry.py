@@ -95,8 +95,47 @@ def git_head_commit():
         return ''
 
 
-def simplify_capabilities(manifest_caps):
-    """Reduce a manifest capabilities object to what the registry UI renders.
+class UnresolvedTemplate(Exception):
+    """A `{{...}}` placeholder that no default in the manifest's own config_schema can answer."""
+
+
+def resolve_template(value, config_schema):
+    """Resolve one `{{property_field[]}}` placeholder using the config_schema defaults.
+
+    This repeats backend/extensions' `ConfigSchema.resolveTemplate`. Both sides have to agree exactly on the
+    `[]` suffix, on reading the first element of the default array, on the `key_field` split, and on leaving
+    anything that does not match unchanged.
+    """
+    if not isinstance(value, str) or len(value) < 5 or not value.startswith('{{') \
+            or not value.endswith('}}'):
+        return value
+    ref = value[2:-2]
+    if not ref.endswith('[]'):
+        return value
+    resolved = _template_target(ref[:-2], config_schema)
+    if resolved is None:
+        raise UnresolvedTemplate('%s resolves to nothing in this manifest’s config_schema' % value)
+    return resolved
+
+
+def _template_target(ref, config_schema):
+    """Returns the default value the placeholder names, or None when no property provides it."""
+    for prop in (config_schema or {}).get('properties') or []:
+        if not isinstance(prop, dict):
+            continue
+        default = prop.get('default')
+        if not isinstance(default, list) or not default or not isinstance(default[0], dict):
+            continue
+        prefix = str(prop.get('key', '')) + '_'
+        if ref.startswith(prefix):
+            field = default[0].get(ref[len(prefix):])
+            if isinstance(field, str):
+                return field
+    return None
+
+
+def simplify_capabilities(manifest_caps, config_schema=None):
+    """Reduce a manifest's capabilities to the fields the registry UI shows.
 
     Only fields surfaced in the capabilities modal are kept:
       - ui:      injection_points ("Modifies") and permissions ("Permissions")
@@ -111,20 +150,16 @@ def simplify_capabilities(manifest_caps):
              the first-run offer matches a non-English browser against it
              (frontend `lib/utils/locale-offer.ts`). It doubles as the pack's identity in
              the Browse list.
-      - css/agent: no detail rows, so an empty config is enough
+      - agent: sandbox.mount only (which host folder the agent wants, and where it appears inside the
+             container); css: no detail rows, so an empty object is enough
     Everything else (command, args, headers, wasm_module, ...) lives in the
-    manifest and is intentionally omitted here. The lsp additions are the exception
-    because consent has to be visible *before* the manifest is fetched: which
-    machine-level directory an install is going to want, and what the server will
-    say when it cannot do its job, are both things you would want before agreeing
-    to run someone's container.
+    manifest and is intentionally omitted here.
 
-    i18n is the second exception, and its reason is the same: the first-run offer
-    matches the browser's language against the *index* — there is nothing installed
-    to read yet — so a pack's locale has to be visible in its entry or the offer can
-    only ever list every pack on the machine and let the user guess which one is
-    French. Only the locale and the two facts about its files are projected; the
-    catalog itself and every translated string stay in the pack.
+    i18n and lsp are the exceptions, for one reason: what the user is asked before installing, and which
+    language pack the first-run offer suggests, are both decided from this index, before any manifest has
+    been fetched. The facts behind those decisions therefore have to be published here
+    (frontend/src/lib/utils/extension-permissions.ts and `lib/utils/locale-offer.ts`). The agent's suggested
+    folders follow the same rule: leave them out and the install dialog never asks about them.
     """
     if not isinstance(manifest_caps, dict):
         return {}
@@ -174,8 +209,27 @@ def simplify_capabilities(manifest_caps):
                 kept['dependency_cache'] = {'container_path': dep['container_path'], 'env': dep['env']}
             if kept:
                 result['lsp'] = kept
-        elif key in ('css', 'agent'):
+        elif key == 'css':
             result[key] = {}
+        elif key == 'agent':
+            # Only the suggested folders are published. The install dialog asks the user about them, and
+            # `env` needs no answer because it gives no access to the machine. An agent with nothing to
+            # suggest still gets an empty object, so Browse shows its badge.
+            kept = {}
+            mounts = []
+            for mount in (value.get('sandbox') or {}).get('mount') or []:
+                if not isinstance(mount, dict):
+                    continue
+                host = resolve_template(mount.get('host_path'), config_schema)
+                container = resolve_template(mount.get('container_path'), config_schema)
+                if not isinstance(host, str) or not host or not isinstance(container, str) or not container:
+                    continue
+                mode = resolve_template(mount.get('mode'), config_schema)
+                mounts.append({'host_path': host, 'container_path': container,
+                               'mode': mode if isinstance(mode, str) else ''})
+            if mounts:
+                kept['sandbox'] = {'mount': mounts}
+            result[key] = kept
         elif key == 'i18n':
             # A translation pack is a css pack with different bytes: it runs nothing, so what is
             # worth publishing is which language it is and what it covers. The locale is the whole
@@ -219,7 +273,13 @@ def build_entry(ext_type, name, manifest_path, repo, commit, subdir=None):
     entry['commit'] = commit
     entry['subdir'] = subdir
 
-    caps = simplify_capabilities(manifest.get('capabilities'))
+    try:
+        caps = simplify_capabilities(manifest.get('capabilities'), manifest.get('config_schema'))
+    except UnresolvedTemplate as exc:
+        print('%s: %s — the index has to carry the directory it means, because that is what the '
+              'install review asks about; fix the reference or the config_schema default it names'
+              % (subdir, exc), file=sys.stderr)
+        sys.exit(1)
     if caps:
         entry['capabilities'] = caps
     return entry

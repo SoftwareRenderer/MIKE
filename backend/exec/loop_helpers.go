@@ -657,15 +657,14 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 // it, so a new field cannot be set in three of them. Only the image comes from the caller -
 // only EnsureImageForProject knows what it settled on.
 func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, planMode bool) sandbox.SandboxOpts {
-	// Everything the container may see on the host comes from the project's own configuration, which is
-	// why all four create paths assemble their options here: a field set in one of them and not the
-	// others is a container that changes shape depending on which way it was started.
+	// The host folders this container may see are the ones the project configured, plus the ones the user
+	// approved for the agent this task runs. No other installed extension contributes a folder.
 	return sandbox.SandboxOpts{
 		BaseImage:        image,
 		NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
 		MemoryLimit:      setup.sandboxOpts.MemoryLimit,
 		ForwardPorts:     setup.sandboxOpts.ForwardPorts,
-		AgentSandbox:     te.agentRegistry.GetAnyAgentSandbox(),
+		AgentSandbox:     te.agentRegistry.AgentSandboxForURL(setup.providerURL()),
 		SkillsDir:        prompts.SkillsDir(),
 		SandboxMounts:    setup.sandboxOpts.SandboxMounts,
 		SandboxEnvs:      setup.sandboxOpts.SandboxEnvs,

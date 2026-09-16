@@ -148,6 +148,7 @@ export {
     deleteExtension,
     setExtensionEnabled,
     setDependencyCache,
+    setAgentMount,
     getHomeDirectory,
     getRegistryIndex,
     installExtension,

@@ -388,7 +388,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 		mountPath := sandbox.MountPath(project.Name)
 		sandboxPath := fsSandboxPath(worktreePath, project, path)
 		// Single command: ls -pA marks dirs with trailing /, one entry per line
-		opts, optsErr := s.fsSandboxOpts(project)
+		opts, optsErr := s.fsSandboxOpts(project, taskID)
 		if optsErr != nil {
 			JSONError(w, http.StatusBadGateway, optsErr.Error())
 			return
@@ -968,8 +968,8 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		}
 		sandboxPath := fsSandboxPath(project.Path, project, req.Path)
 
-		// Resolve sandbox config once, reuse for both calls
-		opts, optsErr := s.fsSandboxOpts(project)
+		// This is the project's own container rather than a task's, so no agent's approved folders apply.
+		opts, optsErr := s.fsSandboxOpts(project, "")
 		if optsErr != nil {
 			JSONError(w, http.StatusBadGateway, optsErr.Error())
 			return
@@ -1098,7 +1098,7 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		sandboxParent := filepath.Dir(sandboxPath)
 
 		// Combined check + mkdir in single command
-		opts, optsErr := s.fsSandboxOpts(project)
+		opts, optsErr := s.fsSandboxOpts(project, taskID)
 		if optsErr != nil {
 			JSONError(w, http.StatusBadGateway, optsErr.Error())
 			return
@@ -1206,7 +1206,7 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 // fsSandboxOpts returns the sandbox config for FS operations, having made sure the project's image
 // exists — opening an explorer is often the first thing to touch it, and the build output goes out
 // over the project's WebSocket so the explorer can show progress while this request blocks.
-func (s *Server) fsSandboxOpts(project *types.Project) (sandbox.SandboxOpts, error) {
+func (s *Server) fsSandboxOpts(project *types.Project, taskID string) (sandbox.SandboxOpts, error) {
 	image, err := s.sandboxMgr.EnsureImageForProject(project, func(status types.SandboxImageStatus) {
 		if s.appStreamMgr != nil {
 			s.appStreamMgr.SendProjectEvent(project.ID, types.StreamEvent{
@@ -1223,13 +1223,26 @@ func (s *Server) fsSandboxOpts(project *types.Project) (sandbox.SandboxOpts, err
 		NetworkIsolation: project.SandboxNetworkIsolation,
 		MemoryLimit:      project.SandboxMemoryLimit,
 		ForwardPorts:     project.ForwardPorts,
-		AgentSandbox:     s.executor.AgentRegistry().GetAnyAgentSandbox(),
+		AgentSandbox:     s.agentGrantForTask(project.ID, taskID),
 		SkillsDir:        prompts.SkillsDir(),
 		SandboxMounts:    project.SandboxMounts,
 		SandboxEnvs:      project.SandboxEnvs,
 		Capabilities:     project.SandboxCapabilities,
 	}
 	return opts, nil
+}
+
+// agentGrantForTask returns nothing for an empty taskID: a project container or a plain file browse has no
+// agent of its own.
+func (s *Server) agentGrantForTask(projectID, taskID string) *types.AgentSandbox {
+	if taskID == "" || s.executor == nil {
+		return nil
+	}
+	task, err := s.store.GetTask(projectID, taskID)
+	if err != nil {
+		return nil
+	}
+	return s.executor.AgentRegistry().AgentSandboxForURL(task.LlamaServerURL)
 }
 
 // gitAuthorFlagCmd quotes git.GitAuthorFlags() into a fragment for a sandbox shell command.

@@ -245,8 +245,9 @@ via podman. Without it, sandboxed projects refuse to start tasks — hard error,
   posture is already there). Extensions delegate to it; a project's own Sandbox Configuration is checked by
   the same rules, and again at container creation because a row can predate them.
 - **Extension sandbox mounts are an allowlist, and borrowed roots are read-only** however the manifest
-  asks: a manifest is registry text. A capability is judged by its shape, never its name; `--privileged`
-  is an argument and is refused.
+  asks: a manifest is registry text, and an agent extension's `sandbox.mount` is a proposal rather than a
+  grant — only a person's answer under Settings → Extensions reaches a container. A capability is judged
+  by its shape, never its name; `--privileged` is an argument and is refused.
 - **The bridge is stdio-only**: one `podman exec` per connection, no listener and no port. Interactive
   terminals bypass it. Rebuild the committed `sandbox-bridge` after any edit under `pkg/` —
   `make bridge-check` fails when the artifact is not a build of this tree.

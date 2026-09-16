@@ -111,10 +111,13 @@ a name as `CHOWN` — while `--privileged` is an *argument* and is refused at in
   pin, not the root list, is what stops a manifest turning one into a write). `adaptProjectMounts`
   mirrors the *union* over projects (global paths like `/go` for everyone, task-root-relative ones only
   for their owning workspace), so a new project changes the mount set once instead of on every switch.
-- An agent extension's mounts come from its manifest plus its own configured values, never from a
-  project's Sandbox Configuration, so `sandbox.Create` runs each of them through
-  `types.ValidateSandboxMount` beside the project's declared mounts, before the availability probe. An
-  entry with one end missing is skipped: it builds no mount.
+- An agent extension's mounts come from the grant a person saved for it (`docs/agent-extensions.md`),
+  never from its manifest and never from a project's Sandbox Configuration, so `sandbox.Create` runs each
+  of them through `types.ValidateSandboxMount` beside the project's declared mounts, before the
+  availability probe. An entry with one end missing is skipped: it builds no mount. A granted directory
+  that does not exist yet is created here (0755, the same as a project's own mount), which is what makes
+  an `rw` grant writable inside the guest — no `:U` option and no userns mapping is involved, and the
+  directory ends up owned by the server's user, which is what a rootless container's root maps to.
 - Tests: `backend/extensions/mount_read_only_test.go`, `backend/sandbox/create_args_test.go`.
 
 ## Podman subprocesses

@@ -278,10 +278,10 @@ func TestGrantSurvivesAnUpdateFromTheRegistry(t *testing.T) {
 	}
 }
 
-// TestCheckGrantShapeWithHomes: the grant is read-only for the language server but read-write in every
-// sandboxed task, and a task runs code a repository's content helps steer — so one text field must not
-// be able to hand over the host's configuration, a whole home directory, or a credential store.
-func TestCheckGrantShapeWithHomes(t *testing.T) {
+// TestCheckGrantShape: the approved folder is read-only for the language server but read-write inside every
+// sandboxed task, and a task runs code that comes from a repository, so one text field must not be able to
+// hand over the host's configuration, a whole home folder, or a place where credentials are kept.
+func TestCheckGrantShape(t *testing.T) {
 	homes := []string{"/home/dev", "/root"}
 
 	allowed := []string{
@@ -294,7 +294,7 @@ func TestCheckGrantShapeWithHomes(t *testing.T) {
 		"/srv/data/projects/mod",
 	}
 	for _, path := range allowed {
-		if err := checkGrantShapeWithHomes(path, homes); err != nil {
+		if err := checkGrantShape(path, homes, dependencyGrant); err != nil {
 			t.Errorf("%s should be grantable: %v", path, err)
 		}
 	}
@@ -316,7 +316,7 @@ func TestCheckGrantShapeWithHomes(t *testing.T) {
 		"/home/dev/.docker":          "credentials",
 	}
 	for path, why := range refused {
-		err := checkGrantShapeWithHomes(path, homes)
+		err := checkGrantShape(path, homes, dependencyGrant)
 		if err == nil {
 			t.Errorf("%s was accepted (%s — it should be refused)", path, why)
 			continue

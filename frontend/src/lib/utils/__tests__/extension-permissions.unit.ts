@@ -9,6 +9,9 @@ import {
     dependencyCacheDeclaration,
     requiresSetupAfterInstall,
     needsDependencyGrant,
+    agentMountDeclaration,
+    agentMountGrant,
+    needsAgentMountGrant,
 } from '../extension-permissions';
 
 describe('isDangerousPermission (sandbox-escaping permissions only)', () => {
@@ -296,5 +299,84 @@ describe('needsDependencyGrant', () => {
     it('is false for an extension that is switched off', () => {
         // One that cannot run is not waiting on anyone, and the warning returns when it is enabled.
         expect(needsDependencyGrant({ enabled: false, sandbox_config: { dependency_cache: DECLARED } })).toBe(false);
+    });
+});
+
+describe('agentMountDeclaration', () => {
+    const PI = {
+        agent: {
+            wasm_module: 'adapter.wasm',
+            sandbox: {
+                mount: [{ host_path: '~/.pi/agent', container_path: '/root/.pi/agent', mode: 'rw' }],
+                env: [{ key: 'PI_HOME', value: '/root/.pi' }],
+            },
+        },
+    };
+
+    it('reads the proposal out of the manifest shape the server sends', () => {
+        expect(agentMountDeclaration(PI)).toEqual([
+            { host_path: '~/.pi/agent', container_path: '/root/.pi/agent', mode: 'rw' },
+        ]);
+    });
+
+    it('is empty for anything that declares no mount', () => {
+        expect(agentMountDeclaration(null)).toEqual([]);
+        expect(agentMountDeclaration({ lsp: {} })).toEqual([]);
+        expect(agentMountDeclaration({ agent: { wasm_module: 'a.wasm' } })).toEqual([]);
+        expect(agentMountDeclaration({ agent: { sandbox: { env: [] } } })).toEqual([]);
+        // A folder with no path inside the container is not a proposal; there is nothing to mount it to.
+        expect(agentMountDeclaration({ agent: { sandbox: { mount: [{ host_path: '~/x' }] } } })).toEqual([]);
+    });
+});
+
+describe('agentMountGrant', () => {
+    it('reads the stored grant', () => {
+        expect(agentMountGrant({
+            config: { sandbox_mount: [{ host_path: '/home/dev/.pi/agent', container_path: '/root/.pi/agent', mode: 'rw' }] },
+        })).toEqual([{ host_path: '/home/dev/.pi/agent', container_path: '/root/.pi/agent', mode: 'rw' }]);
+    });
+
+    it('is empty when nothing was granted, revoked, or written wrong', () => {
+        expect(agentMountGrant({ config: {} })).toEqual([]);
+        expect(agentMountGrant({})).toEqual([]);
+        expect(agentMountGrant({ config: { sandbox_mount: [] } })).toEqual([]);
+        expect(agentMountGrant({ config: { sandbox_mount: [{ host_path: '' }] } })).toEqual([]);
+        // A path missing on either side is not an approval, and the endpoint would refuse it.
+        expect(agentMountGrant({ config: { sandbox_mount: [{ host_path: '/home/dev/.pi/agent' }] } })).toEqual([]);
+        expect(agentMountGrant({ config: { sandbox_mount: 'not-an-array' } })).toEqual([]);
+    });
+});
+
+describe('needsAgentMountGrant', () => {
+    const CAPS = { agent: { sandbox: { mount: [{ host_path: '~/.pi/agent', container_path: '/root/.pi/agent', mode: 'rw' }] } } };
+    const GRANTED = [{ host_path: '/home/dev/.pi/agent', container_path: '/root/.pi/agent', mode: 'rw' }];
+
+    it('is true for an agent nobody has given a folder yet', () => {
+        expect(needsAgentMountGrant({ enabled: true, manifest: { capabilities: CAPS }, config: {} })).toBe(true);
+        expect(needsAgentMountGrant({ enabled: true, manifest: { capabilities: CAPS }, config: { sandbox_mount: [] } })).toBe(true);
+    });
+
+    it('is false once the folder is granted, or the agent is switched off', () => {
+        expect(needsAgentMountGrant({ enabled: true, manifest: { capabilities: CAPS }, config: { sandbox_mount: GRANTED } })).toBe(false);
+        expect(needsAgentMountGrant({ enabled: false, manifest: { capabilities: CAPS }, config: {} })).toBe(false);
+    });
+
+    it('is false for an extension that asked for nothing', () => {
+        expect(needsAgentMountGrant({ enabled: true, manifest: { capabilities: { lsp: {} } }, config: {} })).toBe(false);
+    });
+});
+
+describe('the agent mount as an install gate', () => {
+    // The agent shape the registry index carries, as written by scripts/gen-registry.py.
+    const CAPS = { agent: { sandbox: { mount: [{ host_path: '~/.pi/agent', container_path: '/root/.pi/agent', mode: 'rw' }] } } };
+
+    it('a declarer goes through the install review, so the mount question is asked', () => {
+        expect(requiresInstallReview({ capabilities: CAPS })).toBe(true);
+        expect(requiresSetupAfterInstall(CAPS)).toBe(true);
+    });
+
+    it('an agent that asks for no folder installs without one', () => {
+        expect(requiresInstallReview({ capabilities: { agent: { wasm_module: 'a.wasm' } } })).toBe(false);
+        expect(requiresSetupAfterInstall({ agent: { wasm_module: 'a.wasm' } })).toBe(false);
     });
 });

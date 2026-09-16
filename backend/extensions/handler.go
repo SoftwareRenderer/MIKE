@@ -300,6 +300,13 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 	if req.Config != nil {
+		// Approved host folders have their own endpoint. Accepting one here would let it reach the
+		// containers without the checks that endpoint runs.
+		if _, declares := req.Config[AgentMountConfigKey]; declares && ext.Manifest.Capabilities.GetAgent() != nil {
+			httputil.JSONError(w, http.StatusBadRequest,
+				"sandbox_mount is granted through the extension's mount control, not through its configuration")
+			return
+		}
 		// Merge config: preserve existing sensitive values when masked placeholder is sent
 		merged := make(map[string]any, len(req.Config))
 		for k, v := range req.Config {
@@ -603,6 +610,120 @@ func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *ht
 	}
 }
 
+const AgentMountConfigKey = "sandbox_mount"
+
+// Sending an empty list clears the approval, which is why this is its own endpoint rather than a field of
+// the configuration form.
+func (h *ExtensionHandler) HandleSetAgentMount(w http.ResponseWriter, r *http.Request, id string) {
+	// A pointer, so a request with no mounts key is rejected instead of clearing a working approval.
+	var req struct {
+		Mounts *[]types.SandboxMount `json:"mounts"`
+	}
+	if !httputil.DecodeJSON(w, r, &req) {
+		return
+	}
+	if req.Mounts == nil {
+		httputil.JSONError(w, http.StatusBadRequest, "mounts is required; send an empty list to revoke the grant")
+		return
+	}
+
+	ext, ok := h.extensionOr404(w, id)
+	if !ok {
+		return
+	}
+	declared := ext.Manifest.Capabilities.GetAgent()
+	if declared == nil || declared.Sandbox == nil || len(declared.Sandbox.Mounts) == 0 {
+		httputil.JSONError(w, http.StatusBadRequest, "this extension declares no agent sandbox mount, so there is nothing to grant")
+		return
+	}
+
+	// Every folder is checked before anything is saved, so a refusal partway through the list cannot leave
+	// an earlier folder approved.
+	granted := make([]types.SandboxMount, 0, len(*req.Mounts))
+	for i, m := range *req.Mounts {
+		validated, err := ValidateAgentMountGrant(m)
+		if err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, fmt.Sprintf("mount %d: %v", i, err))
+			return
+		}
+		granted = append(granted, validated)
+	}
+
+	previous := describeMounts(agentMountGrant(ext))
+	setAgentMountGrant(ext, granted)
+	if err := h.store.Update(id, ext); err != nil {
+		httputil.Fault(w, "save the agent mount grant", err)
+		return
+	}
+
+	// An agent extension has no container of its own. The executor recreates the containers of the tasks
+	// that run it when this list changes; see TaskExecutor.agentGrantHash.
+	if len(granted) == 0 {
+		logging.For(logging.Extensions).Infof("ext=%s agent mount grant revoked (was %s) — a task running it keeps its container's view until that container is recreated", id, previous)
+	} else {
+		logging.For(logging.Extensions).Infof("ext=%s agent mount grant %s -> %s — it reaches the containers of the tasks that run this agent, which are recreated when the grant changes", id, previous, describeMounts(granted))
+	}
+
+	httputil.JSONResponse(w, http.StatusOK, h.toResponse(ext, h.sandbox.ListRunning()))
+	if h.onExtensionChanged != nil {
+		h.onExtensionChanged()
+	}
+}
+
+// ParseAgentMountGrant leaves a missing mode empty: each reader decides what a missing mode means.
+func ParseAgentMountGrant(raw any) ([]types.SandboxMount, error) {
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("expected an array of mounts, got %T", raw)
+	}
+	out := make([]types.SandboxMount, 0, len(items))
+	for i, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("mount %d: expected an object, got %T", i, item)
+		}
+		hp, _ := m["host_path"].(string)
+		cp, _ := m["container_path"].(string)
+		mode, _ := m["mode"].(string)
+		out = append(out, types.SandboxMount{HostPath: hp, ContainerPath: cp, Mode: mode})
+	}
+	return out, nil
+}
+
+// agentMountGrant counts a value that cannot be read as nothing approved.
+func agentMountGrant(ext *Extension) []types.SandboxMount {
+	mounts, err := ParseAgentMountGrant(ext.Config[AgentMountConfigKey])
+	if err != nil {
+		return nil
+	}
+	return mounts
+}
+
+// setAgentMountGrant deletes the key when the list is empty, so a cleared approval and one that was never
+// made look the same.
+func setAgentMountGrant(ext *Extension, mounts []types.SandboxMount) {
+	if ext.Config == nil {
+		ext.Config = map[string]any{}
+	}
+	if len(mounts) == 0 {
+		delete(ext.Config, AgentMountConfigKey)
+		return
+	}
+	items := make([]any, 0, len(mounts))
+	for _, m := range mounts {
+		items = append(items, map[string]any{"host_path": m.HostPath, "container_path": m.ContainerPath, "mode": m.Mode})
+	}
+	ext.Config[AgentMountConfigKey] = items
+}
+
+func describeMounts(mounts []types.SandboxMount) string {
+	parts := make([]string, 0, len(mounts))
+	for _, m := range mounts {
+		parts = append(parts, fmt.Sprintf("%s -> %s (%s)", m.HostPath, m.ContainerPath, m.Mode))
+	}
+	return strings.Join(parts, ", ")
+}
+
 // inferExtensionType returns the extension type implied by its capabilities, in priority order
 // (lsp > ui > css > agent > llm > i18n), or "" when none maps to a type. i18n is last because a
 // pack is pure data and validateI18N refuses a pack with a sibling capability, so this order only
@@ -719,7 +840,7 @@ func localRegistryEntry(le localExtension) RegistryEntry {
 		Homepage:     le.Manifest.Homepage,
 		LicenseURL:   le.Manifest.LicenseURL,
 		Image:        le.Manifest.Image,
-		Capabilities: le.Manifest.Capabilities,
+		Capabilities: resolvedSandboxManifest(le.Manifest).Capabilities,
 		LocalPath:    le.Dir,
 		localDir:     le.Dir,
 	}
@@ -1756,7 +1877,7 @@ func (h *ExtensionHandler) toResponse(ext *Extension, statuses map[string]Extens
 		Author:          ext.Author,
 		Version:         ext.Version,
 		Type:            ext.Type,
-		Manifest:        ext.Manifest,
+		Manifest:        resolvedSandboxManifest(ext.Manifest),
 		Config:          maskConfig(ext.Config, ext.Manifest.ConfigSchema),
 		ContainerConfig: ext.ContainerConfig,
 		SandboxConfig:   ext.SandboxConfig,

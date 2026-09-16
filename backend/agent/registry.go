@@ -2,7 +2,7 @@ package agent
 
 import (
 	"fmt"
-	"os"
+	"strings"
 	"sync"
 
 	ext "mike/backend/extensions"
@@ -109,143 +109,128 @@ func (r *AgentRegistry) ToProviders() []types.Provider {
 	return providers
 }
 
-// GetAgentSandbox returns the sandbox config for a specific agent extension.
-// It reads sandbox_mount and sandbox_env arrays from extension config,
-// falling back to manifest defaults. Provider config (AgentConfigDir) can
-// override the host_path of the first mount.
-//
-// Host paths are expanded for leading ~.
-// Returns nil if no mounts are configured for the extension.
+// The mount list written in the manifest is only a suggestion and is never used here, so the answer is nil
+// until the user approves a folder in Settings > Extensions.
 func (r *AgentRegistry) GetAgentSandbox(agentName string) *types.AgentSandbox {
 	r.mu.RLock()
-	ext, ok := r.agents[agentName]
+	installed, ok := r.agents[agentName]
 	r.mu.RUnlock()
 
-	if !ok || !ext.Enabled {
+	if !ok || !installed.Enabled {
 		return nil
 	}
 
-	def := ext.Manifest.Capabilities.GetAgent()
+	def := installed.Manifest.Capabilities.GetAgent()
 	if def == nil {
 		return nil
 	}
 
-	// Start with resolved manifest defaults
+	mountsRaw, ok := installed.Config[ext.AgentMountConfigKey]
+	if !ok {
+		return nil
+	}
+	mounts, err := ext.ParseAgentMountGrant(mountsRaw)
+	if err != nil {
+		logging.For(logging.Agent).Warnf("agent=%s ignored its saved sandbox mounts: %v", agentName, err)
+		return nil
+	}
+	var granted []types.SandboxMount
+	for _, m := range mounts {
+		m.HostPath = ext.ExpandHostPath(m.HostPath)
+		if m.Mode != "ro" && m.Mode != "rw" {
+			m.Mode = "ro"
+		}
+		granted = append(granted, m)
+	}
+
+	// The agent config folder from the provider settings replaces the host folder of a mount the user has
+	// already approved. It never adds a mount of its own.
+	if dir := r.agentConfigDir(); dir != "" {
+		if len(granted) > 0 {
+			logging.For(logging.Agent).Infof("agent=%s mount %q takes its host path from the provider's config directory %q",
+				agentName, granted[0].ContainerPath, dir)
+			granted[0].HostPath = dir
+		} else {
+			logging.For(logging.Agent).Warnf("agent=%s ignores agent_config_dir %q: mounting it needs a sandbox mount granted under Settings → Extensions",
+				agentName, dir)
+		}
+	}
+
 	var sb types.AgentSandbox
-	if def.Sandbox != nil {
-		resolved := def.ResolveSandboxTemplates(ext.Manifest.ConfigSchema)
-		if resolved != nil {
-			sb = *resolved
+	for _, m := range granted {
+		if err := refuseMount(m); err != nil {
+			logging.For(logging.Agent).Warnf("agent=%s refused mount %q: %v", agentName, m.HostPath, err)
+			continue
 		}
+		sb.Mounts = append(sb.Mounts, m)
 	}
-
-	// Read sandbox_mount array from extension config (overrides manifest)
-	if mountsRaw, ok := ext.Config["sandbox_mount"]; ok {
-		if mounts, err := parseMountArray(mountsRaw); err == nil && len(mounts) > 0 {
-			sb.Mounts = mounts
-		}
-	}
-
-	// Read sandbox_env array from extension config (overrides manifest)
-	if envsRaw, ok := ext.Config["sandbox_env"]; ok {
-		if envs, err := parseEnvArray(envsRaw); err == nil {
-			sb.Envs = envs
-		}
-	}
-
-	// Provider-level override of host_path on first mount (AgentConfigDir)
-	if r.configStore != nil && len(sb.Mounts) > 0 {
-		if provider := r.configStore.GetAgentProvider(); provider != nil && provider.AgentConfigDir != "" {
-			sb.Mounts[0].HostPath = provider.AgentConfigDir
-		}
-	}
-
-	// Expand leading ~ to home directory
-	for i := range sb.Mounts {
-		if len(sb.Mounts[i].HostPath) >= 2 && sb.Mounts[i].HostPath[0] == '~' && sb.Mounts[i].HostPath[1] == '/' {
-			if homeDir, err := os.UserHomeDir(); err == nil {
-				sb.Mounts[i].HostPath = homeDir + sb.Mounts[i].HostPath[1:]
-			}
-		}
-		if sb.Mounts[i].Mode != "ro" && sb.Mounts[i].Mode != "rw" {
-			sb.Mounts[i].Mode = "ro"
-		}
-	}
-
 	if len(sb.Mounts) == 0 {
 		return nil
 	}
 
+	// The environment variables from the manifest name folders inside the container that only exist once a
+	// host folder has been approved, so they are returned with the mounts and never on their own.
+	if def.Sandbox != nil {
+		if resolved := def.ResolveSandboxTemplates(installed.Manifest.ConfigSchema); resolved != nil {
+			sb.Envs = resolved.Envs
+		}
+	}
+	if envsRaw, ok := installed.Config["sandbox_env"]; ok {
+		if envs, err := parseEnvArray(envsRaw); err == nil {
+			sb.Envs = envs
+		}
+	}
 	return &sb
 }
 
-// parseObjectArray parses a JSON array of objects from extension config
-func parseObjectArray[T any](v any, parse func(any) (T, error)) ([]T, error) {
-	src, ok := v.([]any)
-	if !ok {
-		return nil, fmt.Errorf("expected array, got %T", v)
+// A saved approval can be older than the checks that exist today, and the agent config folder from the
+// provider settings is a second way a host path can end up in a mount.
+func refuseMount(m types.SandboxMount) error {
+	if err := types.ValidateSandboxMount(m); err != nil {
+		return err
 	}
-	items := make([]T, 0, len(src))
-	for _, item := range src {
-		parsed, err := parse(item)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, parsed)
-	}
-	return items, nil
+	return ext.CheckGrantedHostPath(m.HostPath)
 }
 
-// parseMountArray parses a JSON array of mount objects from extension config.
-func parseMountArray(v any) ([]types.SandboxMount, error) {
-	return parseObjectArray(v, parseMountObject)
+func (r *AgentRegistry) AgentSandboxForURL(providerURL string) *types.AgentSandbox {
+	if r == nil {
+		return nil
+	}
+	name, ok := types.ParseAgentURL(providerURL)
+	if !ok {
+		return nil
+	}
+	return r.GetAgentSandbox(name)
 }
 
-func parseMountObject(v any) (types.SandboxMount, error) {
-	m, ok := v.(map[string]any)
-	if !ok {
-		return types.SandboxMount{}, fmt.Errorf("expected object, got %T", v)
+func (r *AgentRegistry) agentConfigDir() string {
+	if r.configStore == nil {
+		return ""
 	}
-	hp, _ := m["host_path"].(string)
-	cp, _ := m["container_path"].(string)
-	mode, _ := m["mode"].(string)
-	if mode == "" {
-		mode = "rw"
+	provider := r.configStore.GetAgentProvider()
+	if provider == nil {
+		return ""
 	}
-	return types.SandboxMount{HostPath: hp, ContainerPath: cp, Mode: mode}, nil
+	return ext.ExpandHostPath(strings.TrimSpace(provider.AgentConfigDir))
 }
 
 // parseEnvArray parses a JSON array of env objects from extension config.
 func parseEnvArray(v any) ([]types.SandboxEnv, error) {
-	return parseObjectArray(v, parseEnvObject)
-}
-
-func parseEnvObject(v any) (types.SandboxEnv, error) {
-	e, ok := v.(map[string]any)
+	items, ok := v.([]any)
 	if !ok {
-		return types.SandboxEnv{}, fmt.Errorf("expected object, got %T", v)
+		return nil, fmt.Errorf("expected array, got %T", v)
 	}
-	key, _ := e["key"].(string)
-	value, _ := e["value"].(string)
-	return types.SandboxEnv{Key: key, Value: value}, nil
-}
-
-// GetAnyAgentSandbox returns the sandbox config for the first enabled agent extension.
-// Used by sandbox terminals and FS operations that need to mount agent config
-// for any configured agent (not a specific task's agent).
-// Returns nil if no agent extension with a sandbox config is enabled, or if r is nil.
-func (r *AgentRegistry) GetAnyAgentSandbox() *types.AgentSandbox {
-	if r == nil {
-		return nil
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	for _, name := range r.enabled {
-		if sb := r.GetAgentSandbox(name); sb != nil {
-			return sb
+	envs := make([]types.SandboxEnv, 0, len(items))
+	for _, item := range items {
+		e, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("expected object, got %T", item)
 		}
+		key, _ := e["key"].(string)
+		value, _ := e["value"].(string)
+		envs = append(envs, types.SandboxEnv{Key: key, Value: value})
 	}
-	return nil
+	return envs, nil
 }
 
 // Reload re-scans the extension store for enabled agent extensions.

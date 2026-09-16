@@ -111,3 +111,61 @@ Tests: `frontend/src/lib/stores/__tests__/app-store-refresh-config.unit.ts`,
   never persists it, so the client re-reads the config on the `extension_change` broadcast
   (`appStore.refreshConfig()` in `frontend/src/lib/stores/app.svelte.ts`). An agent that only shows up after
   a browser refresh is a bug.
+
+## A manifest's sandbox mount is a proposal; the user's grant is the mount
+
+`capabilities.agent.sandbox.mount` names where the agent keeps its configuration **inside** the container,
+and what it would like on the host side of that path. It is registry text, so it is a proposal and never a
+grant: what it declared used to be resolved through `config_schema` and mounted — `rw` — into every task
+container of every sandboxed project, whatever provider the task ran, and `agent.Registry.GetAgentSandbox`
+no longer does that.
+
+- The host side comes from one place: `PUT /api/extensions/{id}/agent-mount`, which writes the extension's
+  `sandbox_mount` config field. `extensions.AgentMountConfigKey` is the shared name; the route is the only
+  writer, and `PUT /api/extensions/{id}` refuses that key so the edit form cannot be a second way in. An
+  empty list revokes, which is why it is not a field of the configuration write.
+- The container side stays the agent's own: the install dialog and the editor show the proposal's
+  container path and mode, and only the host path is typed. `extensions.ValidateAgentMountGrant` expands
+  `~`, resolves symlinks, defaults a missing mode to `ro`, and applies `checkGrantShape` — the same rule
+  the dependency directory is measured by, with mount-shaped wording (`grantKind`). It refuses the root, a
+  whole top level, the system trees, a home, anything containing a home, and the credential stores, so
+  `~/.pi/agent` is grantable and `~/.ssh` is not.
+- The directory need not exist — the agent makes it on first login — but something above it must, so the
+  server never invents the top level of a path. `sandbox.Create` makes it (0755, like a project's own
+  mount), which is what makes an `rw` grant writable from inside: no `:U`, no userns option is involved,
+  the directory belongs to the server's user, which is what a rootless container's root maps to.
+- `GetAgentSandbox` re-applies the rule when it reads (`refuseMount`), because a row can predate it and
+  because `agent_config_dir` is a second way a host path reaches `Mounts[0]`. It applies only to a grant
+  that already exists; with no grant it warns and mounts nothing.
+- Only the agent that **is** a task's provider contributes: `AgentSandboxForURL(task.LlamaServerURL)`, via
+  `taskExecSetup.providerURL()` on the four task create paths, `Server.agentGrantForTask` for the file
+  endpoints, and `TerminalManager.agentGrantForShell` for shells (a project terminal names no task, so it
+  inherits nothing). `GetAnyAgentSandbox` is gone: "the first enabled agent extension" is exactly the
+  widening this removed.
+- `TaskExecutor.agentGrantHash` hashes the provider URL **and** the grant. The grant's own shape cannot
+  say "nothing granted" — hashing it alone gave `""` for a task on a plain provider and for a task whose
+  agent had no grant, so switching away from an agent left its mount on the running container. Any change
+  now recreates, `∅ → X` and `X → ∅` alike.
+- The adapter still receives the template-resolved manifest sandbox (`runner.go`), because it derives the
+  agent's config-directory variables from it. That is extension-side information, not a host grant.
+- **Two declaration shapes, one reader**, as with the dependency directory. The registry index projects
+  `capabilities.agent.sandbox.mount` (`scripts/gen-registry.py`, which resolves the manifest's `{{…}}`
+  references against the `config_schema` defaults because the index is the only copy a pre-install view
+  has); `GET /api/extensions/local` and the extension endpoints answer with the manifest, with the same
+  resolution applied by `resolvedSandboxManifest` (`toResponse`, `localRegistryEntry`). The stored record
+  keeps the reference. `agentMountDeclaration()` is the only reader. Drop the projection and the install
+  review goes silent for every registry install — `capabilities.agent` would be `{}` again — and
+  `python3 scripts/gen-registry.py --check` is what notices the generator and the published index disagree.
+- The UI settles it at install: an entry declaring `agent.sandbox.mount` goes through the install review
+  dialog (`requiresInstallReview`), whose two mount buttons are the only things that start that install —
+  closing the dialog installs nothing. Afterwards the card carries the state: `needsAgentMountGrant` is the
+  yellow dot and `Needs setup` chip, the granted path is shown there with `Unmount`, and `sandbox_mount` is
+  host-owned in the edit form (`HOST_OWNED_AGENT_CONFIG_KEY`), so it is never sent by a configuration save.
+  The editor saves the grant through the route inside its own Save, and re-derives its rows from the
+  extension the route answered with — the stored value is the expanded, symlink-resolved path, not what was
+  typed, and a dialog still open after a later failure must not offer the same write twice.
+
+Tests: `backend/extensions/agent_mount_test.go` (the route and the rule, and the proposal as it is served),
+`backend/agent/registry_test.go` (proposal vs grant, and the read-time refusal),
+`backend/exec/agent_grant_test.go` and `backend/term/agent_grant_test.go` (who gets a mount), and
+`frontend/src/lib/utils/__tests__/extension-permissions.unit.ts` (the two predicates and the install gate).

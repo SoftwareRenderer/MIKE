@@ -448,6 +448,20 @@ func (s *ConfigSchema) resolveTemplate(value string) string {
 	return value
 }
 
+// The {{...}} placeholders are replaced only in this copy: the saved record keeps them.
+func resolvedSandboxManifest(m ExtensionManifest) ExtensionManifest {
+	agent := m.Capabilities.GetAgent()
+	if agent == nil || agent.Sandbox == nil {
+		return m
+	}
+	resolvedAgent := *agent
+	resolvedAgent.Sandbox = agent.ResolveSandboxTemplates(m.ConfigSchema)
+	caps := *m.Capabilities
+	caps.Agent = &resolvedAgent
+	m.Capabilities = &caps
+	return m
+}
+
 // ConfigSchema is the JSON Schema subset rendered as a form. Properties is an array to keep
 // manifest.json's insertion order.
 type ConfigSchema struct {

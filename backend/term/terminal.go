@@ -198,13 +198,16 @@ func (tm *TerminalManager) shellSandboxOpts(image string, proj *types.Project, a
 	}
 }
 
-// getAgentSandbox returns the agent sandbox config for the current agent, or nil.
-// agentRegistry is set once during initialization and only read afterwards, so no lock needed.
-func (tm *TerminalManager) getAgentSandbox() *types.AgentSandbox {
-	if tm.agentRegistry == nil {
+// A project-level terminal has no task, so it gets no folders.
+func (tm *TerminalManager) agentGrantForShell(projectID, taskID string) *types.AgentSandbox {
+	if tm.agentRegistry == nil || strings.HasPrefix(taskID, "proj:") {
 		return nil
 	}
-	return tm.agentRegistry.GetAnyAgentSandbox()
+	task, err := tm.store.GetTask(projectID, taskID)
+	if err != nil {
+		return nil
+	}
+	return tm.agentRegistry.AgentSandboxForURL(task.LlamaServerURL)
 }
 
 // SetOnPortsAssigned sets a callback invoked when sandbox ports are assigned during terminal shell creation.
@@ -297,8 +300,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		if imgErr != nil {
 			return nil, fmt.Errorf("sandbox not available: %w", imgErr)
 		}
-		// Mount agent sandbox if any coding agent is configured
-		agentSandbox := tm.getAgentSandbox()
+		agentSandbox := tm.agentGrantForShell(projectID, taskID)
 		var shell *sandbox.ShellProcess
 		var err error
 		// Both project and task terminals create the container on demand if it doesn't exist.

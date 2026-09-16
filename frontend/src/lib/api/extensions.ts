@@ -68,6 +68,20 @@ export async function setDependencyCache(id: string, hostPath: string): Promise<
     return res.json();
 }
 
+/** An empty list clears the approval. */
+export async function setAgentMount(
+    id: string,
+    mounts: { host_path: string; container_path: string; mode: string }[],
+): Promise<Extension> {
+    const res = await apiFetch(`${API_BASE}/extensions/${id}/agent-mount`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mounts }),
+    });
+    if (!res.ok) throw await apiError(res, t('api.setAgentMount'));
+    return res.json();
+}
+
 /** The server's own home directory, for suggesting where a dependency directory should live. */
 export async function getHomeDirectory(): Promise<string> {
     const res = await apiFetch(`${API_BASE}/home`);

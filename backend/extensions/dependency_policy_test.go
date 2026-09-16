@@ -182,20 +182,17 @@ func TestBuildExtensionCreateArgs_UsesNoGrantItself(t *testing.T) {
 	}
 }
 
-// TestGrantShapeNamesADirectoryNotAMount: the shape rule is about what the path IS, not how deep it
-// sits. A NAS-style /tank/gomodcache is a perfectly good dependency directory and the old rule refused
-// it for no reason now that the only container which ever sees the path is the extension's own,
-// read-only. A bare top level is still refused: /tank is the whole mount, and a grant is meant to be
-// the dependencies under it, not everything the machine holds.
+// TestGrantShapeNamesADirectoryNotAMount: the rule is about what a folder is, not how deep it sits. A folder
+// such as /tank/gomodcache can be used; /tank on its own is an entire mount.
 func TestGrantShapeNamesADirectoryNotAMount(t *testing.T) {
 	homes := []string{"/home/dev"}
 	for _, good := range []string{"/tank/gomodcache", "/data/go/pkg/mod", "/home/dev/go/pkg/mod", "/opt/cargo/registry"} {
-		if err := checkGrantShapeWithHomes(good, homes); err != nil {
+		if err := checkGrantShape(good, homes, dependencyGrant); err != nil {
 			t.Errorf("%s refused: %v", good, err)
 		}
 	}
 	for _, bad := range []string{"/", "/tank", "/data"} {
-		if err := checkGrantShapeWithHomes(bad, homes); err == nil {
+		if err := checkGrantShape(bad, homes, dependencyGrant); err == nil {
 			t.Errorf("%s accepted, want it refused as a whole top level rather than a dependency directory", bad)
 		}
 	}

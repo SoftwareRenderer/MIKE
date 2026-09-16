@@ -367,9 +367,8 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 			return nil, fmt.Errorf("sandbox mount %d for project %s: %w", i, projectName, err)
 		}
 	}
-	// An agent extension's mounts come from its manifest and its settings, not from anyone choosing
-	// for this project, so they take the same check as the project's own. An entry missing either end
-	// builds no mount, so it is skipped.
+	// These are folders the user approved for the extension, not folders this project chose, so they get
+	// the same shape check as the project's own mounts.
 	if opts.AgentSandbox != nil {
 		for i, m := range opts.AgentSandbox.Mounts {
 			if m.HostPath == "" || m.ContainerPath == "" {
@@ -478,8 +477,9 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 		}
 	}
 
-	// Agent sandbox mounts (only when an agent extension is configured). Its
-	// envs go through containerEnvArgs below, with the rest.
+	// Folders the manifest suggests are not used unless the user approved them. A missing folder is created
+	// here so that a read-write approval works inside the container. Environment variables are added by
+	// containerEnvArgs below.
 	if opts.AgentSandbox != nil {
 		for _, m := range opts.AgentSandbox.Mounts {
 			if m.HostPath == "" || m.ContainerPath == "" {
@@ -489,6 +489,13 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 			if err != nil {
 				logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("skipping agent mount: invalid host path %s: %v", m.HostPath, err)
 				continue
+			}
+			if _, err := os.Stat(absHost); err != nil {
+				if mkErr := os.MkdirAll(absHost, 0o755); mkErr != nil {
+					logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("skipping agent mount %s -> %s: cannot create the granted directory: %v", absHost, m.ContainerPath, mkErr)
+					continue
+				}
+				logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("created granted agent directory %s", absHost)
 			}
 			mountMode := m.Mode
 			if mountMode != "ro" && mountMode != "rw" {

@@ -261,10 +261,8 @@ func ShadowsToolState(containerPath string) bool {
 	return false
 }
 
-// ValidateDependencyGrant checks the host directory a person grants to one extension's language server
-// for its resolved dependencies, and returns the cleaned absolute path to store. It is deliberately
-// not MountPolicy's check: this is a directory the operator chose, not a path a manifest asked for, so
-// it is judged on being an absolute path and not being someone's home tree.
+// The user typed this path themselves, so it is judged on having a sensible shape rather than against the
+// allowlist that MountPolicy applies to an extension's own requests.
 func ValidateDependencyGrant(hostPath string) (string, error) {
 	trimmed := strings.TrimSpace(hostPath)
 	if trimmed == "" {
@@ -290,10 +288,75 @@ func ValidateDependencyGrant(hostPath string) (string, error) {
 	if !info.IsDir() {
 		return "", fmt.Errorf("%s is not a directory", resolved)
 	}
-	if err := checkGrantShapeWithHomes(resolved, hostHomeDirs()); err != nil {
+	if err := checkGrantShape(resolved, hostHomeDirs(), dependencyGrant); err != nil {
 		return "", err
 	}
 	return resolved, nil
+}
+
+// A missing mode means read-only. A folder that does not exist yet is accepted as long as a folder above it
+// exists, because the agent creates its own config folder the first time it runs.
+func ValidateAgentMountGrant(mount types.SandboxMount) (types.SandboxMount, error) {
+	expanded := ExpandHostPath(strings.TrimSpace(mount.HostPath))
+	if expanded == "" {
+		return mount, fmt.Errorf("no directory given")
+	}
+	candidate := mount
+	candidate.HostPath = expanded
+	candidate.Mode = strings.TrimSpace(mount.Mode)
+	if candidate.Mode == "" {
+		candidate.Mode = "ro"
+	}
+	if err := types.ValidateSandboxMount(candidate); err != nil {
+		return mount, err
+	}
+	resolved, err := resolvePath(expanded)
+	if err != nil {
+		return mount, err
+	}
+	if err := checkGrantShape(resolved, hostHomeDirs(), agentMountKind); err != nil {
+		return mount, err
+	}
+	if info, statErr := os.Stat(resolved); statErr == nil {
+		if !info.IsDir() {
+			return mount, fmt.Errorf("%s is not a directory", resolved)
+		}
+	} else if !hasExistingAncestor(resolved) {
+		return mount, fmt.Errorf("%s does not exist and no directory above it does, so there is nowhere to create it", resolved)
+	}
+	candidate.HostPath = resolved
+	return candidate, nil
+}
+
+// An approval saved before today's checks existed still gets checked here. Whether the folder exists is not
+// asked, because the agent creates it.
+func CheckGrantedHostPath(hostPath string) error {
+	resolved, err := resolvePath(ExpandHostPath(hostPath))
+	if err != nil {
+		return err
+	}
+	return checkGrantShape(resolved, hostHomeDirs(), agentMountKind)
+}
+
+func hasExistingAncestor(p string) bool {
+	for cur := filepath.Dir(p); cur != "/" && cur != "."; cur = filepath.Dir(cur) {
+		if info, err := os.Stat(cur); err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+// A leading ~ is replaced by the home directory, because podman does not expand it.
+func ExpandHostPath(p string) string {
+	if p != "~" && !strings.HasPrefix(p, "~/") {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return p
+	}
+	return filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(p, "~"), "/"))
 }
 
 // systemGrantRoots are host trees a dependency directory is never in, and that must never be handed to
@@ -306,39 +369,58 @@ var systemGrantRoots = []string{"/etc", "/usr", "/bin", "/sbin", "/lib", "/lib32
 // A denylist of credential stores: host safety, not language knowledge.
 var credentialGrantDirs = []string{".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".config/gcloud", ".config/gh", ".config/huggingface", ".config/pip"}
 
-// checkGrantShapeWithHomes is the shape rule a dependency directory has to satisfy, and it
-// costs the user nothing to satisfy. A manifest cannot carry a host path, so the user's own
-// answer is the only input and this is the only place to catch a wrong one. Homes are passed
-// in so the rules are testable without touching a real home directory.
-func checkGrantShapeWithHomes(resolved string, homes []string) error {
-	// Not the root, and not the bare top level of the tree. Either hands a language server an entire
-	// mount instead of the directory of dependencies under it, and a whole mount is the widest thing
-	// this field could possibly be pointed at. A named directory of the user's own — /data/go/pkg/mod,
-	// /tank/gomodcache — is what a dependency directory actually is.
+// Lets a refusal name the field the user filled in, instead of talking about dependencies in both cases.
+type grantKind struct {
+	thing     string // what the field names
+	example   string // a directory of the user's own
+	contents  string // what the tree is expected to hold
+	witnesses string // who else could read it
+}
+
+var (
+	dependencyGrant = grantKind{
+		thing:     "a dependency directory",
+		example:   "go/pkg/mod",
+		contents:  "a project's dependencies",
+		witnesses: "every language server in the install",
+	}
+	agentMountKind = grantKind{
+		thing:     "a directory to mount",
+		example:   ".pi/agent",
+		contents:  "one agent's own files",
+		witnesses: "every task that runs this agent",
+	}
+)
+
+// A new kind of approved folder should add a grantKind rather than a new set of checks. The home folders
+// are passed in so the rule can be tested without touching a real home directory.
+func checkGrantShape(resolved string, homes []string, k grantKind) error {
 	trimmed := strings.Trim(resolved, "/")
 	if trimmed == "" {
-		return fmt.Errorf("the filesystem root is not a dependency directory — name the directory your toolchain's files live in")
-	}
-	if !strings.Contains(trimmed, "/") {
-		return fmt.Errorf("%s is the whole top level of the filesystem — name a directory of your own under it (for example %s/go/pkg/mod)", resolved, resolved)
+		return fmt.Errorf("the filesystem root is not %s — name the directory you want inside the container", k.thing)
 	}
 	for _, root := range systemGrantRoots {
 		if resolved == root || strings.HasPrefix(resolved, root+"/") {
-			return fmt.Errorf("%s is inside %s, which belongs to the machine rather than to a project's dependencies", resolved, root)
+			return fmt.Errorf("%s is inside %s, which belongs to the machine rather than to %s", resolved, root, k.contents)
 		}
 	}
 	for _, home := range homes {
 		if resolved == home {
-			return fmt.Errorf("%s is a home directory, not a dependency directory — grant a directory inside it (for example %s/go/pkg/mod), so what becomes readable from every language server in the install is the dependencies and not the person", resolved, home)
+			return fmt.Errorf("%s is a home directory, not %s — grant a directory inside it (for example %s/%s), so what becomes readable from %s is the files you named and not the person",
+				resolved, k.thing, home, k.example, k.witnesses)
 		}
 		if strings.HasPrefix(home, resolved+"/") {
 			return fmt.Errorf("%s contains a home directory, so granting it would expose every project and credential on this machine", resolved)
 		}
 		for _, cred := range credentialGrantDirs {
 			if bad := filepath.Join(home, filepath.ToSlash(cred)); resolved == bad || strings.HasPrefix(resolved, bad+"/") {
-				return fmt.Errorf("%s holds credentials, not dependencies", bad)
+				return fmt.Errorf("%s holds credentials, not %s", bad, k.contents)
 			}
 		}
+	}
+	// This runs after the home checks, because a folder such as /root is both a top-level folder and a home.
+	if !strings.Contains(trimmed, "/") {
+		return fmt.Errorf("%s is the whole top level of the filesystem — name a directory of your own under it (for example %s/%s)", resolved, resolved, k.example)
 	}
 	return nil
 }

@@ -1,10 +1,10 @@
 <script lang="ts">
     import type { Extension, RegistryEntry, ExtensionUpdate, SandboxMount, SandboxEnv } from '$lib/types';
-    import { listExtensions, listLocalExtensions, getRegistryIndex, installExtension, installLocalExtension, deleteExtension, setExtensionEnabled, setDependencyCache, getHomeDirectory, checkUpdates, updateExtension, updateExtensionImage } from '$lib/api';
+    import { listExtensions, listLocalExtensions, getRegistryIndex, installExtension, installLocalExtension, deleteExtension, setExtensionEnabled, setDependencyCache, setAgentMount, getHomeDirectory, checkUpdates, updateExtension, updateExtensionImage } from '$lib/api';
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
-    import { isDangerousPermission, requiresInstallReview, sortPermissions, dependencyCacheDeclaration, needsDependencyGrant, requiresSetupAfterInstall, permissionDescriptions } from '$lib/utils/extension-permissions';
+    import { isDangerousPermission, requiresInstallReview, sortPermissions, dependencyCacheDeclaration, needsDependencyGrant, requiresSetupAfterInstall, permissionDescriptions, agentMountDeclaration, agentMountGrant, needsAgentMountGrant, type AgentMountProposal } from '$lib/utils/extension-permissions';
     import { effectiveConfigFields, initialEditConfig, HOST_OWNED_LSP_CONFIG_KEY, type ConfigField } from '$lib/utils/extension-config';
     import { memoryLimitToInput, parseMemoryLimitMB } from '$lib/utils/memory-stats';
     import { timeAgo } from '$lib/utils/format-time';
@@ -61,11 +61,13 @@
     // Extension id whose local path is revealed (clicked its "Local" badge).
     let revealedLocalPath = $state<string | null>(null);
 
-    // Install confirmation: set when the user clicks Install on an extension
-    // that declares the network capability or sandbox-escaping permissions;
-    // the dialog reviews the network capability (allowed domains) and the full
-    // declared permission list before the install starts.
+    // Set when the user clicks Install on an extension that has to be reviewed first, because it asks for
+    // network access, for permissions that escape the sandbox, or for a host folder. Closing this dialog
+    // installs nothing.
     let pendingInstall = $state<{ entry: RegistryEntry; isLocal: boolean } | null>(null);
+
+    /** The dialog only offers the choice when this is not empty. */
+    let pendingAgentMounts = $derived(pendingInstall ? agentMountDeclaration(pendingInstall.entry.capabilities) : []);
 
     // Human-readable labels for UI injection points
     const INJECTION_POINT_LABELS = $derived<Record<string, string>>({
@@ -178,6 +180,8 @@
     async function loadExtensions() {
         loading = true;
         error = '';
+        // The highlight refers to the list that is loaded now, so loading again clears it.
+        setupFocusId = '';
         try {
             extensions = await listExtensions();
             onExtensionsChanged?.();
@@ -241,19 +245,20 @@
             pendingInstall = { entry, isLocal };
             return;
         }
-        void runInstall(entry, isLocal);
+        void runInstall(entry, isLocal, false);
     }
 
-    // Confirm the pending install from the dialog and start it.
-    function confirmPendingInstall() {
+    /** `true` means the user agreed to mount the suggested folders, which happens once the extension has
+     *  been saved. */
+    function confirmPendingInstall(mount: boolean) {
         const pending = pendingInstall;
         pendingInstall = null;
-        if (pending) void runInstall(pending.entry, pending.isLocal);
+        if (pending) void runInstall(pending.entry, pending.isLocal, mount);
     }
 
     // Install an extension, streaming progress into the card as it happens.
     // Local (unpublished) extensions install from the filesystem, bypassing the registry.
-    async function runInstall(entry: RegistryEntry, isLocal: boolean) {
+    async function runInstall(entry: RegistryEntry, isLocal: boolean, mount: boolean) {
         const name = entry.name;
         if (installing.has(name)) return;
         error = '';
@@ -272,12 +277,60 @@
                 }
             }
             await loadExtensions();
+            // Only after the install stream ends: the extension has to be saved before a folder can be
+            // approved for it.
+            if (mount) await grantProposedMount(entry);
+            focusCardNeedingSetup();
         } catch (e: any) {
             error = e.message || t('settings.extensions.installFailed');
         } finally {
             const next = new Set(installing);
             next.delete(name);
             installing = next;
+        }
+    }
+
+    async function grantProposedMount(entry: RegistryEntry) {
+        const proposal = agentMountDeclaration(entry.capabilities);
+        if (!proposal.length) return;
+        const installed = extensions.find((e) => identityKey(e.author, e.name) === identityKey(entry.author, entry.name));
+        if (!installed) return;
+        try {
+            await setAgentMount(installed.id, proposal.map((m) => ({ host_path: m.host_path, container_path: m.container_path, mode: m.mode })));
+            await loadExtensions();
+        } catch (e: any) {
+            error = t('settings.extensions.agentGrantFailed', { reason: e?.message || String(e) });
+        }
+    }
+
+    // The card to send the user to after an install. It is focused rather than opened in a dialog, because
+    // several installs can be running at once.
+    let setupFocusId = $state('');
+
+    function focusCardNeedingSetup() {
+        const waiting = extensions.find((e) => needsAgentMountGrant(e) || needsDependencyGrant(e));
+        setupFocusId = waiting?.id ?? '';
+    }
+
+    $effect(() => {
+        const id = setupFocusId;
+        if (!id) return;
+        // Focus the card's "Needs setup" badge: it explains the state and can be reached by keyboard.
+        const badge = document.getElementById(`ext-card-${id}`);
+        if (badge) {
+            badge.focus();
+            badge.scrollIntoView({ block: 'nearest' });
+        }
+    });
+
+    // Clears the approval straight from the card, without opening the edit dialog.
+    async function revokeAgentMount(ext: Extension) {
+        error = '';
+        try {
+            await setAgentMount(ext.id, []);
+            await loadExtensions();
+        } catch (e: any) {
+            error = e.message || t('settings.extensions.agentGrantFailed', { reason: e?.message || String(e) });
         }
     }
 
@@ -320,9 +373,14 @@
     // since only one dialog is open at a time.
     let editDepDraft = $state('');
     let editDepError = $state('');
+
+    /** One row per folder the manifest suggested. The container path comes from the extension; the host
+     *  folder and the mode are what the user chooses. `suggestion` is only placeholder text. */
+    type AgentMountRow = AgentMountProposal & { suggestion: string };
+    let editAgentMounts = $state<AgentMountRow[]>([]);
+    let editAgentMountError = $state('');
     let homeDir = $state('');
-    // Not state: nothing renders from either, so the effect below cannot re-trigger itself while it
-    // reads and fills the draft.
+    // Not reactive state: nothing renders from these, so the effect below does not re-run when it reads them.
     let homeTried = false;
     let draftFilled = false;
 
@@ -466,9 +524,48 @@
         };
         editDepDraft = depDraftFor(ext);
         editDepError = '';
+        editAgentMounts = agentMountDraft(ext);
+        editAgentMountError = '';
         // "Filled" means the draft holds the real answer rather than a placeholder waiting on the
         // home directory: a grant is final, and a suggestion needs no home to have been read from.
         draftFilled = !!ext.sandbox_config?.dependency_host_path || homeDir !== '';
+    }
+
+    function agentMountDraft(ext: Extension): AgentMountRow[] {
+        const granted = agentMountGrant(ext);
+        const rows = agentMountDeclaration(ext.manifest.capabilities).map((proposal) => {
+            const saved = granted.find((g) => g.container_path === proposal.container_path);
+            return {
+                host_path: saved?.host_path ?? '',
+                container_path: proposal.container_path,
+                mode: saved?.mode ?? proposal.mode ?? 'rw',
+                suggestion: proposal.host_path,
+            };
+        });
+        // The whole list is sent when the user saves, so an approved folder that gets no row here would be
+        // removed by that save.
+        for (const extra of granted) {
+            if (!rows.some((row) => row.container_path === extra.container_path)) {
+                rows.push({ host_path: extra.host_path, container_path: extra.container_path, mode: extra.mode || 'ro', suggestion: '' });
+            }
+        }
+        return rows;
+    }
+
+    /** A row whose host folder is empty approves nothing. */
+    function agentMountUpdate(rows: AgentMountRow[]) {
+        return rows
+            .filter((row) => row.host_path.trim() !== '')
+            .map((row) => ({ host_path: row.host_path.trim(), container_path: row.container_path, mode: row.mode }));
+    }
+
+    /**
+     * Turns a list of folders into one sorted string, so two lists can be compared in any order. Comparing
+     * JSON text is not enough: the server writes a folder's fields in its own order, so text comparison
+     * would report a change the user never made.
+     */
+    function grantFingerprint(mounts: AgentMountProposal[]) {
+        return mounts.map((m) => `${m.container_path}\u0000${m.host_path}\u0000${m.mode}`).sort().join('\n');
     }
 
     // Close edit form
@@ -479,6 +576,8 @@
         editLspSettings = { editor_enabled: true, tool_calls_enabled: true };
         editDepDraft = '';
         editDepError = '';
+        editAgentMounts = [];
+        editAgentMountError = '';
         draftFilled = false;
     }
 
@@ -498,6 +597,7 @@
         saving = true;
         error = '';
         editDepError = '';
+        editAgentMountError = '';
         try {
             // The grant goes first: it is the change that stops a running sandbox, and a refused
             // directory must not close the dialog with the rest of the edits unsaid. Applying nothing
@@ -516,6 +616,22 @@
                 }
             }
             const data: { config?: Record<string, any>; manifest?: Record<string, any> } = { config: editConfig };
+            // The folders go to their own endpoint, because an empty list has to mean "clear the approval".
+            // This waits for Save so that Cancel still changes nothing.
+            if (editingExtension && editAgentMounts.length > 0) {
+                const next = agentMountUpdate(editAgentMounts);
+                if (grantFingerprint(next) !== grantFingerprint(agentMountGrant(editingExtension))) {
+                    try {
+                        const updated = await setAgentMount(editExtensionId, next);
+                        // Use the list the server saved, since it expands ~ and resolves symlinks.
+                        if (updated?.config) editingExtension.config = updated.config;
+                        editAgentMounts = agentMountDraft(editingExtension);
+                    } catch (e: any) {
+                        editAgentMountError = e?.message || t('api.setAgentMount');
+                        return;
+                    }
+                }
+            }
             // Include LSP settings for LSP extensions
             if (editingExtension?.type === 'lsp') {
                 data.manifest = {
@@ -717,7 +833,12 @@
                 <div class="extension-list">
                     {#each filteredExtensions as ext}
                         {@const isLocal = ext.install_source === 'local'}
-                        <div class="extension-card" class:disabled={!ext.enabled} class:unpublished-card={isLocal}>
+                        <div
+                            class="extension-card"
+                            class:disabled={!ext.enabled}
+                            class:unpublished-card={isLocal}
+                            class:card-setup-focus={setupFocusId === ext.id}
+                        >
                             <div class="card-header">
                                 <div class="ext-icon" class:ext-lsp={ext.type === 'lsp'} class:ext-ui={ext.type === 'ui'} class:ext-css={ext.type === 'css'} class:ext-agent={ext.type === 'agent'} class:ext-llm={ext.type === 'llm'} class:ext-i18n={ext.type === 'i18n'}>
                                     {typeBadge(ext.type)}
@@ -734,14 +855,17 @@
                                                 onclick={(e) => { e.stopPropagation(); revealedLocalPath = revealedLocalPath === ext.id ? null : ext.id; }}
                                             >{t('settings.extensions.local')}</button>
                                         {/if}
-                                        {#if needsDependencyGrant(ext)}
+                                        {#if needsDependencyGrant(ext) || needsAgentMountGrant(ext)}
                                             <!-- Same attention color as the dot on the Edit button, and it opens
                                                   the same dialog: one state, said twice because a dot on an icon
                                                   is easy to look straight past. -->
                                             <button
                                                 class="needs-setup-badge"
                                                 type="button"
-                                                title={t('settings.extensions.needsSetupTitle')}
+                                                id={`ext-card-${ext.id}`}
+                                                title={needsAgentMountGrant(ext)
+                                                    ? t('settings.extensions.needsSetupAgentTitle')
+                                                    : t('settings.extensions.needsSetupTitle')}
                                                 onclick={(e) => { e.stopPropagation(); openEdit(ext); }}
                                             >{t('settings.extensions.needsSetup')}</button>
                                         {/if}
@@ -791,18 +915,18 @@
                                     </button>
                                     {/if}
                                     {#if ext.manifest.config_schema || ext.type === 'lsp'}
-                                    {@const needsDep = needsDependencyGrant(ext)}
+                                    {@const needsGrant = needsDependencyGrant(ext) || needsAgentMountGrant(ext)}
                                     <button
                                         class="btn btn-icon"
-                                        title={needsDep ? t('settings.extensions.editNeedsSetup') : t('settings.extensions.edit')}
-                                        aria-label={needsDep ? t('settings.extensions.editNeedsSetup') : t('settings.extensions.edit')}
+                                        title={needsGrant ? t('settings.extensions.editNeedsSetup') : t('settings.extensions.edit')}
+                                        aria-label={needsGrant ? t('settings.extensions.editNeedsSetup') : t('settings.extensions.edit')}
                                         onclick={() => openEdit(ext)}
                                     >
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                                             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                                         </svg>
-                                        {#if needsDep}
+                                        {#if needsGrant}
                                             <span class="ext-needs-dot" aria-hidden="true"></span>
                                         {/if}
                                     </button>
@@ -818,10 +942,34 @@
                                     <span class="ext-env-note-text">{ext.environment.note || t('settings.extensions.envNote')}</span>
                                 </div>
                             {/if}
-                            <!-- The dependency directory is configured in the Edit dialog, not on the card:
-                                 granting one stops the running sandbox, so it belongs behind the same Save as
-                                 the rest of the settings. What the card carries is the state — the badge above
-                                 and the dot on Edit, both from needsDependencyGrant(ext). -->
+                            <!-- Shows the approved folders. Changing them happens in the Edit dialog. -->
+                            {#if agentMountDeclaration(ext.manifest.capabilities).length > 0}
+                                <!-- An agent has no container of its own, so clearing an approval here
+                                     interrupts nothing. -->
+                                {@const granted = agentMountGrant(ext)}
+                                <div class="ext-agent-row">
+                                    {#if granted.length > 0}
+                                        <!-- This button clears every approved folder, so it must not look
+                                             like it belongs to one row. -->
+                                        <div class="ext-agent-paths">
+                                            {#each granted as entry}
+                                                <div class="ext-agent-path">
+                                                    <span class="ext-dep-state-label">{t('settings.extensions.agentMounted', { mode: entry.mode || 'ro' })}</span>
+                                                    <code class="ext-dep-path" title={t('settings.extensions.agentMountedTitle', { host: entry.host_path, container: entry.container_path })}>{entry.host_path}</code>
+                                                </div>
+                                            {/each}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            class="btn-secondary btn-small"
+                                            title={t('settings.extensions.agentCardUnmountHint')}
+                                            onclick={() => revokeAgentMount(ext)}
+                                        >{t('settings.extensions.agentCardUnmount')}</button>
+                                    {:else}
+                                        <span class="ext-dep-none">{t('settings.extensions.agentCardNone')}</span>
+                                    {/if}
+                                </div>
+                            {/if}
                             {#if buildProgress[ext.name]}
                                 {@const bp = buildProgress[ext.name]}
                                 <div class="ext-build" class:ext-build-error={!!bp.error}>
@@ -914,6 +1062,69 @@
                         </div>
                         {#if editDepError}
                             <p class="ext-dep-error" role="alert">{editDepError}</p>
+                        {/if}
+                    </div>
+                </div>
+            {/if}
+            <!-- This is the only field here that affects other tasks' containers. An empty folder clears the
+                 approval. -->
+            {#if editAgentMounts.length > 0}
+                {@const granted = agentMountGrant(editingExtension)}
+                <div class="config-fields">
+                    <h4>{t('settings.extensions.agentFiles')}</h4>
+                    <div class="config-field">
+                        <label class="field-label" for="edit-agent-mount-0">{t('settings.extensions.agentMountLabel')}</label>
+                        <p class="field-desc">
+                            {t('settings.extensions.agentMountDesc.before')} <code>{editAgentMounts[0].container_path}</code> {t('settings.extensions.agentMountDesc.after')}
+                        </p>
+                        {#each editAgentMounts as row, i}
+                            <input
+                                id={`edit-agent-mount-${i}`}
+                                type="text"
+                                class="config-input ext-dep-input"
+                                aria-label={t('settings.extensions.agentMountAria', { name: editingExtension.name })}
+                                placeholder={row.suggestion || '/path/to/the/agent/folder'}
+                                bind:value={row.host_path}
+                                disabled={saving}
+                            />
+                            {#if row.suggestion && !row.host_path.trim()}
+                                <button type="button" class="btn-secondary btn-small" disabled={saving}
+                                    onclick={() => { row.host_path = row.suggestion; }}
+                                >{t('settings.extensions.agentMountUse', { host: row.suggestion })}</button>
+                            {/if}
+                            <div class="radio-group radio-group-small">
+                                <label class="radio-label" class:active={row.mode === 'rw'}>
+                                    <input type="radio" name={`agent-mount-mode-${i}`} value="rw" checked={row.mode === 'rw'} onchange={() => { row.mode = 'rw'; }} />
+                                    <span class="radio-text">rw</span>
+                                </label>
+                                <label class="radio-label" class:active={row.mode === 'ro'}>
+                                    <input type="radio" name={`agent-mount-mode-${i}`} value="ro" checked={row.mode === 'ro'} onchange={() => { row.mode = 'ro'; }} />
+                                    <span class="radio-text">ro</span>
+                                </label>
+                            </div>
+                            <!-- One row per folder: clearing this field removes this folder and leaves the
+                                 others approved. -->
+                            {@const savedRow = granted.find((g) => g.container_path === row.container_path)}
+                            <div class="ext-dep-state">
+                                {#if savedRow}
+                                    <span class="ext-dep-state-label">{t('settings.extensions.agentMounted', { mode: savedRow.mode || 'ro' })}</span>
+                                    <code class="ext-dep-path" title={t('settings.extensions.agentMountedTitle', { host: savedRow.host_path, container: savedRow.container_path })}>{savedRow.host_path}</code>
+                                    <button type="button" class="btn-secondary btn-small" onclick={() => { row.host_path = ''; }} disabled={saving}
+                                        title={t('settings.extensions.agentCardUnmountHint')}>{t('settings.extensions.depUnmount')}</button>
+                                {:else if !row.host_path.trim()}
+                                    <span class="ext-dep-none">{t('settings.extensions.agentMountNone')}</span>
+                                {/if}
+                                {#if row.host_path.trim() !== (savedRow?.host_path || '')}
+                                    <span class="ext-dep-pending">{t('settings.extensions.agentMountPending', {
+                                        action: savedRow
+                                            ? (row.host_path.trim() ? t('settings.extensions.depPendingReplace') : t('settings.extensions.depPendingUnmount'))
+                                            : t('settings.extensions.depPendingMount'),
+                                    })}</span>
+                                {/if}
+                            </div>
+                        {/each}
+                        {#if editAgentMountError}
+                            <p class="ext-dep-error" role="alert">{editAgentMountError}</p>
                         {/if}
                     </div>
                 </div>
@@ -1167,14 +1378,17 @@
         </BaseModal>
     {/if}
 
-    <!-- Install Confirm: shown before installing an extension that declares
-         the network capability or sandbox-escaping permissions; the user
-         reviews the network capability (allowed domains) and the full declared
-         permission list before the install starts. -->
+    <!-- Shown before installing an extension that asks for network access, for permissions that escape the
+         sandbox, or for a host folder. Closing it installs nothing. -->
     {#if pendingInstall}
         {#snippet installConfirmFooter()}
             <button type="button" class="btn-secondary" onclick={() => pendingInstall = null}>{t('settings.cancel')}</button>
-            <button type="button" class="btn-primary" onclick={confirmPendingInstall}>{t('settings.extensions.install')}</button>
+            {#if pendingAgentMounts.length > 0}
+                <button type="button" class="btn-secondary" onclick={() => confirmPendingInstall(false)}>{t('settings.extensions.agentMountDecline')}</button>
+                <button type="button" class="btn-primary" onclick={() => confirmPendingInstall(true)}>{t('settings.extensions.agentMountGrant')}</button>
+            {:else}
+                <button type="button" class="btn-primary" onclick={() => confirmPendingInstall(false)}>{t('settings.extensions.install')}</button>
+            {/if}
         {/snippet}
 
         {@const pendingPerms = sortPermissions((pendingInstall.entry.capabilities?.ui?.permissions ?? []) as string[])}
@@ -1206,14 +1420,31 @@
                     </div>
                 {/if}
                 {#if pendingDep}
-                    <!-- Not a sandbox escape and not labelled as one: installing grants nothing.
-                         What it does is mean a folder on this machine gets asked about afterwards,
-                         which is the part worth saying before anyone clicks Install. -->
+                    <!-- This is not a sandbox escape. Installing approves nothing; it only means the user is
+                         asked about a folder afterwards. -->
                     <div class="cap-permission">
                         <span class="cap-permission-name">{t('settings.extensions.depPermission')}</span>
                         <span class="cap-permission-desc">
                             {t('settings.extensions.depPermissionDesc.before')} <code>{pendingDep.env}={pendingDep.container_path}</code> {t('settings.extensions.depPermissionDesc.after')}
                         </span>
+                    </div>
+                {/if}
+                {#if pendingAgentMounts.length > 0}
+                    <!-- The only place the user is asked about a folder. The path from the manifest is a
+                         suggestion. -->
+                    <div class="cap-permission">
+                        <span class="cap-permission-name">{t('settings.extensions.agentMountPermission')}</span>
+                        <span class="cap-permission-desc">
+                            {t('settings.extensions.agentMountPermissionDesc.before')} <code>{pendingAgentMounts[0].container_path}</code> {t('settings.extensions.agentMountPermissionDesc.after')}
+                        </span>
+                        <p class="field-desc">{t('settings.extensions.agentMountAsk')}</p>
+                        {#each pendingAgentMounts as proposal}
+                            <div class="cap-detail-tags">
+                                <span class="cap-detail-tag">
+                                    {t('settings.extensions.agentMountProposal', { host: proposal.host_path, container: proposal.container_path, mode: proposal.mode || 'rw' })}
+                                </span>
+                            </div>
+                        {/each}
                     </div>
                 {/if}
                 {#each pendingPerms as perm}
@@ -1256,6 +1487,7 @@
                         {@const isInstalled = installedKeys.has(identityKey(entry.author, entry.name))}
                         {@const needsSetup = requiresSetupAfterInstall(entry.capabilities)}
                         {@const setupDep = dependencyCacheDeclaration(entry.capabilities)}
+                        {@const setupAgentMounts = agentMountDeclaration(entry.capabilities)}
                         <div class="extension-card registry-card" class:unpublished-card={isUnpublished}>
                             <div class="card-header">
                                 <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'} class:ext-agent={entry.type === 'agent'} class:ext-llm={entry.type === 'llm'} class:ext-i18n={entry.type === 'i18n'}>
@@ -1346,7 +1578,11 @@
                                 <!-- Not a permission warning: installing grants nothing. The step is a folder to pick. -->
                                 <p class="ext-note ext-needs-setup-note">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                                    <span>{t('settings.extensions.needsSetupNote.before')} <code>{setupDep?.env}={setupDep?.container_path}</code> {t('settings.extensions.needsSetupNote.after')}</span>
+                                    {#if setupDep}
+                                        <span>{t('settings.extensions.needsSetupNote.before')} <code>{setupDep?.env}={setupDep?.container_path}</code> {t('settings.extensions.needsSetupNote.after')}</span>
+                                    {:else}
+                                        <span>{t('settings.extensions.agentSetupNote.before')} <code>{setupAgentMounts[0]?.container_path}</code> {t('settings.extensions.agentSetupNote.after')}</span>
+                                    {/if}
                                 </p>
                             {/if}
                             {#if entry.capabilities?.network?.allowed_domains?.length}
@@ -1487,6 +1723,35 @@
         flex-wrap: wrap;
         min-width: 0;
         margin-top: 0.35rem;
+    }
+
+    /* The agent row on a card: the approved folders and the button that clears them. */
+    .ext-agent-row {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        flex-wrap: wrap;
+        min-width: 0;
+        margin-top: 0.5rem;
+    }
+
+    .ext-agent-paths {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        min-width: 0;
+    }
+
+    .ext-agent-path {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        min-width: 0;
+    }
+
+    /* A card whose install left a question unanswered. */
+    .extension-card.card-setup-focus {
+        border-color: var(--color-accent);
     }
 
     .ext-dep-state-label {

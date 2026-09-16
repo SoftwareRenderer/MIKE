@@ -47,3 +47,23 @@ argument, and a manifest carrying it is **refused**, not stripped.
   `backend/term/terminal_test.go`; UI states in
   `frontend/src/lib/utils/__tests__/extension-permissions.unit.ts` and
   `frontend/src/lib/components/ConfigModal/__tests__/extensions-dependency-cache.unit.svelte.ts`.
+
+## The second two-origins grant: an agent's configuration folder
+
+`PUT /api/extensions/{id}/agent-mount` (`backend/agent-extensions.md → A manifest's sandbox mount is a
+proposal`) is the same shape — the manifest names the container path, a person names the host path — with
+three differences worth knowing when reading either one:
+
+- **`rw` is possible**, and the mode is the person's choice; a dependency directory is always bound
+  read-only, however the manifest asks.
+- **It reaches task containers, not the extension's own.** An agent extension runs no container of its
+  own, so the route stops nothing: the executor recreates the containers of the tasks that run the agent
+  when the grant changes. The dependency grant stops one running sandbox and is applied at the next use.
+- **The directory may be missing**, when something above it exists — an agent creates its own folder on
+  first login — where a missing cache is refused ("create it first"), because a task's download command is
+  the way a cache gets filled and there is no equivalent for a login.
+
+Both go through the same shape rule (`checkGrantShape`), each with its own wording, and both refuse the
+credential stores, the homes and the system trees: a grant is readable from a container that runs
+extension-supplied or agent-supplied code, and what that code does with a file it can open is nobody's
+promise. Tests: `backend/extensions/agent_mount_test.go`, `backend/extensions/dependency_grant_test.go`.

@@ -349,7 +349,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			te.failTask(setup.task, setup.projectID, err.Error(), "sandbox_setup_failed")
 			return
 		}
-		sb := sandboxState{operatingMode: setup.task.OperatingMode, agentConfigHash: agentSandboxHash(te.agentRegistry.GetAnyAgentSandbox())}
+		sb := sandboxState{operatingMode: setup.task.OperatingMode, agentConfigHash: te.agentGrantHash(setup.providerURL())}
 		sb.exec, sb.execStream, sb.read, sb.write, sb.edit = makeSandboxCallbacks(agentClient)
 		// Wire up bridge recovery — reconnects client or (re)creates sandbox.
 		sb.recoverBridge = func() bool {
@@ -375,6 +375,8 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 	}
 
 	mc := &modelConfig{serverURL: setup.serverURL, modelName: setup.modelName}
+	// A provider switch during the run changes mc, and container creation reads mc.
+	setup.provider = mc
 	providerName := te.configStore.GetProviderIDByURL(setup.serverURL)
 	reasoningEffort := setup.task.ReasoningEffort
 	if reasoningEffort == "" {
@@ -492,11 +494,11 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			}
 		}
 
-		// Check for agent sandbox config change — recreate sandbox with updated mounts/envs
+		// A folder the user just removed counts as a change.
 		if setup.sandboxEnabled && te.sandboxMgr != nil && te.sandboxMgr.ContainerIsRunning(setup.task.ID) {
 			currentHash := state.sandbox().agentConfigHash
-			newHash := agentSandboxHash(te.agentRegistry.GetAnyAgentSandbox())
-			if newHash != "" && newHash != currentHash {
+			newHash := te.agentGrantHash(setup.providerURL())
+			if newHash != currentHash {
 				logging.For(logging.Sandbox).With(logging.TaskID, setup.task.ID).Infof("agent sandbox config changed, recreating sandbox")
 				if err := te.recreateTaskSandbox(setup, state, sandboxRecreate{
 					reason:      "config change",

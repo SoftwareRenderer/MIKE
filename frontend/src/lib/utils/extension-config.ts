@@ -18,20 +18,30 @@ export interface ConfigField {
  */
 export const HOST_OWNED_LSP_CONFIG_KEY = 'memory_limit';
 
+/**
+ * The host folders an agent extension may see are saved by their own endpoint, so the edit form shows no
+ * field for `sandbox_mount` and never sends it.
+ */
+const HOST_OWNED_AGENT_CONFIG_KEY = 'sandbox_mount';
+
 export function isLspExtension(ext: Extension | null | undefined): boolean {
     return ext?.type === 'lsp';
 }
 
+function isAgentExtension(ext: Extension | null | undefined): boolean {
+    return ext?.type === 'agent';
+}
+
 /**
- * Config fields the extension edit form should render for an extension.
- * For LSP extensions any manifest-declared `memory_limit` schema property is
- * excluded — the host renders its own field instead (no double rendering).
+ * The config fields the edit form shows. Fields the app manages itself are left out: `memory_limit` for
+ * language servers, `sandbox_mount` for agents.
  */
 export function effectiveConfigFields(ext: Extension | null | undefined): ConfigField[] {
     const schema = ext?.manifest.config_schema;
     if (!schema?.properties) return [];
     return schema.properties
         .filter((p) => !(isLspExtension(ext) && p.key === HOST_OWNED_LSP_CONFIG_KEY))
+        .filter((p) => !(isAgentExtension(ext) && p.key === HOST_OWNED_AGENT_CONFIG_KEY))
         .map((p: SchemaProperty) => ({
             key: p.key,
             title: p.title || p.key,
@@ -53,6 +63,10 @@ export function initialEditConfig(ext: Extension): Record<string, any> {
     const config: Record<string, any> = { ...ext.config };
     if (isLspExtension(ext)) {
         config[HOST_OWNED_LSP_CONFIG_KEY] = ext.sandbox_config?.memory_limit ?? 0;
+    }
+    if (isAgentExtension(ext)) {
+        // Deleted, not just hidden: sending the field back counts as a write, which the server refuses.
+        delete config[HOST_OWNED_AGENT_CONFIG_KEY];
     }
     return config;
 }

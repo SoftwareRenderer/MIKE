@@ -1047,6 +1047,7 @@ type taskExecSetup struct {
 	summarizeCh    chan *summarizeRequest // channel for manual summarization requests
 	initialContent string                 // user message content for lazy-start (empty for normal start)
 	regenerate     bool
+	provider       *modelConfig
 	sandboxEnabled bool
 	sandboxOpts    sandbox.SandboxOpts
 	done           chan struct{} // closed by executor defer; see executionState.done
@@ -1067,6 +1068,15 @@ func (s *taskExecSetup) projectName() string {
 		return ""
 	}
 	return s.project.Name
+}
+
+func (s *taskExecSetup) providerURL() string {
+	if s.provider != nil {
+		if url, _ := s.provider.get(); url != "" {
+			return url
+		}
+	}
+	return s.serverURL
 }
 
 // ErrTaskAlreadyRunning means another executor holds this task right now. It classifies as
@@ -1786,11 +1796,13 @@ func (te *TaskExecutor) runningState(taskID string) *executionState {
 	return te.tasks[taskID]
 }
 
-func agentSandboxHash(sb *types.AgentSandbox) string {
-	if sb == nil {
-		return ""
-	}
-	b, _ := json.Marshal(sb)
+// agentGrantHash includes the provider, because two empty folder lists can mean either "no agent" or "the
+// user just removed this agent's folder", and only the second needs the container rebuilt.
+func (te *TaskExecutor) agentGrantHash(providerURL string) string {
+	b, _ := json.Marshal(struct {
+		Provider string              `json:"provider"`
+		Grant    *types.AgentSandbox `json:"grant"`
+	}{providerURL, te.agentRegistry.AgentSandboxForURL(providerURL)})
 	return string(b)
 }
 

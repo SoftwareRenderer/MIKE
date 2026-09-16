@@ -77,6 +77,7 @@ var detachedOperations = []sideEffectEntry{
 	{"PUT /api/extensions/{id}", "persists the manifest edit, and validates its sandbox against the policy before storing"},
 	{"PATCH /api/extensions/{id}/enabled", "the enabled flag decides whether the extension runs at all"},
 	{"PUT /api/extensions/{id}/dependency-cache", "grants or revokes a host directory and stops the sandbox so the mount set is right"},
+	{"PUT /api/extensions/{id}/agent-mount", "sets or clears the host folders that reach the containers of the tasks running this agent"},
 	{"PUT /api/extensions/{id}/storage", "writes the namespaced KV store an extension reads back"},
 	{"DELETE /api/extensions/{id}/storage", "clears it"},
 	{

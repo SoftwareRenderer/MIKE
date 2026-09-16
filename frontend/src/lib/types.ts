@@ -537,14 +537,8 @@ export interface AgentExtensionConfig {
     description?: string;    // short description shown in provider card
     setup_info?: string;     // setup instructions shown in provider card
     config_schema?: ConfigSchema;
-    sandbox_mount?: AgentConfigMount; // default config dir mount into sandbox containers
-}
-
-export interface AgentConfigMount {
-    host_path: string;            // host path to agent config dir
-    container_path: string;        // mount point inside the container
-    mode: 'rw' | 'ro';             // "rw" (default) or "ro"
-    envs?: SandboxEnv[];          // env key-value pairs for non-sandbox use
+    /** Only a folder the user approves reaches a container; this is what the manifest asks for. */
+    sandbox?: { mount?: SandboxMount[]; env?: SandboxEnv[] };
 }
 
 export interface LSPConfig {

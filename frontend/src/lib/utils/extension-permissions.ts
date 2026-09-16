@@ -62,12 +62,59 @@ export function dependencyCacheDeclaration(
 }
 
 /**
- * True when installing this extension is only the first half of making it work. Today that is one
- * thing: it declared a dependency directory, which installing does not fill. Add further reasons
- * here rather than adding another check where the card decides to badge.
+ * True when installing the extension is only half the job: it wants a folder that installing neither fills
+ * nor approves. Add new reasons here instead of another check on the card.
  */
 export function requiresSetupAfterInstall(capabilities?: Record<string, any> | null): boolean {
-    return dependencyCacheDeclaration(capabilities) !== null;
+    return dependencyCacheDeclaration(capabilities) !== null || agentMountDeclaration(capabilities).length > 0;
+}
+
+export type AgentMountProposal = {
+    host_path: string;
+    container_path: string;
+    mode: string;
+};
+
+/**
+ * Nothing here reaches a container until the user approves it in the extension's mount control.
+ */
+export function agentMountDeclaration(capabilities?: Record<string, any> | null): AgentMountProposal[] {
+    const mounts = capabilities?.agent?.sandbox?.mount;
+    if (!Array.isArray(mounts)) return [];
+    return mounts.filter((m: unknown): m is AgentMountProposal => {
+        const mount = m as Record<string, unknown> | null;
+        return !!mount && typeof mount.container_path === 'string' && typeof mount.host_path === 'string';
+    });
+}
+
+/** The two fields `needsAgentMountGrant` reads, so a test can pass a plain object. */
+export type AgentMountView = {
+    enabled?: boolean;
+    manifest?: { capabilities?: Record<string, any> | null } | null;
+    config?: Record<string, any> | null;
+};
+
+export function agentMountGrant(ext: AgentMountView): AgentMountProposal[] {
+    const granted = ext.config?.sandbox_mount;
+    if (!Array.isArray(granted)) return [];
+    return granted.filter((m: unknown): m is AgentMountProposal => {
+        const mount = m as Record<string, unknown> | null;
+        // Both paths are needed: a folder with no container path could not be mounted, and the endpoint
+        // refuses it.
+        return !!mount
+            && typeof mount.host_path === 'string' && !!mount.host_path
+            && typeof mount.container_path === 'string' && !!mount.container_path;
+    });
+}
+
+/**
+ * This is the installed card's "Needs setup" badge. An entry from Browse is not installed yet, so it uses
+ * `requiresSetupAfterInstall` instead.
+ */
+export function needsAgentMountGrant(ext: AgentMountView): boolean {
+    return !!ext.enabled
+        && agentMountDeclaration(ext.manifest?.capabilities).length > 0
+        && agentMountGrant(ext).length === 0;
 }
 
 /** The two fields `needsDependencyGrant` reads, so a test can hand it one object literal. */

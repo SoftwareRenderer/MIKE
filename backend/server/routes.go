@@ -71,6 +71,10 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("PUT /api/extensions/{id}/dependency-cache", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleSetDependencyCache(w, r, r.PathValue("id"))
 	})
+	// Its own endpoint because an empty list has to mean "clear the approval".
+	s.mux.HandleFunc("PUT /api/extensions/{id}/agent-mount", func(w http.ResponseWriter, r *http.Request) {
+		s.extHandler.HandleSetAgentMount(w, r, r.PathValue("id"))
+	})
 	s.mux.HandleFunc("GET /api/extensions/registry", s.extHandler.HandleRegistryIndex)
 	s.mux.HandleFunc("GET /api/extensions/local", s.extHandler.HandleLocalExtensions)
 	s.mux.HandleFunc("POST /api/extensions/install", s.extHandler.HandleInstall)
