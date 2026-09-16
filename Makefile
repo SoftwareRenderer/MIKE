@@ -1,11 +1,18 @@
 # MIKE: Integrated Kanban Environment
 
+# The version stamped into a binary (`/api/version`) and used in a package filename. Its source is a
+# git tag: `git tag v1.2.3 && make package`. With no tag `git describe` answers a commit hash, which
+# is not a dotted number, so packages fall back to 0.0.0; `make package VERSION=v1.2.3` overrides.
 VERSION  ?= dev
 GIT_VER  := $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^V/v/')
 ifeq ($(VERSION),dev)
 VERSION  := $(or $(GIT_VER),dev)
 endif
 LDFLAGS  := -X kanban/backend/server.Version=$(VERSION)
+
+# A build someone other than the developer runs: reads no frontend directory and refuses
+# --frontend-dist / MIKE_FRONTEND_DIST. `make check-release` keeps this variant compiled.
+RELEASE_TAGS := release
 
 # ---------------------------------------------------------------------------
 # Build
@@ -22,6 +29,8 @@ build-backend: ## Build Go binary only (no frontend rebuild)
 .PHONY: frontend
 frontend: ## Build frontend (Vite)
 	cd frontend && npm run build
+	@# Vite empties the output directory; one file must stay inside it, or `go:embed` matches nothing.
+	@touch frontend/dist/.gitkeep
 
 # The sandbox-bridge is a second binary: static, linux-only, and it runs INSIDE every
 # sandbox container. It is committed at sandbox/sandbox-bridge, so an artifact that was not
@@ -157,6 +166,16 @@ lint: ## gofmt + scoped vet + staticcheck (all checks) + deadcode (both roots)
 	@echo "==> deadcode"
 	@scripts/deadcode-check.sh
 
+.PHONY: check-release
+check-release: ## Compile and test the -tags release variant that make package ships (~5s)
+	@# Nothing else here compiles a `-tags` variant, so without this step the release build rots.
+	@echo "==> go build -tags $(RELEASE_TAGS)"
+	@go build -tags $(RELEASE_TAGS) -trimpath -o /dev/null .
+	@echo "==> go vet -tags $(RELEASE_TAGS)"
+	@go vet -tags $(RELEASE_TAGS) ./backend/startup/ .
+	@echo "==> go test -tags $(RELEASE_TAGS) ./backend/startup/"
+	@go test -tags $(RELEASE_TAGS) ./backend/startup/ -count=1
+
 .PHONY: check
 check: ## THE GATE: lint + bridge-check + build + Go tests + frontend gates
 	@$(MAKE) --no-print-directory lint
@@ -167,6 +186,7 @@ check: ## THE GATE: lint + bridge-check + build + Go tests + frontend gates
 	@$(MAKE) --no-print-directory bridge-check
 	@echo "==> build"
 	@go build -trimpath -o kanban .
+	@$(MAKE) --no-print-directory check-release
 	@echo "==> go test"
 	@$(MAKE) --no-print-directory test-go
 	@echo "==> svelte-check"
@@ -212,19 +232,42 @@ stop: ## Stop dev server (exact process name; -f would match any path containing
 
 .PHONY: clean
 clean: ## Remove build artifacts
-	rm -f kanban
+	rm -f kanban mike-server
 	rm -rf frontend/dist
+	rm -rf dist
+	@# Recreated: `go:embed` of the SPA needs one file inside frontend/dist.
+	@mkdir -p frontend/dist && touch frontend/dist/.gitkeep
 	rm -f data/kanban.trace data/kanban.trace.old
 
 # ---------------------------------------------------------------------------
 # Release
 # ---------------------------------------------------------------------------
 
+# The version a package filename carries: a dotted number from VERSION, else 0.0.0 — a commit hash is
+# not a name for a download.
+pkg_version = $(shell printf '%s' '$(VERSION)' | grep -Eq '^[Vv]?[0-9]+(\.[0-9]+)*$$' && printf '%s' '$(VERSION)' | tr -d 'Vv' || printf 0.0.0)
+PKG_VERSION ?= $(call pkg_version)
+
+# The sandbox needs Linux, podman and gVisor, so these are the only two targets.
+PACKAGE_TARGETS := linux/amd64 linux/arm64
+
 .PHONY: release
 release: ## Build release binary with git tag as version (set VERSION=vX.Y.Z)
-	@echo "Building version $(VERSION)"
+	@echo "Building version $(VERSION) (release: no frontend directory)"
 	cd frontend && npm run build
-	go build -trimpath -ldflags "$(LDFLAGS)" -o kanban .
+	go build -tags $(RELEASE_TAGS) -trimpath -ldflags "$(LDFLAGS)" -o kanban .
+
+.PHONY: package
+package: frontend ## Build dist/mike-server-<version>-<os>-<arch>.tar.gz for every target + sha256sum.txt
+	@VERSION=$(PKG_VERSION) RELEASE_TAGS=$(RELEASE_TAGS) scripts/package-release.sh $(PACKAGE_TARGETS)
+
+.PHONY: package-amd64
+package-amd64: frontend ## Package linux/amd64 only
+	@VERSION=$(PKG_VERSION) RELEASE_TAGS=$(RELEASE_TAGS) scripts/package-release.sh linux/amd64
+
+.PHONY: package-arm64
+package-arm64: frontend ## Package linux/arm64 only
+	@VERSION=$(PKG_VERSION) RELEASE_TAGS=$(RELEASE_TAGS) scripts/package-release.sh linux/arm64
 
 # ---------------------------------------------------------------------------
 # Help
@@ -232,5 +275,5 @@ release: ## Build release binary with git tag as version (set VERSION=vX.Y.Z)
 
 .PHONY: help
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'

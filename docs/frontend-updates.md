@@ -18,18 +18,20 @@ the join, and writes the first 12 hex characters into `<meta name="app-build" co
   bytes could never equal a hash that includes them.
 * Injected only when that URL list is non-empty, which is why `vite dev` — which serves `/src/main.ts`
   and no hashed assets — ships no stamp at all.
-* `GET /api/version` (`backend/server/handler_version.go`) **reads** that tag out of
-  `frontendDist/index.html`; it does not recompute the digest. That is the cross-boundary contract: the
-  digest's grammar lives in the plugin, and the only thing Go keeps agreeing with is the tag's shape
-  (`assetBuildIDPattern`). A second implementation of the digest would be a second claim about what a
-  build is, and the two would eventually disagree about a build both can name.
-* No dist, an unreadable document, a document over `indexHTMLLimit`, or a tag that is not 12 lowercase
+* `GET /api/version` (`backend/server/handler_version.go`) **reads** that tag out of the document the
+  server is serving — `frontend/dist` on disk in a development build, the copy compiled in otherwise; it
+  does not recompute the digest. The grammar lives in the plugin, and what Go keeps agreeing with is the
+  tag's shape (`assetBuildIDPattern`). A second implementation of the digest would be a second claim about
+  what a build is, and the two would eventually disagree about a build both can name.
+* No document, an unreadable document, a document over `indexHTMLLimit`, or a tag that is not 12 lowercase
   hex characters → `"assets": ""` with a 200. **A client must read an empty identity as "cannot tell",
   never as "you are up to date"** — that is what distinguishes an old install from a current one when
   the stamp did not exist yet.
 
-The binary's `version` is beside it and is not a substitute: `make frontend` replaces `dist` without
-rebuilding the binary, so the two move apart and only `assets` says what the browser is running.
+The binary's `version` is beside it and is not a substitute: a development build reads a `dist` that
+changes under it, so `assets` is the only answer that says what the browser is running. In a `-tags
+release` build the two cannot move apart, because the document is compiled in — there `version` is the
+release's version and `assets` still says what the browser cached.
 
 ## Two authorities, one per client
 

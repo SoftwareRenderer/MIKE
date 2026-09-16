@@ -303,7 +303,7 @@ added to close that gap measures, with the commands beside each number:
 
 | | Command | value |
 |---|---|---|
-| Route registrations | `grep -c 's\.mux\.Handle' backend/server/routes.go` | 104 |
+| Route registrations | `grep -c 's\.mux\.Handle' backend/server/routes.go` | 103 |
 | Verb-carrying `/api` routes — the rule's population | `make archgate` → `apiroutes … checked` | 102 |
 | Routes with no caller | `make archgate` → `apiroutes … violation(s)` | **0** |
 | Caller paths collected from `frontend/src` + the healthcheck | `go test ./scripts/archgate/ -run APIRoutes -v` after lowering the guards | 102 |

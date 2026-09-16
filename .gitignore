@@ -3,8 +3,15 @@ data/
 .env
 /projects/
 __pycache__/
-/extensions/
-frontend/dist
+# The installed-extension tree is pulled state; only its README ships in the release package.
+# (`!` cannot reach through an excluded directory, hence the `*` form.)
+/extensions/*
+!/extensions/README.md
+# Build output; the placeholder lets `go:embed` of the SPA compile on a tree that never ran npm.
+frontend/dist/*
+!frontend/dist/.gitkeep
+# Release archives (make package)
+/dist/
 frontend/stats.html
 frontend/stats.json
 worktrees/*

@@ -21,10 +21,13 @@ stale-state cleanup stay in `AGENTS.md → Testing`.
 - **Config-modifying tests** (settings, models, shortcuts, mode select, …) must run in the `isolated`
   project — add the spec name to `ISOLATED_SPECS` in `frontend/playwright.config.ts` (one array; the
   chromium lane's `testMatch` is derived from it, so the two lanes cannot drift apart).
-- **The harness serves `frontend/dist`, and `global-setup` never builds it.** An e2e run proves what
-  the last `npm run build` contained, never what is in `src/`, so a frontend change nobody built
-  reads as green either way. Build before the run, then make it prove it bites: revert the changed
-  file, rebuild, and watch the spec fail before believing the green.
+- **The harness serves `frontend/dist` from disk** — its server is `go run .`, a development build — and
+  `global-setup` never builds it. So an e2e run proves what the last `npm run build` contained, never what
+  is in `src/`, and a frontend change nobody built reads as green either way. Build before the run, then
+  make it prove it bites: revert the changed file, rebuild, and watch the spec fail before believing the
+  green. A `frontend/dist` with no `index.html` in it is the one case that does not read as a test
+  failure — the compiled-in copy is built from that same directory, so the server refuses its boot and a
+  spec sees `ECONNREFUSED` on 3000 (see `AGENTS.md → Debugging` for the stale-process version).
 - **Never write a test that greps a component's source.** `readFileSync('../Foo.svelte')` +
   `expect(source).toContain('…')` cannot fail a real bug, breaks on any rename, and duplicates what
   `npm run check` already gives you. Assert on rendered output (`render(Foo, props)`) or on behaviour
@@ -348,6 +351,15 @@ runs and can hold another task's start in the gate queue. The gVisor tests that 
 192 MB cap and a 64 MB string, which is enough to make the recorded peak several times the idle reading.
 `TestMemoryLimitEnforced` keeps a 128 MB cap because that is the smallest cap measured to kill the process
 and leave the sandbox up; see `docs/sandbox-runtime.md`.
+
+## A machine that cannot start a container
+
+`podman info` answering `'overlay' is not supported over overlayfs, a mount_program is required` means the
+host's own root is an overlayfs and podman was never given a `mount_program` — the image entrypoint makes
+that switch, a bare test host does not. Every test that creates a container then fails
+(`TestTaskOperatingModeRemount`, the `backend/sandbox` and `pkg/sandboxruntime` container suites), because
+the base image never pulls. Check it with `podman images` on nothing running: a red naming one of those
+suites, with that error in the log, is a reading about the machine.
 
 ## Tests that fail only under load
 

@@ -8,6 +8,7 @@ import (
 	stdtls "crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -79,9 +80,12 @@ type Server struct {
 	loginLimiter        *RateLimiter
 	previewStore        *previewStore
 	mux                 *http.ServeMux
-	addr                string
-	frontendDist        string
-	tlsConfig           *tls.Config
+	// router is what every request enters: the mux, then the SPA behind it.
+	router http.Handler
+	addr   string
+	// assets is the built SPA, rooted at its document directory. The static routes read nothing else.
+	assets    fs.FS
+	tlsConfig *tls.Config
 	// settings is read instead of the environment: no request can observe a different process than
 	// the one that started.
 	settings startup.Config
@@ -293,8 +297,11 @@ func (s *Server) reg(st stage, name string, run func()) func() error {
 
 // NewServer opens the database, wires every component, and registers a teardown step beside each
 // component that needs one.
-func NewServer(settings startup.Config, tlsCfg *tls.Config) (*Server, error) {
-	dbPath, addr, frontendDist := settings.DBPath, settings.Addr, settings.FrontendDist
+func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Server, error) {
+	if assets == nil {
+		return nil, fmt.Errorf("create server: no frontend assets")
+	}
+	dbPath, addr := settings.DBPath, settings.Addr
 	worktreesDir := settings.WorktreesOverride
 	store, err := store.NewStore(dbPath)
 	if err != nil {
@@ -330,7 +337,7 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config) (*Server, error) {
 		configStore:  cfgStore,
 		settings:     settings,
 		addr:         addr,
-		frontendDist: frontendDist,
+		assets:       assets,
 		tlsConfig:    tlsCfg,
 		loginLimiter: newLoginRateLimiter(settings.LoginRateLimit),
 	}
@@ -650,8 +657,7 @@ func (s *Server) RedirectHTTPSMiddleware(next http.Handler) http.Handler {
 func (s *Server) withNonce(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
-			indexPath := filepath.Join(s.frontendDist, "index.html")
-			content, err := os.ReadFile(indexPath)
+			content, err := fs.ReadFile(s.assets, "index.html")
 			if err != nil {
 				http.Error(w, "failed to read index.html", http.StatusInternalServerError)
 				return
@@ -933,7 +939,7 @@ func (s *Server) Serve() error {
 		// Silences repeated "client does not trust the local CA" handshake noise;
 		// see tls_error_log.go.
 		ErrorLog:          httpErrorLog(caFile),
-		Handler:           s.middlewareChain(s.mux),
+		Handler:           s.middlewareChain(s.router),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}

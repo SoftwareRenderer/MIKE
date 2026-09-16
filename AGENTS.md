@@ -7,8 +7,10 @@ something, *replace* the stale sentence; do not append.
 ## Repo Map
 
 - `backend/` — Go server: API handlers, exec loop, LLM client, git/worktrees, sandbox, extensions.
-- `frontend/` — Svelte 5 SPA (Vite), built to `frontend/dist/` and served by the Go server. No dev server
-  in the normal workflow.
+- `frontend/` — Svelte 5 SPA (Vite), built to `frontend/dist/`, which `go:embed` (`assets.go`) compiles
+  into the server binary. A `-tags release` build (`make package`, `make release`, the image) serves that
+  copy and no other; a developer's build prefers `frontend/dist` on disk, so `npm run build` needs no Go
+  rebuild. No dev server in the normal workflow.
 - `pkg/bridge/` — sandbox-bridge protocol/client. `pkg/sandboxruntime/` — podman/gVisor runtime, bridge
   binary discovery.
 - `extensions/` — **installed** extensions (`<author>/<name>`), materialized by the installer and
@@ -39,7 +41,9 @@ something, *replace* the stale sentence; do not append.
 ### Workflow
 
 - **Frontend:** edit `frontend/src/` → `npm run check` (svelte-check; stay TS-clean) → `npm run build` →
-  hard refresh. No server restart.
+  hard refresh. No server restart: a developer's build serves `frontend/dist` from disk (`MIKE_FRONTEND_DIST`
+  moves it, and the startup log names which copy is being served). A `-tags release` binary cannot be shown
+  a build it was not compiled from — prove a packaged artifact by unpacking it, never by refreshing a tab.
 - **Backend:** edit `backend/`/`pkg/` → `gofmt -w` the touched files → `go build -trimpath -o kanban .`
   (or `make build`) → restart. Config persists in SQLite.
 
@@ -417,7 +421,7 @@ deliberately omits.
 
 | File | Subsystem |
 |---|---|
-| `docs/configuration.md` | every env var, the flag twins, startup resolution and the archgate exceptions |
+| `docs/configuration.md` | every env var, the flag twins, startup resolution, the archgate exceptions, the release packages |
 | `docs/sandbox-runtime.md` | boot injection, the stale sweep, container environment, podman args, capabilities, mount policy, podman subprocesses |
 | `docs/sandbox-bridge.md` | bridge connections, LSP session binding, wire IDs, payload limits, upload lifetime |
 | `docs/confinement.md` | path jails, the no-project host jail, size and output caps, subprocess environments |

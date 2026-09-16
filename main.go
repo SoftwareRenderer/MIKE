@@ -26,6 +26,7 @@ func main() {
 	listen := flag.String("listen", "", "Server listen address (default: $MIKE_LISTEN or 127.0.0.1; use 0.0.0.0 or :: to listen on all interfaces)")
 	dataDir := flag.String("data-dir", "", "Data directory for DB, TLS certs, trace files (default: $MIKE_DATA_DIR or ./data)")
 	worktreesDir := flag.String("worktrees-dir", "", "Runtime override for the git worktrees dir (default: $MIKE_WORKTREES_DIR or ./.worktrees)")
+	frontendDist := flag.String("frontend-dist", "", "Development only: serve the SPA built in this directory instead of the one compiled in (default: $MIKE_FRONTEND_DIST or ./frontend/dist). A release build refuses it.")
 	noTLS := flag.Bool("no-tls", false, "Disable TLS (plain HTTP); overrides $MIKE_TLS")
 	tlsCert := flag.String("tls-cert", "", "Path to TLS certificate file (default: auto-generated self-signed)")
 	tlsKey := flag.String("tls-key", "", "Path to TLS private key file")
@@ -38,6 +39,7 @@ func main() {
 		Listen:       *listen,
 		DataDir:      *dataDir,
 		WorktreesDir: *worktreesDir,
+		FrontendDist: *frontendDist,
 		NoTLS:        *noTLS,
 		TLSCertPath:  *tlsCert,
 		TLSKeyPath:   *tlsKey,
@@ -53,6 +55,12 @@ func main() {
 	for _, warning := range cfg.Warnings {
 		logging.For(logging.Main).Warn(warning)
 	}
+
+	assets, assetSource, err := frontendAssets(cfg.FrontendDist)
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+	logging.For(logging.Main).Infof("serving the frontend from: %s", assetSource)
 
 	// Potentially contains API keys and passwords, so this is never on by default.
 	if cfg.PProf {
@@ -127,7 +135,7 @@ func main() {
 		}
 	}
 
-	srv, err := server.NewServer(cfg, tlsCfg)
+	srv, err := server.NewServer(cfg, tlsCfg, assets)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}
