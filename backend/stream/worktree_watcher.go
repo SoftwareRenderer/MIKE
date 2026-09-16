@@ -11,9 +11,10 @@ import (
 
 	"mike/backend/types"
 
-	"github.com/fsnotify/fsnotify"
 	"mike/backend/git"
 	"mike/pkg/logging"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 // DiffStatsEvent holds data for a diff stats broadcast to clients.
@@ -683,7 +684,7 @@ func resolveGitIndexDir(worktreePath string) string {
 
 func isGitMetadataFile(name string) bool {
 	switch name {
-	case "HEAD", "commondir", "gitdir", "config", "options", "logs", "refs", "objects":
+	case "HEAD", "commondir", "gitdir", "config", "options", "logs", "refs", "objects", "index.lock":
 		return true
 	}
 	return false

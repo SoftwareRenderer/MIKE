@@ -39,7 +39,11 @@ func TestHandleEventMapsGitIndexEventToTask(t *testing.T) {
 		want  bool // true = event maps to a task and arms a diff throttle
 	}{
 		{"index file write", fsnotify.Event{Name: gitDir + "/index", Op: fsnotify.Write}, true},
-		{"index lock temp file", fsnotify.Event{Name: gitDir + "/index.lock", Op: fsnotify.Create}, true},
+		// index.lock is git's own write lock: every status/diff the watcher runs creates and removes it,
+		// so reacting to it makes each diff schedule the next one, forever, on an idle worktree.
+		{"index lock create skipped", fsnotify.Event{Name: gitDir + "/index.lock", Op: fsnotify.Create}, false},
+		{"index lock remove skipped", fsnotify.Event{Name: gitDir + "/index.lock", Op: fsnotify.Remove}, false},
+		{"other temp file in index dir", fsnotify.Event{Name: gitDir + "/index.tmp", Op: fsnotify.Create}, true},
 		{"git metadata (HEAD) skipped", fsnotify.Event{Name: gitDir + "/HEAD", Op: fsnotify.Write}, false},
 		{"unrelated path skipped", fsnotify.Event{Name: "/home/user/other/index", Op: fsnotify.Write}, false},
 	}

@@ -10,6 +10,7 @@
     import { gc } from '$lib/storage';
     import { mergeQueuedUpdate, filterTopLevelTaskIds, ancestorInProgress, willConsolidateIntoParent } from '$lib/utils/task-utils';
     import { createStatusLabel } from '$lib/utils/subtask-status';
+    import { columnInViewport, type Span } from '$lib/utils/review-notify';
     import { useMultiSelectActions } from '$lib/composables/use-multi-select-actions.svelte';
     import { useSubtaskHierarchy } from '$lib/composables/use-subtask-hierarchy.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
@@ -262,6 +263,45 @@
         const el = boardEl.querySelector(`.column[aria-label="${title} column"]`);
         return el instanceof HTMLElement ? el : null;
     }
+
+    /** Whether the Review column of this board is the part of it the user is looking at. */
+    function measureReviewColumn() {
+        const review = getColumnEl('review');
+        if (!boardEl || !review) {
+            clearReviewColumnInView();
+            return;
+        }
+        // Both rects are client coordinates, so scrolling moves the column out of the board's box.
+        const span = (el: HTMLElement): Span => {
+            const box = el.getBoundingClientRect();
+            return { start: box.left, end: box.right };
+        };
+        uiStore.reviewColumnInViewOf = columnInViewport(span(boardEl), span(review)) ? projectId : null;
+    }
+
+    function clearReviewColumnInView() {
+        if (uiStore.reviewColumnInViewOf === projectId) uiStore.reviewColumnInViewOf = null;
+    }
+
+    $effect(() => {
+        const board = boardEl;
+        if (!board) return;
+        measureReviewColumn();
+        board.addEventListener('scroll', measureReviewColumn, { passive: true });
+        window.addEventListener('resize', measureReviewColumn);
+        return () => {
+            board.removeEventListener('scroll', measureReviewColumn);
+            window.removeEventListener('resize', measureReviewColumn);
+            // An unmounted board is nobody's line of sight.
+            clearReviewColumnInView();
+        };
+    });
+
+    $effect(() => {
+        // A card landing or leaving moves the Review column.
+        const _reviewColumn = columnTasks.review;
+        measureReviewColumn();
+    });
 
     let hasScrolled = $state(false);
     let lastScrolledTarget = $state<string | null>(null);

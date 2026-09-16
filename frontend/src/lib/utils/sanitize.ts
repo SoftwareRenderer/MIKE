@@ -97,6 +97,14 @@ export function markdownToSafeHTML(markdown: string): string {
 }
 
 /**
+ * A value headed for an inline `style` attribute, or `fallback` if it could start a declaration
+ * of its own: inside that attribute a `;` begins another rule, and `url()` is a fetch.
+ */
+export function safeCSSValue(value: string, fallback: string): string {
+    return /[{};<>"'\\]|url\s*\(|expression\s*\(|@import/i.test(value) ? fallback : value;
+}
+
+/**
  * An icon file's contents, accepted only as a lone `<svg>` root — otherwise nothing.
  *
  * `Icon.svelte` renders `src` with `{@html}`, and every call site today passes an

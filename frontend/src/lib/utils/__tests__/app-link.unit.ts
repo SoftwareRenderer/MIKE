@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { projectTerminalHref, taskTerminalHref, asksForTerminal } from '../app-link';
+import { projectTerminalHref, taskTerminalHref, taskViewHref, asksForTerminal } from '../app-link';
 
 const path = location.pathname;
 
-describe('terminal deep links', () => {
+describe('app deep links', () => {
     it('names the project then the view, as updateUrl orders them', () => {
         expect(projectTerminalHref('p1')).toBe(`${path}?project=p1&view=terminal`);
     });
@@ -14,6 +14,15 @@ describe('terminal deep links', () => {
 
     it('encodes ids so they cannot add params of their own', () => {
         expect(projectTerminalHref('a&x=1')).toBe(`${path}?project=a%26x%3D1&view=terminal`);
+    });
+
+    it('names the task view the way updateUrl writes it: project, task, no view', () => {
+        expect(taskViewHref('p1', 't2')).toBe(`${path}?project=p1&task=t2`);
+        expect(asksForTerminal(taskViewHref('p1', 't2').slice(path.length))).toBe(false);
+    });
+
+    it('encodes ids so they cannot add params of their own', () => {
+        expect(taskViewHref('p1', 'a&x=1')).toBe(`${path}?project=p1&task=a%26x%3D1`);
     });
 
     it('reads the terminal screen back out of a query', () => {

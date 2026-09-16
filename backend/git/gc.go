@@ -17,10 +17,7 @@ const threadBranchNamespace = "thread/"
 
 // GarbageCollect removes worktree directories that have no matching task in the database.
 func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
-	worktreesDir, err := wm.worktreesRoot()
-	if err != nil {
-		return 0, err
-	}
+	worktreesDir := wm.worktreesRoot()
 
 	if _, err := os.Stat(worktreesDir); os.IsNotExist(err) {
 		return 0, nil

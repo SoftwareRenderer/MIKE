@@ -95,3 +95,8 @@ listed here has one.
 Accepts a lone sanitized `<svg>` root and nothing else (`singleSvgMarkup`). Its `{@html src}` was only ever
 safe because of what its call sites pass — a build-time `*.svg?raw` import — and a component cannot see its
 call sites, so it checks the shape itself.
+
+The same argument covers its `style` attribute, which interpolates the `color` prop: escaping the quotes is
+not the control there, because inside a `style` attribute a `;` simply starts another declaration and
+`url()` is a fetch. `safeCSSValue` refuses a value that can do either, and the sizes are coerced through
+`Number` so a value that broke the `number` type cannot arrive as text.

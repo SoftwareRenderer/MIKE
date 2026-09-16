@@ -294,6 +294,10 @@ const catalog = {
     'settings.preferences.oldestFirstDesc': 'Put the least recently moved task at the top of each column',
     'settings.preferences.autoMaximizeChat': 'Auto maximize chat visibility on mobile',
     'settings.preferences.autoMaximizeChatDesc': 'Maximize the chat panel while the chat input has focus',
+    'settings.preferences.notifyOnReview': 'Notify when a task enters Review',
+    'settings.preferences.notifyOnReviewDesc': 'Send a browser notification when a task starts waiting for you while you are looking elsewhere',
+    'settings.preferences.notifyBlocked': 'This browser is not showing notifications for this site — allow them in its site settings',
+    'settings.preferences.notifyUnsupported': 'This browser has no notifications',
 
     // ── ConfigModal/TaskDefaults.svelte ──
     // autoMergeDesc is split around the inline branch badge; the halves keep their spaces.
@@ -625,6 +629,13 @@ const catalog = {
     'settings.extensions.loadingRegistry': 'Loading registry...',
     'settings.extensions.needsSetupNote.before': 'Requires additional setup after installation: it reads resolved dependencies from',
     'settings.extensions.needsSetupNote.after': 'inside its sandbox. Point it at a folder of your choosing afterwards — until you do, it resolves only what its own image contains.',
+
+    // ═══ notify.* — browser notifications ═══
+
+    // The task title and the project name are data, so only the shape of the sentence is here.
+    'notify.review.body': '{project} · waiting in Review',
+    'notify.review.untitled': 'Task in Review',
+    'notify.review.many': { one: '{count} task waiting in Review', other: '{count} tasks waiting in Review' },
 
     // ═══ app.* — app shell and shared primitives ═══
     // aria-label / title / placeholder copy here stays a literal in the component:
