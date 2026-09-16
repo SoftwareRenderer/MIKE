@@ -252,6 +252,11 @@
             nextReconnectAt = 0;
         }
     }
+
+    function retryLiveNow() {
+        tryReconnectNow();
+        silentRefresh().catch(() => {});
+    }
     let projectCounts: Record<string, { backlog: number; in_progress: number; review: number }> = $state({});
     // Cached done-task diff stats, keyed "<projectId>:<taskId>". Done-task diffs
     // are immutable (pinned BaseCommit..BranchTip), so entries persist in
@@ -1435,6 +1440,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     <div class="cache-banner" role="status" aria-live="polite">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         {t('app.cache.banner')}
+        {#if wsConnected}
+            <button class="reconnecting-btn" onclick={retryLiveNow} type="button" aria-label="Try connecting now">{t('app.reconnect.connect')}</button>
+        {/if}
     </div>
 {/if}
 <div class="app" class:collapsed class:task-detail={uiStore.showCardDetail && !!appStore.selectedTask} class:ws-disconnected={!wsConnected} class:cache-visible={servingFromCache}>
@@ -1837,6 +1845,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         border: 1px solid rgba(214, 211, 209, 0.3);
         color: var(--color-alert-text);
         padding: 2px 10px;
+        line-height: 1;
         border-radius: 4px;
         font-size: 0.75rem;
         font-weight: 600;
