@@ -36,8 +36,11 @@ import { csrfFetch } from './helpers';
 // navigate them as much as it likes. A nested frame's `load` belongs to the
 // nested browsing context — it must never count as a reload of the document the
 // host mounted, or every preview refresh would disarm the channel it depends on.
-// The last test navigates a nested iframe three ways and requires the channel to
-// still be armed afterwards.
+// The nested-iframe test navigates three ways and requires the channel to stay armed
+// afterwards.
+//
+// The last test checks the other side of the sandbox boundary: a document opened outside
+// a host frame is sandboxed by its own response.
 //
 // Fixture notes: an extension document is served with the host CSP
 // (`script-src 'self' 'nonce-…'`), so EVERY script in the fixture is an external
@@ -466,5 +469,31 @@ test.describe.serial('Extension frame channel (document identity)', () => {
     const after = await frameLog(await mountedFrame(page, token));
     expect(after).toContain('editor.contentChange');
     expect(after).toContain('still-live');
+  });
+
+  test('an extension document visited outside the host\'s frame cannot reach the session', async ({ browser }) => {
+    // An extension entry is also a plain URL on this origin, reachable outside the frame
+    // the host mounts. docs/ui-extensions.md.
+    const { context, page } = await setupPage(browser);
+    try {
+      // Rewrite the fixture so this test does not depend on the previous one's files.
+      writeFixtureExtension('stay');
+      await page.goto(SIBLING_URL);
+      await expect(page.locator('#log')).toContainText('AT-SIBLING');
+
+      // A sandboxed document has no origin of its own, so storage is refused.
+      expect(await page.evaluate(() => {
+        try { window.localStorage.getItem('kanban-storage'); return 'readable'; } catch { return 'blocked'; }
+      })).toBe('blocked');
+      // And the endpoint that turns same-origin code into API access is unreachable.
+      expect(await page.evaluate(async () => {
+        try {
+          const res = await fetch('/api/auth/session', { credentials: 'include' });
+          return `${res.status} ${JSON.stringify(await res.json())}`;
+        } catch { return 'blocked'; }
+      })).toBe('blocked');
+    } finally {
+      await context.close();
+    }
   });
 });

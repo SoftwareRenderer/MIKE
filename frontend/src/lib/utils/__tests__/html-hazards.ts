@@ -1,34 +1,36 @@
 /**
- * The shared "what must never survive sanitizing" scanner.
+ * The shared "what must never survive sanitizing" scanner. `sanitize.unit.ts` holds it
+ * against the sanitizer and the component sink suite holds it against the components, so
+ * a new hazard class lands in both instead of drifting apart.
  *
- * Two suites need the same answer — `sanitize.unit.ts` holds it against the sanitizer
- * itself, `chat-sink-sanitization.unit.svelte.ts` against the components that call it —
- * and one definition is the point: a hazard class added here (a new URI attribute, a new
- * executing element) is then refused in both suites at once, where two hand-copied
- * scanners would drift and one of them would keep printing a green line.
- *
- * This is a helper, not a suite: the vitest `include` pattern matches `*.unit.*` only,
- * so nothing here runs on its own.
+ * A helper, not a suite: the vitest `include` pattern matches `*.unit.*` only, so nothing
+ * here runs on its own.
  */
 
 /** Attributes that execute or exfiltrate when they carry a scheme. */
-const URI_ATTRS = ['href', 'src', 'action', 'data', 'formaction', 'xlink:href'];
+const URI_ATTRS = ['href', 'src', 'action', 'data', 'formaction', 'xlink:href', 'srcset', 'poster', 'ping', 'codebase'];
+
+/** A scheme that navigates whatever receives it, wherever it appears: an SVG animation's
+ * `values` or `to`, a meta refresh's `content`. */
+const NEVER_SCHEME = /^\s*(javascript|vbscript)\s*:/i;
 
 /** Elements that execute, navigate, or embed a document of someone else's choosing. */
 const EXECUTING_ELEMENTS = ['script', 'iframe', 'object', 'embed', 'base', 'form'];
 
-/** Elements that carry a stylesheet. A `<style>` runs nothing and is not in DOMPurify's
- * defaults-refused set — it survives nested inside a container — so it is named here
- * rather than assumed absent: rules written by a model can hide the board, restyle a
- * control into looking pressed, or reach out with `url()`. The `style` **attribute** is
- * reported below; without this the two suites would keep printing a green line with a
- * stylesheet in the DOM, which is exactly what happened before it was measured. */
+/** `<meta http-equiv>` restates a response header from inside the document, so a refresh
+ * navigates the page the fragment was inserted into. */
+const NAVIGATING_ATTRIBUTES: Record<string, string[]> = { meta: ['http-equiv'] };
+
+/** Elements that carry a stylesheet. A `<style>` runs nothing, but its rules can hide the
+ * board or reach out with `url()`, and DOMPurify's defaults keep one nested inside a
+ * container. */
 const STYLESHEET_ELEMENTS = ['style'];
 
 /**
- * Everything in `source` that untrusted markup must not be allowed to become.
- * A string is parsed into a detached element first, so the answer comes from the
- * DOM the browser built rather than from a pattern matched against the markup.
+ * Everything in `source` that untrusted markup must not be allowed to become. A string is
+ * parsed into a detached element first, so the answer comes from the DOM the browser built
+ * rather than from a pattern matched against the markup. `<template>` and `<slot>` are
+ * deliberately not hazards: docs/markup-sanitizing.md.
  */
 export function htmlHazards(source: string | Element): string[] {
     const scope = typeof source === 'string' ? parse(source) : source;
@@ -39,11 +41,14 @@ export function htmlHazards(source: string | Element): string[] {
         if (STYLESHEET_ELEMENTS.includes(tag)) found.push(`stylesheet <${tag}>`);
         for (const attr of Array.from(el.attributes)) {
             if (/^on/i.test(attr.name)) found.push(`handler ${attr.name}`);
-            // `style` is the refusal this app adds to DOMPurify's defaults, so it is
-            // reported here rather than assumed absent.
+            // The `style` attribute is this app's addition to DOMPurify's defaults.
             if (attr.name === 'style') found.push(`style=${attr.value}`);
             if (URI_ATTRS.includes(attr.name) && /^\s*(javascript|vbscript|data)\s*:/i.test(attr.value)) {
                 found.push(`uri ${attr.name}=${attr.value}`);
+            }
+            if (NEVER_SCHEME.test(attr.value)) found.push(`scheme ${attr.name}=${attr.value}`);
+            if ((NAVIGATING_ATTRIBUTES[tag] ?? []).includes(attr.name)) {
+                found.push(`navigating ${tag}[${attr.name}=${attr.value}]`);
             }
         }
     }

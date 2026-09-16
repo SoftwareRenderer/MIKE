@@ -172,8 +172,9 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
 
 - **Everything the app did not write goes through `$lib/utils/sanitize`** — including LSP hover,
   completion and signature documentation, which reaches an `innerHTML` sink in a dependency that no gate
-  scans. `html-sinks.py` lists every `{@html}`/`innerHTML` sink in core with the mechanism each one relies
-  on, and audits the claim; what the sanitizer refuses and why is in `docs/markup-sanitizing.md`.
+  scans. `html-sinks.py` lists every `{@html}`/`innerHTML` sink in core, plus every URL and style-attribute
+  binding the browser interprets on its own, each with the mechanism it relies on, and audits its own
+  claim; what the sanitizer refuses and why is in `docs/markup-sanitizing.md`.
 - **Formatting follows the active locale; sorting never does.** Pass `activeLocale()` to every `Intl.*`
   call and never a literal tag or `undefined`; never cache a locale-derived value at module scope;
   `document.documentElement.lang` has exactly one writer (the i18n runtime); `localeCompare` keeps its
@@ -354,7 +355,9 @@ Types: `lsp`, `ui`, `css`, `i18n`, `agent`, `llm`.
   to the database; the adapter names its binary; an enabled agent extension *is* a provider, merged into
   the config per request and never persisted. `docs/agent-extensions.md`.
 - UI extension modules are plain JS, not Svelte components, and the postMessage channel is armed by the
-  frame's `exthello` echo. `docs/ui-extensions.md`. The preview token is a credential and its asset root
+  frame's `exthello` echo. `docs/ui-extensions.md`. An extension entry is also a public document on this
+  origin, so its response carries a `sandbox` CSP — the mounted frame's own attribute is not the only
+  lock. The preview token is a credential and its asset root
   is the jail: `docs/preview.md`.
 - Install/build/delete/repair mechanics, REST surface, capability gates, changelogs:
   **`docs/extension-lifecycle.md`**.
