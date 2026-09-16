@@ -47,6 +47,35 @@ when the user clicked Offline Mode and the session then answered.
 
 **Tests:** e2e `boot-slow-session.spec.ts` (the offer comes down by itself; one live stream afterwards).
 
+## An unanswered attempt is replaced, not awaited
+
+A `WebSocket` to a host that accepts nothing never fires `onclose`: the browser sits in `CONNECTING` on the
+OS TCP timeout (minutes) while the page waits, and `readyState === CONNECTING` used to mean *ask again later*
+— so the banner's Connect button, a window coming back and the browser's own `online` event all declined to
+do anything, and on a first attempt nothing had even scheduled a retry. Silence decides instead, whatever
+state the socket claims: `lastActivityAt` is stamped when an attempt **starts**, so an outstanding handshake
+is measured by the same two rules as an OPEN peer that stopped talking — `reconnectNow()` replaces one
+silent for `WAKE_FRAME_GAP_MS`, and the heartbeat, which now runs from the attempt rather than from `onopen`,
+retires one silent for `STALE_THRESHOLD_MS` and hands over to the ladder. The threshold is not a new number:
+`WAKE_FRAME_GAP_MS` is also the ladder ceiling, so a replaced attempt is never slower than the ladder's own
+pace, and a fresh attempt is by definition not silent, which is what keeps it from being torn down.
+
+This bounds one attempt's exclusivity, not the wait: nothing is failed, no offline flag is set, and the
+ladder goes on trying for as long as the page is open. See *No client-side deadline replaced it* — that rule
+is about answering a request, and replacing a handshake that no one answered is asking the question again.
+The cost is a genuinely slow live handshake (> `WAKE_FRAME_GAP_MS`) being torn down by a Connect click or a
+wake signal, both of which arrive with the person's own judgement that it is dead.
+
+One consequence is that `msSinceFrame()` counts from the start of an in-flight attempt, so a `focus` or
+`pageshow` landing during one does not fire the HTTP reconcile (*The tab that comes back*) — the attempt is
+the thing that will bring the answer, and `visibilitychange` is never gated on silence. Exactly one socket is
+live at a time regardless: `connect()` closes what it finds and `connectGen` stale-outs the handlers of the
+one it replaced.
+
+**Tests:** `src/lib/api/__tests__/stream-reconnect.unit.ts` (an attempt with no answer is replaced;
+the heartbeat retires a first attempt that never completes; a fresh attempt is not piled on; the clock
+belongs to the attempt).
+
 ## The reload meets the replay buffer
 
 `loadHistory` runs on reconnect, on task switch and after a stop, and it joins two incomplete views of

@@ -13,7 +13,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createAppStream, type AppStream } from '../stream';
-import { HEARTBEAT_INTERVAL_MS, RECONNECT_MAX_DELAY_MS, SUSPENDED_GAP_MS } from '$lib/constants';
+import { HEARTBEAT_INTERVAL_MS, RECONNECT_MAX_DELAY_MS, STALE_THRESHOLD_MS, SUSPENDED_GAP_MS } from '$lib/constants';
 import { WAKE_FRAME_GAP_MS } from '$lib/utils/tab-return';
 
 /** A `WebSocket` whose state changes only when the test says so. */
@@ -154,6 +154,22 @@ describe('an attempt asked for by evidence', () => {
         expect(sockets()).toBe(before);
     });
 
+    it('replaces an attempt that never completed its handshake', () => {
+        const socket = start();
+        vi.advanceTimersByTime(WAKE_FRAME_GAP_MS + 1000);
+
+        stream!.reconnectNow();
+        expect(socket.closed).toBe(true);
+        expect(sockets()).toBe(2);
+    });
+
+    it('counts an unanswered attempt as the stream speaking', () => {
+        start();
+        last().close();
+        vi.advanceTimersByTime(20_000); // the retry went out at 1s and has not answered
+        expect(stream!.msSinceFrame()).toBe(19_000); // a wake signal during an attempt has nothing to add
+    });
+
     it('leaves a socket that is still framed alone', () => {
         const socket = start();
         socket.open();
@@ -177,6 +193,14 @@ describe('an attempt asked for by evidence', () => {
 });
 
 describe('the heartbeat and a suspended page', () => {
+    it('retires a first attempt that never completes, and hands over to the ladder', () => {
+        const socket = start();
+        vi.advanceTimersByTime(STALE_THRESHOLD_MS + HEARTBEAT_INTERVAL_MS);
+
+        expect(socket.closed).toBe(true);
+        expect(waits[waits.length - 1]).toBe(1000); // the ladder takes over
+    });
+
     it('replaces a socket that went quiet while the page was not running', () => {
         const socket = start();
         socket.open();
