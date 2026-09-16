@@ -22,6 +22,19 @@ fetchable without a session (`isPublicPath`); what the wrapper removes is the en
 **inline `<script>` in an extension's HTML is blocked**; load code as external files
 (`<script src="app.js">`). `<style>`/inline styles are fine (`style-src 'unsafe-inline'`).
 
+**An extension document is sandboxed by its own response, not only by the frame that holds it.** The tree
+is public and on this origin, and `noListingFS` opens any directory holding an `index.html` — so an
+installed UI extension also has a URL reachable *outside* a host-mounted frame: typed, pasted, or clicked
+from a relative link that survived sanitizing (keeping same-origin hrefs is what a markdown sanitizer is
+for). `sandbox="allow-scripts"` is something the host sets on the frame it mounts and says nothing about
+that visit, so `CORSMiddleware` appends `sandbox allow-scripts` to the CSP of every `/extensions/`
+response. That is exactly the grant the iframe already carries, so a mounted frame loses nothing, while a
+top-level document gets an opaque origin: no `localStorage`, and no reading of `GET /api/auth/session`,
+whose answer plus the session cookie is every API. `/api/preview/...` declares the same directive for the
+same reason (`previewDocCSPStrict`); the two are one rule stated twice because the two trees are served by
+two handlers. Pinned by `TestIsolationHeaders` (the header is sent) and by the last test of
+`extension-frame-channel.spec.ts` (what the browser does with it, which only a browser can say).
+
 **The entry is the extension's directory URL.** The host asks for the directory, never
 `<dir>/index.html`: `FileServer` answers the file form with a 301 to `./`, and the per-mount
 `?extch=` token keeps that redirect out of every cache, so every mount would pay the extra round
@@ -82,6 +95,24 @@ to call the granted capabilities.
 
 Regression-tested by `frontend/tests/e2e/extension-frame-channel.spec.ts` (isolated; its fixture
 must use external scripts, see above).
+
+## Grants, calls and pushed events
+
+`computeGrants` grants a declared permission only when the catalog knows it, and the channel
+dispatches a `call` only for a granted one. Pushed events are held to the same list: `forward`
+drops an event whose capability is not granted, warned once per capability per mount. It matters
+for the two events the host pushes itself from `FileEditor` (`editor.contentChange`,
+`editor.jumpToLine`) rather than through an `onGrant` — `editor.contentChange` carries the whole
+file, which is the same disclosure `editor.getContent` is sold for, so the grant check is the only
+thing between it and a frame that never asked for either.
+
+Pairs the channel grants together, which no manifest declares: `theme.update` with the
+always-granted `theme.get` (the live palette arrives as pushes), and
+`editor.removeFooterButton` + `editor.footerButtonClick` with `editor.addFooterButton`.
+`frontend/src/lib/extensions/__tests__/capability-consent.unit.ts` holds the catalog against the
+lists the install dialog reads (`permissionDescriptions`, `HOST_INTERNAL_CAPABILITIES`,
+`DANGEROUS_PERMISSIONS`), so a new capability has to be classified before it can be granted
+quietly.
 
 ## Install model
 

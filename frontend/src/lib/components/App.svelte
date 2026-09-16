@@ -14,6 +14,7 @@
     import { resolveBoardLandingColumn, resolveClosedTaskColumn, mergeTaskUpdateIntoBoard } from '$lib/utils/task-utils';
     import { resolveLandingProject } from '$lib/utils/project-landing';
     import { TERMINAL_VIEW, asksForTerminal } from '$lib/utils/app-link';
+    import { reviewNotifier } from '$lib/services/review-notifications.svelte';
     import { getBoardCache, getBoardCacheEntry, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, clearAll, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
@@ -178,6 +179,23 @@
         appStore.board = board;
         return true;
     }
+
+    /** The counts frame is the arrival signal for projects whose board is not on screen. */
+    function applyProjectCounts(counts: Record<string, { backlog: number; in_progress: number; review: number }>) {
+        projectCounts = counts;
+        reviewNotifier.observeCounts(counts);
+    }
+
+    $effect(() => {
+        // The board on screen tells the notifier which Review cards the user can already see.
+        const board = appStore.board;
+        const projectId = currentProject?.id;
+        if (!board || !projectId) {
+            reviewNotifier.clearBoard();
+            return;
+        }
+        reviewNotifier.observeBoard(projectId, board.tasks || []);
+    });
 
     function startCountdown() {
         stopCountdown();
@@ -532,7 +550,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         closeAppStream();
         appStream = createAppStream({
             onProjectCounts: (counts) => {
-                projectCounts = counts;
+                applyProjectCounts(counts);
             },
             onRefresh: () => refreshBoard(),
             onDiffStats: (task_id, hash, _short_stat, files_n, untracked_n, untracked_lines, tracked_add, tracked_del, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged) => {
@@ -734,7 +752,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             // Fetch initial project counts (best-effort, no cache fallback)
             try {
                 const counts = await getProjectCounts();
-                projectCounts = counts;
+                applyProjectCounts(counts);
             } catch {
                 // Use defaults — counts are non-critical
             }
@@ -865,7 +883,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         // while cached data is read from IndexedDB (avoids flash of empty state)
         isAuthenticated = true;
         appStream = createAppStream({
-            onProjectCounts: (counts) => { projectCounts = counts; },
+            onProjectCounts: (counts) => { applyProjectCounts(counts); },
             onRefresh: () => refreshBoard(),
             onDiffStats: () => {},
             onBranch: (branch) => { currentBranch = branch; },

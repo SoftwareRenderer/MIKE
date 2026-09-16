@@ -29,7 +29,7 @@ export interface AppStreamCallbacks {
 
 export interface AppStream {
     close: () => void;
-    /** ms since a frame arrived, counting from the last close when that was more recent. */
+    /** ms since this stream last had anything to say: a frame, a close, or the attempt under way. */
     msSinceFrame: () => number;
     reconnectNow: () => void;
     subscribeProject: (projectId: string) => void;
@@ -123,11 +123,11 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
     }
 
     /**
-     * Close a socket that appears OPEN but has framed nothing for `maxSilentMs`: a peer that merely
-     * vanished never fires `onclose` by itself, so silence is the only thing that retires it.
+     * Close a socket that has framed nothing for `maxSilentMs`. A peer that simply vanished fires no
+     * `onclose`, so silence is the only thing that retires it — an attempt stuck in the handshake too.
      */
     function dropIfSilent(maxSilentMs: number): boolean {
-        if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return false;
+        if (!currentWs || currentWs.readyState === WebSocket.CLOSED) return false;
         if (Date.now() - lastActivityAt <= maxSilentMs) return false;
         currentWs.close();
         return true;
@@ -168,14 +168,15 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
         const syncParam = hasConnectedOnce ? '?sync=1' : '';
         const ws = new WebSocket(`${window.location.origin}${API_BASE}/stream${syncParam}`);
         currentWs = ws;
+        // An attempt that never completes has no frame to start the silence clock, so it starts here.
+        lastActivityAt = Date.now();
+        startHeartbeat();
 
         ws.onopen = () => {
             if (gen !== connectGen) return; // stale
             reconnectAttempts = 0;
             hasConnectedOnce = true;
-            lastActivityAt = Date.now();
             callbacks.onConnected?.(true);
-            startHeartbeat();
             // Flush pending messages first
             flushPending();
             for (const projectId of subscribedProjects) {
@@ -275,13 +276,8 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
             if (isClosed) return;
 
             reconnectAttempts = 0;
-            const ws = currentWs;
-            if (ws) {
-                if (ws.readyState === WebSocket.CONNECTING) return; // an attempt is already under way
-                // Open and framed recently needs nothing; open and silent is a zombie.
-                if (ws.readyState === WebSocket.OPEN && !dropIfSilent(WAKE_FRAME_GAP_MS)) return;
-            }
-            connect();
+            // connect() closes whatever it finds, so replacing a stalled attempt starts one socket, not two.
+            if (!currentWs || dropIfSilent(WAKE_FRAME_GAP_MS)) connect();
         },
         msSinceFrame: () => Date.now() - lastActivityAt,
         subscribeProject: (projectId: string) => {

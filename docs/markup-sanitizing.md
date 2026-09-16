@@ -35,15 +35,68 @@ and not DOMPurify's, each control written against the shape the defaults **keep*
 on the shape they already refuse proves nothing: `src/lib/utils/__tests__/sanitize.unit.ts`, scanned by
 the shared `__tests__/html-hazards.ts`, which reports a `<style>` element rather than assuming it away.
 
+## `__tests__/html-hazards.ts`
+
+One definition of "what must not survive sanitizing", shared by the sanitizer suite and the component sink
+suite so a new hazard class lands in both instead of drifting apart. It reads the DOM the browser built,
+not a pattern matched against markup — and `describe('the hazard scanner itself')` feeds it un-sanitized
+payloads, because "no hazards found" is also what a scanner that went blind prints.
+
+Two shapes are measured as *surviving* and are deliberately not hazards: `<template>` (through `marked`;
+bare, it is dropped) and `<slot>`. Both keep their children with the handlers stripped, and both are inert
+unless something clones the contents or mounts them in a shadow root — nothing in core does, and there is
+no shadow DOM at all. The suite says so out loud, so a change that starts cloning fragment contents has to
+make them hazards on purpose rather than by omission.
+
 ## `html-sinks.py`
 
-It lists every HTML sink with the mechanism that keeps it safe, and rule 4 checks the claim: a file saying
-`sanitizer` must import the module, `guard:<Ident>` must still contain that check, `escaped-by:<module>`
-must import a helper that still escapes. `html-sinks_test.py` holds each rule in both directions, because
-a sink check that stopped matching prints the same clean line as a sink that is safe.
+Why it exists: `Card.svelte` once built a menu row by concatenating an icon and a `t()` label into
+`innerHTML`. CSP does not settle that — `frame-src 'self'` plus the same-origin `/extensions/` tree is a way
+back into the page — so the row is built with DOM APIs now and the gate keeps the surface from growing back.
+
+Rules 1 to 4 are the markup sinks. Every file with a sink is listed with the reason it is safe (1), no sink
+may render a translation (2), a listed file with no sink left in it fails so the table cannot become
+history (3), and each entry declares in `METHOD` how it stays safe (4): `sanitizer` must import the module
+and not DOMPurify, `guard:<Ident>` must still contain that check, `escaped-by:<module>` must import a
+helper that still escapes, and `literal` is the one form with nothing mechanical to check. Rule 2 reads the
+sink's whole statement rather than the line it started on, because a template may spread a `{@html …}`
+expression over lines and a one-line window would report nothing. Scope is every file the browser runs —
+`src/`, plus `index.html` and `public/host-client.js`, which sit outside `src/`.
+
+Rules 5 to 7 cover the three ways the browser is handed something to interpret that never reaches the
+sanitizer, so the sanitizer cannot speak for them:
+
+- **5 — every URL.** An `href`/`src`/`srcdoc`/`action`/`formaction`/`poster`/`xlink:href` bound to `{…}`
+  or set with `setAttribute` passes only as an asset import (a file the build chose), as a call to a
+  scheme/data-URL guard — whose marker is re-read from the guarding module, so a `safeUrl` that stopped
+  testing `protocol` is a failure, not a name — or as a `URL_SINKS` entry whose mechanism is checked
+  (`contains:`, `encoded-by:`). A `javascript:` URL in a link is markup the browser runs with no
+  `{@html}` anywhere in sight.
+- **6 — no dynamic tag.** `<svelte:element this={X}>` must name a string literal: X is
+  `createElement`'s argument, and `<script>` is one of the names.
+- **7 — no text in a style attribute.** Every `{…}` inside `style="…"` or a `style:prop={…}` passes only
+  when the attribute supplies the CSS unit, which leaves a number as the only thing that can fit;
+  a color or a bare custom property needs a `STYLE_SINKS` entry (`hex-colors:` re-reads the module the
+  colors come from). A style attribute is the layout power the sanitizer refuses for untrusted markup —
+  `position:fixed;inset:0` paints over the app in its own theme — arriving through the app's own template
+  instead, with `style-src 'unsafe-inline'` meaning CSP is not the control. A declaration whose site has
+  gone is reported, so the tables cannot become history.
+
+`html-sinks_test.py` holds every rule in both directions, including the status words: rendering is a
+function the self-test reads, because the first version of this gate printed `ok` beside its own list of
+violations (it tested the truthiness of the string `"FAIL"`).
+
+What it still cannot see: a value carried into a sink through a variable, and a builder like
+`highlighter.ts` whose output a sink later renders. Those need the per-component test, and every sink
+listed here has one.
 
 ## `Icon.svelte`
 
 Accepts a lone sanitized `<svg>` root and nothing else (`singleSvgMarkup`). Its `{@html src}` was only ever
 safe because of what its call sites pass — a build-time `*.svg?raw` import — and a component cannot see its
 call sites, so it checks the shape itself.
+
+The same argument covers its `style` attribute, which interpolates the `color` prop: escaping the quotes is
+not the control there, because inside a `style` attribute a `;` simply starts another declaration and
+`url()` is a fetch. `safeCSSValue` refuses a value that can do either, and the sizes are coerced through
+`Number` so a value that broke the `number` type cannot arrive as text.

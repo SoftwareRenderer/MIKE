@@ -22,6 +22,11 @@ export function taskTerminalHref(projectId: string, taskId: string): string {
     return link(projectId, taskId);
 }
 
+/** The task view itself: `project` plus `task`, and no `view` param at all. */
+export function taskViewHref(projectId: string, taskId: string): string {
+    return location.pathname + '?project=' + encodeURIComponent(projectId) + '&task=' + encodeURIComponent(taskId);
+}
+
 export function asksForTerminal(search: string): boolean {
     return new URLSearchParams(search).get('view') === TERMINAL_VIEW;
 }

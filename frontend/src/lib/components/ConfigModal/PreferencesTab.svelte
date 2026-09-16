@@ -1,5 +1,6 @@
 <script lang="ts">
     import { DEFAULT_SHORTCUTS, normalizeKey, normalizeClick, formatShortcut, defaultCreateTaskSubmitKey, defaultStartTaskKey, defaultMultiSelectClick } from '$lib/utils/keyboard';
+    import { notificationPermission, requestNotificationPermission, type PermissionAnswer } from '$lib/utils/notifications';
     import { t } from '$lib/i18n';
     import ToggleSwitch from '../ToggleSwitch.svelte';
 
@@ -14,6 +15,7 @@
         hideModelBadge = $bindable(false),
         sortOldestFirst = $bindable(false),
         autoMaximizeChat = $bindable(true),
+        notifyOnReview = $bindable(false),
         onDirty,
     }: {
         createTaskKey?: string | undefined;
@@ -26,6 +28,7 @@
         hideModelBadge?: boolean;
         sortOldestFirst?: boolean;
         autoMaximizeChat?: boolean;
+        notifyOnReview?: boolean;
         onDirty?: () => void;
     } = $props();
 
@@ -84,6 +87,7 @@
     ]);
 
     let capturingId = $state<string | null>(null);
+
     /** The row currently capturing a binding — tells a mouse row from a keyboard row. */
     const capturingRow = $derived(rows.find(r => r.id === capturingId));
     let invalidFlash = $state(false);
@@ -180,6 +184,14 @@
             window.removeEventListener('mousedown', handleMousedown, true);
         };
     });
+
+    let permission = $state<PermissionAnswer>(notificationPermission());
+
+    // The enable click is the only gesture a browser accepts a permission prompt from.
+    async function onNotifyChange() {
+        onDirty?.();
+        if (notifyOnReview) permission = await requestNotificationPermission();
+    }
 </script>
 
 <section class="section">
@@ -268,6 +280,21 @@
         </div>
         <div class="shortcut-controls">
             <ToggleSwitch bind:checked={autoMaximizeChat} ariaLabel={t('settings.preferences.autoMaximizeChat')} ariaDescribedby="auto-maximize-chat-desc" onChange={() => onDirty?.()} />
+        </div>
+    </div>
+    <div class="shortcut-row">
+        <div class="shortcut-info">
+            <span class="shortcut-name">{t('settings.preferences.notifyOnReview')}</span>
+            <span id="notify-on-review-desc" class="shortcut-desc">
+                {notifyOnReview && permission === 'unsupported'
+                    ? t('settings.preferences.notifyUnsupported')
+                    : notifyOnReview && permission !== 'granted'
+                        ? t('settings.preferences.notifyBlocked')
+                        : t('settings.preferences.notifyOnReviewDesc')}
+            </span>
+        </div>
+        <div class="shortcut-controls">
+            <ToggleSwitch bind:checked={notifyOnReview} ariaLabel={t('settings.preferences.notifyOnReview')} ariaDescribedby="notify-on-review-desc" onChange={() => void onNotifyChange()} />
         </div>
     </div>
 </section>

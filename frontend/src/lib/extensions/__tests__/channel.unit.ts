@@ -21,6 +21,8 @@ import {
     CAP_PREVIEW_RELEASE,
     CAP_PREVIEW_NAV_STATE,
     CAP_THEME_GET,
+    CAP_THEME_UPDATE,
+    CAP_EDITOR_FOOTER_CLICK,
 } from '../capabilities';
 import type { HostRequest } from '../types';
 
@@ -81,8 +83,8 @@ describe('ExtensionHostChannel capability enforcement', () => {
         arm();
         const init = initOf(messages);
         expect(init.type).toBe('init');
-        // config.get, log.write, theme.get, and ui.status are implicit grants added by the channel.
-        expect(init.granted).toEqual([CAP_CONFIG_GET, CAP_LOG_WRITE, CAP_THEME_GET, CAP_UI_STATUS]);
+        // config.get, log.write, theme.get + theme.update and ui.status are implicit grants.
+        expect(init.granted).toEqual([CAP_CONFIG_GET, CAP_LOG_WRITE, CAP_THEME_GET, CAP_THEME_UPDATE, CAP_UI_STATUS]);
         expect(init.config).toEqual({ key: 'value' });
         channel.destroy();
     });
@@ -318,13 +320,59 @@ describe('ExtensionHostChannel capability enforcement', () => {
     });
 
     it('forwards events to the extension', () => {
-        const {  channel, messages , arm } = makeChannel([CAP_CONFIG_GET]);
+        const {  channel, messages , arm } = makeChannel([CAP_CREATE_TASK_PASTE]);
         arm();
         channel.forward('createTask.events.paste', { text: 'https://github.com/a/b/issues/1' });
         const ev = messages[messages.length - 1];
         expect(ev.type).toBe('event');
         expect(ev.cap).toBe('createTask.events.paste');
         expect(ev.data.text).toContain('github.com');
+        channel.destroy();
+    });
+
+    it('drops a pushed event for a capability that is not granted', () => {
+        // `editor.contentChange` is the whole file, which `editor.getContent` is the permission
+        // for; a frame holding neither must not be handed the text.
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const {  channel, messages , arm } = makeChannel([CAP_CONFIG_GET]);
+        arm();
+        channel.forward('editor.contentChange', { content: 'SECRET FILE TEXT' });
+        expect(messages.some((m) => m.type === 'event')).toBe(false);
+        expect(warn).toHaveBeenCalledTimes(1);
+        // Refused on every push, reported once.
+        channel.forward('editor.contentChange', { content: 'MORE SECRET TEXT' });
+        expect(messages.some((m) => m.type === 'event')).toBe(false);
+        expect(warn).toHaveBeenCalledTimes(1);
+        warn.mockRestore();
+        channel.destroy();
+    });
+
+    it('delivers a pushed event the extension holds the grant for', () => {
+        const {  channel, messages , arm } = makeChannel([CAP_EDITOR_GET_CONTENT]);
+        arm();
+        channel.forward('editor.contentChange', { content: 'live text' });
+        const ev = messages.find((m) => m.type === 'event');
+        expect(ev && ev.cap).toBe('editor.contentChange');
+        expect(ev && ev.data.content).toBe('live text');
+        channel.destroy();
+    });
+
+    it('grants theme.update implicitly with theme.get', () => {
+        const {  channel, messages , arm } = makeChannel([CAP_CONFIG_GET]);
+        arm();
+        expect(initOf(messages).granted).toContain(CAP_THEME_UPDATE);
+        channel.destroy();
+    });
+
+    it('grants the footer click event with editor.addFooterButton', () => {
+        // The host pushes the click of a button the extension created, so the gate needs this.
+        const {  channel, messages , arm } = makeChannel([CAP_EDITOR_ADD_FOOTER_BUTTON]);
+        arm();
+        expect(initOf(messages).granted).toContain(CAP_EDITOR_FOOTER_CLICK);
+        channel.forward(CAP_EDITOR_FOOTER_CLICK, { id: 'preview' });
+        const ev = messages.find((m) => m.type === 'event');
+        expect(ev && ev.cap).toBe(CAP_EDITOR_FOOTER_CLICK);
+        expect(ev && ev.data.id).toBe('preview');
         channel.destroy();
     });
 
@@ -616,7 +664,7 @@ describe('ExtensionHostChannel handshake (document identity)', () => {
     });
 
     it('withholds pushed events while disarmed and delivers them once armed', () => {
-        const { channel, contentWindow, messages } = makeChannel([CAP_CONFIG_GET]);
+        const { channel, contentWindow, messages } = makeChannel([CAP_EDITOR_CONTENT_CHANGE]);
         channel.notifyFrameLoad();
         channel.forward('editor.contentChange', { content: 'SECRET FILE TEXT' });
         expect(messages.some((m) => m.type === 'event')).toBe(false);
@@ -630,7 +678,7 @@ describe('ExtensionHostChannel handshake (document identity)', () => {
 
     it('warns and disarms on a frame reload, then re-arms on a fresh hello', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const { channel, contentWindow, messages, iframe } = makeChannel([CAP_CONFIG_GET]);
+        const { channel, contentWindow, messages, iframe } = makeChannel([CAP_CONFIG_GET, CAP_EDITOR_CONTENT_CHANGE]);
         channel.notifyFrameLoad();
         send(channel, contentWindow, { type: 'exthello', token: TEST_TOKEN } as any);
         expect(initOf(messages)).toBeTruthy();
