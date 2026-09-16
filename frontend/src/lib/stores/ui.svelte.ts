@@ -15,4 +15,6 @@ export class UiStore {
     public showStats = $state(false);
     public showCardDetail = $state(false);
     public showSandboxConfig = $state(false);
+    /** Which project's board is showing its Review column. Written only by `Board.svelte`. */
+    public reviewColumnInViewOf = $state<string | null>(null);
 }

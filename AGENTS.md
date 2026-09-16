@@ -196,6 +196,9 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
 - **CJK typography is scoped to `:lang()`.** `docs/typography.md`.
 - Chat: never disguise a system message as a user message; streaming cursor only during an active
   response; stats are `X tokens · Ys · Z tok/s` (completion tokens).
+- **A Review notification is the client's decision, never the server's.** `notify_on_review` stores the
+  choice; an arrival is detected from the `project_counts` rise and announced only when the Review
+  column is not in view and that task is not the one open. `docs/notifications.md`.
 - Diff text is parsed once in `$lib/utils/diff-parser.ts` (pure, unit-tested) and the diff badges come from
   there (`getStatusBadge`); `GitStatusPanel.svelte` keeps its own for git entries. Sticky section headers
   use `position: sticky` with an opaque background.
@@ -446,6 +449,7 @@ deliberately omits.
 | `docs/preview.md` | preview routes, ref rewriting, nav record, iframe isolation |
 | `docs/agent-extensions.md` | adapter interface + events, WASM memory model, new-adapter recipe |
 | `docs/navigation.md` | board + task-view arrow-key resolution |
+| `docs/notifications.md` | the Review-arrival rule, the counts ledger, the permission policy |
 | `docs/link-rows.md` | project-row/task-card markup, click routing, known limitation |
 | `docs/reconnection.md` | WS reconnect/offline queue mechanism |
 | `docs/frontend-updates.md` | stale-asset detection, the build-id tag contract, prompt-mode worker, the day gate |
