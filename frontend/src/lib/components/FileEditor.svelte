@@ -111,7 +111,8 @@
     const fullscreenTitle = $derived(fullscreenToggleTitle(appStore.config));
 
     let content = $state('');
-    let loading = $state(!!filePath);
+    let loadedPath = $state('');
+    let loading = $derived(!!filePath && filePath !== loadedPath);
     let saving = $state(false);
     const saveController = new SaveController();
     let error = $state('');
@@ -627,6 +628,8 @@
     }
 
     async function loadFile() {
+        // The load records its own path, so an overlapping load cannot mark this instance loaded.
+        const requestPath = filePath;
         resetLspRetry();
         // Close the current document on the LSP server BEFORE dropping the
         // client: the sandboxed server outlives this client, and a document
@@ -644,14 +647,14 @@
             lspClient?.disconnect();
             lspClient = null;
             lspReady = false;
-            loading = false;
+            loadedPath = '';
             content = '';
             baselineContent = '';
             gutterMarkers = null;
             destroyView();
             return;
         }
-        loading = true;
+        loadedPath = '';
         error = '';
         fileTooLarge = false;
         fileNotFound = false;
@@ -752,7 +755,7 @@
         } catch (e) {
             error = String(e);
         } finally {
-            loading = false;
+            loadedPath = requestPath;
         }
 
         // Create editor after DOM has updated (loading=false renders the editor div)

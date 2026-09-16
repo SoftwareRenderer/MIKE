@@ -113,9 +113,10 @@ function addFooterButton(ctx: HostContext, args: { id: string; label?: string; a
     const existingCleanup = anchors.get(anchor);
     let prevLabel = '';
     if (existingCleanup) {
-        const prev = left.querySelector<HTMLButtonElement>(
-            `button[data-ext-footer-ext="${ctx.extensionId}"][data-ext-footer-btn="${args.id}"]`
-        );
+        // Compared through `dataset` because `args.id` came from the frame: in a selector string
+        // a `"` in it would end the attribute value and drive the selector.
+        const prev = Array.from(left.querySelectorAll<HTMLButtonElement>('button[data-ext-footer-btn]'))
+            .find(b => b.dataset.extFooterExt === ctx.extensionId && b.dataset.extFooterBtn === args.id);
         if (prev) prevLabel = prev.textContent || '';
         existingCleanup();
         anchors.delete(anchor);
