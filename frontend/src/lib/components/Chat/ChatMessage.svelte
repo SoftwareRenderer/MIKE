@@ -753,11 +753,13 @@
         font-weight: 600;
         text-align: left;
         padding: 6px 12px;
+        min-width: 80px;
         border: 1px solid var(--color-border);
         color: var(--color-text-primary);
     }
     .assistant .message-text :global(td) {
         padding: 6px 12px;
+        min-width: 80px;
         border: 1px solid var(--color-border);
         color: var(--color-text-primary);
         vertical-align: top;
