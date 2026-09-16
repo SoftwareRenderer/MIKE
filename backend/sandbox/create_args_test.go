@@ -43,6 +43,27 @@ func TestCreateRefusesUnsafeSandboxAdditions(t *testing.T) {
 			opts:    SandboxOpts{SandboxMounts: []types.SandboxMount{{HostPath: "/", ContainerPath: "/host", Mode: "rw"}}},
 			comment: "a task runs an LLM's commands; mounting / read-write is no boundary at all",
 		},
+		{
+			name: "agent mount whose container path rewrites the spec", want: "agent sandbox mount",
+			opts: SandboxOpts{AgentSandbox: &types.AgentSandbox{
+				Mounts: []types.SandboxMount{{HostPath: "/tmp/pi-agent", ContainerPath: "/root/.pi:rw", Mode: "ro"}},
+			}},
+			comment: "an agent extension's mounts come from its own settings and reach podman as written",
+		},
+		{
+			name: "agent mount naming the host root", want: "agent sandbox mount",
+			opts: SandboxOpts{AgentSandbox: &types.AgentSandbox{
+				Mounts: []types.SandboxMount{{HostPath: "/", ContainerPath: "/host", Mode: "rw"}},
+			}},
+			comment: "the host path is a text field in an extension's settings, as a project's is in its own",
+		},
+		{
+			name: "agent mount with a relative host path", want: "agent sandbox mount",
+			opts: SandboxOpts{AgentSandbox: &types.AgentSandbox{
+				Mounts: []types.SandboxMount{{HostPath: "pi-config", ContainerPath: "/root/.pi", Mode: "rw"}},
+			}},
+			comment: "a relative source resolves against this process's working directory",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -57,6 +78,20 @@ func TestCreateRefusesUnsafeSandboxAdditions(t *testing.T) {
 				t.Errorf("the check ran after the availability probe, so it is unenforceable on a host without runsc: %v", err)
 			}
 		})
+	}
+}
+
+// A mount missing one end is skipped, which is what an unconfigured agent extension looks like.
+func TestCreateSkipsAHalfDeclaredAgentMount(t *testing.T) {
+	sm := NewSandboxManager(sandboxruntime.Boot{})
+	project := &types.Project{ID: "p-half", Name: "half-proj", Path: t.TempDir()}
+
+	opts := SandboxOpts{AgentSandbox: &types.AgentSandbox{
+		Mounts: []types.SandboxMount{{HostPath: "", ContainerPath: "/root/.pi", Mode: "rw"}},
+	}}
+	if _, err := sm.Create("task-half", t.TempDir(), project, opts); err != nil &&
+		strings.Contains(err.Error(), "agent sandbox mount") {
+		t.Errorf("an unfinished agent mount was refused as a bad mount: %v", err)
 	}
 }
 

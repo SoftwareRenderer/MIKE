@@ -21,6 +21,7 @@ import (
 const (
 	sessionTokenBytes = 32
 	csrfTokenBytes    = 16
+	sessionIDBytes    = 8
 	sessionDuration   = 30 * 24 * time.Hour // 30 days
 	passwordEnv       = "MIKE_LOGIN_PASSWORD"
 )
@@ -75,19 +76,14 @@ func (m *SessionManager) Login(password, ip, userAgent string) (id, token, csrfT
 		return "", "", "", ErrInvalidPassword
 	}
 
-	tokenBytes := make([]byte, sessionTokenBytes)
-	if _, err := rand.Read(tokenBytes); err != nil {
-		return "", "", "", fmt.Errorf("generate token: %w", err)
+	draw := make([]byte, sessionTokenBytes+csrfTokenBytes+sessionIDBytes)
+	if _, err := rand.Read(draw); err != nil {
+		return "", "", "", fmt.Errorf("generate session credentials: %w", err)
 	}
-	token = hex.EncodeToString(tokenBytes)
+	token = hex.EncodeToString(draw[:sessionTokenBytes])
+	csrfToken = hex.EncodeToString(draw[sessionTokenBytes : sessionTokenBytes+csrfTokenBytes])
+	id = hex.EncodeToString(draw[sessionTokenBytes+csrfTokenBytes:])
 
-	csrfBytes := make([]byte, csrfTokenBytes)
-	if _, err := rand.Read(csrfBytes); err != nil {
-		return "", "", "", fmt.Errorf("generate csrf token: %w", err)
-	}
-	csrfToken = hex.EncodeToString(csrfBytes)
-
-	id = hex.EncodeToString(tokenBytes[:8]) // short id from first 8 bytes
 	expiresAt := time.Now().Add(sessionDuration)
 
 	if err := m.store.CreateSession(context.Background(), store.NewSession{

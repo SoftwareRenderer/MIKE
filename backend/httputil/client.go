@@ -58,6 +58,7 @@ func NewSingleAttemptClient(timeout time.Duration) *http.Client {
 var egressTransport = func() *http.Transport {
 	t := sharedTransport.Clone()
 	t.DialContext = dialPublicOnly
+	t.Proxy = nil
 	return t
 }()
 

@@ -59,6 +59,15 @@ func TestEgressClientRefusesLoopbackTarget(t *testing.T) {
 	}
 }
 
+// TestEgressTransportTakesNoProxy: an inherited proxy would put the address rule on the proxy
+// rather than on the extension's target.
+func TestEgressTransportTakesNoProxy(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:8080")
+	if egressTransport.Proxy != nil {
+		t.Error("extension egress inherits an environment proxy, which moves the address rule off the target")
+	}
+}
+
 // TestReadUpstreamCapsBody: a body past the cap is refused, not truncated.
 func TestReadUpstreamCapsBody(t *testing.T) {
 	if _, err := ReadUpstream(strings.NewReader(strings.Repeat("x", 1<<20))); err != nil {

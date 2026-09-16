@@ -115,6 +115,9 @@ files deleted while the server runs stay broken until the next start. Test:
   `NewSingleAttemptClient` refuses them. The refusal is the security control — the domain allowlist is
   checked against the URL the caller asked for, so following a redirect reaches a host nothing validated.
   Don't build an `http.Client` at a call site. Test: `backend/httputil/client_test.go`.
+- The egress transport takes **no environment proxy** (`egressTransport` sets `Proxy = nil`): the peer of
+  a proxied connection is the proxy, so the address rule would clear the proxy and say nothing about the
+  extension's target. Test: `backend/httputil/egress_test.go`.
 
 ## LSP capability gates
 

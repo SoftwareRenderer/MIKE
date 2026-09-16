@@ -9,10 +9,15 @@ The rules are in `AGENTS.md → Git`. This is the mechanism behind each fence.
   true. Both set `Dir`, `Env: Env()` and `WaitDelay` in one place, so the allowlist and the hook fence
   cannot be forgotten at a call site. `_test.go` is exempt for a stated reason, not for churn: the
   control-case test must be able to spawn an **unfenced** git.
-- `git.HookFence()` pins `core.hooksPath=/dev/null` via `GIT_CONFIG_COUNT`/`KEY_0`/`VALUE_0`, appended
-  *after* the extras so `os/exec`'s last-wins makes it unforgeable. `--no-verify` is not equivalent — it
-  has no effect on `post-checkout`, which `git worktree add` runs. Accepted user-visible consequence: a
-  `pre-push` hook no longer runs when someone clicks Push.
+- `git.HookFence()` pins `core.hooksPath=/dev/null` and `core.fsmonitor=false` via
+  `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`, appended *after* the extras so `os/exec`'s last-wins makes it
+  unforgeable. `--no-verify` is not equivalent — it has no effect on `post-checkout`, which
+  `git worktree add` runs. Accepted user-visible consequence: a `pre-push` hook no longer runs when
+  someone clicks Push.
+- The fence pins those two keys only. Repo-readable settings that name a program otherwise
+  (`credential.helper`, `core.askPass`, `diff.<name>.textconv`) are deliberately left alone: a helper in
+  the operator's own configuration is how a private HTTPS remote authenticates here.
+  `GIT_TERMINAL_PROMPT=0` is what keeps a remote that cannot authenticate from hanging the request.
 - Bounds: a **cancelled context** bounds the child, a **WaitDelay** bounds the output pipes after the
   kill, and neither substitutes for the other. `WithStash`'s bracket and the worktree watcher both
   involve processes that can outlive their caller (see `docs/locking.md`).

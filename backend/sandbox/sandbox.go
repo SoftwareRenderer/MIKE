@@ -367,6 +367,18 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 			return nil, fmt.Errorf("sandbox mount %d for project %s: %w", i, projectName, err)
 		}
 	}
+	// An agent extension's mounts come from its own configuration, so nothing else has measured
+	// them. One missing an end is skipped.
+	if opts.AgentSandbox != nil {
+		for i, m := range opts.AgentSandbox.Mounts {
+			if m.HostPath == "" || m.ContainerPath == "" {
+				continue
+			}
+			if err := types.ValidateSandboxMount(m); err != nil {
+				return nil, fmt.Errorf("agent sandbox mount %d for project %s: %w", i, projectName, err)
+			}
+		}
+	}
 
 	if !sm.available {
 		return nil, fmt.Errorf("gVisor not available (runsc not installed)")

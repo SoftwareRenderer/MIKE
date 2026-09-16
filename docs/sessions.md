@@ -16,6 +16,11 @@ response/cookie; the DB stores `hex(sha256(token))` (indexed, in both `token_has
 `BackfillSessionTokens` migrates pre-hash rows once at startup (their legacy column gets a
 `revoked-<id>` placeholder).
 
+**Session id:** 8 bytes, drawn from the same `crypto/rand` call as the token and the CSRF token but from
+bytes neither carries. `GET /api/sessions` lists ids and `DELETE /api/sessions/{id}` revokes by id, so an
+id that was a slice of the token would put part of a live credential in every listing. A collision on 8
+bytes is answered by the insert failing, not by reuse.
+
 **Per-row metadata:** `ip` + `user_agent` are recorded at login; `last_seen` is stamped during
 validation but throttled to one write per 60 s (`lastSeenInterval`) — the store serialises on a
 single connection, so an unthrottled write would turn every authenticated request into a DB write.

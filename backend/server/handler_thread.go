@@ -22,6 +22,10 @@ func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("taskID")
 	switch r.Method {
 	case http.MethodGet:
+		if _, err := s.store.GetTask(projectID, taskID); err != nil {
+			Fail(w, err, "get task", "task not found")
+			return
+		}
 		threads, err := s.store.GetThreadsByTask(taskID)
 		if err != nil {
 			Fail(w, err, "get threads", "task not found")

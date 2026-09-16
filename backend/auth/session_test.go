@@ -95,6 +95,32 @@ func TestLoginValidPassword(t *testing.T) {
 	}
 }
 
+// The id is listed by GET /api/sessions, so it must not share bytes with the token.
+func TestLoginCredentialsShareNoBytes(t *testing.T) {
+	m := testManager(t)
+
+	seen := map[string]bool{}
+	for i := 0; i < 20; i++ {
+		id, token, csrfToken, err := m.Login(testPassword, testIP, testUA)
+		if err != nil {
+			t.Fatalf("login: %v", err)
+		}
+		if len(id) != 16 { // 8 bytes of hex, the shape stored ids already have
+			t.Fatalf("session id %q: want 16 characters", id)
+		}
+		if strings.HasPrefix(token, id) {
+			t.Fatalf("the session id is the front of the token: id=%s token=%s", id, token)
+		}
+		if strings.Contains(token, id) || strings.Contains(csrfToken, id) {
+			t.Fatalf("the session id shares bytes with a credential: id=%s token=%s csrf=%s", id, token, csrfToken)
+		}
+		if seen[id] {
+			t.Fatalf("session id %q handed out twice", id)
+		}
+		seen[id] = true
+	}
+}
+
 func TestLoginInvalidPassword(t *testing.T) {
 	m := testManager(t)
 

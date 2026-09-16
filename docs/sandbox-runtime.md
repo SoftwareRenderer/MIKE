@@ -111,7 +111,10 @@ a name as `CHOWN` — while `--privileged` is an *argument* and is refused at in
   pin, not the root list, is what stops a manifest turning one into a write). `adaptProjectMounts`
   mirrors the *union* over projects (global paths like `/go` for everyone, task-root-relative ones only
   for their owning workspace), so a new project changes the mount set once instead of on every switch.
-- Tests: `backend/extensions/mount_read_only_test.go`.
+- An agent extension's mounts come from its own configuration row rather than a manifest, so
+  `sandbox.Create` runs each of them through `types.ValidateSandboxMount` beside the project's declared
+  mounts, before the availability probe. An entry with one end missing is skipped: it builds no mount.
+- Tests: `backend/extensions/mount_read_only_test.go`, `backend/sandbox/create_args_test.go`.
 
 ## Podman subprocesses
 

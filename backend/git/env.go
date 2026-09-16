@@ -89,7 +89,7 @@ func isGitSafeEnv(name string) bool {
 	return false
 }
 
-// HookFence pins core.hooksPath to /dev/null; --no-verify has no effect on post-checkout, which worktree add runs.
+// HookFence pins core.hooksPath to /dev/null and core.fsmonitor to false
 func HookFence() []string {
 	return []string{
 		"GIT_CONFIG_COUNT=2",

@@ -961,6 +961,11 @@ func buildDiffManifest(d *git.TaskDiff, stagedPaths map[string]struct{}, baseRef
 // Returns 404 if the task's diff is not cached or the file is not found.
 func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("taskID")
+	// The diff cache is keyed by task alone, so the pair in the path is settled before it is read.
+	task, ok := resolveTask(w, r, h.store)
+	if !ok {
+		return
+	}
 	filePath := r.URL.Query().Get("path")
 	fullFile := r.URL.Query().Get("full") == "1"
 	if filePath == "" {
@@ -977,8 +982,7 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 	if f, ok := taskDiff.Tracked[filePath]; ok {
 		// If full=1 and file was truncated, recompute diff without truncation
 		if fullFile && f.Truncated {
-			task, err := h.store.GetTaskByID(taskID)
-			if err == nil && h.worktreeMgr != nil {
+			if h.worktreeMgr != nil {
 				baseRef, _ := h.worktreeMgr.ResolveDiffBaseline(taskID, task.BaseRef, task.Branch, "")
 				if fullDiff, err := h.worktreeMgr.GetTaskDiff(taskID, baseRef, "", true); err == nil {
 					if ff, ok := fullDiff.Tracked[filePath]; ok {

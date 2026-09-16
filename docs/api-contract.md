@@ -128,6 +128,18 @@ WebSocket upgrades, whose URL is built from `window.location.origin`, and
 `GET /api/preview/{token}/{path...}`, whose sub-resource URLs the server writes into the document it
 serves (`rewriteRootRelative`). Gate: `scripts/archgate` `apiroutes`.
 
+## Child rows under a task path
+
+A route under `/api/projects/{projectID}/tasks/{taskID}/` names a task, but threads, messages and the
+diff cache are keyed by task or message id alone, so the lookup that fetches one never learns which task
+asked. Each of these resolves the task in the path first (`store.GetTask(projectID, taskID)`) and, where
+the row carries a task of its own, compares its `TaskID` with the path before anything is read or
+deleted; `server.messageInTask` is the helper for the message routes, and `HandleTaskDiffFile` settles
+the pair before the cache. A handler that hands `{messageID}` straight to `GetTaskMessageByID` answers
+for another project's row.
+
+Tests: `backend/server/handler_message_ownership_test.go`, `backend/api/git_diff_file_ownership_test.go`.
+
 ## Diffs
 
 `?parsed=1` is a contract every path on `/tasks/{id}/diff` must honour, including the fast ones. The panel

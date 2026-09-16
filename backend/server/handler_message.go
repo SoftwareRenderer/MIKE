@@ -12,6 +12,25 @@ import (
 	"mike/backend/types"
 )
 
+// Message rows are keyed by their own id, so this ties a message to the task in the request's
+// path. ok is false after writing the response.
+func (s *Server) messageInTask(w http.ResponseWriter, projectID, taskID, messageID string) (*types.TaskMessage, bool) {
+	if _, err := s.store.GetTask(projectID, taskID); err != nil {
+		Fail(w, err, "get task", "task not found")
+		return nil, false
+	}
+	msg, err := s.store.GetTaskMessageByID(messageID)
+	if err != nil {
+		Fail(w, err, "get message", "message not found")
+		return nil, false
+	}
+	if msg.TaskID != taskID {
+		JSONError(w, http.StatusNotFound, "message not found")
+		return nil, false
+	}
+	return msg, true
+}
+
 func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -29,8 +48,12 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 		if req.DeleteSingle {
 			// Read the row first: it may be the one naming a checkpoint, and once it is gone nothing
 			// in the database says so.
+			msg, ok := s.messageInTask(w, projectID, taskID, req.MessageID)
+			if !ok {
+				return
+			}
 			var released []string
-			if msg, err := s.store.GetTaskMessageByID(req.MessageID); err == nil && msg != nil && msg.GitCommitHash != "" {
+			if msg.GitCommitHash != "" {
 				released = []string{msg.ID}
 			}
 			if err := s.store.DeleteTaskMessageByID(req.MessageID); err != nil {
@@ -49,14 +72,12 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 			JSONResponse(w, http.StatusOK, map[string]string{"status": "deleted"})
 			return
 		}
-		// Get the message's role, thread_id, and created_at BEFORE deletion.
-		msg, msgErr := s.store.GetTaskMessageByID(req.MessageID)
-		msgRole := ""
-		msgThreadID := ""
-		if msgErr == nil && msg != nil {
-			msgRole = msg.Role
-			msgThreadID = msg.ThreadID
+		msg, ok := s.messageInTask(w, projectID, taskID, req.MessageID)
+		if !ok {
+			return
 		}
+		msgRole := msg.Role
+		msgThreadID := msg.ThreadID
 		msgCreatedAt, msgTimeErr := s.store.GetMessageCreatedAt(req.MessageID)
 		// Use the message's own thread_id so deletion targets the correct thread
 		// even if the task's active thread has switched since the message was created.
@@ -173,15 +194,16 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
 	messageID := r.PathValue("messageID")
+	msg, ok := s.messageInTask(w, projectID, taskID, messageID)
+	if !ok {
+		return
+	}
 	if r.Method == http.MethodGet {
 		// Return full message (with unsuppressed reasoning_content and tool_calls) when full=1
 		if r.URL.Query().Get("full") == "1" {
-			msg, err := s.store.GetTaskMessageByID(messageID)
-			if err != nil {
-				Fail(w, err, "get message", "message not found")
-				return
-			}
 			JSONResponse(w, http.StatusOK, msg)
 			return
 		}
