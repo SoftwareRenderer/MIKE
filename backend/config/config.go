@@ -32,7 +32,7 @@ const DefaultWorkspaceDir = "./.worktrees"
 
 // DefaultRegistryURL is the hosted extension registry index, used when MIKE_REGISTRY_URL names
 // another index (a local fixture, an offline mirror).
-const DefaultRegistryURL = "https://getmike.dev/extensions/registry.json"
+const DefaultRegistryURL = "https://registry.getmike.dev/registry.json"
 
 // SetRegistryURL wires the resolved registry index (startup.Config.RegistryURL) into the store.
 // Wiring-time, before the server serves: the index is sourced exclusively from that variable and is
