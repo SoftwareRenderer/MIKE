@@ -5,7 +5,11 @@
  * items get a warning icon and sort first. File-mutating permissions
  * (editor.setContent / editor.save) are deliberately not flagged: they are the obvious
  * contract of an editor extension, not an escape.
+ *
+ * `lib/extensions/__tests__/capability-consent.unit.ts` checks these lists against the capability
+ * catalog.
  */
+import { t } from '$lib/i18n';
 
 export const DANGEROUS_PERMISSIONS: ReadonlySet<string> = new Set([
     'network.proxy',
@@ -110,4 +114,100 @@ export function sortPermissions(permissions: readonly string[]): string[] {
     const dangerous = permissions.filter(isDangerousPermission);
     const rest = permissions.filter((p) => !isDangerousPermission(p));
     return [...dangerous, ...rest];
+}
+
+/**
+ * Capabilities the host grants itself or pairs with a declared one, so no manifest declares them
+ * and the install dialog never lists them. Every catalog capability is either here or described
+ * below, because anything else is one the user approves with no explanation and no warning.
+ */
+export const HOST_INTERNAL_CAPABILITIES: ReadonlySet<string> = new Set([
+    'config.get',
+    'log.write',
+    'ui.status',
+    'theme.get',
+    'theme.update',
+    'editor.removeFooterButton',
+    'editor.footerButtonClick',
+    'editor.contentChange',
+    'preview.serve',
+    'preview.release',
+    'preview.navState',
+]);
+
+/**
+ * The label and explanation the install dialog shows for a declared permission. A function, so
+ * the wording comes from the active translation pack and not from whichever one loaded first.
+ */
+export function permissionDescriptions(): Record<string, { label: string; description: string }> {
+    return {
+        'createTask.description.insertText': {
+            label: t('settings.extensions.perm.createTaskDescriptionInsertText.label'),
+            description: t('settings.extensions.perm.createTaskDescriptionInsertText.description'),
+        },
+        'createTask.events.paste': {
+            label: t('settings.extensions.perm.createTaskEventsPaste.label'),
+            description: t('settings.extensions.perm.createTaskEventsPaste.description'),
+        },
+        'network.proxy': {
+            label: t('settings.extensions.perm.networkProxy.label'),
+            description: t('settings.extensions.perm.networkProxy.description'),
+        },
+        'ui.setSize': {
+            label: t('settings.extensions.perm.uiSetSize.label'),
+            description: t('settings.extensions.perm.uiSetSize.description'),
+        },
+        'ui.modal': {
+            label: t('settings.extensions.perm.uiModal.label'),
+            description: t('settings.extensions.perm.uiModal.description'),
+        },
+        'storage.get': {
+            label: t('settings.extensions.perm.storageGet.label'),
+            description: t('settings.extensions.perm.storageGet.description'),
+        },
+        'storage.set': {
+            label: t('settings.extensions.perm.storageSet.label'),
+            description: t('settings.extensions.perm.storageSet.description'),
+        },
+        'storage.delete': {
+            label: t('settings.extensions.perm.storageDelete.label'),
+            description: t('settings.extensions.perm.storageDelete.description'),
+        },
+        'storage.list': {
+            label: t('settings.extensions.perm.storageList.label'),
+            description: t('settings.extensions.perm.storageList.description'),
+        },
+        'editor.addFooterButton': {
+            label: t('settings.extensions.perm.editorAddFooterButton.label'),
+            description: t('settings.extensions.perm.editorAddFooterButton.description'),
+        },
+        'editor.getContent': {
+            label: t('settings.extensions.perm.editorGetContent.label'),
+            description: t('settings.extensions.perm.editorGetContent.description'),
+        },
+        'editor.setContent': {
+            label: t('settings.extensions.perm.editorSetContent.label'),
+            description: t('settings.extensions.perm.editorSetContent.description'),
+        },
+        'editor.setOverlay': {
+            label: t('settings.extensions.perm.editorSetOverlay.label'),
+            description: t('settings.extensions.perm.editorSetOverlay.description'),
+        },
+        'editor.jumpToLine': {
+            label: t('settings.extensions.perm.editorJumpToLine.label'),
+            description: t('settings.extensions.perm.editorJumpToLine.description'),
+        },
+        'editor.save': {
+            label: t('settings.extensions.perm.editorSave.label'),
+            description: t('settings.extensions.perm.editorSave.description'),
+        },
+        'preview.serveScripts': {
+            label: t('settings.extensions.perm.previewServeScripts.label'),
+            description: t('settings.extensions.perm.previewServeScripts.description'),
+        },
+        'preview.serveNetwork': {
+            label: t('settings.extensions.perm.previewServeNetwork.label'),
+            description: t('settings.extensions.perm.previewServeNetwork.description'),
+        },
+    };
 }

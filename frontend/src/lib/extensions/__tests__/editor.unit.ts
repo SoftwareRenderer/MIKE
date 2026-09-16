@@ -176,6 +176,33 @@ describe('editor.addFooterButton', () => {
         channel.destroy();
     });
 
+    it('takes a crafted button id as an id and nothing else', async () => {
+        // The id comes from the frame, and it used to be interpolated into a CSS selector, where
+        // a `"` lets it reach for another extension's button.
+        const crafted = 'x"][data-ext-footer-ext="victim';
+        const victim = document.createElement('button');
+        victim.dataset.extFooterBtn = 'keep';
+        victim.dataset.extFooterExt = 'victim';
+        victim.textContent = 'Victim Label';
+        footerLeft.appendChild(victim);
+
+        const { channel, contentWindow, messages } = makeChannel([CAP_EDITOR_ADD_FOOTER_BUTTON], anchor);
+        send(channel, contentWindow, { type: 'call', id: 'c1', cap: CAP_EDITOR_ADD_FOOTER_BUTTON, args: { id: crafted, label: 'Mine' } });
+        await flush();
+        expect(messages[messages.length - 1].ok).toBe(true);
+
+        // A pure active-state update is the call that reads the previous label back.
+        send(channel, contentWindow, { type: 'call', id: 'c2', cap: CAP_EDITOR_ADD_FOOTER_BUTTON, args: { id: crafted, active: true } });
+        await flush();
+        expect(messages[messages.length - 1].ok).toBe(true);
+
+        const mine = Array.from(footerLeft.querySelectorAll<HTMLButtonElement>('button'))
+            .find(b => b.dataset.extFooterExt === 'ext-md');
+        expect(mine?.textContent).toBe('Mine');
+        expect(victim.textContent).toBe('Victim Label');
+        channel.destroy();
+    });
+
     it('editor.footerRemoveButton removes the button', async () => {
         const { channel, contentWindow } = makeChannel([CAP_EDITOR_ADD_FOOTER_BUTTON, CAP_EDITOR_REMOVE_FOOTER_BUTTON], anchor);
         send(channel, contentWindow, { type: 'call', id: 'b1', cap: CAP_EDITOR_ADD_FOOTER_BUTTON, args: { id: 'md-preview', label: 'Preview' } });
