@@ -1490,3 +1490,50 @@ func TestForwardPortSpecDefaultStaysUnprefixed(t *testing.T) {
 		}
 	}
 }
+
+// TestCreate_RejectsAgentSandboxMount checks an agent extension's declared mounts are refused
+// before any container exists, the way the project's own mounts are.
+func TestCreate_RejectsAgentSandboxMount(t *testing.T) {
+	sm := &SandboxManager{
+		active:    make(map[string]string),
+		rt:        sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}),
+		available: false,
+	}
+	host := t.TempDir()
+	for _, tc := range []struct {
+		name string
+		m    types.SandboxMount
+	}{
+		{"the host root", types.SandboxMount{HostPath: "/", ContainerPath: "/mnt/host", Mode: "rw"}},
+		{"a relative host path", types.SandboxMount{HostPath: "agent-config", ContainerPath: "/mnt/x", Mode: "ro"}},
+		{"a host path that walks up", types.SandboxMount{HostPath: host + "/../outside", ContainerPath: "/mnt/x", Mode: "ro"}},
+		{"a container path rewriting the mount spec", types.SandboxMount{HostPath: host, ContainerPath: "/mnt/x:rw", Mode: "ro"}},
+		{"a container path that walks up", types.SandboxMount{HostPath: host, ContainerPath: "/mnt/../etc", Mode: "ro"}},
+		{"a mode that is neither ro nor rw", types.SandboxMount{HostPath: host, ContainerPath: "/mnt/x", Mode: "write"}},
+	} {
+		_, err := sm.Create("task-1", t.TempDir(), &types.Project{Name: "test-proj"}, SandboxOpts{
+			AgentSandbox: &types.AgentSandbox{Mounts: []types.SandboxMount{tc.m}},
+		})
+		if err == nil || !strings.Contains(err.Error(), "agent sandbox mount") {
+			t.Errorf("%s: Create error = %v, want a refusal naming the agent sandbox mount", tc.name, err)
+		}
+	}
+}
+
+// TestCreate_AcceptsAgentSandboxMount checks the gate refuses only what it is about.
+func TestCreate_AcceptsAgentSandboxMount(t *testing.T) {
+	sm := &SandboxManager{
+		active:    make(map[string]string),
+		rt:        sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}),
+		available: false,
+	}
+	_, err := sm.Create("task-1", t.TempDir(), &types.Project{Name: "test-proj"}, SandboxOpts{
+		AgentSandbox: &types.AgentSandbox{Mounts: []types.SandboxMount{
+			{HostPath: t.TempDir(), ContainerPath: "/mnt/agent", Mode: "ro"},
+			{},
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "gVisor not available") {
+		t.Fatalf("Create error = %v, want the unavailable-runtime refusal that follows the gate", err)
+	}
+}

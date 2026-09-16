@@ -4,6 +4,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -318,5 +320,72 @@ func TestMergeConflictFallback_NoMergeHead(t *testing.T) {
 
 	if isMergeInProgress(tmpDir) {
 		t.Fatal("expected no merge in progress after abort")
+	}
+}
+
+// TestGetConflictedFiles_OptionsShapedAndQuotedNames checks that a conflicted file whose name git
+// would quote, or read as one of its own options, still comes back as a path and gets staged.
+func TestGetConflictedFiles_OptionsShapedAndQuotedNames(t *testing.T) {
+	tmpDir := t.TempDir()
+	runGit(t, tmpDir, "init")
+	runGit(t, tmpDir, "config", "user.email", "test@test.com")
+	runGit(t, tmpDir, "config", "user.name", "Test")
+
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(tmpDir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	write("--force", "base\n")
+	write("café.txt", "base\n")
+	write("UU-notes.txt", "base\n")
+	runGit(t, tmpDir, "add", "-A")
+	runGit(t, tmpDir, "commit", "-m", "base")
+
+	runGit(t, tmpDir, "checkout", "-b", "feature")
+	write("--force", "feature\n")
+	write("café.txt", "feature\n")
+	runGit(t, tmpDir, "mv", "UU-notes.txt", "notes.txt")
+	runGit(t, tmpDir, "commit", "-qam", "feature")
+
+	runGit(t, tmpDir, "checkout", "master")
+	write("--force", "master\n")
+	write("café.txt", "master\n")
+	runGit(t, tmpDir, "commit", "-qam", "master")
+
+	// The merge conflicts on both files and applies the rename cleanly.
+	merge := exec.Command("git", "merge", "feature")
+	merge.Dir = tmpDir
+	_ = merge.Run()
+
+	got := append([]string(nil), GetConflictedFiles(tmpDir)...)
+	sort.Strings(got)
+	// The rename merged cleanly, so neither its target nor its source is conflicted.
+	if want := []string{"--force", "café.txt"}; !slices.Equal(got, want) {
+		t.Fatalf("conflicted files = %q, want %q", got, want)
+	}
+
+	write("--force", "resolved\n")
+	write("café.txt", "resolved\n")
+	if !(&mergeOrchestrator{}).stageResolvedConflicts("task-1", tmpDir) {
+		t.Fatal("stageResolvedConflicts failed to stage the resolved files")
+	}
+
+	listCmd := exec.Command("git", "diff", "--cached", "--name-only", "-z")
+	listCmd.Dir = tmpDir
+	stagedRaw, err := listCmd.Output()
+	if err != nil {
+		t.Fatalf("git diff --cached --name-only: %v", err)
+	}
+	staged := strings.Split(string(stagedRaw), "\x00")
+	for _, name := range []string{"--force", "café.txt"} {
+		if !slices.Contains(staged, name) {
+			t.Errorf("%q was not staged; staged: %q", name, staged)
+		}
+	}
+	// "--force" is a real option of git add too, and taken as one it leaves the file conflicted.
+	if still := GetConflictedFiles(tmpDir); len(still) != 0 {
+		t.Errorf("%q is still conflicted after staging the resolution", still)
 	}
 }
