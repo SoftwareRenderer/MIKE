@@ -4,7 +4,7 @@
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
-    import { isDangerousPermission, requiresInstallReview, sortPermissions, dependencyCacheDeclaration, needsDependencyGrant, requiresSetupAfterInstall } from '$lib/utils/extension-permissions';
+    import { isDangerousPermission, requiresInstallReview, sortPermissions, dependencyCacheDeclaration, needsDependencyGrant, requiresSetupAfterInstall, permissionDescriptions } from '$lib/utils/extension-permissions';
     import { effectiveConfigFields, initialEditConfig, HOST_OWNED_LSP_CONFIG_KEY, type ConfigField } from '$lib/utils/extension-config';
     import { memoryLimitToInput, parseMemoryLimitMB } from '$lib/utils/memory-stats';
     import { timeAgo } from '$lib/utils/format-time';
@@ -108,83 +108,8 @@
             description: t('settings.extensions.cap.i18n.description'),
         },
     });
-    // Human-readable explanations for sandboxed UI extension permissions.
-    // Non-technical, user-facing wording. Only permissions an extension
-    // actually DECLARES are listed — always-granted ones (config.get,
-    // log.write, theme.get, ui.status) and implied ones (e.g.
-    // editor.removeFooterButton, editor.contentChange, preview.serve,
-    // preview.release, preview.navState) have no entry. Unknown/legacy names
-    // fall back to the raw name in the UI.
-    const PERMISSION_DESCRIPTIONS = $derived<Record<string, { label: string; description: string }>>({
-        'createTask.description.insertText': {
-            label: t('settings.extensions.perm.createTaskDescriptionInsertText.label'),
-            description: t('settings.extensions.perm.createTaskDescriptionInsertText.description'),
-        },
-        'createTask.events.paste': {
-            label: t('settings.extensions.perm.createTaskEventsPaste.label'),
-            description: t('settings.extensions.perm.createTaskEventsPaste.description'),
-        },
-        'network.proxy': {
-            label: t('settings.extensions.perm.networkProxy.label'),
-            description: t('settings.extensions.perm.networkProxy.description'),
-        },
-        'ui.setSize': {
-            label: t('settings.extensions.perm.uiSetSize.label'),
-            description: t('settings.extensions.perm.uiSetSize.description'),
-        },
-        'ui.modal': {
-            label: t('settings.extensions.perm.uiModal.label'),
-            description: t('settings.extensions.perm.uiModal.description'),
-        },
-        'storage.get': {
-            label: t('settings.extensions.perm.storageGet.label'),
-            description: t('settings.extensions.perm.storageGet.description'),
-        },
-        'storage.set': {
-            label: t('settings.extensions.perm.storageSet.label'),
-            description: t('settings.extensions.perm.storageSet.description'),
-        },
-        'storage.delete': {
-            label: t('settings.extensions.perm.storageDelete.label'),
-            description: t('settings.extensions.perm.storageDelete.description'),
-        },
-        'storage.list': {
-            label: t('settings.extensions.perm.storageList.label'),
-            description: t('settings.extensions.perm.storageList.description'),
-        },
-        'editor.addFooterButton': {
-            label: t('settings.extensions.perm.editorAddFooterButton.label'),
-            description: t('settings.extensions.perm.editorAddFooterButton.description'),
-        },
-        'editor.getContent': {
-            label: t('settings.extensions.perm.editorGetContent.label'),
-            description: t('settings.extensions.perm.editorGetContent.description'),
-        },
-        'editor.setContent': {
-            label: t('settings.extensions.perm.editorSetContent.label'),
-            description: t('settings.extensions.perm.editorSetContent.description'),
-        },
-        'editor.setOverlay': {
-            label: t('settings.extensions.perm.editorSetOverlay.label'),
-            description: t('settings.extensions.perm.editorSetOverlay.description'),
-        },
-        'editor.jumpToLine': {
-            label: t('settings.extensions.perm.editorJumpToLine.label'),
-            description: t('settings.extensions.perm.editorJumpToLine.description'),
-        },
-        'editor.save': {
-            label: t('settings.extensions.perm.editorSave.label'),
-            description: t('settings.extensions.perm.editorSave.description'),
-        },
-        'preview.serveScripts': {
-            label: t('settings.extensions.perm.previewServeScripts.label'),
-            description: t('settings.extensions.perm.previewServeScripts.description'),
-        },
-        'preview.serveNetwork': {
-            label: t('settings.extensions.perm.previewServeNetwork.label'),
-            description: t('settings.extensions.perm.previewServeNetwork.description'),
-        },
-    });
+    // Permission labels and warnings, kept with the lists the consent test checks.
+    const PERMISSION_DESCRIPTIONS = $derived(permissionDescriptions());
 
     // Get list of capability keys for an installed extension
     function getCapabilityKeys(ext: Extension): string[] {

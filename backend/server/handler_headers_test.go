@@ -116,10 +116,11 @@ func TestIsolationHeaders(t *testing.T) {
 	s := testServer(t)
 
 	cases := []struct {
-		path       string
-		wantCORP   bool
-		wantPerms  bool
-		wantNoCorp string
+		path        string
+		wantCORP    bool
+		wantPerms   bool
+		wantSandbox bool
+		wantNoCorp  string
 	}{
 		{path: "/", wantCORP: true, wantPerms: true},
 		{path: "/api/config", wantCORP: true, wantPerms: true},
@@ -138,9 +139,10 @@ func TestIsolationHeaders(t *testing.T) {
 			wantPerms: true,
 		},
 		{
-			path:       "/extensions/acme/pack/index.html",
-			wantPerms:  true,
-			wantNoCorp: "an opaque-origin extension iframe loads its own files as subresources",
+			path:        "/extensions/acme/pack/index.html",
+			wantPerms:   true,
+			wantSandbox: true,
+			wantNoCorp:  "an opaque-origin extension iframe loads its own files as subresources",
 		},
 		{
 			path:       "/api/preview/deadbeef/style.css",
@@ -172,6 +174,19 @@ func TestIsolationHeaders(t *testing.T) {
 			// A clipboard rule would break the terminal's paste, which reads it.
 			if strings.Contains(pp, "clipboard") {
 				t.Errorf("Permissions-Policy restricts the clipboard: %q", pp)
+			}
+
+			// The sandbox directive belongs to documents this app did not write.
+			csp := rr.Header().Get("Content-Security-Policy")
+			if got := strings.Contains(csp, "sandbox allow-scripts"); got != tc.wantSandbox {
+				if tc.wantSandbox {
+					t.Errorf("Content-Security-Policy = %q; want sandbox allow-scripts", csp)
+				} else {
+					t.Errorf("Content-Security-Policy = %q; want no sandbox directive", csp)
+				}
+			}
+			if tc.wantSandbox && !strings.Contains(csp, "frame-ancestors 'self'") {
+				t.Errorf("Content-Security-Policy = %q; want frame-ancestors 'self'", csp)
 			}
 		})
 	}

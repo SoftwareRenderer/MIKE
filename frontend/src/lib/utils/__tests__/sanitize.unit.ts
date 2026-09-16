@@ -30,6 +30,15 @@ const PAYLOADS = [
     '<xmp><img src=x onerror=alert(1)></xmp>',
     '<noembed><img src=x onerror=alert(1)></noembed>',
     '<select><option><style></option></select><img src=x onerror=alert(1)>',
+    // Navigation without a script: a refresh directive and URI attributes a link is not
+    // required to use.
+    '<meta http-equiv="refresh" content="0; url=https://evil.example">',
+    '<div><meta http-equiv="refresh" content="0;url=//evil.example"></div>',
+    '<img srcset="javascript:alert(1)">',
+    '<video poster="javascript:alert(1)"></video>',
+    '<svg><a><animate attributeName="href" values="javascript:alert(1)"/><text>x</text></a></svg>',
+    '<svg><a><set attributeName="href" to="javascript:alert(1)"/><text>x</text></a></svg>',
+    '<object codebase="javascript:alert(1)"></object>',
     '<textarea></textarea><img src=x onerror=alert(1)>',
     '<svg><foreignObject><div onclick=alert(1)>x</div></foreignObject></svg>',
     '<details open ontoggle=alert(1)>',
@@ -184,5 +193,31 @@ describe('markdownToSafeHTML', () => {
         const html = markdownToSafeHTML('![diagram](https://example.com/a.png)');
         expect(html).toContain('src="https://example.com/a.png"');
         expect(hazards(html)).toEqual([]);
+    });
+});
+
+describe('the hazard scanner itself', () => {
+    // Fed to the scanner un-sanitized: "no hazards found" is also what a scanner that went
+    // blind prints.
+    it.each([
+        ['a refresh directive', '<div><meta http-equiv="refresh" content="0;url=//evil.example"></div>'],
+        ['a scheme in srcset', '<img srcset="javascript:alert(1)">'],
+        ['a scheme in poster', '<video poster="javascript:alert(1)"></video>'],
+        ['a scheme in an animation value', '<svg><animate attributeName="href" values="javascript:alert(1)"/></svg>'],
+        ['a scheme in an animation target', '<svg><set attributeName="href" to="javascript:alert(1)"/></svg>'],
+        ['a scheme in an object codebase', '<object codebase="javascript:alert(1)"></object>'],
+        ['a handler on a name nobody guessed', '<div onpointerenter=alert(1)>x</div>'],
+    ])('sees %s', (_name, markup) => {
+        expect(hazards(markup)).not.toEqual([]);
+    });
+
+    it('does not report ordinary markup', () => {
+        expect(hazards('<p>text</p><a href="https://example.com/x">x</a><img src="/a.png">')).toEqual([]);
+    });
+
+    it('records what the sanitizer keeps and the app leaves inert', () => {
+        // Inert unless something clones the contents; docs/markup-sanitizing.md.
+        expect(hazards('<template><img src=x></template>')).toEqual([]);
+        expect(hazards('<slot><img src=x></slot>')).toEqual([]);
     });
 });

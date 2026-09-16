@@ -240,39 +240,20 @@ func (wm *WorktreeManager) GetTaskByID(taskID string) (*types.Task, error) {
 	return wm.store.GetTaskByID(taskID)
 }
 
-// worktreesRoot is the directory every task worktree lives under, returned as an absolute path so that
-// every caller means the same directory even when the configured one is relative.
-func (wm *WorktreeManager) worktreesRoot() (string, error) {
-	cfg, err := wm.configStore.GetConfig()
-	if err != nil {
-		return "", err
-	}
-	worktreesDir := cfg.WorkspaceDir
-	if !filepath.IsAbs(worktreesDir) {
-		if abs, err := filepath.Abs(worktreesDir); err == nil {
-			worktreesDir = abs
-		}
-	}
-	return worktreesDir, nil
+// worktreesRoot is the directory every task worktree lives under
+func (wm *WorktreeManager) worktreesRoot() string {
+	return wm.configStore.WorkspaceDir()
 }
 
 // projectWorktreesDir is the directory holding one project's task worktrees: <root>/<projectID>.
-func (wm *WorktreeManager) projectWorktreesDir(projectID string) (string, error) {
-	root, err := wm.worktreesRoot()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(root, projectID), nil
+func (wm *WorktreeManager) projectWorktreesDir(projectID string) string {
+	return filepath.Join(wm.worktreesRoot(), projectID)
 }
 
 // RemoveProjectWorktrees removes a project's worktree directory. Each task's own removal takes only
 // its own, so this is what takes the parent and anything a failed removal left in it.
 func (wm *WorktreeManager) RemoveProjectWorktrees(projectID string) error {
-	dir, err := wm.projectWorktreesDir(projectID)
-	if err != nil {
-		return err
-	}
-	return os.RemoveAll(dir)
+	return os.RemoveAll(wm.projectWorktreesDir(projectID))
 }
 
 // WorktreePath returns the filesystem path for a task's worktree.
@@ -282,11 +263,7 @@ func (wm *WorktreeManager) WorktreePath(taskID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	projectDir, err := wm.projectWorktreesDir(task.ProjectID)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(projectDir, taskID), nil
+	return filepath.Join(wm.projectWorktreesDir(task.ProjectID), taskID), nil
 }
 
 // CreateWorktree creates a git worktree for a task, capturing the current working tree state.
@@ -303,10 +280,7 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 		return "", "", fmt.Errorf("get project: %w", err)
 	}
 
-	worktreesDir, err := wm.worktreesRoot()
-	if err != nil {
-		return "", "", err
-	}
+	worktreesDir := wm.worktreesRoot()
 	worktreePath := filepath.Join(worktreesDir, projectID, taskID)
 
 	// Acquire per-project mutex with timeout

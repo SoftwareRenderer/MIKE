@@ -40,32 +40,42 @@ func isMergeInProgress(dir string) bool {
 // GetConflictedFiles returns a deduplicated list of files with merge conflicts.
 // Uses git status --porcelain (catches UU, AD, DU, AA, DD, UD, UA) and falls back
 // to git diff --diff-filter=U (catches binary conflicts and renames).
+//
+// Both listings are read with -z: every name here goes back to git as a path, and the plain
+// form is display text that quotes a name outside plain ASCII.
 func GetConflictedFiles(dir string) []string {
 	seen := make(map[string]struct{})
 	var files []string
 
-	// Primary: git status --porcelain
-	cmd := git.Command("", "status", "--porcelain")
+	// Primary: git status --porcelain -z
+	cmd := git.Command("", "status", "--porcelain", "-z")
 	cmd.Dir = dir
 	if out, err := cmd.Output(); err == nil {
-		for line := range strings.SplitSeq(string(out), "\n") {
-			line = strings.TrimSpace(line)
-			if len(line) >= 4 && strings.ContainsRune(line[:2], 'U') {
-				if f := strings.TrimSpace(line[3:]); f != "" {
-					files = addUnique(files, seen, f)
-				}
+		entries := strings.Split(string(out), "\x00")
+		for i := 0; i < len(entries); i++ {
+			line := entries[i]
+			if len(line) < 4 {
+				continue
+			}
+			status := line[:2]
+			if strings.ContainsAny(status, "RC") {
+				i++ // a rename or copy names its source path in the next field
+				continue
+			}
+			if strings.ContainsRune(status, 'U') {
+				files = addUnique(files, seen, line[3:])
 			}
 		}
 	}
 
-	// Fallback: git diff --diff-filter=U (binary conflicts, renames)
+	// Fallback: git diff --name-only -z --diff-filter=U (binary conflicts, renames)
 	if len(files) == 0 {
-		cmd = git.Command("", "diff", "--name-only", "--diff-filter=U")
+		cmd = git.Command("", "diff", "--name-only", "-z", "--diff-filter=U")
 		cmd.Dir = dir
 		if out, err := cmd.Output(); err == nil {
-			for line := range strings.SplitSeq(string(out), "\n") {
-				if f := strings.TrimSpace(line); f != "" {
-					files = addUnique(files, seen, f)
+			for _, name := range strings.Split(string(out), "\x00") {
+				if name != "" {
+					files = addUnique(files, seen, name)
 				}
 			}
 		}

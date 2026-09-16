@@ -367,8 +367,9 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 			return nil, fmt.Errorf("sandbox mount %d for project %s: %w", i, projectName, err)
 		}
 	}
-	// An agent extension's mounts come from its own configuration, so nothing else has measured
-	// them. One missing an end is skipped.
+	// An agent extension's mounts come from its manifest and its settings, not from anyone choosing
+	// for this project, so they take the same check as the project's own. An entry missing either end
+	// builds no mount, so it is skipped.
 	if opts.AgentSandbox != nil {
 		for i, m := range opts.AgentSandbox.Mounts {
 			if m.HostPath == "" || m.ContainerPath == "" {

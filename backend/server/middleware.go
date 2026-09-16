@@ -128,6 +128,12 @@ func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 			} else {
 				csp += " script-src 'self';"
 			}
+			// An extension document is public on this origin, so its response carries the sandbox the
+			// mounted frame asks for: opened at the top level it would otherwise run as the signed-in
+			// user. Same directive as previewDocCSPStrict; docs/ui-extensions.md.
+			if strings.HasPrefix(r.URL.Path, "/extensions/") {
+				csp += " sandbox allow-scripts;"
+			}
 			w.Header().Set("Content-Security-Policy", csp)
 		}
 

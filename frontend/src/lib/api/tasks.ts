@@ -2,6 +2,8 @@ import type { MemoryAlertAckPayload, Task, TaskMessage } from '../types';
 import { API_BASE, apiFetch, apiError, generateId } from './helpers';
 import { setBoardCache, getBoardCache, messagesCacheKey, messageFullCacheKey } from '../storage';
 import { markCached } from './cache';
+import { REVIEW_STATUS } from '../utils/review-notify';
+import { reviewNotifier } from '../services/review-notifications.svelte';
 import {
     getOfflineStatus,
     enqueueAction,
@@ -64,6 +66,8 @@ export async function deleteTask(projectId: string, taskId: string): Promise<voi
 
 /** Move a task to a different column (status). Queued when offline. */
 export async function moveTask(projectId: string, taskId: string, status: string): Promise<Task> {
+    // Every client-side move comes through here, so this is where a self-inflicted arrival is marked.
+    if (status === REVIEW_STATUS) reviewNotifier.noteSelfMove(taskId);
     if (getOfflineStatus()) {
         // Carry moved_at so a queued move still lands on top of its column offline
         return await queueWrite('moveTask', { projectId, taskId, status }, { id: taskId, status, moved_at: new Date().toISOString() } as Task);

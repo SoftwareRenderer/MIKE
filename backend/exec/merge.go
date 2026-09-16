@@ -979,13 +979,14 @@ func (m *mergeOrchestrator) persistAndBroadcastMergeMessage(taskID, threadID, co
 }
 
 // stageResolvedConflicts stages every file whose conflict markers are gone. Nothing recorded as
-// resolved is still a success: the commit below is what records the resolution.
+// resolved is still a success: the commit below is what records the resolution. The names come
+// from git's own listing, so they follow "--" and cannot be read as options of git add.
 func (m *mergeOrchestrator) stageResolvedConflicts(taskID, worktreePath string) bool {
 	conflictedFiles := GetResolvedConflictedFiles(worktreePath)
 	if len(conflictedFiles) == 0 {
 		return true
 	}
-	addArgs := append([]string{"add"}, conflictedFiles...)
+	addArgs := append([]string{"add", "--"}, conflictedFiles...)
 	if err := gitRun(worktreePath, addArgs...); err != nil {
 		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("git add failed: %v", err)
 		return false

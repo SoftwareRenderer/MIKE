@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, fireEvent, cleanup, within } from '@testing-library/svelte';
+import { render, fireEvent, cleanup, within, waitFor } from '@testing-library/svelte';
 import PreferencesTab from '$lib/components/ConfigModal/PreferencesTab.svelte';
 
 const MAC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
@@ -8,6 +8,7 @@ const WIN_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KH
 afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
 });
 
 function mockUserAgent(ua: string) {
@@ -123,6 +124,87 @@ describe('PreferencesTab auto-maximize-chat toggle', () => {
         await fireEvent.click(toggle()!);
         expect(toggle()?.getAttribute('aria-checked')).toBe('false');
         expect(onDirty).toHaveBeenCalledTimes(1);
+    });
+});
+
+/** jsdom has no Notification, and the row reads the permission at render time, so the stub goes in first. */
+function stubNotification(permission: 'default' | 'granted' | 'denied', answer?: 'granted' | 'denied') {
+    const requestPermission = vi.fn().mockResolvedValue(answer ?? (permission === 'default' ? 'granted' : permission));
+    vi.stubGlobal('Notification', class {
+        static permission = permission;
+        static requestPermission = requestPermission;
+    });
+    return requestPermission;
+}
+
+describe('PreferencesTab notify-on-review toggle', () => {
+    const TOGGLE = 'button[aria-label="Notify when a task enters Review"]';
+    const DESC = '#notify-on-review-desc';
+
+    function renderNotifyTab(props: { notifyOnReview?: boolean } = {}) {
+        const onDirty = vi.fn();
+        const utils = render(PreferencesTab, {
+            props: { createTaskKey: undefined, createTaskSubmitKey: undefined, onDirty, ...props },
+        });
+        return {
+            ...utils,
+            onDirty,
+            toggle: () => utils.container.querySelector(TOGGLE) as HTMLButtonElement,
+            desc: () => utils.container.querySelector(DESC)?.textContent?.trim(),
+        };
+    }
+
+    it('is off when nothing is stored for it, and lives in the UI section', () => {
+        stubNotification('granted');
+        const { getByText, toggle, desc } = renderNotifyTab();
+        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
+        expect(toggle()!.closest('.section')?.querySelector('.section-label')?.textContent).toBe('UI');
+        expect(getByText('Notify when a task enters Review')).toBeTruthy();
+        expect(desc()).toBe('Send a browser notification when a task starts waiting for you while you are looking elsewhere');
+    });
+
+    it('reflects a stored preference', () => {
+        stubNotification('granted');
+        expect(renderNotifyTab({ notifyOnReview: true }).toggle()?.getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('toggles and reports dirty', async () => {
+        stubNotification('granted');
+        const { toggle, onDirty } = renderNotifyTab();
+        await fireEvent.click(toggle()!);
+        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+        expect(onDirty).toHaveBeenCalledTimes(1);
+    });
+
+    it('asks the browser once, on the click that enables it', async () => {
+        const requestPermission = stubNotification('default');
+        const { toggle, desc } = renderNotifyTab();
+        await fireEvent.click(toggle()!);
+        expect(requestPermission).toHaveBeenCalledTimes(1);
+        await waitFor(() => expect(desc()).toBe('Send a browser notification when a task starts waiting for you while you are looking elsewhere'));
+    });
+
+    it('does not ask when the click disables it', async () => {
+        const requestPermission = stubNotification('granted');
+        const { toggle } = renderNotifyTab({ notifyOnReview: true });
+        await fireEvent.click(toggle()!);
+        expect(requestPermission).not.toHaveBeenCalled();
+    });
+
+    it('names what to do while the browser refuses, and only while enabled', async () => {
+        stubNotification('denied');
+        const { toggle, desc } = renderNotifyTab();
+        expect(desc()).toBe('Send a browser notification when a task starts waiting for you while you are looking elsewhere');
+        await fireEvent.click(toggle()!);
+        expect(desc()).toBe('This browser is not showing notifications for this site — allow them in its site settings');
+        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('says the browser has no notifications rather than blaming the user', () => {
+        // No Notification stubbed at all: a plain-http origin or a webview.
+        const { desc, toggle } = renderNotifyTab({ notifyOnReview: true });
+        expect(desc()).toBe('This browser has no notifications');
+        expect(toggle()?.disabled).toBe(false);
     });
 });
 

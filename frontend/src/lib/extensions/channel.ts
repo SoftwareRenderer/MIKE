@@ -15,7 +15,9 @@ import {
     SUPPORTED_CAPABILITIES,
     CAP_EDITOR_ADD_FOOTER_BUTTON,
     CAP_EDITOR_REMOVE_FOOTER_BUTTON,
+    CAP_EDITOR_FOOTER_CLICK,
     CAP_THEME_GET,
+    CAP_THEME_UPDATE,
     CAP_UI_STATUS,
     CAP_EDITOR_GET_CONTENT,
     CAP_EDITOR_CONTENT_CHANGE,
@@ -28,6 +30,7 @@ import {
 } from './capabilities';
 import { cleanupFooterButtons } from './handlers/editor';
 import { t } from '$lib/i18n';
+import { randomHex } from '$lib/utils/random';
 
 export interface ExtensionHostOptions {
     extensionId: string;
@@ -55,16 +58,7 @@ export interface ExtensionHostOptions {
  * up in the same frame.
  */
 export function mintChannelToken(): string {
-    const bytes = new Uint8Array(16);
-    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-        crypto.getRandomValues(bytes);
-    } else {
-        // Non-browser fallback (jsdom without crypto.getRandomValues).
-        for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
-    }
-    let out = '';
-    for (const b of bytes) out += b.toString(16).padStart(2, '0');
-    return out;
+    return randomHex(16);
 }
 
 export class ExtensionHostChannel {
@@ -90,6 +84,8 @@ export class ExtensionHostChannel {
     /** Sliding-window capability budget (see `overBudget`). */
     private callTimes: number[] = [];
     private lastRateWarnAt = 0;
+    /** Pushed capabilities refused for lack of a grant, warned about once each. */
+    private refusedPushes = new Set<string>();
 
     /** The injection point this channel is mounted at (public for host bookkeeping). */
     get point(): InjectionPoint {
@@ -105,9 +101,12 @@ export class ExtensionHostChannel {
         this.granted.add('config.get');
         this.granted.add('log.write');
         this.granted.add(CAP_THEME_GET);
+        // An extension cannot read the palette and decline the updates that keep it correct.
+        this.granted.add(CAP_THEME_UPDATE);
         this.granted.add(CAP_UI_STATUS);
         if (this.granted.has(CAP_EDITOR_ADD_FOOTER_BUTTON)) {
             this.granted.add(CAP_EDITOR_REMOVE_FOOTER_BUTTON);
+            this.granted.add(CAP_EDITOR_FOOTER_CLICK);
         }
         if (this.granted.has(CAP_EDITOR_GET_CONTENT)) {
             this.granted.add(CAP_EDITOR_CONTENT_CHANGE);
@@ -206,8 +205,22 @@ export class ExtensionHostChannel {
         this.arm();
     }
 
-    /** Push an app event into the frame. Dropped while disarmed (post()). */
+    /**
+     * Push an app event into the frame, unless the capability is not granted:
+     * `editor.contentChange` carries the whole file, which is what the `editor.getContent`
+     * permission is bought for.
+     */
     forward(cap: string, data: any) {
+        if (!this.granted.has(cap)) {
+            if (!this.refusedPushes.has(cap)) {
+                this.refusedPushes.add(cap);
+                console.warn(
+                    `[extension-host] ${this.opts.extensionName}: dropped a pushed ${cap} event — ` +
+                    `the capability is not granted to this extension.`
+                );
+            }
+            return;
+        }
         this.post({ type: 'event', cap, data });
     }
 
