@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"kanban/backend/llmadapter"
-	"kanban/backend/types"
+	"mike/backend/llmadapter"
+	"mike/backend/types"
 )
 
 func openRouterStyleMapping(serverURL string) llmadapter.Mapping {

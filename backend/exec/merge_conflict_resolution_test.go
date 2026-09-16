@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/git"
-	"kanban/backend/types"
+	"mike/backend/git"
+	"mike/backend/types"
 )
 
 // TestMergeConflictResolution_StagesOnlyConflictedFiles verifies that when

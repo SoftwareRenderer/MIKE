@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/startup"
+	"mike/backend/startup"
 )
 
 // login returns the session cookie and CSRF token of a fresh login on s. Several

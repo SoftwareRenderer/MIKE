@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // TestBranchChildFrom_RecreatesMissingParentBranch: a merged and cleaned-up parent still

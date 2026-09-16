@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/extensions"
-	"kanban/backend/types"
+	"mike/backend/extensions"
+	"mike/backend/types"
 )
 
 // A tool call of a sandboxed task runs in its container, so a missing sandbox callback is a

@@ -2,14 +2,14 @@ package server
 
 import (
 	"encoding/json"
-	"kanban/backend/httputil"
+	"mike/backend/httputil"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
 
-	"kanban/backend/toolresult"
-	"kanban/backend/types"
+	"mike/backend/toolresult"
+	"mike/backend/types"
 )
 
 func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {

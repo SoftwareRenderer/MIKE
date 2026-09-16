@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"kanban/backend/git"
+	"mike/backend/git"
 )
 
 // The LSP tools. Each one resolves a symbol by text search in the task's own file access, then asks

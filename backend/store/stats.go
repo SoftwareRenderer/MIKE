@@ -2,8 +2,8 @@ package store
 
 import (
 	"database/sql"
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // GetProjectStats returns aggregated token usage for a project, grouped by model/provider.

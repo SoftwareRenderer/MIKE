@@ -14,15 +14,15 @@ import (
 	"sync"
 	"time"
 
-	"kanban/backend/fsutil"
-	"kanban/backend/git"
-	"kanban/backend/httputil"
-	"kanban/backend/store"
-	"kanban/backend/types"
-	"kanban/pkg/keylock"
+	"mike/backend/fsutil"
+	"mike/backend/git"
+	"mike/backend/httputil"
+	"mike/backend/store"
+	"mike/backend/types"
+	"mike/pkg/keylock"
 
 	"github.com/coder/websocket"
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 var toolCallMarker = []byte(`"event":"tool_call"`)

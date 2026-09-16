@@ -2,7 +2,7 @@ package store
 
 import (
 	"fmt"
-	"kanban/backend/types"
+	"mike/backend/types"
 	"strings"
 	"testing"
 	"time"

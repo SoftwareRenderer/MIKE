@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/httputil"
+	"mike/backend/httputil"
 )
 
 // TestHandleProxyCapsResponse: the proxied response is buffered in full, so without a cap any

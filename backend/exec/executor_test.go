@@ -12,13 +12,13 @@ import (
 	"time"
 
 	"errors"
-	"kanban/backend/config"
-	"kanban/backend/errs"
-	"kanban/backend/git"
-	"kanban/backend/store"
-	"kanban/backend/stream"
-	"kanban/backend/types"
-	pkgagent "kanban/pkg/agent"
+	"mike/backend/config"
+	"mike/backend/errs"
+	"mike/backend/git"
+	"mike/backend/store"
+	"mike/backend/stream"
+	"mike/backend/types"
+	pkgagent "mike/pkg/agent"
 )
 
 // setupExecutorWithGit creates a TaskExecutor with a real git repo for testing.

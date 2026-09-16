@@ -11,8 +11,8 @@ import (
 	"sync"
 	"testing"
 
-	"kanban/backend/types"
-	"kanban/pkg/bridge/protocol"
+	"mike/backend/types"
+	"mike/pkg/bridge/protocol"
 )
 
 // --- isSandboxableTool Tests ---

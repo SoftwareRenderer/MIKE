@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/git"
-	"kanban/backend/types"
+	"mike/backend/git"
+	"mike/backend/types"
 )
 
 // GET /projects/{id}/tasks/{id}/diff/file?full=1 re-reads the file from the task's worktree. The

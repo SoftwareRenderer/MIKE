@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/pkg/keylock"
+	"mike/pkg/keylock"
 )
 
 func TestLockWorktreeWatchedQueuesOnTheSameTableAsLockWorktree(t *testing.T) {

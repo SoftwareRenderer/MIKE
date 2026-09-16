@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 func testConfigStore(t *testing.T) *ConfigStore {

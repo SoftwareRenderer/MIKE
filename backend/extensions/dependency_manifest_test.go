@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 func lspManifest(sandbox *SandboxConfig) *LSPConfig {

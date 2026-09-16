@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"kanban/backend/git"
-	"kanban/backend/lsp"
-	"kanban/pkg/logging"
+	"mike/backend/git"
+	"mike/backend/lsp"
+	"mike/pkg/logging"
 )
 
 // maxDiagnosticFilesPerPass bounds one pass: every file costs a language-server round trip,

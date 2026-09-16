@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 func TestLSPWorkspaceAllowed(t *testing.T) {

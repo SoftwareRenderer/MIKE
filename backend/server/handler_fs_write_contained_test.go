@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"kanban/backend/startup"
+	"mike/backend/startup"
 )
 
 // TestFSWriteRefusesSymlinkedParent (security): a task owns its worktree and can swap a

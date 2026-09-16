@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/store"
+	"mike/backend/types"
 
-	"kanban/pkg/sandboxruntime"
+	"mike/pkg/sandboxruntime"
 )
 
 // jailManager builds a manager over a fresh database with one registered project, so the policy

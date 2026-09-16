@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // configUpdates is the body of PUT /api/config: the fields still encoded, so both "was this key

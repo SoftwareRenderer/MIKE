@@ -222,7 +222,7 @@ func (s *Server) routes() {
 `,
 		"backend/server/server.go": `package server
 
-import "kanban/backend/api"
+import "mike/backend/api"
 
 type Server struct {
 	gitHandler *api.GitHandler
@@ -486,7 +486,7 @@ func (s *Server) routes() {
 `,
 		"backend/server/server.go": `package server
 
-import "kanban/backend/api"
+import "mike/backend/api"
 
 type Server struct {
 	gitHandler  *api.GitHandler
@@ -499,7 +499,7 @@ type Server struct {
 import (
 	"net/http"
 
-	"kanban/backend/stream"
+	"mike/backend/stream"
 )
 
 type GitHandler struct{ store any }
@@ -1540,7 +1540,7 @@ func newOtherThing() *TaskExecutor {
 `,
 		"backend/server/wire.go": `package server
 
-import "kanban/backend/exec"
+import "mike/backend/exec"
 
 func wire() *exec.TaskExecutor { return &exec.TaskExecutor{} }
 `,
@@ -1573,7 +1573,7 @@ func wire() *exec.TaskExecutor { return &exec.TaskExecutor{} }
 		"backend/exec/executor.go": executorFixture,
 		"backend/server/wire.go": `package server
 
-import "kanban/backend/exec"
+import "mike/backend/exec"
 
 func wire() *exec.TaskExecutor { return exec.NewTaskExecutor(exec.Deps{}) }
 `,

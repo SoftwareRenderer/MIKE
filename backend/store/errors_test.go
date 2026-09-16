@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"kanban/backend/errs"
+	"mike/backend/errs"
 )
 
 // The single-row readers carry two things in one error: the 404 classification and the

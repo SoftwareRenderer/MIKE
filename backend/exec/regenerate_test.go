@@ -3,7 +3,7 @@ package exec
 import (
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 func TestTruncateForRegenerate(t *testing.T) {

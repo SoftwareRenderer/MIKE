@@ -3,7 +3,7 @@ package exec
 import (
 	"strings"
 
-	"kanban/backend/git"
+	"mike/backend/git"
 )
 
 // binaryPathsFromStaged returns paths of staged binary non-image files.

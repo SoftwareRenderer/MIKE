@@ -10,7 +10,7 @@ import (
 	"slices"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // toolRow builds a tool_call row as the loop persists it: invocation JSON plus the result

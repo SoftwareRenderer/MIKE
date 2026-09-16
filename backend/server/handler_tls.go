@@ -3,9 +3,9 @@ package server
 import (
 	"net/http"
 
-	"kanban/backend/httputil"
-	"kanban/backend/tls"
-	"kanban/pkg/logging"
+	"mike/backend/httputil"
+	"mike/backend/tls"
+	"mike/pkg/logging"
 )
 
 // caCertFileName is the download name offered for the local CA.

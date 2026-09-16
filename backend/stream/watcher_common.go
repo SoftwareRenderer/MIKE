@@ -6,7 +6,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // runWatcherEventLoop dispatches fsnotify events to handleEvent until the

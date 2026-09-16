@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // HandleProjectDiffFile reads a file the request names inside the project. The cap is the one

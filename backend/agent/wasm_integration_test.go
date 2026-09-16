@@ -10,8 +10,8 @@ import (
 	"sync"
 	"testing"
 
-	"kanban/backend/extensions"
-	"kanban/pkg/agent"
+	"mike/backend/extensions"
+	"mike/pkg/agent"
 )
 
 // withProjectRoot changes the working directory to the project root so

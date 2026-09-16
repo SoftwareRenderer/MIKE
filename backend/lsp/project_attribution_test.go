@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 type attributionProjects struct{ paths []string }

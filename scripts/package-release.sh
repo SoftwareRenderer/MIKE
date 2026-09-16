@@ -172,7 +172,7 @@ for target in "$@"; do
 
     # The server is built as a release: it reads no frontend directory. The bridge takes no tag.
     CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
-        go build -tags "$RELEASE_TAGS" -trimpath -ldflags "-s -w -X kanban/backend/server.Version=$VERSION" -o "$stage/mike-server" .
+        go build -tags "$RELEASE_TAGS" -trimpath -ldflags "-s -w -X mike/backend/server.Version=$VERSION" -o "$stage/mike-server" .
     CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
         go build -trimpath -ldflags "-s -w" -o "$stage/sandbox/sandbox-bridge" ./pkg/bridge/agent
     chmod 0755 "$stage/mike-server" "$stage/sandbox/sandbox-bridge"

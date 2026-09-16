@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // testMergeWaitReport is short so the test proves the report exists without sleeping for the production

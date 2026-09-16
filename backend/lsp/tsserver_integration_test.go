@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/extensions"
+	"mike/backend/extensions"
 
-	"kanban/pkg/bridge"
+	"mike/pkg/bridge"
 )
 
 // TestTSServerCrossFileViaBridge drives the real sandbox-bridge binary (stdin/stdout, as in the
@@ -415,7 +415,7 @@ func findBridgeBinary(t *testing.T) string {
 		return abs
 	}
 	tmp := filepath.Join(t.TempDir(), "sandbox-bridge")
-	out, err := exec.Command("go", "build", "-o", tmp, "kanban/pkg/bridge/agent").CombinedOutput()
+	out, err := exec.Command("go", "build", "-o", tmp, "mike/pkg/bridge/agent").CombinedOutput()
 	if err != nil {
 		t.Skipf("sandbox-bridge not found and cannot build: %v (%s)", err, out)
 	}

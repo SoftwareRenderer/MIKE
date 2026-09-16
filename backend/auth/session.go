@@ -14,8 +14,8 @@ import (
 	"fmt"
 	"time"
 
-	"kanban/backend/store"
-	"kanban/pkg/logging"
+	"mike/backend/store"
+	"mike/pkg/logging"
 )
 
 const (

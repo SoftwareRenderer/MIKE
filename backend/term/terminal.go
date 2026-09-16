@@ -15,17 +15,17 @@ import (
 	"strings"
 	"sync"
 
-	"kanban/backend/agent"
-	"kanban/backend/config"
-	"kanban/backend/httputil"
-	"kanban/backend/prompts"
-	"kanban/backend/sandbox"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/agent"
+	"mike/backend/config"
+	"mike/backend/httputil"
+	"mike/backend/prompts"
+	"mike/backend/sandbox"
+	"mike/backend/store"
+	"mike/backend/types"
 
 	"github.com/coder/websocket"
 	"github.com/creack/pty"
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 const (

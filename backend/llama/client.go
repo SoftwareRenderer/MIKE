@@ -16,11 +16,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"kanban/backend/llmadapter"
-	"kanban/backend/types"
+	"mike/backend/llmadapter"
+	"mike/backend/types"
 
-	"kanban/backend/httputil"
-	"kanban/pkg/logging"
+	"mike/backend/httputil"
+	"mike/pkg/logging"
 )
 
 // LlamaError is a structured error returned by the llama.cpp-compatible server

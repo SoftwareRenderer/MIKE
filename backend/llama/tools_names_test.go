@@ -3,7 +3,7 @@ package llama
 import (
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // TestToolSetsUseOnlyDeclaredNames: offered names and declared names must match in both directions,

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"kanban/backend/httputil"
-	"kanban/backend/types"
+	"mike/backend/httputil"
+	"mike/backend/types"
 )
 
 // TestConnectionRequest is the body for POST /api/config/test-connection.

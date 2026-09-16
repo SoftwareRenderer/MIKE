@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"kanban/pkg/bridge/protocol"
-	"kanban/pkg/logging"
+	"mike/pkg/bridge/protocol"
+	"mike/pkg/logging"
 )
 
 // lspSession is one language server process started on this connection, spoken to over

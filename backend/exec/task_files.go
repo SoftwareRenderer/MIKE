@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"kanban/backend/errs"
-	"kanban/backend/fsutil"
-	"kanban/backend/git"
-	"kanban/backend/sandbox"
+	"mike/backend/errs"
+	"mike/backend/fsutil"
+	"mike/backend/git"
+	"mike/backend/sandbox"
 )
 
 // A pasted or dropped file that is neither an image nor text lands in the environment where this task's

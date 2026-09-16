@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"kanban/backend/lsp"
+	"mike/backend/lsp"
 )
 
 // lspManager is the subset of *lsp.ExtensionLSPManager that TaskExecutor uses.

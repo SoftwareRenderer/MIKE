@@ -44,7 +44,7 @@ something, *replace* the stale sentence; do not append.
   hard refresh. No server restart: a developer's build serves `frontend/dist` from disk (`MIKE_FRONTEND_DIST`
   moves it, and the startup log names which copy is being served). A `-tags release` binary cannot be shown
   a build it was not compiled from — prove a packaged artifact by unpacking it, never by refreshing a tab.
-- **Backend:** edit `backend/`/`pkg/` → `gofmt -w` the touched files → `go build -trimpath -o kanban .`
+- **Backend:** edit `backend/`/`pkg/` → `gofmt -w` the touched files → `go build -trimpath -o mike .`
   (or `make build`) → restart. Config persists in SQLite.
 
 ## Verify the tool output, not the expectation

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 func TestListBranchNamesStripsGitDecoration(t *testing.T) {

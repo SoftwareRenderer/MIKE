@@ -1,10 +1,10 @@
 package exec
 
 import (
-	"kanban/backend/store"
+	"mike/backend/store"
 	"strings"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // Task-level provider concurrency.

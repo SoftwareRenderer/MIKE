@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/agent"
-	"kanban/backend/store"
-	"kanban/backend/stream"
-	"kanban/backend/types"
+	"mike/backend/agent"
+	"mike/backend/store"
+	"mike/backend/stream"
+	"mike/backend/types"
 
 	"github.com/google/uuid"
-	ext "kanban/backend/extensions"
+	ext "mike/backend/extensions"
 )
 
 // heldLLMMock is an httptest LLM server that HOLDS every chat request open

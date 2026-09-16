@@ -23,11 +23,11 @@ import (
 
 	"github.com/creack/pty"
 
-	"kanban/backend/toolresult"
-	"kanban/backend/types"
-	"kanban/pkg/bridge"
-	"kanban/pkg/logging"
-	"kanban/pkg/sandboxruntime"
+	"mike/backend/toolresult"
+	"mike/backend/types"
+	"mike/pkg/bridge"
+	"mike/pkg/logging"
+	"mike/pkg/sandboxruntime"
 )
 
 const (

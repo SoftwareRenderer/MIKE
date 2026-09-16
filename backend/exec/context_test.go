@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // --- Checkpoint Label Prompt Tests ---

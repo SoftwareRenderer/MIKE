@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/sandbox"
+	"mike/backend/sandbox"
 )
 
 // TestHostShellEnvIsGatedOnDangerZone pins both sides of the host terminal's

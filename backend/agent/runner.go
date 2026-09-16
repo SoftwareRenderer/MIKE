@@ -14,10 +14,10 @@ import (
 	"syscall"
 	"time"
 
-	"kanban/backend/extensions"
-	"kanban/backend/sandbox"
-	pkgagent "kanban/pkg/agent"
-	"kanban/pkg/logging"
+	"mike/backend/extensions"
+	"mike/backend/sandbox"
+	pkgagent "mike/pkg/agent"
+	"mike/pkg/logging"
 )
 
 // AgentRunner manages an agent adapter (WASM) and its subprocess.

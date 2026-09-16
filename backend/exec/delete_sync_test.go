@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // TestDeletedMessagesNotSentToLLM verifies that when messages are deleted

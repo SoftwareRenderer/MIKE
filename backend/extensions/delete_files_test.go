@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/pkg/sandboxruntime"
+	"mike/pkg/sandboxruntime"
 )
 
 func deleteFixture(t *testing.T) (*ExtensionHandler, *ExtensionStore, string) {

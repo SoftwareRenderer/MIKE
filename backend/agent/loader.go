@@ -15,9 +15,9 @@ import (
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 
-	"kanban/backend/extensions"
-	"kanban/pkg/agent"
-	"kanban/pkg/logging"
+	"mike/backend/extensions"
+	"mike/pkg/agent"
+	"mike/pkg/logging"
 )
 
 // adapterRegistry holds registered adapter factories. Production loads WASM; tests

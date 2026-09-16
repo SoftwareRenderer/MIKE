@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/pkg/bridge/protocol"
+	"mike/pkg/bridge/protocol"
 )
 
 // TestBashCancelRequest verifies that bash_cancel frames are constructed and parsed correctly.

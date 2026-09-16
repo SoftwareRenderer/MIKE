@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/store"
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/store"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 func peakFixture(t *testing.T) (*store.Store, *types.Task) {

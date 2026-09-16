@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/config"
-	"kanban/backend/git"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/config"
+	"mike/backend/git"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 // TestBranchWatcherLifecycle verifies that the branch watcher starts, detects

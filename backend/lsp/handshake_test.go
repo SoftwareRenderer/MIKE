@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/extensions"
+	"mike/backend/extensions"
 
-	"kanban/pkg/bridge"
-	"kanban/pkg/bridge/protocol"
+	"mike/pkg/bridge"
+	"mike/pkg/bridge/protocol"
 )
 
 // bridgePair hands back a bridge client wired to a stand-in bridge that reads every frame and

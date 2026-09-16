@@ -12,7 +12,7 @@ import (
 	"text/template"
 	"unicode/utf8"
 
-	"kanban/backend/prompts"
+	"mike/backend/prompts"
 )
 
 // Manifest validation: a malformed syntax profile or a duplicated file type is rejected at install

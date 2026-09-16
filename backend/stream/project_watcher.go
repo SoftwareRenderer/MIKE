@@ -9,8 +9,8 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"kanban/backend/fsutil"
-	"kanban/pkg/logging"
+	"mike/backend/fsutil"
+	"mike/pkg/logging"
 )
 
 // isInternalPathInProject checks if absPath is .git or flight recorder relative to projectRoot.

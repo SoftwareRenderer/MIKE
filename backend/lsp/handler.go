@@ -17,9 +17,9 @@ import (
 
 	"github.com/coder/websocket"
 
-	"kanban/backend/httputil"
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/httputil"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // JSONRPCMessage is a JSON-RPC 2.0 message: a request (id and method), a response (id only),

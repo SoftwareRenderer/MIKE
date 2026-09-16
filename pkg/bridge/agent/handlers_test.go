@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/pkg/bridge/protocol"
+	"mike/pkg/bridge/protocol"
 )
 
 // --- Direct handler logic tests (no network simulation) ---

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"kanban/backend/llama"
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/llama"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // commitMessagePrompt is the system prompt for generating commit messages.

@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/sandbox"
-	"kanban/backend/types"
+	"mike/backend/sandbox"
+	"mike/backend/types"
 
-	"kanban/pkg/bridge"
-	"kanban/pkg/bridge/protocol"
+	"mike/pkg/bridge"
+	"mike/pkg/bridge/protocol"
 )
 
 // ---------------------------------------------------------------------------

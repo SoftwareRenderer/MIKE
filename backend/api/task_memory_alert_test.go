@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // The route as backend/server/routes.go registers it.

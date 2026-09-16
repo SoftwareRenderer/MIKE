@@ -17,7 +17,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/git"
+	"mike/backend/git"
 )
 
 // Identity written into every repository created here.

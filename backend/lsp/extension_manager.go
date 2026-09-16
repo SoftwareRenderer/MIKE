@@ -12,12 +12,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"kanban/backend/extensions"
-	"kanban/backend/fsutil"
-	"kanban/backend/sandbox"
-	"kanban/backend/types"
-	"kanban/pkg/bridge"
-	"kanban/pkg/logging"
+	"mike/backend/extensions"
+	"mike/backend/fsutil"
+	"mike/backend/sandbox"
+	"mike/backend/types"
+	"mike/pkg/bridge"
+	"mike/pkg/logging"
 )
 
 // errStaleClient marks a sandbox bridge connection that has outlived its process. The

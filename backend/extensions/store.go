@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"kanban/backend/crypto"
-	"kanban/backend/errs"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/crypto"
+	"mike/backend/errs"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 // mapSensitiveConfig applies transform to every config value the schema declares sensitive and

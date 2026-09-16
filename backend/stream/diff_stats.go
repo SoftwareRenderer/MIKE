@@ -3,8 +3,8 @@ package stream
 import (
 	"strings"
 
-	"kanban/backend/git"
-	"kanban/backend/types"
+	"mike/backend/git"
+	"mike/backend/types"
 )
 
 // DiffStats holds computed diff statistics for a task.

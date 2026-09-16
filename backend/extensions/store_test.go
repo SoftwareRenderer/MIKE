@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/errs"
-	"kanban/backend/store"
+	"mike/backend/errs"
+	"mike/backend/store"
 )
 
 func testStore(t *testing.T) *ExtensionStore {

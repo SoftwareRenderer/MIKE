@@ -10,7 +10,7 @@ import (
 	"os"
 	"testing"
 
-	"kanban/backend/tls"
+	"mike/backend/tls"
 )
 
 // defaultCertServer wires a test server the way main.go wires a real one without

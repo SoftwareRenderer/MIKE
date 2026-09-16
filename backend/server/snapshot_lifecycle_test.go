@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/git"
+	"mike/backend/git"
 )
 
 func pinFixtureRepo(t *testing.T, s *Server, name string) (projID, repoPath, head string) {

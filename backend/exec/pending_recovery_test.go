@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // seedPendingTask creates an "In Progress + Pending" task whose thread tail is the given

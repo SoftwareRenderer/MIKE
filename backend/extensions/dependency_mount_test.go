@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // envSpecs returns the value of every "-e" argument, the counterpart of mountSpecs. A dependency

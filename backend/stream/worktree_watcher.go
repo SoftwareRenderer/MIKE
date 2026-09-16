@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 
 	"github.com/fsnotify/fsnotify"
-	"kanban/backend/git"
-	"kanban/pkg/logging"
+	"mike/backend/git"
+	"mike/pkg/logging"
 )
 
 // DiffStatsEvent holds data for a diff stats broadcast to clients.

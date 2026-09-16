@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/fsutil"
-	"kanban/backend/types"
+	"mike/backend/fsutil"
+	"mike/backend/types"
 
-	"kanban/backend/startup"
+	"mike/backend/startup"
 )
 
 // The host-root jail on the three no-project file endpoints: the picker (GET /api/fs), its mkdir,

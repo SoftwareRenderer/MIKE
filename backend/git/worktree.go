@@ -15,12 +15,12 @@ import (
 	"sync"
 	"time"
 
-	"kanban/backend/config"
-	"kanban/backend/fsutil"
-	"kanban/backend/store"
-	"kanban/backend/types"
-	"kanban/pkg/keylock"
-	"kanban/pkg/logging"
+	"mike/backend/config"
+	"mike/backend/fsutil"
+	"mike/backend/store"
+	"mike/backend/types"
+	"mike/pkg/keylock"
+	"mike/pkg/logging"
 )
 
 // EmptyTreeHash is git's SHA-1 of "tree 0\0" — the empty tree object.

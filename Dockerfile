@@ -51,8 +51,8 @@ COPY --from=web /build/dist ./frontend/dist
 ENV CGO_ENABLED=0
 ARG VERSION
 # The image ships no frontend directory, so this is the release build; the bridge takes no tag.
-RUN go build -tags release -trimpath -buildvcs=false -ldflags "-s -w -X kanban/backend/server.Version=${VERSION}" \
-      -o /out/kanban . && \
+RUN go build -tags release -trimpath -buildvcs=false -ldflags "-s -w -X mike/backend/server.Version=${VERSION}" \
+      -o /out/mike . && \
     go build -trimpath -buildvcs=false -ldflags "-s -w" \
       -o /out/sandbox-bridge ./pkg/bridge/agent
 
@@ -134,12 +134,12 @@ RUN mkdir -p /etc/containers/registries.conf.d && \
 #   extensions dir      -> ./extensions      (a volume at runtime)
 #   prompts             -> ./prompts
 WORKDIR /mike
-COPY --from=go  /out/kanban           /mike/kanban
+COPY --from=go  /out/mike             /mike/mike
 COPY --from=go  /out/sandbox-bridge   /mike/sandbox-bridge
 COPY prompts/*.tmpl /mike/prompts/
 COPY scripts/docker-entrypoint.sh /usr/local/bin/mike-entrypoint.sh
 COPY scripts/mike-healthcheck.sh  /usr/local/bin/mike-healthcheck
-RUN chmod 0755 /mike/kanban /mike/sandbox-bridge /usr/local/bin/mike-entrypoint.sh /usr/local/bin/mike-healthcheck && \
+RUN chmod 0755 /mike/mike /mike/sandbox-bridge /usr/local/bin/mike-entrypoint.sh /usr/local/bin/mike-healthcheck && \
     mkdir -p /mike/data /mike/worktrees /mike/extensions /mike/projects && \
     chmod 0700 /mike/data
 

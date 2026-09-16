@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/extensions"
-	"kanban/pkg/agent"
+	"mike/backend/extensions"
+	"mike/pkg/agent"
 )
 
 // mockAdapter implements agent.AgentAdapter for testing.

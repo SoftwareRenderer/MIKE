@@ -44,7 +44,7 @@ with zero agent-specific persistence in the backend.
 
 `backend/agent`'s `TestWasmPiAdapter_*` tests are the only check that a rebuilt `pi.wasm` loads under
 wazero, and they **skip** rather than fail when `extensions/agent/pi/pi.wasm` is absent — which it is in a
-checkout with no installed pi extension. So `ok kanban/backend/agent` says nothing about the artifact:
+checkout with no installed pi extension. So `ok mike/backend/agent` says nothing about the artifact:
 copy the built module to that path (gitignored) and re-run `-run TestWasmPiAdapter` to see them pass.
 
 **URL scheme:** `agent://<name>` (legacy `pi://agent`). The shape has one home —

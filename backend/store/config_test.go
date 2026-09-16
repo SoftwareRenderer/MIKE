@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 func TestGetSetConfigValue(t *testing.T) {

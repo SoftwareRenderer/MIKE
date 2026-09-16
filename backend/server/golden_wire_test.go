@@ -27,9 +27,9 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/git"
-	"kanban/backend/testutil/testgit"
-	"kanban/backend/types"
+	"mike/backend/git"
+	"mike/backend/testutil/testgit"
+	"mike/backend/types"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite the golden wire files instead of comparing")

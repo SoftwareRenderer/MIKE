@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/httputil"
+	"mike/backend/httputil"
 )
 
 // TestMaxBodyMiddlewareBoundsEveryReader covers the handlers that decode straight from

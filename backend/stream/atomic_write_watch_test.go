@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/fsutil"
-	"kanban/backend/git"
+	"mike/backend/fsutil"
+	"mike/backend/git"
 )
 
 type fsEvent struct{ op, path string }

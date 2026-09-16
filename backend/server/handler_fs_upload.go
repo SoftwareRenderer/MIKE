@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"kanban/backend/exec"
-	"kanban/backend/fsutil"
-	"kanban/pkg/logging"
+	"mike/backend/exec"
+	"mike/backend/fsutil"
+	"mike/pkg/logging"
 )
 
 // Uploads are the only fs write whose body is not JSON: /api/fs/write's `content`

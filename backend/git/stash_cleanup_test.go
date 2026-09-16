@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/config"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/config"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 // setupStashTest creates a repo with an initial commit and a worktree manager.

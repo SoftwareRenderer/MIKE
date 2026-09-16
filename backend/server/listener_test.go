@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // The hybrid listener reads a connection's first byte to tell TLS from plain HTTP, and

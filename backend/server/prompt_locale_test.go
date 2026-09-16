@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"kanban/backend/extensions"
-	"kanban/backend/prompts"
+	"mike/backend/extensions"
+	"mike/backend/prompts"
 )
 
 // packWithFiles creates the on-disk half of an installed pack under the server's

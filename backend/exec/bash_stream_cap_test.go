@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/toolresult"
+	"mike/backend/toolresult"
 )
 
 // The host bash path writes a tool command's output straight into this process's memory;

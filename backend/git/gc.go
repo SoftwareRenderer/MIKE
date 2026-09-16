@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"kanban/backend/store"
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/store"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // threadBranchNamespace is the fork branch namespace; server/handler_thread.go writes the same name.

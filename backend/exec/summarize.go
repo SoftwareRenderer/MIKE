@@ -9,16 +9,16 @@ import (
 	"sync"
 	"time"
 
-	"kanban/backend/config"
-	"kanban/backend/git"
-	"kanban/backend/httputil"
-	"kanban/backend/prompts"
-	"kanban/backend/store"
-	"kanban/backend/stream"
-	"kanban/backend/types"
+	"mike/backend/config"
+	"mike/backend/git"
+	"mike/backend/httputil"
+	"mike/backend/prompts"
+	"mike/backend/store"
+	"mike/backend/stream"
+	"mike/backend/types"
 
 	"github.com/google/uuid"
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // summarizeOrchestrator owns a task's context window: deciding when the conversation approaches

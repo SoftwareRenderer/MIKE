@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // ResolveMainBranch returns the branch to use for a task's Main thread. A titled

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/pkg/sandboxruntime"
+	"mike/pkg/sandboxruntime"
 )
 
 // TestPodmanCommandBoundsTheWait checks the bound is set, not that it works: proving that needs a

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // CreateThread inserts a new thread for a task.

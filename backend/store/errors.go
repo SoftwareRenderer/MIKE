@@ -3,7 +3,7 @@ package store
 import (
 	"fmt"
 
-	"kanban/backend/errs"
+	"mike/backend/errs"
 )
 
 // Sentinels for the single-row readers. Each wraps errs.ErrNotFound with the entity's

@@ -3,7 +3,7 @@ package sandbox
 import (
 	"testing"
 
-	"kanban/pkg/sandboxruntime"
+	"mike/pkg/sandboxruntime"
 )
 
 // fixedMemory stands in for the memory tracker, so the accounting can be tested without a

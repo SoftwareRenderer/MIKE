@@ -15,7 +15,7 @@ import (
 	"testing"
 	"text/template"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // resetOverlay returns the package to the no-pack state after a test, so overlay

@@ -11,14 +11,14 @@ import (
 	"syscall"
 	"time"
 
-	"kanban/backend/server"
-	"kanban/backend/tls"
+	"mike/backend/server"
+	"mike/backend/tls"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 	"net/http"
 	_ "net/http/pprof"
 
-	"kanban/backend/startup"
+	"mike/backend/startup"
 )
 
 func main() {

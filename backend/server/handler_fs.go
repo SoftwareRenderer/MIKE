@@ -17,13 +17,13 @@ import (
 	"strconv"
 	"strings"
 
-	"kanban/backend/errs"
-	"kanban/backend/fsutil"
-	"kanban/backend/git"
-	"kanban/backend/prompts"
-	"kanban/backend/sandbox"
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/errs"
+	"mike/backend/fsutil"
+	"mike/backend/git"
+	"mike/backend/prompts"
+	"mike/backend/sandbox"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {

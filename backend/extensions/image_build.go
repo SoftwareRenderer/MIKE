@@ -3,12 +3,12 @@ package extensions
 import (
 	"fmt"
 	"io"
-	"kanban/pkg/subproc"
+	"mike/pkg/subproc"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"kanban/pkg/sandboxruntime"
+	"mike/pkg/sandboxruntime"
 )
 
 // An extension image is built in a temp directory this package creates, never in the server's

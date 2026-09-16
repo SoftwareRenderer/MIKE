@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"kanban/backend/llama"
-	"kanban/backend/types"
+	"mike/backend/llama"
+	"mike/backend/types"
 )
 
 var pathRegex = regexp.MustCompile(`"path"\s*:\s*"([^"]+)"`)

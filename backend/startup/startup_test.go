@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/extensions"
-	"kanban/backend/fsutil"
-	"kanban/backend/sandbox"
-	"kanban/pkg/logging"
+	"mike/backend/extensions"
+	"mike/backend/fsutil"
+	"mike/backend/sandbox"
+	"mike/pkg/logging"
 )
 
 // env is the test-only variable used by the ladder tests. Nothing in production reads it.

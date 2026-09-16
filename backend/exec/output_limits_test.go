@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/toolresult"
-	"kanban/pkg/bridge/protocol"
+	"mike/backend/toolresult"
+	"mike/pkg/bridge/protocol"
 )
 
 // A sandboxed command writes whatever it likes and the bridge hands over the whole stream, while

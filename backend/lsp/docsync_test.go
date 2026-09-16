@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"kanban/backend/extensions"
-	"kanban/backend/fsutil"
+	"mike/backend/extensions"
+	"mike/backend/fsutil"
 )
 
 func TestDecideDocSync(t *testing.T) {

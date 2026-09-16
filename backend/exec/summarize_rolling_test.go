@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // summaryLLM records every request body it serves and answers each call with the next

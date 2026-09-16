@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 func TestAgentClient(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"kanban/backend/fsutil"
-	"kanban/backend/types"
+	"mike/backend/fsutil"
+	"mike/backend/types"
 )
 
 // TestFSWriteAtomic: a save renames a temporary file into place, so a caller never

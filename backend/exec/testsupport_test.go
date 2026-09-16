@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"kanban/backend/config"
-	"kanban/backend/git"
-	"kanban/backend/store"
-	"kanban/backend/stream"
+	"mike/backend/config"
+	"mike/backend/git"
+	"mike/backend/store"
+	"mike/backend/stream"
 )
 
 // newTestExecutorWith builds an executor through the production constructor. A dependency a test has

@@ -5,9 +5,9 @@ import (
 	"os"
 	"sync"
 
-	ext "kanban/backend/extensions"
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	ext "mike/backend/extensions"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // ConfigStore is the interface the registry needs for user-configured agent settings.

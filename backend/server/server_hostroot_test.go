@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/fsutil"
-	"kanban/backend/startup"
-	"kanban/pkg/logging"
+	"mike/backend/fsutil"
+	"mike/backend/startup"
+	"mike/pkg/logging"
 )
 
 // widenHostRoot swaps a server's jail to the widened one. It exists because production decides the

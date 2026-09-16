@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/pkg/bridge"
+	"mike/pkg/bridge"
 )
 
 // A bridge whose peer never reads is a language server that stopped answering. These tests pin

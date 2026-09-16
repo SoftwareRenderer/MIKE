@@ -3,11 +3,11 @@ package lsp
 import (
 	"testing"
 
-	"kanban/backend/extensions"
+	"mike/backend/extensions"
 
 	"github.com/coder/websocket"
 
-	"kanban/pkg/sandboxruntime"
+	"mike/pkg/sandboxruntime"
 )
 
 // TestReleaseHandsTheConnectionBackOnlyToTheLastHolder guards the rule that keeps a turn's

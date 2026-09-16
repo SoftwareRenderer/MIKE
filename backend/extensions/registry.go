@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"kanban/backend/git"
-	"kanban/pkg/sandboxruntime"
-	"kanban/pkg/subproc"
+	"mike/backend/git"
+	"mike/pkg/sandboxruntime"
+	"mike/pkg/subproc"
 
-	"kanban/backend/httputil"
-	"kanban/pkg/logging"
+	"mike/backend/httputil"
+	"mike/pkg/logging"
 )
 
 // RegistryClient fetches extension metadata and manages container images.

@@ -1,7 +1,7 @@
 package store
 
 import (
-	"kanban/backend/types"
+	"mike/backend/types"
 	"testing"
 	"time"
 )

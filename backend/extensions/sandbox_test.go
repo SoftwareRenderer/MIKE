@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
-	"kanban/pkg/sandboxruntime"
+	"mike/backend/types"
+	"mike/pkg/sandboxruntime"
 )
 
 func TestSanitizeContainerID(t *testing.T) {

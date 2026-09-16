@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // TestShutdownOrderIsWhatWeDeclared: the declared sequence is [stageCount] names, and Shutdown must run

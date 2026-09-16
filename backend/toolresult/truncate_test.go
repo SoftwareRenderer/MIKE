@@ -1,7 +1,7 @@
 package toolresult_test
 
 import (
-	"kanban/backend/toolresult"
+	"mike/backend/toolresult"
 	"strings"
 	"testing"
 )

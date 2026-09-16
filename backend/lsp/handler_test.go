@@ -14,7 +14,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // mockRegistry is a test double for lspRegistry. It resolves .go files to a

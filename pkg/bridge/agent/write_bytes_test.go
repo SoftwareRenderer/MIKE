@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/pkg/bridge/protocol"
+	"mike/pkg/bridge/protocol"
 )
 
 // runBytesWrite drives handleWriteBytes over a net.Pipe, which is unbuffered: the handler writes

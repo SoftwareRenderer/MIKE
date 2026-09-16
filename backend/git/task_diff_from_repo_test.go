@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/config"
-	"kanban/backend/store"
+	"mike/backend/config"
+	"mike/backend/store"
 )
 
 // newBareDiffTestRepo creates a temp git repo with an initial commit and

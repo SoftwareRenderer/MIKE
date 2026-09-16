@@ -101,4 +101,4 @@ fi
 # exec, so the server IS PID 1's replacement and SIGTERM reaches its bounded shutdown path
 # (backend/server/shutdown.go). A shell left in front of it would eat the signal and leave
 # the containers running.
-exec /mike/kanban "$@"
+exec /mike/mike "$@"

@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"kanban/backend/agent"
-	"kanban/backend/extensions"
-	"kanban/backend/git"
-	"kanban/backend/prompts"
-	"kanban/backend/types"
-	pkgagent "kanban/pkg/agent"
+	"mike/backend/agent"
+	"mike/backend/extensions"
+	"mike/backend/git"
+	"mike/backend/prompts"
+	"mike/backend/types"
+	pkgagent "mike/pkg/agent"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 
 	"github.com/google/uuid"
 )

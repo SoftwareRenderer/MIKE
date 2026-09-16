@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/pkg/bridge/protocol"
+	"mike/pkg/bridge/protocol"
 )
 
 // runReadRequest drives handleRead over a net.Pipe and returns every frame the agent wrote,

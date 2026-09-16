@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/config"
-	"kanban/backend/git"
-	"kanban/backend/store"
-	"kanban/backend/testutil/testgit"
-	"kanban/backend/types"
+	"mike/backend/config"
+	"mike/backend/git"
+	"mike/backend/store"
+	"mike/backend/testutil/testgit"
+	"mike/backend/types"
 )
 
 // --- Test helpers (shared) ---

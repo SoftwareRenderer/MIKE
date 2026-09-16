@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // chdirToRepoRoot points the CWD at the repo root so summarizeContext can render

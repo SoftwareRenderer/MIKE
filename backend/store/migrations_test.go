@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // Migrations are the only schema path for a database created by an older MIKE. Pinning the

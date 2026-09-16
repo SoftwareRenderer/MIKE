@@ -3,7 +3,7 @@ package git
 import (
 	"time"
 
-	"kanban/pkg/keylock"
+	"mike/pkg/keylock"
 )
 
 // tryLockProjectWorktree waits up to timeout for the project's worktree lock and returns its release

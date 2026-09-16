@@ -5,9 +5,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"kanban/backend/sandbox"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/sandbox"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 // A deleted project's tasks own containers, worktrees and upload directories outside the database.

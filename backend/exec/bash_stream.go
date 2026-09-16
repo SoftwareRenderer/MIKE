@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"kanban/backend/agent"
-	"kanban/backend/toolresult"
-	"kanban/pkg/procterm"
+	"mike/backend/agent"
+	"mike/backend/toolresult"
+	"mike/pkg/procterm"
 )
 
 // Bounds for the tool's bash timeout. Ending the command — killing its group, flushing

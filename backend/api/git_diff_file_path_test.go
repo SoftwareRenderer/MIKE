@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // secretMarker is the content of the file planted outside the project; seeing it in

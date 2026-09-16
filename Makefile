@@ -8,7 +8,7 @@ GIT_VER  := $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^V
 ifeq ($(VERSION),dev)
 VERSION  := $(or $(GIT_VER),dev)
 endif
-LDFLAGS  := -X kanban/backend/server.Version=$(VERSION)
+LDFLAGS  := -X mike/backend/server.Version=$(VERSION)
 
 # A build someone other than the developer runs: reads no frontend directory and refuses
 # --frontend-dist / MIKE_FRONTEND_DIST. `make check-release` keeps this variant compiled.
@@ -20,11 +20,11 @@ RELEASE_TAGS := release
 
 .PHONY: build
 build: frontend ## Build binary with version injected + frontend
-	go build -trimpath -ldflags "$(LDFLAGS)" -o kanban .
+	go build -trimpath -ldflags "$(LDFLAGS)" -o mike .
 
 .PHONY: build-backend
 build-backend: ## Build Go binary only (no frontend rebuild)
-	go build -trimpath -ldflags "$(LDFLAGS)" -o kanban .
+	go build -trimpath -ldflags "$(LDFLAGS)" -o mike .
 
 .PHONY: frontend
 frontend: ## Build frontend (Vite)
@@ -185,7 +185,7 @@ check: ## THE GATE: lint + bridge-check + build + Go tests + frontend gates
 	@echo "==> bridge-check (a stale sandbox-bridge is an edit that never runs)"
 	@$(MAKE) --no-print-directory bridge-check
 	@echo "==> build"
-	@go build -trimpath -o kanban .
+	@go build -trimpath -o mike .
 	@$(MAKE) --no-print-directory check-release
 	@echo "==> go test"
 	@$(MAKE) --no-print-directory test-go
@@ -220,11 +220,11 @@ MIKE_TLS ?= 0
 
 .PHONY: run
 run: ## Start dev server (background, no TLS, dev defaults)
-	MIKE_ENCRYPTION_KEY=$(MIKE_ENCRYPTION_KEY) MIKE_LOGIN_PASSWORD=$(MIKE_LOGIN_PASSWORD) MIKE_TLS=$(MIKE_TLS) ./kanban &
+	MIKE_ENCRYPTION_KEY=$(MIKE_ENCRYPTION_KEY) MIKE_LOGIN_PASSWORD=$(MIKE_LOGIN_PASSWORD) MIKE_TLS=$(MIKE_TLS) ./mike &
 
 .PHONY: stop
-stop: ## Stop dev server (exact process name; -f would match any path containing */kanban)
-	pkill -x kanban
+stop: ## Stop dev server (exact process name; -f would match any path containing */mike)
+	pkill -x mike
 
 # ---------------------------------------------------------------------------
 # Clean
@@ -232,7 +232,7 @@ stop: ## Stop dev server (exact process name; -f would match any path containing
 
 .PHONY: clean
 clean: ## Remove build artifacts
-	rm -f kanban mike-server
+	rm -f mike mike-server
 	rm -rf frontend/dist
 	rm -rf dist
 	@# Recreated: `go:embed` of the SPA needs one file inside frontend/dist.
@@ -255,7 +255,7 @@ PACKAGE_TARGETS := linux/amd64 linux/arm64
 release: ## Build release binary with git tag as version (set VERSION=vX.Y.Z)
 	@echo "Building version $(VERSION) (release: no frontend directory)"
 	cd frontend && npm run build
-	go build -tags $(RELEASE_TAGS) -trimpath -ldflags "$(LDFLAGS)" -o kanban .
+	go build -tags $(RELEASE_TAGS) -trimpath -ldflags "$(LDFLAGS)" -o mike .
 
 .PHONY: package
 package: frontend ## Build dist/mike-server-<version>-<os>-<arch>.tar.gz for every target + sha256sum.txt

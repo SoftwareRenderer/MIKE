@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/llama"
-	"kanban/backend/store"
-	"kanban/backend/stream"
-	"kanban/backend/types"
+	"mike/backend/llama"
+	"mike/backend/store"
+	"mike/backend/stream"
+	"mike/backend/types"
 
 	"github.com/coder/websocket"
 )

@@ -8,9 +8,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"kanban/pkg/bridge/protocol"
-	"kanban/pkg/logging"
-	"kanban/pkg/procterm"
+	"mike/pkg/bridge/protocol"
+	"mike/pkg/logging"
+	"mike/pkg/procterm"
 )
 
 // handler manages request dispatch for a single client connection.

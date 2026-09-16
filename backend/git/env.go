@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"kanban/pkg/subproc"
+	"mike/pkg/subproc"
 )
 
 // gitBinary is a variable so a test can point a subprocess at a stub.

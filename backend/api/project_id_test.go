@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // "<repo>/sub/.." names the repository, and its base name is "..".

@@ -1,4 +1,4 @@
-module kanban
+module mike
 
 go 1.26.2
 

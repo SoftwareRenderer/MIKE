@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"time"
 
-	"kanban/backend/httputil"
-	"kanban/backend/stream"
-	"kanban/backend/types"
+	"mike/backend/httputil"
+	"mike/backend/stream"
+	"mike/backend/types"
 
 	"github.com/google/uuid"
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // HandleRetry restarts a task's turn on its existing conversation tree. The route is registered as

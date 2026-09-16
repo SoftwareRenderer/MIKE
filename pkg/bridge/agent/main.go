@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // stdioConn implements net.Conn using stdin/stdout pipes.

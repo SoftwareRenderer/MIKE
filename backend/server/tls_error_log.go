@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // net/http logs its own errors through Server.ErrorLog. One of them is pure noise here:

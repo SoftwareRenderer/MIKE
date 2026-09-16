@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 func TestMemoryGateZeroCapacityDisablesGate(t *testing.T) {

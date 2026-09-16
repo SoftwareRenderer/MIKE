@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // removeExtensionFiles deletes a deleted extension's materialized directory and returns a sentence

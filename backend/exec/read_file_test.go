@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/config"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/config"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 // newReadTestExecutor creates a TaskExecutor with a test store and worktree for testing read_file.

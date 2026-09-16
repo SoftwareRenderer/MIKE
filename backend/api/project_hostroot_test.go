@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/config"
-	"kanban/backend/fsutil"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/config"
+	"mike/backend/fsutil"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 // Adding a project is a host-wide file operation, so it obeys the picker's rule — inside $HOME

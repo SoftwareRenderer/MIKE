@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
-	"kanban/pkg/bridge/protocol"
+	"mike/backend/types"
+	"mike/pkg/bridge/protocol"
 )
 
 // taskUploadProject seeds an unsandboxed project whose directory is a real git repository, one task, and

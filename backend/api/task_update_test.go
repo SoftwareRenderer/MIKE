@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // TestPUTTask_FieldWrongTypeIsRejectedWithoutPanicOrSilence: a wrong-typed field in a partial task

@@ -2,7 +2,7 @@ package server
 
 import (
 	"io/fs"
-	"kanban/backend/fsutil"
+	"mike/backend/fsutil"
 	"net/http"
 	"path/filepath"
 	"strings"

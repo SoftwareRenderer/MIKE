@@ -3,7 +3,7 @@ package llama
 import (
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 func TestGetPlanModeToolDefinitions(t *testing.T) {

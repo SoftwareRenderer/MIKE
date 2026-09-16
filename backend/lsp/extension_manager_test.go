@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/extensions"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/extensions"
+	"mike/backend/store"
+	"mike/backend/types"
 
-	"kanban/pkg/sandboxruntime"
+	"mike/pkg/sandboxruntime"
 )
 
 func testExtensionStore(t *testing.T) *extensions.ExtensionStore {

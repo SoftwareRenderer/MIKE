@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // TestMessageCommitHashRequiresObjectID holds the shape rule at the entry point that is

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // taskMessageCols is the column list every task_messages reader must use, kept next to

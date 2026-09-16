@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // envFlags returns the value of every -e flag, in order, and checks the flags are

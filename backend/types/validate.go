@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"kanban/pkg/sandboxruntime"
+	"mike/pkg/sandboxruntime"
 )
 
 // charTable marks ASCII alphanumeric plus the given extras, as a lookup table for the

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/fsutil"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/fsutil"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 func jailedDockerfileProject(t *testing.T) (h *ProjectHandler, s *store.Store, id, inside, outside string) {

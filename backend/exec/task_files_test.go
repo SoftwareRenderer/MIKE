@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/config"
-	"kanban/backend/errs"
-	"kanban/backend/git"
-	"kanban/backend/sandbox"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/config"
+	"mike/backend/errs"
+	"mike/backend/git"
+	"mike/backend/sandbox"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 // uploadFixture seeds a real git repository, a project (sandboxed or not), a task and its worktree. The

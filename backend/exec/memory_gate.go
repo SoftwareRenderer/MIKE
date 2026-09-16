@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // memoryGatePollInterval is the re-check interval when no Release signal arrives.

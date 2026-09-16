@@ -13,11 +13,11 @@ import (
 	"strconv"
 	"strings"
 
-	"kanban/backend/exec"
-	"kanban/backend/fsutil"
-	"kanban/backend/git"
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/exec"
+	"mike/backend/fsutil"
+	"mike/backend/git"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // rawImageTypes is the whole permission of GET /api/fs/raw: a name is served if and only if it is a

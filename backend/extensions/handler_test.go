@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"io/fs"
-	"kanban/pkg/sandboxruntime"
+	"mike/pkg/sandboxruntime"
 )
 
 func testHandler(t *testing.T) *ExtensionHandler {

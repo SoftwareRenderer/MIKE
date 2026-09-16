@@ -282,7 +282,7 @@ within 15000ms".
 
 `globalTeardown` is `tests/global-teardown.ts`, whose default export is *only* teardown — naming
 `global-setup.ts` there re-runs setup at the end of every run and leaves a server pair, lock and database
-nothing will stop. Verify after any change to setup/teardown: `pgrep -xc kanban` → 0, nothing listening on
+nothing will stop. Verify after any change to setup/teardown: `pgrep -xc mike` → 0, nothing listening on
 3000/3001/9999, no `/tmp/kanban-test-data*`. Teardown stops servers by **identity** (`--data-dir <dir>`):
 they are `setsid go run .` grandchildren, so the port owner is not the process that should stop, and
 `lsof -ti:PORT` also answers with clients.

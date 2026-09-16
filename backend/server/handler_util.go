@@ -1,7 +1,7 @@
 package server
 
 import (
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 	"net/http"
 	"os"
 	"strings"

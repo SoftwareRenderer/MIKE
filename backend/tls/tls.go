@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // Config holds TLS certificate paths for the server.

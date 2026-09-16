@@ -7,10 +7,10 @@ package api
 import (
 	"net/http"
 
-	"kanban/backend/httputil"
-	"kanban/backend/types"
+	"mike/backend/httputil"
+	"mike/backend/types"
 
-	"kanban/backend/git"
+	"mike/backend/git"
 )
 
 // taskGetter is the store call the shared preambles need.

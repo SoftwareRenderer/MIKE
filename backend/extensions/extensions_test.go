@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 func makeTestExtension(t *testing.T, extType, installSource string) *Extension {

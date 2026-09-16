@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // ErrShutdownDeadline is returned when the shutdown sequence did not finish inside its budget.

@@ -2,7 +2,7 @@ package exec
 
 import (
 	"fmt"
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // The cleanup that runs when a task loop exits, as an ordered list rather than 50 lines inside a defer.

@@ -3,10 +3,10 @@ package api
 import (
 	"net/http"
 
-	"kanban/backend/config"
-	"kanban/backend/httputil"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/config"
+	"mike/backend/httputil"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 // BoardHandler handles board-level operations.

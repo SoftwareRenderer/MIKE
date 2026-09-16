@@ -18,10 +18,10 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/config"
-	"kanban/backend/sandbox"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/config"
+	"mike/backend/sandbox"
+	"mike/backend/store"
+	"mike/backend/types"
 
 	"github.com/coder/websocket"
 	"github.com/creack/pty"

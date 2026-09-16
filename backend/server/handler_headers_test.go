@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/startup"
+	"mike/backend/startup"
 )
 
 // TestSessionCookieSecureFlag pins what decides the Secure flag. A TLS-terminating proxy is the

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 // recordingSupervisorActions records every stopTask/startTask/startSubtask call.

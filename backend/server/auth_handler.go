@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"kanban/backend/auth"
+	"mike/backend/auth"
 )
 
 const (

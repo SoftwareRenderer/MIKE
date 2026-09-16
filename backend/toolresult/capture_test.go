@@ -3,7 +3,7 @@ package toolresult_test
 import (
 	"fmt"
 	"io"
-	"kanban/backend/toolresult"
+	"mike/backend/toolresult"
 	"strings"
 	"sync"
 	"testing"

@@ -12,13 +12,13 @@ import (
 	"strings"
 	"sync"
 
-	"kanban/backend/fsutil"
-	"kanban/backend/git"
-	"kanban/backend/httputil"
-	"kanban/backend/store"
-	"kanban/backend/stream"
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/fsutil"
+	"mike/backend/git"
+	"mike/backend/httputil"
+	"mike/backend/store"
+	"mike/backend/stream"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // GitHandler handles git operations.

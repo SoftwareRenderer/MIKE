@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	"kanban/pkg/bridge/protocol"
-	"kanban/pkg/procterm"
+	"mike/pkg/bridge/protocol"
+	"mike/pkg/procterm"
 )
 
 const (

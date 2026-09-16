@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"kanban/pkg/bridge/protocol"
+	"mike/pkg/bridge/protocol"
 )
 
 // handleWrite writes content to a file atomically (temp file + rename).

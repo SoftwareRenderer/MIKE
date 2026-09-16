@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // putConfigRaw sends one raw JSON body straight through the PUT handler and hands back the

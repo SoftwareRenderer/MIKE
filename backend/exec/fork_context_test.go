@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 func forkCtxStore(t *testing.T) *store.Store {

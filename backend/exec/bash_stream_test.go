@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // processGone reports whether pid is no longer running. A killed child is

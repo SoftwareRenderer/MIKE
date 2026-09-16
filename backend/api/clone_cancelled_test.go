@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/git"
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/git"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // Phase 9's acceptance specs, written in Phase 3h. A clone is the one long operation that *is* the

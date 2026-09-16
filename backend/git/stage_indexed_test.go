@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // conflictedWorktree leaves a worktree holding one unmerged file (base.txt) and one staged

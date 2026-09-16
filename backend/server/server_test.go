@@ -17,11 +17,11 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"kanban/backend/testutil/testgit"
-	"kanban/backend/tls"
-	"kanban/backend/types"
+	"mike/backend/testutil/testgit"
+	"mike/backend/tls"
+	"mike/backend/types"
 
-	"kanban/backend/startup"
+	"mike/backend/startup"
 )
 
 // testPassword is the password used in tests (matches LOGIN_PASSWORD env var).

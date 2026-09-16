@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"kanban/backend/extensions"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/extensions"
+	"mike/backend/store"
+	"mike/backend/types"
 
-	"kanban/pkg/sandboxruntime"
+	"mike/pkg/sandboxruntime"
 )
 
 func planFixture(t *testing.T, grant string, projectMounts []types.SandboxMount) (*ExtensionLSPManager, *extensions.Extension, string) {

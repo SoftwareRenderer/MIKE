@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"kanban/backend/agent"
-	"kanban/backend/extensions"
-	pkgagent "kanban/pkg/agent"
+	"mike/backend/agent"
+	"mike/backend/extensions"
+	pkgagent "mike/pkg/agent"
 )
 
 // Neither the extension nor its binary is named "pi": an agent whose binary has some other name is

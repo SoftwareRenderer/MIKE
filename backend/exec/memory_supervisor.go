@@ -5,10 +5,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/store"
+	"mike/backend/types"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // DefaultMemSupervisorInterval is how often MemorySupervisor.TickOnce runs in production.

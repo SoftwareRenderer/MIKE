@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/config"
-	"kanban/backend/extensions"
-	"kanban/backend/lsp"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/config"
+	"mike/backend/extensions"
+	"mike/backend/lsp"
+	"mike/backend/store"
+	"mike/backend/types"
 	"time"
 )
 

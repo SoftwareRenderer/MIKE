@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"kanban/backend/httputil"
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/httputil"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // sseEvent is one SSE payload: progress events, then a final Done=true event

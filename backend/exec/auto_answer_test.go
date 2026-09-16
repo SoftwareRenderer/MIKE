@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // mockAnswerLLM returns an httptest server that answers a non-streaming chat

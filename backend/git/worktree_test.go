@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/config"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/config"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 // setupTestRepo creates a temporary git repo, store, config, project, and task.

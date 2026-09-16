@@ -6,16 +6,16 @@ import (
 	"strings"
 	"time"
 
-	"kanban/backend/llama"
-	"kanban/backend/prompts"
-	"kanban/backend/sandbox"
-	"kanban/backend/stream"
-	"kanban/backend/types"
+	"mike/backend/llama"
+	"mike/backend/prompts"
+	"mike/backend/sandbox"
+	"mike/backend/stream"
+	"mike/backend/types"
 
-	"kanban/pkg/bridge"
+	"mike/pkg/bridge"
 
 	"github.com/google/uuid"
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // sandboxRecreate describes a mid-turn rebuild of a running task's container: the task

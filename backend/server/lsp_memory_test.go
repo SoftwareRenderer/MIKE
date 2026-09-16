@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // TestHandleLSPMemory_Unauthenticated verifies the LSP sandbox memory

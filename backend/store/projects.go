@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"time"
 
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // CreateProject inserts a new project.

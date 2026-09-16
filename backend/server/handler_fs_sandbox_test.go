@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // sandboxFSProject creates a project directly in the store and returns it.

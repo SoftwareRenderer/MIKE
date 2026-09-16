@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/llama"
-	"kanban/backend/types"
+	"mike/backend/llama"
+	"mike/backend/types"
 )
 
 // TestEveryDeclaredToolIsDispatched checks that every tool offered to a provider is also dispatched.

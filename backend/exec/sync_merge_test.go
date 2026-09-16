@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/git"
-	"kanban/backend/types"
+	"mike/backend/git"
+	"mike/backend/types"
 )
 
 func TestSyncTargetIntoTask_NoNewCommits(t *testing.T) {

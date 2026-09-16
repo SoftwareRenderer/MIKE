@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/extensions"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/extensions"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 func TestAdaptProjectMountsDropsACoreContainerPath(t *testing.T) {

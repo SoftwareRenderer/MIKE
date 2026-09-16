@@ -17,9 +17,9 @@ import (
 	"strings"
 	"time"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 
-	"kanban/pkg/subproc"
+	"mike/pkg/subproc"
 )
 
 // imageRefPattern matches valid OCI/Docker image references.

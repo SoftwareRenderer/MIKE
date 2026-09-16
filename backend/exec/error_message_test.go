@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // A failed task used to announce itself again on every page view: the error frame

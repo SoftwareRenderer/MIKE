@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // How long one restore may take, and the whole pass. A boot runs this off the boot path, so the numbers

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // HandleSend dedups a double submit: the same send landing twice with nothing in

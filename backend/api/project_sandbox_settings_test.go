@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // TestCreateProjectRefusesWideningSandboxSettings is the project side of the rule an

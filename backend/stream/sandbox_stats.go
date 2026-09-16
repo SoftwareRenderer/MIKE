@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 const (

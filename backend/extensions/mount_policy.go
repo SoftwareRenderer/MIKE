@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"kanban/backend/fsutil"
-	"kanban/backend/types"
-	"kanban/pkg/sandboxruntime"
+	"mike/backend/fsutil"
+	"mike/backend/types"
+	"mike/pkg/sandboxruntime"
 )
 
 // Extension sandboxes start with `--cap-drop ALL` and no host filesystem access beyond

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/httputil"
+	"mike/backend/httputil"
 )
 
 // allowLoopbackProxy lets one test proxy to an httptest server, which listens on the loopback

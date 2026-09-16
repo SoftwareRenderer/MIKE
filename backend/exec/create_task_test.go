@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 // projectSeeder is what a fixture needs to put a project in the database: a real store or

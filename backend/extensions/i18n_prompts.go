@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // PromptOverlay is the resolved prompt-locale answer: the active pack's translated

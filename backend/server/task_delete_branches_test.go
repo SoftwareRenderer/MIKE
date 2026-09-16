@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // repoBranchNames lists the project repo's branches under prefix ("task/", "thread/"), undecorated.

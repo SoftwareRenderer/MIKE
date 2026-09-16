@@ -14,7 +14,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"kanban/pkg/subproc"
+	"mike/pkg/subproc"
 )
 
 // podmanBinary: a variable so a test can point a subprocess at a stub, the way backend/git does.

@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // seedMessage writes a message directly to the store. It is used to seed

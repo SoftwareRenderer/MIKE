@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/pkg/bridge/protocol"
+	"mike/pkg/bridge/protocol"
 )
 
 // fakeLanguageServer is a command that stays alive reading stdin. These tests only ask a session

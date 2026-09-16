@@ -10,13 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"kanban/backend/sandbox"
-	"kanban/backend/toolresult"
-	"kanban/backend/types"
-	"kanban/pkg/bridge"
-	"kanban/pkg/bridge/protocol"
+	"mike/backend/sandbox"
+	"mike/backend/toolresult"
+	"mike/backend/types"
+	"mike/pkg/bridge"
+	"mike/pkg/bridge/protocol"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // execFunc runs a shell command. Provided by the sandbox in container mode.

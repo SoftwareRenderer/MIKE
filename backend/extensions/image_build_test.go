@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/pkg/sandboxruntime"
+	"mike/pkg/sandboxruntime"
 )
 
 // These pin what the build path must control - the context it creates and what is staged in it - not

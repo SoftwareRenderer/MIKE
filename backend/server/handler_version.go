@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"regexp"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // indexHTMLLimit bounds the read of our own build artifact; index.html holds the pre-paint script

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/pkg/bridge/protocol"
+	"mike/pkg/bridge/protocol"
 )
 
 // Nothing about a chunk stream says how big it will be, and the peer chose the file, so the

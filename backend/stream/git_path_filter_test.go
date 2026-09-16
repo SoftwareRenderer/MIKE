@@ -3,7 +3,7 @@ package stream
 import (
 	"testing"
 
-	"kanban/backend/git"
+	"mike/backend/git"
 )
 
 // TestIsInternalFile verifies that internal files (.git + flight recorder) are detected.

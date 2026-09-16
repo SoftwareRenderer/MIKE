@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 
 	"github.com/coder/websocket"
 )

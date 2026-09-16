@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"kanban/pkg/bridge"
-	"kanban/pkg/sandboxruntime"
+	"mike/pkg/bridge"
+	"mike/pkg/sandboxruntime"
 )
 
 // A container that survives `podman rm -f` has to stay in the active map: Stop only looks at tasks in

@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"context"
-	"kanban/backend/errs"
-	"kanban/pkg/logging"
+	"mike/backend/errs"
+	"mike/pkg/logging"
 )
 
 // decodeError reads the {"error": "..."} envelope JSONError/Fail write.

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 func TestCreateAndGetTask(t *testing.T) {

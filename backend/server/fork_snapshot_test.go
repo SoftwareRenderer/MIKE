@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/git"
-	"kanban/backend/types"
+	"mike/backend/git"
+	"mike/backend/types"
 )
 
 // forkFixture: a Main thread with one completed turn (a file change plus its checkpoint), a later user

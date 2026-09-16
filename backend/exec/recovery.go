@@ -1,11 +1,11 @@
 package exec
 
 import (
-	"kanban/backend/sandbox"
-	"kanban/backend/types"
+	"mike/backend/sandbox"
+	"mike/backend/types"
 
-	"kanban/pkg/bridge"
-	"kanban/pkg/logging"
+	"mike/pkg/bridge"
+	"mike/pkg/logging"
 )
 
 // bridgeSandboxManager is the subset of SandboxManager operations used by

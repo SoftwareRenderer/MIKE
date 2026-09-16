@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"kanban/backend/fsutil"
-	"kanban/pkg/logging"
+	"mike/backend/fsutil"
+	"mike/pkg/logging"
 )
 
 // GetTaskDiff returns the git diff for a task's worktree.

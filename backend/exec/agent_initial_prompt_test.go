@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // The rule this holds is the one an agent cannot tell you it got wrong: what its first message is. A

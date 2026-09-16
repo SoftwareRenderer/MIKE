@@ -3,7 +3,7 @@ package config
 import (
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 func TestResolveAPIKey(t *testing.T) {

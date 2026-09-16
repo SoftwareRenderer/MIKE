@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"kanban/pkg/bridge/protocol"
+	"mike/pkg/bridge/protocol"
 )
 
 // handleEdit reads a file, applies text replacements, and writes atomically.

@@ -1,6 +1,6 @@
 package config
 
-import "kanban/backend/types"
+import "mike/backend/types"
 
 // GetAgentProvider returns the first configured agent provider
 func (cs *ConfigStore) GetAgentProvider() *types.Provider {

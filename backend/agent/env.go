@@ -3,7 +3,7 @@ package agent
 import (
 	"strings"
 
-	"kanban/pkg/subproc"
+	"mike/pkg/subproc"
 )
 
 // Agent adapters spawn a subprocess (e.g. the `pi` binary) from an extension, and

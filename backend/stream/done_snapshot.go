@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 
-	"kanban/backend/git"
-	"kanban/backend/store"
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/git"
+	"mike/backend/store"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // DoneTaskDiff is a done task's materialized diff. Its canonical diff is BaseRef..HeadRef — two pinned

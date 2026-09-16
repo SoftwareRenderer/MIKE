@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/pkg/bridge/protocol"
+	"mike/pkg/bridge/protocol"
 )
 
 // bashHarness drives handleBash over in-memory pipes and records every frame the

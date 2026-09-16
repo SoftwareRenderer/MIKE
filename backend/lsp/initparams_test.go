@@ -7,10 +7,10 @@ import (
 	"sync"
 	"testing"
 
-	"kanban/backend/extensions"
+	"mike/backend/extensions"
 
-	"kanban/pkg/bridge"
-	"kanban/pkg/bridge/protocol"
+	"mike/pkg/bridge"
+	"mike/pkg/bridge/protocol"
 )
 
 // captureBridge stands in for sandbox-bridge: it answers every request with a fixed reply and keeps

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 
-	"kanban/pkg/sandboxruntime"
+	"mike/pkg/sandboxruntime"
 )
 
 // grantCandidate returns an existing absolute directory that is NOT inside any policy root. Not

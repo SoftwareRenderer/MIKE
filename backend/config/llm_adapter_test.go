@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"kanban/backend/llmadapter"
+	"mike/backend/llmadapter"
 )
 
 func adapterForTests(serverURL string) *llmadapter.Adapter {

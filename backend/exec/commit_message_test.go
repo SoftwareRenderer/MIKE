@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // stubAgentLister implements config.AgentProviderLister with a fixed set of

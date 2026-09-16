@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // taskUpdateRequest is the body of PUT /api/projects/{projectID}/tasks/{taskID}.

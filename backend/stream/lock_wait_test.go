@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 func isLockWait(frame map[string]any) bool {

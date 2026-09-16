@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 
 	_ "modernc.org/sqlite"
 )

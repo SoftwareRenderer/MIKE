@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // These tests hold the two properties the multi-statement sections exist to provide, and each was written

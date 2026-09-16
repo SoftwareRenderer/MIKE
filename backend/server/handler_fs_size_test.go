@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // The file these tests ask for, and what a refused read may allocate. Both the fixed

@@ -11,10 +11,10 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"kanban/backend/httputil"
-	"kanban/pkg/logging"
+	"mike/backend/httputil"
+	"mike/pkg/logging"
 
-	"kanban/backend/startup"
+	"mike/backend/startup"
 )
 
 // Re-export JSON helpers from httputil.

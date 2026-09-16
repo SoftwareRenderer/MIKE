@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // chdirRepoRoot makes prompts/summarize.tmpl and prompts/base.tmpl resolvable from

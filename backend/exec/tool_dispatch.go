@@ -10,15 +10,15 @@ import (
 	"sort"
 	"strings"
 
-	"kanban/backend/config"
-	"kanban/backend/git"
-	"kanban/backend/llama"
-	"kanban/backend/store"
-	"kanban/backend/stream"
-	"kanban/backend/types"
+	"mike/backend/config"
+	"mike/backend/git"
+	"mike/backend/llama"
+	"mike/backend/store"
+	"mike/backend/stream"
+	"mike/backend/types"
 
-	"kanban/pkg/bridge/protocol"
-	"kanban/pkg/logging"
+	"mike/pkg/bridge/protocol"
+	"mike/pkg/logging"
 )
 
 // toolRunner dispatches a tool call to the handler registered under its name.

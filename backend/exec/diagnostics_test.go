@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/config"
-	"kanban/backend/extensions"
-	"kanban/backend/git"
-	"kanban/backend/lsp"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/config"
+	"mike/backend/extensions"
+	"mike/backend/git"
+	"mike/backend/lsp"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 // The advisory channel: environment notes the model must see but the user never said.

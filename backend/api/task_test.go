@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/config"
-	"kanban/backend/exec"
-	"kanban/backend/git"
-	"kanban/backend/store"
-	"kanban/backend/stream"
-	"kanban/backend/types"
+	"mike/backend/config"
+	"mike/backend/exec"
+	"mike/backend/git"
+	"mike/backend/store"
+	"mike/backend/stream"
+	"mike/backend/types"
 )
 
 // --- Test helpers for task handler validation tests ---

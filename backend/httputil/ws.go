@@ -11,7 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // AcceptWS upgrades a WebSocket with the settings every MIKE endpoint shares, so no endpoint

@@ -5,16 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"kanban/backend/httputil"
+	"mike/backend/httputil"
 	"net/http"
 	"strings"
 	"time"
 
-	"kanban/backend/exec"
-	"kanban/backend/git"
-	"kanban/backend/stream"
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/exec"
+	"mike/backend/git"
+	"mike/backend/stream"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {

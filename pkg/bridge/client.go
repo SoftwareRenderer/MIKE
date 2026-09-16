@@ -15,8 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"kanban/pkg/bridge/protocol"
-	"kanban/pkg/logging"
+	"mike/pkg/bridge/protocol"
+	"mike/pkg/logging"
 )
 
 // pipeConn wraps separate read/write pipes as a net.Conn.

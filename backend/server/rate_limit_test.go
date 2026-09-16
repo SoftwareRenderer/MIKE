@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/startup"
+	"mike/backend/startup"
 )
 
 func TestRateLimitMiddleware_AllowsUnderLimit(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"os"
 	"sync"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // Where a project's sandbox image comes from. Decided in one place so the executor, the

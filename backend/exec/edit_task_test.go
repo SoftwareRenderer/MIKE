@@ -3,8 +3,8 @@ package exec
 import (
 	"testing"
 
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 // editTaskTarget creates a backlog task in the given project with explicit

@@ -8,8 +8,8 @@ import (
 	"errors"
 	"net/http"
 
-	"kanban/backend/errs"
-	"kanban/pkg/logging"
+	"mike/backend/errs"
+	"mike/pkg/logging"
 )
 
 // JSONResponse sends a JSON response with the given status code.

@@ -16,7 +16,7 @@ import (
 	"sync/atomic"
 	"text/template"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // overlayState is one immutable answer to "whose templates are active". It is

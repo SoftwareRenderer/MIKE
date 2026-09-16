@@ -16,17 +16,17 @@ import (
 
 	"github.com/google/uuid"
 
-	"kanban/backend/config"
-	"kanban/backend/errs"
-	"kanban/backend/exec"
-	"kanban/backend/git"
-	"kanban/backend/httputil"
-	"kanban/backend/prompts"
-	"kanban/backend/store"
-	"kanban/backend/stream"
-	"kanban/backend/term"
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/config"
+	"mike/backend/errs"
+	"mike/backend/exec"
+	"mike/backend/git"
+	"mike/backend/httputil"
+	"mike/backend/prompts"
+	"mike/backend/store"
+	"mike/backend/stream"
+	"mike/backend/term"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // TaskHandler handles task CRUD operations.

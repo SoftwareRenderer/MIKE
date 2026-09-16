@@ -3,7 +3,7 @@ package store
 import (
 	"fmt"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // SQLite has no "ALTER TABLE … ADD COLUMN IF NOT EXISTS", so startup used to fire ~50

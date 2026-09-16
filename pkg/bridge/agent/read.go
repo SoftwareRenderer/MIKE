@@ -6,7 +6,7 @@ import (
 	"net"
 	"os"
 
-	"kanban/pkg/bridge/protocol"
+	"mike/pkg/bridge/protocol"
 )
 
 // readChunkSize is the size of each chunk sent for file reads.

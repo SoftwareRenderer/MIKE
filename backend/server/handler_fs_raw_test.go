@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/exec"
-	"kanban/backend/types"
+	"mike/backend/exec"
+	"mike/backend/types"
 )
 
 // One pixel of PNG: the bytes that come back are then recognisable as the file, not as padding.

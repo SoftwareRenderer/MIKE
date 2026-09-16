@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 func TestMeminfoMB(t *testing.T) {

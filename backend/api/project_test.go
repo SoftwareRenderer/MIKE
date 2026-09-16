@@ -14,13 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/config"
-	"kanban/backend/fsutil"
-	"kanban/backend/git"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/config"
+	"mike/backend/fsutil"
+	"mike/backend/git"
+	"mike/backend/store"
+	"mike/backend/types"
 
-	"kanban/backend/sandbox"
+	"mike/backend/sandbox"
 )
 
 // createBareRepo creates a bare git repository at the given path to act as a

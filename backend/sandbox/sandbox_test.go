@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
-	"kanban/pkg/sandboxruntime"
+	"mike/backend/types"
+	"mike/pkg/sandboxruntime"
 )
 
 // TestMain sweeps stale containers before and after the suite: an interrupted run can leave containers

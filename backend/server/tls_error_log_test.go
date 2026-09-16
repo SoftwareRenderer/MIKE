@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // captureLog redirects the logging package for the duration of the test and returns a buffer of

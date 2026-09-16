@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // TestChatStream_ReadIdleTimeout verifies ChatStream returns

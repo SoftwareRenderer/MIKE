@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
-	ext "kanban/backend/extensions"
-	"kanban/backend/types"
+	ext "mike/backend/extensions"
+	"mike/backend/types"
 )
 
 // mockExtensionStore implements a minimal ExtensionStore for testing.

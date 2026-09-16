@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/store"
+	"mike/backend/store"
 )
 
 func testManager(t *testing.T) *SessionManager {

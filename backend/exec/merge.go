@@ -14,11 +14,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"kanban/backend/git"
-	"kanban/backend/store"
-	"kanban/backend/stream"
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/git"
+	"mike/backend/store"
+	"mike/backend/stream"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // mergeOrchestrator owns what happens to a task's commits once a turn ends: branch, merge,

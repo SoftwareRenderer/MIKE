@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/pkg/bridge/protocol"
+	"mike/pkg/bridge/protocol"
 )
 
 func TestLSPStartCarriesNoEnvironment(t *testing.T) {

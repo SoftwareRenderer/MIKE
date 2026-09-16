@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // marshalAssignedPorts encodes the assigned_ports column. An empty slice

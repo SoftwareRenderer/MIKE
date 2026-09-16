@@ -5,9 +5,9 @@ import (
 	"os/exec"
 	"testing"
 
-	"kanban/pkg/bridge"
+	"mike/pkg/bridge"
 
-	"kanban/pkg/sandboxruntime"
+	"mike/pkg/sandboxruntime"
 )
 
 // testBridgeClient builds a bridge client over a pair of pipes. Nothing is spoken over them.

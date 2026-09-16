@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // testStore creates a new Store with a temporary database for testing.

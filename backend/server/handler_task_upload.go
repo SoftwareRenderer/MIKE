@@ -7,8 +7,8 @@ import (
 	"io"
 	"net/http"
 
-	"kanban/backend/exec"
-	"kanban/backend/httputil"
+	"mike/backend/exec"
+	"mike/backend/httputil"
 )
 
 // handleTaskUpload accepts multipart/form-data with one `file` part and answers {"path": "..."} —

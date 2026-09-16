@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/git"
-	"kanban/backend/types"
+	"mike/backend/git"
+	"mike/backend/types"
 )
 
 func TestTaskCreate(t *testing.T) {

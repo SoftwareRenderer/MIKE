@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"kanban/backend/prompts"
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/prompts"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // BuildSystemPrompt creates the system prompt for task execution. worktreePath is where AGENTS.md

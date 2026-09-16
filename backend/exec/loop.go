@@ -12,16 +12,16 @@ import (
 	"sync"
 	"time"
 
-	"kanban/backend/git"
-	"kanban/backend/llama"
-	"kanban/backend/stream"
-	"kanban/backend/toolresult"
-	"kanban/backend/types"
+	"mike/backend/git"
+	"mike/backend/llama"
+	"mike/backend/stream"
+	"mike/backend/toolresult"
+	"mike/backend/types"
 
-	"kanban/pkg/bridge"
+	"mike/pkg/bridge"
 
 	"github.com/google/uuid"
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // imageExts is the set of file extensions considered image files (allowed in staging).

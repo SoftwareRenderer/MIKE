@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 type fakeStatsSource struct {

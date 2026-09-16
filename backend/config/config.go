@@ -12,11 +12,11 @@ import (
 	"strconv"
 	"strings"
 
-	"kanban/backend/crypto"
-	"kanban/backend/httputil"
-	"kanban/backend/llmadapter"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/crypto"
+	"mike/backend/httputil"
+	"mike/backend/llmadapter"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 // AgentProviderLister provides agent provider entries discovered from extensions.

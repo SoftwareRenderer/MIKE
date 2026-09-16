@@ -1,7 +1,7 @@
 package llama
 
 import (
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // toolDisplayNames maps tool names to their UI display names.

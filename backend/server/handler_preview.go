@@ -16,11 +16,11 @@ import (
 	"sync"
 	"time"
 
-	"kanban/backend/errs"
-	"kanban/backend/fsutil"
-	"kanban/backend/sandbox"
-	"kanban/backend/types"
-	"kanban/pkg/logging"
+	"mike/backend/errs"
+	"mike/backend/fsutil"
+	"mike/backend/sandbox"
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // Preview document lifecycle limits.

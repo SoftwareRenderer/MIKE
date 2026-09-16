@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"kanban/backend/llmadapter"
-	"kanban/pkg/logging"
+	"mike/backend/llmadapter"
+	"mike/pkg/logging"
 )
 
 // defaultMappingsFile is used when the llm capability does not name a file.

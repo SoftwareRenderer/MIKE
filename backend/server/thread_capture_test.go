@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/git"
-	"kanban/backend/types"
+	"mike/backend/git"
+	"mike/backend/types"
 )
 
 // blockGitWrites makes git refuse to write in this worktree, the way a stale index.lock or a concurrent

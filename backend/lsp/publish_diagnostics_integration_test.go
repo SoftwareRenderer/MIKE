@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/pkg/bridge"
+	"mike/pkg/bridge"
 )
 
 // TestPublishDiagnosticsForEveryFileWithOneHandshake: against the real server, one connection and

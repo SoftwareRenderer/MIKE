@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 func TestEstimateCallCost_NoPricingConfigured(t *testing.T) {

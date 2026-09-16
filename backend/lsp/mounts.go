@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"kanban/backend/extensions"
-	"kanban/backend/types"
+	"mike/backend/extensions"
+	"mike/backend/types"
 )
 
 // containerWorkspacePath maps a host workspace path to where it lives in the extension sandbox:

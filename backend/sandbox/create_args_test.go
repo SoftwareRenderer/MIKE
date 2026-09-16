@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
-	"kanban/pkg/sandboxruntime"
+	"mike/backend/types"
+	"mike/pkg/sandboxruntime"
 )
 
 // TestCreateRefusesUnsafeSandboxAdditions is the second line of the rule the project

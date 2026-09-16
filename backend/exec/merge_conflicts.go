@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"kanban/backend/git"
+	"mike/backend/git"
 )
 
 // ErrNotAMergeConflict means git merge failed with no merge in progress (no MERGE_HEAD): a

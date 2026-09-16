@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/pkg/sandboxruntime"
+	"mike/pkg/sandboxruntime"
 )
 
 // A stand-in podman for tests that need a build attempted without a daemon: it records the argv and a

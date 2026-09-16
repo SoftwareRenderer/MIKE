@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 // TestShadowsToolState: borrowing a project's mounts is how the server reads its dependency roots,

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/pkg/sandboxruntime"
+	"mike/pkg/sandboxruntime"
 )
 
 // repairFixture is a handler whose extensions directory is an empty temp dir, plus that directory.

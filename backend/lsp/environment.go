@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"kanban/backend/extensions"
-	"kanban/pkg/logging"
-	"kanban/pkg/shlex"
+	"mike/backend/extensions"
+	"mike/pkg/logging"
+	"mike/pkg/shlex"
 )
 
 const (

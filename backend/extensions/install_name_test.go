@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/pkg/sandboxruntime"
+	"mike/pkg/sandboxruntime"
 )
 
 // sourceRepo makes a one-commit git repo to act as the registry's pinned source and returns

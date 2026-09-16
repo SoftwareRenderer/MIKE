@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // mustOut runs a command and returns its stdout.

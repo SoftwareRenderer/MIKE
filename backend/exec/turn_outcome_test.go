@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/stream"
-	"kanban/backend/types"
+	"mike/backend/stream"
+	"mike/backend/types"
 
 	"github.com/google/uuid"
 )

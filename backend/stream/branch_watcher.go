@@ -8,7 +8,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // branchProject tracks state for a watched project.

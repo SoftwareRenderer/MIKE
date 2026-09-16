@@ -1,8 +1,8 @@
 package store
 
 import (
-	"kanban/backend/types"
 	"math"
+	"mike/backend/types"
 	"testing"
 )
 

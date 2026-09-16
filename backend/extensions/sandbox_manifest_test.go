@@ -3,7 +3,7 @@ package extensions
 import (
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // TestMergeManifestSandboxAdditionsAppliesANewerManifestsDeclaration is the reason the merge

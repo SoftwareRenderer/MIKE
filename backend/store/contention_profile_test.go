@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 const profileEnv = "MIKE_STORE_PROFILE"

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/config"
-	"kanban/backend/store"
-	"kanban/backend/types"
+	"mike/backend/config"
+	"mike/backend/store"
+	"mike/backend/types"
 )
 
 // uploadsPattern is the exclude pattern the task-upload path asks for. The name itself belongs to

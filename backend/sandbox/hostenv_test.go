@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // TestSandboxContainerSeesNoHostEnv is the end-to-end form of the rule the rest of this package

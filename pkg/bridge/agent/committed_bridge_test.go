@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"kanban/pkg/bridge/protocol"
+	"mike/pkg/bridge/protocol"
 )
 
 // committedBridge is the binary the containers actually run, staged at sandbox/sandbox-bridge.

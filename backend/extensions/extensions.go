@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"kanban/backend/types"
+	"mike/backend/types"
 )
 
 // ExtensionType distinguishes between different kinds of extensions.

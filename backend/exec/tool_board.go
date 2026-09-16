@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"kanban/backend/llama"
-	"kanban/backend/types"
+	"mike/backend/llama"
+	"mike/backend/types"
 
 	"github.com/google/uuid"
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // The task-board tools: what create_task, view_tasks and edit_task do, and the plan-mode scan that

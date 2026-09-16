@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"kanban/pkg/logging"
+	"mike/pkg/logging"
 )
 
 // Podman must never be handed an unqualified ("short") image name: it picks a registry by

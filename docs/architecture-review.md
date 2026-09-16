@@ -260,7 +260,7 @@ Each of these was derived wrongly in the round that produced the findings above.
   `go.etcd.io/etcd/api/v3` are counter-examples in production. The rename bought truthfulness about what the
   package holds and no structural change with it.
 - **Folding every handler into one package is impossible, not unfashionable.** `go list -deps ./backend/api |
-  grep -c kanban/backend/server` → **0**, and `backend/server` is `backend/api`'s only importer. Inside
+  grep -c mike/backend/server` → **0**, and `backend/server` is `backend/api`'s only importer. Inside
   `backend/server`, 175 call sites reach a function or method declared in a sibling file of the same package
   (a one-off `go/ast` walk, as in §2), and `handler_fs.go`/`handler_fs_raw.go`/`handler_fs_upload.go` are 19
   `*Server` methods calling `s.validateFSPath`, `s.writeContainedFile`, `s.fsWriteTarget` and

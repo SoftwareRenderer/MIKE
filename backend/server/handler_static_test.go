@@ -8,7 +8,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"kanban/backend/startup"
+	"mike/backend/startup"
 )
 
 // staticGet runs a request through the nonce middleware and the router, the pair that serves the SPA.

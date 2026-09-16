@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/config"
-	"kanban/backend/extensions"
-	"kanban/backend/git"
-	"kanban/backend/lsp"
-	"kanban/backend/store"
+	"mike/backend/config"
+	"mike/backend/extensions"
+	"mike/backend/git"
+	"mike/backend/lsp"
+	"mike/backend/store"
 )
 
 // recordingLSPManager is a language server the pass can be watched talking to. It answers a

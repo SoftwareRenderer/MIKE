@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"kanban/backend/types"
-	"kanban/pkg/sandboxruntime"
+	"mike/backend/types"
+	"mike/pkg/sandboxruntime"
 )
 
 // fakeMem answers a container's usage and records the Forget calls, so the teardown reading is
