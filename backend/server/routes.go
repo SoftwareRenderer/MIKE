@@ -4,7 +4,6 @@ import (
 	"io/fs"
 	"kanban/backend/fsutil"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -170,16 +169,6 @@ func (s *Server) setupRoutes() {
 	// Task-specific git operations
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/git/log", s.gitHandler.HandleTaskLog)
 
-	// Frontend
-	if s.frontendDist != "" {
-		if _, err := os.Stat(s.frontendDist); err == nil {
-			sub, err := fs.Sub(os.DirFS(s.frontendDist), ".")
-			if err == nil {
-				s.mux.Handle("/", s.withNonce(http.FileServer(noWriterToFS{http.FS(sub)})))
-			}
-		}
-	}
-
 	// Extensions static files — FILES ONLY. This prefix is public (see
 	// isPublicPath: sandboxed extension iframes have an opaque origin and cannot
 	// send session cookies), so it stays minimal. A raw http.FileServer would
@@ -188,6 +177,28 @@ func (s *Server) setupRoutes() {
 	// noListingFS returns 404 for those instead, and noEscapeFS refuses what http.Dir follows.
 	s.mux.Handle("/extensions/", http.StripPrefix("/extensions/",
 		http.FileServer(noListingFS{noEscapeFS{dir: "extensions"}})))
+
+	// The SPA is served behind the mux rather than inside it: a catch-all in the mux outranks that
+	// mux's own answer for a verb mismatch, so a GET on a POST-only route would get the document
+	// instead of the 405 the route contract promises. noListingFS keeps `/assets/` from answering an
+	// unauthenticated index of every chunk the build made.
+	s.router = spaBehind{s.mux, s.withNonce(http.FileServer(noListingFS{noWriterToFS{http.FS(s.assets)}}))}
+}
+
+// spaBehind serves the SPA where the API mux claimed nothing. A verb mismatch and anything under the
+// API prefix stay the mux's answer.
+type spaBehind struct {
+	api *http.ServeMux
+	spa http.Handler
+}
+
+func (b spaBehind) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// An empty pattern is the mux's "nothing registered here": no route, or a route for another verb.
+	if _, pattern := b.api.Handler(r); pattern == "" && !strings.HasPrefix(r.URL.Path, "/api/") {
+		b.spa.ServeHTTP(w, r)
+		return
+	}
+	b.api.ServeHTTP(w, r)
 }
 
 // noListingFS wraps an http.FileSystem so http.FileServer can never render a

@@ -28,8 +28,9 @@ and how a value becomes a decision.
 
 Nine have one, named after them, and **flags win**: `--port`/`MIKE_PORT`, `--listen`,
 `--data-dir`/`MIKE_DATA_DIR`, `--no-tls`, `--tls-cert`/`--tls-key`, `--allowed-hosts`,
-`--worktrees-dir`, `--log-level`/`MIKE_LOG_LEVEL`. A switch that widens a permission or points at a host
-path has one spelling only, so it cannot arrive by a route the operator did not read about.
+`--worktrees-dir`, `--log-level`/`MIKE_LOG_LEVEL`, `--frontend-dist`/`MIKE_FRONTEND_DIST` (dev-only,
+below). A switch that widens a permission or points at a host path has one spelling only, so it cannot
+arrive by a route the operator did not read about.
 
 `--worktrees-dir` (`MIKE_WORKTREES_DIR`) is a runtime override that is **not** persisted to the DB
 `workspace_dir`.
@@ -52,7 +53,7 @@ path has one spelling only, so it cannot arrive by a route the operator did not 
 | `MIKE_MEMORY_BUDGET_PCT` | The share of **installed RAM** the memory budget admits against (default `90`) — the ceiling every sandbox MIKE started shares, counted at each container's `max(held, cap)` plus outstanding reservations plus the server's own resident set. What the rest of the host holds is **not** in that sum, so `MemAvailable` under 5 % of RAM is what pauses tasks on a machine that is full for other reasons. A value that does not parse, or parses outside `1-100`, refuses the boot naming the variable. Env-only: there is no `--memory-budget-pct` flag to reach for. The reported ceiling is in Settings → About. Rule and consequences: `docs/sandbox-runtime.md → The memory budget`. |
 | `MIKE_GC_DRY_RUN` | Set to `1` to report the branch GC's decisions without deleting anything. Exact-value-1, with the boot warning for a truthy typo. |
 | `MIKE_PPROF` | Set to `1` to serve `net/http/pprof` on `localhost:6060`. A profile can contain API keys and passwords, so it is never on by default and never off the loopback interface. |
-| `MIKE_FRONTEND_DIST` | Where the built SPA is served from (default `./frontend/dist`). Env-only: there is no `--frontend-dist` flag to reach for. |
+| `MIKE_FRONTEND_DIST` | **Development only.** Serve the SPA from this directory (default `./frontend/dist`) instead of the copy compiled into the binary, so `npm run build` reaches a running server with no Go rebuild. It is honoured only when the directory holds an `index.html`; otherwise the compiled-in copy answers and the startup log says which. A `-tags release` binary (`make package`, `make release`, the image) resolves this to nothing and **refuses the boot** when either spelling is given — accepted-and-ignored would read, months later, as a deployment serving its own frontend directory. |
 | `MIKE_TLS` | Set to `0` to serve over plain HTTP — the env spelling of `--no-tls`, and only the exact value `0` turns it off. Development and the e2e harness; anything else keeps TLS. |
 | `DANGER_ZONE` | Set to `1` to allow **disabling** sandboxing: a project may then be created with sandboxing disabled, or switched to it; without the flag both are 403. It does not gate execution. Resolved once into `startup.Config.DangerZone` and injected as `sandbox.DangerZone` into the two places that decide. Its second meaning (what a host terminal is *given*) is in `docs/confinement.md`. |
 | `MIKE_ALLOW_ROOT_FS` | Set to `1` to let the **no-project** file endpoints — the directory picker, its `mkdir`, `git init`, and the add-project/clone target — reach any host path. Unset = they are jailed to `$HOME` plus the workspace and extensions directories declared at startup, and the refusal says so and names this variable. **Only the exact value `1` widens**; `true`, `yes`, `0` and a set-but-empty value all keep the jail, and a set-but-not-`1` value gets a startup warning. Never widens anything project-scoped, and the data directory is not a root either way. The decision is taken once by `startup.Resolve` and handed to `fsutil.NewHostRoot(allowRootFS, …)` (`backend/fsutil/hostroot.go`): a jail that re-read the variable per call could widen between two calls of one request, and the roots quoted in a refusal would not be the roots that refused. |
@@ -61,3 +62,45 @@ path has one spelling only, so it cannot arrive by a route the operator did not 
 
 Reachability is `MIKE_LISTEN` + Host pinning (`MIKE_ALLOWED_HOSTS`), not the SAN set. Weak-password and
 non-loopback startup rules, certs and distribution: `docs/tls.md`.
+
+## Distribution
+
+`make package` builds `dist/mike-server-<version>-<os>-<arch>.tar.gz` for `linux/amd64` and
+`linux/arm64` (`scripts/package-release.sh`; `make package-amd64` builds one target), and writes
+`dist/sha256sum.txt` beside them. `<version>` is `VERSION` when that is a dotted number and `0.0.0`
+when the tree names no version, so an untagged checkout never puts a commit hash in a filename
+someone runs `sha256sum -c` on.
+
+Both binaries in an archive are built for that archive's `GOARCH`, including `sandbox/sandbox-bridge`
+whose committed copy belongs to whoever last ran `make bridge`. `CGO_ENABLED=0` throughout — SQLite here
+is modernc.org, so the binary needs no glibc match. Archives are byte-comparable between runs (sorted
+names, no uid/gid, zeroed mtime, `gzip -n`).
+
+One archive holds `mike-server`, `extensions/` (its README only; the rest of that tree is written by the
+installer), `prompts/`, `sandbox/` (`sandbox-bridge` and the two Dockerfiles), the licences and a README,
+under one top-level directory. That layout is what the sibling lookups require, not a convention:
+`sandbox-bridge` beside the executable or under `sandbox/` (`pkg/sandboxruntime.GetAgentBinaryPath`),
+`prompts/` beside the executable (`backend/prompts.resolvePromptDir`), and `extensions/` relative to the
+**working directory**. Hence: extract, `cd`, run.
+
+The SPA is compiled into `mike-server` (`assets.go`, `//go:embed all:frontend/dist`), so a package ships
+no frontend directory and reads none: both binaries are built `-tags release`, which resolves
+`--frontend-dist` / `MIKE_FRONTEND_DIST` to nothing and refuses the boot when either is given
+(`backend/startup/frontend_release.go`). The image follows the same rule — its Go stage receives
+`frontend/dist` from the web stage because that is what `go:embed` reads (`.dockerignore` keeps it out of
+the build context), and the runtime stage ships no frontend directory. `make package` depends on
+`make frontend` for that reason, and the committed `frontend/dist/.gitkeep` exists only so `go:embed`
+has something to match on a tree that never ran npm. `all:` takes whatever else that directory holds,
+so `package-release.sh` refuses to package a tree containing a `*.map` or a stray dotfile — a
+sourcemap would publish the sources inside the download.
+
+The version in the filename is stamped into the binary as well (`/api/version`), and its source is a
+**git tag**: `git tag v1.2.3 && make package`. An untagged tree describes a commit hash, which is a fine
+thing for a developer's binary to carry and not a thing to name a download after, so the filename falls
+back to `0.0.0`; `make package VERSION=v1.2.3` overrides without a tag. Nothing in the tree holds a
+version constant to bump. The script re-checks both variables it is handed — `VERSION` a dotted number,
+`RELEASE_TAGS` a list of build tags — because they reach a filename, a `sed` program and `-ldflags`.
+
+`dist/sha256sum.txt` proves an archive matches the checksum file beside it. Nothing signs the archives,
+so that pair is only as trusted as whoever handed them over: the package README says so where it tells
+the buyer to run `sha256sum -c`.

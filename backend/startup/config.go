@@ -77,6 +77,7 @@ type Flags struct {
 	Listen       string
 	DataDir      string
 	WorktreesDir string
+	FrontendDist string
 	NoTLS        bool
 	TLSCertPath  string
 	TLSKeyPath   string
@@ -95,7 +96,9 @@ type Config struct {
 	// WorktreesOverride is a runtime override for the git worktrees directory and is deliberately
 	// never persisted to the DB workspace_dir.
 	WorktreesOverride string
-	FrontendDist      string
+	// FrontendDist is the directory a development build serves the SPA from. Empty means serve the
+	// copy compiled into this binary, which is what every `-tags release` build resolves to.
+	FrontendDist string
 
 	TLSDisabled bool
 	TLSCertPath string
@@ -171,7 +174,16 @@ func Resolve(f Flags) (Config, error) {
 	c.DataDir = resolveString(f.DataDir, EnvDataDir, DefaultDataDir)
 	c.DBPath = c.DataDir + string(os.PathSeparator) + "kanban.db"
 	c.WorktreesOverride = resolveString(f.WorktreesDir, EnvWorktreesDir, "")
-	c.FrontendDist = resolveString("", EnvFrontendDist, DefaultFrontend)
+
+	// A `-tags release` build serves the copy it carries, so it refuses both spellings rather than
+	// accepting and ignoring them.
+	if !frontendDirAllowed {
+		if f.FrontendDist != "" || os.Getenv(EnvFrontendDist) != "" {
+			return Config{}, fmt.Errorf("--frontend-dist and %s are not available in this build: it serves the frontend it was compiled with", EnvFrontendDist)
+		}
+	} else {
+		c.FrontendDist = resolveString(f.FrontendDist, EnvFrontendDist, DefaultFrontend)
+	}
 
 	// --no-tls and MIKE_TLS=0 both disable TLS; MIKE_TLS is the env spelling of the same switch, so
 	// only the exact "0" means off (an unset or garbage value keeps TLS on).

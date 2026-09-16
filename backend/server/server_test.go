@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"kanban/backend/testutil/testgit"
 	"kanban/backend/tls"
@@ -40,6 +42,20 @@ func testServer(t *testing.T) *Server {
 // is how a test pins a decision that would otherwise come from the environment: a refusal test asks
 // for DangerZone=false, a jail test for AllowRootFS=false, a proxy test for TrustProxy=true.
 func testServerWith(t *testing.T, mutate func(*startup.Config)) *Server {
+	t.Helper()
+	return testServerWithAssets(t, testAssets(), mutate)
+}
+
+// testAssets is the frontend a test server serves: a stamped document and one hashed asset.
+func testAssets() fs.FS {
+	return fstest.MapFS{
+		"index.html":             &fstest.MapFile{Data: []byte(`<!doctype html><html><head><script nonce="{{.Nonce}}"></script></head><body>board</body></html>`)},
+		"assets/app-12345678.js": &fstest.MapFile{Data: []byte(`console.log("app")`)},
+	}
+}
+
+// testServerWithAssets is testServerWith with the frontend under the test's control too.
+func testServerWithAssets(t *testing.T, assets fs.FS, mutate func(*startup.Config)) *Server {
 	t.Helper()
 	dir := t.TempDir()
 	worktreesDir := filepath.Join(dir, "worktrees")
@@ -77,7 +93,7 @@ func testServerWith(t *testing.T, mutate func(*startup.Config)) *Server {
 		mutate(&cfg)
 	}
 
-	s, err := NewServer(cfg, nil)
+	s, err := NewServer(cfg, nil, assets)
 	if err != nil {
 		t.Fatalf("create test server: %v", err)
 	}

@@ -42,12 +42,16 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+# The SPA is compiled into the server, so this stage needs the web stage's output; .dockerignore keeps
+# it out of the build context, and a Go build with nothing to embed does not compile.
+COPY --from=web /build/dist ./frontend/dist
 # CGO off on purpose: SQLite here is modernc.org (pure Go), so both binaries are static
 # and the runtime layer needs no glibc version match. -buildvcs=false because the build
 # context carries no .git (see .dockerignore).
 ENV CGO_ENABLED=0
 ARG VERSION
-RUN go build -trimpath -buildvcs=false -ldflags "-s -w -X kanban/backend/server.Version=${VERSION}" \
+# The image ships no frontend directory, so this is the release build; the bridge takes no tag.
+RUN go build -tags release -trimpath -buildvcs=false -ldflags "-s -w -X kanban/backend/server.Version=${VERSION}" \
       -o /out/kanban . && \
     go build -trimpath -buildvcs=false -ldflags "-s -w" \
       -o /out/sandbox-bridge ./pkg/bridge/agent
@@ -126,13 +130,12 @@ RUN mkdir -p /etc/containers/registries.conf.d && \
 
 # Layout is dictated by how the binary finds its own siblings:
 #   GetAgentBinaryPath  -> <dir of exe>/sandbox-bridge
-#   MIKE_FRONTEND_DIST  -> ./frontend/dist
+#   frontend            -> inside the binary
 #   extensions dir      -> ./extensions      (a volume at runtime)
 #   prompts             -> ./prompts
 WORKDIR /mike
 COPY --from=go  /out/kanban           /mike/kanban
 COPY --from=go  /out/sandbox-bridge   /mike/sandbox-bridge
-COPY --from=web /build/dist           /mike/frontend/dist
 COPY prompts/*.tmpl /mike/prompts/
 COPY scripts/docker-entrypoint.sh /usr/local/bin/mike-entrypoint.sh
 COPY scripts/mike-healthcheck.sh  /usr/local/bin/mike-healthcheck

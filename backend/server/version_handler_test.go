@@ -2,29 +2,22 @@ package server
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-
-	"kanban/backend/startup"
+	"testing/fstest"
 )
 
-// writeDist returns a dist directory holding the given document as its index.html.
-func writeDist(t *testing.T, indexHTML string) string {
-	t.Helper()
-	dist := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dist, "index.html"), []byte(indexHTML), 0o644); err != nil {
-		t.Fatalf("write index.html: %v", err)
-	}
-	return dist
+// docAssets returns a frontend whose index.html is the given document.
+func docAssets(indexHTML string) fs.FS {
+	return fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte(indexHTML)}}
 }
 
-func versionAtStart(t *testing.T, dist string) *Server {
+func versionAtStart(t *testing.T, assets fs.FS) *Server {
 	t.Helper()
-	return testServerWith(t, func(c *startup.Config) { c.FrontendDist = dist })
+	return testServerWithAssets(t, assets, nil)
 }
 
 type versionResponse struct {
@@ -44,12 +37,11 @@ func getVersion(t *testing.T, s *Server) (versionResponse, *httptest.ResponseRec
 	return got, rr
 }
 
-// TestVersionAnswersTheBuildIdentityStampedIntoDist: what the client compares against is the id the
-// build wrote into the document it serves.
+// The id the client compares against is the one the build wrote into the document it serves.
 func TestVersionAnswersTheBuildIdentityStampedIntoDist(t *testing.T) {
-	dist := writeDist(t, `<head><meta name="app-build" content="0a1b2c3d4e5f"><title>Board</title></head>`)
+	assets := docAssets(`<head><meta name="app-build" content="0a1b2c3d4e5f"><title>Board</title></head>`)
 
-	got, rr := getVersion(t, versionAtStart(t, dist))
+	got, rr := getVersion(t, versionAtStart(t, assets))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("GET /api/version: got %d, want 200", rr.Code)
@@ -65,50 +57,41 @@ func TestVersionAnswersTheBuildIdentityStampedIntoDist(t *testing.T) {
 	}
 }
 
-// TestVersionAnswersUnknownForEveryDistThatCannotBeNamed: a missing dist, a build predating the stamp,
-// an unreadable file and a document too large to be ours all answer empty assets with a 200.
-func TestVersionAnswersUnknownForEveryDistThatCannotBeNamed(t *testing.T) {
-	t.Run("no dist configured", func(t *testing.T) {
-		got, rr := getVersion(t, versionAtStart(t, ""))
+// A missing, unstamped or oversized document answers empty assets with a 200.
+func TestVersionAnswersUnknownForEveryAssetTreeThatCannotBeNamed(t *testing.T) {
+	t.Run("no document in the tree", func(t *testing.T) {
+		got, rr := getVersion(t, versionAtStart(t, fstest.MapFS{}))
 		if rr.Code != http.StatusOK || got.Assets != "" {
 			t.Fatalf("got %d %q, want 200 with an empty assets field", rr.Code, got.Assets)
 		}
 	})
 
 	t.Run("dist without a stamped document", func(t *testing.T) {
-		got, rr := getVersion(t, versionAtStart(t, writeDist(t, `<head><title>Board</title></head>`)))
-		if rr.Code != http.StatusOK || got.Assets != "" {
-			t.Fatalf("got %d %q, want 200 with an empty assets field", rr.Code, got.Assets)
-		}
-	})
-
-	t.Run("dist directory is gone again", func(t *testing.T) {
-		got, rr := getVersion(t, versionAtStart(t, filepath.Join(t.TempDir(), "not-built")))
+		got, rr := getVersion(t, versionAtStart(t, docAssets(`<head><title>Board</title></head>`)))
 		if rr.Code != http.StatusOK || got.Assets != "" {
 			t.Fatalf("got %d %q, want 200 with an empty assets field", rr.Code, got.Assets)
 		}
 	})
 
 	t.Run("a tag this rule does not describe", func(t *testing.T) {
-		dist := writeDist(t, `<head><meta name="app-build" content="ZZZZ"></head>`)
-		got, _ := getVersion(t, versionAtStart(t, dist))
+		assets := docAssets(`<head><meta name="app-build" content="ZZZZ"></head>`)
+		got, _ := getVersion(t, versionAtStart(t, assets))
 		if got.Assets != "" {
 			t.Errorf("assets: got %q, want the unparseable tag ignored", got.Assets)
 		}
 	})
 
 	t.Run("document larger than our own read limit", func(t *testing.T) {
-		dist := writeDist(t, `<head><meta name="app-build" content="0a1b2c3d4e5f">`+strings.Repeat("x", indexHTMLLimit))
-		got, _ := getVersion(t, versionAtStart(t, dist))
+		assets := docAssets(`<head><meta name="app-build" content="0a1b2c3d4e5f">` + strings.Repeat("x", indexHTMLLimit))
+		got, _ := getVersion(t, versionAtStart(t, assets))
 		if got.Assets != "" {
 			t.Errorf("assets: got %q, want nothing read past the limit", got.Assets)
 		}
 	})
 }
 
-// TestVersionIsSessionAuthed.
 func TestVersionIsSessionAuthed(t *testing.T) {
-	s := versionAtStart(t, writeDist(t, `<head><meta name="app-build" content="0a1b2c3d4e5f"></head>`))
+	s := versionAtStart(t, docAssets(`<head><meta name="app-build" content="0a1b2c3d4e5f"></head>`))
 
 	rr := testResponse(t, s, testRequest(http.MethodGet, "/api/version", nil))
 	if rr.Code != http.StatusUnauthorized {

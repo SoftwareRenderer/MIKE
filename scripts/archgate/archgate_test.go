@@ -931,10 +931,10 @@ func countRegistrations(t *testing.T, root string) int {
 func TestMeasuredNumbersAgreeWithTheReview(t *testing.T) {
 	root := repoRoot(t)
 
-	// The count `grep -c 's\.mux\.Handle' backend/server/routes.go` answers today: 104. The verb
-	// split is 45 GET, 39 POST, 10 DELETE, 6 PUT, 2 PATCH and 2 methodless — the two file servers,
-	// left as subtrees on purpose. A new registration moves this number and nothing else here.
-	const routeRegistrations = 104
+	// What `grep -c 's\.mux\.Handle' backend/server/routes.go` answers: 102 verb-carrying routes plus
+	// the extensions file subtree. The frontend is served behind this mux, so it is no longer a subtree.
+	// A new registration moves this number and nothing else here.
+	const routeRegistrations = 103
 	if routes, checked, err := scanRoutes(root); err != nil {
 		t.Fatalf("scanRoutes: %v", err)
 	} else if checked != routeRegistrations {
@@ -981,13 +981,13 @@ func TestMeasuredNumbersAgreeWithTheReview(t *testing.T) {
 	}
 
 	// The HTTP twin of the check above: no registered /api route is uncalled. Its population is the
-	// routes carrying a verb — the 102 of the 104 registrations above that are not a file subtree.
+	// routes carrying a verb — the 102 of the 103 registrations above that are not the file subtree.
 	uncalled, apiRoutes, err := scanAPIRoutes(root)
 	if err != nil {
 		t.Fatalf("apiroutes: %v", err)
 	}
-	if apiRoutes != routeRegistrations-2 {
-		t.Fatalf("apiroutes examined %d routes; the route table registers %d and 2 are file subtrees",
+	if apiRoutes != routeRegistrations-1 {
+		t.Fatalf("apiroutes examined %d routes; the route table registers %d and 1 is a file subtree",
 			apiRoutes, routeRegistrations)
 	}
 	if len(uncalled) != 0 {

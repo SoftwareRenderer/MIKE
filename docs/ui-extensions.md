@@ -13,6 +13,11 @@ listing; only directories that actually hold an `index.html` open, which keeps t
 contract (`/extensions/<author>/<name>/`) intact. `manifest.json` carries metadata,
 `ui.injection_points`, optional `config_schema`, and `priority` (lower loads first; ties by name).
 
+The embedded SPA goes through the same wrapper, so `GET /assets/` 404s rather than handing an
+unauthenticated caller the list of every chunk the build made. Any chunk whose name is known is still
+fetchable without a session (`isPublicPath`); what the wrapper removes is the enumeration
+(`TestAssetDirectoryIsNotListed`).
+
 **CSP:** `/extensions/...` goes through `CORSMiddleware`, so `script-src 'self' 'nonce-…'` applies —
 **inline `<script>` in an extension's HTML is blocked**; load code as external files
 (`<script src="app.js">`). `<style>`/inline styles are fine (`style-src 'unsafe-inline'`).

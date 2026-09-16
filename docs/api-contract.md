@@ -87,10 +87,18 @@ answers 405 with an `Allow` header before any handler runs, and handlers do not 
 refuse. A new methodless `/api` route is an archgate `routes` violation, so it fails `make check` rather
 than being noticed in review. A methodless route also escapes `CSRFMiddleware`, which guards non-GET only.
 
-Exemptions, each with a reason: the two file-server subtrees (`/`, `/extensions/`), the two WebSocket
+Exemptions, each with a reason: the extensions file-server subtree (`/extensions/`), the two WebSocket
 upgrades (`/api/stream`, `/api/lsp` — they upgrade on GET and never inspect the verb),
 `handler_preview.go`'s two `r.Method != http.MethodHead` checks (they suppress a HEAD *body*, not a
 request), and `handleTaskMessages` (three verbs through one function).
+
+The frontend is served **behind** the mux (`spaBehind`, `backend/server/routes.go`), never as a route in
+it, and that is a route-verb rule rather than a styling preference: a catch-all pattern inside a
+`ServeMux` outranks that mux's own verb-mismatch answer, so `GET` on a POST-only `/api` route gets served
+the application document — a 200 that reads to a caller as a route which accepted the request. Behind the
+mux, an unmatched path outside `/api/` is the SPA's and everything under `/api/` keeps the mux's answer,
+405 and `Allow` included. `TestSPAServesNothingToAWrongVerbOnAnAPIPath` and
+`TestMuxRefusesAnUnregisteredVerbWhileTheSPAServes` pin the two directions.
 
 A handler that switches on `r.Method` is not a methodless route and is not stale either. Nine branches
 across six files (`api/task.go`, `api/project.go`, `config/config.go`, `extensions/handler.go`,

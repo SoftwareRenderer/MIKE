@@ -31,6 +31,8 @@ frontend/test-results-json
 # ── Rebuilt inside the image ─────────────────────────────────────────────────
 node_modules
 **/node_modules
+# The Go stage gets this from the web stage, not the context: a context copy would be whatever the
+# last local `npm run build` left behind.
 frontend/dist
 frontend/stats.html
 frontend/stats.json

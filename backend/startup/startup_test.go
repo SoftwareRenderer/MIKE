@@ -371,9 +371,6 @@ func TestResolveDefaults(t *testing.T) {
 	if c.DataDir != "./data" || !strings.HasSuffix(c.DBPath, "kanban.db") {
 		t.Errorf("DataDir = %q, DBPath = %q", c.DataDir, c.DBPath)
 	}
-	if c.FrontendDist != DefaultFrontend {
-		t.Errorf("FrontendDist = %q, want %q", c.FrontendDist, DefaultFrontend)
-	}
 	if c.LoginRateLimit != DefaultLoginRateLimit {
 		t.Errorf("LoginRateLimit = %d, want %d", c.LoginRateLimit, DefaultLoginRateLimit)
 	}
@@ -517,4 +514,72 @@ func TestEnvNamesMatchTheirOwners(t *testing.T) {
 	if extensions.EnvMountRoots != EnvExtMountRoots {
 		t.Errorf("extensions.EnvMountRoots = %q, startup says %q", extensions.EnvMountRoots, EnvExtMountRoots)
 	}
+}
+
+// A development build serves the directory its developer names, the flag over the environment; a
+// `-tags release` build resolves to the copy it carries and refuses both spellings.
+func TestFrontendDistIsADevDecision(t *testing.T) {
+	t.Run("given by flag", func(t *testing.T) {
+		clearResolverEnv(t)
+		c, err := resolveWithKey(t, Flags{FrontendDist: "/tmp/spa-dir"})
+		if !frontendDirAllowed {
+			if err == nil {
+				t.Fatalf("Resolve accepted --frontend-dist in a release build (FrontendDist=%q)", c.FrontendDist)
+			}
+			for _, want := range []string{"--frontend-dist", EnvFrontendDist} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("refusal %q does not name %s", err, want)
+				}
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if c.FrontendDist != "/tmp/spa-dir" {
+			t.Errorf("FrontendDist = %q, want the directory the flag gave", c.FrontendDist)
+		}
+	})
+
+	t.Run("given by environment, which the flag outranks", func(t *testing.T) {
+		clearResolverEnv(t)
+		t.Setenv(EnvEncryptionKey, "a-long-enough-test-key")
+		t.Setenv(EnvFrontendDist, "/tmp/spa-from-env")
+
+		c, err := Resolve(Flags{})
+		if !frontendDirAllowed {
+			if err == nil {
+				t.Fatalf("Resolve accepted %s in a release build (FrontendDist=%q)", EnvFrontendDist, c.FrontendDist)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if c.FrontendDist != "/tmp/spa-from-env" {
+			t.Errorf("FrontendDist = %q, want the environment's value", c.FrontendDist)
+		}
+		if c, err = Resolve(Flags{FrontendDist: "/tmp/spa-from-flag"}); err != nil {
+			t.Fatalf("Resolve with the flag: %v", err)
+		}
+		if c.FrontendDist != "/tmp/spa-from-flag" {
+			t.Errorf("FrontendDist = %q, want the flag's value to outrank the environment", c.FrontendDist)
+		}
+	})
+
+	t.Run("unset", func(t *testing.T) {
+		clearResolverEnv(t)
+		c := mustResolve(t, Flags{})
+		want := map[bool]string{true: DefaultFrontend, false: ""}[frontendDirAllowed]
+		if c.FrontendDist != want {
+			t.Errorf("FrontendDist = %q, want %q", c.FrontendDist, want)
+		}
+	})
+}
+
+// resolveWithKey is mustResolve for a test that reads the error.
+func resolveWithKey(t *testing.T, f Flags) (Config, error) {
+	t.Helper()
+	t.Setenv(EnvEncryptionKey, "a-long-enough-test-key")
+	return Resolve(f)
 }
