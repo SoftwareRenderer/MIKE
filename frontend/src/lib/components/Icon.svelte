@@ -1,7 +1,13 @@
 <script lang="ts">
-    import { singleSvgMarkup } from '$lib/utils/sanitize';
+    import { singleSvgMarkup, safeCSSValue } from '$lib/utils/sanitize';
 
     let { src, color = 'currentColor', width = 16, height = 16, title, class: className }: { src: string; color?: string; width?: number; height?: number; title?: string; class?: string } = $props();
+
+    // These three go into a `style` attribute, where a `;` starts a declaration of its own:
+    // `safeCSSValue` refuses such a colour, and a size that is not a number falls back to 16.
+    let safeColor = $derived(safeCSSValue(color, 'currentColor'));
+    let safeWidth = $derived(Number(width) || 16);
+    let safeHeight = $derived(Number(height) || 16);
 
     // `src` is rendered as markup, so only the shape this component is for is
     // accepted: a lone, sanitized `<svg>` root. Everything real passes — the 26
@@ -19,7 +25,7 @@
     });
 </script>
 
-<span class="icon {className}" aria-hidden="true" style="--icon-color: {color}; --icon-width: {width}px; --icon-height: {height}px" title={title}>{@html safeSrc}</span>
+<span class="icon {className}" aria-hidden="true" style="--icon-color: {safeColor}; --icon-width: {safeWidth}px; --icon-height: {safeHeight}px" title={title}>{@html safeSrc}</span>
 
 <style>
     :global(.icon svg) {

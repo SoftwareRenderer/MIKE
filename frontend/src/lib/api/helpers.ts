@@ -1,13 +1,14 @@
 import { t } from '$lib/i18n';
+import { randomUUIDv4 } from '$lib/utils/random';
 
 const API_BASE = '/api';
 
-/** Generate a unique ID. Falls back to timestamp-based ID if crypto.randomUUID is unavailable. */
+/**
+ * The ID the server stores as this row's identity, so it is built from `crypto.getRandomValues`
+ * rather than `crypto.randomUUID`, which a plain-HTTP origin does not have.
+ */
 export function generateId(): string {
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-        return crypto.randomUUID();
-    }
-    return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    return randomUUIDv4();
 }
 
 /** CSRF token, set on login or session check. Held in memory only. */

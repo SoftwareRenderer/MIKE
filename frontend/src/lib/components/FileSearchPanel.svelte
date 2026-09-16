@@ -130,7 +130,8 @@
         onFileSelected(fullPath, result.line || undefined);
     }
 
-    /** Highlight matching text in a line of content */
+    // Highlight matching text in a line. The regex half can hang the tab on text the repository
+    // supplies, and only a worker would bound a pattern the user typed; left open on purpose.
     function highlightMatch(line: string, q: string): string {
         if (!q || !line) return escapeHtml(line);
         try {
