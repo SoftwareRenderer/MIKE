@@ -30,28 +30,9 @@ vi.mock('$lib/types', () => ({
     getToolDisplayName: (displayName: string | undefined, toolName: string) => displayName || toolName.replace('_', ' '),
 }));
 
-vi.mock('$lib/utils/toolArgs', async (importOriginal) => {
-    // Keep the real normalizeEdits/EDIT_DIFF_MAX_LINES (toolArgs.ts is a
-    // dependency-free module) — only formatToolArgs is stubbed here.
-    const actual = await importOriginal<typeof import('$lib/utils/toolArgs')>();
-    return {
-        ...actual,
-        formatToolArgs: (toolName: string, args: Record<string, unknown> | null, _rawArgs?: string) => {
-            if (!args) return '';
-            if (toolName === 'bash') return `$ ${args.command || ''}`;
-            if (toolName === 'read_file' || toolName === 'write_file') return (args.path as string) || '';
-            if (toolName === 'edit_file') {
-                const p = args.path as string;
-                const count = actual.normalizeEdits(args.edits).length;
-                return count > 0 ? `${p} (${count} edit${count > 1 ? 's' : ''})` : p || '';
-            }
-            return JSON.stringify(args);
-        },
-        HIDE_ARGS_FOR_TOOLS: new Set(['create_task', 'edit_task', 'view_tasks', 'request_review', 'ask_question']),
-        SANDBOXABLE_TOOLS: new Set(['read_file', 'write_file', 'edit_file', 'bash']),
-        ARGS_MAX_LEN: 50,
-    };
-});
+// `$lib/utils/toolArgs` is deliberately unmocked: the progress line reads the same streamed path
+// the header prints, and a `formatToolArgs` stub that ignored the partial arguments would let this
+// suite disagree with the app about whether the filename is already on screen.
 
 const baseProps = {
     expandedArgs: new Set<string>(),
@@ -105,7 +86,7 @@ describe('ToolCall - pending status text', () => {
         expect(container.querySelector('.progress-text')?.textContent).toBe('Writing...');
     });
 
-    it('names the file a write_file is still generating its content for', () => {
+    it('names the file in the header alone while its content is still generating', () => {
         const { container } = render(ToolCall, {
             ...baseProps,
             toolCall: makeToolCall({
@@ -115,7 +96,8 @@ describe('ToolCall - pending status text', () => {
                 isPending: true,
             }),
         });
-        expect(container.querySelector('.progress-text')?.textContent).toBe('Writing: src/file.go');
+        expect(container.querySelector('.tool-args')?.textContent).toBe('./src/file.go');
+        expect(container.querySelector('.progress-text')?.textContent).toBe('Writing...');
     });
 
     it('names the file from the tool event when the arguments do not carry it yet', () => {
@@ -129,10 +111,11 @@ describe('ToolCall - pending status text', () => {
                 isPending: true,
             }),
         });
+        expect(container.querySelector('.tool-args')?.textContent).toBe('');
         expect(container.querySelector('.progress-text')?.textContent).toBe('Writing: src/file.go');
     });
 
-    it('names the file while the write itself runs', () => {
+    it('shows "Writing..." while the write runs on a file the header already names', () => {
         const { container } = render(ToolCall, {
             ...baseProps,
             toolCall: makeToolCall({
@@ -141,7 +124,8 @@ describe('ToolCall - pending status text', () => {
                 isPending: true,
             }),
         });
-        expect(container.querySelector('.progress-text')?.textContent).toBe('Writing: src/file.go');
+        expect(container.querySelector('.tool-args')?.textContent).toBe('./src/file.go');
+        expect(container.querySelector('.progress-text')?.textContent).toBe('Writing...');
     });
 
     it('shows "Preparing: path" for pending read_file', () => {
@@ -208,7 +192,7 @@ describe('ToolCall - pending status text', () => {
         expect(text).toContain('Running for');
     });
 
-    it('names the file instead of the elapsed time while the write is still generating', () => {
+    it('holds the elapsed time back while the write is still generating', () => {
         const startedAt = Date.now() - 10000;
         const { container } = render(ToolCall, {
             ...baseProps,
@@ -220,7 +204,7 @@ describe('ToolCall - pending status text', () => {
                 startedAt,
             }),
         });
-        expect(container.querySelector('.progress-text')?.textContent).toBe('Writing: src/file.go');
+        expect(container.querySelector('.progress-text')?.textContent).toBe('Writing...');
     });
 });
 

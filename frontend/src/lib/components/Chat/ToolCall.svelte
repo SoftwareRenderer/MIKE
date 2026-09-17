@@ -109,6 +109,10 @@
             : ''
     );
 
+    let showArgs = $derived(!HIDE_ARGS_FOR_TOOLS.has(tc.toolName));
+    let argsDisplay = $derived(formatToolArgs(tc.toolName, tc.args, tc.raw_args));
+    let truncated = $derived(truncateArgs(argsDisplay));
+
     // Pending-tool-call progress line: one message per variant, placeholders included, so a language
     // that puts them elsewhere can say so. `bash` before its command is complete falls through to "Writing".
     let progressText = $derived.by(() => {
@@ -119,7 +123,7 @@
         if (tc.toolName === 'ask_question') return t('chat.tool.writingQuestion');
         if (tc.toolName === 'edit_file') return t('chat.tool.editing');
         if (tc.toolName === 'write_file') {
-            return writeStreamPath ? t('chat.tool.writingPath', { path: writeStreamPath }) : t('chat.tool.writingFile');
+            return writeStreamPath && !argsDisplay ? t('chat.tool.writingPath', { path: writeStreamPath }) : t('chat.tool.writingFile');
         }
         if (tc.toolName === 'bash' && isBashExecuting) {
             return tc.path ? t('chat.tool.runningPath', { path: tc.path }) : t('chat.tool.running');
@@ -167,10 +171,6 @@
         if (!wasSelecting) onToggleArgs(tc.toolId);
         wasSelecting = false;
     }
-
-    let showArgs = $derived(!HIDE_ARGS_FOR_TOOLS.has(tc.toolName));
-    let argsDisplay = $derived(formatToolArgs(tc.toolName, tc.args, tc.raw_args));
-    let truncated = $derived(truncateArgs(argsDisplay));
 
     // Bash result truncation: max 10 lines AND max 1KB (whichever is smaller)
     const RESULT_MAX_LINES = 10;
