@@ -172,6 +172,31 @@ func parseToolArgs(s string) map[string]any {
 	return result
 }
 
+// maxEchoedArgsBytes bounds what of a call's own arguments is quoted back to the model
+const maxEchoedArgsBytes = 200
+
+// unparseableToolArgs is the answer for a tool call whose arguments could not be decoded
+func unparseableToolArgs(rawArgs string, parsed map[string]any) string {
+	trimmed := strings.TrimSpace(rawArgs)
+	if trimmed == "" || len(parsed) > 0 || json.Valid([]byte(trimmed)) {
+		return ""
+	}
+	offset := 0
+	var probe any
+	if err := json.Unmarshal([]byte(trimmed), &probe); err != nil {
+		if syn, ok := err.(*json.SyntaxError); ok {
+			offset = int(syn.Offset)
+		}
+	}
+	echo, more := trimmed, ""
+	if len(echo) > maxEchoedArgsBytes {
+		echo = strings.ToValidUTF8(echo[:maxEchoedArgsBytes], "")
+		more = "... (truncated)"
+	}
+	return fmt.Sprintf("Error: the tool call's arguments are not valid JSON (broken at offset %d of %d bytes), so nothing ran. "+
+		"What arrived: %q%s\nSend the call again with complete, valid JSON arguments.", offset, len(trimmed), echo, more)
+}
+
 // normalizePath strips the sandbox mount prefix from absolute paths, so a path written the way the
 // container sees it names the same file on both sides. A relative path is returned as-is and
 // resolved against the worktree by the caller; any other absolute path stays absolute.

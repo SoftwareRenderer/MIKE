@@ -836,6 +836,23 @@ func TestLlamaError_ErrorText(t *testing.T) {
 	}
 }
 
+// TestLlamaError_IsRequestRejected pins which refusals end the run at once. A 4xx that a later call
+// could get an answer from must stay retryable, or a rate-limited provider kills the task.
+func TestLlamaError_IsRequestRejected(t *testing.T) {
+	rejected := []int{400, 401, 403, 404, 413, 422}
+	retryable := []int{200, 408, 429, 500, 502, 503}
+	for _, code := range rejected {
+		if !(&LlamaError{StatusCode: code}).IsRequestRejected() {
+			t.Errorf("IsRequestRejected(%d) = false, want true: the same request will be refused again", code)
+		}
+	}
+	for _, code := range retryable {
+		if (&LlamaError{StatusCode: code}).IsRequestRejected() {
+			t.Errorf("IsRequestRejected(%d) = true, want false: a later call can answer", code)
+		}
+	}
+}
+
 func TestLlamaError_IsRateLimit(t *testing.T) {
 	if !(&LlamaError{StatusCode: 429}).IsRateLimit() {
 		t.Error("IsRateLimit() = false for 429, want true")
