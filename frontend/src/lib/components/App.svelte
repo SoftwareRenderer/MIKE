@@ -197,6 +197,12 @@
         reviewNotifier.observeBoard(projectId, board.tasks || []);
     });
 
+    $effect(() => {
+        // What the user opens, and which Review column they are looking at, is them having seen it.
+        const openTaskId = appStore.selectedTask?.id || uiStore.floatingTask?.taskId || null;
+        reviewNotifier.observeAttention(openTaskId, uiStore.reviewColumnInViewOf);
+    });
+
     function startCountdown() {
         stopCountdown();
         updateCountdown();

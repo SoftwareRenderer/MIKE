@@ -73,3 +73,24 @@ export function notableArrivals(arrivals: Task[], openTaskId: string | null, sel
     const selfMoved = new Set(selfMovedIds);
     return arrivals.filter(t => t.id !== openTaskId && !selfMoved.has(t.id));
 }
+
+/** A notification this client put up, and what it was standing for. */
+export interface ShownNotice {
+    tag: string;
+    projectId: string;
+    /** Null for one that speaks for the column as a whole rather than for a single task. */
+    taskId: string | null;
+}
+
+/**
+ * Which notifications the user has now seen: the column being in front of them retires every notice of
+ * that project, batch included; an open task retires only the notice that names it, because the batch
+ * also stands for the tasks still unread in it.
+ */
+export function dismissedTags(shown: ShownNotice[], openTaskId: string | null, reviewProject: string | null): string[] {
+    if (!openTaskId && !reviewProject) return [];
+    return shown
+        .filter(n => (reviewProject !== null && n.projectId === reviewProject)
+            || (openTaskId !== null && n.taskId === openTaskId))
+        .map(n => n.tag);
+}

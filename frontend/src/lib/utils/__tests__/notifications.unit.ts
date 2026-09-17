@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { notificationPermission, requestNotificationPermission, showBrowserNotification } from '$lib/utils/notifications';
+import { notificationPermission, requestNotificationPermission, showBrowserNotification, dismissBrowserNotification } from '$lib/utils/notifications';
 
 afterEach(() => {
     vi.unstubAllGlobals();
@@ -31,11 +31,27 @@ function stubNotification(permission: 'default' | 'granted' | 'denied', behaviou
     return { posted, requestPermission };
 }
 
-function stubServiceWorker(showNotification: ReturnType<typeof vi.fn> | null) {
+function stubServiceWorker(showNotification: ReturnType<typeof vi.fn> | null, reported: WorkerNotice[] = []) {
     Object.defineProperty(navigator, 'serviceWorker', {
         configurable: true,
-        value: showNotification ? { getRegistration: () => Promise.resolve({ showNotification }) } : undefined,
+        value: showNotification ? {
+            getRegistration: () => Promise.resolve({
+                showNotification,
+                getNotifications: (options?: { tag?: string }) => Promise.resolve(
+                    reported.filter(n => n.tag === options?.tag) as unknown as Notification[]),
+            }),
+        } : undefined,
     });
+}
+
+/** A notification a live worker would answer for `getNotifications({ tag })`. */
+interface WorkerNotice {
+    tag: string;
+    close: ReturnType<typeof vi.fn>;
+}
+
+function workerNotice(tag: string): WorkerNotice {
+    return { tag, close: vi.fn() };
 }
 
 describe('notificationPermission', () => {
@@ -123,5 +139,44 @@ describe('showBrowserNotification', () => {
         stubServiceWorker(null);
         stubNotification('granted', { throws: true });
         expect(showBrowserNotification({ title: 'T', body: 'B' })).toBe(false);
+    });
+});
+
+describe('dismissBrowserNotification', () => {
+    it('closes what this page put up under that tag', () => {
+        const { posted } = stubNotification('granted');
+        showBrowserNotification({ title: 'T', body: 'B', tag: 'mike-task-t1' });
+        dismissBrowserNotification('mike-task-t1');
+        expect(posted[0].close).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves alone what went up under another tag', () => {
+        const { posted } = stubNotification('granted');
+        showBrowserNotification({ title: 'T', body: 'B', tag: 'mike-task-t1' });
+        dismissBrowserNotification('mike-task-somebody-else');
+        expect(posted[0].close).not.toHaveBeenCalled();
+    });
+
+    it('closes what the worker reports for that tag, and only that tag', async () => {
+        const arrived = workerNotice('mike-review-p1');
+        const elsewhere = workerNotice('mike-review-p2');
+        stubServiceWorker(vi.fn(), [arrived, elsewhere]);
+        stubNotification('granted', { throws: true });
+        showBrowserNotification({ title: 'T', body: 'B', tag: 'mike-review-p1' });
+        dismissBrowserNotification('mike-review-p1');
+        await vi.waitFor(() => expect(arrived.close).toHaveBeenCalledTimes(1));
+        expect(elsewhere.close).not.toHaveBeenCalled();
+    });
+
+    it('closes the same tag twice without complaint', () => {
+        const { posted } = stubNotification('granted');
+        showBrowserNotification({ title: 'T', body: 'B', tag: 'mike-task-t2' });
+        dismissBrowserNotification('mike-task-t2');
+        expect(() => dismissBrowserNotification('mike-task-t2')).not.toThrow();
+        expect(posted[0].close).toHaveBeenCalledTimes(1);
+    });
+
+    it('is quiet where the Notification API does not exist', () => {
+        expect(() => dismissBrowserNotification('mike-task-t3')).not.toThrow();
     });
 });
