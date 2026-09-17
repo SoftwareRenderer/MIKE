@@ -67,6 +67,28 @@ A notification is due when the preference is on **and** the user is not looking 
 
 Several arrivals in one read are one notification, naming the count.
 
+## Taking one back
+
+A notification the user has now seen is closed rather than left to time out. The same two facts decide
+it, read as state instead of as a gate: the open task retires its own `mike-task-<id>`, and
+`reviewColumnInViewOf` retires every notification of that project — the batch `mike-review-<project>`
+included. Opening one of the tasks a batch speaks for retires nothing of the batch, because it also
+stands for the tasks still unread in it. `dismissedTags` holds the rule; one `$effect` in `App.svelte`
+reads `selectedTask`, `floatingTask` and `reviewColumnInViewOf` and hands the result to the service,
+which decides nothing of its own.
+
+- **Visible and focused, read at the moment the state changes rather than watched** — focus is not a
+  reactive value, so a tab that merely regains focus keeps what it already had.
+- **Dismissal is by tag.** `dismissBrowserNotification` closes the objects this page holds and asks the
+  live registration for `getNotifications({ tag })`, so a service-worker notification that outlived a
+  reload goes too. A constructor-shown one does not: `getNotifications` answers only for what
+  `showNotification` showed, and a reload drops the reference to the rest. Hence the hold-by-tag map in
+  `notifications.ts` — it is what makes a notification dismissible while its page lives.
+- **The record is not a leak.** A tag leaves the ledger when it is retired, and when its project
+  disappears from a `project_counts` frame — the same rule the ledger applies to its own per-project
+  state. A task's record is deliberately *not* dropped when the task leaves Review: the open-task rule
+  still applies to a card that has since moved on.
+
 ## Permission and delivery
 
 `$lib/utils/notifications.ts` is the only place that touches the Notification API, and every entry
@@ -80,14 +102,17 @@ point is safe where it does not exist (plain-http origin, webview, Safari's page
   generated one (`vite-plugin-pwa`, workbox `generateSW`), so that path carries no click handler and
   cannot open the task.
 - `tag` is `mike-task-<id>` (or `mike-review-<project>` for a batch), so a task that keeps moving
-  replaces its own notification instead of stacking.
+  replaces its own notification instead of stacking, and so the tag alone is enough to take one back
+  later — see *Taking one back*.
 
 ## Tests
 
-- `utils/__tests__/review-notify.unit.ts` — the arrival diff, the viewport geometry, the gate.
-- `utils/__tests__/notifications.unit.ts` — permission answers and both delivery paths.
+- `utils/__tests__/review-notify.unit.ts` — the arrival diff, the viewport geometry, the gate, the
+  retirement rule.
+- `utils/__tests__/notifications.unit.ts` — permission answers, both delivery paths, and closing a tag
+  through the held objects and through the registration.
 - `services/__tests__/review-notifications.unit.svelte.ts` — the ledger: seeding, one announcement per
-  arrival, the suppression cases, the preference off.
+  arrival, the suppression cases, the preference off, and taking a notification back.
 - `components/__tests__/preferences-tab.unit.svelte.ts` — the row and its permission sentences.
 - `backend/config/config_test.go` / `updates_test.go` — the flag's round-trip and its partial update.
 

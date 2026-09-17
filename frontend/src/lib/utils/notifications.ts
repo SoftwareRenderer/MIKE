@@ -4,7 +4,7 @@
  */
 
 /** `tag` replaces an earlier notification for the same task instead of stacking. */
-interface BrowserNotification {
+export interface BrowserNotification {
     title: string;
     body: string;
     tag?: string;
@@ -16,6 +16,28 @@ export type PermissionAnswer = 'unsupported' | 'default' | 'granted' | 'denied';
 
 function api(): typeof Notification | null {
     return typeof Notification === 'undefined' ? null : Notification;
+}
+
+/**
+ * Constructor-path notifications by tag, so one can be closed later: `getNotifications` answers only
+ * for what `showNotification` showed, never for these. Entries leave on the `close` event, which the
+ * browser fires for its own timeout and the user's own swipe as well as for ours.
+ */
+const held = new Map<string, Set<Notification>>();
+
+function hold(tag: string, notification: Notification): void {
+    let byTag = held.get(tag);
+    if (!byTag) {
+        byTag = new Set();
+        held.set(tag, byTag);
+    }
+    byTag.add(notification);
+    notification.onclose = () => {
+        const still = held.get(tag);
+        if (!still) return;
+        still.delete(notification);
+        if (still.size === 0) held.delete(tag);
+    };
 }
 
 export function notificationPermission(): PermissionAnswer {
@@ -46,6 +68,7 @@ export function showBrowserNotification(spec: BrowserNotification): boolean {
     if (spec.tag) options.tag = spec.tag;
     try {
         const shown = new n(spec.title, options);
+        if (spec.tag) hold(spec.tag, shown);
         const url = spec.url;
         if (url) {
             shown.onclick = () => {
@@ -61,4 +84,23 @@ export function showBrowserNotification(spec: BrowserNotification): boolean {
         registration.then((r) => { void r?.showNotification(spec.title, options); }).catch(() => {});
         return true;
     }
+}
+
+/**
+ * Take back a notification this app showed under `tag`: the objects this page still holds, plus
+ * whatever a live registration reports for that tag — which is how one that outlived a reload goes.
+ * Quiet everywhere the API is absent.
+ */
+export function dismissBrowserNotification(tag: string): void {
+    const ours = held.get(tag);
+    if (ours) {
+        for (const notification of ours) notification.close();
+        held.delete(tag);
+    }
+    const registration = navigator.serviceWorker?.getRegistration?.();
+    if (!registration) return;
+    registration
+        .then((r) => r?.getNotifications?.({ tag }))
+        .then((found) => { for (const notification of found || []) notification.close(); })
+        .catch(() => {});
 }

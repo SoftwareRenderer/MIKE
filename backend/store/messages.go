@@ -13,6 +13,21 @@ import (
 // scanTaskMessage so a new column cannot be selected in one query and missed in another.
 const taskMessageCols = `id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, assistant_msg_id, kind, created_at`
 
+// messageTimeLayout is the storage form of a task message's created_at, and the reason chat reads back
+// in the order it was written. SQL orders these rows and cuts them at a message by comparing that text,
+// and time.RFC3339Nano trims the zeros off the end of the fraction: 'Z' (0x5A) sorts above every digit,
+// so the earlier "…:05.3892121Z" sorts *after* the later "…:05.38921216Z". A fixed-width fraction makes
+// the text order the time order — for text in one zone, which is why the instant is stored in UTC: an
+// hour of wall-clock time repeats at a fall-back, and two offsets would order it backwards.
+const messageTimeLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
+// formatMessageTime renders a timestamp for task_messages.created_at.
+func formatMessageTime(t time.Time) string { return t.UTC().Format(messageTimeLayout) }
+
+// messageOrder lists messages oldest first. rowid breaks a tie inside one turn, where an assistant row
+// and its tool_call rows share a created_at.
+const messageOrder = "ORDER BY created_at ASC, rowid ASC"
+
 // optStr is the inverse of nullStr: the empty string for a NULL column.
 func optStr(n sql.NullString) string {
 	if n.Valid {
@@ -50,7 +65,7 @@ func (s *Store) CreateTaskMessage(m *types.TaskMessage) error {
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
 		`INSERT INTO task_messages (id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, assistant_msg_id, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.TaskID, ptrStr(m.ThreadID), m.Role, ptrStr(m.Severity), m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, ptrStr(m.Attachments), m.ModelName, m.ProviderName, m.PromptTokens, m.PredictedTokens, m.CacheTokens, m.PromptMs, m.PredictedMs, m.Duration, ptrStr(m.GitCommitHash), B2I(m.IsLoopHint), ptrStr(m.AssistantMsgID), ptrStr(m.Kind), m.CreatedAt.Format(time.RFC3339Nano),
+		m.ID, m.TaskID, ptrStr(m.ThreadID), m.Role, ptrStr(m.Severity), m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, ptrStr(m.Attachments), m.ModelName, m.ProviderName, m.PromptTokens, m.PredictedTokens, m.CacheTokens, m.PromptMs, m.PredictedMs, m.Duration, ptrStr(m.GitCommitHash), B2I(m.IsLoopHint), ptrStr(m.AssistantMsgID), ptrStr(m.Kind), formatMessageTime(m.CreatedAt),
 	)
 	if err != nil {
 		return err
@@ -93,19 +108,19 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 		// taskID is provided, keep both filters for callers that expect them.
 		if taskID != "" {
 			rows, err = s.db.Query(
-				`SELECT `+taskMessageCols+` FROM task_messages WHERE task_id = ? AND thread_id = ? ORDER BY created_at ASC`,
+				`SELECT `+taskMessageCols+` FROM task_messages WHERE task_id = ? AND thread_id = ? `+messageOrder,
 				taskID, threadID,
 			)
 		} else {
 			rows, err = s.db.Query(
-				`SELECT `+taskMessageCols+` FROM task_messages WHERE thread_id = ? ORDER BY created_at ASC`,
+				`SELECT `+taskMessageCols+` FROM task_messages WHERE thread_id = ? `+messageOrder,
 				threadID,
 			)
 		}
 	} else {
 		// For backward compatibility: get messages with no thread_id (legacy) or all messages
 		rows, err = s.db.Query(
-			`SELECT `+taskMessageCols+` FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
+			`SELECT `+taskMessageCols+` FROM task_messages WHERE task_id = ? `+messageOrder,
 			taskID,
 		)
 	}
@@ -225,7 +240,7 @@ func (s *Store) GetLastUserMessageInThread(threadID string) (string, error) {
 	err := s.db.QueryRow(`
 		SELECT id FROM task_messages
 		WHERE thread_id = ? AND role = 'user'
-		ORDER BY created_at DESC
+		ORDER BY created_at DESC, rowid DESC
 		LIMIT 1
 	`, threadID).Scan(&id)
 	return id, err
@@ -318,8 +333,8 @@ func (s *Store) FixPostSummaryTimestamps(taskID, threadID string, anchorTime, su
 	newTime := summaryTime.Add(time.Millisecond)
 	_, err := s.db.Exec(
 		`UPDATE task_messages SET created_at = ? WHERE task_id = ? AND thread_id = ? AND created_at > ? AND created_at < ?`,
-		newTime.Format(time.RFC3339Nano), taskID, threadID,
-		anchorTime.Format(time.RFC3339Nano), summaryTime.Format(time.RFC3339Nano),
+		formatMessageTime(newTime), taskID, threadID,
+		formatMessageTime(anchorTime), formatMessageTime(summaryTime),
 	)
 	if err != nil {
 		return fmt.Errorf("fix post-summary timestamps: %w", err)

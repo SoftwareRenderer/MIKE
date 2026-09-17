@@ -773,3 +773,22 @@ export interface SessionInfo {
     current: boolean;
 }
 
+/**
+ * One API token (GET /api/tokens). There is no token field: the plaintext is handed out once, by
+ * the request that created it, so a listing cannot leak a credential.
+ */
+export interface APITokenInfo {
+    id: string;
+    /** The name the user gave it — the only thing that identifies the row afterwards. */
+    label: string;
+    /** RFC3339 UTC issue time. */
+    created_at: string;
+    /** RFC3339 UTC last request it authenticated. "" when it has never been used. */
+    last_used_at: string;
+}
+
+/** A created token: the row plus its secret, which is shown once and never stored in this browser. */
+export interface CreatedAPIToken extends APITokenInfo {
+    token: string;
+}
+

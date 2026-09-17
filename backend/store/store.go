@@ -86,6 +86,9 @@ func NewStore(dbPath string) (*Store, error) {
 	if err := s.initSessions(); err != nil {
 		return nil, fmt.Errorf("init sessions: %w", err)
 	}
+	if err := s.initAPITokens(); err != nil {
+		return nil, fmt.Errorf("init api tokens: %w", err)
+	}
 	if err := s.initConfigDefaults(); err != nil {
 		return nil, fmt.Errorf("init config defaults: %w", err)
 	}
@@ -174,6 +177,7 @@ func (s *Store) initSchema() error {
 	s.addMissingColumns()
 	s.migrateTokenStats()
 	s.zeroLegacySandboxPeaks()
+	s.normalizeTimeText()
 	s.clearDoneDiffSnapshotsIfOlderThan(stored)
 	s.setUserVersion(schemaVersion)
 	return nil
@@ -225,12 +229,14 @@ func ptrStr(s string) *string {
 	return &s
 }
 
-// ptrTime formats a time pointer as RFC3339 string, or nil if zero.
+// ptrTime formats a time pointer as RFC3339 UTC string, or nil if zero. UTC because the stored text is
+// compared as text: task_threads.checkpoint_message_time is matched against a message's created_at
+// rendered by the caller, and that one is UTC too (see messageTimeLayout).
 func ptrTime(t *time.Time) *string {
 	if t == nil || t.IsZero() {
 		return nil
 	}
-	s := t.Format(time.RFC3339)
+	s := t.UTC().Format(time.RFC3339)
 	return &s
 }
 

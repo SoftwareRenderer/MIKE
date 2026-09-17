@@ -109,8 +109,8 @@ func (r *AgentRegistry) ToProviders() []types.Provider {
 	return providers
 }
 
-// The mount list written in the manifest is only a suggestion and is never used here, so the answer is nil
-// until the user approves a folder in Settings > Extensions.
+// GetAgentSandbox answers nil until the user approves a folder in Settings > Extensions: the mount
+// list written in the manifest is only a suggestion and is never used here.
 func (r *AgentRegistry) GetAgentSandbox(agentName string) *types.AgentSandbox {
 	r.mu.RLock()
 	installed, ok := r.agents[agentName]

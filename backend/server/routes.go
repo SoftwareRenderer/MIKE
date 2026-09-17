@@ -26,6 +26,12 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/sessions/revoke-others", s.handleSessionsRevokeOthers)
 	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.handleSessionRevoke)
 
+	// API tokens for headless clients (same rule as the session routes: session-authed, CSRF on the
+	// writes, never public, and never on tokenScope — a token cannot mint or revoke a token).
+	s.mux.HandleFunc("GET /api/tokens", s.handleAPITokensList)
+	s.mux.HandleFunc("POST /api/tokens", s.handleAPITokenCreate)
+	s.mux.HandleFunc("DELETE /api/tokens/{id}", s.handleAPITokenRevoke)
+
 	// The local CA behind the server's default certificate, for Settings → About.
 	s.mux.HandleFunc("GET /api/tls/ca", s.HandleTLSCA)
 

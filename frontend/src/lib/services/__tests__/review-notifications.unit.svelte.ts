@@ -2,9 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Config, Project, Task } from '$lib/types';
 import { appStore, uiStore } from '$lib/stores';
 
-const { getBoard, show } = vi.hoisted(() => ({ getBoard: vi.fn(), show: vi.fn() }));
+const { getBoard, show, dismiss } = vi.hoisted(() => ({ getBoard: vi.fn(), show: vi.fn(), dismiss: vi.fn() }));
 vi.mock('$lib/api/projects', () => ({ getBoard: (projectId: string) => getBoard(projectId) }));
-vi.mock('$lib/utils/notifications', () => ({ showBrowserNotification: (spec: unknown) => show(spec) }));
+vi.mock('$lib/utils/notifications', () => ({
+    showBrowserNotification: (spec: unknown) => show(spec),
+    dismissBrowserNotification: (tag: string) => dismiss(tag),
+}));
 
 import { reviewNotifier } from '$lib/services/review-notifications.svelte';
 
@@ -57,6 +60,8 @@ function setVisibility({ visible = true, focused = true }: { visible?: boolean; 
 beforeEach(() => {
     getBoard.mockReset();
     show.mockReset();
+    show.mockReturnValue(true);
+    dismiss.mockReset();
     setPreference(true);
     setVisibility();
     uiStore.reviewColumnInViewOf = null;
@@ -304,5 +309,89 @@ describe('reviewNotifier and moves this tab made itself', () => {
         } finally {
             vi.useRealTimers();
         }
+    });
+});
+
+describe('reviewNotifier taking a notification back', () => {
+    /** One arrival, announced, in a project of its own. Ids are unique per case: the notifier is a
+     *  singleton, so a name shared with another case could answer for that case's notification. */
+    async function announceOne(caseName: string) {
+        const projectId = freshProject();
+        getBoard.mockResolvedValue({ tasks: [reviewOf(`${caseName}-resident`), reviewOf(`${caseName}-arrived`, '2026-09-16T09:00:00Z')] });
+        reviewNotifier.observeCounts(counts(projectId, 1));
+        reviewNotifier.observeCounts(counts(projectId, 2));
+        await vi.waitFor(() => expect(show).toHaveBeenCalledTimes(1));
+        return { projectId, taskId: `${caseName}-arrived` };
+    }
+
+    /** Two arrivals at once: one notification standing for both tasks. */
+    async function announceBatch(caseName: string) {
+        const projectId = freshProject();
+        getBoard.mockResolvedValue({ tasks: [reviewOf(`${caseName}-one`, '2026-09-16T09:00:00Z'), reviewOf(`${caseName}-two`, '2026-09-16T09:01:00Z')] });
+        reviewNotifier.observeCounts(counts(projectId, 0));
+        reviewNotifier.observeCounts(counts(projectId, 2));
+        await vi.waitFor(() => expect(show).toHaveBeenCalledTimes(1));
+        return { projectId, first: `${caseName}-one`, second: `${caseName}-two` };
+    }
+
+    it('retires the notification when the task it names is opened', async () => {
+        const { taskId } = await announceOne('open');
+        reviewNotifier.observeAttention(taskId, null);
+        expect(dismiss).toHaveBeenCalledWith(`mike-task-${taskId}`);
+    });
+
+    it('retires the notification when its project’s Review column comes into view', async () => {
+        const { projectId, taskId } = await announceOne('column');
+        reviewNotifier.observeAttention(null, projectId);
+        expect(dismiss).toHaveBeenCalledWith(`mike-task-${taskId}`);
+    });
+
+    it('leaves a batch alone while one of the tasks it speaks for is opened', async () => {
+        const { first } = await announceBatch('batchopen');
+        reviewNotifier.observeAttention(first, null);
+        expect(dismiss).not.toHaveBeenCalled();
+    });
+
+    it('retires a batch when the column it speaks for comes into view', async () => {
+        const { projectId } = await announceBatch('batchcolumn');
+        reviewNotifier.observeAttention(null, projectId);
+        expect(dismiss).toHaveBeenCalledWith(`mike-review-${projectId}`);
+    });
+
+    it('retires nothing in a background tab', async () => {
+        const { projectId, taskId } = await announceOne('bg');
+        setVisibility({ focused: false });
+        reviewNotifier.observeAttention(taskId, projectId);
+        expect(dismiss).not.toHaveBeenCalled();
+    });
+
+    it('retires nothing in a hidden tab', async () => {
+        const { projectId, taskId } = await announceOne('hidden');
+        setVisibility({ visible: false });
+        reviewNotifier.observeAttention(taskId, projectId);
+        expect(dismiss).not.toHaveBeenCalled();
+    });
+
+    it('comes back for what the tab never actually showed', async () => {
+        show.mockReturnValue(false);
+        const { projectId, taskId } = await announceOne('noshow');
+        show.mockReturnValue(true);
+        reviewNotifier.observeAttention(taskId, projectId);
+        expect(dismiss).not.toHaveBeenCalled();
+    });
+
+    it('retires each notification once, however long the user sits on it', async () => {
+        const { projectId, taskId } = await announceOne('twice');
+        reviewNotifier.observeAttention(taskId, projectId);
+        reviewNotifier.observeAttention(taskId, projectId);
+        expect(dismiss).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves another project’s notification alone', async () => {
+        const { projectId, taskId } = await announceOne('neighbour');
+        reviewNotifier.observeAttention('someone-else', 'another-project');
+        expect(dismiss).not.toHaveBeenCalled();
+        reviewNotifier.observeAttention(taskId, projectId);
+        expect(dismiss).toHaveBeenCalledTimes(1);
     });
 });

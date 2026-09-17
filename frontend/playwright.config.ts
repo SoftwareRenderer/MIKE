@@ -25,6 +25,8 @@ const ISOLATED_SPECS = [
   'settings-extension-dependency-cache',
   'settings-provider',
   'settings-sessions',
+  // Issues and revokes API tokens on the lane server, and asserts what a token can reach.
+  'settings-api-tokens',
 ];
 
 export default defineConfig({

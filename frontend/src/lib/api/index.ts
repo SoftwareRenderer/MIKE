@@ -139,6 +139,13 @@ export {
     revokeOtherSessions,
 } from './sessions';
 
+// -- API tokens (bearer credentials, Settings → About) --
+export {
+    listAPITokens,
+    createAPIToken,
+    revokeAPIToken,
+} from './tokens';
+
 // -- Extensions --
 export {
     listExtensions,

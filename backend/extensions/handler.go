@@ -615,8 +615,9 @@ func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *ht
 
 const AgentMountConfigKey = "sandbox_mount"
 
-// Sending an empty list clears the approval, which is why this is its own endpoint rather than a field of
-// the configuration form.
+// HandleSetAgentMount writes the folders a person approved for one extension's agent sandbox. Sending
+// an empty list clears the approval, which is why this is its own endpoint rather than a field of the
+// configuration form.
 func (h *ExtensionHandler) HandleSetAgentMount(w http.ResponseWriter, r *http.Request, id string) {
 	// A pointer, so a request with no mounts key is rejected instead of clearing a working approval.
 	var req struct {
