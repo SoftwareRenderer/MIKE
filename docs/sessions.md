@@ -47,6 +47,10 @@ mutates immediately — deliberately **outside** the modal's dirty/Save/Cancel f
 install button above it — and fetches only when the About tab mounts. Revoking the current session
 hands off to the modal's `onSignOut` prop.
 
+The **API tokens** section under it (`ConfigModal/ApiTokensSection.svelte`, `$lib/api/tokens.ts`) is
+a different credential with a smaller reach: login sessions authenticate the whole app, a token
+authenticates the routes listed in `docs/api.md`.
+
 ## Tests
 
 `backend/store/sessions_test.go`, `backend/auth/session_test.go`,

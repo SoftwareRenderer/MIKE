@@ -62,6 +62,20 @@ running containers — nothing else would ever remove them.
   limit 0}` is a real dismissal on a kernel without `memory.peak`, so the three numbers alone cannot
   carry it.
 
+## An instant that SQL compares is fixed-width UTC
+
+`ORDER BY`, `>=` and `<` on a stored timestamp compare **text**, so the text must be one fixed width and
+one zone. `time.RFC3339Nano` is neither: it trims the zeros off the end of the fraction, and `Z` (0x5A)
+sorts above every digit, so the earlier `…:07.3892121Z` came back **after** the later `…:07.38921216Z` —
+which is how a chat could read its own turns the wrong way round — and a zone offset repeats an hour of
+wall-clock time at a fall-back. `task_messages.created_at` is stored through `formatMessageTime`
+(`messageTimeLayout`); `task_threads.checkpoint_message_time` through `ptrTime`, because
+`GetThreadsByCheckpointMessageTime` matches that column against a message's `created_at` rendered by its
+caller. Both columns were stored the other way before `doneMessageTimeKeysStamp`, so `normalizeTimeText`
+rewrites the rows it finds — one table holding both shapes has no order at all — and a row whose text does
+not parse is named in the log and left as stored. `rowid` breaks an exact tie, as `GetLastMessageInThread`
+already did; the listing queries do the same. Tests: `backend/store/messages_time_test.go`.
+
 ## File permissions
 
 Data dir `0700`; `kanban.db` plus `-wal`/`-shm` `0600` (`backend/store/store.go`); `kanban.trace` `0600`

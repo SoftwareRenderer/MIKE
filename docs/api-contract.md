@@ -23,6 +23,16 @@ package means moving `Server` with them or taking a `server ↔ api` import cycl
 not drift: a handler is exported because `backend/server`'s route table names it and unexported because only
 the package calls it, so renaming one set into the other changes who may reach it.
 
+## Who may call a route at all
+
+Two credentials reach this server. A login cookie reaches everything the middleware guards. A bearer
+token reaches the patterns in `tokenScope` (`backend/server/token_auth.go`) and nothing else, which is
+checked against the pattern the mux reports for the request — so a route renamed without editing that
+map loses its grant rather than keeping one under the old name. `docs/api.md` is the client-facing
+version of that list and of what each route does; `TestTokenScopeIsTheApprovedSet` holds the code and
+that list together. Nothing else in this file changes for a token caller except CSRF, which has no
+cookie to protect.
+
 ## Frames
 
 - Inbound frames are `stream.AppStreamMessage` (`Data` is `json.RawMessage`). **Outbound** frames are

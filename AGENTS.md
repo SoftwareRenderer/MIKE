@@ -214,6 +214,10 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
 - **`PRAGMA user_version` gates the schema.** Adding a migration extends the probe chain *and* raises the
   version, leaving the earlier idempotent steps in place; a step that must run exactly once needs its own
   marker.
+- **An instant that SQL compares is stored as fixed-width UTC text.** `RFC3339Nano` trims the zeros off the
+  fraction and `Z` sorts above every digit, so trimmed text orders two nearby instants backwards; a zone
+  offset repeats an hour at a fall-back. The columns, the rewrite of the older rows, the tie rule:
+  **`docs/storage.md`**.
 - Tests induced mid-write use SQLite `RAISE(ABORT)` triggers, never a production seam.
 - Permissions, ID generation, what is in and out of `tx`: **`docs/storage.md`**.
 
@@ -225,6 +229,15 @@ The session cookie's `Secure` flag is decided **per request** (TLS terminated he
 header under `MIKE_TRUST_PROXY`) and there is deliberately no variable for it; logout clears with the
 flag it set. `/api/sessions*` are session-authed, CSRF-guarded, never public, and their responses carry
 no token of any kind. Storage shape, endpoint shapes and the Settings UI: `docs/sessions.md`.
+
+- **A bearer token is a second credential with a smaller world.** Issued, labelled and revoked in
+  Settings → About; stored as `hex(sha256(token))` like a session and shown once. It authenticates
+  only the project-list and task-CRUD/start/stop routes in `tokenScope`
+  (`backend/server/token_auth.go`) — everything else, including `/api/tokens` itself, stays
+  cookie+CSRF, so a leaked token cannot mint or revoke tokens. A request that presents one is
+  answered by the token or not at all: it never falls back to a session cookie, and it needs no
+  CSRF header because nothing but its owner attaches a header. Issuance, the allowlist and the
+  client-facing route reference: `docs/api.md`.
 
 ## Sandboxing
 
@@ -433,7 +446,7 @@ deliberately omits.
 | `docs/sandbox-bridge.md` | bridge connections, LSP session binding, wire IDs, payload limits, upload lifetime |
 | `docs/confinement.md` | path jails, the no-project host jail, size and output caps, subprocess environments |
 | `docs/locking.md` | keylock domains, accessor shape, lock order, watched waits, `sandboxMu` |
-| `docs/storage.md` | what is in `tx`, migrations and `user_version`, file permissions, ID generation |
+| `docs/storage.md` | what is in `tx`, migrations and `user_version`, stored timestamps, file permissions, ID generation |
 | `docs/git-operations.md` | command construction and hook fence, worktree layout, stash identity, ref/clone/hash fences, slugify |
 | `docs/lifecycle.md` | construction order = shutdown order, the base-context registry, the TLS listener |
 | `docs/api-contract.md` | frame shapes, route verbs, partial updates, diff contract, error vocabulary, headers, endpoint ownership |
@@ -444,6 +457,7 @@ deliberately omits.
 | `docs/testing.md` | test environment, teardown, e2e conventions, mock-LLM fixtures, load-sensitive tests |
 | `docs/tls.md` | certs/SANs, distribution, proxy + `Host`, weak-password and cookie rules |
 | `docs/sessions.md` | session storage shape, `/api/sessions*` responses, Settings → About UI |
+| `docs/api.md` | the bearer-token surface: provisioning, the route allowlist, what each route does |
 | `docs/threads-checkpoints.md` | branch vs snapshot layers, checkpoint pinning/restore, fork inheritance |
 | `docs/commit-and-done.md` | what the click does, conflict arming, which files never get committed |
 | `docs/auto-answer.md` | `Autostarted` provenance, which stops are answered from the parent, the advisory row |
