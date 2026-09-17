@@ -1,7 +1,9 @@
 package store
 
 import (
+	"database/sql"
 	"fmt"
+	"time"
 
 	"mike/pkg/logging"
 )
@@ -20,7 +22,7 @@ import (
 // steps in place. A database stamped N has been through 1..N; an older one reads 0 and runs the
 // whole chain. So the steps must stay idempotent, and one that must run exactly once needs its own
 // marker (see the config-row guard on the backfill) rather than trusting this number.
-const schemaVersion = doneLegacyPeakClearedStamp
+const schemaVersion = doneMessageTimeKeysStamp
 
 // doneDiffParsedStamp is the stamp from which a stored done-task diff body carries parsed_files.
 // Older bodies are served byte for byte and cannot grow the key, so initSchema drops those rows.
@@ -38,6 +40,11 @@ const doneMemoryAlertAckStamp = doneOOMKillStamp + 1
 // doneLegacyPeakClearedStamp is the schema version from which tasks.sandbox_memory_peak_mb stores
 // held memory, as sandboxruntime.CgroupMemory.HeldBytes defines it.
 const doneLegacyPeakClearedStamp = doneMemoryAlertAckStamp + 1
+
+// doneMessageTimeKeysStamp is the version from which a stored instant that SQL compares as text is
+// fixed-width UTC (see messageTimeLayout and timeTextColumns). Rows written before it are rewritten once
+// by normalizeTimeText: a table holding both shapes cannot be ordered by its own text.
+const doneMessageTimeKeysStamp = doneLegacyPeakClearedStamp + 1
 
 // userVersion reads PRAGMA user_version. A read failure answers 0, which reruns the probe chain:
 // slow, but it cannot leave a column missing. The caller holds s.mu.
@@ -435,4 +442,113 @@ func (s *Store) clearDoneDiffSnapshotsIfOlderThan(stored int) {
 			logging.For(logging.Store).Warnf("clearing done-task diff snapshots failed: %v", err)
 		}
 	}
+}
+
+// nonCanonicalMessageTimeText selects the task_messages rows whose created_at is not in
+// messageTimeLayout. That layout is one fixed width, so any other shape is caught here; the Go pass
+// behind this filter makes the decision row by row, and a current database reads nothing.
+const nonCanonicalMessageTimeText = `
+	  substr(created_at, 20, 1) <> '.'
+	  OR length(created_at) <> 30
+	  OR substr(created_at, 30, 1) <> 'Z'`
+
+// nonCanonicalCheckpointTime selects the task_threads rows whose checkpoint_message_time was not written
+// in UTC. The handler matches that column against a message's created_at rendered as text, so both sides
+// have to be the same shape (see GetThreadsByCheckpointMessageTime).
+const nonCanonicalCheckpointTime = `
+	  checkpoint_message_time IS NOT NULL
+	  AND (length(checkpoint_message_time) <> 20 OR substr(checkpoint_message_time, 20, 1) <> 'Z')`
+
+// timeTextColumn is one stored instant whose text is compared as text: the rows this build did not
+// write, and the shape to rewrite them into. Both are fixed width and UTC. The text before them was
+// time.RFC3339Nano, which trims the zeros off the end of the fraction — 'Z' (0x5A) sorts above every
+// digit, so an earlier instant rendered shorter sorted *after* a later one rendered longer — and it kept
+// the writer's zone, where a fall-back repeats an hour of wall-clock time.
+type timeTextColumn struct {
+	name        string
+	selectStale string
+	update      string
+	layout      string
+}
+
+var timeTextColumns = []timeTextColumn{
+	{
+		name:        "task_messages.created_at",
+		selectStale: `SELECT id, created_at FROM task_messages WHERE ` + nonCanonicalMessageTimeText,
+		update:      `UPDATE task_messages SET created_at = ? WHERE id = ?`,
+		layout:      messageTimeLayout,
+	},
+	{
+		name:        "task_threads.checkpoint_message_time",
+		selectStale: `SELECT id, checkpoint_message_time FROM task_threads WHERE ` + nonCanonicalCheckpointTime,
+		update:      `UPDATE task_threads SET checkpoint_message_time = ? WHERE id = ?`,
+		layout:      time.RFC3339,
+	},
+}
+
+// normalizeTimeText rewrites every stored instant that SQL compares as text into the one shape this
+// build writes, so no table holds two orders for the same pair of instants.
+//
+// A row whose text this build cannot read is named and left as stored: a wrong order is survivable, a
+// discarded timestamp is not. The caller holds s.mu, so this opens its own transaction rather than
+// calling Store.tx.
+func (s *Store) normalizeTimeText() {
+	for _, col := range timeTextColumns {
+		s.rewriteTimeText(col)
+	}
+}
+
+func (s *Store) rewriteTimeText(col timeTextColumn) {
+	rows, err := s.db.Query(col.selectStale)
+	if err != nil {
+		logging.For(logging.Store).Warnf("reading %s to normalize it failed: %v", col.name, err)
+		return
+	}
+	stale, err := scanRows(rows, func(r *sql.Rows) (staleTimeText, error) {
+		var row staleTimeText
+		err := r.Scan(&row.id, &row.text)
+		return row, err
+	})
+	if err != nil {
+		logging.For(logging.Store).Warnf("reading %s to normalize it failed: %v", col.name, err)
+		return
+	}
+	if len(stale) == 0 {
+		return
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		logging.For(logging.Store).Warnf("beginning the rewrite of %s failed: %v", col.name, err)
+		return
+	}
+	rewritten := 0
+	for _, row := range stale {
+		at := scanTime(row.text)
+		if at.IsZero() {
+			logging.For(logging.Store).Warnf("%s of %s is text this build cannot read (%q); leaving it as stored",
+				col.name, row.id, row.text)
+			continue
+		}
+		if canonical := at.UTC().Format(col.layout); canonical != row.text {
+			if _, err := tx.Exec(col.update, canonical, row.id); err != nil {
+				logging.For(logging.Store).Warnf("rewriting the %s of %s failed: %v", col.name, row.id, err)
+				_ = tx.Rollback()
+				return
+			}
+			rewritten++
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		logging.For(logging.Store).Warnf("committing the rewrite of %s failed: %v", col.name, err)
+		return
+	}
+	if rewritten > 0 {
+		logging.For(logging.Store).Infof("rewrote %d %s values into fixed-width UTC", rewritten, col.name)
+	}
+}
+
+// staleTimeText is one row's id and the stored text it holds.
+type staleTimeText struct {
+	id, text string
 }

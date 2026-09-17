@@ -15,6 +15,7 @@
     import ProviderCard from './ConfigModal/ProviderCard.svelte';
     import ExtensionsTab from './ConfigModal/ExtensionsTab.svelte';
     import SessionsSection from './ConfigModal/SessionsSection.svelte';
+    import ApiTokensSection from './ConfigModal/ApiTokensSection.svelte';
     import pwaIcon from '$lib/assets/icons/pwa-icon.svg?raw';
     import { checkNow, type UpdateOutcome } from '$lib/services/app-update';
 
@@ -922,6 +923,9 @@
             <!-- Login sessions: mutates immediately (like the PWA button above),
                  so it is deliberately outside the dirty/Save flow. -->
             <SessionsSection onSignOut={onSignOut} />
+
+            <!-- Bearer tokens for headless clients: same rule, same flow. -->
+            <ApiTokensSection />
         {/if}
 
         {#if error}

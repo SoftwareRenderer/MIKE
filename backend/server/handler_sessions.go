@@ -23,9 +23,9 @@ type sessionInfoResponse struct {
 	Current   bool   `json:"current"`    // true for the session making this request
 }
 
-// formatSessionTime renders a session timestamp for the API. A zero time — never
+// formatAuthTime renders a session timestamp for the API. A zero time — never
 // seen, or a row predating the columns — is "".
-func formatSessionTime(t time.Time) string {
+func formatAuthTime(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
@@ -58,9 +58,9 @@ func (s *Server) handleSessionsList(w http.ResponseWriter, r *http.Request) {
 	for _, se := range sessions {
 		out = append(out, sessionInfoResponse{
 			ID:        se.ID,
-			CreatedAt: formatSessionTime(se.CreatedAt),
-			LastSeen:  formatSessionTime(se.LastSeen),
-			ExpiresAt: formatSessionTime(se.ExpiresAt),
+			CreatedAt: formatAuthTime(se.CreatedAt),
+			LastSeen:  formatAuthTime(se.LastSeen),
+			ExpiresAt: formatAuthTime(se.ExpiresAt),
 			IP:        se.IP,
 			UserAgent: se.UserAgent,
 			Current:   se.ID == current,

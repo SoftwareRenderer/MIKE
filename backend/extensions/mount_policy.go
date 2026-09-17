@@ -261,8 +261,9 @@ func ShadowsToolState(containerPath string) bool {
 	return false
 }
 
-// The user typed this path themselves, so it is judged on having a sensible shape rather than against the
-// allowlist that MountPolicy applies to an extension's own requests.
+// ValidateDependencyGrant returns the resolved host path of a dependency cache, or refuses it. The user
+// typed it themselves, so it is judged on having a sensible shape rather than against the allowlist
+// that MountPolicy applies to an extension's own requests.
 func ValidateDependencyGrant(hostPath string) (string, error) {
 	trimmed := strings.TrimSpace(hostPath)
 	if trimmed == "" {
@@ -294,8 +295,9 @@ func ValidateDependencyGrant(hostPath string) (string, error) {
 	return resolved, nil
 }
 
-// A missing mode means read-only. A folder that does not exist yet is accepted as long as a folder above it
-// exists, because the agent creates its own config folder the first time it runs.
+// ValidateAgentMountGrant returns the grant to store for one agent sandbox mount. A missing mode means
+// read-only. A folder that does not exist yet is accepted as long as a folder above it exists, because
+// the agent creates its own config folder the first time it runs.
 func ValidateAgentMountGrant(mount types.SandboxMount) (types.SandboxMount, error) {
 	expanded := ExpandHostPath(strings.TrimSpace(mount.HostPath))
 	if expanded == "" {
@@ -328,8 +330,8 @@ func ValidateAgentMountGrant(mount types.SandboxMount) (types.SandboxMount, erro
 	return candidate, nil
 }
 
-// An approval saved before today's checks existed still gets checked here. Whether the folder exists is not
-// asked, because the agent creates it.
+// CheckGrantedHostPath re-checks a stored approval, so one saved before today's checks existed is still
+// judged. Whether the folder exists is not asked, because the agent creates it.
 func CheckGrantedHostPath(hostPath string) error {
 	resolved, err := resolvePath(ExpandHostPath(hostPath))
 	if err != nil {
@@ -347,7 +349,7 @@ func hasExistingAncestor(p string) bool {
 	return false
 }
 
-// A leading ~ is replaced by the home directory, because podman does not expand it.
+// ExpandHostPath replaces a leading ~ with the home directory, because podman does not expand it.
 func ExpandHostPath(p string) string {
 	if p != "~" && !strings.HasPrefix(p, "~/") {
 		return p

@@ -85,6 +85,16 @@ var detachedOperations = []sideEffectEntry{
 		"deletes the row, then the directory. A half-run is the bug this repo records twice: a row with files still " +
 			"present is a deleted extension that keeps executing, a directory with no row is listed as installable",
 	},
+	{
+		"POST /api/tokens",
+		"writes the token row. The plaintext is in the response only, so an aborted request must still be decided " +
+			"one way: a row exists and the user regenerates, or no row exists — never a token whose caller cannot tell",
+	},
+	{
+		"DELETE /api/tokens/{id}",
+		"revocation is the row's absence: a cancel that left it standing leaves a credential live that the user " +
+			"believes is gone",
+	},
 }
 
 // requestScopedReads serve a response and leave nothing behind. Their cancellation is expected — a

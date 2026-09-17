@@ -405,6 +405,36 @@ const catalog = {
     'settings.sessions.revokeFailed': 'Failed to revoke session',
     'settings.sessions.revokeAllFailed': 'Failed to revoke other sessions',
 
+    // ── ConfigModal/ApiTokensSection.svelte ──
+    // revoke-token-* / refresh-tokens aria-labels are e2e selectors, not prose. The scope sentence
+    // is the one place a user learns what a leaked token would cost them, so it names the routes.
+    'settings.tokens.title': 'API tokens',
+    'settings.tokens.help': 'Credentials for scripts and other headless clients, sent as "Authorization: Bearer <token>". A token can list projects, create, read, update and delete tasks, and start or stop a task — nothing else, and no other endpoint. It does not expire; revoke it to take it away.',
+    'settings.tokens.reloadTitle': 'Reload the token list',
+    'settings.tokens.refresh': 'Refresh',
+    'settings.tokens.loading': 'Loading...',
+    'settings.tokens.loadingList': 'Loading tokens...',
+    'settings.tokens.none': 'No API tokens',
+    'settings.tokens.created': 'Created',
+    'settings.tokens.lastUsed': 'Last used',
+    'settings.tokens.neverUsed': 'Never used',
+    'settings.tokens.labelPlaceholder': 'What uses this token?',
+    'settings.tokens.labelRequired': 'Give the token a name first',
+    'settings.tokens.create': 'Create token',
+    'settings.tokens.creating': 'Creating...',
+    'settings.tokens.createdTitle': 'Copy it now — this is the only time it is shown.',
+    'settings.tokens.copy': 'Copy',
+    'settings.tokens.copied': 'Copied',
+    'settings.tokens.revoke': 'Revoke',
+    'settings.tokens.revoking': 'Revoking...',
+    'settings.tokens.revokeHint': 'Revoke this token',
+    'settings.tokens.revokeTitle': 'Revoke this token?',
+    'settings.tokens.revokeMessage': 'Anything using it stops working on its next request and cannot be given the same token back.',
+    'settings.tokens.revokedToast': 'Token revoked',
+    'settings.tokens.loadFailed': 'Failed to load tokens',
+    'settings.tokens.createFailed': 'Failed to create token',
+    'settings.tokens.revokeFailed': 'Failed to revoke token',
+
     // ── ConfigModal/ProviderCard.svelte (+ the display fallbacks in utils/providers.ts) ──
     // fetchError and testResult.message are server answers: not translated.
     'settings.provider.removeTitle': 'Remove Provider',
@@ -864,6 +894,9 @@ const catalog = {
     'api.fetchSessions': 'Failed to fetch sessions',
     'api.revokeSession': 'Failed to revoke session',
     'api.revokeOtherSessions': 'Failed to revoke other sessions',
+    'api.fetchAPITokens': 'Failed to fetch tokens',
+    'api.createAPIToken': 'Failed to create token',
+    'api.revokeAPIToken': 'Failed to revoke token',
     'api.fetchThreads': 'Failed to fetch threads',
     'api.loadExtensions': 'Failed to load extensions',
     'api.loadRegistry': 'Failed to load registry',
