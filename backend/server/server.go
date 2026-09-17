@@ -60,6 +60,7 @@ type Server struct {
 	store               *store.Store
 	configStore         *config.ConfigStore
 	sessionMgr          *auth.SessionManager
+	apiTokens           *auth.APITokenManager
 	projectHandler      *api.ProjectHandler
 	taskHandler         *api.TaskHandler
 	boardHandler        *api.BoardHandler
@@ -369,6 +370,9 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 		return nil, fmt.Errorf("create session manager: %w\nSet MIKE_LOGIN_PASSWORD environment variable to enable authentication", err)
 	}
 	s.sessionMgr = sessionMgr
+	// Bearer tokens for headless clients. Issuance and revocation live behind the session-authed
+	// /api/tokens routes; this manager is what authenticates them (token_auth.go).
+	s.apiTokens = auth.NewAPITokenManager(store)
 
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.appStreamMgr = stream.NewAppStreamManager(store, worktreeMgr)
@@ -909,6 +913,9 @@ func (s *Server) middlewareChain(h http.Handler) http.Handler {
 		MaxBodyMiddleware(httputil.MaxRequestBodyBytes),
 		NonceMiddleware,
 		s.CORSMiddleware,
+		// Before CSRF and the session: a bearer credential carries no cookie to forge, and its
+		// absence must leave the cookie path untouched.
+		s.APITokenMiddleware,
 		s.CSRFMiddleware,
 		s.SessionMiddleware,
 		CompressMiddleware,

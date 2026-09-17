@@ -9,6 +9,8 @@ import {
     isLookingAtReview,
     shouldNotifyReview,
     notableArrivals,
+    dismissedTags,
+    type ShownNotice,
 } from '$lib/utils/review-notify';
 
 function task(id: string, status: string, movedAt = '2026-01-01T00:00:00Z'): Task {
@@ -153,5 +155,42 @@ describe('notableArrivals', () => {
     it('keeps everything when nothing is open and this tab moved nothing', () => {
         expect(notableArrivals(arrivals, null, []).map(t => t.id))
             .toEqual(['opened', 'moved-by-me', 'someone-else']);
+    });
+});
+
+describe('dismissedTags', () => {
+    const shown: ShownNotice[] = [
+        { tag: 'mike-task-t1', projectId: 'p1', taskId: 't1' },
+        { tag: 'mike-task-t2', projectId: 'p1', taskId: 't2' },
+        { tag: 'mike-review-p1', projectId: 'p1', taskId: null },
+        { tag: 'mike-task-t9', projectId: 'p2', taskId: 't9' },
+        { tag: 'mike-review-p2', projectId: 'p2', taskId: null },
+    ];
+
+    it('retires nothing while no task is open and no Review column is in view', () => {
+        expect(dismissedTags(shown, null, null)).toEqual([]);
+    });
+
+    it('retires only the notice that names the open task', () => {
+        expect(dismissedTags(shown, 't1', null)).toEqual(['mike-task-t1']);
+    });
+
+    it('leaves a batch alone when one of the tasks it speaks for is opened', () => {
+        expect(dismissedTags(shown, 't2', null)).not.toContain('mike-review-p1');
+    });
+
+    it('retires every notice of the project whose Review column is in view, batch included', () => {
+        expect(dismissedTags(shown, null, 'p1')).toEqual(['mike-task-t1', 'mike-task-t2', 'mike-review-p1']);
+    });
+
+    it('leaves another project alone however closely this one is being read', () => {
+        const retired = dismissedTags(shown, 't1', 'p1');
+        expect(retired).not.toContain('mike-task-t9');
+        expect(retired).not.toContain('mike-review-p2');
+    });
+
+    it('answers both rules at once', () => {
+        expect(dismissedTags(shown, 't9', 'p1'))
+            .toEqual(['mike-task-t1', 'mike-task-t2', 'mike-review-p1', 'mike-task-t9']);
     });
 });

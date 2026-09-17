@@ -34,6 +34,9 @@ type ServerConfig struct {
 	FileTypes          []extensions.LSPFileType
 	Language           string         // routing language, e.g., "go", "typescript"
 	InitParamsOverride map[string]any // merged into initialize params sent to server
+	// ChatDiagnostics is the owning extension's post-edit diagnostics gate, read once here so a
+	// caller that already looked this file up needs no second read of the extension store.
+	ChatDiagnostics bool
 }
 
 // LanguageIDFor answers what a document notification must call this file — the per-file id, not
@@ -1306,5 +1309,6 @@ func (r *ExtensionRegistry) toServerConfig(ext *extensions.Extension) *ServerCon
 		Command:            lspCfg.Command,
 		FileTypes:          lspCfg.FileTypes,
 		InitParamsOverride: lspCfg.InitParamsOverride,
+		ChatDiagnostics:    lspCfg.IsChatDiagnosticsEnabled(),
 	}
 }

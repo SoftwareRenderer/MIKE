@@ -477,13 +477,14 @@ func TestHandleUpdate_LSPConfig_BoolFlags(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Update editor_enabled and tool_calls_enabled
+	// Update editor_enabled, tool_calls_enabled and chat_diagnostics_enabled
 	body := map[string]any{
 		"manifest": map[string]any{
 			"capabilities": map[string]any{
 				"lsp": map[string]any{
-					"editor_enabled":     false,
-					"tool_calls_enabled": true,
+					"editor_enabled":           false,
+					"tool_calls_enabled":       true,
+					"chat_diagnostics_enabled": true,
 				},
 			},
 		},
@@ -519,6 +520,31 @@ func TestHandleUpdate_LSPConfig_BoolFlags(t *testing.T) {
 	if !*lspCfg.ToolCallsEnabled {
 		t.Error("ToolCallsEnabled = false, want true")
 	}
+	if lspCfg.ChatDiagnosticsEnabled == nil || !*lspCfg.ChatDiagnosticsEnabled {
+		t.Error("ChatDiagnosticsEnabled = nil or false, want true (opting in must land)")
+	}
+
+	// And back off: an explicit false has to overwrite the stored true, or the Settings
+	// toggle could be switched on but never off.
+	off, _ := json.Marshal(map[string]any{
+		"manifest": map[string]any{"capabilities": map[string]any{
+			"lsp": map[string]any{"chat_diagnostics_enabled": false},
+		}},
+	})
+	offReq := httptest.NewRequest(http.MethodPut, "/api/extensions/test-ext", bytes.NewReader(off))
+	offReq.Header.Set("Content-Type", "application/json")
+	offW := httptest.NewRecorder()
+	h.HandleUpdate(offW, offReq, "test-ext")
+	if offW.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", offW.Code)
+	}
+	switched, err := h.store.GetByID("test-ext")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got := switched.Manifest.Capabilities.GetLSP(); got.ChatDiagnosticsEnabled == nil || *got.ChatDiagnosticsEnabled {
+		t.Error("ChatDiagnosticsEnabled = nil or true, want false (an explicit false must land)")
+	}
 }
 
 func TestHandleUpdate_LSPConfig_BoolFlags_PartialUpdate(t *testing.T) {
@@ -526,12 +552,13 @@ func TestHandleUpdate_LSPConfig_BoolFlags_PartialUpdate(t *testing.T) {
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
 	falseVal := false
 	ext.Manifest.Capabilities = &Capabilities{LSP: &LSPConfig{
-		Command:          "gopls",
-		Args:             []string{"serve"},
-		FileTypes:        []LSPFileType{{Extension: "go", LanguageID: "go"}},
-		Language:         "go",
-		EditorEnabled:    &falseVal,
-		ToolCallsEnabled: &falseVal,
+		Command:                "gopls",
+		Args:                   []string{"serve"},
+		FileTypes:              []LSPFileType{{Extension: "go", LanguageID: "go"}},
+		Language:               "go",
+		EditorEnabled:          &falseVal,
+		ToolCallsEnabled:       &falseVal,
+		ChatDiagnosticsEnabled: &falseVal,
 	}}
 	if err := h.store.Create(ext); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -573,6 +600,10 @@ func TestHandleUpdate_LSPConfig_BoolFlags_PartialUpdate(t *testing.T) {
 	// tool_calls_enabled should still be false (not in request)
 	if lspCfg.ToolCallsEnabled == nil || *lspCfg.ToolCallsEnabled {
 		t.Error("ToolCallsEnabled should still be false (not in request)")
+	}
+	// chat_diagnostics_enabled should still be false (not in request)
+	if lspCfg.ChatDiagnosticsEnabled == nil || *lspCfg.ChatDiagnosticsEnabled {
+		t.Error("ChatDiagnosticsEnabled should still be false (not in request)")
 	}
 }
 

@@ -169,7 +169,8 @@ func (m *recordingLSPManager) counts() (initCalls, syncCalls, created, released 
 }
 
 // lspLanguageExtension is a minimal LSP manifest that names its language, the way both
-// installed language-server manifests do.
+// installed language-server manifests do, and opts into the post-edit pass the way the pass
+// tests need it to.
 func lspLanguageExtension(id, language, fileExt string) *extensions.Extension {
 	return &extensions.Extension{
 		ID: id, Name: id, Version: "1.0.0", Type: extensions.ExtensionTypeLSP, Enabled: true,
@@ -178,7 +179,8 @@ func lspLanguageExtension(id, language, fileExt string) *extensions.Extension {
 			Capabilities: &extensions.Capabilities{
 				LSP: &extensions.LSPConfig{
 					Command: id, Args: []string{"--stdio"}, Language: language,
-					FileTypes: []extensions.LSPFileType{{Extension: fileExt, LanguageID: language}},
+					FileTypes:              []extensions.LSPFileType{{Extension: fileExt, LanguageID: language}},
+					ChatDiagnosticsEnabled: boolRef(true),
 				},
 			},
 		},

@@ -131,8 +131,9 @@ files deleted while the server runs stay broken until the next start. Test:
 
 ## LSP capability gates
 
-`manifest.capabilities.lsp` — both default to enabled, both toggled per extension in Settings →
-Extensions, and **independent** of each other.
+`manifest.capabilities.lsp` — three gates, each toggled per extension in Settings → Extensions →
+LSP Features, all **independent** of each other. `editor_enabled` and `tool_calls_enabled` default to
+enabled; `chat_diagnostics_enabled` defaults to **disabled** (see below).
 
 - `editor_enabled` gates the *browser's* LSP features: the server only stores and serves the flag, while
   `extension-manager.getEditorLSPExtensions()` filters and `lsp-connection-manager.isLSPAvailable()`
@@ -143,6 +144,21 @@ Extensions, and **independent** of each other.
   single `ResolvedFile.editorLSP` field, which nothing but `isLSPAvailable` reads.
 - `tool_calls_enabled` gates the *agent's* LSP tools and is enforced server-side
   (`ExtensionRegistry.IsToolCallsEnabledForFile`, checked before an LSP tool runs).
+- `chat_diagnostics_enabled` gates the turn-boundary pass that hands the files a turn edited to their
+  language server and feeds `publishDiagnostics` back to the model as an advisory. Enforced server-side in
+  `exec.filterDiagnosticFiles`, which drops every candidate whose extension has not opted in, so an
+  ungated workspace yields no files and therefore **no server attach, no handshake, no manifest-change
+  recycle** — the pass never starts. The browser never reads it. **Its default is the opposite of the two
+  above: absent means off**, because the pass costs a language-server round trip per edited file, so a
+  fresh install diagnoses nothing until a person ticks the box per language. `ServerConfig.ChatDiagnostics`
+  carries the verdict from the one `ExtensionRegistry.Lookup` a caller already makes, so no second read of
+  the extension store decides it.
+
+Neither agent-side gate routes anything: which server a file reaches is the manifest's `file_types[]`
+(`LSPConfig.MatchesFile`), and a per-extension flag only filters that answer. With gopls off and tsserver
+on, a turn touching Go and TypeScript files diagnoses the TypeScript ones alone. An LSP tool call needs
+nothing from this gate either — `LSPRequest` calls `ensureDocSync` for itself, so `references`, `hover`
+and `rename` still see the on-disk text with chat diagnostics off. Test: `TestFilterDiagnosticFiles_OnlyOptedInExtensions`.
 
 ## Changelogs
 

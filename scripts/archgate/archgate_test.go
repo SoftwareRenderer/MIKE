@@ -931,10 +931,10 @@ func countRegistrations(t *testing.T, root string) int {
 func TestMeasuredNumbersAgreeWithTheReview(t *testing.T) {
 	root := repoRoot(t)
 
-	// What `grep -c 's\.mux\.Handle' backend/server/routes.go` answers: 103 verb-carrying routes plus
+	// What `grep -c 's\.mux\.Handle' backend/server/routes.go` answers: 107 verb-carrying routes plus
 	// the extensions file subtree. The frontend is served behind this mux, so it is no longer a subtree.
 	// A new registration moves this number and nothing else here.
-	const routeRegistrations = 105
+	const routeRegistrations = 108
 	if routes, checked, err := scanRoutes(root); err != nil {
 		t.Fatalf("scanRoutes: %v", err)
 	} else if checked != routeRegistrations {
@@ -981,7 +981,7 @@ func TestMeasuredNumbersAgreeWithTheReview(t *testing.T) {
 	}
 
 	// The HTTP twin of the check above: no registered /api route is uncalled. Its population is the
-	// routes carrying a verb — the 102 of the 103 registrations above that are not the file subtree.
+	// routes carrying a verb — every registration above but the 1 file subtree.
 	uncalled, apiRoutes, err := scanAPIRoutes(root)
 	if err != nil {
 		t.Fatalf("apiroutes: %v", err)

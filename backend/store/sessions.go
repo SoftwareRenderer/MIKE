@@ -25,13 +25,14 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 // lastSeenInterval is the minimum seconds between two last_seen writes for one
 // session. The store serialises on a single connection, so an unconditional
-// write would make every authenticated request a database write.
+// write would make every authenticated request a database write. The same interval throttles an
+// API token's last_used_at, for the same reason.
 const lastSeenInterval = 60
 
-// HashSessionToken returns the lookup key stored for a session token:
-// hex(sha256(token)). Only the digest reaches the database, so a copy of
-// kanban.db cannot be replayed as a live session.
-func HashSessionToken(token string) string {
+// hashToken returns the lookup key stored for a presented credential — a login session or an API
+// token: hex(sha256(token)). Only the digest reaches the database, so a copy of kanban.db cannot be
+// replayed as a live credential.
+func hashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
@@ -78,7 +79,7 @@ type NewSession struct {
 func (s *Store) CreateSession(ctx context.Context, ses NewSession) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	hash := HashSessionToken(ses.Token)
+	hash := hashToken(ses.Token)
 	now := time.Now().Unix()
 	_, err := s.db.ExecContext(
 		ctx,
@@ -108,7 +109,7 @@ func (s *Store) GetSessionByToken(ctx context.Context, token string) (id, csrfTo
 	err = s.db.QueryRowContext(ctx,
 		`SELECT id, COALESCE(csrf_token, ''), expires_at, COALESCE(last_seen, 0)
 		   FROM sessions WHERE token_hash = ?`,
-		HashSessionToken(token)).
+		hashToken(token)).
 		Scan(&id, &csrf, &expiresAtUnix, &lastSeen)
 	if err != nil {
 		return "", "", time.Time{}, err
@@ -130,7 +131,7 @@ func (s *Store) DeleteSession(ctx context.Context, token string) error {
 	if token == "" {
 		return nil
 	}
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = ?`, HashSessionToken(token))
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = ?`, hashToken(token))
 	if err != nil {
 		return fmt.Errorf("delete session: %w", err)
 	}
@@ -189,7 +190,7 @@ func (s *Store) BackfillSessionTokens(ctx context.Context) (int, error) {
 	for _, r := range pending {
 		if _, err := s.db.ExecContext(ctx,
 			`UPDATE sessions SET token_hash = ?, token = 'revoked-' || id WHERE id = ?`,
-			HashSessionToken(r.token), r.id); err != nil {
+			hashToken(r.token), r.id); err != nil {
 			return n, fmt.Errorf("backfill session %s: %w", r.id, err)
 		}
 		n++

@@ -266,8 +266,13 @@ func NonceMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// sessionKey is the context key for the authenticated session id.
-var sessionKey = ctxKey{}
+// sessionKey is the context key for the authenticated session id. It needs a type of its own:
+// values of an empty struct type compare equal, so every key declared as `ctxKey{}` reads and writes
+// the same context slot — with nonceKey sharing it, a request that reached a handler with no session
+// in its context would answer currentSessionID with the CSP nonce.
+type sessionIDKeyType struct{}
+
+var sessionKey = sessionIDKeyType{}
 
 // SessionMiddleware validates the PHPSESSID cookie and injects auth state into context.
 // Public paths (health check, login, session check) bypass validation.
@@ -275,6 +280,12 @@ func (s *Server) SessionMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Allow public paths without auth
 		if isPublicPath(r.URL.Path, r.Method) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// A request a bearer token authenticated is already answered: it carries no session cookie,
+		// and its route scope was checked where the token was.
+		if apiTokenID(r) != "" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -351,6 +362,14 @@ func (s *Server) CSRFMiddleware(next http.Handler) http.Handler {
 
 		// Skip public paths
 		if isPublicPath(r.URL.Path, r.Method) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Skip a request a bearer token authenticated. CSRF protection exists because a browser sends
+		// a session cookie on its own; a token reaches this server only if the caller put it in the
+		// header, which no other page can do.
+		if apiTokenID(r) != "" {
 			next.ServeHTTP(w, r)
 			return
 		}

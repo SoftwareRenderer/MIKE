@@ -570,6 +570,7 @@ export interface LSPConfig {
     initParamsOverride?: Record<string, any>;
     editor_enabled?: boolean;  // LSP features in the editor (diagnostics, completions, hover) — NOT syntax highlighting, which reads the manifest either way
     tool_calls_enabled?: boolean;  // LSP tools for agent (references, definition, etc.)
+    chat_diagnostics_enabled?: boolean;  // After an edit, hand the file to its language server and report what it answers back to the agent. Absent means off — unlike the two above.
 }
 
 /** One file type an LSP extension owns. Mirrors extensions.LSPFileType. */
@@ -790,5 +791,24 @@ export interface SessionInfo {
     user_agent: string;
     /** True for the session making the request — "this device". */
     current: boolean;
+}
+
+/**
+ * One API token (GET /api/tokens). There is no token field: the plaintext is handed out once, by
+ * the request that created it, so a listing cannot leak a credential.
+ */
+export interface APITokenInfo {
+    id: string;
+    /** The name the user gave it — the only thing that identifies the row afterwards. */
+    label: string;
+    /** RFC3339 UTC issue time. */
+    created_at: string;
+    /** RFC3339 UTC last request it authenticated. "" when it has never been used. */
+    last_used_at: string;
+}
+
+/** A created token: the row plus its secret, which is shown once and never stored in this browser. */
+export interface CreatedAPIToken extends APITokenInfo {
+    token: string;
 }
 

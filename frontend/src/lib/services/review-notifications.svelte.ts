@@ -7,8 +7,9 @@ import { getBoard } from '$lib/api/projects';
 import { appStore, uiStore } from '$lib/stores';
 import { t } from '$lib/i18n';
 import { taskViewHref } from '$lib/utils/app-link';
-import { showBrowserNotification } from '$lib/utils/notifications';
+import { showBrowserNotification, dismissBrowserNotification, type BrowserNotification } from '$lib/utils/notifications';
 import {
+    dismissedTags,
     notableArrivals,
     reviewArrivals,
     reviewBaseline,
@@ -16,6 +17,7 @@ import {
     tasksInReview,
     type AttentionState,
     type ReviewBaseline,
+    type ShownNotice,
 } from '$lib/utils/review-notify';
 
 /** How long a move this tab made itself counts as its own news. */
@@ -32,6 +34,8 @@ class ReviewNotifier {
     /** Per project, task id to the `moved_at` announced: the store restamps it on every column move,
      *  so a task that left Review and came back is a different move and news again. */
     private announced = new Map<string, Map<string, string>>();
+    /** What this client put up, by tag, so the user can be caught up with later. */
+    private shown = new Map<string, ShownNotice>();
     private openBoard: { projectId: string; tasks: Task[] } | null = null;
     private selfMoved = new Map<string, number>();
     private fetching = new Set<string>();
@@ -57,6 +61,9 @@ class ReviewNotifier {
                 this.counts.delete(projectId);
                 this.columns.delete(projectId);
                 this.announced.delete(projectId);
+                for (const [tag, notice] of this.shown) {
+                    if (notice.projectId === projectId) this.shown.delete(tag);
+                }
             }
         }
     }
@@ -77,6 +84,19 @@ class ReviewNotifier {
     /** A card this tab dragged into Review is not news. */
     noteSelfMove(taskId: string): void {
         this.selfMoved.set(taskId, Date.now());
+    }
+
+    /**
+     * Take back what the user has now seen: the task they opened, or the Review column they are looking
+     * at. Focus is not a reactive value, so it is read here rather than watched.
+     */
+    observeAttention(openTaskId: string | null, reviewProject: string | null): void {
+        if (this.shown.size === 0) return;
+        if (document.visibilityState !== 'visible' || !document.hasFocus()) return;
+        for (const tag of dismissedTags([...this.shown.values()], openTaskId, reviewProject)) {
+            this.shown.delete(tag);
+            dismissBrowserNotification(tag);
+        }
     }
 
     private async readProject(projectId: string, previousCount: number): Promise<void> {
@@ -141,20 +161,28 @@ class ReviewNotifier {
         const [first] = arrivals;
         if (!first) return;
         if (arrivals.length > 1) {
-            showBrowserNotification({
+            const tag = `mike-review-${projectId}`;
+            this.show({
                 title: t('notify.review.many', { count: arrivals.length }),
                 body,
-                tag: `mike-review-${projectId}`,
+                tag,
                 url: taskViewHref(projectId, first.id),
-            });
+            }, { tag, projectId, taskId: null });
             return;
         }
-        showBrowserNotification({
+        const tag = `mike-task-${first.id}`;
+        this.show({
             title: first.title?.trim() || t('notify.review.untitled'),
             body,
-            tag: `mike-task-${first.id}`,
+            tag,
             url: taskViewHref(projectId, first.id),
-        });
+        }, { tag, projectId, taskId: first.id });
+    }
+
+    /** Only what reached the screen is worth remembering. */
+    private show(spec: BrowserNotification, notice: ShownNotice): void {
+        if (!showBrowserNotification(spec)) return;
+        this.shown.set(notice.tag, notice);
     }
 }
 

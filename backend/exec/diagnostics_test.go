@@ -200,6 +200,12 @@ func TestComposeDiagnosticsAdvisory_SilentWhenNothingSurvives(t *testing.T) {
 
 // --- diagnostics discovery -------------------------------------------------------
 
+// boolRef writes one of the manifest's gates, which are pointers because absent means the
+// extension never declared it and each gate reads that differently.
+func boolRef(v bool) *bool { return &v }
+
+// lspGoExtension opts into the post-edit pass, so the tests built on it exercise the pass
+// rather than the gate.
 func lspGoExtension() *extensions.Extension {
 	return &extensions.Extension{
 		ID: "gopls", Name: "gopls", Version: "1.0.0", Type: extensions.ExtensionTypeLSP, Enabled: true,
@@ -207,7 +213,8 @@ func lspGoExtension() *extensions.Extension {
 			DisplayName: "Go Language Server", Version: "1.0.0",
 			Capabilities: &extensions.Capabilities{
 				LSP: &extensions.LSPConfig{Command: "gopls", Args: []string{"serve"},
-					Language: "go", FileTypes: []extensions.LSPFileType{{Extension: "go", LanguageID: "go"}}},
+					Language: "go", FileTypes: []extensions.LSPFileType{{Extension: "go", LanguageID: "go"}},
+					ChatDiagnosticsEnabled: boolRef(true)},
 			},
 		},
 	}
@@ -302,6 +309,35 @@ func TestTurnDiagnosticFiles_AskGitWhatTheShellChanged(t *testing.T) {
 	// Nothing ran that could change a file: no git call, no files.
 	if files := te.turnDiagnosticFiles(setup, &loopContext{}); files != nil {
 		t.Errorf("turnDiagnosticFiles with no footprint = %v, want none", files)
+	}
+
+	// The extension never opted into the post-edit pass, so the same turn asks about nothing —
+	// and therefore attaches no server.
+	ext, err := es.GetByID("gopls")
+	if err != nil {
+		t.Fatalf("get extension: %v", err)
+	}
+	ext.Manifest.Capabilities.LSP.ChatDiagnosticsEnabled = nil
+	if err := es.Update(ext.ID, ext); err != nil {
+		t.Fatalf("update extension: %v", err)
+	}
+	if files := te.turnDiagnosticFiles(setup, &loopContext{shellMayHaveChangedFiles: true}); len(files) != 0 {
+		t.Errorf("turnDiagnosticFiles with the gate undeclared = %v, want none", files)
+	}
+}
+
+func TestFilterDiagnosticFiles_OnlyOptedInExtensions(t *testing.T) {
+	off := lspLanguageExtension("pyright", "python", "py")
+	falseVal := false
+	off.Manifest.Capabilities.LSP.ChatDiagnosticsEnabled = &falseVal
+	// gopls opted in, pyright was switched off, tsserver never declared the field.
+	noVerdict := lspLanguageExtension("tsserver", "typescript", "ts")
+	noVerdict.Manifest.Capabilities.LSP.ChatDiagnosticsEnabled = nil
+	registry := lspRegistryWith(t, lspGoExtension(), off, noVerdict)
+
+	got := filterDiagnosticFiles(registry, "proj", []string{"main.go", "app.py", "app.ts"})
+	if strings.Join(got, ",") != "main.go" {
+		t.Fatalf("filterDiagnosticFiles = %v, want [main.go]: an extension that did not opt in must contribute nothing", got)
 	}
 }
 
@@ -431,10 +467,11 @@ func installTSLSPExtension(t *testing.T, s *store.Store) *lsp.ExtensionRegistry 
 			DisplayName: "TypeScript LSP", Version: "1.0.0",
 			Capabilities: &extensions.Capabilities{
 				LSP: &extensions.LSPConfig{
-					Command:   "typescript-language-server",
-					Args:      []string{"--stdio"},
-					FileTypes: []extensions.LSPFileType{{Extension: "ts", LanguageID: "typescript"}},
-					Language:  "typescript",
+					Command:                "typescript-language-server",
+					Args:                   []string{"--stdio"},
+					FileTypes:              []extensions.LSPFileType{{Extension: "ts", LanguageID: "typescript"}},
+					Language:               "typescript",
+					ChatDiagnosticsEnabled: boolRef(true),
 				},
 			},
 		},
