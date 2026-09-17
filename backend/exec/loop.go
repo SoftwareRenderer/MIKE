@@ -61,6 +61,32 @@ func backoffFor(attempt int, err error) time.Duration {
 	return time.Duration(1<<attempt) * 2 * time.Second // 2s, 4s, 8s, ...
 }
 
+// llmIsRequestRejected reports a provider answer that says our request was unacceptable. Calling it
+// again sends the same body to the same refusal, so the retry loop is skipped and the failure is
+// reported as what it is: a request to fix, not a connection to wait out.
+func llmIsRequestRejected(err error) bool {
+	var le *llama.LlamaError
+	return errors.As(err, &le) && le.IsRequestRejected()
+}
+
+// llmFailure is the sentence and the code a failed LLM call is reported under. They are decided
+// together because the two faults ask different things of the reader: a lost connection may answer on
+// the next try, a refused request will not, and only a refused request is a bug in MIKE.
+type llmFailure struct {
+	code     string
+	sentence string
+}
+
+func classifyLLMFailure(err error) llmFailure {
+	if llmIsRequestRejected(err) {
+		return llmFailure{
+			"llm_request_rejected",
+			fmt.Sprintf("The model provider refused the request MIKE sent, so it was not retried: %v", err),
+		}
+	}
+	return llmFailure{"llm_connection_failed", fmt.Sprintf("LLM connection failed: %v", err)}
+}
+
 // sendRetryHint records an interrupted LLM call and that the executor is calling it again. It is
 // called once per LLM call, not once per attempt.
 func (te *TaskExecutor) sendRetryHint(projectID, taskID string, task *types.Task, streamErr error) {
@@ -665,8 +691,9 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		go func() {
 			lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, tokenCb, progressCb, usageCb)
 
-			// Retry on transient errors (skip if cancelled by user message)
-			if streamErr != nil && callCtx.Err() == nil {
+			// Retry on transient errors, unless the call was cancelled by a user message or refused by
+			// the provider: a refusal is deterministic, so the loop would only repeat it.
+			if streamErr != nil && callCtx.Err() == nil && !llmIsRequestRejected(streamErr) {
 				for i := range llmRetryAttempts {
 					select {
 					case <-callCtx.Done():
@@ -820,10 +847,9 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		if streamErr != nil {
 			// Release gate slot (was acquired before the LLM call above).
 			te.gate.Release(gateURL)
-			logging.For(logging.Startup).With(logging.TaskID, setup.task.ID).Errorf("LLM connection failed after retries: %v", streamErr)
-			te.failTask(setup.task, setup.projectID,
-				fmt.Sprintf("LLM connection failed: %v", streamErr),
-				"llm_connection_failed")
+			failure := classifyLLMFailure(streamErr)
+			logging.For(logging.LLM).With(logging.TaskID, setup.task.ID).Errorf("LLM call failed (code=%s): %v", failure.code, streamErr)
+			te.failTask(setup.task, setup.projectID, failure.sentence, failure.code)
 			return
 		}
 
@@ -957,35 +983,46 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 				logging.For(logging.Tools).Warnf("FAILED to persist tool_call message for setup.task=%s tool=%s: %v", setup.task.ID, tc.Function.Name, err)
 			}
 
-			// tool_call event already sent during streaming, just execute and send result
-			logging.For(logging.Tools).Infof("executing %s for setup.task=%s", tc.Function.Name, setup.task.ID)
-			toolStart := time.Now()
-			te.taskMu.Lock()
-			state := te.tasks[setup.task.ID]
-			te.taskMu.Unlock()
+			// A call the model could not state its arguments for is refused rather than run with an
+			// empty argument map: see unparseableToolArgs.
+			refusal := unparseableToolArgs(tc.Function.Arguments, args)
+			var result string
+			var success bool
+			var toolStart time.Time
 			streamed := false
-			// runToolProtected holds the worktree lock for this block and turns a panic
-			// into a failed result, so the tool_result below is always sent and stored.
-			result, success := te.runToolProtected(setup.task.ID, tc.Function.Name, func() (string, bool) {
-				result, success := te.executeTool(setup.ctx, tc.Function.Name, args, setup.worktreePath, setup.task, state, func(toolID string, text string) {
-					streamed = true
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolOutput, Data: map[string]any{"tool_id": tc.ID, "text": text}})
-				})
+			if refusal != "" {
+				result, success = refusal, false
+				logging.For(logging.Tools).With(logging.TaskID, setup.task.ID).Warnf("refused %s: arguments that did not decode", tc.Function.Name)
+			} else {
+				// tool_call event already sent during streaming, just execute and send result
+				logging.For(logging.Tools).Infof("executing %s for setup.task=%s", tc.Function.Name, setup.task.ID)
+				toolStart = time.Now()
+				te.taskMu.Lock()
+				state := te.tasks[setup.task.ID]
+				te.taskMu.Unlock()
+				// runToolProtected holds the worktree lock for this block and turns a panic
+				// into a failed result, so the tool_result below is always sent and stored.
+				result, success = te.runToolProtected(setup.task.ID, tc.Function.Name, func() (string, bool) {
+					result, success := te.executeTool(setup.ctx, tc.Function.Name, args, setup.worktreePath, setup.task, state, func(toolID string, text string) {
+						streamed = true
+						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolOutput, Data: map[string]any{"tool_id": tc.ID, "text": text}})
+					})
 
-				// Remember what this tool touched. Diagnostics run at the turn boundary
-				// (collectTurnDiagnostics), not here: this callback holds the worktree
-				// mutex, where a language server round trip would serialise the rest of
-				// the turn and report a state the turn's later edits may already fix.
-				switch tc.Function.Name {
-				case llama.ToolWriteFile, llama.ToolEditFile:
-					if path, ok := args["path"].(string); ok && path != "" {
-						lc.noteTouchedFile(path)
+					// Remember what this tool touched. Diagnostics run at the turn boundary
+					// (collectTurnDiagnostics), not here: this callback holds the worktree
+					// mutex, where a language server round trip would serialise the rest of
+					// the turn and report a state the turn's later edits may already fix.
+					switch tc.Function.Name {
+					case llama.ToolWriteFile, llama.ToolEditFile:
+						if path, ok := args["path"].(string); ok && path != "" {
+							lc.noteTouchedFile(path)
+						}
+					case llama.ToolBash:
+						lc.noteShellMayHaveChangedFiles()
 					}
-				case llama.ToolBash:
-					lc.noteShellMayHaveChangedFiles()
-				}
-				return result, success
-			})
+					return result, success
+				})
+			}
 			toolDuration := time.Since(toolStart).Milliseconds()
 			isSandboxed := (lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)) || isLSPTool(tc.Function.Name)
 			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: buildToolResultEvent(tc.ID, tc.Function.Name, result, success, toolDuration, args, tc.Function.Arguments, extractPathFromArgs(tc.Function.Arguments), isSandboxed, streamed, toolCallMsgID)})
@@ -1006,6 +1043,11 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 				signature: tc.Function.Name + ":" + tc.Function.Arguments,
 				success:   success,
 			})
+
+			if refusal != "" {
+				// Nothing ran, so nothing was committed, touched or put up for review.
+				continue
+			}
 
 			// Detect git commands in bash tool calls
 			if tc.Function.Name == llama.ToolBash {

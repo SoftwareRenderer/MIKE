@@ -397,6 +397,10 @@ func applyEditReplacements(content string, edits []textEdit) (string, string) {
 
 func (r *toolRunner) runBash(ctx context.Context, args map[string]any, env *toolEnv) (string, bool) {
 	cmd, _ := args["command"].(string)
+	if strings.TrimSpace(cmd) == "" {
+		// An empty command is a call that lost its argument, not a command that printed nothing.
+		return failed(errors.New("command is required"))
+	}
 	timeout := int64(5)
 	if t, ok := args["timeout"].(float64); ok {
 		timeout = int64(t)

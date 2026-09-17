@@ -42,6 +42,11 @@ func (e *LlamaError) IsRateLimit() bool {
 	return e.StatusCode == http.StatusTooManyRequests
 }
 
+func (e *LlamaError) IsRequestRejected() bool {
+	return e.StatusCode >= 400 && e.StatusCode < 500 &&
+		e.StatusCode != http.StatusRequestTimeout && e.StatusCode != http.StatusTooManyRequests
+}
+
 // ErrStreamAborted is a stream that ended before its terminal frame: `data: [DONE]`, or a
 // non-empty finish_reason on the last choice. Reaching EOF is not an error, so without this a
 // provider that died mid-request reads as one that answered with nothing.
@@ -160,9 +165,10 @@ func (c *LlamaClient) setAuthHeader(req *http.Request) {
 	}
 }
 
+const noResultRecorded = "No result was recorded for this tool call: the run ended before it finished."
+
 // toAPIMessage converts a ChatMessage to the format expected by the LLM API.
-// If ContentParts is set, content is serialized as an array of parts (multi-modal).
-// Uses standard OpenAI format: {type: "image_url", image_url: {url: "data:..."}}
+// See requestMessages for the rule that spans messages (a tool call needs its answer).
 func toAPIMessage(m types.ChatMessage) map[string]any {
 	// An advisory is an environment note the model must see but the user never said
 	role := m.Role
@@ -172,25 +178,13 @@ func toAPIMessage(m types.ChatMessage) map[string]any {
 	result := map[string]any{
 		"role": role,
 	}
-	if len(m.ContentParts) > 0 {
-		parts := make([]any, len(m.ContentParts))
-		for i, p := range m.ContentParts {
-			if p.Type == "text" {
-				parts[i] = map[string]any{"type": "text", "text": p.Text}
-			} else if p.ImageSource != nil {
-				dataURL := "data:" + p.ImageSource.MediaType + ";base64," + p.ImageSource.Data
-				parts[i] = map[string]any{
-					"type":      "image_url",
-					"image_url": map[string]any{"url": dataURL},
-				}
-			}
-		}
+	if parts := apiContentParts(m); len(parts) > 0 {
 		result["content"] = parts
 	} else {
 		result["content"] = m.Content
 	}
-	if len(m.ToolCalls) > 0 {
-		result["tool_calls"] = m.ToolCalls
+	if calls := apiToolCalls(m); len(calls) > 0 {
+		result["tool_calls"] = calls
 	}
 	if m.ToolCallID != "" {
 		result["tool_call_id"] = m.ToolCallID
@@ -201,11 +195,89 @@ func toAPIMessage(m types.ChatMessage) map[string]any {
 	return result
 }
 
-// toAPIMessages converts a slice of ChatMessages to the API format.
-func toAPIMessages(messages []types.ChatMessage) []map[string]any {
-	result := make([]map[string]any, len(messages))
+// apiContentParts builds a multi-modal content array in the OpenAI shape
+// ({type: "image_url", image_url: {url: "data:..."}}). A part that is neither text nor an image with
+// data would serialize as null, which the provider refuses, so it is left out; when nothing is left,
+// the caller sends the message's plain text instead of an empty array.
+func apiContentParts(m types.ChatMessage) []any {
+	if len(m.ContentParts) == 0 {
+		return nil
+	}
+	parts := make([]any, 0, len(m.ContentParts))
+	for i, p := range m.ContentParts {
+		switch {
+		case p.Type == "text":
+			parts = append(parts, map[string]any{"type": "text", "text": p.Text})
+		case p.ImageSource != nil && p.ImageSource.Data != "":
+			dataURL := "data:" + p.ImageSource.MediaType + ";base64," + p.ImageSource.Data
+			parts = append(parts, map[string]any{
+				"type":      "image_url",
+				"image_url": map[string]any{"url": dataURL},
+			})
+		default:
+			logging.For(logging.LLM).Warnf("dropped content part %d of a %s message: neither text nor an image with data", i, m.Role)
+		}
+	}
+	return parts
+}
+
+// apiToolCalls builds an assistant message's tool calls. `arguments` must hold a JSON object: the
+// provider decodes it, so text the model truncated, double-encoded or left empty is replaced by {}.
+// The tool's own result row is what tells the model what happened to that call.
+func apiToolCalls(m types.ChatMessage) []map[string]any {
+	var calls []map[string]any
+	for _, tc := range m.ToolCalls {
+		if tc.ID == "" || tc.Function.Name == "" {
+			logging.For(logging.LLM).Warnf("dropped a tool call with no id or name (id=%q name=%q)", tc.ID, tc.Function.Name)
+			continue
+		}
+		args := tc.Function.Arguments
+		if !isJSONObject(args) {
+			logging.For(logging.LLM).Warnf("tool call %s carries %d bytes of arguments that are not a JSON object; sending {} in their place", tc.Function.Name, len(args))
+			args = "{}"
+		}
+		calls = append(calls, map[string]any{
+			"id":       tc.ID,
+			"type":     "function",
+			"function": map[string]any{"name": tc.Function.Name, "arguments": args},
+		})
+	}
+	return calls
+}
+
+// isJSONObject reports whether s is JSON that decodes to an object, which is what `arguments` holds.
+func isJSONObject(s string) bool {
+	var probe map[string]any
+	return json.Unmarshal([]byte(s), &probe) == nil
+}
+
+// requestMessages parses a tool call's arguments to render the chat template
+func requestMessages(messages []types.ChatMessage) []map[string]any {
+	converted := make([]map[string]any, len(messages))
+	answered := make(map[string]bool)
 	for i, m := range messages {
-		result[i] = toAPIMessage(m)
+		converted[i] = toAPIMessage(m)
+		if m.Role == "tool" && m.ToolCallID != "" {
+			answered[m.ToolCallID] = true
+		}
+	}
+
+	result := make([]map[string]any, 0, len(messages))
+	for i, m := range messages {
+		if m.Role == "tool" && m.ToolCallID == "" {
+			logging.For(logging.LLM).Warnf("dropped a tool answer that names no tool call")
+			continue
+		}
+		result = append(result, converted[i])
+		for _, tc := range m.ToolCalls {
+			if tc.ID == "" || tc.Function.Name == "" || answered[tc.ID] {
+				continue
+			}
+			logging.For(logging.LLM).Warnf("answered an unfinished tool call (tool_call_id=%s) so the request stays well-formed", tc.ID)
+			result = append(result, map[string]any{
+				"role": "tool", "content": noResultRecorded, "tool_call_id": tc.ID,
+			})
+		}
 	}
 	return result
 }
@@ -236,7 +308,7 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 
 	reqBody := map[string]any{
 		"model":           c.modelName,
-		"messages":        toAPIMessages(messages),
+		"messages":        requestMessages(messages),
 		"stream":          true,
 		"return_progress": true,
 		// Without this, vLLM omits usage from the stream and all token
@@ -434,7 +506,7 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 
 	reqBody := map[string]any{
 		"model":       c.modelName,
-		"messages":    toAPIMessages(messages),
+		"messages":    requestMessages(messages),
 		"stream":      false,
 		"tool_choice": "none",
 	}
