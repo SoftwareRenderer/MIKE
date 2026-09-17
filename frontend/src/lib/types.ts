@@ -550,6 +550,7 @@ export interface LSPConfig {
     initParamsOverride?: Record<string, any>;
     editor_enabled?: boolean;  // LSP features in the editor (diagnostics, completions, hover) — NOT syntax highlighting, which reads the manifest either way
     tool_calls_enabled?: boolean;  // LSP tools for agent (references, definition, etc.)
+    chat_diagnostics_enabled?: boolean;  // After an edit, hand the file to its language server and report what it answers back to the agent. Absent means off — unlike the two above.
 }
 
 /** One file type an LSP extension owns. Mirrors extensions.LSPFileType. */

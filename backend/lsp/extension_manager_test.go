@@ -629,6 +629,37 @@ func TestIsToolCallsEnabledForFile(t *testing.T) {
 	}
 }
 
+func TestRegistryLookup_ChatDiagnosticsGate(t *testing.T) {
+	store := testExtensionStore(t)
+	if err := store.InitSchema(); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	// Routing stays per file: each extension's own declaration decides which server a file
+	// reaches, and the gate rides on that answer rather than choosing a server itself.
+	goExt := makeTestLSPExt("gopls", "go")
+	trueVal := true
+	goExt.Manifest.Capabilities.LSP.ChatDiagnosticsEnabled = &trueVal
+	if err := store.Create(goExt); err != nil {
+		t.Fatalf("create gopls: %v", err)
+	}
+	// python declares nothing, so it answers off.
+	if err := store.Create(makeTestLSPExt("pyright", "python")); err != nil {
+		t.Fatalf("create pyright: %v", err)
+	}
+
+	reg := NewExtensionRegistry(store)
+	if cfg := reg.Lookup("main.go"); cfg == nil || !cfg.ChatDiagnostics {
+		t.Error("Lookup(main.go) has ChatDiagnostics = false, want true (the extension opted in)")
+	}
+	if cfg := reg.Lookup("app.py"); cfg == nil || cfg.ChatDiagnostics {
+		t.Error("Lookup(app.py) has ChatDiagnostics = true, want false (never declared)")
+	}
+	if cfg := reg.Lookup("README.md"); cfg != nil {
+		t.Errorf("Lookup(README.md) = %+v, want nil (no extension claims it)", cfg)
+	}
+}
+
 func TestResolveWorkspaceMounts(t *testing.T) {
 	projectMounts := map[string]string{
 		"/home/user/projects/kanban/worktrees/MIKE/steel-prism-crypt": "/mnt/steel-prism-crypt",

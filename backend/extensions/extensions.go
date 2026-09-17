@@ -199,6 +199,9 @@ type LSPConfig struct {
 	// ToolCallsEnabled controls whether LSP tools (references, definition,
 	// rename, hover) are available to agent tool calls. Nil or true = enabled.
 	ToolCallsEnabled *bool `json:"tool_calls_enabled,omitempty"`
+	// ChatDiagnosticsEnabled controls the turn-boundary pass that hands the files a turn
+	// edited to their language server
+	ChatDiagnosticsEnabled *bool `json:"chat_diagnostics_enabled,omitempty"`
 	// Sandbox declares default sandbox options (writable mounts, envs, memory).
 	Sandbox *SandboxConfig `json:"sandbox,omitempty"`
 }
@@ -210,6 +213,13 @@ func (c *LSPConfig) IsToolCallsEnabled() bool {
 		return true
 	}
 	return *c.ToolCallsEnabled
+}
+
+// IsChatDiagnosticsEnabled returns true when the post-edit diagnostics pass may use this
+// extension's server. Defaults to false: an extension that never declared the field is asked
+// for nothing, and Settings writes the flag when a person opts in.
+func (c *LSPConfig) IsChatDiagnosticsEnabled() bool {
+	return c != nil && c.ChatDiagnosticsEnabled != nil && *c.ChatDiagnosticsEnabled
 }
 
 // LSPFileType is one file type an LSP extension owns.

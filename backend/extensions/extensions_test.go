@@ -168,6 +168,32 @@ func TestLSPConfig_ToolCallsEnabled(t *testing.T) {
 	}
 }
 
+func TestLSPConfig_ChatDiagnosticsEnabled(t *testing.T) {
+	// The post-edit pass is opt-in, so the absence of the field is the off state — the
+	// opposite of the gate above, and the reason a fresh install diagnoses nothing.
+	cfg := &LSPConfig{Command: "gopls", Args: []string{"serve"}}
+	if cfg.IsChatDiagnosticsEnabled() {
+		t.Error("IsChatDiagnosticsEnabled() = true, want false (nil defaults to disabled)")
+	}
+
+	trueVal := true
+	cfg.ChatDiagnosticsEnabled = &trueVal
+	if !cfg.IsChatDiagnosticsEnabled() {
+		t.Error("IsChatDiagnosticsEnabled() = false, want true (explicitly enabled)")
+	}
+
+	falseVal := false
+	cfg.ChatDiagnosticsEnabled = &falseVal
+	if cfg.IsChatDiagnosticsEnabled() {
+		t.Error("IsChatDiagnosticsEnabled() = true, want false (explicitly disabled)")
+	}
+
+	var nilCfg *LSPConfig
+	if nilCfg.IsChatDiagnosticsEnabled() {
+		t.Error("nil.IsChatDiagnosticsEnabled() = true, want false")
+	}
+}
+
 func TestRegistryEntry_Fields(t *testing.T) {
 	entry := RegistryEntry{
 		Name:          "gopls",

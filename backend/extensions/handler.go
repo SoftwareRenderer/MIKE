@@ -421,6 +421,9 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 		if req.Manifest.Capabilities.LSP.ToolCallsEnabled != nil {
 			ext.Manifest.Capabilities.LSP.ToolCallsEnabled = req.Manifest.Capabilities.LSP.ToolCallsEnabled
 		}
+		if req.Manifest.Capabilities.LSP.ChatDiagnosticsEnabled != nil {
+			ext.Manifest.Capabilities.LSP.ChatDiagnosticsEnabled = req.Manifest.Capabilities.LSP.ChatDiagnosticsEnabled
+		}
 		// Checked after the merge, because that is the shape that gets stored.
 		if err := ext.Manifest.Capabilities.GetLSP().Validate(); err != nil {
 			http.Error(w, "extension declares an unusable language configuration: "+err.Error(), http.StatusBadRequest)

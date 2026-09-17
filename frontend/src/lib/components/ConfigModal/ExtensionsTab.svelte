@@ -48,7 +48,7 @@
     let editExtensionId = $state<string | null>(null);
     let editingExtension = $state<Extension | null>(null);
     let editConfig = $state<Record<string, any>>({});
-    let editLspSettings = $state<{ editor_enabled: boolean; tool_calls_enabled: boolean }>({ editor_enabled: true, tool_calls_enabled: true });
+    let editLspSettings = $state<{ editor_enabled: boolean; tool_calls_enabled: boolean; chat_diagnostics_enabled: boolean }>({ editor_enabled: true, tool_calls_enabled: true, chat_diagnostics_enabled: false });
     let saving = $state(false);
     let installing = $state<Set<string>>(new Set());
     let updating = $state<Set<string>>(new Set());
@@ -521,6 +521,7 @@
         editLspSettings = {
             editor_enabled: lsp?.editor_enabled ?? true,
             tool_calls_enabled: lsp?.tool_calls_enabled ?? true,
+            chat_diagnostics_enabled: lsp?.chat_diagnostics_enabled ?? false,
         };
         editDepDraft = depDraftFor(ext);
         editDepError = '';
@@ -573,7 +574,7 @@
         editingExtension = null;
         editExtensionId = null;
         editConfig = {};
-        editLspSettings = { editor_enabled: true, tool_calls_enabled: true };
+        editLspSettings = { editor_enabled: true, tool_calls_enabled: true, chat_diagnostics_enabled: false };
         editDepDraft = '';
         editDepError = '';
         editAgentMounts = [];
@@ -639,6 +640,7 @@
                         lsp: {
                             editor_enabled: editLspSettings.editor_enabled,
                             tool_calls_enabled: editLspSettings.tool_calls_enabled,
+                            chat_diagnostics_enabled: editLspSettings.chat_diagnostics_enabled,
                         },
                     },
                 };
@@ -1249,6 +1251,15 @@
                             checked={editLspSettings.tool_calls_enabled}
                             onChange={() => editLspSettings.tool_calls_enabled = !editLspSettings.tool_calls_enabled}
                             ariaLabel={t('settings.extensions.toolCallsAria')}
+                        />
+                    </div>
+                    <div class="config-field">
+                        <span class="field-label">{t('settings.extensions.chatDiagnostics')}</span>
+                        <p class="field-desc">{t('settings.extensions.chatDiagnosticsDesc')}</p>
+                        <ToggleSwitch
+                            checked={editLspSettings.chat_diagnostics_enabled}
+                            onChange={() => editLspSettings.chat_diagnostics_enabled = !editLspSettings.chat_diagnostics_enabled}
+                            ariaLabel={t('settings.extensions.chatDiagnosticsAria')}
                         />
                     </div>
                 </div>

@@ -52,7 +52,8 @@ func (lc *loopContext) noteShellMayHaveChangedFiles() {
 
 // turnDiagnosticFiles returns the workspace-relative files worth asking a language server
 // about: what the worktree reports changed, plus what the tools named, filtered to paths an
-// installed LSP extension claims. It consumes the turn's bookkeeping so the next starts clean.
+// installed LSP extension claims and that extension opted into (chat diagnostics). It consumes
+// the turn's bookkeeping so the next starts clean.
 func (te *TaskExecutor) turnDiagnosticFiles(setup *taskExecSetup, lc *loopContext) []string {
 	toolPaths := lc.touchedFiles
 	shellRan := lc.shellMayHaveChangedFiles
@@ -82,7 +83,8 @@ func (te *TaskExecutor) turnDiagnosticFiles(setup *taskExecSetup, lc *loopContex
 }
 
 // filterDiagnosticFiles normalizes candidate paths, drops duplicates and everything no
-// installed LSP extension claims, and bounds the result.
+// installed LSP extension claims or has not opted into, and bounds the result. Nothing gated
+// off here reaches the pass, so an extension nobody switched on starts no server.
 func filterDiagnosticFiles(registry *lsp.ExtensionRegistry, projectName string, candidates []string) []string {
 	seen := make(map[string]bool, len(candidates))
 	files := make([]string, 0, len(candidates))
@@ -91,7 +93,8 @@ func filterDiagnosticFiles(registry *lsp.ExtensionRegistry, projectName string, 
 		if rel == "" || rel == "." || seen[rel] {
 			continue
 		}
-		if registry.Lookup(rel) == nil {
+		cfg := registry.Lookup(rel)
+		if cfg == nil || !cfg.ChatDiagnostics {
 			continue
 		}
 		seen[rel] = true
