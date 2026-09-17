@@ -43,7 +43,7 @@ class ReviewNotifier {
     observeCounts(counts: Record<string, { review?: number } | undefined>): void {
         // Counted even while off, so the first frame after it comes on is a steady count rather than a
         // debt of notifications for changes already made.
-        const enabled = appStore.config?.notify_on_review === true;
+        const enabled = uiStore.notifyOnReview;
         const seen = new Set<string>();
         for (const [projectId, entry] of Object.entries(counts || {})) {
             seen.add(projectId);
@@ -154,7 +154,7 @@ class ReviewNotifier {
             documentFocused: document.hasFocus(),
             reviewColumnInView: uiStore.reviewColumnInViewOf === projectId,
         };
-        if (!shouldNotifyReview(appStore.config?.notify_on_review === true, attention)) return;
+        if (!shouldNotifyReview(uiStore.notifyOnReview, attention)) return;
 
         const project = appStore.projects.find(p => p.id === projectId);
         const body = t('notify.review.body', { project: project?.name || projectId });

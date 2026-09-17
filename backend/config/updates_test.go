@@ -41,7 +41,6 @@ func TestPUTConfig_FieldWrongTypeIsRejectedWithoutPanicOrSilence(t *testing.T) {
 		{"run_siblings_parallel is a string", `{"run_siblings_parallel":"x"}`},
 		{"sort_oldest_first is a string", `{"sort_oldest_first":"x"}`},
 		{"auto_maximize_chat_mobile is a string", `{"auto_maximize_chat_mobile":"x"}`},
-		{"notify_on_review is a string", `{"notify_on_review":"x"}`},
 		{"default_max_failed_turns is a string", `{"default_max_failed_turns":"many"}`},
 		{"default_auto_summarize_threshold is a string", `{"default_auto_summarize_threshold":"half"}`},
 		// A default nothing dispatches on would be echoed back by the UI and ignored, so it is
@@ -178,7 +177,7 @@ func TestPUTConfig_AbsentFieldsKeepStoredValues(t *testing.T) {
 		"default_auto_commit":true,"default_auto_merge":true,"default_subtasks_auto_merge":true,
 		"default_operating_mode":"plan","default_max_failed_turns":5,
 		"default_auto_summarize_threshold":42,"hide_model_badge":true,
-		"run_siblings_parallel":true,"sort_oldest_first":true,"auto_maximize_chat_mobile":false,"notify_on_review":true}`
+		"run_siblings_parallel":true,"sort_oldest_first":true,"auto_maximize_chat_mobile":false}`
 	if w := putConfigRaw(t, cs, seed); w.Code != http.StatusOK {
 		t.Fatalf("seed PUT: status %d body %s", w.Code, w.Body.String())
 	}
@@ -269,6 +268,5 @@ func sameConfigExcept(a, b *types.Config, ignore ...string) bool {
 		eqBoolPtr("run_siblings_parallel", a.RunSiblingsParallel, b.RunSiblingsParallel) &&
 		eqBoolPtr("sort_oldest_first", a.SortOldestFirst, b.SortOldestFirst) &&
 		eqBoolPtr("auto_maximize_chat_mobile", a.AutoMaximizeChatMobile, b.AutoMaximizeChatMobile) &&
-		eqBoolPtr("notify_on_review", a.NotifyOnReview, b.NotifyOnReview) &&
 		len(a.Providers) == len(b.Providers)
 }

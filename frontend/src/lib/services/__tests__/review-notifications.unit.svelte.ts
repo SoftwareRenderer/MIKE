@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { Config, Project, Task } from '$lib/types';
+import type { Project, Task } from '$lib/types';
 import { appStore, uiStore } from '$lib/stores';
 
 const { getBoard, show, dismiss } = vi.hoisted(() => ({ getBoard: vi.fn(), show: vi.fn(), dismiss: vi.fn() }));
@@ -40,8 +40,9 @@ function counts(projectId: string, review: number) {
     return { [projectId]: { backlog: 0, in_progress: 0, review } };
 }
 
+/** The choice belongs to this browser, so the notifier reads it from `uiStore`. */
 function setPreference(on: boolean) {
-    appStore.config = { notify_on_review: on } as unknown as Config;
+    uiStore.notifyOnReview = on;
 }
 
 let projectSeq = 0;

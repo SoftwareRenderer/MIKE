@@ -111,11 +111,8 @@ type Config struct {
 	SortOldestFirst *bool `json:"sort_oldest_first,omitempty"`
 	// AutoMaximizeChatMobile maximizes the task chat while its input holds focus on
 	// the mobile layout. Nil = on (default).
-	AutoMaximizeChatMobile *bool `json:"auto_maximize_chat_mobile,omitempty"`
-	// NotifyOnReview asks the browser to notify when a task enters Review. The rule for who
-	// hears about it is the client's (docs/notifications.md). Nil = off.
-	NotifyOnReview    *bool              `json:"notify_on_review,omitempty"`
-	KeyboardShortcuts *KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
+	AutoMaximizeChatMobile *bool              `json:"auto_maximize_chat_mobile,omitempty"`
+	KeyboardShortcuts      *KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
 }
 
 // KeyboardShortcuts holds user-customizable keyboard shortcut bindings.

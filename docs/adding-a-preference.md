@@ -4,6 +4,9 @@ Both go through the same config plumbing (`config` table → `GET/PUT /api/confi
 and both are 7-layer changes. Consult this file when adding one; the semantics that must not break
 are in `AGENTS.md → Keyboard Shortcuts` and `AGENTS.md → UI Preferences`.
 
+A preference about **this browser** rather than about the user does not belong in that plumbing — see
+*When the preference belongs to a browser* below.
+
 `PUT /api/config` is a **partial update** at the top level but **replaces whole objects** — a settings
 payload must always send **all** `keyboard_shortcuts` bindings, because omitting one resets it to its
 default.
@@ -59,6 +62,18 @@ its regression is the explicit-false one, not the unset one.
 **Tests to add/update:** `backend/config/config_test.go` (round-trip + omitted-when-nil),
 `preferences-tab.unit.svelte.ts`, a component test for the gated widget (e.g.
 `card-model-badge.unit.svelte.ts`), e2e `preferences-hide-model-badge.spec.ts` (isolated).
+
+## When the preference belongs to a browser
+
+A choice that only this browser can act on — a notification it must show, a permission only it granted —
+must not be stored on the server, where every other browser of the same account would inherit it. Keep it
+in the `app-settings` store through `$lib/storage` and mirror it into a store field the app can read
+reactively: `uiStore.notifyOnReview` is the example (`docs/notifications.md`).
+
+Three things stay the same as for a server-stored preference: the row lives in `PreferencesTab.svelte`,
+`ConfigModal.svelte` hydrates it when the dialog opens and writes the local store inside `save()` (so
+Cancel discards it), and `clearAll()` at sign-out takes it with the rest. The test is the store's own
+round-trip with `$lib/storage` mocked — `stores/__tests__/notify-on-review-persist.unit.ts`.
 
 ## Full layer lists (moved from AGENTS.md)
 ### Keyboard Shortcuts (Settings → Preferences)

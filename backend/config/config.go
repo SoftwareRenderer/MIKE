@@ -316,7 +316,6 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	runSiblingsParallelRaw, _ := cs.db.GetConfigValue("run_siblings_parallel")
 	sortOldestFirstRaw, _ := cs.db.GetConfigValue("sort_oldest_first")
 	autoMaximizeChatMobileRaw, _ := cs.db.GetConfigValue("auto_maximize_chat_mobile")
-	notifyOnReviewRaw, _ := cs.db.GetConfigValue("notify_on_review")
 	keyboardShortcutsRaw, _ := cs.db.GetConfigValue("keyboard_shortcuts")
 
 	cfg := &types.Config{
@@ -372,9 +371,6 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	}
 	if v, err := parseBoolPtr(autoMaximizeChatMobileRaw); err == nil && v != nil {
 		cfg.AutoMaximizeChatMobile = v
-	}
-	if v, err := parseBoolPtr(notifyOnReviewRaw); err == nil && v != nil {
-		cfg.NotifyOnReview = v
 	}
 	cfg.KeyboardShortcuts = normalizeKeyboardShortcuts(cfg.KeyboardShortcuts)
 	return cfg, nil
@@ -485,11 +481,6 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			return err
 		}
 	}
-	if c.NotifyOnReview != nil {
-		if err := cs.db.SetConfigValue("notify_on_review", fmt.Sprintf("%t", *c.NotifyOnReview)); err != nil {
-			return err
-		}
-	}
 	if c.KeyboardShortcuts != nil {
 		ksJSON, err := json.Marshal(c.KeyboardShortcuts)
 		if err != nil {
@@ -522,7 +513,6 @@ type configResponse struct {
 	RunSiblingsParallel           *bool                    `json:"run_siblings_parallel,omitempty"`
 	SortOldestFirst               *bool                    `json:"sort_oldest_first,omitempty"`
 	AutoMaximizeChatMobile        *bool                    `json:"auto_maximize_chat_mobile,omitempty"`
-	NotifyOnReview                *bool                    `json:"notify_on_review,omitempty"`
 	KeyboardShortcuts             *types.KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
 	EncryptionEnabled             bool                     `json:"encryption_enabled"`
 	// TLSCAAvailable tells the UI to offer the CA download (GET /api/tls/ca). The
@@ -610,7 +600,6 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		RunSiblingsParallel:           cfg.RunSiblingsParallel,
 		SortOldestFirst:               cfg.SortOldestFirst,
 		AutoMaximizeChatMobile:        cfg.AutoMaximizeChatMobile,
-		NotifyOnReview:                cfg.NotifyOnReview,
 		KeyboardShortcuts:             normalizeKeyboardShortcuts(cfg.KeyboardShortcuts),
 		EncryptionEnabled:             crypto.IsEnabled(),
 		TLSCAAvailable:                cs.tlsCAAvailable,
@@ -674,7 +663,6 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		current.RunSiblingsParallel = updates.boolPtrOr("run_siblings_parallel", current.RunSiblingsParallel)
 		current.SortOldestFirst = updates.boolPtrOr("sort_oldest_first", current.SortOldestFirst)
 		current.AutoMaximizeChatMobile = updates.boolPtrOr("auto_maximize_chat_mobile", current.AutoMaximizeChatMobile)
-		current.NotifyOnReview = updates.boolPtrOr("notify_on_review", current.NotifyOnReview)
 		current.DefaultMaxFailedTurns = updates.intPtrOr("default_max_failed_turns", current.DefaultMaxFailedTurns)
 		current.DefaultAutoSummarizeThreshold = updates.intPtrOr("default_auto_summarize_threshold", current.DefaultAutoSummarizeThreshold)
 		if threshold := current.DefaultAutoSummarizeThreshold; threshold != nil {

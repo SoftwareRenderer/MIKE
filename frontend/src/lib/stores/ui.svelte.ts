@@ -1,3 +1,8 @@
+import { loadAppSetting, saveAppSetting } from '$lib/storage';
+
+/** IndexedDB app-settings key holding this browser's Review-notification choice. */
+const NOTIFY_ON_REVIEW_KEY = 'notify-on-review';
+
 // ─── UI Visibility State ───
 
 export class UiStore {
@@ -17,4 +22,18 @@ export class UiStore {
     public showSandboxConfig = $state(false);
     /** Which project's board is showing its Review column. Written only by `Board.svelte`. */
     public reviewColumnInViewOf = $state<string | null>(null);
+    /** Whether this browser asks for a notification when a task enters Review. Per browser because
+     *  permission and delivery are per browser — the server never sees it (docs/notifications.md). */
+    public notifyOnReview = $state(false);
+
+    constructor() {
+        loadAppSetting(NOTIFY_ON_REVIEW_KEY, false).then((v: unknown) => {
+            this.notifyOnReview = v === true;
+        }).catch(() => {});
+    }
+
+    /** Write this browser's choice back to its own storage. */
+    persistNotifyOnReview(): void {
+        saveAppSetting(NOTIFY_ON_REVIEW_KEY, this.notifyOnReview).catch(() => {});
+    }
 }

@@ -107,11 +107,6 @@ func TestUIFlagPreferences(t *testing.T) {
 			set:  func(c *types.Config, v *bool) { c.AutoMaximizeChatMobile = v },
 			get:  func(c *types.Config) *bool { return c.AutoMaximizeChatMobile },
 		},
-		{
-			name: "notify_on_review",
-			set:  func(c *types.Config, v *bool) { c.NotifyOnReview = v },
-			get:  func(c *types.Config) *bool { return c.NotifyOnReview },
-		},
 	}
 
 	for _, f := range flags {

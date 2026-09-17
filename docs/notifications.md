@@ -1,8 +1,21 @@
 # Review notifications
 
-One preference, `notify_on_review` (`*bool`, nil = off), adds a browser notification for a task that
-enters Review. The rule that decides whether an arrival is worth telling someone about lives entirely
-in the client; the server only stores the flag. Recipe for the flag itself: `docs/adding-a-preference.md`.
+One preference, `notifyOnReview`, adds a browser notification for a task that enters Review. Both halves
+of the feature are the client's: where the choice is kept, and the rule that decides whether an arrival
+is worth telling someone about. The server stores nothing about notifications and is never told about one.
+
+## Where the flag lives
+
+Permission and delivery belong to a browser, so the choice does too: saved on the server it would apply
+one browser's answer to every other browser this person opens. `uiStore.notifyOnReview` (default off) is
+the app's one read of it, loaded from and written back to the `notify-on-review` key of the `app-settings`
+store through `$lib/storage`.
+
+Settings still owns the editing: `ConfigModal.svelte` hydrates its row from the store when the dialog
+opens and writes the store inside `save()`, so Cancel discards an unsaved toggle like every other
+preference on that form. Sign-out erases it with the rest of the stores (`clearAll()`). A
+`notify_on_review` row an older server left in the `config` table is read by nothing; the flag is off in
+each browser until it is switched on there.
 
 ## Why the client detects the arrival
 
@@ -96,7 +109,7 @@ point is safe where it does not exist (plain-http origin, webview, Safari's page
 
 - Permission is asked for on the click that enables the preference — the only user gesture available —
   and the Preferences row then states what the browser answered: blocked, or no notifications at all.
-  Nothing is disabled or refused; the flag still saves.
+  Nothing is disabled or refused; the flag still persists.
 - Delivery is `new Notification` with a click handler that focuses the tab and opens the task. Where
   the constructor throws, it falls back to `registration.showNotification`; the worker is the
   generated one (`vite-plugin-pwa`, workbox `generateSW`), so that path carries no click handler and
@@ -114,7 +127,8 @@ point is safe where it does not exist (plain-http origin, webview, Safari's page
 - `services/__tests__/review-notifications.unit.svelte.ts` — the ledger: seeding, one announcement per
   arrival, the suppression cases, the preference off, and taking a notification back.
 - `components/__tests__/preferences-tab.unit.svelte.ts` — the row and its permission sentences.
-- `backend/config/config_test.go` / `updates_test.go` — the flag's round-trip and its partial update.
+- `stores/__tests__/notify-on-review-persist.unit.ts` — the flag is loaded from this browser's storage,
+  anything but a stored `true` leaves it off, and the save writes the key back.
 
 No Playwright spec: a real notification permission cannot be driven headless, and everything that
 decides is pure or unit-tested above.
