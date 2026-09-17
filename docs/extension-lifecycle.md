@@ -104,10 +104,16 @@ files deleted while the server runs stay broken until the next start. Test:
 
 ## Egress and REST surface
 
-- `POST /{id}/proxy` is the **only** extension egress path: it enforces the manifest's domain allowlist,
-  refuses redirects, caps the response at `maxProxyResponseBytes` and never echoes the upstream's
-  `Content-Type` — `proxyContentType` keeps `application/json` because that is what the client branches
-  on and answers `text/plain` for everything else, since the bytes are served from MIKE's own origin.
+- `POST /{id}/proxy` is the egress path an **extension's own script** calls; a contributed tool and the
+  pre-save probe reach the network through the same policy in `extensions.Egress`
+  (`backend/extensions/egress.go`), which enforces the manifest's domain allowlist beside the operator's
+  configured address, resolves the manifest's header templates, refuses redirects, caps the response and
+  never echoes the upstream's `Content-Type` — `proxyContentType` keeps `application/json` because that is
+  what the client branches on and answers `text/plain` for everything else, since the bytes are served from
+  MIKE's own origin. The proxy route passes **no address grants**: loopback is reachable only for an address
+  a person typed, which is `docs/extension-tools.md`.
+- `POST /{id}/test-url` is a probe of an address a person is about to save: same policy, and it writes
+  nothing, so it is classified as a request-scoped read (`server/sideeffects.go`).
 - Routes: `/api/extensions` (list/get/update/delete), `PATCH /{id}/enabled`, `GET /registry`,
   `GET /local`, `GET /check-updates`, `GET|PUT|DELETE /{id}/storage` (the namespaced KV store behind
   `extHost.storage.*`), `PUT /api/extensions/{id}/dependency-cache`.
@@ -115,6 +121,10 @@ files deleted while the server runs stay broken until the next start. Test:
   `NewSingleAttemptClient` refuses them. The refusal is the security control — the domain allowlist is
   checked against the URL the caller asked for, so following a redirect reaches a host nothing validated.
   Don't build an `http.Client` at a call site. Test: `backend/httputil/client_test.go`.
+- A call to a URL someone else chose is `httputil.DoOutbound` (`outbound.go`): it is the single place that
+  builds the request, applies the caller's headers and reads the answer under `MaxUpstreamBodyBytes`. The
+  `http` archgate rule is why `net/http` stays in `backend/httputil` and `backend/server`, and why a domain
+  package holds a typed answer instead.
 - The egress transport takes **no environment proxy** (`egressTransport` sets `Proxy = nil`): the peer of
   a proxied connection is the proxy, so the address rule would clear the proxy and say nothing about the
   extension's target. Test: `backend/httputil/egress_test.go`.

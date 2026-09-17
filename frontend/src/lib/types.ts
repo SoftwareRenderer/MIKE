@@ -259,6 +259,9 @@ export interface Config {
     memory_total_mb?: number;
     memory_budget_pct?: number;
     keyboard_shortcuts?: KeyboardShortcuts;
+/** The extensions whose contributed tools reach the network from the server process. Read-only: a PUT
+     *  naming this key writes nothing. */
+    server_network_extensions?: NetworkedExtension[];
 }
 
 /**
@@ -480,7 +483,15 @@ export type TaskEventData = { task_id: string; type: string; data: any };
 
 // ─── Extension types ───
 
-export type ExtensionType = 'lsp' | 'ui' | 'css' | 'agent' | 'llm' | 'i18n';
+export type ExtensionType = 'lsp' | 'ui' | 'css' | 'agent' | 'llm' | 'i18n' | 'tool';
+
+/** An enabled extension whose contributed tools reach the network from the server process. Served with
+ *  the configuration and never stored. */
+export interface NetworkedExtension {
+    name: string;
+    display_name: string;
+    tools: string[];
+}
 
 export interface ExtensionManifest {
     display_name: string;
@@ -502,6 +513,15 @@ export interface ExtensionCapabilities {
     network?: NetworkExtensionConfig;
     llm?: LLMExtensionConfig;
     i18n?: I18NExtensionConfig;
+    /** Tools this extension contributes to the agent, declared as data. */
+    tools?: ContributedTool[];
+}
+
+/** One tool an extension's manifest declares: the name the model calls and the label on its card. */
+export interface ContributedTool {
+    name: string;
+    display_name?: string;
+    description: string;
 }
 
 export interface LLMExtensionConfig {
@@ -628,7 +648,7 @@ export interface ConfigSchema {
 
 export interface SchemaProperty {
     key: string;
-    type: string; // "string", "number", "boolean", "mount", "env"
+    type: string; // "string", "number", "boolean", "url", "mount", "env"
     title?: string;
     description?: string;
     default?: any;

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -331,6 +330,11 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 			}
 		}
 		ext.Config = merged
+		// A `url` property is an address this extension may contact, so a save checks it.
+		if err := ValidateConfigValues(ext.Manifest.ConfigSchema, ext.Config); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	if req.ContainerConfig.Image != "" || req.ContainerConfig.Dockerfile != "" {
 		if req.ContainerConfig.Image != "" {
@@ -440,6 +444,12 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 	// <link> and into the pre-paint storage, so a save must not be able to aim it elsewhere.
 	if err := ext.Manifest.Capabilities.GetCSS().Validate(); err != nil {
 		http.Error(w, "extension declares an unusable stylesheet: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// The stored declaration decides what the model may call and where, so an update is vetted too.
+	if err := validateTools(ext.Manifest.Capabilities, ext.Manifest.ConfigSchema); err != nil {
+		http.Error(w, "extension declares an unusable tool: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -733,6 +743,8 @@ func inferExtensionType(caps *Capabilities) string {
 		return ""
 	}
 	switch {
+	case caps.Tools != nil:
+		return ExtensionTypeTool
 	case caps.LSP != nil:
 		return ExtensionTypeLSP
 	case caps.UI != nil:
@@ -1095,6 +1107,11 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 	// same reason: the browser resolves it into a <link> before anything here can look again.
 	if err := manifest.Capabilities.GetCSS().Validate(); err != nil {
 		fail(fmt.Errorf("extension %s declares an unusable stylesheet: %w", entry.Name, err))
+		return
+	}
+	// The declaration comes from registry text, so it is vetted before it is stored.
+	if err := validateTools(manifest.Capabilities, manifest.ConfigSchema); err != nil {
+		fail(fmt.Errorf("extension %s declares an unusable tool: %w", entry.Name, err))
 		return
 	}
 	// An image that names no registry cannot be pulled headless, so reject the entry here rather
@@ -1472,6 +1489,10 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 					fail(fmt.Errorf("extension %s declares an unusable stylesheet: %w", entry.Name, err))
 					return
 				}
+				if err := validateTools(m.Capabilities, m.ConfigSchema); err != nil {
+					fail(fmt.Errorf("extension %s declares an unusable tool: %w", entry.Name, err))
+					return
+				}
 				if len(merged.Envs) > len(before.Envs) || len(merged.Mounts) > len(before.Mounts) ||
 					len(merged.Capabilities) > len(before.Capabilities) {
 					logging.For(logging.Extensions).Infof("ext=%s update added %d env, %d mount, %d capability declaration(s) from the manifest", id, len(merged.Envs)-len(before.Envs), len(merged.Mounts)-len(before.Mounts), len(merged.Capabilities)-len(before.Capabilities))
@@ -1569,20 +1590,14 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 // upstream must not choose how that origin labels its bytes. JSON is kept because the client
 // branches on it; everything else maps to a type that cannot execute.
 func proxyContentType(upstream string) string {
-	media, _, err := mime.ParseMediaType(upstream)
-	if err == nil && (media == "application/json" || strings.HasSuffix(media, "+json")) {
+	if httputil.IsJSONContentType(upstream) {
 		return "application/json"
 	}
 	return "text/plain; charset=utf-8"
 }
 
-// proxyClient builds the HTTP client for one proxied call. It is a variable because httptest
-// servers listen on the loopback address that client refuses.
-var proxyClient = httputil.NewExtensionEgressClient
-
-// HandleProxy proxies requests to external APIs on behalf of an extension.
-// The extension must declare a `network` capability in its manifest with
-// allowed_domains and optional header templates.
+// HandleProxy proxies a request on an extension's behalf. The egress path decides what it may reach and
+// what content type it answers with, the same as for a tool call.
 func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, id string) {
 
 	ext, ok := h.extensionOr404(w, id)
@@ -1610,84 +1625,56 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 		httputil.JSONError(w, http.StatusBadRequest, "url is required")
 		return
 	}
-	if req.Method == "" {
-		req.Method = http.MethodGet
-	}
 
-	u, err := parseURL(req.URL)
+	// No grants: this URL comes from an extension's script, not from an address a person typed.
+	result, err := Egress(r.Context(), ext, EgressRequest{
+		URL:    req.URL,
+		Method: req.Method,
+		Body:   req.Body,
+		Source: "proxy",
+	})
 	if err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid url: "+err.Error())
-		return
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		httputil.JSONError(w, http.StatusBadRequest, "only http/https URLs are allowed")
-		return
-	}
-	allowed := false
-	for _, d := range ext.Manifest.Capabilities.GetNetwork().AllowedDomains {
-		if d == u.Hostname() {
-			allowed = true
-			break
+		switch {
+		case errors.Is(err, ErrEgressForbidden):
+			httputil.JSONError(w, http.StatusForbidden, err.Error())
+		case errors.Is(err, ErrEgressUnusable):
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+		default:
+			httputil.JSONError(w, http.StatusBadGateway, "proxy request failed: "+err.Error())
 		}
-	}
-	if !allowed {
-		httputil.JSONError(w, http.StatusForbidden, "domain not in allowed_domains: "+u.Hostname())
 		return
 	}
 
-	// Resolve header templates from extension config
-	headers := make(map[string]string)
-	for k, template := range ext.Manifest.Capabilities.GetNetwork().Headers {
-		resolved := resolveProxyTemplate(template, ext.Config)
-		if resolved == "" || resolved == template {
-			continue // skip unresolved or empty headers
-		}
-		headers[k] = resolved
-	}
+	// The content type is MIKE's choice, never the upstream's.
+	w.Header().Set("Content-Type", proxyContentType(result.ContentType))
+	w.WriteHeader(result.StatusCode)
+	w.Write(result.Body)
+}
 
-	// Bound to the inbound request's context, so a closed tab also stops the outbound call.
-	proxyReq, err := http.NewRequestWithContext(r.Context(), req.Method, req.URL, strings.NewReader(req.Body))
-	if err != nil {
-		httputil.Fault(w, "proxy the extension request", err)
+// HandleTestURL probes one configured address before it is saved, so an unsaved value is what gets tested.
+// It is POST because it sends a request, and still a read because nothing changes.
+func (h *ExtensionHandler) HandleTestURL(w http.ResponseWriter, r *http.Request, id string) {
+	ext, ok := h.extensionOr404(w, id)
+	if !ok {
 		return
 	}
-	for k, v := range headers {
-		proxyReq.Header.Set(k, v)
-	}
-	proxyReq.Header.Set("Content-Type", "application/json")
-	proxyReq.Header.Set("Accept", "application/json")
-
-	// Log the proxy request
-	logging.For(logging.Extensions).Infof("extension=%s method=%s url=%s status=pending", ext.Name, req.Method, req.URL)
-
-	// Execute proxy request. Redirects are NOT followed: the allowlist only
-	// validates the original URL's hostname, so following a redirect could
-	// otherwise reach an arbitrary internal host (SSRF via redirect).
-	client := proxyClient(30 * time.Second)
-	resp, err := client.Do(proxyReq)
-	if err != nil {
-		httputil.JSONError(w, http.StatusBadGateway, "proxy request failed: "+err.Error())
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := httputil.ReadUpstream(resp.Body)
-	if err != nil {
-		logging.For(logging.Extensions).Infof("extension=%s url=%s %v", ext.Name, req.URL, err)
-		if errors.Is(err, httputil.ErrUpstreamTooLarge) {
-			httputil.JSONError(w, http.StatusBadGateway, "proxy response too large")
-			return
-		}
-		httputil.JSONError(w, http.StatusBadGateway, "failed to read proxy response: "+err.Error())
+	if ext.Manifest.Capabilities.GetNetwork() == nil {
+		httputil.JSONError(w, http.StatusForbidden, "extension does not have network capability")
 		return
 	}
 
-	logging.For(logging.Extensions).Infof("extension=%s method=%s url=%s status=%d", ext.Name, req.Method, req.URL, resp.StatusCode)
-
-	// Return raw response; the type is MIKE's choice, never the upstream's.
-	w.Header().Set("Content-Type", proxyContentType(resp.Header.Get("Content-Type")))
-	w.WriteHeader(resp.StatusCode)
-	w.Write(body)
+	var req testURLRequest
+	if !httputil.DecodeJSON(w, r, &req) {
+		return
+	}
+	tool, problem := probeTarget(ext, strings.TrimSpace(req.Key))
+	if problem != "" {
+		httputil.JSONError(w, http.StatusBadRequest, problem)
+		return
+	}
+	result := runProbe(r.Context(), ext, tool, req)
+	logging.For(logging.Extensions).Infof("extension=%s probe=%s class=%s", ext.Name, strings.TrimSpace(req.Key), result.Class)
+	httputil.JSONResponse(w, http.StatusOK, result)
 }
 
 // HandleStorage provides scoped key-value storage for an extension.
@@ -1757,11 +1744,6 @@ func (h *ExtensionHandler) HandleStorage(w http.ResponseWriter, r *http.Request,
 	default:
 		httputil.MethodNotAllowed(w)
 	}
-}
-
-// parseURL parses a URL and returns the parsed URL.
-func parseURL(rawURL string) (*url.URL, error) {
-	return url.Parse(rawURL)
 }
 
 // resolveProxyTemplate resolves {{property_name}} placeholders in a template string

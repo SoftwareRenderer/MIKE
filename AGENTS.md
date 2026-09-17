@@ -335,7 +335,7 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
 
 ## Extensions
 
-Types: `lsp`, `ui`, `css`, `i18n`, `agent`, `llm`.
+Types: `lsp`, `ui`, `css`, `i18n`, `agent`, `llm`, `tool`.
 
 - **An installed extension's directory *is* the install.** Deleting the row deletes the directory, and
   both directions are derived from the stored record, never from a request field. A row whose files are
@@ -350,6 +350,10 @@ Types: `lsp`, `ui`, `css`, `i18n`, `agent`, `llm`.
 - **A dependency-cache grant is two fields with two origins** — the manifest declares the container path,
   a human configures the host path — reaches one extension's sandbox, and is always read-only. Never
   discover where a toolchain's cache lives. `docs/extension-dependency-cache.md`.
+- **A contributed tool is data, and its address is a grant.** The manifest declares the tool and core runs
+  it; the only origin it may contact is the origin stored in a `config_schema` property of type `"url"`, so
+  every peer is one a person typed. These tools execute in the server process, so a project's network
+  isolation does not cover them and the Sandbox Configuration says so. `docs/extension-tools.md`.
 - **Language knowledge lives in extensions.** The core holds no language names, keyword lists, comment
   markers or bracket tables, in either language; both sides read the manifest through one helper each, and
   a syntax is data, never code. `docs/languages.md`.
@@ -439,6 +443,7 @@ deliberately omits.
 | `docs/api-contract.md` | frame shapes, route verbs, partial updates, diff contract, error vocabulary, headers, endpoint ownership |
 | `docs/markup-sanitizing.md` | sanitizer deltas from DOMPurify's defaults, the sink audit, `Icon.svelte` |
 | `docs/extension-lifecycle.md` | install/build/delete/repair, SSE ordering, egress, capability gates, changelogs |
+| `docs/extension-tools.md` | contributed-tool grammar, the `url` grant and its loopback exception, the pre-save probe |
 | `docs/extension-dependency-cache.md` | the `dependency_cache` grant, `ro` mounts, `environment` check |
 | `docs/typography.md` | CJK font chains and how to verify them with pixels |
 | `docs/testing.md` | test environment, teardown, e2e conventions, mock-LLM fixtures, load-sensitive tests |

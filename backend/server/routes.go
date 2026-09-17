@@ -86,6 +86,11 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/extensions/{id}/proxy", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleProxy(w, r, r.PathValue("id"))
 	})
+	// Probes the address field of an extension's configuration before it is saved. Its own route because the
+	// permission is different: a typed address grants this one call, and the proxy route never gets it.
+	s.mux.HandleFunc("POST /api/extensions/{id}/test-url", func(w http.ResponseWriter, r *http.Request) {
+		s.extHandler.HandleTestURL(w, r, r.PathValue("id"))
+	})
 	// HandleStorage keeps its own switch: the three verbs share a path and differ only in which
 	// namespaced KV operation they run, which is a choice the path cannot express.
 	s.mux.HandleFunc("GET /api/extensions/{id}/storage", func(w http.ResponseWriter, r *http.Request) {

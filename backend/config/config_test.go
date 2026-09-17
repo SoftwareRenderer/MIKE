@@ -1236,3 +1236,58 @@ func TestConfigResponseReportsTheMemoryBudget(t *testing.T) {
 		}
 	})
 }
+
+// stubToolLister stands in for the extension tool registry, which is wired at startup.
+type stubToolLister struct{ list []types.NetworkedExtension }
+
+func (s stubToolLister) NetworkedExtensions() []types.NetworkedExtension { return s.list }
+
+// The list is derived from what is installed, so it is served and ignored on write.
+func TestConfigResponseServerNetworkExtensionsIsServedAndNeverWritten(t *testing.T) {
+	cs := testConfigStore(t)
+	cs.SetServerToolLister(stubToolLister{list: []types.NetworkedExtension{
+		{Name: "contrib-searxng", DisplayName: "SearXNG Search", Tools: []string{"web_search"}},
+	}})
+
+	read := func() []types.NetworkedExtension {
+		t.Helper()
+		w := httptest.NewRecorder()
+		cs.HandleConfig(w, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+		var out struct {
+			ServerNetworkExtensions []types.NetworkedExtension `json:"server_network_extensions"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return out.ServerNetworkExtensions
+	}
+
+	got := read()
+	if len(got) != 1 || got[0].DisplayName != "SearXNG Search" || len(got[0].Tools) != 1 || got[0].Tools[0] != "web_search" {
+		t.Fatalf("served %v, want the extension and its tool", got)
+	}
+
+	body := `{"server_network_extensions":[{"name":"injected","display_name":"Injected","tools":["nope"]}]}`
+	w := httptest.NewRecorder()
+	cs.HandleConfig(w, httptest.NewRequest(http.MethodPut, "/api/config", strings.NewReader(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("a PUT naming a derived key was refused: %d %s", w.Code, w.Body.String())
+	}
+	if after := read(); len(after) != 1 || after[0].Name != "contrib-searxng" {
+		t.Errorf("a PUT wrote the derived list: %v", after)
+	}
+}
+
+// No extension tool registry means no notice to show, so the key is absent rather than empty.
+func TestConfigResponseOmitsServerNetworkExtensionsWithoutARegistry(t *testing.T) {
+	w := httptest.NewRecorder()
+	cs := testConfigStore(t)
+	cs.HandleConfig(w, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	var out map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := out["server_network_extensions"]; ok {
+		t.Errorf("the key is served with nothing wired: %v", out["server_network_extensions"])
+	}
+}

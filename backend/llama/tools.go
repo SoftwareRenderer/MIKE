@@ -365,6 +365,32 @@ func GetLSPToolDefinitions() []types.ChatTool {
 	}
 }
 
+// ContributedToolDefinitions turns the tools installed extensions declare into the definitions the
+// provider is given. The parameter schema passes through unchanged: extensions refused anything else when
+// the manifest was stored.
+func ContributedToolDefinitions(specs []types.ToolSpec) []types.ChatTool {
+	if len(specs) == 0 {
+		return nil
+	}
+	defs := make([]types.ChatTool, 0, len(specs))
+	for _, spec := range specs {
+		params := spec.Parameters
+		if len(params) == 0 {
+			params = map[string]any{"type": "object", "properties": map[string]any{}}
+		}
+		defs = append(defs, types.ChatTool{
+			Type: "function",
+			Function: &types.ToolDef{
+				Name:        spec.Name,
+				DisplayName: spec.DisplayName,
+				Description: spec.Description,
+				Parameters:  params,
+			},
+		})
+	}
+	return defs
+}
+
 var toolEditTask = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{

@@ -21,6 +21,7 @@ import (
 
 	"mike/backend/agent"
 	"mike/backend/config"
+	"mike/backend/extensions"
 	"mike/backend/git"
 	"mike/backend/llama"
 	"mike/backend/llmadapter"
@@ -66,6 +67,7 @@ type TaskExecutor struct {
 	// name the pre-flight asks about is the behaviour under test.
 	agentBinaries agentBinaries
 	lspMgr        lspManager
+	extTools      *extensions.ToolRegistry
 	commitQueue   *CommitQueue
 	gate          *ConcurrencyGate // per-LLM-request in-flight limit (incl. utility calls)
 	taskGate      *ConcurrencyGate // per-provider running-task limit
@@ -86,6 +88,14 @@ type TaskExecutor struct {
 
 func (te *TaskExecutor) AgentRegistry() *agent.AgentRegistry {
 	return te.agentRegistry
+}
+
+// A contributed tool brings its own label; other tools use the core table.
+func (te *TaskExecutor) toolDisplayName(toolName string) string {
+	if spec, ok := te.extTools.Spec(toolName); ok && spec.DisplayName != "" {
+		return spec.DisplayName
+	}
+	return llama.GetToolDisplayName(toolName)
 }
 
 // SetLLMAdapter wires the provider request adapter (from enabled `llm`
@@ -301,14 +311,15 @@ func (mc *modelConfig) set(serverURL, modelName string) {
 // every task reports over it — and the rest may be nil: an executor with no sandbox, no LSP manager
 // or no agent registry answers "not available" rather than starting one.
 type Deps struct {
-	Store         *store.Store
-	ConfigStore   *config.ConfigStore
-	AppStreamMgr  *stream.AppStreamManager
-	WorktreeMgr   *git.WorktreeManager
-	SandboxMgr    *sandbox.SandboxManager
-	AgentRegistry *agent.AgentRegistry
-	LSPMgr        *lsp.ExtensionLSPManager
-	CommitQueue   *CommitQueue
+	Store          *store.Store
+	ConfigStore    *config.ConfigStore
+	AppStreamMgr   *stream.AppStreamManager
+	WorktreeMgr    *git.WorktreeManager
+	SandboxMgr     *sandbox.SandboxManager
+	AgentRegistry  *agent.AgentRegistry
+	LSPMgr         *lsp.ExtensionLSPManager
+	CommitQueue    *CommitQueue
+	ExtensionTools *extensions.ToolRegistry
 }
 
 // NewTaskExecutor wires an executor and the collaborators split out of it. Every TaskExecutor in
@@ -334,6 +345,7 @@ func NewTaskExecutor(deps Deps) *TaskExecutor {
 		agentRegistry: deps.AgentRegistry,
 		agentBinaries: binaries,
 		lspMgr:        lspMgrI,
+		extTools:      deps.ExtensionTools,
 		commitQueue:   deps.CommitQueue,
 		gate:          NewConcurrencyGate(),
 		taskGate:      NewConcurrencyGate(),

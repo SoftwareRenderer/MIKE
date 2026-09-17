@@ -643,7 +643,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 					if isNew {
 						actualPrevLen = 0
 					}
-					flusher.appendToolCall(tc.ID, tc.Function.Name, llama.GetToolDisplayName(tc.Function.Name), path, tc.Function.Arguments, argLen, actualPrevLen, (lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)) || isLSPTool(tc.Function.Name))
+					flusher.appendToolCall(tc.ID, tc.Function.Name, te.toolDisplayName(tc.Function.Name), path, tc.Function.Arguments, argLen, actualPrevLen, (lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)) || isLSPTool(tc.Function.Name))
 				}
 			}
 			// Throttled progress updates for write_file (1 per 2 seconds)
@@ -888,11 +888,8 @@ const (
 	turnStop
 )
 
-// toolDefinitionsFor answers which tools a task exposes: the operating mode chooses the acting set — plan
-// and explore replace it rather than add to it — and the LSP tools an installed extension has enabled are
-// appended to whichever set the mode chose, because a language server that answers tool calls is useful in
-// every mode. Both the loop's start and a mid-run mode change call this; the two used to spell the rule in
-// opposite orders, which was harmless only while the modes stay exclusive.
+// Which tools a task exposes. The operating mode chooses the acting set (plan and explore replace it), and
+// contributed and LSP tools are appended to whatever the mode chose.
 func (te *TaskExecutor) toolDefinitionsFor(task *types.Task) []types.ChatTool {
 	var tools []types.ChatTool
 	switch {
@@ -906,7 +903,20 @@ func (te *TaskExecutor) toolDefinitionsFor(task *types.Task) []types.ChatTool {
 	if te.lspMgr != nil && te.lspMgr.GetRegistry().HasAnyLSPToolCallsExtension() {
 		tools = append(tools, llama.GetLSPToolDefinitions()...)
 	}
-	return tools
+	return append(tools, llama.ContributedToolDefinitions(te.contributedSpecs())...)
+}
+
+// Read per turn, so installing or configuring an extension takes effect on the next turn.
+func (te *TaskExecutor) contributedSpecs() []types.ToolSpec {
+	contributed := te.extTools.Contributed()
+	if len(contributed) == 0 {
+		return nil
+	}
+	specs := make([]types.ToolSpec, 0, len(contributed))
+	for _, c := range contributed {
+		specs = append(specs, c.Spec)
+	}
+	return specs
 }
 
 // finalizeTurn handles what follows one LLM call: persist the assistant message and run its tool calls,
@@ -961,7 +971,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 			tcJSON, _ := json.Marshal(map[string]any{
 				"tool_id":           tc.ID,
 				"tool_name":         tc.Function.Name,
-				"tool_display_name": llama.GetToolDisplayName(tc.Function.Name),
+				"tool_display_name": te.toolDisplayName(tc.Function.Name),
 				"args":              args,
 				"raw_args":          tc.Function.Arguments,
 				"sandbox":           (lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)) || isLSPTool(tc.Function.Name),

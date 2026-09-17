@@ -9,6 +9,27 @@ export async function listExtensions(): Promise<Extension[]> {
     return res.json();
 }
 
+// `config` carries the form's current values, so an unsaved address and an unsaved token are both tested.
+// Never queued when offline: a replayed probe answers a question nobody is still asking.
+export async function testExtensionUrl(
+    id: string,
+    body: { key: string; url: string; config?: Record<string, any> }
+): Promise<ExtensionUrlProbe> {
+    const res = await apiFetch(`${API_BASE}/extensions/${id}/test-url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) throw await apiError(res, t('api.testExtensionUrl'));
+    return res.json();
+}
+
+/** One address an extension's tools send to, as the dialog reports it. */
+export interface ExtensionUrlProbe {
+    success: boolean;
+    message: string;
+}
+
 /** Update an existing extension. */
 export async function updateExtension(id: string, data: {
     version?: string;

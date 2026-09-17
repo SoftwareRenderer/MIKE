@@ -76,10 +76,12 @@ type Server struct {
 	extSandboxMgr       *extensions.ExtensionSandboxManager
 	extHandler          *extensions.ExtensionHandler
 	extLSPMgr           *lsp.ExtensionLSPManager
-	lspHandler          *lsp.LSPHandler
-	loginLimiter        *RateLimiter
-	previewStore        *previewStore
-	mux                 *http.ServeMux
+	// Read per turn and per config request, so it holds nothing that can fall behind the store.
+	extToolRegistry *extensions.ToolRegistry
+	lspHandler      *lsp.LSPHandler
+	loginLimiter    *RateLimiter
+	previewStore    *previewStore
+	mux             *http.ServeMux
 	// router is what every request enters: the mux, then the SPA behind it.
 	router http.Handler
 	addr   string
@@ -429,6 +431,8 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	defer s.reg(stageExtensionSandboxManager, "extension sandbox manager", s.extSandboxMgr.Close)()
 	s.extSandboxMgr.SetExtraMountRoots(settings.ExtMountRoots)
 	s.extLSPMgr = lsp.NewExtensionLSPManager(s.extStore, s.extSandboxMgr, store)
+	s.extToolRegistry = extensions.NewToolRegistry(s.extStore)
+	cfgStore.SetServerToolLister(s.extToolRegistry)
 	defer s.reg(stageExtensionLSPManager, "extension lsp manager", s.extLSPMgr.Close)()
 
 	// Enabled `llm` extensions rewrite MIKE's provider requests; their mappings files are
@@ -455,14 +459,15 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	s.refreshPromptLocale()
 
 	s.executor = kanbanexec.NewTaskExecutor(kanbanexec.Deps{
-		Store:         store,
-		ConfigStore:   cfgStore,
-		AppStreamMgr:  s.appStreamMgr,
-		WorktreeMgr:   worktreeMgr,
-		SandboxMgr:    s.sandboxMgr,
-		AgentRegistry: agentRegistry,
-		LSPMgr:        s.extLSPMgr,
-		CommitQueue:   commitQueue,
+		Store:          store,
+		ConfigStore:    cfgStore,
+		AppStreamMgr:   s.appStreamMgr,
+		WorktreeMgr:    worktreeMgr,
+		SandboxMgr:     s.sandboxMgr,
+		AgentRegistry:  agentRegistry,
+		LSPMgr:         s.extLSPMgr,
+		CommitQueue:    commitQueue,
+		ExtensionTools: s.extToolRegistry,
 	})
 	s.executor.SetLLMAdapter(s.llmAdapter)
 	// The budget is measured on the same tick that samples the containers it counts, and reports

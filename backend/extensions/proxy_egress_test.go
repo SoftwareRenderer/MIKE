@@ -1,6 +1,7 @@
 package extensions
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,9 +15,11 @@ import (
 // address production refuses. The egress rule must not be exercised through it.
 func allowLoopbackProxy(t *testing.T) {
 	t.Helper()
-	prev := proxyClient
-	proxyClient = httputil.NewSingleAttemptClient
-	t.Cleanup(func() { proxyClient = prev })
+	prev := egressCall
+	egressCall = func(ctx context.Context, req httputil.OutboundRequest) (*httputil.OutboundAnswer, error) {
+		return httputil.DoOutboundWith(ctx, httputil.NewSingleAttemptClient(req.Timeout), req)
+	}
+	t.Cleanup(func() { egressCall = prev })
 }
 
 // TestExtensionProxyRefusesLoopbackTarget (security): a name on a manifest allowlist can

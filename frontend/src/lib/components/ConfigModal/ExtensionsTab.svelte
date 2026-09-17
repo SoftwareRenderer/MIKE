@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { Extension, RegistryEntry, ExtensionUpdate, SandboxMount, SandboxEnv } from '$lib/types';
-    import { listExtensions, listLocalExtensions, getRegistryIndex, installExtension, installLocalExtension, deleteExtension, setExtensionEnabled, setDependencyCache, setAgentMount, getHomeDirectory, checkUpdates, updateExtension, updateExtensionImage } from '$lib/api';
+    import { listExtensions, listLocalExtensions, getRegistryIndex, installExtension, installLocalExtension, deleteExtension, setExtensionEnabled, setDependencyCache, setAgentMount, getHomeDirectory, checkUpdates, updateExtension, updateExtensionImage, testExtensionUrl, type ExtensionUrlProbe } from '$lib/api';
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
@@ -58,6 +58,33 @@
     // Capabilities modal
     let showCapabilitiesModal = $state(false);
     let selectedExtension: Extension | null = $state(null);
+
+    // The probe's answer belongs to this dialog, never to a row of the database.
+    let probingKey = $state('');
+    let probeAnswers = $state<Record<string, ExtensionUrlProbe>>({});
+
+    const urlConfigFields = $derived(effectiveConfigFields(editingExtension).filter((field) => field.type === 'url'));
+
+    /** A failed request is still an answer: it fills the same slot as a successful one. */
+    async function testConfiguredAddress(field: ConfigField) {
+        const ext = editingExtension;
+        if (!ext || probingKey) return;
+        const key = field.key;
+        const url = String(editConfig[key] ?? '').trim();
+        if (!url) {
+            probeAnswers[key] = { success: false, message: t('settings.extensions.testNoAddress') };
+            return;
+        }
+        probingKey = key;
+        delete probeAnswers[key];
+        try {
+            probeAnswers[key] = await testExtensionUrl(ext.id, { key, url, config: { ...editConfig } });
+        } catch (err) {
+            probeAnswers[key] = { success: false, message: (err as Error).message };
+        } finally {
+            probingKey = '';
+        }
+    }
     // Extension id whose local path is revealed (clicked its "Local" badge).
     let revealedLocalPath = $state<string | null>(null);
 
@@ -109,6 +136,10 @@
             label: t('settings.extensions.cap.i18n.label'),
             description: t('settings.extensions.cap.i18n.description'),
         },
+        tools: {
+            label: t('settings.extensions.cap.tools.label'),
+            description: t('settings.extensions.cap.tools.description'),
+        },
     });
     // Permission labels and warnings, kept with the lists the consent test checks.
     const PERMISSION_DESCRIPTIONS = $derived(permissionDescriptions());
@@ -125,6 +156,7 @@
         if (caps.network) keys.push('network');
         if (caps.llm) keys.push('llm');
         if (caps.i18n) keys.push('i18n');
+        if (caps.tools) keys.push('tools');
         return keys;
     }
 
@@ -172,6 +204,7 @@
             case 'agent': return 'AGENT';
             case 'llm': return 'LLM';
             case 'i18n': return 'I18N';
+            case 'tool': return 'TOOL';
             default: return 'UI';
         }
     }
@@ -526,6 +559,8 @@
         editDepError = '';
         editAgentMounts = agentMountDraft(ext);
         editAgentMountError = '';
+        probingKey = '';
+        probeAnswers = {};
         // "Filled" means the draft holds the real answer rather than a placeholder waiting on the
         // home directory: a grant is final, and a suggestion needs no home to have been read from.
         draftFilled = !!ext.sandbox_config?.dependency_host_path || homeDir !== '';
@@ -1207,6 +1242,30 @@
                 </div>
             {:else if editingExtension.type !== 'lsp'}
                 <p class="no-schema">{t('settings.extensions.noSchema')}</p>
+            {/if}
+            {#if urlConfigFields.length > 0}
+                <div class="config-fields">
+                    <h4>{t('settings.extensions.connectivity')}</h4>
+                    {#each urlConfigFields as field (field.key)}
+                        <div class="config-field">
+                            <div class="connectivity-row">
+                                <span class="field-label">{field.title || field.key}</span>
+                                <button
+                                    type="button"
+                                    class="btn-secondary btn-test"
+                                    onclick={() => testConfiguredAddress(field)}
+                                    disabled={probingKey !== ''}
+                                >{probingKey === field.key ? t('settings.extensions.testingAddress') : t('settings.extensions.testAddress')}</button>
+                            </div>
+                            <p class="field-desc">{t('settings.extensions.connectivityDesc')}</p>
+                            {#if probeAnswers[field.key]}
+                                <p class="probe-answer" class:probe-ok={probeAnswers[field.key].success} class:probe-fail={!probeAnswers[field.key].success} role="status">
+                                    {probeAnswers[field.key].message}
+                                </p>
+                            {/if}
+                        </div>
+                    {/each}
+                </div>
             {/if}
             <!-- Sandbox (host-owned) — every LSP extension runs in a sandbox, so
                  the memory limit is always available, declared or not. -->
@@ -2797,6 +2856,36 @@
         color: var(--color-text-tertiary);
         font-size: 0.75rem;
         margin: 0;
+    }
+
+    .connectivity-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+
+    .btn-test {
+        flex: none;
+    }
+
+    .probe-answer {
+        padding: 6px 10px;
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        line-height: 1.45;
+    }
+
+    .probe-ok {
+        background: rgba(34, 197, 94, 0.08);
+        border: 1px solid rgba(34, 197, 94, 0.3);
+        color: var(--color-status-green);
+    }
+
+    .probe-fail {
+        background: rgba(248, 81, 73, 0.1);
+        border: 1px solid rgba(248, 81, 73, 0.3);
+        color: var(--color-text-secondary);
     }
 
     /* Mount/Env editors */

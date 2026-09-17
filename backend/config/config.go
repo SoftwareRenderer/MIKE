@@ -26,6 +26,12 @@ type AgentProviderLister interface {
 	ToProviders() []types.Provider
 }
 
+// ServerToolLister is satisfied by extensions.ToolRegistry; the interface keeps config from importing it.
+// The list is served with the configuration and never stored: what is installed is not a preference.
+type ServerToolLister interface {
+	NetworkedExtensions() []types.NetworkedExtension
+}
+
 // DefaultWorkspaceDir is the default git worktrees directory when no
 // --worktrees-dir flag or MIKE_WORKTREES_DIR env var is provided.
 const DefaultWorkspaceDir = "./.worktrees"
@@ -69,6 +75,7 @@ type ConfigStore struct {
 	dbPath               string
 	version              string
 	agentRegistry        AgentProviderLister // optional — set via SetAgentRegistry
+	serverTools          ServerToolLister    // optional — set via SetServerToolLister
 	workspaceDirOverride string              // set at startup via --worktrees-dir / MIKE_WORKTREES_DIR
 	llmAdapter           *llmadapter.Adapter // optional — set via SetLLMAdapter
 	tlsCAAvailable       bool                // set at startup via SetTLSCAAvailable
@@ -140,6 +147,11 @@ func (cs *ConfigStore) agentProviders() []types.Provider {
 		return nil
 	}
 	return cs.agentRegistry.ToProviders()
+}
+
+// SetServerToolLister wires the registry the config response reads the server-side tool extensions from.
+func (cs *ConfigStore) SetServerToolLister(l ServerToolLister) {
+	cs.serverTools = l
 }
 
 // filterPersistedProviders removes agent:// providers from the list so they
@@ -522,6 +534,9 @@ type configResponse struct {
 	MemoryBudgetMB  int64 `json:"memory_budget_mb"`
 	MemoryTotalMB   int64 `json:"memory_total_mb"`
 	MemoryBudgetPct int   `json:"memory_budget_pct"`
+	// The extensions whose contributed tools reach the network from this process. Read-only: a project's
+	// isolation bounds its container, and these calls never enter it.
+	ServerNetworkExtensions []types.NetworkedExtension `json:"server_network_extensions,omitempty"`
 }
 
 // storedAPIKey returns the decrypted key saved for the provider whose URL matches
@@ -602,7 +617,15 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		MemoryBudgetMB:                cs.memoryBudgetMB,
 		MemoryTotalMB:                 cs.memoryTotalMB,
 		MemoryBudgetPct:               cs.memoryBudgetPct,
+		ServerNetworkExtensions:       cs.serverNetworkExtensions(),
 	}
+}
+
+func (cs *ConfigStore) serverNetworkExtensions() []types.NetworkedExtension {
+	if cs.serverTools == nil {
+		return nil
+	}
+	return cs.serverTools.NetworkedExtensions()
 }
 
 // HandleConfig handles GET and PUT /api/config.

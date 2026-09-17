@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"mike/backend/config"
+	"mike/backend/extensions"
 	"mike/backend/git"
 	"mike/backend/llama"
 	"mike/backend/store"
@@ -36,6 +37,10 @@ type toolRunner struct {
 	lspMgr func() lspManager
 	// A func value: storing a task belongs to the executor, not to the dispatcher.
 	storeTask func(*types.Task, string) error
+	// A func value: the executor owns the registry, so a copy here could fall behind it.
+	extTools func() *extensions.ToolRegistry
+	// A func value so a test here needs no network. The policy is tested in backend/extensions.
+	egress egressFunc
 	// One entry per name in llama.AllToolNames(); TestEveryDeclaredToolIsDispatched is what fails
 	// when a name is missing from it.
 	handlers map[string]toolHandler
@@ -54,6 +59,8 @@ func (te *TaskExecutor) newToolRunner() *toolRunner {
 		appStreamMgr: te.appStreamMgr,
 		lspMgr:       func() lspManager { return te.lspMgr },
 		storeTask:    te.storeTask,
+		extTools:     func() *extensions.ToolRegistry { return te.extTools },
+		egress:       extensions.Egress,
 	}
 	r.handlers = map[string]toolHandler{
 		llama.ToolReadFile:      r.runReadFile,
@@ -81,7 +88,8 @@ func (r *toolRunner) run(ctx context.Context, name string, args map[string]any, 
 	env := newToolEnv(state, worktreePath, task, outputCallback)
 	handler, ok := r.handlers[name]
 	if !ok {
-		return fmt.Sprintf("Unknown tool: %s", name), false
+		// Not a core tool; it may be one an extension contributes.
+		return r.runContributedTool(ctx, name, args, env)
 	}
 	return handler(ctx, args, env)
 }

@@ -5,7 +5,8 @@
     import { updateProject, buildSandboxImageStream, getBoard, getProject } from '$lib/api';
     import { DEFAULT_MEMORY_LIMIT_MB, formatMemoryLimitMB, memoryLimitToInput, parseMemoryLimitMB } from '$lib/utils/memory-stats';
     import { bindForInput, formatAssignedHost, formatForwardPort, formatForwardPorts, normalizeBind, portRowError } from '$lib/utils/sandbox-ports';
-    import { dialogStore } from '$lib/stores';
+    import { appStore, dialogStore } from '$lib/stores';
+    import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/server-tool-network';
     import type { PortForward, AssignedPort, SandboxMount, SandboxEnv } from '$lib/types';
     import Icon from '$lib/components/Icon.svelte';
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
@@ -64,6 +65,10 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     $effect(() => { sandboxEnvs = project.sandbox_envs ?? []; });
     $effect(() => { envsExpanded = !!project.sandbox_envs && project.sandbox_envs.length > 0; });
     $effect(() => { networkIsolationBaseline = project.sandbox_network_isolation ?? false; });
+    // See $lib/utils/server-tool-network for the rule.
+    const serverToolNotice = $derived(
+        serverToolExtensions(appStore.config, sandboxEnabled, networkIsolation)
+    );
     let newMountHostPath = $state('');
     let newMountContainerPath = $state('');
     let newMountMode = $state<'rw' | 'ro'>('rw');
@@ -759,6 +764,12 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 </div>
                 <ToggleSwitch bind:checked={networkIsolation} disabled={isLocked} ariaLabel={t('sandbox.networkIsolationAria')} />
             </div>
+
+            {#if serverToolNotice.length > 0}
+                <div class="server-tool-notice">
+                    {t('sandbox.networkIsolationServerTools', { extensions: formatNetworkedExtensions(serverToolNotice) })}
+                </div>
+            {/if}
 
             <!-- Port forwarding subsection (nested under network isolation, only when isolation is off) -->
             {#if !networkIsolation}
@@ -1811,6 +1822,17 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         border-radius: var(--radius-sm);
         color: var(--color-text-secondary);
         font-size: 0.75rem;
+    }
+
+    .server-tool-notice {
+        padding: 8px 12px;
+        margin: -4px 0 12px;
+        background: rgba(210, 153, 34, 0.08);
+        border: 1px solid rgba(210, 153, 34, 0.3);
+        border-radius: var(--radius-md);
+        color: var(--color-text-secondary);
+        font-size: 0.75rem;
+        line-height: 1.45;
     }
 
     .save-warning-message {

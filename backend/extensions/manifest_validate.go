@@ -417,6 +417,9 @@ func (c *Capabilities) otherCapabilityNames() []string {
 	if c.LLM != nil {
 		others = append(others, "llm")
 	}
+	if len(c.Tools) > 0 {
+		others = append(others, "tools")
+	}
 	return others
 }
 

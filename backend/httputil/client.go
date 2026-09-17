@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strings"
 	"time"
 )
 
@@ -86,6 +87,12 @@ func publicAddress(ip netip.Addr) bool {
 }
 
 func dialPublicOnly(ctx context.Context, network, addr string) (net.Conn, error) {
+	return dialAddresses(ctx, network, addr, func(_ string, ip netip.Addr) bool { return publicAddress(ip) })
+}
+
+// The resolved address is judged rather than the name: an allowlisted name can resolve to this host, and a
+// name can be re-pointed after it was checked.
+func dialAddresses(ctx context.Context, network, addr string, admit func(host string, ip netip.Addr) bool) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
@@ -97,7 +104,7 @@ func dialPublicOnly(ctx context.Context, network, addr string) (net.Conn, error)
 	dial := sharedTransport.DialContext
 	var last = ErrInternalAddress
 	for _, ip := range ips {
-		if !publicAddress(ip) {
+		if !admit(host, ip) {
 			last = fmt.Errorf("%w: %s", ErrInternalAddress, ip)
 			continue
 		}
@@ -108,6 +115,36 @@ func dialPublicOnly(ctx context.Context, network, addr string) (net.Conn, error)
 		last = derr
 	}
 	return nil, last
+}
+
+// NewExtensionEgressClientGranting is NewExtensionEgressClient with loopback admitted for the hosts a
+// person named: the target is an address they typed, not one an allowlisted name resolved to.
+//
+// Only loopback is admitted — the metadata address and every other non-public range stay refused even when
+// named — and the grant is per call, so its transport is too, with keep-alives off.
+func NewExtensionEgressClientGranting(timeout time.Duration, grantedHosts []string) *http.Client {
+	if len(grantedHosts) == 0 {
+		return NewExtensionEgressClient(timeout)
+	}
+	granted := make(map[string]bool, len(grantedHosts))
+	for _, h := range grantedHosts {
+		granted[strings.ToLower(h)] = true
+	}
+	transport := egressTransport.Clone()
+	transport.DisableKeepAlives = true
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return dialAddresses(ctx, network, addr, func(host string, ip netip.Addr) bool {
+			if publicAddress(ip) {
+				return true
+			}
+			return ip.IsLoopback() && granted[strings.ToLower(host)]
+		})
+	}
+	return &http.Client{
+		Timeout:       timeout,
+		Transport:     transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 }
 
 // MaxUpstreamBodyBytes bounds an upstream body read into memory: it is somebody else's server.

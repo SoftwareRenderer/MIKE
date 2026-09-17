@@ -122,8 +122,11 @@ Tests: `backend/api/git_diff_file_path_test.go`, `git_diff_file_full_test.go`,
   refused up front, a chunked one by the wrapped reader. Most handlers (`git`, `fs`, `task`, `thread`)
   decode `r.Body` directly rather than through `httputil.DecodeJSON`, which has its own limit and answers
   **413** rather than "invalid request body" when the body was simply big.
-- Outbound reads are capped too: the extension proxy (`maxProxyResponseBytes`) buffers a bounded response
-  and answers it with a type of MIKE's own (`proxyContentType`), never the upstream's.
+- Outbound reads are capped too: an extension's answer (`httputil.ReadUpstream`, applied by
+  `httputil.DoOutbound`) buffers a bounded response and answers it with a type of MIKE's own
+  (`proxyContentType`), never the upstream's. A contributed tool's answer is bounded twice over — the
+  manifest's own `max_results` / `max_snippet_chars`, then `toolresult.MaxCaptureBytes` on the rendered
+  text, the same number a command's output is held to (`docs/extension-tools.md`).
 - A subprocess's output is bounded where it is captured, not where it is shown: `toolresult.Capture`
   (`backend/toolresult/capture.go`) is the writer a sandboxed `Exec` hands its command and
   `streamLineWriter` does the same for the host bash path, both at `MaxCaptureBytes` with a trailing

@@ -26,6 +26,9 @@ const (
 	// pack's locale, plus optionally translated prompt templates. It executes nothing — static files
 	// served from its own directory — so it gets no sandbox, no mounts, no network, no permissions.
 	ExtensionTypeI18N = "i18n"
+	// Its logic is data in the manifest, so the core holds no upstream knowledge. It runs in the server
+	// process rather than a container, so it pairs with `network` and needs no image.
+	ExtensionTypeTool = "tool"
 )
 
 // maxExtensionValueBytes caps the size of a single storage value (KiB).
@@ -84,6 +87,9 @@ type Capabilities struct {
 	Network *NetworkConfig `json:"network,omitempty"` // server-side network capability
 	LLM     *LLMConfig     `json:"llm,omitempty"`     // provider request adaptation
 	I18N    *I18NConfig    `json:"i18n,omitempty"`    // data-only translation pack (UI catalog + prompt templates)
+	// Declaring tools makes the extension's type `tool`, and that column is how the executor finds the
+	// row, so a manifest pairing tools with another executing capability is refused.
+	Tools []ToolConfig `json:"tools,omitempty"`
 }
 
 // GetLSP returns the LSP capability, or nil if not present.
@@ -132,6 +138,14 @@ func (c *Capabilities) GetCSS() *CSSConfig {
 		return nil
 	}
 	return c.CSS
+}
+
+// GetTools returns the contributed tool declarations, or nil when the manifest declares none.
+func (c *Capabilities) GetTools() []ToolConfig {
+	if c == nil {
+		return nil
+	}
+	return c.Tools
 }
 
 // I18NConfig declares a translation pack: translated interface strings plus an optional overlay
@@ -367,6 +381,61 @@ type CSSConfig struct {
 	CSSURL string `json:"css_url,omitempty"` // global stylesheet URL (relative to server root)
 }
 
+// ToolConfig is one tool as an extension declares it. The shape is data and nothing here names a
+// provider: the manifest spells out the path, the parameters and the answer field names.
+type ToolConfig struct {
+	// Never a core tool's name: the model would call it and never reach the core tool.
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name,omitempty"`
+	// The tool's only route to the model: a contributed tool ships no prompt text.
+	Description string `json:"description"`
+	// Only an object schema with declared properties: every `{{args.<name>}}` must name one.
+	Parameters map[string]any `json:"parameters,omitempty"`
+	Request    ToolRequest    `json:"request"`
+	Response   ToolResponse   `json:"response"`
+	// Withholds this tool from the agent while the extension stays installed.
+	ToolCallsEnabled *bool `json:"tool_calls_enabled,omitempty"`
+}
+
+// IsToolCallsEnabled reports whether the tool is offered. Nil means offered.
+func (t *ToolConfig) IsToolCallsEnabled() bool {
+	if t == nil || t.ToolCallsEnabled == nil {
+		return true
+	}
+	return *t.ToolCallsEnabled
+}
+
+// ToolRequest asks the upstream something. Its origin comes only from the configuration (see
+// validateURLTemplate), so a person can point an extension at their own instance and the manifest cannot
+// choose a different peer.
+type ToolRequest struct {
+	// GET (default) or POST; a POST sends the declared Query entries as a form body.
+	Method string `json:"method,omitempty"`
+	// A template beginning with the `{{config.<key>}}` of a property declared `type: "url"`.
+	URL   string            `json:"url"`
+	Query map[string]string `json:"query,omitempty"`
+	// Bounds one upstream round trip. Zero is the default, not no timeout.
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+}
+
+// ToolField is one line of a rendered result: the label the agent sees and the key it reads.
+type ToolField struct {
+	Label string `json:"label"`
+	// A dotted path inside one result item ("title", "parsed_url").
+	Key string `json:"key"`
+}
+
+// ToolResponse says where the results are in the upstream's JSON and what to show from each one.
+type ToolResponse struct {
+	Results string `json:"results"`
+	// Rendered in declaration order, so an answer's shape never depends on map iteration.
+	Fields []ToolField `json:"fields"`
+	Total  string      `json:"total,omitempty"`
+	// Always capped, whatever the manifest asks: the answer spends the model's context.
+	MaxResults      int `json:"max_results,omitempty"`
+	MaxSnippetChars int `json:"max_snippet_chars,omitempty"`
+}
+
 // AgentConfig defines agent-specific extension configuration.
 // The agent adapter (WASM module) handles all protocol details.
 type AgentConfig struct {
@@ -514,6 +583,12 @@ func (s *ConfigSchema) GetProperty(key string) *SchemaProp {
 	}
 	return nil
 }
+
+// SchemaTypeURL marks a config property whose value is an address a person typed. It is the only kind of
+// value that grants a network peer: a contributed tool may contact only the origin stored in a property of
+// this type (see validateURLTemplate), so such a property carries no default and the editor shows an empty
+// field.
+const SchemaTypeURL = "url"
 
 // SchemaProp describes a single property in a config schema.
 type SchemaProp struct {

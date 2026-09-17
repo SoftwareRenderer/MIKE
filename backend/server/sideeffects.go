@@ -108,6 +108,12 @@ var requestScopedReads = []sideEffectEntry{
 		"a fetch through the manifest's domain allowlist. A verb that looks like a mutation and is one: the " +
 			"caller asked for bytes, nothing is persisted, and a cancel leaves nothing to explain",
 	},
+	{
+		"POST /api/extensions/{id}/test-url",
+		"one probe of an address a person is about to save. It sends a request and writes nothing: the " +
+			"result belongs to the dialog that asked, and a cancel mid-flight leaves no answer behind, which is " +
+			"the same as no answer",
+	},
 }
 
 // idempotentWritesOnReads is the exception F19 found, and the reason it is an exception rather than a

@@ -10,6 +10,8 @@
 import BaseModal from './BaseModal.svelte';
 import SandboxSettingLists from './SandboxSettingLists.svelte';
 import { t } from '$lib/i18n';
+import { appStore } from '$lib/stores';
+import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/server-tool-network';
 
     let { task, stats, onClose }: {
         task: Task;
@@ -29,6 +31,9 @@ import { t } from '$lib/i18n';
     }
 
     let project = $state<Project | null>(null);
+    const serverToolNotice = $derived(
+        serverToolExtensions(appStore.config, project?.sandbox_enabled ?? false, project?.sandbox_network_isolation ?? false)
+    );
     let loading = $state(true);
     let error = $state('');
 
@@ -114,6 +119,10 @@ import { t } from '$lib/i18n';
                         <span class="sandbox-value">{project.sandbox_network_isolation ? t('sandbox.enabled') : t('sandbox.disabled')}</span>
                     </div>
 
+                    {#if serverToolNotice.length > 0}
+                        <div class="server-tool-notice">{t('sandbox.networkIsolationServerToolsShort', { extensions: formatNetworkedExtensions(serverToolNotice) })}</div>
+                    {/if}
+
                     <!-- Memory limit -->
                     <div class="sandbox-row">
                         <span class="sandbox-label">{t('sandbox.memoryLimit')}</span>
@@ -186,6 +195,16 @@ import { t } from '$lib/i18n';
         border-radius: var(--radius-md);
         color: var(--color-primary);
         font-size: 0.8125rem;
+        line-height: 1.4;
+    }
+
+    .server-tool-notice {
+        padding: 6px 10px;
+        background: rgba(210, 153, 34, 0.08);
+        border: 1px solid rgba(210, 153, 34, 0.3);
+        border-radius: var(--radius-sm);
+        color: var(--color-text-secondary);
+        font-size: 0.75rem;
         line-height: 1.4;
     }
 

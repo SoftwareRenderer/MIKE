@@ -154,4 +154,7 @@ export {
     installExtension,
     installLocalExtension,
     checkUpdates,
+    testExtensionUrl,
 } from './extensions';
+
+export type { ExtensionUrlProbe } from './extensions';

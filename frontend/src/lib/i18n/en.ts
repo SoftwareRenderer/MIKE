@@ -517,6 +517,8 @@ const catalog = {
     // enabled pack, so this row offers no switch of its own.
     'settings.extensions.cap.i18n.label': 'Language',
     'settings.extensions.cap.i18n.description': 'Use a different language',
+    'settings.extensions.cap.tools.label': 'Agent tools',
+    'settings.extensions.cap.tools.description': 'Adds tools the agent can call',
 
     // ── ConfigModal/ExtensionsTab.svelte — chrome, dialogs, browse + installed cards ──
     // Build progress, install/update output and environment.note come from the server
@@ -616,6 +618,11 @@ const catalog = {
     'settings.extensions.addVariable': 'Add variable',
     'settings.extensions.noLimit': 'No limit',
     'settings.extensions.noSchema': 'No configurable fields for this extension.',
+    'settings.extensions.connectivity': 'Connectivity',
+    'settings.extensions.connectivityDesc': 'Sends the request this extension’s tool would send, to the address above and with the values in this form — saved or not. Nothing is stored by the test.',
+    'settings.extensions.testAddress': 'Test',
+    'settings.extensions.testNoAddress': 'Type an address first.',
+    'settings.extensions.testingAddress': 'Testing…',
     'settings.extensions.sandbox': 'Sandbox',
     'settings.extensions.memoryLimit': 'Memory Limit (MB)',
     'settings.extensions.memoryLimitDesc': 'Maximum memory for the language server sandbox. Blank = no limit. Applied immediately on save.',
@@ -781,6 +788,7 @@ const catalog = {
     'api.requestCancelled': 'Request cancelled',
     'api.fetchConfig': 'Failed to fetch config',
     'api.testConnection': 'Failed to test connection',
+    'api.testExtensionUrl': 'Failed to test the address',
     'api.fetchModels': 'Failed to fetch models',
     'api.fetchExtensions': 'Failed to fetch extensions',
     'api.updateExtension': 'Failed to update extension',
@@ -887,6 +895,8 @@ const catalog = {
     'sandbox.networkIsolation': 'Network Isolation',
     'sandbox.networkIsolationAria': 'Network isolation',
     'sandbox.networkIsolationDesc': 'Block all network access',
+    'sandbox.networkIsolationServerTools': 'Isolation closes this project’s container. {extensions} run in the MIKE server process, so their requests still leave while isolation is on.',
+    'sandbox.networkIsolationServerToolsShort': 'Extension tools run outside the container and still reach the network: {extensions}',
     'sandbox.memoryLimit': 'Memory Limit',
     'sandbox.memoryLimitDesc': 'Memory a task’s sandbox may hold (MB) — blank = no limit',
     'sandbox.memoryLimitAria': 'Maximum memory a task’s sandbox may hold, in MB',
