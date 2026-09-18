@@ -186,6 +186,12 @@ export function memoryAlertSentences(alert: MemoryAlert): string[] {
     return lines;
 }
 
+/** The advice, or nothing when raising the ceiling could not have changed the outcome: the limit is
+ * only what stopped the task once the peak reached it. */
+export function memoryAlertAction(alert: MemoryAlert): string | null {
+    return alert.limitMB > 0 && alert.peakMB >= alert.limitMB ? t('memory.alert.action') : null;
+}
+
 /** One-line usage summary shared by the editor footer and the Sandbox panel; null renders as "—". */
 export function formatSandboxMemory(stats: SandboxMemoryStats | null | undefined): string {
     if (!stats) return '—';
