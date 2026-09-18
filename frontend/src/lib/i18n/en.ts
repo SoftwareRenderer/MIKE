@@ -821,7 +821,7 @@ const catalog = {
     // What shows when a response carried no message. Never wrap server text in t().
     // The request got no answer at all: server not running, unreachable, or restarted mid-request.
     // Named as the thing to check, because the toast is the only feedback that path gives.
-    'api.noAnswer': 'MIKE did not answer — check the server is still running',
+    'api.noAnswer': 'Connection issue... Please try again',
     'api.requestCancelled': 'Request cancelled',
     'api.fetchConfig': 'Failed to fetch config',
     'api.testConnection': 'Failed to test connection',

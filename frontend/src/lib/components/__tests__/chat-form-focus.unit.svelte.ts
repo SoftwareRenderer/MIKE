@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
 
 import ChatForm from '$lib/components/Chat/ChatForm.svelte';
-
 // ============================================================
-// CHAT FORM — FOCUS ENTERING / LEAVING THE CHAT INPUT (Task View auto-maximize)
+// CHAT FORM — FOCUS ENTERING / LEAVING THE CHAT INPUT (Task View auto-maximize),
+// AND WHERE THE CARET SITS WHEN A MESSAGE IS SENT
 // ============================================================
 // The panel maximizes while the chat input holds focus, and the input is the only thing that
 // reports it: every other control of the form — the model bar (provider, model, compaction,
@@ -13,6 +13,9 @@ import ChatForm from '$lib/components/Chat/ChatForm.svelte';
 // or nowhere; the @ mention list is not a leave — it renders outside the form and hands focus
 // back to the input as soon as a row is picked. (jsdom never dispatches focusout from
 // element.blur(), so Escape's blur-first path is not exercised here.)
+
+/** What the viewport reports through useIsMobile — read at stub-call time. */
+let mediaMatches = false;
 
 const baseProps = {
     projectId: 'proj-1',
@@ -38,10 +41,25 @@ beforeAll(() => {
     Element.prototype.scrollIntoView = vi.fn();
 });
 
+beforeEach(() => {
+    // Polyfill matchMedia for useIsMobile (desktop: never matches)
+    vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: mediaMatches,
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+    }));
+});
+
 afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    mediaMatches = false;
 });
 
 function renderForm(props = {}) {
@@ -147,5 +165,37 @@ describe('ChatForm focus notification', () => {
         fireEvent.blur(textarea, { relatedTarget: null });
 
         expect(onInputBlur).not.toHaveBeenCalled();
+    });
+});
+
+describe('ChatForm caret after a send', () => {
+    /** Send with the pointer: the click owns the focus until the send replaces ➤ Send with ■ Stop.
+     *  jsdom never moves focus on click, so the hand-off to the button is stated outright. */
+    function sendWithPointer(container: HTMLElement, textarea: HTMLTextAreaElement) {
+        textarea.focus();
+        fireEvent.input(textarea, { target: { value: 'next message' } });
+        textarea.blur();
+        fireEvent.submit(container.querySelector('form')!);
+    }
+
+    it('returns to the input, where the next message is typed', () => {
+        const onSubmit = vi.fn();
+        const { container, textarea } = renderForm({ onSubmit });
+
+        sendWithPointer(container, textarea);
+
+        expect(onSubmit).toHaveBeenCalledWith('next message', undefined);
+        expect(document.activeElement).toBe(textarea);
+    });
+
+    it('stays out of the way on mobile, where a focus raises the keyboard', () => {
+        mediaMatches = true;
+        const onSubmit = vi.fn();
+        const { container, textarea } = renderForm({ onSubmit });
+
+        sendWithPointer(container, textarea);
+
+        expect(onSubmit).toHaveBeenCalledWith('next message', undefined);
+        expect(document.activeElement).not.toBe(textarea);
     });
 });

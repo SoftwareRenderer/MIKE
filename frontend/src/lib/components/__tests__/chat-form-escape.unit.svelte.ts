@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
 
 import ChatForm from '$lib/components/Chat/ChatForm.svelte';
@@ -24,6 +24,20 @@ const baseProps = {
 beforeAll(() => {
     // jsdom implements neither of these; ChatForm's focus handler / auto-resize call them.
     Element.prototype.scrollIntoView = vi.fn();
+});
+
+beforeEach(() => {
+    // Polyfill matchMedia for useIsMobile (desktop: never matches)
+    vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+    }));
 });
 
 afterEach(() => {
