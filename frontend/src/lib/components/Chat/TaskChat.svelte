@@ -189,6 +189,7 @@
     let showRestartButton = $derived(
         taskStatus === 'in_progress' &&
         !isLoading &&
+        !awaitingResponse &&
         !isPaused &&
         !isSummarizing &&
         queuePosition === 0 &&
@@ -607,10 +608,9 @@
                 handleQueuedSend(msg, entryId);
             }
             scroll(true);
-            chatFormComp?.focus();
         } finally {
             // The send is the user’s part done: the view that maximized for the input gets the room
-            // back, whatever the request did next. After the refocus, which would maximize again.
+            // back, whatever the request did next.
             onMessageSent?.();
         }
     }
@@ -1189,8 +1189,9 @@
             scroll();
             // If task was started externally (e.g., from board) and is running with no
             // assistant response yet, show the "awaiting LLM" spinner until first token/tool_call.
-            // Only for in_progress — review tasks have no active executor.
-            if (taskStatus === 'in_progress') {
+            // Only for a task the server says is running: a stalled one answers with the Restart
+            // bar, and `awaitingResponse` is what holds that bar off the chat input.
+            if (taskIsInFlight(taskExecutionState)) {
                 const lastEntry = entries[entries.length - 1];
                 if (lastEntry?.role === 'user') {
                     stream.state.awaitingResponse = true;

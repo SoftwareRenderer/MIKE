@@ -10,6 +10,7 @@
     import type { DraftAttachment } from '$lib/storage';
     import { useImageAttachments } from '$lib/composables/use-image-attachments.svelte';
     import { imageSrc } from '$lib/utils/attachments';
+    import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { t } from '$lib/i18n';
 
     interface Props {
@@ -81,6 +82,8 @@
     let textareaEl: HTMLTextAreaElement | undefined;
     let fileInputEl: HTMLInputElement | undefined;
     let formEl: HTMLFormElement | undefined;
+
+    const { isMobile } = useIsMobile();
 
     // @ file mention — shared state machine (see use-file-mention.svelte.ts)
     const mention = useFileMention({
@@ -177,6 +180,8 @@
         // Clear draft synchronously before onSubmit (component may unmount after)
         onClearDraft?.();
         onSubmit?.(msg, imageAttachments.length > 0 ? imageAttachments : undefined);
+
+        if (!isMobile) textareaEl?.focus();
     }
 
     function handleStop() {
