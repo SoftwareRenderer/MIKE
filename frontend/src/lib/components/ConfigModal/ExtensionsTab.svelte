@@ -41,6 +41,8 @@
     let loadingUpdates = $state(false);
     let hasCheckedUpdates = $state(false);
     let updatingAll = $state(false);
+    /** Names of rows `Update all` left alone because updating them needs a decision. */
+    let updatesAwaitingReview = $state<string[]>([]);
     let error = $state('');
     let searchQuery = $state('');
 
@@ -461,6 +463,7 @@
         error = '';
         try {
             updates = await checkUpdates();
+            updatesAwaitingReview = [];
             hasCheckedUpdates = true;
         } catch (e: any) {
             error = e.message || t('settings.extensions.checkUpdatesFailed');
@@ -471,11 +474,11 @@
 
     // Perform the real file/image replacement for one extension by streaming the
     // registry update operation. Returns true on success, false on failure.
-    async function applyExtensionUpdate(id: string, name: string): Promise<boolean> {
+    async function applyExtensionUpdate(id: string, name: string, acknowledgeNewDomains = false): Promise<boolean> {
         let ok = true;
         updating = new Set(updating).add(name);
         try {
-            for await (const event of updateExtensionImage(id)) {
+            for await (const event of updateExtensionImage(id, acknowledgeNewDomains)) {
                 setBuildProgress(event.extension, event.progress, event.message, event.error);
                 if (event.done) {
                     if (event.error) {
@@ -499,27 +502,42 @@
     }
 
     // Update a single extension — performs the actual file/image replacement.
+    // The user's answer goes to the server with the request, which refuses the update without it.
     async function handleUpdate(update: ExtensionUpdate) {
         error = '';
-        const ok = await applyExtensionUpdate(update.id, update.name);
+        let acknowledged = false;
+        if (update.domains_added) {
+            acknowledged = await dialogStore.showConfirm({
+                title: t('settings.extensions.updateDomainsTitle'),
+                message: t('settings.extensions.updateDomainsMessage', { name: update.name }),
+                confirmText: t('settings.extensions.update'),
+            });
+            if (!acknowledged) return;
+        }
+        const ok = await applyExtensionUpdate(update.id, update.name, acknowledged);
         await loadExtensions();
         if (ok) {
             updates = updates.filter(u => u.id !== update.id);
+            updatesAwaitingReview = updatesAwaitingReview.filter(n => n !== update.name);
         }
     }
 
     // Update all available extensions, sequentially, performing real replacements.
+    // A row needing a decision is skipped, and stays listed for the user to decide.
     async function handleUpdateAll() {
         updatingAll = true;
         error = '';
+        const awaiting = [...updates].filter(u => u.domains_added).map(u => u.name);
         try {
             for (const update of [...updates]) {
+                if (update.domains_added) continue;
                 const ok = await applyExtensionUpdate(update.id, update.name);
                 if (ok) {
                     updates = updates.filter(u => u.id !== update.id);
                 }
                 // On failure the error is already set; continue with the rest.
             }
+            updatesAwaitingReview = awaiting;
             await loadExtensions();
         } finally {
             updatingAll = false;
@@ -810,9 +828,14 @@
                             {updatingAll ? t('settings.extensions.updating') : t('settings.extensions.updateAll')}
                         </button>
                     </div>
+                    {#if updatesAwaitingReview.length > 0}
+                        <div class="update-new-perms">
+                            <div class="update-new-perms-title">{t('settings.extensions.updateAllSkipped', { names: updatesAwaitingReview.join(', ') })}</div>
+                        </div>
+                    {/if}
                     {#each updates as update}
                         {@const newPerms = update.new_permissions ?? []}
-                        <div class="update-item" class:has-new-perms={newPerms.length > 0}>
+                        <div class="update-item" class:has-new-perms={newPerms.length > 0 || !!update.domains_added}>
                             <div class="update-info">
                                 <span class="update-name" title={update.name}>{update.name}</span>
                                 <span class="update-versions">{update.current_version} → {update.available_version}</span>
@@ -847,6 +870,11 @@
                                             </li>
                                         {/each}
                                     </ul>
+                                </div>
+                            {/if}
+                            {#if update.domains_added}
+                                <div class="update-new-perms">
+                                    <div class="update-new-perms-title">{t('settings.extensions.updateDomainsNote')}</div>
                                 </div>
                             {/if}
                             <button class="btn btn-primary btn-small update-action" onclick={() => handleUpdate(update)}>{t('settings.extensions.update')}</button>

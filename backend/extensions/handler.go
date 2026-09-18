@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -1324,6 +1325,7 @@ func (h *ExtensionHandler) HandleCheckUpdates(w http.ResponseWriter, r *http.Req
 			if entry.Name != ext.Name {
 				continue
 			}
+			domainsAdded := len(newEgressHosts(ext.Manifest.Capabilities, entry.Capabilities)) > 0
 			// Git-pinned extensions update when the curated (vetted) commit changes.
 			if ext.Commit != "" && entry.Commit != "" {
 				if ext.Commit != entry.Commit {
@@ -1335,6 +1337,7 @@ func (h *ExtensionHandler) HandleCheckUpdates(w http.ResponseWriter, r *http.Req
 						CurrentCommit:    ext.Commit,
 						AvailableCommit:  entry.Commit,
 						NewPermissions:   newPermissions(ext.Manifest.Capabilities, entry.Capabilities),
+						DomainsAdded:     domainsAdded,
 						Changelog:        h.changelogForUpdate(entry, ext.Commit),
 					})
 				}
@@ -1347,6 +1350,7 @@ func (h *ExtensionHandler) HandleCheckUpdates(w http.ResponseWriter, r *http.Req
 					CurrentVersion:   ext.Version,
 					AvailableVersion: entry.Version,
 					NewPermissions:   newPermissions(ext.Manifest.Capabilities, entry.Capabilities),
+					DomainsAdded:     domainsAdded,
 				})
 			}
 			break
@@ -1395,6 +1399,18 @@ func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Read the body first: rejecting a request must not leave the extension marked busy.
+	// A request with no body sends no acknowledgment.
+	var req struct {
+		AcknowledgeNewDomains bool `json:"acknowledge_new_domains"`
+	}
+	if r.Body != nil {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			httputil.JSONError(w, http.StatusBadRequest, "acknowledge_new_domains must be true or false")
+			return
+		}
+	}
+
 	// Prevent a concurrent update of the same extension.
 	if !h.inFlightOps.begin(ext.Name) {
 		httputil.JSONError(w, http.StatusConflict, "update already in progress: "+ext.Name)
@@ -1402,13 +1418,21 @@ func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Requ
 	}
 
 	events := make(chan sseEvent, 16)
-	go h.updateImageInBackground(id, ext.Name, url, events)
+	go h.updateImageInBackground(id, ext.Name, url, req.AcknowledgeNewDomains, events)
 
 	h.streamOperation(w, r, events)
 }
 
+func summarizeHosts(hosts []string) string {
+	const shown = 5
+	if len(hosts) <= shown {
+		return strings.Join(hosts, ", ")
+	}
+	return strings.Join(hosts[:shown], ", ") + fmt.Sprintf(" (+%d more)", len(hosts)-shown)
+}
+
 // updateImageInBackground updates an extension's image, detached like install.
-func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events chan<- sseEvent) {
+func (h *ExtensionHandler) updateImageInBackground(id, name, url string, ackNewDomains bool, events chan<- sseEvent) {
 	defer h.inFlightOps.end(name)
 	defer close(events)
 
@@ -1432,13 +1456,22 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 		return
 	}
 
-	// Stop sandbox if running
-	_ = h.sandbox.Stop(id)
 	ext, err := h.store.GetByID(id)
 	if err != nil {
 		fail(fmt.Errorf("extension not found: %w", err))
 		return
 	}
+
+	// This check stays before the sandbox stop and the checkout, so a refused update changes nothing.
+	if added := newEgressHosts(ext.Manifest.Capabilities, entry.Capabilities); len(added) > 0 && !ackNewDomains {
+		logging.For(logging.Extensions).Warnf("ext=%s update to %s refused: %d newly granted host(s): %s",
+			id, entry.Version, len(added), strings.Join(added, ", "))
+		fail(fmt.Errorf("%s %s reaches a host this extension was never granted (%s) — review its allowed domains, then update again to accept them",
+			name, entry.Version, summarizeHosts(added)))
+		return
+	}
+	// Stop sandbox if running
+	_ = h.sandbox.Stop(id)
 
 	if err := refuseUninstallable(entry); err != nil {
 		fail(err)
@@ -1833,6 +1866,9 @@ type ExtensionUpdate struct {
 	// NewPermissions lists the UI permissions the update would newly grant
 	// (present in the registry version but not the installed one).
 	NewPermissions []string `json:"new_permissions,omitempty"`
+	// DomainsAdded is set when the update names a host in `allowed_domains` that the installed
+	// manifest does not. Removing a host never sets it.
+	DomainsAdded bool `json:"domains_added,omitempty"`
 	// Changelog lists the changes (oldest → newest) newer than the installed
 	// commit, from the extension's published changelog. Empty when no
 	// changelog is published, it cannot be fetched, the installed commit is

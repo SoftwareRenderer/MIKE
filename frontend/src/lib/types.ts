@@ -768,6 +768,8 @@ export interface ExtensionUpdate {
     available_commit?: string;
     /** UI permissions this update would newly grant (present in the registry version but not installed). */
     new_permissions?: string[];
+    /** The update names a host in `allowed_domains` the installed manifest does not; removing one never sets it. */
+    domains_added?: boolean;
     /** Changes newer than the installed commit, oldest → newest. */
     changelog?: ExtensionChangelogEntry[];
 }

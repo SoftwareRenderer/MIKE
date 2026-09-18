@@ -143,8 +143,10 @@ export async function checkUpdates(): Promise<ExtensionUpdate[]> {
 }
 
 /** Stream SSE progress + final result for an image update (detached, like install). */
-export function updateExtensionImage(id: string): AsyncIterable<BuildProgressEvent> {
-    return streamOperation(`/extensions/${id}/update`, {});
+/** Pass true only after the user accepts a version that can reach a new host; the server refuses
+ * that update without it. */
+export function updateExtensionImage(id: string, acknowledgeNewDomains = false): AsyncIterable<BuildProgressEvent> {
+    return streamOperation(`/extensions/${id}/update`, { acknowledge_new_domains: acknowledgeNewDomains });
 }
 
 /** Build progress event from an operation's SSE stream. */

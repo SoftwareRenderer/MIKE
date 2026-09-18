@@ -1588,6 +1588,87 @@ func TestHandleCheckUpdates_NewPermissions(t *testing.T) {
 	}
 }
 
+// Adding a host grants no new UI permission, so check-updates reports the host list on its own.
+// Dropping one is not reported.
+func TestHandleCheckUpdates_DomainsAdded(t *testing.T) {
+	const installedCommit = "1111111111111111111111111111111111111111"
+	const vettedCommit = "2222222222222222222222222222222222222222"
+
+	index := RegistryIndex{
+		{
+			Name: "web-search", Version: "2.0.0", Type: ExtensionTypeUI,
+			Repo: "https://example.invalid/web-search.git", Commit: vettedCommit,
+			// Gains a host.
+			Capabilities: &Capabilities{
+				Network: &NetworkConfig{AllowedDomains: []string{"search.example.com", "telemetry.example.net"}},
+			},
+		},
+		{
+			Name: "notes", Version: "2.0.0", Type: ExtensionTypeUI,
+			Repo: "https://example.invalid/notes.git", Commit: vettedCommit,
+			// Loses one.
+			Capabilities: &Capabilities{
+				Network: &NetworkConfig{AllowedDomains: []string{"notes.example.com"}},
+			},
+		},
+	}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(index)
+	}))
+	defer mockServer.Close()
+
+	h := testHandler(t)
+	h.config.RegistryURL = mockServer.URL
+
+	grew := makeTestExt("search-1", "web-search", ExtensionTypeUI)
+	grew.Version = "1.0.0"
+	grew.Commit = installedCommit
+	grew.InstallSource = "registry"
+	grew.Manifest.Capabilities = &Capabilities{
+		Network: &NetworkConfig{AllowedDomains: []string{"search.example.com"}},
+	}
+	_ = h.store.Create(grew)
+
+	shrank := makeTestExt("notes-1", "notes", ExtensionTypeUI)
+	shrank.Version = "1.0.0"
+	shrank.Commit = installedCommit
+	shrank.InstallSource = "registry"
+	shrank.Manifest.Capabilities = &Capabilities{
+		Network: &NetworkConfig{AllowedDomains: []string{"notes.example.com", "legacy.example.com"}},
+	}
+	_ = h.store.Create(shrank)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
+	w := httptest.NewRecorder()
+	h.HandleCheckUpdates(w, req)
+
+	var result []ExtensionUpdate
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	byName := make(map[string]ExtensionUpdate, len(result))
+	for _, u := range result {
+		byName[u.Name] = u
+	}
+
+	grewUpdate, ok := byName["web-search"]
+	if !ok {
+		t.Fatal("web-search update missing")
+	}
+	if !grewUpdate.DomainsAdded {
+		t.Error("domains_added = false, want true for a host the installed manifest never named")
+	}
+	if len(grewUpdate.NewPermissions) != 0 {
+		t.Errorf("new_permissions = %v, want none: this is the case the permission diff cannot see", grewUpdate.NewPermissions)
+	}
+	if shrankUpdate, ok := byName["notes"]; !ok {
+		t.Fatal("notes update missing")
+	} else if shrankUpdate.DomainsAdded {
+		t.Error("domains_added = true for an update that only removes a host, want false")
+	}
+}
+
 func TestHandleInstall_FallbackCopiesLicenseURL(t *testing.T) {
 	// Registry entry with no git source (no repo/commit) — fallback path should copy LicenseURL
 	index := RegistryIndex{
@@ -1855,6 +1936,127 @@ func TestHandleUpdateImage_StreamsProgress(t *testing.T) {
 	}
 	if guardHolds(h.inFlightOps, "github-issue-importer") {
 		t.Error("in-flight guard not released after update completed")
+	}
+}
+
+// newHostUpdateFixture installs a UI extension whose vetted update names one host the installed
+// manifest does not.
+func newHostUpdateFixture(t *testing.T) (*ExtensionHandler, *Extension, string) {
+	t.Helper()
+	repo, commit := makeGitRepo(t, map[string]string{
+		"search/manifest.json": `{"display_name":"Web Search","description":"d","author":"tester","version":"2.0.0",` +
+			`"capabilities":{"network":{"allowed_domains":["search.example.com","telemetry.example.net"]}}}`,
+	})
+	index := RegistryIndex{{
+		Name: "web-search", Version: "2.0.0", Type: ExtensionTypeUI, Author: "tester",
+		Repo: repo, Commit: commit, Subdir: "search",
+		Capabilities: &Capabilities{
+			Network: &NetworkConfig{AllowedDomains: []string{"search.example.com", "telemetry.example.net"}},
+		},
+	}}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(index)
+	}))
+	t.Cleanup(mockServer.Close)
+
+	h := testHandler(t)
+	h.config.RegistryURL = mockServer.URL
+	extDir := t.TempDir()
+	h.config.ExtensionsDir = extDir
+
+	ext := makeTestExt("search-1", "web-search", ExtensionTypeUI)
+	ext.Version = "1.0.0"
+	ext.Commit = "1111111111111111111111111111111111111111"
+	ext.InstallSource = "registry"
+	ext.Manifest.Capabilities = &Capabilities{
+		Network: &NetworkConfig{AllowedDomains: []string{"search.example.com"}},
+	}
+	if err := h.store.Create(ext); err != nil {
+		t.Fatalf("install fixture: %v", err)
+	}
+	return h, ext, extDir
+}
+
+func postUpdate(t *testing.T, h *ExtensionHandler, id, body string) sseEvent {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/"+id+"/update", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.HandleUpdateImage(w, req, id)
+	events := readSSEEvents(t, w.Body.Bytes())
+	if len(events) == 0 {
+		t.Fatal("update answered with no SSE event")
+	}
+	return events[len(events)-1]
+}
+
+func TestHandleUpdateImage_NewHostRefused(t *testing.T) {
+	h, ext, extDir := newHostUpdateFixture(t)
+
+	last := postUpdate(t, h, ext.ID, `{}`)
+	if !last.Done || last.Error == "" {
+		t.Fatalf("last event = %+v, want a done event carrying a refusal", last)
+	}
+	if !strings.Contains(last.Error, "telemetry.example.net") {
+		t.Errorf("refusal does not name the host it refuses: %q", last.Error)
+	}
+
+	if entries, err := os.ReadDir(extDir); err != nil {
+		t.Fatalf("read extensions dir: %v", err)
+	} else if len(entries) != 0 {
+		t.Errorf("refused update wrote %d file entr(ies) into the extensions dir, want none", len(entries))
+	}
+
+	stored, err := h.store.GetByID(ext.ID)
+	if err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if stored.Commit != ext.Commit {
+		t.Errorf("commit = %q, want the installed %q", stored.Commit, ext.Commit)
+	}
+	if got := stored.Manifest.Capabilities.GetNetwork().AllowedDomains; len(got) != 1 || got[0] != "search.example.com" {
+		t.Errorf("stored allowed_domains = %v, want the installed list unchanged", got)
+	}
+}
+
+// The 400 for a bad body comes before the update is marked in progress, so a refused request cannot
+// block every later update.
+func TestHandleUpdateImage_MalformedBody(t *testing.T) {
+	h, ext, _ := newHostUpdateFixture(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/"+ext.ID+"/update",
+		strings.NewReader(`{"acknowledge_new_domains":"yes"}`))
+	w := httptest.NewRecorder()
+	h.HandleUpdateImage(w, req, ext.ID)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "acknowledge_new_domains") {
+		t.Errorf("refusal does not name the field: %s", w.Body.String())
+	}
+	if guardHolds(h.inFlightOps, ext.Name) {
+		t.Error("the in-flight guard was taken for a request that was refused")
+	}
+}
+
+func TestHandleUpdateImage_NewHostAcknowledged(t *testing.T) {
+	h, ext, _ := newHostUpdateFixture(t)
+
+	last := postUpdate(t, h, ext.ID, `{"acknowledge_new_domains":true}`)
+	if !last.Done || last.Error != "" {
+		t.Fatalf("last event = %+v, want a clean completion", last)
+	}
+
+	stored, err := h.store.GetByID(ext.ID)
+	if err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if stored.Commit == ext.Commit {
+		t.Fatal("commit unchanged: the acknowledged update did not land")
+	}
+	if !strings.Contains(strings.Join(stored.Manifest.Capabilities.GetNetwork().AllowedDomains, ","), "telemetry.example.net") {
+		t.Errorf("stored allowed_domains = %v, want the updated manifest", stored.Manifest.Capabilities.GetNetwork().AllowedDomains)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -279,6 +280,47 @@ func newPermissions(installed, remote *Capabilities) []string {
 		}
 	}
 	return added
+}
+
+// newEgressHosts returns the hosts the new manifest can reach that the installed one cannot. A host
+// that was only removed is not one of them.
+func newEgressHosts(installed, remote *Capabilities) []string {
+	network := remote.GetNetwork()
+	if network == nil {
+		return nil
+	}
+	current := egressHostSet(installed.GetNetwork())
+	var added []string
+	for _, host := range network.AllowedDomains {
+		key := normalizeEgressHost(host)
+		if key == "" {
+			continue
+		}
+		if _, ok := current[key]; ok {
+			continue
+		}
+		current[key] = struct{}{}
+		added = append(added, key)
+	}
+	sort.Strings(added)
+	return added
+}
+
+func egressHostSet(network *NetworkConfig) map[string]struct{} {
+	if network == nil {
+		return map[string]struct{}{}
+	}
+	set := make(map[string]struct{}, len(network.AllowedDomains))
+	for _, host := range network.AllowedDomains {
+		if key := normalizeEgressHost(host); key != "" {
+			set[key] = struct{}{}
+		}
+	}
+	return set
+}
+
+func normalizeEgressHost(host string) string {
+	return strings.ToLower(strings.TrimSpace(host))
 }
 
 // commitHashRe matches a full hex commit hash: 40-char (SHA-1) or 64-char

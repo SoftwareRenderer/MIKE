@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -141,6 +142,39 @@ CMD ["/usr/bin/gopls", "serve"]
 	}
 	if got != expected {
 		t.Errorf("Dockerfile = %q, want %q", got, expected)
+	}
+}
+
+func TestNewEgressHosts(t *testing.T) {
+	caps := func(hosts ...string) *Capabilities {
+		return &Capabilities{Network: &NetworkConfig{AllowedDomains: hosts}}
+	}
+	tests := []struct {
+		name      string
+		installed *Capabilities
+		remote    *Capabilities
+		want      []string
+	}{
+		{"a new host is reported", caps("api.example.com"), caps("api.example.com", "telemetry.example.net"), []string{"telemetry.example.net"}},
+		{"a lookalike subdomain is a new host", caps("example.com"), caps("evil.example.com"), []string{"evil.example.com"}},
+		{"a subdomain of a granted host is a new host", caps("example.com"), caps("sub.example.com"), []string{"sub.example.com"}},
+		{"a reword is a new host", caps("example.com"), caps("www.example.com"), []string{"www.example.com"}},
+		{"a removed host is not a decision", caps("a.example.com", "b.example.com"), caps("a.example.com"), nil},
+		{"every host removed is not a decision", caps("a.example.com"), caps(), nil},
+		{"reordering is not a decision", caps("a.example.com", "b.example.com"), caps("b.example.com", "a.example.com"), nil},
+		{"case and spacing are not a decision", caps("API.Example.com"), caps(" api.example.com "), nil},
+		{"remote declares no network", caps("a.example.com"), &Capabilities{}, nil},
+		{"both capabilities absent", nil, nil, nil},
+		{"installed named none", nil, caps("b.example.com", "a.example.com"), []string{"a.example.com", "b.example.com"}},
+		{"listed twice remotely is reported once", nil, caps("a.example.com", "A.EXAMPLE.COM"), []string{"a.example.com"}},
+		{"blank entries are ignored", caps("a.example.com"), caps("a.example.com", "   "), nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := newEgressHosts(tc.installed, tc.remote); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("newEgressHosts() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
