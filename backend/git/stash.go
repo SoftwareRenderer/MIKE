@@ -47,7 +47,9 @@ func (wm *WorktreeManager) PushStash(repoPath, message string) (string, error) {
 // it, returning whether the entry was found. `git stash pop` pops stash@{0} with no idea who pushed
 // it, so on a shared stack one merge restores another's work and keeps its own entry, with no error
 // on either side — hence identity by hash. A failed apply leaves the entry on the stack: dropping
-// what could not be applied turns a resolvable conflict into lost work.
+// what could not be applied turns a resolvable conflict into lost work. When the failure left unmerged
+// paths the error is a *RestoreConflictError naming them, which is how a caller tells a conflict it must
+// report from a refusal that left the tree alone.
 //
 // The restore keeps the pushed work's staged/unstaged split: a plain apply returns a modification
 // unstaged, and commit-and-done commits the index only.
@@ -82,7 +84,11 @@ func (wm *WorktreeManager) PopStashByHash(dir, hash string) (bool, error) {
 		out, err = wm.gitRunInGitDir(dir, "stash", "apply", hash)
 	}
 	if err != nil {
-		// Deliberately not dropped — see the doc comment.
+		// Deliberately not dropped — see the doc comment. The unmerged index, not git's wording, is what
+		// says the work reached the tree as well as staying on the stack.
+		if paths := wm.unmergedPaths(dir); len(paths) > 0 {
+			return true, &RestoreConflictError{Hash: hash, Paths: paths, GitMessage: gitMessage(out, err)}
+		}
 		return true, fmt.Errorf("stash apply %s: %s", shortHash(hash), gitMessage(out, err))
 	}
 	if err := wm.DropStashByHash(dir, hash); err != nil {
@@ -96,6 +102,21 @@ func (wm *WorktreeManager) PopStashByHash(dir, hash string) (bool, error) {
 func (wm *WorktreeManager) porcelainStatus(dir string) (string, bool) {
 	out, err := wm.gitRunOutput(dir, "status", "--porcelain")
 	return out, err == nil
+}
+
+// unmergedPaths lists the paths dir's index holds unmerged. Empty means nothing conflicted.
+func (wm *WorktreeManager) unmergedPaths(dir string) []string {
+	out, err := wm.gitRunOutput(dir, "diff", "--name-only", "--diff-filter=U", "-z")
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	for _, p := range strings.Split(out, "\x00") {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths
 }
 
 // listStashEntries parses "git stash list --format=%gd%x00%H%x00%gs" output.

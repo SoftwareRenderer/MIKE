@@ -110,8 +110,16 @@ live branches kept), `backend/git/branch_listing_test.go` (both markers, slug pr
   `--index` and falls back to a plain apply only when the refused attempt changed nothing: measured, git
   answers `conflicts in index. Try without --index.` and leaves the tree untouched, so the retry cannot
   double-apply. A retry that also fails keeps the entry on the stack and the worktree conflicted.
+- **A conflicted restore is reported, with the paths read from git rather than from its wording.**
+  `PopStashByHash` checks `git diff --name-only --diff-filter=U` after a failed apply and returns
+  `*RestoreConflictError` (the paths and the entry's hash, classified with `errors.As`) only when the
+  index is unmerged: a conflict is a file a person has to resolve, a refusal left the tree alone, and
+  git's phrasing does not tell them apart. What a caller does with it is in *Commit and Done*
+  (`docs/commit-and-done.md`) — the merge paths finish the task on it, which is why the git layer states
+  it separately instead of returning one error for the bracket.
 - Tests: `backend/git/stash_identity_test.go`, `push_stash_test.go`, `stash_bracket_test.go`,
-  `backend/exec/sync_merge_test.go` (`…_KeepsUnstagedWorkWhenTheStashFails` — its stash-ref injection is
+  `stash_restore_conflict_test.go`, `backend/exec/sync_merge_test.go`
+  (`…_KeepsUnstagedWorkWhenTheStashFails` — its stash-ref injection is
   used instead of an index lock because a locked index blocks the forced checkout too, so the loss never
   happens and the test passes vacuously).
 

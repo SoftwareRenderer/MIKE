@@ -2,6 +2,7 @@ package git
 
 import (
 	"errors"
+	"fmt"
 	"os/exec"
 	"strings"
 )
@@ -16,6 +17,23 @@ var ErrWorktreeNotFound = errors.New("worktree not found")
 // and the push. Callers must not read it as a saved state — but there is nothing lost either, because git
 // found nothing to take. Classify it with errors.Is.
 var ErrNothingToStash = errors.New("stash push created no entry")
+
+// RestoreConflictError is a failed stash apply that left unmerged paths: the parked work is in the
+// working tree with conflict markers *and* still on the stack. It reports the state of the working copy,
+// not of the work the bracket parked it for, and names the files git could not put back and the entry
+// that still holds them, which a caller has to report because the entry is deliberately not dropped.
+// Classify it with errors.As.
+type RestoreConflictError struct {
+	Hash  string
+	Paths []string
+	// GitMessage is git's own reason for refusing the apply.
+	GitMessage string
+}
+
+func (e *RestoreConflictError) Error() string {
+	return fmt.Sprintf("stash apply %s left %d unmerged file(s) (%s); the entry is still on the stack: %s",
+		shortHash(e.Hash), len(e.Paths), strings.Join(e.Paths, ", "), e.GitMessage)
+}
 
 // gitMessage renders why git failed: git's own words on one line, the exit status only as a fallback. It
 // reaches the user through the error it is wrapped into, so "exit status 1" alone is never good enough.

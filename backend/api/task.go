@@ -957,7 +957,8 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	if mergeErr := h.executor.MergeBranch(projectID, taskID, task); mergeErr != nil {
+	// The click asked for commit + merge + done, and a landed merge delivered it — see MergedDelivered.
+	if mergeErr := h.executor.MergeBranch(projectID, taskID, task); !exec.MergedDelivered(mergeErr) {
 		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("merge failed: %v", mergeErr)
 		// Reload to check for merge conflict flag set by MergeBranch
 		task, _ = h.store.GetTask(projectID, taskID)

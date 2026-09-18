@@ -478,7 +478,9 @@ func (m *mergeOrchestrator) CommitAndMerge(projectID, taskID, worktreePath, comm
 	if autoMerge {
 		task, _ := m.store.GetTaskByID(taskID)
 		if err := m.MergeBranch(projectID, taskID, task); err != nil {
-			logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("merge failed: %v", err)
+			if !MergedDelivered(err) {
+				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("merge failed: %v", err)
+			}
 			return err
 		}
 	} else {
@@ -674,9 +676,14 @@ func (m *mergeOrchestrator) mergeInWorktree(projectID, worktreePath, targetBranc
 
 // mergeInto merges taskBranch into targetBranch in dir. restoreRef, when it differs from
 // targetBranch, is the checkout dir is put back on afterwards.
+//
+// `landed` separates the bracket's two failures: with both joined, the restore conflict is still reachable
+// inside a failed merge, and only the merge outcome decides whether the task finished.
 func (m *mergeOrchestrator) mergeInto(projectID, dir, targetBranch, taskBranch, taskID, restoreRef string) error {
-	return m.worktreeMgr.WithStash(projectID, dir, git.StashMessageForAutoMerge(taskID), func() error {
+	landed := false
+	bracketErr := m.worktreeMgr.WithStash(projectID, dir, git.StashMessageForAutoMerge(taskID), func() error {
 		mergeErr := m.mergeOnTargetBranch(projectID, dir, targetBranch, taskBranch, taskID)
+		landed = mergeErr == nil
 		// Back off the caller's checkout before the bracket restores the stashed work, so it lands
 		// on the branch the directory belongs to rather than on the merge target.
 		if restoreRef != "" && restoreRef != targetBranch {
@@ -686,6 +693,44 @@ func (m *mergeOrchestrator) mergeInto(projectID, dir, targetBranch, taskBranch, 
 		}
 		return mergeErr
 	})
+	var conflict *git.RestoreConflictError
+	if landed && errors.As(bracketErr, &conflict) {
+		m.logConflictedRestore(taskID, targetBranch, conflict)
+		return fmt.Errorf("%w: %w", errMergedWithConflictedRestore, bracketErr)
+	}
+	return bracketErr
+}
+
+// errMergedWithConflictedRestore is a merge that delivered the work to the target branch, followed by a
+// restore of the checkout's own parked work that conflicted. mergeInto adds it only when the merge landed,
+// which is what MergedDelivered is testing for.
+var errMergedWithConflictedRestore = errors.New("merged, but the parked work came back conflicted")
+
+// MergedDelivered is the Done test for a merge error: the branch reached its target. A conflicted restore
+// of the project's own parked work leaves the project's working copy holding the conflict and does not
+// undo that.
+//
+// The merge-conflict resolver must never be pointed at such a task: it answers a conflict by editing the
+// file and running `git add`, which is git's signal that the conflict is resolved, and what is conflicted
+// here is the person's own uncommitted text.
+func MergedDelivered(mergeErr error) bool {
+	return mergeErr == nil || errors.Is(mergeErr, errMergedWithConflictedRestore)
+}
+
+// logConflictedRestore is the only announcement that a file was left with conflict markers by a merge that
+// succeeded, so it names the file and where the parked version still is.
+func (m *mergeOrchestrator) logConflictedRestore(taskID, targetBranch string, conflict *git.RestoreConflictError) {
+	task, _ := m.store.GetTaskByID(taskID)
+	if task == nil {
+		return
+	}
+	logging.For(logging.Merge).With(logging.TaskID, taskID).With(logging.ProjectID, task.ProjectID).Warnf(
+		"merged into %s but the project's own work could not be restored: %v", targetBranch, conflict)
+	m.logSystemMessage(taskID, task.CurrentThreadID, "warning", fmt.Sprintf(
+		"Merged into %s. Your own uncommitted changes to %s could not be restored on top of the merge: "+
+			"the file is left with conflict markers in the project checkout, and your version is still in the "+
+			"project's stash (git stash list → %s). Resolve it there — this task is done.",
+		targetBranch, strings.Join(conflict.Paths, ", "), git.StashMessageForAutoMerge(taskID)))
 }
 
 // mergeOnTargetBranch checks dir out on targetBranch and merges taskBranch into it, recording the
@@ -875,10 +920,10 @@ func (r conflictResolution) mergeWanted() bool {
 	return r.commitDone || (r.task != nil && r.task.AutoMerge)
 }
 
-// finishesTask reports whether the resolution delivered what mergeWanted asked for: committed,
-// merged cleanly, nothing re-conflicted. Otherwise the task goes back to the user.
+// finishesTask reports whether the resolution delivered what mergeWanted asked for: committed, the work
+// in the target branch, nothing re-conflicted. Otherwise the task goes back to the user.
 func (r conflictResolution) finishesTask() bool {
-	return r.committed && r.mergeWanted() && r.mergeErr == nil && r.task != nil && !r.task.HasMergeConflict
+	return r.committed && r.mergeWanted() && MergedDelivered(r.mergeErr) && r.task != nil && !r.task.HasMergeConflict
 }
 
 // tryResolveMergeConflicts classifies a failed merge in dir: with no conflicted files git finished
@@ -1057,7 +1102,7 @@ func (m *mergeOrchestrator) commitConflictResolution(projectID, taskID, worktree
 	// A click merges whatever auto_merge says; without one, auto_merge alone decides.
 	if commitOK && (task.AutoMerge || commitDone) {
 		mergeErr = m.MergeBranch(projectID, taskID, task)
-		if mergeErr != nil {
+		if mergeErr != nil && !MergedDelivered(mergeErr) {
 			logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("final merge failed: %v", mergeErr)
 		}
 	} else if commitOK {
@@ -1075,7 +1120,7 @@ func (m *mergeOrchestrator) commitConflictResolution(projectID, taskID, worktree
 	if !updatedTask.HasMergeConflict {
 		// The conflict is over, so the click is spent, merge failure included; a still conflicted
 		// task keeps it for the turn that finishes it.
-		res.commitDone = m.takeCommitAndDone(taskID, mergeErr == nil)
+		res.commitDone = m.takeCommitAndDone(taskID, MergedDelivered(mergeErr))
 	}
 	return res
 }

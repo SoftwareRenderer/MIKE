@@ -11,4 +11,18 @@ merge/commit half of `backend/exec/merge.go`.
 - **A merge conflict interrupts the click; it does not cancel it.** The click asked for commit + merge + Done, so the turn that finishes resolving merges into the target branch **whatever `auto_merge` says** (`auto_merge=false` is why the user clicked it) and marks the task Done.
 - **Only the click knows it was the click.** A conflict found at task start means "keep working on the task", so `ArmCommitAndDone` / `takeCommitAndDone` (`backend/exec/merge.go`) records which conflict the click produced — **in memory**, so a merge nobody asked for never comes back. The record is spent by the resolution it was waiting on, dropped when the user takes over (`HandleSend`, the `ask_question` stop), and kept across a resolution that is *still* conflicted. **Nothing is marked Done that did not reach the target branch:** `conflictResolution.finishesTask()` is the only road to Done from a resolution, so a refused or failed merge is Review with `Merge failed: …`.
 - When the worktrees dir lives **inside** the project, `CreateWorktree` (`backend/git/worktree.go`, `ensureWorktreesExcluded`) idempotently appends it to the repo's local `.git/info/exclude` so worktree content never shows in project `git status` or gets swept into a project-level `git stash -u`. Local-only, never committed.
-- **Tests:** `task_test.go` (`TestHandleCommitAndDone_ExcludesUnstagedFiles`, `TestHandleCommitAndDone_ArmsClickForConflictResolution`), `merge_conflict_resolution_test.go` (`TestCommitConflictResolution_DoesNotSweepUntrackedFiles`, `…_CommitAndDoneClickMergesWithAutoMergeOff`, `…_NoClickNoMergeWithAutoMergeOff`, `…_StillConflictedKeepsTheClick`), `commit_and_done_test.go`, `backend/git/worktree_test.go` (`TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus`, `…_NoExcludeWhenWorktreesOutsideProject`), e2e `commit-and-done-unstaged.spec.ts`.
+- **A merge that landed finishes the click, whatever came back afterwards.** The merge parks the project
+  checkout's own uncommitted work before it moves that checkout (`docs/git-operations.md → Stash`), and
+  putting that work back can conflict with what the merge brought in. `mergeInto` then returns
+  `errMergedWithConflictedRestore`, and `MergedDelivered` is the one predicate every Done decision
+  applies — the work reached the target branch, so the task is Done, and what is left is the project's
+  working copy. One Warn and one thread message name the file
+  and the stash entry that still holds the person's version, because nothing on the card says it.
+  Such a path never raises `has_merge_conflict`: the resolver answers a conflict by editing the file and
+  running `git add`, which is git's signal that the conflict is resolved, and these are the person's own
+  words. A merge that failed *and* conflicted on the restore is not this — `mergeInto` classifies on
+  whether the merge landed, never on what the joined error contains.
+- **Tests:** `task_test.go` (`TestHandleCommitAndDone_ExcludesUnstagedFiles`,
+  `TestHandleCommitAndDone_ArmsClickForConflictResolution`,
+  `TestHandleCommitAndDone_DoneWhenOnlyTheProjectOwnsTheConflict`), `backend/exec/merge_restore_test.go`
+  (`TestMergedDeliveredReadsTheMergeNotTheRestore`), `merge_conflict_resolution_test.go` (`TestCommitConflictResolution_DoesNotSweepUntrackedFiles`, `…_CommitAndDoneClickMergesWithAutoMergeOff`, `…_NoClickNoMergeWithAutoMergeOff`, `…_StillConflictedKeepsTheClick`), `commit_and_done_test.go`, `backend/git/worktree_test.go` (`TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus`, `…_NoExcludeWhenWorktreesOutsideProject`), e2e `commit-and-done-unstaged.spec.ts`.

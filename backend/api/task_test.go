@@ -1371,3 +1371,109 @@ func TestHandleCommitAndDone_ReportsACommitThatGitRefused(t *testing.T) {
 		t.Error("the uncommitted work was merged to the target branch anyway")
 	}
 }
+
+// TestHandleCommitAndDone_DoneWhenOnlyTheProjectOwnsTheConflict: the task's branch reached the target
+// branch and the only thing that came back conflicted was the project checkout's own uncommitted edit,
+// which the merge bracket had parked to run. The click asked for commit + merge + done and got all three,
+// so the task finishes and the leftover conflict is reported by name. It used to travel back as a merge
+// failure, which left a merged task in Review with nothing anywhere saying why.
+func TestHandleCommitAndDone_DoneWhenOnlyTheProjectOwnsTheConflict(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	h.commitQueue = exec.NewCommitQueue()
+
+	proj, err := s.GetProject(projID)
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	target := strings.TrimSpace(gitOutput(t, proj.Path, "rev-parse", "--abbrev-ref", "HEAD"))
+
+	// One line both sides will reword, committed so the merge and the parked edit share a base.
+	if err := os.WriteFile(filepath.Join(proj.Path, "shared.txt"), []byte("the original sentence\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, proj.Path, "add", "shared.txt")
+	gitRun(t, proj.Path, "commit", "-m", "shared line")
+
+	task := &types.Task{
+		ID:              "merged-anyway",
+		ProjectID:       projID,
+		Title:           "Merged anyway",
+		Prompt:          "make changes",
+		Status:          types.StatusReview,
+		Branch:          "task/merged-anyway",
+		BaseRef:         target,
+		CurrentThreadID: "thread-merged-anyway",
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	wtPath, _, err := h.worktreeMgr.CreateWorktree(projID, task.ID, task.Branch, "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	// The task rewords the line...
+	if err := os.WriteFile(filepath.Join(wtPath, "shared.txt"), []byte("the task wording\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, wtPath, "add", "shared.txt")
+	// ...and so does the person, in the project checkout, uncommitted.
+	if err := os.WriteFile(filepath.Join(proj.Path, "shared.txt"), []byte("the project's own wording\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/commit", h.HandleCommitAndDone)
+	body, _ := json.Marshal(map[string]string{"commit_message": "task work"})
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projID+"/tasks/"+task.ID+"/commit", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("commit-and-done status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	updated, err := s.GetTask(projID, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updated.Status != types.StatusDone {
+		t.Fatalf("status = %q, want done — the work reached %s (output=%q)", updated.Status, target, updated.Output)
+	}
+	if updated.ExecutionState != types.ExecStateCompleted {
+		t.Errorf("execution_state = %q, want completed", updated.ExecutionState)
+	}
+	if updated.HasMergeConflict {
+		t.Error("the task is flagged for the conflict resolver: that path has the model edit and stage the project's own words")
+	}
+	if out := gitOutput(t, proj.Path, "show", "HEAD:shared.txt"); !strings.Contains(out, "the task wording") {
+		t.Errorf("the merge did not deliver the task's work: HEAD:shared.txt = %q", out)
+	}
+
+	// What is left over is the project's working copy, and it has to be reported: the file, and where
+	// the parked version still is.
+	if status := gitOutput(t, proj.Path, "status", "--porcelain"); !strings.Contains(status, "UU shared.txt") {
+		t.Errorf("the project checkout was not left holding the conflict: %q", status)
+	}
+	label := git.StashMessageForAutoMerge(task.ID)
+	if out := gitOutput(t, proj.Path, "stash", "list"); !strings.Contains(out, label) {
+		t.Errorf("the entry holding the project's own wording was dropped: %q", out)
+	}
+	msgs, err := s.GetTaskMessages(task.ID, task.CurrentThreadID)
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	var reported bool
+	for _, m := range msgs {
+		if strings.Contains(m.Content, "Merge failed") {
+			t.Errorf("a merged task is told its merge failed: %q", m.Content)
+		}
+		if strings.Contains(m.Content, "shared.txt") && strings.Contains(m.Content, label) {
+			reported = true
+		}
+	}
+	if !reported {
+		t.Error("nothing tells the user which file is left conflicted and which stash entry holds their version")
+	}
+}

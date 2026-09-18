@@ -1193,7 +1193,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 					te.prepareMergeConflictTurn(setup, lc, GetResolvedConflictedFiles(setup.worktreePath))
 					return turnNextLLMCall
 				}
-				if mergeErr != nil {
+				if !MergedDelivered(mergeErr) {
 					logging.For(logging.Merge).With(logging.TaskID, setup.task.ID).Warnf("merge failed, moving to review: %v", mergeErr)
 					setup.task.ExecutionState = types.ExecStateIdle
 					setup.task.Status = types.StatusReview

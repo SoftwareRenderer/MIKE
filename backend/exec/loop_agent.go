@@ -505,8 +505,8 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, wor
 			return
 		}
 		// The conflict is over, so the click is spent - merge failure included.
-		commitDone = te.merge.takeCommitAndDone(task.ID, mergeErr == nil)
-		if mergeErr != nil {
+		commitDone = te.merge.takeCommitAndDone(task.ID, MergedDelivered(mergeErr))
+		if !MergedDelivered(mergeErr) {
 			logging.For(logging.Agent).With(logging.TaskID, task.ID).Warnf("merge failed, moving to review: %v", mergeErr)
 			task.ExecutionState = types.ExecStateIdle
 			task.Status = types.StatusReview
