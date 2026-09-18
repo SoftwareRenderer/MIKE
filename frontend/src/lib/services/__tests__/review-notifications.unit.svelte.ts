@@ -53,6 +53,18 @@ function freshProject(name = 'Payments') {
     return id;
 }
 
+/** Several projects at once, for the cases where one burst crosses project lines. */
+function freshProjects(...names: string[]): string[] {
+    const made = names.map(name => ({ id: `proj-${++projectSeq}`, name }) as Project);
+    appStore.projects = [...appStore.projects, ...made];
+    return made.map(p => p.id);
+}
+
+/** A macrotask: long enough for a board read in flight to have settled and its burst to have flushed. */
+function settled(): Promise<void> {
+    return new Promise(resolve => { setTimeout(resolve, 0); });
+}
+
 function setVisibility({ visible = true, focused = true }: { visible?: boolean; focused?: boolean } = {}) {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (visible ? 'visible' : 'hidden') });
     vi.spyOn(document, 'hasFocus').mockReturnValue(focused);
@@ -126,13 +138,46 @@ describe('reviewNotifier arrivals in another project', () => {
         expect(spec.url).toContain('task=just-landed');
     });
 
-    it('says how many arrived when several landed at once', async () => {
+    it('says how many arrived when several landed at once, and opens the board rather than one of them', async () => {
         const projectId = freshProject();
         getBoard.mockResolvedValue({ tasks: [reviewOf('a', '2026-09-16T09:00:00Z'), reviewOf('b', '2026-09-16T09:01:00Z')] });
         reviewNotifier.observeCounts(counts(projectId, 0));
         reviewNotifier.observeCounts(counts(projectId, 2));
         await vi.waitFor(() => expect(show).toHaveBeenCalledTimes(1));
-        expect(show.mock.calls[0][0].title).toBe('2 tasks waiting in Review');
+        const spec = show.mock.calls[0][0];
+        expect(spec.title).toBe('2 tasks waiting in Review');
+        expect(spec.body).toContain('Payments');
+        expect(spec.tag).toBe('mike-review-batch');
+        expect(spec.url).toContain(`project=${projectId}`);
+        expect(spec.url).not.toContain('task=');
+    });
+
+    it('is one notification for arrivals in two projects, naming the fuller Review column', async () => {
+        const [ingest, payments] = freshProjects('Ingest', 'Payments');
+        const boards: Record<string, Task[]> = {
+            [ingest]: [reviewOf('i1', '2026-09-16T09:00:00Z'), reviewOf('i2', '2026-09-16T09:01:00Z')],
+            [payments]: [reviewOf('p1', '2026-09-16T09:02:00Z')],
+        };
+        getBoard.mockImplementation((projectId: string) => Promise.resolve({ tasks: boards[projectId] || [] }));
+        reviewNotifier.observeCounts({ [ingest]: { review: 0 }, [payments]: { review: 0 } });
+        reviewNotifier.observeCounts({ [ingest]: { review: 2 }, [payments]: { review: 9 } });
+        await vi.waitFor(() => expect(show).toHaveBeenCalledTimes(1));
+        const spec = show.mock.calls[0][0];
+        expect(spec.title).toBe('3 tasks waiting in Review');
+        expect(spec.body).toContain('Payments');
+        expect(spec.url).toContain(`project=${payments}`);
+        expect(getBoard).toHaveBeenCalledTimes(2);
+    });
+
+    it('announces what the surviving read found when the other project’s board cannot be had', async () => {
+        const [gone, live] = freshProjects('Gone', 'Live');
+        getBoard.mockImplementation((projectId: string) => projectId === gone
+            ? Promise.reject(new Error('the project is gone'))
+            : Promise.resolve({ tasks: [reviewOf('survivor', '2026-09-16T09:00:00Z')] }));
+        reviewNotifier.observeCounts({ [gone]: { review: 0 }, [live]: { review: 0 } });
+        reviewNotifier.observeCounts({ [gone]: { review: 3 }, [live]: { review: 1 } });
+        await vi.waitFor(() => expect(show).toHaveBeenCalledTimes(1));
+        expect(show.mock.calls[0][0].title).toBe('survivor');
     });
 
     it('announces one arrival once, whichever signal reports it first', async () => {
@@ -230,6 +275,8 @@ describe('reviewNotifier while the user is looking', () => {
         reviewNotifier.observeCounts(counts(projectId, before));
         reviewNotifier.observeCounts(counts(projectId, after));
         await vi.waitFor(() => expect(getBoard).toHaveBeenCalled());
+        // The burst flushes when the read settles, so a case that expects silence has to wait for it.
+        await settled();
     }
 
     it('stays quiet while the Review column of the project in view is the one that grew', async () => {
@@ -332,7 +379,21 @@ describe('reviewNotifier taking a notification back', () => {
         reviewNotifier.observeCounts(counts(projectId, 0));
         reviewNotifier.observeCounts(counts(projectId, 2));
         await vi.waitFor(() => expect(show).toHaveBeenCalledTimes(1));
-        return { projectId, first: `${caseName}-one`, second: `${caseName}-two` };
+        return `${caseName}-one`;
+    }
+
+    /** Arrivals in two projects: one notification, pointing at one of the two boards. */
+    async function announceAcrossProjects(caseName: string) {
+        const [full, sparse] = freshProjects(`${caseName} Full`, `${caseName} Sparse`);
+        const boards: Record<string, Task[]> = {
+            [full]: [reviewOf(`${caseName}-f1`, '2026-09-16T09:00:00Z')],
+            [sparse]: [reviewOf(`${caseName}-s1`, '2026-09-16T09:01:00Z')],
+        };
+        getBoard.mockImplementation((projectId: string) => Promise.resolve({ tasks: boards[projectId] || [] }));
+        reviewNotifier.observeCounts({ [full]: { review: 0 }, [sparse]: { review: 0 } });
+        reviewNotifier.observeCounts({ [full]: { review: 12 }, [sparse]: { review: 2 } });
+        await vi.waitFor(() => expect(show).toHaveBeenCalledTimes(1));
+        return { full, sparse };
     }
 
     it('retires the notification when the task it names is opened', async () => {
@@ -348,15 +409,21 @@ describe('reviewNotifier taking a notification back', () => {
     });
 
     it('leaves a batch alone while one of the tasks it speaks for is opened', async () => {
-        const { first } = await announceBatch('batchopen');
+        const first = await announceBatch('batchopen');
         reviewNotifier.observeAttention(first, null);
         expect(dismiss).not.toHaveBeenCalled();
     });
 
-    it('retires a batch when the column it speaks for comes into view', async () => {
-        const { projectId } = await announceBatch('batchcolumn');
-        reviewNotifier.observeAttention(null, projectId);
-        expect(dismiss).toHaveBeenCalledWith(`mike-review-${projectId}`);
+    it('retires a batch when the board it points at comes into view', async () => {
+        const { full } = await announceAcrossProjects('batchcolumn');
+        reviewNotifier.observeAttention(null, full);
+        expect(dismiss).toHaveBeenCalledWith('mike-review-batch');
+    });
+
+    it('leaves the batch alone while the other board it spoke for is the one in view', async () => {
+        const { sparse } = await announceAcrossProjects('batchother');
+        reviewNotifier.observeAttention(null, sparse);
+        expect(dismiss).not.toHaveBeenCalled();
     });
 
     it('retires nothing in a background tab', async () => {

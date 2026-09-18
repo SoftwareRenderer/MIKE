@@ -4,6 +4,7 @@ import App from './lib/components/App.svelte';
 import { appStore } from './lib/stores';
 import { applyCachedCatalog } from './lib/i18n/boot';
 import { startAppUpdate } from './lib/services/app-update';
+import { watchNotificationClicks } from './lib/utils/notifications';
 import { isChunkLoadFailure, reportChunkFailure } from './lib/services/chunk-failure';
 
 // Centralized unhandled promise rejection handler
@@ -35,6 +36,9 @@ window.addEventListener('appinstalled', () => {
     appStore.pwaInstalled = true;
     appStore.pwaInstallPrompt = null;
 });
+
+// Before the mount and before the first await: a click the worker posts has to find a listener.
+watchNotificationClicks();
 
 /**
  * Mount after the last resolved language has been applied.

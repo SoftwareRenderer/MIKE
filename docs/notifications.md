@@ -55,9 +55,9 @@ notification on changes that were already there. While the preference is off the
 counted but nothing is fetched and nothing announced, so switching it on does not deliver the backlog
 of rises that happened while it was off.
 
-Which Review cards are new, and whether to say so, is pure logic in `$lib/utils/review-notify.ts`
-(`reviewArrivals`, `columnInViewport`, `shouldNotifyReview`, `notableArrivals`) — the service holds no
-rules of its own.
+Which Review cards are new, what one notification should speak for, and whether to say so at all, is
+pure logic in `$lib/utils/review-notify.ts` (`reviewArrivals`, `planReviewNotice`, `isLookingAtReview`,
+`columnInViewport`, `notableArrivals`) — the service holds no rules of its own.
 
 ## When it stays quiet
 
@@ -72,23 +72,36 @@ A notification is due when the preference is on **and** the user is not looking 
   board unmounts behind a task detail or an explorer, and its effect's teardown clears the flag — an
   unmounted board is nobody's line of sight.
 - **The document** must be visible and focused (`document.visibilityState`, `document.hasFocus()`); a
-  background or unfocused tab is never looking at anything.
+  background or unfocused tab is never looking at anything — which is also why that tab is still told
+  about arrivals in the board it would otherwise be staring at. The column that counts as in view is the
+  one in a tab that is looking.
 - **The open task** is `appStore.selectedTask` or the floating chat's task.
 - **A move this tab made itself** is not news: `moveTask` in `$lib/api/tasks.ts` is the only way the
   client changes a status, so it marks the task as self-moved for 60 s, covering drag, card menu,
   multi-select move, board DnD and the task view alike.
 
-Several arrivals in one read are one notification, naming the count.
+Several arrivals are one notification, naming the count — and the burst they belong to is whatever the
+client learned together. A `project_counts` frame that raised several projects starts one board read each,
+and the notification goes out when the last of them settles, so nobody gets one notice per project. No
+clock bounds that wait and nothing deadlines it: a read that fails settles it too, and whatever the
+surviving read found is still announced. An arrival the board on screen reports joins whatever is in
+flight, and flushes at once when nothing is.
+
+`planReviewNotice` then picks the one thing the notification opens: with a single arrival, that task; with
+several, a board — the project with the most waiting in Review, which is where the click is worth taking
+them. It ranks by the count the frame carried, not by who had more arrivals, so a project whose column is
+merely long, with nothing new in it, never steals a notification about someone else's arrivals.
 
 ## Taking one back
 
 A notification the user has now seen is closed rather than left to time out. The same two facts decide
 it, read as state instead of as a gate: the open task retires its own `mike-task-<id>`, and
-`reviewColumnInViewOf` retires every notification of that project — the batch `mike-review-<project>`
-included. Opening one of the tasks a batch speaks for retires nothing of the batch, because it also
-stands for the tasks still unread in it. `dismissedTags` holds the rule; one `$effect` in `App.svelte`
-reads `selectedTask`, `floatingTask` and `reviewColumnInViewOf` and hands the result to the service,
-which decides nothing of its own.
+`reviewColumnInViewOf` retires every notification of that project — the batch `mike-review-batch`
+included, since the project a batch carries is the board it points at. Opening one of the tasks a batch
+speaks for retires nothing of the batch, and neither does looking at one of its *other* boards: the batch
+also stands for the tasks still unread in it. `dismissedTags` holds the rule; one `$effect` in
+`App.svelte` reads `selectedTask`, `floatingTask` and `reviewColumnInViewOf` and hands the result to the
+service, which decides nothing of its own.
 
 - **Visible and focused, read at the moment the state changes rather than watched** — focus is not a
   reactive value, so a tab that merely regains focus keeps what it already had.
@@ -110,25 +123,42 @@ point is safe where it does not exist (plain-http origin, webview, Safari's page
 - Permission is asked for on the click that enables the preference — the only user gesture available —
   and the Preferences row then states what the browser answered: blocked, or no notifications at all.
   Nothing is disabled or refused; the flag still persists.
-- Delivery is `new Notification` with a click handler that focuses the tab and opens the task. Where
-  the constructor throws, it falls back to `registration.showNotification`; the worker is the
-  generated one (`vite-plugin-pwa`, workbox `generateSW`), so that path carries no click handler and
-  cannot open the task.
-- `tag` is `mike-task-<id>` (or `mike-review-<project>` for a batch), so a task that keeps moving
-  replaces its own notification instead of stacking, and so the tag alone is enough to take one back
-  later — see *Taking one back*.
+- Delivery is `new Notification` with a click handler that focuses the tab and opens what the
+  notification was about. Where the constructor throws, the registration shows it instead and owns the
+  click, so the target travels inside the notification (`data.url`, absolute and same-origin — the two
+  rules `notificationTarget` holds) rather than living in a closure this page can lose.
+- **The worker's half is `frontend/public/sw-notifications.js`**, pulled into the generated worker by
+  `workbox.importScripts`: `generateSW` ships no click handler of its own, and this adds one without
+  touching its routing or the prompt-mode update story. It closes the notice, then either focuses an open
+  window and posts it the target — `WindowClient.navigate` is not available everywhere — or opens a window
+  when none is, which is how a cold start reaches the task through the URL the app already restores. The
+  page's half is `watchNotificationClicks`, called from `main.ts` before the mount, because a notification
+  can outlive the reload of the page that wants to open it. The message type is written out in both files
+  and imported by neither: a classic worker script cannot import a module.
+- **`/sw-notifications.js` is public beside `/sw.js`** (`isPublicPath`): a worker fetches its own scripts
+  with no session to present, so gating the companion script would leave the click with nothing to run. It
+  rides the precache manifest with a revision, so changing it changes `dist/sw.js` and rolls the worker the
+  way `docs/frontend-updates.md` describes.
+- `tag` is `mike-task-<id>`, or `mike-review-batch` for the batch, so a task that keeps moving replaces
+  its own notification instead of stacking, the newest batch replaces the previous one, and the tag alone
+  is enough to take one back later — see *Taking one back*.
 
 ## Tests
 
-- `utils/__tests__/review-notify.unit.ts` — the arrival diff, the viewport geometry, the gate, the
-  retirement rule.
-- `utils/__tests__/notifications.unit.ts` — permission answers, both delivery paths, and closing a tag
-  through the held objects and through the registration.
+- `utils/__tests__/review-notify.unit.ts` — the arrival diff, the viewport geometry, the gate, which
+  board a batch names (and both of its tie-breaks), the retirement rule.
+- `utils/__tests__/notifications.unit.ts` — permission answers, both delivery paths, the target each click
+  path is given and the foreign or absent ones it refuses, and closing a tag through the held objects and
+  through the registration.
 - `services/__tests__/review-notifications.unit.svelte.ts` — the ledger: seeding, one announcement per
-  arrival, the suppression cases, the preference off, and taking a notification back.
+  arrival, one announcement for a burst across projects, the suppression cases, the preference off, and
+  taking a notification back.
 - `components/__tests__/preferences-tab.unit.svelte.ts` — the row and its permission sentences.
 - `stores/__tests__/notify-on-review-persist.unit.ts` — the flag is loaded from this browser's storage,
   anything but a stored `true` leaves it off, and the save writes the key back.
+- `backend/server`'s `TestWorkerScriptNeedsNoSession` — the worker's click script is answered with no
+  session, through the chain Serve installs.
 
-No Playwright spec: a real notification permission cannot be driven headless, and everything that
-decides is pure or unit-tested above.
+No Playwright spec: a real notification permission cannot be driven headless, and neither a click on a
+notification nor the worker's own `notificationclick` can be reached without one. Everything that decides
+is pure or unit-tested above.

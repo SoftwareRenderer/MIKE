@@ -59,9 +59,11 @@ func isPublicPath(path, method string) bool {
 	if strings.HasPrefix(path, "/api/preview/") && !isPreviewNavPath(path) {
 		return method == http.MethodGet || method == http.MethodHead
 	}
-	// PWA assets (manifest, service worker, icons) are always public
+	// PWA assets (manifest, service worker, icons) are always public. A worker fetches its own scripts
+	// with no session to present, so its companion scripts are public beside it.
 	if path == "/manifest.webmanifest" ||
 		path == "/sw.js" ||
+		path == "/sw-notifications.js" ||
 		path == "/registerSW.js" ||
 		strings.HasPrefix(path, "/workbox-") ||
 		strings.HasPrefix(path, "/pwa-icon-") {

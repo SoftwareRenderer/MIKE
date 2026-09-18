@@ -58,20 +58,64 @@ export function columnInViewport(viewport: Span, column: Span, threshold = REVIE
 export interface AttentionState {
     documentVisible: boolean;
     documentFocused: boolean;
-    reviewColumnInView: boolean;
+    /** The project whose Review column sits inside the board's scroll viewport. */
+    reviewProject: string | null;
 }
 
+/** A hidden or unfocused tab is looking at nothing, whatever is painted in it. */
 export function isLookingAtReview(state: AttentionState): boolean {
-    return state.documentVisible && state.documentFocused && state.reviewColumnInView;
-}
-
-export function shouldNotifyReview(enabled: boolean, state: AttentionState): boolean {
-    return enabled && !isLookingAtReview(state);
+    return state.documentVisible && state.documentFocused && state.reviewProject !== null;
 }
 
 export function notableArrivals(arrivals: Task[], openTaskId: string | null, selfMovedIds: Iterable<string>): Task[] {
     const selfMoved = new Set(selfMovedIds);
     return arrivals.filter(t => t.id !== openTaskId && !selfMoved.has(t.id));
+}
+
+/** One project's share of a burst: the cards that landed in its Review column since it was last read. */
+export interface ArrivalGroup {
+    projectId: string;
+    tasks: Task[];
+}
+
+/** What one notification speaks for — a task that arrived, or a board several arrivals share. */
+export interface ReviewNotice {
+    projectId: string;
+    count: number;
+    /** The task to open, or null when the notification opens `projectId`'s board. */
+    task: Task | null;
+}
+
+/**
+ * One notification for a burst of arrivals: what is in front of the user is not news, one arrival opens
+ * its own task, and several open one board — the one with the most waiting, which is where the click is
+ * worth taking them.
+ */
+export function planReviewNotice(
+    groups: ArrivalGroup[],
+    reviewCounts: Record<string, number>,
+    attention: AttentionState,
+): ReviewNotice | null {
+    const inSight = isLookingAtReview(attention) ? attention.reviewProject : null;
+    const unseen = groups.filter(g => g.tasks.length > 0 && g.projectId !== inSight);
+    const count = unseen.reduce((sum, g) => sum + g.tasks.length, 0);
+    if (count === 0) return null;
+    const [first] = unseen;
+    if (count === 1 && first) return { projectId: first.projectId, count: 1, task: first.tasks[0] ?? null };
+    const fullest = unseen.reduce((best, g) => (outranks(g, best, reviewCounts) ? g : best));
+    return { projectId: fullest.projectId, count, task: null };
+}
+
+/** A project nothing arrived in still holds its Review column against whatever the last frame said. */
+function waiting(group: ArrivalGroup, reviewCounts: Record<string, number>): number {
+    return reviewCounts[group.projectId] ?? group.tasks.length;
+}
+
+function outranks(group: ArrivalGroup, best: ArrivalGroup, reviewCounts: Record<string, number>): boolean {
+    const difference = waiting(group, reviewCounts) - waiting(best, reviewCounts);
+    if (difference !== 0) return difference > 0;
+    if (group.tasks.length !== best.tasks.length) return group.tasks.length > best.tasks.length;
+    return group.projectId < best.projectId;
 }
 
 /** A notification this client put up, and what it was standing for. */

@@ -81,6 +81,27 @@ func TestMiddlewareAuthenticationGating(t *testing.T) {
 	}
 }
 
+// TestWorkerScriptNeedsNoSession: the generated worker imports the click handler for every notification
+// it shows, and a worker fetches its own scripts with no session to present, so that script is answered
+// like the worker itself.
+func TestWorkerScriptNeedsNoSession(t *testing.T) {
+	s := testServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/sw-notifications.js", nil)
+	req.Host = "localhost"
+	rr := httptest.NewRecorder()
+	// The chain Serve installs over the router, which is what serves the frontend — the bare mux answers
+	// nothing outside the API.
+	s.middlewareChain(s.router).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /sw-notifications.js with no session: got %d %q, want 200", rr.Code, rr.Body.String())
+	}
+	if body := rr.Body.String(); !strings.Contains(body, "notificationclick") {
+		t.Errorf("body = %q, want the click handler the worker imports", body)
+	}
+}
+
 // TestMiddlewareSessionIDInContext checks what the status-code rows above cannot: that
 // the middleware publishes the validated session id on the context, which is how every
 // handler downstream identifies the caller.
