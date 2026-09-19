@@ -329,7 +329,7 @@ type SSEFlusher interface {
 	http.Flusher
 }
 
-// GenerateCommitMessage writes the task's commit message from the conversation and the diff.
+// GenerateCommitMessage writes the task's commit message from the conversation.
 // Every commit path goes through it. Each model that contributed gets its own Assisted-by line.
 func (m *mergeOrchestrator) GenerateCommitMessage(ctx context.Context, task *types.Task) string {
 	taskMsgs, _ := m.store.GetTaskMessages(task.ID, task.CurrentThreadID)
