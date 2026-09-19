@@ -972,7 +972,8 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 	// lock covers the ping because frames are broadcast to this connection elsewhere.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	httputil.Keepalive(ctx, conn, &client.writeMu, cancel)
+	// Only this endpoint's client measures silence from onmessage, so only it gets the app frame.
+	httputil.Keepalive(ctx, conn, &client.writeMu, cancel, httputil.WithAppFrame())
 
 	// Send buffered events on reconnect
 	if r.URL.Query().Get("sync") == "1" {

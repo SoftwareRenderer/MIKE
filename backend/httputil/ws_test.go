@@ -110,6 +110,34 @@ func expectQuiet(t *testing.T, frames <-chan string, d time.Duration) bool {
 	}
 }
 
+// awaitFrame reads until want arrives, ignoring the keepalive frames that overtake it.
+func awaitFrame(t *testing.T, frames <-chan string, want string, within time.Duration) bool {
+	t.Helper()
+	deadline := time.After(within)
+	for {
+		select {
+		case f := <-frames:
+			if f == want {
+				return true
+			}
+		case <-deadline:
+			return false
+		}
+	}
+}
+
+// notDead reports whether the pinger has declared the peer dead yet. The keepalive keeps running
+// while the test looks, so the check is one-way: it proves only that the tick has not fired so far.
+func notDead(t *testing.T, dead <-chan struct{}) bool {
+	t.Helper()
+	select {
+	case <-dead:
+		return false
+	default:
+		return true
+	}
+}
+
 // testTick/testTimeout drive the keepalive's injected timings: a tick fast enough to
 // keep the test quick, and a ping timeout long enough that hitting one means the peer
 // really did stop answering.
@@ -118,13 +146,14 @@ const (
 	testTimeout = time.Second
 )
 
-// TestKeepaliveFrameReachesTheClient: the frame the browser can actually see.
+// TestKeepaliveFrameReachesTheClient: the frame the browser can actually see, on the endpoint
+// that asked for it.
 func TestKeepaliveFrameReachesTheClient(t *testing.T) {
 	server, frames := wsPair(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	keepalive(ctx, server, testTick, testTimeout, nil, nil)
+	keepalive(ctx, server, testTick, testTimeout, nil, nil, WithAppFrame())
 
 	if got := nextFrame(t, frames); got != KeepaliveFrame {
 		t.Errorf("keepalive frame = %q, want %q", got, KeepaliveFrame)
@@ -138,7 +167,7 @@ func TestKeepaliveIsSerialisedByWriteMu(t *testing.T) {
 	var mu sync.Mutex
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	keepalive(ctx, server, testTick, testTimeout, &mu, nil)
+	keepalive(ctx, server, testTick, testTimeout, &mu, nil, WithAppFrame())
 
 	mu.Lock()
 	quiet := expectQuiet(t, frames, 200*time.Millisecond)
@@ -151,13 +180,101 @@ func TestKeepaliveIsSerialisedByWriteMu(t *testing.T) {
 	nextFrame(t, frames)
 }
 
+// TestKeepaliveDoesNotQueueBehindAWriter: a reconnecting client holds the write lock across a
+// whole replay backlog, which is longer than a ping timeout. The ticks that find the lock busy
+// must be skipped: a write in flight proves the peer is there, and killing it mid-replay makes it
+// reconnect and replay again, forever.
+func TestKeepaliveDoesNotQueueBehindAWriter(t *testing.T) {
+	server, frames := wsPair(t)
+
+	var mu sync.Mutex
+	dead := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	keepalive(ctx, server, 20*time.Millisecond, 50*time.Millisecond, &mu, func() { close(dead) })
+
+	mu.Lock()
+	time.Sleep(300 * time.Millisecond) // many times interval + timeout
+	if !notDead(t, dead) {
+		mu.Unlock()
+		t.Fatal("a write in flight was read as a dead peer")
+	}
+	mu.Unlock()
+
+	// Give the queued tick its turn before looking: the close the library does for an expired
+	// write context lands on its own goroutine, so reading the outcome too early races it.
+	time.Sleep(150 * time.Millisecond)
+	if !notDead(t, dead) {
+		t.Fatal("a write in flight was read as a dead peer")
+	}
+
+	// The liveness proof is the caller's own frame, not a keepalive frame: which visible frames
+	// an endpoint sends is the other test's subject, and a peer that survived the busy ticks must
+	// still carry traffic either way. Pre-fix the queued tick returns from Ping only when the lock
+	// frees, by which time its deadline is spent and the library has closed the socket.
+	written := make(chan error, 1)
+	go func() {
+		mu.Lock()
+		defer mu.Unlock()
+		written <- WriteText(ctx, server, []byte("replayed"), 2*time.Second)
+	}()
+	select {
+	case err := <-written:
+		if err != nil {
+			t.Fatalf("write after the busy ticks: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the server's write never returned")
+	}
+	if !awaitFrame(t, frames, "replayed", 2*time.Second) {
+		t.Error("the caller's frame never reached the client")
+	}
+	if !notDead(t, dead) {
+		t.Error("a live peer was declared dead after its replay finished")
+	}
+}
+
+// TestKeepaliveResumesAfterAHeldLock: skipping a busy tick must not end the loop — the pinger is
+// what keeps a proxy's idle timeout off a connection that goes quiet again after the write.
+func TestKeepaliveResumesAfterAHeldLock(t *testing.T) {
+	server, frames := wsPair(t)
+
+	var mu sync.Mutex
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	keepalive(ctx, server, testTick, testTimeout, &mu, nil, WithAppFrame())
+
+	mu.Lock()
+	expectQuiet(t, frames, 150*time.Millisecond) // many ticks' worth, all skipped
+	mu.Unlock()
+
+	nextFrame(t, frames)
+	nextFrame(t, frames)
+}
+
+// TestKeepaliveAppFrameIsOptIn: the app-level frame is there because a browser cannot see a
+// control ping. A socket whose protocol is not the app stream's must be pinged without it.
+func TestKeepaliveAppFrameIsOptIn(t *testing.T) {
+	server, frames := wsPair(t)
+
+	dead := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	keepalive(ctx, server, testTick, testTimeout, nil, func() { close(dead) })
+
+	expectQuiet(t, frames, 200*time.Millisecond)
+	if !notDead(t, dead) {
+		t.Fatal("a control ping that reached the peer declared it dead")
+	}
+}
+
 // TestKeepaliveStopsWithTheContext: the pinger must end with the request, or it keeps
 // writing on a connection nobody owns.
 func TestKeepaliveStopsWithTheContext(t *testing.T) {
 	server, frames := wsPair(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	keepalive(ctx, server, testTick, testTimeout, nil, nil)
+	keepalive(ctx, server, testTick, testTimeout, nil, nil, WithAppFrame())
 
 	// Prove it was running, then stop it.
 	nextFrame(t, frames)

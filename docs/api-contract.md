@@ -252,3 +252,26 @@ WebSocket route in this server upgrades through, so the rule is stated once and 
 request first; this is the second lock on an endpoint that hands out a shell. A request with **no** Origin
 is still accepted: only a non-browser client omits it, and that client can set the session cookie by hand
 anyway. Test: `backend/httputil/ws_origin_test.go`.
+
+### Which socket carries the app-level ping
+
+Every upgraded connection is kept alive by `httputil.Keepalive` (`backend/httputil/ws.go`), whose control
+ping runs every 27 s (`KeepaliveInterval`) — under the 30–60 s idle timeout a proxy or VPN enforces.
+Control frames are invisible to JavaScript, so they never fire `onmessage` and never reset a browser's
+own silence timer; the app-level frame `{"type":"ping"}` (`KeepaliveFrame`) rides beside the control ping
+on **`/api/stream` only**, because that client stamps `lastActivityAt` from `onmessage` and retires a
+silent socket at `STALE_THRESHOLD_MS` (60 s, calibrated against the 27 s tick). `/api/lsp` speaks JSON-RPC
+and the terminal speaks `types.TerminalMessage`, so both get the control ping alone: the frame is opt-in
+(`httputil.WithAppFrame()`) rather than something the shared helper always sends. Nothing has to ignore
+a frame it never receives.
+
+Two rules keep a **busy** connection from being read as a dead one, and both are about `writeMu`, which
+the pinger holds so a ping cannot interleave with the endpoint's own frames. The ping's deadline is
+built *after* the lock is taken, so `KeepaliveTimeout` bounds the ping and never the queue in front of
+it, and the lock is taken with `TryLock`, because a lock another writer holds is a frame on its way out
+— liveness evidence — so that tick is skipped. Queuing instead was measurable: a reconnecting client
+holds `writeMu` across a whole replay backlog (the per-task buffer, `?sync=1`), longer than the ping
+timeout, the queued tick's deadline expired in the queue, and `coder/websocket` closes the socket for an
+expired write context even when it wrote nothing. The peer is healthy, dies mid-replay, reconnects and
+replays again. A pinger blocked on the lock also sends nothing, which retires the same socket from the
+client side at 60 s. Tests: `backend/httputil/ws_test.go`.
