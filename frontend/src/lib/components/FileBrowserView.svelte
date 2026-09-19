@@ -1,12 +1,21 @@
 <script lang="ts">
-    import { onMount, tick } from 'svelte';
-    import { ensureCsrfToken } from '$lib/api';
+    import { onDestroy, onMount, tick } from 'svelte';
+    import {
+        copyFsPaths, deleteFsPaths, ensureCsrfToken, moveFsPaths, renameFsPath,
+        type FsOpsResult,
+    } from '$lib/api';
+    import { dialogStore } from '$lib/stores';
     import { useFileDropUpload } from '$lib/composables/use-file-drop-upload.svelte';
+    import FileContextMenu, { type FileMenuItem } from '$lib/components/FileContextMenu.svelte';
     import FileDropProgress from '$lib/components/FileDropProgress.svelte';
     import Icon from '$lib/components/Icon.svelte';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
-    import { t } from '$lib/i18n';
+    import { t, type MessageKey } from '$lib/i18n';
+    import {
+        allSelectablePaths, applyRowClick, baseName, emptySelection, pasteTarget, pruneSelection,
+        rowIsSelectable, type FileSelection,
+    } from '$lib/utils/file-selection';
     import type { FsEvent } from '$lib/utils/fs-event';
 
     type Entry = { name: string; isDir: boolean; path: string };
@@ -32,6 +41,7 @@
         mapFsEvent,
         onFsEvent,
         onMutated,
+        onDeleted,
         extraEntryInfo,
         listingClass = '',
         rowClass = '',
@@ -64,6 +74,8 @@
         onFsEvent?: (op: 'create' | 'delete', relPath: string) => void;
         /** This listing wrote something: a file, a folder, or an uploaded run. */
         onMutated?: () => void;
+        /** Paths that no longer exist, so the editor can close any tab open on them. */
+        onDeleted?: (paths: string[]) => void;
         extraEntryInfo?: (entry: Entry) => EntryBadge | null;
         /** Names the listing and its rows are addressed by outside this file. */
         listingClass?: string;
@@ -135,6 +147,9 @@
     async function loadDir(path: string) {
         // Clamp to root: nothing above it is listed, whatever a row, a crumb or a keystroke asked for.
         const target = path.startsWith(rootPath) ? path : rootPath;
+        // Reloading the current directory keeps the selection; opening a different one clears it.
+        const sameDir = target === currentPath;
+        menu = null;
         loading = true;
         error = '';
         currentPath = target;
@@ -172,6 +187,8 @@
             }
             missingDirRetries = 0;
             firstLoadComplete = true;
+            if (sameDir) selection = pruneSelection(rows, selection);
+            else clearSelection();
         } catch (e) {
             if (!retrying) {
                 error = String(e);
@@ -354,6 +371,306 @@
     // start the file drag the zone waits for. Only the button and the input live here; the run is
     // dropUpload's. Why the input cannot move into a child of this component: see file-drop.css.
     let uploadInput: HTMLInputElement | null = $state(null);
+
+    // ── Selection, the context menu, and the clipboard ──
+    //
+    // A shift range needs the order the rows are rendered in, so the selection lives here. The
+    // clipboard belongs to this panel alone: a cut must not survive a project switch.
+
+    const LONG_PRESS_MS = 450;
+    const LONG_PRESS_SLOP = 10;
+    // How many names the delete confirmation lists before counting the rest.
+    const CONFIRM_LIST_MAX = 8;
+
+    let selection = $state<FileSelection>(emptySelection());
+    // Set when a gesture selects on purpose (long press, ctrl-click, select-all), which shows the
+    // action bar even for one row.
+    let selectionMode = $state(false);
+    let clipboard = $state<{ mode: 'copy' | 'cut'; paths: string[] } | null>(null);
+    let menu = $state<{ x: number; y: number; entry: Entry | null } | null>(null);
+    let renaming = $state<string | null>(null);
+    let renameValue = $state('');
+    let renameInput = $state<HTMLInputElement | null>(null);
+    // True while a delete, paste or rename is in flight; blocks a second one.
+    let mutating = $state(false);
+
+    let rows = $derived(entries.map(e => ({ path: e.path, selectable: rowIsSelectable(e) })));
+    let selectedPaths = $derived([...selection.paths]);
+    let showActionBar = $derived(selection.paths.size > 1 || (selectionMode && selection.paths.size > 0));
+
+    function opsScope() {
+        return { projectId, taskId: taskId || undefined };
+    }
+
+    function isCut(path: string): boolean {
+        return clipboard?.mode === 'cut' && clipboard.paths.includes(path);
+    }
+
+    function clearSelection(): void {
+        selection = emptySelection();
+        selectionMode = false;
+    }
+
+    function handleRowClick(e: MouseEvent, entry: Entry, index: number): void {
+        if (swallowClick) { swallowClick = false; return; }
+        if (renaming === entry.path) return;
+        selection = applyRowClick(rows, selection, index, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
+        // Only a plain click opens the file; ctrl and shift just change the selection.
+        if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+            selectionMode = false;
+            openEntry(entry, false);
+        }
+    }
+
+    // Touch has no ctrl key, so holding a row is the multi-select gesture.
+    let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+    let pressAt = { x: 0, y: 0 };
+    // Set by a long press, so the click that follows doesn't also open the row.
+    let swallowClick = false;
+
+    function handleRowPointerDown(e: PointerEvent, index: number): void {
+        // Clear this so a long press that never got its click doesn't swallow the next one.
+        swallowClick = false;
+        if (e.pointerType !== 'touch') return;
+        cancelLongPress();
+        pressAt = { x: e.clientX, y: e.clientY };
+        longPressTimer = setTimeout(() => {
+            longPressTimer = null;
+            swallowClick = true;
+            selectionMode = true;
+            selection = applyRowClick(rows, selection, index, { ctrl: true, shift: false });
+        }, LONG_PRESS_MS);
+    }
+
+    function handleRowPointerMove(e: PointerEvent): void {
+        if (!longPressTimer) return;
+        if (Math.abs(e.clientX - pressAt.x) > LONG_PRESS_SLOP || Math.abs(e.clientY - pressAt.y) > LONG_PRESS_SLOP) {
+            cancelLongPress();
+        }
+    }
+
+    function cancelLongPress(): void {
+        if (!longPressTimer) return;
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+    }
+
+    onDestroy(cancelLongPress);
+
+    function openMenuAt(x: number, y: number, entry: Entry | null, index: number): void {
+        if (renaming) return;
+        // Right-clicking a row outside the selection selects it first.
+        if (entry && rowIsSelectable(entry) && !selection.paths.has(entry.path)) {
+            selection = { paths: new Set([entry.path]), anchor: index };
+        }
+        menu = { x, y, entry };
+    }
+
+    // Right-clicking the listing below the rows opens the same menu with nothing selected.
+    function handleListContextmenu(e: MouseEvent): void {
+        if ((e.target as HTMLElement).closest('.file-browser-item')) return;
+        openMenuAt(e.clientX, e.clientY, null, -1);
+    }
+
+    const menuItems = $derived.by((): FileMenuItem[] => {
+        const asked = menu;
+        if (!asked) return [];
+        const entry = asked.entry;
+        const paths = selectedPaths;
+        const items: FileMenuItem[] = [];
+        if (entry) items.push({ label: t('explorer.shared.menuOpen'), icon: 'open', run: () => openEntry(entry, false) });
+        if (paths.length > 0) {
+            items.push({ label: t('explorer.shared.menuCut'), icon: 'cut', disabled: mutating, run: () => setClipboard('cut', paths) });
+            items.push({ label: t('explorer.shared.menuCopy'), icon: 'copy', disabled: mutating, run: () => setClipboard('copy', paths) });
+            if (paths.length === 1) items.push({ label: t('explorer.shared.menuRename'), icon: 'rename', disabled: mutating, run: () => startRename(paths[0]) });
+            items.push({ label: t('explorer.shared.menuDelete'), icon: 'delete', destructive: true, disabled: mutating, run: () => void deletePaths(paths) });
+        }
+        if (clipboard) {
+            items.push({
+                label: t('explorer.shared.menuPaste'),
+                icon: 'paste',
+                disabled: mutating,
+                run: () => void pasteInto(pasteTarget(asked.entry, currentPath)),
+            });
+        }
+        return items;
+    });
+
+    function setClipboard(mode: 'copy' | 'cut', paths: string[]): void {
+        if (paths.length === 0) return;
+        clipboard = { mode, paths };
+    }
+
+    // One toast for what landed, one for what failed, whatever the batch size.
+    function reportOps(res: FsOpsResult, doneKey: MessageKey): void {
+        if (res.done.length > 0) dialogStore.showToast(t(doneKey, { count: res.done.length }), 'success');
+        if (res.failed.length > 0) {
+            const reason = res.failed[0].reason || '';
+            dialogStore.showToast(t('explorer.shared.opsFailed', { count: res.failed.length, error: reason }), 'error');
+        }
+    }
+
+    function reportFailure(e: unknown): void {
+        dialogStore.showToast(e instanceof Error ? e.message : String(e), 'error');
+    }
+
+    async function afterMutation(): Promise<void> {
+        await loadDir(currentPath);
+        onMutated?.();
+    }
+
+    async function pasteInto(dest: string): Promise<void> {
+        const clip = clipboard;
+        if (!clip || mutating) return;
+        mutating = true;
+        try {
+            const res = clip.mode === 'copy'
+                ? await copyFsPaths(opsScope(), clip.paths, dest)
+                : await moveFsPaths(opsScope(), clip.paths, dest);
+            reportOps(res, 'explorer.shared.pastedCount');
+            await afterMutation();
+            const renamed = res.done.filter(d => d.renamed && d.to);
+            if (renamed.length > 0) {
+                await dialogStore.showNotice({
+                    title: t('explorer.shared.pasteRenamedTitle'),
+                    message: t('explorer.shared.pasteRenamedMessage'),
+                    items: renamed.map(d => t('explorer.shared.pasteRenamedEntry', { from: baseName(d.from), to: baseName(d.to || '') })),
+                });
+            }
+            if (clip.mode === 'cut') {
+                clipboard = null;
+                onDeleted?.(res.done.map(d => d.from));
+            }
+        } catch (e) {
+            reportFailure(e);
+        } finally {
+            mutating = false;
+        }
+    }
+
+    async function deletePaths(paths: string[]): Promise<void> {
+        if (paths.length === 0 || mutating) return;
+        const names = paths.map(baseName);
+        const listed = names.slice(0, CONFIRM_LIST_MAX);
+        if (names.length > listed.length) {
+            listed.push(t('explorer.shared.deleteMore', { count: names.length - listed.length }));
+        }
+        const confirmed = await dialogStore.showConfirm({
+            title: t('explorer.shared.deleteTitle'),
+            message: t('explorer.shared.deleteMessage', { count: paths.length, name: names[0] }),
+            items: listed,
+            confirmText: t('explorer.shared.menuDelete'),
+            cancelText: t('explorer.shared.cancel'),
+            variant: 'destructive',
+        });
+        if (!confirmed) return;
+        mutating = true;
+        try {
+            const res = await deleteFsPaths(opsScope(), paths);
+            clearSelection();
+            reportOps(res, 'explorer.shared.deletedCount');
+            onDeleted?.(res.done.map(d => d.from));
+            await afterMutation();
+        } catch (e) {
+            reportFailure(e);
+        } finally {
+            mutating = false;
+        }
+    }
+
+    function startRename(path: string): void {
+        renaming = path;
+        renameValue = baseName(path);
+        void tick().then(() => {
+            renameInput?.focus();
+            // Select the stem, so the extension is left alone.
+            const dot = renameValue.lastIndexOf('.');
+            renameInput?.setSelectionRange(0, dot > 0 ? dot : renameValue.length);
+        });
+    }
+
+    function handleRenameKey(e: KeyboardEvent): void {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            void commitRename();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            renaming = null;
+        }
+    }
+
+    async function commitRename(): Promise<void> {
+        const path = renaming;
+        renaming = null;
+        if (!path) return;
+        const name = renameValue.trim();
+        if (!name || name === baseName(path)) return;
+        try {
+            const moved = await renameFsPath(opsScope(), path, name);
+            dialogStore.showToast(t('explorer.shared.renamedTo', { name: baseName(moved) }), 'success');
+            onDeleted?.([path]);
+            await afterMutation();
+        } catch (e) {
+            reportFailure(e);
+        }
+    }
+
+    // Bound to the list element, not the window, so Ctrl+C means the file selection here and the
+    // editor's text there.
+    function handleListKeydown(e: KeyboardEvent): void {
+        if (renaming) return;
+        const mod = e.ctrlKey || e.metaKey;
+        const paths = selectedPaths;
+
+        if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+            const row = e.target instanceof HTMLElement ? e.target : null;
+            const index = Number(row?.dataset.index);
+            if (!row || !Number.isInteger(index) || !entries[index]) return;
+            const rect = row.getBoundingClientRect();
+            openMenuAt(rect.left + 16, rect.bottom, entries[index], index);
+            return;
+        }
+        if (mod && (e.key === 'a' || e.key === 'A')) {
+            e.preventDefault();
+            selection = { paths: allSelectablePaths(rows), anchor: -1 };
+            selectionMode = true;
+            return;
+        }
+        if (mod && (e.key === 'x' || e.key === 'X')) {
+            e.preventDefault();
+            setClipboard('cut', paths);
+            return;
+        }
+        if (mod && (e.key === 'c' || e.key === 'C')) {
+            // With nothing selected, let the browser copy the text under the cursor.
+            if (paths.length === 0) return;
+            e.preventDefault();
+            setClipboard('copy', paths);
+            return;
+        }
+        if (mod && (e.key === 'v' || e.key === 'V')) {
+            e.preventDefault();
+            void pasteInto(currentPath);
+            return;
+        }
+        if (e.key === 'F2' && paths.length === 1) {
+            e.preventDefault();
+            startRename(paths[0]);
+            return;
+        }
+        if ((e.key === 'Delete' || e.key === 'Backspace') && paths.length > 0) {
+            e.preventDefault();
+            void deletePaths(paths);
+            return;
+        }
+        if (e.key === 'Escape' && paths.length > 0) {
+            // Clear the selection; stop here so the panel behind it stays open.
+            e.preventDefault();
+            e.stopPropagation();
+            clearSelection();
+        }
+    }
 </script>
 
 <div class="file-browser">
@@ -471,6 +788,8 @@
         ondragover={dropUpload.handleDragOver}
         ondragleave={dropUpload.handleDragLeave}
         ondrop={dropUpload.handleDrop}
+        oncontextmenu={handleListContextmenu}
+        onkeydown={handleListKeydown}
     >
         <FileDropProgress drop={dropUpload} />
         {#if loading && entries.length === 0}
@@ -478,36 +797,127 @@
         {:else if !error && entries.length === 0}
             <div class="file-browser-empty">{emptyMessage}</div>
         {/if}
-        {#each entries as entry}
+        {#each entries as entry, i}
             {@const badge = extraEntryInfo ? extraEntryInfo(entry) : null}
-            <button
-                class="file-browser-item {rowClass}"
-                class:dir={entry.isDir}
-                role="treeitem"
-                aria-selected="false"
-                title={entry.path}
-                onclick={() => openEntry(entry, false)}
-                ondblclick={() => openEntry(entry, true)}
-            >
-                {#if entry.isDir}
-                    <Icon src={folderIcon} color="currentColor" width={14} height={14} class="file-icon folder-icon" />
-                {:else}
-                    <Icon src={fileIcon} color="#6E7681" width={14} height={14} class="file-icon" />
-                {/if}
-                <span class="file-name">{entry.name}</span>
-                {#if badge}
-                    <span class="git-status-badge {badge.cls}" title={badge.title} aria-label={badge.ariaLabel}>{badge.char}</span>
-                {/if}
-                {#if (!entry.isDir && unsavedPaths.has(entry.path)) || (entry.isDir && unsavedDirPrefixes.has(entry.path))}
-                    <span class="unsaved-dot" title={t('explorer.shared.unsavedChanges')}>
-                        <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
-                            <circle cx="4" cy="4" r="3.5" fill="currentColor"/>
-                        </svg>
-                    </span>
-                {/if}
-            </button>
+            {@const isSelected = selection.paths.has(entry.path)}
+            {#if renaming === entry.path}
+                <div class="file-browser-item is-renaming" role="treeitem" aria-selected="true">
+                    {#if entry.isDir}
+                        <Icon src={folderIcon} color="currentColor" width={14} height={14} class="file-icon folder-icon" />
+                    {:else}
+                        <Icon src={fileIcon} color="#6E7681" width={14} height={14} class="file-icon" />
+                    {/if}
+                    <input
+                        type="text"
+                        class="file-rename-input"
+                        bind:this={renameInput}
+                        value={renameValue}
+                        oninput={(e) => renameValue = (e.target as HTMLInputElement).value}
+                        onkeydown={handleRenameKey}
+                        onblur={() => renaming = null}
+                        aria-label={t('explorer.shared.renameAria', { name: entry.name })}
+                    />
+                </div>
+            {:else}
+                <button
+                    class="file-browser-item {rowClass}"
+                    class:dir={entry.isDir}
+                    class:selected={isSelected}
+                    class:is-cut={isCut(entry.path)}
+                    role="treeitem"
+                    aria-selected={isSelected}
+                    title={entry.path}
+                    data-index={i}
+                    onclick={(e) => handleRowClick(e, entry, i)}
+                    ondblclick={() => openEntry(entry, true)}
+                    oncontextmenu={(e) => openMenuAt(e.clientX, e.clientY, entry, i)}
+                    onpointerdown={(e) => handleRowPointerDown(e, i)}
+                    onpointermove={handleRowPointerMove}
+                    onpointerup={cancelLongPress}
+                    onpointercancel={cancelLongPress}
+                >
+                    {#if entry.isDir}
+                        <Icon src={folderIcon} color="currentColor" width={14} height={14} class="file-icon folder-icon" />
+                    {:else}
+                        <Icon src={fileIcon} color="#6E7681" width={14} height={14} class="file-icon" />
+                    {/if}
+                    <span class="file-name">{entry.name}</span>
+                    {#if badge}
+                        <span class="git-status-badge {badge.cls}" title={badge.title} aria-label={badge.ariaLabel}>{badge.char}</span>
+                    {/if}
+                    {#if (!entry.isDir && unsavedPaths.has(entry.path)) || (entry.isDir && unsavedDirPrefixes.has(entry.path))}
+                        <span class="unsaved-dot" title={t('explorer.shared.unsavedChanges')}>
+                            <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
+                                <circle cx="4" cy="4" r="3.5" fill="currentColor"/>
+                            </svg>
+                        </span>
+                    {/if}
+                </button>
+            {/if}
         {/each}
     </div>
+
+    <!-- Touch equivalent of the context menu: a phone can select rows but has no right button. -->
+    {#if showActionBar}
+        <div class="file-selection-bar" role="toolbar" aria-label={t('explorer.shared.selectionAria')}>
+            <span class="selection-count">{t('explorer.shared.selectedCount', { count: selection.paths.size })}</span>
+            <button
+                type="button"
+                class="selection-btn"
+                disabled={mutating}
+                title={t('explorer.shared.menuCut')}
+                aria-label={t('explorer.shared.menuCut')}
+                onclick={() => setClipboard('cut', selectedPaths)}
+            >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
+                    <line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/>
+                </svg>
+            </button>
+            <button
+                type="button"
+                class="selection-btn"
+                disabled={mutating}
+                title={t('explorer.shared.menuCopy')}
+                aria-label={t('explorer.shared.menuCopy')}
+                onclick={() => setClipboard('copy', selectedPaths)}
+            >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+                </svg>
+            </button>
+            <button
+                type="button"
+                class="selection-btn destructive"
+                disabled={mutating}
+                title={t('explorer.shared.menuDelete')}
+                aria-label={t('explorer.shared.menuDelete')}
+                onclick={() => void deletePaths(selectedPaths)}
+            >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                    <path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                </svg>
+            </button>
+            <button
+                type="button"
+                class="selection-btn"
+                title={t('explorer.shared.selectionClear')}
+                aria-label={t('explorer.shared.selectionClear')}
+                onclick={clearSelection}
+            >✕</button>
+        </div>
+    {/if}
+
+    {#if menu}
+        <FileContextMenu
+            x={menu.x}
+            y={menu.y}
+            items={menuItems}
+            ariaLabel={t('explorer.shared.menuAria')}
+            onClose={() => menu = null}
+        />
+    {/if}
 </div>
 
 <style>

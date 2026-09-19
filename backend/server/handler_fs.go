@@ -843,34 +843,60 @@ type fsTarget struct {
 	roots []string
 }
 
-// fsWriteTarget answers, in the one order that is safe, what every write into a project must
-// settle: which tree the request names (?task= bound to ?project=), whether the host can run the
-// sandbox that tree lives in, which host file a container path names, and whether the result is
-// inside the project once symlinks are followed. Each step is the jail for the next, so a handler
-// that repeats them by hand can drop one and still compile. project must not be nil. ok is
-// false after writing the response.
-func (s *Server) fsWriteTarget(w http.ResponseWriter, r *http.Request, project *types.Project, path string) (fsTarget, bool) {
+// fsScope is what a request settles before touching any path: which tree it writes into, and which
+// roots nothing may leave.
+type fsScope struct {
+	project      *types.Project
+	worktreePath string
+	roots        []string
+}
+
+// fsWriteScope answers the request-level questions every write shares: which tree it names (?task=
+// must belong to ?project=), and whether the host can run that tree's sandbox. The order matters,
+// because each check is a precondition of the next. project must not be nil, and ok is false after
+// the response is written.
+func (s *Server) fsWriteScope(w http.ResponseWriter, r *http.Request, project *types.Project) (fsScope, bool) {
 	worktreePath, ok := s.fsWorktreeRoot(w, r, project)
 	if !ok {
-		return fsTarget{}, false
+		return fsScope{}, false
 	}
 	if !s.requireSandboxAvailable(w, project) {
-		return fsTarget{}, false
+		return fsScope{}, false
 	}
-	if project.SandboxEnabled {
-		// The container path names the bind-mounted host file.
-		if host, ok := sandbox.ContainerToHost(worktreePath, project.Name, path); ok {
+	return fsScope{project: project, worktreePath: worktreePath, roots: projectFSRoots(project, worktreePath)}, true
+}
+
+// fsScopeTarget resolves one path of a scope to the host file it names, or an error when that file
+// is outside the scope's roots once symlinks are followed. Callers MUST open the returned path.
+func (s *Server) fsScopeTarget(scope fsScope, path string) (fsTarget, error) {
+	// Convert the container path first: only a host path can be checked.
+	if scope.project.SandboxEnabled {
+		if host, ok := sandbox.ContainerToHost(scope.worktreePath, scope.project.Name, path); ok {
 			path = host
 		}
 	}
-	// Open the symlink-resolved path validateFSPath returns; writing through a link
-	// planted in the project would land wherever it points.
-	resolved, err := s.validateFSPath(project, worktreePath, path)
+	// Writing through a symlink planted in the project would land wherever it points, so use the
+	// path validateFSPath resolved.
+	resolved, err := s.validateFSPath(scope.project, scope.worktreePath, path)
+	if err != nil {
+		return fsTarget{}, err
+	}
+	return fsTarget{path: resolved, roots: scope.roots}, nil
+}
+
+// fsWriteTarget is one path through both halves: the request's scope, then the target inside it.
+// ok is false after the response is written.
+func (s *Server) fsWriteTarget(w http.ResponseWriter, r *http.Request, project *types.Project, path string) (fsTarget, bool) {
+	scope, ok := s.fsWriteScope(w, r, project)
+	if !ok {
+		return fsTarget{}, false
+	}
+	target, err := s.fsScopeTarget(scope, path)
 	if err != nil {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return fsTarget{}, false
 	}
-	return fsTarget{path: resolved, roots: projectFSRoots(project, worktreePath)}, true
+	return target, true
 }
 
 // writeContainedFile writes content to a target that fsWriteTarget already contained,

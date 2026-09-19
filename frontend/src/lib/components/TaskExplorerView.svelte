@@ -160,6 +160,7 @@
                 unsavedFiles={[...core.unsavedFiles]}
                 pendingFsEvent={core.pendingFsEvent}
                 onFileSelected={core.handleFileSelected}
+                onDeleted={core.handleFilesDeleted}
                 onPathChange={(p) => currentFolderPath = p}
                 onToggleFind={core.toggleFind}
             />
