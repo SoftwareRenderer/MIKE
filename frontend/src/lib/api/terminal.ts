@@ -5,6 +5,17 @@ import { t } from '$lib/i18n';
 // Track last activity per terminal WebSocket for stale connection detection
 const terminalActivity = new WeakMap<WebSocket, number>();
 
+// The newest socket per URL. Only that one speaks for the shell: a retired socket's `close`
+// arrives after its replacement exists, and reading it as the shell gone would kill that one.
+const currentSocket = new Map<string, WebSocket>();
+
+/** Retire `ws` as the socket speaking for `url`; false if a newer one already took its place. */
+function retireSocket(url: string, ws: WebSocket): boolean {
+    if (currentSocket.get(url) !== ws) return false;
+    currentSocket.delete(url);
+    return true;
+}
+
 /**
  * Terminal WebSocket connections.
  * Creates WebSocket connections for task terminals and project-level shells.
@@ -44,6 +55,7 @@ function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal, on
     term.write(`\x1b[2m${t('terminal.connecting')}\x1b[0m`);
     const ws = new WebSocket(url);
     terminalActivity.set(ws, Date.now());
+    currentSocket.set(url, ws);
     ws.onopen = () => {
         terminalActivity.set(ws, Date.now());
         // Replace connecting message: go to row 1 col 1, clear line
@@ -73,10 +85,10 @@ function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal, on
         if (msg.type === 'output') term.write(msg.data);
         if (msg.type === 'title') (term as any).title = msg.data; // xterm Terminal lacks .title in types
         if (msg.type === 'status') term.write(msg.data);
-        if (msg.type === 'closed' && onClosed) onClosed();
+        if (msg.type === 'closed' && retireSocket(url, ws) && onClosed) onClosed();
     };
     ws.onclose = () => {
-        if (onClosed) onClosed();
+        if (retireSocket(url, ws) && onClosed) onClosed();
     };
     return ws;
 }
