@@ -252,3 +252,26 @@ WebSocket route in this server upgrades through, so the rule is stated once and 
 request first; this is the second lock on an endpoint that hands out a shell. A request with **no** Origin
 is still accepted: only a non-browser client omits it, and that client can set the session cookie by hand
 anyway. Test: `backend/httputil/ws_origin_test.go`.
+
+### Every upgrade is admitted by a count, never a deadline
+
+`/api/stream`, `/api/lsp` and the two terminal routes refuse a socket **before** `httputil.AcceptWS` —
+`http.Error` 503 plus a `Warn` naming the live count and the limit — so the browser sees a refusal rather
+than an upgrade it has to work out is dead. Each bound is a package constant mirrored by a field on the
+manager (`maxConns` on `AppStreamManager` and `TerminalManager`, `maxSessions` on `LSPHandler`) so a test
+shrinks the number instead of opening hundreds of sockets. Nothing here reads an environment variable, and
+nothing here is a timeout: inside a bound, a request waits exactly as long as its language server takes.
+The same rule holds the bookkeeping *behind* the upgrade — a bound that is reached answers what it
+overturns, it never drops it silently.
+
+| Bound | Default | Counts | When it is reached |
+|---|---|---|---|
+| `stream.DefaultMaxConnections` | 256 | live `/api/stream` sockets | 503 before the upgrade |
+| `lsp.DefaultMaxSessions` | 64 | live `/api/lsp` sessions | 503 before the upgrade |
+| `term.DefaultMaxConnections` | 64 | live terminal sockets, across every session | 503 before the upgrade |
+| `lsp.DefaultMaxPendingRequests` | 256 | requests one session has waiting for an answer | the oldest is answered with a JSON-RPC error and loses its slot; an answer that does arrive frees its slot first |
+| `lsp.DefaultMaxQueuedInitializes` | 64 | `initialize` requests waiting behind the one in flight | the whole queue is failed as a failed send fails it, the overflowing request in the same sentence, so a later `initialize` is forwarded |
+
+Terminal counts connections rather than PTYs because a session is per task or project and every client of
+it shares one shell, so connections are what a client can multiply. Tests: `backend/stream/app_stream_bounds_test.go`,
+`backend/lsp/handler_bounds_test.go`, `backend/term/terminal_bounds_test.go`.

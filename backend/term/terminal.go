@@ -31,6 +31,11 @@ import (
 const (
 	// TerminalBufferSize is the max number of output frames to keep when no clients are connected.
 	TerminalBufferSize = 4096
+
+	// DefaultMaxConnections bounds live terminal sockets across every session. Sessions are per
+	// task or project and reused, so connections are what a client can multiply: each one costs a
+	// read loop and a pinger.
+	DefaultMaxConnections = 64
 )
 
 // connSize tracks the terminal dimensions reported by a connected client.
@@ -110,12 +115,13 @@ func clampDim(v int) uint16 {
 	return uint16(v)
 }
 
-// applySize sets the PTY to the given rows/cols if it differs from current size.
+// applySize sets the PTY to the given rows/cols if it differs from current size. The lock is held
+// across the ioctls: close() drops the PTY under it, and an ioctl on a file another goroutine is
+// closing races os.File.Fd against os.File.Close.
 func (t *taskTerminal) applySize(rows, cols uint16) {
 	t.mu.Lock()
-	closed := t.closed
-	t.mu.Unlock()
-	if closed {
+	defer t.mu.Unlock()
+	if t.closed {
 		return // the PTY is already gone
 	}
 	curRows, curCols, err := pty.Getsize(t.ptmx)
@@ -174,8 +180,11 @@ type sandboxOps interface {
 
 // TerminalManager manages per-task persistent terminal sessions.
 type TerminalManager struct {
-	mu                     sync.RWMutex
-	sessions               map[string]*taskTerminal
+	mu       sync.RWMutex
+	sessions map[string]*taskTerminal
+	// maxConns bounds live terminal sockets over every session. It is a field so a test can
+	// shrink it instead of opening hundreds of sockets, and no environment variable reaches it.
+	maxConns               int
 	store                  *store.Store
 	cfgStore               *config.ConfigStore
 	sandboxMgr             sandboxOps
@@ -188,6 +197,7 @@ type TerminalManager struct {
 func NewTerminalManager(store *store.Store, cfgStore *config.ConfigStore, sandboxMgr sandboxOps, agentRegistry *agent.AgentRegistry, dangerZone sandbox.DangerZone) *TerminalManager {
 	return &TerminalManager{
 		sessions:      make(map[string]*taskTerminal),
+		maxConns:      DefaultMaxConnections,
 		store:         store,
 		cfgStore:      cfgStore,
 		sandboxMgr:    sandboxMgr,
@@ -420,6 +430,20 @@ func (tm *TerminalManager) activeSessionCount() int {
 	return len(tm.sessions)
 }
 
+// liveConns counts the sockets attached to any session — the count the admission cap is drawn
+// against. It takes tm.mu then a session's own lock, the only nesting of the two.
+func (tm *TerminalManager) liveConns() int {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	conns := 0
+	for _, session := range tm.sessions {
+		session.mu.Lock()
+		conns += len(session.conns)
+		session.mu.Unlock()
+	}
+	return conns
+}
+
 // Close terminates every live terminal session; each holds a PTY and a child shell that would
 // otherwise outlive shutdown, and Server.Shutdown calls it before sandbox cleanup so the kill
 // lands while the container can still receive it. Detach under the lock and close outside it:
@@ -519,12 +543,17 @@ func (t *taskTerminal) close() {
 	clear(t.conns)
 	clear(t.connSizes)
 	t.closed = true
+	// The fd goes away under the lock that guards the resize ioctls, so a client leaving at this
+	// moment cannot size a PTY that is gone. The sandbox path closes it again through shell.Close,
+	// which an os.File answers as already closed.
+	if t.ptmx != nil {
+		_ = t.ptmx.Close()
+	}
 	t.mu.Unlock()
 
 	if t.shell != nil {
 		_ = t.shell.Close()
 	} else {
-		t.ptmx.Close()
 		t.cmd.Process.Kill()
 		t.cmd.Wait()
 	}
@@ -574,6 +603,14 @@ func (tm *TerminalManager) HandleProjectTerminal(w http.ResponseWriter, r *http.
 // handleTerminalWSWithSetup upgrades the WebSocket first, then creates the terminal session.
 // This allows sending status messages (e.g., pulling image) before the shell is ready.
 func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *http.Request, sessionKey, taskID, worktreePath, projectID string) {
+	if live := tm.liveConns(); live >= tm.maxConns {
+		// Answered before the upgrade, so the browser sees a refusal rather than a shell that
+		// never prints.
+		logging.For(logging.Terminal).Warnf("refusing a terminal connection: %d already live (limit %d)", live, tm.maxConns)
+		http.Error(w, "too many live terminal connections", http.StatusServiceUnavailable)
+		return
+	}
+
 	// Origin checking lives in httputil.AcceptWS: the second lock on an endpoint that
 	// hands out a shell.
 	conn, ok := httputil.AcceptWS(w, r, "terminal")

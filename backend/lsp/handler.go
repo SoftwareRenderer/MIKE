@@ -6,6 +6,7 @@
 package lsp
 
 import (
+	"container/list"
 	"context"
 	"encoding/json"
 	"errors"
@@ -45,13 +46,30 @@ type SubscribeParams struct {
 	File      string `json:"file"`
 }
 
+// The handler's bounds. They are counts, not deadlines: a request inside one waits exactly as
+// long as its language server takes, and nothing here is a timeout.
+const (
+	// DefaultMaxSessions bounds live /api/lsp sockets. Each costs a read loop, a pinger and the
+	// maps that route answers back to it.
+	DefaultMaxSessions = 64
+
+	// DefaultMaxPendingRequests bounds the requests one session may have waiting for an answer.
+	// A language server that stops answering used to grow those maps for as long as the editor
+	// kept asking.
+	DefaultMaxPendingRequests = 256
+
+	// DefaultMaxQueuedInitializes bounds how many initialize requests may wait behind the one in
+	// flight for a workspace.
+	DefaultMaxQueuedInitializes = 64
+)
+
 // ClientSession is one WebSocket client of the LSP handler. Workspace and language are tracked
 // per-channel via _workspace/_lang hints, not per-session.
 type ClientSession struct {
 	conn     *websocket.Conn
 	clientID uint64
 	// mu protects the session's maps (incomingIDs, channelIDs, workspaceKeys, activeWorkspaces)
-	// from concurrent access by forwardRequest/routeResponse goroutines.
+	// and the pending order below from concurrent access by forwardRequest/routeResponse goroutines.
 	mu sync.Mutex
 	// backendRequestID → clientRequestID (incoming responses)
 	incomingIDs map[string]string
@@ -59,9 +77,86 @@ type ClientSession struct {
 	channelIDs map[string]int64
 	// backendRequestID → workspaceKey (workspace + language, for per-language routing)
 	workspaceKeys map[string]string
+	// pendingOrder holds exactly the backend IDs the three maps above have a mapping for, oldest
+	// forwarded first; pendingElems indexes it by ID so a delivered answer removes its own node.
+	// Together they are what makes "this session is over its bound, drop the oldest" a lookup
+	// rather than a scan, so the bound cannot be outgrown by the bookkeeping that enforces it.
+	pendingOrder *list.List
+	pendingElems map[string]*list.Element
 	// activeWorkspaces tracks all workspace keys this session has forwarded requests to.
 	// Used for cleanup on disconnect (a session can talk to multiple language servers).
 	activeWorkspaces map[string]int
+}
+
+// newClientSession builds the bookkeeping one connection starts with.
+func newClientSession(conn *websocket.Conn, clientID uint64) *ClientSession {
+	return &ClientSession{
+		conn:             conn,
+		clientID:         clientID,
+		incomingIDs:      make(map[string]string),
+		channelIDs:       make(map[string]int64),
+		workspaceKeys:    make(map[string]string),
+		pendingOrder:     list.New(),
+		pendingElems:     make(map[string]*list.Element),
+		activeWorkspaces: make(map[string]int),
+	}
+}
+
+// droppedReq is a forwarded request the session gives up on because too many others are already
+// waiting for an answer. It carries what its failure answer needs: nothing may be dropped silently.
+type droppedReq struct {
+	backendID   string
+	clientReqID string
+	channelID   int64
+}
+
+// track records where the answer to a forwarded request must go, and hands back the oldest
+// outstanding request when this one crossed the session's bound. The caller answers what it hands
+// back; the newest request keeps its slot and the one that has waited longest loses it.
+func (s *ClientSession) track(backendID, clientReqID string, channelID int64, workspaceKey string, bound int) *droppedReq {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.incomingIDs[backendID] = clientReqID
+	s.channelIDs[backendID] = channelID
+	s.workspaceKeys[backendID] = workspaceKey
+	// Track that this session uses this workspace (for cleanup on disconnect)
+	s.activeWorkspaces[workspaceKey]++
+	s.pendingElems[backendID] = s.pendingOrder.PushBack(backendID)
+	if len(s.incomingIDs) <= bound {
+		return nil
+	}
+	oldest := s.pendingOrder.Front()
+	if oldest == nil {
+		return nil
+	}
+	return s.dropLocked(oldest.Value.(string))
+}
+
+// forget removes one request's mappings where its answer arrived or its own send failed.
+func (s *ClientSession) forget(backendID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dropLocked(backendID)
+}
+
+// dropLocked removes a request's mappings and returns what an answer to it needs, or nil when it
+// is already gone. Callers hold s.mu.
+func (s *ClientSession) dropLocked(backendID string) *droppedReq {
+	elem, ok := s.pendingElems[backendID]
+	if !ok {
+		return nil
+	}
+	req := &droppedReq{
+		backendID:   backendID,
+		clientReqID: s.incomingIDs[backendID],
+		channelID:   s.channelIDs[backendID],
+	}
+	delete(s.pendingElems, backendID)
+	s.pendingOrder.Remove(elem)
+	delete(s.incomingIDs, backendID)
+	delete(s.channelIDs, backendID)
+	delete(s.workspaceKeys, backendID)
+	return req
 }
 
 // queuedInit holds a pending initialize request waiting for the server response.
@@ -126,15 +221,17 @@ func (ws *workspaceState) markInitializedSent() bool {
 type initDecision int
 
 const (
-	initCached initDecision = iota // answer it from the cached response
-	initQueued                     // it waits on the response to the request in flight
-	initFirst                      // this caller owns the forward to the server
+	initCached   initDecision = iota // answer it from the cached response
+	initQueued                       // it waits on the response to the request in flight
+	initFirst                        // this caller owns the forward to the server
+	initOverflow                     // too many are already waiting; the queue is failed, not grown
 )
 
 // decideInitialize answers one initialize request against the entry: the cached response, the
 // replay queue, or the claim on the forward. The caller holding initFirst owns that request: a
-// send that fails goes to abandonInitialize, a response to cacheInitResponse.
-func (ws *workspaceState) decideInitialize(session *ClientSession, clientReqID string, channelID int64) (initDecision, json.RawMessage) {
+// send that fails goes to abandonInitialize, a response to cacheInitResponse. A request arriving
+// when the queue already holds bound of them is turned away with initOverflow rather than added.
+func (ws *workspaceState) decideInitialize(session *ClientSession, clientReqID string, channelID int64, bound int) (initDecision, json.RawMessage) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
 	switch {
@@ -144,6 +241,9 @@ func (ws *workspaceState) decideInitialize(session *ClientSession, clientReqID s
 		}
 		return initCached, remapResponseIDWithChannel(ws.initResponse, clientReqID, channelID)
 	case ws.pendingInitialize:
+		if len(ws.queuedInitialize) >= bound {
+			return initOverflow, nil
+		}
 		ws.queuedInitialize = append(ws.queuedInitialize, &queuedInit{
 			session:     session,
 			clientReqID: clientReqID,
@@ -217,6 +317,13 @@ type LSPHandler struct {
 	clients  map[*websocket.Conn]*ClientSession
 	// Per workspace+language state
 	workspaces map[string]*workspaceState
+	// maxSessions bounds live sockets; maxPendingReqs bounds the requests one session may have
+	// waiting for an answer; maxQueuedInit bounds the initialize requests waiting behind the one
+	// in flight. They are fields so a test can shrink them instead of opening hundreds of
+	// sockets, and no environment variable reaches them.
+	maxSessions    int
+	maxPendingReqs int
+	maxQueuedInit  int
 	// validateWorkspace, if set, restricts which workspace paths a client may subscribe to;
 	// nil (the default, used in tests) means no restriction.
 	validateWorkspace func(workspace string) bool
@@ -237,6 +344,9 @@ func NewLSPHandler(reg lspRegistry, mgr lspManager) *LSPHandler {
 		clients:          make(map[*websocket.Conn]*ClientSession),
 		workspaces:       make(map[string]*workspaceState),
 		serverRouterDone: make(chan struct{}),
+		maxSessions:      DefaultMaxSessions,
+		maxPendingReqs:   DefaultMaxPendingRequests,
+		maxQueuedInit:    DefaultMaxQueuedInitializes,
 	}
 	// Start the server message router
 	h.wg.Add(1)
@@ -281,6 +391,17 @@ func (h *LSPHandler) HandleSandboxMemory(w http.ResponseWriter, r *http.Request)
 
 // HandleLSP is the HTTP handler for the LSP WebSocket endpoint at /api/lsp.
 func (h *LSPHandler) HandleLSP(w http.ResponseWriter, r *http.Request) {
+	h.mu.Lock()
+	live := len(h.clients)
+	h.mu.Unlock()
+	if live >= h.maxSessions {
+		// Answered before the upgrade, so the browser sees a refusal rather than a connection it
+		// has to work out is dead.
+		logging.For(logging.LSP).Warnf("refusing a session: %d already live (limit %d)", live, h.maxSessions)
+		http.Error(w, "too many live LSP sessions", http.StatusServiceUnavailable)
+		return
+	}
+
 	// Origin checking lives in httputil.AcceptWS; this endpoint hands out a workspace's
 	// language servers.
 	conn, ok := httputil.AcceptWS(w, r, "lsp")
@@ -289,14 +410,7 @@ func (h *LSPHandler) HandleLSP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientID := h.nextID.Add(1)
-	session := &ClientSession{
-		conn:             conn,
-		clientID:         clientID,
-		incomingIDs:      make(map[string]string),
-		channelIDs:       make(map[string]int64),
-		workspaceKeys:    make(map[string]string),
-		activeWorkspaces: make(map[string]int),
-	}
+	session := newClientSession(conn, clientID)
 
 	h.mu.Lock()
 	h.clients[conn] = session
@@ -570,9 +684,10 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 
 // handleInitialize intercepts initialize requests: only the first client's (or first channel's
 // in multiplex mode) reaches the server, later ones get the cached response, and those arriving
-// while it is in flight are queued and replayed. A workspace that does not exist yet — a second
-// language on the same WS, or a client that sends initialize before subscribing — is created
-// lazily from the file path's server config.
+// while it is in flight are queued and replayed — up to the queue's bound, past which the queue is
+// failed rather than grown. A workspace that does not exist yet — a second language on the same WS,
+// or a client that sends initialize before subscribing — is created lazily from the file path's
+// server config.
 //
 // Nothing holds h.mu on entry, and no branch keeps a lock across the forward.
 func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string, channelID int64, workspacePath, workspaceKey, filePath string) {
@@ -596,7 +711,7 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 		return
 	}
 
-	decision, cachedResponse := ws.decideInitialize(session, clientReqID, channelID)
+	decision, cachedResponse := ws.decideInitialize(session, clientReqID, channelID, h.queuedInitBound())
 	switch decision {
 	case initCached:
 		// Already initialized — the cached response answers this request immediately
@@ -608,6 +723,16 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 		return
 	case initQueued:
 		// A first initialize is in flight — routeResponse replays its answer to this request
+		return
+	case initOverflow:
+		// Enough requests are already waiting behind one that has not answered that the whole
+		// queue is failed, exactly as a send failure fails it: the later initialize that finds no
+		// queue is the one that reaches the server.
+		cause := fmt.Errorf("too many initialize requests are already waiting (%d)", h.queuedInitBound())
+		logging.For(logging.LSP).Warnf("client %d: workspace=%s has %d initialize requests waiting, failing the queue",
+			session.clientID, workspaceKey, h.queuedInitBound())
+		h.failInitialize(workspaceKey, cause)
+		h.answerError(ctx, session, clientReqID, channelID, initFailureMessage(cause))
 		return
 	}
 
@@ -684,11 +809,40 @@ func (h *LSPHandler) failInitialize(workspaceKey string, cause error) {
 	}
 	queued := ws.abandonInitialize()
 
-	message := fmt.Sprintf("language server unreachable: %v", cause)
+	message := initFailureMessage(cause)
 	ctx := context.Background()
 	for _, q := range queued {
 		h.answerError(ctx, q.session, q.clientReqID, q.channelID, message)
 	}
+}
+
+// initFailureMessage is what an initialize that will never be answered is answered with, from
+// either place that finds out.
+func initFailureMessage(cause error) string {
+	return fmt.Sprintf("language server unreachable: %v", cause)
+}
+
+// pendingBound is the outstanding-request bound of one session. A bound below one would evict the
+// request being forwarded, so the floor is one.
+func (h *LSPHandler) pendingBound() int {
+	if h.maxPendingReqs < 1 {
+		return 1
+	}
+	return h.maxPendingReqs
+}
+
+// queuedInitBound is the bound on initialize requests waiting behind the one in flight.
+func (h *LSPHandler) queuedInitBound() int {
+	if h.maxQueuedInit < 1 {
+		return 1
+	}
+	return h.maxQueuedInit
+}
+
+// pendingOverflowMessage is what a request that crossed the session's bound is answered with, and
+// names the bound because the editor shows the sentence to a person.
+func pendingOverflowMessage(bound int) string {
+	return fmt.Sprintf("too many requests waiting for the language server (%d); this one was dropped", bound)
 }
 
 // forwardRequest remaps the request ID and forwards it to the workspaceKey server; channelID
@@ -700,24 +854,19 @@ func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession,
 	backendID := h.nextBackendID.Add(1)
 	backendIDStr := itoa(backendID)
 
-	// Store the mapping
-	session.mu.Lock()
-	session.incomingIDs[backendIDStr] = clientReqID
-	session.channelIDs[backendIDStr] = channelID
-	session.workspaceKeys[backendIDStr] = workspaceKey
-	// Track that this session uses this workspace (for cleanup on disconnect)
-	session.activeWorkspaces[workspaceKey]++
-	session.mu.Unlock()
+	// Store the mapping, and answer whatever this push put over the session's bound.
+	bound := h.pendingBound()
+	if evicted := session.track(backendIDStr, clientReqID, channelID, workspaceKey, bound); evicted != nil {
+		logging.For(logging.LSP).Warnf("client %d: %d requests already waiting for workspace=%s, dropping the oldest (client id=%s backend id=%s)",
+			session.clientID, bound, workspaceKey, evicted.clientReqID, evicted.backendID)
+		h.answerError(ctx, session, evicted.clientReqID, evicted.channelID, pendingOverflowMessage(bound))
+	}
 
 	defer func() {
 		if err != nil {
 			// No answer is coming, so nothing may keep waiting for one: not the browser
 			// (answerError) and not the map that routes answers back.
-			session.mu.Lock()
-			delete(session.incomingIDs, backendIDStr)
-			delete(session.channelIDs, backendIDStr)
-			delete(session.workspaceKeys, backendIDStr)
-			session.mu.Unlock()
+			session.forget(backendIDStr)
 			h.answerError(ctx, session, clientReqID, channelID, err.Error())
 		}
 	}()
@@ -865,9 +1014,7 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 			channelID = s.channelIDs[backendID]
 			workspaceKey = s.workspaceKeys[backendID]
 			// Clean up mappings
-			delete(s.incomingIDs, backendID)
-			delete(s.channelIDs, backendID)
-			delete(s.workspaceKeys, backendID)
+			s.dropLocked(backendID)
 		}
 		s.mu.Unlock()
 		if targetSession != nil {
