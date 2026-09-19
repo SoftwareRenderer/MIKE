@@ -153,9 +153,15 @@ func main() {
 	go func() { serveErr <- srv.Serve() }()
 
 	exitCode := 0
+	restartRequested := false
 	select {
 	case <-sigCh:
 		logging.For(logging.Main).Info("Shutting down...")
+	case <-srv.RestartRequests():
+		// A staged release is on disk and only a new exec sees it. This is the same path a SIGTERM
+		// takes: a restart that cleaned up less than a stop would be the worse of the two.
+		logging.For(logging.Main).Info("Restart requested to apply a staged release...")
+		restartRequested = true
 	case err := <-serveErr:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logging.For(logging.Main).Warnf("Server error: %v", err)
@@ -175,6 +181,22 @@ func main() {
 		if errors.Is(err, server.ErrShutdownDeadline) && exitCode == 0 {
 			// A wedged subsystem is worth a non-zero exit: the process left work behind.
 			exitCode = 1
+		}
+	}
+	// The exec is last, after every teardown: the new process opens the same database, so the old one
+	// must have closed it. This is a re-exec, not a subprocess inheriting the server's environment.
+	if restartRequested {
+		exe, err := os.Executable()
+		if err != nil {
+			logging.For(logging.Main).Errorf("restart: cannot find this binary: %v", err)
+			os.Exit(1)
+		}
+		logging.For(logging.Main).Infof("re-executing %s", exe)
+		if err := syscall.Exec(exe, os.Args, os.Environ()); err != nil {
+			// The staged release is on disk, so the next start applies it either way; non-zero says
+			// this one did not.
+			logging.For(logging.Main).Errorf("restart: re-executing %s failed: %v; the staged release is on disk and the next start will apply it", exe, err)
+			os.Exit(1)
 		}
 	}
 	os.Exit(exitCode)

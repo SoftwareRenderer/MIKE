@@ -82,7 +82,7 @@ describe('apiFetch failure classification', () => {
 
         expect(err).toBeInstanceOf(ConnectionFailure);
         expect(isAborted(err)).toBe(false);
-        expect((err as Error).message).toContain('MIKE did not answer');
+        expect((err as Error).message).toContain('Connection issue');
         expect(offlineCalls).toEqual([true]);
         // The cause survives, so the raw TypeError is still reachable in a debugger and in console output.
         expect((err as any).cause?.name).toBe('TypeError');

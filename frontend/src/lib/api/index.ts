@@ -89,9 +89,19 @@ export {
 export {
     getConfig,
     updateConfig,
+    setUpdateCheckConsent,
     testConnection,
     fetchModels,
 } from './config';
+
+// -- Release updates (Settings → About; docs/auto-update.md) --
+export {
+    fetchUpdateStatus,
+    checkForUpdates,
+    prepareUpdate,
+    applyUpdate,
+    restartToUpdate,
+} from './updates';
 
 // -- Git --
 export {

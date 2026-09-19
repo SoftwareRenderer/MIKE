@@ -76,3 +76,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) Detached() (context.Context, context.CancelFunc) {
 	return context.WithCancel(s.base)
 }
+
+// RestartRequests is the channel the update restart route sends on: main.go's signal select reads it, so
+// a restart takes the declared stage list rather than a second one invented for it.
+func (s *Server) RestartRequests() <-chan struct{} { return s.restart }

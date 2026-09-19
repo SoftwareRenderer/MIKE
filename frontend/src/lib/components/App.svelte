@@ -28,6 +28,8 @@
     import { localeOffer } from '$lib/services/locale-offer.svelte';
     import { reportChunkFailure } from '$lib/services/chunk-failure';
     import { sandboxImageStatus } from '$lib/services/sandbox-image-status.svelte';
+    import { updateCheck } from '$lib/services/update-check.svelte';
+    import UpdateDot from './UpdateDot.svelte';
     const LAST_PROJECT_KEY = 'lastProjectId';
 
     let TerminalPanelComponent: typeof import('./TerminalPanel.svelte').default | null = $state(null);
@@ -202,6 +204,14 @@
         const openTaskId = appStore.selectedTask?.id || uiStore.floatingTask?.taskId || null;
         reviewNotifier.observeAttention(openTaskId, uiStore.reviewColumnInViewOf);
     });
+
+    /**
+     * Every Settings opener goes through here. The update dot decides which tab the modal opens on, so
+     * the mark on the control leads to the row that explains it rather than to the provider list.
+     */
+    function openSettings(): void {
+        uiStore.openSettings(updateCheck.dot === 'none' ? null : 'about');
+    }
 
     function startCountdown() {
         stopCountdown();
@@ -920,6 +930,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         extensionManager.loadExtensions()
             .then(() => localeOffer.detect())
             .catch(() => {});
+        // The opt-in question it may ask belongs to a settled screen, not the loading one.
+        void updateCheck.start();
     }
 
     // Detect external URL changes (e.g., page.goto() in Playwright, direct URL navigation).
@@ -1492,7 +1504,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onRemoveProject={removeProject}
             onToggleSidebar={toggleSidebar}
             onShowStats={() => { uiStore.showStats = true; if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
-            onShowConfig={() => { uiStore.showConfig = true; if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
+            onShowConfig={() => { openSettings(); if (isMobileCtx.isMobile) mobileMenuOpen = false; }}
             onToggleFullScreen={() => {
                 if (document.fullscreenElement) {
                     document.exitFullscreen().catch(() => {});
@@ -1533,7 +1545,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 onOpenExplorerView={() => { showExplorerViewVal = true; updateUrl({ project: currentProject?.id, view: 'explorer' }, false, true); }}
                 onOpenTerminal={openTerminal}
                 onShowStats={() => uiStore.showStats = true}
-                onShowConfig={() => uiStore.showConfig = true}
+                onShowConfig={openSettings}
             />
             {/if}
             <section class="board-container" aria-label="Kanban board">
@@ -1596,16 +1608,17 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             </section>
         {:else}
             <div class="empty-state">
-                <button class="icon-btn" onclick={() => uiStore.showConfig = true} aria-label="Settings" title="Settings">
+                <button class="icon-btn" onclick={openSettings} aria-label="Settings" title="Settings">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <circle cx="12" cy="12" r="3"/>
                         <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
                     </svg>
+                    <UpdateDot />
                 </button>
                 {#if !hasProviders}
                     <h2>{t('app.empty.welcomeTitle')}</h2>
                     <p>{t('app.empty.welcomeBody')}</p>
-                    <button class="btn-primary" onclick={() => uiStore.showConfig = true} title="Configure an LLM provider">{t('app.empty.configureProvider')}</button>
+                    <button class="btn-primary" onclick={() => uiStore.openSettings()} title="Configure an LLM provider">{t('app.empty.configureProvider')}</button>
                 {:else}
                     <h2>{t('app.empty.noProjectsTitle')}</h2>
                     <p>{t('app.empty.noProjectsBody')}</p>

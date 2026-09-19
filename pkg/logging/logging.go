@@ -79,8 +79,10 @@ const (
 	TLS        = "tls"
 	Tools      = "tools"
 	Trace      = "trace"
-	Watcher    = "watcher"
-	Worktree   = "worktree"
+	// Updates is the release check and the staged upgrade (docs/auto-update.md).
+	Updates  = "updates"
+	Watcher  = "watcher"
+	Worktree = "worktree"
 )
 
 var (

@@ -313,6 +313,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	defaultMaxFailedTurnsRaw, _ := cs.db.GetConfigValue("default_max_failed_turns")
 	defaultAutoSummarizeThresholdRaw, _ := cs.db.GetConfigValue("default_auto_summarize_threshold")
 	hideModelBadgeRaw, _ := cs.db.GetConfigValue("hide_model_badge")
+	updateCheckEnabledRaw, _ := cs.db.GetConfigValue("update_check_enabled")
 	runSiblingsParallelRaw, _ := cs.db.GetConfigValue("run_siblings_parallel")
 	sortOldestFirstRaw, _ := cs.db.GetConfigValue("sort_oldest_first")
 	autoMaximizeChatMobileRaw, _ := cs.db.GetConfigValue("auto_maximize_chat_mobile")
@@ -362,6 +363,9 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	}
 	if v, err := parseBoolPtr(hideModelBadgeRaw); err == nil && v != nil {
 		cfg.HideModelBadge = v
+	}
+	if v, err := parseBoolPtr(updateCheckEnabledRaw); err == nil && v != nil {
+		cfg.UpdateCheckEnabled = v
 	}
 	if v, err := parseBoolPtr(runSiblingsParallelRaw); err == nil && v != nil {
 		cfg.RunSiblingsParallel = v
@@ -466,6 +470,11 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			return err
 		}
 	}
+	if c.UpdateCheckEnabled != nil {
+		if err := cs.db.SetConfigValue("update_check_enabled", fmt.Sprintf("%t", *c.UpdateCheckEnabled)); err != nil {
+			return err
+		}
+	}
 	if c.RunSiblingsParallel != nil {
 		if err := cs.db.SetConfigValue("run_siblings_parallel", fmt.Sprintf("%t", *c.RunSiblingsParallel)); err != nil {
 			return err
@@ -510,6 +519,7 @@ type configResponse struct {
 	DefaultMaxFailedTurns         *int                     `json:"default_max_failed_turns,omitempty"`
 	DefaultAutoSummarizeThreshold *int                     `json:"default_auto_summarize_threshold,omitempty"`
 	HideModelBadge                *bool                    `json:"hide_model_badge,omitempty"`
+	UpdateCheckEnabled            *bool                    `json:"update_check_enabled,omitempty"`
 	RunSiblingsParallel           *bool                    `json:"run_siblings_parallel,omitempty"`
 	SortOldestFirst               *bool                    `json:"sort_oldest_first,omitempty"`
 	AutoMaximizeChatMobile        *bool                    `json:"auto_maximize_chat_mobile,omitempty"`
@@ -597,6 +607,7 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		DefaultMaxFailedTurns:         cfg.DefaultMaxFailedTurns,
 		DefaultAutoSummarizeThreshold: cfg.DefaultAutoSummarizeThreshold,
 		HideModelBadge:                cfg.HideModelBadge,
+		UpdateCheckEnabled:            cfg.UpdateCheckEnabled,
 		RunSiblingsParallel:           cfg.RunSiblingsParallel,
 		SortOldestFirst:               cfg.SortOldestFirst,
 		AutoMaximizeChatMobile:        cfg.AutoMaximizeChatMobile,
@@ -660,6 +671,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		current.DefaultAutoMerge = updates.boolPtrOr("default_auto_merge", current.DefaultAutoMerge)
 		current.DefaultSubtasksAutoMerge = updates.boolPtrOr("default_subtasks_auto_merge", current.DefaultSubtasksAutoMerge)
 		current.HideModelBadge = updates.boolPtrOr("hide_model_badge", current.HideModelBadge)
+		current.UpdateCheckEnabled = updates.boolPtrOr("update_check_enabled", current.UpdateCheckEnabled)
 		current.RunSiblingsParallel = updates.boolPtrOr("run_siblings_parallel", current.RunSiblingsParallel)
 		current.SortOldestFirst = updates.boolPtrOr("sort_oldest_first", current.SortOldestFirst)
 		current.AutoMaximizeChatMobile = updates.boolPtrOr("auto_maximize_chat_mobile", current.AutoMaximizeChatMobile)

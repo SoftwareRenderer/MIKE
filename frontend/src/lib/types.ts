@@ -246,6 +246,9 @@ export interface Config {
     default_max_failed_turns?: number;
     default_auto_summarize_threshold?: number; // percent of context window, 1-100
     hide_model_badge?: boolean; // hide the model badge on task cards
+    // May MIKE ask the release manifest whether a newer version exists? Absent means never asked —
+    // off, and still owed the first-run question. MIKE_DISABLE_UPDATES outranks both answers.
+    update_check_enabled?: boolean;
     run_siblings_parallel?: boolean; // start all of a parent's subtasks at once (default off)
     sort_oldest_first?: boolean; // put the least recently moved card on top of a column (default off)
     auto_maximize_chat_mobile?: boolean; // maximize the chat while its input has focus (default on)
@@ -811,5 +814,78 @@ export interface APITokenInfo {
 /** A created token: the row plus its secret, which is shown once and never stored in this browser. */
 export interface CreatedAPIToken extends APITokenInfo {
     token: string;
+}
+
+/** What this install could do about a new release. Only `packaged` may replace its own files. */
+export interface UpdateInstall {
+    kind: 'packaged' | 'container' | 'source' | 'unknown';
+    dir?: string;
+    reason?: string;
+    can_stage: boolean;
+}
+
+/** The whole update answer, which every update route returns — a failed route still answers it. */
+export interface UpdateStatus {
+    /** This binary's version; a development or image build reports a name no release has. */
+    current_version: string;
+    /** The manifest's newest release. Empty when no check has produced one — not "up to date". */
+    latest?: string;
+    published?: string;
+    notes_url?: string;
+    /** This machine's archive, absent when the newest release names none for it. */
+    asset?: { url: string; sha256: string };
+    /** A newer release with an archive for this machine. The dot is lit from this. */
+    available: boolean;
+    /** RFC3339 UTC. Empty when nothing has been checked. */
+    checked_at?: string;
+    /** The last check's failure, kept so the About tab can say why the dot never lit. */
+    last_error?: string;
+    /** What a check learned that is neither an error nor a version, e.g. a version it cannot compare. */
+    note?: string;
+    staged_version?: string;
+    backup_path?: string;
+    /** A downloaded, verified release waiting for the install click. */
+    prepared_version?: string;
+    prepared_bytes?: number;
+    /** How many files installing it would replace. */
+    prepared_files?: number;
+    prepared_at?: string;
+    enabled: boolean;
+    /** The organization switch: nothing on this server checks, downloads, installs or restarts. */
+    disabled: boolean;
+    /** False while nobody has ever answered the opt-in question — the state that owes the prompt. */
+    answered: boolean;
+    install: UpdateInstall;
+    manifest_url: string;
+    /** What this server is doing right now — 'prepare' or 'apply'. Empty when neither is. */
+    working?: string;
+}
+
+/** POST /api/updates/prepare: the release now downloaded and verified, installing it is still a click. */
+export interface UpdatePreparedResult {
+    version: string;
+    bytes: number;
+    sha256: string;
+    /** How many files installing would replace. */
+    files: number;
+    notes?: string[];
+}
+
+/** POST /api/updates/apply: the release now in place. `restarting` false means finish it by hand. */
+export interface UpdateApplyResult {
+    version: string;
+    bytes: number;
+    sha256: string;
+    backup_path: string;
+    replaced: string[];
+    notes?: string[];
+    restarting: boolean;
+    restart_note?: string;
+}
+
+/** POST /api/updates/restart. A process with no restart path refuses instead of answering this. */
+export interface UpdateRestartResult {
+    restarting: boolean;
+    applies?: string;
 }
 

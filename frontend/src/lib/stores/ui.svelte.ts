@@ -16,6 +16,9 @@ export class UiStore {
      *  the gap before the board WS update lands in the task list. */
     public floatingTask = $state<{ projectId: string; taskId: string; task?: any } | null>(null);
     public showConfig = $state(false);
+    /** The tab Settings opens on, named by whoever opened it: the update dot says 'about', every other
+     *  opener leaves it null and Settings opens where it always did. */
+    public settingsTab = $state<string | null>(null);
     public showTerminal = $state(false);
     public showStats = $state(false);
     public showCardDetail = $state(false);
@@ -25,6 +28,12 @@ export class UiStore {
     /** Whether this browser asks for a notification when a task enters Review. Per browser because
      *  permission and delivery are per browser — the server never sees it (docs/notifications.md). */
     public notifyOnReview = $state(false);
+
+    /** Open Settings, optionally on a named tab; the update dot names 'about'. */
+    public openSettings(tab: string | null = null): void {
+        this.settingsTab = tab;
+        this.showConfig = true;
+    }
 
     constructor() {
         loadAppSetting(NOTIFY_ON_REVIEW_KEY, false).then((v: unknown) => {

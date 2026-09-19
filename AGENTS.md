@@ -292,6 +292,13 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
   podman, agent), each returning the whole environment with extras last. `os.Environ()` survives in one
   sanctioned place: the operator's own host terminal under `DANGER_ZONE=1`.
 - **The git author identity is accessor-only** and process-wide.
+- **The release check is the one place a network answer becomes code**, so it is opt-in and never
+  self-applying: the preference turns it on (`MIKE_DISABLE_UPDATES=1` forbids it for every browser), a newer
+  release is fetched and verified without a click into its own directory, and *Install* — which swaps the
+  files and restarts — is the one click that changes anything. An install that is not an unpacked release
+  directory — a container, a source tree, anything unnamed — refuses rather than swapping files it cannot
+  describe, and gets nothing downloaded either. No auto-apply, ever.
+  Mechanism, refusals and what is verified: **`docs/auto-update.md`**.
 - Mechanisms, helpers and tests: **`docs/confinement.md`**.
 
 ## Concurrency
@@ -477,4 +484,5 @@ deliberately omits.
 | `docs/link-rows.md` | project-row/task-card markup, click routing, known limitation |
 | `docs/reconnection.md` | WS reconnect/offline queue mechanism |
 | `docs/frontend-updates.md` | stale-asset detection, the build-id tag contract, prompt-mode worker, the day gate |
+| `docs/auto-update.md` | the release manifest, the opt-in ladder, the install shapes that refuse, staging and restart |
 | `docs/adding-a-preference.md` | the recipes for a shortcut or a `*bool` preference |

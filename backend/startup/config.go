@@ -4,6 +4,7 @@ package startup
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,27 +16,32 @@ import (
 // TestEnvNamesMatchTheirOwners holds this copy and those together, because two spellings of one
 // variable drift in exactly the way that ends with a documented flag doing nothing.
 const (
-	EnvPort             = "MIKE_PORT"
-	EnvListen           = "MIKE_LISTEN"
-	EnvDataDir          = "MIKE_DATA_DIR"
-	EnvWorktreesDir     = "MIKE_WORKTREES_DIR"
-	EnvFrontendDist     = "MIKE_FRONTEND_DIST"
-	EnvTLS              = "MIKE_TLS"
-	EnvAllowedHosts     = "MIKE_ALLOWED_HOSTS"
-	EnvLogLevel         = "MIKE_LOG_LEVEL"
-	EnvLoginPassword    = "MIKE_LOGIN_PASSWORD"
-	EnvEncryptionKey    = "MIKE_ENCRYPTION_KEY"
-	EnvRegistryURL      = "MIKE_REGISTRY_URL"
-	EnvExtMountRoots    = "MIKE_EXT_MOUNT_ROOTS"
-	EnvAgentPath        = "MIKE_AGENT_PATH"
-	EnvSkipSandboxSweep = "MIKE_SANDBOX_SKIP_STARTUP_CLEANUP"
-	EnvTrustProxy       = "MIKE_TRUST_PROXY"
-	EnvLoginRateLimit   = "MIKE_LOGIN_RATE_LIMIT"
-	EnvAllowRootFS      = "MIKE_ALLOW_ROOT_FS"
-	EnvDangerZone       = "DANGER_ZONE"
-	EnvGCDryRun         = "MIKE_GC_DRY_RUN"
-	EnvPProf            = "MIKE_PPROF"
-	EnvMemoryBudgetPct  = "MIKE_MEMORY_BUDGET_PCT"
+	EnvPort           = "MIKE_PORT"
+	EnvListen         = "MIKE_LISTEN"
+	EnvDataDir        = "MIKE_DATA_DIR"
+	EnvWorktreesDir   = "MIKE_WORKTREES_DIR"
+	EnvFrontendDist   = "MIKE_FRONTEND_DIST"
+	EnvTLS            = "MIKE_TLS"
+	EnvAllowedHosts   = "MIKE_ALLOWED_HOSTS"
+	EnvLogLevel       = "MIKE_LOG_LEVEL"
+	EnvLoginPassword  = "MIKE_LOGIN_PASSWORD"
+	EnvEncryptionKey  = "MIKE_ENCRYPTION_KEY"
+	EnvRegistryURL    = "MIKE_REGISTRY_URL"
+	EnvUpdateURL      = "MIKE_UPDATE_URL"
+	EnvDisableUpdates = "MIKE_DISABLE_UPDATES"
+	// EnvUpdateCheckDeprecated is read by nothing: it is the tri-state this variable replaced, named
+	// only so an operator whose .env still sets it is told at boot.
+	EnvUpdateCheckDeprecated = "MIKE_UPDATE_CHECK"
+	EnvExtMountRoots         = "MIKE_EXT_MOUNT_ROOTS"
+	EnvAgentPath             = "MIKE_AGENT_PATH"
+	EnvSkipSandboxSweep      = "MIKE_SANDBOX_SKIP_STARTUP_CLEANUP"
+	EnvTrustProxy            = "MIKE_TRUST_PROXY"
+	EnvLoginRateLimit        = "MIKE_LOGIN_RATE_LIMIT"
+	EnvAllowRootFS           = "MIKE_ALLOW_ROOT_FS"
+	EnvDangerZone            = "DANGER_ZONE"
+	EnvGCDryRun              = "MIKE_GC_DRY_RUN"
+	EnvPProf                 = "MIKE_PPROF"
+	EnvMemoryBudgetPct       = "MIKE_MEMORY_BUDGET_PCT"
 )
 
 // DefaultPort and DefaultListenAddr are the built-in defaults of the ladder. Loopback by default
@@ -113,6 +119,13 @@ type Config struct {
 	MasterPassword string
 	EncryptionKey  string
 	RegistryURL    string
+
+	// UpdateManifestURL is where the release manifest is read from. Empty means the hosted default.
+	UpdateManifestURL string
+	// DisableUpdates is the organization-level kill switch for the server's own release updates: no
+	// check, no download, no install, no restart, and no prompt about any of them. It outranks the
+	// stored preference and cannot be answered from a browser.
+	DisableUpdates bool
 
 	// ExtMountRoots are the extra host roots an extension sandbox may bind-mount, beyond the
 	// implicit ones. Still an allowlist.
@@ -205,6 +218,16 @@ func Resolve(f Flags) (Config, error) {
 	// Empty means "not given": the hosted index is the config package's default (config.DefaultRegistryURL),
 	// and this package does not duplicate the URL.
 	c.RegistryURL = resolveString("", EnvRegistryURL, "")
+	// The manifest is the channel a newer binary is announced over, so its scheme is checked at boot.
+	c.UpdateManifestURL, err = resolveUpdateURL(os.Getenv(EnvUpdateURL))
+	if err != nil {
+		return Config{}, err
+	}
+	c.DisableUpdates = resolveDisable(EnvDisableUpdates, &c.Warnings)
+	if stale := os.Getenv(EnvUpdateCheckDeprecated); stale != "" {
+		c.Warnings = append(c.Warnings, fmt.Sprintf("%s=%q is no longer read: release updates are turned off with %s=1, and are otherwise decided in Settings → About",
+			EnvUpdateCheckDeprecated, stale, EnvDisableUpdates))
+	}
 	c.ExtMountRoots = splitPathList(os.Getenv(EnvExtMountRoots))
 	c.AgentPath = resolveString("", EnvAgentPath, "")
 	c.SweepStaleContainersAtBoot = os.Getenv(EnvSkipSandboxSweep) == ""
@@ -347,6 +370,44 @@ func resolvePercent(raw string) (int, error) {
 // typo (true, yes, on) is not the opt-in it was meant to be, and a set-but-empty value keeps the
 // safe behaviour.
 func isOne(envName string) bool { return os.Getenv(envName) == "1" }
+
+// resolveDisable reads a switch whose only job is to turn a capability off. It follows the opt-in shape —
+// only the exact value "1" disables, a set-but-empty value means unset — and says out loud when a
+// truthy-looking value disabled nothing, because that is the failure this switch exists to prevent. "0" is
+// the switch's own off spelling, so it disables nothing quietly.
+func resolveDisable(envName string, warnings *[]string) bool {
+	raw := os.Getenv(envName)
+	switch raw {
+	case "", "0":
+		return false
+	case "1":
+		return true
+	}
+	*warnings = append(*warnings, fmt.Sprintf("%s=%q is not the exact value 1, so it disables nothing; set it to 1 to disable, or unset it to leave the decision to Settings", envName, raw))
+	return false
+}
+
+// resolveUpdateURL accepts the release manifest's location. HTTPS is required because the manifest is the
+// channel a newer binary is announced over; plain HTTP only on loopback.
+func resolveUpdateURL(raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "", fmt.Errorf("%s=%q is not a URL", EnvUpdateURL, raw)
+	}
+	host := u.Hostname()
+	loopback := host == "localhost" || net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback()
+	switch {
+	case u.Scheme == "https":
+		return raw, nil
+	case u.Scheme == "http" && loopback:
+		return raw, nil
+	default:
+		return "", fmt.Errorf("%s=%q must be https (http is accepted only on loopback)", EnvUpdateURL, raw)
+	}
+}
 
 // listenAddr builds the server listen address from a listen address and port.
 // An empty address means loopback; "0.0.0.0"/"::" are the explicit

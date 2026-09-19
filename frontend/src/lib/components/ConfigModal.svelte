@@ -16,8 +16,10 @@
     import ExtensionsTab from './ConfigModal/ExtensionsTab.svelte';
     import SessionsSection from './ConfigModal/SessionsSection.svelte';
     import ApiTokensSection from './ConfigModal/ApiTokensSection.svelte';
+    import UpdatesSection from './ConfigModal/UpdatesSection.svelte';
     import pwaIcon from '$lib/assets/icons/pwa-icon.svg?raw';
     import { checkNow, type UpdateOutcome } from '$lib/services/app-update';
+    import { updateCheck } from '$lib/services/update-check.svelte';
 
     let { config, onClose, onSaved, onSignOut }: { config: Config | null; onClose: () => void; onSaved: () => void; onSignOut?: () => void | Promise<void> } = $props();
 
@@ -47,14 +49,17 @@
     let keyboardMultiSelectClick = $state<string | undefined>(undefined);
     let keyboardHideHints = $state(false);
     let hideModelBadge = $state(false);
+    // null is "nobody has answered yet", which is not the same state as false: the first-run question
+    // is owed until this holds an answer, so an unrelated Save must not write a false of its own.
+    let updateCheckEnabled = $state<boolean | null>(null);
     let sortOldestFirst = $state(false);
     let autoMaximizeChat = $state(true);
     let notifyOnReview = $state(false);
     let loading = $state(false);
     let error = $state('');
 
-    // Tab navigation
-    let activeTab = $state('providers');
+    // The modal is mounted per open, so the tab the opener asked for is read once here.
+    let activeTab = $state<string>(uiStore.settingsTab ?? 'providers');
 
     // Track unsaved changes
     let hasChanges = $state(false);
@@ -227,6 +232,7 @@
             keyboardMultiSelectClick = config.keyboard_shortcuts?.multi_select_click;
             keyboardHideHints = config.keyboard_shortcuts?.hide_hints === true;
             hideModelBadge = config.hide_model_badge === true;
+            updateCheckEnabled = config.update_check_enabled ?? null;
             sortOldestFirst = config.sort_oldest_first === true;
             autoMaximizeChat = config.auto_maximize_chat_mobile !== false;
             notifyOnReview = uiStore.notifyOnReview;
@@ -509,6 +515,12 @@
         return '';
     }
 
+    // Writing `false` because the row was never touched would take the first-run question off the
+    // table for good; "declined" is a thing a person said.
+    function updateCheckPayload(payload: Config): Config {
+        return updateCheckEnabled === null ? payload : { ...payload, update_check_enabled: updateCheckEnabled };
+    }
+
     async function handleSave() {
         const validationError = validatePrimaryProviders();
         if (validationError) {
@@ -561,7 +573,7 @@
                     }
                     return base;
                 });
-            const cfg = await updateConfig({
+            const cfg = await updateConfig(updateCheckPayload({
                 workspace_dir: config?.workspace_dir || '',
                 providers: savedProviders,
                 worker_provider: workerProvider,
@@ -579,10 +591,12 @@
                 sort_oldest_first: sortOldestFirst,
                 auto_maximize_chat_mobile: autoMaximizeChat,
                 keyboard_shortcuts: { create_task: keyboardCreateTask, create_task_submit: keyboardCreateTaskSubmit, open_terminal: keyboardOpenTerminal, start_task: keyboardStartTask, toggle_fullscreen: keyboardToggleFullscreen, multi_select_click: keyboardMultiSelectClick, hide_hints: keyboardHideHints },
-            } as Config);
+            } as Config));
             appStore.config = cfg;
             uiStore.notifyOnReview = notifyOnReview;
             uiStore.persistNotifyOnReview();
+            // The switch may have just answered the question the dot is waiting on.
+            void updateCheck.refresh();
             onSaved();
         } catch (e) {
             error = String(e);
@@ -864,6 +878,10 @@
                     </div>
                 </div>
             </div>
+
+            <!-- The server's own release: a different question from the one above (that button asks about
+                 this browser's assets), and the only place the update answers are given. -->
+            <UpdatesSection bind:enabled={updateCheckEnabled} onDirty={markDirty} />
 
             {#if appStore.pwaInstallPrompt}
             <div class="section">

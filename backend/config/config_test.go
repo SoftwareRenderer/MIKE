@@ -107,6 +107,13 @@ func TestUIFlagPreferences(t *testing.T) {
 			set:  func(c *types.Config, v *bool) { c.AutoMaximizeChatMobile = v },
 			get:  func(c *types.Config) *bool { return c.AutoMaximizeChatMobile },
 		},
+		{
+			// Unset is "never asked", not "off": a stored answer must not dissolve back into
+			// never-asked, and only the round-trip rows tell them apart.
+			name: "update_check_enabled",
+			set:  func(c *types.Config, v *bool) { c.UpdateCheckEnabled = v },
+			get:  func(c *types.Config) *bool { return c.UpdateCheckEnabled },
+		},
 	}
 
 	for _, f := range flags {

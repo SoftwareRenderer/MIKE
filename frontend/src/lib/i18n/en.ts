@@ -701,6 +701,52 @@ const catalog = {
     'settings.extensions.needsSetupNote.before': 'Requires additional setup after installation: it reads resolved dependencies from',
     'settings.extensions.needsSetupNote.after': 'inside its sandbox. Point it at a folder of your choosing afterwards — until you do, it resolves only what its own image contains.',
 
+    // ═══ updates.* — this server's own release (Settings → About) ═══
+
+    // Only text a person can act on is written here. A refusal they cannot act on comes from the server
+    // and is shown in the server's own words. docs/auto-update.md.
+    'updates.title': 'Release updates',
+    'updates.enable': 'Check for new releases',
+    'updates.enableDesc': 'Ask {host} once a day whether a newer release exists, and download one when it does. Nothing is installed until you click Install.',
+    'updates.managed': 'Updates are managed by your organization.',
+    'updates.off': 'Checks are off. MIKE will not look for a new release on its own.',
+    'updates.noneKnown': 'MIKE has not checked for a new release yet.',
+    'updates.available': 'Release {version} is available',
+    'updates.upToDate': 'You are up to date — {version} is the latest release',
+    'updates.lastChecked': 'Last checked {time}',
+    'updates.check': 'Check now',
+    'updates.checkHint': 'Check for a new release now, instead of waiting for the daily check',
+    'updates.download': 'Download',
+    'updates.downloadHint': 'Download the release now and check that its files arrived complete and unmodified. Nothing on this server changes until you install it.',
+    'updates.downloading': 'Downloading…',
+    'updates.prepared': '{version} is downloaded and verified',
+    'updates.preparedSize': '{size} downloaded',
+    'updates.preparedFiles': 'Installing replaces {files} files',
+    'updates.install': 'Install {version}',
+    'updates.installHint': 'Replace this server’s files with the downloaded release, then restart the server so it runs them',
+    'updates.installing': 'Installing…',
+    'updates.staged': '{version} is on disk. Restart the server to run it.',
+    'updates.backup': 'The release you had before is kept in {path}',
+    'updates.rollback': 'Rolling back is manual: stop the server and run the saved copy.',
+    'updates.restart': 'Restart now',
+    'updates.restartHint': 'Stop the server and start it again so it runs the new release',
+    'updates.applying': 'Restarting…',
+    'updates.restarting': 'The server is restarting. Reload this page once it answers again.',
+    'updates.cannotStage': 'This server cannot update its own files.',
+    // The command is what a container has to run, so it stays exact rather than translated.
+    'updates.pullCommand': 'docker compose pull && docker compose up -d',
+    'updates.dot.update': 'A new release is available',
+    'updates.dot.ready': 'A release is downloaded and waiting to be installed',
+    'updates.dot.question': 'MIKE is asking whether it may check for new releases',
+    'updates.ready.title': 'Release {version} is downloaded and verified',
+    'updates.ready.message': 'Install it now? The server will restart to run it.',
+    'updates.ready.install': 'Install now',
+    'updates.ready.later': 'Later',
+    'updates.consent.title': 'Enable automatic updates?',
+    'updates.consent.message': 'Would you like MIKE to automatically check for updates once per day?',
+    'updates.consent.yes': 'Yes',
+    'updates.consent.no': 'No',
+
     // ═══ notify.* — browser notifications ═══
 
     // The task title and the project name are data, so only the shape of the sentence is here.
@@ -912,6 +958,10 @@ const catalog = {
     'api.fetchAPITokens': 'Failed to fetch tokens',
     'api.createAPIToken': 'Failed to create token',
     'api.revokeAPIToken': 'Failed to revoke token',
+    'api.fetchUpdateStatus': 'Failed to read the update status',
+    'api.prepareUpdate': 'Failed to download the release',
+    'api.applyUpdate': 'Failed to install the release',
+    'api.restartToUpdate': 'Failed to restart the server',
     'api.fetchThreads': 'Failed to fetch threads',
     'api.loadExtensions': 'Failed to load extensions',
     'api.loadRegistry': 'Failed to load registry',

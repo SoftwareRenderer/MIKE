@@ -33,6 +33,14 @@ version of that list and of what each route does; `TestTokenScopeIsTheApprovedSe
 that list together. Nothing else in this file changes for a token caller except CSRF, which has no
 cookie to protect.
 
+The five `/api/updates/*` routes stay out of `tokenScope` for the reason that section is about: a bearer token
+is what a headless client carries, and no headless client needs to replace this server's binary. They are
+session + CSRF routes, all five declare their verb, and `GET /api/updates/status` answers from what the last
+check learned rather than making a request of its own — the row that route serves is docs/auto-update.md.
+`POST /api/updates/prepare` and `POST /api/updates/apply` are the pair that changes anything, split so the
+fetch can run on a detached context while the swap stays behind a click; the route that ends the process is
+`POST /api/updates/restart`.
+
 ## Frames
 
 - Inbound frames are `stream.AppStreamMessage` (`Data` is `json.RawMessage`). **Outbound** frames are

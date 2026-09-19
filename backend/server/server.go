@@ -37,6 +37,7 @@ import (
 	"mike/backend/term"
 	"mike/backend/tls"
 	"mike/backend/types"
+	"mike/backend/updates"
 	"mike/pkg/keylock"
 	"mike/pkg/logging"
 
@@ -57,18 +58,20 @@ type Server struct {
 	// registers where it is built (lifecycle.go), so a step that was never registered simply never runs.
 	shutdown [stageCount]func()
 
-	store               *store.Store
-	configStore         *config.ConfigStore
-	sessionMgr          *auth.SessionManager
-	apiTokens           *auth.APITokenManager
-	projectHandler      *api.ProjectHandler
-	taskHandler         *api.TaskHandler
-	boardHandler        *api.BoardHandler
-	appStreamMgr        *stream.AppStreamManager
-	gitHandler          *api.GitHandler
-	executor            *kanbanexec.TaskExecutor
-	terminalMgr         *term.TerminalManager
-	sandboxMgr          *sandbox.SandboxManager
+	store          *store.Store
+	configStore    *config.ConfigStore
+	sessionMgr     *auth.SessionManager
+	apiTokens      *auth.APITokenManager
+	projectHandler *api.ProjectHandler
+	taskHandler    *api.TaskHandler
+	boardHandler   *api.BoardHandler
+	appStreamMgr   *stream.AppStreamManager
+	gitHandler     *api.GitHandler
+	executor       *kanbanexec.TaskExecutor
+	terminalMgr    *term.TerminalManager
+	sandboxMgr     *sandbox.SandboxManager
+	updatesService *updates.Service
+	restart             chan struct{}
 	sandboxStatsSampler *stream.SandboxStatsSampler
 	agentRegistry       *agent.AgentRegistry
 	extStore            *extensions.ExtensionStore
@@ -385,6 +388,41 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 		SweepStaleContainersAtBoot: settings.SweepStaleContainersAtBoot,
 		AgentPath:                  settings.AgentPath,
 	}
+	s.restart = make(chan struct{}, 1)
+	// The one place the update decisions are assembled: the URL and override from the resolved startup
+	// config, the preference from the store, and the two paths only this server knows.
+	updatesService, err := updates.New(updates.Options{
+		ManifestURL:    settings.UpdateManifestURL,
+		Version:        Version,
+		Store:          updateStateStore{store},
+		Bridge:         sandboxruntime.NewRuntimeWithBoot(boot).GetAgentBinaryPath,
+		DisableUpdates: settings.DisableUpdates,
+		Restart: func() error {
+			select {
+			case s.restart <- struct{}{}:
+				return nil
+			default:
+				// A request is already waiting to restart; asking twice changes nothing.
+				return nil
+			}
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create update service: %w", err)
+	}
+	s.updatesService = updatesService
+	// The posture is announced once per boot so the operator's log, not the UI, is the record of which
+	// switch this process booted on.
+	if settings.DisableUpdates {
+		logging.For(logging.Updates).Infof("release updates are disabled by %s: this server will not check for, download, install or restart onto a release", updates.EnvDisableUpdates)
+	} else {
+		manifestURL := settings.UpdateManifestURL
+		if manifestURL == "" {
+			manifestURL = updates.DefaultManifestURL
+		}
+		logging.For(logging.Updates).Infof("release updates are enabled against %s: the daily check and the download of a newer release run once this deployment opts in under Settings \u2192 About", manifestURL)
+	}
+
 	s.sandboxMgr = sandbox.NewSandboxManager(boot)
 	defer s.reg(stageSandboxContainers, "sandbox containers", s.sandboxMgr.Cleanup)()
 	// Emits a sandbox_stats task event only when usage changes.

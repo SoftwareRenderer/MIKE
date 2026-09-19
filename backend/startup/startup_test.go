@@ -8,6 +8,7 @@ import (
 	"mike/backend/extensions"
 	"mike/backend/fsutil"
 	"mike/backend/sandbox"
+	"mike/backend/updates"
 	"mike/pkg/logging"
 )
 
@@ -218,7 +219,8 @@ var resolverEnv = []string{
 	EnvPort, EnvListen, EnvDataDir, EnvWorktreesDir, EnvFrontendDist, EnvTLS, EnvAllowedHosts,
 	EnvLogLevel, EnvLoginPassword, EnvEncryptionKey, EnvRegistryURL, EnvExtMountRoots,
 	EnvAgentPath, EnvSkipSandboxSweep, EnvTrustProxy, EnvLoginRateLimit, EnvAllowRootFS,
-	EnvDangerZone, EnvGCDryRun, EnvPProf, EnvMemoryBudgetPct,
+	EnvDangerZone, EnvGCDryRun, EnvPProf, EnvMemoryBudgetPct, EnvUpdateURL, EnvDisableUpdates,
+	EnvUpdateCheckDeprecated,
 }
 
 func clearResolverEnv(t testing.TB) {
@@ -514,6 +516,111 @@ func TestEnvNamesMatchTheirOwners(t *testing.T) {
 	if extensions.EnvMountRoots != EnvExtMountRoots {
 		t.Errorf("extensions.EnvMountRoots = %q, startup says %q", extensions.EnvMountRoots, EnvExtMountRoots)
 	}
+	if updates.EnvManifestURL != EnvUpdateURL {
+		t.Errorf("updates.EnvManifestURL = %q, startup says %q", updates.EnvManifestURL, EnvUpdateURL)
+	}
+	if updates.EnvDisableUpdates != EnvDisableUpdates {
+		t.Errorf("updates.EnvDisableUpdates = %q, startup says %q", updates.EnvDisableUpdates, EnvDisableUpdates)
+	}
+}
+
+// The manifest's URL is decided at boot, and a value that cannot be used refuses the boot rather than
+// surfacing as a failed check weeks later. Plain HTTP survives only on loopback.
+func TestUpdateManifestURLIsResolvedAtBoot(t *testing.T) {
+	cases := []struct {
+		value   string
+		want    string
+		wantErr bool
+	}{
+		{value: "", want: ""},
+		{value: "https://getmike.dev/version", want: "https://getmike.dev/version"},
+		{value: "https://mirror.example/version.json", want: "https://mirror.example/version.json"},
+		{value: "http://127.0.0.1:8080/version", want: "http://127.0.0.1:8080/version"},
+		{value: "http://localhost:8080/version", want: "http://localhost:8080/version"},
+		{value: "http://[::1]:8080/version", want: "http://[::1]:8080/version"},
+		{value: "http://getmike.dev/version", wantErr: true},
+		{value: "ftp://getmike.dev/version", wantErr: true},
+		{value: "getmike.dev/version", wantErr: true},
+		{value: "://", wantErr: true},
+		{value: "https:///no-host", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run("MIKE_UPDATE_URL="+tc.value, func(t *testing.T) {
+			clearResolverEnv(t)
+			t.Setenv(EnvUpdateURL, tc.value)
+			c, err := resolveWithKey(t, Flags{})
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("Resolve accepted %q (UpdateManifestURL=%q)", tc.value, c.UpdateManifestURL)
+				}
+				if !strings.Contains(err.Error(), EnvUpdateURL) {
+					t.Errorf("refusal %q does not name %s", err, EnvUpdateURL)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if c.UpdateManifestURL != tc.want {
+				t.Errorf("UpdateManifestURL = %q, want %q", c.UpdateManifestURL, tc.want)
+			}
+		})
+	}
+}
+
+// The switch disables on one exact value, and a value that only looks like one says so: the failure it is
+// asked to prevent is a deployment believing itself switched off while it is not.
+func TestDisableUpdatesIsTheExactValue(t *testing.T) {
+	cases := []struct {
+		value    string
+		want     bool
+		wantWarn bool
+	}{
+		{value: ""},
+		{value: "0"},
+		{value: "1", want: true},
+		{value: "true", wantWarn: true},
+		{value: "yes", wantWarn: true},
+		{value: " 1 ", wantWarn: true},
+		{value: "01", wantWarn: true},
+	}
+	for _, tc := range cases {
+		t.Run("MIKE_DISABLE_UPDATES="+tc.value, func(t *testing.T) {
+			clearResolverEnv(t)
+			t.Setenv(EnvDisableUpdates, tc.value)
+			c := mustResolve(t, Flags{})
+			if c.DisableUpdates != tc.want {
+				t.Errorf("DisableUpdates = %v, want %v", c.DisableUpdates, tc.want)
+			}
+			warned := strings.Contains(strings.Join(c.Warnings, "\n"), EnvDisableUpdates)
+			if warned != tc.wantWarn {
+				t.Errorf("warned=%v, want %v (warnings: %v)", warned, tc.wantWarn, c.Warnings)
+			}
+			if tc.want && warned {
+				t.Errorf("the value that disabled also warned: %v", c.Warnings)
+			}
+		})
+	}
+
+	// The variable this replaced is read by nothing, but an .env still carrying it must not go quiet.
+	t.Run("the name it replaced is reported and ignored", func(t *testing.T) {
+		clearResolverEnv(t)
+		t.Setenv(EnvUpdateCheckDeprecated, "1")
+		c := mustResolve(t, Flags{})
+		if c.DisableUpdates {
+			t.Errorf("%s disabled updates; it is no longer read", EnvUpdateCheckDeprecated)
+		}
+		joined := strings.Join(c.Warnings, "\n")
+		if !strings.Contains(joined, EnvUpdateCheckDeprecated) || !strings.Contains(joined, EnvDisableUpdates) {
+			t.Errorf("the warning %q does not name both the stale name and its replacement", joined)
+		}
+
+		// A variable set but empty means unset, and an unset one warns nobody.
+		clearResolverEnv(t)
+		if c := mustResolve(t, Flags{}); strings.Contains(strings.Join(c.Warnings, "\n"), EnvUpdateCheckDeprecated) {
+			t.Errorf("an absent %s warned: %v", EnvUpdateCheckDeprecated, c.Warnings)
+		}
+	})
 }
 
 // A development build serves the directory its developer names, the flag over the environment; a

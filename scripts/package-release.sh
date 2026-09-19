@@ -55,6 +55,12 @@ if ! command -v go > /dev/null; then
     exit 1
 fi
 
+# The release manifest is generated from the checksum file, so python3 is needed to finish a package.
+if ! command -v python3 > /dev/null; then
+    echo "package-release: python3 is not on PATH; dist/version.json cannot be written without it" >&2
+    exit 1
+fi
+
 # Both come from the Makefile, and both reach a filename, a sed program and -ldflags below, so the
 # script checks them rather than trusting how it was called.
 if [[ ! "${VERSION:-}" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
@@ -204,5 +210,11 @@ done
 # The list is relative to dist/ so it names the files as a buyer sees them.
 ( cd "$OUT" && rm -f sha256sum.txt && sha256sum "${names[@]}" > sha256sum.txt )
 echo "package-release: $OUT/sha256sum.txt"
+
+# The manifest the update check reads. Its digests are read out of sha256sum.txt rather than
+# recomputed, so the two files a buyer and an install compare cannot disagree.
+UPDATE_BASE_URL="${UPDATE_BASE_URL:-https://getmike.dev/download}" \
+    python3 "$ROOT/scripts/gen-version-manifest.py" --dist "$OUT" --version "$VERSION"
+echo "package-release: $OUT/version.json"
 # Nothing here signs the archives, so this is as far as the build can vouch for them.
 echo "package-release: publish sha256sum.txt by a route other than the download, or sign the archives"

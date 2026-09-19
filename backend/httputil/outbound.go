@@ -2,10 +2,14 @@ package httputil
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -75,9 +79,48 @@ func DoOutboundWith(ctx context.Context, client *http.Client, r OutboundRequest)
 	return &OutboundAnswer{StatusCode: resp.StatusCode, ContentType: resp.Header.Get("Content-Type"), Body: body}, nil
 }
 
-func (a *OutboundAnswer) OK() bool { return a.StatusCode >= 200 && a.StatusCode < 300 }
-
+func (a *OutboundAnswer) OK() bool          { return a.StatusCode >= 200 && a.StatusCode < 300 }
 func (a *OutboundAnswer) RateLimited() bool { return a.StatusCode == http.StatusTooManyRequests }
+
+// ErrDownloadTooLarge says a response body went past the caller's limit.
+var ErrDownloadTooLarge = errors.New("download exceeds its limit")
+
+// DownloadToFile streams one GET to dest and returns the byte count and the digest.
+func DownloadToFile(ctx context.Context, client *http.Client, rawURL, dest string, limit int64) (int64, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, "", fmt.Errorf("%s answered %s", rawURL, resp.Status)
+	}
+
+	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return 0, "", err
+	}
+	defer f.Close()
+
+	hasher := sha256.New()
+	n, err := io.Copy(io.MultiWriter(f, hasher), io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return 0, "", err
+	}
+	if n > limit {
+		return 0, "", fmt.Errorf("%w: %s sent more than %d bytes", ErrDownloadTooLarge, rawURL, limit)
+	}
+	return n, hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+// DownloadToFileGranting is DownloadToFile over the egress client that admits the hosts a person named.
+func DownloadToFileGranting(ctx context.Context, rawURL, dest string, limit int64, grantedHosts []string) (int64, string, error) {
+	return DownloadToFile(ctx, NewExtensionEgressClientGranting(0, grantedHosts), rawURL, dest, limit)
+}
 
 // RefusedForCredentials reports a refusal outright or a lack of authority.
 func (a *OutboundAnswer) RefusedForCredentials() bool {

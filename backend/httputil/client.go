@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -84,6 +85,24 @@ func NewExtensionEgressClient(timeout time.Duration) *http.Client {
 // local dial.
 func publicAddress(ip netip.Addr) bool {
 	return ip.IsGlobalUnicast() && !ip.IsUnspecified()
+}
+
+// FetchSchemeAllowed reports whether a URL the operator named may be fetched at all: HTTPS always, plain
+// HTTP only when the host is loopback. It guards the URLs whose bytes decide what runs next.
+func FetchSchemeAllowed(u *url.URL) bool {
+	switch u.Scheme {
+	case "https":
+		return true
+	case "http":
+		host := u.Hostname()
+		if strings.EqualFold(host, "localhost") {
+			return true
+		}
+		ip := net.ParseIP(host)
+		return ip != nil && ip.IsLoopback()
+	default:
+		return false
+	}
 }
 
 func dialPublicOnly(ctx context.Context, network, addr string) (net.Conn, error) {

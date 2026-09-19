@@ -103,6 +103,9 @@ type Config struct {
 	DefaultAutoSummarizeThreshold *int           `json:"default_auto_summarize_threshold,omitempty"`
 	// HideModelBadge hides the model badge on board task cards. Nil = visible (default).
 	HideModelBadge *bool `json:"hide_model_badge,omitempty"`
+	// UpdateCheckEnabled is the operator's answer to "may MIKE ask whether a newer release exists".
+	// Nil means never answered — off, and still owed the first-run question. docs/auto-update.md.
+	UpdateCheckEnabled *bool `json:"update_check_enabled,omitempty"`
 	// RunSiblingsParallel starts all of a parent's startable subtasks at once
 	// (instead of one at a time). Nil = off (sequential, the default).
 	RunSiblingsParallel *bool `json:"run_siblings_parallel,omitempty"`

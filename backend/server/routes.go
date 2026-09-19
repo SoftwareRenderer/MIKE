@@ -14,6 +14,15 @@ func (s *Server) setupRoutes() {
 	// Health & auth
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/version", s.handleVersion)
+
+	// Server release updates (docs/auto-update.md): what is known, a check on demand, then the two
+	// separate clicks that change anything. Session + CSRF, and out of tokenScope: a bearer token must
+	// not be able to replace this binary.
+	s.mux.HandleFunc("GET /api/updates/status", s.handleUpdateStatus)
+	s.mux.HandleFunc("POST /api/updates/check", s.handleUpdateCheck)
+	s.mux.HandleFunc("POST /api/updates/prepare", s.handleUpdatePrepare)
+	s.mux.HandleFunc("POST /api/updates/apply", s.handleUpdateApply)
+	s.mux.HandleFunc("POST /api/updates/restart", s.handleUpdateRestart)
 	// Rate limit login attempts (5/min per IP by default; MIKE_LOGIN_RATE_LIMIT can
 	// raise or lower it, but no longer turn it off).
 	s.mux.Handle("POST /api/auth/login", RateLimitMiddleware(s.loginLimiter, s.settings.TrustProxy, http.HandlerFunc(s.handleAuthLogin)))

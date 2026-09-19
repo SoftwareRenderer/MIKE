@@ -59,6 +59,12 @@ export async function updateConfig(config: Config): Promise<Config> {
     return updateConfigRaw(config);
 }
 
+/** Answer the release-check question outside the Settings form (the first-run prompt does). A partial
+ *  body: PUT /api/config writes only the fields it names. */
+export async function setUpdateCheckConsent(enabled: boolean): Promise<void> {
+    await updateConfig({ update_check_enabled: enabled } as Config);
+}
+
 /** Test connectivity to an LLM provider by sending a minimal chat completion request. */
 export async function testConnection(llamaServerUrl: string, modelName: string, apiKey?: string): Promise<{ success: boolean; message: string }> {
     const res = await apiFetch(`${API_BASE}/config/test-connection`, {

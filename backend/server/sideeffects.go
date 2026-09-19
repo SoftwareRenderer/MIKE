@@ -91,6 +91,21 @@ var detachedOperations = []sideEffectEntry{
 			"one way: a row exists and the user regenerates, or no row exists — never a token whose caller cannot tell",
 	},
 	{
+		"POST /api/updates/prepare",
+		"downloads and verifies the release into this install's own directory. It is a download a person may " +
+			"be waiting on while the tab that started it navigates away, so it finishes and leaves one archive " +
+			"or none",
+	},
+	{
+		"POST /api/updates/apply",
+		"replaces the files in this install directory. Half a swap is a server that does not start, so the " +
+			"copy pass and the renames run on the detached context and finish whatever the tab does",
+	},
+	{
+		"POST /api/updates/restart",
+		"ends this process to apply a staged release. There is no half of a restart to be left holding",
+	},
+	{
 		"DELETE /api/tokens/{id}",
 		"revocation is the row's absence: a cancel that left it standing leaves a credential live that the user " +
 			"believes is gone",
@@ -114,9 +129,19 @@ var requestScopedReads = []sideEffectEntry{
 	{"GET /api/preview/{token}/{path...}", "a preview asset, served from the resolved worktree"},
 	{"GET /api/preview/{token}/nav", "the preview's navigation record"},
 	{
+		"POST /api/updates/check",
+		"a fetch of the release manifest that caches its answer as one config row. The verb looks like a " +
+			"mutation and is one: the caller asked whether anything is newer, and a cancel leaves the previous " +
+			"row standing, which is the same answer as no check at all",
+	},
+	{
 		"POST /api/extensions/{id}/proxy",
 		"a fetch through the manifest's domain allowlist. A verb that looks like a mutation and is one: the " +
 			"caller asked for bytes, nothing is persisted, and a cancel leaves nothing to explain",
+	},
+	{
+		"GET /api/updates/status",
+		"the cached check result and this install's shape; it performs no egress",
 	},
 	{
 		"POST /api/extensions/{id}/test-url",

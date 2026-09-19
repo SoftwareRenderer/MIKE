@@ -42,6 +42,8 @@ arrive by a route the operator did not read about.
 | `MIKE_ENCRYPTION_KEY` | Non-blank; derives the AES-256-GCM key for sensitive data. Server refuses to start without it. |
 | `MIKE_LOGIN_PASSWORD` | Master password for auth/sessions. Server refuses to start without it. Only its `sha256` digest is kept in memory; a weak one (< 8 chars, or a known default) additionally refuses a non-loopback listen address. |
 | `MIKE_REGISTRY_URL` | Extension registry index URL. Sourced **exclusively** from this env var (not DB-backed); falls back to `https://registry.getmike.dev/registry.json`. A bare path (no `http(s)://`/`file://` scheme) is a local file resolved against the CWD. |
+| `MIKE_UPDATE_URL` | Release manifest the update check reads. Falls back to `updates.DefaultManifestURL` (`https://getmike.dev/version`); a mirror or a local fixture names itself here. Read **once** at startup and handed to the service as a value. Must be `https` (loopback may be `http`) with a host; anything else **refuses the boot** naming the variable. An archive the manifest names is fetched only from this same host. **`docs/auto-update.md`**. |
+| `MIKE_DISABLE_UPDATES` | The organization-level kill switch for the server's own release updates: exactly `1` and this process will not check for, download, install or restart onto a release, and no browser is asked to opt in (About reads "Updates are managed by your organization"). `0` or unset leaves the decision to the `update_check_enabled` preference; any other value warns at boot that it **disabled nothing**. Replaces `MIKE_UPDATE_CHECK`, which is read by nothing and only warns an `.env` still carrying it. Applies to server releases only — the extension registry is untouched. **`docs/auto-update.md`**. |
 | `MIKE_TRUST_PROXY` | Set to `1` only behind a trusted reverse proxy that strips forwarding headers. Only then are `X-Forwarded-For` (rate-limit IP) and `X-Forwarded-Proto` (HTTPS redirect) honored; unset = ignored so they can't be spoofed. |
 | `MIKE_LISTEN` | Which socket the API is reachable on — it **never authorizes a `Host` header**. **Defaults to `127.0.0.1`**: the API is RCE-complete (terminal WS, git ops, file writes), so it is never public by accident. `0.0.0.0`/`::` are the explicit all-interfaces values; any other address listens on that interface only. (Renamed from `--bind`/`MIKE_BIND` — the old names do nothing; a stale `MIKE_BIND=0.0.0.0` comes up loopback-only.) |
 | `MIKE_ALLOWED_HOSTS` | Comma-separated extra hostnames accepted in the `Host` header (DNS-rebinding pinning, `HostPinMiddleware`). Accepted without listing: `localhost`, `127.0.0.1`, `::1`, the listen host. Anything else — a proxy's public domain, `hostname.local`, a LAN IP — gets **HTTP 421** until listed here; a missing/empty `Host` is rejected too. Ports are stripped on both sides. `--allowed-hosts` **overrides** (not extends); `Serve()` logs the effective value and every rejection names both. |
@@ -67,9 +69,10 @@ non-loopback startup rules, certs and distribution: `docs/tls.md`.
 
 `make package` builds `dist/mike-server-<version>-<os>-<arch>.tar.gz` for `linux/amd64` and
 `linux/arm64` (`scripts/package-release.sh`; `make package-amd64` builds one target), and writes
-`dist/sha256sum.txt` beside them. `<version>` is `VERSION` when that is a dotted number and `0.0.0`
-when the tree names no version, so an untagged checkout never puts a commit hash in a filename
-someone runs `sha256sum -c` on.
+`dist/sha256sum.txt` and `dist/version.json` beside them. `<version>` is `VERSION` when that is a dotted
+number and `0.0.0` when the tree names no version, so an untagged checkout never puts a commit hash in a
+filename someone runs `sha256sum -c` on. `version.json` is the release manifest the update check reads; its
+digests are read out of `sha256sum.txt`, so the two agree by construction (**`docs/auto-update.md`**).
 
 Both binaries in an archive are built for that archive's `GOARCH`, including `sandbox/sandbox-bridge`
 whose committed copy belongs to whoever last ran `make bridge`. `CGO_ENABLED=0` throughout — SQLite here
@@ -103,4 +106,4 @@ version constant to bump. The script re-checks both variables it is handed — `
 
 `dist/sha256sum.txt` proves an archive matches the checksum file beside it. Nothing signs the archives,
 so that pair is only as trusted as whoever handed them over: the package README says so where it tells
-the buyer to run `sha256sum -c`.
+the buyer to run `sha256sum -c`. The update check inherits that limit and says so (**`docs/auto-update.md`**).
