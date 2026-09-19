@@ -1779,24 +1779,15 @@ func composeSystemPrompt(task *types.Task, worktreePath, projectName string, san
 }
 
 // buildMessagesFromDB loads persisted messages and builds the system prompt.
-// The most recent summary is injected into the system prompt.
+// The summary in effect is extracted from the rebuilt conversation, so it is read by the one rule
+// (extractPrevSummary) rather than by a second walk over the stored rows.
 func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktreePath, projectName string, sandboxEnabled bool) []types.ChatMessage {
-	// Extract most recent summary for the system prompt.
-	var summary string
-	for i := len(taskMsgs) - 1; i >= 0; i-- {
-		if taskMsgs[i].Role == "summarization" {
-			summary = taskMsgs[i].Content
-			break
-		}
-	}
-
-	messages := []types.ChatMessage{{Role: "system", Content: composeSystemPrompt(task, worktreePath, projectName, sandboxEnabled, summary)}}
-
-	// One rebuild path for every consumer of persisted rows (see groupTaskMessages): the
-	// system prompt on front, the conversation — tool calls with their assistant row, tool
-	// results right after, advisories under their own role — behind it.
-	messages = append(messages, groupTaskMessages(taskMsgs)...)
-	return messages
+	// One rebuild path for every consumer of persisted rows (see groupTaskMessages): the conversation —
+	// tool calls with their assistant row, tool results right after, advisories under their own role —
+	// and the system prompt on front, carrying that conversation's summary.
+	conversation := groupTaskMessages(taskMsgs)
+	prompt := composeSystemPrompt(task, worktreePath, projectName, sandboxEnabled, extractPrevSummary(conversation))
+	return append([]types.ChatMessage{{Role: "system", Content: prompt}}, conversation...)
 }
 
 // runningState returns the executionState of a running task, or nil. Its body takes taskMu here

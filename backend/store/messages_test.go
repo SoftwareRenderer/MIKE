@@ -732,3 +732,70 @@ func TestDeleteTaskMessagesAfter_ReportsDeletedCheckpoints(t *testing.T) {
 		t.Errorf("the earlier checkpoint and the summary must survive: %+v", remaining)
 	}
 }
+
+func TestLastSummarizationMessageID(t *testing.T) {
+	s := testStore(t)
+	if err := s.CreateProject(newProject("proj-1", "test", "/tmp/test")); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	for _, th := range []*types.TaskThread{
+		newThread("thread-1", "task-1", "Main"),
+		newThread("thread-2", "task-1", "Fork"),
+	} {
+		if err := s.CreateThread(th); err != nil {
+			t.Fatalf("create thread %s: %v", th.ID, err)
+		}
+	}
+
+	base := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	in := func(id, threadID, role, content string, offset time.Duration) {
+		m := newMessage(id, "task-1", role, content)
+		m.ThreadID = threadID
+		m.CreatedAt = base.Add(offset)
+		if err := s.CreateTaskMessage(m); err != nil {
+			t.Fatalf("create message %s: %v", id, err)
+		}
+	}
+	in("turn-1", "thread-1", "user", "first", 0)
+	in("summary-old", "thread-1", "summarization", "old summary", time.Second)
+	in("turn-2", "thread-1", "user", "second", 2*time.Second)
+	// A created_at tie, as one turn writes several rows with the same instant: rowid
+	// breaks it, which is the rule GetTaskMessages reads the thread in.
+	in("summary-first", "thread-1", "summarization", "tied summary", 3*time.Second)
+	in("summary-tied", "thread-1", "summarization", "newest summary", 3*time.Second)
+	in("fork-summary", "thread-2", "summarization", "fork summary", 9*time.Second)
+
+	got, err := s.LastSummarizationMessageID("thread-1")
+	if err != nil {
+		t.Fatalf("last summarization id: %v", err)
+	}
+	if got != "summary-tied" {
+		t.Fatalf("expected summary-tied (newer than the tied row, and not thread-2's), got %q", got)
+	}
+
+	// thread-2's answer is its own row, however much later it is.
+	got, err = s.LastSummarizationMessageID("thread-2")
+	if err != nil {
+		t.Fatalf("last summarization id for thread-2: %v", err)
+	}
+	if got != "fork-summary" {
+		t.Fatalf("expected fork-summary, got %q", got)
+	}
+
+	if err := s.DeleteTaskMessageByID("fork-summary"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	got, err = s.LastSummarizationMessageID("thread-2")
+	if err != nil {
+		t.Fatalf("last summarization id for an unsummarized thread: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("expected an empty id for a thread with no summary, got %q", got)
+	}
+	if got, err := s.LastSummarizationMessageID(""); err != nil || got != "" {
+		t.Fatalf("expected (\"\", nil) for an empty thread id, got (%q, %v)", got, err)
+	}
+}

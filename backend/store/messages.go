@@ -246,6 +246,28 @@ func (s *Store) GetLastUserMessageInThread(threadID string) (string, error) {
 	return id, err
 }
 
+// LastSummarizationMessageID returns the id of the newest summarization row of a thread, or "" when the
+// thread has none. It is the SQL twin of extractPrevSummary in backend/exec: one row is the summary in
+// effect and both must name it, because this one decides which edited row is worth waking a task for.
+func (s *Store) LastSummarizationMessageID(threadID string) (string, error) {
+	if threadID == "" {
+		return "", nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var id string
+	err := s.db.QueryRow(`
+		SELECT id FROM task_messages
+		WHERE thread_id = ? AND role = 'summarization'
+		ORDER BY created_at DESC, rowid DESC
+		LIMIT 1
+	`, threadID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
+}
+
 // GetLastMessageInThread returns the newest row of a thread, or nil when it has none.
 // It ignores role, so callers can ask "has anything happened since this message?". rowid
 // breaks ties inside one turn, where an assistant row and its tool_call rows share a

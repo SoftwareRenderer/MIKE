@@ -254,6 +254,10 @@ func estimatePromptTokens(messages []types.ChatMessage) int {
 	return total
 }
 
+// extractPrevSummary returns the summary in effect: the content of the last summarization message, since
+// a rolling summary appends a message rather than rewriting one. store.LastSummarizationMessageID is the
+// same rule over stored rows, and the two must name the same one — that id decides which edited row is
+// worth waking a running task for.
 func extractPrevSummary(messages []types.ChatMessage) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == "summarization" {

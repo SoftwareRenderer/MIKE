@@ -58,19 +58,19 @@ type Server struct {
 	// registers where it is built (lifecycle.go), so a step that was never registered simply never runs.
 	shutdown [stageCount]func()
 
-	store          *store.Store
-	configStore    *config.ConfigStore
-	sessionMgr     *auth.SessionManager
-	apiTokens      *auth.APITokenManager
-	projectHandler *api.ProjectHandler
-	taskHandler    *api.TaskHandler
-	boardHandler   *api.BoardHandler
-	appStreamMgr   *stream.AppStreamManager
-	gitHandler     *api.GitHandler
-	executor       *kanbanexec.TaskExecutor
-	terminalMgr    *term.TerminalManager
-	sandboxMgr     *sandbox.SandboxManager
-	updatesService *updates.Service
+	store               *store.Store
+	configStore         *config.ConfigStore
+	sessionMgr          *auth.SessionManager
+	apiTokens           *auth.APITokenManager
+	projectHandler      *api.ProjectHandler
+	taskHandler         *api.TaskHandler
+	boardHandler        *api.BoardHandler
+	appStreamMgr        *stream.AppStreamManager
+	gitHandler          *api.GitHandler
+	executor            *kanbanexec.TaskExecutor
+	terminalMgr         *term.TerminalManager
+	sandboxMgr          *sandbox.SandboxManager
+	updatesService      *updates.Service
 	restart             chan struct{}
 	sandboxStatsSampler *stream.SandboxStatsSampler
 	agentRegistry       *agent.AgentRegistry
