@@ -177,3 +177,17 @@ func TestBuildMessagesFromDB_MissingToolResultStaysMissing(t *testing.T) {
 		t.Fatalf("results = %v, want [A]", results)
 	}
 }
+
+// The system prompt's summary is read off the rebuilt conversation, so a summarization row has to
+// survive that rebuild: a row dropped from the conversation is a summary missing from the prompt.
+func TestRebuildKeepsTheSummarizationRows(t *testing.T) {
+	rows := []types.TaskMessage{
+		{Role: "user", Content: "first request"},
+		{Role: "summarization", Content: "the superseded summary"},
+		{Role: "user", Content: "second request"},
+		{Role: "summarization", Content: "the edited summary"},
+	}
+	if got := extractPrevSummary(rebuildRows(rows)); got != "the edited summary" {
+		t.Fatalf("the rebuilt conversation does not carry the summary in effect: %q", got)
+	}
+}

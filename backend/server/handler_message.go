@@ -3,7 +3,9 @@ package server
 import (
 	"encoding/json"
 	"mike/backend/httputil"
+	"mike/pkg/logging"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -231,17 +233,36 @@ func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPatch {
 		var req struct {
-			Content    string `json:"content"`
-			CommitHash string `json:"git_commit_hash"`
+			Content    *json.RawMessage `json:"content"`
+			CommitHash string           `json:"git_commit_hash"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			JSONError(w, http.StatusBadRequest, "invalid request")
 			return
 		}
-		if req.Content != "" {
-			if err := s.store.UpdateTaskMessage(messageID, req.Content); err != nil {
+		// Absent leaves the row alone. A present value is written as given, but never a blank one: a
+		// summarization row's content is the whole conversation for everything before it, which
+		// buildLLMContext drops on the strength of that row existing.
+		var content *string
+		if req.Content != nil {
+			var written string
+			if err := json.Unmarshal(*req.Content, &written); err != nil {
+				JSONError(w, http.StatusBadRequest, "content must be a string")
+				return
+			}
+			if strings.TrimSpace(written) == "" {
+				JSONError(w, http.StatusBadRequest, "content must not be empty")
+				return
+			}
+			content = &written
+		}
+		if content != nil {
+			if err := s.store.UpdateTaskMessage(messageID, *content); err != nil {
 				Fail(w, err, "update message", "message not found")
 				return
+			}
+			if msg.Role == "summarization" {
+				s.publishSummaryEdit(projectID, taskID, msg, *content)
 			}
 		}
 		if req.CommitHash != "" {
@@ -260,6 +281,31 @@ func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httputil.MethodNotAllowed(w)
+}
+
+// publishSummaryEdit announces an edited summary to the task's clients and, when the edit changed the
+// summary in effect, wakes the running executor so its next call rebuilds the system prompt from the
+// stored row. Waking it for an older row would cancel a turn over a row nothing reads.
+func (s *Server) publishSummaryEdit(projectID, taskID string, msg *types.TaskMessage, content string) {
+	s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeSummarization, Data: map[string]any{
+		"id":      msg.ID,
+		"summary": content,
+	}})
+	if s.executor == nil {
+		return
+	}
+	latest, err := s.store.LastSummarizationMessageID(msg.ThreadID)
+	if err != nil {
+		logging.For(logging.HTTP).With(logging.TaskID, taskID).Warnf("thread=%s could not find its current summary: %v", msg.ThreadID, err)
+		return
+	}
+	if latest != msg.ID {
+		return
+	}
+	task, _ := s.store.GetTask(projectID, taskID)
+	if task != nil && task.ExecutionState == types.ExecStateRunning {
+		s.executor.NotifyContextChanged(taskID)
+	}
 }
 
 // cleanupDeletedMessageForks deletes orphan fork threads when a checkpoint message is deleted.

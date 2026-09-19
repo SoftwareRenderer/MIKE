@@ -1038,6 +1038,21 @@
         scroll(true);
     }
 
+    // Rewrites the summarized context. The entry shows what the stored row says, so a refusal puts
+    // back the text the server still holds rather than leaving prose on screen that no turn will read.
+    async function handleSummaryEdit(entryId: string, newContent: string) {
+        const entry = entries.find(e => e.id === entryId);
+        if (!entry) return;
+        const stored = entry.content;
+        stream.state.entries = entries.map(e => (e.id === entryId ? { ...e, content: newContent } : e));
+        try {
+            await updateTaskMessage(projectId, taskId, entryId, newContent);
+        } catch (e) {
+            stream.state.entries = stream.state.entries.map(en => (en.id === entryId ? { ...en, content: stored } : en));
+            dialogStore.showToast(String(e));
+        }
+    }
+
     /** Dismiss a single error message without affecting other messages. */
     async function handleDismissError(messageId: string) {
         const entry = entries.find(e => e.id === messageId);
@@ -1352,6 +1367,7 @@
         onMsgFork={handleMsgFork}
         onMsgSend={handleMsgSend}
         onRegenerate={handleRegenerate}
+        onSummaryEdit={handleSummaryEdit}
         onNavigateTask={handleMsgNavigateTask}
         {onViewChanges}
         {onToggleFullscreen}
