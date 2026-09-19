@@ -167,11 +167,12 @@ func TestSyncReplayReleasesTheWriteLockWhenThePeerVanishesMidReplay(t *testing.T
 	client.writeMu.Unlock()
 }
 
-// TestSilentPeerCannotStallTheFanOut: a peer that stopped reading costs one write timeout,
-// not the goroutine that walked into it.
+// TestSilentPeerCannotStallTheFanOut: a peer that stopped reading costs it its own queue and
+// nothing else — the fan-out that walked into it hands the frame over and returns, and the live
+// client on the same fan-out is served by its own sender.
 func TestSilentPeerCannotStallTheFanOut(t *testing.T) {
 	asm := NewAppStreamManager(writeTestStore(t), nil)
-	asm.writeTimeout = 150 * time.Millisecond
+	asm.writeTimeout = 5 * time.Second
 	t.Cleanup(asm.Close)
 	srv := httptest.NewServer(http.HandlerFunc(asm.HandleStream))
 	t.Cleanup(srv.Close)
@@ -183,30 +184,38 @@ func TestSilentPeerCannotStallTheFanOut(t *testing.T) {
 	liveClient := clientOtherThan(t, asm, stalledClient)
 
 	big := []byte(`{"type":"board_refresh","pad":"` + strings.Repeat("a", 200*1024) + `"}`)
+	// Nothing is read on that socket, so its sender is proved stuck writing once the socket fills.
+	awaitStuckSender(t, stalledClient, func() { asm.deliver([]*clientState{stalledClient}, big) })
 
-	// Fill the stalled peer's socket until a write to it has to wait.
-	slowed := make(chan struct{})
-	go func() {
-		for {
-			start := time.Now()
-			asm.writeFrame([]*clientState{stalledClient}, big)
-			if time.Since(start) > asm.writeTimeout/2 {
-				close(slowed)
-				return
-			}
-		}
-	}()
-	select {
-	case <-slowed:
-	case <-time.After(10 * time.Second):
-		t.Fatal("a write to a peer that stopped reading never returned")
-	}
-
-	// The same fan-out, stalled client first: the live client still gets its frame.
 	probe, _ := json.Marshal(map[string]any{"type": "board_refresh", "probe": "still-here"})
-	asm.writeFrame([]*clientState{stalledClient, liveClient}, probe)
+	started := time.Now()
+	asm.deliver([]*clientState{stalledClient, liveClient}, probe)
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("the fan-out into a stalled peer took %v; it queues and returns", elapsed)
+	}
 	live.awaitFrame(t, 5*time.Second, func(f map[string]any) bool { return f["probe"] == "still-here" },
 		"frame to the live client behind a stalled one in the same fan-out")
+}
+
+// awaitStuckSender keeps calling fill until the client's sender is proved to be inside a write:
+// writeMu held and staying held. Nothing else in the server waits behind that write, and that is
+// what the delivery path has to guarantee.
+func awaitStuckSender(t *testing.T, client *clientState, fill func()) {
+	t.Helper()
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	for {
+		fill()
+		if !tryLockWithin(&client.writeMu, 300*time.Millisecond) {
+			return
+		}
+		client.writeMu.Unlock()
+		select {
+		case <-deadline.C:
+			t.Fatal("this peer never stopped reading, so nothing was ever stuck")
+		case <-time.After(time.Millisecond):
+		}
+	}
 }
 
 // TestConcurrentConnectionsDoNotRaceTheClientMap: the accept log reads asm.clients while

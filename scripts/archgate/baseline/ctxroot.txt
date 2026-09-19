@@ -1,4 +1,4 @@
-# frozen violations, regenerated with -update.
+# archgate baseline: frozen violations, regenerated with -update.
 # ctxroot: every base context in production Go, classified. key = file|function|reason|x<count>.
 # root = a genuine entry point (nothing above it to cancel from). detached = a state-leaving write that
 # must outlive the request that began it (Decision 6). legacy = a caller has a context and does not pass
@@ -30,8 +30,6 @@ backend/lsp/handler.go|LSPHandler.routeResponse|root|x3
 backend/server/server.go|NewServer|root|x1
 backend/server/shutdown.go|runShutdownWithDeadline|root|x1
 backend/stream/app_stream.go|AppStreamManager.HandleStream|root|x1
-backend/stream/app_stream.go|AppStreamManager.subscribeTask|root|x2
-backend/stream/app_stream.go|AppStreamManager.writeFrame|detached|x1
 backend/term/terminal.go|TerminalManager.handleTerminalWSWithSetup|root|x2
 backend/term/terminal.go|taskTerminal.readLoop|root|x2
 pkg/bridge/agent/lsp.go|handler.handleLSPNotify|root|x1

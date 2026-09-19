@@ -156,6 +156,11 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
 - Inbound frames are typed; outbound frames are flat maps built where they are broadcast — read
   `msg.task_id`, not `msg.data.task_id`. A frame that is not a JSON object is dropped and reported once:
   a throw inside `onmessage` is swallowed and leaves the app believing it is current.
+- **One goroutine per app-stream connection writes its socket**, besides that connection's pinger; every
+  delivery path queues into it and never calls `Write` itself. The queue drops the **oldest** frames and
+  ends the connection so the client resyncs — a slow browser degrades to a reconnect, never to a timeout
+  on someone's wait, and never to a producer that waits for it. `docs/api-contract.md`,
+  `docs/reconnection.md`.
 - **Every `/api` route declares its verb in the pattern.** Handlers don't check `r.Method`, and a
   methodless route also escapes the CSRF middleware. Exemptions and consequences: `docs/api-contract.md`.
 - **A partial update decodes into pointer fields, never a `map[string]any` behind type assertions**:

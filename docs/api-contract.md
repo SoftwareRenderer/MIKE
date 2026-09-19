@@ -266,12 +266,63 @@ overturns, it never drops it silently.
 
 | Bound | Default | Counts | When it is reached |
 |---|---|---|---|
-| `stream.DefaultMaxConnections` | 256 | live `/api/stream` sockets | 503 before the upgrade |
+| `stream.DefaultMaxConnections` | 256 | live `/api/stream` sockets | 503 before the upgrade, and a `StatusTryAgainLater` close for the handshakes that arrive during the gap (see below) |
 | `lsp.DefaultMaxSessions` | 64 | live `/api/lsp` sessions | 503 before the upgrade |
 | `term.DefaultMaxConnections` | 64 | live terminal sockets, across every session | 503 before the upgrade |
 | `lsp.DefaultMaxPendingRequests` | 256 | requests one session has waiting for an answer | the oldest is answered with a JSON-RPC error and loses its slot; an answer that does arrive frees its slot first |
 | `lsp.DefaultMaxQueuedInitializes` | 64 | `initialize` requests waiting behind the one in flight | the whole queue is failed as a failed send fails it, the overflowing request in the same sentence, so a later `initialize` is forwarded |
 
 Terminal counts connections rather than PTYs because a session is per task or project and every client of
-it shares one shell, so connections are what a client can multiply. Tests: `backend/stream/app_stream_bounds_test.go`,
+it shares one shell, so connections are what a client can multiply.
+
+A pre-upgrade count is an offer, not a decision: handshakes arrive during the gap between reading it and
+registering the socket. `/api/stream` is the one endpoint that closes the gap — counting and joining
+`clients` are one decision under `asm.mu`, and a connection that turned out to be over the bound is
+closed after its upgrade with `StatusTryAgainLater`, which the client already reads as "reconnect and
+try again" (`docs/reconnection.md`). The other three read the count before the upgrade and register
+after it, so a burst can land a few sockets past the bound: a bound that stops one browser from making
+the server hold thousands, not an exact admission control. Tests: `backend/stream/app_stream_bounds_test.go`,
 `backend/lsp/handler_bounds_test.go`, `backend/term/terminal_bounds_test.go`.
+
+### Which socket carries the app-level ping
+
+Every upgraded connection is kept alive by `httputil.Keepalive` (`backend/httputil/ws.go`), whose control
+ping runs every 27 s (`KeepaliveInterval`) — under the 30–60 s idle timeout a proxy or VPN enforces.
+Control frames are invisible to JavaScript, so they never fire `onmessage` and never reset a browser's
+own silence timer; the app-level frame `{"type":"ping"}` (`KeepaliveFrame`) rides beside the control ping
+on **`/api/stream` only**, because that client stamps `lastActivityAt` from `onmessage` and retires a
+silent socket at `STALE_THRESHOLD_MS` (60 s, calibrated against the 27 s tick). `/api/lsp` speaks JSON-RPC
+and the terminal speaks `types.TerminalMessage`, so both get the control ping alone: the frame is opt-in
+(`httputil.WithAppFrame()`) rather than something the shared helper always sends. Nothing has to ignore
+a frame it never receives.
+
+Two rules keep a **busy** connection from being read as a dead one, and both are about `writeMu`, which
+the pinger holds so a ping cannot interleave with the endpoint's own frames. The ping's deadline is
+built *after* the lock is taken, so `KeepaliveTimeout` bounds the ping and never the queue in front of
+it, and the lock is taken with `TryLock`, because a lock another writer holds is a frame on its way out
+— liveness evidence — so that tick is skipped. Queuing instead was measurable: holding `writeMu` longer
+than the ping timeout lets a queued tick's deadline expire in the queue, and `coder/websocket` closes
+the socket for an expired write context even when it wrote nothing. The shape that made it measurable
+was a reconnecting client holding the lock across a whole replay backlog (the per-task buffer,
+`?sync=1`); that backlog is a queue now, and what still holds the lock is one frame's write, up to
+`WriteTimeout` of it. The peer is healthy, dies mid-replay, reconnects and replays again. A pinger
+blocked on the lock also sends nothing, which retires the same socket from the client side at 60 s.
+Tests: `backend/httputil/ws_test.go`.
+
+### Who writes an app-stream connection
+
+One goroutine per connection (`runSender`) is the only writer to its socket besides that connection's
+pinger. Everything else — a turn's `SendTaskEvent`, the board broadcasts, a task's replay and the
+sandbox-stats frame that extends it, a project's initial diff data — hands the frame to that
+connection's bounded queue (`sendQueue`) and returns, so the goroutine producing a frame never waits
+on a browser. The queue is bounded by frame count and bytes (`DefaultBufferSize`, `DefaultBufferBytes`)
+and overflows by dropping **the oldest** frames, never the newest: a client that stopped reading is
+caught up on the tail.
+
+A connection that missed frames is ended once its queue has drained — see *What a reconnect brings
+back* in `docs/reconnection.md` for why the close is the resync and not a new frame type, and
+`backend/stream/app_stream_sender_test.go` with it. A replay goes in behind any replay already
+queued and ahead of every live frame, which is the ordering the client can see: `subscribe_task` for
+two tasks in a row replays one and then the other, the `sandbox_stats` frame lands at the end of the
+replay it extends, and a live frame never lands inside either. Beyond that one rule the queue makes no
+ordering promise between two producers.

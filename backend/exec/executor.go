@@ -1405,7 +1405,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string, autostarted bool) er
 
 	// Agents send their own status:running (Pi via agent_start).
 	if !te.configStore.IsAgentProvider(execSetup.serverURL) {
-		te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Starting task execution"}})
+		te.appStreamMgr.SendTaskEvent(projectID, taskID, types.TurnStatusEvent("running", "Starting task execution"))
 	}
 
 	go te.executeTask(execSetup)
@@ -1758,7 +1758,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 
 	// Signal the executor (re)started so clients arm the "Awaiting LLM" indicator
 	if !te.configStore.IsAgentProvider(execSetup.serverURL) {
-		te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Starting task execution"}})
+		te.appStreamMgr.SendTaskEvent(projectID, taskID, types.TurnStatusEvent("running", "Starting task execution"))
 	}
 
 	go te.executeTask(execSetup)

@@ -137,7 +137,7 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 		})
 	}
 
-	te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Agent started"}})
+	te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.TurnStatusEvent("running", "Agent started"))
 
 	// The subprocess starts fresh every run: resume a saved session if there is one, otherwise
 	// replay the conversation as a transcript.
@@ -810,7 +810,7 @@ func toStreamEvent(event pkgagent.Event, sandbox bool) types.StreamEvent {
 		if event.Status.Activity != "" {
 			activity = event.Status.Activity
 		}
-		return types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": state, "activity": activity}}
+		return types.TurnStatusEvent(state, activity)
 
 	case pkgagent.EventTypeError:
 		msg := ""
@@ -827,7 +827,7 @@ func toStreamEvent(event pkgagent.Event, sandbox bool) types.StreamEvent {
 
 	default:
 		// Pass through unknown events as status
-		return types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": fmt.Sprintf("Agent: %s", event.Type)}}
+		return types.TurnStatusEvent("running", fmt.Sprintf("Agent: %s", event.Type))
 	}
 }
 

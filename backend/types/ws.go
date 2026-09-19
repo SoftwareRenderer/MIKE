@@ -72,6 +72,25 @@ type StreamEvent struct {
 	Data any
 }
 
+// TurnStatus is the data of a WSTypeStatus frame. It is a type rather than a map because the
+// senders and the reader of the frame's *purpose* — stream's SendTaskEvent, which drops a task's
+// replay buffer when the turn ends — have to agree on it by construction: a payload read with a
+// type assertion skips that decision in silence.
+//
+// Activity is declared first because encoding/json writes struct fields in declaration order and
+// a map's keys sorted: this order is what keeps the wire bytes of the map payload it replaced.
+type TurnStatus struct {
+	Activity string `json:"activity"`
+	State    string `json:"state"`
+}
+
+// TurnStatusEvent builds the WSTypeStatus frame for one turn state. `state` is the client's
+// badge vocabulary, which is wider than ExecutionState: "cancelled" is a response replaced by a
+// new message, not an execution state.
+func TurnStatusEvent(state, activity string) StreamEvent {
+	return StreamEvent{Type: WSTypeStatus, Data: TurnStatus{Activity: activity, State: state}}
+}
+
 // TerminalMessage is the envelope for terminal WebSocket frames.
 type TerminalMessage struct {
 	Type string `json:"type"`

@@ -96,41 +96,63 @@ const (
 	// KeepaliveTimeout bounds one ping so a silent peer cannot wedge the pinger.
 	KeepaliveTimeout = 10 * time.Second
 
-	// KeepaliveFrame is an app-level ping sent beside the control ping. Control frames
-	// are invisible to JavaScript, so they never fire onmessage and never reset the
+	// KeepaliveFrame is the app-level ping WithAppFrame sends beside the control ping. Control
+	// frames are invisible to JavaScript, so they never fire onmessage and never reset the
 	// browser's own stale-connection timer. Must stay valid JSON.
 	KeepaliveFrame = `{"type":"ping"}`
 )
 
-// Keepalive pings conn until ctx is done, in its own goroutine. A failed ping calls onDead
-// and stops; callers pass the cancel of the context their read loop is blocked on, because
-// Read never returns for a peer that merely stopped talking. writeMu holds off the caller's
-// own frames while pinging (nil if nothing else writes). The caller must also be reading conn:
-// only Read() delivers a pong, so with no reader a live peer looks dead.
-func Keepalive(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, onDead func()) {
-	keepalive(ctx, conn, KeepaliveInterval, KeepaliveTimeout, writeMu, onDead)
+// KeepaliveOption changes one aspect of the loop; see WithAppFrame.
+type KeepaliveOption func(*keepaliveOptions)
+
+type keepaliveOptions struct {
+	appFrame bool
+}
+
+// WithAppFrame sends KeepaliveFrame after each control ping, for the endpoint whose client measures
+// silence from onmessage. The LSP socket speaks JSON-RPC and the terminal its own message type, so
+// both stay on the control ping alone: a frame neither declared is a foreign message there.
+func WithAppFrame() KeepaliveOption {
+	return func(o *keepaliveOptions) { o.appFrame = true }
+}
+
+// Keepalive pings conn until ctx is done, in its own goroutine. A failed ping calls onDead and
+// stops; callers pass the cancel of the context their read loop is blocked on, because Read never
+// returns for a peer that merely stopped talking, and the caller must be reading conn because only
+// Read() delivers a pong.
+//
+// writeMu holds off the caller's own frames while pinging (nil if nothing else writes). It is taken
+// with TryLock and the ping's deadline built after it, because a lock another writer holds is a
+// frame on its way out — liveness evidence. Queuing instead lets KeepaliveTimeout expire in line,
+// and the library closes the socket for a spent write context that wrote nothing.
+func Keepalive(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, onDead func(), opts ...KeepaliveOption) {
+	keepalive(ctx, conn, KeepaliveInterval, KeepaliveTimeout, writeMu, onDead, opts...)
 }
 
 // keepalive is Keepalive with the timings injected, so tests need not wait 27 s.
-func keepalive(ctx context.Context, conn *websocket.Conn, interval, timeout time.Duration, writeMu *sync.Mutex, onDead func()) {
+func keepalive(ctx context.Context, conn *websocket.Conn, interval, timeout time.Duration, writeMu *sync.Mutex, onDead func(), opts ...KeepaliveOption) {
+	var options keepaliveOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				pingCtx, pingCancel := context.WithTimeout(ctx, timeout)
-				if writeMu != nil {
-					writeMu.Lock()
+				if writeMu != nil && !writeMu.TryLock() {
+					continue
 				}
+				pingCtx, pingCancel := context.WithTimeout(ctx, timeout)
 				err := conn.Ping(pingCtx)
-				if err == nil {
-					_ = conn.Write(pingCtx, websocket.MessageText, []byte(KeepaliveFrame))
+				pingCancel()
+				if err == nil && options.appFrame {
+					_ = WriteText(ctx, conn, []byte(KeepaliveFrame), WriteTimeout)
 				}
 				if writeMu != nil {
 					writeMu.Unlock()
 				}
-				pingCancel()
 				if err != nil {
 					if onDead != nil {
 						onDead()

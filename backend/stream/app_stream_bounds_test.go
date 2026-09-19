@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -126,8 +128,15 @@ func TestSubscriptionsStopAtThePerConnectionCap(t *testing.T) {
 	for _, taskID := range []string{"task-1", "task-2", "task-3"} {
 		c.sendSubscription(t, "subscribe_task", projectID, taskID)
 	}
-	c.await(t, 5*time.Second, isTaskEventFor("task-1", "warm-task-1"), 1, "first task subscription replayed")
-	c.await(t, 5*time.Second, isTaskEventFor("task-2", "warm-task-2"), 1, "second task subscription replayed")
+	// One drain for both inside-cap replays: each is written by its own goroutine, so which
+	// reaches the wire first is not decided, and an await for one of them would consume the
+	// other out of the channel.
+	if counts := c.tally(2*time.Second,
+		isTaskEventFor("task-1", "warm-task-1"),
+		isTaskEventFor("task-2", "warm-task-2")); counts[0] != 1 || counts[1] != 1 {
+		t.Fatalf("replays for the two subscriptions inside the cap: task-1=%d task-2=%d, want one of each",
+			counts[0], counts[1])
+	}
 
 	// The read loop is sequential, so the initial-data burst that closes subscribe_project
 	// proves the third subscribe_task has already been decided either way.
@@ -162,5 +171,65 @@ func TestStreamRefusesConnectionsBeyondItsCap(t *testing.T) {
 		t.Fatal("a second connection was accepted at the cap of 1")
 	} else if !strings.Contains(err.Error(), "503") {
 		t.Fatalf("the second connection failed for a reason that is not a refusal: %v", err)
+	}
+}
+
+// TestConcurrentHandshakesDoNotOvershootTheConnectionCap: the cap is a bound on registered
+// connections, so counting them and joining the map is one decision. A count read before the
+// handshake and an insert after it lets every connection that arrives during the gap in.
+func TestConcurrentHandshakesDoNotOvershootTheConnectionCap(t *testing.T) {
+	asm := NewAppStreamManager(writeTestStore(t), nil)
+	asm.maxConns = 1
+	t.Cleanup(asm.Close)
+	srv := httptest.NewServer(http.HandlerFunc(asm.HandleStream))
+	t.Cleanup(srv.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	const attempts = 64
+	// A connection the manager registered is told the project counts the moment it arrives; one
+	// refused past the cap is closed instead, so its first read fails.
+	live := make([]bool, attempts)
+	start := make(chan struct{})
+	resolved := make(chan struct{}, attempts)
+	release := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			<-start
+			conn, _, err := websocket.Dial(ctx, wsURL+"/?i="+strconv.Itoa(i), nil)
+			if err == nil {
+				defer conn.CloseNow()
+				_, _, err = conn.Read(ctx)
+			}
+			live[i] = err == nil
+			resolved <- struct{}{}
+			// A live connection is held until the count has been taken: one that closes hands its
+			// slot to a later handshake, and that admission is legitimate but not what is here.
+			select {
+			case <-release:
+			case <-time.After(10 * time.Second):
+			}
+		}(i)
+	}
+	close(start)
+	for i := 0; i < attempts; i++ {
+		<-resolved
+	}
+
+	held := 0
+	for _, isLive := range live {
+		if isLive {
+			held++
+		}
+	}
+	close(release)
+	wg.Wait()
+
+	if held != 1 {
+		t.Fatalf("%d of %d concurrent handshakes got a live stream connection at the cap of 1", held, attempts)
 	}
 }

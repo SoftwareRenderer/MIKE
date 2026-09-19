@@ -566,10 +566,9 @@ func taskStreamFramesDuring(t *testing.T, asm *stream.AppStreamManager, projectI
 				if !drain {
 					return frames
 				}
-				// The replay goroutine writes the whole buffer under one writeMu hold,
-				// but it can lose that race to the flush event's write. Drain briefly so
-				// a late replay still lands before the capture ends. The drain read runs
-				// on a short deadline, which closes the connection, so it is the last read.
+				// A turn's frames outlive the flush that ends the capture, so keep
+				// reading until the connection goes quiet. The drain read runs on a
+				// short deadline, which closes the connection, so it is the last read.
 				for {
 					drainCtx, cancelDrain := context.WithTimeout(ctx, 500*time.Millisecond)
 					late, lateOutcome := readOne(drainCtx)
