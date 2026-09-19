@@ -36,6 +36,7 @@
         onMsgSend,
         onRegenerate,
         onNavigateTask,
+        onSummaryEdit,
         onViewChanges,
         onToggleFullscreen,
         isChatFullscreen,
@@ -64,6 +65,8 @@
         onMsgDelete: (entry: ChatEntry) => void;
         onMsgFork: (msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) => Promise<void>;
         onMsgSend: (msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) => Promise<void>;
+        /** Rewrites the summarized context. Offered on one entry only — see `editableSummaryId`. */
+        onSummaryEdit?: (msgId: string, newContent: string) => Promise<void>;
         onRegenerate: (entryId: string) => Promise<void>;
         onNavigateTask: (targetTaskId: string) => void;
         onViewChanges?: (commitHash: string) => void;
@@ -76,6 +79,24 @@
 
     function isOptimisticId(id: string): boolean {
         return /^[a-z0-9]{8}$/.test(id);
+    }
+
+    // Only one summary is worth editing: a rolling summarization appends a row and the model reads the
+    // newest one, so anything older is history. An entry with an optimistic id is not a row at all —
+    // agent-mode compaction hands the summary straight to the client — so it has nothing to rewrite.
+    const editableSummaryId = $derived.by(() => {
+        if (!onSummaryEdit) return null;
+        for (let i = entries.length - 1; i >= 0; i--) {
+            const entry = entries[i];
+            if (entry.role !== 'summarization') continue;
+            return isOptimisticId(entry.id) ? null : entry.id;
+        }
+        return null;
+    });
+
+    // The callback's one promise is what the prop asks for; the optional prop is why the fallback exists.
+    function editSummary(msgId: string, newContent: string): Promise<void> {
+        return onSummaryEdit?.(msgId, newContent) ?? Promise.resolve();
     }
 
     // The real (non-virtualized) message container, and the wrapper whose height
@@ -311,7 +332,7 @@
                             </div>
                             <div class="divider-line"></div>
                         </div>
-                        <ChatMessage role="assistant" content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} isOptimistic={isOptimisticId(entry.id)} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} onDelete={() => onMsgDelete(entry)} isLastUserMessage={false} isFirstUserMessage={false} taskStatus={taskStatus} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} reasoningExpandedOverride={reasoningExpandedOverrides[entry.id]} onReasoningToggle={(exp) => handleReasoningToggle(entry.id, exp)} resolvedReasoningOverride={resolvedReasoningOverrides[entry.id]} onReasoningResolved={(content) => handleReasoningResolved(entry.id, content)} />
+                        <ChatMessage role="assistant" content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} isOptimistic={isOptimisticId(entry.id)} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} onDelete={() => onMsgDelete(entry)} isLastUserMessage={false} isFirstUserMessage={false} taskStatus={taskStatus} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} reasoningExpandedOverride={reasoningExpandedOverrides[entry.id]} onReasoningToggle={(exp) => handleReasoningToggle(entry.id, exp)} resolvedReasoningOverride={resolvedReasoningOverrides[entry.id]} onReasoningResolved={(content) => handleReasoningResolved(entry.id, content)} onEditSummary={entry.id === editableSummaryId ? (newContent) => editSummary(entry.id, newContent) : undefined} />
                     </div>
                 {:else if entry.role === 'advisory'}
                     <div class="advisory-entry">

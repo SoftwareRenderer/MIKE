@@ -1238,6 +1238,7 @@ const catalog = {
     'chat.actions.forkTitle': 'Edit / new thread',
     'chat.actions.delete': 'Delete message and all following messages',
     'chat.actions.regenerate': 'Regenerate response',
+    'chat.actions.editSummary': 'Edit the summarized context',
 
     // ── Chat/QueueIndicator.svelte ──
     'chat.queue.targetAgent': 'agent',

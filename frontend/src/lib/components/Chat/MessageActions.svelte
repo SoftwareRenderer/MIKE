@@ -12,10 +12,12 @@
         onDelete?: () => void;
         onRegenerate?: () => void;
         onFork?: () => void;
+        /** Rewrites this message where it stands — the summarized context, never a chat turn. */
+        onEdit?: () => void;
         copied?: boolean;
     }
 
-    let { variant = 'assistant', timestampTooltip, timestampDisplay, hasContent = true, isStreaming = false, isOptimistic = false, onCopy, onDelete, onRegenerate, onFork, copied = false }: Props = $props();
+    let { variant = 'assistant', timestampTooltip, timestampDisplay, hasContent = true, isStreaming = false, isOptimistic = false, onCopy, onDelete, onRegenerate, onFork, onEdit, copied = false }: Props = $props();
 </script>
 
 <div class="message-actions" class:user-actions={variant === 'user'} class:assistant-actions={variant === 'assistant'}>
@@ -64,6 +66,14 @@
                     <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
                     <path d="M3 22v-6h6"/>
                     <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+                </svg>
+            </button>
+        {/if}
+        {#if onEdit}
+            <button class="action-btn" onclick={onEdit} aria-label={t('chat.actions.editSummary')} title={t('chat.actions.editSummary')}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                 </svg>
             </button>
         {/if}

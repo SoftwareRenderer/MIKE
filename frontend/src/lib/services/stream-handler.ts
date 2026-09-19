@@ -486,7 +486,12 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
             }
             case 'summarization': {
                 const data = event.data as { id?: string; summary: string; created_at?: string; prompt_tokens?: number; predicted_tokens?: number; prompt_ms?: number; predicted_ms?: number; model_name?: string };
-                if (data.id && s.entries.some(e => e.id === data.id)) break;
+                // The same id twice is an edit of the summary, not a second one: the row keeps its
+                // place in the conversation and only its text moves.
+                if (data.id && s.entries.some(e => e.id === data.id)) {
+                    s.entries = s.entries.map(e => (e.id === data.id ? { ...e, content: data.summary || e.content } : e));
+                    break;
+                }
                 const summaryEntry = {
                     id: data.id || genId(), role: 'summarization' as const, content: data.summary || t('chat.stream.summarized'),
                     isStreaming: false, createdAt: data.created_at || new Date().toISOString(),
