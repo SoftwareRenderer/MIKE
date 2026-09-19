@@ -483,3 +483,16 @@ export function advisoryLabel(kind?: string): string {
         default: return t('chat.advisory.note');
     }
 }
+
+/**
+ * Body of a system note whose wording the catalog owns: the server writes a `kind` plus English text, and
+ * the kind picks the translated sentence. The kinds are the ones backend/exec/system_note.go lists and must
+ * agree case for case; anything else shows the text stored on the row.
+ */
+export function systemNoteText(kind: string | undefined, fallback: string): string {
+    switch (kind) {
+        case 'memory_pressure': return t('chat.system.memoryPaused');
+        case 'memory_resumed': return t('chat.system.memoryResumed');
+        default: return fallback;
+    }
+}

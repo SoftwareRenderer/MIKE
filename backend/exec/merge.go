@@ -299,23 +299,10 @@ func (m *mergeOrchestrator) generateBranchName(task *types.Task, taskID, project
 	return branchName
 }
 
-// logSystemMessage writes a system message to the task's thread. An empty severity renders as the
+// logSystemMessage adds a note about a merge to the task's thread. An empty severity renders as the
 // default warning style.
 func (m *mergeOrchestrator) logSystemMessage(taskID, threadID, severity, content string) {
-	if threadID == "" {
-		return
-	}
-	if err := m.store.CreateTaskMessage(&types.TaskMessage{
-		ID:        uuid.New().String(),
-		TaskID:    taskID,
-		ThreadID:  threadID,
-		Role:      "system",
-		Severity:  severity,
-		Content:   content,
-		CreatedAt: time.Now().UTC(),
-	}); err != nil {
-		logging.For(logging.Exec).With(logging.TaskID, taskID).Warnf("failed to log message: %v", err)
-	}
+	systemNote{severity: severity, content: content}.recordOnThread(m.store, taskID, threadID)
 }
 
 // ResolveMergeTarget answers where the task's work lands: a child merges into its parent's branch,

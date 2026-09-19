@@ -9,6 +9,7 @@
     import { computeInterleavedLayout } from '$lib/utils/chat-layout';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { imageSrc } from '$lib/utils/attachments';
+    import { systemNoteText } from '$lib/utils/chat-entries';
     import { useImageAttachments } from '$lib/composables/use-image-attachments.svelte';
     import { uploadTaskFile } from '$lib/api';
     import { t } from '$lib/i18n';
@@ -39,6 +40,7 @@
     interface Props {
         role: string;
         severity?: string;
+        kind?: string;
         content: string;
         reasoningContent?: string;
         hasReasoning?: boolean;
@@ -68,7 +70,7 @@
         onReasoningResolved?: (content: string) => void;
     }
 
-    let { role, severity = '', content, reasoningContent, hasReasoning = false, isStreaming = false, isOptimistic = false, timestamp, messageId, attachments, stats, toolCalls = [], onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, editDiffOverrides = {}, onToggleEditDiff = () => {}, projectId = '', taskId: msgTaskId = '', reasoningExpandedOverride, onReasoningToggle, resolvedReasoningOverride, onReasoningResolved }: Props = $props();
+    let { role, severity = '', kind = '', content, reasoningContent, hasReasoning = false, isStreaming = false, isOptimistic = false, timestamp, messageId, attachments, stats, toolCalls = [], onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, editDiffOverrides = {}, onToggleEditDiff = () => {}, projectId = '', taskId: msgTaskId = '', reasoningExpandedOverride, onReasoningToggle, resolvedReasoningOverride, onReasoningResolved }: Props = $props();
 
     // Edit state
     let isEditing = $state(false);
@@ -461,7 +463,7 @@
 
 {#snippet systemMessage()}
     <div class="message-wrapper system-wrapper">
-        <div class="system-card" class:system-info={severity === 'info'}>
+        <div class="system-card" class:system-info={severity === 'info'} class:system-warning={severity === 'warning'}>
             <div class="system-header">
                 {#if severity === 'info'}
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -486,7 +488,7 @@
                     </button>
                 {/if}
             </div>
-            <div class="system-message">{content}</div>
+            <div class="system-message">{systemNoteText(kind, content)}</div>
         </div>
     </div>
 {/snippet}
@@ -589,6 +591,14 @@
         background: color-mix(in srgb, var(--color-surface-3) 70%, transparent);
         border: 1px solid var(--color-border);
         border-left: 3px solid var(--color-text-tertiary);
+    }
+    .system-card.system-warning {
+        background: color-mix(in srgb, var(--color-status-yellow) 8%, transparent);
+        border: 1px solid color-mix(in srgb, var(--color-status-yellow) 32%, transparent);
+        border-left: 3px solid var(--color-status-yellow);
+    }
+    .system-card.system-warning .system-header {
+        color: var(--color-status-yellow);
     }
     .system-header {
         display: flex;

@@ -172,6 +172,20 @@ func (s *Store) SetMemorySupervisorPaused(taskID string, paused bool) error {
 	return err
 }
 
+// SetMemoryPressurePausedOutput replaces the output text of a pause the supervisor caused. The guard is
+// the flag it owns: once a start or stop clears it, whoever acted next owns the text.
+func (s *Store) SetMemoryPressurePausedOutput(taskID, text string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res, err := s.db.Exec(`UPDATE tasks SET output = ?, updated_at = ? WHERE id = ? AND execution_state = 'paused' AND memory_supervisor_paused = 1`,
+		text, time.Now().UTC().Format(time.RFC3339), taskID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // GetRunningSandboxedTasks returns running/pulling_image tasks in sandbox-enabled projects,
 // ordered by sandbox_memory_peak_mb ascending — the pause order the supervisor uses.
 func (s *Store) GetRunningSandboxedTasks() ([]types.Task, error) {

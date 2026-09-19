@@ -92,21 +92,9 @@ func classifyLLMFailure(err error) llmFailure {
 func (te *TaskExecutor) sendRetryHint(projectID, taskID string, task *types.Task, streamErr error) {
 	retryMsg := "Connection interrupted, retrying the request."
 	logging.For(logging.Exec).With(logging.TaskID, taskID).Warnf("LLM call interrupted: %v", streamErr)
-	retryMsgID := uuid.New().String()
-	if err := te.store.CreateTaskMessage(&types.TaskMessage{
-		ID: retryMsgID, TaskID: taskID, ThreadID: task.CurrentThreadID, Role: "system",
-		Content: retryMsg, CreatedAt: time.Now().UTC(),
-	}); err != nil {
-		logging.For(logging.Exec).With(logging.TaskID, taskID).Warnf("retry note not stored: %v", err)
-	}
-	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeHint, Data: map[string]any{
-		"id":         retryMsgID,
-		"role":       "system",
-		"content":    retryMsg,
-		"kind":       "retry",
-		"error":      streamErr.Error(),
-		"created_at": time.Now().UTC().Format(time.RFC3339),
-	}})
+	note := systemNote{kind: retryNoteKind, content: retryMsg}
+	id := note.record(te.store, taskID, task.CurrentThreadID)
+	note.show(te.appStreamMgr, projectID, taskID, id, map[string]any{"error": streamErr.Error()})
 }
 
 // jitter returns a random duration between 250ms and 500ms (inclusive)

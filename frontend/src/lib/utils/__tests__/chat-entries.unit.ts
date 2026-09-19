@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findLastUserMessageBefore, trimEntriesForRegenerate, buildCheckpointStateMap, mergeToolCallsIntoAssistant, computeLastUserMessageIds, getCheckpointThreads, buildEntriesFromMessages, advisoryLabel } from '$lib/utils/chat-entries';
+import { findLastUserMessageBefore, trimEntriesForRegenerate, buildCheckpointStateMap, mergeToolCallsIntoAssistant, computeLastUserMessageIds, getCheckpointThreads, buildEntriesFromMessages, advisoryLabel, systemNoteText } from '$lib/utils/chat-entries';
 import type { ChatEntry, Thread } from '$lib/types';
 
 function entry(role: string, content: string): ChatEntry {
@@ -670,5 +670,21 @@ describe('advisoryLabel', () => {
         expect(advisoryLabel(entries[2].kind)).toBe('Automated answer (parent context)');
         // Never rendered as something the user said.
         expect(entries.every(e => e.role === 'advisory')).toBe(true);
+    });
+});
+
+describe('systemNoteText', () => {
+    it('words each known system-note kind from the catalog', () => {
+        expect(systemNoteText('memory_pressure', 'server text')).toBe(
+            'Task has been temporarily paused due to memory pressure, and will automatically resume');
+        expect(systemNoteText('memory_resumed', 'server text')).toBe(
+            'Memory freed up, so the task resumed automatically');
+    });
+
+    it('shows an unknown or missing kind its own text', () => {
+        expect(systemNoteText('retry', 'Connection interrupted, retrying the request.')).toBe(
+            'Connection interrupted, retrying the request.');
+        expect(systemNoteText(undefined, 'Merge conflict detected during commit')).toBe(
+            'Merge conflict detected during commit');
     });
 });
