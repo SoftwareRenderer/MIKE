@@ -2253,6 +2253,320 @@ func TestFindDeepestStartableSubtasks_SkipsReviewBlocked(t *testing.T) {
 	}
 }
 
+// TestFindStartableSubtasks_AllDepths checks that every ready task is a candidate at whatever depth
+// its branch is ready at, so a ready leaf does not wait on a deeper branch. No task is returned
+// together with one of its own descendants.
+func TestFindStartableSubtasks_AllDepths(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+
+	aID, bID, cID, g1ID, g2ID := "fa-a", "fa-b", "fa-c", "fa-g1", "fa-g2"
+	revID, revChildID := "fa-review", "fa-review-child"
+	tasks := []*types.Task{
+		{ID: aID, Title: "A", Prompt: "a", Status: types.StatusInProgress, ExecutionState: types.ExecStateIdle, ProjectID: projectID},
+		{ID: bID, Title: "B", Prompt: "b", Status: types.StatusInProgress, ExecutionState: types.ExecStateIdle, ProjectID: projectID},
+		{ID: cID, Title: "C", Prompt: "c", Status: types.StatusInProgress, ExecutionState: types.ExecStateIdle, ProjectID: projectID},
+		{ID: g1ID, Title: "G1", Prompt: "g1", Status: types.StatusBacklog, ProjectID: projectID, ParentTaskID: cID},
+		{ID: g2ID, Title: "G2", Prompt: "g2", Status: types.StatusBacklog, ProjectID: projectID, ParentTaskID: cID},
+		{ID: revID, Title: "Review", Prompt: "r", Status: types.StatusReview, ExecutionState: types.ExecStateIdle, ProjectID: projectID},
+		{ID: revChildID, Title: "ReviewChild", Prompt: "rc", Status: types.StatusBacklog, ProjectID: projectID, ParentTaskID: revID},
+	}
+	for _, tk := range tasks {
+		if err := te.store.CreateTask(tk); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var roots []types.Task
+	for _, id := range []string{aID, bID, cID, revID} {
+		tk, err := te.store.GetTaskByID(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		roots = append(roots, *tk)
+	}
+
+	candidates := te.FindStartableSubtasks(roots)
+	got := map[string]bool{}
+	for _, c := range candidates {
+		got[c.ID] = true
+	}
+	for _, want := range []string{aID, bID, g1ID, g2ID} {
+		if !got[want] {
+			t.Errorf("%s missing from candidates %v", want, idsOf(candidates))
+		}
+	}
+	for _, unwanted := range []string{cID, revID, revChildID} {
+		if got[unwanted] {
+			t.Errorf("%s must not be a candidate, got %v", unwanted, idsOf(candidates))
+		}
+	}
+}
+
+// TestAutoStartNextSibling_ParallelStartsEachBranch checks that with the setting on, one finish
+// releases every ready branch: the ready leaf and the ready task inside the sibling that is waiting
+// on children. That waiting sibling itself stays unstarted.
+func TestAutoStartNextSibling_ParallelStartsEachBranch(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+	if err := te.store.SetConfigValue("run_siblings_parallel", "true"); err != nil {
+		t.Fatal(err)
+	}
+
+	fixture := newParallelChainFixture(t, te, projectID)
+
+	if err := te.AutoStartNextSibling(projectID, fixture.finishedID, fixture.parentID); err != nil {
+		t.Fatalf("AutoStartNextSibling failed: %v", err)
+	}
+
+	for _, id := range []string{fixture.leafID, fixture.deepID} {
+		tk, err := te.store.GetTaskByID(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !tk.Autostarted {
+			t.Errorf("%s should have started autostarted: state=%q", id, tk.ExecutionState)
+		}
+	}
+	waiter, _ := te.store.GetTaskByID(fixture.waitID)
+	if waiter.Autostarted || te.hasLiveExecutor(fixture.waitID) {
+		t.Errorf("%s must stay unstarted while its own child is unfinished", fixture.waitID)
+	}
+}
+
+// TestAutoStartNextSibling_SequentialStartsOneBranch is the same tree with the setting off: one
+// branch starts and the ready leaf keeps waiting for the next finish.
+func TestAutoStartNextSibling_SequentialStartsOneBranch(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+
+	fixture := newParallelChainFixture(t, te, projectID)
+
+	if err := te.AutoStartNextSibling(projectID, fixture.finishedID, fixture.parentID); err != nil {
+		t.Fatalf("AutoStartNextSibling failed: %v", err)
+	}
+
+	leaf, _ := te.store.GetTaskByID(fixture.leafID)
+	if leaf.Autostarted || te.hasLiveExecutor(fixture.leafID) {
+		t.Errorf("%s must not start in sequential mode", fixture.leafID)
+	}
+	deep, _ := te.store.GetTaskByID(fixture.deepID)
+	if !deep.Autostarted {
+		t.Errorf("%s should have started (deepest ready task): state=%q", fixture.deepID, deep.ExecutionState)
+	}
+}
+
+// TestAutoStartNextSibling_QueuedDescendantKeepsItsQueuePlace checks that a task already waiting for
+// a provider slot is not started a second time, which would replace its executor and lose its place
+// in that queue. Such a task can be a candidate because it waits inside a sibling that is itself only
+// started-but-pending.
+func TestAutoStartNextSibling_QueuedDescendantKeepsItsQueuePlace(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+	if err := te.store.SetConfigValue("run_siblings_parallel", "true"); err != nil {
+		t.Fatal(err)
+	}
+	fixture := newParallelChainFixture(t, te, projectID)
+	defer queueSubtaskForSlot(t, te, projectID, fixture.deepID)()
+
+	before := liveExecutor(te, fixture.deepID)
+	if before == nil {
+		t.Fatal("expected a live executor for the queued task")
+	}
+
+	if err := te.AutoStartNextSibling(projectID, fixture.finishedID, fixture.parentID); err != nil {
+		t.Fatalf("AutoStartNextSibling failed: %v", err)
+	}
+
+	if liveExecutor(te, fixture.deepID) != before {
+		t.Errorf("queued task %s had its executor replaced", fixture.deepID)
+	}
+	reloaded, _ := te.store.GetTaskByID(fixture.deepID)
+	if reloaded.Autostarted {
+		t.Errorf("queued task %s was started again", fixture.deepID)
+	}
+	// The guard skips one candidate, not the whole list.
+	leaf, _ := te.store.GetTaskByID(fixture.leafID)
+	if !leaf.Autostarted {
+		t.Errorf("%s should still start alongside the skipped candidate", fixture.leafID)
+	}
+}
+
+// threeLeafParent makes an in_progress parent with three backlog leaf subtasks. The parent has no LLM
+// config, so a sequential tie-break falls back instead of calling out.
+func threeLeafParent(t *testing.T, te *TaskExecutor, projectID, parentID string) *types.Task {
+	t.Helper()
+	parent := &types.Task{ID: parentID, ProjectID: projectID, Title: "Parent", Prompt: "parent prompt", Status: types.StatusInProgress, ExecutionState: types.ExecStateIdle}
+	if err := te.store.CreateTask(parent); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{parentID + "-a", parentID + "-b", parentID + "-c"} {
+		if err := te.store.CreateTask(&types.Task{ID: id, ProjectID: projectID, Title: "sub", Prompt: "sub prompt", Status: types.StatusBacklog, ParentTaskID: parent.ID, LlamaServerURL: "http://localhost:8080", ModelName: "test-model"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return parent
+}
+
+// Sequential (default) mode: one subtask, the deepest.
+func TestSubtasksToStart_Sequential(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+	parent := threeLeafParent(t, te, projectID, "st-seq-parent")
+	children, err := te.store.GetChildren(parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if ids := te.subtasksToStart(parent, children); len(ids) != 1 {
+		t.Fatalf("expected 1 subtask in sequential mode, got %d: %v", len(ids), ids)
+	}
+}
+
+// Parallel mode: every currently startable subtask, so they all begin at once.
+func TestSubtasksToStart_Parallel(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+	parent := threeLeafParent(t, te, projectID, "st-par-parent")
+	if err := te.store.SetConfigValue("run_siblings_parallel", "true"); err != nil {
+		t.Fatal(err)
+	}
+	children, err := te.store.GetChildren(parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if ids := te.subtasksToStart(parent, children); len(ids) != 3 {
+		t.Fatalf("expected 3 subtasks in parallel mode, got %d: %v", len(ids), ids)
+	}
+}
+
+// Parallel mode over a nested tree: the ready leaves are picked alongside the ready task inside a
+// sibling still waiting on its child.
+func TestSubtasksToStart_ParallelMixedDepth(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+	parent := threeLeafParent(t, te, projectID, "st-par-nest")
+	deep := &types.Task{ID: "st-par-nest-c-deep", ProjectID: projectID, Title: "deep", Prompt: "deep prompt", Status: types.StatusBacklog, ParentTaskID: "st-par-nest-c"}
+	if err := te.store.CreateTask(deep); err != nil {
+		t.Fatal(err)
+	}
+	if err := te.store.SetConfigValue("run_siblings_parallel", "true"); err != nil {
+		t.Fatal(err)
+	}
+	children, err := te.store.GetChildren(parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ids := te.subtasksToStart(parent, children)
+	got := map[string]bool{}
+	for _, id := range ids {
+		got[id] = true
+	}
+	for _, want := range []string{"st-par-nest-a", "st-par-nest-b", deep.ID} {
+		if !got[want] {
+			t.Errorf("%s should start in parallel mode, got %v", want, ids)
+		}
+	}
+	if got["st-par-nest-c"] {
+		t.Errorf("st-par-nest-c must not start while %s is unfinished, got %v", deep.ID, ids)
+	}
+}
+
+// StartReadySubtasks is what a start route calls. Every ready branch starts, and the one already
+// queued for a slot does not.
+func TestStartReadySubtasks_StartsReadyBranchesAndLeavesQueuedAlone(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+	if err := te.store.SetConfigValue("run_siblings_parallel", "true"); err != nil {
+		t.Fatal(err)
+	}
+	parent := threeLeafParent(t, te, projectID, "srs-parent")
+	queuedID := parent.ID + "-a"
+	defer queueSubtaskForSlot(t, te, projectID, queuedID)()
+	t.Cleanup(func() {
+		for _, id := range []string{parent.ID + "-b", parent.ID + "-c", parent.ID} {
+			_ = te.StopTask(id)
+		}
+	})
+
+	started, firstErr := te.StartReadySubtasks(projectID, parent.ID)
+	if firstErr != nil {
+		t.Fatalf("StartReadySubtasks failed: %v", firstErr)
+	}
+	got := map[string]bool{}
+	for _, id := range started {
+		got[id] = true
+	}
+	for _, want := range []string{parent.ID + "-b", parent.ID + "-c"} {
+		if !got[want] {
+			t.Errorf("%s should have started, got %v", want, started)
+		}
+	}
+	if got[queuedID] {
+		t.Errorf("queued subtask %s was started a second time", queuedID)
+	}
+	reloaded, _ := te.store.GetTaskByID(queuedID)
+	if reloaded.Autostarted {
+		t.Errorf("queued subtask %s was started again", queuedID)
+	}
+}
+
+// queueSubtaskForSlot leaves a task as one waiting for a provider slot: a live executor, and the
+// in_progress+idle row acquireTaskSlot writes while it waits. The returned function cancels it.
+func queueSubtaskForSlot(t *testing.T, te *TaskExecutor, projectID, taskID string) func() {
+	t.Helper()
+	setup, err := te.prepareTaskExecution(projectID, taskID, "", "", true)
+	if err != nil {
+		t.Fatalf("prepareTaskExecution failed: %v", err)
+	}
+	row, err := te.store.GetTaskByID(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.Status = types.StatusInProgress
+	row.ExecutionState = types.ExecStateIdle
+	if err := te.store.UpdateTask(row); err != nil {
+		t.Fatal(err)
+	}
+	return setup.cancel
+}
+
+// liveExecutor returns the in-flight registry entry for a task, nil when it has none.
+func liveExecutor(te *TaskExecutor, taskID string) *executionState {
+	te.taskMu.Lock()
+	defer te.taskMu.Unlock()
+	return te.tasks[taskID]
+}
+
+type parallelChainFixture struct {
+	parentID, finishedID, leafID, waitID, deepID string
+}
+
+// newParallelChainFixture makes the tree the sibling scheduler is judged on: a parent with a finished
+// child, a ready leaf sibling, and a sibling waiting on its own ready child.
+func newParallelChainFixture(t *testing.T, te *TaskExecutor, projectID string) parallelChainFixture {
+	t.Helper()
+	fx := parallelChainFixture{
+		parentID:   "pc-parent",
+		finishedID: "pc-finished",
+		leafID:     "pc-leaf",
+		waitID:     "pc-waiting",
+		deepID:     "pc-deep",
+	}
+	tasks := []*types.Task{
+		{ID: fx.parentID, ProjectID: projectID, Title: "P", Prompt: "p", Status: types.StatusInProgress, ExecutionState: types.ExecStateIdle, CurrentThreadID: "thread-pc-parent", LlamaServerURL: "http://localhost:8080", ModelName: "test-model"},
+		{ID: fx.finishedID, ProjectID: projectID, Title: "finished", Prompt: "f", Status: types.StatusReview, ExecutionState: types.ExecStateIdle, ParentTaskID: fx.parentID, CurrentThreadID: "thread-pc-finished", LlamaServerURL: "http://localhost:8080", ModelName: "test-model"},
+		{ID: fx.leafID, ProjectID: projectID, Title: "leaf", Prompt: "l", Status: types.StatusInProgress, ExecutionState: types.ExecStateIdle, ParentTaskID: fx.parentID, CurrentThreadID: "thread-pc-leaf", LlamaServerURL: "http://localhost:8080", ModelName: "test-model"},
+		{ID: fx.waitID, ProjectID: projectID, Title: "waiting", Prompt: "w", Status: types.StatusInProgress, ExecutionState: types.ExecStateIdle, ParentTaskID: fx.parentID, CurrentThreadID: "thread-pc-waiting", LlamaServerURL: "http://localhost:8080", ModelName: "test-model"},
+		{ID: fx.deepID, ProjectID: projectID, Title: "deep", Prompt: "d", Status: types.StatusBacklog, ParentTaskID: fx.waitID, CurrentThreadID: "thread-pc-deep", LlamaServerURL: "http://localhost:8080", ModelName: "test-model"},
+	}
+	for _, tk := range tasks {
+		if err := te.store.CreateTask(tk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		for _, id := range []string{fx.leafID, fx.deepID, fx.waitID, fx.parentID} {
+			_ = te.StopTask(id)
+		}
+	})
+	return fx
+}
+
 // TestAllChildrenDone covers the readiness predicate: no children, all done,
 // one in review, one in backlog.
 func TestAllChildrenDone(t *testing.T) {
