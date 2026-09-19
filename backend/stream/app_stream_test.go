@@ -36,17 +36,29 @@ type frameStream struct {
 	frames chan map[string]any
 }
 
+// serveStream serves asm on a throwaway server for the rest of the test and returns its
+// ws URL, so a test can put several real clients on one manager.
+func serveStream(t *testing.T, asm *AppStreamManager) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(asm.HandleStream))
+	t.Cleanup(srv.Close)
+	return "ws" + strings.TrimPrefix(srv.URL, "http")
+}
+
 // dialStream serves asm on a throwaway server, connects a real client and
 // starts pumping its frames. Everything is torn down with the test.
 func dialStream(t *testing.T, asm *AppStreamManager) *frameStream {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(asm.HandleStream))
-	t.Cleanup(srv.Close)
+	return dialFrameStream(t, serveStream(t, asm))
+}
 
+// dialFrameStream connects a real client to the stream listening at wsURL and starts
+// pumping its frames.
+func dialFrameStream(t *testing.T, wsURL string) *frameStream {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("dial stream: %v", err)

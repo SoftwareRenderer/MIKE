@@ -280,11 +280,12 @@ func (asm *AppStreamManager) unsubscribeProject(conn *websocket.Conn, projectID 
 			}
 		}
 	}
-	hasSubs := len(client.projectSub) > 0
 	asm.mu.Unlock()
 
-	// Stop branch watcher and project watcher if no clients are subscribed to this project
-	if !hasSubs {
+	// A project's branch and filesystem watchers stop when no live connection holds it,
+	// which is every client's count and not this one's. It is read after this connection's
+	// entry is gone and outside asm.mu, which hasProjectSubscribers takes as a reader.
+	if !asm.hasProjectSubscribers(projectID) {
 		if asm.branchWatcher != nil {
 			asm.branchWatcher.Unwatch(projectID)
 		}
@@ -950,7 +951,7 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 		asm.mu.Unlock()
 		conn.Close(websocket.StatusNormalClosure, "closed")
 
-		// Stop watchers for projects no one is subscribed to
+		// Watchers stop with the last subscriber: same rule as unsubscribeProject.
 		for projectID := range client.projectSub {
 			if !asm.hasProjectSubscribers(projectID) {
 				if asm.branchWatcher != nil {
