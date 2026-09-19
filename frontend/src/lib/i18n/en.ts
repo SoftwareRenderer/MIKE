@@ -705,6 +705,8 @@ const catalog = {
 
     // The task title and the project name are data, so only the shape of the sentence is here.
     'notify.review.body': '{project} · waiting in Review',
+    // Several arrivals are one notification, and it opens the board it names.
+    'notify.review.most': 'Most in {project}',
     'notify.review.untitled': 'Task in Review',
     'notify.review.many': { one: '{count} task waiting in Review', other: '{count} tasks waiting in Review' },
 

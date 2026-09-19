@@ -6,6 +6,7 @@
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     import { boardEdgeCard } from '$lib/composables/use-board-arrow-nav';
+    import { projectBoardHref } from '$lib/utils/app-link';
     import { useStandaloneDisplay } from '$lib/composables/use-standalone-display.svelte';
     // UI extension injection point — re-render when extensions change
     $effect(() => {
@@ -93,7 +94,7 @@
      * Deep link to a project, so the browser can open it in a new tab. Same param order
      * as `updateUrl` (App.svelte), so an opened tab restores the same board.
      */
-    const projectHref = (p: Project) => `${location.pathname}?project=${encodeURIComponent(p.id)}`;
+    const projectHref = (p: Project) => projectBoardHref(p.id);
 
     /** An unmodified click navigates in-app; a modifier click is the browser's (new tab/window). */
     function handleProjectClick(e: MouseEvent, p: Project) {

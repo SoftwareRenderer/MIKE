@@ -46,11 +46,13 @@ func testServerWith(t *testing.T, mutate func(*startup.Config)) *Server {
 	return testServerWithAssets(t, testAssets(), mutate)
 }
 
-// testAssets is the frontend a test server serves: a stamped document and one hashed asset.
+// testAssets is the frontend a test server serves: a stamped document, one hashed asset, and the worker's
+// own companion script, which a test asks for with no session to present.
 func testAssets() fs.FS {
 	return fstest.MapFS{
 		"index.html":             &fstest.MapFile{Data: []byte(`<!doctype html><html><head><script nonce="{{.Nonce}}"></script></head><body>board</body></html>`)},
 		"assets/app-12345678.js": &fstest.MapFile{Data: []byte(`console.log("app")`)},
+		"sw-notifications.js":    &fstest.MapFile{Data: []byte(`self.addEventListener("notificationclick", () => {})`)},
 	}
 }
 

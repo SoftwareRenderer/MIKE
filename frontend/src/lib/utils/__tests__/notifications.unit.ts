@@ -1,7 +1,15 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { notificationPermission, requestNotificationPermission, showBrowserNotification, dismissBrowserNotification } from '$lib/utils/notifications';
+import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
+import {
+    notificationPermission,
+    requestNotificationPermission,
+    notificationTarget,
+    showBrowserNotification,
+    dismissBrowserNotification,
+    watchNotificationClicks,
+} from '$lib/utils/notifications';
 
 afterEach(() => {
+    restoreLocation?.();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
 });
@@ -52,6 +60,20 @@ interface WorkerNotice {
 
 function workerNotice(tag: string): WorkerNotice {
     return { tag, close: vi.fn() };
+}
+
+/** jsdom navigates nowhere, so a case that cares where a click lands swaps in a location it can read. */
+let restoreLocation: (() => void) | undefined;
+
+function stubLocation(href: string): () => string {
+    const original = Object.getOwnPropertyDescriptor(window, 'location');
+    const stub = { href };
+    Object.defineProperty(window, 'location', { configurable: true, writable: true, value: stub });
+    restoreLocation = () => {
+        if (original) Object.defineProperty(window, 'location', original);
+        restoreLocation = undefined;
+    };
+    return () => stub.href;
 }
 
 describe('notificationPermission', () => {
@@ -116,14 +138,25 @@ describe('showBrowserNotification', () => {
         expect(posted[0].options.tag).toBeUndefined();
     });
 
-    it('brings the app back when the notification is clicked', () => {
+    it('brings the app back to the task the notification spoke for', () => {
         const { posted } = stubNotification('granted');
+        const here = stubLocation('http://localhost:3000/');
         const focus = vi.spyOn(window, 'focus').mockImplementation(() => {});
-        // The url is where this tab already is, so the click may not navigate anywhere.
-        showBrowserNotification({ title: 'T', body: 'B', url: location.href });
+        showBrowserNotification({ title: 'T', body: 'B', url: '/?project=p1&task=t1' });
         posted[0].onclick?.();
         expect(focus).toHaveBeenCalledTimes(1);
         expect(posted[0].close).toHaveBeenCalledTimes(1);
+        expect(here()).toBe(new URL('/?project=p1&task=t1', 'http://localhost:3000/').href);
+    });
+
+    it('leaves the tab alone when the notification already names what it is showing', () => {
+        const { posted } = stubNotification('granted');
+        const here = stubLocation('http://localhost:3000/?project=p1&task=t1');
+        const focus = vi.spyOn(window, 'focus').mockImplementation(() => {});
+        showBrowserNotification({ title: 'T', body: 'B', url: here() });
+        posted[0].onclick?.();
+        expect(focus).toHaveBeenCalledTimes(1);
+        expect(here()).toBe('http://localhost:3000/?project=p1&task=t1');
     });
 
     it('falls back to the service worker where the constructor is refused', async () => {
@@ -133,6 +166,20 @@ describe('showBrowserNotification', () => {
         expect(showBrowserNotification({ title: 'T', body: 'B' })).toBe(true);
         await Promise.resolve();
         expect(showNotification).toHaveBeenCalledWith('T', { body: 'B' });
+    });
+
+    it('hands the worker the target too, since the worker is the one that will be clicked', async () => {
+        const showNotification = vi.fn();
+        stubServiceWorker(showNotification);
+        stubNotification('granted', { throws: true });
+        stubLocation('http://localhost:3000/');
+        expect(showBrowserNotification({ title: 'T', body: 'B', tag: 'mike-review-batch', url: '/?project=p1' })).toBe(true);
+        await Promise.resolve();
+        expect(showNotification).toHaveBeenCalledWith('T', {
+            body: 'B',
+            tag: 'mike-review-batch',
+            data: { url: new URL('/?project=p1', 'http://localhost:3000/').href },
+        });
     });
 
     it('gives up when a refusing browser also has no worker', () => {
@@ -158,12 +205,12 @@ describe('dismissBrowserNotification', () => {
     });
 
     it('closes what the worker reports for that tag, and only that tag', async () => {
-        const arrived = workerNotice('mike-review-p1');
-        const elsewhere = workerNotice('mike-review-p2');
+        const arrived = workerNotice('mike-review-batch');
+        const elsewhere = workerNotice('mike-task-t7');
         stubServiceWorker(vi.fn(), [arrived, elsewhere]);
         stubNotification('granted', { throws: true });
-        showBrowserNotification({ title: 'T', body: 'B', tag: 'mike-review-p1' });
-        dismissBrowserNotification('mike-review-p1');
+        showBrowserNotification({ title: 'T', body: 'B', tag: 'mike-review-batch' });
+        dismissBrowserNotification('mike-review-batch');
         await vi.waitFor(() => expect(arrived.close).toHaveBeenCalledTimes(1));
         expect(elsewhere.close).not.toHaveBeenCalled();
     });
@@ -178,5 +225,82 @@ describe('dismissBrowserNotification', () => {
 
     it('is quiet where the Notification API does not exist', () => {
         expect(() => dismissBrowserNotification('mike-task-t3')).not.toThrow();
+    });
+});
+
+describe('notificationTarget', () => {
+    const here = 'http://localhost:3000/';
+
+    it('resolves the app link a notification carries against this tab', () => {
+        expect(notificationTarget(here, '/?project=p1&task=t1'))
+            .toBe(new URL('/?project=p1&task=t1', here).href);
+    });
+
+    it('answers nothing for a notification that speaks for no target', () => {
+        expect(notificationTarget(here, undefined)).toBeNull();
+        expect(notificationTarget(here, '')).toBeNull();
+    });
+
+    it('answers the same address when this tab is already where the click would go', () => {
+        const current = 'http://localhost:3000/?project=p1&task=t1';
+        expect(notificationTarget(current, current)).toBe(current);
+        expect(notificationTarget(current, '/?project=p1&task=t1')).toBe(current);
+    });
+
+    it('answers nothing for a target on another origin', () => {
+        expect(notificationTarget(here, 'https://elsewhere.test/?project=p1')).toBeNull();
+    });
+
+    it('answers nothing for bytes that are no url', () => {
+        expect(notificationTarget(here, 'http://')).toBeNull();
+    });
+});
+
+describe('watchNotificationClicks', () => {
+    /**
+     * The page holds one listener for the worker's clicks however often boot calls for it, so the cases
+     * share the handler the first registration captured.
+     */
+    const handlers: Array<(event: MessageEvent) => void> = [];
+    let send: (data: unknown) => void = () => {};
+
+    beforeAll(() => {
+        Object.defineProperty(navigator, 'serviceWorker', {
+            configurable: true,
+            value: {
+                addEventListener: (type: string, handler: (event: MessageEvent) => void) => {
+                    if (type === 'message') handlers.push(handler);
+                },
+            },
+        });
+        watchNotificationClicks();
+        // A second boot must not put a second listener on the same channel.
+        watchNotificationClicks();
+        send = (data: unknown) => {
+            for (const handler of handlers) handler({ data } as MessageEvent);
+        };
+    });
+
+    it('registers once, however often the app boots', () => {
+        expect(handlers).toHaveLength(1);
+    });
+
+    it('opens the task the worker was clicked on', () => {
+        const here = stubLocation('http://localhost:3000/');
+        const focus = vi.spyOn(window, 'focus').mockImplementation(() => {});
+        send({ type: 'mike:notification-click', url: 'http://localhost:3000/?project=p1&task=t1' });
+        expect(focus).toHaveBeenCalledTimes(1);
+        expect(here()).toBe('http://localhost:3000/?project=p1&task=t1');
+    });
+
+    it('ignores a frame that is not a notification click', () => {
+        const here = stubLocation('http://localhost:3000/');
+        const focus = vi.spyOn(window, 'focus').mockImplementation(() => {});
+        send({ type: 'somebody-elses-message', url: 'http://localhost:3000/?project=p1' });
+        send({ type: 'mike:notification-click' });
+        send({ type: 'mike:notification-click', url: 'https://elsewhere.test/?project=p1' });
+        send('not even an object');
+        expect(focus).not.toHaveBeenCalled();
+        expect(here()).toBe('http://localhost:3000/');
     });
 });

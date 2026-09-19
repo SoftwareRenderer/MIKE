@@ -6,15 +6,16 @@ import type { Task } from '$lib/types';
 import { getBoard } from '$lib/api/projects';
 import { appStore, uiStore } from '$lib/stores';
 import { t } from '$lib/i18n';
-import { taskViewHref } from '$lib/utils/app-link';
+import { projectBoardHref, taskViewHref } from '$lib/utils/app-link';
 import { showBrowserNotification, dismissBrowserNotification, type BrowserNotification } from '$lib/utils/notifications';
 import {
     dismissedTags,
     notableArrivals,
+    planReviewNotice,
     reviewArrivals,
     reviewBaseline,
-    shouldNotifyReview,
     tasksInReview,
+    type ArrivalGroup,
     type AttentionState,
     type ReviewBaseline,
     type ShownNotice,
@@ -22,6 +23,9 @@ import {
 
 /** How long a move this tab made itself counts as its own news. */
 const SELF_MOVE_TTL_MS = 60_000;
+
+/** One tag for the batch, so the newest news replaces the previous one instead of stacking under it. */
+const BATCH_TAG = 'mike-review-batch';
 
 interface ColumnRead {
     count: number;
@@ -39,6 +43,11 @@ class ReviewNotifier {
     private openBoard: { projectId: string; tasks: Task[] } | null = null;
     private selfMoved = new Map<string, number>();
     private fetching = new Set<string>();
+    /** Arrivals collected but not announced yet, per project. */
+    private pending = new Map<string, Task[]>();
+    /** Board reads in flight. A frame that raised several projects started several reads, and the burst is
+     *  not over until the last one says what its column holds. */
+    private reads = 0;
 
     observeCounts(counts: Record<string, { review?: number } | undefined>): void {
         // Counted even while off, so the first frame after it comes on is a steady count rather than a
@@ -61,6 +70,7 @@ class ReviewNotifier {
                 this.counts.delete(projectId);
                 this.columns.delete(projectId);
                 this.announced.delete(projectId);
+                this.pending.delete(projectId);
                 for (const [tag, notice] of this.shown) {
                     if (notice.projectId === projectId) this.shown.delete(tag);
                 }
@@ -102,20 +112,24 @@ class ReviewNotifier {
     private async readProject(projectId: string, previousCount: number): Promise<void> {
         if (this.fetching.has(projectId)) return;
         this.fetching.add(projectId);
-        let tasks: Task[];
+        this.reads++;
+        let board: { tasks?: Task[] } | null = null;
         try {
-            const board = await getBoard(projectId);
-            tasks = board.tasks || [];
+            board = await getBoard(projectId);
         } catch {
             // Offline, or the project is gone; a later rise is asked about again.
+        } finally {
             this.fetching.delete(projectId);
+            this.reads--;
+        }
+        if (!board) {
+            this.flushIfQuiet();
             return;
         }
-        this.fetching.delete(projectId);
         // A previous read is the pre-rise column only while its count still matches.
         const snapshot = this.columns.get(projectId);
         const ids = snapshot && snapshot.count === previousCount ? snapshot.ids : null;
-        this.applyColumn(projectId, tasksInReview(tasks), reviewBaseline(previousCount, ids));
+        this.applyColumn(projectId, tasksInReview(board.tasks || []), reviewBaseline(previousCount, ids));
     }
 
     /** Land one reading of a project's Review column and announce what is new in it. */
@@ -125,16 +139,28 @@ class ReviewNotifier {
         const inReview = new Set(ids);
         const announced = new Map([...(this.announced.get(projectId) || [])].filter(([taskId]) => inReview.has(taskId)));
         this.announced.set(projectId, announced);
-        if (!baseline || review.length <= baseline.count) return;
-
-        const arrivals: Task[] = [];
-        for (const task of reviewArrivals(baseline, review)) {
-            if (announced.get(task.id) === (task.moved_at || '')) continue;
-            announced.set(task.id, task.moved_at || '');
-            arrivals.push(task);
+        if (baseline && review.length > baseline.count) {
+            const arrivals: Task[] = [];
+            for (const task of reviewArrivals(baseline, review)) {
+                if (announced.get(task.id) === (task.moved_at || '')) continue;
+                announced.set(task.id, task.moved_at || '');
+                arrivals.push(task);
+            }
+            const openTaskId = appStore.selectedTask?.id || uiStore.floatingTask?.taskId || null;
+            this.record(projectId, notableArrivals(arrivals, openTaskId, this.liveSelfMoves()));
         }
-        const openTaskId = appStore.selectedTask?.id || uiStore.floatingTask?.taskId || null;
-        this.notify(projectId, notableArrivals(arrivals, openTaskId, this.liveSelfMoves()));
+        this.flushIfQuiet();
+    }
+
+    /** One burst may read the same project twice; a card counts once towards what arrived. */
+    private record(projectId: string, arrivals: Task[]): void {
+        if (arrivals.length === 0) return;
+        const group = this.pending.get(projectId) ?? [];
+        const collected = new Set(group.map(t => t.id));
+        for (const task of arrivals) {
+            if (!collected.has(task.id)) group.push(task);
+        }
+        this.pending.set(projectId, group);
     }
 
     private liveSelfMoves(): string[] {
@@ -147,36 +173,56 @@ class ReviewNotifier {
         return live;
     }
 
-    private notify(projectId: string, arrivals: Task[]): void {
-        if (arrivals.length === 0) return;
-        const attention: AttentionState = {
-            documentVisible: document.visibilityState === 'visible',
-            documentFocused: document.hasFocus(),
-            reviewColumnInView: uiStore.reviewColumnInViewOf === projectId,
-        };
-        if (!shouldNotifyReview(uiStore.notifyOnReview, attention)) return;
+    /** The burst is over when nothing is being read: what was collected goes out as one notification. */
+    private flushIfQuiet(): void {
+        if (this.reads > 0 || this.pending.size === 0) return;
+        const groups: ArrivalGroup[] = [...this.pending].map(([projectId, tasks]) => ({ projectId, tasks }));
+        this.pending.clear();
+        this.announce(groups);
+    }
 
-        const project = appStore.projects.find(p => p.id === projectId);
-        const body = t('notify.review.body', { project: project?.name || projectId });
-        const [first] = arrivals;
-        if (!first) return;
-        if (arrivals.length > 1) {
-            const tag = `mike-review-${projectId}`;
+    private announce(groups: ArrivalGroup[]): void {
+        if (!uiStore.notifyOnReview) return;
+        const notice = planReviewNotice(groups, this.reviewCounts(), this.attention());
+        if (!notice) return;
+
+        const project = appStore.projects.find(p => p.id === notice.projectId);
+        const projectName = project?.name || notice.projectId;
+        const task = notice.task;
+        if (task) {
+            const tag = `mike-task-${task.id}`;
             this.show({
-                title: t('notify.review.many', { count: arrivals.length }),
-                body,
+                title: task.title?.trim() || t('notify.review.untitled'),
+                body: t('notify.review.body', { project: projectName }),
                 tag,
-                url: taskViewHref(projectId, first.id),
-            }, { tag, projectId, taskId: null });
+                url: taskViewHref(notice.projectId, task.id),
+            }, { tag, projectId: notice.projectId, taskId: task.id });
             return;
         }
-        const tag = `mike-task-${first.id}`;
         this.show({
-            title: first.title?.trim() || t('notify.review.untitled'),
-            body,
-            tag,
-            url: taskViewHref(projectId, first.id),
-        }, { tag, projectId, taskId: first.id });
+            title: t('notify.review.many', { count: notice.count }),
+            body: t('notify.review.most', { project: projectName }),
+            tag: BATCH_TAG,
+            url: projectBoardHref(notice.projectId),
+        }, { tag: BATCH_TAG, projectId: notice.projectId, taskId: null });
+    }
+
+    private reviewCounts(): Record<string, number> {
+        const counts: Record<string, number> = {};
+        for (const [projectId, review] of this.counts) counts[projectId] = review;
+        return counts;
+    }
+
+    /**
+     * What the user is looking at, read at the moment of the decision — `document.hasFocus()` is not a
+     * reactive value, so nothing here can watch it.
+     */
+    private attention(): AttentionState {
+        return {
+            documentVisible: document.visibilityState === 'visible',
+            documentFocused: document.hasFocus(),
+            reviewProject: uiStore.reviewColumnInViewOf,
+        };
     }
 
     /** Only what reached the screen is worth remembering. */

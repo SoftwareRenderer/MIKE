@@ -57,7 +57,7 @@
     import MobileTabBar from './CardDetail/MobileTabBar.svelte';
     import { useMemoryAlert } from '$lib/composables/use-memory-alert.svelte';
     import { reportChunkFailure } from '$lib/services/chunk-failure';
-    import { memoryAlertSentences, projectMemoryLimitMB } from '$lib/utils/memory-stats';
+    import { memoryAlertAction, memoryAlertSentences, projectMemoryLimitMB } from '$lib/utils/memory-stats';
     import TaskHeader from './CardDetail/TaskHeader.svelte';
     import BoardOverview from './CardDetail/BoardOverview.svelte';
     import MultiSelectBar from './MultiSelectBar.svelte';
@@ -72,6 +72,7 @@
     const memLimitMB = $derived(projectMemoryLimitMB(appStore.projects.find(p => p.id === task.project_id)));
     const memory = useMemoryAlert(() => task, () => memLimitMB);
     const memAlert = $derived(memory.alert);
+    const memAlertAction = $derived(memAlert ? memoryAlertAction(memAlert.alert) : null);
 
     /**
      * Section `id`s are status data (compared, sent to the API); `title` is the English
@@ -994,7 +995,7 @@
                 <span class="memory-alert-text">
                     <span class="memory-alert-title">{t('memory.alert.title')}</span>
                     {#each memoryAlertSentences(memAlert.alert) as line}<span class="memory-alert-line">{line}</span>{/each}
-                    <span class="memory-alert-line">{t('memory.alert.action')}</span>
+                    {#if memAlertAction}<span class="memory-alert-line">{memAlertAction}</span>{/if}
                 </span>
                 <button class="memory-alert-dismiss" onclick={() => { void memory.dismiss(); }}>
                     {t('memory.alert.dismiss')}

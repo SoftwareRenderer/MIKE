@@ -185,6 +185,27 @@ describe('SandboxPanel memory section', () => {
             expect(text).toContain('Raise or remove the limit');
         });
 
+        it('keeps the alert but drops the advice when the peak stayed under the limit', async () => {
+            const { container } = renderPanel(stats({ memory_current_mb: 400, memory_peak_mb: 1776, memory_limit_mb: 2048, oom_kills: 5 }));
+            await vi.waitFor(() => {
+                if (!container.querySelector('.memory-alert')) throw new Error('no alert rendered');
+            });
+            const text = container.querySelector('.memory-alert')!.textContent!;
+            expect(text).toContain('ran out of memory');
+            expect(text).toContain('5 processes were killed');
+            expect(text).not.toContain('Raise or remove the limit');
+        });
+
+        it('keeps the alert but drops the advice when no limit is enforced', async () => {
+            const { container } = renderPanel(stats({ memory_current_mb: 400, memory_peak_mb: 1776, memory_limit_mb: 0, oom_kills: 1 }));
+            await vi.waitFor(() => {
+                if (!container.querySelector('.memory-alert')) throw new Error('no alert rendered');
+            });
+            const text = container.querySelector('.memory-alert')!.textContent!;
+            expect(text).toContain('with no limit enforced');
+            expect(text).not.toContain('Raise or remove the limit');
+        });
+
         it('sends the numbers the alert showed, so the dismissal lands on the server', async () => {
             const { container } = renderPanel(stats({ memory_peak_mb: 1024, memory_limit_mb: 1024, oom_kills: 2 }));
             const dismiss = (await vi.waitFor(() => {
