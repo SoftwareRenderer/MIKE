@@ -133,13 +133,13 @@ func TestLeavingOneProjectOfManyKeepsTheSharedWatchersAlive(t *testing.T) {
 	awaitWatched(t, asm, projectID, true)
 
 	b.sendSubscription(t, "unsubscribe_project", projectID, "")
-	b.flushSubscriptions(t, projectID, "probe-b") // applied: it preceded this subscribe
+	b.flushSubscriptions(t, asm, projectID)
 
 	assertSubscriberCount(t, asm, projectID, true)
 	awaitWatched(t, asm, projectID, true)
 
 	a.sendSubscription(t, "unsubscribe_project", projectID, "")
-	a.flushSubscriptions(t, projectID, "probe-a")
+	a.flushSubscriptions(t, asm, projectID)
 
 	assertSubscriberCount(t, asm, projectID, false)
 	awaitWatched(t, asm, projectID, false)
@@ -168,7 +168,7 @@ func TestUnsubscribingOneProjectStopsOnlyThatProjectsWatchers(t *testing.T) {
 	awaitWatched(t, asm, held, true)
 
 	a.sendSubscription(t, "unsubscribe_project", left, "")
-	a.flushSubscriptions(t, left, "probe-left")
+	a.flushSubscriptions(t, asm, left)
 
 	assertSubscriberCount(t, asm, left, false)
 	awaitWatched(t, asm, left, false)
