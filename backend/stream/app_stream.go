@@ -63,6 +63,23 @@ const maxFrameBufferSize = 256 * 1024 // 256KB
 
 const (
 	DefaultBufferSize = 5000
+
+	// DefaultBufferBytes bounds a replay buffer in bytes: a frame may be
+	// maxFrameBufferSize long, so a frame count alone bounds nothing.
+	DefaultBufferBytes = 16 << 20
+
+	// DefaultTaskBufferKeys is how many tasks may hold a replay buffer at once; the oldest
+	// gives way.
+	DefaultTaskBufferKeys = 64
+
+	// DefaultMaxConnections bounds live /api/stream sockets. Each costs a read loop, a
+	// pinger and a replay buffer.
+	DefaultMaxConnections = 256
+
+	// DefaultMaxTaskSubs and DefaultMaxProjectSubs cap what one connection may ask to be
+	// told about; their keys arrive as text from the client.
+	DefaultMaxTaskSubs    = 1024
+	DefaultMaxProjectSubs = 256
 )
 
 // UserMessage carries a user message with optional model override.
@@ -84,6 +101,7 @@ type clientState struct {
 	bufMu      sync.Mutex
 	ringBuffer [][]byte
 	bufSize    int
+	bufBytes   int // bytes held in ringBuffer, held with bufMu
 }
 
 // AppStreamMessage is the envelope for client-to-server messages.
@@ -126,9 +144,22 @@ type AppStreamManager struct {
 	taskBufMu   sync.Mutex
 	taskBuffers map[string][]taskFrame // task key -> ring buffer
 	taskBufSize int
+	// taskBufLoad is the bytes each key's buffer holds. taskBufOrder is exactly the keys of
+	// taskBuffers, oldest opened first, which is the order they are evicted in.
+	taskBufLoad    map[string]int
+	taskBufOrder   []string
+	taskBufBound   int // byte bound on one task's buffer
+	taskBufKeys    int // how many tasks may hold one
+	clientBufBound int // byte bound on one client's ring buffer
+	maxConns       int
+	maxTaskSubs    int
+	maxProjectSubs int
 
 	// Latest-known sandbox memory stats
 	sandboxStatsProvider func(projectID, taskID string) *types.SandboxMemoryStats
+
+	// writeTimeout bounds one frame's delivery to one client; see httputil.WriteTimeout.
+	writeTimeout time.Duration
 }
 
 type taskFrame struct {
@@ -139,11 +170,19 @@ type taskFrame struct {
 // NewAppStreamManager creates a new AppStreamManager with filesystem watchers.
 func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *AppStreamManager {
 	asm := &AppStreamManager{
-		clients:     make(map[*websocket.Conn]*clientState),
-		store:       store,
-		worktreeMgr: worktreeMgr,
-		taskBuffers: make(map[string][]taskFrame),
-		taskBufSize: DefaultBufferSize,
+		clients:        make(map[*websocket.Conn]*clientState),
+		store:          store,
+		worktreeMgr:    worktreeMgr,
+		taskBuffers:    make(map[string][]taskFrame),
+		taskBufLoad:    make(map[string]int),
+		taskBufSize:    DefaultBufferSize,
+		taskBufBound:   DefaultBufferBytes,
+		taskBufKeys:    DefaultTaskBufferKeys,
+		clientBufBound: DefaultBufferBytes,
+		maxConns:       DefaultMaxConnections,
+		maxTaskSubs:    DefaultMaxTaskSubs,
+		maxProjectSubs: DefaultMaxProjectSubs,
+		writeTimeout:   httputil.WriteTimeout,
 	}
 	// The diff cache callback is set later via SetDiffCacheUpdate, once GitHandler exists.
 	var err error
@@ -200,6 +239,11 @@ func (asm *AppStreamManager) subscribeProject(conn *websocket.Conn, projectID st
 	}
 	if client.projectSub == nil {
 		client.projectSub = make(map[string]int)
+	}
+	if _, held := client.projectSub[projectID]; !held && len(client.projectSub) >= asm.maxProjectSubs {
+		asm.mu.Unlock()
+		logging.For(logging.Stream).Warnf("refusing project=%s: this connection already holds %d subscriptions", projectID, asm.maxProjectSubs)
+		return
 	}
 	client.projectSub[projectID]++
 	wasEmpty := len(client.projectSub) == 1 // first project subscription
@@ -261,6 +305,11 @@ func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, task
 		client.taskSub = make(map[string]int)
 	}
 	key := projectID + ":" + taskID
+	if _, held := client.taskSub[key]; !held && len(client.taskSub) >= asm.maxTaskSubs {
+		asm.mu.Unlock()
+		logging.For(logging.Stream).Warnf("refusing task=%s in project=%s: this connection already holds %d subscriptions", taskID, projectID, asm.maxTaskSubs)
+		return
+	}
 	client.taskSub[key]++
 	asm.mu.Unlock()
 
@@ -270,29 +319,23 @@ func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, task
 	// hash-deduped no-ops). If a done task is moved back to active work, the
 	// executor start path re-registers its watcher.
 
-	// Send per-task buffer so the client can catch up on missed events
-	// (e.g., tokens streamed while the page was reloading).
+	// Replay what the client missed, then the latest sandbox stats, which the task view needs
+	// even when that buffer has been cleared. One goroutine holds writeMu for both, so the
+	// stats land after the replay they extend.
 	buf := asm.getTaskBuffer(key)
-	if len(buf) > 0 {
+	statsFrame := asm.latestSandboxStatsFrame(projectID, taskID)
+	if len(buf) > 0 || statsFrame != nil {
 		go func() {
 			client.writeMu.Lock()
 			defer client.writeMu.Unlock()
 			for _, frame := range buf {
-				if err := conn.Write(context.Background(), websocket.MessageText, frame); err != nil {
+				if err := httputil.WriteText(context.Background(), conn, frame, asm.writeTimeout); err != nil {
 					return
 				}
 			}
-		}()
-	}
-
-	// Deliver the latest known sandbox memory stats after the buffer replay so
-	// clients opening the task view see the most recent usage even when the
-	// task is idle (the buffer above is cleared when execution completes).
-	if frame := asm.latestSandboxStatsFrame(projectID, taskID); frame != nil {
-		go func() {
-			client.writeMu.Lock()
-			defer client.writeMu.Unlock()
-			_ = conn.Write(context.Background(), websocket.MessageText, frame)
+			if statsFrame != nil {
+				_ = httputil.WriteText(context.Background(), conn, statsFrame, asm.writeTimeout)
+			}
 		}()
 	}
 }
@@ -384,14 +427,14 @@ func (asm *AppStreamManager) allClients() []*clientState {
 	return targets
 }
 
-// writeFrame delivers a marshalled frame to each target. Per-client writeMu
-// serialises this with the keepalive pinger and the replay goroutines.
+// writeFrame delivers a marshalled frame to each target. Per-client writeMu serialises this
+// with the keepalive pinger and the replay goroutines.
 func (asm *AppStreamManager) writeFrame(targets []*clientState, frame []byte) {
 	for _, client := range targets {
 		client.writeMu.Lock()
 		// A write error means the client disconnected; its read loop removes it
 		// from asm.clients, so there is nothing to do here.
-		_ = client.conn.Write(context.Background(), websocket.MessageText, frame)
+		_ = httputil.WriteText(context.Background(), client.conn, frame, asm.writeTimeout)
 		client.writeMu.Unlock()
 	}
 }
@@ -666,10 +709,14 @@ func (asm *AppStreamManager) bufferRaw(frame []byte) {
 
 	for _, client := range targets {
 		client.bufMu.Lock()
-		if len(client.ringBuffer) >= client.bufSize {
+		client.ringBuffer = append(client.ringBuffer, frame)
+		client.bufBytes += len(frame)
+		// Trim from the oldest end: a reconnecting client is caught up on the tail.
+		for len(client.ringBuffer) > client.bufSize ||
+			(client.bufBytes > asm.clientBufBound && len(client.ringBuffer) > 1) {
+			client.bufBytes -= len(client.ringBuffer[0])
 			client.ringBuffer = client.ringBuffer[1:]
 		}
-		client.ringBuffer = append(client.ringBuffer, frame)
 		client.bufMu.Unlock()
 	}
 }
@@ -700,10 +747,11 @@ func (asm *AppStreamManager) bufferTask(taskKey string, frame []byte) {
 
 	asm.taskBufMu.Lock()
 	defer asm.taskBufMu.Unlock()
-	buf, ok := asm.taskBuffers[taskKey]
-	if !ok {
-		buf = make([]taskFrame, 0, asm.taskBufSize)
+	if _, fresh := asm.taskBuffers[taskKey]; !fresh {
+		asm.makeRoomForTaskBufferLocked()
+		asm.taskBufOrder = append(asm.taskBufOrder, taskKey)
 	}
+	buf := asm.taskBuffers[taskKey]
 
 	// For tool_call events, replace any existing frame with the same tool_id
 	// so only the last delta is kept (avoids duplicate tool calls on replay).
@@ -711,14 +759,32 @@ func (asm *AppStreamManager) bufferTask(taskKey string, frame []byte) {
 		buf = removeFrameWithToolID(buf, toolID)
 	}
 
-	if len(buf) >= asm.taskBufSize {
-		buf = buf[1:]
-	}
 	// Copy frame to avoid aliasing
 	frameCopy := make([]byte, len(frame))
 	copy(frameCopy, frame)
 	buf = append(buf, taskFrame{data: frameCopy, toolID: toolID})
+
+	loaded := asm.taskBufLoad[taskKey] + len(frameCopy)
+	for len(buf) > asm.taskBufSize || (loaded > asm.taskBufBound && len(buf) > 1) {
+		loaded -= len(buf[0].data)
+		buf = buf[1:]
+	}
 	asm.taskBuffers[taskKey] = buf
+	asm.taskBufLoad[taskKey] = loaded
+}
+
+// makeRoomForTaskBufferLocked closes the oldest task buffer so an incoming task may open one.
+// Reaching the cap means tasks streamed without a terminal event or a deletion, and the
+// freshest keys are the ones someone may be looking at.
+func (asm *AppStreamManager) makeRoomForTaskBufferLocked() {
+	if len(asm.taskBufOrder) == 0 || len(asm.taskBufOrder) < asm.taskBufKeys {
+		return
+	}
+	oldest := asm.taskBufOrder[0]
+	asm.taskBufOrder = asm.taskBufOrder[1:]
+	logging.For(logging.Stream).Warnf("task replay buffers at their limit of %d, dropping the oldest (task=%s)", asm.taskBufKeys, oldest)
+	delete(asm.taskBuffers, oldest)
+	delete(asm.taskBufLoad, oldest)
 }
 
 func extractToolID(frame []byte) string {
@@ -763,6 +829,13 @@ func (asm *AppStreamManager) clearTaskBuffer(taskKey string) {
 	asm.taskBufMu.Lock()
 	defer asm.taskBufMu.Unlock()
 	delete(asm.taskBuffers, taskKey)
+	delete(asm.taskBufLoad, taskKey)
+	for i, key := range asm.taskBufOrder {
+		if key == taskKey {
+			asm.taskBufOrder = append(asm.taskBufOrder[:i], asm.taskBufOrder[i+1:]...)
+			break
+		}
+	}
 }
 
 // ClearTaskBuffer removes the per-task ring buffer.
@@ -836,12 +909,23 @@ func (asm *AppStreamManager) sendDoneTaskInitialDiff(ctx context.Context, client
 	}
 	msg, _ := json.Marshal(frame)
 	client.writeMu.Lock()
-	conn.Write(ctx, websocket.MessageText, msg)
+	_ = httputil.WriteText(ctx, conn, msg, asm.writeTimeout)
 	client.writeMu.Unlock()
 }
 
 // HandleStream is the HTTP handler for the /api/stream WebSocket endpoint.
 func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request) {
+	asm.mu.RLock()
+	live := len(asm.clients)
+	asm.mu.RUnlock()
+	if live >= asm.maxConns {
+		// Answered before the upgrade, so the browser sees a refusal rather than a connection
+		// it has to work out is dead.
+		logging.For(logging.Stream).Warnf("refusing a connection: %d already live (limit %d)", live, asm.maxConns)
+		http.Error(w, "too many live stream connections", http.StatusServiceUnavailable)
+		return
+	}
+
 	conn, ok := httputil.AcceptWS(w, r, "app stream")
 	if !ok {
 		return
@@ -857,6 +941,7 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 
 	asm.mu.Lock()
 	asm.clients[conn] = client
+	total := len(asm.clients)
 	asm.mu.Unlock()
 
 	defer func() {
@@ -878,7 +963,7 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 		}
 	}()
 
-	logging.For(logging.Stream).Infof("connection accepted (total: %d)", len(asm.clients))
+	logging.For(logging.Stream).Infof("connection accepted (total: %d)", total)
 
 	// Send initial project counts
 	asm.BroadcastProjectCounts()
@@ -894,17 +979,17 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 		go func() {
 			buf := asm.getBuffer(conn)
 			client.writeMu.Lock()
+			defer client.writeMu.Unlock()
 			for _, frame := range buf {
 				select {
 				case <-ctx.Done():
 					return
 				default:
 				}
-				if err := conn.Write(ctx, websocket.MessageText, frame); err != nil {
+				if err := httputil.WriteText(ctx, conn, frame, asm.writeTimeout); err != nil {
 					return
 				}
 			}
-			client.writeMu.Unlock()
 		}()
 	}
 
@@ -1007,7 +1092,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 				"already_merged":        stats.AlreadyMerged,
 			}))
 			client.writeMu.Lock()
-			conn.Write(ctx, websocket.MessageText, statsMsg)
+			_ = httputil.WriteText(ctx, conn, statsMsg, asm.writeTimeout)
 			client.writeMu.Unlock()
 			// No per-file task_diff manifest frame is broadcast: no component reads it, and the
 			// task detail view fetches its data from the REST diff endpoint.
@@ -1021,7 +1106,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			"branch": branch,
 		}))
 		client.writeMu.Lock()
-		conn.Write(ctx, websocket.MessageText, msg)
+		_ = httputil.WriteText(ctx, conn, msg, asm.writeTimeout)
 		client.writeMu.Unlock()
 	}
 }

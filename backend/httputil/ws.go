@@ -14,6 +14,11 @@ import (
 	"mike/pkg/logging"
 )
 
+// ReadLimit bounds one frame a client sends. The library default of 32 KiB is reachable in
+// ordinary use, and going over it closes the connection rather than refusing the frame, so
+// the browser reconnects, re-sends, and is closed again.
+const ReadLimit = 1 << 20
+
 // AcceptWS upgrades a WebSocket with the settings every MIKE endpoint shares, so no endpoint
 // hand-rolls its own accept. logTag names the endpoint in the failure log; on ok == false
 // nothing was accepted.
@@ -38,6 +43,7 @@ func AcceptWS(w http.ResponseWriter, r *http.Request, logTag string) (conn *webs
 		logging.For(logging.HTTP).Warnf("websocket accept error at %s: %v", logTag, err)
 		return nil, false
 	}
+	c.SetReadLimit(ReadLimit)
 	return c, true
 }
 
@@ -68,6 +74,19 @@ func splitHostPort(hostport string) (host, port string) {
 		return hostport, ""
 	}
 	return h, p
+}
+
+// WriteTimeout bounds the delivery of one frame. coder/websocket takes a write deadline only
+// from the context it is handed, so a write without one waits forever on a peer that stopped
+// reading and every writer behind it waits too; an expired deadline also closes the
+// connection, so the error means "this peer is gone".
+const WriteTimeout = 10 * time.Second
+
+// WriteText writes one text frame under a deadline built from ctx and timeout.
+func WriteText(ctx context.Context, conn *websocket.Conn, frame []byte, timeout time.Duration) error {
+	writeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return conn.Write(writeCtx, websocket.MessageText, frame)
 }
 
 const (
