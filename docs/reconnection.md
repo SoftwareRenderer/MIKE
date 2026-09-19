@@ -35,6 +35,35 @@ wake-up path refetches the board over HTTP, and why `TaskChat` reloads history f
 that does survive a reconnect is the **per-task** one (`getTaskBuffer`, replayed on `subscribe_task`),
 which is why a task's buffer is cleared the moment its turn ends.
 
+## One frame per key: what a reconnect may say
+
+A connection holds a subscription **per key** (`backend/stream/app_stream_subscription_test.go`), so one
+`unsubscribe_*` leaves it, and the work a subscription starts — a project's initial-data pass, a task's
+buffer replay — belongs to the key rather than to the frame that arrived. The client's side is `owed`
+(`src/lib/api/stream.ts`): the newest intent for each key, recorded when `subscribeProject`/
+`unsubscribeProject`/`subscribeTask`/`unsubscribeTask` run, never a log of frames. It is a projection of
+the two subscription sets, which is what bounds it — an outage costs at most one frame per key the app
+has opened however long it runs, where a message log replayed a frame per navigation and re-subscribed
+every held key on top, so a project opened during an outage was subscribed twice and unsubscribed once.
+That second hold never left, and the project's branch and filesystem watchers stayed armed for the life
+of the socket.
+
+Two rules the server's holding depends on, both held by the shape of `owed`: a key's `unsubscribe_*` is
+never sent after a later `subscribe_*` for that key, because the newest intent replaces the older one; and
+a subscribe the server never received is undone by **dropping** it, not by sending its cancellation — the
+connection that would have carried it never held the key. `onopen` writes what is owed, then one subscribe
+per key still held that the owed pass did not already cover.
+
+`subscribe_project` is the one frame that waits: it goes out after the async `getKnownStats` provider
+answers, so the skip-if-known handshake still declares what the client already holds. The **intent** is
+recorded in `owed` at call time regardless, so an enter-and-leave during that wait costs nothing, and when
+the provider answers its frame is written only if `owed` still holds it — otherwise the app left that
+project, and a subscribe nothing will unsubscribe is exactly what the old ordering wrote.
+
+**Tests:** `src/lib/api/__tests__/stream-subscription.unit.ts` (coalescing, the bound, the provider's
+ordering) with `stream-reconnect.unit.ts` for the ladder around it; the server half is
+`app_stream_subscription_test.go` and `project_subscription_watchers_test.go`.
+
 ## The boot offer and one stream per page
 
 `/api/auth/session` decides whether the app or the offline mirror is on screen. A 2 s timer *offers*
