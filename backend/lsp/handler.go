@@ -75,6 +75,15 @@ type queuedInit struct {
 type workspaceState struct {
 	process *LSPProcess
 	cfg     *ServerConfig
+	// mu guards every field below it — the initialize lifecycle and the subscriber count — because
+	// those are written by the single server-message router goroutine (routeResponse) and by
+	// whichever client connection's goroutine arrives first (handleInitialize, handleSubscription,
+	// handleClientMessage). h.mu guards the handler's maps (clients, workspaces) and reaches none of
+	// them; process, cfg and the entry's own first clientCount are written as the entry is built,
+	// before its pointer reaches the map. Lock order is h.mu → mu → ClientSession.mu: an entry's
+	// lock may be taken under h.mu, and a session's lock under either, never in the opposite
+	// direction (sessionsUsingLocked states the last step).
+	mu sync.Mutex
 	// clientCount counts the subscribe messages that joined this entry. It is a log line only:
 	// it went up per subscribe and down once per session, so the release decision counts
 	// sessions instead — see sessionsUsingLocked.
@@ -92,6 +101,97 @@ type workspaceState struct {
 	// sentInitialized tracks whether the "initialized" notification has been forwarded.
 	// Only the first one should reach the server.
 	sentInitialized bool
+}
+
+// addSubscriber counts a subscribe message on the entry and returns the running total.
+func (ws *workspaceState) addSubscriber() int {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	ws.clientCount++
+	return ws.clientCount
+}
+
+// markInitializedSent reports whether this is the entry's first "initialized" notification.
+func (ws *workspaceState) markInitializedSent() bool {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	if ws.sentInitialized {
+		return false
+	}
+	ws.sentInitialized = true
+	return true
+}
+
+// initDecision is what one initialize request found on the entry.
+type initDecision int
+
+const (
+	initCached initDecision = iota // answer it from the cached response
+	initQueued                     // it waits on the response to the request in flight
+	initFirst                      // this caller owns the forward to the server
+)
+
+// decideInitialize answers one initialize request against the entry: the cached response, the
+// replay queue, or the claim on the forward. The caller holding initFirst owns that request: a
+// send that fails goes to abandonInitialize, a response to cacheInitResponse.
+func (ws *workspaceState) decideInitialize(session *ClientSession, clientReqID string, channelID int64) (initDecision, json.RawMessage) {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	switch {
+	case ws.initialized:
+		if ws.initResponse == nil {
+			return initCached, nil
+		}
+		return initCached, remapResponseIDWithChannel(ws.initResponse, clientReqID, channelID)
+	case ws.pendingInitialize:
+		ws.queuedInitialize = append(ws.queuedInitialize, &queuedInit{
+			session:     session,
+			clientReqID: clientReqID,
+			channelID:   channelID,
+		})
+		return initQueued, nil
+	default:
+		ws.pendingInitialize = true
+		return initFirst, nil
+	}
+}
+
+// cacheInitResponse stores an initialize response for the channels that arrive after it and
+// returns the requests queued behind it, which the caller replays. It returns nil for a response
+// that is not an initialize result and for an entry that is initialized already.
+func (ws *workspaceState) cacheInitResponse(serverMsg json.RawMessage) []*queuedInit {
+	var rpc JSONRPCMessage
+	if err := json.Unmarshal(serverMsg, &rpc); err != nil || rpc.Result == nil {
+		return nil
+	}
+	var result struct {
+		Capabilities json.RawMessage `json:"capabilities"`
+	}
+	if err := json.Unmarshal(rpc.Result, &result); err != nil || len(result.Capabilities) == 0 {
+		return nil
+	}
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	if ws.initialized {
+		return nil
+	}
+	ws.initialized = true
+	ws.pendingInitialize = false
+	ws.initResponse = serverMsg
+	queued := ws.queuedInitialize
+	ws.queuedInitialize = nil
+	return queued
+}
+
+// abandonInitialize unwinds a first initialize that never reached the server and returns everyone
+// queued behind it, so later initializes don't queue behind a failed request.
+func (ws *workspaceState) abandonInitialize() []*queuedInit {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	queued := ws.queuedInitialize
+	ws.queuedInitialize = nil
+	ws.pendingInitialize = false
+	return queued
 }
 
 // lspRegistry defines the operations the LSP handler needs from the registry.
@@ -315,19 +415,14 @@ func (h *LSPHandler) handleClientMessage(ctx context.Context, session *ClientSes
 
 	// Filter "initialized" notification — only the first per language should reach the server
 	if rpc.Method == "initialized" && rpc.ID == nil {
-		h.mu.Lock()
-		ws, ok := h.workspaces[workspaceKey]
-		if ok && !ws.sentInitialized {
-			ws.sentInitialized = true
-			h.mu.Unlock()
+		ws, ok := h.lookupWorkspace(workspaceKey)
+		if ok && ws.markInitializedSent() {
 			h.forwardRaw(ctx, session, stripped, workspaceKey)
 			// Notify frontend that LSP is fully ready (after initialized notification forwarded)
 			h.sendLSPReady(ctx, session, channelID)
-		} else {
-			h.mu.Unlock()
-			// Silently drop duplicate "initialized" notifications
-			// $server/lspReady was already sent (by handleInitialize cached path or first channel)
 		}
+		// A duplicate "initialized" is dropped silently: $server/lspReady was already sent (by
+		// handleInitialize cached path or first channel)
 		return
 	}
 
@@ -429,17 +524,9 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 
 	workspaceKey := processKey(sub.Params.Workspace, cfg.Language)
 
-	// Check if workspace already exists (brief lock)
-	h.mu.Lock()
-	ws, ok := h.workspaces[workspaceKey]
-	if ok {
-		ws.clientCount++
-		h.mu.Unlock()
-	} else {
-		h.mu.Unlock()
-	}
-
-	if !ok {
+	// Count this subscribe on the entry, spawning a process first when there is no entry yet.
+	ws, exists := h.lookupWorkspace(workspaceKey)
+	if !exists {
 		// Spawn a new process (OUTSIDE lock to avoid blocking other operations)
 		process, err := h.manager.GetOrCreate(ctx, sub.Params.Workspace, cfg.Language)
 		if err != nil {
@@ -453,14 +540,12 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 		h.mu.Lock()
 		// Another subscriber may have created it while we were spawning
 		if existing, ok := h.workspaces[workspaceKey]; ok {
-			existing.clientCount++
 			ws = existing
 			droppedProcess = true
 		} else {
 			ws = &workspaceState{
-				process:     process,
-				cfg:         cfg,
-				clientCount: 1,
+				process: process,
+				cfg:     cfg,
 			}
 			h.workspaces[workspaceKey] = ws
 		}
@@ -472,11 +557,12 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 			h.manager.Release(sub.Params.Workspace, cfg.Language)
 		}
 	}
+	clients := ws.addSubscriber()
 
 	session.mu.Lock()
 	session.activeWorkspaces[workspaceKey]++ // track for cleanup on disconnect
 	session.mu.Unlock()
-	logging.For(logging.LSP).Debugf("client %d ch=%d subscribed to workspace=%s lang=%s (clients=%d)", session.clientID, sub.ChannelID, sub.Params.Workspace, cfg.Language, ws.clientCount)
+	logging.For(logging.LSP).Debugf("client %d ch=%d subscribed to workspace=%s lang=%s (clients=%d)", session.clientID, sub.ChannelID, sub.Params.Workspace, cfg.Language, clients)
 
 	// Notify frontend that LSP is ready for this channel
 	h.sendLSPReady(ctx, session, sub.ChannelID)
@@ -488,7 +574,7 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 // language on the same WS, or a client that sends initialize before subscribing — is created
 // lazily from the file path's server config.
 //
-// Nothing holds h.mu on entry, and no branch keeps it across a spawn.
+// Nothing holds h.mu on entry, and no branch keeps a lock across the forward.
 func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string, channelID int64, workspacePath, workspaceKey, filePath string) {
 	// This path creates a workspace from a client-supplied hint, with no subscribe first.
 	if !h.allowWorkspace(session, workspacePath) {
@@ -503,45 +589,29 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 		}
 	}
 
-	h.mu.Lock()
-	ws, ok := h.workspaces[workspaceKey]
+	ws, ok := h.lookupWorkspace(workspaceKey)
 	if !ok {
-		// Released by a disconnect between the create above and this lock.
-		h.mu.Unlock()
+		// Released by a disconnect between the create above and this lookup.
 		h.answerError(ctx, session, clientReqID, channelID, "language server went away before it initialized")
 		return
 	}
 
-	if ws.initialized {
-		// Already initialized — return cached response immediately
-		var cachedResponse json.RawMessage
-		if ws.initResponse != nil {
-			cachedResponse = remapResponseIDWithChannel(ws.initResponse, clientReqID, channelID)
-		}
-		h.mu.Unlock()
+	decision, cachedResponse := ws.decideInitialize(session, clientReqID, channelID)
+	switch decision {
+	case initCached:
+		// Already initialized — the cached response answers this request immediately
 		if cachedResponse != nil {
 			_ = httputil.WriteText(ctx, session.conn, cachedResponse, httputil.WriteTimeout)
 		}
 		// Notify frontend that LSP is ready for this channel
 		h.sendLSPReady(ctx, session, channelID)
 		return
-	}
-
-	if ws.pendingInitialize {
-		// First initialize is in flight — queue this request
-		ws.queuedInitialize = append(ws.queuedInitialize, &queuedInit{
-			session:     session,
-			clientReqID: clientReqID,
-			channelID:   channelID,
-		})
-		h.mu.Unlock()
+	case initQueued:
+		// A first initialize is in flight — routeResponse replays its answer to this request
 		return
 	}
 
-	// First client/channel — mark pending, merge params, forward
-	ws.pendingInitialize = true
-	h.mu.Unlock()
-
+	// First client/channel — merge params and forward
 	merged := mergeInitParams(msg, ws.cfg)
 	if err := h.forwardRequest(ctx, session, merged, clientReqID, channelID, workspaceKey); err != nil {
 		// The request itself is already answered — forwardRequest answers what it fails to send.
@@ -608,14 +678,11 @@ func (h *LSPHandler) lazyCreateWorkspace(ctx context.Context, session *ClientSes
 // failInitialize unwinds a first `initialize` that never reached the server: the pending marker
 // and everyone queued behind it, so later initializes don't queue behind a failed request.
 func (h *LSPHandler) failInitialize(workspaceKey string, cause error) {
-	h.mu.Lock()
-	var queued []*queuedInit
-	if ws, ok := h.workspaces[workspaceKey]; ok {
-		queued = ws.queuedInitialize
-		ws.queuedInitialize = nil
-		ws.pendingInitialize = false
+	ws, ok := h.lookupWorkspace(workspaceKey)
+	if !ok {
+		return
 	}
-	h.mu.Unlock()
+	queued := ws.abandonInitialize()
 
 	message := fmt.Sprintf("language server unreachable: %v", cause)
 	ctx := context.Background()
@@ -817,23 +884,11 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 		return
 	}
 
-	// Check if this is an initialize response — cache it and replay to queued clients
+	// Cache an initialize response and replay it to whoever queued behind it; the entry's own lock
+	// is what orders this against a client's initialize arriving on another connection.
 	var queuedReplay []*queuedInit
-	if targetWorkspace != nil && !targetWorkspace.initialized {
-		var rpc JSONRPCMessage
-		if err := json.Unmarshal(serverMsg, &rpc); err == nil && rpc.Result != nil {
-			var result struct {
-				Capabilities json.RawMessage `json:"capabilities"`
-			}
-			if err := json.Unmarshal(rpc.Result, &result); err == nil && len(result.Capabilities) > 0 {
-				// This is the initialize response — cache it and wake up queued clients
-				targetWorkspace.initialized = true
-				targetWorkspace.pendingInitialize = false
-				targetWorkspace.initResponse = serverMsg
-				queuedReplay = targetWorkspace.queuedInitialize
-				targetWorkspace.queuedInitialize = nil
-			}
-		}
+	if targetWorkspace != nil {
+		queuedReplay = targetWorkspace.cacheInitResponse(serverMsg)
 	}
 
 	// Remap the id back to the original client ID, with channel hint if multiplexed
@@ -958,7 +1013,7 @@ func remapResponseIDWithChannel(msg json.RawMessage, clientID string, channelID 
 }
 
 // sessionsUsingLocked counts the connected sessions that still reference workspaceKey. Callers
-// hold h.mu and take each session's own lock second, the order the rest of this handler uses.
+// hold h.mu and take each session's own lock second, the order declared at workspaceState.
 func (h *LSPHandler) sessionsUsingLocked(workspaceKey string) int {
 	used := 0
 	for _, s := range h.clients {
