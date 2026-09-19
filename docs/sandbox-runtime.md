@@ -216,6 +216,24 @@ a name as `CHOWN` — while `--privileged` is an *argument* and is refused at in
   (`memoryAvailableFloorPct`), which pauses with an empty queue because nothing finishing soon is the
   reason the host is tight; it logs at `Warn`, naming the task and what it waits on. Resume happens only
   when `InUse() + reserve ≤ capacity`, so a resume cannot immediately re-queue.
+- **Both transitions write to the task's own history, because the paused row cannot say it.** `noteMemoryPause`
+  and `noteMemoryResume` (`backend/exec/memory_supervisor.go`, on the executor side of
+  `memorySupervisorActions`) record a `system` note on the task's current thread through `systemNote`
+  (`backend/exec/system_note.go`), which is where the role's rule lives: a system row is display-only, since
+  `groupTaskMessages` drops it when it rebuilds the conversation, and the same type carries the retry hint
+  and the merge orchestrator's notes. The row's `kind` (`memory_pressure` / `memory_resumed`) is what the
+  card is worded and coloured by: `systemNoteText`
+  renders the sentence from `en.ts` and `severity: "warning"` selects the yellow system card, so the kind
+  strings and `chat-entries.ts` must agree case for case; the stored `content` stays English because it is
+  what an API client reads. Order is the rule: the pause note goes **after** `SetMemorySupervisorPaused`,
+  because it promises the auto-resume that flag arms, and a failed stop or start records nothing. The same
+  note corrects `tasks.output`, which the shared stop transition fills with "Paused by user" for every
+  pause including this one, through `SetMemoryPressurePausedOutput` — one guarded statement whose guard is
+  `execution_state = 'paused' AND memory_supervisor_paused = 1`. That guard doubles as the ownership check
+  for the note: a row whose flag a start already cleared gets neither, because whoever acted next owns what
+  the task says about why it stopped, and a promise to resume would describe a run that is already going.
+  The `status` frame's `activity` line stays "Task paused by user": the SPA reads it only for its
+  `Pulling ` prefix, and the note travels beside it.
 - **Trigger 2 is the only host-side guard, and it is a thin one.** Because the admission sum ignores
   everyone else's RAM, MIKE can be admitted onto a machine that is already full; nothing in the gate
   refuses it. Below the 5 % floor the supervisor pauses, and below what the kernel will tolerate the host
@@ -271,3 +289,8 @@ a name as `CHOWN` — while `--privileged` is an *argument* and is refused at in
   `frontend/src/lib/utils/__tests__/memory-stats.unit.ts`,
   `frontend/src/lib/api/__tests__/queue-board-scope.unit.ts`,
   `frontend/src/lib/components/__tests__/{task-header-sandbox-dot,sandbox-panel-memory,card-memory-pill}.unit.svelte.ts`.
+  The two history notes: `backend/store/tasks_test.go` (the output-text guard),
+  `frontend/src/lib/utils/__tests__/chat-entries.unit.ts` (the wording by kind),
+  `frontend/src/lib/services/__tests__/stream-handler.unit.ts` (the frame carries kind and severity),
+  `frontend/src/lib/components/__tests__/chat-system-note-warning.unit.svelte.ts` (the card it draws), and
+  `backend/exec/system_note_test.go` (the two record shapes).

@@ -4,7 +4,7 @@
     import { getProject } from '$lib/api';
     import Icon from '$lib/components/Icon.svelte';
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
-    import { isNearMemoryLimit, isMemoryLimitReached, formatSandboxMemory, formatMemoryLimitMB, memoryAlertSentences, projectMemoryLimitMB, taskSandboxMemoryFallback } from '$lib/utils/memory-stats';
+    import { isNearMemoryLimit, isMemoryLimitReached, formatSandboxMemory, formatMemoryLimitMB, memoryAlertAction, memoryAlertSentences, projectMemoryLimitMB, taskSandboxMemoryFallback } from '$lib/utils/memory-stats';
     import { useMemoryAlert } from '$lib/composables/use-memory-alert.svelte';
     import { formatAssignedHost } from '$lib/utils/sandbox-ports';
 import BaseModal from './BaseModal.svelte';
@@ -44,6 +44,7 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
     // The same alert the dot and the board card show; the OOM line below it stays once acknowledged.
     const memory = useMemoryAlert(() => task, () => limitMB, () => stats);
     const alert = $derived(memory.alert);
+    const alertAction = $derived(alert ? memoryAlertAction(alert.alert) : null);
 
     $effect(() => {
         async function load() {
@@ -96,7 +97,9 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
                             {#each memoryAlertSentences(alert.alert) as line}
                                 <div class="memory-alert-line">{line}</div>
                             {/each}
-                            <div class="memory-alert-line">{t('memory.alert.action')}</div>
+                            {#if alertAction}
+                                <div class="memory-alert-line">{alertAction}</div>
+                            {/if}
                             <button class="memory-alert-dismiss" onclick={() => { void memory.dismiss(); }}>{t('memory.alert.dismiss')}</button>
                         </div>
                     {:else if shownStats.oom_kills > 0}

@@ -2,7 +2,9 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ type recordingSupervisorActions struct {
 	mu       sync.Mutex
 	stopped  []string
 	started  []string // "P/T" for root, "P/T:parent" for subtask
+	noted    []string // "pause:T" / "resume:T" for the history notes
 	stopErr  error
 	startErr error
 }
@@ -39,6 +42,24 @@ func (a *recordingSupervisorActions) startSubtask(projectID, taskID string) erro
 	defer a.mu.Unlock()
 	a.started = append(a.started, projectID+"/"+taskID+":parent")
 	return a.startErr
+}
+
+func (a *recordingSupervisorActions) noteMemoryPause(taskID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.noted = append(a.noted, "pause:"+taskID)
+}
+
+func (a *recordingSupervisorActions) noteMemoryResume(taskID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.noted = append(a.noted, "resume:"+taskID)
+}
+
+func (a *recordingSupervisorActions) noteKinds() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.noted...)
 }
 
 func (a *recordingSupervisorActions) stoppedIDs() []string {
@@ -122,6 +143,9 @@ func TestSupervisorPausesSmallestLiveChargeFirst(t *testing.T) {
 	gotHeavy, _ := s.GetTaskByID("task-heavy")
 	if gotHeavy.MemorySupervisorPaused {
 		t.Error("MemorySupervisorPaused must be false on the non-paused task")
+	}
+	if notes := actions.noteKinds(); len(notes) != 1 || notes[0] != "pause:task-light" {
+		t.Errorf("the paused task alone must get the pause note, got %v", notes)
 	}
 }
 
@@ -234,6 +258,9 @@ func TestSupervisorResumesLowestPausedTask(t *testing.T) {
 	started := actions.startedIDs()
 	if len(started) != 1 || started[0] != "proj-mem/task-b" {
 		t.Fatalf("expected task-b resumed first (equal reserves, recorded peak breaks the tie), got %v", started)
+	}
+	if notes := actions.noteKinds(); len(notes) != 1 || notes[0] != "resume:task-b" {
+		t.Errorf("the resumed task alone must get the resume note, got %v", notes)
 	}
 }
 
@@ -415,5 +442,161 @@ func TestSupervisorResumeKeepsRunProvenance(t *testing.T) {
 					"it is not a start of its own", got.Autostarted, tc.autostarted)
 			}
 		})
+	}
+}
+
+func TestSupervisorNotesOnlyFollowASuccessfulTransition(t *testing.T) {
+	t.Run("failed stop leaves no pause note", func(t *testing.T) {
+		s := newMemSupTestStore(t)
+		seedRunningTask(t, s, "task-a", 500)
+
+		gate := &MemoryGate{}
+		gate.SetCapacity(900)
+		gate.SetMeasurements(500, 500, 90, 2000) // under the free-memory floor: pauses with an empty queue
+
+		actions := &recordingSupervisorActions{stopErr: errors.New("executor gone")}
+		NewMemorySupervisor(s, gate, fixedCharges{"task-a": 500}, actions, time.Second).TickOnce()
+
+		if notes := actions.noteKinds(); len(notes) != 0 {
+			t.Errorf("a stop that failed must record no note, got %v", notes)
+		}
+	})
+
+	t.Run("failed resume leaves no note and keeps the flag", func(t *testing.T) {
+		s := newMemSupTestStore(t)
+		now := time.Now().UTC()
+		if err := s.CreateTask(&types.Task{
+			ID: "task-b", ProjectID: "proj-mem", Title: "task-b",
+			Status: types.StatusInProgress, ExecutionState: types.ExecStatePaused,
+			SandboxMemoryPeakMB: 200, MemorySupervisorPaused: true,
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		gate := &MemoryGate{}
+		gate.SetCapacity(2000)
+
+		actions := &recordingSupervisorActions{startErr: errors.New("slot refused")}
+		NewMemorySupervisor(s, gate, nil, actions, time.Second).TickOnce()
+
+		if notes := actions.noteKinds(); len(notes) != 0 {
+			t.Errorf("a resume that failed must record no note, got %v", notes)
+		}
+		got, err := s.GetTaskByID("task-b")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !got.MemorySupervisorPaused {
+			t.Error("a resume that failed must leave the task supervisor-paused, not user-paused")
+		}
+	})
+}
+
+func TestMemoryTransitionNotesAreSystemRowsOnTheThread(t *testing.T) {
+	te, s := newTestExecutorWithStore(t)
+	now := time.Now().UTC()
+	if err := s.CreateProject(&types.Project{ID: "proj-note", Name: "note", Path: t.TempDir(), SandboxEnabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateTask(&types.Task{
+		ID: "task-note", ProjectID: "proj-note", Title: "note",
+		Status: types.StatusInProgress, ExecutionState: types.ExecStatePaused,
+		MemorySupervisorPaused: true, CurrentThreadID: "thread-note",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateThread(&types.TaskThread{ID: "thread-note", TaskID: "task-note", Name: "Main", IsActive: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	te.noteMemoryPause("task-note")
+	te.noteMemoryResume("task-note")
+
+	rows, err := s.GetTaskMessages("task-note", "thread-note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("want one row per transition, got %d: %+v", len(rows), rows)
+	}
+	pause, resume := rows[0], rows[1]
+	if pause.Role != "system" || pause.Kind != memoryPauseNoteKind || pause.Severity != "warning" {
+		t.Errorf("pause row = role %q kind %q severity %q, want system/%s/warning", pause.Role, pause.Kind, pause.Severity, memoryPauseNoteKind)
+	}
+	if !strings.Contains(pause.Content, "memory pressure") {
+		t.Errorf("pause row must say why in its own text too (API clients read it, not the catalog): %q", pause.Content)
+	}
+	if resume.Role != "system" || resume.Kind != memoryResumeNoteKind || resume.Severity != "info" {
+		t.Errorf("resume row = role %q kind %q severity %q, want system/%s/info", resume.Role, resume.Kind, resume.Severity, memoryResumeNoteKind)
+	}
+
+	got, err := s.GetTaskByID("task-note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Output != memoryPauseOutput {
+		t.Errorf("paused row's output = %q, want %q", got.Output, memoryPauseOutput)
+	}
+}
+
+func TestMemoryPauseNoteSkipsARowTheSupervisorNoLongerOwns(t *testing.T) {
+	te, s := newTestExecutorWithStore(t)
+	now := time.Now().UTC()
+	if err := s.CreateProject(&types.Project{ID: "proj-mine", Name: "mine", Path: t.TempDir(), SandboxEnabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateTask(&types.Task{
+		ID: "task-mine", ProjectID: "proj-mine", Title: "mine", Output: "Paused by user",
+		Status: types.StatusInProgress, ExecutionState: types.ExecStatePaused,
+		CurrentThreadID: "thread-mine", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateThread(&types.TaskThread{ID: "thread-mine", TaskID: "task-mine", Name: "Main", IsActive: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	te.noteMemoryPause("task-mine") // paused, but with no supervisor flag on the row
+
+	rows, err := s.GetTaskMessages("task-mine", "thread-mine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("a pause that is not the supervisor's must record no note, got %+v", rows)
+	}
+	got, err := s.GetTaskByID("task-mine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Output != "Paused by user" {
+		t.Errorf("output = %q, want the text whoever paused it wrote", got.Output)
+	}
+}
+
+func TestMemoryTransitionNoteNeedsAThread(t *testing.T) {
+	te, s := newTestExecutorWithStore(t)
+	now := time.Now().UTC()
+	if err := s.CreateProject(&types.Project{ID: "proj-nothread", Name: "nothread", Path: t.TempDir(), SandboxEnabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateTask(&types.Task{
+		ID: "task-nothread", ProjectID: "proj-nothread", Title: "nothread",
+		Status: types.StatusInProgress, ExecutionState: types.ExecStatePaused,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	te.noteMemoryPause("task-nothread")
+
+	rows, err := s.GetTaskMessages("task-nothread", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("a threadless task must record no note, got %+v", rows)
 	}
 }

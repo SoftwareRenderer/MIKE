@@ -27,6 +27,14 @@ export function taskViewHref(projectId: string, taskId: string): string {
     return location.pathname + '?project=' + encodeURIComponent(projectId) + '&task=' + encodeURIComponent(taskId);
 }
 
+/**
+ * A project's board — the link a sidebar row carries, and the one a notification about several tasks
+ * opens, since no single task is what it speaks for.
+ */
+export function projectBoardHref(projectId: string): string {
+    return location.pathname + '?project=' + encodeURIComponent(projectId);
+}
+
 export function asksForTerminal(search: string): boolean {
     return new URLSearchParams(search).get('view') === TERMINAL_VIEW;
 }

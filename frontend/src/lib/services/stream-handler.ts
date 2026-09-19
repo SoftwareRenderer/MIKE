@@ -375,7 +375,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 break;
             }
             case 'hint': {
-                const data = event.data as { id?: string; role?: string; content: string; kind?: string; error?: string; created_at: string };
+                const data = event.data as { id?: string; role?: string; content: string; kind?: string; severity?: string; error?: string; created_at: string };
                 if (data.content) {
                     // Dedupe replayed hint events (reconnect buffer replay).
                     if (data.id && s.entries.some(e => e.id === data.id)) break;
@@ -392,7 +392,8 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     }
                     // Use the backend message id so loadHistory() dedupes against the DB entry.
                     // Role from the backend; legacy frames without a role default to "user".
-                    s.entries = [...s.entries, { id: data.id || genId(), role: data.role || 'user', content: data.content, isStreaming: false, createdAt: data.created_at || new Date().toISOString() }];
+                    // Without `severity` and `kind` a live note is drawn differently from the reloaded row.
+                    s.entries = [...s.entries, { id: data.id || genId(), role: data.role || 'user', content: data.content, kind: data.kind, severity: data.severity, isStreaming: false, createdAt: data.created_at || new Date().toISOString() }];
                 }
                 break;
             }

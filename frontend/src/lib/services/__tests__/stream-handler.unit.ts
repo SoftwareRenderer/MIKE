@@ -395,6 +395,13 @@ describe('createStreamHandler', () => {
         expect(stream.state.entries[0].content).toContain('Connection interrupted');
     });
 
+    it('hint event carries severity and kind onto the entry', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'hint', data: { id: 'mem-1', role: 'system', kind: 'memory_pressure', severity: 'warning', content: 'paused by the memory budget', created_at: '2026-01-01T00:00:00Z' } }, false);
+        expect(stream.state.entries[0].severity).toBe('warning');
+        expect(stream.state.entries[0].kind).toBe('memory_pressure');
+    });
+
     it('hint event without an id falls back to genId', () => {
         const { stream, handleEvent } = setup();
         handleEvent({ type: 'hint', data: { content: 'retry hint', created_at: '2026-01-01T00:00:00Z' } }, false);

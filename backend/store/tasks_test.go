@@ -1277,3 +1277,54 @@ func TestMemoryAlertAckPersistsAcrossReopen(t *testing.T) {
 		t.Fatalf("ack after reopen = %+v, want {700 0 700}", got.MemoryAlertAck)
 	}
 }
+
+func TestSetMemoryPressurePausedOutputGuard(t *testing.T) {
+	s := testStore(t)
+	if err := s.CreateProject(newProject("proj-out", "out", "/tmp/out")); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	newTaskInState(t, s, "sup-paused", "proj-out", types.StatusInProgress, types.ExecStatePaused)
+	newTaskInState(t, s, "user-paused", "proj-out", types.StatusInProgress, types.ExecStatePaused)
+	newTaskInState(t, s, "still-running", "proj-out", types.StatusInProgress, types.ExecStateRunning)
+	for _, id := range []string{"sup-paused", "still-running"} {
+		if err := s.SetMemorySupervisorPaused(id, true); err != nil {
+			t.Fatalf("set flag on %s: %v", id, err)
+		}
+	}
+
+	for _, id := range []string{"user-paused", "still-running"} {
+		changed, err := s.SetMemoryPressurePausedOutput(id, "memory pressure")
+		if err != nil {
+			t.Fatalf("write %s: %v", id, err)
+		}
+		if changed {
+			t.Errorf("%s: must refuse a row that is not paused-by-supervisor", id)
+		}
+	}
+
+	changed, err := s.SetMemoryPressurePausedOutput("sup-paused", "memory pressure")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("a paused row carrying the flag must accept the text")
+	}
+	got, err := s.GetTaskByID("sup-paused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Output != "memory pressure" {
+		t.Errorf("output = %q, want the reason the supervisor gave", got.Output)
+	}
+
+	if err := s.SetMemorySupervisorPaused("sup-paused", false); err != nil {
+		t.Fatal(err)
+	}
+	changed, err = s.SetMemoryPressurePausedOutput("sup-paused", "still mine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Error("a row whose flag a start cleared is no longer the supervisor's to annotate")
+	}
+}

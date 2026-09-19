@@ -751,6 +751,8 @@ const catalog = {
 
     // The task title and the project name are data, so only the shape of the sentence is here.
     'notify.review.body': '{project} · waiting in Review',
+    // Several arrivals are one notification, and it opens the board it names.
+    'notify.review.most': 'Most in {project}',
     'notify.review.untitled': 'Task in Review',
     'notify.review.many': { one: '{count} task waiting in Review', other: '{count} tasks waiting in Review' },
 
@@ -1201,6 +1203,9 @@ const catalog = {
     'chat.advisory.mergeConflict': 'Merge conflict',
     'chat.advisory.autoAnswer': 'Automated answer (parent context)',
     'chat.advisory.note': 'Environment note',
+    // Why a run stopped, for the system notes the server labels with a `kind`.
+    'chat.system.memoryPaused': 'Task has been temporarily paused due to memory pressure, and will automatically resume',
+    'chat.system.memoryResumed': 'Memory freed up, so the task resumed automatically',
     'chat.stream.sandboxImage': 'sandbox image',
     'chat.stream.pullingImage': 'Pulling {name}...',
     'chat.stream.buildingImage': 'Building sandbox image from Dockerfile...',

@@ -7,9 +7,10 @@ import {
     visibleFraction,
     columnInViewport,
     isLookingAtReview,
-    shouldNotifyReview,
     notableArrivals,
+    planReviewNotice,
     dismissedTags,
+    type AttentionState,
     type ShownNotice,
 } from '$lib/utils/review-notify';
 
@@ -120,24 +121,13 @@ describe('columnInViewport', () => {
 });
 
 describe('isLookingAtReview', () => {
-    const onReview = { documentVisible: true, documentFocused: true, reviewColumnInView: true };
+    const onReview: AttentionState = { documentVisible: true, documentFocused: true, reviewProject: 'p1' };
 
     it('is only true with the board, the Review column and the person all present', () => {
         expect(isLookingAtReview(onReview)).toBe(true);
         expect(isLookingAtReview({ ...onReview, documentVisible: false })).toBe(false);
         expect(isLookingAtReview({ ...onReview, documentFocused: false })).toBe(false);
-        expect(isLookingAtReview({ ...onReview, reviewColumnInView: false })).toBe(false);
-    });
-});
-
-describe('shouldNotifyReview', () => {
-    it('notifies unless the preference is off or the Review column is in front of them', () => {
-        const looking = { documentVisible: true, documentFocused: true, reviewColumnInView: true };
-        const elsewhere = { documentVisible: true, documentFocused: true, reviewColumnInView: false };
-        expect(shouldNotifyReview(true, elsewhere)).toBe(true);
-        expect(shouldNotifyReview(true, looking)).toBe(false);
-        expect(shouldNotifyReview(false, elsewhere)).toBe(false);
-        expect(shouldNotifyReview(false, looking)).toBe(false);
+        expect(isLookingAtReview({ ...onReview, reviewProject: null })).toBe(false);
     });
 });
 
@@ -158,13 +148,90 @@ describe('notableArrivals', () => {
     });
 });
 
+describe('planReviewNotice', () => {
+    const group = (projectId: string, ...ids: string[]) => ({ projectId, tasks: ids.map(id => review(id)) });
+    /** Nobody is looking at anything until a case says so. */
+    const blind: AttentionState = { documentVisible: false, documentFocused: false, reviewProject: null };
+    const plan = (
+        groups: { projectId: string; tasks: Task[] }[],
+        reviewCounts: Record<string, number>,
+        reviewProject: string | null = null,
+        attention: Partial<AttentionState> = {},
+    ) => planReviewNotice(groups, reviewCounts, {
+        documentVisible: true,
+        documentFocused: true,
+        reviewProject,
+        ...attention,
+    });
+
+    it('opens the task when one card arrived', () => {
+        expect(plan([group('p1', 'solo')], { p1: 1 })).toEqual({ projectId: 'p1', count: 1, task: review('solo') });
+    });
+
+    it('opens the board when several cards arrived, and counts them all', () => {
+        const notice = plan([group('p1', 'a', 'b', 'c')], { p1: 3 });
+        expect(notice?.task).toBeNull();
+        expect(notice).toMatchObject({ projectId: 'p1', count: 3 });
+    });
+
+    it('is one notification across projects, pointing at the fullest Review column', () => {
+        // Ingest received more of the arrivals, but Payments has the bigger pile to wade through.
+        const notice = plan(
+            [group('ingest', 'i1', 'i2'), group('payments', 'p1')],
+            { ingest: 2, payments: 9 },
+        );
+        expect(notice).toMatchObject({ projectId: 'payments', count: 3, task: null });
+    });
+
+    it('counts what is waiting, not what arrived, when the frame knows the column', () => {
+        const notice = plan([group('small', 'a'), group('large', 'b')], { small: 1, large: 40 });
+        expect(notice?.projectId).toBe('large');
+    });
+
+    it('ranks by the arrivals it has when no count was ever read for a project', () => {
+        const notice = plan([group('unread', 'a'), group('other', 'b', 'c')], {});
+        expect(notice?.projectId).toBe('other');
+    });
+
+    it('settles a tie on waiting by who had more arrivals, then by project id', () => {
+        expect(plan([group('aaa', 'a'), group('bbb', 'b', 'c')], { aaa: 5, bbb: 5 })?.projectId).toBe('bbb');
+        expect(plan([group('zzz', 'a'), group('aaa', 'b')], { zzz: 5, aaa: 5 })?.projectId).toBe('aaa');
+    });
+
+    it('drops the arrivals of the project whose Review column is in view', () => {
+        const notice = plan(
+            [group('watched', 'w1', 'w2'), group('elsewhere', 'e1')],
+            { watched: 9, elsewhere: 1 },
+            'watched',
+        );
+        expect(notice).toEqual({ projectId: 'elsewhere', count: 1, task: review('e1') });
+    });
+
+    it('says nothing when the only arrivals are in front of the user', () => {
+        expect(plan([group('watched', 'w1')], { watched: 2 }, 'watched')).toBeNull();
+    });
+
+    it('tells a background tab about the arrivals of the board it would otherwise be staring at', () => {
+        const unfocused = plan([group('own', 'a')], { own: 2 }, 'own', { documentFocused: false });
+        expect(unfocused).toEqual({ projectId: 'own', count: 1, task: review('a') });
+        expect(plan([group('own', 'a')], { own: 2 }, 'own', { documentVisible: false })).not.toBeNull();
+        // A tab that is neither visible nor focused is looking at nothing, wherever its board is.
+        expect(planReviewNotice([group('own', 'a')], { own: 2 }, blind)).not.toBeNull();
+    });
+
+    it('says nothing when every group is empty', () => {
+        expect(plan([group('p1'), group('p2')], { p1: 4, p2: 4 })).toBeNull();
+        expect(plan([], {})).toBeNull();
+    });
+});
+
 describe('dismissedTags', () => {
+    /** One batch at a time: its tag replaces itself, so the ledger holds a single one, pointing at p1. */
     const shown: ShownNotice[] = [
         { tag: 'mike-task-t1', projectId: 'p1', taskId: 't1' },
         { tag: 'mike-task-t2', projectId: 'p1', taskId: 't2' },
-        { tag: 'mike-review-p1', projectId: 'p1', taskId: null },
+        { tag: 'mike-review-batch', projectId: 'p1', taskId: null },
         { tag: 'mike-task-t9', projectId: 'p2', taskId: 't9' },
-        { tag: 'mike-review-p2', projectId: 'p2', taskId: null },
     ];
 
     it('retires nothing while no task is open and no Review column is in view', () => {
@@ -176,21 +243,21 @@ describe('dismissedTags', () => {
     });
 
     it('leaves a batch alone when one of the tasks it speaks for is opened', () => {
-        expect(dismissedTags(shown, 't2', null)).not.toContain('mike-review-p1');
+        expect(dismissedTags(shown, 't2', null)).not.toContain('mike-review-batch');
     });
 
     it('retires every notice of the project whose Review column is in view, batch included', () => {
-        expect(dismissedTags(shown, null, 'p1')).toEqual(['mike-task-t1', 'mike-task-t2', 'mike-review-p1']);
+        expect(dismissedTags(shown, null, 'p1')).toEqual(['mike-task-t1', 'mike-task-t2', 'mike-review-batch']);
     });
 
     it('leaves another project alone however closely this one is being read', () => {
-        const retired = dismissedTags(shown, 't1', 'p1');
-        expect(retired).not.toContain('mike-task-t9');
-        expect(retired).not.toContain('mike-review-p2');
+        expect(dismissedTags(shown, 't1', 'p1')).not.toContain('mike-task-t9');
+        // The batch points at p1's board, so reading p2 retires only what p2 owns.
+        expect(dismissedTags(shown, null, 'p2')).toEqual(['mike-task-t9']);
     });
 
     it('answers both rules at once', () => {
         expect(dismissedTags(shown, 't9', 'p1'))
-            .toEqual(['mike-task-t1', 'mike-task-t2', 'mike-review-p1', 'mike-task-t9']);
+            .toEqual(['mike-task-t1', 'mike-task-t2', 'mike-review-batch', 'mike-task-t9']);
     });
 });

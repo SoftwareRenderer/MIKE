@@ -43,6 +43,9 @@ export default defineConfig({
             },
             workbox: {
                 globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+                // The generated worker has no click handler of its own; this adds the one that opens what
+                // a notification was about.
+                importScripts: ['/sw-notifications.js'],
                 runtimeCaching: [
                     {
                         // Extension assets (served from disk by the Go server, not part

@@ -14,12 +14,17 @@ import (
 // DefaultMemSupervisorInterval is how often MemorySupervisor.TickOnce runs in production.
 const DefaultMemSupervisorInterval = 5 * time.Second
 
-// memorySupervisorActions is the surface MemorySupervisor uses to pause and resume tasks.
+// "Paused by user" is what the shared stop transition writes for every pause, including this one.
+const memoryPauseOutput = "Paused for memory pressure — resumes automatically when memory frees"
+
+// memorySupervisorActions is the surface MemorySupervisor uses to pause, resume and annotate tasks.
 // TaskExecutor implements it; tests substitute a recording mock.
 type memorySupervisorActions interface {
 	stopTask(taskID string) error
 	startTask(projectID, taskID string) error
 	startSubtask(projectID, taskID string) error
+	noteMemoryPause(taskID string)
+	noteMemoryResume(taskID string)
 }
 
 // MemorySupervisor keeps sandbox memory inside the budget. With a non-empty gate queue it pauses the
@@ -125,6 +130,8 @@ func (s *MemorySupervisor) TickOnce() {
 		if err := s.store.SetMemorySupervisorPaused(victim.ID, true); err != nil {
 			logging.For(logging.Exec).With(logging.TaskID, victim.ID).Warnf("memory supervisor: setting paused flag: %v", err)
 		}
+		// After the flag: the note promises the auto-resume that flag arms.
+		s.actions.noteMemoryPause(victim.ID)
 		if emergency {
 			logging.For(logging.Exec).With(logging.TaskID, victim.ID).Warnf(
 				"memory supervisor: host has %d MB free, under %d%% of its RAM — paused (frees %d MB), waiting on the host itself, queued %d",
@@ -167,8 +174,45 @@ func (s *MemorySupervisor) TickOnce() {
 		_ = s.store.SetMemorySupervisorPaused(candidate.ID, true)
 		return
 	}
+	s.actions.noteMemoryResume(candidate.ID)
 	logging.For(logging.Exec).With(logging.TaskID, candidate.ID).Infof(
 		"memory supervisor: resumed (reserve %d MB, used %d/%d MB)", candEst, used, capacity)
+}
+
+func (te *TaskExecutor) noteMemoryPause(taskID string) {
+	// The guarded write doubles as the ownership check: a row someone else started or stopped since the
+	// flag went on gets no note.
+	set, err := te.store.SetMemoryPressurePausedOutput(taskID, memoryPauseOutput)
+	if err != nil {
+		logging.For(logging.Exec).With(logging.TaskID, taskID).Warnf("memory supervisor note: output text: %v", err)
+		return
+	}
+	if !set {
+		logging.For(logging.Exec).With(logging.TaskID, taskID).Debugf("memory supervisor note: pause no longer the supervisor's, note not recorded")
+		return
+	}
+	te.noteMemoryTransition(taskID, memoryPauseNoteKind, "warning",
+		"Task has been temporarily paused due to memory pressure, and will automatically resume")
+}
+
+func (te *TaskExecutor) noteMemoryResume(taskID string) {
+	te.noteMemoryTransition(taskID, memoryResumeNoteKind, "info",
+		"Memory freed up, so the task resumed automatically")
+}
+
+// noteMemoryTransition reads the row afresh because the stop this follows rewrote it.
+func (te *TaskExecutor) noteMemoryTransition(taskID, kind, severity, content string) {
+	task, err := te.store.GetTaskByID(taskID)
+	if err != nil {
+		logging.For(logging.Exec).With(logging.TaskID, taskID).Warnf("memory supervisor note: task unreadable: %v", err)
+		return
+	}
+	note := systemNote{kind: kind, severity: severity, content: content}
+	id := note.recordOnThread(te.store, taskID, task.CurrentThreadID)
+	if id == "" {
+		return
+	}
+	note.show(te.appStreamMgr, task.ProjectID, taskID, id, nil)
 }
 
 // smallestReserve picks the running task whose pause costs the memory budget least. A task with no

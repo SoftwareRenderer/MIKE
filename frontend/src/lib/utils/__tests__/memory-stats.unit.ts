@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     memoryAlert,
     memoryAlertAckCovers,
+    memoryAlertAction,
     memoryAlertPayloadOf,
     memoryDotSeverity,
     taskMemoryAlert,
@@ -44,6 +45,21 @@ describe('memoryAlert', () => {
 
     it('does not fire at full tilt below the limit — that is pressure, not an alert', () => {
         expect(memoryAlert(stats({ memory_current_mb: 1000, memory_peak_mb: 1000 }))).toBeNull();
+    });
+});
+
+describe('memoryAlertAction', () => {
+    it('advises a higher ceiling when the peak hit the limit', () => {
+        expect(memoryAlertAction({ peakMB: 1024, oomKills: 2, limitMB: 1024 })).toContain('Raise or remove the limit');
+    });
+
+    it('advises nothing when the peak stayed under the limit', () => {
+        // A higher ceiling would not have changed what the OOM killer took.
+        expect(memoryAlertAction({ peakMB: 1776, oomKills: 5, limitMB: 2048 })).toBeNull();
+    });
+
+    it('advises nothing when no limit is enforced', () => {
+        expect(memoryAlertAction({ peakMB: 1776, oomKills: 5, limitMB: 0 })).toBeNull();
     });
 });
 
