@@ -19,6 +19,15 @@ import (
 // fsnotify cannot take a watch, which is what the watcher tests do too.
 func watcherTestManager(t *testing.T, projectIDs ...string) *AppStreamManager {
 	t.Helper()
+	asm := newWatcherTestManager(t, projectIDs...)
+	t.Cleanup(asm.Close)
+	return asm
+}
+
+// newWatcherTestManager is watcherTestManager without the closing Cleanup, for a test that
+// measures Close itself: WorktreeWatcher.Close is not idempotent, so exactly one caller runs it.
+func newWatcherTestManager(t *testing.T, projectIDs ...string) *AppStreamManager {
+	t.Helper()
 
 	s, err := store.NewStore(filepath.Join(t.TempDir(), "subscriptions.db"))
 	if err != nil {
@@ -39,8 +48,8 @@ func watcherTestManager(t *testing.T, projectIDs ...string) *AppStreamManager {
 
 	// No worktree manager: a subscription then starts no git work, only the watchers.
 	asm := NewAppStreamManager(s, nil)
-	t.Cleanup(asm.Close)
 	if asm.branchWatcher == nil || asm.projectWatcher == nil {
+		asm.Close() // the skip ends the test, and no Cleanup closes this manager
 		t.Skip("the manager's project watchers are unavailable")
 	}
 
@@ -49,6 +58,7 @@ func watcherTestManager(t *testing.T, projectIDs ...string) *AppStreamManager {
 		t.Fatalf("mkdir probe: %v", err)
 	}
 	if err := asm.projectWatcher.Watch("inotify-probe", probe); err != nil {
+		asm.Close()
 		t.Skipf("cannot take a watch: %v", err)
 	}
 	asm.projectWatcher.Unwatch("inotify-probe")

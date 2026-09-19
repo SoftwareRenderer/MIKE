@@ -235,10 +235,13 @@ func (asm *AppStreamManager) UnwatchWorktree(taskID string) {
 	}
 }
 
-// Close stops all watchers and releases resources.
+// Close stops all watchers and releases resources; it is the whole "websocket watchers" stage.
 func (asm *AppStreamManager) Close() {
 	if asm.watcher != nil {
 		asm.watcher.Close()
+	}
+	if asm.projectWatcher != nil {
+		asm.projectWatcher.Close()
 	}
 	if asm.branchWatcher != nil {
 		asm.branchWatcher.Close()
