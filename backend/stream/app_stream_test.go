@@ -51,6 +51,9 @@ func dialStream(t *testing.T, asm *AppStreamManager) *frameStream {
 	if err != nil {
 		t.Fatalf("dial stream: %v", err)
 	}
+	// A test that fills a socket does it with frames larger than the library's 32 KiB default,
+	// which the reader would answer by closing the connection it is meant to be watching.
+	conn.SetReadLimit(-1)
 	t.Cleanup(func() { conn.CloseNow() })
 
 	fs := &frameStream{conn: conn, ctx: ctx, frames: make(chan map[string]any, 1024)}
@@ -432,7 +435,7 @@ func TestTaskBufferClearedOnTerminalStatus(t *testing.T) {
 				t.Fatalf("buffer before the status frame = %d frames, want 1", got)
 			}
 
-			asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": state}})
+			asm.SendTaskEvent("proj-1", "task-1", types.TurnStatusEvent(state, "still going"))
 
 			if got := len(asm.getTaskBuffer("proj-1:task-1")); got != 0 {
 				t.Fatalf("buffer after state %q = %d frames, want 0", state, got)
@@ -444,7 +447,7 @@ func TestTaskBufferClearedOnTerminalStatus(t *testing.T) {
 		t.Run(state+"_keeps", func(t *testing.T) {
 			asm := NewAppStreamManager(nil, nil)
 			asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "x"}})
-			asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": state}})
+			asm.SendTaskEvent("proj-1", "task-1", types.TurnStatusEvent(state, "still going"))
 			if got := len(asm.getTaskBuffer("proj-1:task-1")); got != 2 {
 				t.Fatalf("buffer after state %q = %d frames, want 2", state, got)
 			}
@@ -461,7 +464,7 @@ func TestSyncReplayIsPerConnection(t *testing.T) {
 	register := func(conn *websocket.Conn) {
 		asm.mu.Lock()
 		defer asm.mu.Unlock()
-		asm.clients[conn] = &clientState{conn: conn, bufSize: DefaultBufferSize}
+		asm.clients[conn] = newClientState(conn, asm)
 	}
 	register(before)
 

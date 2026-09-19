@@ -35,6 +35,26 @@ wake-up path refetches the board over HTTP, and why `TaskChat` reloads history f
 that does survive a reconnect is the **per-task** one (`getTaskBuffer`, replayed on `subscribe_task`),
 which is why a task's buffer is cleared the moment its turn ends.
 
+### The slow client is released, not timed out
+
+Every frame for a connection goes through that connection's own queue (`sendQueue`) and one sender
+goroutine writes it, so a browser that stopped reading costs nobody else in the server. The queue is
+bounded by frame count and bytes; over the bound the **oldest** frames go, which leaves what the client
+receives a contiguous tail with a hole behind it — and a chat holding a hole never becomes right by
+waiting.
+
+So once such a queue has drained, the server ends the connection (`StatusTryAgainLater`, one
+`component=stream` warning naming how many frames were missed) and the client's existing path does the
+rest: `onclose` → `onConnected(false)` → reconnect with `?sync=1` → `onConnected(true)` →
+`silentRefresh()` and `TaskChat.loadHistory()`, plus the per-task replay its `subscribe_task` answers.
+That is why there is no "you missed frames" frame to add: the resync the app has is a connection, and
+the only other choice — holding the connection open on a gap it cannot report — is a view that lies
+until someone reloads. Nothing here puts a deadline on a wait for this server (AGENTS.md →
+Reconnection & Offline); a slow client is degraded, not timed out.
+
+**Tests:** `backend/stream/app_stream_sender_test.go` (a stalled subscriber does not hold the turn, the
+queue's two bounds drop the oldest, the missed-frames connection is ended).
+
 ## The boot offer and one stream per page
 
 `/api/auth/session` decides whether the app or the offline mirror is on screen. A 2 s timer *offers*

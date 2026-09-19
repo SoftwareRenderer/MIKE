@@ -269,9 +269,29 @@ Two rules keep a **busy** connection from being read as a dead one, and both are
 the pinger holds so a ping cannot interleave with the endpoint's own frames. The ping's deadline is
 built *after* the lock is taken, so `KeepaliveTimeout` bounds the ping and never the queue in front of
 it, and the lock is taken with `TryLock`, because a lock another writer holds is a frame on its way out
-— liveness evidence — so that tick is skipped. Queuing instead was measurable: a reconnecting client
-holds `writeMu` across a whole replay backlog (the per-task buffer, `?sync=1`), longer than the ping
-timeout, the queued tick's deadline expired in the queue, and `coder/websocket` closes the socket for an
-expired write context even when it wrote nothing. The peer is healthy, dies mid-replay, reconnects and
-replays again. A pinger blocked on the lock also sends nothing, which retires the same socket from the
-client side at 60 s. Tests: `backend/httputil/ws_test.go`.
+— liveness evidence — so that tick is skipped. Queuing instead was measurable: holding `writeMu` longer
+than the ping timeout lets a queued tick's deadline expire in the queue, and `coder/websocket` closes
+the socket for an expired write context even when it wrote nothing. The shape that made it measurable
+was a reconnecting client holding the lock across a whole replay backlog (the per-task buffer,
+`?sync=1`); that backlog is a queue now, and what still holds the lock is one frame's write, up to
+`WriteTimeout` of it. The peer is healthy, dies mid-replay, reconnects and replays again. A pinger
+blocked on the lock also sends nothing, which retires the same socket from the client side at 60 s.
+Tests: `backend/httputil/ws_test.go`.
+
+### Who writes an app-stream connection
+
+One goroutine per connection (`runSender`) is the only writer to its socket besides that connection's
+pinger. Everything else — a turn's `SendTaskEvent`, the board broadcasts, a task's replay and the
+sandbox-stats frame that extends it, a project's initial diff data — hands the frame to that
+connection's bounded queue (`sendQueue`) and returns, so the goroutine producing a frame never waits
+on a browser. The queue is bounded by frame count and bytes (`DefaultBufferSize`, `DefaultBufferBytes`)
+and overflows by dropping **the oldest** frames, never the newest: a client that stopped reading is
+caught up on the tail.
+
+A connection that missed frames is ended once its queue has drained — see *What a reconnect brings
+back* in `docs/reconnection.md` for why the close is the resync and not a new frame type, and
+`backend/stream/app_stream_sender_test.go` with it. A replay goes in behind any replay already
+queued and ahead of every live frame, which is the ordering the client can see: `subscribe_task` for
+two tasks in a row replays one and then the other, the `sandbox_stats` frame lands at the end of the
+replay it extends, and a live frame never lands inside either. Beyond that one rule the queue makes no
+ordering promise between two producers.

@@ -368,10 +368,8 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		// Wire up bridge recovery — reconnects client or (re)creates sandbox.
 		sb.recoverBridge = func() bool {
 			return te.recoverBridgeForTask(te.sandboxMgr, setup, state, imageToUse, func() {
-				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{
-					Type: types.WSTypeStatus,
-					Data: map[string]string{"state": "running", "activity": "Sandbox bridge recovered"},
-				})
+				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID,
+					types.TurnStatusEvent("running", "Sandbox bridge recovered"))
 			})
 		}
 		state.setSandbox(func(dst *sandboxState) { *dst = sb })
@@ -503,7 +501,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 					// Update setup.task reference with latest mode
 					setup.task.OperatingMode = updatedTask.OperatingMode
 					tools = te.toolDefinitionsFor(updatedTask)
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": fmt.Sprintf("Sandbox recreated for mode change (%s)", newOperatingMode)}})
+					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", fmt.Sprintf("Sandbox recreated for mode change (%s)", newOperatingMode)))
 				}
 			}
 		}
@@ -522,7 +520,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 				}); err != nil {
 					return
 				}
-				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Sandbox recreated for extension config change"}})
+				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Sandbox recreated for extension config change"))
 			}
 		}
 
@@ -607,7 +605,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 				// Real-time phrase repetition detection (not throttled — detection runs per-token)
 				if loopType := lc.detector.checkStreamingText(*choice.Delta.Content); loopType == LoopPhrase {
 					logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("phrase repetition detected during streaming")
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Repetitive response detected"}})
+					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Repetitive response detected"))
 				}
 			}
 			if len(choice.Delta.ToolCalls) > 0 {
@@ -826,7 +824,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			}
 
 			// Notify frontend that response was cancelled.
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "cancelled", "activity": "Response cancelled, processing new message"}})
+			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("cancelled", "Response cancelled, processing new message"))
 
 			continue
 		}
@@ -1437,7 +1435,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 			}
 			setup.task.ExecutionState = types.ExecStateRunning
 			te.persistTaskClaiming(setup)
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
+			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Processing new message"))
 			return turnNextLLMCall
 		default:
 		}
@@ -1481,7 +1479,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 		lc.assistantContent.Reset()
 		lc.reasoningContent.Reset()
 		lc.finishReason = ""
-		te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Reasoning-only response, requesting action"}})
+		te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Reasoning-only response, requesting action"))
 
 		// Auto-summarize if context is approaching the window limit
 		te.summarize.maybeAutoSummarize(setup, lc, activeModel, true)
@@ -1617,7 +1615,7 @@ idleWait:
 			setup.task.Status = types.StatusInProgress
 			setup.task.ExecutionState = types.ExecStateRunning
 			te.persistTaskClaiming(setup)
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing queued message"}})
+			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Processing queued message"))
 			return idleResume
 		case um := <-setup.userMsgChan:
 			if um.ContextChanged {
@@ -1650,7 +1648,7 @@ idleWait:
 			}
 			setup.task.ExecutionState = types.ExecStateRunning
 			te.persistTaskClaiming(setup)
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
+			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Processing new message"))
 			return idleResume
 		}
 	}

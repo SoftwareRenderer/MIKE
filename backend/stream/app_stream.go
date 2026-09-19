@@ -62,10 +62,11 @@ func filterInternalPathsFromList(paths []string) []string {
 const maxFrameBufferSize = 256 * 1024 // 256KB
 
 const (
-	DefaultBufferSize = 5000
-
-	// DefaultBufferBytes bounds a replay buffer in bytes: a frame may be
-	// maxFrameBufferSize long, so a frame count alone bounds nothing.
+	// DefaultBufferSize and DefaultBufferBytes are the bound on one connection's held frames,
+	// and both apply twice: the per-task and per-client replay buffers, and the queue the
+	// sender goroutine drains (sendQueue). A frame count bounds nothing on its own, since a
+	// frame may be maxFrameBufferSize long.
+	DefaultBufferSize  = 5000
 	DefaultBufferBytes = 16 << 20
 
 	// DefaultTaskBufferKeys is how many tasks may hold a replay buffer at once; the oldest
@@ -73,7 +74,7 @@ const (
 	DefaultTaskBufferKeys = 64
 
 	// DefaultMaxConnections bounds live /api/stream sockets. Each costs a read loop, a
-	// pinger and a replay buffer.
+	// pinger, a sender goroutine and a replay buffer.
 	DefaultMaxConnections = 256
 
 	// DefaultMaxTaskSubs and DefaultMaxProjectSubs cap what one connection may ask to be
@@ -97,11 +98,14 @@ type clientState struct {
 	conn       *websocket.Conn
 	projectSub map[string]int
 	taskSub    map[string]int
+	// writeMu separates the two writers of conn: the sender goroutine draining out, and the
+	// keepalive pinger, which takes it with TryLock (httputil.Keepalive).
 	writeMu    sync.Mutex
 	bufMu      sync.Mutex
 	ringBuffer [][]byte
 	bufSize    int
 	bufBytes   int // bytes held in ringBuffer, held with bufMu
+	out        *sendQueue
 }
 
 // AppStreamMessage is the envelope for client-to-server messages.
@@ -151,6 +155,9 @@ type AppStreamManager struct {
 	taskBufBound   int // byte bound on one task's buffer
 	taskBufKeys    int // how many tasks may hold one
 	clientBufBound int // byte bound on one client's ring buffer
+	// queueFrames and queueBytes bound one connection's outbound queue; see sendQueue.
+	queueFrames    int
+	queueBytes     int
 	maxConns       int
 	maxTaskSubs    int
 	maxProjectSubs int
@@ -179,6 +186,8 @@ func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *
 		taskBufBound:   DefaultBufferBytes,
 		taskBufKeys:    DefaultTaskBufferKeys,
 		clientBufBound: DefaultBufferBytes,
+		queueFrames:    DefaultBufferSize,
+		queueBytes:     DefaultBufferBytes,
 		maxConns:       DefaultMaxConnections,
 		maxTaskSubs:    DefaultMaxTaskSubs,
 		maxProjectSubs: DefaultMaxProjectSubs,
@@ -320,24 +329,14 @@ func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, task
 	// executor start path re-registers its watcher.
 
 	// Replay what the client missed, then the latest sandbox stats, which the task view needs
-	// even when that buffer has been cleared. One goroutine holds writeMu for both, so the
-	// stats land after the replay they extend.
+	// even when that buffer has been cleared. One batch, so the stats land after the replay they
+	// extend; behind any replay already queued and ahead of the live frames, so no live frame
+	// lands inside either.
 	buf := asm.getTaskBuffer(key)
-	statsFrame := asm.latestSandboxStatsFrame(projectID, taskID)
-	if len(buf) > 0 || statsFrame != nil {
-		go func() {
-			client.writeMu.Lock()
-			defer client.writeMu.Unlock()
-			for _, frame := range buf {
-				if err := httputil.WriteText(context.Background(), conn, frame, asm.writeTimeout); err != nil {
-					return
-				}
-			}
-			if statsFrame != nil {
-				_ = httputil.WriteText(context.Background(), conn, statsFrame, asm.writeTimeout)
-			}
-		}()
+	if statsFrame := asm.latestSandboxStatsFrame(projectID, taskID); statsFrame != nil {
+		buf = append(buf, statsFrame)
 	}
+	client.out.pushReplay(buf)
 }
 
 // latestSandboxStatsFrame returns the task_event frame carrying the
@@ -427,18 +426,6 @@ func (asm *AppStreamManager) allClients() []*clientState {
 	return targets
 }
 
-// writeFrame delivers a marshalled frame to each target. Per-client writeMu serialises this
-// with the keepalive pinger and the replay goroutines.
-func (asm *AppStreamManager) writeFrame(targets []*clientState, frame []byte) {
-	for _, client := range targets {
-		client.writeMu.Lock()
-		// A write error means the client disconnected; its read loop removes it
-		// from asm.clients, so there is nothing to do here.
-		_ = httputil.WriteText(context.Background(), client.conn, frame, asm.writeTimeout)
-		client.writeMu.Unlock()
-	}
-}
-
 // -- Broadcast methods --
 
 func (asm *AppStreamManager) sendBoardPayload(projectID string, payload any) {
@@ -451,7 +438,7 @@ func (asm *AppStreamManager) sendBoardPayload(projectID string, payload any) {
 		return
 	}
 
-	asm.writeFrame(targets, frame)
+	asm.deliver(targets, frame)
 
 	// Buffer for reconnect sync
 	asm.bufferRaw(frame)
@@ -503,12 +490,19 @@ func (asm *AppStreamManager) SendTaskEvent(projectID, taskID string, event types
 
 	// Clear per-task buffer when a streaming turn ends, so reconnecting clients
 	// don't get stale tokens from a previous turn.
-	if event.Type == types.WSTypeStatus {
-		if state, ok := event.Data.(map[string]string)["state"]; ok && terminalTurnStates[state] {
+	switch event.Type {
+	case types.WSTypeStatus:
+		status, ok := event.Data.(types.TurnStatus)
+		if !ok {
+			// A status frame nobody built with types.TurnStatusEvent: the frame still goes out,
+			// and whether the turn ended is a question nobody answered.
+			logging.For(logging.Stream).With(logging.TaskID, taskID).Warnf("status frame carrying %T instead of types.TurnStatus", event.Data)
+			return
+		}
+		if terminalTurnStates[status.State] {
 			asm.clearTaskBuffer(projectID + ":" + taskID)
 		}
-	}
-	if event.Type == types.WSTypeComplete {
+	case types.WSTypeComplete:
 		asm.clearTaskBuffer(projectID + ":" + taskID)
 	}
 }
@@ -532,7 +526,7 @@ func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, payload a
 		return
 	}
 
-	asm.writeFrame(targets, frame)
+	asm.deliver(targets, frame)
 
 	// Buffer for reconnect sync (per-client and per-task)
 	asm.bufferRaw(frame)
@@ -544,7 +538,7 @@ func (asm *AppStreamManager) BroadcastAll(msg []byte) {
 	asm.mu.RLock()
 	targets := asm.allClients()
 	asm.mu.RUnlock()
-	asm.writeFrame(targets, msg)
+	asm.deliver(targets, msg)
 }
 
 // BroadcastProjectCounts computes and broadcasts task counts for all projects.
@@ -730,7 +724,10 @@ func (asm *AppStreamManager) getBuffer(conn *websocket.Conn) [][]byte {
 	}
 	client.bufMu.Lock()
 	defer client.bufMu.Unlock()
-	return client.ringBuffer
+	// A copy: the caller replays it while the next broadcast is appending to the live buffer.
+	frames := make([][]byte, len(client.ringBuffer))
+	copy(frames, client.ringBuffer)
+	return frames
 }
 
 func (asm *AppStreamManager) bufferTask(taskKey string, frame []byte) {
@@ -886,7 +883,7 @@ func (asm *AppStreamManager) computeAlreadyMerged(projectID string, task types.T
 // persistent snapshot — no per-connection `git diff` runs. When the client
 // declared (via known_stats) that it already has stats for this exact task
 // state, the frame is skipped entirely.
-func (asm *AppStreamManager) sendDoneTaskInitialDiff(ctx context.Context, client *clientState, conn *websocket.Conn, projectID string, task types.Task, sub AppStreamSubscription) {
+func (asm *AppStreamManager) sendDoneTaskInitialDiff(client *clientState, projectID string, task types.Task, sub AppStreamSubscription) {
 	d, err := MaterializeDoneTaskDiff(asm.store, asm.worktreeMgr, projectID, &task)
 	if err != nil || d == nil || !d.HasChanges {
 		return
@@ -908,9 +905,7 @@ func (asm *AppStreamManager) sendDoneTaskInitialDiff(ctx context.Context, client
 		frame[k] = v
 	}
 	msg, _ := json.Marshal(frame)
-	client.writeMu.Lock()
-	_ = httputil.WriteText(ctx, conn, msg, asm.writeTimeout)
-	client.writeMu.Unlock()
+	client.out.push(msg)
 }
 
 // HandleStream is the HTTP handler for the /api/stream WebSocket endpoint.
@@ -931,13 +926,7 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	client := &clientState{
-		conn:       conn,
-		projectSub: make(map[string]int),
-		taskSub:    make(map[string]int),
-		ringBuffer: make([][]byte, 0, DefaultBufferSize),
-		bufSize:    DefaultBufferSize,
-	}
+	client := newClientState(conn, asm)
 
 	asm.mu.Lock()
 	asm.clients[conn] = client
@@ -965,33 +954,21 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 
 	logging.For(logging.Stream).Infof("connection accepted (total: %d)", total)
 
-	// Send initial project counts
-	asm.BroadcastProjectCounts()
-
 	// A failed ping cancels the read context, unblocking the Read loop below. The write
-	// lock covers the ping because frames are broadcast to this connection elsewhere.
+	// lock covers the ping because the sender goroutine writes frames to this connection too.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// Only this endpoint's client measures silence from onmessage, so only it gets the app frame.
 	httputil.Keepalive(ctx, conn, &client.writeMu, cancel, httputil.WithAppFrame())
+	go asm.runSender(ctx, client)
 
-	// Send buffered events on reconnect
+	// Send initial project counts
+	asm.BroadcastProjectCounts()
+
+	// Send buffered events on reconnect. Ahead of everything else this queue holds: they are
+	// older than anything arriving from here on.
 	if r.URL.Query().Get("sync") == "1" {
-		go func() {
-			buf := asm.getBuffer(conn)
-			client.writeMu.Lock()
-			defer client.writeMu.Unlock()
-			for _, frame := range buf {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-				if err := httputil.WriteText(ctx, conn, frame, asm.writeTimeout); err != nil {
-					return
-				}
-			}
-		}()
+		client.out.pushReplay(asm.getBuffer(conn))
 	}
 
 	// Read loop — handle client messages
@@ -1014,7 +991,7 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 				logging.For(logging.Stream).Infof("subscribed to project=%s", sub.ProjectID)
 
 				// Send initial data for the project (background to not block the read loop)
-				go asm.sendInitialProjectData(ctx, client, conn, sub)
+				go asm.sendInitialProjectData(ctx, client, sub)
 			}
 
 		case "unsubscribe_project":
@@ -1042,7 +1019,7 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 	}
 }
 
-func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client *clientState, conn *websocket.Conn, sub AppStreamSubscription) {
+func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client *clientState, sub AppStreamSubscription) {
 	projectID := sub.ProjectID
 	if asm.store == nil || asm.worktreeMgr == nil {
 		return
@@ -1063,7 +1040,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			// git baseline resolution — their canonical diff (pinned
 			// BaseCommit..BranchTip) is immutable, so the stored snapshot is the
 			// source of truth (re-watched normally if the task leaves Done).
-			asm.sendDoneTaskInitialDiff(ctx, client, conn, projectID, task, sub)
+			asm.sendDoneTaskInitialDiff(client, projectID, task, sub)
 			continue
 		}
 		baseRef := asm.getDiffBaseline(task)
@@ -1092,9 +1069,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 				"has_committed_changes": diffResult.CommittedDiff != "",
 				"already_merged":        stats.AlreadyMerged,
 			}))
-			client.writeMu.Lock()
-			_ = httputil.WriteText(ctx, conn, statsMsg, asm.writeTimeout)
-			client.writeMu.Unlock()
+			client.out.push(statsMsg)
 			// No per-file task_diff manifest frame is broadcast: no component reads it, and the
 			// task detail view fetches its data from the REST diff endpoint.
 		}
@@ -1106,8 +1081,6 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 		msg, _ := json.Marshal(appFrame(types.WSTypeProjectBranch, map[string]any{
 			"branch": branch,
 		}))
-		client.writeMu.Lock()
-		_ = httputil.WriteText(ctx, conn, msg, asm.writeTimeout)
-		client.writeMu.Unlock()
+		client.out.push(msg)
 	}
 }
