@@ -648,15 +648,17 @@ func (te *TaskExecutor) IsStartableNow(t types.Task) bool {
 	return err == nil && done
 }
 
-// FindDeepestStartableSubtasks returns the startable subtasks at the deepest
-// level of the tree (startable board state and all children done). Subtrees
-// rooted at a non-startable task (review, failed) are skipped.
-func (te *TaskExecutor) FindDeepestStartableSubtasks(tasks []types.Task) []types.Task {
-	type levelTask struct {
-		task  types.Task
-		depth int
-	}
-	var startable []levelTask
+// A startable task and the depth it was found at.
+type startableSubtask struct {
+	task  types.Task
+	depth int
+}
+
+// Collects the tasks able to run now: startable board state and all children done. A task with
+// unfinished children is descended into instead of collected, so no member is an ancestor of another
+// and starting the set cannot put a parent beside its own child.
+func (te *TaskExecutor) startableSubtasks(tasks []types.Task) []startableSubtask {
+	var found []startableSubtask
 	var walk func(tasks []types.Task, depth int)
 	walk = func(tasks []types.Task, depth int) {
 		for _, t := range tasks {
@@ -667,11 +669,11 @@ func (te *TaskExecutor) FindDeepestStartableSubtasks(tasks []types.Task) []types
 			children, err := te.store.GetChildren(t.ID)
 			if err != nil || len(children) == 0 {
 				// Leaf (or unreadable children) — startable as-is.
-				startable = append(startable, levelTask{t, depth})
+				found = append(found, startableSubtask{t, depth})
 				continue
 			}
 			if ChildrenAllDone(children) {
-				startable = append(startable, levelTask{t, depth})
+				found = append(found, startableSubtask{t, depth})
 				continue
 			}
 			// Still has pending children — walk down to them.
@@ -679,17 +681,35 @@ func (te *TaskExecutor) FindDeepestStartableSubtasks(tasks []types.Task) []types
 		}
 	}
 	walk(tasks, 1)
-	if len(startable) == 0 {
+	return found
+}
+
+// FindStartableSubtasks returns every startable descendant at any depth: a task once its children
+// are done, otherwise the ready tasks inside it.
+func (te *TaskExecutor) FindStartableSubtasks(tasks []types.Task) []types.Task {
+	found := te.startableSubtasks(tasks)
+	out := make([]types.Task, 0, len(found))
+	for _, s := range found {
+		out = append(out, s.task)
+	}
+	return out
+}
+
+// FindDeepestStartableSubtasks returns the startable subtasks at the deepest level, so a shallower
+// sibling waits while a deeper branch still has work.
+func (te *TaskExecutor) FindDeepestStartableSubtasks(tasks []types.Task) []types.Task {
+	found := te.startableSubtasks(tasks)
+	if len(found) == 0 {
 		return nil
 	}
 	maxDepth := 0
-	for _, s := range startable {
+	for _, s := range found {
 		if s.depth > maxDepth {
 			maxDepth = s.depth
 		}
 	}
 	var deepest []types.Task
-	for _, s := range startable {
+	for _, s := range found {
 		if s.depth == maxDepth {
 			deepest = append(deepest, s.task)
 		}
@@ -714,10 +734,8 @@ func isIncompleteForStart(t types.Task) bool {
 // one, or the LLM's choice when several tie (first on LLM failure). Empty
 // string if none is startable.
 //
-// A start path should prefer TaskHandler.subtasksToStart (backend/api),
-// which honors the "run siblings in parallel" setting by returning every
-// startable subtask when that is on; use this directly only when a single pick
-// is genuinely wanted.
+// Ignores the "run subtasks in parallel" setting; a start path that honours it uses
+// StartReadySubtasks or subtasksToStart.
 func (te *TaskExecutor) SelectSubtaskToStart(parent *types.Task, subtasks []types.Task) string {
 	deepest := te.FindDeepestStartableSubtasks(subtasks)
 	if len(deepest) == 0 {
@@ -853,11 +871,10 @@ func (te *TaskExecutor) StartSubtask(projectID, subtaskID string, autostarted bo
 	return te.StartTask(projectID, subtaskID, autostarted)
 }
 
-// AutoStartNextSibling continues the autostart chain after a task finishes: start the next
-// startable sibling (deepest first, the LLM picks when several), or the parent once all its
-// children are done — but only a parent already in_progress, never a Backlog one. A child in
-// review/failed halts that branch while the scheduler bubbles up, so an ancestor's other
-// branches still progress.
+// AutoStartNextSibling continues the autostart chain after a task finishes: start the subtasks
+// subtasksToStart picks under the parent, or the parent itself once all its children are done and it
+// was already in_progress. A child in review or failed halts that branch while the scheduler bubbles
+// up to an ancestor's other branches.
 func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTaskID string) error {
 	parent, err := te.store.GetTaskByID(parentTaskID)
 	if err != nil {
@@ -903,22 +920,14 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 			return nil
 		}
 
-		selectedID := te.SelectSubtaskToStart(parent, pending)
-		if selectedID == "" {
+		ids := te.subtasksToStart(parent, pending)
+		if len(ids) == 0 {
 			// Nothing startable — the branch is blocked (e.g. child in review).
 			// Bubble up so the ancestor's other branches can progress.
 			return te.autoStartAncestorSiblings(projectID, parent, finishedTaskID)
 		}
-
-		// Reload to avoid stale state — prepareTaskExecution has its own guard.
-		selected, err := te.store.GetTaskByID(selectedID)
-		if err != nil || !te.IsStartableNow(*selected) {
-			logging.For(logging.Startup).With(logging.TaskID, finishedTaskID).Infof("selected sibling %s no longer startable, skipping", selectedID)
-			return nil
-		}
-
-		logging.For(logging.Startup).With(logging.TaskID, finishedTaskID).Infof("finished, starting next sibling %s (parent=%s)", selectedID, parentTaskID)
-		return te.StartSubtask(projectID, selectedID, true)
+		_, err = te.startSubtasks(projectID, parent, ids, finishedTaskID)
+		return err
 	}
 
 	// No pending siblings.
@@ -942,6 +951,73 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 
 	// Children still unfinished — bubble up to the ancestor's other branches.
 	return te.autoStartAncestorSiblings(projectID, parent, finishedTaskID)
+}
+
+// The scheduling decision under a parent: every startable descendant at any depth with "run subtasks
+// in parallel", otherwise the single deepest pick. startSubtasks carries it out.
+func (te *TaskExecutor) subtasksToStart(parent *types.Task, subtasks []types.Task) []string {
+	if te.configStore.GetRunSiblingsParallel() {
+		startable := te.FindStartableSubtasks(subtasks)
+		ids := make([]string, 0, len(startable))
+		for _, s := range startable {
+			ids = append(ids, s.ID)
+		}
+		return ids
+	}
+	if id := te.SelectSubtaskToStart(parent, subtasks); id != "" {
+		return []string{id}
+	}
+	return nil
+}
+
+// StartReadySubtasks starts the subtasks ready under a parent and reports which ones started. No
+// result and no error means nothing is ready, which is not a failure: the caller decides whether the
+// parent then runs.
+func (te *TaskExecutor) StartReadySubtasks(projectID, parentID string) (started []string, firstErr error) {
+	parent, err := te.store.GetTaskByID(parentID)
+	if err != nil {
+		return nil, fmt.Errorf("get parent task: %w", err)
+	}
+	subtasks, err := te.store.GetChildren(parentID)
+	if err != nil {
+		return nil, fmt.Errorf("get children: %w", err)
+	}
+	return te.startSubtasks(projectID, parent, te.subtasksToStart(parent, subtasks), "")
+}
+
+// Starts the chosen subtasks autostarted; a failed start does not stop the others. A task with a
+// live executor is skipped: StartTask refuses only a running task, so restarting one queued for a
+// slot would leave two executors for one task, and only the second reachable by StopTask.
+func (te *TaskExecutor) startSubtasks(projectID string, parent *types.Task, ids []string, triggeredBy string) (started []string, firstErr error) {
+	for _, id := range ids {
+		if te.hasLiveExecutor(id) {
+			continue
+		}
+		// Reload to avoid stale state — prepareTaskExecution has its own guard.
+		fresh, err := te.store.GetTaskByID(id)
+		if err != nil || !te.IsStartableNow(*fresh) {
+			logging.For(logging.Startup).With(logging.TaskID, id).Infof("no longer startable, skipping (parent=%s)", parent.ID)
+			continue
+		}
+		if err := te.StartSubtask(projectID, id, true); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			logging.For(logging.Startup).With(logging.TaskID, id).Warnf("failed to start subtask (parent=%s): %v", parent.ID, err)
+			continue
+		}
+		started = append(started, id)
+	}
+
+	if len(started) == 0 {
+		return nil, firstErr
+	}
+	if triggeredBy != "" {
+		logging.For(logging.Startup).With(logging.TaskID, triggeredBy).Infof("finished, starting %d subtask(s) %v (parent=%s)", len(started), started, parent.ID)
+	} else {
+		logging.For(logging.Startup).With(logging.TaskID, parent.ID).Infof("starting %d subtask(s) %v", len(started), started)
+	}
+	return started, firstErr
 }
 
 // autoStartAncestorSiblings bubbles up one level so the waiting parent's
@@ -1779,24 +1855,15 @@ func composeSystemPrompt(task *types.Task, worktreePath, projectName string, san
 }
 
 // buildMessagesFromDB loads persisted messages and builds the system prompt.
-// The most recent summary is injected into the system prompt.
+// The summary in effect is extracted from the rebuilt conversation, so it is read by the one rule
+// (extractPrevSummary) rather than by a second walk over the stored rows.
 func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktreePath, projectName string, sandboxEnabled bool) []types.ChatMessage {
-	// Extract most recent summary for the system prompt.
-	var summary string
-	for i := len(taskMsgs) - 1; i >= 0; i-- {
-		if taskMsgs[i].Role == "summarization" {
-			summary = taskMsgs[i].Content
-			break
-		}
-	}
-
-	messages := []types.ChatMessage{{Role: "system", Content: composeSystemPrompt(task, worktreePath, projectName, sandboxEnabled, summary)}}
-
-	// One rebuild path for every consumer of persisted rows (see groupTaskMessages): the
-	// system prompt on front, the conversation — tool calls with their assistant row, tool
-	// results right after, advisories under their own role — behind it.
-	messages = append(messages, groupTaskMessages(taskMsgs)...)
-	return messages
+	// One rebuild path for every consumer of persisted rows (see groupTaskMessages): the conversation —
+	// tool calls with their assistant row, tool results right after, advisories under their own role —
+	// and the system prompt on front, carrying that conversation's summary.
+	conversation := groupTaskMessages(taskMsgs)
+	prompt := composeSystemPrompt(task, worktreePath, projectName, sandboxEnabled, extractPrevSummary(conversation))
+	return append([]types.ChatMessage{{Role: "system", Content: prompt}}, conversation...)
 }
 
 // runningState returns the executionState of a running task, or nil. Its body takes taskMu here

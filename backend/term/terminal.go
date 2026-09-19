@@ -49,6 +49,23 @@ type taskTerminal struct {
 	connSizes map[*websocket.Conn]connSize // per-client terminal dimensions
 	buf       [][]byte
 	onExit    func() // called when shell process exits, to remove session from manager
+	// closed says the shell is gone. The connection maps stay valid either way.
+	closed bool
+}
+
+// attach registers a connection and hands back what the shell has already printed. It
+// reports false for a closing session, which the manager can still hand out until its PTY is
+// killed, and a client registered with one would hear nothing at all.
+func (t *taskTerminal) attach(conn *websocket.Conn) (live bool, backlog [][]byte) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return false, nil
+	}
+	t.conns[conn] = true
+	backlog = make([][]byte, len(t.buf))
+	copy(backlog, t.buf)
+	return true, backlog
 }
 
 // defaultTermSize is the fallback PTY size when no clients have reported dimensions.
@@ -95,6 +112,12 @@ func clampDim(v int) uint16 {
 
 // applySize sets the PTY to the given rows/cols if it differs from current size.
 func (t *taskTerminal) applySize(rows, cols uint16) {
+	t.mu.Lock()
+	closed := t.closed
+	t.mu.Unlock()
+	if closed {
+		return // the PTY is already gone
+	}
 	curRows, curCols, err := pty.Getsize(t.ptmx)
 	if err != nil {
 		logging.For(logging.Terminal).Warnf("terminal getsz error: %v", err)
@@ -135,9 +158,9 @@ func (t *taskTerminal) removeConnSize(conn *websocket.Conn) {
 	t.mu.Lock()
 	delete(t.conns, conn)
 	delete(t.connSizes, conn)
-	r, c := t.minSize()
+	rows, cols := t.minSize()
 	t.mu.Unlock()
-	t.applySize(r, c)
+	t.applySize(rows, cols)
 }
 
 // sandboxOps exists so tests can mock the sandbox without depending on gVisor.
@@ -444,12 +467,12 @@ func (t *taskTerminal) readLoop() {
 			for c := range t.conns {
 				conns = append(conns, c)
 			}
-			t.conns = nil
+			t.closed = true
 			t.mu.Unlock()
 
 			ctx := context.Background()
 			for _, c := range conns {
-				_ = c.Write(ctx, websocket.MessageText, closedMsg)
+				_ = httputil.WriteText(ctx, c, closedMsg, httputil.WriteTimeout)
 				c.Close(websocket.StatusNormalClosure, "shell exited")
 			}
 			logging.For(logging.Terminal).Infof("shell exited, notified %d client(s)", len(conns))
@@ -475,7 +498,11 @@ func (t *taskTerminal) readLoop() {
 		if len(conns) > 0 {
 			ctx := context.Background()
 			for _, c := range conns {
-				_ = c.Write(ctx, websocket.MessageText, encoded)
+				if err := httputil.WriteText(ctx, c, encoded, httputil.WriteTimeout); err != nil {
+					// The deadline closed that connection. Retire it: this loop is the only
+					// thing draining the PTY.
+					t.removeConnSize(c)
+				}
 			}
 		}
 	}
@@ -487,7 +514,11 @@ func (t *taskTerminal) close() {
 	for c := range t.conns {
 		c.Close(websocket.StatusNormalClosure, "closed")
 	}
-	t.conns = nil
+	// Dropping the clients here keeps the read loop's own exit pass from announcing
+	// connections that are already hung up.
+	clear(t.conns)
+	clear(t.connSizes)
+	t.closed = true
 	t.mu.Unlock()
 
 	if t.shell != nil {
@@ -553,6 +584,10 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 
 	ctx := context.Background()
 
+	write := func(frame []byte) error {
+		return httputil.WriteText(ctx, conn, frame, httputil.WriteTimeout)
+	}
+
 	// This is the terminal's own progress channel: the image is prepared before the shell starts, so
 	// its output is what the user sees while the terminal is still blank.
 	var sandboxProject *types.Project
@@ -565,13 +600,13 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 	if sandboxEnabled && tm.sandboxMgr != nil {
 		_, imgErr := tm.sandboxMgr.EnsureImageForProject(sandboxProject, func(status types.SandboxImageStatus) {
 			if line, ok := imageStatusLabel(status); ok {
-				_ = conn.Write(ctx, websocket.MessageText, termStatusMessage(line))
+				write(termStatusMessage(line))
 			}
 		})
 		if imgErr != nil {
-			_ = conn.Write(ctx, websocket.MessageText, termStatusMessage("Failed to prepare sandbox image: "+imgErr.Error()+"\n"))
+			write(termStatusMessage("Failed to prepare sandbox image: " + imgErr.Error() + "\n"))
 			closeMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
-			_ = conn.Write(ctx, websocket.MessageText, closeMsg)
+			write(closeMsg)
 			return
 		}
 	}
@@ -579,38 +614,40 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 	// Notify user before container creation (can take several seconds)
 	if sandboxEnabled {
 		statusMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Starting sandbox container..."})
-		_ = conn.Write(ctx, websocket.MessageText, statusMsg)
+		write(statusMsg)
 	}
 
 	session, err := tm.getOrCreate(sessionKey, taskID, worktreePath, projectID)
 	if err != nil {
 		logging.For(logging.Terminal).Warnf("terminal pty error for %s: %v", sessionKey, err)
 		errMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Failed to start terminal: " + err.Error() + "\n"})
-		_ = conn.Write(ctx, websocket.MessageText, errMsg)
+		write(errMsg)
 		closeMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
-		_ = conn.Write(ctx, websocket.MessageText, closeMsg)
+		write(closeMsg)
 		return
 	}
 
 	// Shell is ready — switch to normal I/O relay. Status messages remain visible.
 	// Send a newline so shell output starts on a fresh line at column 0.
 	newlineMsg, _ := json.Marshal(types.TerminalMessage{Type: "output", Data: "\r\n"})
-	_ = conn.Write(ctx, websocket.MessageText, newlineMsg)
+	write(newlineMsg)
 
-	// Switch to normal I/O relay
-	session.mu.Lock()
-	session.conns[conn] = true
-	bufCopy := make([][]byte, len(session.buf))
-	copy(bufCopy, session.buf)
-	session.mu.Unlock()
-
-	for _, frame := range bufCopy {
-		_ = conn.Write(ctx, websocket.MessageText, frame)
+	// The session may already be closing, in which case this client is told the shell is gone
+	// rather than registered with it.
+	live, bufCopy := session.attach(conn)
+	if !live {
+		closeMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
+		write(closeMsg)
+		return
 	}
 
-	defer func() {
-		session.removeConnSize(conn)
-	}()
+	defer session.removeConnSize(conn)
+
+	for _, frame := range bufCopy {
+		if write(frame) != nil {
+			return
+		}
+	}
 
 	// A failed ping cancels the read context, which unblocks the Read loop below.
 	ctxRead, cancelRead := context.WithCancel(context.Background())

@@ -1,6 +1,7 @@
 package httputil
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -187,5 +188,88 @@ func TestKeepaliveReportsADeadPeer(t *testing.T) {
 	case <-dead:
 	case <-time.After(3 * time.Second):
 		t.Fatal("a failed ping did not reach the caller — the read loop would hang forever")
+	}
+}
+
+// acceptReader serves AcceptWS and reports each frame's size, or -1 once its read fails.
+func acceptReader(t *testing.T) (sizes <-chan int, clientURL string) {
+	t.Helper()
+
+	seen := make(chan int, 4)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		c, ok := AcceptWS(w, r, "test")
+		if !ok {
+			return
+		}
+		for {
+			_, data, err := c.Read(context.Background())
+			if err != nil {
+				seen <- -1
+				return
+			}
+			seen <- len(data)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	return seen, "ws" + srv.URL[len("http"):] + "/ws"
+}
+
+func dialWriter(t *testing.T, url string) *websocket.Conn {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, _, err := websocket.Dial(ctx, url, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { client.CloseNow() })
+	return client
+}
+
+// TestAcceptWSReadLimitCoversALargeClientFrame: a frame past the read limit closes the
+// connection, which the browser reads as a dropped link and reconnects into.
+func TestAcceptWSReadLimitCoversALargeClientFrame(t *testing.T) {
+	sizes, url := acceptReader(t)
+	client := dialWriter(t, url)
+
+	payload := bytes.Repeat([]byte("a"), 64*1024) // past the library default, inside ReadLimit
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := client.Write(ctx, websocket.MessageText, payload); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	select {
+	case n := <-sizes:
+		if n != len(payload) {
+			t.Fatalf("server read %d bytes, want %d — the frame was not accepted", n, len(payload))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the server never read the frame")
+	}
+}
+
+// TestAcceptWSReadLimitIsABound says the limit is a number, not absent.
+func TestAcceptWSReadLimitIsABound(t *testing.T) {
+	sizes, url := acceptReader(t)
+	client := dialWriter(t, url)
+
+	payload := bytes.Repeat([]byte("a"), ReadLimit+1)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := client.Write(ctx, websocket.MessageText, payload); err != nil {
+		return // a write that refuses is the same bound, seen from this end
+	}
+
+	select {
+	case n := <-sizes:
+		if n > 0 {
+			t.Fatalf("a frame of %d bytes above ReadLimit was read (limit %d)", n, ReadLimit)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the oversized frame was neither read nor refused")
 	}
 }

@@ -737,3 +737,39 @@ func TestTerminalManagerClose(t *testing.T) {
 	// Shutdown may call Close twice (SIGTERM, then deferred cleanup).
 	tm.Close()
 }
+
+// TestAttachRefusesAClosingSession: getOrCreate can hand out a session that is already
+// closing, and registering with it panicked on the connection map the exit path had dropped.
+func TestAttachRefusesAClosingSession(t *testing.T) {
+	dir := t.TempDir()
+	s, cs := newTestConfigStore(t)
+	mock := newMockSandbox(t)
+	tm := NewTerminalManager(s, cs, mock, nil, dangerZoneForTest)
+
+	projID := "test-proj-attach"
+	if err := s.CreateProject(&types.Project{ID: projID, Name: "Attach", Path: dir, SandboxEnabled: true}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	sess, err := tm.getOrCreate("attach-task", "attach-task", dir, projID)
+	if err != nil {
+		t.Fatalf("getOrCreate: %v", err)
+	}
+
+	if live, _ := sess.attach(newTestConn(t)); !live {
+		t.Fatal("a live session refused its first connection")
+	}
+
+	sess.close()
+
+	live, backlog := sess.attach(newTestConn(t))
+	if live {
+		t.Fatal("a closing session accepted a new connection")
+	}
+	if backlog != nil {
+		t.Fatalf("a closing session handed back %d buffered frames", len(backlog))
+	}
+
+	// The maps stay usable: a client leaving a closed session is routine.
+	sess.removeConnSize(newTestConn(t))
+}

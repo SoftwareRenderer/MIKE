@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/coder/websocket"
 
@@ -188,9 +187,6 @@ func (h *LSPHandler) HandleLSP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-
-	// Allow large LSP responses (hover docs, completions, etc.)
-	conn.SetReadLimit(1024 * 1024) // 1MB
 
 	clientID := h.nextID.Add(1)
 	session := &ClientSession{
@@ -524,7 +520,7 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 		}
 		h.mu.Unlock()
 		if cachedResponse != nil {
-			session.conn.Write(ctx, websocket.MessageText, cachedResponse)
+			_ = httputil.WriteText(ctx, session.conn, cachedResponse, httputil.WriteTimeout)
 		}
 		// Notify frontend that LSP is ready for this channel
 		h.sendLSPReady(ctx, session, channelID)
@@ -705,9 +701,8 @@ func (h *LSPHandler) answerError(ctx context.Context, session *ClientSession, cl
 	if err != nil {
 		return
 	}
-	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	if err := session.conn.Write(writeCtx, websocket.MessageText, payload); err != nil {
+	// WithoutCancel: a request that was cancelled still gets its answer.
+	if err := httputil.WriteText(context.WithoutCancel(ctx), session.conn, payload, httputil.WriteTimeout); err != nil {
 		logging.For(logging.LSP).Warnf("client %d: could not deliver the failure of request %s: %v", session.clientID, clientReqID, err)
 	}
 }
@@ -781,7 +776,7 @@ func (h *LSPHandler) routeNotification(serverMsg json.RawMessage) {
 	h.mu.Unlock()
 
 	for _, s := range clients {
-		_ = s.conn.Write(context.Background(), websocket.MessageText, serverMsg)
+		_ = httputil.WriteText(context.Background(), s.conn, serverMsg, httputil.WriteTimeout)
 	}
 }
 
@@ -844,14 +839,14 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 	// Remap the id back to the original client ID, with channel hint if multiplexed
 	remapped := remapResponseIDWithChannel(serverMsg, originalClientID, channelID)
 	if remapped != nil {
-		targetSession.conn.Write(context.Background(), websocket.MessageText, remapped)
+		_ = httputil.WriteText(context.Background(), targetSession.conn, remapped, httputil.WriteTimeout)
 	}
 
 	// Replay cached initialize response to queued clients
 	for _, q := range queuedReplay {
 		qremapped := remapResponseIDWithChannel(serverMsg, q.clientReqID, q.channelID)
 		if qremapped != nil {
-			q.session.conn.Write(context.Background(), websocket.MessageText, qremapped)
+			_ = httputil.WriteText(context.Background(), q.session.conn, qremapped, httputil.WriteTimeout)
 		}
 		// Notify frontend that LSP is ready for this queued channel
 		h.sendLSPReady(context.Background(), q.session, q.channelID)
@@ -987,7 +982,7 @@ func (h *LSPHandler) sendLSPReady(ctx context.Context, session *ClientSession, c
 		msg["_ch"] = channelID
 	}
 	data, _ := json.Marshal(msg)
-	_ = session.conn.Write(ctx, websocket.MessageText, data)
+	_ = httputil.WriteText(ctx, session.conn, data, httputil.WriteTimeout)
 }
 
 // BroadcastLSPReset sends a $server/lspReset notification to all active sessions.
@@ -1005,7 +1000,7 @@ func (h *LSPHandler) BroadcastLSPReset() {
 	h.mu.Unlock()
 
 	for _, s := range clients {
-		_ = s.conn.Write(context.Background(), websocket.MessageText, msg)
+		_ = httputil.WriteText(context.Background(), s.conn, msg, httputil.WriteTimeout)
 	}
 }
 

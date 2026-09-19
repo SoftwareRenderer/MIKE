@@ -347,8 +347,8 @@ const catalog = {
     'settings.defaults.subtasksAutoMergeDesc': 'Subtasks created under a task will auto-merge into it',
     'settings.defaults.autoSummarize': 'Auto-summarize threshold',
     'settings.defaults.autoSummarizeDesc': "Summarize context when it reaches this % of the model's context window",
-    'settings.defaults.runParallel': 'Run siblings in parallel',
-    'settings.defaults.runParallelDesc': "Start all of a parent's subtasks at once instead of one at a time",
+    'settings.defaults.runParallel': 'Run subtasks in parallel',
+    'settings.defaults.runParallelDesc': 'Start available subtasks in parallel',
     'settings.defaults.maxFailed': 'Max failed turns',
     'settings.defaults.maxFailedDesc': 'Stop task after this many consecutive LLM failures',
 
@@ -1274,6 +1274,7 @@ const catalog = {
     'chat.actions.forkTitle': 'Edit / new thread',
     'chat.actions.delete': 'Delete message and all following messages',
     'chat.actions.regenerate': 'Regenerate response',
+    'chat.actions.editSummary': 'Edit the summarized context',
 
     // ── Chat/QueueIndicator.svelte ──
     'chat.queue.targetAgent': 'agent',

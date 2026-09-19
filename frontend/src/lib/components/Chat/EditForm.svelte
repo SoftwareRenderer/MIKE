@@ -16,11 +16,16 @@
         projectId?: string;
         taskId?: string;
         isSubmitting?: boolean;
+        /** 'auto' labels the submit from the message's place in the thread (Send / New thread /
+         *  Save). 'save' rewrites text that already exists: a Save button, and Enter writes a
+         *  newline because what is being edited is prose, with Ctrl/Cmd+Enter as the submit — the
+         *  combination the mobile edit dialog already uses for a long message. */
+        submitMode?: 'auto' | 'save';
         onSubmit?: (content: string, attachments: Array<{ mimeType: string; data: string }>) => void;
         onCancel?: () => void;
     }
 
-    let { content, attachments = [], isFirstUserMessage = false, isLastUserMessage = false, taskStatus = 'backlog', projectId = '', taskId = '', isSubmitting = false, onSubmit, onCancel }: Props = $props();
+    let { content, attachments = [], isFirstUserMessage = false, isLastUserMessage = false, taskStatus = 'backlog', projectId = '', taskId = '', isSubmitting = false, submitMode = 'auto', onSubmit, onCancel }: Props = $props();
 
     let editContent = $state('');
     let textareaEl: HTMLTextAreaElement | null = $state(null);
@@ -56,7 +61,7 @@
 
     function handleKeydown(e: KeyboardEvent) {
         if (mention.handleKeydown(e)) return;
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (e.key === 'Enter' && (submitMode === 'save' ? e.ctrlKey || e.metaKey : !e.shiftKey)) {
             e.preventDefault();
             if (!isSubmitting && canSubmit) onSubmit?.(editContent.trim(), editAttachments);
         } else if (e.key === 'Escape') {
@@ -67,6 +72,7 @@
 
     /** Determine the submit button label based on context. */
     let submitLabel = $derived(() => {
+        if (submitMode === 'save') return t('chat.common.save');
         if (isFirstUserMessage && taskStatus === 'backlog') return t('chat.common.save');
         if (isFirstUserMessage) return t('chat.common.send');
         if (isLastUserMessage) return t('chat.common.send');
@@ -74,6 +80,7 @@
     });
 
     let submitIcon = $derived(() => {
+        if (submitMode === 'save') return 'check';
         if (isFirstUserMessage && taskStatus === 'backlog') return 'check';
         if (isFirstUserMessage) return 'send';
         if (isLastUserMessage) return 'send';
