@@ -150,12 +150,13 @@ func (q *sendQueue) notify() {
 // newClientState builds the state HandleStream serves one connection from.
 func newClientState(conn *websocket.Conn, asm *AppStreamManager) *clientState {
 	return &clientState{
-		conn:       conn,
-		projectSub: make(map[string]int),
-		taskSub:    make(map[string]int),
-		ringBuffer: make([][]byte, 0, DefaultBufferSize),
-		bufSize:    DefaultBufferSize,
-		out:        newSendQueue(asm.queueFrames, asm.queueBytes),
+		conn:        conn,
+		projectSub:  make(map[string]struct{}),
+		taskSub:     make(map[string]struct{}),
+		initPending: make(map[string]AppStreamSubscription),
+		ringBuffer:  make([][]byte, 0, DefaultBufferSize),
+		bufSize:     DefaultBufferSize,
+		out:         newSendQueue(asm.queueFrames, asm.queueBytes),
 	}
 }
 

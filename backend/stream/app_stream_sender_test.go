@@ -54,9 +54,9 @@ func awaitTaskSub(t *testing.T, asm *AppStreamManager, client *clientState, proj
 	defer deadline.Stop()
 	for {
 		asm.mu.RLock()
-		signed := client.taskSub[key] > 0
+		_, subscribed := client.taskSub[key]
 		asm.mu.RUnlock()
-		if signed {
+		if subscribed {
 			return
 		}
 		select {

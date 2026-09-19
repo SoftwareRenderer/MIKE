@@ -51,6 +51,17 @@ export interface AppStreamOptions {
     getKnownStats?: (projectId: string) => Record<string, string> | Promise<Record<string, string>>;
 }
 
+/** One of the four frames that move a subscription. */
+type SubscriptionFrameType = 'subscribe_project' | 'unsubscribe_project' | 'subscribe_task' | 'unsubscribe_task';
+
+/** A subscription frame the server has not been told about yet. */
+interface OwedSubscription {
+    type: SubscriptionFrameType;
+    data: Record<string, any>;
+    /** A `subscribe_project` whose `known_stats` are still resolving: nothing may be written yet. */
+    waiting?: boolean;
+}
+
 export function createAppStream(callbacks: AppStreamCallbacks, options: AppStreamOptions = {}): AppStream {
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -65,43 +76,104 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
     // Track active subscriptions for re-subscription on reconnect
     const subscribedProjects = new Set<string>();
     const subscribedTasks = new Set<string>(); // "projectId:taskId"
-    // Pending messages queued before WebSocket is open
-    const pendingMessages: Array<{ type: string; data: Record<string, any> }> = [];
+    /**
+     * What the server has not been told about these two sets: at most one frame per key, holding the
+     * newest intent recorded for it, in the order those intents were formed. Keys are the sets' own — a
+     * project id, or "projectId:taskId". Recording the intent is synchronous, so two calls in the same
+     * tick coalesce; only a `subscribe_project`'s payload waits, and while it does its frame stays
+     * unwritten.
+     *
+     * A projection rather than a message log, which is what bounds it: an entry can only name a key the
+     * app has opened, so an outage costs at most `subscribedProjects.size + subscribedTasks.size` frames
+     * however long it runs or how often the view changed during it. The two wire rules it exists to hold —
+     * the newest intent for a key is the only one sent, and an undelivered subscribe is dropped rather
+     * than cancelled — are in `docs/reconnection.md → One frame per key`.
+     */
+    const owed: Map<string, OwedSubscription> = new Map();
 
-    function sendMsg(type: string, data: Record<string, any>) {
-        if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-            currentWs.send(JSON.stringify({ type, data }));
-        } else {
-            // Queue message for when WebSocket opens
-            pendingMessages.push({ type, data });
-        }
+    /** Write one key's owed frame if the socket can carry it, and stop owing it when it did. */
+    function deliverOwed(key: string): boolean {
+        const frame = owed.get(key);
+        if (!frame || frame.waiting) return false;
+        if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return false;
+        currentWs.send(JSON.stringify({ type: frame.type, data: frame.data }));
+        owed.delete(key);
+        return true;
     }
 
-    function flushPending() {
-        for (const msg of pendingMessages) {
-            if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-                currentWs.send(JSON.stringify(msg));
-            }
-        }
-        pendingMessages.length = 0;
+    /** The server must be told it holds this key; if nothing is open, that becomes the key's debt. */
+    function oweSubscribe(key: string, frame: OwedSubscription) {
+        owed.set(key, frame);
+        deliverOwed(key);
     }
 
-    /** Subscribe (or re-subscribe) to a project, declaring any cached done-task stats.
-     * The provider is async (IndexedDB-backed), so the subscribe message goes out
-     * once it resolves — before the server builds the initial payload for this
-     * connection, keeping the skip-if-known handshake in place on reconnects. */
-    async function sendSubscribeProject(projectId: string) {
+    /**
+     * The server must be told the client has left this key. A subscribe still owed for it is dropped
+     * instead: nothing was ever asked for, so there is nothing for the server to release.
+     */
+    function oweUnsubscribe(key: string, frame: OwedSubscription) {
+        if (owed.get(key)?.type.startsWith('subscribe_')) {
+            owed.delete(key);
+            return;
+        }
+        owed.set(key, frame);
+        deliverOwed(key);
+    }
+
+    /**
+     * Subscribe (or re-subscribe) to a project, declaring any cached done-task stats. The frame waits for
+     * the async (IndexedDB-backed) provider so the skip-if-known handshake declares something on the
+     * reconnect path too, where the frame is formed by {@link flushSubscriptions} and not by a click; with
+     * no provider there is nothing to wait for and it goes out at once.
+     */
+    function requestProjectSubscribe(projectId: string) {
+        const frame: OwedSubscription = {
+            type: 'subscribe_project',
+            data: { project_id: projectId },
+            waiting: !!options.getKnownStats,
+        };
+        oweSubscribe(projectId, frame);
+        if (frame.waiting) void fillKnownStats(projectId, frame);
+    }
+
+    /** Attach the cached stats to a project's held `subscribe_project` and write it if that freed it. */
+    async function fillKnownStats(projectId: string, frame: OwedSubscription) {
         let knownStats: Record<string, string> | undefined;
         try {
             knownStats = await options.getKnownStats?.(projectId);
         } catch {
             knownStats = undefined; // provider failure must never block subscribing
         }
-        const data: Record<string, any> = { project_id: projectId };
+        // Only this frame's own call may fill it. The app may have left the project, and a subscribe
+        // written behind that unsubscribe is one nothing will ever release; or it re-entered, and the
+        // newer frame has its own call answering for it.
+        if (owed.get(projectId) !== frame) return;
         if (knownStats && Object.keys(knownStats).length > 0) {
-            data.known_stats = knownStats;
+            frame.data.known_stats = knownStats;
         }
-        sendMsg('subscribe_project', data);
+        frame.waiting = false;
+        deliverOwed(projectId);
+    }
+
+    /**
+     * Say to a new connection everything it does not already know: what the sets changed while it was
+     * down, then one subscribe per key still held. A held key can only owe a subscribe, so a key the
+     * first pass covered — including one still waiting on its stats — is never asked for twice.
+     */
+    function flushSubscriptions() {
+        const told = new Set<string>();
+        for (const [key, frame] of [...owed]) {
+            if (!frame.waiting && !deliverOwed(key)) return; // not open after all: the rest of the debt survives
+            told.add(key); // covered, including a frame the provider will write to whichever socket is current
+        }
+        for (const projectId of subscribedProjects) {
+            if (!told.has(projectId)) requestProjectSubscribe(projectId);
+        }
+        for (const key of subscribedTasks) {
+            if (told.has(key)) continue;
+            const [projectId, taskId] = key.split(':');
+            oweSubscribe(key, { type: 'subscribe_task', data: { project_id: projectId, task_id: taskId } });
+        }
     }
 
     function startHeartbeat() {
@@ -177,15 +249,7 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
             reconnectAttempts = 0;
             hasConnectedOnce = true;
             callbacks.onConnected?.(true);
-            // Flush pending messages first
-            flushPending();
-            for (const projectId of subscribedProjects) {
-                void sendSubscribeProject(projectId);
-            }
-            for (const key of subscribedTasks) {
-                const [projectId, taskId] = key.split(':');
-                sendMsg('subscribe_task', { project_id: projectId, task_id: taskId });
-            }
+            flushSubscriptions();
         };
 
         ws.onmessage = (e) => {
@@ -283,21 +347,22 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
         subscribeProject: (projectId: string) => {
             if (subscribedProjects.has(projectId)) return;
             subscribedProjects.add(projectId);
-            void sendSubscribeProject(projectId);
+            requestProjectSubscribe(projectId);
         },
         unsubscribeProject: (projectId: string) => {
             subscribedProjects.delete(projectId);
-            sendMsg('unsubscribe_project', { project_id: projectId });
+            oweUnsubscribe(projectId, { type: 'unsubscribe_project', data: { project_id: projectId } });
         },
         subscribeTask: (projectId: string, taskId: string) => {
             const key = `${projectId}:${taskId}`;
             if (subscribedTasks.has(key)) return;
             subscribedTasks.add(key);
-            sendMsg('subscribe_task', { project_id: projectId, task_id: taskId });
+            oweSubscribe(key, { type: 'subscribe_task', data: { project_id: projectId, task_id: taskId } });
         },
         unsubscribeTask: (projectId: string, taskId: string) => {
-            subscribedTasks.delete(`${projectId}:${taskId}`);
-            sendMsg('unsubscribe_task', { project_id: projectId, task_id: taskId });
+            const key = `${projectId}:${taskId}`;
+            subscribedTasks.delete(key);
+            oweUnsubscribe(key, { type: 'unsubscribe_task', data: { project_id: projectId, task_id: taskId } });
         },
     };
 }

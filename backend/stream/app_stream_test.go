@@ -3,9 +3,11 @@ package stream
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,17 +38,29 @@ type frameStream struct {
 	frames chan map[string]any
 }
 
+// serveStream serves asm on a throwaway server for the rest of the test and returns its
+// ws URL, so a test can put several real clients on one manager.
+func serveStream(t *testing.T, asm *AppStreamManager) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(asm.HandleStream))
+	t.Cleanup(srv.Close)
+	return "ws" + strings.TrimPrefix(srv.URL, "http")
+}
+
 // dialStream serves asm on a throwaway server, connects a real client and
 // starts pumping its frames. Everything is torn down with the test.
 func dialStream(t *testing.T, asm *AppStreamManager) *frameStream {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(asm.HandleStream))
-	t.Cleanup(srv.Close)
+	return dialFrameStream(t, serveStream(t, asm))
+}
 
+// dialFrameStream connects a real client to the stream listening at wsURL and starts
+// pumping its frames.
+func dialFrameStream(t *testing.T, wsURL string) *frameStream {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("dial stream: %v", err)
@@ -151,16 +165,48 @@ func (fs *frameStream) collect(window time.Duration, pred func(map[string]any) b
 	}
 }
 
-// flushSubscriptions makes the server acknowledge everything this client has
-// sent so far: HandleStream's read loop is sequential, so a probe subscription
-// whose replay we observe proves every earlier frame from this connection (an
-// unsubscribe, say) has already been applied. Without it a negative assertion
-// would race the server's read loop.
-func (fs *frameStream) flushSubscriptions(t *testing.T, projectID, probeTaskID string) {
-	t.Helper()
-	fs.sendSubscription(t, "subscribe_task", projectID, probeTaskID)
-	fs.await(t, 5*time.Second, isTaskEventFor(probeTaskID, "warm-"+probeTaskID), 1, "subscription flush")
+// tally drains this connection's frames for window and counts how many matched each predicate,
+// keeping what the other predicates still need. A caller that awaits one frame first cannot then
+// claim nothing more arrived: the await consumed whatever came before it.
+func (fs *frameStream) tally(window time.Duration, preds ...func(map[string]any) bool) []int {
+	deadline := time.NewTimer(window)
+	defer deadline.Stop()
+	counts := make([]int, len(preds))
+	for {
+		select {
+		case frame, ok := <-fs.frames:
+			if !ok {
+				return counts // connection closed
+			}
+			for i, pred := range preds {
+				if pred(frame) {
+					counts[i]++
+				}
+			}
+		case <-deadline.C:
+			return counts
+		}
+	}
 }
+
+// flushSubscriptions makes the server acknowledge everything this client has sent so far:
+// HandleStream's read loop is sequential, so a probe subscription whose replay we observe
+// proves every earlier frame from this connection (an unsubscribe, say) has already been
+// applied. Without it a negative assertion would race the server's read loop.
+//
+// Every probe takes a task key of its own, warmed here, because a connection replays nothing
+// for a subscription it already holds, and a key shared with another connection's probe would
+// deliver that connection's warm frame as a live event.
+func (fs *frameStream) flushSubscriptions(t *testing.T, asm *AppStreamManager, projectID string) {
+	t.Helper()
+	taskID := fmt.Sprintf("flush-probe-%d", flushProbeSeq.Add(1))
+	warmProbe(t, asm, projectID, taskID)
+	fs.sendSubscription(t, "subscribe_task", projectID, taskID)
+	fs.await(t, 5*time.Second, isTaskEventFor(taskID, "warm-"+taskID), 1, "subscription flush")
+}
+
+// flushProbeSeq numbers the flushSubscriptions probes, so no two of them share a task key.
+var flushProbeSeq atomic.Uint64
 
 // isTaskEventFor reports a frame predicate for a task_event carrying text.
 func isTaskEventFor(taskID, text string) func(map[string]any) bool {
@@ -276,9 +322,8 @@ func TestBroadcastFramesAreFlat(t *testing.T) {
 }
 
 // TestTaskEventDelivery verifies task event delivery is gated by the task
-// subscription: project-only and other-task subscribers never see it, and a
-// task subscriber stops seeing it exactly when its subscription count drops to
-// zero (multi-tab).
+// subscription: project-only and other-task subscribers never see it, a task subscriber stops
+// seeing it when the one unsubscribe it sent arrives, and sees it again when it re-subscribes.
 func TestTaskEventDelivery(t *testing.T) {
 	_, s, _, wm, _ := setupDoneSnapshotTest(t)
 	asm := NewAppStreamManager(s, wm)
@@ -314,19 +359,19 @@ func TestTaskEventDelivery(t *testing.T) {
 	b.quietWindow(t, time.Second, isTaskEventFor(taskID, "gated"), "project-only subscriber")
 	c.quietWindow(t, time.Second, isTaskEventFor(taskID, "gated"), "other-task subscriber")
 
-	// 2. Two tabs on one connection (subscribe_task twice): the first
-	// unsubscribe drops the count to 1, so delivery must continue.
+	// 2. A task key is held once, so the single unsubscribe the browser sends for it ends
+	// delivery even when the subscribe frame was sent twice.
 	a.sendSubscription(t, "subscribe_task", projectID, taskID)
 	a.sendSubscription(t, "unsubscribe_task", projectID, taskID)
-	a.flushSubscriptions(t, projectID, probeTask)
-	asm.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "still-subscribed"}})
-	a.await(t, 5*time.Second, isTaskEventFor(taskID, "still-subscribed"), 1, "second tab still subscribed")
+	a.flushSubscriptions(t, asm, projectID)
+	asm.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "after-one-unsubscribe"}})
+	a.quietWindow(t, time.Second, isTaskEventFor(taskID, "after-one-unsubscribe"), "delivery after one unsubscribe_task")
 
-	// 3. The last unsubscribe removes the key, so delivery stops.
-	a.sendSubscription(t, "unsubscribe_task", projectID, taskID)
-	a.flushSubscriptions(t, projectID, probeTask)
-	asm.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "after-unsubscribe"}})
-	a.quietWindow(t, time.Second, isTaskEventFor(taskID, "after-unsubscribe"), "unsubscribed client")
+	// 3. Re-subscribing takes the key again, so delivery resumes.
+	a.sendSubscription(t, "subscribe_task", projectID, taskID)
+	a.flushSubscriptions(t, asm, projectID)
+	asm.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "resubscribed"}})
+	a.await(t, 5*time.Second, isTaskEventFor(taskID, "resubscribed"), 1, "delivery after re-subscribing")
 }
 
 // TestSandboxStatsTaskEventPayload verifies the sandbox_stats task event
