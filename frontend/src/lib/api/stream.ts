@@ -205,7 +205,6 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
         return true;
     }
 
-    let hasConnectedOnce = false;
     let connectGen = 0; // incremented each connect() to stale out old onclose handlers
 
     /** Wait out the retry ladder, then attempt. */
@@ -236,9 +235,9 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
         }
         stopHeartbeat(); // prevent leak when stale onclose is skipped
         callbacks.onConnectAttempt?.();
-        // Use ?sync=1 on reconnect so the server sends the global event buffer
-        const syncParam = hasConnectedOnce ? '?sync=1' : '';
-        const ws = new WebSocket(`${window.location.origin}${API_BASE}/stream${syncParam}`);
+        // No sync parameter: what a reconnect catches up on is its own subscriptions and the
+        // HTTP refetch they trigger, not a backlog the server kept for the socket it lost.
+        const ws = new WebSocket(`${window.location.origin}${API_BASE}/stream`);
         currentWs = ws;
         // An attempt that never completes has no frame to start the silence clock, so it starts here.
         lastActivityAt = Date.now();
@@ -247,7 +246,6 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
         ws.onopen = () => {
             if (gen !== connectGen) return; // stale
             reconnectAttempts = 0;
-            hasConnectedOnce = true;
             callbacks.onConnected?.(true);
             flushSubscriptions();
         };

@@ -12,6 +12,11 @@ The rules are in `AGENTS.md → Server Management`.
   operation still writes through is taken away. What sets the rest of the order is the pipe/`WaitDelay`
   rule in `docs/sandbox-runtime.md`: websocket watchers → terminal sessions → lsp → extensions → sandbox
   containers → database, so a session's shell is killed while its container can still receive it.
+- The **websocket watchers** stage is `AppStreamManager.Close`, and it closes all three watchers that
+  manager constructs — worktree, project, branch. A watcher built there but left out of `Close` keeps its
+  inotify watches and keeps broadcasting through the rest of the shutdown: it watches paths the later
+  stages are deleting, and `/api/stream` has no stage of its own, so the frames it produces go to a hub
+  nobody is closing. Test: `backend/stream/app_stream_close_watchers_test.go`.
 - SIGTERM must end the process. `srv.Shutdown` runs under `server.RunShutdownWithDeadline`
   (`backend/server/shutdown.go`, 15 s). Every step waits on something uninterruptible (a container not
   answering podman, an LSP bridge whose peer died), and a shutdown that hangs leaves the process **holding

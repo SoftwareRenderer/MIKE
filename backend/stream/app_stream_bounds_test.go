@@ -1,10 +1,9 @@
 package stream
 
 // What one client may make the server hold: connections, subscriptions, and the bytes a
-// replay buffer keeps.
+// replay buffer and a send queue keep.
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -20,32 +19,6 @@ import (
 	"github.com/coder/websocket"
 )
 
-// TestRingBufferHoldsItsByteBudgetNotJustItsFrameCount: a frame count is not a byte bound.
-func TestRingBufferHoldsItsByteBudgetNotJustItsFrameCount(t *testing.T) {
-	asm := NewAppStreamManager(nil, nil)
-	asm.clientBufBound = 4096
-	t.Cleanup(asm.Close)
-
-	dialStream(t, asm)
-	client := clientAlone(t, asm)
-
-	frame := bytes.Repeat([]byte("x"), 1000)
-	for i := 0; i < 50; i++ {
-		asm.bufferRaw(frame)
-	}
-
-	client.bufMu.Lock()
-	frames, held := len(client.ringBuffer), client.bufBytes
-	client.bufMu.Unlock()
-
-	if held > asm.clientBufBound {
-		t.Fatalf("one client's replay buffer holds %d bytes, over its %d budget", held, asm.clientBufBound)
-	}
-	if frames >= 50 {
-		t.Fatalf("all %d buffered frames survived a %d byte budget", frames, asm.clientBufBound)
-	}
-}
-
 // TestTaskReplayBuffersStayInsideTheirByteAndKeyLimits: a task that streams forever trims
 // its buffer from the oldest end, and the number of buffers is capped, oldest giving way.
 func TestTaskReplayBuffersStayInsideTheirByteAndKeyLimits(t *testing.T) {
@@ -55,7 +28,7 @@ func TestTaskReplayBuffersStayInsideTheirByteAndKeyLimits(t *testing.T) {
 	t.Cleanup(asm.Close)
 
 	for i := 0; i < 20; i++ {
-		asm.bufferTask("proj:t0", bytes.Repeat([]byte("y"), 1000))
+		asm.SendTaskEvent("proj", "t0", tokenText(strings.Repeat("y", 900)))
 	}
 	asm.taskBufMu.Lock()
 	held := asm.taskBufLoad["proj:t0"]
@@ -65,7 +38,7 @@ func TestTaskReplayBuffersStayInsideTheirByteAndKeyLimits(t *testing.T) {
 	}
 
 	for i := 1; i <= 5; i++ {
-		asm.bufferTask(fmt.Sprintf("proj:t%d", i), []byte(`{"type":"task_event"}`))
+		asm.SendTaskEvent("proj", fmt.Sprintf("t%d", i), tokenText("x"))
 	}
 	asm.taskBufMu.Lock()
 	keys := len(asm.taskBuffers)
@@ -93,7 +66,8 @@ func TestClosingATaskBufferTakesItsBookkeepingWithIt(t *testing.T) {
 	const turns = 4 * DefaultTaskBufferKeys
 	for i := 0; i < turns; i++ {
 		key := fmt.Sprintf("proj:t%d", i)
-		asm.bufferTask(key, []byte(`{"type":"task_event"}`))
+		projectID, taskID := "proj", fmt.Sprintf("t%d", i)
+		asm.SendTaskEvent(projectID, taskID, tokenText("x"))
 		asm.clearTaskBuffer(key)
 	}
 

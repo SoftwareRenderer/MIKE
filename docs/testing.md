@@ -339,6 +339,21 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
   startup test sets only what it asserts and inherits the rest.
 - The Pi agent adapter's unit tests live in `../MIKE-extensions/agent/pi` and are run there — they are
   **not** part of `./backend/... ./pkg/...`.
+- **A run that ended is not a thread that is complete.** `failTask` persists the task with
+  `execution_state = failed` and writes the `error` row afterwards, so a test that polls the state and then
+  reads `GetTaskMessages` once can read between the two writes — it fails under load saying `no error row
+  stored` while the roles it prints a moment later (a second read) include the row. Wait for the row as well
+  as the state; `backend/exec`'s `TestLLMCrashMidTurnWithToolCallLeavesNoPartialTurn` does.
+- **`make check-race`'s `RACE_PKGS` is not the whole concurrency surface.** It omits `./backend/lsp/`,
+  `./backend/term/` and `./backend/httputil/`, and the app-stream/LSP/terminal lock fixes are held by tests
+  in those three: `backend/lsp`'s `TestSecondInitializeDuringFirstResponseRouting` (one `initialize` reaches
+  the language server across an overlapping second one, every client answered with its own id) proves a
+  lock-order bug only under the detector, and `backend/httputil`'s `TestKeepalive*` measure the pinger
+  against injected ticks (20 ms) and 150–300 ms windows, so they prove the deadline-after-the-`TryLock` rule
+  that no `-race` run of another package can see. Name them when touching those packages:
+  `make check-race RACE_PKGS="./backend/stream/ ./backend/server/ ./backend/lsp/ ./backend/api/ ./backend/exec/"`.
+  Neither is on the load list — 10 rounds of the first and 8 of the second, run while a five-package `-race`
+  sweep already loaded the machine, came back green.
 
 ### Memory in a test
 

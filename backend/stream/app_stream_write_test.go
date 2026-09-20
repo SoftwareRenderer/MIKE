@@ -126,43 +126,30 @@ func tryLockWithin(mu *sync.Mutex, window time.Duration) bool {
 	}
 }
 
-// TestSyncReplayReleasesTheWriteLockWhenThePeerVanishesMidReplay: a writeMu left locked
+// TestABacklogStillWritingWhenThePeerVanishesReleasesTheWriteLock: a writeMu left locked
 // outlives its connection, and a broadcast that had snapshotted that client waits on it forever.
-func TestSyncReplayReleasesTheWriteLockWhenThePeerVanishesMidReplay(t *testing.T) {
+func TestABacklogStillWritingWhenThePeerVanishesReleasesTheWriteLock(t *testing.T) {
 	asm := NewAppStreamManager(writeTestStore(t), nil)
 	t.Cleanup(asm.Close)
 	srv := httptest.NewServer(http.HandlerFunc(asm.HandleStream))
 	t.Cleanup(srv.Close)
 
-	// A backlog long enough that the replay is still writing when the peer goes; bufferRaw
-	// only appends, so filling it never waits on a connection.
-	stop := make(chan struct{})
-	var fill sync.WaitGroup
-	fill.Add(1)
-	go func() {
-		defer fill.Done()
-		frame := []byte(`{"type":"board_refresh","pad":"` + strings.Repeat("a", 200*1024) + `"}`)
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			asm.bufferRaw(frame)
-		}
-	}()
-	defer func() { close(stop); fill.Wait() }()
-
-	conn := dialSilent(t, srv.URL, "/?sync=1")
+	conn := dialSilent(t, srv.URL, "/")
 	client := clientAlone(t, asm)
 
-	// Nothing was ever read on that socket, so the replay is mid-backlog when the peer vanishes.
+	// A backlog long enough that a frame is still being written when the peer goes, and small
+	// enough to stay inside the queue's bound — this is about the write, not about a drop.
+	frame := []byte(`{"type":"board_refresh","pad":"` + strings.Repeat("a", 200*1024) + `"}`)
+	for i := 0; i < 40; i++ {
+		asm.BroadcastAll(frame)
+	}
+
 	conn.CloseNow()
 	awaitClientCount(t, asm, 0)
 
 	// Nothing is connected any more, so only a leaked lock can still be held.
 	if !tryLockWithin(&client.writeMu, 2*time.Second) {
-		t.Fatal("clientState.writeMu is still locked after the sync=1 replay lost its peer")
+		t.Fatal("clientState.writeMu is still locked after the sender lost its peer")
 	}
 	client.writeMu.Unlock()
 }

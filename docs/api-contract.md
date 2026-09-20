@@ -219,7 +219,12 @@ absolute worktree path, and logs nothing.
   `Fault` — `RetryTask` propagates `ErrTaskAlreadyRunning`, so retrying a running task answers 409.
 - `httputil.Fail` maps `context.Canceled` to 499 at debug — no fault to report, and an operator's log is
   not a transcript of every closed tab — and everything else to 500 at error.
-- The ratchet is the `status500` archgate rule (0 violations across 248 examined).
+- An **admission refusal** is not a server fault and reaches neither `Fail` nor `Fault`: a socket over its
+  connection cap is answered where the count is read — `http.Error` 503, naming what is refused and never
+  a cause — while the live count and the limit go to the log at `Warn`. Same for a subscription a single
+  connection asks for past its own cap: the refusal is logged, the connection keeps running and keeps
+  every key it already held. See *Every upgrade is admitted by a count, never a deadline*.
+- The ratchet is the `status500` archgate rule (0 violations across 289 examined).
 
 Tests: `backend/errs/errs_test.go`, `backend/httputil/httputil_test.go`.
 
@@ -296,18 +301,20 @@ and the terminal speaks `types.TerminalMessage`, so both get the control ping al
 (`httputil.WithAppFrame()`) rather than something the shared helper always sends. Nothing has to ignore
 a frame it never receives.
 
-Two rules keep a **busy** connection from being read as a dead one, and both are about `writeMu`, which
-the pinger holds so a ping cannot interleave with the endpoint's own frames. The ping's deadline is
-built *after* the lock is taken, so `KeepaliveTimeout` bounds the ping and never the queue in front of
-it, and the lock is taken with `TryLock`, because a lock another writer holds is a frame on its way out
-— liveness evidence — so that tick is skipped. Queuing instead was measurable: holding `writeMu` longer
-than the ping timeout lets a queued tick's deadline expire in the queue, and `coder/websocket` closes
-the socket for an expired write context even when it wrote nothing. The shape that made it measurable
-was a reconnecting client holding the lock across a whole replay backlog (the per-task buffer,
-`?sync=1`); that backlog is a queue now, and what still holds the lock is one frame's write, up to
-`WriteTimeout` of it. The peer is healthy, dies mid-replay, reconnects and replays again. A pinger
-blocked on the lock also sends nothing, which retires the same socket from the client side at 60 s.
-Tests: `backend/httputil/ws_test.go`.
+Two rules keep a **busy** connection from being read as a dead one, and both are about `writeMu`, which the
+pinger holds so a ping cannot interleave with the frames of the one endpoint that passes it — `/api/stream`.
+`/api/lsp` and the terminals pass nil: there a frame is written by whichever goroutine produced it, the
+router or the connection's own read loop, each under its own `WriteTimeout`, so the pinger has no lock of
+ours to refuse to wait behind. The ping's deadline is built *after* the lock is taken, so `KeepaliveTimeout`
+bounds the ping and never the queue in front of it, and the lock is taken with `TryLock`, because a lock
+another writer holds is a frame on its way out — liveness evidence — so that tick is skipped. Queuing
+instead was measurable: holding `writeMu` longer than the ping timeout lets a queued tick's deadline expire
+in the queue, and `coder/websocket` closes the socket for an expired write context even when it wrote
+nothing. The shape that made it measurable was a reconnecting client holding the lock across a whole replay
+backlog (the per-task buffer); that backlog is a queue now, and what still holds the lock is one
+frame's write, up to `WriteTimeout` of it. The peer is healthy, dies mid-replay, reconnects and replays
+again. A pinger blocked on the lock also sends nothing, which retires the same socket from the client side
+at 60 s. Tests: `backend/httputil/ws_test.go`.
 
 ### Who writes an app-stream connection
 

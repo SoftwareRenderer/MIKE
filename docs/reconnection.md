@@ -27,13 +27,40 @@ wake-up fetch.
 
 ## What a reconnect brings back, and what the client must fetch
 
-`?sync=1` replays the ring buffer of the **connection** that asks (`bufferRaw` → `clientState.ringBuffer`
-in `backend/stream/app_stream.go`), and a reconnect is a new connection with an empty one — so a
-reconnected app stream receives `project_counts` and whatever its own `subscribe_project` answers, and
-nothing that happened while it was down. That is why `onConnected(true)` runs `silentRefresh()`, why the
-wake-up path refetches the board over HTTP, and why `TaskChat` reloads history from the DB. The replay
-that does survive a reconnect is the **per-task** one (`getTaskBuffer`, replayed on `subscribe_task`),
-which is why a task's buffer is cleared the moment its turn ends.
+A reconnect is a **new connection**, and nothing is held for a connection that has gone: the app stream
+answers it with `project_counts` and whatever its own `subscribe_project` answers, and nothing that
+happened while it was down. That is why `onConnected(true)` runs `silentRefresh()`, why the wake-up path
+refetches the board over HTTP, and why `TaskChat` reloads history from the DB. The one replay that
+survives a reconnect is the **per-task** one (`taskBufferFrames`, replayed on `subscribe_task`): it is
+keyed by what the client asks for again, not by the socket it lost, which is why a task's buffer is
+cleared the moment its turn ends.
+
+That replay holds **one frame per tool call**, because two frames for one call replay as two cards. The
+live path sends a call's whole args and then only its growth, so the frames of one call are joined where
+the replay is read (`foldToolCallFrames`): the frame handed over carries the whole input, not the last
+delta, or a card opened mid-call would start mid-JSON. Joining at the read costs one pass per subscribe
+instead of one per frame, and it runs on the frames copied out of the buffer rather than inside the hub
+lock — a full buffer of one call's deltas measured 26 ms of JSON there, and 0.9 ms for the same pass with
+nothing to join. A delta whose start has already been trimmed stays a delta — there is nothing to fold it
+into, and dropping it would hide the call.
+
+**Tests:** `backend/stream/app_stream_test.go` (one frame per call, args from the start, a lone delta
+kept as it arrived).
+
+A replay is never written on the goroutine that asks for it: it is queued into the connection's own sender
+(`sendQueue.pushReplay`) and comes out of it in order — behind any replay already queued, so two replays
+keep the order they were asked for, and ahead of every live frame, so a replay is not interrupted by what
+the task said meanwhile. A replay is therefore subject to the queue's bound like any other frame, and a
+backlog too large for it is truncated at the oldest end and ends the connection rather than reaching the
+browser in pieces — see *The slow client is released, not timed out*. No replay path writes the socket
+itself: the read loop and the initial-data worker both hand frames over.
+
+A task's frame reaches a connection **exactly once**, which is a locking rule rather than a client one: the
+hub hands the frame to the task's subscribers and adds it to that task's replay buffer in one step, and
+`subscribe_task` reads the buffer in the same step that makes the connection a subscriber (`asm.mu`, taken
+before `taskBufMu`). Split into two steps, a subscribe landing between them got the frame twice or never,
+and a hole in a replay is something the client cannot see. **Tests:**
+`backend/stream/app_stream_subscribe_race_test.go`.
 
 ## The slow client is released, not timed out
 
@@ -45,7 +72,7 @@ waiting.
 
 So once such a queue has drained, the server ends the connection (`StatusTryAgainLater`, one
 `component=stream` warning naming how many frames were missed) and the client's existing path does the
-rest: `onclose` → `onConnected(false)` → reconnect with `?sync=1` → `onConnected(true)` →
+rest: `onclose` → `onConnected(false)` → reconnect → `onConnected(true)` →
 `silentRefresh()` and `TaskChat.loadHistory()`, plus the per-task replay its `subscribe_task` answers.
 That is why there is no "you missed frames" frame to add: the resync the app has is a connection, and
 the only other choice — holding the connection open on a gap it cannot report — is a view that lies
@@ -194,7 +221,7 @@ hand it a task that belongs to another project, and each is answered where it ar
   projectId)`, which drops the write when that project is no longer on screen.
 - **A board frame from a project the client left.** `task_updated` and friends go only to that
   project's subscribers, but a frame already in flight outlives `unsubscribe_project`, and the
-  per-task replay buffer (`getTaskBuffer`) answers a `subscribe_task` on a *new* connection. So the
+  per-task replay buffer (`taskBufferFrames`) answers a `subscribe_task` on a *new* connection. So the
   client checks what the frame names:
   `mergeTaskUpdateIntoBoard` (`src/lib/utils/task-utils.ts`) appends an unknown task only when its
   `project_id` is the project on screen. `commit_status` and `task_deleted` name no project, so those

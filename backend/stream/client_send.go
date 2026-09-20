@@ -154,8 +154,6 @@ func newClientState(conn *websocket.Conn, asm *AppStreamManager) *clientState {
 		projectSub:  make(map[string]struct{}),
 		taskSub:     make(map[string]struct{}),
 		initPending: make(map[string]AppStreamSubscription),
-		ringBuffer:  make([][]byte, 0, DefaultBufferSize),
-		bufSize:     DefaultBufferSize,
 		out:         newSendQueue(asm.queueFrames, asm.queueBytes),
 	}
 }

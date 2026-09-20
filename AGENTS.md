@@ -402,9 +402,11 @@ The client distinguishes a cancellation from a lost connection and treats neithe
 never marks the app offline, and a long wait gets a report naming what it waits on rather than a timeout.
 Nothing in the product puts a deadline on a wait for this server. Writes queue while offline **except** a
 request carrying a plaintext secret, which is refused rather than queued — the queue is persisted, so a
-queued value outlives the tab and the session. **A task's status is never the answer to "is it still
-running"** — a stopped task keeps `status = in_progress` and only moves `execution_state` to `paused`, and
-`taskIsInFlight` (`$lib/utils/task-utils.ts`), mirrored server-side by `terminalTurnStates`
+queued value outlives the tab and the session. A connection's **subscriptions** are not queued frames:
+what it owes the server is its current state per project or task key, coalesced and bounded by what the app
+has open, because two holds of one key are undone by one release. **A task's status is never the answer to
+"is it still running"** — a stopped task keeps `status = in_progress` and only moves `execution_state` to
+`paused`, and `taskIsInFlight` (`$lib/utils/task-utils.ts`), mirrored server-side by `terminalTurnStates`
 (`stream/app_stream.go`), is what decides whether an unanswered tool call is work or a leftover. Mechanisms: `docs/reconnection.md`.
 
 ## Licensing

@@ -259,6 +259,12 @@ func termStatusMessage(data string) []byte {
 	return msg
 }
 
+// termClosedMessage tells a client its shell is gone.
+func termClosedMessage() []byte {
+	msg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
+	return msg
+}
+
 // imageStatusLabel names what an image-preparation event is doing, for the terminal's text channel,
 // or false when the event carries nothing the user needs (the completion marker, or a failure the
 // caller reports itself).
@@ -485,7 +491,7 @@ func (t *taskTerminal) readLoop() {
 		n, err := t.ptmx.Read(buf)
 		if err != nil {
 			// Shell process exited — notify all connected clients and clean up
-			closedMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
+			closedMsg := termClosedMessage()
 			t.mu.Lock()
 			conns := make([]*websocket.Conn, 0, len(t.conns))
 			for c := range t.conns {
@@ -642,8 +648,7 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 		})
 		if imgErr != nil {
 			write(termStatusMessage("Failed to prepare sandbox image: " + imgErr.Error() + "\n"))
-			closeMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
-			write(closeMsg)
+			write(termClosedMessage())
 			return
 		}
 	}
@@ -659,8 +664,7 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 		logging.For(logging.Terminal).Warnf("terminal pty error for %s: %v", sessionKey, err)
 		errMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Failed to start terminal: " + err.Error() + "\n"})
 		write(errMsg)
-		closeMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
-		write(closeMsg)
+		write(termClosedMessage())
 		return
 	}
 
@@ -673,8 +677,7 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 	// rather than registered with it.
 	live, bufCopy := session.attach(conn)
 	if !live {
-		closeMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
-		write(closeMsg)
+		write(termClosedMessage())
 		return
 	}
 

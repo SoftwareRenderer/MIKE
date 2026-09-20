@@ -83,9 +83,18 @@ type ClientSession struct {
 	// rather than a scan, so the bound cannot be outgrown by the bookkeeping that enforces it.
 	pendingOrder *list.List
 	pendingElems map[string]*list.Element
-	// activeWorkspaces tracks all workspace keys this session has forwarded requests to.
-	// Used for cleanup on disconnect (a session can talk to multiple language servers).
-	activeWorkspaces map[string]int
+	// activeWorkspaces is the set of workspace keys this session talks to, however many requests or
+	// channels reached them. Membership is the whole question: the disconnect path releases the keys
+	// the session used, and a server notification reaches every session that uses something.
+	activeWorkspaces map[string]struct{}
+}
+
+// uses records that this session talks to a workspace. A session holds a key once however many
+// channels it multiplexes over it, which is what makes the release decision count sessions.
+func (s *ClientSession) uses(workspaceKey string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.activeWorkspaces[workspaceKey] = struct{}{}
 }
 
 // newClientSession builds the bookkeeping one connection starts with.
@@ -98,7 +107,7 @@ func newClientSession(conn *websocket.Conn, clientID uint64) *ClientSession {
 		workspaceKeys:    make(map[string]string),
 		pendingOrder:     list.New(),
 		pendingElems:     make(map[string]*list.Element),
-		activeWorkspaces: make(map[string]int),
+		activeWorkspaces: map[string]struct{}{},
 	}
 }
 
@@ -119,8 +128,8 @@ func (s *ClientSession) track(backendID, clientReqID string, channelID int64, wo
 	s.incomingIDs[backendID] = clientReqID
 	s.channelIDs[backendID] = channelID
 	s.workspaceKeys[backendID] = workspaceKey
-	// Track that this session uses this workspace (for cleanup on disconnect)
-	s.activeWorkspaces[workspaceKey]++
+	// A forwarded request is this session talking to the workspace; uses states the rule.
+	s.activeWorkspaces[workspaceKey] = struct{}{}
 	s.pendingElems[backendID] = s.pendingOrder.PushBack(backendID)
 	if len(s.incomingIDs) <= bound {
 		return nil
@@ -174,15 +183,11 @@ type workspaceState struct {
 	// those are written by the single server-message router goroutine (routeResponse) and by
 	// whichever client connection's goroutine arrives first (handleInitialize, handleSubscription,
 	// handleClientMessage). h.mu guards the handler's maps (clients, workspaces) and reaches none of
-	// them; process, cfg and the entry's own first clientCount are written as the entry is built,
-	// before its pointer reaches the map. Lock order is h.mu → mu → ClientSession.mu: an entry's
-	// lock may be taken under h.mu, and a session's lock under either, never in the opposite
-	// direction (sessionsUsingLocked states the last step).
+	// them; process and cfg are written as the entry is built, before its pointer reaches the map.
+	// Lock order is h.mu → mu → ClientSession.mu: an entry's lock may be taken under h.mu, and a
+	// session's lock under either, never in the opposite direction (sessionsUsingLocked states the
+	// last step).
 	mu sync.Mutex
-	// clientCount counts the subscribe messages that joined this entry. It is a log line only:
-	// it went up per subscribe and down once per session, so the release decision counts
-	// sessions instead — see sessionsUsingLocked.
-	clientCount int
 	// initialized tracks whether the LSP server has been initialized.
 	// In multiplex mode, only the first channel's initialize reaches the server;
 	// subsequent channels get the cached response.
@@ -196,14 +201,6 @@ type workspaceState struct {
 	// sentInitialized tracks whether the "initialized" notification has been forwarded.
 	// Only the first one should reach the server.
 	sentInitialized bool
-}
-
-// addSubscriber counts a subscribe message on the entry and returns the running total.
-func (ws *workspaceState) addSubscriber() int {
-	ws.mu.Lock()
-	defer ws.mu.Unlock()
-	ws.clientCount++
-	return ws.clientCount
 }
 
 // markInitializedSent reports whether this is the entry's first "initialized" notification.
@@ -236,9 +233,8 @@ func (ws *workspaceState) decideInitialize(session *ClientSession, clientReqID s
 	defer ws.mu.Unlock()
 	switch {
 	case ws.initialized:
-		if ws.initResponse == nil {
-			return initCached, nil
-		}
+		// initialized is set in the same step that stores the response, so an initialized
+		// entry has one.
 		return initCached, remapResponseIDWithChannel(ws.initResponse, clientReqID, channelID)
 	case ws.pendingInitialize:
 		if len(ws.queuedInitialize) >= bound {
@@ -413,8 +409,20 @@ func (h *LSPHandler) HandleLSP(w http.ResponseWriter, r *http.Request) {
 	session := newClientSession(conn, clientID)
 
 	h.mu.Lock()
-	h.clients[conn] = session
+	// Counting and joining the map are one decision, so two handshakes that each read a free slot
+	// cannot both take one. The count above only refuses early, before the upgrade.
+	pastCap := len(h.clients) >= h.maxSessions
+	if !pastCap {
+		h.clients[conn] = session
+	}
 	h.mu.Unlock()
+
+	if pastCap {
+		// The upgrade already happened, so the refusal is a close with a code that says retry.
+		logging.For(logging.LSP).Warnf("refusing a session after its upgrade: %d already live (limit %d)", h.maxSessions, h.maxSessions)
+		_ = conn.Close(websocket.StatusTryAgainLater, "too many live LSP sessions")
+		return
+	}
 
 	defer func() {
 		// Snapshot workspace keys under session lock, then process under handler lock
@@ -429,10 +437,9 @@ func (h *LSPHandler) HandleLSP(w http.ResponseWriter, r *http.Request) {
 		h.mu.Lock()
 		delete(h.clients, conn)
 
-		// Hand the language server back when no browser session is left using its entry.
-		// The count comes from the sessions themselves: clientCount counted one per subscribe
-		// but was decremented once per session, so two editor channels on one workspace left it
-		// above zero forever and the server was never given back.
+		// Hand the language server back when no browser session is left using its entry, counting
+		// sessions rather than subscribes: two channels of one editor on one workspace are one
+		// holder, and a holder that is never released keeps the server from ever being given back.
 		for _, wk := range wkKeys {
 			ws, ok := h.workspaces[wk]
 			if !ok {
@@ -638,9 +645,9 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 
 	workspaceKey := processKey(sub.Params.Workspace, cfg.Language)
 
-	// Count this subscribe on the entry, spawning a process first when there is no entry yet.
-	ws, exists := h.lookupWorkspace(workspaceKey)
-	if !exists {
+	// Give the workspace a process when nothing has one yet; the session's own hold is recorded
+	// below, whatever this branch did.
+	if _, exists := h.lookupWorkspace(workspaceKey); !exists {
 		// Spawn a new process (OUTSIDE lock to avoid blocking other operations)
 		process, err := h.manager.GetOrCreate(ctx, sub.Params.Workspace, cfg.Language)
 		if err != nil {
@@ -653,15 +660,10 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 		var droppedProcess bool
 		h.mu.Lock()
 		// Another subscriber may have created it while we were spawning
-		if existing, ok := h.workspaces[workspaceKey]; ok {
-			ws = existing
+		if _, ok := h.workspaces[workspaceKey]; ok {
 			droppedProcess = true
 		} else {
-			ws = &workspaceState{
-				process: process,
-				cfg:     cfg,
-			}
-			h.workspaces[workspaceKey] = ws
+			h.workspaces[workspaceKey] = &workspaceState{process: process, cfg: cfg}
 		}
 		h.mu.Unlock()
 		if droppedProcess {
@@ -671,12 +673,8 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 			h.manager.Release(sub.Params.Workspace, cfg.Language)
 		}
 	}
-	clients := ws.addSubscriber()
-
-	session.mu.Lock()
-	session.activeWorkspaces[workspaceKey]++ // track for cleanup on disconnect
-	session.mu.Unlock()
-	logging.For(logging.LSP).Debugf("client %d ch=%d subscribed to workspace=%s lang=%s (clients=%d)", session.clientID, sub.ChannelID, sub.Params.Workspace, cfg.Language, clients)
+	session.uses(workspaceKey)
+	logging.For(logging.LSP).Debugf("client %d ch=%d subscribed to workspace=%s lang=%s", session.clientID, sub.ChannelID, sub.Params.Workspace, cfg.Language)
 
 	// Notify frontend that LSP is ready for this channel
 	h.sendLSPReady(ctx, session, sub.ChannelID)
@@ -783,13 +781,10 @@ func (h *LSPHandler) lazyCreateWorkspace(ctx context.Context, session *ClientSes
 		droppedProcess = true
 	} else {
 		h.workspaces[workspaceKey] = &workspaceState{
-			process:     process,
-			cfg:         cfg,
-			clientCount: 1,
+			process: process,
+			cfg:     cfg,
 		}
-		session.mu.Lock()
-		session.activeWorkspaces[workspaceKey]++
-		session.mu.Unlock()
+		session.uses(workspaceKey)
 		logging.For(logging.LSP).Debugf("client %d: lazy-created workspace=%s lang=%s", session.clientID, workspacePath, cfg.Language)
 	}
 	h.mu.Unlock()
@@ -928,16 +923,12 @@ func (h *LSPHandler) answerError(ctx context.Context, session *ClientSession, cl
 func (h *LSPHandler) forwardRaw(ctx context.Context, session *ClientSession, msg json.RawMessage, workspaceKey string) {
 	h.mu.Lock()
 	ws, ok := h.workspaces[workspaceKey]
-	if ok {
-		session.mu.Lock()
-		session.activeWorkspaces[workspaceKey]++
-		session.mu.Unlock()
-	}
 	h.mu.Unlock()
 
 	if !ok || ws.process == nil {
 		return
 	}
+	session.uses(workspaceKey)
 
 	if err := h.manager.SendToServer(ctx, ws.process, msg); err != nil {
 		logging.For(logging.LSP).Warnf("client %d: forward raw failed: %v", session.clientID, err)

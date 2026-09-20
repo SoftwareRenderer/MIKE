@@ -214,14 +214,23 @@ func TestLLMCrashMidTurnWithToolCallLeavesNoPartialTurn(t *testing.T) {
 
 	startExecRun(t, te, projectID, taskID, srv.URL, worktreePath)
 
-	// Every retry dies the same way, so wait for the run to settle on its own.
+	// Every retry dies the same way, so wait for the run to settle on its own. `failTask` persists
+	// the failed task row before it writes the error row, so the state alone does not mean the
+	// thread is complete — reading it between those two writes is a red under load.
 	deadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
+	for {
 		row, err := te.store.GetTaskByID(taskID)
 		if err != nil {
 			t.Fatalf("read task row: %v", err)
 		}
-		if row.ExecutionState == types.ExecStateFailed {
+		stored, err := te.store.GetTaskMessages(taskID, "thread-"+taskID)
+		if err != nil {
+			t.Fatalf("get messages: %v", err)
+		}
+		if row.ExecutionState == types.ExecStateFailed && lastErrorRow(stored) != "" {
+			break
+		}
+		if time.Now().After(deadline) {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)

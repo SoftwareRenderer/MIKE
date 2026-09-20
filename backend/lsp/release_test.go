@@ -62,18 +62,18 @@ func TestReleaseOfUnknownWorkspaceIsHarmless(t *testing.T) {
 }
 
 // TestSessionsUsingLockedCountsSessionsNotChannels backs the editor's release decision. A
-// session that subscribed three channels to one workspace holds it once: counting subscribes
-// (the old clientCount) left a number nobody could ever get back to zero, so the language
-// server was never handed back.
+// session that subscribed three channels to one workspace holds it once, so a count of
+// subscribes is a number nobody can ever get back to zero and the language server is never
+// handed back.
 func TestSessionsUsingLockedCountsSessionsNotChannels(t *testing.T) {
 	const key = "some workspace key"
 	h := &LSPHandler{
 		clients:    map[*websocket.Conn]*ClientSession{},
 		workspaces: map[string]*workspaceState{},
 	}
-	h.clients[&websocket.Conn{}] = &ClientSession{activeWorkspaces: map[string]int{key: 3}}
-	h.clients[&websocket.Conn{}] = &ClientSession{activeWorkspaces: map[string]int{key: 1}}
-	h.clients[&websocket.Conn{}] = &ClientSession{activeWorkspaces: map[string]int{processKey("/other", "go"): 1}}
+	h.clients[&websocket.Conn{}] = newSessionUsing(key, key, key) // three channels of one editor
+	h.clients[&websocket.Conn{}] = newSessionUsing(key)
+	h.clients[&websocket.Conn{}] = newSessionUsing(processKey("/other", "go"))
 
 	if got := h.sessionsUsingLocked(key); got != 2 {
 		t.Errorf("sessions using the workspace = %d, want 2 (channels a session subscribed do not add holders)", got)
@@ -81,6 +81,14 @@ func TestSessionsUsingLockedCountsSessionsNotChannels(t *testing.T) {
 	if got := h.sessionsUsingLocked(processKey("/untouched", "typescript")); got != 0 {
 		t.Errorf("sessions using an untouched workspace = %d, want 0", got)
 	}
+}
+
+func newSessionUsing(workspaceKeys ...string) *ClientSession {
+	s := newClientSession(&websocket.Conn{}, 0)
+	for _, key := range workspaceKeys {
+		s.uses(key)
+	}
+	return s
 }
 
 // TestRetireDropsADeadConnectionOnce: a connection that can no longer be used leaves the map,

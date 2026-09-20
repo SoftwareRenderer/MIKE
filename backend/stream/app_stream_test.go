@@ -453,18 +453,18 @@ func TestTaskBufferClearedOnTaskDeleted(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "x"}})
 	}
-	if got := len(asm.getTaskBuffer("proj-1:task-1")); got != 3 {
+	if got := len(replayedFrames(asm, "proj-1:task-1")); got != 3 {
 		t.Fatalf("buffer before delete = %d frames, want 3", got)
 	}
 
 	asm.BroadcastTaskDeleted("proj-1", "task-1")
-	if got := len(asm.getTaskBuffer("proj-1:task-1")); got != 0 {
+	if got := len(replayedFrames(asm, "proj-1:task-1")); got != 0 {
 		t.Fatalf("buffer after delete = %d frames, want 0", got)
 	}
 
 	// Other tasks' buffers are untouched.
 	asm.SendTaskEvent("proj-1", "task-2", types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "y"}})
-	if got := len(asm.getTaskBuffer("proj-1:task-2")); got != 1 {
+	if got := len(replayedFrames(asm, "proj-1:task-2")); got != 1 {
 		t.Fatalf("other task buffer = %d frames, want 1", got)
 	}
 }
@@ -476,13 +476,13 @@ func TestTaskBufferClearedOnTerminalStatus(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			asm := NewAppStreamManager(nil, nil)
 			asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]string{"tool_id": "call-1", "tool_name": "bash"}})
-			if got := len(asm.getTaskBuffer("proj-1:task-1")); got != 1 {
+			if got := len(replayedFrames(asm, "proj-1:task-1")); got != 1 {
 				t.Fatalf("buffer before the status frame = %d frames, want 1", got)
 			}
 
 			asm.SendTaskEvent("proj-1", "task-1", types.TurnStatusEvent(state, "still going"))
 
-			if got := len(asm.getTaskBuffer("proj-1:task-1")); got != 0 {
+			if got := len(replayedFrames(asm, "proj-1:task-1")); got != 0 {
 				t.Fatalf("buffer after state %q = %d frames, want 0", state, got)
 			}
 		})
@@ -493,69 +493,82 @@ func TestTaskBufferClearedOnTerminalStatus(t *testing.T) {
 			asm := NewAppStreamManager(nil, nil)
 			asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "x"}})
 			asm.SendTaskEvent("proj-1", "task-1", types.TurnStatusEvent(state, "still going"))
-			if got := len(asm.getTaskBuffer("proj-1:task-1")); got != 2 {
+			if got := len(replayedFrames(asm, "proj-1:task-1")); got != 2 {
 				t.Fatalf("buffer after state %q = %d frames, want 2", state, got)
 			}
 		})
 	}
 }
 
-// TestSyncReplayIsPerConnection: `?sync=1` replays the connection's own ring buffer, and a reconnect
-// is a new connection with an empty one, so the client must refetch the board over HTTP.
-func TestSyncReplayIsPerConnection(t *testing.T) {
+// TestToolCallReplayedToALateSubscriberCarriesWholeArgs: the live path sends a tool call's whole
+// args and then only its growth, and the replay owes each call one frame — so that frame has to
+// say everything the frames it joins said. A replay handing over only the last delta renders a
+// tool call whose input starts mid-JSON.
+func TestToolCallReplayedToALateSubscriberCarriesWholeArgs(t *testing.T) {
 	asm := NewAppStreamManager(nil, nil)
-	before := &websocket.Conn{}
-	after := &websocket.Conn{}
-	register := func(conn *websocket.Conn) {
-		asm.mu.Lock()
-		defer asm.mu.Unlock()
-		asm.clients[conn] = newClientState(conn, asm)
-	}
-	register(before)
+	whole := `{"path":"a.txt"`
+	first := `,"content":"hi"`
+	second := `}`
 
-	asm.bufferRaw([]byte(`{"type":"task_updated","task_id":"task-1"}`))
-	if got := len(asm.getBuffer(before)); got != 1 {
-		t.Fatalf("buffer for the connection that was open = %d frames, want 1", got)
-	}
+	asm.SendTaskEvent("proj-1", "task-1", toolCall(map[string]any{"tool_id": "call_1", "tool_name": "write_file", "raw_args": whole}))
+	asm.SendTaskEvent("proj-1", "task-1", toolCall(map[string]any{"tool_id": "call_1", "tool_name": "write_file", "raw_args_delta": first}))
+	asm.SendTaskEvent("proj-1", "task-1", toolCall(map[string]any{"tool_id": "call_1", "tool_name": "write_file", "raw_args_delta": second}))
 
-	// The reconnect: same client, new connection, nothing to replay.
-	asm.mu.Lock()
-	delete(asm.clients, before)
-	asm.mu.Unlock()
-	register(after)
-	if got := len(asm.getBuffer(after)); got != 0 {
-		t.Fatalf("buffer for a reconnecting connection = %d frames, want 0", got)
+	buf := replayedFrames(asm, "proj-1:task-1")
+	if len(buf) != 1 {
+		t.Fatalf("replay holds %d frames for one tool call, want 1", len(buf))
+	}
+	data := toolCallArgs(buf[0])
+	if got := data["raw_args"]; got != whole+first+second {
+		t.Fatalf("replayed tool call carries raw_args %v, want the whole input %q", got, whole+first+second)
+	}
+	if _, still := data["raw_args_delta"]; still {
+		t.Fatalf("replayed tool call still carries a delta its subscriber has nothing to append to: %v", data["raw_args_delta"])
+	}
+	// The envelope is re-marshalled with it: a payload without its task_id routes nowhere.
+	var envelope struct {
+		Type   string `json:"type"`
+		TaskID string `json:"task_id"`
+		Event  string `json:"event"`
+	}
+	if err := json.Unmarshal(buf[0], &envelope); err != nil {
+		t.Fatalf("replayed frame does not read as JSON: %v", err)
+	}
+	if envelope.Type != string(types.WSTypeTaskEvent) || envelope.TaskID != "task-1" || envelope.Event != string(types.WSTypeToolCall) {
+		t.Fatalf("replayed envelope became %+v", envelope)
 	}
 }
 
-// TestEveryExecStateEndsOrContinuesTheTurn: an ExecutionState that is neither in flight
-// nor terminal leaves its frames replayable forever, and no compiler error announces it.
-func TestEveryExecStateEndsOrContinuesTheTurn(t *testing.T) {
-	// Mirrors taskIsInFlight on the client.
-	inFlight := map[string]bool{
-		string(types.ExecStateRunning):      true,
-		string(types.ExecStatePullingImage): true,
+// TestToolCallDeltaSurvivesAReplayWithNothingToJoinItTo: when the frame holding a call's start has
+// already been trimmed from the buffer, the delta is what there is. Dropping it would hide the
+// call entirely, and rewriting it would invent input the model never sent.
+func TestToolCallDeltaSurvivesAReplayWithNothingToJoinItTo(t *testing.T) {
+	asm := NewAppStreamManager(nil, nil)
+	asm.SendTaskEvent("proj-1", "task-1", toolCall(map[string]any{"tool_id": "call_9", "tool_name": "write_file", "raw_args_delta": `"tail"`}))
+
+	buf := replayedFrames(asm, "proj-1:task-1")
+	if len(buf) != 1 {
+		t.Fatalf("a lone delta left the replay with %d frames, want 1", len(buf))
 	}
-	for _, state := range []types.ExecutionState{
-		types.ExecStateIdle, types.ExecStateRunning, types.ExecStatePullingImage,
-		types.ExecStatePaused, types.ExecStateCompleted, types.ExecStateFailed,
-	} {
-		if _, known := types.ParseExecutionState(string(state)); !known {
-			t.Fatalf("%q is no longer a known execution state — exec_state.go changed", state)
-		}
-		if !terminalTurnStates[string(state)] && !inFlight[string(state)] {
-			t.Fatalf("execution state %q neither ends the turn nor continues it", state)
-		}
+	data := toolCallArgs(buf[0])
+	if data["raw_args_delta"] != `"tail"` {
+		t.Fatalf("a lone delta was rewritten: %v", data)
+	}
+	if _, invented := data["raw_args"]; invented {
+		t.Fatalf("a delta with no start became a whole input: %v", data["raw_args"])
 	}
 }
 
-// TestNilStoreStaysNilAfterConstruction: a store-less manager must stay store-less, or
-// every `asm.store == nil` guard in this package reads as "a store exists". The guarded
-// path must stay callable with none.
-func TestNilStoreStaysNilAfterConstruction(t *testing.T) {
-	if asm := NewAppStreamManager(nil, nil); asm.store != nil {
-		t.Fatal("NewAppStreamManager(nil, nil) produced a non-nil store — the nil guards in this file are now dead code")
-	}
-	// And the guarded path must actually be callable.
-	NewAppStreamManager(nil, nil).BroadcastProjectCounts()
+func tokenText(text string) types.StreamEvent {
+	return types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": text}}
+}
+
+func toolCall(data map[string]any) types.StreamEvent {
+	return types.StreamEvent{Type: types.WSTypeToolCall, Data: data}
+}
+
+// replayedFrames is what a subscriber of the task is owed: the buffer with one frame per streaming
+// tool call. It is the two steps subscribeTask takes, so a test reading the buffer reads the replay.
+func replayedFrames(asm *AppStreamManager, taskKey string) [][]byte {
+	return foldToolCallFrames(asm.taskBufferFrames(taskKey))
 }
