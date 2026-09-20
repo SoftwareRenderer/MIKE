@@ -123,8 +123,8 @@ i18n-parity: ## Check a locale pack against the English contract (make i18n-pari
 # vocabulary, and the shape of the executor's split: who may build it, what a collaborator may hold,
 # how long a function may get.
 # Every rule runs against a frozen baseline, so the count only shrinks and a fixed violation must be
-# shrunk out of the register. scripts/archgate holds the reasons; docs/architecture-review.md holds the
-# numbers that justified them, and the commands that re-measure them.
+# shrunk out of the register. scripts/archgate holds the reasons, the commands that re-measure them, and
+# the derivations that turned out to be wrong.
 .PHONY: archgate
 archgate: ## Report structural debt against its frozen baselines (~0.2s)
 	@go run ./scripts/archgate $(if $(RULE),--rule $(RULE),) $(if $(UPDATE),-update,)
@@ -136,6 +136,19 @@ test-archgate: ## Test the structural gate itself, both directions (~0.2s)
 .PHONY: test-i18n-parity
 test-i18n-parity: ## Run the i18n parity checker's own tests (~0.2s)
 	go test ./scripts/i18nparity/ -count=1
+
+# Documentation has the same failure mode as code: a pointer that names a heading the last trim
+# deleted, an environment variable that was renamed, a line number that now points at a blank
+# line. scripts/docs-check.py measures that instead of arguing about it, and its register
+# (scripts/docscheck/baseline.json) is a ceiling like archgate's baselines — `make docs-check
+# UPDATE=1` re-freezes it, and only on purpose.
+.PHONY: docs-check
+docs-check: ## Check the docs: pointers, indexes, line refs, env table, ADR shape, ratchet (~0.2s)
+	@python3 scripts/docs-check.py $(if $(UPDATE),--update,)
+
+.PHONY: test-docs-check
+test-docs-check: ## Test the documentation gate itself, both directions (~0.2s)
+	@python3 scripts/docs-check_test.py
 
 # ---------------------------------------------------------------------------
 # Quality gate
@@ -177,11 +190,14 @@ check-release: ## Compile and test the -tags release variant that make package s
 	@go test -tags $(RELEASE_TAGS) ./backend/startup/ -count=1
 
 .PHONY: check
-check: ## THE GATE: lint + bridge-check + build + Go tests + frontend gates
+check: ## THE GATE: lint + archgate + docs-check + bridge-check + build + Go tests + frontend gates
 	@$(MAKE) --no-print-directory lint
 	@echo "==> archgate (structural debt against its baselines)"
 	@$(MAKE) --no-print-directory archgate
 	@$(MAKE) --no-print-directory test-archgate
+	@echo "==> docs-check (a dead pointer is a rule nobody can follow)"
+	@$(MAKE) --no-print-directory docs-check
+	@$(MAKE) --no-print-directory test-docs-check
 	@echo "==> bridge-check (a stale sandbox-bridge is an edit that never runs)"
 	@$(MAKE) --no-print-directory bridge-check
 	@echo "==> build"

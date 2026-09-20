@@ -1,0 +1,182 @@
+{
+ "AGENTS.md": {
+  "history": 4,
+  "longsent": 8,
+  "words": 5413
+ },
+ "docs/adding-a-preference.md": {
+  "history": 0,
+  "longsent": 0,
+  "words": 798
+ },
+ "docs/adr/0001-key-decisions-are-recorded.md": {
+  "history": 0,
+  "longsent": 0,
+  "words": 472
+ },
+ "docs/adr/README.md": {
+  "history": 0,
+  "longsent": 0,
+  "words": 557
+ },
+ "docs/agent-extensions.md": {
+  "history": 0,
+  "longsent": 2,
+  "words": 1534
+ },
+ "docs/api-contract.md": {
+  "history": 0,
+  "longsent": 15,
+  "words": 2686
+ },
+ "docs/api.md": {
+  "history": 0,
+  "longsent": 2,
+  "words": 1687
+ },
+ "docs/auto-answer.md": {
+  "history": 0,
+  "longsent": 0,
+  "words": 853
+ },
+ "docs/auto-update.md": {
+  "history": 4,
+  "longsent": 6,
+  "words": 2689
+ },
+ "docs/commit-and-done.md": {
+  "history": 0,
+  "longsent": 4,
+  "words": 588
+ },
+ "docs/configuration.md": {
+  "history": 0,
+  "longsent": 0,
+  "words": 2063
+ },
+ "docs/confinement.md": {
+  "history": 0,
+  "longsent": 8,
+  "words": 1794
+ },
+ "docs/extension-dependency-cache.md": {
+  "history": 4,
+  "longsent": 3,
+  "words": 1256
+ },
+ "docs/extension-lifecycle.md": {
+  "history": 0,
+  "longsent": 9,
+  "words": 1854
+ },
+ "docs/extension-tools.md": {
+  "history": 0,
+  "longsent": 4,
+  "words": 1369
+ },
+ "docs/frontend-updates.md": {
+  "history": 2,
+  "longsent": 6,
+  "words": 1795
+ },
+ "docs/git-operations.md": {
+  "history": 2,
+  "longsent": 4,
+  "words": 1918
+ },
+ "docs/i18n.md": {
+  "history": 2,
+  "longsent": 18,
+  "words": 5772
+ },
+ "docs/languages.md": {
+  "history": 0,
+  "longsent": 9,
+  "words": 1963
+ },
+ "docs/lifecycle.md": {
+  "history": 0,
+  "longsent": 1,
+  "words": 526
+ },
+ "docs/link-rows.md": {
+  "history": 0,
+  "longsent": 5,
+  "words": 1073
+ },
+ "docs/locking.md": {
+  "history": 0,
+  "longsent": 3,
+  "words": 724
+ },
+ "docs/markup-sanitizing.md": {
+  "history": 0,
+  "longsent": 5,
+  "words": 1123
+ },
+ "docs/navigation.md": {
+  "history": 0,
+  "longsent": 0,
+  "words": 258
+ },
+ "docs/notifications.md": {
+  "history": 1,
+  "longsent": 2,
+  "words": 1857
+ },
+ "docs/preview.md": {
+  "history": 0,
+  "longsent": 6,
+  "words": 1226
+ },
+ "docs/reconnection.md": {
+  "history": 6,
+  "longsent": 21,
+  "words": 3653
+ },
+ "docs/sandbox-bridge.md": {
+  "history": 4,
+  "longsent": 6,
+  "words": 2482
+ },
+ "docs/sandbox-runtime.md": {
+  "history": 0,
+  "longsent": 11,
+  "words": 2679
+ },
+ "docs/sessions.md": {
+  "history": 0,
+  "longsent": 1,
+  "words": 457
+ },
+ "docs/storage.md": {
+  "history": 0,
+  "longsent": 4,
+  "words": 831
+ },
+ "docs/testing.md": {
+  "history": 4,
+  "longsent": 12,
+  "words": 4235
+ },
+ "docs/threads-checkpoints.md": {
+  "history": 2,
+  "longsent": 9,
+  "words": 2003
+ },
+ "docs/tls.md": {
+  "history": 0,
+  "longsent": 1,
+  "words": 809
+ },
+ "docs/typography.md": {
+  "history": 0,
+  "longsent": 1,
+  "words": 363
+ },
+ "docs/ui-extensions.md": {
+  "history": 0,
+  "longsent": 8,
+  "words": 1686
+ }
+}

@@ -15,10 +15,10 @@ task?", not "did a human want this":
 
 | The run began when… | `Autostarted` |
 |---|---|
-| Start/retry/drag on **this** task (`managers/task.go:503`, `527`, `1317`, `1330`, `1464`, `executor.go:1656`) | false |
-| Start or drag on its **parent**, or on a task whose deepest child runs (`managers/task.go:488`, `1305`, `1444`) | true |
-| Sibling continuation after another task finished (`executor.go:888`), or the parent's own start once all children are done (`executor.go:897`) | true |
-| The memory supervisor resumed it after a memory pause (`executor.go:101`) | whatever the paused run recorded |
+| Start, retry or drag on **this** task (`HandleStart`, `HandleStartSubtask`, the `HandleMove` branch that starts one, a message forwarded by `ForwardUserMessage`) | false |
+| Start or drag on its **parent**, or on a task whose deepest child runs (`startSubtaskIDs`, reached from `HandleMove`) | true |
+| Sibling continuation after another task finished, or the parent's own start once all children are done (`AutoStartNextSibling`) | true |
+| The memory supervisor resumed it after a memory pause (`resumeProvenance`) | whatever the paused run recorded |
 
 The supervisor row is deliberate: it picks its victim by memory cost, which says nothing about who is
 waiting on the task, so `resumeProvenance` hands the resume the answer the paused run already gave.

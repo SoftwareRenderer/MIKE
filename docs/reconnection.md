@@ -190,9 +190,9 @@ is the only route back: `retryLiveNow` skips the socket's backoff and runs `sile
 live data on screen or leaves the banner exactly where it was. The button is hidden while the socket is
 down, because the reconnecting banner already offers it. No spec covers the button itself.
 
-## Behaviour in full (moved from AGENTS.md)
-### Reconnection & Offline
-`onConnected(true)` in `App.svelte` runs `silentRefresh()` once `initialLoadComplete`; `TaskChat` reloads history from the DB on reconnect because **turns completed while offline are never replayed** (buffer cleared at turn end). `offline` queues writes immediately, except a value that carries a secret — an unmasked provider key, or a clone URL with credentials in it — which is refused because the queue is persisted; `online` flushes the queue and calls `reconnectNow()` to skip backoff; `visibilitychange` refreshes the board (phone-sleep), and the open task's chat and diff answer the same signal together with the window's own `focus` and a bfcache `pageshow` — gated on the screen being able to be behind, never on the task's status. Project re-subscription forces a re-send of `task_diff_stats`. Mechanism + test approach: `docs/reconnection.md`.
+## The behaviour, in full
+
+`onConnected(true)` in `App.svelte` runs `silentRefresh()` once `initialLoadComplete`; `TaskChat` reloads history from the DB on reconnect because **turns completed while offline are never replayed** (buffer cleared at turn end). `offline` queues writes immediately, except a value that carries a secret — an unmasked provider key, or a clone URL with credentials in it — which is refused because the queue is persisted; `online` flushes the queue and calls `reconnectNow()` to skip backoff; `visibilitychange` refreshes the board (phone-sleep), and the open task's chat and diff answer the same signal together with the window's own `focus` and a bfcache `pageshow` — gated on the screen being able to be behind, never on the task's status. Project re-subscription forces a re-send of `task_diff_stats`.
 
 ### How a request ends: cancelled, or unanswered
 

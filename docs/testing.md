@@ -1,13 +1,15 @@
 # Testing Conventions & Mock LLM
 
-Read this when writing or debugging e2e/unit tests. The commands, the test-server table and the
-stale-state cleanup stay in `AGENTS.md → Testing`.
+Read this when writing or debugging e2e or unit tests. `AGENTS.md → Testing` keeps the commands and the
+short rules; this file holds the environment, the conventions, the mock-LLM fixtures and the tests that fail
+only under load.
 
 ## E2E conventions
 - Descriptive spec filenames in `frontend/tests/e2e/`; shared helpers in `helpers.ts`.
 - `test.describe.serial()` when tests share state; unique identifiers (`Date.now()`) to avoid
   interference; wait for selectors, no arbitrary delays (drag-and-drop is the known exception —
-  headless is slow).
+  headless is slow). `serial` amplifies whatever coupling is left: one failure skips the rest of the
+  block as "did not run".
 - **Mock LLM is default** — tests use pre-recorded fixtures, never the real endpoint. Fail gracefully
   when the LLM is slow/unavailable.
 - **LSP specs come in two kinds, and only one may gate on the server.**
@@ -40,10 +42,10 @@ stale-state cleanup stay in `AGENTS.md → Testing`.
   seed tasks). Keyed at the worker, not the file, because `fullyParallel` spreads one file's
   tests over several workers. Specs that assert on the **global** view (sidebar project list,
   file browser, add-project flow, project-id derivation) must NOT use it.
-- **A spec that starts a task or sends a chat message owns its own project.** The executor queues
-  turns per project, so on the shared project the answer lands behind five other workers' tasks:
-  the symptom is `.btn-send` (idle) never becoming visible, in whichever chat spec lost the race
-  that run. Cheap to honour, and it also makes each task's worktree its own.
+- **A spec that starts a task or sends a chat message owns its own project.** The executor queues a turn per
+  project, so on the shared project an answer lands behind five other workers' tasks. The symptom is `.btn-send`
+  (idle) never becoming visible, in whichever chat spec lost the race that run. Honouring this is cheap, and it
+  makes each task's worktree its own as well.
 - **A project's `sandbox_enabled` is not a scratch flag.** The explorer seeds the folder it
   browses from it (`sandboxEnabled ? mountPath : projectPath`), so a spec that turns sandboxing on
   for the shared project makes a *concurrent* spec request the container path from the host —
@@ -63,11 +65,11 @@ stale-state cleanup stay in `AGENTS.md → Testing`.
   *unrelated* specs losing their `.file-browser-list` — the explorer's listing is a live
   `git status` and it does not retry after an error. Worktree git (`gitWithRetry`,
   `writeFileInWorktree`) is already per-task and needs nothing.
-- **The two file browsers are one component (`FileBrowserView`), and its listing answers to two names.**
-  Every listing is `.file-browser-list` and every row `.file-browser-item`; the task explorer's
-  listing and rows carry `file-list` / `file-entry` beside those, because that is the name its specs
-  locate them by (the props are `listingClass` / `rowClass`, and `file-drop.css` matches either).
-  Dropping the second name fails no gate — only `editor-line-task`.
+- **The two file browsers are one component (`FileBrowserView`) whose listing answers to two names.** Every
+  listing is `.file-browser-list` and every row `.file-browser-item`. The task explorer's listing and rows carry
+  `file-list` / `file-entry` as well, because that is the name its specs locate them by (the props are
+  `listingClass` / `rowClass`, and `file-drop.css` matches either). Drop the second name and no gate fails — only
+  `editor-line-task`.
 - **`[role="dialog"]` is not a selector here.** BaseModal, `CommitDiffOverlay`,
   `TerminalPanel` and BOTH explorer views carry `role="dialog"`, and every ChatMessage's
   edit `<dialog>` has it implicitly — so the bare locator is a strict-mode violation
@@ -115,12 +117,11 @@ stale-state cleanup stay in `AGENTS.md → Testing`.
   commit-and-done commits don't pass `-c` author flags, and without it those e2e tests fail silently
   (commit skipped, task still moves to Done).
 
-**Concurrency is part of the environment, not an optimization.** `workers: 4` is measured, not
-guessed: six workers run the suite ~2.7 min instead of ~3.0, and buy that speed with 1-4 failures
-per run that ROTATE between specs (chat-core, chat-messages, diff-viewer, link-like-rows,
-thread-new-thread — every one of them green alone and in pairs). They share the one lane server,
-which queues executor turns, so under six workers "wait for the task to go idle" becomes a race
-against everyone else's turns. Any new turn-bound wait must say so in its budget (use the
+**Concurrency is part of the environment, not an optimization.** `workers: 4` is measured, not guessed. Six
+workers run the suite in ~2.7 min instead of ~3.0 and pay for it with 1-4 failures per run that rotate between
+specs (chat-core, chat-messages, diff-viewer, link-like-rows, thread-new-thread — every one of them green alone
+and in pairs). One lane server answers all the workers and queues executor turns, so under six workers "wait for
+the task to go idle" is a race against everyone else's turns. Any new turn-bound wait must say so in its budget (use the
 `waitForSendButton(page, timeout)` turn budgets in `helpers.ts`, not the 10s `expect.timeout`).
 
 ## Mock LLM server
@@ -219,7 +220,7 @@ For request-pattern/race investigation, write standalone Playwright scripts in `
 ## E2E failure patterns
 
 - **`ERR_CONNECTION_REFUSED`** / wrong-protocol response: stale processes from an interrupted run hold
-  the ports — run the cleanup block in `AGENTS.md → Testing → Test Environment`.
+  the ports — run the cleanup block in `docs/testing.md → A run must leave nothing behind`.
 - **A panel container is visible before its content is.** `.git-graph` is on screen while the history
   panel still reads "Loading commits…", so counting `.git-commit-row` right after it answers 0 for a
   repo that has commits — wait for the first row, not for the container.
@@ -237,21 +238,7 @@ For request-pattern/race investigation, write standalone Playwright scripts in `
   predicate timeout.
 - **Mock LLM routing wrong:** check keyword matching in `mock-llm.js` and the fixture files.
 
-## Conventions that bite (moved from AGENTS.md)
-### E2E Tests
-Specs in `frontend/tests/e2e/` (helpers in `helpers.ts`); **mock LLM by default** (`frontend/tests/mock-llm.js`, port 9999, fixtures in `frontend/tests/fixtures/`). Conventions that bite:
-- **Config-modifying specs** (settings, models, shortcuts, mode select, …) must run in the `isolated` project — add the spec name to `ISOLATED_SPECS` in `frontend/playwright.config.ts` (one array; the chromium lane's `testMatch` is derived from it, so the two lanes cannot drift).
-- **Heavy fixtures get a dedicated repo** — never write big files into the shared `/tmp/kanban-test-repo`, where another spec's `git add -A && git commit` races with them.
-- `test.describe.serial()` + `Date.now()` identifiers for shared state; wait for selectors, not delays (drag-and-drop is the known exception).
-- **Every spec that touches the board owns its project** via `isolatedProject()` + `gotoProject()` (`helpers.ts`) — the lane used to share global-setup's one project across ~9 concurrent specs, and two runs of identical code then differed by 15 failures. Key it at the *worker*, never the file, because `fullyParallel` spreads one file across workers. Specs asserting on the **global** view (sidebar project list, file browser, add-project flow) must not use it, and must never do `.project-item` + `.first()` — use `selectProject(page, id)`. `serial` amplifies leftover coupling: one failure skips its whole block as "did not run".
-- **`workers: 4` is measured** (see `playwright.config.ts`): 6 is ~10% faster and buys 1-4 rotating turn-queue failures per run.
-- **A spec that runs an executor TURN owns its own project** — turns are queued per project, so on the shared project a fork's answer waits behind every other worker's task and the spec times out waiting for the task to go idle (`.btn-send` never returns). Same for anything that mutates the project: `git add`/`commit`, or its **sandbox configuration**. Concurrent git in the shared repo makes *other* specs lose their file listing (it is a live `git status` that never retries after an error), and flipping `sandbox_enabled` makes the project explorer seed the **container** mount path and ask the host for it — 400 `path outside allowed project directory`, panel stuck on the error.
-- **Pin the mock LLM's fixture with `llm-fixture:<name>` in the prompt.** Keyword routing is unreachable from an ordinary task prompt — the plan-first skill is in every system prompt, so plan routing answers first and a spec asking for "edit" silently gets `create_task`. Convention + the two measured chat behaviours (`.awaiting-llm` = "request sent, nothing back yet", absent while streaming; a task auto-starts, so wait for idle and assert on the entry that appears *after* your send): `docs/testing.md`.
-- **`[role="dialog"]` is never a unique locator** (BaseModal, both explorer views, `TerminalPanel`, `CommitDiffOverlay`, and every ChatMessage's `<dialog>` all have it) — filter by the content that identifies the dialog you mean. Selector-by-component and the commit/review-bar rules: `docs/testing.md`.
-- **A spec exists only if it needs a browser or the real backend** (DnD, real focus/keyboard, scroll/CSS geometry, iframes + CSP, git/worktrees, WS reconnect). Component state belongs in vitest — 2.1k tests in ~23 s versus a page-load tax per spec. And **never write a `readFileSync('../Foo.svelte')` + `toContain(...)` "test"**: it cannot fail a real bug and breaks on renames. The suite is budgeted at a few minutes for a full run; keep it there.
-
-
-## Test environment (moved from AGENTS.md)
+## Test environment
 
 Two dedicated test servers with isolated databases plus one shared mock LLM, fully managed by
 `frontend/tests/global-setup.ts` (torn down and rebuilt each run):
@@ -264,14 +251,15 @@ Two dedicated test servers with isolated databases plus one shared mock LLM, ful
 
 Test repos live at `/tmp/kanban-test-repo` (+ `-2`), worktrees at `/tmp/kanban-test-worktrees/`.
 
-The registry is pinned to a local fixture (`frontend/tests/registry-fixture.json`) so registry e2e never
-hits the hosted registry — but the servers read `/tmp/kanban-test-registry.json`, which setup writes from
-that fixture with the i18n pack's `__I18N_PACK_COMMIT__` placeholder resolved to the HEAD of the local git
-repo it builds from `tests/fixtures/i18n-pack-repo`, because a git-pinned install needs a commit that
-exists. A spec that installs a **published** extension with `install-local` needs its directory on disk,
-and the product is what removes it — **deleting an extension deletes its directory** — so setup seeds the
-published sources from `../MIKE-extensions` where absent and refuses the run naming the path when the
-sibling checkout is missing; otherwise the run after an uninstall reports
+The registry is pinned to a local fixture (`frontend/tests/registry-fixture.json`) so registry e2e never hits the
+hosted registry. The servers read `/tmp/kanban-test-registry.json`, which setup writes from that fixture with the
+i18n pack's `__I18N_PACK_COMMIT__` placeholder resolved to the HEAD of the local git repo it builds from
+`tests/fixtures/i18n-pack-repo` — a git-pinned install needs a commit that exists.
+
+A spec that installs a **published** extension with `install-local` needs its directory on disk, and the product
+is what removes it: **deleting an extension deletes its directory**. So setup seeds the published sources from
+`../MIKE-extensions` where absent, and refuses the run naming the path when the sibling checkout is missing.
+Otherwise the run after an uninstall reports
 `install-local failed (404): <name> not in local extensions list`, which reads as a code regression.
 
 Test servers are spawned via `go run .` and **inherit your shell environment** — export
@@ -297,11 +285,7 @@ rm -f /tmp/kanban-test-setup.lock
 rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-worktrees
 ```
 
-### Playwright tuning
-
-`workers: 4` is measured: 6 is ~10% faster and buys 1-4 rotating turn-queue failures per run.
-
-## Go unit test environment (moved from AGENTS.md)
+## Go unit test environment
 
 - **`MIKE_ENCRYPTION_KEY` must be set in the shell** for `go test ./backend/...`: the config tests that
   store a provider API key encrypt it on the way in, and `backend/config` fails with

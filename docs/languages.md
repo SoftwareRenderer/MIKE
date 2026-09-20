@@ -2,7 +2,7 @@
 
 Read this before touching extension manifests, `backend/extensions/manifest_validate.go`,
 `frontend/src/lib/syntax/`, `frontend/src/lib/utils/editor-language.ts` or `highlighter.ts`.
-The hard rules live in `AGENTS.md → Language Knowledge Lives in Extensions`; this file is the why.
+The hard rules live in `AGENTS.md → Extensions`; this file is the why.
 
 This is the record of a **completed** refactor: language knowledge was moved out of six separate
 core places (two independent ext→grammar maps, a 278-line hand-written Go-template grammar,
@@ -102,48 +102,86 @@ component's `<script>`; a file none of them covers gets an empty outline, which 
 out of the dependency set — only the fallback grammars remain (lang-javascript survives
 transitively, via lang-html).
 
+## Which helper reads the manifest
+
+`file_types[]` (`{extension, language_id, label, syntax}`) is the routing table and the source of the `didOpen`
+languageId and the status-bar label. Go reads it through `extensions.LSPConfig.fileTypeFor`
+(`MatchesFile`/`LanguageIDFor`, `ServerConfig.LanguageIDFor`); the browser reads it through
+`editor-language.ts::resolveFile`. There is no other reader and no local map, and the browser's LSP channel takes
+its routing key from the same `resolveFile` call that chooses the grammar.
+
+## What one shared scan needs
+
+Fold, indent and bracket matching all ask the same question — "is this range code?" — and share one reader for the
+answer (`syntax/stream-tokens.ts`). Splitting it is how a `"{"` becomes a bracket in one place and not another.
+
+## An old manifest is normalized, not migrated
+
+`backend/extensions/manifest_validate.go` refuses a bad manifest on install, on update and on
+`PUT /api/extensions/{id}`; it is never stored. `LSPConfig.NormalizeFileTypes()` in `scanExtension` fills in what
+an older manifest lacks, so runtime code reads one shape and there is no migration step.
+
+## A grammar is never gated by the LSP switch
+
+`editor_enabled` (Settings → Extensions → "Editor Features: diagnostics, completions, go-to-definition, and
+hover") decides whether a *channel* opens, so `lsp-connection-manager.isLSPAvailable()` is the only reader of
+`ResolvedFile.editorLSP`. `resolveFile()` answers the file type, wire id and `syntax{}` profile from
+`getEnabledLSPExtensions()` (installed + enabled), because that answer is a data read from a manifest already on
+disk, not a server call. Answering `spec: null` when the switch is off is how one checkbox in Settings turned
+`.py`, `.ts` and `.js` back into plain text — in the diff view too, which has no LSP client at all. A disabled
+extension is a different thing: it claims nothing.
+
+## The one language table left in core
+
+`frontend/src/lib/utils/fallback-languages.ts` (json, markdown, html, css/scss/less, yaml, sql, `tmpl`/`gohtml`)
+is consulted only when no extension declares the file type. It answers a markdown fence tag too
+(`fallbackLanguageForTag`), because a fence tag and a file suffix name the same grammar. `highlighter.ts` (diffs)
+resolves through the same `getLanguageSupport`, so a diff and an editor cannot disagree about a file. It is a
+`Map`, not an object literal: the key comes off a filename, and a literal answers inherited keys as well —
+`foo.constructor` resolves to `Object`, which is truthy, and CodeMirror then refuses to open the file.
+
+## One token table, one token stylesheet
+
+`frontend/src/lib/syntax/token-style.ts` is the only place a token gets a color. The editor's two
+`HighlightStyle`s are built from it (`buildHighlightStyle`), and the diff highlighter (`diffHighlighter`) emits
+the class names that `frontend/src/lib/styles/token-colors.css` paints from the `--cm-*` variables — one list
+behind both diff renderers (`DiffViewer`, and `CommitDiffOverlay`, whose side-by-side columns have no
+`.diff-text` wrapper). Five hand-written lists described these tokens before, and the drift was silent: a profile
+tags `true`/`None`/`nil` as `tags.atom`, `atom` has no parent tag, and the `constant(keyword)` entry most of the
+lists carried matched nothing, so constants came out in the default text color everywhere. Two tags that mean
+"constant" reach the table (`tags.atom` for a stream token, `tags.bool`/`tags.null` for the core JSON grammar) and
+share one class: a tag with no parent needs its own row, or it inherits a color nobody chose.
+
 ## Tests
 
-`backend/extensions/manifest_validate_test.go`, `backend/lsp/docsync_test.go` (per-file wire id),
-`backend/lsp/tsserver_integration_test.go` (real tsserver refuses `.jsx` when the id collapses to
-`typescript`), `frontend/src/lib/syntax/__tests__/spec-language.unit.ts` (tokens, folds, indent out of a
-profile, including what each shape rule does switched off),
-`frontend/src/lib/syntax/__tests__/bracket-pairs.unit.ts` (levels, comments and strings, and the classes a
-real `EditorView` puts in the DOM),
-`frontend/src/lib/syntax/__tests__/bundled-profiles.unit.ts` (the shipped manifests, and a profile with
-neither new key — the state of every install that predates them. It reads the sibling checkout from
-`frontend/../..`: from `frontend/..` the path never exists and the whole file **skips green** without
-measuring anything, which is exactly how it shipped once. A manifest that goes missing in a checkout
-that is there now fails the file instead.),
-`frontend/src/lib/__tests__/highlighter.unit.ts` (the same answers in a diff),
-`frontend/src/lib/utils/__tests__/editor-outline.unit.ts` (the outline fallback: the headings a Markdown
-file has, the `define`/`block` names a template has, and **nothing** for a file no extractor covers),
-`frontend/src/lib/syntax/__tests__/token-style.unit.ts` (every token `TOK` can emit, mounted in a real
-`EditorView` under both palettes and read back with `getComputedStyle`; the diff highlighter's classes;
-JSON's literals off the real core grammar; and the table against `styles/token-colors.css` in both
-directions — a row with no rule, a rule nothing emits, and any **second** stylesheet naming a token
-class all fail it),
-`frontend/src/lib/utils/__tests__/editor-language.unit.svelte.ts` (resolution order: extension →
-fallback → plain text; the colors survive `editor_enabled: false` while the channel does not; a
-switched-off extension answers nothing; and a fence tag answered by `language_id`, by `language`, by
-`extension` or by the hovered file), `frontend/src/lib/utils/__tests__/lsp-doc-highlight.unit.svelte.ts` (a real `LSPClient` +
-`EditorView` rendering a gopls hover: the keyword class survives `DOMPurify` and resolves to a color;
-the same input through a client without the hook yields nothing, which is the bug), and the live probes
-`frontend/tests/declared-languages-check.mjs` (wire ids sniffed off the WebSocket, plus highlight,
-block/region folding, Ctrl-/ in a real editor:
-`MIKE_CHECK_PROJECT=<scratch project> node tests/declared-languages-check.mjs` — it writes fixtures
-into that project, so the name is required) and
-`frontend/tests/lsp-hover-highlight-check.mjs` (hover a real `fmt.Println` and read the computed colors
-off the tooltip, then check a TypeScript file in the same workspace: the grammar follows the open file,
-not the connection).
-
-## Rules the core keeps (moved from AGENTS.md)
-### Language Knowledge Lives in Extensions
-The core holds **no** language names, keyword lists, comment markers or bracket tables — neither in Go nor in the frontend. Why the design is shaped this way, and its tests: `docs/languages.md`.
-
-- **`file_types[]`** (`{extension, language_id, label, syntax}`) is the routing table *and* the source of the `didOpen` languageId and the status-bar label. `language` is the **routing** key (which server owns the file); `language_id` is **per file type** — collapsing them breaks routing or the parse. Both sides read it through exactly one helper: `extensions.LSPConfig.fileTypeFor` (`MatchesFile`/`LanguageIDFor`, `ServerConfig.LanguageIDFor`) in Go, `editor-language.ts::resolveFile` in the browser — **never** a local map, and the browser's LSP channel takes its routing key from that same call. A code fence in a language server's own documentation (the ​```go signature a hover card opens with) is answered by `getGrammarForFence` in the same module — the same three fields, **no alias table**, then the core fallback table, then the grammar of the file the documentation is about — wired as `LSPClient`'s `highlightLanguage` by `lsp-client-config.ts`, the one factory **both** `LSPClient` constructions use.
-- **`syntax{}`** is a grammar as **data, never code** - a shipped module would run in the app's realm. `frontend/src/lib/syntax/spec-language.ts` compiles a profile into a `StreamLanguage` + `foldService` + `indentService` + `commentTokens`/`closeBrackets` + bracket pair colorization (from `pairs`). A name the word lists do not cover is colored by **shape**: `name(` is a function, an upper-case-first name is a type, everything else the default (`call_as_function`, `capitalized_types`; `*bool` in Go so an explicit `false` survives the round trip). Bracket color is the pair's nesting level (`syntax/bracket-pairs.ts`), themed .cm-bracket-l0|1|2`. **Every scan that reads characters shares one reader** for "this range is not code" (`syntax/stream-tokens.ts`) — fold, indent, brackets — or a `"{"` becomes a bracket in one place and not another. A spec-built grammar is named `mike-declared`, deliberately not a valid language id, so a call site that forgets an explicit id fails loudly instead of silently. Tests: `frontend/src/lib/syntax/__tests__/`, `backend/extensions/manifest_validate_test.go`, `bundled_manifests_test.go`, and the tooltip path in `frontend/src/lib/utils/__tests__/lsp-doc-highlight.unit.svelte.ts`.
-- **A bad manifest is refused, not stored** (`backend/extensions/manifest_validate.go`, on install, update and `PUT /api/extensions/{id}); **legacy manifests are normalized at load**, not migrated (`LSPConfig.NormalizeFileTypes()` in `scanExtension`), so runtime code sees one shape.
-- **A grammar is never gated by an LSP switch.** `editor_enabled` (Settings → Extensions → "Editor Features: diagnostics, completions, go-to-definition, and hover") decides whether a *channel* opens, so `lsp-connection-manager.isLSPAvailable()` is the only reader of `ResolvedFile.editorLSP`; `resolveFile()` itself answers the file type, wire id and `syntax{}` profile from `getEnabledLSPExtensions()` (installed + enabled), because that answer is a data read from a manifest already on disk, not a server call. Answering `spec: null` for the gate is how one checkbox in Settings turned `.py`, `.ts` and `.js` back into plain text — in the diff view too, which has no LSP client at all. A **disabled** extension is a different thing: it claims nothing.
-- **The one language table left in core** is `frontend/src/lib/utils/fallback-languages.ts` (json, markdown, html, css/scss/less, yaml, sql, `tmpl`/`gohtml`) — consulted only when no extension declares the file type, and it answers a markdown fence tag too (`fallbackLanguageForTag`), because a fence tag and a suffix name the same grammar. `highlighter.ts` (diffs) resolves through the same `getLanguageSupport`, so a diff and an editor can never disagree. It is a **`Map`, not an object literal**: the key comes off a filename, and a literal answers inherited keys too — `foo.constructor` resolved to `Object`, which is truthy, and CodeMirror refused to open the file.
-- **One token table, one token stylesheet.** `frontend/src/lib/syntax/token-style.ts` is the only place a token has a color: the editor's two `HighlightStyle`s are built from it (`buildHighlightStyle`) and the diff highlighter (`diffHighlighter`) emits its class names, which `frontend/src/lib/styles/token-colors.css` paints off the `--cm-*` variables — the whole diff palette, for both diff renderers (`DiffViewer` and `CommitDiffOverlay`, whose side-by-side columns have no `.diff-text` wrapper), from one list. Five hand-written lists described these tokens before; the drift was silent — a profile tags `true`/`None`/`nil` as `tags.atom`, `atom` has no parent tag, and the `constant(keyword)` entry most of the lists carried matched nothing, so constants came out in the default text color everywhere. Two tags that mean "constant" reach the table (`tags.atom` for a stream token, `tags.bool`/`tags.null` for the core JSON grammar) and share one class: **a tag with no parent needs its own row** or it inherits a color nobody chose.
+- `backend/extensions/manifest_validate_test.go` — the validator's refusals.
+- `backend/lsp/docsync_test.go` — the wire id, per file.
+- `backend/lsp/tsserver_integration_test.go` — real tsserver refuses `.jsx` when the id collapses to `typescript`.
+- `frontend/src/lib/syntax/__tests__/spec-language.unit.ts` — tokens, folds and indent out of a profile,
+  including what each shape rule does switched off.
+- `frontend/src/lib/syntax/__tests__/bracket-pairs.unit.ts` — nesting levels, comments and strings, and the
+  classes a real `EditorView` puts in the DOM.
+- `frontend/src/lib/syntax/__tests__/bundled-profiles.unit.ts` — the shipped manifests, and a profile with neither
+  new key, which is the state of every install that predates them. It reads the sibling checkout from
+  `frontend/../..`: from `frontend/..` the path never exists and the whole file skips green without measuring
+  anything, which is how it shipped once. A manifest missing from a checkout that is there now fails the file.
+- `frontend/src/lib/__tests__/highlighter.unit.ts` — the same answers in a diff.
+- `frontend/src/lib/utils/__tests__/editor-outline.unit.ts` — the outline fallback: the headings a Markdown file
+  has, the `define`/`block` names a template has, and nothing for a file no extractor covers.
+- `frontend/src/lib/syntax/__tests__/token-style.unit.ts` — every token `TOK` can emit, mounted in a real
+  `EditorView` under both palettes and read back with `getComputedStyle`; the diff highlighter's classes; JSON's
+  literals off the real core grammar; and the table against `styles/token-colors.css` in both directions, so a row
+  with no rule, a rule nothing emits, or a second stylesheet naming a token class all fail it.
+- `frontend/src/lib/utils/__tests__/editor-language.unit.svelte.ts` — resolution order (extension → fallback →
+  plain text); the colors survive `editor_enabled: false` while the channel does not; a switched-off extension
+  answers nothing; a fence tag answered by `language_id`, by `language`, by `extension`, or by the hovered file.
+- `frontend/src/lib/utils/__tests__/lsp-doc-highlight.unit.svelte.ts` — a real `LSPClient` + `EditorView`
+  rendering a gopls hover: the keyword class survives `DOMPurify` and resolves to a color, and the same input
+  through a client without the hook yields nothing, which is the bug this test was written for.
+- `frontend/tests/declared-languages-check.mjs` — the live probe: wire ids sniffed off the WebSocket, plus
+  highlight, block and region folding, and Ctrl-/ in a real editor.
+  `MIKE_CHECK_PROJECT=<scratch project> node tests/declared-languages-check.mjs` — it writes fixtures into that
+  project, so the name is required.
+- `frontend/tests/lsp-hover-highlight-check.mjs` — hover a real `fmt.Println` and read the computed colors off the
+  tooltip, then check a TypeScript file in the same workspace: the grammar follows the open file, not the
+  connection.

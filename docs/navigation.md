@@ -2,7 +2,7 @@
 
 Read this before touching arrow-key handling in `App.svelte`, `App/Sidebar.svelte`,
 `CardDetail.svelte`, or the two resolver modules. The hard rules live in
-`AGENTS.md → Keyboard Navigation`.
+`AGENTS.md → Frontend`.
 
 ## Board overview
 

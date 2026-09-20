@@ -2,7 +2,7 @@
 
 Both go through the same config plumbing (`config` table → `GET/PUT /api/config` → `appStore.config`)
 and both are 7-layer changes. Consult this file when adding one; the semantics that must not break
-are in `AGENTS.md → Keyboard Shortcuts` and `AGENTS.md → UI Preferences`.
+are in this file's *Full layer lists*, and the rule that they ride one shared Save/Cancel flow is in `AGENTS.md → Frontend`.
 
 A preference about **this browser** rather than about the user does not belong in that plumbing — see
 *When the preference belongs to a browser* below.
@@ -75,9 +75,9 @@ Three things stay the same as for a server-stored preference: the row lives in `
 Cancel discards it), and `clearAll()` at sign-out takes it with the rest. The test is the store's own
 round-trip with `$lib/storage` mocked — `stores/__tests__/notify-on-review-persist.unit.ts`.
 
-## Full layer lists (moved from AGENTS.md)
-### Keyboard Shortcuts (Settings → Preferences)
-Persisted as `keyboard_shortcuts` JSON in the `config` table through the shared Settings Save/Cancel flow. Adding one is a 7-layer change — recipe: **`docs/adding-a-preference.md`**.
+## The keyboard-shortcut layers
+
+Persisted as `keyboard_shortcuts` JSON in the `config` table through the shared Settings Save/Cancel flow. Adding one is a 7-layer change.
 
 - Defaults + helpers in `$lib/utils/keyboard.ts`: `create_task` `C`, `create_task_submit`/`start_task` platform Ctrl/Cmd+Enter, `open_terminal` Ctrl+`, `toggle_fullscreen` Ctrl+Up, `multi_select_click` platform Ctrl/Cmd+Click. Platform-aware defaults are `default*()` functions, **not** `DEFAULT_SHORTCUTS` entries.
 - **Format:** normalized `control`+`meta`+`shift`+`alt`+key; absent = default, `""` = disabled. The key may be the pseudo-key `click` for a **mouse binding** (`"shift+click"`; `normalizeClick` / `matchesClickBinding` / `effectiveMultiSelectClick` / `isBrowserLinkClick`) — only the primary button is bindable and an unmodified click is never a binding.
@@ -86,4 +86,5 @@ Persisted as `keyboard_shortcuts` JSON in the `config` table through the shared 
 - **Tests:** `backend/config/config_test.go`, `utils/__tests__/keyboard.unit.ts`, `preferences-tab.unit.svelte.ts`, e2e `preferences-keyboard.spec.ts` (isolated).
 
 ### UI Preferences (Settings → Preferences → UI)
-Top-level `*bool` config fields (`parseBoolPtr` in `GetConfig`, `omitempty` in `configResponse`) with the same Save/Cancel plumbing as shortcuts. Example: `hide_model_badge` gates `.model-badge` in `Card.svelte`. Full recipe + tests: **`docs/adding-a-preference.md`**.
+
+Top-level `*bool` config fields (`parseBoolPtr` in `GetConfig`, `omitempty` in `configResponse`) with the same Save/Cancel plumbing as shortcuts. Example: `hide_model_badge` gates `.model-badge` in `Card.svelte`.

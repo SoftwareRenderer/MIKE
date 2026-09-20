@@ -2,7 +2,7 @@
 
 Read this before touching `backend/tls/`, the listen/Host-header logic, or anything that
 decides whether a peer may reach the server. The invariant list that must survive any edit
-lives in `AGENTS.md → HTTPS / TLS`.
+lives in `AGENTS.md → Server Management`.
 
 ## Certificates on disk
 
@@ -28,9 +28,9 @@ when the host's names change (network or hostname change). There is **no expiry-
 refresh an expired leaf by deleting `mike.crt`/`mike.key` and restarting (keep the CA). The server
 sends the leaf alone: the CA is a root, so an importing client needs no intermediate.
 
-Plain HTTP on a TLS-enabled server gets a 301 → https. Custom certs: `--tls-cert/--tls-key` or
-`MIKE_TLS_CERT`/`MIKE_TLS_KEY` (no CA involved). Disable: `--no-tls` or `MIKE_TLS=0`. With TLS
-active, WebSockets upgrade to `wss://`.
+Plain HTTP on a TLS-enabled server gets a 301 → https. Custom certs: `--tls-cert`/`--tls-key`, which have
+no environment spelling and bring no CA of ours. Disable: `--no-tls` or `MIKE_TLS=0`. With TLS active,
+WebSockets upgrade to `wss://`.
 
 The session cookie's `Secure` flag follows the request, not the boot configuration
 (`requestIsHTTPS`): TLS terminated here, or a TLS-terminating proxy whose `X-Forwarded-Proto: https`
@@ -40,9 +40,7 @@ A proxy must therefore set `proxy_set_header X-Forwarded-Proto $scheme;` *and* h
 `MIKE_TRUST_PROXY=1`; with either missing, MIKE can only see cleartext and marks the cookie
 honestly. The single case that stays unencrypted is `--no-tls` with no proxy — loopback
 development and the e2e harness, where a `Secure` cookie could never be stored and no one could
-sign in. (`MIKE_SECURE_COOKIES` used to force the flag from the process side; it was removed
-because the proxy case is detectable from the request, and an opt-in flag is off in exactly the
-deployment it was written for.)
+sign in. There is deliberately **no variable** for the flag.
 
 ## A certificate is not the gate
 
@@ -73,5 +71,5 @@ CA/leaf reuse, `CertPEM` serves a certificate and nothing else), `backend/server
 (the download: needs a session, 404 without a local CA, GET-only, and `tls_ca_available` tracks it),
 `backend/server/listener_test.go`.
 
-## The listener (moved from AGENTS.md)
+## The listener
 - **The TLS-vs-plain first-byte sniff must not run inside `hybridListener.Accept()`** (`backend/server/server.go`): `net/http` accepts **serially**, so one peer that connects and sends nothing stalls every later handshake, and returning its EOF/reset reads as a dead listener, ends `Serve` and kills the process. `Accept()` waits on a queue that a per-connection sniff goroutine fills — no worker pool, since N workers still block everyone at N silent peers. Sniffed-out peers are closed and logged per host, never handed to `net/http`; only the listener's own accept error may end `Serve`. Tests: `backend/server/listener_test.go`.

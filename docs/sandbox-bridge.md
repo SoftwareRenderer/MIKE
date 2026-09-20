@@ -2,7 +2,7 @@
 
 Read this before changing `pkg/bridge/`, `backend/sandbox/sandbox.go`,
 `backend/extensions/sandbox.go` or `backend/lsp/extension_manager.go`. The invariants that must
-survive any edit live in `AGENTS.md → Sandbox Bridge`; this file is the *why*.
+survive any edit live in `AGENTS.md → Sandboxing`; this file is the *why*.
 
 ## Why one stdio connection per consumer
 
@@ -135,8 +135,8 @@ the path written, the upload surviving everything but its task's deletion),
 and the uploads inside it), `backend/sandbox/stop_retry_test.go` (a container that refused `podman rm`
 stays tracked, so a later stop can still remove it).
 
-## Invariants to preserve (moved from AGENTS.md)
-Invariants to preserve (the why, and the open work, are in `docs/sandbox-bridge.md`):
+## Invariants that must not break
+
 - A task sandbox has exactly one connection for its lifetime; an **extension sandbox has one per LSP session**. `ExtensionSandboxManager.StartSession`/`ReleaseSession` (`backend/extensions/sandbox.go`) own it and `retire` (`backend/lsp/extension_manager.go`) hands it back — the connection *is* the sandbox reference.
 - **A task's sandbox callbacks are read as one snapshot.** The eight `sandbox*`/`recoverBridge` fields of `executionState` are guarded by `sandboxMu` and reachable only through `sandbox()` (returns a copy) and `setSandbox()`. Setup, a mode switch, an agent-config switch and bridge recovery each replace the whole set, so reading fields one at a time can mix the old container's reader with the new one's writer — which reads as a broken pipe and gets retried. `sandboxRecreate.underLock` therefore takes the `*sandboxState` being written, not the `*executionState`: `sandboxMu` is already held and is not reentrant. `sandboxMu` is never held while taking `taskMu`.
 - A repeated `start` of the same command+args is **idempotent**; a different one is **refused, never replaced**. The agent kills its session when the connection ends (`handler.close`) — the only thing that reaps the server — and never auto-restarts one.

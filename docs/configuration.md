@@ -5,6 +5,8 @@ and how a value becomes a decision.
 
 ## Resolution
 
+Resolved **once**: a consumer receives the decision and never re-reads a variable where it is used.
+
 - The flag → env → default ladder is resolved **once**, in `backend/startup` (`startup.Resolve` →
   immutable `startup.Config`; `startup.Flags` for the command line). A new variable is added there and
   its **decision** is injected into the consumer, never re-read where it is used.
@@ -26,11 +28,20 @@ and how a value becomes a decision.
 
 ## Variables with a `--flag` twin
 
-Nine have one, named after them, and **flags win**: `--port`/`MIKE_PORT`, `--listen`,
-`--data-dir`/`MIKE_DATA_DIR`, `--no-tls`, `--tls-cert`/`--tls-key`, `--allowed-hosts`,
-`--worktrees-dir`, `--log-level`/`MIKE_LOG_LEVEL`, `--frontend-dist`/`MIKE_FRONTEND_DIST` (dev-only,
-below). A switch that widens a permission or points at a host path has one spelling only, so it cannot
+Eight of the ten flags have an environment twin and **flags win**: `--port`/`MIKE_PORT`,
+`--listen`/`MIKE_LISTEN`, `--data-dir`/`MIKE_DATA_DIR`, `--worktrees-dir`/`MIKE_WORKTREES_DIR`,
+`--frontend-dist`/`MIKE_FRONTEND_DIST` (dev-only, below), `--no-tls`/`MIKE_TLS`,
+`--allowed-hosts`/`MIKE_ALLOWED_HOSTS`, `--log-level`/`MIKE_LOG_LEVEL`. `--tls-cert` and `--tls-key` have
+no environment spelling at all: pointing the server at someone's key file is a flag or nothing. Two of
+the twins are not name-matched (`--no-tls` ↔ `MIKE_TLS`), so the list is the authority, not the rule "add
+`MIKE_`".
+
+A switch that widens a permission or points at a host path has one spelling only, so it cannot
 arrive by a route the operator did not read about.
+
+**Names this table does not carry are not live.** A name an older `.env` still carries either appears here
+or does nothing at all — except `MIKE_UPDATE_CHECK`, which is read only to warn an `.env` carrying it that it
+disabled nothing (`docs/auto-update.md → Who decided`).
 
 `--worktrees-dir` (`MIKE_WORKTREES_DIR`) is a runtime override that is **not** persisted to the DB
 `workspace_dir`.
@@ -43,9 +54,9 @@ arrive by a route the operator did not read about.
 | `MIKE_LOGIN_PASSWORD` | Master password for auth/sessions. Server refuses to start without it. Only its `sha256` digest is kept in memory; a weak one (< 8 chars, or a known default) additionally refuses a non-loopback listen address. |
 | `MIKE_REGISTRY_URL` | Extension registry index URL. Sourced **exclusively** from this env var (not DB-backed); falls back to `https://registry.getmike.dev/registry.json`. A bare path (no `http(s)://`/`file://` scheme) is a local file resolved against the CWD. |
 | `MIKE_UPDATE_URL` | Release manifest the update check reads. Falls back to `updates.DefaultManifestURL` (`https://getmike.dev/version`); a mirror or a local fixture names itself here. Read **once** at startup and handed to the service as a value. Must be `https` (loopback may be `http`) with a host; anything else **refuses the boot** naming the variable. An archive the manifest names is fetched only from this same host. **`docs/auto-update.md`**. |
-| `MIKE_DISABLE_UPDATES` | The organization-level kill switch for the server's own release updates: exactly `1` and this process will not check for, download, install or restart onto a release, and no browser is asked to opt in (About reads "Updates are managed by your organization"). `0` or unset leaves the decision to the `update_check_enabled` preference; any other value warns at boot that it **disabled nothing**. Replaces `MIKE_UPDATE_CHECK`, which is read by nothing and only warns an `.env` still carrying it. Applies to server releases only — the extension registry is untouched. **`docs/auto-update.md`**. |
+| `MIKE_DISABLE_UPDATES` | The organization-level kill switch for the server's own release updates: exactly `1` and this process will not check for, download, install or restart onto a release, and no browser is asked to opt in (About reads "Updates are managed by your organization"). `0` or unset leaves the decision to the `update_check_enabled` preference; any other value warns at boot that it **disabled nothing**. It outranks the stored preference; the ladder is in `docs/auto-update.md → Who decided: the ladder`. Applies to server releases only — the extension registry is untouched. **`docs/auto-update.md`**. |
 | `MIKE_TRUST_PROXY` | Set to `1` only behind a trusted reverse proxy that strips forwarding headers. Only then are `X-Forwarded-For` (rate-limit IP) and `X-Forwarded-Proto` (HTTPS redirect) honored; unset = ignored so they can't be spoofed. |
-| `MIKE_LISTEN` | Which socket the API is reachable on — it **never authorizes a `Host` header**. **Defaults to `127.0.0.1`**: the API is RCE-complete (terminal WS, git ops, file writes), so it is never public by accident. `0.0.0.0`/`::` are the explicit all-interfaces values; any other address listens on that interface only. (Renamed from `--bind`/`MIKE_BIND` — the old names do nothing; a stale `MIKE_BIND=0.0.0.0` comes up loopback-only.) |
+| `MIKE_LISTEN` | Which socket the API is reachable on — it **never authorizes a `Host` header**. **Defaults to `127.0.0.1`**: the API is RCE-complete (terminal WS, git ops, file writes), so it is never public by accident. `0.0.0.0`/`::` are the explicit all-interfaces values; any other address listens on that interface only. |
 | `MIKE_ALLOWED_HOSTS` | Comma-separated extra hostnames accepted in the `Host` header (DNS-rebinding pinning, `HostPinMiddleware`). Accepted without listing: `localhost`, `127.0.0.1`, `::1`, the listen host. Anything else — a proxy's public domain, `hostname.local`, a LAN IP — gets **HTTP 421** until listed here; a missing/empty `Host` is rejected too. Ports are stripped on both sides. `--allowed-hosts` **overrides** (not extends); `Serve()` logs the effective value and every rejection names both. |
 | `MIKE_LOGIN_RATE_LIMIT` | Login budget per client IP per minute (default `5`). **Cannot be disabled:** `0`, negative or unparsable values fall back to `5` with a startup warning, so a typo can't silently drop brute-force protection. |
 | `MIKE_EXT_MOUNT_ROOTS` | `os.PathList`-separated list of **extra** host roots an extension sandbox may bind-mount, beyond the implicit ones (workspace dir, registered project paths, extensions dir, system temp dir). Still an allowlist — anything outside it is rejected. |

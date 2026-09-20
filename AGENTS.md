@@ -1,8 +1,10 @@
 # AGENTS.md
 
-This file holds **rules**. Mechanism, measurements, tables and test lists live in `docs/` — read the
-pointer before touching that subsystem, and add new detail there rather than here. When you learn
-something, *replace* the stale sentence; do not append.
+This file holds **rules**. Mechanism, tables and test lists live in `docs/`; **why a rule is this shape** lives in
+`docs/adr/` — one numbered file per decision, written when the choice is made, never afterwards (ADR-0001). Start
+from the index `docs/adr/README.md`: rule files and subsystem docs do not link the records behind them. Read the
+pointer before editing that subsystem, put new detail in the file that owns it, and defend a choice by opening a
+record there rather than arguing inside the rule. When you learn something, *replace* the stale sentence.
 
 ## Repo Map
 
@@ -19,10 +21,10 @@ something, *replace* the stale sentence; do not append.
   verifies) — never edit it by hand.
 - `Makefile` — build/run/test entry points. `data/` — SQLite DB, TLS certs, trace files. `prompts/` — LLM
   prompt templates.
-- `Dockerfile` + `compose.yaml` + `.env.example` — deployment. The image carries podman and `runsc` and
-  drives them nested (`privileged`), so neither is a host prerequisite there. `README.md → Quick Start`
-  owns the run/deploy story; `.env` is the only source of the master password, encryption key and
-  `MIKE_ALLOWED_HOSTS`.
+- `Dockerfile` + `compose.yaml` + `.env.example` — deployment. The image carries podman and `runsc` and drives
+  them nested (`privileged`), so neither is a host prerequisite there. There is no `README.md` in this tree:
+  `scripts/package-release.sh` writes one into the package, and its "Running it" section owns the run/deploy
+  story. `.env` is the only source of the master password, encryption key and `MIKE_ALLOWED_HOSTS`.
 
 ## Non-Negotiables
 
@@ -30,10 +32,11 @@ something, *replace* the stale sentence; do not append.
 - **Never leave the server running** after a crash or panic — stop it first.
 - **`make check` is the gate** and there is no CI file, so it is the only thing that catches a
   regression: `lint` (gofmt → vet → staticcheck → deadcode, both roots) → `archgate` + `test-archgate`
-  (structural debt against its frozen baselines) → `bridge-check` → build → the Go
-  suite → `svelte-check` → the frontend gates. Run it before claiming done, and `make check-race` on
-  whatever you touched (`RACE_PKGS`: git, exec, server, stream, api) — a package's own green tests
-  prove nothing about code that only runs when a task does. `make lint` is the static half alone.
+  (structural debt against its frozen baselines) → `docs-check` + `test-docs-check` (the same, for docs) →
+  `bridge-check` → build → `check-release` → the Go suite → `svelte-check` → the frontend gates. Run it
+  before claiming done, and `make check-race` on whatever you touched (`RACE_PKGS`: git, exec, server,
+  stream, api) — a package's own green tests prove nothing about code that only runs when a task does.
+  `make lint` is the static half alone.
 - **E2E runs kill your dev server** (global-setup owns ports 3000/3001/9999) — restart with `make run`
   afterwards.
 - Run the dev server in **background** (`&`).
@@ -87,7 +90,7 @@ code, the change is arguing with itself.
   child.** Every git and podman subprocess comes from a constructor that sets one. A context exists only
   where a caller has something worth cancelling (clone, pull/push, extension install); local git calls are
   deliberately context-less. If you add a long-running subprocess, give it both.
-- **`environment` on an LSP extension always answers "healthy"** — declared, validated, never called.
+- **`environment` on an LSP extension always reports "healthy"** — the check is declared and validated; nothing runs it.
 - **A translation pack overlays `*.tmpl` prompt templates, not `prompts/skills/`** — skill bodies stay
   English whatever pack is enabled (`docs/i18n.md`).
 
@@ -103,11 +106,11 @@ curl -sk https://localhost:3000/api/config   # 401 JSON = up; use http:// with -
   no expiry-based renewal — refresh an expired leaf by deleting the leaf and restarting. **A certificate
   is not the gate**: reachability is the listen address plus Host pinning. `docs/tls.md`.
 - **Never `log.Fatalf` on a `Serve()` error** — run the signal cleanup path, then exit 1.
-- **Shutdown is a declared stage list.** A component registers its stop step in `server.Registrar`
-  *where it is constructed*, so construction order is shutdown order; duplicate or nil steps are refused at
-  registration, and the first stage cancels the server's base context. SIGTERM must end the process: a
-  wedged shutdown keeps the data directory open, so the next run boots on the previous run's database.
-  **`docs/lifecycle.md`**.
+- **Shutdown is a declared stage list.** A component registers its stop step with `s.reg(stage, name, step)`
+  *where it is constructed* (the stages are declared in `backend/server/lifecycle.go`), so construction order
+  is shutdown order; duplicate or nil steps are refused at registration, and the first stage cancels the
+  server's base context. SIGTERM must end the process: a wedged shutdown keeps the data directory open, so
+  the next run boots on the previous run's database. **`docs/lifecycle.md`**.
 - **Every base context in the tree is registered with a reason** (`root`, `detached`, `legacy`) by the
   `ctxroot` archgate rule; `backend/server/sideeffects.go` states the same classification for HTTP
   handlers. `docs/lifecycle.md`.
@@ -120,8 +123,8 @@ curl -sk https://localhost:3000/api/config   # 401 JSON = up; use http:// with -
 - Flags take priority over env vars, which take priority over defaults, and the whole ladder resolves
   **once** in `backend/startup` into an immutable `startup.Config`. A consumer receives the decision; it
   never re-reads a variable where it is used.
-- A malformed value **refuses the boot naming the variable**, before any side effect. A set-but-empty
-  variable means unset. An opt-in switch is the exact value `1`, and a set-but-not-`1` value warns.
+- A malformed value **stops startup and names the variable**, before anything else happens. A variable set
+  to empty means unset. An opt-in switch needs exactly `1`; any other value warns.
 - Only `main.go` and `backend/startup` read `MIKE_*`; the `env` archgate rule holds that.
 - Every variable, the flag twins, and the exceptions: **`docs/configuration.md`**.
 
@@ -158,13 +161,13 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
   a throw inside `onmessage` is swallowed and leaves the app believing it is current.
 - **Every `/api` route declares its verb in the pattern.** Handlers don't check `r.Method`, and a
   methodless route also escapes the CSRF middleware. Exemptions and consequences: `docs/api-contract.md`.
-- **A partial update decodes into pointer fields, never a `map[string]any` behind type assertions**:
-  absent = leave alone, present = write (including `""`/`false`), null = absent; a wrong type is a 400
-  naming the field, validated before anything is written.
+- **A partial update decodes into pointer fields, never a `map[string]any` behind type assertions.** A field that
+  is absent — or sent as `null` — is left alone; a field that is present is written, including `""` and `false`. A
+  field of the wrong type is a 400 naming that field, and nothing is written before every field validates.
 - **`?parsed=1` is a contract every diff path must honour** — `git.ParseUnifiedDiff` is the only diff
   grammar, and the panel never re-parses patch text.
-- **A server fault answers MIKE's own sentence; the cause goes to the log.** `httputil.Fail` is the only
-  place a status code is chosen, and an `Operation` does not unwrap its cause.
+- **A server fault answers with MIKE's own message, never the underlying error text; the cause goes to the
+  log.** `httputil.Fail` is the only place a status code is chosen, and an `Operation` does not unwrap its cause.
 - Full frame shapes, route exemptions, headers, error vocabulary, and which package owns a new endpoint:
   **`docs/api-contract.md`**.
 
@@ -173,8 +176,8 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
 - **Everything the app did not write goes through `$lib/utils/sanitize`** — including LSP hover,
   completion and signature documentation, which reaches an `innerHTML` sink in a dependency that no gate
   scans. `html-sinks.py` lists every `{@html}`/`innerHTML` sink in core, plus every URL and style-attribute
-  binding the browser interprets on its own, each with the mechanism it relies on, and audits its own
-  claim; what the sanitizer refuses and why is in `docs/markup-sanitizing.md`.
+  binding the browser interprets on its own, each with the mechanism it relies on, and it fails if its own list
+  misses a sink; what the sanitizer refuses and why is in `docs/markup-sanitizing.md`.
 - **Formatting follows the active locale; sorting never does.** Pass `activeLocale()` to every `Intl.*`
   call and never a literal tag or `undefined`; never cache a locale-derived value at module scope;
   `document.documentElement.lang` has exactly one writer (the i18n runtime); `localeCompare` keeps its
@@ -210,8 +213,8 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
 - SQLite, one connection, one serialisation point. **A multi-statement write that must land entirely runs
   in `Store.tx`** — with one connection and the store mutex, that buys failure atomicity, not isolation.
   Anything outside `tx` states its reason at its definition.
-- **CASCADE is the row story only.** One `DELETE FROM projects` removes the rows; a task's container,
-  worktree, branches and uploads are stopped by the deletion path, not by the schema. See *Deletion*.
+- **`ON DELETE CASCADE` deletes rows, nothing else.** One `DELETE FROM projects` removes the rows; a task's
+  container, worktree, branches and uploads are stopped by the deletion path, not by the schema. See *Deletion*.
 - **`PRAGMA user_version` gates the schema.** Adding a migration extends the probe chain *and* raises the
   version, leaving the earlier idempotent steps in place; a step that must run exactly once needs its own
   marker.
@@ -219,7 +222,8 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
   fraction and `Z` sorts above every digit, so trimmed text orders two nearby instants backwards; a zone
   offset repeats an hour at a fall-back. The columns, the rewrite of the older rows, the tie rule:
   **`docs/storage.md`**.
-- Tests induced mid-write use SQLite `RAISE(ABORT)` triggers, never a production seam.
+- A test that needs a write to fail half way through installs a SQLite `RAISE(ABORT)` trigger, never a hook
+  in production code.
 - Permissions, ID generation, what is in and out of `tx`: **`docs/storage.md`**.
 
 ## Sessions & Auth
@@ -231,13 +235,13 @@ header under `MIKE_TRUST_PROXY`) and there is deliberately no variable for it; l
 flag it set. `/api/sessions*` are session-authed, CSRF-guarded, never public, and their responses carry
 no token of any kind. Storage shape, endpoint shapes and the Settings UI: `docs/sessions.md`.
 
-- **A bearer token is a second credential with a smaller world.** Issued, labelled and revoked in
+- **A bearer token is a second credential with a narrower scope.** Issued, labelled and revoked in
   Settings → About; stored as `hex(sha256(token))` like a session and shown once. It authenticates
   only the project-list and task-CRUD/start/stop routes in `tokenScope`
   (`backend/server/token_auth.go`) — everything else, including `/api/tokens` itself, stays
   cookie+CSRF, so a leaked token cannot mint or revoke tokens. A request that presents one is
   answered by the token or not at all: it never falls back to a session cookie, and it needs no
-  CSRF header because nothing but its owner attaches a header. Issuance, the allowlist and the
+  CSRF header because a browser never attaches this header on its own. Issuance, the allowlist and the
   client-facing route reference: `docs/api.md`.
 
 ## Sandboxing
@@ -259,17 +263,17 @@ via podman. Without it, sandboxed projects refuse to start tasks — hard error,
   posture is already there). Extensions delegate to it; a project's own Sandbox Configuration is checked by
   the same rules, and again at container creation because a row can predate them.
 - **Extension sandbox mounts are an allowlist, and borrowed roots are read-only** however the manifest
-  asks: a manifest is registry text, and an agent extension's `sandbox.mount` is a proposal rather than a
-  grant — only a person's answer under Settings → Extensions reaches a container. A capability is judged
-  by its shape, never its name; `--privileged` is an argument and is refused.
+  asks: a manifest is text that came from the registry, not from a person, and an agent extension's
+  `sandbox.mount` is a request rather than a grant — only a person's answer under Settings → Extensions reaches
+  a container. A capability is judged by its shape, never its name; `--privileged` is an argument and is refused.
 - **The bridge is stdio-only**: one `podman exec` per connection, no listener and no port. Interactive
   terminals bypass it. Rebuild the committed `sandbox-bridge` after any edit under `pkg/` —
   `make bridge-check` fails when the artifact is not a build of this tree.
 - **Plan mode's bash restriction is prompt text, not executor-enforced.** What holds a planning turn is
   the read-only worktree mount plus the sandbox — don't add a fake allowlist.
-- Invariants that must not break (connections as sandbox references, idempotent `start`, every request
-  answered, retired wire IDs never reused, unknown-not-clean diagnostics, forwarded ports): the list and
-  each mechanism in **`docs/sandbox-bridge.md`**.
+- Invariants that must not break: a connection *is* the sandbox's reference, `start` is idempotent, every
+  request is answered, a retired wire ID is never reused, diagnostics report what is unknown instead of assuming
+  clean, and forwarded ports survive. Each mechanism: **`docs/sandbox-bridge.md`**.
 - Boot injection, the sweep's running-container rule, environment construction, capability measurements,
   the mount allowlist, podman subprocess rules: **`docs/sandbox-runtime.md`**.
 
@@ -285,19 +289,18 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
   and injected, so the picker and the create path can never disagree about what was declared.
 - **Two host reads sit outside the tool path** (LSP document sync, a project's Dockerfile) and are jailed
   where the path is accepted, because the stored value is what the later read trusts.
-- **Nothing is read or captured unbounded**, and the cap runs before the bytes: request bodies, proxied
-  responses, subprocess output, file reads and bridge frames each have one. Bound output where it is
-  captured, not where it is shown.
+- **Nothing is read or captured unbounded**, and every limit is applied before the bytes are read: request
+  bodies, proxied responses, subprocess output, file reads and bridge frames each have one. Bound output where
+  it is captured, not where it is shown.
 - **No subprocess inherits the server environment.** Exactly three allowlists, one per family (git,
   podman, agent), each returning the whole environment with extras last. `os.Environ()` survives in one
   sanctioned place: the operator's own host terminal under `DANGER_ZONE=1`.
 - **The git author identity is accessor-only** and process-wide.
-- **The release check is the one place a network answer becomes code**, so it is opt-in and never
-  self-applying: the preference turns it on (`MIKE_DISABLE_UPDATES=1` forbids it for every browser), a newer
-  release is fetched and verified without a click into its own directory, and *Install* — which swaps the
-  files and restarts — is the one click that changes anything. An install that is not an unpacked release
-  directory — a container, a source tree, anything unnamed — refuses rather than swapping files it cannot
-  describe, and gets nothing downloaded either. No auto-apply, ever.
+- **The release check is the only place where something downloaded from the network becomes running code**, so
+  it is opt-in and never self-applying: the preference turns it on (`MIKE_DISABLE_UPDATES=1` forbids it for every
+  browser), a newer release is downloaded and verified without touching the install directory, and *Install* — which
+  swaps the files and restarts — is the one click that changes anything. An install that is not an unpacked release
+  directory — a container, a source tree, anything unnamed — refuses, and gets nothing downloaded either. No auto-apply, ever.
   Mechanism, refusals and what is verified: **`docs/auto-update.md`**.
 - Mechanisms, helpers and tests: **`docs/confinement.md`**.
 
@@ -305,7 +308,7 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
 
 - **Keyed locks come from `pkg/keylock`, one named domain type per domain**, embedded by value. Distinct
   types and distinct tables are both required: task IDs and project IDs come from the same alphabet, so a
-  shared table fuses two domains in silence.
+  shared table merges two domains and nothing reports it.
 - **Lock tables never leave their package** — accessors return a release function, never a mutex.
 - **Lock order: merge before stash, never after.** Never hold a mutex across a `Wait` for a goroutine that
   takes it. A goroutine that wins a lock after its caller timed out must release it.
@@ -338,7 +341,7 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
   `git add -u`, **not** `git add -A`.
 - **A merge conflict interrupts the click, it does not cancel it.** The turn that finishes resolving merges
   and marks Done whatever `auto_merge` says, but only the recorded click (`ArmCommitAndDone`) authorizes
-  that merge, and it is spent by the resolution it waited for.
+  that merge, and the resolution it waited for consumes it.
 - **Nothing is marked Done that did not reach the target branch.** `docs/commit-and-done.md`.
 - **A run the user did not start is not left waiting in Review on a text-only turn** — the parent's
   context answers it, as it answers `ask_question`. Which runs that covers, and why the answer is an
@@ -453,8 +456,9 @@ deliberately omits.
 
 | File | Subsystem |
 |---|---|
+| `docs/adr/README.md` | what belongs in a decision record, its shape, and the index of the records that exist |
 | `docs/configuration.md` | every env var, the flag twins, startup resolution, the archgate exceptions, the release packages |
-| `docs/sandbox-runtime.md` | boot injection, the stale sweep, container environment, podman args, capabilities, mount policy, podman subprocesses |
+| `docs/sandbox-runtime.md` | boot injection, the stale sweep, container environment, podman args, capabilities, mount policy, memory caps and admission, podman subprocesses |
 | `docs/sandbox-bridge.md` | bridge connections, LSP session binding, wire IDs, payload limits, upload lifetime |
 | `docs/confinement.md` | path jails, the no-project host jail, size and output caps, subprocess environments |
 | `docs/locking.md` | keylock domains, accessor shape, lock order, watched waits, `sandboxMu` |

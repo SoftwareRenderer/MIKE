@@ -80,14 +80,7 @@ create and `PUT` (400 naming the field).
   `TestTaskSandboxIsolatesWhatACapabilityGrantAssumes`, `TestBuildExtensionCreateArgs_CapabilityPosture`,
   and each builder's `…BeginWithTheSharedPreface` test, which fails the day one re-inlines the posture.
 
-### There is no capability denylist, and what replaced it
-
-Measured on runsc release-20260721.0: a guest with `SYS_ADMIN` cannot write through an `ro` bind mount
-(its remount flips its own mount table to `rw` and the gofer still refuses), sees only its own PIDs, and
-its `mount --bind / x` exposes its own overlay, not the host tree. So a capability is judged by its
-**shape** — it lands in a guest that started from `--cap-drop ALL`, which makes `SYS_ADMIN` as harmless
-a name as `CHOWN` — while `--privileged` is an *argument* and is refused at install and on
-`PUT /api/extensions/{id}`.
+### Capabilities are judged by shape, not name
 
 ## Extension sandbox mounts
 
@@ -141,156 +134,106 @@ a name as `CHOWN` — while `--privileged` is an *argument* and is refused at in
 ## A container's memory record, and what the user is told
 
 - **Held memory is `anon + shmem` from `memory.stat`** — `sandboxruntime.CgroupMemory.HeldBytes`, the
-  definition every number in this subsystem rests on. `anon` is the host-side heaps of the processes in
-  the cgroup; `shmem` is shared memory, tmpfs, and **the RAM backing the gVisor guest**, because runsc
-  runs the guest out of a memory file. Measured here, a container writing 500 MB *inside* the guest put
-  537 MB into `shmem` and left `anon` at 17 MB — so an `anon`-only reading reports 18 MB for a sandbox
-  holding half a gigabyte, which is how this was originally wrong.
-  What is excluded, and why: `file` (cgroup v2 counts `shmem` inside it, so the host's page cache is
-  `file − shmem` — RAM the host can take back, and a container that only made the host *read* a large
-  file moves neither line), and `kernel`, two thirds of which measured as `slab_reclaimable`.
-  A missing `anon` line is *no data*, never 0 MB; a missing `shmem` line is 0.
-- **`memory.peak` is not a source.** It counts everything the cgroup ever touched, page cache included,
-  and on this kernel it cannot be reset — a container that grew once reads its cap forever, which is
-  where a trivia task came to record 4990 MB against a 1024 MB limit. The high-water is MIKE's own:
-  `MemoryTracker` keeps `peak` per container, raises it from each sample and never lowers it, and
-  `Forget` drops it with the container.
-- **Sampling follows the container, not the task's status** (`backend/stream/sandbox_stats.go`): a task
-  idle with its container alive still holds RAM the budget must see. Only a container whose ID names no
-  task row (the project's `proj:` terminal container) is skipped there. Two ticks share one sampler —
-  500 ms to sample (`DefaultSandboxSampleInterval`, also the budget's clock), 2 s to broadcast a value
-  that changed. The final reading is taken before the container is removed, so a run's peak is its
-  high-water and not its last sample.
-- `oom_kill` dies with the container, so `Stop` hands `(peak, oomKills)` to
-  `Store.RecordTaskSandboxMemory` before the removal: the one writer of `tasks.sandbox_memory_peak_mb`
-  and `tasks.sandbox_oom_kills`. An ID naming no row (the `proj:` container, a task deleted mid-run) is a
-  no-op, and a reading that produced neither number reports nothing rather than erasing a previous run.
-  `UpdateTask` owns neither column but reads both back, so broadcasting the row it just wrote cannot
-  clear a measurement taken during it.
-- **A stored peak means *the last run*.** It is not an estimate of anything and is used by no admission
-  decision. Peaks written before this definition counted page cache, so `zeroLegacySandboxPeaks` clears
-  the column and any dismissal taken against it exactly once, guarded by its own `config` row (the
-  statement is not idempotent in the direction that matters: a re-run would zero honest numbers).
+  definition every number in this subsystem rests on. `shmem` carries the gVisor guest's RAM, so an
+  `anon`-only reading reports a fraction of what a sandbox holds. `file` and `kernel` are excluded, and a
+  missing `anon` line is *no data*, never 0 MB; a missing `shmem` line is 0.
+- **`memory.peak` is not a source.** The high-water is MIKE's own: `MemoryTracker` keeps `peak` per
+  container, raises it from each sample, never lowers it, and `Forget` drops it with the container.
+- **Sampling follows the container, not the task's status** (`backend/stream/sandbox_stats.go`): a task idle
+  with its container alive still holds RAM the budget must see. Only a container whose ID names no task row
+  (the project's `proj:` terminal container) is skipped. Two ticks share one sampler — 500 ms to sample
+  (`DefaultSandboxSampleInterval`, also the budget's clock), 2 s to broadcast a value that changed. The final
+  reading is taken before the container is removed, so a run's peak is its high-water and not its last sample.
+- `oom_kill` dies with the container, so `Stop` hands `(peak, oomKills)` to `Store.RecordTaskSandboxMemory`
+  before the removal: the one writer of `tasks.sandbox_memory_peak_mb` and `tasks.sandbox_oom_kills`. An ID
+  naming no row is a no-op, and a reading that produced neither number reports nothing rather than erasing a
+  previous run. `UpdateTask` owns neither column but reads both back, so broadcasting the row it just wrote
+  cannot clear a measurement taken during it (`docs/storage.md → The schema is gated by PRAGMA user_version`).
+- **A stored peak means *the last run*.** It estimates nothing and is used by no admission decision.
+- **What needs a person's attention is decided once**, in `frontend/src/lib/utils/memory-stats.ts`: an OOM
+  kill, or a peak that reached the limit. Running near the limit is pressure, not an alert — it colours the
+  bar and the shield dot orange and asks for nothing. Red outlives the run because the numbers that produced
+  it do.
+- **A dismissal is a column on the task row**, not a record in the browser that clicked: `POST
+  …/memory-alert-ack` through `Store.DismissTaskMemoryAlert`, then the task broadcast — the same path a status
+  change travels, so one operator with a phone and a laptop sees one answer. The ack keeps the three numbers
+  the alert showed and covers an alert when the limit matches and neither counter is worse, so a worse run
+  announces itself again; the comparison is by numbers and not a timestamp because a container's counters only
+  rise and `sandbox_stats` carries no time. A task that hits an identical cap in a later run stays dismissed —
+  nothing on the row distinguishes the runs, and a per-container run token would re-arm it.
+- Tests: `backend/sandbox/memory_peak_test.go`, `backend/sandbox/memory_accounting_test.go`,
+  `backend/extensions/memory_accounting_test.go`, `pkg/sandboxruntime/memorystats_test.go`,
+  `backend/stream/sandbox_stats_test.go`, `backend/api/task_memory_alert_test.go`,
+  `frontend/src/lib/utils/__tests__/memory-stats.unit.ts`,
+  `frontend/src/lib/components/__tests__/{task-header-sandbox-dot,sandbox-panel-memory,card-memory-pill}.unit.svelte.ts`.
 
 ## The memory budget: what admits a task, and what pauses one
 
-- **One rule**, in `exec.MemoryGate`: `mikeMB + reservations + candidate ≤ capacity`. `mikeMB` is what
-  MIKE itself costs — every container it started plus its own process — and capacity is
-  `MIKE_MEMORY_BUDGET_PCT` (default 90) percent of installed RAM, computed once at startup in
-  `backend/server` and handed to the gate, to `ConfigStore.SetMemoryBudget` for the About tab, and to the
-  startup log line. **The ceiling is MIKE's share of the machine, not a margin over everyone else's
-  usage**: what the rest of the host holds is in no admission sum. `/proc/meminfo` has exactly one reader
-  in the tree (`meminfoMB` under `readMeminfoMB`), and `/proc/self/status` likewise (`selfRSSMB` under
-  `readSelfRSSMB`).
-- **`mikeMB` is the sum of three accountants** (`memoryBudget.Measure`): the task containers and the
-  project-level `proj:` terminal containers (`SandboxManager.MemoryAccounting`, which iterates the same
-  `active` map that holds both), the extension sandboxes
-  (`ExtensionSandboxManager.MemoryAccounting`), and the server process itself (`selfProcessAccountant`,
-  `VmRSS` — no cgroup, no limit, so held and charge are the same figure; an unreadable `VmRSS` adds
-  nothing and warns once, not once per tick). Each container costs `max(held, cap)` —
-  `sandboxruntime.ChargeMB` — so a capped container pays its cap, an uncapped one what it holds, an
-  unreadable one its cap alone: "unreadable" is not "free". Caps are recorded when the container is
-  created (`capsMB`, `extensionSandboxState.memLimitMB`), because the row that carried the limit can
-  change while it runs.
-- **`heldMB` travels with `mikeMB` for the log, not the rule.** The ceiling never reads it, but the tick
-  prints the two side by side, and the gap between them is what makes a `paused (frees 2048 MB)` line
-  readable when the container behind it holds 25 MB.
-- **The reservation a task acquires lives only across the container's creation.** `acquireMemSlot`
-  reserves the project's configured limit — the cap the container is about to get, never a mean of other
-  tasks' history — and `confirmMemReservation` spends it as soon as `Create` has registered the
-  container, since from then the managers' sums represent it. **A non-sandboxed run books the same number
-  and keeps it to the end of the run**: its agent CLI is memory MIKE started with no cgroup to measure,
-  so nothing else would ever report it. An uncapped project reserves 0 and is admitted only while the
-  budget is *under* the ceiling. Consequence worth knowing: `GetRunningSandboxedTasks` lists only
-  sandbox-enabled projects, so a host run's reservation is one the supervisor cannot give back — it is
-  returned when the run ends, and only then.
-- **An unread host is never read as an empty one.** If either `MemTotal` or `MemAvailable` is missing,
-  the tick reports "not measured" and the gate admits on its reservation ledger — the pre-measurement
-  behaviour — rather than admitting everything.
-- **Pause is the last resort, and it picks the cheapest victim.** `MemorySupervisor` takes each live
-  container's charge from `SandboxManager.Charges()` and stops the smallest, one per tick: stopping a
-  task destroys its container's writable layer and the turn in flight, and the large task is the one
-  likeliest to finish and free its own memory. A task with no live container is costed at the reserve the
-  budget already carries, never at zero. Trigger 1 is a non-empty queue — the case a finishing task
-  solves by itself. Trigger 2 is `MemAvailable` under 5 % of `MemTotal`
-  (`memoryAvailableFloorPct`), which pauses with an empty queue because nothing finishing soon is the
-  reason the host is tight; it logs at `Warn`, naming the task and what it waits on. Resume happens only
-  when `InUse() + reserve ≤ capacity`, so a resume cannot immediately re-queue.
-- **Both transitions write to the task's own history, because the paused row cannot say it.** `noteMemoryPause`
-  and `noteMemoryResume` (`backend/exec/memory_supervisor.go`, on the executor side of
-  `memorySupervisorActions`) record a `system` note on the task's current thread through `systemNote`
-  (`backend/exec/system_note.go`), which is where the role's rule lives: a system row is display-only, since
-  `groupTaskMessages` drops it when it rebuilds the conversation, and the same type carries the retry hint
-  and the merge orchestrator's notes. The row's `kind` (`memory_pressure` / `memory_resumed`) is what the
-  card is worded and coloured by: `systemNoteText`
-  renders the sentence from `en.ts` and `severity: "warning"` selects the yellow system card, so the kind
-  strings and `chat-entries.ts` must agree case for case; the stored `content` stays English because it is
-  what an API client reads. Order is the rule: the pause note goes **after** `SetMemorySupervisorPaused`,
-  because it promises the auto-resume that flag arms, and a failed stop or start records nothing. The same
-  note corrects `tasks.output`, which the shared stop transition fills with "Paused by user" for every
-  pause including this one, through `SetMemoryPressurePausedOutput` — one guarded statement whose guard is
-  `execution_state = 'paused' AND memory_supervisor_paused = 1`. That guard doubles as the ownership check
-  for the note: a row whose flag a start already cleared gets neither, because whoever acted next owns what
-  the task says about why it stopped, and a promise to resume would describe a run that is already going.
-  The `status` frame's `activity` line stays "Task paused by user": the SPA reads it only for its
-  `Pulling ` prefix, and the note travels beside it.
-- **Trigger 2 is the only host-side guard, and it is a thin one.** Because the admission sum ignores
-  everyone else's RAM, MIKE can be admitted onto a machine that is already full; nothing in the gate
-  refuses it. Below the 5 % floor the supervisor pauses, and below what the kernel will tolerate the host
-  memcg killer takes a whole `runsc` sandbox rather than the over-allocating guest process (exit 128,
-  `WaitPID failed: EOF`) — the failure recorded in *The cap is the enforcement point* below and in
-  `docs/testing.md`. `HostMemoryTight` and admission are deliberately independent: a tight host still
-  admits whatever fits MIKE's ceiling, and the supervisor is what reacts.
-- **The cap is the enforcement point; a throttle line is not.** `ApplyMemoryLimit` writes `memory.max`
-  and `memory.swap.max = 0`, and leaves `memory.high` at `max` (clearing one an older build may have
-  left). Measured on this host: a throttle line at 90 % of the cap has nothing to reclaim for a gVisor
-  guest — its RAM is charged as `shmem` and swap is off — so crossing it *stalls* rather than sheds: the
-  same 512 MB allocation took 21 s with the line (2032 throttle events) and 1 s without, and the cgroup
-  OOM-killed either way. (A whole-sandbox death seen alongside it under parallel load is the host memcg
-  killer taking runsc, which `docs/testing.md` records for this test with or without a throttle line — the
-  stall does not need to be blamed for it. The stall alone is reason enough.) What bounds the overshoot
-  between samples is admission, not throttling.
-- **A memory cap has a floor below which it kills the sandbox, not the process.** An idle sandbox holds
-  ~23 MB for its own guest processes, and a 64 MB cap was measured taking runsc itself rather than the
-  over-allocating guest process (exit 128, `WaitPID failed: EOF`, container gone, 3 runs out of 3, no host
-  pressure involved). At 128 MB the guest process is OOM-killed and the container survives, which is what
-  `TestMemoryLimitEnforced` asserts at that cap. A project configured with a very low limit therefore does
-  not get "the runaway process dies"; it gets a dead sandbox.
-- **Extension sandboxes are bounded** (`DefaultExtensionMemory` = 2048 MB, above the gopls peak of 1816
-  MB measured here): an unbounded one is invisible to the budget until it has already grown. The limit
-  field reads three ways — 0 is "no opinion, take the default", positive is that bound, negative is no
-  bound — in the manifest and in the stored config alike, so declaring a limit is never overwritten by
-  the default.
-- **The shared containers count, but not against a task.** One `kanban-ext-<author>-<name>` sandbox per
-  LSP extension and a project's `proj:` terminal container are real RAM, so they sit inside `mikeMB`;
-  they are never inside a *task's* recorded peak, which is its own container only.
-  Extension sandboxes outlive the task that started them (`ExtensionStopGracePeriod`), and a terminal
-  container is released by its holders, so attributing them to a task would charge one run for another's.
-- What needs a person's attention is decided once, in `frontend/src/lib/utils/memory-stats.ts`: an OOM
-  kill, or a peak that reached the limit. Running near the limit is pressure, not an alert — it colours
-  the bar and the shield dot orange and asks for nothing. Red is the alert, and it outlives the run
-  because the numbers that produced it do.
-- A dismissal is a column on the task row, not a record in the browser that clicked: one operator with a
-  phone and a laptop sees one answer. `POST …/memory-alert-ack` writes it through
-  `Store.DismissTaskMemoryAlert` and broadcasts the task, which is how the other devices find out — the
-  same path a status change travels. The ack keeps the three numbers the alert showed and covers an
-  alert when the limit matches and neither counter is worse, so a worse run announces itself again; the
-  comparison is by numbers rather than a timestamp because a container's counters only rise and
-  `sandbox_stats` carries no time. Known nuance: a task that hits an identical cap in a *later* run
-  stays dismissed, because nothing on the row distinguishes the runs — a per-container run token, on the
-  row and in the `sandbox_stats` frame, is what would re-arm it.
-- Tests: `backend/sandbox/memory_peak_test.go` (incl. the high-water surviving a voluntary free, on a real
-  gVisor container), `backend/sandbox/memory_accounting_test.go`,
-  `backend/extensions/memory_accounting_test.go`, `pkg/sandboxruntime/memorystats_test.go`,
-  `backend/exec/memory_gate_test.go`, `backend/exec/memory_supervisor_test.go`,
-  `backend/server/memory_budget_test.go`, `backend/stream/sandbox_stats_test.go`,
-  `backend/store/tasks_test.go`, `backend/store/migrations_test.go`,
-  `backend/api/task_memory_alert_test.go`,
-  `frontend/src/lib/utils/__tests__/memory-stats.unit.ts`,
-  `frontend/src/lib/api/__tests__/queue-board-scope.unit.ts`,
-  `frontend/src/lib/components/__tests__/{task-header-sandbox-dot,sandbox-panel-memory,card-memory-pill}.unit.svelte.ts`.
-  The two history notes: `backend/store/tasks_test.go` (the output-text guard),
-  `frontend/src/lib/utils/__tests__/chat-entries.unit.ts` (the wording by kind),
-  `frontend/src/lib/services/__tests__/stream-handler.unit.ts` (the frame carries kind and severity),
-  `frontend/src/lib/components/__tests__/chat-system-note-warning.unit.svelte.ts` (the card it draws), and
-  `backend/exec/system_note_test.go` (the two record shapes).
+- **One rule**, in `exec.MemoryGate`: `mikeMB + reservations + candidate ≤ capacity`. `mikeMB` is what MIKE
+  itself costs — every container it started plus its own process — and capacity is
+  `MIKE_MEMORY_BUDGET_PCT` (default 90) percent of **installed** RAM, computed once at startup in
+  `backend/server` and handed to the gate, to `ConfigStore.SetMemoryBudget` for the About tab and to the
+  startup log line. `/proc/meminfo` has exactly one reader in the tree (`meminfoMB` under `readMeminfoMB`),
+  and `/proc/self/status` likewise (`selfRSSMB` under `readSelfRSSMB`).
+- **`mikeMB` is the sum of three accountants** (`memoryBudget.Measure`): task containers and the project-level
+  `proj:` terminal containers (`SandboxManager.MemoryAccounting`, over the same `active` map that holds both),
+  the extension sandboxes (`ExtensionSandboxManager.MemoryAccounting`), and the server process itself
+  (`selfProcessAccountant`, `VmRSS` — no cgroup, so held and charge are one figure; an unreadable `VmRSS` adds
+  nothing and warns once, not once per tick). Each container costs `max(held, cap)`
+  (`sandboxruntime.ChargeMB`): a capped container pays its cap, an uncapped one what it holds, an unreadable
+  one its cap alone — "unreadable" is not "free". Caps are recorded at container creation (`capsMB`,
+  `extensionSandboxState.memLimitMB`), because the row that carried the limit can change while it runs.
+- **`heldMB` travels with `mikeMB` for the log, not the rule.** The gap between them is what makes a
+  `paused (frees 2048 MB)` line readable when the container behind it holds 25 MB.
+- **The reservation a task acquires lives only across the container's creation.** `acquireMemSlot` reserves
+  the project's configured limit — the cap the container is about to get, never a mean of other tasks'
+  history — and `confirmMemReservation` spends it once `Create` has registered the container. **A
+  non-sandboxed run books the same number and keeps it to the end of the run**: its agent CLI is memory MIKE
+  started with no cgroup to measure. An uncapped project reserves 0 and is admitted only while the budget is
+  *under* the ceiling. `GetRunningSandboxedTasks` lists only sandbox-enabled projects, so a host run's
+  reservation is one the supervisor cannot give back — it returns when the run ends, and only then.
+- **An unread host is never read as an empty one.** If `MemTotal` or `MemAvailable` is missing, the tick
+  reports "not measured" and the gate admits on its reservation ledger rather than admitting everything.
+- **Pause is the last resort and picks the cheapest victim**, one per tick; a task with no live container is
+  costed at the reserve the budget already carries, never at zero. Trigger 1 is a non-empty queue; trigger 2
+  is `MemAvailable` under 5 % of `MemTotal` (`memoryAvailableFloorPct`), which pauses with an empty queue and
+  logs at `Warn`, naming the task and what it waits on. Resume happens only when
+  `InUse() + reserve ≤ capacity`, so a resume cannot immediately re-queue.
+- **Both transitions write to the task's own history, because the paused row cannot say it.**
+  `noteMemoryPause` / `noteMemoryResume` (`backend/exec/memory_supervisor.go`) record a `system` note on the
+  current thread through `systemNote`, whose rule lives with the role: a system row is display-only, since
+  `groupTaskMessages` drops it when it rebuilds the conversation. The row's `kind` (`memory_pressure` /
+  `memory_resumed`) is what the card is worded and coloured by — `systemNoteText` renders the sentence from
+  `en.ts` and `severity: "warning"` selects the yellow card, so the kind strings and `chat-entries.ts` must
+  agree case for case; the stored `content` stays English because an API client reads it. **Order is the
+  rule:** the pause note goes *after* `SetMemorySupervisorPaused`, because it promises the auto-resume that
+  flag arms, and a failed stop or start records nothing. The same note corrects `tasks.output` through
+  `SetMemoryPressurePausedOutput`, one guarded statement whose guard is
+  `execution_state = 'paused' AND memory_supervisor_paused = 1` — that guard doubles as the ownership check,
+  because whoever acted next owns what the task says about why it stopped. The `status` frame's `activity`
+  line stays "Task paused by user": the SPA reads it only for its `Pulling ` prefix.
+- **`HostMemoryTight` and admission are deliberately independent**, which costs an admission that a tight
+  host will go on to pause. Below
+  the 5 % floor the supervisor pauses; below what the kernel tolerates the host memcg killer takes a whole
+  `runsc` sandbox rather than the over-allocating guest process (the failure `docs/testing.md → Tests that
+  fail only under load` records).
+- **Extension sandboxes are bounded** (`DefaultExtensionMemory`, above any measured language-server peak):
+  an unbounded one is invisible to the budget until it has already grown. The limit field reads three ways —
+  0 is "no opinion, take the default", positive is that bound, negative is no bound — in the manifest and in
+  the stored config alike, so declaring a limit is never overwritten by the default.
+- **The shared containers count, but not against a task.** One `kanban-ext-<author>-<name>` sandbox per LSP
+  extension and a project's `proj:` terminal container sit inside `mikeMB` and never inside a *task's*
+  recorded peak, which is its own container only. Extension sandboxes outlive the task that started them
+  (`ExtensionStopGracePeriod`) and a terminal container is released by its holders, so attributing them to a
+  task would charge one run for another's.
+- Tests: `backend/exec/memory_gate_test.go`, `backend/exec/memory_supervisor_test.go`,
+  `backend/server/memory_budget_test.go`, `backend/store/tasks_test.go`, `backend/store/migrations_test.go`.
+
+## The cap is the enforcement point, and it has a floor
+
+- `ApplyMemoryLimit` writes `memory.max` and `memory.swap.max = 0`, and leaves `memory.high` at `max`
+  (clearing one an older build may have left). Nothing bounds the overshoot between samples except admission.
+- A cap set far below 128 MB does not mean "the runaway process dies"; it gets a dead sandbox. A project
+  configured that low is answered by the container's exit, and `TestMemoryLimitEnforced` holds the floor.
+- Tests: `TestMemoryLimitEnforced` (asserts the process-dies-not-the-sandbox behaviour at 128 MB),
+  `backend/sandbox/memory_peak_test.go`.

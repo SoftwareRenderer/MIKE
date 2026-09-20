@@ -1,7 +1,7 @@
 # Agent Extensions — Adapter & WASM Detail
 
 Read this before writing or changing a WASM adapter, `backend/agent/`, or `backend/exec/loop_agent.go`.
-The invariants live in `AGENTS.md → Agent Extensions`. Reference implementation:
+The invariants live in `AGENTS.md → Extensions`. Reference implementation:
 `../MIKE-extensions/agent/pi/` (its unit tests live there too and are **not** part of
 `go test ./backend/... ./pkg/...`).
 
@@ -62,10 +62,10 @@ and resolves that config without spawning anything; `Prepared.Binary()` reports 
 `Prepared.Start` spawns it. `NewAgentRunner` is the two in sequence.
 
 The sandboxed task's pre-flight (`exec.prepareAgent`) therefore runs **after** the adapter is known
-good, and asks the container about `Prepared.Binary()` — a hard-coded name refused every agent whose
-binary was not literally `pi`, in sandboxed projects only. A refusal keeps its own code,
-`agent_not_available`, distinct from `agent_start_failed`; the message names the binary it actually
-looked for.
+good, and asks the container about `Prepared.Binary()`: a hard-coded name refused every agent whose binary was
+not literally `pi`, and only in sandboxed projects. A refusal answers `agent_not_available`, not
+`agent_start_failed`, and names the binary it probed — an agent that fails with the other code is a spawn
+failure, which is a different bug. Test: `backend/exec/agent_preflight_test.go`.
 
 ## An agent extension *is* a provider — and the UI learns about it live
 
@@ -85,40 +85,21 @@ and the client has to notice it:
   the derived agent rows: the dialog is open while the user installs the extension, and a full
   re-sync would discard the LLM provider they are editing (keys come back masked). Agents are
   the only rows the user does not own, so they are the only ones that move.
-- `TaskChat.svelte` tracks `appStore.config` — it outlives the change (a chat stays mounted),
-  unlike the modals, which are built per open. Its sync is `untrack()`ed because it reads and
-  writes the provider/selection state it is updating.
+- `TaskChat.svelte` tracks `appStore.config` — it outlives the change (a chat stays mounted), unlike the
+  modals, which are built per open. Its sync is `untrack()`ed because it reads and writes the
+  provider/selection state it is updating.
 
-Tests: `frontend/src/lib/stores/__tests__/app-store-refresh-config.unit.ts`,
-`frontend/src/lib/components/__tests__/config-modal-live-agent-provider.unit.svelte.ts`,
-`reselectProvider` in `frontend/src/lib/utils/__tests__/providers.unit.ts`.
-
-## Naming the binary, and the agent as a provider
-
-- `SubprocessConfig().Binary` is the only home for the executable's name — never a manifest field (a second
-  source of truth that can disagree) and never a literal in the backend. A sandboxed task's
-  `BinaryAvailable` check runs on the resolved name **after** the adapter is loaded and validated
-  (`exec.prepareAgent` over `agent.PrepareAgent`/`Prepared.Start`; `NewAgentRunner` is the two in
-  sequence), because a hard-coded `"pi"` refused every other agent in sandboxed projects only, and reported
-  the extension rather than the binary it probed. The refusal keeps the code `agent_not_available`,
-  distinct from `agent_start_failed`, and names the binary it looked for.
-  Test: `backend/exec/agent_preflight_test.go`.
-- The URL scheme `agent://<name>` is emitted and parsed in one place — `types.AgentProviderURL` /
-  `types.ParseAgentURL` / `types.IsAgentURL` on `types.AgentURLPrefix` (`backend/types/agent_url.go`),
-  which every reader calls including `backend/config` — which can never import `backend/agent`, since
-  `agent → extensions → git → config`. The browser mirrors the prefix as `AGENT_URL_PREFIX`.
-- An enabled agent extension **is a provider** with that URL: `GET /api/config` merges it per request and
-  never persists it, so the client re-reads the config on the `extension_change` broadcast
-  (`appStore.refreshConfig()` in `frontend/src/lib/stores/app.svelte.ts`). An agent that only shows up after
-  a browser refresh is a bug.
+An agent extension that only appears in the list after a browser refresh is a bug in this path, not in the
+installation. Tests: `frontend/src/lib/stores/__tests__/app-store-refresh-config.unit.ts`,
+`frontend/src/lib/components/__tests__/config-modal-live-agent-provider.unit.svelte.ts`, and `reselectProvider`
+in `frontend/src/lib/utils/__tests__/providers.unit.ts`.
 
 ## A manifest's sandbox mount is a proposal; the user's grant is the mount
 
-`capabilities.agent.sandbox.mount` names where the agent keeps its configuration **inside** the container,
-and what it would like on the host side of that path. It is registry text, so it is a proposal and never a
-grant: what it declared used to be resolved through `config_schema` and mounted — `rw` — into every task
-container of every sandboxed project, whatever provider the task ran, and `agent.Registry.GetAgentSandbox`
-no longer does that.
+`capabilities.agent.sandbox.mount` names where the agent keeps its configuration **inside** the container, and
+what it would like on the host side of that path. It is text from the registry, so it is a request and never a
+grant: `agent.Registry.GetAgentSandbox` mounts only what a person approved, and reading the declaration itself
+into every task container of every sandboxed project is the thing this rule refuses.
 
 - The host side comes from one place: `PUT /api/extensions/{id}/agent-mount`, which writes the extension's
   `sandbox_mount` config field. `extensions.AgentMountConfigKey` is the shared name; the route is the only

@@ -3,7 +3,7 @@
 Read this before touching `App/Sidebar.svelte`, `Card.svelte`, `App/TopBar.svelte`,
 `CardDetail/TaskHeader.svelte`, `ExplorerHeader.svelte`, `$lib/utils/app-link.ts`, or the click routing
 in `use-board-arrow-nav.ts` / `keyboard.ts`. The
-hard rules live in `AGENTS.md → Link-like Rows`.
+hard rules live in `AGENTS.md → Frontend`.
 
 Sidebar project rows, task cards, both Explorer buttons and all four Terminal buttons are reachable by
 real URLs, so the browser's own link actions work on them: right-click → *Open Link in New Tab/Window*,
@@ -97,8 +97,8 @@ source is the card not the link, second tab lands on the linked project/task/exp
 tab holds a terminal and nothing else), e2e
 `preferences-keyboard.spec.ts` (isolated; rebinding frees Ctrl+Click).
 
-## Markup and stacking contract (moved from AGENTS.md)
-### Link-like Rows (projects & task cards)
+## Markup and stacking contract
+
 Sidebar project rows and task cards are real links, so the browser's own link actions work on them (open in new tab, middle click, copy link address, status-bar URL) using the same deep links the app writes (`?project=`, `?project=&task=`).
 
 - **Project row** = `<a class="project-item" href="/?project=<id>" role="button" tabindex="0">`; unmodified click `preventDefault()`s, **any modifier click is left uncancelled**. A cloning project gets **no href**. `role="button"` means Space is handled explicitly.

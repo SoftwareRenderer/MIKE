@@ -4,10 +4,10 @@ The rules are in `AGENTS.md → Server Management`.
 
 ## Shutdown is a declared stage list
 
-- A component registers its stop step in `server.Registrar` (`backend/server/lifecycle.go`) **where it is
-  constructed**, so construction order is shutdown order and `NewServer` reads as the list of things that
-  need stopping. Registering the same stage twice is a panic at startup, and a **nil step is refused at
-  registration** — a nil step would panic only at shutdown, long after the construction that misplaced it.
+- A component registers its stop step with `s.reg(stage, name, step)` at a stage declared in
+  `backend/server/lifecycle.go`, **where it is constructed**, so construction order is shutdown order and
+  `NewServer` reads as the list of things that need stopping. Registering a stage twice panics at startup,
+  and a nil step is refused at registration — otherwise it panics at shutdown, far from its cause.
 - The first stage cancels the server's base context (`Server.Detached()`), before any resource a detached
   operation still writes through is taken away. What sets the rest of the order is the pipe/`WaitDelay`
   rule in `docs/sandbox-runtime.md`: websocket watchers → terminal sessions → lsp → extensions → sandbox

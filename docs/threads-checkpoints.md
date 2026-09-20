@@ -23,8 +23,9 @@ thread has no message to hang it on. Both are opaque owners — the ref layout d
 patch and never by moving `HEAD`.** The restore is `checkout -f HEAD` + `clean -fd` + `read-tree --reset -u
 <snapshot>` + (if the snapshot is a 3-parent stash commit) `checkout <p3> -- .` to overlay the untracked
 files git kept off that tree. Reading a tree cannot fail halfway the way `git apply` can, and the only
-`git reset` in it is the no-op index refresh. Branches are moved exclusively by checkout/merge inside
-`ResetToBranch` and `CreateWorktree`. The `clean -fd` step reaches untracked files only, so a task's
+`git reset` in it is the no-op index refresh. Nothing rewrites a branch ref behind git's back — the only
+`update-ref` calls in the tree are the snapshot refs in `git/snapshots.go` — so a branch moves only by
+checkout or merge (`CreateWorktree`'s `checkout -B`, the merge path's `checkout -f <target>`). The `clean -fd` step reaches untracked files only, so a task's
 `.mike-uploads/` — excluded through the repository's local `info/exclude`, see `docs/git-operations.md` —
 survives a restore with its attachments in it; `TestExcludedUploadsSurviveACleanAndARestore` holds that,
 including the control that the same restore does discard an ordinary untracked file.
@@ -106,10 +107,10 @@ one exception is a failed pin, which leaves the entry on purpose: it is then the
 
 1. **Every thread shares one worktree.** A switch is a rewind of live files under whoever is looking.
 2. **Thread identity is decided in more than one place.** `thread.GitBranch` is the authority when set,
-   otherwise the task's branch, otherwise `ResolveMainBranch` recovers a slug branch `task/<slug>-<6>`
-   that Main lost when a fork took `task/<taskID>` away. That resolution is duplicated across
-   `threadBranchOrFallback`, `resolveTaskBranchForRollback`, `ResolveDiffBaseline`, `resolveThreadBranch`
-   and `ensureTaskBranch`, each with slightly different fallbacks.
+   otherwise the task's branch, otherwise `ResolveMainBranch` recovers a slug branch `task/<slug>-<6>` that
+   Main lost when a fork took `task/<taskID>` away. That chain is rewritten at each site that needs it —
+   `git.ResolveTaskBaseline`, `git.ResolveDiffBaseline`, `(*Server).checkoutThreadBranch` and the inline
+   `thread.GitBranch` tests in `api/task.go` and `handler_message.go` — each with different fallbacks.
 3. **Checkpoint identity is positional.** "The checkpoint at index N" means "the Nth message with a hash"
    in message order; the durable `threads.checkpoint_commit_hash` is written at fork time and ignored by
    the readers that matter.
@@ -118,23 +119,20 @@ one exception is a failed pin, which leaves the entry on purpose: it is then the
 
 ## Deferred work, the right shape
 
-**Per-thread worktrees (fixes 1, 5, and most of 3).** A thread *is* a branch plus a snapshot, so the
-isolation is already in git — the cost is disk (an agent's `node_modules` per thread). The shape that
-avoids paying it twice: worktrees by **branch**, snapshots by **thread**, since several threads share a
-fork branch; and since a diff panel already speaks arbitrary refs (`GetDiffInRange(base, head)`, and the
-pinned done-task diff is `BaseCommit..BranchTip`), the UI change is small. The real work is the migration:
-a thread without a worktree must lazily materialize one, which is `CreateWorktree(branch)` followed by
-`ResetWorktreeTo(snapshot)` — the same two calls a switch does today, aimed at a new directory instead of
-rewinding the old one. Everything downstream of that — sandbox mounts, the diff baseline, orphan-worktree
-GC, the terminal's cwd — resolves paths through `WorktreePath(taskID)`, which would need to become
-`WorktreePath(taskID, threadID)`. Roughly 3–5 days.
+Deferred, not rejected: what it costs is disk (an agent's `node_modules` per thread) and the migration
+below, and no day-count is recorded here because a number copied forward is one nobody re-measured. The
+shape is here because building it the other way means paying twice:
 
-**Identity resolution in one place (fixes 2, 3).** A `ThreadContextResolver` returning
-`{branch, base, diffBaseline, snapshotHash}` per `(task, thread)`, built once from
-`task.BaseCommit`/`BaseRef`/`Branch` plus `thread.GitBranch`/`CheckpointCommitHash`/`CheckpointSeq` — the
-five fallback chains collapse into one. Then give a checkpoint an id: make it the owning assistant
-message's id, put `checkpoint_seq` on `task_messages` alongside the hash, and address it directly instead
-of counting positions.
+- **Per-thread worktrees (gaps 1, 4 and most of 3).** Worktrees by **branch**, snapshots by **thread**,
+  since several threads share one fork branch. A thread without a directory materializes one with
+  `CreateWorktree(branch)` then `ResetWorktreeTo(snapshot)` — the two calls a switch already makes, aimed at
+  a new directory. Everything downstream resolves paths through `WorktreePath(taskID)`, which has to become
+  `WorktreePath(taskID, threadID)`: sandbox mounts, the diff baseline, orphan-worktree GC, the terminal cwd.
+- **Identity resolution in one place (gaps 2 and 3).** One `ThreadContextResolver` returning
+  `{branch, base, diffBaseline, snapshotHash}` per `(task, thread)`, built once from
+  `task.BaseCommit`/`BaseRef`/`Branch` plus `thread.GitBranch`/`CheckpointCommitHash`, is
+  the five chains above collapsed into one. A checkpoint is then addressed by its owning assistant
+  message's id — `checkpoint_seq` on `task_messages` beside the hash — instead of by counting positions.
 
 ## Tests
 

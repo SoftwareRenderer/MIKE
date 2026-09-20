@@ -2,7 +2,7 @@
 
 Read this before touching `backend/server/routes.go` (the `/extensions` tree),
 `frontend/public/host-client.js`, `frontend/src/lib/services/extension-manager.svelte.ts` or
-`ui-injector.svelte.ts`. The hard rules live in `AGENTS.md → UI Extensions`.
+`ui-injector.svelte.ts`. The hard rules live in `AGENTS.md → Extensions`.
 
 ## Serving and listing
 
@@ -50,7 +50,7 @@ is known measured ~2 round trips better (Preview button 1253 ms → 670 ms at 12
 host still does not know the file is openable, and boots a frame for every open that ends in
 `fileNotFound` / `fileTooLarge`. Taking it also requires `editor.addFooterButton` to wait for
 `.editor-footer .footer-left` instead of answering `editor footer not found` — an installed
-extension stops asking after 8 tries at 250 ms (`Preview.js:250`), and that budget belongs to the
+extension stops asking after 8 tries at 250 ms, and that budget belongs to the
 pinned artifact, not to the host.
 
 **Cross-Origin-Resource-Policy — `/host-client.js` is an opaque-origin path like the two trees above.**
@@ -145,9 +145,9 @@ The core `frontend/` workspace must NOT gain an extension's runtime dependencies
 frontend workspace), not in `frontend/tests/`. Shared extension logic is a plain script loaded by
 both the extension and its tests — never copy it.
 
-## Module shape and channel handshake (moved from AGENTS.md)
-### UI Extensions
-UI extensions are **plain JavaScript modules — not Svelte components** (external bundles carry their own Svelte runtime → `effect_orphan`). A module default-exports `init({ component, config, ...scopeContext })` and returns a cleanup `() => void`; no Svelte imports, DOM + `createElement('style')` only. Serving, CSP, listing, install model, bundling and tests: `docs/ui-extensions.md`.
+## Module shape and channel handshake
+
+UI extensions are **plain JavaScript modules — not Svelte components** (external bundles carry their own Svelte runtime → `effect_orphan`). A module default-exports `init({ component, config, ...scopeContext })` and returns a cleanup `() => void`; no Svelte imports, DOM + `createElement('style')` only.
 
 - **Source lives in `../MIKE-extensions/<type>/<name>/`;** `registry.json` is **generated** — `python3 scripts/gen-registry.py` after editing a manifest or bumping a commit (`--check` in CI).
 - **The host CSP blocks inline `<script>`** in an extension's HTML — load code as external files.

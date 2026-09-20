@@ -41,8 +41,8 @@ returned `*sync.Mutex` can be stored, copied and passed on, and a caller holding
   across the wait deadlocks `Close` — and with it the shutdown step that closes the watchers. Pinned by
   `TestCloseDoesNotWaitHoldingTheLock`.
 - **Do not add a seconds-scale bound to a git-family lock.** `mergeMu` and `stashMu` are both reachable
-  while a goroutine waits on the task's tool lock (`exec/merge.go:654`→`:672`,
-  `exec/context.go:249`→`:254`), which is held across an entire tool call (`bash` ≤ 300 s), so the wait is
+  while a goroutine waits on the task's tool lock (`mergeOrchestrator`'s restore path and
+  `exec/context.go`'s request lock each take it), which is held across an entire tool call (`bash` ≤ 300 s), so the wait is
   usually legitimate. Wedged sections are surfaced by the per-domain slow-wait report instead:
   `gitSlowWait` 2 s, `requestLockSlowWait` 5 s, `taskLockSlowWait` 60 s. The one bounded git wait is
   `worktreeLockTimeout` (30 s) on worktree creation, which waits on nothing else.
