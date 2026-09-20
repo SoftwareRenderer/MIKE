@@ -744,9 +744,9 @@ const catalog = {
     // and is shown in the server's own words. docs/auto-update.md.
     'updates.title': 'Release updates',
     'updates.enable': 'Check for new releases',
-    'updates.enableDesc': 'Ask {host} once a day whether a newer release exists, and download one when it does. Nothing is installed until you click Install.',
+    'updates.enableDesc': 'Check {host} for updates once per day, and download it. Nothing is installed until you click Install.',
     'updates.managed': 'Updates are managed by your organization.',
-    'updates.off': 'Checks are off. MIKE will not look for a new release on its own.',
+    'updates.off': 'Status: Auto Updates are disabled.',
     'updates.noneKnown': 'MIKE has not checked for a new release yet.',
     'updates.available': 'Release {version} is available',
     'updates.upToDate': 'You are up to date — {version} is the latest release',
