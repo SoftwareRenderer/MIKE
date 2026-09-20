@@ -170,7 +170,7 @@ func newTestConfigStore(t *testing.T) (*store.Store, *config.ConfigStore) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "config.db")
 	s := newTestStore(t)
-	cs := config.NewConfigStore(s, dbPath, "test")
+	cs := config.NewConfigStore(s, dbPath, "test", nil)
 	cs.SetWorkspaceDirOverride(dir)
 	return s, cs
 }

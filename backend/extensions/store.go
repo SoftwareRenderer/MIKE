@@ -3,6 +3,7 @@ package extensions
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"mike/backend/errs"
 	"mike/backend/store"
 	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // mapSensitiveConfig applies transform to every config value the schema declares sensitive and
@@ -20,7 +22,7 @@ import (
 //
 // The result is always a copy: these maps reach both the store and the browser, and mutating the
 // input could leak a decrypted secret into a cached response.
-func mapSensitiveConfig(config map[string]any, schema *ConfigSchema, transform func(value any) (any, bool)) map[string]any {
+func mapSensitiveConfig(config map[string]any, schema *ConfigSchema, transform func(key string, value any) (any, bool)) map[string]any {
 	if schema == nil || len(schema.Properties) == 0 || config == nil {
 		return config
 	}
@@ -32,7 +34,7 @@ func mapSensitiveConfig(config map[string]any, schema *ConfigSchema, transform f
 			result[k] = v
 			continue
 		}
-		if mapped, ok := transform(v); ok {
+		if mapped, ok := transform(k, v); ok {
 			result[k] = mapped
 			continue
 		}
@@ -41,30 +43,55 @@ func mapSensitiveConfig(config map[string]any, schema *ConfigSchema, transform f
 	return result
 }
 
-// encryptConfigValues encrypts sensitive config values based on the manifest's config_schema.
-// A value that fails to encrypt is stored as-is (graceful degradation).
-func encryptConfigValues(config map[string]any, schema *ConfigSchema) map[string]any {
-	return mapSensitiveConfig(config, schema, func(v any) (any, bool) {
-		encrypted, err := crypto.Encrypt(fmt.Sprintf("%v", v))
-		if err != nil {
+// extensionKeyPurpose is the record kind an extension's sensitive config value is sealed under, next to
+// the extension id and the config key, so a value cannot move between them.
+const extensionKeyPurpose = "extension-config"
+
+// encryptConfigValues encrypts the sensitive config values the manifest declares. With no box there is no
+// key to seal with, so a secret is dropped rather than written plain.
+func encryptConfigValues(box *crypto.Box, extID string, config map[string]any, schema *ConfigSchema) map[string]any {
+	return mapSensitiveConfig(config, schema, func(key string, v any) (any, bool) {
+		plain := fmt.Sprintf("%v", v)
+		if plain == "" {
 			return nil, false
+		}
+		if box == nil {
+			logging.For(logging.Extensions).Warnf("dropping sensitive config %q of %s: no encryption key configured", key, extID)
+			return "", true
+		}
+		record := crypto.Record(extID, key)
+		if box.Opens(extensionKeyPurpose, record, plain) {
+			return nil, false // already this key's record
+		}
+		encrypted, err := box.Encrypt(extensionKeyPurpose, record, plain)
+		if err != nil {
+			logging.For(logging.Extensions).Warnf("could not encrypt sensitive config %q of %s: %s", key, extID, err)
+			return "", true
 		}
 		return encrypted, true
 	})
 }
 
 // decryptConfigValues decrypts sensitive config values based on the manifest's config_schema.
-// Returns a new map with decrypted values. Anything that is not a non-empty
-// decryptable string is left as-is (it may be plain text stored before encryption).
-func decryptConfigValues(config map[string]any, schema *ConfigSchema) map[string]any {
-	return mapSensitiveConfig(config, schema, func(v any) (any, bool) {
+//
+// A record that will not open answers as no value; a value that could not be a record at all passes
+// through unchanged.
+func decryptConfigValues(box *crypto.Box, extID string, config map[string]any, schema *ConfigSchema) map[string]any {
+	return mapSensitiveConfig(config, schema, func(key string, v any) (any, bool) {
 		strVal, okStr := v.(string)
 		if !okStr || strVal == "" {
 			return nil, false
 		}
-		decrypted, err := crypto.Decrypt(strVal)
-		if err != nil {
+		if box == nil {
+			return "", true
+		}
+		decrypted, err := box.Decrypt(extensionKeyPurpose, crypto.Record(extID, key), strVal)
+		if errors.Is(err, crypto.ErrNotRecord) {
 			return nil, false
+		}
+		if err != nil {
+			logging.For(logging.Extensions).Warnf("sensitive config %q of %s did not open: %s", key, extID, err)
+			return "", true
 		}
 		return decrypted, true
 	})
@@ -88,11 +115,14 @@ type projectPaths interface {
 type ExtensionStore struct {
 	db       rawSQL
 	projects projectPaths
+	// box seals the config values a manifest marks sensitive. Nil means a secret is dropped rather than
+	// stored in the clear.
+	box *crypto.Box
 }
 
 // NewExtensionStore creates a new ExtensionStore.
-func NewExtensionStore(s *store.Store) *ExtensionStore {
-	return &ExtensionStore{db: s.RawSQL(), projects: s}
+func NewExtensionStore(s *store.Store, box *crypto.Box) *ExtensionStore {
+	return &ExtensionStore{db: s.RawSQL(), projects: s, box: box}
 }
 
 var (
@@ -225,7 +255,7 @@ func (es *ExtensionStore) GetByType(extType string) ([]Extension, error) {
 
 	var extensions []Extension
 	for rows.Next() {
-		ext, err := scanExtension(rows)
+		ext, err := es.scanExtension(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan extension: %w", err)
 		}
@@ -272,7 +302,7 @@ func (es *ExtensionStore) GetByAuthorName(author, name string) (*Extension, erro
 // as parameters. sql.ErrNoRows is returned unwrapped so the caller can name the
 // identity it looked up.
 func (es *ExtensionStore) queryOne(where string, args ...any) (*Extension, error) {
-	ext, err := scanExtension(es.db.QueryRow(
+	ext, err := es.scanExtension(es.db.QueryRow(
 		`SELECT `+extensionColumns+` FROM extensions `+where, args...))
 	if err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("query extension: %w", err)
@@ -298,7 +328,7 @@ func (es *ExtensionStore) Create(ext *Extension) error {
 		return fmt.Errorf("marshal manifest: %w", err)
 	}
 	// Encrypt sensitive config values before storage
-	configToStore := encryptConfigValues(ext.Config, ext.Manifest.ConfigSchema)
+	configToStore := encryptConfigValues(es.box, ext.ID, ext.Config, ext.Manifest.ConfigSchema)
 	configJSON, err := json.Marshal(configToStore)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
@@ -338,7 +368,7 @@ func (es *ExtensionStore) Update(id string, ext *Extension) error {
 		return fmt.Errorf("marshal manifest: %w", err)
 	}
 	// Encrypt sensitive config values before storage
-	configToStore := encryptConfigValues(ext.Config, ext.Manifest.ConfigSchema)
+	configToStore := encryptConfigValues(es.box, id, ext.Config, ext.Manifest.ConfigSchema)
 	configJSON, err := json.Marshal(configToStore)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
@@ -542,7 +572,7 @@ func (es *ExtensionStore) StorageDeleteAll(extID string) error {
 }
 
 // scanExtension scans a row into an Extension.
-func scanExtension(s scanner) (*Extension, error) {
+func (es *ExtensionStore) scanExtension(s scanner) (*Extension, error) {
 	var ext Extension
 	var manifestJSON, configJSON, containerConfigJSON, sandboxConfigJSON, imageRef sql.NullString
 	var extType, installSource string
@@ -581,7 +611,7 @@ func scanExtension(s scanner) (*Extension, error) {
 		ext.Config = map[string]any{}
 	}
 	// Decrypt sensitive config values after loading
-	ext.Config = decryptConfigValues(ext.Config, ext.Manifest.ConfigSchema)
+	ext.Config = decryptConfigValues(es.box, ext.ID, ext.Config, ext.Manifest.ConfigSchema)
 	if containerConfigJSON.Valid {
 		if err := json.Unmarshal([]byte(containerConfigJSON.String), &ext.ContainerConfig); err != nil {
 			return nil, fmt.Errorf("unmarshal container config: %w", err)

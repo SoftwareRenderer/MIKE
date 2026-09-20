@@ -303,10 +303,12 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
 
 ## Go unit test environment (moved from AGENTS.md)
 
-- **`MIKE_ENCRYPTION_KEY` must be set in the shell** for `go test ./backend/...`: the config tests that
-  store a provider API key encrypt it on the way in, and `backend/config` fails with
-  `crypto: MIKE_ENCRYPTION_KEY environment variable is not set` — not with a test failure you can read
-  past.
+- **No `MIKE_ENCRYPTION_KEY` is needed.** The secret box is injected (`crypto.New` in `NewServer`) and no
+  package reads the variable, so `go test ./backend/...` runs with it unset — a test that needed one once
+  failed with `crypto: MIKE_ENCRYPTION_KEY environment variable is not set` instead of a readable failure.
+  A test that needs a box derives one: `backend/config` shares a single package-level box and
+  `backend/crypto` a `testBox`, because the KDF costs hundreds of milliseconds on purpose and a derivation
+  per test would dominate the suite.
 - **No global git identity is needed**, so `make check` never depends on the developer's config: every
   fixture commits through `backend/testutil/testgit`, which puts `-c user.name` / `-c user.email` on every
   command. A `Committer identity unknown` failure names a

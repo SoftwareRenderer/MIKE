@@ -19,38 +19,76 @@ const messages = [
 
 const diff = { diff: '--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new', untracked: [], short_stat: '1 file changed' };
 
-function mockResolvedFetch(body: any) {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => body }));
+function mockResolvedFetch(body: any, headers: Record<string, string> = {}) {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => body,
+        headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
+    }));
 }
 function mockRejectedFetch() {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
 }
 
+/** The window headers the messages route answers with. */
+const windowHeaders = { 'x-messages-more': 'false' };
+
 describe('offline message cache', () => {
-    it('returns cached messages (marked from cache) when network fails', async () => {
+    it('returns the cached window (marked from cache) when network fails', async () => {
         const storage = await import('$lib/storage');
         const { isFromCache } = await import('$lib/api/cache');
         mockRejectedFetch();
-        await storage.setBoardCache(storage.messagesCacheKey('p1', 't1'), messages);
+        const cachedWindow = { messages, hasMore: true, before: 'cursor-1' };
+        await storage.setBoardCache(storage.messagesCacheKey('p1', 't1'), cachedWindow);
 
         const { getTaskMessages } = await import('$lib/api/tasks');
         const result = await getTaskMessages('p1', 't1');
 
-        // Copy the array to drop the cache-marker symbol on the array itself before deep-compare
-        expect([...result]).toEqual(messages);
+        expect(result.messages).toEqual(messages);
+        // The cached copy carries what the server said about the window, not just its rows.
+        expect(result.before).toBe('cursor-1');
         expect(isFromCache(result)).toBe(true);
     });
 
-    it('caches successfully fetched messages', async () => {
+    it('leaves the cached window alone when an older one is fetched', async () => {
         const storage = await import('$lib/storage');
-        mockResolvedFetch(messages);
+        const newest = { messages, hasMore: true, before: 'cursor-1' };
+        await storage.setBoardCache(storage.messagesCacheKey('p1', 't1'), newest);
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+            ok: true, json: async () => [], headers: { get: () => null },
+        }));
+
+        const { getTaskMessages } = await import('$lib/api/tasks');
+        await getTaskMessages('p1', 't1', 'cursor-1');
+
+        // An offline reload opens on this entry, so it must stay the newest window.
+        expect(await storage.getBoardCache(storage.messagesCacheKey('p1', 't1'))).toEqual(newest);
+    });
+
+    it('caches the window the server described', async () => {
+        const storage = await import('$lib/storage');
+        mockResolvedFetch(messages, { ...windowHeaders, 'x-messages-more': 'true', 'x-messages-before': 'cursor-9' });
 
         const { getTaskMessages } = await import('$lib/api/tasks');
         const result = await getTaskMessages('p1', 't1');
 
-        expect(result).toEqual(messages);
+        expect(result).toEqual({ messages, hasMore: true, before: 'cursor-9' });
         const cached = await storage.getBoardCache(storage.messagesCacheKey('p1', 't1'));
-        expect(cached).toEqual(messages);
+        expect(cached).toEqual(result);
+    });
+
+    it('sends the cursor of the window it is asking for', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true, json: async () => [], headers: { get: () => null },
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        const { getTaskMessages } = await import('$lib/api/tasks');
+        await getTaskMessages('p1', 't1', 'a/b+c');
+
+        // apiFetch resolves the CSRF session first, so the messages request is the call after it.
+        const url = fetchMock.mock.calls.map(c => String(c[0])).find(u => u.includes('/messages'));
+        expect(url).toContain('/projects/p1/tasks/t1/messages?before=a%2Fb%2Bc');
     });
 
     it('rejects when network fails and no cache exists', async () => {

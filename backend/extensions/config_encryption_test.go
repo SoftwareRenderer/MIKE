@@ -27,8 +27,6 @@ func makeTestExtWithConfig(t *testing.T, id, name string, config map[string]any,
 }
 
 func TestConfigEncryption_RoundTrip(t *testing.T) {
-	setEncryptionKey(t)
-
 	es := testStore(t)
 
 	// Schema marks github_token as sensitive
@@ -73,8 +71,6 @@ func TestConfigEncryption_RoundTrip(t *testing.T) {
 }
 
 func TestConfigEncryption_EncryptedInDB(t *testing.T) {
-	setEncryptionKey(t)
-
 	es := testStore(t)
 
 	schema := &ConfigSchema{
@@ -110,8 +106,6 @@ func TestConfigEncryption_EncryptedInDB(t *testing.T) {
 }
 
 func TestConfigEncryption_NoSchema(t *testing.T) {
-	setEncryptionKey(t)
-
 	es := testStore(t)
 
 	// No config_schema — values stored as-is
@@ -136,9 +130,7 @@ func TestConfigEncryption_NoSchema(t *testing.T) {
 }
 
 func TestConfigEncryption_NoKey(t *testing.T) {
-	clearEncryptionKey(t)
-
-	es := testStore(t)
+	es := testStoreNoKey(t)
 
 	schema := &ConfigSchema{
 		Properties: []SchemaProp{
@@ -164,15 +156,20 @@ func TestConfigEncryption_NoKey(t *testing.T) {
 		t.Fatalf("GetByID: %v", err)
 	}
 
-	// Without encryption key, value stored as-is
-	if got.Config["api_key"] != "plain-without-key" {
-		t.Errorf("api_key = %v, want plain-without-key", got.Config["api_key"])
+	// Nothing to seal with, so the secret is dropped rather than stored in the clear.
+	if got.Config["api_key"] == "plain-without-key" {
+		t.Error("the secret was stored in the clear")
+	}
+	var raw string
+	if err := es.db.QueryRow(`SELECT config FROM extensions WHERE id = ?`, "nokey-ext").Scan(&raw); err != nil {
+		t.Fatalf("query raw config: %v", err)
+	}
+	if configContains(raw, "plain-without-key") {
+		t.Errorf("the plaintext reached the row: %s", raw)
 	}
 }
 
 func TestConfigEncryption_UpdatePreservesEncryption(t *testing.T) {
-	setEncryptionKey(t)
-
 	es := testStore(t)
 
 	schema := &ConfigSchema{
@@ -215,8 +212,6 @@ func TestConfigEncryption_UpdatePreservesEncryption(t *testing.T) {
 }
 
 func TestConfigEncryption_ListAlsoDecrypts(t *testing.T) {
-	setEncryptionKey(t)
-
 	es := testStore(t)
 
 	schema := &ConfigSchema{
@@ -249,8 +244,6 @@ func TestConfigEncryption_ListAlsoDecrypts(t *testing.T) {
 }
 
 func TestConfigEncryption_MultipleSensitiveFields(t *testing.T) {
-	setEncryptionKey(t)
-
 	es := testStore(t)
 
 	schema := &ConfigSchema{
@@ -289,8 +282,6 @@ func TestConfigEncryption_MultipleSensitiveFields(t *testing.T) {
 }
 
 func TestConfigEncryption_EmptySensitiveValue(t *testing.T) {
-	setEncryptionKey(t)
-
 	es := testStore(t)
 
 	schema := &ConfigSchema{
@@ -319,8 +310,6 @@ func TestConfigEncryption_EmptySensitiveValue(t *testing.T) {
 }
 
 func TestConfigEncryption_NonStringSensitiveValue(t *testing.T) {
-	setEncryptionKey(t)
-
 	es := testStore(t)
 
 	schema := &ConfigSchema{
@@ -354,18 +343,6 @@ func TestConfigEncryption_NonStringSensitiveValue(t *testing.T) {
 	if got.Config["visible"] != float64(3000) {
 		t.Errorf("visible = %v, want 3000", got.Config["visible"])
 	}
-}
-
-// Helper: set a valid ENCRYPTION_KEY for the test
-func setEncryptionKey(t *testing.T) {
-	t.Helper()
-	t.Setenv("MIKE_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
-}
-
-// Helper: clear ENCRYPTION_KEY for the test
-func clearEncryptionKey(t *testing.T) {
-	t.Helper()
-	t.Setenv("MIKE_ENCRYPTION_KEY", "")
 }
 
 func configContains(s, substr string) bool {
@@ -429,8 +406,6 @@ func TestMaskConfig_EmptySensitiveValue(t *testing.T) {
 }
 
 func TestMaskConfig_PreservedOnUpdate(t *testing.T) {
-	setEncryptionKey(t)
-
 	h := testHandler(t)
 
 	schema := &ConfigSchema{

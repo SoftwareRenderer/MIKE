@@ -2,9 +2,13 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"mike/backend/httputil"
+	"mike/backend/store"
 	"mike/pkg/logging"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -162,11 +166,23 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 	if taskErr == nil && task != nil {
 		threadID = task.CurrentThreadID
 	}
-	messages, err := s.store.GetTaskMessages(taskID, threadID)
+	// A window, not the whole thread: the read, the redaction pass below and the response are all bounded
+	// by it. The body stays the array of rows; the window rides the X-Messages-* headers.
+	limit, err := messageWindowLimit(r)
 	if err != nil {
+		JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	page, err := s.store.GetTaskMessagePage(taskID, threadID, limit, r.URL.Query().Get("before"))
+	if err != nil {
+		if errors.Is(err, store.ErrMessageCursor) {
+			JSONError(w, http.StatusBadRequest, "before is not a cursor this endpoint issued")
+			return
+		}
 		Fail(w, err, "get messages", "task not found")
 		return
 	}
+	messages := page.Messages
 	// Suppress write_file content args, reasoning_content, and bash tool results unless full=1
 	if r.URL.Query().Get("full") != "1" {
 		for i := range messages {
@@ -192,7 +208,25 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	w.Header().Set("X-Messages-More", strconv.FormatBool(page.HasMore))
+	if page.Before != "" {
+		w.Header().Set("X-Messages-Before", page.Before)
+	}
 	JSONResponse(w, http.StatusOK, messages)
+}
+
+// messageWindowLimit reads the caller's window size. Absent or unparsable is the default; above the
+// ceiling is a 400, because the ceiling is what bounds the request.
+func messageWindowLimit(r *http.Request) (int, error) {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return store.MessageWindowDefault, nil
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit < 1 || limit > store.MessageWindowMax {
+		return 0, fmt.Errorf("limit must be between 1 and %d", store.MessageWindowMax)
+	}
+	return limit, nil
 }
 
 func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {

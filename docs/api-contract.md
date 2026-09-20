@@ -158,6 +158,49 @@ for another project's row.
 
 Tests: `backend/server/handler_message_ownership_test.go`, `backend/api/git_diff_file_ownership_test.go`.
 
+## The conversation is a window, not the thread
+
+`GET /api/projects/{projectID}/tasks/{taskID}/messages` answers the **newest window** of the task's active
+thread: the body stays the flat array of rows (chronological, oldest first) and the window rides two
+response headers — `X-Messages-More`, and `X-Messages-Before`, the opaque cursor that asks for the
+next-older page. Nothing counts the conversation: a row total is a second walk of it, and no client asks
+for one. `?limit=` sizes the window (default 120, ceiling 500; outside that a 400 naming the parameter)
+and `?before=<cursor>` walks back. A cursor the route never issued is a 400, not an empty page: a client
+must not read its own bad token as "no history". `full=1` changes only the redaction, never the window,
+and `GET …/messages/{messageID}` is unchanged.
+
+Two invariants hold the transcript together under paging. **A page never opens in the middle of a turn**:
+the read reaches back to the user row that started the row it cut on, so the newest page carries an
+assistant's text with its own tool cards, and *regenerate* — which deletes from that user row forwards —
+finds something to act on. **The client owns the merge**: `TaskChat` keeps every row it has fetched and
+rebuilds the transcript from all of them (`prependRows` in `$lib/utils/chat-window.ts` dedups by row id),
+so a turn longer than a page is still one entry once both pages are held. **Scrolling is the only
+affordance** — no control asks the reader to fetch anything; the list edge is the request. The scroll
+position is preserved by re-finding the entry under the top edge of the viewport (`data-entry-id`), never
+by a pixel guess, and re-applied over the frames after the insert: entries are `content-visibility: auto`,
+so the rows above report placeholder heights when a page lands and grow after it (measured: one landing
+slid the reader 156 px off their row before this settled). The reader's own scroll ends the settling.
+The offline cache holds **the newest window only**: asking for an older page needs the network anyway, and
+a mid-thread page is the wrong thing to open a task on when the request fails.
+
+The read walks the covering index for the window's positions (one row further when the cut falls inside a
+turn, and the answer to "is there an older page" is one bounded `EXISTS` on the same index), then fetches
+those rows by `rowid`. The sort, the cut and the redaction pass are therefore proportional to the window,
+not to the thread — a 4 400-row thread went from 14.5 MB and 224 ms to 0.39 MB and 12 ms at the p50, and a
+1 200-row one from 3.9 MB and 126 ms to 0.4 MB and 21 ms.
+
+**The window bounds rows, not bytes.** A conversation of a few enormous rows — the newest 120 rows holding
+18 MB of tool output — is bounded by the same rows either way, so it costs what reading those rows costs
+(measured the same as the whole-thread read, and no more). Keeping that case bounded is a byte budget over
+the window, which this does not have.
+
+Tests:
+`backend/store/messages_window_test.go` (including the `EXPLAIN QUERY PLAN` claim),
+`backend/server/handler_message_window_test.go`, `frontend/src/lib/utils/__tests__/chat-window.unit.ts`,
+and `frontend/tests/e2e/chat-window-scroll.spec.ts` for what only a browser answers — that nothing is
+rendered asking the reader to fetch a page, that reaching the top edge fetches it unasked, and that the
+page leaves the reader on the row they were reading.
+
 ## Diffs
 
 `?parsed=1` is a contract every path on `/tasks/{id}/diff` must honour, including the fast ones. The panel

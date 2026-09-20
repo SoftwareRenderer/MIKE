@@ -127,8 +127,12 @@ func TestPUTConfig_PreservesStoredAPIKeysWhenNotSent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	if len(after.Providers) != 1 || after.Providers[0].APIKey == nil || *after.Providers[0].APIKey != "secret-key" {
-		t.Fatalf("stored API key did not survive a providers payload that omitted it: %+v", after.Providers)
+	// The preserve is about the stored row, and GetConfig is not where a key is visible any more.
+	if len(after.Providers) != 1 || after.Providers[0].APIKey != nil {
+		t.Fatalf("GetConfig handed a key out: %+v", after.Providers)
+	}
+	if got := cs.GetProviderAPIKey("http://localhost:8080/v1"); got != "secret-key" {
+		t.Fatalf("stored API key did not survive a providers payload that omitted it: %q", got)
 	}
 }
 

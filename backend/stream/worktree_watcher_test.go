@@ -37,7 +37,7 @@ func TestWorktreeWatcherRetriesWhileInFlight(t *testing.T) {
 	}
 	defer s.Close()
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {

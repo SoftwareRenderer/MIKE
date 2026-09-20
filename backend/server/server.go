@@ -23,6 +23,7 @@ import (
 	"mike/backend/api"
 	"mike/backend/auth"
 	"mike/backend/config"
+	"mike/backend/crypto"
 	kanbanexec "mike/backend/exec"
 	"mike/backend/extensions"
 	"mike/backend/fsutil"
@@ -314,7 +315,17 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 		return nil, fmt.Errorf("create store: %w", err)
 	}
 
-	cfgStore := config.NewConfigStore(store, dbPath, Version)
+	// The one key derivation this process performs: hundreds of milliseconds, so never on a request path.
+	salt, err := store.InstallationSalt()
+	if err != nil {
+		return nil, fmt.Errorf("installation salt: %w", err)
+	}
+	secretBox, err := crypto.New(settings.EncryptionKey, salt)
+	if err != nil {
+		return nil, fmt.Errorf("derive secret key: %w", err)
+	}
+
+	cfgStore := config.NewConfigStore(store, dbPath, Version, secretBox)
 	cfgStore.SetRegistryURL(settings.RegistryURL)
 	if err := cfgStore.MigrateProviderIDs(); err != nil {
 		return nil, fmt.Errorf("migrate provider IDs: %w", err)
@@ -322,6 +333,10 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
 		return nil, fmt.Errorf("get config: %w", err)
+	}
+	// Say it once, here: otherwise a run simply has no key, with nothing pointing at Settings.
+	for _, name := range cfgStore.ProvidersWithUnreadableKeys() {
+		logging.For(logging.Startup).Warnf("provider %q has a stored API key this version cannot read; re-enter it under Settings", name)
 	}
 
 	if worktreesDir == "" {
@@ -457,7 +472,7 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	})
 	commitQueue := kanbanexec.NewCommitQueue()
 
-	s.extStore = extensions.NewExtensionStore(store)
+	s.extStore = extensions.NewExtensionStore(store, secretBox)
 	if err := s.extStore.InitSchema(); err != nil {
 		return nil, fmt.Errorf("init extension schema: %w", err)
 	}

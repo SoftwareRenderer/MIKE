@@ -32,7 +32,7 @@ func newLSPTestExecutor(t *testing.T, worktreePath string) *TaskExecutor {
 func newLSPTestExecutorWithMgr(t *testing.T, worktreePath string, exts ...*extensions.Extension) *TaskExecutor {
 	t.Helper()
 	s := testStore(t)
-	es := extensions.NewExtensionStore(s)
+	es := extensions.NewExtensionStore(s, nil)
 	if err := es.InitSchema(); err != nil {
 		t.Fatalf("InitSchema: %v", err)
 	}

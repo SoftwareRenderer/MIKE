@@ -141,7 +141,7 @@ func TestExcludedUploadsAreHiddenInAWorktreeInsideTheProject(t *testing.T) {
 	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 
 	if err := s.CreateProject(&types.Project{ID: "proj-in-repo", Name: "in-repo", Path: repoDir}); err != nil {

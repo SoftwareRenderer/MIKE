@@ -114,7 +114,7 @@ func newTestGitHandler(t *testing.T) (*GitHandler, *store.Store, *git.WorktreeMa
 	s.SetConfigValue("utility_provider", "")
 	s.SetConfigValue("utility_model", "")
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	wm := git.NewWorktreeManager(s, cfgStore)
 	h := NewGitHandler(s, wm)
@@ -804,7 +804,7 @@ func TestHandleStageFile_PathStartingWithDash(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	cfgStore := config.NewConfigStore(s, filepath.Join(t.TempDir(), "test.db"), "test")
+	cfgStore := config.NewConfigStore(s, filepath.Join(t.TempDir(), "test.db"), "test", nil)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	wm := git.NewWorktreeManager(s, cfgStore)
 	h := &GitHandler{store: s, worktreeMgr: wm}

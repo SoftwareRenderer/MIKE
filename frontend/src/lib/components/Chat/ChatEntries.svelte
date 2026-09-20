@@ -4,6 +4,7 @@
     import { computeStickyHeader, STICKY_LINE_FALLBACK, type StickyUserMessage } from '$lib/utils/chat-sticky-header';
     import { scrollToLine } from '$lib/utils/settle-scroll';
     import { isAtBottom, type ChatFollow } from '$lib/composables/use-chat-follow.svelte';
+    import { atTopOfList } from '$lib/utils/chat-window';
     import ChatMessage from './ChatMessage.svelte';
     import CheckpointDivider from './CheckpointDivider.svelte';
     import QueueIndicator from './QueueIndicator.svelte';
@@ -42,6 +43,9 @@
         isChatFullscreen,
         follow,
         historyLoading = false,
+        hasEarlier = false,
+        loadingEarlier = false,
+        onLoadEarlier,
     }: {
         entries: ChatEntry[];
         entryMetas: EntryMeta[];
@@ -75,6 +79,11 @@
         /** Shared follow-the-bottom tracker (created by TaskChat). */
         follow: ChatFollow;
         historyLoading?: boolean;
+        /** Older rows exist beyond the window on screen; scrolling to the top edge asks for them. */
+        hasEarlier?: boolean;
+        loadingEarlier?: boolean;
+        /** Fetch the next-older window, called when the reader reaches the top edge. */
+        onLoadEarlier?: () => Promise<void>;
     } = $props();
 
     function isOptimisticId(id: string): boolean {
@@ -227,6 +236,10 @@
     function handleCombinedScroll() {
         follow.handleScroll();
         computeStickyFromScroll();
+        // Reaching the top edge is the request for what is above it; there is no control asking for it.
+        if (chatScrollEl && hasEarlier && !loadingEarlier && atTopOfList(chatScrollEl.scrollTop)) {
+            void onLoadEarlier?.();
+        }
     }
 
     // Recompute the sticky header when entries change, and keep the viewport
@@ -277,11 +290,12 @@
             {/if}
         </div>
     {:else}
-        <div class="chat-messages" bind:this={chatScrollEl} role="region" aria-label={t('chat.entries.region')} tabindex="-1" onscroll={handleCombinedScroll}>
+        <div class="chat-messages" bind:this={chatScrollEl} role="region" aria-label={t('chat.entries.region')} tabindex="-1"
+             aria-busy={loadingEarlier} onscroll={handleCombinedScroll}>
           <div class="chat-content" bind:this={chatContentEl}>
             {#each entries as entry, entryIdx (entry.id)}
                 {@const meta = entryMetas[entryIdx] as EntryMeta}
-                <div class="chat-entry">
+                <div class="chat-entry" data-entry-id={entry.id}>
                 {#if entry.role === 'user'}
                     {#if meta.cpThread || meta.cpState}
                         <div>
@@ -490,9 +504,12 @@
         border-bottom: 1px solid var(--color-border);
         width: calc(100% - 14px);
         border-bottom-right-radius: 1.125rem;
+        /* Only its own controls take a click, so what lies under it stays reachable. */
+        pointer-events: none;
     }
     .chat-sticky-bubble {
         font-size: 0.8125rem;
+        pointer-events: auto;
         color: var(--color-text-primary);
         background: color-mix(in srgb, var(--color-accent) 18%, transparent);
         border-radius: 1.125rem;
@@ -512,6 +529,7 @@
     }
     .chat-sticky-fullscreen {
         display: flex;
+        pointer-events: auto;
         align-items: center;
         justify-content: center;
         width: 28px;

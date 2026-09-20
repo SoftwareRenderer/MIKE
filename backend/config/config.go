@@ -11,12 +11,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"mike/backend/crypto"
 	"mike/backend/httputil"
 	"mike/backend/llmadapter"
 	"mike/backend/store"
 	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // AgentProviderLister provides agent provider entries discovered from extensions.
@@ -63,8 +65,12 @@ func (cs *ConfigStore) RegistryURL() string {
 // remap that rewrites provider attribution in tables the store owns.
 type configDB interface {
 	GetConfigValue(key string) (string, error)
+	GetConfigValues(keys ...string) (map[string]string, error)
 	SetConfigValue(key, value string) error
 	RemapProviderNames(oldSlugToID map[string]string) error
+	// ConfigGeneration counts config-table writes, so a cached config can tell stale from current
+	// without re-reading.
+	ConfigGeneration() uint64
 }
 
 var _ configDB = (*store.Store)(nil)
@@ -86,6 +92,21 @@ type ConfigStore struct {
 	memoryBudgetMB  int64
 	memoryTotalMB   int64
 	memoryBudgetPct int
+
+	// box opens stored provider keys. Built once at startup: a derivation costs hundreds of
+	// milliseconds, so no read path may pay one.
+	box *crypto.Box
+
+	snapMu sync.Mutex
+	snap   *configSnapshot
+}
+
+// configSnapshot is the read-side cache. It holds providers exactly as stored, so no plaintext
+// secret sits in it.
+type configSnapshot struct {
+	generation uint64
+	rows       map[string]string
+	providers  []types.Provider
 }
 
 // SetLLMAdapter helps map outgoing LLM API requests to the provider's expected format
@@ -249,75 +270,103 @@ func (cs *ConfigStore) MigrateProviderIDs() error {
 	return cs.db.SetConfigValue("providers", string(providersJSON))
 }
 
-// NewConfigStore creates a new ConfigStore.
-func NewConfigStore(s *store.Store, dbPath, version string) *ConfigStore {
+// NewConfigStore creates a new ConfigStore. box comes from crypto.New at startup.
+func NewConfigStore(s configDB, dbPath, version string, box *crypto.Box) *ConfigStore {
 	abs, _ := filepath.Abs(dbPath)
-	return &ConfigStore{db: s, dbPath: abs, version: version}
+	return &ConfigStore{db: s, dbPath: abs, version: version, box: box}
 }
 
-// GetConfig retrieves the full server configuration.
-// API keys are decrypted from the DB before returning.
-func (cs *ConfigStore) GetConfig() (*types.Config, error) {
-	// Workspace dir is set at startup via CLI flag / env var — not persisted.
-	// WorkspaceDir() is that same computation without the config-row reads.
-	workspaceDir := cs.WorkspaceDir()
-	providersRaw, err := cs.db.GetConfigValue("providers")
+// configRowKeys are the rows a full config read wants, in one query.
+var configRowKeys = []string{
+	"worker_provider", "worker_model", "utility_provider", "utility_model",
+	"default_auto_commit", "default_auto_merge", "default_subtasks_auto_merge",
+	"default_operating_mode", "default_max_failed_turns", "default_auto_summarize_threshold",
+	"hide_model_badge", "update_check_enabled", "run_siblings_parallel", "sort_oldest_first",
+	"auto_maximize_chat_mobile", "keyboard_shortcuts",
+}
+
+func (cs *ConfigStore) snapshot() (*configSnapshot, error) {
+	generation := cs.db.ConfigGeneration()
+	cs.snapMu.Lock()
+	defer cs.snapMu.Unlock()
+	if cs.snap != nil && cs.snap.generation == generation {
+		return cs.snap, nil
+	}
+	rows, err := cs.db.GetConfigValues(append(append([]string{}, configRowKeys...), "providers")...)
 	if err != nil {
 		return nil, err
 	}
 	providers := make([]types.Provider, 0)
-	if providersRaw != "" {
-		if err := json.Unmarshal([]byte(providersRaw), &providers); err != nil {
+	if raw := rows["providers"]; raw != "" {
+		if err := json.Unmarshal([]byte(raw), &providers); err != nil {
 			return nil, err
 		}
 	}
+	cs.snap = &configSnapshot{generation: generation, rows: rows, providers: providers}
+	return cs.snap, nil
+}
+
+// copyProviders returns a writable copy, so a caller patching a model's context window or dropping a
+// secret cannot reach the cached row behind it.
+func copyProviders(src []types.Provider) []types.Provider {
+	out := make([]types.Provider, len(src))
+	copy(out, src)
+	for i := range out {
+		if out[i].Models != nil {
+			out[i].Models = append([]types.ModelConfig{}, out[i].Models...)
+		}
+	}
+	return out
+}
+
+// storedProviders is the provider list as stored, secrets sealed. Every read-modify-write of that row
+// goes through it, because GetConfig hands out no key and writing its result back would drop one.
+func (cs *ConfigStore) storedProviders() ([]types.Provider, error) {
+	snap, err := cs.snapshot()
+	if err != nil {
+		return nil, err
+	}
+	return copyProviders(snap.providers), nil
+}
+
+// GetConfig retrieves the full server configuration and hands out no plaintext secret: a provider's
+// APIKey is absent, because this sits on the request path. Whoever authenticates an outbound call asks for
+// that one key, by GetProviderAPIKey or ResolveAPIKey.
+func (cs *ConfigStore) GetConfig() (*types.Config, error) {
+	// Workspace dir is set at startup via CLI flag / env var — not persisted.
+	// WorkspaceDir() is that same computation without the config-row reads.
+	workspaceDir := cs.WorkspaceDir()
+	snap, err := cs.snapshot()
+	if err != nil {
+		return nil, err
+	}
 	// Agent providers are derived from enabled agent extensions
-	providers = filterPersistedProviders(providers)
+	providers := filterPersistedProviders(copyProviders(snap.providers))
 	for i := range providers {
 		if providers[i].Kind != "agent" {
 			providers[i].DisplayName = ""
 		}
+		providers[i].APIKey = nil
 	}
-	// Decrypt API keys
-	for i := range providers {
-		if providers[i].APIKey != nil && *providers[i].APIKey != "" {
-			decrypted, err := crypto.Decrypt(*providers[i].APIKey)
-			if err == nil {
-				providers[i].APIKey = &decrypted
-			}
-			// If decryption fails, leave the value as-is (may be plain text from before encryption was added)
-		}
-	}
+	rows := snap.rows
 
-	workerProvider, err := cs.db.GetConfigValue("worker_provider")
-	if err != nil {
-		return nil, err
-	}
-	workerModel, err := cs.db.GetConfigValue("worker_model")
-	if err != nil {
-		return nil, err
-	}
-	utilityProvider, err := cs.db.GetConfigValue("utility_provider")
-	if err != nil {
-		return nil, err
-	}
-	utilityModel, err := cs.db.GetConfigValue("utility_model")
-	if err != nil {
-		return nil, err
-	}
+	workerProvider := rows["worker_provider"]
+	workerModel := rows["worker_model"]
+	utilityProvider := rows["utility_provider"]
+	utilityModel := rows["utility_model"]
 	registryURL := cs.RegistryURL()
-	defaultAutoCommitRaw, _ := cs.db.GetConfigValue("default_auto_commit")
-	defaultAutoMergeRaw, _ := cs.db.GetConfigValue("default_auto_merge")
-	defaultSubtasksAutoMergeRaw, _ := cs.db.GetConfigValue("default_subtasks_auto_merge")
-	defaultOperatingModeRaw, _ := cs.db.GetConfigValue("default_operating_mode")
-	defaultMaxFailedTurnsRaw, _ := cs.db.GetConfigValue("default_max_failed_turns")
-	defaultAutoSummarizeThresholdRaw, _ := cs.db.GetConfigValue("default_auto_summarize_threshold")
-	hideModelBadgeRaw, _ := cs.db.GetConfigValue("hide_model_badge")
-	updateCheckEnabledRaw, _ := cs.db.GetConfigValue("update_check_enabled")
-	runSiblingsParallelRaw, _ := cs.db.GetConfigValue("run_siblings_parallel")
-	sortOldestFirstRaw, _ := cs.db.GetConfigValue("sort_oldest_first")
-	autoMaximizeChatMobileRaw, _ := cs.db.GetConfigValue("auto_maximize_chat_mobile")
-	keyboardShortcutsRaw, _ := cs.db.GetConfigValue("keyboard_shortcuts")
+	defaultAutoCommitRaw := rows["default_auto_commit"]
+	defaultAutoMergeRaw := rows["default_auto_merge"]
+	defaultSubtasksAutoMergeRaw := rows["default_subtasks_auto_merge"]
+	defaultOperatingModeRaw := rows["default_operating_mode"]
+	defaultMaxFailedTurnsRaw := rows["default_max_failed_turns"]
+	defaultAutoSummarizeThresholdRaw := rows["default_auto_summarize_threshold"]
+	hideModelBadgeRaw := rows["hide_model_badge"]
+	updateCheckEnabledRaw := rows["update_check_enabled"]
+	runSiblingsParallelRaw := rows["run_siblings_parallel"]
+	sortOldestFirstRaw := rows["sort_oldest_first"]
+	autoMaximizeChatMobileRaw := rows["auto_maximize_chat_mobile"]
+	keyboardShortcutsRaw := rows["keyboard_shortcuts"]
 
 	cfg := &types.Config{
 		WorkspaceDir:    workspaceDir,
@@ -396,6 +445,10 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 	c.Providers = filterPersistedProviders(c.Providers)
 	// Assign stable IDs to providers that don't have one yet (new providers).
 	assignProviderIDs(c.Providers)
+	storedKeys, err := cs.storedKeysByProviderID()
+	if err != nil {
+		return err
+	}
 	// Enforce minimum concurrency of 1, non-negative rate limit, and encrypt API keys
 	for i := range c.Providers {
 		if c.Providers[i].Concurrency < 1 {
@@ -407,8 +460,20 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 		if c.Providers[i].StreamIdleSeconds < 0 {
 			c.Providers[i].StreamIdleSeconds = 0
 		}
-		if c.Providers[i].APIKey != nil && *c.Providers[i].APIKey != "" {
-			encrypted, err := crypto.Encrypt(*c.Providers[i].APIKey)
+		// A value is a new key to seal, an omitted one or the masked placeholder keeps what is stored,
+		// and an empty string clears it.
+		switch {
+		case c.Providers[i].APIKey == nil || *c.Providers[i].APIKey == maskedAPIKey:
+			if key, ok := storedKeys[c.Providers[i].ID]; ok {
+				c.Providers[i].APIKey = &key
+			}
+		case *c.Providers[i].APIKey == "":
+			c.Providers[i].APIKey = nil
+		default:
+			if cs.box == nil {
+				return fmt.Errorf("no encryption key configured: cannot store an API key for provider %q", c.Providers[i].Name)
+			}
+			encrypted, err := cs.box.Encrypt(providerKeyPurpose, strconv.Itoa(c.Providers[i].ID), *c.Providers[i].APIKey)
 			if err != nil {
 				return fmt.Errorf("failed to encrypt API key for provider %q: %w", c.Providers[i].Name, err)
 			}
@@ -542,30 +607,54 @@ type configResponse struct {
 	ServerNetworkExtensions []types.NetworkedExtension `json:"server_network_extensions,omitempty"`
 }
 
-// storedAPIKey returns the decrypted key saved for the provider whose URL matches
-// serverURL, or "" when no provider matches or that one has no key. A trailing slash
-// is ignored on both sides, because the client sends whichever it was given.
-func storedAPIKey(providers []types.Provider, serverURL string) string {
+// storedAPIKey is the stored key of the provider whose URL matches serverURL, plus the record identity
+// it was sealed under, or "" for none. A trailing slash is ignored on both sides.
+func storedAPIKey(providers []types.Provider, serverURL string) (sealed, record string) {
 	serverURL = strings.TrimRight(serverURL, "/")
 	for _, p := range providers {
 		if strings.TrimRight(p.URL, "/") == serverURL {
-			return p.APIKeyValue()
+			if v := p.APIKeyValue(); v != "" {
+				return v, strconv.Itoa(p.ID)
+			}
+			return "", ""
 		}
 	}
-	return ""
+	return "", ""
 }
 
-// maskAPIKeys replaces non-empty API keys with a masked placeholder.
-
+// maskedAPIKey stands in for a stored key in a response. The browser omits it from what it sends back,
+// and one that comes back reads as "unchanged".
 const maskedAPIKey = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" // 10 bullets
 
-func maskAPIKeys(providers []types.Provider) {
+// providerKeyPurpose is the record kind a provider API key is sealed under, so a value from an
+// extension or another provider cannot open here.
+const providerKeyPurpose = "provider"
+
+// maskAPIKeys masks the providers that hold a stored key. That list comes from the row, not from the
+// list being masked, which may be the keyless config view.
+func maskAPIKeys(providers []types.Provider, storedKeys map[int]string) {
 	for i := range providers {
-		if providers[i].APIKey != nil && *providers[i].APIKey != "" {
+		if _, ok := storedKeys[providers[i].ID]; ok {
 			masked := maskedAPIKey
 			providers[i].APIKey = &masked
 		}
 	}
+}
+
+// storedKeysByProviderID maps provider id to its stored secret, so a response can say a key is set
+// without carrying it and a write can keep a key the payload did not repeat.
+func (cs *ConfigStore) storedKeysByProviderID() (map[int]string, error) {
+	snap, err := cs.snapshot()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int]string, len(snap.providers))
+	for _, p := range snap.providers {
+		if v := p.APIKeyValue(); v != "" {
+			out[p.ID] = v
+		}
+	}
+	return out, nil
 }
 
 // buildConfigResponse constructs the API response from stored config, merging
@@ -593,7 +682,10 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 			providers[i].Models = []types.ModelConfig{}
 		}
 	}
-	maskAPIKeys(providers)
+	// An unreadable row masks nothing: this list already carries no keys, so the worst case is a field
+	// shown empty.
+	stored, _ := cs.storedKeysByProviderID()
+	maskAPIKeys(providers, stored)
 	return configResponse{
 		WorkspaceDir:                  cfg.WorkspaceDir,
 		DatabasePath:                  cfg.DatabasePath,
@@ -615,7 +707,7 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		SortOldestFirst:               cfg.SortOldestFirst,
 		AutoMaximizeChatMobile:        cfg.AutoMaximizeChatMobile,
 		KeyboardShortcuts:             normalizeKeyboardShortcuts(cfg.KeyboardShortcuts),
-		EncryptionEnabled:             crypto.IsEnabled(),
+		EncryptionEnabled:             cs.box != nil,
 		TLSCAAvailable:                cs.tlsCAAvailable,
 		MemoryBudgetMB:                cs.memoryBudgetMB,
 		MemoryTotalMB:                 cs.memoryTotalMB,
@@ -664,7 +756,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		if updates.field("providers", &incoming) {
 			// agent:// rows in the payload are dropped by UpdateConfig (agent providers
 			// are registry-derived); registry agents are merged in buildConfigResponse.
-			current.Providers = mergeProviderKeys(incoming, current.Providers)
+			current.Providers = incoming
 		}
 		current.WorkerProvider = updates.strOr("worker_provider", current.WorkerProvider)
 		current.WorkerModel = updates.strOr("worker_model", current.WorkerModel)
@@ -756,28 +848,65 @@ func (cs *ConfigStore) GetRunSiblingsParallel() bool {
 	return false
 }
 
-// GetProviderAPIKey returns the decrypted API key stored for a provider URL,
-// or "" when no provider matches or none is set.
+// GetProviderAPIKey is the key stored for a provider URL, or "" when no provider matches or none is
+// set. One of the two places a stored key is opened.
 func (cs *ConfigStore) GetProviderAPIKey(serverURL string) string {
-	cfg, err := cs.GetConfig()
-	if err != nil {
+	sealed, record := cs.sealedKeyFor(serverURL)
+	if sealed == "" || cs.box == nil {
 		return ""
 	}
-	return storedAPIKey(cfg.Providers, serverURL)
+	plain, err := cs.box.Decrypt(providerKeyPurpose, record, sealed)
+	if err != nil {
+		// An unreadable key is no key: the run continues as if none were set, and Settings is where it
+		// gets typed again.
+		logging.For(logging.LLM).Warnf("provider API key for %s did not open: %s", serverURL, err)
+		return ""
+	}
+	return plain
+}
+
+// sealedKeyFor is the stored key for a provider URL and the record it was sealed under.
+func (cs *ConfigStore) sealedKeyFor(serverURL string) (sealed, record string) {
+	snap, err := cs.snapshot()
+	if err != nil {
+		return "", ""
+	}
+	return storedAPIKey(snap.providers, serverURL)
+}
+
+// ProvidersWithUnreadableKeys names the providers whose stored secret this build cannot open. Startup
+// says it once, so a run with no key is not silent.
+func (cs *ConfigStore) ProvidersWithUnreadableKeys() []string {
+	providers, err := cs.storedProviders()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, p := range providers {
+		v := p.APIKeyValue()
+		if v == "" {
+			continue
+		}
+		if cs.box == nil || !cs.box.Opens(providerKeyPurpose, strconv.Itoa(p.ID), v) {
+			out = append(out, p.Name)
+		}
+	}
+	return out
 }
 
 // SaveModelContextWindow persists a discovered context window for a model in the config.
 func (cs *ConfigStore) SaveModelContextWindow(modelName, providerURL string, contextWindow int) {
-	cfg, err := cs.GetConfig()
+	// The stored row, not the config view: this writes the list back, and the view has no keys to write.
+	providers, err := cs.storedProviders()
 	if err != nil {
 		return
 	}
 
-	for i := range cfg.Providers {
-		if cfg.Providers[i].URL == providerURL {
-			for j := range cfg.Providers[i].Models {
-				if cfg.Providers[i].Models[j].Name == modelName {
-					cfg.Providers[i].Models[j].ContextWindow = &contextWindow
+	for i := range providers {
+		if providers[i].URL == providerURL {
+			for j := range providers[i].Models {
+				if providers[i].Models[j].Name == modelName {
+					providers[i].Models[j].ContextWindow = &contextWindow
 					break
 				}
 			}
@@ -785,6 +914,6 @@ func (cs *ConfigStore) SaveModelContextWindow(modelName, providerURL string, con
 		}
 	}
 
-	providersJSON, _ := json.Marshal(cfg.Providers)
+	providersJSON, _ := json.Marshal(providers)
 	_ = cs.db.SetConfigValue("providers", string(providersJSON))
 }

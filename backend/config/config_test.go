@@ -8,12 +8,24 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"mike/backend/crypto"
 	"mike/backend/store"
 	"mike/backend/types"
 )
+
+// sharedSecretBox is derived once for the whole package: a per-test derivation would dominate the suite.
+// A test that needs its own key builds or passes one explicitly.
+var sharedSecretBox = sync.OnceValue(func() *crypto.Box {
+	box, err := crypto.New("test-passphrase", []byte("0123456789abcdef"))
+	if err != nil {
+		panic(err)
+	}
+	return box
+})
 
 func testConfigStore(t *testing.T) *ConfigStore {
 	t.Helper()
@@ -30,7 +42,7 @@ func testConfigStoreWithStore(t *testing.T) (*ConfigStore, *store.Store) {
 	if err != nil {
 		t.Fatalf("create test store: %v", err)
 	}
-	return NewConfigStore(db, dir+"/test.db", "test"), db
+	return NewConfigStore(db, dir+"/test.db", "test", sharedSecretBox()), db
 }
 
 func TestGetConfigDefaultWorkspaceDir(t *testing.T) {
@@ -650,7 +662,7 @@ func TestMigrateProviderIDs(t *testing.T) {
 }
 
 func TestBuildConfigResponseMasksAPIKeys(t *testing.T) {
-	cs := testConfigStore(t)
+	cs, db := testConfigStoreWithStore(t)
 
 	cfg := &types.Config{
 		Providers: []types.Provider{
@@ -665,12 +677,16 @@ func TestBuildConfigResponseMasksAPIKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	// Sanity check: the stored key decrypts to the plaintext.
-	if len(readCfg.Providers) != 1 || readCfg.Providers[0].APIKey == nil || *readCfg.Providers[0].APIKey != "super-secret-key" {
-		t.Fatalf("expected decrypted key in GetConfig, got %+v", readCfg.Providers)
+	// GetConfig hands out no key; the response masking below is a second line, not the only one.
+	if len(readCfg.Providers) != 1 || readCfg.Providers[0].APIKey != nil {
+		t.Fatalf("expected a provider with no APIKey, got %+v", readCfg.Providers)
+	}
+	// The key is still there for the one caller allowed to have it.
+	if got := cs.GetProviderAPIKey("http://localhost:8080/v1"); got != "super-secret-key" {
+		t.Fatalf("GetProviderAPIKey = %q, want the stored key", got)
 	}
 
-	// The HTTP response must mask the key, never return it in plaintext.
+	// The HTTP response masks it.
 	resp := cs.buildConfigResponse(readCfg)
 	if len(resp.Providers) != 1 || resp.Providers[0].APIKey == nil {
 		t.Fatalf("expected 1 provider with an APIKey field, got %+v", resp.Providers)
@@ -678,8 +694,16 @@ func TestBuildConfigResponseMasksAPIKeys(t *testing.T) {
 	if got := *resp.Providers[0].APIKey; got != maskedAPIKey {
 		t.Fatalf("API key not masked in response: got %q, want %q", got, maskedAPIKey)
 	}
-	if got := *resp.Providers[0].APIKey; got == "super-secret-key" {
-		t.Fatal("plaintext API key leaked in config response")
+	// Neither the plaintext nor the stored ciphertext may appear anywhere in the response body.
+	sealed := firstStoredKey(t, db)
+	body, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	for _, leak := range []string{"super-secret-key", sealed} {
+		if leak != "" && strings.Contains(string(body), leak) {
+			t.Errorf("config response body leaks %q", leak)
+		}
 	}
 }
 

@@ -3,7 +3,6 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 
 	"mike/backend/types"
 )
@@ -117,22 +116,4 @@ func clamp(v, lo, hi int) int {
 		return hi
 	}
 	return v
-}
-
-// mergeProviderKeys preserves stored API keys for providers the payload did not carry one for.
-// nil = not provided (preserve), "" = explicitly clear, non-empty = new value.
-func mergeProviderKeys(incoming []types.Provider, existing []types.Provider) []types.Provider {
-	existingByKey := make(map[string]string)
-	for _, p := range existing {
-		if p.APIKey != nil && p.ID != 0 {
-			existingByKey[strconv.Itoa(p.ID)] = *p.APIKey
-		}
-	}
-	for i := range incoming {
-		if incoming[i].APIKey == nil && existingByKey[strconv.Itoa(incoming[i].ID)] != "" {
-			key := existingByKey[strconv.Itoa(incoming[i].ID)]
-			incoming[i].APIKey = &key
-		}
-	}
-	return incoming
 }
