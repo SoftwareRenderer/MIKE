@@ -214,27 +214,8 @@ func TestLLMCrashMidTurnWithToolCallLeavesNoPartialTurn(t *testing.T) {
 
 	startExecRun(t, te, projectID, taskID, srv.URL, worktreePath)
 
-	// Every retry dies the same way, so wait for the run to settle on its own. `failTask` persists
-	// the failed task row before it writes the error row, so the state alone does not mean the
-	// thread is complete — reading it between those two writes is a red under load.
-	deadline := time.Now().Add(60 * time.Second)
-	for {
-		row, err := te.store.GetTaskByID(taskID)
-		if err != nil {
-			t.Fatalf("read task row: %v", err)
-		}
-		stored, err := te.store.GetTaskMessages(taskID, "thread-"+taskID)
-		if err != nil {
-			t.Fatalf("get messages: %v", err)
-		}
-		if row.ExecutionState == types.ExecStateFailed && lastErrorRow(stored) != "" {
-			break
-		}
-		if time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	// Every retry dies the same way, so wait for the run to settle on its own.
+	waitForFailureRow(t, te, taskID, 60*time.Second)
 
 	row := mustGetTask(t, te, taskID)
 	if row.ExecutionState != types.ExecStateFailed {
@@ -276,6 +257,21 @@ func TestLLMCrashMidTurnWithToolCallLeavesNoPartialTurn(t *testing.T) {
 }
 
 // lastErrorRow returns the content of the thread's last error row, or "".
+// waitForFailureRow waits until the run is failed and its error row is stored. `failTask` writes the
+// failed task row before the error row, so the state alone does not mean the thread is complete —
+// reading it between those two writes is a red under load.
+func waitForFailureRow(t *testing.T, te *TaskExecutor, taskID string, wait time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(wait)
+	for time.Now().Before(deadline) {
+		if mustGetTask(t, te, taskID).ExecutionState == types.ExecStateFailed &&
+			lastErrorRow(mustMessages(t, te, taskID, "thread-"+taskID)) != "" {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func lastErrorRow(msgs []types.TaskMessage) string {
 	last := ""
 	for _, m := range msgs {
@@ -296,13 +292,7 @@ func TestLLMProviderDiesBeforeFirstFrameRetriesThenFailsIntoReview(t *testing.T)
 
 	startExecRun(t, te, projectID, taskID, srv.URL, worktreePath)
 
-	deadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
-		if mustGetTask(t, te, taskID).ExecutionState == types.ExecStateFailed {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	waitForFailureRow(t, te, taskID, 60*time.Second)
 
 	row := mustGetTask(t, te, taskID)
 	if row.ExecutionState != types.ExecStateFailed || row.Status != types.StatusReview {
@@ -331,13 +321,7 @@ func TestLLMCompletionWithNoContentFailsIntoReview(t *testing.T) {
 
 	startExecRun(t, te, projectID, taskID, srv.URL, worktreePath)
 
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if mustGetTask(t, te, taskID).ExecutionState == types.ExecStateFailed {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	waitForFailureRow(t, te, taskID, 30*time.Second)
 
 	row := mustGetTask(t, te, taskID)
 	if row.ExecutionState != types.ExecStateFailed || row.Status != types.StatusReview {

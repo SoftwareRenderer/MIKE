@@ -30,6 +30,7 @@
         models: ModelEntry[];
         concurrency: number;
         max_requests_per_second: number; // 0 = unlimited; max new LLM request starts per second
+        stream_idle_seconds: number; // 0 = no ceiling; seconds a response may stay silent
         input_price: number;
         output_price: number;
         cache_read_price: number;
@@ -216,6 +217,13 @@
                             <HelpIcon label={t('settings.provider.maxRps')} text={t('settings.provider.maxRpsHelp')} />
                         </div>
                         <input id={`max-rps-${index}`} type="number" min="0" step="1" bind:value={provider.max_requests_per_second} class="option-input" onchange={() => onDirty?.()} />
+                    </div>
+                    <div class="option-row">
+                        <div class="option-label-group">
+                            <label class="option-label" for={`stream-idle-${index}`}>{t('settings.provider.streamIdle')}</label>
+                            <HelpIcon label={t('settings.provider.streamIdle')} text={t('settings.provider.streamIdleHelp')} />
+                        </div>
+                        <input id={`stream-idle-${index}`} type="number" min="0" step="1" bind:value={provider.stream_idle_seconds} class="option-input" onchange={() => onDirty?.()} />
                     </div>
                 </div>
 

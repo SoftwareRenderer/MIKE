@@ -327,6 +327,7 @@ export interface Provider {
     models: ProviderModel[];
     concurrency: number;
     max_requests_per_second: number; // 0 = unlimited; max new LLM request starts per second
+    stream_idle_seconds: number; // 0 = no ceiling; seconds a response may stay silent before it is ended
     agent_config_dir?: string; // optional host path override for agent config dir; empty means use extension default
     input_price?: number;      // USD per 1M input (non-cached) tokens
     output_price?: number;     // USD per 1M output tokens
@@ -426,10 +427,12 @@ export interface ProjectStats {
     total_cost: number; // USD (API + electricity)
 }
 
-// A lock a click is waiting on, named by its domain. Rendered by QueueIndicator.
+// A wait a click is watching, named by its domain. Rendered by QueueIndicator. `phase` arrives only
+// from the provider wait, which reads differently before the first token and after it.
 export interface LockWait {
     domain: 'worktree' | 'stash' | string;
     seconds: number;
+    phase?: string;
 }
 
 // Stream events

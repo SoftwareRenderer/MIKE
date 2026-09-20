@@ -446,10 +446,10 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
             case 'lock_wait': {
                 // Repeated while the wait lasts, acquired=true at the end: a lost frame costs one repeat
                 // instead of a spinner that never stops.
-                const data = event.data as { domain?: string; waited_seconds?: number; acquired?: boolean };
+                const data = event.data as { domain?: string; waited_seconds?: number; acquired?: boolean; phase?: string };
                 s.lockWait = data.acquired
                     ? null
-                    : { domain: data.domain || 'other', seconds: data.waited_seconds || 0 };
+                    : { domain: data.domain || 'other', seconds: data.waited_seconds || 0, phase: data.phase };
                 break;
             }
             case 'prompt_progress': {

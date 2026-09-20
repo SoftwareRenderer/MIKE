@@ -34,6 +34,7 @@
       "name": "",
       "output_price": 0,
       "power_consumption_w": 0,
+      "stream_idle_seconds": 0,
       "url": "https://llm.invalid/v1"
     }
   ],

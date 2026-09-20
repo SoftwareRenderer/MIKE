@@ -404,6 +404,9 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 		if c.Providers[i].MaxRequestsPerSecond < 0 {
 			c.Providers[i].MaxRequestsPerSecond = 0
 		}
+		if c.Providers[i].StreamIdleSeconds < 0 {
+			c.Providers[i].StreamIdleSeconds = 0
+		}
 		if c.Providers[i].APIKey != nil && *c.Providers[i].APIKey != "" {
 			encrypted, err := crypto.Encrypt(*c.Providers[i].APIKey)
 			if err != nil {

@@ -127,11 +127,13 @@ func (te *TaskExecutor) resumeProvenance(taskID string) bool {
 	return err == nil && task.Autostarted
 }
 
-// newLlamaClient creates a LlamaClient with the provider request adapter
-// attached.
-func (te *TaskExecutor) newLlamaClient(serverURL, modelName, reasoningEffort, apiKey string) *llama.LlamaClient {
+// newLlamaClient creates a LlamaClient with the provider request adapter attached and that
+// provider's ceiling for a quiet stream. silence may be nil: a utility call has nobody watching it,
+// but it reaches the same endpoint, so the same ceiling applies to it.
+func (te *TaskExecutor) newLlamaClient(serverURL, modelName, reasoningEffort, apiKey string, silence *streamSilenceWatcher) *llama.LlamaClient {
 	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
 	client.SetAdapter(te.llmAdapter)
+	client.SetSilencePolicy(te.configStore.GetProviderStreamIdle(serverURL), silence.onWait())
 	return client
 }
 
@@ -588,7 +590,7 @@ func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName
 		}
 	}
 	apiKey := te.configStore.GetProviderAPIKey(serverURL)
-	client := te.newLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
+	client := te.newLlamaClient(serverURL, modelName, reasoningEffort, apiKey, nil)
 	var usage *types.ChatUsage
 	var text string
 	err := te.RunWithGate(ctx, serverURL, func() error {
@@ -604,7 +606,7 @@ func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName
 // is fully transparent. Uses the same provider concurrency limits as ChatCompletion.
 func (te *TaskExecutor) StreamCompletion(ctx context.Context, serverURL, modelName string, messages []types.ChatMessage, cb types.StreamCallback, onProgress types.PromptProgressCallback) (*types.ChatUsage, error) {
 	apiKey := te.configStore.GetProviderAPIKey(serverURL)
-	client := te.newLlamaClient(serverURL, modelName, "off", apiKey)
+	client := te.newLlamaClient(serverURL, modelName, "off", apiKey, nil)
 	var usage *types.ChatUsage
 	err := te.RunWithGate(ctx, serverURL, func() error {
 		var err error

@@ -15,15 +15,19 @@
 
     let { queuePosition, queueEstimatedWait, promptProgress, retryCount, retryError, isAgentSelected, lockWait = null }: Props = $props();
 
-    // The held lock decides the sentence; an unlisted domain still gets one.
+    // The held lock decides the sentence; an unlisted domain still gets one. A quiet provider is
+    // keyed by phase as well: waiting for a first token and going silent mid-answer read differently.
     const LOCK_KEYS: Record<string, MessageKey> = {
         worktree: 'chat.queue.lockWorktree',
         stash: 'chat.queue.lockStash',
+        'model:first_token': 'chat.queue.modelPrompt',
+        'model:mid_response': 'chat.queue.modelQuiet',
     };
 
     let label = $derived(() => {
         if (lockWait) {
-            return t(LOCK_KEYS[lockWait.domain] || 'chat.queue.lockOther', { seconds: lockWait.seconds });
+            const key = LOCK_KEYS[`${lockWait.domain}:${lockWait.phase}`] ?? LOCK_KEYS[lockWait.domain] ?? 'chat.queue.lockOther';
+            return t(key, { seconds: lockWait.seconds });
         }
         const target = isAgentSelected() ? t('chat.queue.targetAgent') : t('chat.queue.targetLlm');
         if (queuePosition > 0) {

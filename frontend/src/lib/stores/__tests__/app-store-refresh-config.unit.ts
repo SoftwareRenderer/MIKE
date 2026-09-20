@@ -36,8 +36,8 @@ function makeConfig(providers: Provider[]): Config {
     };
 }
 
-const llm: Provider = { id: 1, url: 'http://llm:8080/v1', models: [{ name: 'model-a' }], concurrency: 1, max_requests_per_second: 0 };
-const pi: Provider = { name: 'pi', kind: 'agent', url: 'agent://pi', display_name: 'Pi Coding Agent', concurrency: 1, max_requests_per_second: 0, models: [] };
+const llm: Provider = { id: 1, url: 'http://llm:8080/v1', models: [{ name: 'model-a' }], concurrency: 1, max_requests_per_second: 0, stream_idle_seconds: 0 };
+const pi: Provider = { name: 'pi', kind: 'agent', url: 'agent://pi', display_name: 'Pi Coding Agent', concurrency: 1, max_requests_per_second: 0, models: [], stream_idle_seconds: 0, };
 
 describe('AppStore.refreshConfig', () => {
     beforeEach(() => {

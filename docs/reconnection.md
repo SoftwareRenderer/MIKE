@@ -360,8 +360,26 @@ and the user would have to reload to be told the truth. Repeating costs one smal
 makes the worst case one repeat of staleness instead of an indefinite lie. Nothing on the server tracks whether a
 client saw the frames: there is no state to get out of step.
 
-Tests: `backend/stream/lock_wait_test.go` (both frames), `frontend/src/lib/services/__tests__/stream-handler.unit.ts`
+Tests: `backend/stream/lock_wait_test.go` (both frames), `frontend/src/lib/components/__tests__/queue-indicator.unit.svelte.ts`,
+`frontend/src/lib/services/__tests__/stream-handler.unit.ts`
 (the acquisition clears it, an unknown domain still names a wait).
+
+### The same frame carries a wait for the model, which is not a lock
+
+A second producer sends `lock_wait` with `domain: "model"`: a task's provider that has sent nothing for a while
+(`streamSilenceWatcher`, `backend/exec/loop.go`). It repeats and withdraws on the same `LockWaitNoticeEvery` cadence
+because a frame that must survive a lost frame has the same shape whatever it waits on, and it adds one field,
+`phase` — `first_token` while no token has arrived, `mid_response` after one has, which is the difference between
+"still processing the prompt" and "generating without streaming" and therefore between two different sentences in
+`QueueIndicator`.
+
+The two producers differ in one thing that is not on the wire: **a lock wait ends the wait, a model wait does not
+end the call.** The client-side notice measures silence and says what it measures; only a per-provider
+`stream_idle_seconds` ceiling ends a stream, and its default of 0 means silence is waited out however long it
+lasts. A provider has been measured holding 16,267 generated tokens behind 76-89 seconds of silence and then
+finishing normally, so silence is never reported as a lost connection and the notice is the whole response to it.
+
+Tests: `backend/exec/quiet_stream_test.go` (the frame pair, and that a resumed stream is not retried).
 
 ## What refuses the queue rather than joining it
 

@@ -501,6 +501,8 @@ const catalog = {
     'settings.provider.concurrencyHelp': 'Max tasks running concurrently on this provider; also caps in-flight LLM requests to this number.',
     'settings.provider.maxRps': 'Max requests/sec',
     'settings.provider.maxRpsHelp': 'Maximum new requests started per second to this provider. 0 = unlimited.',
+    'settings.provider.streamIdle': 'Idle stream limit (s)',
+    'settings.provider.streamIdleHelp': 'Terminate the stream after inactivity. This can workaround potential provider issues. 0 = never',
 
     // ── StatsModal.svelte — token usage table. `t/s`, `kWh`, `Wh`, `mWh` are units, not copy. ──
     'settings.stats.title': 'Token Usage',
@@ -1287,6 +1289,8 @@ const catalog = {
     'chat.queue.lockWorktree': 'Waiting — this task is still working ({seconds}s)...',
     'chat.queue.lockStash': 'Waiting — another git operation has this project open ({seconds}s)...',
     'chat.queue.lockOther': 'Waiting — the project is busy ({seconds}s)...',
+    'chat.queue.modelPrompt': 'The provider is processing the prompt ({seconds}s)...',
+    'chat.queue.modelQuiet': 'The provider is generating quietly ({seconds}s since its last token)...',
 
     // ── Chat/ContextUsage.svelte (donut tooltip; the suffix keeps its leading separator) ──
     'chat.context.usage': '{used} / {limit} tokens · {percent}%',

@@ -161,3 +161,23 @@ func TestGrantedEgressClientWithNoGrantsIsTheStrictClient(t *testing.T) {
 		t.Error("a granted call must not share the strict pool — the address rule differs per call")
 	}
 }
+
+// TestNewStreamClientIsUnboundedAndOnItsOwnPool: the two properties that make it the streaming
+// client. No timeout, because a completion is finished by its last token and not by the clock; a
+// pool of its own, because its keepalive floor must not become every extension's and every update
+// check's keepalive policy.
+func TestNewStreamClientIsUnboundedAndOnItsOwnPool(t *testing.T) {
+	stream := NewStreamClient()
+	if stream.Timeout != 0 {
+		t.Errorf("Timeout = %v, want 0: a bounded client cannot carry a long completion", stream.Timeout)
+	}
+	if stream.Transport == sharedTransport {
+		t.Error("the streaming client shares sharedTransport, so its keepalive floor reaches every other outbound call")
+	}
+	if stream.Transport == egressTransport {
+		t.Error("the streaming client borrowed the egress pool, which refuses addresses it never needed to refuse")
+	}
+	if _, ok := stream.Transport.(*http.Transport); !ok {
+		t.Errorf("Transport = %T, want an *http.Transport that can carry a keepalive config", stream.Transport)
+	}
+}

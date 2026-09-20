@@ -490,6 +490,14 @@ func (cs *ConfigStore) GetProviderMaxRequestsPerSecond(serverURL string) int {
 	return cs.providerInt(serverURL, func(p types.Provider) int { return p.MaxRequestsPerSecond }, 0)
 }
 
+// GetProviderStreamIdle returns how long one response may stay silent before MIKE ends it, for the
+// provider matching the given server URL. Zero — the unset default — means no ceiling: silence is
+// reported and waited out, because a provider generating constrained output can hold thousands of
+// tokens behind a silent minute and then finish normally.
+func (cs *ConfigStore) GetProviderStreamIdle(serverURL string) time.Duration {
+	return time.Duration(cs.providerInt(serverURL, func(p types.Provider) int { return p.StreamIdleSeconds }, 0)) * time.Second
+}
+
 // IsAgentProvider returns true if the provider matching the given server URL is an agent (non-LLM kind).
 // Also returns true for agent:// URLs (agent extensions).
 // Returns false if no matching provider is found.

@@ -282,14 +282,15 @@ type modelSwitchResult struct {
 
 // applyModelSwitch creates a new LlamaClient for the given serverURL/modelName,
 // updates the modelConfig, and optionally persists the override to the task DB row.
-// If discoverContext is true, it attempts to discover and save the context window.
-func (te *TaskExecutor) applyModelSwitch(mc *modelConfig, task *types.Task, projectID, serverURL, modelName string, persistToDB, discoverContext bool) modelSwitchResult {
+// If discoverContext is true, it attempts to discover and save the context window. silence is the
+// run's watcher, handed on so the new client keeps announcing a quiet provider.
+func (te *TaskExecutor) applyModelSwitch(mc *modelConfig, task *types.Task, projectID, serverURL, modelName string, persistToDB, discoverContext bool, silence *streamSilenceWatcher) modelSwitchResult {
 	reasoningEffort := task.ReasoningEffort
 	if reasoningEffort == "" {
 		reasoningEffort = te.configStore.GetModelReasoningEffort(modelName)
 	}
 	apiKey := te.configStore.GetProviderAPIKey(serverURL)
-	client := te.newLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
+	client := te.newLlamaClient(serverURL, modelName, reasoningEffort, apiKey, silence)
 	providerName := te.configStore.GetProviderIDByURL(serverURL)
 
 	var contextWindow *int
