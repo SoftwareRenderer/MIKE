@@ -206,6 +206,38 @@ subresource, what it can carry is the whole permission:
 
 Tests: `backend/server/handler_fs_raw_test.go`.
 
+## The Explorer's file batch
+
+`POST /api/fs/delete`, `/copy`, `/move` and `/rename` (`backend/server/handler_fs_ops.go`) are the four writes
+`handler_fs.go` does not already have, and they share one answer: `{ done: [...], failed: [...] }`, each entry
+`{ from, to?, renamed?, reason? }`.
+
+- **Both lists are always present** — an empty `failed` is the answer the caller reads, not a missing key — and
+  `from` is the path *as the caller named it*, so a browser browsing a sandboxed project never has a host path
+  handed back to it. `to` is absent when the item went nowhere.
+- **`renamed` is the server admitting it chose a different name.** A destination folder that already holds the
+  name takes `name copy`, `name copy2`, … rather than overwriting or failing, and only the server knows which
+  items needed one, so the listing lists them in a dialog (`pasteRenamedEntry`) instead of leaving a paste that
+  renamed files to be discovered later.
+- **A refusal has two altitudes.** The jail's and the request's — an uncorrelated `?task=`/`?project=`, a path
+  outside the project, a destination that is not a folder, an empty batch or one over
+  `maxFSOpsBatch` (100 paths), a destination folder that no longer exists — fail the **request** before a path
+  is touched, which is what makes a paste atomic. Anything learned while running (a source that vanished, a
+  `.git` row, a tree over its copy bound) is one entry in `failed` and the rest of the selection still lands,
+  because a batch is a person's selection. `fsOpsReason` is the whole vocabulary: fsutil's own refusals and
+  `os.ErrNotExist` are sentences the requester can act on and are passed through; anything else is this
+  server's problem, so its cause goes to the log and the caller gets MIKE's sentence, like everywhere else
+  (`Errors` below).
+- A move into the folder the path already sits in answers `done` with no `to` — the no-op the click asked for —
+  while the same request as a copy is a duplicate, which is why only the move short-circuits. `/rename` is the
+  one single-path route, and a name the folder already holds there is a **409** rather than an auto-rename:
+  the person typing the name chose it, and a third name nobody asked for would be the worse answer.
+- Like `write` and `mkdir`, these routes carry `?project=` (plus `?task=` for a task's listing), declare their
+  verb in the pattern, and take the CSRF header.
+
+Tests: `backend/server/handler_fs_ops_test.go`; client side `frontend/src/lib/api/fs-ops.ts` and
+`frontend/src/lib/components/__tests__/file-browser-context-menu.unit.svelte.ts`.
+
 ## Errors
 
 A server fault answers MIKE's own sentence; the cause goes to the log. `errs.Operation(operation, cause)`

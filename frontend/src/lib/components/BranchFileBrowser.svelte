@@ -5,7 +5,7 @@
     import FileBrowserView from '$lib/components/FileBrowserView.svelte';
     import { t } from '$lib/i18n';
 
-    let { projectId, projectPath, initialPath, sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange, onToggleFind }: {
+    let { projectId, projectPath, initialPath, sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange, onToggleFind, onDeleted }: {
         projectId: string;
         projectPath: string;
         initialPath?: string;
@@ -15,6 +15,7 @@
         onFileSelected: (path: string, line?: number, pin?: boolean) => void;
         onPathChange: (path: string) => void;
         onToggleFind?: () => void;
+        onDeleted?: (paths: string[]) => void;
     } = $props();
 
     // Sandbox mount path for this project
@@ -99,6 +100,7 @@
     {pendingFsEvent}
     onFsEvent={loadGitStatus}
     onMutated={loadGitStatus}
+    {onDeleted}
     extraEntryInfo={gitBadge}
     emptyMessage={t('explorer.branchFiles.empty')}
     pendingMessage={t('explorer.branchFiles.initSandbox')}

@@ -12,7 +12,9 @@
     // in a derived rather than into state.
     let confirmOverride = $state<string | null>(null);
     let cancelOverride = $state<string | null>(null);
-    let confirmText = $derived(confirmOverride ?? t('app.confirm.confirm'));
+    // A notice's single button is labelled by the caller, not by "Cancel".
+    let okOverride = $state<string | null>(null);
+    let confirmText = $derived(okOverride ?? confirmOverride ?? t('app.confirm.confirm'));
     let cancelText = $derived(cancelOverride ?? t('app.cancel'));
 
     const dialog = usePromiseDialog({
@@ -26,6 +28,7 @@
             items = value.items ?? [];
             confirmOverride = value.confirmText ?? null;
             cancelOverride = value.cancelText ?? null;
+            okOverride = value.okText ?? null;
             variant = value.variant ?? 'destructive';
         },
     });
@@ -36,6 +39,7 @@
     {title}
     cancelLabel={cancelText}
     confirmLabel={confirmText}
+    dismissOnly={okOverride !== null}
     {variant}
     onConfirm={dialog.confirm}
     onCancel={dialog.cancel}

@@ -126,6 +126,10 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/fs/upload", s.handleFSUpload)
 	s.mux.HandleFunc("POST /api/fs/init-git", s.handleFSInitGit)
 	s.mux.HandleFunc("POST /api/fs/mkdir", s.handleFSMkdir)
+	s.mux.HandleFunc("POST /api/fs/delete", s.handleFSDelete)
+	s.mux.HandleFunc("POST /api/fs/copy", s.handleFSCopyPaths)
+	s.mux.HandleFunc("POST /api/fs/move", s.handleFSMovePaths)
+	s.mux.HandleFunc("POST /api/fs/rename", s.handleFSRenamePath)
 	s.mux.HandleFunc("GET /api/fs/search", s.handleFSSearch)
 	s.mux.HandleFunc("GET /api/fs", s.handleFS)
 
