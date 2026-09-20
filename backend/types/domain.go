@@ -177,6 +177,7 @@ type Provider struct {
 	Models                []ModelConfig `json:"models"`
 	Concurrency           int           `json:"concurrency"`
 	MaxRequestsPerSecond  int           `json:"max_requests_per_second"`    // 0 = unlimited; max new LLM request starts per second
+	StreamIdleSeconds     int           `json:"stream_idle_seconds"`        // 0 = no ceiling: a provider that goes quiet mid-stream is waited out, not dropped
 	AgentConfigDir        string        `json:"agent_config_dir,omitempty"` // optional host path override for the agent config dir; empty means use extension default
 	InputPrice            float64       `json:"input_price"`                // USD per 1M input (non-cached) tokens
 	OutputPrice           float64       `json:"output_price"`               // USD per 1M output tokens

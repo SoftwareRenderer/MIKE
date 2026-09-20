@@ -23,6 +23,7 @@ ROOTS=("." "./pkg/bridge/agent")
 # allowing `none` in backend/extensions cannot also excuse an unrelated `none` elsewhere.
 ALLOWLIST="
 backend/agent/loader.go:RegisterAdapterFactory
+backend/crypto/encryption.go:Derivations
 backend/extensions/i18n_prompts.go:none
 backend/llama/tools_names.go:AllToolNames
 backend/prompts/overlay.go:ActiveOverlay
@@ -49,6 +50,8 @@ pkg/logging/logging.go:Lines
 #
 # backend/stream: TickOnce drives one sample and one broadcast in lockstep, which is how every
 # sampler test steps the ticker; production runs the same two halves on their own intervals.
+#
+# backend/crypto: Derivations is how the one-KDF-per-Box test counts without measuring wall time.
 
 is_allowed() {
 	local file="$1" name="$2" entry

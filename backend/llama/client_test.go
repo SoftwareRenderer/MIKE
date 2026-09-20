@@ -1,7 +1,6 @@
 package llama
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,9 +18,10 @@ import (
 	"mike/backend/types"
 )
 
-// TestChatStream_ReadIdleTimeout verifies ChatStream returns
-// context.DeadlineExceeded when the server stops sending data.
-func TestChatStream_ReadIdleTimeout(t *testing.T) {
+// TestChatStream_SilenceCeilingEndsStream a stream that goes quiet past the ceiling the caller set
+// ends with ErrStreamSilent naming the silence. It must never read as "deadline exceeded": that
+// borrowed error sent people looking for a timeout the product does not have.
+func TestChatStream_SilenceCeilingEndsStream(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -36,17 +36,94 @@ func TestChatStream_ReadIdleTimeout(t *testing.T) {
 	defer server.Close()
 
 	c := NewLlamaClient(server.URL, "test-model", "off", "")
-	c.readIdleTimeout = 100 * time.Millisecond
+	c.waitTick = 10 * time.Millisecond
+	c.SetSilencePolicy(100*time.Millisecond, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	_, err := c.ChatStream(ctx, testMessages(), nil, func(choice types.ChatChoice) {}, nil, nil)
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	var silent *ErrStreamSilent
+	if !errors.As(err, &silent) {
+		t.Fatalf("expected ErrStreamSilent, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "deadline") {
-		t.Fatalf("expected deadline exceeded error, got: %v", err)
+	if silent.Phase != StreamPhaseMidResponse {
+		t.Errorf("phase = %q, want %q: a token had arrived", silent.Phase, StreamPhaseMidResponse)
+	}
+	if silent.Silent < 100*time.Millisecond {
+		t.Errorf("silent = %v, want at least the 100ms ceiling", silent.Silent)
+	}
+	if strings.Contains(err.Error(), "deadline") {
+		t.Errorf("the sentence still blames a deadline: %v", err)
+	}
+}
+
+// TestChatStream_SilenceBeforeFirstTokenIsWaitedOut is the case a 74k prompt produces: the provider
+// accepts the request and says nothing while it works. Silence is announced and the call is ended
+// by the caller's context, never by the silence itself.
+func TestChatStream_SilenceBeforeFirstTokenIsWaitedOut(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	c := NewLlamaClient(server.URL, "test-model", "off", "")
+	c.noticeFirstTok = 30 * time.Millisecond
+	c.waitTick = 10 * time.Millisecond
+	var phases atomic.Value
+	c.SetSilencePolicy(0, func(silent time.Duration, phase string) {
+		phases.Store(phase)
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+
+	_, err := c.ChatStream(ctx, testMessages(), nil, func(types.ChatChoice) {}, nil, nil)
+	if got, _ := phases.Load().(string); got != StreamPhaseFirstToken {
+		t.Errorf("announced phase = %q, want %q", got, StreamPhaseFirstToken)
+	}
+	var silent *ErrStreamSilent
+	if errors.As(err, &silent) {
+		t.Errorf("a caller-less ceiling ended the call: %v", err)
+	}
+}
+
+// TestChatStream_SilenceThatResumesCompletes: a provider that goes quiet and then finishes is a
+// successful response, and the notice that fired while it was quiet is not an error.
+func TestChatStream_SilenceThatResumesCompletes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("no flusher")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n")
+		f.Flush()
+		time.Sleep(90 * time.Millisecond) // longer than the notice floor, shorter than any ceiling
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\ndata: [DONE]\n\n")
+		f.Flush()
+	}))
+	defer server.Close()
+
+	c := NewLlamaClient(server.URL, "test-model", "off", "")
+	c.noticeMidResp = 30 * time.Millisecond
+	c.waitTick = 10 * time.Millisecond
+	var notices int
+	c.SetSilencePolicy(0, func(time.Duration, string) { notices++ })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := c.ChatStream(ctx, testMessages(), nil, func(types.ChatChoice) {}, nil, nil); err != nil {
+		t.Fatalf("a resumed stream must complete, got: %v", err)
+	}
+	if notices == 0 {
+		t.Error("the silent stretch was never announced")
 	}
 }
 
@@ -72,7 +149,7 @@ func TestChatStream_TimedOutRace(t *testing.T) {
 	}()
 
 	c := NewLlamaClient("http://"+listener.Addr().String(), "test-model", "off", "")
-	c.readIdleTimeout = 50 * time.Millisecond
+	c.SetSilencePolicy(50*time.Millisecond, nil)
 
 	for range 20 {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -91,39 +168,6 @@ func handleRaceConn(t *testing.T, conn net.Conn) {
 	conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"))
 	conn.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\n"))
 	time.Sleep(55 * time.Millisecond)
-}
-
-// TestChatStream_TimedOutDataRace exercises the timedOut race via io.Pipe.
-func TestChatStream_TimedOutDataRace(t *testing.T) {
-	for i := 0; i < 200; i++ {
-		testTimedOutRaceOnce(t)
-	}
-}
-
-func testTimedOutRaceOnce(_ *testing.T) {
-	r, w := io.Pipe()
-	go func() {
-		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\n"))
-		time.Sleep(50 * time.Millisecond)
-		w.Close()
-	}()
-
-	scanner := bufio.NewScanner(r)
-	idleTimeout := 50 * time.Millisecond
-	var timedOut atomic.Bool
-	readTimer := time.AfterFunc(idleTimeout, func() {
-		timedOut.Store(true)
-		r.Close()
-	})
-	readTimer.Stop()
-
-	for scanner.Scan() {
-		_ = scanner.Text()
-		readTimer.Stop()
-		readTimer.Reset(idleTimeout)
-	}
-	readTimer.Stop()
-	_ = timedOut.Load()
 }
 
 // TestChatStream_ProductionTimedOutRace calls the real ChatStream
@@ -156,7 +200,7 @@ func TestChatStream_ProductionTimedOutRace(t *testing.T) {
 	}()
 
 	c := NewLlamaClient("http://"+listener.Addr().String(), "test-model", "off", "")
-	c.readIdleTimeout = 50 * time.Millisecond
+	c.SetSilencePolicy(50*time.Millisecond, nil)
 
 	for range 200 {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

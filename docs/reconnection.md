@@ -27,13 +27,89 @@ wake-up fetch.
 
 ## What a reconnect brings back, and what the client must fetch
 
-`?sync=1` replays the ring buffer of the **connection** that asks (`bufferRaw` → `clientState.ringBuffer`
-in `backend/stream/app_stream.go`), and a reconnect is a new connection with an empty one — so a
-reconnected app stream receives `project_counts` and whatever its own `subscribe_project` answers, and
-nothing that happened while it was down. That is why `onConnected(true)` runs `silentRefresh()`, why the
-wake-up path refetches the board over HTTP, and why `TaskChat` reloads history from the DB. The replay
-that does survive a reconnect is the **per-task** one (`getTaskBuffer`, replayed on `subscribe_task`),
-which is why a task's buffer is cleared the moment its turn ends.
+A reconnect is a **new connection**, and nothing is held for a connection that has gone: the app stream
+answers it with `project_counts` and whatever its own `subscribe_project` answers, and nothing that
+happened while it was down. That is why `onConnected(true)` runs `silentRefresh()`, why the wake-up path
+refetches the board over HTTP, and why `TaskChat` reloads history from the DB. The one replay that
+survives a reconnect is the **per-task** one (`taskBufferFrames`, replayed on `subscribe_task`): it is
+keyed by what the client asks for again, not by the socket it lost, which is why a task's buffer is
+cleared the moment its turn ends.
+
+That replay holds **one frame per tool call**, because two frames for one call replay as two cards. The
+live path sends a call's whole args and then only its growth, so the frames of one call are joined where
+the replay is read (`foldToolCallFrames`): the frame handed over carries the whole input, not the last
+delta, or a card opened mid-call would start mid-JSON. Joining at the read costs one pass per subscribe
+instead of one per frame, and it runs on the frames copied out of the buffer rather than inside the hub
+lock — a full buffer of one call's deltas measured 26 ms of JSON there, and 0.9 ms for the same pass with
+nothing to join. A delta whose start has already been trimmed stays a delta — there is nothing to fold it
+into, and dropping it would hide the call.
+
+**Tests:** `backend/stream/app_stream_test.go` (one frame per call, args from the start, a lone delta
+kept as it arrived).
+
+A replay is never written on the goroutine that asks for it: it is queued into the connection's own sender
+(`sendQueue.pushReplay`) and comes out of it in order — behind any replay already queued, so two replays
+keep the order they were asked for, and ahead of every live frame, so a replay is not interrupted by what
+the task said meanwhile. A replay is therefore subject to the queue's bound like any other frame, and a
+backlog too large for it is truncated at the oldest end and ends the connection rather than reaching the
+browser in pieces — see *The slow client is released, not timed out*. No replay path writes the socket
+itself: the read loop and the initial-data worker both hand frames over.
+
+A task's frame reaches a connection **exactly once**, which is a locking rule rather than a client one: the
+hub hands the frame to the task's subscribers and adds it to that task's replay buffer in one step, and
+`subscribe_task` reads the buffer in the same step that makes the connection a subscriber (`asm.mu`, taken
+before `taskBufMu`). Split into two steps, a subscribe landing between them got the frame twice or never,
+and a hole in a replay is something the client cannot see. **Tests:**
+`backend/stream/app_stream_subscribe_race_test.go`.
+
+## The slow client is released, not timed out
+
+Every frame for a connection goes through that connection's own queue (`sendQueue`) and one sender
+goroutine writes it, so a browser that stopped reading costs nobody else in the server. The queue is
+bounded by frame count and bytes; over the bound the **oldest** frames go, which leaves what the client
+receives a contiguous tail with a hole behind it — and a chat holding a hole never becomes right by
+waiting.
+
+So once such a queue has drained, the server ends the connection (`StatusTryAgainLater`, one
+`component=stream` warning naming how many frames were missed) and the client's existing path does the
+rest: `onclose` → `onConnected(false)` → reconnect → `onConnected(true)` →
+`silentRefresh()` and `TaskChat.loadHistory()`, plus the per-task replay its `subscribe_task` answers.
+That is why there is no "you missed frames" frame to add: the resync the app has is a connection, and
+the only other choice — holding the connection open on a gap it cannot report — is a view that lies
+until someone reloads. Nothing here puts a deadline on a wait for this server (AGENTS.md →
+Reconnection & Offline); a slow client is degraded, not timed out.
+
+**Tests:** `backend/stream/app_stream_sender_test.go` (a stalled subscriber does not hold the turn, the
+queue's two bounds drop the oldest, the missed-frames connection is ended).
+
+## One frame per key: what a reconnect may say
+
+A connection holds a subscription **per key** (`backend/stream/app_stream_subscription_test.go`), so one
+`unsubscribe_*` leaves it, and the work a subscription starts — a project's initial-data pass, a task's
+buffer replay — belongs to the key rather than to the frame that arrived. The client's side is `owed`
+(`src/lib/api/stream.ts`): the newest intent for each key, recorded when `subscribeProject`/
+`unsubscribeProject`/`subscribeTask`/`unsubscribeTask` run, never a log of frames. It is a projection of
+the two subscription sets, which is what bounds it — an outage costs at most one frame per key the app
+has opened however long it runs, where a message log replayed a frame per navigation and re-subscribed
+every held key on top, so a project opened during an outage was subscribed twice and unsubscribed once.
+That second hold never left, and the project's branch and filesystem watchers stayed armed for the life
+of the socket.
+
+Two rules the server's holding depends on, both held by the shape of `owed`: a key's `unsubscribe_*` is
+never sent after a later `subscribe_*` for that key, because the newest intent replaces the older one; and
+a subscribe the server never received is undone by **dropping** it, not by sending its cancellation — the
+connection that would have carried it never held the key. `onopen` writes what is owed, then one subscribe
+per key still held that the owed pass did not already cover.
+
+`subscribe_project` is the one frame that waits: it goes out after the async `getKnownStats` provider
+answers, so the skip-if-known handshake still declares what the client already holds. The **intent** is
+recorded in `owed` at call time regardless, so an enter-and-leave during that wait costs nothing, and when
+the provider answers its frame is written only if `owed` still holds it — otherwise the app left that
+project, and a subscribe nothing will unsubscribe is exactly what the old ordering wrote.
+
+**Tests:** `src/lib/api/__tests__/stream-subscription.unit.ts` (coalescing, the bound, the provider's
+ordering) with `stream-reconnect.unit.ts` for the ladder around it; the server half is
+`app_stream_subscription_test.go` and `project_subscription_watchers_test.go`.
 
 ## The boot offer and one stream per page
 
@@ -145,7 +221,7 @@ hand it a task that belongs to another project, and each is answered where it ar
   projectId)`, which drops the write when that project is no longer on screen.
 - **A board frame from a project the client left.** `task_updated` and friends go only to that
   project's subscribers, but a frame already in flight outlives `unsubscribe_project`, and the
-  per-task replay buffer (`getTaskBuffer`) answers a `subscribe_task` on a *new* connection. So the
+  per-task replay buffer (`taskBufferFrames`) answers a `subscribe_task` on a *new* connection. So the
   client checks what the frame names:
   `mergeTaskUpdateIntoBoard` (`src/lib/utils/task-utils.ts`) appends an unknown task only when its
   `project_id` is the project on screen. `commit_status` and `task_deleted` name no project, so those
@@ -284,8 +360,26 @@ and the user would have to reload to be told the truth. Repeating costs one smal
 makes the worst case one repeat of staleness instead of an indefinite lie. Nothing on the server tracks whether a
 client saw the frames: there is no state to get out of step.
 
-Tests: `backend/stream/lock_wait_test.go` (both frames), `frontend/src/lib/services/__tests__/stream-handler.unit.ts`
+Tests: `backend/stream/lock_wait_test.go` (both frames), `frontend/src/lib/components/__tests__/queue-indicator.unit.svelte.ts`,
+`frontend/src/lib/services/__tests__/stream-handler.unit.ts`
 (the acquisition clears it, an unknown domain still names a wait).
+
+### The same frame carries a wait for the model, which is not a lock
+
+A second producer sends `lock_wait` with `domain: "model"`: a task's provider that has sent nothing for a while
+(`streamSilenceWatcher`, `backend/exec/loop.go`). It repeats and withdraws on the same `LockWaitNoticeEvery` cadence
+because a frame that must survive a lost frame has the same shape whatever it waits on, and it adds one field,
+`phase` — `first_token` while no token has arrived, `mid_response` after one has, which is the difference between
+"still processing the prompt" and "generating without streaming" and therefore between two different sentences in
+`QueueIndicator`.
+
+The two producers differ in one thing that is not on the wire: **a lock wait ends the wait, a model wait does not
+end the call.** The client-side notice measures silence and says what it measures; only a per-provider
+`stream_idle_seconds` ceiling ends a stream, and its default of 0 means silence is waited out however long it
+lasts. A provider has been measured holding 16,267 generated tokens behind 76-89 seconds of silence and then
+finishing normally, so silence is never reported as a lost connection and the notice is the whole response to it.
+
+Tests: `backend/exec/quiet_stream_test.go` (the frame pair, and that a resumed stream is not retried).
 
 ## What refuses the queue rather than joining it
 

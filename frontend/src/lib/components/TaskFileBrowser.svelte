@@ -3,7 +3,7 @@
     import { t } from '$lib/i18n';
     import { taskRelativeFsPath, type FsEvent } from '$lib/utils/fs-event';
 
-    let { projectId, projectName, taskId, taskPath, sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange, onToggleFind }: {
+    let { projectId, projectName, taskId, taskPath, sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange, onToggleFind, onDeleted }: {
         projectId: string;
         projectName: string;
         taskId: string;
@@ -14,6 +14,7 @@
         onFileSelected: (path: string, line?: number, pin?: boolean) => void;
         onPathChange: (path: string) => void;
         onToggleFind?: () => void;
+        onDeleted?: (paths: string[]) => void;
     } = $props();
 
     // Sandbox mount path: /home/sandbox/<projectName>
@@ -46,6 +47,7 @@
     {unsavedFiles}
     {pendingFsEvent}
     {mapFsEvent}
+    {onDeleted}
     emptyMessage={t('explorer.taskFiles.empty')}
     pendingMessage={t('explorer.shared.loading')}
     onFileSelected={openFile}

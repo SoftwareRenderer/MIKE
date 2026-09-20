@@ -62,7 +62,24 @@ func filterInternalPathsFromList(paths []string) []string {
 const maxFrameBufferSize = 256 * 1024 // 256KB
 
 const (
-	DefaultBufferSize = 5000
+	// DefaultBufferSize and DefaultBufferBytes bound what one task's replay buffer and one
+	// connection's send queue hold, and both apply twice: a frame count bounds nothing on its
+	// own, since a frame may be maxFrameBufferSize long.
+	DefaultBufferSize  = 5000
+	DefaultBufferBytes = 16 << 20
+
+	// DefaultTaskBufferKeys is how many tasks may hold a replay buffer at once; the oldest
+	// gives way.
+	DefaultTaskBufferKeys = 64
+
+	// DefaultMaxConnections bounds live /api/stream sockets. Each costs a read loop, a
+	// pinger, a sender goroutine and a replay buffer.
+	DefaultMaxConnections = 256
+
+	// DefaultMaxTaskSubs and DefaultMaxProjectSubs cap what one connection may ask to be
+	// told about; their keys arrive as text from the client.
+	DefaultMaxTaskSubs    = 1024
+	DefaultMaxProjectSubs = 256
 )
 
 // UserMessage carries a user message with optional model override.
@@ -78,12 +95,20 @@ type UserMessage struct {
 
 type clientState struct {
 	conn       *websocket.Conn
-	projectSub map[string]int
-	taskSub    map[string]int
-	writeMu    sync.Mutex
-	bufMu      sync.Mutex
-	ringBuffer [][]byte
-	bufSize    int
+	projectSub map[string]struct{}
+	taskSub    map[string]struct{}
+	// writeMu separates the two writers of conn: the sender goroutine draining out, and the
+	// keepalive pinger, which takes it with TryLock (httputil.Keepalive).
+	writeMu sync.Mutex
+	out     *sendQueue
+
+	// A project's first-data pass is read by one worker per connection, in the order the
+	// subscriptions arrived. initMu guards the passes waiting to run; initOrder is exactly the
+	// keys of initPending, oldest first.
+	initMu      sync.Mutex
+	initPending map[string]AppStreamSubscription
+	initOrder   []string
+	initRunning bool
 }
 
 // AppStreamMessage is the envelope for client-to-server messages.
@@ -126,9 +151,24 @@ type AppStreamManager struct {
 	taskBufMu   sync.Mutex
 	taskBuffers map[string][]taskFrame // task key -> ring buffer
 	taskBufSize int
+	// taskBufLoad is the bytes each key's buffer holds. taskBufOrder is exactly the keys of
+	// taskBuffers, oldest opened first, which is the order they are evicted in.
+	taskBufLoad  map[string]int
+	taskBufOrder []string
+	taskBufBound int // byte bound on one task's buffer
+	taskBufKeys  int // how many tasks may hold one
+	// queueFrames and queueBytes bound one connection's outbound queue; see sendQueue.
+	queueFrames    int
+	queueBytes     int
+	maxConns       int
+	maxTaskSubs    int
+	maxProjectSubs int
 
 	// Latest-known sandbox memory stats
 	sandboxStatsProvider func(projectID, taskID string) *types.SandboxMemoryStats
+
+	// writeTimeout bounds one frame's delivery to one client; see httputil.WriteTimeout.
+	writeTimeout time.Duration
 }
 
 type taskFrame struct {
@@ -139,11 +179,20 @@ type taskFrame struct {
 // NewAppStreamManager creates a new AppStreamManager with filesystem watchers.
 func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *AppStreamManager {
 	asm := &AppStreamManager{
-		clients:     make(map[*websocket.Conn]*clientState),
-		store:       store,
-		worktreeMgr: worktreeMgr,
-		taskBuffers: make(map[string][]taskFrame),
-		taskBufSize: DefaultBufferSize,
+		clients:        make(map[*websocket.Conn]*clientState),
+		store:          store,
+		worktreeMgr:    worktreeMgr,
+		taskBuffers:    make(map[string][]taskFrame),
+		taskBufLoad:    make(map[string]int),
+		taskBufSize:    DefaultBufferSize,
+		taskBufBound:   DefaultBufferBytes,
+		taskBufKeys:    DefaultTaskBufferKeys,
+		queueFrames:    DefaultBufferSize,
+		queueBytes:     DefaultBufferBytes,
+		maxConns:       DefaultMaxConnections,
+		maxTaskSubs:    DefaultMaxTaskSubs,
+		maxProjectSubs: DefaultMaxProjectSubs,
+		writeTimeout:   httputil.WriteTimeout,
 	}
 	// The diff cache callback is set later via SetDiffCacheUpdate, once GitHandler exists.
 	var err error
@@ -179,10 +228,13 @@ func (asm *AppStreamManager) UnwatchWorktree(taskID string) {
 	}
 }
 
-// Close stops all watchers and releases resources.
+// Close stops all watchers and releases resources; it is the whole "websocket watchers" stage.
 func (asm *AppStreamManager) Close() {
 	if asm.watcher != nil {
 		asm.watcher.Close()
+	}
+	if asm.projectWatcher != nil {
+		asm.projectWatcher.Close()
 	}
 	if asm.branchWatcher != nil {
 		asm.branchWatcher.Close()
@@ -191,110 +243,99 @@ func (asm *AppStreamManager) Close() {
 
 // -- Subscription management --
 
-func (asm *AppStreamManager) subscribeProject(conn *websocket.Conn, projectID string) {
+// subscribeProject takes a project for this connection and reports whether the key is newly
+// held. A connection holds a key once: the browser keeps the set of what it subscribed to and
+// sends one unsubscribe per key, so a repeated subscribe frame changes nothing, and a reference
+// count here could only drift upward and leave a project's watchers armed forever. Everything a
+// subscription starts — the watchers below, the initial-data pass, a task buffer replay — runs
+// on the frame that newly takes the key and on no later one.
+func (asm *AppStreamManager) subscribeProject(conn *websocket.Conn, projectID string) bool {
 	asm.mu.Lock()
 	client := asm.clients[conn]
 	if client == nil {
 		asm.mu.Unlock()
-		return
+		return false
 	}
 	if client.projectSub == nil {
-		client.projectSub = make(map[string]int)
+		client.projectSub = make(map[string]struct{})
 	}
-	client.projectSub[projectID]++
-	wasEmpty := len(client.projectSub) == 1 // first project subscription
+	if _, held := client.projectSub[projectID]; held {
+		asm.mu.Unlock()
+		return false
+	}
+	if len(client.projectSub) >= asm.maxProjectSubs {
+		asm.mu.Unlock()
+		logging.For(logging.Stream).With(logging.ProjectID, projectID).Warnf("refusing a project subscription: this connection already holds %d", asm.maxProjectSubs)
+		return false
+	}
+	client.projectSub[projectID] = struct{}{}
 	asm.mu.Unlock()
 
-	// Start branch watcher and project watcher if this is the first subscriber to this project
-	if wasEmpty {
-		// Watch project directory for branch switches and file create/delete events
-		project, err := asm.store.GetProject(projectID)
-		if err == nil && project != nil && project.Path != "" {
-			if asm.branchWatcher != nil {
-				_ = asm.branchWatcher.Watch(projectID, project.Path)
-			}
-			if asm.projectWatcher != nil {
-				_ = asm.projectWatcher.Watch(projectID, project.Path)
-			}
+	// Watch the project directory for branch switches and file create/delete events.
+	project, err := asm.store.GetProject(projectID)
+	if err == nil && project != nil && project.Path != "" {
+		if asm.branchWatcher != nil {
+			_ = asm.branchWatcher.Watch(projectID, project.Path)
+		}
+		if asm.projectWatcher != nil {
+			_ = asm.projectWatcher.Watch(projectID, project.Path)
 		}
 	}
+	return true
 }
 
+// unsubscribeProject releases the project; see subscribeProject for what a connection holds.
 func (asm *AppStreamManager) unsubscribeProject(conn *websocket.Conn, projectID string) {
 	asm.mu.Lock()
 	client := asm.clients[conn]
-	if client == nil {
-		asm.mu.Unlock()
-		return
+	if client != nil {
+		delete(client.projectSub, projectID)
 	}
-	if client.projectSub != nil {
-		if count, ok := client.projectSub[projectID]; ok {
-			if count <= 1 {
-				delete(client.projectSub, projectID)
-			} else {
-				client.projectSub[projectID] = count - 1
-			}
-		}
-	}
-	hasSubs := len(client.projectSub) > 0
 	asm.mu.Unlock()
 
-	// Stop branch watcher and project watcher if no clients are subscribed to this project
-	if !hasSubs {
-		if asm.branchWatcher != nil {
-			asm.branchWatcher.Unwatch(projectID)
-		}
-		if asm.projectWatcher != nil {
-			asm.projectWatcher.Unwatch(projectID)
-		}
-	}
+	asm.releaseProjectWatchers(projectID)
 }
 
-func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, taskID string) {
+// subscribeTask takes a task for this connection, held once per key exactly as subscribeProject
+// holds a project, and replays only on the frame that newly takes it.
+func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, taskID string) bool {
+	key := projectID + ":" + taskID
 	asm.mu.Lock()
 	client := asm.clients[conn]
 	if client == nil {
 		asm.mu.Unlock()
-		return
+		return false
 	}
 	if client.taskSub == nil {
-		client.taskSub = make(map[string]int)
+		client.taskSub = make(map[string]struct{})
 	}
-	key := projectID + ":" + taskID
-	client.taskSub[key]++
+	if _, held := client.taskSub[key]; held {
+		asm.mu.Unlock()
+		return false
+	}
+	if len(client.taskSub) >= asm.maxTaskSubs {
+		asm.mu.Unlock()
+		logging.For(logging.Stream).With(logging.TaskID, taskID).With(logging.ProjectID, projectID).
+			Warnf("refusing a task subscription: this connection already holds %d", asm.maxTaskSubs)
+		return false
+	}
+	client.taskSub[key] = struct{}{}
+	// Read the buffer before releasing the lock that made this connection a subscriber, so a frame
+	// being sent right now is either already in it or will be delivered to this socket.
+	frames := asm.taskBufferFrames(key)
 	asm.mu.Unlock()
 
-	// Done tasks are never watched: their canonical diff (pinned
-	// BaseCommit..BranchTip) is immutable and served from the persistent
-	// snapshot, so a watcher could only burn git CPU (its broadcasts are
-	// hash-deduped no-ops). If a done task is moved back to active work, the
-	// executor start path re-registers its watcher.
-
-	// Send per-task buffer so the client can catch up on missed events
-	// (e.g., tokens streamed while the page was reloading).
-	buf := asm.getTaskBuffer(key)
-	if len(buf) > 0 {
-		go func() {
-			client.writeMu.Lock()
-			defer client.writeMu.Unlock()
-			for _, frame := range buf {
-				if err := conn.Write(context.Background(), websocket.MessageText, frame); err != nil {
-					return
-				}
-			}
-		}()
+	// Joining a call's frames is a pass over the snapshot with JSON in it, so it runs once the hub
+	// lock is gone; what the connection is owed was settled by the snapshot, not by the fold.
+	buf := foldToolCallFrames(frames)
+	// Then the latest sandbox stats, which the task view needs even when that buffer has been
+	// cleared. One batch, so the stats land after the replay they extend; behind any replay already
+	// queued and ahead of the live frames, so no live frame lands inside either.
+	if statsFrame := asm.latestSandboxStatsFrame(projectID, taskID); statsFrame != nil {
+		buf = append(buf, statsFrame)
 	}
-
-	// Deliver the latest known sandbox memory stats after the buffer replay so
-	// clients opening the task view see the most recent usage even when the
-	// task is idle (the buffer above is cleared when execution completes).
-	if frame := asm.latestSandboxStatsFrame(projectID, taskID); frame != nil {
-		go func() {
-			client.writeMu.Lock()
-			defer client.writeMu.Unlock()
-			_ = conn.Write(context.Background(), websocket.MessageText, frame)
-		}()
-	}
+	client.out.pushReplay(buf)
+	return true
 }
 
 // latestSandboxStatsFrame returns the task_event frame carrying the
@@ -327,22 +368,12 @@ func (asm *AppStreamManager) SetSandboxStatsProvider(fn func(projectID, taskID s
 	asm.mu.Unlock()
 }
 
+// unsubscribeTask releases the task; see subscribeProject for what a connection holds.
 func (asm *AppStreamManager) unsubscribeTask(conn *websocket.Conn, projectID, taskID string) {
 	asm.mu.Lock()
 	client := asm.clients[conn]
-	if client == nil {
-		asm.mu.Unlock()
-		return
-	}
-	if client.taskSub != nil {
-		key := projectID + ":" + taskID
-		if count, ok := client.taskSub[key]; ok {
-			if count <= 1 {
-				delete(client.taskSub, key)
-			} else {
-				client.taskSub[key] = count - 1
-			}
-		}
+	if client != nil {
+		delete(client.taskSub, projectID+":"+taskID)
 	}
 	asm.mu.Unlock()
 }
@@ -353,21 +384,37 @@ func (asm *AppStreamManager) hasProjectSubscribers(projectID string) bool {
 	return len(asm.subscribers(projectSubs, projectID)) > 0
 }
 
-// subField selects one of a client's subscription maps (project- or
+// releaseProjectWatchers stops a project's branch and filesystem watchers once no live
+// connection holds the project, which is every client's count and not the caller's. The
+// caller holds no lock and, when it is a connection leaving, has already removed its own
+// entry: hasProjectSubscribers takes asm.mu as a reader.
+func (asm *AppStreamManager) releaseProjectWatchers(projectID string) {
+	if asm.hasProjectSubscribers(projectID) {
+		return
+	}
+	if asm.branchWatcher != nil {
+		asm.branchWatcher.Unwatch(projectID)
+	}
+	if asm.projectWatcher != nil {
+		asm.projectWatcher.Unwatch(projectID)
+	}
+}
+
+// subField selects one of a client's subscription sets (project- or
 // task-scoped), so the fan-out helpers below stay single-purpose.
-type subField func(*clientState) map[string]int
+type subField func(*clientState) map[string]struct{}
 
 var (
-	projectSubs subField = func(c *clientState) map[string]int { return c.projectSub }
-	taskSubs    subField = func(c *clientState) map[string]int { return c.taskSub }
+	projectSubs subField = func(c *clientState) map[string]struct{} { return c.projectSub }
+	taskSubs    subField = func(c *clientState) map[string]struct{} { return c.taskSub }
 )
 
-// subscribers returns the connected clients holding an active (>0) count for
-// key in the chosen subscription map. Callers must hold at least asm.mu.RLock().
+// subscribers returns the connected clients holding key in the chosen subscription set, which
+// is the whole of what "holding" means. Callers must hold at least asm.mu.RLock().
 func (asm *AppStreamManager) subscribers(field subField, key string) []*clientState {
 	targets := make([]*clientState, 0, len(asm.clients))
 	for _, client := range asm.clients {
-		if count, ok := field(client)[key]; ok && count > 0 {
+		if _, held := field(client)[key]; held {
 			targets = append(targets, client)
 		}
 	}
@@ -384,18 +431,6 @@ func (asm *AppStreamManager) allClients() []*clientState {
 	return targets
 }
 
-// writeFrame delivers a marshalled frame to each target. Per-client writeMu
-// serialises this with the keepalive pinger and the replay goroutines.
-func (asm *AppStreamManager) writeFrame(targets []*clientState, frame []byte) {
-	for _, client := range targets {
-		client.writeMu.Lock()
-		// A write error means the client disconnected; its read loop removes it
-		// from asm.clients, so there is nothing to do here.
-		_ = client.conn.Write(context.Background(), websocket.MessageText, frame)
-		client.writeMu.Unlock()
-	}
-}
-
 // -- Broadcast methods --
 
 func (asm *AppStreamManager) sendBoardPayload(projectID string, payload any) {
@@ -408,10 +443,7 @@ func (asm *AppStreamManager) sendBoardPayload(projectID string, payload any) {
 		return
 	}
 
-	asm.writeFrame(targets, frame)
-
-	// Buffer for reconnect sync
-	asm.bufferRaw(frame)
+	asm.deliver(targets, frame)
 }
 
 // appFrame builds one app-stream frame. The "type" key and the event name are written here and nowhere
@@ -460,12 +492,19 @@ func (asm *AppStreamManager) SendTaskEvent(projectID, taskID string, event types
 
 	// Clear per-task buffer when a streaming turn ends, so reconnecting clients
 	// don't get stale tokens from a previous turn.
-	if event.Type == types.WSTypeStatus {
-		if state, ok := event.Data.(map[string]string)["state"]; ok && terminalTurnStates[state] {
+	switch event.Type {
+	case types.WSTypeStatus:
+		status, ok := event.Data.(types.TurnStatus)
+		if !ok {
+			// A status frame nobody built with types.TurnStatusEvent: the frame still goes out,
+			// and whether the turn ended is a question nobody answered.
+			logging.For(logging.Stream).With(logging.TaskID, taskID).Warnf("status frame carrying %T instead of types.TurnStatus", event.Data)
+			return
+		}
+		if terminalTurnStates[status.State] {
 			asm.clearTaskBuffer(projectID + ":" + taskID)
 		}
-	}
-	if event.Type == types.WSTypeComplete {
+	case types.WSTypeComplete:
 		asm.clearTaskBuffer(projectID + ":" + taskID)
 	}
 }
@@ -480,20 +519,26 @@ var terminalTurnStates = map[string]bool{
 
 func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, payload any) {
 	key := projectID + ":" + taskID
-	asm.mu.RLock()
-	targets := asm.subscribers(taskSubs, key)
-	asm.mu.RUnlock()
-
 	frame, err := json.Marshal(payload)
 	if err != nil {
 		return
 	}
+	// tool_id rides the buffered frame so a replay can collapse one call's frames; it is read
+	// here because the hub lock taken below must not be held across JSON parsing.
+	var toolID string
+	if bytes.Contains(frame, toolCallMarker) {
+		toolID = extractToolID(frame)
+	}
 
-	asm.writeFrame(targets, frame)
-
-	// Buffer for reconnect sync (per-client and per-task)
-	asm.bufferRaw(frame)
-	asm.bufferTask(key, frame)
+	// Handing the frame to the subscribers and adding it to the replay buffer are one step, and so
+	// is taking the task (see subscribeTask). A frame therefore reaches a connection exactly once:
+	// either it was buffered before that connection held the task, so the replay carries it, or it
+	// arrives over the socket. Split apart, a subscribe landing between the two steps got the frame
+	// twice or never, and never is a hole the client cannot see.
+	asm.mu.Lock()
+	asm.deliver(asm.subscribers(taskSubs, key), frame)
+	asm.bufferTaskLocked(key, frame, toolID)
+	asm.mu.Unlock()
 }
 
 // BroadcastAll sends a raw message to all connected clients.
@@ -501,7 +546,7 @@ func (asm *AppStreamManager) BroadcastAll(msg []byte) {
 	asm.mu.RLock()
 	targets := asm.allClients()
 	asm.mu.RUnlock()
-	asm.writeFrame(targets, msg)
+	asm.deliver(targets, msg)
 }
 
 // BroadcastProjectCounts computes and broadcasts task counts for all projects.
@@ -653,72 +698,47 @@ func (asm *AppStreamManager) BroadcastExtensionChange() {
 	asm.BroadcastAll(msg)
 }
 
-// -- Ring buffer --
+// -- Task replay buffer --
 
-func (asm *AppStreamManager) bufferRaw(frame []byte) {
-	if len(frame) > maxFrameBufferSize {
-		return
-	}
-	// Collect clients under global lock, then release before per-client writes.
-	asm.mu.RLock()
-	targets := asm.allClients()
-	asm.mu.RUnlock()
-
-	for _, client := range targets {
-		client.bufMu.Lock()
-		if len(client.ringBuffer) >= client.bufSize {
-			client.ringBuffer = client.ringBuffer[1:]
-		}
-		client.ringBuffer = append(client.ringBuffer, frame)
-		client.bufMu.Unlock()
-	}
-}
-
-func (asm *AppStreamManager) getBuffer(conn *websocket.Conn) [][]byte {
-	asm.mu.RLock()
-	client := asm.clients[conn]
-	asm.mu.RUnlock()
-	if client == nil {
-		return nil
-	}
-	client.bufMu.Lock()
-	defer client.bufMu.Unlock()
-	return client.ringBuffer
-}
-
-func (asm *AppStreamManager) bufferTask(taskKey string, frame []byte) {
+func (asm *AppStreamManager) bufferTaskLocked(taskKey string, frame []byte, toolID string) {
 	// Skip large frames to prevent memory exhaustion
 	if len(frame) > maxFrameBufferSize {
 		return
 	}
 
-	// Pre-extract tool_id for O(1) dedup
-	var toolID string
-	if bytes.Contains(frame, toolCallMarker) {
-		toolID = extractToolID(frame)
-	}
-
 	asm.taskBufMu.Lock()
 	defer asm.taskBufMu.Unlock()
-	buf, ok := asm.taskBuffers[taskKey]
-	if !ok {
-		buf = make([]taskFrame, 0, asm.taskBufSize)
+	if _, fresh := asm.taskBuffers[taskKey]; !fresh {
+		asm.makeRoomForTaskBufferLocked()
+		asm.taskBufOrder = append(asm.taskBufOrder, taskKey)
 	}
 
-	// For tool_call events, replace any existing frame with the same tool_id
-	// so only the last delta is kept (avoids duplicate tool calls on replay).
-	if toolID != "" {
-		buf = removeFrameWithToolID(buf, toolID)
-	}
-
-	if len(buf) >= asm.taskBufSize {
-		buf = buf[1:]
-	}
 	// Copy frame to avoid aliasing
 	frameCopy := make([]byte, len(frame))
 	copy(frameCopy, frame)
-	buf = append(buf, taskFrame{data: frameCopy, toolID: toolID})
+	buf := append(asm.taskBuffers[taskKey], taskFrame{data: frameCopy, toolID: toolID})
+
+	loaded := asm.taskBufLoad[taskKey] + len(frameCopy)
+	for len(buf) > asm.taskBufSize || (loaded > asm.taskBufBound && len(buf) > 1) {
+		loaded -= len(buf[0].data)
+		buf = buf[1:]
+	}
 	asm.taskBuffers[taskKey] = buf
+	asm.taskBufLoad[taskKey] = loaded
+}
+
+// makeRoomForTaskBufferLocked closes the oldest task buffer so an incoming task may open one.
+// Reaching the cap means tasks streamed without a terminal event or a deletion, and the
+// freshest keys are the ones someone may be looking at.
+func (asm *AppStreamManager) makeRoomForTaskBufferLocked() {
+	if len(asm.taskBufOrder) == 0 || len(asm.taskBufOrder) < asm.taskBufKeys {
+		return
+	}
+	oldest := asm.taskBufOrder[0]
+	asm.taskBufOrder = asm.taskBufOrder[1:]
+	logging.For(logging.Stream).Warnf("task replay buffers at their limit of %d, dropping the oldest (task=%s)", asm.taskBufKeys, oldest)
+	delete(asm.taskBuffers, oldest)
+	delete(asm.taskBufLoad, oldest)
 }
 
 func extractToolID(frame []byte) string {
@@ -737,32 +757,98 @@ func extractToolID(frame []byte) string {
 	return data.ToolID
 }
 
-func removeFrameWithToolID(buf []taskFrame, toolID string) []taskFrame {
-	filtered := make([]taskFrame, 0, len(buf))
+// foldToolCallFrames collapses the frames of one streaming tool call into the single frame a
+// subscriber is owed. The live path sends a call's whole args and then only its growth, and two
+// frames for one call replay as two cards — so the frames are joined where the replay is read, which
+// costs one pass per subscribe rather than one per frame as it is buffered, and keeps the JSON out of
+// the hub lock. A full buffer of one call's deltas measured 26 ms; the same pass over 5000 frames
+// with nothing to join measured 0.9 ms.
+//
+// A frame carrying the whole args supersedes what was collected (args only grow), and a delta is
+// appended to the whole held so far. A delta with no whole ahead of it — the head has been trimmed
+// from the buffer — stays a delta: there is nothing to join it to, and dropping it would hide the call.
+func foldToolCallFrames(buf []taskFrame) [][]byte {
+	out := make([][]byte, 0, len(buf))
+	heldAt := map[string]int{}
 	for _, f := range buf {
-		if f.toolID != toolID {
-			filtered = append(filtered, f)
+		if f.toolID == "" {
+			out = append(out, f.data)
+			continue
 		}
+		at, seen := heldAt[f.toolID]
+		if !seen {
+			heldAt[f.toolID] = len(out)
+			out = append(out, f.data)
+			continue
+		}
+		out[at] = foldToolCall(out[at], f.data)
 	}
-	return filtered
+	return out
 }
 
-func (asm *AppStreamManager) getTaskBuffer(taskKey string) [][]byte {
+func foldToolCall(held, next []byte) []byte {
+	var envelope map[string]any
+	if err := json.Unmarshal(next, &envelope); err != nil {
+		return next
+	}
+	data, _ := envelope["data"].(map[string]any)
+	delta, isDelta := data["raw_args_delta"].(string)
+	if !isDelta {
+		return next
+	}
+	whole, ok := toolCallArgs(held)["raw_args"].(string)
+	if !ok {
+		return next
+	}
+	data["raw_args"] = whole + delta
+	delete(data, "raw_args_delta")
+	merged, err := json.Marshal(envelope)
+	if err != nil {
+		return next
+	}
+	return merged
+}
+
+// toolCallArgs reads the payload of a buffered task_event frame, or nil when it does not read as
+// an object payload.
+func toolCallArgs(frame []byte) map[string]any {
+	var envelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(frame, &envelope); err != nil || len(envelope.Data) == 0 {
+		return nil
+	}
+	var data map[string]any
+	if err := json.Unmarshal(envelope.Data, &data); err != nil {
+		return nil
+	}
+	return data
+}
+
+// taskBufferFrames is the task's replay buffer as it stands. The caller holds at least asm.mu, so a
+// frame arriving now is either in the copy or about to reach that caller's connection over the socket.
+// The frames are shared, not copied: the buffer only ever appends past what this copy holds or trims
+// from its front, and a fold builds new frames rather than writing into these.
+func (asm *AppStreamManager) taskBufferFrames(taskKey string) []taskFrame {
 	asm.taskBufMu.Lock()
 	defer asm.taskBufMu.Unlock()
 	buf := asm.taskBuffers[taskKey]
-	// Extract raw data from frames
-	result := make([][]byte, len(buf))
-	for i, f := range buf {
-		result[i] = f.data
-	}
-	return result
+	frames := make([]taskFrame, len(buf))
+	copy(frames, buf)
+	return frames
 }
 
 func (asm *AppStreamManager) clearTaskBuffer(taskKey string) {
 	asm.taskBufMu.Lock()
 	defer asm.taskBufMu.Unlock()
 	delete(asm.taskBuffers, taskKey)
+	delete(asm.taskBufLoad, taskKey)
+	for i, key := range asm.taskBufOrder {
+		if key == taskKey {
+			asm.taskBufOrder = append(asm.taskBufOrder[:i], asm.taskBufOrder[i+1:]...)
+			break
+		}
+	}
 }
 
 // ClearTaskBuffer removes the per-task ring buffer.
@@ -813,7 +899,7 @@ func (asm *AppStreamManager) computeAlreadyMerged(projectID string, task types.T
 // persistent snapshot — no per-connection `git diff` runs. When the client
 // declared (via known_stats) that it already has stats for this exact task
 // state, the frame is skipped entirely.
-func (asm *AppStreamManager) sendDoneTaskInitialDiff(ctx context.Context, client *clientState, conn *websocket.Conn, projectID string, task types.Task, sub AppStreamSubscription) {
+func (asm *AppStreamManager) sendDoneTaskInitialDiff(client *clientState, projectID string, task types.Task, sub AppStreamSubscription) {
 	d, err := MaterializeDoneTaskDiff(asm.store, asm.worktreeMgr, projectID, &task)
 	if err != nil || d == nil || !d.HasChanges {
 		return
@@ -835,29 +921,46 @@ func (asm *AppStreamManager) sendDoneTaskInitialDiff(ctx context.Context, client
 		frame[k] = v
 	}
 	msg, _ := json.Marshal(frame)
-	client.writeMu.Lock()
-	conn.Write(ctx, websocket.MessageText, msg)
-	client.writeMu.Unlock()
+	client.out.push(msg)
 }
 
 // HandleStream is the HTTP handler for the /api/stream WebSocket endpoint.
 func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request) {
+	asm.mu.RLock()
+	live := len(asm.clients)
+	asm.mu.RUnlock()
+	if live >= asm.maxConns {
+		// Answered before the upgrade, so the browser sees a refusal rather than a connection
+		// it has to work out is dead. This reads a count only: connections arrive during the gap
+		// before the slot is taken at registration below, so that is the authoritative bound.
+		logging.For(logging.Stream).Warnf("refusing a connection: %d already live (limit %d)", live, asm.maxConns)
+		http.Error(w, "too many live stream connections", http.StatusServiceUnavailable)
+		return
+	}
+
 	conn, ok := httputil.AcceptWS(w, r, "app stream")
 	if !ok {
 		return
 	}
 
-	client := &clientState{
-		conn:       conn,
-		projectSub: make(map[string]int),
-		taskSub:    make(map[string]int),
-		ringBuffer: make([][]byte, 0, DefaultBufferSize),
-		bufSize:    DefaultBufferSize,
-	}
+	client := newClientState(conn, asm)
 
 	asm.mu.Lock()
-	asm.clients[conn] = client
+	// Counting and joining the map are one decision, so two handshakes that each read a free
+	// slot cannot both take one.
+	pastCap := len(asm.clients) >= asm.maxConns
+	if !pastCap {
+		asm.clients[conn] = client
+	}
+	total := len(asm.clients)
 	asm.mu.Unlock()
+
+	if pastCap {
+		// The upgrade already happened, so the refusal is a close with a code that says retry.
+		logging.For(logging.Stream).Warnf("refusing a connection after its upgrade: %d already live (limit %d)", total, asm.maxConns)
+		_ = conn.Close(websocket.StatusTryAgainLater, "too many live stream connections")
+		return
+	}
 
 	defer func() {
 		asm.mu.Lock()
@@ -865,48 +968,23 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 		asm.mu.Unlock()
 		conn.Close(websocket.StatusNormalClosure, "closed")
 
-		// Stop watchers for projects no one is subscribed to
 		for projectID := range client.projectSub {
-			if !asm.hasProjectSubscribers(projectID) {
-				if asm.branchWatcher != nil {
-					asm.branchWatcher.Unwatch(projectID)
-				}
-				if asm.projectWatcher != nil {
-					asm.projectWatcher.Unwatch(projectID)
-				}
-			}
+			asm.releaseProjectWatchers(projectID)
 		}
 	}()
 
-	logging.For(logging.Stream).Infof("connection accepted (total: %d)", len(asm.clients))
+	logging.For(logging.Stream).Infof("connection accepted (total: %d)", total)
+
+	// A failed ping cancels the read context, unblocking the Read loop below. The write
+	// lock covers the ping because the sender goroutine writes frames to this connection too.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Only this endpoint's client measures silence from onmessage, so only it gets the app frame.
+	httputil.Keepalive(ctx, conn, &client.writeMu, cancel, httputil.WithAppFrame())
+	go asm.runSender(ctx, client)
 
 	// Send initial project counts
 	asm.BroadcastProjectCounts()
-
-	// A failed ping cancels the read context, unblocking the Read loop below. The write
-	// lock covers the ping because frames are broadcast to this connection elsewhere.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	httputil.Keepalive(ctx, conn, &client.writeMu, cancel)
-
-	// Send buffered events on reconnect
-	if r.URL.Query().Get("sync") == "1" {
-		go func() {
-			buf := asm.getBuffer(conn)
-			client.writeMu.Lock()
-			for _, frame := range buf {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-				if err := conn.Write(ctx, websocket.MessageText, frame); err != nil {
-					return
-				}
-			}
-			client.writeMu.Unlock()
-		}()
-	}
 
 	// Read loop — handle client messages
 	for {
@@ -924,39 +1002,91 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 		case "subscribe_project":
 			var sub AppStreamSubscription
 			if err := json.Unmarshal(input.Data, &sub); err == nil && sub.ProjectID != "" {
-				asm.subscribeProject(conn, sub.ProjectID)
-				logging.For(logging.Stream).Infof("subscribed to project=%s", sub.ProjectID)
-
-				// Send initial data for the project (background to not block the read loop)
-				go asm.sendInitialProjectData(ctx, client, conn, sub)
+				if asm.subscribeProject(conn, sub.ProjectID) {
+					logging.For(logging.Stream).With(logging.ProjectID, sub.ProjectID).Info("subscribed")
+					// Queued rather than run here: the pass must not block the read loop.
+					asm.queueInitialProjectData(ctx, client, sub)
+				}
 			}
 
 		case "unsubscribe_project":
 			var sub AppStreamSubscription
 			if err := json.Unmarshal(input.Data, &sub); err == nil && sub.ProjectID != "" {
 				asm.unsubscribeProject(conn, sub.ProjectID)
-				logging.For(logging.Stream).Infof("unsubscribed from project=%s", sub.ProjectID)
+				logging.For(logging.Stream).With(logging.ProjectID, sub.ProjectID).Info("unsubscribed")
 			}
 
 		case "subscribe_task":
 			var sub AppStreamSubscription
 			if err := json.Unmarshal(input.Data, &sub); err == nil && sub.ProjectID != "" && sub.TaskID != "" {
-				asm.subscribeTask(conn, sub.ProjectID, sub.TaskID)
-				logging.For(logging.Stream).Infof("subscribed to task=%s in project=%s", sub.TaskID, sub.ProjectID)
+				if asm.subscribeTask(conn, sub.ProjectID, sub.TaskID) {
+					logging.For(logging.Stream).With(logging.TaskID, sub.TaskID).With(logging.ProjectID, sub.ProjectID).
+						Info("subscribed")
+				}
 			}
 
 		case "unsubscribe_task":
 			var sub AppStreamSubscription
 			if err := json.Unmarshal(input.Data, &sub); err == nil && sub.ProjectID != "" && sub.TaskID != "" {
 				asm.unsubscribeTask(conn, sub.ProjectID, sub.TaskID)
-				logging.For(logging.Stream).Infof("unsubscribed from task=%s in project=%s", sub.TaskID, sub.ProjectID)
+				logging.For(logging.Stream).With(logging.TaskID, sub.TaskID).With(logging.ProjectID, sub.ProjectID).
+					Info("unsubscribed")
 			}
 
 		}
 	}
 }
 
-func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client *clientState, conn *websocket.Conn, sub AppStreamSubscription) {
+// queueInitialProjectData asks for a project's initial data. One worker per connection takes
+// the pending projects in arrival order, and a project already pending is not queued twice: a
+// second pass over a project would re-read the diffs the first is reading and re-watch the
+// worktrees it is already watching, so it buys nothing but git processes — and two passes
+// writing at once would interleave their frames.
+func (asm *AppStreamManager) queueInitialProjectData(ctx context.Context, client *clientState, sub AppStreamSubscription) {
+	client.initMu.Lock()
+	if _, pending := client.initPending[sub.ProjectID]; !pending {
+		client.initOrder = append(client.initOrder, sub.ProjectID)
+	}
+	// The newest frame decides what the client still needs, so its known_stats wins.
+	client.initPending[sub.ProjectID] = sub
+	startWorker := !client.initRunning
+	client.initRunning = true
+	client.initMu.Unlock()
+
+	if startWorker {
+		go asm.initialProjectWorker(ctx, client)
+	}
+}
+
+// initialProjectWorker runs the connection's queued initial-data passes, one at a time. It ends
+// with the read loop's context, which is cancelled when the connection goes away.
+func (asm *AppStreamManager) initialProjectWorker(ctx context.Context, client *clientState) {
+	for {
+		client.initMu.Lock()
+		if len(client.initOrder) == 0 {
+			client.initRunning = false
+			client.initMu.Unlock()
+			return
+		}
+		projectID := client.initOrder[0]
+		client.initOrder = client.initOrder[1:]
+		sub, pending := client.initPending[projectID]
+		delete(client.initPending, projectID)
+		client.initMu.Unlock()
+
+		// A project the connection left while its pass waited is not worth reading: the
+		// frames would answer a subscription that no longer exists.
+		asm.mu.RLock()
+		_, held := client.projectSub[projectID]
+		asm.mu.RUnlock()
+
+		if pending && held {
+			asm.sendInitialProjectData(ctx, client, sub)
+		}
+	}
+}
+
+func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client *clientState, sub AppStreamSubscription) {
 	projectID := sub.ProjectID
 	if asm.store == nil || asm.worktreeMgr == nil {
 		return
@@ -977,7 +1107,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			// git baseline resolution — their canonical diff (pinned
 			// BaseCommit..BranchTip) is immutable, so the stored snapshot is the
 			// source of truth (re-watched normally if the task leaves Done).
-			asm.sendDoneTaskInitialDiff(ctx, client, conn, projectID, task, sub)
+			asm.sendDoneTaskInitialDiff(client, projectID, task, sub)
 			continue
 		}
 		baseRef := asm.getDiffBaseline(task)
@@ -1006,9 +1136,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 				"has_committed_changes": diffResult.CommittedDiff != "",
 				"already_merged":        stats.AlreadyMerged,
 			}))
-			client.writeMu.Lock()
-			conn.Write(ctx, websocket.MessageText, statsMsg)
-			client.writeMu.Unlock()
+			client.out.push(statsMsg)
 			// No per-file task_diff manifest frame is broadcast: no component reads it, and the
 			// task detail view fetches its data from the REST diff endpoint.
 		}
@@ -1020,8 +1148,6 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 		msg, _ := json.Marshal(appFrame(types.WSTypeProjectBranch, map[string]any{
 			"branch": branch,
 		}))
-		client.writeMu.Lock()
-		conn.Write(ctx, websocket.MessageText, msg)
-		client.writeMu.Unlock()
+		client.out.push(msg)
 	}
 }

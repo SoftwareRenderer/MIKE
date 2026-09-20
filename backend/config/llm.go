@@ -93,16 +93,13 @@ func (cs *ConfigStore) TestConnection(req TestConnectionRequest) TestConnectionR
 }
 
 // ResolveAPIKey returns the effective API key for a provider URL, substituting
-// the stored key when the client sends the masked placeholder or nothing.
+// the stored key when the client sends the masked placeholder or nothing. It is the
+// second of the two places a stored key is opened (see GetProviderAPIKey).
 func (cs *ConfigStore) ResolveAPIKey(serverURL string, providedKey string) string {
 	if providedKey != "" && providedKey != maskedAPIKey {
 		return providedKey
 	}
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		return ""
-	}
-	return storedAPIKey(cfg.Providers, serverURL)
+	return cs.GetProviderAPIKey(serverURL)
 }
 
 // HandleTestConnection handles POST /api/config/test-connection.
@@ -488,6 +485,14 @@ func (cs *ConfigStore) GetProviderConcurrency(serverURL string) int {
 // is not found or the value is unset/invalid.
 func (cs *ConfigStore) GetProviderMaxRequestsPerSecond(serverURL string) int {
 	return cs.providerInt(serverURL, func(p types.Provider) int { return p.MaxRequestsPerSecond }, 0)
+}
+
+// GetProviderStreamIdle returns how long one response may stay silent before MIKE ends it, for the
+// provider matching the given server URL. Zero — the unset default — means no ceiling: silence is
+// reported and waited out, because a provider generating constrained output can hold thousands of
+// tokens behind a silent minute and then finish normally.
+func (cs *ConfigStore) GetProviderStreamIdle(serverURL string) time.Duration {
+	return time.Duration(cs.providerInt(serverURL, func(p types.Provider) int { return p.StreamIdleSeconds }, 0)) * time.Second
 }
 
 // IsAgentProvider returns true if the provider matching the given server URL is an agent (non-LLM kind).

@@ -11,6 +11,8 @@ export class DialogStore {
         confirmText?: string;
         cancelText?: string;
         variant?: 'default' | 'destructive';
+        /** Set by showNotice: the dialog gets a single button. */
+        okText?: string;
         _resolve?: (value: boolean) => void;
     } | null>(null);
     public commitDialog = $state<{
@@ -74,6 +76,25 @@ export class DialogStore {
                 cancelText: options.cancelText ?? t('app.cancel'),
                 variant: options.variant ?? 'destructive',
                 _resolve: resolve,
+            };
+        });
+    }
+
+    /** Show a message with one button. It replaces any open confirmation, so two never stack. */
+    public showNotice(options: {
+        title: string;
+        message: string;
+        items?: string[];
+        okText?: string;
+    }): Promise<void> {
+        return new Promise((resolve) => {
+            this.confirmation = {
+                title: options.title,
+                message: options.message,
+                items: options.items,
+                okText: options.okText ?? t('app.ok'),
+                variant: 'default',
+                _resolve: () => resolve(),
             };
         });
     }

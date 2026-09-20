@@ -47,9 +47,11 @@ func unstageNewBinaryFiles(wm *git.WorktreeManager, taskID string) {
 	unstagePaths(wm, taskID, paths)
 }
 
-// Retry bounds for LLM streaming.
+// Retry bounds for LLM streaming. llmRetryWindow caps how long a run keeps retrying at all: a
+// provider that is ill does not get better because four identical requests arrived in order.
 const (
 	llmRetryAttempts = 3
+	llmRetryWindow   = 3 * time.Minute
 )
 
 // backoffFor returns the duration to wait before the next LLM retry attempt
@@ -57,6 +59,12 @@ func backoffFor(attempt int, err error) time.Duration {
 	var le *llama.LlamaError
 	if errors.As(err, &le) && le.IsRateLimit() && le.RetryAfter > 0 {
 		return le.RetryAfter + time.Second + jitter()
+	}
+	// A stream that went quiet is the provider being slow, not the link being broken. Waiting less
+	// than the silence already observed just re-issues the request into the same slowness.
+	var silent *llama.ErrStreamSilent
+	if errors.As(err, &silent) && silent.Silent > 0 {
+		return silent.Silent + time.Second + jitter()
 	}
 	return time.Duration(1<<attempt) * 2 * time.Second // 2s, 4s, 8s, ...
 }
@@ -84,7 +92,91 @@ func classifyLLMFailure(err error) llmFailure {
 			fmt.Sprintf("The model provider refused the request MIKE sent, so it was not retried: %v", err),
 		}
 	}
+	var silent *llama.ErrStreamSilent
+	if errors.As(err, &silent) {
+		return llmFailure{
+			"llm_stream_silent",
+			fmt.Sprintf("%v, which reached the quiet-stream ceiling set for this provider. "+
+				"Nothing was lost in transit: raise or clear that ceiling in Settings if the provider answers this slowly on purpose.", silent),
+		}
+	}
 	return llmFailure{"llm_connection_failed", fmt.Sprintf("LLM connection failed: %v", err)}
+}
+
+// streamSilenceDomain is the wait domain a quiet provider announces under; the frontend owns the
+// sentence shown for it.
+const streamSilenceDomain = "model"
+
+// streamSilenceWatcher tells the people watching a turn that its provider has sent nothing for a
+// while, and takes the notice back as soon as the stream speaks or the call ends. It rides the
+// slow-lock channel because a wait with a name already has a place in the chat.
+//
+// Nothing here ends a call: silence means the provider is holding its answer back, not that the
+// link is gone - llama.ErrStreamSilent holds that measurement.
+type streamSilenceWatcher struct {
+	mu        sync.Mutex
+	send      func(string, string, types.StreamEvent)
+	projectID string
+	taskID    string
+	every     time.Duration
+	last      time.Time
+	phase     string
+	reported  bool
+}
+
+func (te *TaskExecutor) newStreamSilenceWatcher(projectID, taskID string) *streamSilenceWatcher {
+	return &streamSilenceWatcher{
+		send:      te.appStreamMgr.SendTaskEvent,
+		projectID: projectID,
+		taskID:    taskID,
+		every:     stream.LockWaitNoticeEvery,
+	}
+}
+
+// notice is the wait frame every locked-out caller already uses, carrying one extra field: which
+// kind of quiet this is. "Still waiting for the first token" and "stopped mid-answer" need
+// different sentences, and a person deciding whether to wait needs the difference.
+func (w *streamSilenceWatcher) notice(waited time.Duration, acquired bool, phase string) {
+	w.send(w.projectID, w.taskID, types.StreamEvent{Type: types.WSTypeLockWait, Data: map[string]any{
+		"domain":         streamSilenceDomain,
+		"waited_seconds": int(waited.Seconds()),
+		"acquired":       acquired,
+		"phase":          phase,
+	}})
+}
+
+// onSilence is the callback the client invokes once per second while a stream stays quiet.
+func (w *streamSilenceWatcher) onSilence(silent time.Duration, phase string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.last.IsZero() && time.Since(w.last) < w.every {
+		return
+	}
+	w.last = time.Now()
+	w.phase = phase
+	w.reported = true
+	w.notice(silent, false, phase)
+}
+
+// clear withdraws the announcement. Calling it when nothing was announced costs nothing, so every
+// exit from a call can call it.
+func (w *streamSilenceWatcher) clear() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.reported {
+		return
+	}
+	w.reported = false
+	w.last = time.Time{}
+	w.notice(0, true, w.phase)
+}
+
+// onWait is the callback shape the LLM client wants, or nil when nobody is watching this call.
+func (w *streamSilenceWatcher) onWait() llama.SilenceCallback {
+	if w == nil {
+		return nil
+	}
+	return w.onSilence
 }
 
 // sendRetryHint records an interrupted LLM call and that the executor is calling it again. It is
@@ -249,6 +341,7 @@ type loopContext struct {
 	prevArgLens      map[string]int // tool_id -> arg length, for detecting streaming updates
 	finishReason     string         // LLM finish_reason from last stream ("stop", "tool_calls", etc.)
 	detector         *loopDetector
+	silence          *streamSilenceWatcher // announces a quiet provider for the whole run
 	tracker          failureTracker
 	mc               *modelConfig
 	client           *llama.LlamaClient
@@ -368,10 +461,8 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		// Wire up bridge recovery — reconnects client or (re)creates sandbox.
 		sb.recoverBridge = func() bool {
 			return te.recoverBridgeForTask(te.sandboxMgr, setup, state, imageToUse, func() {
-				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{
-					Type: types.WSTypeStatus,
-					Data: map[string]string{"state": "running", "activity": "Sandbox bridge recovered"},
-				})
+				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID,
+					types.TurnStatusEvent("running", "Sandbox bridge recovered"))
 			})
 		}
 		state.setSandbox(func(dst *sandboxState) { *dst = sb })
@@ -397,7 +488,10 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		reasoningEffort = te.configStore.GetModelReasoningEffort(setup.modelName)
 	}
 	apiKey := te.configStore.GetProviderAPIKey(setup.serverURL)
-	client := te.newLlamaClient(setup.serverURL, setup.modelName, reasoningEffort, apiKey)
+	// One watcher for the whole run, so a provider switch mid-run keeps announcing instead of
+	// leaving the last notice standing.
+	silence := te.newStreamSilenceWatcher(setup.projectID, setup.task.ID)
+	client := te.newLlamaClient(setup.serverURL, setup.modelName, reasoningEffort, apiKey, silence)
 	tools := te.toolDefinitionsFor(setup.task)
 	taskMsgs, _ := te.store.GetTaskMessages(setup.task.ID, setup.task.CurrentThreadID)
 	messages := buildMessagesFromDB(setup.task, taskMsgs, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
@@ -429,6 +523,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		pendingToolCalls: nil,
 		prevArgLens:      make(map[string]int),
 		detector:         newLoopDetector(),
+		silence:          silence,
 		mc:               mc,
 		client:           client,
 		providerName:     providerName,
@@ -466,7 +561,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 					if newModel == "" {
 						newModel = curModel
 					}
-					switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, newURL, newModel, false, true)
+					switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, newURL, newModel, false, true, silence)
 					lc.client = switched.client
 					lc.providerName = switched.providerName
 					if switched.contextWindow != nil {
@@ -503,7 +598,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 					// Update setup.task reference with latest mode
 					setup.task.OperatingMode = updatedTask.OperatingMode
 					tools = te.toolDefinitionsFor(updatedTask)
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": fmt.Sprintf("Sandbox recreated for mode change (%s)", newOperatingMode)}})
+					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", fmt.Sprintf("Sandbox recreated for mode change (%s)", newOperatingMode)))
 				}
 			}
 		}
@@ -522,7 +617,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 				}); err != nil {
 					return
 				}
-				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Sandbox recreated for extension config change"}})
+				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Sandbox recreated for extension config change"))
 			}
 		}
 
@@ -593,6 +688,12 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 
 		// Shared callbacks for ChatStream — used by both the initial call and retries.
 		tokenCb := func(choice types.ChatChoice) {
+			// A token is the end of the wait, whatever the provider was holding back.
+			if (choice.Delta.Content != nil && *choice.Delta.Content != "") ||
+				(choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "") ||
+				len(choice.Delta.ToolCalls) > 0 {
+				silence.clear()
+			}
 			// Capture finish_reason for loop detection (last non-empty value wins).
 			if choice.FinishReason != "" {
 				lc.finishReason = choice.FinishReason
@@ -607,7 +708,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 				// Real-time phrase repetition detection (not throttled — detection runs per-token)
 				if loopType := lc.detector.checkStreamingText(*choice.Delta.Content); loopType == LoopPhrase {
 					logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("phrase repetition detected during streaming")
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Repetitive response detected"}})
+					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Repetitive response detected"))
 				}
 			}
 			if len(choice.Delta.ToolCalls) > 0 {
@@ -677,11 +778,14 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 
 		lc.callStartTime = time.Now()
 		go func() {
+			defer silence.clear() // every exit ends the notice, including a cancellation
+
 			lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, tokenCb, progressCb, usageCb)
 
 			// Retry on transient errors, unless the call was cancelled by a user message or refused by
 			// the provider: a refusal is deterministic, so the loop would only repeat it.
 			if streamErr != nil && callCtx.Err() == nil && !llmIsRequestRejected(streamErr) {
+				retryStarted := time.Now()
 				for i := range llmRetryAttempts {
 					select {
 					case <-callCtx.Done():
@@ -689,6 +793,9 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 						close(streamDone)
 						return
 					case <-time.After(backoffFor(i, streamErr)):
+					}
+					if time.Since(retryStarted) > llmRetryWindow {
+						break // the provider is ill and four requests in a row will not cure it
 					}
 					if i == 0 {
 						te.sendRetryHint(setup.projectID, setup.task.ID, setup.task, streamErr)
@@ -813,7 +920,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 					lc.messages = append(lc.messages, userMessageToChatMessage(qm))
 				}
 				if qm.ModelName != "" {
-					switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, qm.ServerURL, qm.ModelName, true, false)
+					switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, qm.ServerURL, qm.ModelName, true, false, silence)
 					lc.client = switched.client
 					lc.providerName = switched.providerName
 				}
@@ -826,7 +933,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			}
 
 			// Notify frontend that response was cancelled.
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "cancelled", "activity": "Response cancelled, processing new message"}})
+			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("cancelled", "Response cancelled, processing new message"))
 
 			continue
 		}
@@ -1425,7 +1532,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
 			}
 			if um.ModelName != "" {
-				switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, um.ServerURL, um.ModelName, true, false)
+				switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, um.ServerURL, um.ModelName, true, false, lc.silence)
 				lc.client = switched.client
 				lc.providerName = switched.providerName
 			}
@@ -1437,7 +1544,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 			}
 			setup.task.ExecutionState = types.ExecStateRunning
 			te.persistTaskClaiming(setup)
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
+			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Processing new message"))
 			return turnNextLLMCall
 		default:
 		}
@@ -1481,7 +1588,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 		lc.assistantContent.Reset()
 		lc.reasoningContent.Reset()
 		lc.finishReason = ""
-		te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Reasoning-only response, requesting action"}})
+		te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Reasoning-only response, requesting action"))
 
 		// Auto-summarize if context is approaching the window limit
 		te.summarize.maybeAutoSummarize(setup, lc, activeModel, true)
@@ -1528,7 +1635,7 @@ func (te *TaskExecutor) intakeUserMessage(setup *taskExecSetup, lc *loopContext)
 			}
 			if um.ModelName != "" && !te.configStore.IsAgentProvider(um.ServerURL) {
 				prevURL, _ := lc.mc.get()
-				switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, um.ServerURL, um.ModelName, true, false)
+				switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, um.ServerURL, um.ModelName, true, false, lc.silence)
 				lc.client = switched.client
 				lc.providerName = switched.providerName
 				if um.ServerURL != "" && strings.TrimRight(um.ServerURL, "/") != strings.TrimRight(prevURL, "/") {
@@ -1617,7 +1724,7 @@ idleWait:
 			setup.task.Status = types.StatusInProgress
 			setup.task.ExecutionState = types.ExecStateRunning
 			te.persistTaskClaiming(setup)
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing queued message"}})
+			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Processing queued message"))
 			return idleResume
 		case um := <-setup.userMsgChan:
 			if um.ContextChanged {
@@ -1638,7 +1745,7 @@ idleWait:
 				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
 			}
 			if um.ModelName != "" && !te.configStore.IsAgentProvider(um.ServerURL) {
-				switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, um.ServerURL, um.ModelName, true, false)
+				switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, um.ServerURL, um.ModelName, true, false, lc.silence)
 				lc.client = switched.client
 				lc.providerName = switched.providerName
 			}
@@ -1650,7 +1757,7 @@ idleWait:
 			}
 			setup.task.ExecutionState = types.ExecStateRunning
 			te.persistTaskClaiming(setup)
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
+			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Processing new message"))
 			return idleResume
 		}
 	}

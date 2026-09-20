@@ -43,7 +43,7 @@ function makeConfig(): Config {
         database_path: '/tmp/db',
         version: '1.0.0',
         providers: [
-            { id: 1, url: 'http://localhost:9999/v1', models: [{ name: 'model-a' }], concurrency: 1, max_requests_per_second: 0 },
+            { id: 1, url: 'http://localhost:9999/v1', models: [{ name: 'model-a' }], concurrency: 1, max_requests_per_second: 0, stream_idle_seconds: 0 },
         ],
         worker_provider: '1',
         worker_model: 'model-a',

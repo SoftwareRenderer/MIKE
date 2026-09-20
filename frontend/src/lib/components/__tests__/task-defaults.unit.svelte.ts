@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, fireEvent, cleanup } from '@testing-library/svelte';
 import TaskDefaults from '$lib/components/ConfigModal/TaskDefaults.svelte';
 
-const TOGGLE = 'button[aria-label="Run siblings in parallel"]';
+const TOGGLE = 'button[aria-label="Run subtasks in parallel"]';
 
 afterEach(() => {
     cleanup();
@@ -43,7 +43,7 @@ describe('TaskDefaults run-siblings-in-parallel toggle', () => {
     it('is placed above the "Max failed turns" row', () => {
         const { container } = renderDefaults();
         const fields = Array.from(container.querySelectorAll('.toggle-field'));
-        const idxParallel = fields.findIndex((f) => f.textContent?.includes('Run siblings in parallel'));
+        const idxParallel = fields.findIndex((f) => f.textContent?.includes('Run subtasks in parallel'));
         const idxMaxFailed = fields.findIndex((f) => f.textContent?.includes('Max failed turns'));
         expect(idxParallel).toBeGreaterThan(-1);
         expect(idxMaxFailed).toBeGreaterThan(-1);

@@ -1186,3 +1186,34 @@ describe('unresolvedToolIds — what this screen owes a card for', () => {
         expect(stream.state.unresolvedToolIds.size).toBe(0);
     });
 });
+
+describe('summarization frame', () => {
+    function setup() {
+        const stream = new StreamState();
+        const cb = makeCallbacks();
+        const handleEvent = createStreamHandler(stream, cb);
+        return { stream, handleEvent };
+    }
+
+    it('adds a summary the client has not seen, and updates in place one it has', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'summarization', data: { id: 'sum-1', summary: 'the first text', created_at: '2026-01-01T00:00:00Z' } }, false);
+        expect(stream.state.entries.map(e => [e.id, e.content])).toEqual([['sum-1', 'the first text']]);
+
+        // The edit is a broadcast of the same row: the entry keeps its place in the conversation.
+        handleEvent({ type: 'summarization', data: { id: 'sum-1', summary: 'the edited text' } }, false);
+        expect(stream.state.entries).toHaveLength(1);
+        expect(stream.state.entries[0].content).toBe('the edited text');
+        expect(stream.state.entries[0].createdAt).toBe('2026-01-01T00:00:00Z');
+
+        handleEvent({ type: 'summarization', data: { id: 'sum-2', summary: 'a newer summary' } }, false);
+        expect(stream.state.entries.map(e => e.id)).toEqual(['sum-1', 'sum-2']);
+    });
+
+    it('keeps the stored text when an edit frame carries none', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'summarization', data: { id: 'sum-1', summary: 'the stored text' } }, false);
+        handleEvent({ type: 'summarization', data: { id: 'sum-1', summary: '' } }, false);
+        expect(stream.state.entries[0].content).toBe('the stored text');
+    });
+});

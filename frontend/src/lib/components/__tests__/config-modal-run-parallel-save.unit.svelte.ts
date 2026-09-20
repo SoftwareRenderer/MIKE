@@ -37,7 +37,7 @@ function makeConfig(): Config {
         database_path: '/tmp/db',
         version: '1.0.0',
         providers: [
-            { id: 1, url: 'http://localhost:9999/v1', models: [{ name: 'model-a' }], concurrency: 1, max_requests_per_second: 0 },
+            { id: 1, url: 'http://localhost:9999/v1', models: [{ name: 'model-a' }], concurrency: 1, max_requests_per_second: 0, stream_idle_seconds: 0 },
         ],
         worker_provider: '1',
         worker_model: 'model-a',
@@ -57,10 +57,10 @@ describe('ConfigModal run-siblings-in-parallel save payload', () => {
         // Open the Task Defaults tab.
         const tabs = Array.from(container.querySelectorAll('button.tab-btn'));
         fireEvent.click(tabs.find((b) => b.textContent?.trim() === 'Task Defaults')!);
-        await waitFor(() => expect(container.querySelector('button[aria-label="Run siblings in parallel"]')).toBeTruthy(), { timeout: 1000 });
+        await waitFor(() => expect(container.querySelector('button[aria-label="Run subtasks in parallel"]')).toBeTruthy(), { timeout: 1000 });
 
         // Flip the toggle on, and save.
-        fireEvent.click(container.querySelector('button[aria-label="Run siblings in parallel"]')!);
+        fireEvent.click(container.querySelector('button[aria-label="Run subtasks in parallel"]')!);
         fireEvent.click(container.querySelector('button[title="Save settings"]')!);
         await waitFor(() => expect(updateConfig).toHaveBeenCalledTimes(1), { timeout: 1000 });
 
@@ -76,7 +76,7 @@ describe('ConfigModal run-siblings-in-parallel save payload', () => {
 
         const tabs = Array.from(container.querySelectorAll('button.tab-btn'));
         fireEvent.click(tabs.find((b) => b.textContent?.trim() === 'Task Defaults')!);
-        await waitFor(() => expect(container.querySelector('button[aria-label="Run siblings in parallel"]')).toBeTruthy(), { timeout: 1000 });
+        await waitFor(() => expect(container.querySelector('button[aria-label="Run subtasks in parallel"]')).toBeTruthy(), { timeout: 1000 });
 
         // Leave the toggle off and save.
         fireEvent.click(container.querySelector('button[title="Save settings"]')!);

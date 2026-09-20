@@ -54,7 +54,9 @@ lock is taken, and says nothing at all when the lock was free — a line that fl
 acquisition is a line that gets ignored. The owning packages expose watched twins
 (`LockProjectStashWatched`, `LockWorktreeWatched`) that take the notice as a parameter, because the table
 must still not leave the package. The caller supplies `stream.LockWaitNotifier(projectID, taskID,
-domain)`, which is the one place the frame is shaped, and `QueueIndicator` renders it as the top rung of
+domain)`, which is where a lock's frame is shaped — the one other producer of that frame is a wait that is
+not a lock and carries one extra field, so it shapes its own (`docs/reconnection.md`) — and
+`QueueIndicator` renders it as the top rung of
 the line that already says "Awaiting LLM provider…". It is wired where a click is the waiter (Commit &
 Done behind a tool call, a thread switch behind a stash) and deliberately not where it is not (merges from
 turns, GC) — the split is `Lock` versus `TryLock` in the same package, expressed in UI terms.

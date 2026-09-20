@@ -13,8 +13,9 @@ import (
 	"time"
 )
 
-// Outbound HTTP goes through this file so the redirect policy is decided once. Two clients, named
-// for the property that differs, sharing one connection pool.
+// Outbound HTTP goes through this file so the redirect policy is decided once. Three clients, named
+// for the property that differs. The first two share one connection pool; the streaming one keeps
+// its own, so its keepalive floor does not reach extension egress or update checks.
 
 // sharedTransport is the pool behind every client here. The numbers are the stdlib defaults,
 // written out because the DialContext is not one of them: without a dial timeout, connecting to a
@@ -37,6 +38,32 @@ var sharedTransport = &http.Transport{
 // response needs; say so at the call site when you pass 0.
 func NewClient(timeout time.Duration) *http.Client {
 	return &http.Client{Timeout: timeout, Transport: sharedTransport}
+}
+
+// streamTransport differs from sharedTransport in one way: how fast a peer that stopped existing
+// shows up. sharedTransport inherits the OS keepalive defaults (75s between probes, 9 of them here),
+// which notice a vanished host in ~12 minutes — invisible to an ordinary request, but the only thing
+// that will ever end a stream whose response is deliberately unbounded in time.
+var streamTransport = func() *http.Transport {
+	t := sharedTransport.Clone()
+	t.DialContext = (&net.Dialer{
+		Timeout: 30 * time.Second,
+		KeepAliveConfig: net.KeepAliveConfig{
+			Enable:   true,
+			Idle:     30 * time.Second,
+			Interval: 15 * time.Second,
+			Count:    3,
+		},
+	}).DialContext
+	return t
+}()
+
+// NewStreamClient is for a response that stays open for minutes: no wall-clock timeout, because a
+// completion is finished by its last token and not by the clock. The keepalive floor underneath is
+// for a host that is GONE - it is not a test of whether a stream is alive. A provider that is up and
+// saying nothing for a minute is normal; see llama.ErrStreamSilent for what silence actually means.
+func NewStreamClient() *http.Client {
+	return &http.Client{Transport: streamTransport}
 }
 
 // NewSingleAttemptClient refuses redirects instead of following them. Use it for any URL an

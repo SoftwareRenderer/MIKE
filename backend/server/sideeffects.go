@@ -50,6 +50,17 @@ var detachedOperations = []sideEffectEntry{
 	{"POST /api/fs/upload", "writes a file"},
 	{"POST /api/fs/mkdir", "creates a directory"},
 	{"POST /api/fs/init-git", "creates a repository"},
+	{
+		"POST /api/fs/delete",
+		"removes files from disk. A cancel between two paths of a selection leaves a half-deleted batch " +
+			"that the panel no longer lists",
+	},
+	{"POST /api/fs/copy", "writes files into the destination folder"},
+	{
+		"POST /api/fs/move",
+		"writes the destination and removes the source: half a move is a file in neither place",
+	},
+	{"POST /api/fs/rename", "renames a path an editor may have open on it"},
 	{"POST /api/projects/{projectID}/tasks/{taskID}/init", "creates the worktree and the task branch"},
 	{"POST /api/projects/{projectID}/tasks/{taskID}/messages", "persists the message, then the turn's answer arrives beside it"},
 	{

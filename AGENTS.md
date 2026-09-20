@@ -159,6 +159,11 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
 - Inbound frames are typed; outbound frames are flat maps built where they are broadcast — read
   `msg.task_id`, not `msg.data.task_id`. A frame that is not a JSON object is dropped and reported once:
   a throw inside `onmessage` is swallowed and leaves the app believing it is current.
+- **One goroutine per app-stream connection writes its socket**, besides that connection's pinger; every
+  delivery path queues into it and never calls `Write` itself. The queue drops the **oldest** frames and
+  ends the connection so the client resyncs — a slow browser degrades to a reconnect, never to a timeout
+  on someone's wait, and never to a producer that waits for it. `docs/api-contract.md`,
+  `docs/reconnection.md`.
 - **Every `/api` route declares its verb in the pattern.** Handlers don't check `r.Method`, and a
   methodless route also escapes the CSRF middleware. Exemptions and consequences: `docs/api-contract.md`.
 - **A partial update decodes into pointer fields, never a `map[string]any` behind type assertions.** A field that
@@ -400,9 +405,11 @@ The client distinguishes a cancellation from a lost connection and treats neithe
 never marks the app offline, and a long wait gets a report naming what it waits on rather than a timeout.
 Nothing in the product puts a deadline on a wait for this server. Writes queue while offline **except** a
 request carrying a plaintext secret, which is refused rather than queued — the queue is persisted, so a
-queued value outlives the tab and the session. **A task's status is never the answer to "is it still
-running"** — a stopped task keeps `status = in_progress` and only moves `execution_state` to `paused`, and
-`taskIsInFlight` (`$lib/utils/task-utils.ts`), mirrored server-side by `terminalTurnStates`
+queued value outlives the tab and the session. A connection's **subscriptions** are not queued frames:
+what it owes the server is its current state per project or task key, coalesced and bounded by what the app
+has open, because two holds of one key are undone by one release. **A task's status is never the answer to
+"is it still running"** — a stopped task keeps `status = in_progress` and only moves `execution_state` to
+`paused`, and `taskIsInFlight` (`$lib/utils/task-utils.ts`), mirrored server-side by `terminalTurnStates`
 (`stream/app_stream.go`), is what decides whether an unanswered tool call is work or a leftover. Mechanisms: `docs/reconnection.md`.
 
 ## Licensing
@@ -487,6 +494,7 @@ deliberately omits.
 | `docs/notifications.md` | the Review-arrival rule, the counts ledger, the permission policy |
 | `docs/link-rows.md` | project-row/task-card markup, click routing, known limitation |
 | `docs/reconnection.md` | WS reconnect/offline queue mechanism |
+| `docs/llm-streaming.md` | provider silence and what measures it, the per-provider ceiling, retrying a quiet provider, keeping the socket honest |
 | `docs/frontend-updates.md` | stale-asset detection, the build-id tag contract, prompt-mode worker, the day gate |
 | `docs/auto-update.md` | the release manifest, the opt-in ladder, the install shapes that refuse, staging and restart |
 | `docs/adding-a-preference.md` | the recipes for a shortcut or a `*bool` preference |

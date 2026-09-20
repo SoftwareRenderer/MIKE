@@ -68,7 +68,7 @@ func searchToolExtension(address string) *extensions.Extension {
 func toolRegistryWith(t *testing.T, exts ...*extensions.Extension) *extensions.ToolRegistry {
 	t.Helper()
 	s := testStore(t)
-	es := extensions.NewExtensionStore(s)
+	es := extensions.NewExtensionStore(s, nil)
 	if err := es.InitSchema(); err != nil {
 		t.Fatalf("InitSchema: %v", err)
 	}

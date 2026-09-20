@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -463,6 +464,195 @@ func TestInitializeCaching(t *testing.T) {
 	}
 	if caps["textDocumentSync"].(float64) != 1 {
 		t.Errorf("expected textDocumentSync=1, got %v", caps["textDocumentSync"])
+	}
+}
+
+// writeInit writes an initialize request and returns the failure instead of reporting it, so the
+// caller can send it from a goroutine the test goroutine only joins later.
+func writeInit(c *testClient, id int, workspace, file string) error {
+	data, err := json.Marshal(map[string]any{
+		"jsonrpc":    "2.0",
+		"id":         id,
+		"method":     "initialize",
+		"_ch":        c.channelID,
+		"_workspace": workspace,
+		"_lang":      c.language,
+		"_file":      file,
+		"params":     map[string]any{"rootUri": "file://" + workspace, "capabilities": map[string]any{}},
+	})
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return c.conn.Write(ctx, websocket.MessageText, data)
+}
+
+// awaitSentMethodID waits for a request with the method to reach the language server and returns
+// its remapped id, which is what the fake server has to answer for the response to route.
+func awaitSentMethodID(t *testing.T, mgr *mockProcessManager, method string) any {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		for _, m := range mgr.SentMessages() {
+			var req struct {
+				Method string `json:"method"`
+				ID     any    `json:"id"`
+			}
+			if err := json.Unmarshal(m, &req); err == nil && req.Method == method {
+				return req.ID
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no %q request reached the language server", method)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// receiveResponseFor reads until the client gets a response — $/lspReady may arrive on either side
+// of it — and fails when the response is not the client's own id and channel, or carries no result.
+func receiveResponseFor(t *testing.T, c *testClient, wantID string, wantCh int64) JSONRPCMessage {
+	t.Helper()
+	for i := 0; i < 4; i++ {
+		data := c.receive(t)
+		var msg JSONRPCMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			t.Fatalf("unmarshal error: %v, data: %s", err, data)
+		}
+		if msg.ID == nil || msg.Method != "" {
+			continue
+		}
+		if msg.ID.String() != wantID {
+			t.Fatalf("client %d: response carried id=%s, want its own id %s (data: %s)", c.channelID, msg.ID, wantID, data)
+		}
+		var hint struct {
+			Ch int64 `json:"_ch"`
+		}
+		if err := json.Unmarshal(data, &hint); err != nil || hint.Ch != wantCh {
+			t.Fatalf("client %d: response for id=%s carried _ch=%d (data: %s)", c.channelID, wantID, hint.Ch, data)
+		}
+		if msg.Error != nil {
+			t.Fatalf("client %d: response for id=%s was an error: %s", c.channelID, wantID, msg.Error.Message)
+		}
+		if msg.Result == nil {
+			t.Fatalf("client %d: response for id=%s carried no result", c.channelID, wantID)
+		}
+		return msg
+	}
+	t.Fatalf("client %d: no response for id=%s among the first 4 messages", c.channelID, wantID)
+	return JSONRPCMessage{}
+}
+
+func countSentMethods(sent []json.RawMessage, method string) int {
+	count := 0
+	for _, m := range sent {
+		var req struct {
+			Method string `json:"method"`
+		}
+		if err := json.Unmarshal(m, &req); err == nil && req.Method == method {
+			count++
+		}
+	}
+	return count
+}
+
+// subscribeRaceChannel connects and subscribes without the pause subscribeClient takes: the drain
+// read already waits for $/lspReady, and this test repeats the handoff often enough to need cheap
+// rounds.
+func subscribeRaceChannel(t *testing.T, url string, channelID int64, workspace, file, language string) *testClient {
+	t.Helper()
+	c := connectClient(t, url)
+	c.channelID, c.workspace, c.language = channelID, workspace, language
+	c.send(t, map[string]any{
+		"_ch":    channelID,
+		"method": "workspace/subscribe",
+		"params": map[string]any{"workspace": workspace, "file": file},
+	})
+	c.receiveJSON(t) // $/lspReady for this channel
+	return c
+}
+
+// TestSecondInitializeDuringFirstResponseRouting: one client's initialize response is being routed
+// while other clients' initialize requests are being handled on their own connections, against one
+// workspace entry. Across that overlap exactly one initialize reaches the language server, and
+// every client gets a response with its own id and channel back. Rounds because the overlap is a
+// goroutine handoff wide.
+func TestSecondInitializeDuringFirstResponseRouting(t *testing.T) {
+	const (
+		workspace = "/tmp/test-project"
+		rounds    = 24
+		racers    = 3 // sessions whose initialize arrives while the first response is in flight
+	)
+	initResponse := func(backendID any) []byte {
+		return mustMarshal(t, map[string]any{
+			"jsonrpc": "2.0",
+			"id":      backendID,
+			"result": map[string]any{
+				"capabilities": map[string]any{"textDocumentSync": 1},
+				"serverInfo":   map[string]any{"name": "gopls", "version": "v1.0"},
+			},
+		})
+	}
+
+	for round := 1; round <= rounds; round++ {
+		t.Run(fmt.Sprintf("round-%d", round), func(t *testing.T) {
+			mgr := newMockProcessManager()
+			handler := NewLSPHandler(newTestRegistry(), mgr)
+			defer handler.Close()
+
+			url := startTestServer(t, handler)
+			first := subscribeRaceChannel(t, url, 1, workspace, "main.go", "go")
+			racing := make([]*testClient, 0, racers)
+			for ch := int64(2); ch <= racers+1; ch++ {
+				racing = append(racing, subscribeRaceChannel(t, url, ch, workspace, "main.go", "go"))
+			}
+
+			// The first initialize is forwarded and left unanswered.
+			sendInit(t, first, 1, workspace, "main.go")
+			backendID := awaitSentMethodID(t, mgr, "initialize")
+			response := initResponse(backendID)
+
+			// Released together: the router caches and replays the response while the other
+			// clients' initialize requests are handled on their connections' goroutines.
+			start := make(chan struct{})
+			var both sync.WaitGroup
+			writeErr := make(chan error, len(racing))
+			for i, c := range racing {
+				both.Add(1)
+				go func(c *testClient, id int) {
+					defer both.Done()
+					<-start
+					writeErr <- writeInit(c, id, workspace, "main.go")
+				}(c, i+2)
+			}
+			both.Add(1)
+			go func() {
+				defer both.Done()
+				<-start
+				mgr.Deliver(response)
+			}()
+			close(start)
+			both.Wait()
+			close(writeErr)
+			for err := range writeErr {
+				if err != nil {
+					t.Fatalf("an initialize could not be sent: %v", err)
+				}
+			}
+
+			receiveResponseFor(t, first, "1", 1)
+			for i, c := range racing {
+				receiveResponseFor(t, c, fmt.Sprint(i+2), int64(i+2))
+			}
+
+			// A client that decided it was first forwards its own initialize only after the
+			// response cleared the pending marker, so give it that same grace.
+			time.Sleep(20 * time.Millisecond)
+			if got := countSentMethods(mgr.SentMessages(), "initialize"); got != 1 {
+				t.Errorf("%d initialize requests reached the language server, want exactly 1", got)
+			}
+		})
 	}
 }
 

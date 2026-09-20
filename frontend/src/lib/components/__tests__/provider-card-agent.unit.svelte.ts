@@ -63,6 +63,7 @@ function makeProvider(kind: 'llm' | 'agent') {
         models: [],
         concurrency: 1,
         max_requests_per_second: 0,
+        stream_idle_seconds: 0,
         input_price: 0,
         output_price: 0,
         cache_read_price: 0,

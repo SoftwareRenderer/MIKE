@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 
 	"mike/backend/errs"
@@ -16,3 +17,7 @@ var (
 	ErrThreadNotFound  = fmt.Errorf("thread %w", errs.ErrNotFound)
 	ErrMessageNotFound = fmt.Errorf("task message %w", errs.ErrNotFound)
 )
+
+// ErrMessageCursor is a paging cursor this store never issued. Refusing it beats an empty page, which a
+// client would read as "no history".
+var ErrMessageCursor = errors.New("malformed message cursor")

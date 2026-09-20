@@ -37,7 +37,7 @@ func setupStashTest(t *testing.T) (string, string, string, *store.Store, *config
 	}
 	t.Cleanup(func() { s.Close() })
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {

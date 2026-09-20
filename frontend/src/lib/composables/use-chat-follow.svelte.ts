@@ -61,6 +61,9 @@ export interface ChatFollow {
      * this is a takeover even when the layout changed at the same moment.
      */
     noteUserIntent(): void;
+    /** The reader asked for what is above the viewport. Stops the pin loop so growth below does not
+     * pull them back. */
+    stopFollowing(): void;
     /** Release observers and pending frames. */
     destroy(): void;
 }
@@ -205,6 +208,12 @@ export function createChatFollow(): ChatFollow {
         intentSeq++;
     }
 
+    function stopFollowing(): void {
+        following = false;
+        cancelPin();
+        noteUserIntent();
+    }
+
     /** Keys that scroll a container; anything else is not a takeover. */
     const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 
@@ -274,6 +283,7 @@ export function createChatFollow(): ChatFollow {
         pin,
         handleScroll,
         noteUserIntent,
+        stopFollowing,
         destroy,
     };
 }

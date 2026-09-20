@@ -223,7 +223,7 @@ func lspGoExtension() *extensions.Extension {
 func lspRegistryWith(t *testing.T, exts ...*extensions.Extension) *lsp.ExtensionRegistry {
 	t.Helper()
 	s := testStore(t)
-	es := extensions.NewExtensionStore(s)
+	es := extensions.NewExtensionStore(s, nil)
 	if err := es.InitSchema(); err != nil {
 		t.Fatalf("InitSchema: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestFilterDiagnosticFiles(t *testing.T) {
 
 func TestTurnDiagnosticFiles_AskGitWhatTheShellChanged(t *testing.T) {
 	te, _, projectID, _ := setupExecutorWithGit(t)
-	es := extensions.NewExtensionStore(te.store)
+	es := extensions.NewExtensionStore(te.store, nil)
 	if err := es.InitSchema(); err != nil {
 		t.Fatalf("InitSchema: %v", err)
 	}
@@ -456,7 +456,7 @@ func (m *wedgedLSPManager) GetOrCreate(ctx context.Context, _, _ string) (*lsp.L
 // installTSLSPExtension makes the pass chase app.ts instead of filtering it out.
 func installTSLSPExtension(t *testing.T, s *store.Store) *lsp.ExtensionRegistry {
 	t.Helper()
-	es := extensions.NewExtensionStore(s)
+	es := extensions.NewExtensionStore(s, nil)
 	if err := es.InitSchema(); err != nil {
 		t.Fatalf("init extension schema: %v", err)
 	}
@@ -489,7 +489,7 @@ func TestCollectTurnDiagnostics_BoundedAndCancellable(t *testing.T) {
 	reg := installTSLSPExtension(t, s)
 
 	// WorktreePath looks the task up in the store, so everything here shares s.
-	cs := config.NewConfigStore(s, "", "test")
+	cs := config.NewConfigStore(s, "", "test", nil)
 	cs.SetWorkspaceDirOverride(t.TempDir())
 	fake := &wedgedLSPManager{registry: reg, gotCtx: make(chan context.Context, 4)}
 	te := newTestExecutorWith(t, Deps{

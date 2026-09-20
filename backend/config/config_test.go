@@ -8,11 +8,24 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"mike/backend/crypto"
 	"mike/backend/store"
 	"mike/backend/types"
 )
+
+// sharedSecretBox is derived once for the whole package: a per-test derivation would dominate the suite.
+// A test that needs its own key builds or passes one explicitly.
+var sharedSecretBox = sync.OnceValue(func() *crypto.Box {
+	box, err := crypto.New("test-passphrase", []byte("0123456789abcdef"))
+	if err != nil {
+		panic(err)
+	}
+	return box
+})
 
 func testConfigStore(t *testing.T) *ConfigStore {
 	t.Helper()
@@ -29,7 +42,7 @@ func testConfigStoreWithStore(t *testing.T) (*ConfigStore, *store.Store) {
 	if err != nil {
 		t.Fatalf("create test store: %v", err)
 	}
-	return NewConfigStore(db, dir+"/test.db", "test"), db
+	return NewConfigStore(db, dir+"/test.db", "test", sharedSecretBox()), db
 }
 
 func TestGetConfigDefaultWorkspaceDir(t *testing.T) {
@@ -649,7 +662,7 @@ func TestMigrateProviderIDs(t *testing.T) {
 }
 
 func TestBuildConfigResponseMasksAPIKeys(t *testing.T) {
-	cs := testConfigStore(t)
+	cs, db := testConfigStoreWithStore(t)
 
 	cfg := &types.Config{
 		Providers: []types.Provider{
@@ -664,12 +677,16 @@ func TestBuildConfigResponseMasksAPIKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	// Sanity check: the stored key decrypts to the plaintext.
-	if len(readCfg.Providers) != 1 || readCfg.Providers[0].APIKey == nil || *readCfg.Providers[0].APIKey != "super-secret-key" {
-		t.Fatalf("expected decrypted key in GetConfig, got %+v", readCfg.Providers)
+	// GetConfig hands out no key; the response masking below is a second line, not the only one.
+	if len(readCfg.Providers) != 1 || readCfg.Providers[0].APIKey != nil {
+		t.Fatalf("expected a provider with no APIKey, got %+v", readCfg.Providers)
+	}
+	// The key is still there for the one caller allowed to have it.
+	if got := cs.GetProviderAPIKey("http://localhost:8080/v1"); got != "super-secret-key" {
+		t.Fatalf("GetProviderAPIKey = %q, want the stored key", got)
 	}
 
-	// The HTTP response must mask the key, never return it in plaintext.
+	// The HTTP response masks it.
 	resp := cs.buildConfigResponse(readCfg)
 	if len(resp.Providers) != 1 || resp.Providers[0].APIKey == nil {
 		t.Fatalf("expected 1 provider with an APIKey field, got %+v", resp.Providers)
@@ -677,8 +694,16 @@ func TestBuildConfigResponseMasksAPIKeys(t *testing.T) {
 	if got := *resp.Providers[0].APIKey; got != maskedAPIKey {
 		t.Fatalf("API key not masked in response: got %q, want %q", got, maskedAPIKey)
 	}
-	if got := *resp.Providers[0].APIKey; got == "super-secret-key" {
-		t.Fatal("plaintext API key leaked in config response")
+	// Neither the plaintext nor the stored ciphertext may appear anywhere in the response body.
+	sealed := firstStoredKey(t, db)
+	body, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	for _, leak := range []string{"super-secret-key", sealed} {
+		if leak != "" && strings.Contains(string(body), leak) {
+			t.Errorf("config response body leaks %q", leak)
+		}
 	}
 }
 
@@ -793,6 +818,39 @@ func TestGetProviderMaxRequestsPerSecond(t *testing.T) {
 	// Unknown URL → 0
 	if got := cs.GetProviderMaxRequestsPerSecond("http://unknown/v1"); got != 0 {
 		t.Fatalf("expected 0 for unknown URL, got %d", got)
+	}
+}
+
+// TestGetProviderStreamIdleIsNoCeilingUnlessConfigured holds the default open: 0 means "wait the
+// stream out", and a default number of seconds here would silently reintroduce the bound that
+// fails a provider for composing a long answer.
+func TestGetProviderStreamIdleIsNoCeilingUnlessConfigured(t *testing.T) {
+	cs := testConfigStore(t)
+	cfg := &types.Config{
+		Providers: []types.Provider{
+			{ID: 1, URL: "http://saturn:8100/v1", Concurrency: 1, StreamIdleSeconds: 45},
+			{ID: 2, URL: "http://other:9000/v1", Concurrency: 1},
+			{ID: 3, URL: "http://negative:9000/v1", Concurrency: 1, StreamIdleSeconds: -7},
+		},
+	}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	if got := cs.GetProviderStreamIdle("http://saturn:8100/v1"); got != 45*time.Second {
+		t.Errorf("configured provider = %v, want 45s", got)
+	}
+	if got := cs.GetProviderStreamIdle("http://saturn:8100/v1/"); got != 45*time.Second {
+		t.Errorf("trailing-slash lookup = %v, want 45s", got)
+	}
+	if got := cs.GetProviderStreamIdle("http://other:9000/v1"); got != 0 {
+		t.Errorf("unset provider = %v, want 0 (no ceiling)", got)
+	}
+	if got := cs.GetProviderStreamIdle("http://unknown/v1"); got != 0 {
+		t.Errorf("unknown URL = %v, want 0 (no ceiling)", got)
+	}
+	if got := cs.GetProviderStreamIdle("http://negative:9000/v1"); got != 0 {
+		t.Errorf("negative value = %v, want it clamped to 0 like the rate limit is", got)
 	}
 }
 

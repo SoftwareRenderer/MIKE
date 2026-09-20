@@ -1,153 +1,138 @@
-// Package crypto encrypts secrets kept in the database (provider API keys) with
-// AES-256-GCM, keyed from MIKE_ENCRYPTION_KEY. Refusing to run without a key is the
-// server's decision, not this package's.
+// Package crypto encrypts the secrets kept in the database — provider API keys and the config
+// values an extension manifest marks sensitive — with AES-256-GCM.
+//
+// The stored form is bare base64 of `nonce ‖ ciphertext ‖ tag` and names no format, so opening a value is
+// the only test of what it is: ErrNotRecord is a plain value, ErrNotAuthentic a secret this build cannot
+// read. The GCM additional data binds a record to what it is and whose it is.
 package crypto
 
 import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
+	"sync/atomic"
 
-	"golang.org/x/crypto/pbkdf2"
+	"golang.org/x/crypto/argon2"
 )
 
-// Version prefix for the encryption format.
-// Format: "v1:" + base64(salt + nonce + ciphertext + tag)
-// Uses PBKDF2-HMAC-SHA256 (100k iterations) for key derivation with a random salt.
-const v1Prefix = "v1:"
+const (
+	// SaltSize is the length of the per-installation KDF salt, generated once and stored in the
+	// database so the derivation is repeatable across restarts.
+	SaltSize = 16
 
-// PBKDF2 iteration count. Balances security against performance:
-// 100,000 iterations takes ~50ms on typical hardware, which is acceptable
-// for the frequency of decryption (once per task start, not per-token).
-const pbkdf2Iterations = 100_000
+	// The KDF's cost, paid once per process. It is memory-hard because the input is a passphrase an
+	// operator may well have typed short.
+	argonTime    = 3
+	argonMemory  = 64 * 1024 // KiB, so 64 MiB
+	argonThreads = 4
+	keyLen       = 32
 
-// saltSize is the length of the random salt in bytes for PBKDF2.
-const saltSize = 16
+	// fieldSep separates the additional-data fields, so two spellings of the same string cannot name
+	// the same record.
+	fieldSep = "\x00"
+)
 
-// Encrypt encrypts a plaintext value using AES-256-GCM.
-// API keys are encrypted before being stored in the database.
-//
-// The format is: "v1:" + base64(salt + nonce + ciphertext + tag)
-// Key derivation uses PBKDF2-HMAC-SHA256 with a random salt and 100k iterations.
-func Encrypt(value string) (string, error) {
+var (
+	// ErrNotRecord reports a stored value that cannot be one of this package's records at all — plain
+	// text, or a row this build does not read.
+	ErrNotRecord = errors.New("crypto: stored value is not an encrypted record")
+	// ErrNotAuthentic reports a value shaped like a record that did not authenticate: the passphrase
+	// changed, the bytes were tampered with, or the value moved from another record.
+	ErrNotAuthentic = errors.New("crypto: stored value does not authenticate")
+
+	// derivations is how the one-derivation-per-process test counts without timing anything.
+	derivations atomic.Int64
+)
+
+// Box holds the derived data key. It is immutable, so it is safe to share.
+type Box struct {
+	key []byte
+}
+
+// New derives a Box's data key from the passphrase and the installation salt.
+func New(passphrase string, salt []byte) (*Box, error) {
+	if passphrase == "" {
+		return nil, errors.New("crypto: no passphrase to derive from")
+	}
+	if len(salt) < SaltSize {
+		return nil, fmt.Errorf("crypto: salt must be at least %d bytes, got %d", SaltSize, len(salt))
+	}
+	derivations.Add(1)
+	key := argon2.IDKey([]byte(passphrase), salt, argonTime, argonMemory, argonThreads, keyLen)
+	return &Box{key: key}, nil
+}
+
+// Derivations reports how many data keys this process has derived.
+func Derivations() int64 { return derivations.Load() }
+
+// Opens reports whether value is a record for exactly this purpose and record.
+func (b *Box) Opens(purpose, record, value string) bool {
+	_, err := b.Decrypt(purpose, record, value)
+	return err == nil
+}
+
+// Encrypt seals value as the secret of type purpose belonging to record — "provider" and a provider id,
+// "extension-config" and an extension id plus its config key. A value lifted into another row, or another
+// kind of secret, will not open.
+func (b *Box) Encrypt(purpose, record, value string) (string, error) {
 	if value == "" {
 		return "", nil
 	}
-
-	salt, err := generateSalt()
+	block, err := aes.NewCipher(b.key)
 	if err != nil {
-		return "", fmt.Errorf("crypto: failed to generate salt: %w", err)
+		return "", fmt.Errorf("crypto: %w", err)
 	}
-
-	key := deriveKeyPBKDF2(salt)
-	if key == nil {
-		return "", fmt.Errorf("crypto: MIKE_ENCRYPTION_KEY environment variable is not set")
-	}
-
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return "", fmt.Errorf("crypto: failed to create cipher: %w", err)
-	}
-
 	aesGCM, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", fmt.Errorf("crypto: failed to create GCM: %w", err)
+		return "", fmt.Errorf("crypto: %w", err)
 	}
-
 	nonce := make([]byte, aesGCM.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return "", fmt.Errorf("crypto: failed to generate nonce: %w", err)
+		return "", fmt.Errorf("crypto: %w", err)
 	}
-
-	// Seal appends the ciphertext + auth tag to the nonce
-	encrypted := aesGCM.Seal(nonce, nonce, []byte(value), nil)
-
-	// Format: "v1:" + base64(salt + encrypted)
-	combined := append(salt, encrypted...)
-	return v1Prefix + base64.StdEncoding.EncodeToString(combined), nil
+	combined := aesGCM.Seal(nonce, nonce, []byte(value), aad(purpose, record))
+	return base64.StdEncoding.EncodeToString(combined), nil
 }
 
-// Decrypt decrypts an encrypted value produced by Encrypt.
-// Supports the v1 (PBKDF2) format exclusively.
-func Decrypt(encrypted string) (string, error) {
-	if encrypted == "" {
+// Decrypt opens a record produced by Encrypt for the same purpose and record. An empty value is an
+// empty secret, not a failure; anything else must be a record and must authenticate.
+func (b *Box) Decrypt(purpose, record, sealed string) (string, error) {
+	if sealed == "" {
 		return "", nil
 	}
-
-	if !strings.HasPrefix(encrypted, v1Prefix) {
-		return "", fmt.Errorf("crypto: unrecognized encryption format (expected %s prefix)", v1Prefix)
-	}
-
-	return decryptV1(encrypted[len(v1Prefix):])
-}
-
-// decryptV1 decrypts a v1-formatted value (PBKDF2-derived key with salt).
-func decryptV1(encoded string) (string, error) {
-	data, err := base64.StdEncoding.DecodeString(encoded)
+	data, err := base64.StdEncoding.DecodeString(sealed)
 	if err != nil {
-		return "", fmt.Errorf("crypto: failed to decode base64: %w", err)
+		return "", ErrNotRecord
 	}
-
-	if len(data) < saltSize {
-		return "", fmt.Errorf("crypto: ciphertext too short")
-	}
-
-	salt := data[:saltSize]
-	encrypted := data[saltSize:]
-
-	derivedKey := deriveKeyPBKDF2(salt)
-
-	block, err := aes.NewCipher(derivedKey)
+	block, err := aes.NewCipher(b.key)
 	if err != nil {
-		return "", fmt.Errorf("crypto: failed to create cipher: %w", err)
+		return "", fmt.Errorf("crypto: %w", err)
 	}
-
 	aesGCM, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", fmt.Errorf("crypto: failed to create GCM: %w", err)
+		return "", fmt.Errorf("crypto: %w", err)
 	}
-
-	nonceSize := aesGCM.NonceSize()
-	if len(encrypted) < nonceSize {
-		return "", fmt.Errorf("crypto: ciphertext too short")
+	// A record is a nonce and a tag at minimum; anything shorter was never one.
+	if len(data) < aesGCM.NonceSize()+aesGCM.Overhead() {
+		return "", ErrNotRecord
 	}
-
-	nonce, ciphertext := encrypted[:nonceSize], encrypted[nonceSize:]
-	decrypted, err := aesGCM.Open(nil, nonce, ciphertext, nil)
+	nonce, ciphertext := data[:aesGCM.NonceSize()], data[aesGCM.NonceSize():]
+	plain, err := aesGCM.Open(nil, nonce, ciphertext, aad(purpose, record))
 	if err != nil {
-		return "", fmt.Errorf("crypto: failed to decrypt: %w", err)
+		return "", ErrNotAuthentic
 	}
-
-	return string(decrypted), nil
+	return string(plain), nil
 }
 
-// IsEnabled returns true if the MIKE_ENCRYPTION_KEY environment variable is set.
-func IsEnabled() bool {
-	return os.Getenv("MIKE_ENCRYPTION_KEY") != ""
+func aad(purpose, record string) []byte {
+	return []byte(purpose + fieldSep + record)
 }
 
-// deriveKeyPBKDF2 derives a 32-byte AES key from the MIKE_ENCRYPTION_KEY env var
-// using PBKDF2-HMAC-SHA256 with the given salt.
-// Returns nil if the env var is not set.
-func deriveKeyPBKDF2(salt []byte) []byte {
-	raw := os.Getenv("MIKE_ENCRYPTION_KEY")
-	if raw == "" {
-		return nil
-	}
-	return pbkdf2.Key([]byte(raw), salt, pbkdf2Iterations, 32, sha256.New)
-}
-
-// generateSalt generates a cryptographically random salt.
-func generateSalt() ([]byte, error) {
-	salt := make([]byte, saltSize)
-	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
-		return nil, err
-	}
-	return salt, nil
-}
+// Record joins the parts that name one secret into the record field. The separator lives here so no
+// caller can spell two records that open each other.
+func Record(parts ...string) string { return strings.Join(parts, fieldSep) }

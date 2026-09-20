@@ -16,9 +16,12 @@ task?", not "did a human want this":
 | The run began when… | `Autostarted` |
 |---|---|
 | Start, retry or drag on **this** task (`HandleStart`, `HandleStartSubtask`, the `HandleMove` branch that starts one, a message forwarded by `ForwardUserMessage`) | false |
-| Start or drag on its **parent**, or on a task whose deepest child runs (`startSubtaskIDs`, reached from `HandleMove`) | true |
+| Start or drag on its **parent**, or on a task whose subtasks run instead — the same three handlers reach `StartReadySubtasks`, which starts what `subtasksToStart` picks | true |
 | Sibling continuation after another task finished, or the parent's own start once all children are done (`AutoStartNextSibling`) | true |
 | The memory supervisor resumed it after a memory pause (`resumeProvenance`) | whatever the paused run recorded |
+
+`subtasksToStart` is that pick: every startable descendant under the **Run subtasks in parallel** setting, and
+the single deepest one without it.
 
 The supervisor row is deliberate: it picks its victim by memory cost, which says nothing about who is
 waiting on the task, so `resumeProvenance` hands the resume the answer the paused run already gave.

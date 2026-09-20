@@ -24,7 +24,7 @@ func jailManager(t *testing.T, workspace, projectPath, extDir string) *Extension
 		t.Fatalf("create store: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	es := NewExtensionStore(db)
+	es := NewExtensionStore(db, nil)
 	if err := es.InitSchema(); err != nil {
 		t.Fatalf("init schema: %v", err)
 	}

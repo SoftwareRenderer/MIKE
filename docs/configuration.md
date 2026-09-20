@@ -21,9 +21,10 @@ Resolved **once**: a consumer receives the decision and never re-reads a variabl
   destructive sweep **off**, so any non-empty value suppresses it and no warning is owed (a truthy typo
   there costs a stale container, not a live sandbox).
 - `main.go` and `backend/startup` are the only readers of `MIKE_*` in a boot or request path; the
-  `env` archgate rule holds that. Four baselined exceptions: the encryption key, read per crypto
-  operation because its PBKDF2 salt is per value, and `term`'s two reads of the *operator's own* shell
-  environment, which is the sanctioned widening.
+  `env` archgate rule holds that. Three baselined exceptions read no `MIKE_*` at all: `handler_fs.go`'s
+  git author identity, and `term`'s two reads of the *operator's own* shell environment, which is the
+  sanctioned widening. The encryption key is not an exception: it resolves here and reaches
+  `crypto.New` as a value.
 - Soft refusals the boot prints once arrive as `startup.Config.Warnings`.
 
 ## Variables with a `--flag` twin
@@ -50,7 +51,7 @@ disabled nothing (`docs/auto-update.md → Who decided`).
 
 | Env Var | Description |
 |---------|-------------|
-| `MIKE_ENCRYPTION_KEY` | Non-blank; derives the AES-256-GCM key for sensitive data. Server refuses to start without it. |
+| `MIKE_ENCRYPTION_KEY` | Non-blank; with this installation's salt (the `installation_salt` config row, written on first boot) it derives the AES-256-GCM data key — **once per process**, argon2id, never per value or per request. Server refuses to start without it. A secret stored by an older build does not open; startup names the providers whose key must be typed again. The stored form carries **no version marker** (`base64(nonce‖ciphertext‖tag)`, GCM AAD = purpose + record key): nothing older is readable, so a label would only promise a reader that does not exist, and a row is told apart from a secret by whether it opens rather than by what it is prefixed with. |
 | `MIKE_LOGIN_PASSWORD` | Master password for auth/sessions. Server refuses to start without it. Only its `sha256` digest is kept in memory; a weak one (< 8 chars, or a known default) additionally refuses a non-loopback listen address. |
 | `MIKE_REGISTRY_URL` | Extension registry index URL. Sourced **exclusively** from this env var (not DB-backed); falls back to `https://registry.getmike.dev/registry.json`. A bare path (no `http(s)://`/`file://` scheme) is a local file resolved against the CWD. |
 | `MIKE_UPDATE_URL` | Release manifest the update check reads. Falls back to `updates.DefaultManifestURL` (`https://getmike.dev/version`); a mirror or a local fixture names itself here. Read **once** at startup and handed to the service as a value. Must be `https` (loopback may be `http`) with a host; anything else **refuses the boot** naming the variable. An archive the manifest names is fetched only from this same host. **`docs/auto-update.md`**. |

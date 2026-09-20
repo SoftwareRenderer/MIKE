@@ -128,7 +128,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 	// Forward to executor or lazy-start. Skip when the message was deduped
 	if isDuplicate {
 		logging.For(logging.Exec).With(logging.TaskID, taskID).Infof("duplicate user message (%q) not persisted, skipping executor trigger", req.Content)
-		te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "idle", "activity": "Duplicate message ignored"}})
+		te.appStreamMgr.SendTaskEvent(projectID, taskID, types.TurnStatusEvent("idle", "Duplicate message ignored"))
 	} else {
 		te.ForwardUserMessage(projectID, taskID, stream.UserMessage{
 			Content:         req.Content,

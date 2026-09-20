@@ -1,6 +1,7 @@
 package extensions
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -11,11 +12,33 @@ import (
 	"testing"
 	"time"
 
+	"mike/backend/crypto"
 	"mike/backend/errs"
 	"mike/backend/store"
 )
 
 func testStore(t *testing.T) *ExtensionStore {
+	t.Helper()
+	return newTestStore(t, testBox())
+}
+
+// testStoreNoKey is a store with nothing to seal a secret with.
+func testStoreNoKey(t *testing.T) *ExtensionStore {
+	t.Helper()
+	return newTestStore(t, nil)
+}
+
+// testBox is the data key these stores seal with. The derivation is expensive on purpose, so one Box
+// serves the package.
+var testBox = sync.OnceValue(func() *crypto.Box {
+	box, err := crypto.New("extension-test-passphrase", bytes.Repeat([]byte("k"), crypto.SaltSize))
+	if err != nil {
+		panic(err)
+	}
+	return box
+})
+
+func newTestStore(t *testing.T, box *crypto.Box) *ExtensionStore {
 	t.Helper()
 	dir := t.TempDir()
 	db, err := store.NewStore(filepath.Join(dir, "test.db"))
@@ -24,7 +47,7 @@ func testStore(t *testing.T) *ExtensionStore {
 	}
 	t.Cleanup(func() { db.Close() })
 
-	es := NewExtensionStore(db)
+	es := NewExtensionStore(db, box)
 	if err := es.InitSchema(); err != nil {
 		t.Fatalf("init schema: %v", err)
 	}

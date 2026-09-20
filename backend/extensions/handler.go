@@ -1882,7 +1882,7 @@ const maskedValue = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u202
 // maskConfig replaces every schema-declared sensitive value with maskedValue. An empty
 // value passes through — a mask in a blank field reads as if a secret were set.
 func maskConfig(config map[string]any, schema *ConfigSchema) map[string]any {
-	return mapSensitiveConfig(config, schema, func(v any) (any, bool) {
+	return mapSensitiveConfig(config, schema, func(_ string, v any) (any, bool) {
 		if fmt.Sprintf("%v", v) == "" {
 			return nil, false
 		}

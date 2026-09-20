@@ -24,6 +24,12 @@ export function toExplorerPath(path: string, rootPath: string): string {
     return rootPath.replace(/\/+$/, '') + '/' + rel;
 }
 
+/** Whether `path` is `root` or inside it. The separator matters: `/a/bc` is not under `/a/b`. */
+export function isUnderPath(path: string, root: string): boolean {
+    if (!path || !root) return false;
+    return path === root || path.startsWith(root.endsWith('/') ? root : root + '/');
+}
+
 /**
  * Compute a display path for a task's worktree directory.
  * The backend sends an absolute workspaceDir (e.g. `/home/projects/kanban/worktrees`).

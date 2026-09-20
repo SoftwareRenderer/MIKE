@@ -331,7 +331,7 @@ func testProjectHandlerWithStore(t *testing.T) (*ProjectHandler, string, *store.
 	}
 	t.Cleanup(func() { s.Close() })
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil)
 
 	h := &ProjectHandler{
 		store:       s,

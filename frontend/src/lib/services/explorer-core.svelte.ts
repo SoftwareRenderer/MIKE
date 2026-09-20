@@ -8,6 +8,7 @@ import {
     type EditorTabState,
 } from '$lib/storage';
 import { revealFileTab, toPersistedTabs, type OpenFileTab } from '$lib/utils/editor-tabs';
+import { isUnderPath } from '$lib/utils/path';
 import { EDITOR_SAVE_SETTLED, SAVE_SETTLE_BACKSTOP_MS, SaveRequestGuard } from '$lib/utils/save-state';
 import type { LSPSymbol } from '$lib/utils/lsp-symbols';
 import type { GitCommit, GitLogResponse } from '$lib/types';
@@ -275,27 +276,49 @@ export class ExplorerCore {
     }
 
     private closeTab(path: string, idx: number): void {
-        const next = this.openFiles.filter(f => f.path !== path);
-        this.openFiles = next;
-        const nextUnsaved = new Set(this.unsavedFiles);
-        nextUnsaved.delete(path);
-        this.unsavedFiles = nextUnsaved;
-        const nextPinned = new Set(this.pinnedFiles);
-        nextPinned.delete(path);
-        this.pinnedFiles = nextPinned;
-        if (path !== this.activeFilePath) return;
+        const wasActive = path === this.activeFilePath;
+        this.dropTabs(new Set([path]));
+        if (wasActive) this.activateTabAfter(this.openFiles, idx);
+    }
+
+    /** Remove these paths from the tabs, the unsaved set, and the pins. */
+    private dropTabs(paths: Set<string>): void {
+        const still = (file: string) => !paths.has(file);
+        this.openFiles = this.openFiles.filter(f => still(f.path));
+        this.unsavedFiles = new Set([...this.unsavedFiles].filter(still));
+        this.pinnedFiles = new Set([...this.pinnedFiles].filter(still));
+    }
+
+    /** Activate the tab next to the one at `idx`, or none if nothing is left. */
+    private activateTabAfter(next: OpenFileTab[], idx: number): void {
         if (next.length === 0) {
             this.activeFilePath = '';
             this.edges.updateFile(null);
             if (this.edges.isMobile.isMobile) this.activeTab = 'files';
             this.editorFullscreen = false;
-        } else {
-            // Adjacent tab, preferring the left neighbour.
-            const newIdx = Math.min(idx, next.length - 1);
-            this.activeFilePath = next[newIdx].path;
-            this.edges.updateFile(this.activeFilePath);
+            return;
         }
+        // Adjacent tab, preferring the left neighbour.
+        const newIdx = Math.min(idx, next.length - 1);
+        this.activeFilePath = next[newIdx].path;
+        this.edges.updateFile(this.activeFilePath);
     }
+
+    // Close the tabs for files the listing deleted, with their drafts and undo history. A deleted
+    // folder takes every tab under it.
+    handleFilesDeleted = (paths: string[]): void => {
+        const isGone = (file: string) => paths.some(p => isUnderPath(file, p));
+        const gone = this.openFiles.filter(f => isGone(f.path));
+        if (gone.length === 0) return;
+        const firstIdx = this.openFiles.indexOf(gone[0]);
+        const wasActive = isGone(this.activeFilePath);
+        for (const tab of gone) {
+            clearEditorDraft(tab.path).catch(() => {});
+            clearEditorHistory(tab.path).catch(() => {});
+        }
+        this.dropTabs(new Set(gone.map(f => f.path)));
+        if (wasActive) this.activateTabAfter(this.openFiles, firstIdx);
+    };
 
     // ---- Save handshake ----
 

@@ -108,6 +108,41 @@ const catalog = {
     'explorer.shared.dropErrNetwork': 'upload failed after {loaded} of {total} bytes',
     'explorer.shared.dropError': 'Upload failed: {error}',
 
+    // ── Selecting and moving files: the file list's context menu, action bar and dialogs ──
+    // Used by both the project explorer and the task explorer.
+    'explorer.shared.menuAria': 'File actions',
+    'explorer.shared.menuOpen': 'Open',
+    'explorer.shared.menuCut': 'Cut',
+    'explorer.shared.menuCopy': 'Copy',
+    'explorer.shared.menuPaste': 'Paste into folder',
+    'explorer.shared.menuRename': 'Rename',
+    'explorer.shared.menuDelete': 'Delete',
+    'explorer.shared.selectedCount': { one: '{count} selected', other: '{count} selected' },
+    'explorer.shared.selectionAria': 'Actions for the selected files',
+    'explorer.shared.selectionClear': 'Clear selection',
+    'explorer.shared.renameAria': 'New name for {name}',
+    'explorer.shared.renamedTo': 'Renamed to {name}',
+    'explorer.shared.deleteTitle': 'Delete files',
+    'explorer.shared.deleteMessage': {
+        one: 'Delete "{name}" from disk? Nothing here can undo it.',
+        other: 'Delete these {count} items from disk? Nothing here can undo them.',
+    },
+    'explorer.shared.deleteMore': '{count} more',
+    'explorer.shared.deletedCount': { one: 'Deleted {count} item', other: 'Deleted {count} items' },
+    'explorer.shared.pastedCount': { one: 'Pasted {count} item', other: 'Pasted {count} items' },
+    'explorer.shared.pasteRenamedTitle': 'Pasted under other names',
+    'explorer.shared.pasteRenamedMessage': 'That folder already held these names:',
+    'explorer.shared.pasteRenamedEntry': '{from} → {to}',
+    'explorer.shared.opsFailed': {
+        one: '{count} item was not changed: {error}',
+        other: '{count} items were not changed: {error}',
+    },
+    // Shown when the request itself failed; a refusal carries the server's own sentence instead.
+    'explorer.shared.errDeleteFiles': 'Failed to delete',
+    'explorer.shared.errCopyFiles': 'Failed to copy',
+    'explorer.shared.errMoveFiles': 'Failed to move',
+    'explorer.shared.errRenameFile': 'Failed to rename',
+
     // ── ExplorerView.svelte — project explorer shell (branch view) ──
     'explorer.view.aria': 'Explorer view',
     'explorer.view.closeAria': 'Close branch view',
@@ -312,8 +347,8 @@ const catalog = {
     'settings.defaults.subtasksAutoMergeDesc': 'Subtasks created under a task will auto-merge into it',
     'settings.defaults.autoSummarize': 'Auto-summarize threshold',
     'settings.defaults.autoSummarizeDesc': "Summarize context when it reaches this % of the model's context window",
-    'settings.defaults.runParallel': 'Run siblings in parallel',
-    'settings.defaults.runParallelDesc': "Start all of a parent's subtasks at once instead of one at a time",
+    'settings.defaults.runParallel': 'Run subtasks in parallel',
+    'settings.defaults.runParallelDesc': 'Start available subtasks in parallel',
     'settings.defaults.maxFailed': 'Max failed turns',
     'settings.defaults.maxFailedDesc': 'Stop task after this many consecutive LLM failures',
 
@@ -466,6 +501,8 @@ const catalog = {
     'settings.provider.concurrencyHelp': 'Max tasks running concurrently on this provider; also caps in-flight LLM requests to this number.',
     'settings.provider.maxRps': 'Max requests/sec',
     'settings.provider.maxRpsHelp': 'Maximum new requests started per second to this provider. 0 = unlimited.',
+    'settings.provider.streamIdle': 'Idle stream limit (s)',
+    'settings.provider.streamIdleHelp': 'Terminate the stream after inactivity. This can workaround potential provider issues. 0 = never',
 
     // ── StatsModal.svelte — token usage table. `t/s`, `kWh`, `Wh`, `mWh` are units, not copy. ──
     'settings.stats.title': 'Token Usage',
@@ -707,9 +744,9 @@ const catalog = {
     // and is shown in the server's own words. docs/auto-update.md.
     'updates.title': 'Release updates',
     'updates.enable': 'Check for new releases',
-    'updates.enableDesc': 'Ask {host} once a day whether a newer release exists, and download one when it does. Nothing is installed until you click Install.',
+    'updates.enableDesc': 'Check {host} for updates once per day. Nothing is installed until you click Install.',
     'updates.managed': 'Updates are managed by your organization.',
-    'updates.off': 'Checks are off. MIKE will not look for a new release on its own.',
+    'updates.off': 'Status: Auto Updates are disabled.',
     'updates.noneKnown': 'MIKE has not checked for a new release yet.',
     'updates.available': 'Release {version} is available',
     'updates.upToDate': 'You are up to date — {version} is the latest release',
@@ -762,6 +799,7 @@ const catalog = {
 
     // ── shared button / dialog copy ──
     'app.cancel': 'Cancel',
+    'app.ok': 'OK',
     'app.discard': 'Discard',
     'app.keepEditing': 'Keep editing',
     'app.confirm.confirm': 'Confirm',
@@ -1238,6 +1276,7 @@ const catalog = {
     'chat.actions.forkTitle': 'Edit / new thread',
     'chat.actions.delete': 'Delete message and all following messages',
     'chat.actions.regenerate': 'Regenerate response',
+    'chat.actions.editSummary': 'Edit the summarized context',
 
     // ── Chat/QueueIndicator.svelte ──
     'chat.queue.targetAgent': 'agent',
@@ -1250,6 +1289,8 @@ const catalog = {
     'chat.queue.lockWorktree': 'Waiting — this task is still working ({seconds}s)...',
     'chat.queue.lockStash': 'Waiting — another git operation has this project open ({seconds}s)...',
     'chat.queue.lockOther': 'Waiting — the project is busy ({seconds}s)...',
+    'chat.queue.modelPrompt': 'The provider is processing the prompt ({seconds}s)...',
+    'chat.queue.modelQuiet': 'The provider is generating quietly ({seconds}s since its last token)...',
 
     // ── Chat/ContextUsage.svelte (donut tooltip; the suffix keeps its leading separator) ──
     'chat.context.usage': '{used} / {limit} tokens · {percent}%',

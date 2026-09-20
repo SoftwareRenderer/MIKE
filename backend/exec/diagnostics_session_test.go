@@ -247,7 +247,7 @@ func passSetup(t *testing.T, s *store.Store, projectID, taskID string) *taskExec
 // task rows, a workspace dir for the worktree path, and the recording server.
 func passExecutor(t *testing.T, s *store.Store, mgr lspManager) *TaskExecutor {
 	t.Helper()
-	cs := config.NewConfigStore(s, "", "test")
+	cs := config.NewConfigStore(s, "", "test", nil)
 	cs.SetWorkspaceDirOverride(t.TempDir())
 	te := newTestExecutorWith(t, Deps{
 		Store:       s,

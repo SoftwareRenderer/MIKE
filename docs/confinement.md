@@ -63,6 +63,29 @@ projects too because the server process enforces them.
   It runs the same `fsutil.Contained` check against the worktree root before the bytes go, because the task's
   own actions can plant a symlink at that name, and writes `0600` into a `0700` directory.
   `docs/sandbox-bridge.md`.
+- **The write jail is two halves so a batch can share one of them.** `fsWriteScope` settles what the
+  *request* decides (`fsWorktreeRoot` → `requireSandboxAvailable`), `fsScopeTarget` settles what one
+  *path* needs (`ContainerToHost` → `validateFSPath`), and `fsWriteTarget` is the two in order for a handler
+  with a single path. `POST /api/fs/delete|copy|move|rename` (`handler_fs_ops.go`) resolves **every** path of
+  the batch against the one `fsScope` before anything is removed or written, so a selection whose last row is
+  outside the project moves nothing, and no path can be checked against a tree other than the one the request
+  named. These four run on the host filesystem for a sandboxed project too — the bind mount's bytes are there,
+  exactly as `POST /api/fs/write` — which is why the translation, not the request body, decides the host path.
+- **Two refusals live inside the jail and are still refused**: any `.git` component
+  (`fsutil.ErrGitPath` — including a worktree's `.git` *file*, whose removal no in-worktree command can undo)
+  and a tree root or its ancestor (`fsutil.ErrProtectedPath`: the project's checkout and the task's own
+  worktree, directories this server created and tears down elsewhere — `docs/commit-and-done.md`). Both are
+  answered **per item**, beside the path they happened to, because a batch is a person's selection and one
+  wrong row should not cost the rest of it; only a containment failure, which is the jail rather than one
+  row's bad luck, fails the whole request. A nested `.git` directory is skipped by both the size walk and the
+  copy itself, so a folder that happens to hold a repository does not drag it along.
+- **Every bound runs before the bytes** (`backend/fsutil/ops.go`): a copy walks its tree and refuses past
+  `CopyMaxBytes` (64 MiB), `CopyMaxEntries` (5000) or `CopyMaxDepth` (32), the copy loop re-counts as it writes
+  (the walk is the refusal, the running total is the bound against a tree a task is still writing into), and a
+  copy that fails removes what it wrote, so a refused copy leaves no half-tree behind. The request's own bound
+  sits beside it: at most `maxFSOpsBatch` (100) paths, and the `name copy`, `name copy2` search stops at
+  `UniqueNameMaxTries` (200). Without them a paste of `node_modules` is unbounded work inside one HTTP request.
+- Tests: `backend/fsutil/ops_test.go`, `backend/server/handler_fs_ops_test.go`, beside the ones above.
 
 ## The no-project host jail
 

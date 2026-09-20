@@ -2,8 +2,11 @@ package store
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"mike/backend/types"
@@ -27,6 +30,189 @@ func formatMessageTime(t time.Time) string { return t.UTC().Format(messageTimeLa
 // messageOrder lists messages oldest first. rowid breaks a tie inside one turn, where an assistant row
 // and its tool_call rows share a created_at.
 const messageOrder = "ORDER BY created_at ASC, rowid ASC"
+
+// newestFirstOrder is the same walk backwards, which is how a window is cut: SQL drops the oldest rows
+// at the LIMIT.
+const newestFirstOrder = "ORDER BY created_at DESC, rowid DESC"
+
+// The ceiling bounds what one request may cost.
+const (
+	MessageWindowDefault = 120
+	MessageWindowMax     = 500
+)
+
+// MessagePage is one window of a conversation: its newest rows, oldest first.
+type MessagePage struct {
+	Messages []types.TaskMessage
+	// Before is the cursor for the next-older window, empty when this window reaches the first row.
+	Before  string
+	HasMore bool
+}
+
+// messageKey is a row's position in the conversation order: the values the ORDER BY compares.
+type messageKey struct {
+	id    string
+	at    string
+	rowid int64
+	role  string
+}
+
+// encodeMessageCursor renders a cursor. It is opaque: a position in this table's order, not a value a
+// caller composes.
+func encodeMessageCursor(k messageKey) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(k.at + "|" + strconv.FormatInt(k.rowid, 10)))
+}
+
+func decodeMessageCursor(s string) (messageKey, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return messageKey{}, ErrMessageCursor
+	}
+	at, rest, ok := strings.Cut(string(raw), "|")
+	if !ok || at == "" {
+		return messageKey{}, ErrMessageCursor
+	}
+	rowid, err := strconv.ParseInt(rest, 10, 64)
+	if err != nil {
+		return messageKey{}, ErrMessageCursor
+	}
+	return messageKey{at: at, rowid: rowid}, nil
+}
+
+// conversationWhere is the WHERE of a conversation read: one thread when one is named, otherwise the
+// whole task, cut at the caller's cursor. A created_at alone cannot cut a turn — its rows share one
+// instant — so the comparison is the pair the ORDER BY uses.
+func conversationWhere(taskID, threadID string, cursor *messageKey) (string, []any) {
+	var sb strings.Builder
+	var args []any
+	if threadID != "" {
+		sb.WriteString("thread_id = ?")
+		args = append(args, threadID)
+	} else {
+		sb.WriteString("task_id = ?")
+		args = append(args, taskID)
+	}
+	if cursor != nil {
+		sb.WriteString(" AND (created_at, rowid) < (?, ?)")
+		args = append(args, cursor.at, cursor.rowid)
+	}
+	return sb.String(), args
+}
+
+// messageKeyCols names only the columns the (scope, created_at) index carries, so a window read never
+// touches a content page.
+const messageKeyCols = `SELECT id, created_at, rowid, role FROM task_messages WHERE `
+
+func (s *Store) messageKeys(taskID, threadID string, cursor *messageKey, n int) ([]messageKey, error) {
+	where, args := conversationWhere(taskID, threadID, cursor)
+	rows, err := s.db.Query(messageKeyCols+where+` `+newestFirstOrder+` LIMIT ?`,
+		append(append([]any{}, args...), n)...)
+	if err != nil {
+		return nil, err
+	}
+	return scanRows(rows, scanMessageKey)
+}
+
+// A window never opens mid-turn: a turn's work without the user row that asked for it reads as an answer
+// to nothing, and regenerate deletes from that user row. The reach back is bounded by one batch.
+const turnJoinBatch = 64
+
+// continuesTurn is true for a row whose turn started earlier; a turn's head is its user row.
+func continuesTurn(role string) bool { return role == "assistant" || role == "tool_call" }
+
+// headOfReachBack is how far of a batch of older rows the window keeps: down to and including the first
+// row that starts a turn. batch is newest-first.
+func headOfReachBack(batch []messageKey) int {
+	for i, k := range batch {
+		if !continuesTurn(k.role) {
+			return i + 1
+		}
+	}
+	return len(batch)
+}
+
+// GetTaskMessagePage answers one window: the newest limit rows, oldest first, with before naming a cursor
+// an earlier call returned. Positions are read before rows, so the cut and the sort run over index
+// entries rather than the conversation's bytes.
+func (s *Store) GetTaskMessagePage(taskID, threadID string, limit int, before string) (*MessagePage, error) {
+	// The route refuses a window outside 1..MessageWindowMax; this covers a caller that is not a request.
+	if limit <= 0 || limit > MessageWindowMax {
+		limit = MessageWindowDefault
+	}
+	var cursor *messageKey
+	if before != "" {
+		c, err := decodeMessageCursor(before)
+		if err != nil {
+			return nil, err
+		}
+		cursor = &c
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	page := &MessagePage{}
+	keys, err := s.messageKeys(taskID, threadID, cursor, limit)
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) > 0 && continuesTurn(keys[len(keys)-1].role) {
+		older, err := s.messageKeys(taskID, threadID, &keys[len(keys)-1], turnJoinBatch)
+		if err != nil {
+			return nil, err
+		}
+		if len(older) > 0 {
+			keys = append(keys, older[:headOfReachBack(older)]...)
+		}
+	}
+	if len(keys) == 0 {
+		return page, nil
+	}
+	// The oldest row here starts the next window: it answers both the cursor and whether one exists.
+	oldest := keys[len(keys)-1]
+	olderWhere, olderArgs := conversationWhere(taskID, threadID, &oldest)
+	var more int
+	if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM task_messages WHERE `+olderWhere+`)`, olderArgs...).Scan(&more); err != nil {
+		return nil, err
+	}
+	page.HasMore = more == 1
+	if page.HasMore {
+		page.Before = encodeMessageCursor(oldest)
+	}
+
+	placeholders := make([]string, len(keys))
+	rowids := make([]any, len(keys))
+	for i, k := range keys {
+		placeholders[i] = "?"
+		rowids[i] = k.rowid
+	}
+	rows, err := s.db.Query(`SELECT `+taskMessageCols+` FROM task_messages WHERE rowid IN (`+strings.Join(placeholders, ",")+`)`, rowids...)
+	if err != nil {
+		return nil, err
+	}
+	found, err := scanRows(rows, func(r *sql.Rows) (types.TaskMessage, error) { return scanTaskMessage(r) })
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]types.TaskMessage, len(found))
+	for _, m := range found {
+		byID[m.ID] = m
+	}
+	page.Messages = make([]types.TaskMessage, 0, len(keys))
+	for i := len(keys) - 1; i >= 0; i-- {
+		if m, ok := byID[keys[i].id]; ok {
+			page.Messages = append(page.Messages, m)
+		}
+	}
+	return page, nil
+}
+
+func scanMessageKey(r *sql.Rows) (messageKey, error) {
+	var k messageKey
+	if err := r.Scan(&k.id, &k.at, &k.rowid, &k.role); err != nil {
+		return k, err
+	}
+	return k, nil
+}
 
 // optStr is the inverse of nullStr: the empty string for a NULL column.
 func optStr(n sql.NullString) string {
@@ -95,6 +281,13 @@ func (s *Store) CreateTaskMessage(m *types.TaskMessage) error {
 	return nil
 }
 
+// Named so the plan test explains the text these reads run.
+const (
+	taskThreadMessagesSQL = `SELECT ` + taskMessageCols + ` FROM task_messages WHERE task_id = ? AND thread_id = ? ` + messageOrder
+	threadMessagesSQL     = `SELECT ` + taskMessageCols + ` FROM task_messages WHERE thread_id = ? ` + messageOrder
+	taskMessagesAllSQL    = `SELECT ` + taskMessageCols + ` FROM task_messages WHERE task_id = ? ` + messageOrder
+)
+
 // GetTaskMessages retrieves all messages for a task, optionally filtered by thread.
 func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, error) {
 	s.mu.RLock()
@@ -107,22 +300,13 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 		// omit the task_id filter so the lookup isn't restricted to task_id = ''. When
 		// taskID is provided, keep both filters for callers that expect them.
 		if taskID != "" {
-			rows, err = s.db.Query(
-				`SELECT `+taskMessageCols+` FROM task_messages WHERE task_id = ? AND thread_id = ? `+messageOrder,
-				taskID, threadID,
-			)
+			rows, err = s.db.Query(taskThreadMessagesSQL, taskID, threadID)
 		} else {
-			rows, err = s.db.Query(
-				`SELECT `+taskMessageCols+` FROM task_messages WHERE thread_id = ? `+messageOrder,
-				threadID,
-			)
+			rows, err = s.db.Query(threadMessagesSQL, threadID)
 		}
 	} else {
 		// For backward compatibility: get messages with no thread_id (legacy) or all messages
-		rows, err = s.db.Query(
-			`SELECT `+taskMessageCols+` FROM task_messages WHERE task_id = ? `+messageOrder,
-			taskID,
-		)
+		rows, err = s.db.Query(taskMessagesAllSQL, taskID)
 	}
 	if err != nil {
 		return nil, err
@@ -246,6 +430,29 @@ func (s *Store) GetLastUserMessageInThread(threadID string) (string, error) {
 	return id, err
 }
 
+// lastSummarizationSQL is the summary row in effect for a thread: the newest one. It is the SQL twin of
+// extractPrevSummary in backend/exec, which must name the same row.
+const lastSummarizationSQL = `SELECT id FROM task_messages WHERE thread_id = ? AND role = 'summarization' ` + newestFirstOrder + ` LIMIT 1`
+
+// LastSummarizationMessageID returns the id of the newest summarization row of a thread, or "" when the
+// thread has none.
+func (s *Store) LastSummarizationMessageID(threadID string) (string, error) {
+	if threadID == "" {
+		return "", nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var id string
+	err := s.db.QueryRow(lastSummarizationSQL, threadID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
+}
+
+// lastMessageInThreadSQL is the newest row of a thread.
+const lastMessageInThreadSQL = `SELECT ` + taskMessageCols + ` FROM task_messages WHERE thread_id = ? ` + newestFirstOrder + ` LIMIT 1`
+
 // GetLastMessageInThread returns the newest row of a thread, or nil when it has none.
 // It ignores role, so callers can ask "has anything happened since this message?". rowid
 // breaks ties inside one turn, where an assistant row and its tool_call rows share a
@@ -256,10 +463,7 @@ func (s *Store) GetLastMessageInThread(threadID string) (*types.TaskMessage, err
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	m, err := scanTaskMessage(s.db.QueryRow(
-		`SELECT `+taskMessageCols+` FROM task_messages WHERE thread_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`,
-		threadID,
-	))
+	m, err := scanTaskMessage(s.db.QueryRow(lastMessageInThreadSQL, threadID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil

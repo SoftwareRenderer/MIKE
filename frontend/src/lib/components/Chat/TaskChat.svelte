@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { onMount, onDestroy, untrack } from 'svelte';
-    import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData } from '$lib/types';
+    import { onMount, onDestroy, untrack, tick } from 'svelte';
+    import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData, TaskMessage } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getQueuedTaskIds, getDroppedTaskIds, getTask } from '$lib/api';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
@@ -24,6 +24,7 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { t } from '$lib/i18n';
     import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
+    import { prependRows, resolveAnchor, anchorScrollDelta, type MeasuredEntry, type ScrollAnchor } from '$lib/utils/chat-window';
     import { createTabReturn } from '$lib/composables/use-tab-return';
     import ChatForm from './ChatForm.svelte';
     import ChatEntries from './ChatEntries.svelte';
@@ -37,6 +38,12 @@
     const follow = createChatFollow();
     // True while the initial conversation history is being fetched
     let historyLoading = $state(false);
+    /** Rows every window has delivered, oldest first; the transcript is rebuilt from these. */
+    let historyRows: TaskMessage[] = [];
+    /** Where the next-older window starts, and whether there is one. */
+    let earlierCursor = $state('');
+    let hasEarlier = $state(false);
+    let loadingEarlier = $state(false);
     let inputValue = $state('');
     let draftAttachments = $state<DraftAttachment[]>([]);
 
@@ -212,7 +219,8 @@
         lastNonErrorEntry.role === 'user'
     );
 
-    // Set of user message IDs with no assistant response after them.
+    // Set of user message IDs with no assistant response after them. Window-safe: the window always
+    // ends on the newest row.
     let lastUserMessageIds = $derived(computeLastUserMessageIds(entries));
 
     // Precomputed per-entry metadata — O(n) single-pass via buildCheckpointStateMap.
@@ -225,6 +233,7 @@
         // Even checkpoints without commitHash get an index — the backend resolves
         // to the matching stash by index when headRef equals baseRef.
         let cpIdx = 0;
+        // Entry 0 is the thread's first row only while nothing older is left unloaded.
         for (let i = 0; i < entries.length; i++) {
             const entry = entries[i];
             const cpState = entry.role === 'user' ? (cpStateMap.get(i) ?? null) : null;
@@ -232,7 +241,7 @@
             metas[i] = entry.role === 'user'
                 ? {
                     cpState,
-                    cpThread: threads.length > 0 ? getCheckpointThreadsUtil(entry, threads, activeThread, i === 0) : null,
+                    cpThread: threads.length > 0 ? getCheckpointThreadsUtil(entry, threads, activeThread, i === 0 && !hasEarlier) : null,
                     checkpointIndex: idx,
                     isLastUserMessage: lastUserMessageIds.has(entry.id) && !streaming,
                 }
@@ -337,7 +346,10 @@
         }
     }
 
-    /** Error codes that are client-side only — never persisted to the DB. */
+    /** Frames the anchor is re-read while lazily rendered rows find their height; see `settleOnRow`. */
+    const ANCHOR_SETTLE_FRAMES = 20;
+
+/** Error codes that are client-side only — never persisted to the DB. */
     const LOCAL_ERROR_CODES = new Set(['send_queued', 'send_refused']);
 
     /** Append a client-side error entry (visible but never persisted to the DB). */
@@ -472,28 +484,11 @@
      * read the task row passes it; the board copy can be a turn behind. */
     async function loadHistory(scrollAfter = false, executionState = taskExecutionState) {
         try {
-            const messages = await getTaskMessages(projectId, taskId);
-            // Build entries from DB messages using shared utility
-            const { entries: mergedDbEntries, checkpointHashes } = buildEntriesFromMessages(messages);
-            stream.state.checkpointCommitHashes = checkpointHashes;
-
-            stream.state.entries = mergeLoadedHistory(mergedDbEntries, messages.map(m => m.id), stream.state.entries, taskIsInFlight(executionState));
-            // These are new entry objects, so refs captured while streaming are now
-            // detached; re-point them before more events for this turn arrive.
-            stream.reconcileActiveToolCalls();
-            // Restore context usage from the last assistant message.
-            // Use total context (prompt + predicted) to reflect full window consumed.
-            const lastAssistant = [...stream.state.entries].reverse().find(e => e.role === 'assistant' && e.stats);
-            if (lastAssistant?.stats) {
-                stream.state.lastPromptTokens = (lastAssistant.stats.prompt_tokens || 0) + (lastAssistant.stats.predicted_tokens || 0);
-                stream.state.contextState = { ...stream.state.contextState, used: stream.state.lastPromptTokens };
-            }
-            // The DOM re-renders after the entries are replaced, so pin on the
-            // next frame.
-            if (scrollAfter) {
-                await new Promise(resolve => requestAnimationFrame(resolve));
-                scroll();
-            }
+            const window = await getTaskMessages(projectId, taskId);
+            historyRows = window.messages;
+            earlierCursor = window.before;
+            hasEarlier = window.hasMore;
+            renderHistory(scrollAfter, executionState);
         } catch (e) {
             // Task may have been deleted — clear stale draft
             if (e instanceof Error && (e.message.includes('Not found') || e.message.includes('404'))) {
@@ -502,6 +497,92 @@
             }
             // Otherwise: no history yet, ignore
         }
+    }
+
+    /** Draws the transcript from the rows loaded so far. Rebuilding it whole keeps a turn the window cut
+     * in the middle as one entry. */
+    function renderHistory(scrollAfter: boolean, executionState: string) {
+        const { entries: mergedDbEntries, checkpointHashes } = buildEntriesFromMessages(historyRows);
+        stream.state.checkpointCommitHashes = checkpointHashes;
+
+        stream.state.entries = mergeLoadedHistory(mergedDbEntries, historyRows.map(m => m.id), stream.state.entries, taskIsInFlight(executionState));
+        // These are new entry objects, so refs captured while streaming are now
+        // detached; re-point them before more events for this turn arrive.
+        stream.reconcileActiveToolCalls();
+        // Restore context usage from the last assistant message.
+        // Use total context (prompt + predicted) to reflect full window consumed.
+        const lastAssistant = [...stream.state.entries].reverse().find(e => e.role === 'assistant' && e.stats);
+        if (lastAssistant?.stats) {
+            stream.state.lastPromptTokens = (lastAssistant.stats.prompt_tokens || 0) + (lastAssistant.stats.predicted_tokens || 0);
+            stream.state.contextState = { ...stream.state.contextState, used: stream.state.lastPromptTokens };
+        }
+        if (!scrollAfter) return;
+        // The DOM re-renders after the entries are replaced, so pin on the next frame.
+        void (async () => {
+            await tick();
+            requestAnimationFrame(() => scroll());
+        })();
+    }
+
+    /** Adds the next-older window above the rows held, leaving the reader on their row: the entry under
+     * the top edge is found again by id afterwards. */
+    async function loadEarlierMessages() {
+        // The cursor is named for exactly as long as older rows exist, so the flag is the guard.
+        if (!hasEarlier || loadingEarlier) return;
+        loadingEarlier = true;
+        // Reading older rows is a takeover: growth at the bottom must not pull the reader back there.
+        follow.stopFollowing();
+        try {
+            const older = await getTaskMessages(projectId, taskId, earlierCursor);
+            const el = follow.el;
+            // Read where the reader is now, not where the request went out: they may have kept scrolling
+            // while it was in flight, and pinning them back to that is a jump.
+            const anchor = el ? resolveAnchor(measuredEntries(el), el.getBoundingClientRect().top) : null;
+            historyRows = prependRows(historyRows, older.messages);
+            earlierCursor = older.before;
+            hasEarlier = older.hasMore;
+            renderHistory(false, taskExecutionState);
+            await tick();
+            if (el && anchor) await settleOnRow(el, anchor);
+        } catch {
+            // Nothing to undo: the rows held and the cursor are untouched.
+        } finally {
+            loadingEarlier = false;
+        }
+    }
+
+    /** Keeps the reader's row under the top edge while the prepended rows find their real heights — entries
+     * are `content-visibility: auto`, so a page that lands is placeholder-sized at first. A scroll stops
+     * it: the reader is driving. */
+    async function settleOnRow(el: HTMLElement, anchor: ScrollAnchor): Promise<void> {
+        let takenOver = false;
+        const stop = () => { takenOver = true; };
+        for (const kind of ['wheel', 'touchstart', 'keydown']) el.addEventListener(kind, stop, { passive: true });
+        try {
+            let steady = 0;
+            for (let frame = 0; frame < ANCHOR_SETTLE_FRAMES && steady < 2; frame++) {
+                await new Promise(resolve => requestAnimationFrame(resolve));
+                const node = el.querySelector<HTMLElement>(`[data-entry-id="${anchor.id}"]`);
+                if (!node) return;
+                const delta = anchorScrollDelta(anchor, node.getBoundingClientRect().top - el.getBoundingClientRect().top);
+                if (takenOver || Math.abs(delta) < 1) { steady++; continue; }
+                steady = 0;
+                el.scrollTop += delta;
+            }
+        } finally {
+            for (const kind of ['wheel', 'touchstart', 'keydown']) el.removeEventListener(kind, stop);
+        }
+    }
+
+    /** Frames to keep re-reading the anchor row while lazily rendered rows above it find their height. */
+
+    /** Every entry box in viewport offsets, for resolveAnchor. */
+    function measuredEntries(el: HTMLElement): MeasuredEntry[] {
+        const top = el.getBoundingClientRect().top;
+        return Array.from(el.querySelectorAll<HTMLElement>('[data-entry-id]')).map(node => {
+            const box = node.getBoundingClientRect();
+            return { id: node.dataset.entryId as string, top: box.top - top, bottom: box.bottom - top };
+        });
     }
 
     async function loadThreads() {
@@ -1038,6 +1119,21 @@
         scroll(true);
     }
 
+    // Rewrites the summarized context. The entry shows what the stored row says, so a refusal puts
+    // back the text the server still holds rather than leaving prose on screen that no turn will read.
+    async function handleSummaryEdit(entryId: string, newContent: string) {
+        const entry = entries.find(e => e.id === entryId);
+        if (!entry) return;
+        const stored = entry.content;
+        stream.state.entries = entries.map(e => (e.id === entryId ? { ...e, content: newContent } : e));
+        try {
+            await updateTaskMessage(projectId, taskId, entryId, newContent);
+        } catch (e) {
+            stream.state.entries = stream.state.entries.map(en => (en.id === entryId ? { ...en, content: stored } : en));
+            dialogStore.showToast(String(e));
+        }
+    }
+
     /** Dismiss a single error message without affecting other messages. */
     async function handleDismissError(messageId: string) {
         const entry = entries.find(e => e.id === messageId);
@@ -1352,11 +1448,15 @@
         onMsgFork={handleMsgFork}
         onMsgSend={handleMsgSend}
         onRegenerate={handleRegenerate}
+        onSummaryEdit={handleSummaryEdit}
         onNavigateTask={handleMsgNavigateTask}
         {onViewChanges}
         {onToggleFullscreen}
         {isChatFullscreen}
         {historyLoading}
+        hasEarlier={hasEarlier}
+        loadingEarlier={loadingEarlier}
+        onLoadEarlier={loadEarlierMessages}
     />
     {#if showStartButton}
         <StartPanel

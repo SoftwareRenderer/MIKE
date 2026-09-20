@@ -173,20 +173,34 @@ export async function sendTaskMessage(
     }
 }
 
-/** Fetch all messages for a task. Falls back to cached copy on failure.
+/** One window of a task's conversation, plus how to ask for the older rows. */
+export interface MessageWindow {
+    messages: TaskMessage[];
+    hasMore: boolean;
+    /** Cursor for the next-older window; empty when this window reaches the first row. */
+    before: string;
+}
+
+/** Fetch the newest window of a task's conversation, or an older one by cursor.
  * Always tries the network first — the isOffline flag tracks WebSocket state,
  * not HTTP availability. On mobile wake (tab resume), the WebSocket may be
  * disconnected but HTTP still works, so we must not short-circuit to cache. */
-export async function getTaskMessages(projectId: string, taskId: string): Promise<TaskMessage[]> {
+export async function getTaskMessages(projectId: string, taskId: string, before = ''): Promise<MessageWindow> {
+    const query = before ? `?before=${encodeURIComponent(before)}` : '';
     try {
-        const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`);
+        const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages${query}`);
         if (!res.ok) throw await apiError(res, t('api.fetchMessages'));
-        const data = await res.json();
-        // Cache fire-and-forget
-        setBoardCache(messagesCacheKey(projectId, taskId), data).catch(() => {});
-        return data;
+        const window: MessageWindow = {
+            messages: await res.json(),
+            hasMore: res.headers.get('X-Messages-More') === 'true',
+            before: res.headers.get('X-Messages-Before') ?? '',
+        };
+        // Only the newest window is worth caching: paging needs the network anyway, and an older page
+        // left in the cache is what an offline reload would open on.
+        if (!before) setBoardCache(messagesCacheKey(projectId, taskId), window).catch(() => {});
+        return window;
     } catch (e) {
-        const cached = await getBoardCache<TaskMessage[]>(messagesCacheKey(projectId, taskId));
+        const cached = await getBoardCache<MessageWindow>(messagesCacheKey(projectId, taskId));
         if (cached) return markCached(cached);
         throw e;
     }

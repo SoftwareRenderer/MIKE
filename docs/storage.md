@@ -76,6 +76,17 @@ rewrites the rows it finds — one table holding both shapes has no order at all
 not parse is named in the log and left as stored. `rowid` breaks an exact tie, as `GetLastMessageInThread`
 already did; the listing queries do the same. Tests: `backend/store/messages_time_test.go`.
 
+## A conversation is read in the order it was written
+
+`idx_task_messages_thread_time(thread_id, created_at)` and `idx_task_messages_task_time(task_id, created_at)`
+(`doneMessageOrderIndexesStamp`) are what every `ORDER BY created_at, rowid` on `task_messages` reads
+through. A single-column index on `thread_id` or `task_id` satisfies the `WHERE` and leaves SQLite to sort
+the whole thread — every content column of it — in a temp B-tree, so the read costs the thread before it
+returns a row; the windowed read (`GetTaskMessagePage`, `docs/api-contract.md → The conversation is a
+window`) is bounded by its window only because these two carry the order. The composite index covers what
+the single-column one did, so those are dropped rather than left to cost every insert for nothing.
+`EXPLAIN QUERY PLAN` is asserted, not assumed: `backend/store/messages_window_test.go`.
+
 ## File permissions
 
 Data dir `0700`; `kanban.db` plus `-wal`/`-shm` `0600` (`backend/store/store.go`); `kanban.trace` `0600`

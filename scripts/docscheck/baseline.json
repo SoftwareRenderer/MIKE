@@ -2,7 +2,7 @@
  "AGENTS.md": {
   "history": 4,
   "longsent": 8,
-  "words": 5413
+  "words": 5539
  },
  "docs/adding-a-preference.md": {
   "history": 0,
@@ -25,9 +25,9 @@
   "words": 1534
  },
  "docs/api-contract.md": {
-  "history": 0,
-  "longsent": 15,
-  "words": 2686
+  "history": 1,
+  "longsent": 30,
+  "words": 4767
  },
  "docs/api.md": {
   "history": 0,
@@ -37,7 +37,7 @@
  "docs/auto-answer.md": {
   "history": 0,
   "longsent": 0,
-  "words": 853
+  "words": 882
  },
  "docs/auto-update.md": {
   "history": 4,
@@ -52,12 +52,12 @@
  "docs/configuration.md": {
   "history": 0,
   "longsent": 0,
-  "words": 2063
+  "words": 2168
  },
  "docs/confinement.md": {
   "history": 0,
-  "longsent": 8,
-  "words": 1794
+  "longsent": 13,
+  "words": 2167
  },
  "docs/extension-dependency-cache.md": {
   "history": 4,
@@ -96,18 +96,23 @@
  },
  "docs/lifecycle.md": {
   "history": 0,
-  "longsent": 1,
-  "words": 526
+  "longsent": 2,
+  "words": 598
  },
  "docs/link-rows.md": {
   "history": 0,
-  "longsent": 5,
+  "longsent": 4,
   "words": 1073
+ },
+ "docs/llm-streaming.md": {
+  "history": 0,
+  "longsent": 1,
+  "words": 1018
  },
  "docs/locking.md": {
   "history": 0,
-  "longsent": 3,
-  "words": 724
+  "longsent": 4,
+  "words": 751
  },
  "docs/markup-sanitizing.md": {
   "history": 0,
@@ -131,13 +136,13 @@
  },
  "docs/reconnection.md": {
   "history": 6,
-  "longsent": 21,
-  "words": 3653
+  "longsent": 31,
+  "words": 4801
  },
  "docs/sandbox-bridge.md": {
   "history": 4,
   "longsent": 6,
-  "words": 2482
+  "words": 2479
  },
  "docs/sandbox-runtime.md": {
   "history": 0,
@@ -151,13 +156,13 @@
  },
  "docs/storage.md": {
   "history": 0,
-  "longsent": 4,
-  "words": 831
+  "longsent": 5,
+  "words": 952
  },
  "docs/testing.md": {
   "history": 4,
-  "longsent": 12,
-  "words": 4235
+  "longsent": 14,
+  "words": 4480
  },
  "docs/threads-checkpoints.md": {
   "history": 2,

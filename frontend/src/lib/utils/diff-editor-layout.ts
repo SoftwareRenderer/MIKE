@@ -4,7 +4,7 @@
  */
 
 /** Below this rendered diff-column width, opening a file from a diff line maximizes the editor. */
-export const DIFF_EDITOR_FULLSCREEN_MAX_WIDTH = 1200;
+export const DIFF_EDITOR_FULLSCREEN_MAX_WIDTH = 900;
 
 /**
  * Should a diff line click maximize the editor it opens?

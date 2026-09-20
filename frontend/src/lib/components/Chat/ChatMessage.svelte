@@ -55,6 +55,8 @@
         onFork?: (messageId: string, originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) => Promise<void>;
         onSend?: (messageId: string, originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) => Promise<void>;
         onRegenerate?: () => void;
+        /** Present on the summarized-context entry: the edit rewrites that text where it stands. */
+        onEditSummary?: (content: string) => Promise<void>;
         isLastUserMessage?: boolean;
         isFirstUserMessage?: boolean;
         taskStatus?: string;
@@ -70,7 +72,7 @@
         onReasoningResolved?: (content: string) => void;
     }
 
-    let { role, severity = '', kind = '', content, reasoningContent, hasReasoning = false, isStreaming = false, isOptimistic = false, timestamp, messageId, attachments, stats, toolCalls = [], onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, editDiffOverrides = {}, onToggleEditDiff = () => {}, projectId = '', taskId: msgTaskId = '', reasoningExpandedOverride, onReasoningToggle, resolvedReasoningOverride, onReasoningResolved }: Props = $props();
+    let { role, severity = '', kind = '', content, reasoningContent, hasReasoning = false, isStreaming = false, isOptimistic = false, timestamp, messageId, attachments, stats, toolCalls = [], onDelete, onFork, onSend, onRegenerate, onEditSummary, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, editDiffOverrides = {}, onToggleEditDiff = () => {}, projectId = '', taskId: msgTaskId = '', reasoningExpandedOverride, onReasoningToggle, resolvedReasoningOverride, onReasoningResolved }: Props = $props();
 
     // Edit state
     let isEditing = $state(false);
@@ -171,11 +173,12 @@
         if (newContent.trim() && messageId) {
             isSubmitting = true;
             try {
-                // No in-place rewrite: an edit forks a new thread (first/any message) or
-                // is sent as a follow-up (the last one), never rewrites history.
-                if (isFirstUserMessage) {
-                    await onFork?.(messageId, content, newContent.trim(), newAttachments?.length ? newAttachments : undefined);
-                } else if (isLastUserMessage && onSend) {
+                // The summarized context is the one text a turn did not write, so it is rewritten in
+                // place; every other edit keeps its rule of never rewriting history — the first message
+                // always forks a thread, and only the last one can be sent again.
+                if (onEditSummary) {
+                    await onEditSummary(newContent.trim());
+                } else if (!isFirstUserMessage && isLastUserMessage && onSend) {
                     await onSend(messageId, content, newContent.trim(), newAttachments?.length ? newAttachments : undefined);
                 } else {
                     await onFork?.(messageId, content, newContent.trim(), newAttachments?.length ? newAttachments : undefined);
@@ -357,6 +360,7 @@
                 {projectId}
                 taskId={msgTaskId}
                 {isSubmitting}
+                submitMode={onEditSummary ? 'save' : 'auto'}
                 onSubmit={submitEdit}
                 onCancel={cancelEdit}
             />
@@ -379,6 +383,7 @@
                     isOptimistic={isOptimistic}
                     onCopy={handleCopy}
                     onRegenerate={onRegenerate}
+                    onEdit={onEditSummary ? startEdit : undefined}
                     onDelete={onDelete}
                     {copied}
                 />

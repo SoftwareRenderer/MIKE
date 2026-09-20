@@ -446,10 +446,10 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
             case 'lock_wait': {
                 // Repeated while the wait lasts, acquired=true at the end: a lost frame costs one repeat
                 // instead of a spinner that never stops.
-                const data = event.data as { domain?: string; waited_seconds?: number; acquired?: boolean };
+                const data = event.data as { domain?: string; waited_seconds?: number; acquired?: boolean; phase?: string };
                 s.lockWait = data.acquired
                     ? null
-                    : { domain: data.domain || 'other', seconds: data.waited_seconds || 0 };
+                    : { domain: data.domain || 'other', seconds: data.waited_seconds || 0, phase: data.phase };
                 break;
             }
             case 'prompt_progress': {
@@ -486,7 +486,12 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
             }
             case 'summarization': {
                 const data = event.data as { id?: string; summary: string; created_at?: string; prompt_tokens?: number; predicted_tokens?: number; prompt_ms?: number; predicted_ms?: number; model_name?: string };
-                if (data.id && s.entries.some(e => e.id === data.id)) break;
+                // The same id twice is an edit of the summary, not a second one: the row keeps its
+                // place in the conversation and only its text moves.
+                if (data.id && s.entries.some(e => e.id === data.id)) {
+                    s.entries = s.entries.map(e => (e.id === data.id ? { ...e, content: data.summary || e.content } : e));
+                    break;
+                }
                 const summaryEntry = {
                     id: data.id || genId(), role: 'summarization' as const, content: data.summary || t('chat.stream.summarized'),
                     isStreaming: false, createdAt: data.created_at || new Date().toISOString(),

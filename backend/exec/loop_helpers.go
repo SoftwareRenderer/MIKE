@@ -238,7 +238,7 @@ func (te *TaskExecutor) sendStopStatusEvent(projectID, taskID string, state type
 	}
 	// The WebSocket frame carries a plain string; the conversion is written out so the
 	// boundary between the typed state and the wire form stays visible.
-	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": string(state), "activity": activity}})
+	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.TurnStatusEvent(string(state), activity))
 }
 
 // persistStopTransition applies the stop transition
@@ -282,14 +282,15 @@ type modelSwitchResult struct {
 
 // applyModelSwitch creates a new LlamaClient for the given serverURL/modelName,
 // updates the modelConfig, and optionally persists the override to the task DB row.
-// If discoverContext is true, it attempts to discover and save the context window.
-func (te *TaskExecutor) applyModelSwitch(mc *modelConfig, task *types.Task, projectID, serverURL, modelName string, persistToDB, discoverContext bool) modelSwitchResult {
+// If discoverContext is true, it attempts to discover and save the context window. silence is the
+// run's watcher, handed on so the new client keeps announcing a quiet provider.
+func (te *TaskExecutor) applyModelSwitch(mc *modelConfig, task *types.Task, projectID, serverURL, modelName string, persistToDB, discoverContext bool, silence *streamSilenceWatcher) modelSwitchResult {
 	reasoningEffort := task.ReasoningEffort
 	if reasoningEffort == "" {
 		reasoningEffort = te.configStore.GetModelReasoningEffort(modelName)
 	}
 	apiKey := te.configStore.GetProviderAPIKey(serverURL)
-	client := te.newLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
+	client := te.newLlamaClient(serverURL, modelName, reasoningEffort, apiKey, silence)
 	providerName := te.configStore.GetProviderIDByURL(serverURL)
 
 	var contextWindow *int
@@ -553,7 +554,7 @@ func (te *TaskExecutor) autoAnswerTextStop(setup *taskExecSetup, lc *loopContext
 	setup.task.Status = types.StatusInProgress
 	setup.task.ExecutionState = types.ExecStateRunning
 	te.persistTaskClaiming(setup)
-	te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Automated answer from parent context"}})
+	te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Automated answer from parent context"))
 	logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("automated answer to a text-only stop from parent context, continuing")
 	return turnNextLLMCall
 }
@@ -584,7 +585,7 @@ func (te *TaskExecutor) prepareMergeConflictTurn(setup *taskExecSetup, lc *loopC
 	lc.detector.reset()
 	lc.detector.clearHints()
 	te.flushAdvisories(setup, lc)
-	te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Resolving merge conflicts"}})
+	te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Resolving merge conflicts"))
 	lc.pendingToolCalls = nil
 	lc.assistantContent.Reset()
 	lc.reasoningContent.Reset()
@@ -647,7 +648,7 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 		"content":    hint,
 		"created_at": time.Now().UTC().Format(time.RFC3339),
 	}})
-	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Loop detected, steering agent"}})
+	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.TurnStatusEvent("running", "Loop detected, steering agent"))
 	return false // continue
 }
 
@@ -700,8 +701,7 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Clie
 				activity = "Building sandbox image from Dockerfile"
 			}
 			// The phase doubles as the task state, which is what the card badge shows.
-			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{
-				Type: types.WSTypeStatus, Data: map[string]string{"state": status.Phase, "activity": activity}})
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.TurnStatusEvent(status.Phase, activity))
 		}
 	})
 	if imgErr != nil {
@@ -723,7 +723,7 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Clie
 			te.storeTask(task, setup.projectID)
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 		}
-		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Sandbox container started"}})
+		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.TurnStatusEvent("running", "Sandbox container started"))
 	} else {
 		logging.For(logging.Sandbox).With(logging.TaskID, task.ID).Infof("reusing existing sandbox container")
 	}

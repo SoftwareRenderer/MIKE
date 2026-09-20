@@ -26,7 +26,7 @@ func testExtensionStore(t *testing.T) *extensions.ExtensionStore {
 	}
 	t.Cleanup(func() { db.Close() })
 
-	es := extensions.NewExtensionStore(db)
+	es := extensions.NewExtensionStore(db, nil)
 	if err := es.InitSchema(); err != nil {
 		t.Fatalf("init schema: %v", err)
 	}

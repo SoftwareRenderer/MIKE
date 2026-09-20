@@ -158,6 +158,49 @@ for another project's row.
 
 Tests: `backend/server/handler_message_ownership_test.go`, `backend/api/git_diff_file_ownership_test.go`.
 
+## The conversation is a window, not the thread
+
+`GET /api/projects/{projectID}/tasks/{taskID}/messages` answers the **newest window** of the task's active
+thread: the body stays the flat array of rows (chronological, oldest first) and the window rides two
+response headers — `X-Messages-More`, and `X-Messages-Before`, the opaque cursor that asks for the
+next-older page. Nothing counts the conversation: a row total is a second walk of it, and no client asks
+for one. `?limit=` sizes the window (default 120, ceiling 500; outside that a 400 naming the parameter)
+and `?before=<cursor>` walks back. A cursor the route never issued is a 400, not an empty page: a client
+must not read its own bad token as "no history". `full=1` changes only the redaction, never the window,
+and `GET …/messages/{messageID}` is unchanged.
+
+Two invariants hold the transcript together under paging. **A page never opens in the middle of a turn**:
+the read reaches back to the user row that started the row it cut on, so the newest page carries an
+assistant's text with its own tool cards, and *regenerate* — which deletes from that user row forwards —
+finds something to act on. **The client owns the merge**: `TaskChat` keeps every row it has fetched and
+rebuilds the transcript from all of them (`prependRows` in `$lib/utils/chat-window.ts` dedups by row id),
+so a turn longer than a page is still one entry once both pages are held. **Scrolling is the only
+affordance** — no control asks the reader to fetch anything; the list edge is the request. The scroll
+position is preserved by re-finding the entry under the top edge of the viewport (`data-entry-id`), never
+by a pixel guess, and re-applied over the frames after the insert: entries are `content-visibility: auto`,
+so the rows above report placeholder heights when a page lands and grow after it (measured: one landing
+slid the reader 156 px off their row before this settled). The reader's own scroll ends the settling.
+The offline cache holds **the newest window only**: asking for an older page needs the network anyway, and
+a mid-thread page is the wrong thing to open a task on when the request fails.
+
+The read walks the covering index for the window's positions (one row further when the cut falls inside a
+turn, and the answer to "is there an older page" is one bounded `EXISTS` on the same index), then fetches
+those rows by `rowid`. The sort, the cut and the redaction pass are therefore proportional to the window,
+not to the thread — a 4 400-row thread went from 14.5 MB and 224 ms to 0.39 MB and 12 ms at the p50, and a
+1 200-row one from 3.9 MB and 126 ms to 0.4 MB and 21 ms.
+
+**The window bounds rows, not bytes.** A conversation of a few enormous rows — the newest 120 rows holding
+18 MB of tool output — is bounded by the same rows either way, so it costs what reading those rows costs
+(measured the same as the whole-thread read, and no more). Keeping that case bounded is a byte budget over
+the window, which this does not have.
+
+Tests:
+`backend/store/messages_window_test.go` (including the `EXPLAIN QUERY PLAN` claim),
+`backend/server/handler_message_window_test.go`, `frontend/src/lib/utils/__tests__/chat-window.unit.ts`,
+and `frontend/tests/e2e/chat-window-scroll.spec.ts` for what only a browser answers — that nothing is
+rendered asking the reader to fetch a page, that reaching the top edge fetches it unasked, and that the
+page leaves the reader on the row they were reading.
+
 ## Diffs
 
 `?parsed=1` is a contract every path on `/tasks/{id}/diff` must honour, including the fast ones. The panel
@@ -206,6 +249,38 @@ subresource, what it can carry is the whole permission:
 
 Tests: `backend/server/handler_fs_raw_test.go`.
 
+## The Explorer's file batch
+
+`POST /api/fs/delete`, `/copy`, `/move` and `/rename` (`backend/server/handler_fs_ops.go`) are the four writes
+`handler_fs.go` does not already have, and they share one answer: `{ done: [...], failed: [...] }`, each entry
+`{ from, to?, renamed?, reason? }`.
+
+- **Both lists are always present** — an empty `failed` is the answer the caller reads, not a missing key — and
+  `from` is the path *as the caller named it*, so a browser browsing a sandboxed project never has a host path
+  handed back to it. `to` is absent when the item went nowhere.
+- **`renamed` is the server admitting it chose a different name.** A destination folder that already holds the
+  name takes `name copy`, `name copy2`, … rather than overwriting or failing, and only the server knows which
+  items needed one, so the listing lists them in a dialog (`pasteRenamedEntry`) instead of leaving a paste that
+  renamed files to be discovered later.
+- **A refusal has two altitudes.** The jail's and the request's — an uncorrelated `?task=`/`?project=`, a path
+  outside the project, a destination that is not a folder, an empty batch or one over
+  `maxFSOpsBatch` (100 paths), a destination folder that no longer exists — fail the **request** before a path
+  is touched, which is what makes a paste atomic. Anything learned while running (a source that vanished, a
+  `.git` row, a tree over its copy bound) is one entry in `failed` and the rest of the selection still lands,
+  because a batch is a person's selection. `fsOpsReason` is the whole vocabulary: fsutil's own refusals and
+  `os.ErrNotExist` are sentences the requester can act on and are passed through; anything else is this
+  server's problem, so its cause goes to the log and the caller gets MIKE's sentence, like everywhere else
+  (`Errors` below).
+- A move into the folder the path already sits in answers `done` with no `to` — the no-op the click asked for —
+  while the same request as a copy is a duplicate, which is why only the move short-circuits. `/rename` is the
+  one single-path route, and a name the folder already holds there is a **409** rather than an auto-rename:
+  the person typing the name chose it, and a third name nobody asked for would be the worse answer.
+- Like `write` and `mkdir`, these routes carry `?project=` (plus `?task=` for a task's listing), declare their
+  verb in the pattern, and take the CSRF header.
+
+Tests: `backend/server/handler_fs_ops_test.go`; client side `frontend/src/lib/api/fs-ops.ts` and
+`frontend/src/lib/components/__tests__/file-browser-context-menu.unit.svelte.ts`.
+
 ## Errors
 
 A server fault answers MIKE's own sentence; the cause goes to the log. `errs.Operation(operation, cause)`
@@ -219,7 +294,12 @@ absolute worktree path, and logs nothing.
   `Fault` — `RetryTask` propagates `ErrTaskAlreadyRunning`, so retrying a running task answers 409.
 - `httputil.Fail` maps `context.Canceled` to 499 at debug — no fault to report, and an operator's log is
   not a transcript of every closed tab — and everything else to 500 at error.
-- The ratchet is the `status500` archgate rule (0 violations across 248 examined).
+- An **admission refusal** is not a server fault and reaches neither `Fail` nor `Fault`: a socket over its
+  connection cap is answered where the count is read — `http.Error` 503, naming what is refused and never
+  a cause — while the live count and the limit go to the log at `Warn`. Same for a subscription a single
+  connection asks for past its own cap: the refusal is logged, the connection keeps running and keeps
+  every key it already held. See *Every upgrade is admitted by a count, never a deadline*.
+- The ratchet is the `status500` archgate rule (0 violations across 289 examined).
 
 Tests: `backend/errs/errs_test.go`, `backend/httputil/httputil_test.go`.
 
@@ -252,3 +332,79 @@ WebSocket route in this server upgrades through, so the rule is stated once and 
 request first; this is the second lock on an endpoint that hands out a shell. A request with **no** Origin
 is still accepted: only a non-browser client omits it, and that client can set the session cookie by hand
 anyway. Test: `backend/httputil/ws_origin_test.go`.
+
+### Every upgrade is admitted by a count, never a deadline
+
+`/api/stream`, `/api/lsp` and the two terminal routes refuse a socket **before** `httputil.AcceptWS` —
+`http.Error` 503 plus a `Warn` naming the live count and the limit — so the browser sees a refusal rather
+than an upgrade it has to work out is dead. Each bound is a package constant mirrored by a field on the
+manager (`maxConns` on `AppStreamManager` and `TerminalManager`, `maxSessions` on `LSPHandler`) so a test
+shrinks the number instead of opening hundreds of sockets. Nothing here reads an environment variable, and
+nothing here is a timeout: inside a bound, a request waits exactly as long as its language server takes.
+The same rule holds the bookkeeping *behind* the upgrade — a bound that is reached answers what it
+overturns, it never drops it silently.
+
+| Bound | Default | Counts | When it is reached |
+|---|---|---|---|
+| `stream.DefaultMaxConnections` | 256 | live `/api/stream` sockets | 503 before the upgrade, and a `StatusTryAgainLater` close for the handshakes that arrive during the gap (see below) |
+| `lsp.DefaultMaxSessions` | 64 | live `/api/lsp` sessions | 503 before the upgrade |
+| `term.DefaultMaxConnections` | 64 | live terminal sockets, across every session | 503 before the upgrade |
+| `lsp.DefaultMaxPendingRequests` | 256 | requests one session has waiting for an answer | the oldest is answered with a JSON-RPC error and loses its slot; an answer that does arrive frees its slot first |
+| `lsp.DefaultMaxQueuedInitializes` | 64 | `initialize` requests waiting behind the one in flight | the whole queue is failed as a failed send fails it, the overflowing request in the same sentence, so a later `initialize` is forwarded |
+
+Terminal counts connections rather than PTYs because a session is per task or project and every client of
+it shares one shell, so connections are what a client can multiply.
+
+A pre-upgrade count is an offer, not a decision: handshakes arrive during the gap between reading it and
+registering the socket. `/api/stream` is the one endpoint that closes the gap — counting and joining
+`clients` are one decision under `asm.mu`, and a connection that turned out to be over the bound is
+closed after its upgrade with `StatusTryAgainLater`, which the client already reads as "reconnect and
+try again" (`docs/reconnection.md`). The other three read the count before the upgrade and register
+after it, so a burst can land a few sockets past the bound: a bound that stops one browser from making
+the server hold thousands, not an exact admission control. Tests: `backend/stream/app_stream_bounds_test.go`,
+`backend/lsp/handler_bounds_test.go`, `backend/term/terminal_bounds_test.go`.
+
+### Which socket carries the app-level ping
+
+Every upgraded connection is kept alive by `httputil.Keepalive` (`backend/httputil/ws.go`), whose control
+ping runs every 27 s (`KeepaliveInterval`) — under the 30–60 s idle timeout a proxy or VPN enforces.
+Control frames are invisible to JavaScript, so they never fire `onmessage` and never reset a browser's
+own silence timer; the app-level frame `{"type":"ping"}` (`KeepaliveFrame`) rides beside the control ping
+on **`/api/stream` only**, because that client stamps `lastActivityAt` from `onmessage` and retires a
+silent socket at `STALE_THRESHOLD_MS` (60 s, calibrated against the 27 s tick). `/api/lsp` speaks JSON-RPC
+and the terminal speaks `types.TerminalMessage`, so both get the control ping alone: the frame is opt-in
+(`httputil.WithAppFrame()`) rather than something the shared helper always sends. Nothing has to ignore
+a frame it never receives.
+
+Two rules keep a **busy** connection from being read as a dead one, and both are about `writeMu`, which the
+pinger holds so a ping cannot interleave with the frames of the one endpoint that passes it — `/api/stream`.
+`/api/lsp` and the terminals pass nil: there a frame is written by whichever goroutine produced it, the
+router or the connection's own read loop, each under its own `WriteTimeout`, so the pinger has no lock of
+ours to refuse to wait behind. The ping's deadline is built *after* the lock is taken, so `KeepaliveTimeout`
+bounds the ping and never the queue in front of it, and the lock is taken with `TryLock`, because a lock
+another writer holds is a frame on its way out — liveness evidence — so that tick is skipped. Queuing
+instead was measurable: holding `writeMu` longer than the ping timeout lets a queued tick's deadline expire
+in the queue, and `coder/websocket` closes the socket for an expired write context even when it wrote
+nothing. The shape that made it measurable was a reconnecting client holding the lock across a whole replay
+backlog (the per-task buffer); that backlog is a queue now, and what still holds the lock is one
+frame's write, up to `WriteTimeout` of it. The peer is healthy, dies mid-replay, reconnects and replays
+again. A pinger blocked on the lock also sends nothing, which retires the same socket from the client side
+at 60 s. Tests: `backend/httputil/ws_test.go`.
+
+### Who writes an app-stream connection
+
+One goroutine per connection (`runSender`) is the only writer to its socket besides that connection's
+pinger. Everything else — a turn's `SendTaskEvent`, the board broadcasts, a task's replay and the
+sandbox-stats frame that extends it, a project's initial diff data — hands the frame to that
+connection's bounded queue (`sendQueue`) and returns, so the goroutine producing a frame never waits
+on a browser. The queue is bounded by frame count and bytes (`DefaultBufferSize`, `DefaultBufferBytes`)
+and overflows by dropping **the oldest** frames, never the newest: a client that stopped reading is
+caught up on the tail.
+
+A connection that missed frames is ended once its queue has drained — see *What a reconnect brings
+back* in `docs/reconnection.md` for why the close is the resync and not a new frame type, and
+`backend/stream/app_stream_sender_test.go` with it. A replay goes in behind any replay already
+queued and ahead of every live frame, which is the ordering the client can see: `subscribe_task` for
+two tasks in a row replays one and then the other, the `sandbox_stats` frame lands at the end of the
+replay it extends, and a live frame never lands inside either. Beyond that one rule the queue makes no
+ordering promise between two producers.

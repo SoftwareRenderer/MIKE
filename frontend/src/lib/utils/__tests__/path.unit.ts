@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toExplorerPath } from '$lib/utils/path';
+import { isUnderPath, toExplorerPath } from '$lib/utils/path';
 
 /**
  * A tool call names the file it wrote relative to the task root, while the explorer's
@@ -37,5 +37,29 @@ describe('toExplorerPath', () => {
 
     it('answers an empty path unchanged, so nothing opens a directory', () => {
         expect(toExplorerPath('', worktree)).toBe('');
+    });
+});
+
+// A deleted folder takes every file under it; a sibling whose name only starts with it does not.
+describe('isUnderPath', () => {
+    const root = '/srv/proj/src';
+
+    it('names the path itself', () => {
+        expect(isUnderPath(root, root)).toBe(true);
+    });
+
+    it('names anything inside it', () => {
+        expect(isUnderPath(`${root}/main.go`, root)).toBe(true);
+        expect(isUnderPath(`${root}/deep/deeper/x.go`, root)).toBe(true);
+    });
+
+    it('refuses the sibling whose name merely starts with it', () => {
+        expect(isUnderPath('/srv/proj/src-backup/keep.go', root)).toBe(false);
+        expect(isUnderPath('/srv/proj/src2/main.go', root)).toBe(false);
+    });
+
+    it('refuses an empty side rather than treating it as a prefix of everything', () => {
+        expect(isUnderPath('', root)).toBe(false);
+        expect(isUnderPath(root, '')).toBe(false);
     });
 });

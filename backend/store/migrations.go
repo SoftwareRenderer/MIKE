@@ -22,7 +22,7 @@ import (
 // steps in place. A database stamped N has been through 1..N; an older one reads 0 and runs the
 // whole chain. So the steps must stay idempotent, and one that must run exactly once needs its own
 // marker (see the config-row guard on the backfill) rather than trusting this number.
-const schemaVersion = doneMessageTimeKeysStamp
+const schemaVersion = doneMessageOrderIndexesStamp
 
 // doneDiffParsedStamp is the stamp from which a stored done-task diff body carries parsed_files.
 // Older bodies are served byte for byte and cannot grow the key, so initSchema drops those rows.
@@ -45,6 +45,10 @@ const doneLegacyPeakClearedStamp = doneMemoryAlertAckStamp + 1
 // fixed-width UTC (see messageTimeLayout and timeTextColumns). Rows written before it are rewritten once
 // by normalizeTimeText: a table holding both shapes cannot be ordered by its own text.
 const doneMessageTimeKeysStamp = doneLegacyPeakClearedStamp + 1
+
+// doneMessageOrderIndexesStamp is the version from which a thread's or a task's messages come out of a
+// composite (scope, created_at) index rather than a temp B-tree over the whole thread.
+const doneMessageOrderIndexesStamp = doneMessageTimeKeysStamp + 1
 
 // userVersion reads PRAGMA user_version. A read failure answers 0, which reruns the probe chain:
 // slow, but it cannot leave a column missing. The caller holds s.mu.
@@ -242,7 +246,8 @@ CREATE TABLE IF NOT EXISTS task_diff_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
-CREATE INDEX IF NOT EXISTS idx_task_messages_task ON task_messages(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_messages_thread_time ON task_messages(thread_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_task_messages_task_time ON task_messages(task_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 `
 
@@ -280,7 +285,6 @@ func (s *Store) addMissingColumns() {
 	s.addColumn("tasks", "current_thread_id", "TEXT NULL")
 	s.addColumn("task_messages", "thread_id", "TEXT NULL")
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id)`)
-	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_messages_thread ON task_messages(thread_id)`)
 	s.addColumn("task_threads", "parent_thread_id", "TEXT NULL")
 	s.addColumn("task_threads", "checkpoint_message_id", "TEXT NULL")
 	s.addColumn("task_threads", "checkpoint_message_time", "TEXT NULL")
@@ -335,6 +339,12 @@ func (s *Store) addMissingColumns() {
 	s.addColumn("tasks", "autostarted", "INTEGER NOT NULL DEFAULT 0")
 	// Set by the memory supervisor when it pauses a task; cleared by any user action.
 	s.addColumn("tasks", "memory_supervisor_paused", "INTEGER NOT NULL DEFAULT 0")
+	// These carry the order the conversation reads use, which a single-column index left to a temp
+	// B-tree over every row. Each replaces the single-column index on its own leading column.
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_messages_thread_time ON task_messages(thread_id, created_at)`)
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_messages_task_time ON task_messages(task_id, created_at)`)
+	_, _ = s.db.Exec(`DROP INDEX IF EXISTS idx_task_messages_thread`)
+	_, _ = s.db.Exec(`DROP INDEX IF EXISTS idx_task_messages_task`)
 	// moved_at orders the board: it changes only when a task moves column (see UpdateTask).
 	// The backfill belongs to the moment the column first appears, so this one probes.
 	if !s.hasColumn("tasks", "moved_at") {

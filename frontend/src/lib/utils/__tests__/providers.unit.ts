@@ -25,6 +25,7 @@ const llmProvider: Provider = {
     models: [{ name: 'model-a' }, { name: 'model-b', reasoning_effort: 'high' }],
     concurrency: 1,
     max_requests_per_second: 2,
+    stream_idle_seconds: 0,
 };
 
 const agentProvider: Provider = {
@@ -35,6 +36,7 @@ const agentProvider: Provider = {
     models: [],
     concurrency: 1,
     max_requests_per_second: 0,
+    stream_idle_seconds: 0,
 };
 
 describe('getModelName', () => {

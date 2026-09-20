@@ -38,6 +38,23 @@ describe('QueueIndicator lock wait', () => {
         expect(shown).not.toContain('refs');
     });
 
+    it('names which kind of provider quietness it is, because they need different sentences', () => {
+        const prefill = text({ lockWait: { domain: 'model', seconds: 41, phase: 'first_token' } });
+        expect(prefill).toContain('processing the prompt');
+        expect(prefill).toContain('41s');
+
+        const midAnswer = text({ lockWait: { domain: 'model', seconds: 76, phase: 'mid_response' } });
+        expect(midAnswer).toContain('generating quietly');
+        expect(midAnswer).toContain('76s');
+        expect(midAnswer).not.toContain('busy');
+    });
+
+    // The control: a provider frame without a phase says the generic thing rather than guessing.
+    it('falls back to the generic wait when a model frame carries no phase', () => {
+        const shown = text({ lockWait: { domain: 'model', seconds: 9 } });
+        expect(shown).toContain('the project is busy');
+    });
+
     it('outranks the queue position, which is the vaguer of the two answers', () => {
         const shown = text({ lockWait: { domain: 'worktree', seconds: 12 }, queuePosition: 3, queueEstimatedWait: 40 });
         expect(shown).toContain('this task is still working');

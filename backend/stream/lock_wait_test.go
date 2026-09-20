@@ -20,7 +20,11 @@ func TestLockWaitNotifierAnnouncesTheWaitThenTheAcquisition(t *testing.T) {
 
 	const projectID, taskID = "proj-lock", "task-lock"
 	c := dialStream(t, asm)
+	client := clientAlone(t, asm)
 	c.sendSubscription(t, "subscribe_task", projectID, taskID)
+	// Applied before the first notice, or the first frame is the one that races the server's own
+	// read loop rather than the wait it is meant to announce.
+	awaitTaskSub(t, asm, client, projectID, taskID)
 
 	notice := asm.LockWaitNotifier(projectID, taskID, "worktree")
 	notice(12*time.Second, false)

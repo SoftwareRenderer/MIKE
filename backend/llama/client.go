@@ -111,6 +111,42 @@ func applyReasoningParams(reqBody map[string]any, effort string) {
 	}
 }
 
+// Silence phases of an open stream. A provider that answered without sending a token is in a
+// different state from one that streamed tokens and stopped: the first is usually prompt
+// processing, the second is usually output the provider is holding back.
+const (
+	StreamPhaseFirstToken  = "first_token"
+	StreamPhaseMidResponse = "mid_response"
+)
+
+// When silence on a stream starts being worth reporting. Both are floors, not deadlines: nothing
+// here ends a stream for being silent unless a caller sets a ceiling (SetSilencePolicy).
+const (
+	streamNoticeFirstToken  = 15 * time.Second // a cold prefill of 74k tokens measures ~10s
+	streamNoticeMidResponse = 30 * time.Second // longer than any gap between two tokens
+	streamWaitTick          = time.Second      // the clock's resolution; the caller throttles
+)
+
+// SilenceCallback reports silence on a stream that is still open. Called repeatedly while the
+// silence grows, never for a stream that is merely slow to the point of the notice floor.
+type SilenceCallback func(silent time.Duration, phase string)
+
+// ErrStreamSilent says the provider answered and then stopped sending, and that a configured
+// ceiling was reached. It exists because a quiet stream is not a dead one: a provider generating
+// grammar-constrained tool calls has been measured holding 16,267 tokens behind 76-89 seconds of
+// silence and then finishing normally, so this error names a ceiling, never a lost connection.
+type ErrStreamSilent struct {
+	Silent time.Duration
+	Phase  string // StreamPhaseFirstToken or StreamPhaseMidResponse
+}
+
+func (e *ErrStreamSilent) Error() string {
+	if e.Phase == StreamPhaseFirstToken {
+		return fmt.Sprintf("the provider sent nothing for %s", e.Silent.Round(time.Second))
+	}
+	return fmt.Sprintf("the provider sent nothing for %s after streaming a response", e.Silent.Round(time.Second))
+}
+
 // LlamaClient handles communication with llama.cpp OpenAI-compatible API.
 type LlamaClient struct {
 	baseURL         string
@@ -118,8 +154,21 @@ type LlamaClient struct {
 	reasoningEffort string
 	apiKey          string
 	httpClient      *http.Client
-	readIdleTimeout time.Duration // 0 means default 30s
+	ceiling         time.Duration   // 0: silence alone never ends a stream
+	onWait          SilenceCallback // nil: silence is not reported
+	noticeFirstTok  time.Duration   // 0 means streamNoticeFirstToken
+	noticeMidResp   time.Duration   // 0 means streamNoticeMidResponse
+	waitTick        time.Duration   // 0 means streamWaitTick
 	adapter         *llmadapter.Adapter
+}
+
+// SetSilencePolicy decides what a quiet stream costs. onWait hears every second of silence past
+// the notice floor while the stream is open; a non-zero ceiling ends the call with
+// ErrStreamSilent at that much silence. The zero ceiling, which is the default, never ends one —
+// only the peer closing, a failed keepalive or a cancelled context does.
+func (c *LlamaClient) SetSilencePolicy(ceiling time.Duration, onWait SilenceCallback) {
+	c.ceiling = ceiling
+	c.onWait = onWait
 }
 
 // SetAdapter configures provider-dependent request adaptation (llm
@@ -153,8 +202,7 @@ func NewLlamaClient(baseURL, modelName, reasoningEffort, apiKey string) *LlamaCl
 		modelName:       modelName,
 		reasoningEffort: reasoningEffort,
 		apiKey:          apiKey,
-		httpClient:      httputil.NewClient(0), // 0: a streaming completion is not bounded by a wall-clock timeout
-		readIdleTimeout: 30 * time.Second,
+		httpClient:      httputil.NewStreamClient(), // a streaming completion is not bounded by a wall-clock timeout
 	}
 }
 
@@ -366,22 +414,55 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
-	// Read idle timeout: close resp.Body to unblock scanner.Scan().
-	idleTimeout := c.readIdleTimeout
-	if idleTimeout == 0 {
-		idleTimeout = 30 * time.Second
-	}
-	var timedOut atomic.Bool
-	readTimer := time.AfterFunc(idleTimeout, func() {
-		timedOut.Store(true)
-		_ = resp.Body.Close()
-	})
-	readTimer.Stop()
+	// One clock for both phases, running beside the scanner. Silence is measured from the last line
+	// read and reported as it grows; only a configured ceiling ends the call, and closing resp.Body
+	// (the only way to unblock scanner.Scan()) records why before it closes.
+	var lastByte atomic.Int64
+	lastByte.Store(time.Now().UnixNano())
+	var streaming atomic.Bool // a token has arrived, so the phase is mid-response
+	var silenced atomic.Pointer[ErrStreamSilent]
+	watchDone := make(chan struct{})
+	defer close(watchDone)
+	go func() {
+		noticeFirst, noticeMid, tick := c.noticeFirstTok, c.noticeMidResp, c.waitTick
+		if noticeFirst == 0 {
+			noticeFirst = streamNoticeFirstToken
+		}
+		if noticeMid == 0 {
+			noticeMid = streamNoticeMidResponse
+		}
+		if tick == 0 {
+			tick = streamWaitTick
+		}
+		timer := time.NewTicker(tick)
+		defer timer.Stop()
+		for {
+			select {
+			case <-watchDone:
+				return
+			case <-timer.C:
+			}
+			silent := time.Since(time.Unix(0, lastByte.Load()))
+			notice, phase := noticeFirst, StreamPhaseFirstToken
+			if streaming.Load() {
+				notice, phase = noticeMid, StreamPhaseMidResponse
+			}
+			// The ceiling stands on its own: a caller who set one below the notice floor still
+			// gets the stream ended, and one above it still gets the notices first.
+			if c.ceiling > 0 && silent >= c.ceiling {
+				silenced.Store(&ErrStreamSilent{Silent: silent, Phase: phase})
+				_ = resp.Body.Close()
+				return
+			}
+			if silent >= notice && c.onWait != nil {
+				c.onWait(silent, phase)
+			}
+		}
+	}()
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		readTimer.Stop()
-		readTimer.Reset(idleTimeout)
+		lastByte.Store(time.Now().UnixNano())
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
@@ -437,16 +518,18 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 				sawFinish = true
 			}
 			normalizeReasoning(&cr.Choices[i])
-			if firstTokenTime.IsZero() && hasContent(cr.Choices[i]) {
-				firstTokenTime = time.Now()
+			if hasContent(cr.Choices[i]) {
+				streaming.Store(true)
+				if firstTokenTime.IsZero() {
+					firstTokenTime = time.Now()
+				}
 			}
 			cb(cr.Choices[i])
 		}
 	}
-	readTimer.Stop()
 
-	if timedOut.Load() {
-		return usage, context.DeadlineExceeded
+	if e := silenced.Load(); e != nil {
+		return usage, e
 	}
 
 	if err := scanner.Err(); err != nil {

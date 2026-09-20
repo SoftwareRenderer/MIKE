@@ -3,9 +3,11 @@ package stream
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,21 +38,36 @@ type frameStream struct {
 	frames chan map[string]any
 }
 
+// serveStream serves asm on a throwaway server for the rest of the test and returns its
+// ws URL, so a test can put several real clients on one manager.
+func serveStream(t *testing.T, asm *AppStreamManager) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(asm.HandleStream))
+	t.Cleanup(srv.Close)
+	return "ws" + strings.TrimPrefix(srv.URL, "http")
+}
+
 // dialStream serves asm on a throwaway server, connects a real client and
 // starts pumping its frames. Everything is torn down with the test.
 func dialStream(t *testing.T, asm *AppStreamManager) *frameStream {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(asm.HandleStream))
-	t.Cleanup(srv.Close)
+	return dialFrameStream(t, serveStream(t, asm))
+}
 
+// dialFrameStream connects a real client to the stream listening at wsURL and starts
+// pumping its frames.
+func dialFrameStream(t *testing.T, wsURL string) *frameStream {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("dial stream: %v", err)
 	}
+	// A test that fills a socket does it with frames larger than the library's 32 KiB default,
+	// which the reader would answer by closing the connection it is meant to be watching.
+	conn.SetReadLimit(-1)
 	t.Cleanup(func() { conn.CloseNow() })
 
 	fs := &frameStream{conn: conn, ctx: ctx, frames: make(chan map[string]any, 1024)}
@@ -148,16 +165,48 @@ func (fs *frameStream) collect(window time.Duration, pred func(map[string]any) b
 	}
 }
 
-// flushSubscriptions makes the server acknowledge everything this client has
-// sent so far: HandleStream's read loop is sequential, so a probe subscription
-// whose replay we observe proves every earlier frame from this connection (an
-// unsubscribe, say) has already been applied. Without it a negative assertion
-// would race the server's read loop.
-func (fs *frameStream) flushSubscriptions(t *testing.T, projectID, probeTaskID string) {
-	t.Helper()
-	fs.sendSubscription(t, "subscribe_task", projectID, probeTaskID)
-	fs.await(t, 5*time.Second, isTaskEventFor(probeTaskID, "warm-"+probeTaskID), 1, "subscription flush")
+// tally drains this connection's frames for window and counts how many matched each predicate,
+// keeping what the other predicates still need. A caller that awaits one frame first cannot then
+// claim nothing more arrived: the await consumed whatever came before it.
+func (fs *frameStream) tally(window time.Duration, preds ...func(map[string]any) bool) []int {
+	deadline := time.NewTimer(window)
+	defer deadline.Stop()
+	counts := make([]int, len(preds))
+	for {
+		select {
+		case frame, ok := <-fs.frames:
+			if !ok {
+				return counts // connection closed
+			}
+			for i, pred := range preds {
+				if pred(frame) {
+					counts[i]++
+				}
+			}
+		case <-deadline.C:
+			return counts
+		}
+	}
 }
+
+// flushSubscriptions makes the server acknowledge everything this client has sent so far:
+// HandleStream's read loop is sequential, so a probe subscription whose replay we observe
+// proves every earlier frame from this connection (an unsubscribe, say) has already been
+// applied. Without it a negative assertion would race the server's read loop.
+//
+// Every probe takes a task key of its own, warmed here, because a connection replays nothing
+// for a subscription it already holds, and a key shared with another connection's probe would
+// deliver that connection's warm frame as a live event.
+func (fs *frameStream) flushSubscriptions(t *testing.T, asm *AppStreamManager, projectID string) {
+	t.Helper()
+	taskID := fmt.Sprintf("flush-probe-%d", flushProbeSeq.Add(1))
+	warmProbe(t, asm, projectID, taskID)
+	fs.sendSubscription(t, "subscribe_task", projectID, taskID)
+	fs.await(t, 5*time.Second, isTaskEventFor(taskID, "warm-"+taskID), 1, "subscription flush")
+}
+
+// flushProbeSeq numbers the flushSubscriptions probes, so no two of them share a task key.
+var flushProbeSeq atomic.Uint64
 
 // isTaskEventFor reports a frame predicate for a task_event carrying text.
 func isTaskEventFor(taskID, text string) func(map[string]any) bool {
@@ -273,9 +322,8 @@ func TestBroadcastFramesAreFlat(t *testing.T) {
 }
 
 // TestTaskEventDelivery verifies task event delivery is gated by the task
-// subscription: project-only and other-task subscribers never see it, and a
-// task subscriber stops seeing it exactly when its subscription count drops to
-// zero (multi-tab).
+// subscription: project-only and other-task subscribers never see it, a task subscriber stops
+// seeing it when the one unsubscribe it sent arrives, and sees it again when it re-subscribes.
 func TestTaskEventDelivery(t *testing.T) {
 	_, s, _, wm, _ := setupDoneSnapshotTest(t)
 	asm := NewAppStreamManager(s, wm)
@@ -311,19 +359,19 @@ func TestTaskEventDelivery(t *testing.T) {
 	b.quietWindow(t, time.Second, isTaskEventFor(taskID, "gated"), "project-only subscriber")
 	c.quietWindow(t, time.Second, isTaskEventFor(taskID, "gated"), "other-task subscriber")
 
-	// 2. Two tabs on one connection (subscribe_task twice): the first
-	// unsubscribe drops the count to 1, so delivery must continue.
+	// 2. A task key is held once, so the single unsubscribe the browser sends for it ends
+	// delivery even when the subscribe frame was sent twice.
 	a.sendSubscription(t, "subscribe_task", projectID, taskID)
 	a.sendSubscription(t, "unsubscribe_task", projectID, taskID)
-	a.flushSubscriptions(t, projectID, probeTask)
-	asm.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "still-subscribed"}})
-	a.await(t, 5*time.Second, isTaskEventFor(taskID, "still-subscribed"), 1, "second tab still subscribed")
+	a.flushSubscriptions(t, asm, projectID)
+	asm.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "after-one-unsubscribe"}})
+	a.quietWindow(t, time.Second, isTaskEventFor(taskID, "after-one-unsubscribe"), "delivery after one unsubscribe_task")
 
-	// 3. The last unsubscribe removes the key, so delivery stops.
-	a.sendSubscription(t, "unsubscribe_task", projectID, taskID)
-	a.flushSubscriptions(t, projectID, probeTask)
-	asm.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "after-unsubscribe"}})
-	a.quietWindow(t, time.Second, isTaskEventFor(taskID, "after-unsubscribe"), "unsubscribed client")
+	// 3. Re-subscribing takes the key again, so delivery resumes.
+	a.sendSubscription(t, "subscribe_task", projectID, taskID)
+	a.flushSubscriptions(t, asm, projectID)
+	asm.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "resubscribed"}})
+	a.await(t, 5*time.Second, isTaskEventFor(taskID, "resubscribed"), 1, "delivery after re-subscribing")
 }
 
 // TestSandboxStatsTaskEventPayload verifies the sandbox_stats task event
@@ -405,18 +453,18 @@ func TestTaskBufferClearedOnTaskDeleted(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "x"}})
 	}
-	if got := len(asm.getTaskBuffer("proj-1:task-1")); got != 3 {
+	if got := len(replayedFrames(asm, "proj-1:task-1")); got != 3 {
 		t.Fatalf("buffer before delete = %d frames, want 3", got)
 	}
 
 	asm.BroadcastTaskDeleted("proj-1", "task-1")
-	if got := len(asm.getTaskBuffer("proj-1:task-1")); got != 0 {
+	if got := len(replayedFrames(asm, "proj-1:task-1")); got != 0 {
 		t.Fatalf("buffer after delete = %d frames, want 0", got)
 	}
 
 	// Other tasks' buffers are untouched.
 	asm.SendTaskEvent("proj-1", "task-2", types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "y"}})
-	if got := len(asm.getTaskBuffer("proj-1:task-2")); got != 1 {
+	if got := len(replayedFrames(asm, "proj-1:task-2")); got != 1 {
 		t.Fatalf("other task buffer = %d frames, want 1", got)
 	}
 }
@@ -428,13 +476,13 @@ func TestTaskBufferClearedOnTerminalStatus(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			asm := NewAppStreamManager(nil, nil)
 			asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]string{"tool_id": "call-1", "tool_name": "bash"}})
-			if got := len(asm.getTaskBuffer("proj-1:task-1")); got != 1 {
+			if got := len(replayedFrames(asm, "proj-1:task-1")); got != 1 {
 				t.Fatalf("buffer before the status frame = %d frames, want 1", got)
 			}
 
-			asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": state}})
+			asm.SendTaskEvent("proj-1", "task-1", types.TurnStatusEvent(state, "still going"))
 
-			if got := len(asm.getTaskBuffer("proj-1:task-1")); got != 0 {
+			if got := len(replayedFrames(asm, "proj-1:task-1")); got != 0 {
 				t.Fatalf("buffer after state %q = %d frames, want 0", state, got)
 			}
 		})
@@ -444,70 +492,83 @@ func TestTaskBufferClearedOnTerminalStatus(t *testing.T) {
 		t.Run(state+"_keeps", func(t *testing.T) {
 			asm := NewAppStreamManager(nil, nil)
 			asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "x"}})
-			asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": state}})
-			if got := len(asm.getTaskBuffer("proj-1:task-1")); got != 2 {
+			asm.SendTaskEvent("proj-1", "task-1", types.TurnStatusEvent(state, "still going"))
+			if got := len(replayedFrames(asm, "proj-1:task-1")); got != 2 {
 				t.Fatalf("buffer after state %q = %d frames, want 2", state, got)
 			}
 		})
 	}
 }
 
-// TestSyncReplayIsPerConnection: `?sync=1` replays the connection's own ring buffer, and a reconnect
-// is a new connection with an empty one, so the client must refetch the board over HTTP.
-func TestSyncReplayIsPerConnection(t *testing.T) {
+// TestToolCallReplayedToALateSubscriberCarriesWholeArgs: the live path sends a tool call's whole
+// args and then only its growth, and the replay owes each call one frame — so that frame has to
+// say everything the frames it joins said. A replay handing over only the last delta renders a
+// tool call whose input starts mid-JSON.
+func TestToolCallReplayedToALateSubscriberCarriesWholeArgs(t *testing.T) {
 	asm := NewAppStreamManager(nil, nil)
-	before := &websocket.Conn{}
-	after := &websocket.Conn{}
-	register := func(conn *websocket.Conn) {
-		asm.mu.Lock()
-		defer asm.mu.Unlock()
-		asm.clients[conn] = &clientState{conn: conn, bufSize: DefaultBufferSize}
-	}
-	register(before)
+	whole := `{"path":"a.txt"`
+	first := `,"content":"hi"`
+	second := `}`
 
-	asm.bufferRaw([]byte(`{"type":"task_updated","task_id":"task-1"}`))
-	if got := len(asm.getBuffer(before)); got != 1 {
-		t.Fatalf("buffer for the connection that was open = %d frames, want 1", got)
-	}
+	asm.SendTaskEvent("proj-1", "task-1", toolCall(map[string]any{"tool_id": "call_1", "tool_name": "write_file", "raw_args": whole}))
+	asm.SendTaskEvent("proj-1", "task-1", toolCall(map[string]any{"tool_id": "call_1", "tool_name": "write_file", "raw_args_delta": first}))
+	asm.SendTaskEvent("proj-1", "task-1", toolCall(map[string]any{"tool_id": "call_1", "tool_name": "write_file", "raw_args_delta": second}))
 
-	// The reconnect: same client, new connection, nothing to replay.
-	asm.mu.Lock()
-	delete(asm.clients, before)
-	asm.mu.Unlock()
-	register(after)
-	if got := len(asm.getBuffer(after)); got != 0 {
-		t.Fatalf("buffer for a reconnecting connection = %d frames, want 0", got)
+	buf := replayedFrames(asm, "proj-1:task-1")
+	if len(buf) != 1 {
+		t.Fatalf("replay holds %d frames for one tool call, want 1", len(buf))
+	}
+	data := toolCallArgs(buf[0])
+	if got := data["raw_args"]; got != whole+first+second {
+		t.Fatalf("replayed tool call carries raw_args %v, want the whole input %q", got, whole+first+second)
+	}
+	if _, still := data["raw_args_delta"]; still {
+		t.Fatalf("replayed tool call still carries a delta its subscriber has nothing to append to: %v", data["raw_args_delta"])
+	}
+	// The envelope is re-marshalled with it: a payload without its task_id routes nowhere.
+	var envelope struct {
+		Type   string `json:"type"`
+		TaskID string `json:"task_id"`
+		Event  string `json:"event"`
+	}
+	if err := json.Unmarshal(buf[0], &envelope); err != nil {
+		t.Fatalf("replayed frame does not read as JSON: %v", err)
+	}
+	if envelope.Type != string(types.WSTypeTaskEvent) || envelope.TaskID != "task-1" || envelope.Event != string(types.WSTypeToolCall) {
+		t.Fatalf("replayed envelope became %+v", envelope)
 	}
 }
 
-// TestEveryExecStateEndsOrContinuesTheTurn: an ExecutionState that is neither in flight
-// nor terminal leaves its frames replayable forever, and no compiler error announces it.
-func TestEveryExecStateEndsOrContinuesTheTurn(t *testing.T) {
-	// Mirrors taskIsInFlight on the client.
-	inFlight := map[string]bool{
-		string(types.ExecStateRunning):      true,
-		string(types.ExecStatePullingImage): true,
+// TestToolCallDeltaSurvivesAReplayWithNothingToJoinItTo: when the frame holding a call's start has
+// already been trimmed from the buffer, the delta is what there is. Dropping it would hide the
+// call entirely, and rewriting it would invent input the model never sent.
+func TestToolCallDeltaSurvivesAReplayWithNothingToJoinItTo(t *testing.T) {
+	asm := NewAppStreamManager(nil, nil)
+	asm.SendTaskEvent("proj-1", "task-1", toolCall(map[string]any{"tool_id": "call_9", "tool_name": "write_file", "raw_args_delta": `"tail"`}))
+
+	buf := replayedFrames(asm, "proj-1:task-1")
+	if len(buf) != 1 {
+		t.Fatalf("a lone delta left the replay with %d frames, want 1", len(buf))
 	}
-	for _, state := range []types.ExecutionState{
-		types.ExecStateIdle, types.ExecStateRunning, types.ExecStatePullingImage,
-		types.ExecStatePaused, types.ExecStateCompleted, types.ExecStateFailed,
-	} {
-		if _, known := types.ParseExecutionState(string(state)); !known {
-			t.Fatalf("%q is no longer a known execution state — exec_state.go changed", state)
-		}
-		if !terminalTurnStates[string(state)] && !inFlight[string(state)] {
-			t.Fatalf("execution state %q neither ends the turn nor continues it", state)
-		}
+	data := toolCallArgs(buf[0])
+	if data["raw_args_delta"] != `"tail"` {
+		t.Fatalf("a lone delta was rewritten: %v", data)
+	}
+	if _, invented := data["raw_args"]; invented {
+		t.Fatalf("a delta with no start became a whole input: %v", data["raw_args"])
 	}
 }
 
-// TestNilStoreStaysNilAfterConstruction: a store-less manager must stay store-less, or
-// every `asm.store == nil` guard in this package reads as "a store exists". The guarded
-// path must stay callable with none.
-func TestNilStoreStaysNilAfterConstruction(t *testing.T) {
-	if asm := NewAppStreamManager(nil, nil); asm.store != nil {
-		t.Fatal("NewAppStreamManager(nil, nil) produced a non-nil store — the nil guards in this file are now dead code")
-	}
-	// And the guarded path must actually be callable.
-	NewAppStreamManager(nil, nil).BroadcastProjectCounts()
+func tokenText(text string) types.StreamEvent {
+	return types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": text}}
+}
+
+func toolCall(data map[string]any) types.StreamEvent {
+	return types.StreamEvent{Type: types.WSTypeToolCall, Data: data}
+}
+
+// replayedFrames is what a subscriber of the task is owed: the buffer with one frame per streaming
+// tool call. It is the two steps subscribeTask takes, so a test reading the buffer reads the replay.
+func replayedFrames(asm *AppStreamManager, taskKey string) [][]byte {
+	return foldToolCallFrames(asm.taskBufferFrames(taskKey))
 }

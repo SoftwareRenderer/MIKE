@@ -32,13 +32,7 @@ func TestRefusedRequestEndsTheRunInOneCall(t *testing.T) {
 
 	startExecRun(t, te, projectID, taskID, srv.URL, worktreePath)
 
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if mustGetTask(t, te, taskID).ExecutionState == types.ExecStateFailed {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	waitForFailureRow(t, te, taskID, 30*time.Second)
 
 	row := mustGetTask(t, te, taskID)
 	if row.ExecutionState != types.ExecStateFailed || row.Status != types.StatusReview {

@@ -44,7 +44,7 @@ func newTestTaskHandler(t *testing.T) (*TaskHandler, *store.Store, string) {
 	s.SetConfigValue("utility_provider", "")
 	s.SetConfigValue("utility_model", "")
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	wm := git.NewWorktreeManager(s, cfgStore)
 	boardMgr := stream.NewAppStreamManager(s, wm)
@@ -509,7 +509,7 @@ func newTaskHandlerWithExecutor(t *testing.T) (*TaskHandler, *store.Store, strin
 	s.SetConfigValue("utility_provider", "")
 	s.SetConfigValue("utility_model", "")
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 
 	projID := "proj-auto-start"
@@ -1004,7 +1004,7 @@ func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
 	s.SetConfigValue("utility_provider", "held")
 	s.SetConfigValue("utility_model", "m1")
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	wm := git.NewWorktreeManager(s, cfgStore)
 	boardMgr := stream.NewAppStreamManager(s, wm)
@@ -1082,57 +1082,6 @@ func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
 	if task.Status != types.StatusInProgress || task.ExecutionState != types.ExecStateRunning || task.Branch != "task/"+taskID {
 		t.Fatalf("title update clobbered task state: status=%s exec=%s branch=%q",
 			task.Status, task.ExecutionState, task.Branch)
-	}
-}
-
-// createParallelTestParent makes an in_progress parent with 3 backlog leaf
-// subtasks, returning the parent. Used by the subtasksToStart tests.
-func createParallelTestParent(t *testing.T, s *store.Store, projID, parentID string) *types.Task {
-	t.Helper()
-	parent := &types.Task{ID: parentID, ProjectID: projID, Title: "Parent", Prompt: "parent prompt", Status: types.StatusInProgress}
-	if err := s.CreateTask(parent); err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []string{parentID + "-a", parentID + "-b", parentID + "-c"} {
-		if err := s.CreateTask(&types.Task{ID: id, ProjectID: projID, Title: "sub", Prompt: "sub prompt", Status: types.StatusBacklog, ParentTaskID: parent.ID}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return parent
-}
-
-// Sequential (default) mode: subtasksToStart returns a single subtask ID — the
-// deepest one (LLM tie-break falls back to the first when no LLM is configured).
-func TestSubtasksToStart_Sequential(t *testing.T) {
-	h, s, projID := newTaskHandlerWithExecutor(t)
-	parent := createParallelTestParent(t, s, projID, "st-seq-parent")
-	children, err := s.GetChildren(parent.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ids := h.subtasksToStart(parent, children)
-	if len(ids) != 1 {
-		t.Fatalf("expected 1 subtask in sequential mode, got %d: %v", len(ids), ids)
-	}
-}
-
-// Parallel mode: subtasksToStart returns every currently startable (deepest)
-// subtask so they all start at once.
-func TestSubtasksToStart_Parallel(t *testing.T) {
-	h, s, projID := newTaskHandlerWithExecutor(t)
-	parent := createParallelTestParent(t, s, projID, "st-par-parent")
-
-	if err := s.SetConfigValue("run_siblings_parallel", "true"); err != nil {
-		t.Fatal(err)
-	}
-	children, err := s.GetChildren(parent.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ids := h.subtasksToStart(parent, children)
-	if len(ids) != 3 {
-		t.Fatalf("expected 3 subtasks in parallel mode, got %d: %v", len(ids), ids)
 	}
 }
 

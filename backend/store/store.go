@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"mike/backend/types"
@@ -27,6 +28,9 @@ type Store struct {
 	// "no other caller can interleave" true, and it must be held for a whole multi-statement section, not
 	// per statement. It is not a substitute for tx — see tx for what a transaction adds on top.
 	mu sync.RWMutex
+	// configGen counts config-table writes, so a consumer that caches a parsed config can tell
+	// "nothing changed" from "something changed". Bumped under mu.
+	configGen atomic.Uint64
 }
 
 // NewStore creates a new Store instance, initializing the schema if needed.

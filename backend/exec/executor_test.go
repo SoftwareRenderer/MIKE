@@ -52,7 +52,7 @@ func setupExecutorWithGit(t *testing.T) (*TaskExecutor, string, string, string) 
 	}
 	t.Cleanup(func() { s.Close() })
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 
 	projectID := "test-project"
