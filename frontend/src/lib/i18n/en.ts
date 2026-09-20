@@ -1012,7 +1012,7 @@ const catalog = {
     // security copy — say exactly what happens. Capability names (CAP_*), paths and
     // port numbers are data, and the DANGER_ZONE refusal is the server's own message.
     'sandbox.title': 'Sandbox Configuration',
-    'sandbox.lockedNotice': 'Cannot change sandbox settings while tasks are In Progress. The settings below are shown for reference only.',
+    'sandbox.lockedNotice': 'Cannot change sandbox settings while tasks are In Progress',
     'sandbox.enabled': 'Enabled',
     'sandbox.disabled': 'Disabled',
     'sandbox.default': 'Default',

@@ -457,8 +457,10 @@
 
     onDestroy(cancelLongPress);
 
-    function openMenuAt(x: number, y: number, entry: Entry | null, index: number): void {
+    // suppress native right-click menu
+    function openMenuAt(e: MouseEvent | KeyboardEvent, x: number, y: number, entry: Entry | null, index: number): void {
         if (renaming) return;
+        e.preventDefault();
         // Right-clicking a row outside the selection selects it first.
         if (entry && rowIsSelectable(entry) && !selection.paths.has(entry.path)) {
             selection = { paths: new Set([entry.path]), anchor: index };
@@ -469,7 +471,7 @@
     // Right-clicking the listing below the rows opens the same menu with nothing selected.
     function handleListContextmenu(e: MouseEvent): void {
         if ((e.target as HTMLElement).closest('.file-browser-item')) return;
-        openMenuAt(e.clientX, e.clientY, null, -1);
+        openMenuAt(e, e.clientX, e.clientY, null, -1);
     }
 
     const menuItems = $derived.by((): FileMenuItem[] => {
@@ -628,7 +630,7 @@
             const index = Number(row?.dataset.index);
             if (!row || !Number.isInteger(index) || !entries[index]) return;
             const rect = row.getBoundingClientRect();
-            openMenuAt(rect.left + 16, rect.bottom, entries[index], index);
+            openMenuAt(e, rect.left + 16, rect.bottom, entries[index], index);
             return;
         }
         if (mod && (e.key === 'a' || e.key === 'A')) {
@@ -830,7 +832,7 @@
                     data-index={i}
                     onclick={(e) => handleRowClick(e, entry, i)}
                     ondblclick={() => openEntry(entry, true)}
-                    oncontextmenu={(e) => openMenuAt(e.clientX, e.clientY, entry, i)}
+                    oncontextmenu={(e) => openMenuAt(e, e.clientX, e.clientY, entry, i)}
                     onpointerdown={(e) => handleRowPointerDown(e, i)}
                     onpointermove={handleRowPointerMove}
                     onpointerup={cancelLongPress}

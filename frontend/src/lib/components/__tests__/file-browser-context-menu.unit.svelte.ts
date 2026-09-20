@@ -128,6 +128,44 @@ describe('the file list context menu', () => {
         expect(menuLabels()).toEqual(['Open', 'Cut', 'Copy', 'Delete']);
     });
 
+    // fireEvent returns false once the handler has prevented the default, which is what keeps the
+    // browser's own menu from drawing on top of this one.
+    it('suppresses the browser menu when it opens on a row', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        expect(await fireEvent.contextMenu(rowEl(container, `${ROOT}/a.txt`)!, { clientX: 30, clientY: 30 })).toBe(false);
+        await waitFor(() => expect(menuEl()).toBeTruthy());
+    });
+
+    it('suppresses the browser menu when it opens below the rows', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        expect(await fireEvent.contextMenu(container.querySelector('.file-browser-list')!, { clientX: 60, clientY: 200 })).toBe(false);
+        await waitFor(() => expect(menuEl()).toBeTruthy());
+    });
+
+    it('suppresses the browser menu opened from the keyboard', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        expect(await fireEvent.keyDown(rowEl(container, `${ROOT}/a.txt`)!, { key: 'ContextMenu' })).toBe(false);
+        await waitFor(() => expect(menuEl()).toBeTruthy());
+    });
+
+    it('leaves the browser menu to the rename input', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        await fireEvent.click(rowEl(container, `${ROOT}/a.txt`)!);
+        await openRowMenu(container, `${ROOT}/a.txt`);
+        menuItem('Rename')!.click();
+        await waitFor(() => expect(container.querySelector('.file-rename-input')).toBeTruthy());
+
+        expect(await fireEvent.contextMenu(container.querySelector('.file-rename-input')!)).toBe(true);
+    });
+
     it('offers a paste only once the clipboard holds something', async () => {
         const { container } = openBrowser();
         await loadRoot(container);
