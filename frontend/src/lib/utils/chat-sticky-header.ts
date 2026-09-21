@@ -56,11 +56,16 @@ const TOP_MESSAGE_TOLERANCE = 12;
  * The header stays hidden until the first user message has scrolled out, so it never
  * overlaps that message. The returned entryIdx identifies the exact entry, which
  * keeps the jump target right when first lines repeat.
+ *
+ * `tappedIdx` is the message the header last jumped to. If that message is still the
+ * one above the line, the header names the message before it, so a tap always goes
+ * back one turn.
  */
 export function computeStickyHeader(
     userMessages: StickyUserMessage[],
     scrollTop: number,
     topInset = 0,
+    tappedIdx = -1,
 ): StickyHeaderState {
     if (userMessages.length === 0) {
         return { firstLine: '', entryIdx: -1, show: false };
@@ -69,6 +74,10 @@ export function computeStickyHeader(
     let latest: StickyUserMessage | null = null;
     for (const m of userMessages) {
         if (m.top < line - TOP_MESSAGE_TOLERANCE) latest = m;
+    }
+    if (latest && latest.entryIdx === tappedIdx) {
+        const at = userMessages.indexOf(latest);
+        latest = at > 0 ? userMessages[at - 1] : null;
     }
     const show = latest !== null && scrollTop >= userMessages[0].bottom;
     return {

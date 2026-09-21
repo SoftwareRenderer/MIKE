@@ -61,6 +61,9 @@ export interface ChatFollow {
      * this is a takeover even when the layout changed at the same moment.
      */
     noteUserIntent(): void;
+    /** How many times the reader has shown they want to scroll: wheel, touch drag,
+     *  scroll keys, or `stopFollowing`. */
+    readonly intent: number;
     /** The reader asked for what is above the viewport. Stops the pin loop so growth below does not
      * pull them back. */
     stopFollowing(): void;
@@ -279,6 +282,7 @@ export function createChatFollow(): ChatFollow {
         get atBottom() { return atBottom; },
         get following() { return following; },
         get ready() { return ready; },
+        get intent() { return intentSeq; },
         attach,
         pin,
         handleScroll,

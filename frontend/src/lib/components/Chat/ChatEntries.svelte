@@ -174,6 +174,9 @@
     // The overlay hangs over the top of the scroller, so it decides where a message
     // has to land to be readable rather than behind it.
     let stickyHeaderEl: HTMLElement | null = $state(null);
+    // The message the header last jumped to. Until the reader scrolls by hand again, the
+    // header names the message before it, rather than trusting where the jump ended up.
+    let tapped: { entryIdx: number; intent: number } | null = null;
 
     /**
      * The sticky line: the overlay's bottom edge, measured. A tapped message lands on
@@ -212,7 +215,9 @@
                 bottom: rect.bottom - containerTop + scrollTop,
             });
         }
-        const sticky = computeStickyHeader(userMessages, scrollTop, stickyLineOffset());
+        // The reader scrolled by hand after the tap, so choose by position again.
+        if (tapped && follow.intent !== tapped.intent) tapped = null;
+        const sticky = computeStickyHeader(userMessages, scrollTop, stickyLineOffset(), tapped?.entryIdx ?? -1);
         computedStickyMessage = sticky.firstLine;
         stickyEntryIdx = sticky.entryIdx;
         computedShowHeader = sticky.show;
@@ -229,7 +234,10 @@
         // Declare the takeover, or the follow tracker's pin loop writes scrollTop
         // against us.
         follow.noteUserIntent();
+        tapped = { entryIdx: stickyEntryIdx, intent: follow.intent };
         scrollToLine(scroller, target, stickyLineOffset());
+        // A tap that moves nothing fires no scroll event, so update the header here too.
+        computeStickyFromScroll();
     }
 
     /** One scroll listener for both jobs: shared follow state + sticky header. */

@@ -95,4 +95,34 @@ describe('computeStickyHeader', () => {
         const r = computeStickyHeader([A, B, C], 0, INSET);
         expect(r.show).toBe(false);
     });
+
+    // A message can end up more than 12px above the line, past the tolerance, when the
+    // content above it changes height as it is drawn.
+    describe('after a tap jumped to a message', () => {
+        const overshot = landedAt(B.top) + 30;
+
+        it('names the message before the one it jumped to, past the tolerance', () => {
+            expect(computeStickyHeader([A, B, C], landedAt(B.top), INSET, B.entryIdx).entryIdx).toBe(0);
+            expect(computeStickyHeader([A, B, C], overshot, INSET, B.entryIdx).entryIdx).toBe(0);
+            expect(computeStickyHeader([A, B, C], overshot, INSET, B.entryIdx).firstLine).toBe('First message');
+        });
+
+        it('keeps offering the earlier message while the tapped one is the one above the line', () => {
+            for (const scrollTop of [354, 370, overshot]) {
+                expect(computeStickyHeader([A, B, C], scrollTop, INSET, B.entryIdx).entryIdx).toBe(0);
+            }
+        });
+
+        it('hides the header when the message it jumped to has nothing before it', () => {
+            // A is the first message, so there is no earlier turn to offer.
+            const r = computeStickyHeader([A, B, C], 130, INSET, A.entryIdx);
+            expect(r.show).toBe(false);
+            expect(r.entryIdx).toBe(-1);
+        });
+
+        it('names the tapped message again once a later one is above the line', () => {
+            // C is the message above the line now, so the tap on B no longer applies.
+            expect(computeStickyHeader([A, B, C], landedAt(C.top) + 30, INSET, B.entryIdx).entryIdx).toBe(4);
+        });
+    });
 });

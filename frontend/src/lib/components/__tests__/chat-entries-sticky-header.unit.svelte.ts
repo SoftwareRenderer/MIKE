@@ -84,6 +84,12 @@ const namedEntries = [
     makeEntry('a-2', 'assistant', 'Done'),
 ];
 
+const namedEntries3 = [
+    ...namedEntries,
+    makeEntry('u-c', 'user', 'Charlie request\nmore'),
+    makeEntry('a-3', 'assistant', 'Shipped'),
+];
+
 // Rendered geometry in content space (px from the content top):
 //   user A [0, 400) · assistant [400, 500) · user B [500, 600) · assistant [600, 700)
 const A_TOP = 0, A_BOTTOM = 400, B_TOP = 500, B_BOTTOM = 600;
@@ -93,6 +99,16 @@ const HEADER_HEIGHT = 46;
 /** A checkpoint divider drawn above a user message. */
 const DIVIDER_HEIGHT = 34;
 const SCROLL_HEIGHT = 1200;
+
+// Same conversation, one more message. Scroll positions stay under 600 so the chat is
+// never near the bottom, where it would follow the latest message again.
+const THREE_A_TOP = 0, THREE_A_BOTTOM = 140, THREE_B_TOP = 200, THREE_B_BOTTOM = 350;
+const THREE_C_TOP = 400, THREE_C_BOTTOM = 550;
+const THREE_GEOMETRY = new Map<number, number[]>([
+    [0, [THREE_A_TOP, THREE_A_BOTTOM]],
+    [2, [THREE_B_TOP, THREE_B_BOTTOM]],
+    [4, [THREE_C_TOP, THREE_C_BOTTOM]],
+]);
 
 function rect(top: number, bottom: number) {
     return { top, bottom, left: 0, right: 0, width: 0, height: bottom - top, x: 0, y: top, toJSON: () => ({}) };
@@ -106,7 +122,7 @@ function stubRect(el: Element, value: () => { top: number; bottom: number }) {
  * Live geometry derived from `scrollTop`, so every rect read sees the effect of the
  * previous scroll write and the settle loop converges here as it does on screen.
  */
-function mountGeometry(container: HTMLElement, follow: ChatFollow) {
+function mountGeometry(container: HTMLElement, follow: ChatFollow, geometry?: Map<number, number[]>) {
     const el = container.querySelector<HTMLElement>('.chat-messages')!;
     let top = 0;
     Object.defineProperty(el, 'scrollTop', {
@@ -120,9 +136,9 @@ function mountGeometry(container: HTMLElement, follow: ChatFollow) {
     Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => CONTAINER_HEIGHT });
     stubRect(el, () => ({ top: CONTAINER_TOP, bottom: CONTAINER_TOP + CONTAINER_HEIGHT }));
 
-    const geometry = new Map([[0, [A_TOP, A_BOTTOM]], [2, [B_TOP, B_BOTTOM]]]);
+    const geom = geometry ?? new Map([[0, [A_TOP, A_BOTTOM]], [2, [B_TOP, B_BOTTOM]]]);
     el.querySelectorAll<HTMLElement>('.sticky-user-message').forEach((node) => {
-        const [msgTop, msgBottom] = geometry.get(Number(node.dataset.entryIdx)) ?? [0, 0];
+        const [msgTop, msgBottom] = geom.get(Number(node.dataset.entryIdx)) ?? [0, 0];
         stubRect(node, () => ({
             top: CONTAINER_TOP + msgTop - top,
             bottom: CONTAINER_TOP + msgBottom - top,
@@ -147,6 +163,12 @@ function mountGeometry(container: HTMLElement, follow: ChatFollow) {
         async to(scrollTop: number) {
             follow.noteUserIntent();
             top = scrollTop;
+            el.dispatchEvent(new Event('scroll'));
+            await flush();
+        },
+        /** The view moved on its own: scroll anchoring, or content above changing height. */
+        async nudge(delta: number) {
+            top = Math.max(0, Math.min(top + delta, SCROLL_HEIGHT - CONTAINER_HEIGHT));
             el.dispatchEvent(new Event('scroll'));
             await flush();
         },
@@ -249,5 +271,42 @@ describe('ChatEntries — sticky user-message header', () => {
 
         expect(view.at()).toBe(0);
         expect(container.querySelector('.chat-sticky-header')).toBeNull();
+    });
+
+    // A message can come to rest more than 12px above the line, past the tolerance,
+    // when the content above it changes height as it is drawn.
+    it('shows the previous message when the jump stops above the sticky line', async () => {
+        const { container, follow } = await renderChat(undefined, namedEntries3);
+        const view = mountGeometry(container, follow, THREE_GEOMETRY);
+        await view.to(560);
+        expect(headerText(container)).toBe('Charlie request');
+
+        await tapHeader(container, view);
+        expect(view.at()).toBe(THREE_C_TOP - HEADER_HEIGHT);
+        expect(headerText(container)).toBe('Bravo request');
+
+        // The view drifts 24px further, past the tolerance.
+        await view.nudge(24);
+        expect(headerText(container)).toBe('Bravo request');
+
+        await tapHeader(container, view);
+        expect(view.at()).toBe(THREE_B_TOP - HEADER_HEIGHT);
+        expect(headerText(container)).toBe('Alpha request');
+
+        await tapHeader(container, view);
+        expect(view.at()).toBe(0);
+        expect(container.querySelector('.chat-sticky-header')).toBeNull();
+    });
+
+    it('names the message it jumped to once the reader scrolls by hand', async () => {
+        const { container, follow } = await renderChat(undefined, namedEntries3);
+        const view = mountGeometry(container, follow, THREE_GEOMETRY);
+        await view.to(560);
+        await tapHeader(container, view);
+        await view.nudge(24);
+
+        // The reader scrolled by hand, so the header names the message above the line again.
+        await view.to(430);
+        expect(headerText(container)).toBe('Charlie request');
     });
 });
