@@ -194,6 +194,134 @@ describe('markdownToSafeHTML', () => {
         expect(html).toContain('src="https://example.com/a.png"');
         expect(hazards(html)).toEqual([]);
     });
+
+    it('renders a markdown block inline in the answer', () => {
+        const html = markdownToSafeHTML([
+            'Here is the document:',
+            '',
+            '```markdown',
+            '# Plan',
+            '',
+            '- **do** the thing',
+            '',
+            '| a | b |',
+            '| - | - |',
+            '| 1 | 2 |',
+            '```',
+            '',
+            'That is all.',
+        ].join('\n'));
+        expect(html).toContain('<h1>Plan</h1>');
+        expect(html).toContain('<strong>do</strong>');
+        expect(html).toContain('<td>1</td>');
+        expect(html).not.toContain('<pre');
+        expect(html).toContain('<p>That is all.</p>');
+        expect(hazards(html)).toEqual([]);
+    });
+
+    // The narrow tag match is the escape hatch: any other fence shows markup as source.
+    it.each(['md', 'markdownish', 'text', 'txt', 'plain', 'go'])('leaves a %s fence as source', (tag) => {
+        const html = markdownToSafeHTML(['```' + tag, '# Plan', '```'].join('\n'));
+        expect(html).toContain('<pre><code class="language-' + tag + '"># Plan');
+        expect(html).not.toContain('<h1>');
+    });
+
+    it('leaves an untagged fence as source', () => {
+        const html = markdownToSafeHTML(['```', '# Plan', '```'].join('\n'));
+        expect(html).toMatch(/<pre><code># Plan/);
+        expect(html).not.toContain('<h1>');
+    });
+
+    it('reads the fence tag as the first word of the info string, whatever its case', () => {
+        for (const info of ['markdown', 'Markdown', 'MARKDOWN', 'markdown title=PLAN.md']) {
+            expect(markdownToSafeHTML(['```' + info, '# Plan', '```'].join('\n'))).toContain('<h1>Plan</h1>');
+        }
+    });
+
+    it.each(PAYLOADS)('sanitizes what a markdown block carries: %s', (payload) => {
+        // Control: unrendered, a payload is escaped text in a code block, and "no hazards"
+        // would be true of markup nobody parsed.
+        const html = markdownToSafeHTML(['```markdown', payload, '```'].join('\n'));
+        expect(html).not.toContain('<pre');
+        expect(hazards(html)).toEqual([]);
+    });
+
+    it('keeps the element a fenced payload named and drops the handler from it', () => {
+        const out = markdownToSafeHTML('```markdown\n<img src=x onerror=alert(1)>alt\n```');
+        const box = document.createElement('div');
+        box.innerHTML = out;
+        const img = box.querySelector('img');
+        expect(img, 'the fence delivered an <img>, not its source').not.toBeNull();
+        expect(img?.getAttribute('onerror')).toBeNull();
+        expect(box.textContent).toContain('alt');
+    });
+
+    it('drops the scheme from a fenced link and keeps the anchor', () => {
+        for (const md of ['[click](javascript:alert(1))', '<a href="javascript:alert(1)">click</a>']) {
+            const box = document.createElement('div');
+            box.innerHTML = markdownToSafeHTML(['```markdown', md, '```'].join('\n'));
+            const link = box.querySelector('a');
+            expect(link, `the fence delivered an <a> for ${md}`).not.toBeNull();
+            expect(link?.getAttribute('href')).toBeNull();
+            expect(box.textContent).toContain('click');
+        }
+    });
+
+    it('drops the stylesheet but keeps the fenced container and its prose', () => {
+        const out = markdownToSafeHTML(
+            '```markdown\n<div><style>#app{display:none}</style>Hidden prose</div>\n```',
+        );
+        const box = document.createElement('div');
+        box.innerHTML = out;
+        expect(box.querySelector('div'), 'the fence delivered the <div>').not.toBeNull();
+        expect(box.querySelector('style')).toBeNull();
+        expect(box.textContent).toContain('Hidden prose');
+    });
+
+    it('re-serializes a fenced fragment, so an unbalanced end tag cannot escape the bubble', () => {
+        const out = markdownToSafeHTML('```markdown\n</div><img src=x onerror=alert(1)>after\n```');
+        expect(out).not.toContain('</div');
+        expect(out).not.toContain('onerror');
+        expect(out).toContain('after');
+    });
+
+    it('refuses a fenced fragment exactly as it refuses the same fragment bare', () => {
+        // One pass over composed HTML must not be a looser configuration than the fragment path.
+        const payload = '<p style="position:fixed;inset:0">Sign in</p><div><style>#app{display:none}</style></div>';
+        expect(markdownToSafeHTML(['```markdown', payload, '```'].join('\n')))
+            .toBe(sanitizeHTML(payload));
+    });
+
+    it('gives a fenced link no new browsing context', () => {
+        // With no `target`, a fenced link cannot open a window of its own.
+        const out = markdownToSafeHTML('```markdown\n[a](https://example.com/a)\n```');
+        expect(out).toContain('href="https://example.com/a"');
+        expect(out).not.toMatch(/target/i);
+    });
+
+    it('renders an unclosed markdown block as the tokens arrive', () => {
+        // A fence with no closing line is one code token, so streaming never flashes raw source.
+        const html = markdownToSafeHTML('Sure:\n\n```markdown\n# Plan\n\n- one\n- tw');
+        expect(html).toContain('<h1>Plan</h1>');
+        expect(html).toContain('<li>one</li>');
+        expect(html).not.toContain('<pre');
+    });
+
+    it('renders one level of markdown block and no deeper', () => {
+        // A block quoting markdown is source again, so one block costs one parse however deep it nests.
+        const html = markdownToSafeHTML([
+            '```markdown',
+            '# outer',
+            '',
+            '````markdown',
+            '# inner',
+            '````',
+            '```',
+        ].join('\n'));
+        expect(html).toContain('<h1>outer</h1>');
+        expect(html).toContain('<code class="language-markdown"># inner');
+        expect(html).not.toContain('<h1>inner</h1>');
+    });
 });
 
 describe('the hazard scanner itself', () => {
