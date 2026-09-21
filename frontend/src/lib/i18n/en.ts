@@ -746,8 +746,6 @@ const catalog = {
     'updates.enable': 'Check for new releases',
     'updates.enableDesc': 'Check {host} for updates once per day. Nothing is installed until you click Install.',
     'updates.managed': 'Updates are managed by your organization.',
-    'updates.off': 'Status: Auto Updates are disabled.',
-    'updates.noneKnown': 'MIKE has not checked for a new release yet.',
     'updates.available': 'Release {version} is available',
     'updates.upToDate': 'You are up to date — {version} is the latest release',
     'updates.lastChecked': 'Last checked {time}',

@@ -96,14 +96,19 @@ describe('a packaged install', () => {
         expect(verdict?.textContent).not.toContain('No release newer than');
     });
 
+    it('says the row has no verdict until a check has produced a version', () => {
+        const { container } = open({});
+        expect(container.querySelector('[data-testid="update-verdict"]')).toBeNull();
+    });
+
     it('names the host the switch is asking', () => {
         const { container } = open({});
         expect(container.textContent).toContain('getmike.dev');
     });
 
-    it('says plainly that the switch downloads as well as asks', () => {
+    it('says nothing reaches disk without the install click', () => {
         const { container } = open({});
-        expect(container.textContent).toContain('download one when it does');
+        expect(container.textContent).toContain('Nothing is installed until you click Install');
     });
 });
 
@@ -223,9 +228,9 @@ describe('who decided', () => {
         expect(toggle?.getAttribute('aria-describedby')).toBe('update-check-desc');
     });
 
-    it('marks the feature off in the reader\'s own words when the preference is off', () => {
+    it('leaves an off preference with nothing but the switch', () => {
         const { container } = open({ enabled: false }, false);
-        expect(container.textContent).toContain('Checks are off');
+        expect(container.querySelector('[data-testid="update-verdict"]')).toBeNull();
         expect(container.querySelector('[data-testid="update-check-now"]')).toBeNull();
     });
 
