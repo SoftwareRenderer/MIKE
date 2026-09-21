@@ -410,14 +410,14 @@ func TestLatestSandboxStatsFrame(t *testing.T) {
 	asm := NewAppStreamManager(nil, nil)
 
 	if frame := asm.latestSandboxStatsFrame("p1", "t1"); frame != nil {
-		t.Fatalf("expected nil frame without provider, got %s", frame)
+		t.Fatalf("expected nil frame without provider, got %v", frame)
 	}
 
 	asm.SetSandboxStatsProvider(func(projectID, taskID string) *types.SandboxMemoryStats {
 		return nil
 	})
 	if frame := asm.latestSandboxStatsFrame("p1", "t1"); frame != nil {
-		t.Fatalf("expected nil frame when provider returns nil, got %s", frame)
+		t.Fatalf("expected nil frame when provider returns nil, got %v", frame)
 	}
 
 	gotProject, gotTask := "", ""
@@ -432,7 +432,7 @@ func TestLatestSandboxStatsFrame(t *testing.T) {
 	if gotProject != "proj-x" || gotTask != "task-y" {
 		t.Fatalf("provider called with (%q, %q), want (\"proj-x\", \"task-y\")", gotProject, gotTask)
 	}
-	msg := decodeFrame(t, frame)
+	msg := decodeFrame(t, frame.data)
 	if msg["event"] != "sandbox_stats" {
 		t.Fatalf("expected event=sandbox_stats, got %v", msg["event"])
 	}
@@ -570,5 +570,10 @@ func toolCall(data map[string]any) types.StreamEvent {
 // replayedFrames is what a subscriber of the task is owed: the buffer with one frame per streaming
 // tool call. It is the two steps subscribeTask takes, so a test reading the buffer reads the replay.
 func replayedFrames(asm *AppStreamManager, taskKey string) [][]byte {
-	return foldToolCallFrames(asm.taskBufferFrames(taskKey))
+	queued := foldToolCallFrames(asm.taskBufferFrames(taskKey))
+	frames := make([][]byte, 0, len(queued))
+	for _, frame := range queued {
+		frames = append(frames, frame.data)
+	}
+	return frames
 }

@@ -53,6 +53,19 @@ fetch can run on a detached context while the swap stays behind a click; the rou
 - Use optimistic UI for user messages (add immediately, skip the echo).
 - Model/provider changes ride a `user_message` with optional `model_name`/`llama_server_url`.
 
+### The task row a browser holds has no result text
+
+`output` is the text the agent reported when its turn ended. It is the largest field a row has, and nothing in
+`frontend/src` reads it: the chat shows the thread's messages, and the `token` frames carried those words
+already. So a whole task row reaches a browser only through `stream.TaskForBrowser`, which clears the field —
+in the `task_updated` frame and on the board route. The key still arrives, empty, so a row always has the same
+shape. `GET /api/projects/{projectID}/tasks[/{taskID}]` answers in full; it is token-scoped and its reader
+asked for the result (`docs/api.md`). This holds because every client write names the fields it changed
+(*Partial updates decode into pointer fields*). Measured with the byte counter in `backend/stream/traffic.go`:
+a row is about 750 bytes of fixed shape, and one holding a 6.3 KB result cost 55 KB over 8 broadcasts to one
+tab, against 6.4 KB with the field cleared. Tests: `backend/stream/browser_row_test.go`,
+`backend/server/board_row_test.go`.
+
 ### A retried LLM call names itself in a field
 
 When the first attempt of an LLM call fails, `sendRetryHint` (`backend/exec/loop.go`) broadcasts one

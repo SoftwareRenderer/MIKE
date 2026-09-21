@@ -182,7 +182,7 @@ func TestSendQueueHoldsItsFrameAndByteBoundsByDroppingTheOldest(t *testing.T) {
 		return frame
 	}
 	for i := 0; i < 30; i++ {
-		q.push(marked(i))
+		q.push(marked(i), "board_refresh")
 	}
 
 	q.mu.Lock()
@@ -201,7 +201,7 @@ func TestSendQueueHoldsItsFrameAndByteBoundsByDroppingTheOldest(t *testing.T) {
 		if !ok {
 			break
 		}
-		survivors = append(survivors, frame[0])
+		survivors = append(survivors, frame.data[0])
 	}
 	if len(survivors) == 0 || len(survivors) >= 30 {
 		t.Fatalf("%d frames survived 30 pushes into a bounded queue", len(survivors))
@@ -222,21 +222,21 @@ func TestSendQueueHoldsItsFrameAndByteBoundsByDroppingTheOldest(t *testing.T) {
 // frames arrive it is the oldest one that goes.
 func TestSendQueueKeepsOneOversizedFrameUntilTheNewerOnesNeedTheRoom(t *testing.T) {
 	q := newSendQueue(10, 100)
-	q.push(bytes.Repeat([]byte("y"), 1000))
-	if frame, ok := q.pop(); !ok || len(frame) != 1000 {
-		t.Fatalf("the queue refused to hold a frame over its byte bound: ok=%v len=%d", ok, len(frame))
+	q.push(bytes.Repeat([]byte("y"), 1000), "board_refresh")
+	if frame, ok := q.pop(); !ok || len(frame.data) != 1000 {
+		t.Fatalf("the queue refused to hold a frame over its byte bound: ok=%v len=%d", ok, len(frame.data))
 	}
 
-	q.push(bytes.Repeat([]byte("y"), 1000))
-	q.push([]byte(`{"type":"board_refresh"}`))
+	q.push(bytes.Repeat([]byte("y"), 1000), "board_refresh")
+	q.push([]byte(`{"type":"board_refresh"}`), "board_refresh")
 	q.mu.Lock()
 	frames, held := len(q.live), q.bytes
 	q.mu.Unlock()
 	if held > 100 {
 		t.Fatalf("%d frame(s) holding %d bytes left in a queue bounded at 100 bytes", frames, held)
 	}
-	if frame, ok := q.pop(); !ok || len(frame) != 24 {
-		t.Fatalf("dropping the oldest left a %d-byte frame, not the newest one", len(frame))
+	if frame, ok := q.pop(); !ok || len(frame.data) != 24 {
+		t.Fatalf("dropping the oldest left a %d-byte frame, not the newest one", len(frame.data))
 	}
 	if missed := q.droppedFrames(); missed != 1 {
 		t.Fatalf("the oversized frame was dropped, and the connection is marked as having missed %d", missed)
@@ -248,12 +248,12 @@ func TestSendQueueKeepsOneOversizedFrameUntilTheNewerOnesNeedTheRoom(t *testing.
 // replay cannot keep are its own oldest ones.
 func TestReplayGoesAheadOfWhatIsAlreadyQueued(t *testing.T) {
 	q := newSendQueue(10, 1<<20)
-	q.push([]byte("live-1"))
-	q.push([]byte("live-2"))
-	q.pushReplay([][]byte{[]byte("replay-1"), []byte("replay-2")})
+	q.push([]byte("live-1"), "token")
+	q.push([]byte("live-2"), "token")
+	q.pushReplay([]outboundFrame{{data: []byte("replay-1"), bucket: "token"}, {data: []byte("replay-2"), bucket: "token"}})
 	// A second task subscribed while the first replay is still queued: its own replay goes behind
 	// that one, not in front of it.
-	q.pushReplay([][]byte{[]byte("replay-3")})
+	q.pushReplay([]outboundFrame{{data: []byte("replay-3"), bucket: "token"}})
 
 	var order []string
 	for {
@@ -261,23 +261,23 @@ func TestReplayGoesAheadOfWhatIsAlreadyQueued(t *testing.T) {
 		if !ok {
 			break
 		}
-		order = append(order, string(frame))
+		order = append(order, string(frame.data))
 	}
 	want := []string{"replay-1", "replay-2", "replay-3", "live-1", "live-2"}
 	if strings.Join(order, ",") != strings.Join(want, ",") {
 		t.Fatalf("queue drained %v, want %v", order, want)
 	}
 
-	q.pushReplay([][]byte{[]byte("replay-a"), []byte("replay-b"), []byte("replay-c")})
+	q.pushReplay([]outboundFrame{{data: []byte("replay-a"), bucket: "token"}, {data: []byte("replay-b"), bucket: "token"}, {data: []byte("replay-c"), bucket: "token"}})
 	q.frame = 2
-	q.push([]byte("live-3"))
+	q.push([]byte("live-3"), "token")
 	drained := ""
 	for {
 		frame, ok := q.pop()
 		if !ok {
 			break
 		}
-		drained += string(frame) + " "
+		drained += string(frame.data) + " "
 	}
 	if drained != "replay-c live-3 " {
 		t.Fatalf("an overflowing replay drained %q, keeping the tail of the replay and the newest live frame", drained)
