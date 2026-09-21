@@ -30,6 +30,19 @@ Three deliberate differences from DOMPurify's defaults:
 
 `class` stays — the LSP plugin colors fenced code with `tok-*`.
 
+A fence whose info string is `markdown` is rendered, not shown, so an answer carrying a fenced document
+arrives as a document. Every other tag — `md`, `text`, a language, none at all — keeps the code block:
+that is how generated text displays markup the reader is meant to see. The embedded parse uses a
+`marked` instance with no renderer of its own, so a `markdown` fence *inside* one is source again — one
+nested parse per block. An unclosed fence renders the same way, so a streaming answer never reverts to
+raw source.
+
+The nested HTML joins the outer parse's output before either is sanitized, so one `sanitizeHTML` call
+covers both. `__tests__/sanitize.unit.ts` re-runs the payload list through a fence to hold that, with
+"no `<pre>` in the output" as its control: unrendered, a payload is escaped text and inert for the wrong
+reason. `__tests__/chat-markdown-fence.unit.svelte.ts` proves the chat bubble and the tool card go
+through the same helper.
+
 The tests are written as the payload list plus a control case for each refusal, proving it is this config
 and not DOMPurify's, each control written against the shape the defaults **keep** — a refusal tested only
 on the shape they already refuse proves nothing: `src/lib/utils/__tests__/sanitize.unit.ts`, scanned by

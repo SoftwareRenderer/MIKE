@@ -55,7 +55,7 @@
  * selects a rule the application already ships, `app.css` has no `position: fixed`
  * rule for untrusted markup to adopt, and component styles are scope-hashed.
  */
-import { marked } from 'marked';
+import { Marked } from 'marked';
 import DOMPurify from 'dompurify';
 
 /** Attributes no untrusted fragment may carry, whatever their value. A mutable
@@ -83,6 +83,28 @@ export function sanitizeHTML(html: string, forbidTags?: readonly string[]): stri
 }
 
 /**
+ * The only fence tag rendered rather than shown. Every other tag stays a code block, which is how
+ * generated text displays markup the reader is meant to read.
+ */
+const RENDERED_FENCE_TAG = 'markdown';
+
+/** Markdown parsed the default way, for inside a rendered fence. With no renderer of its own, a
+ * `RENDERED_FENCE_TAG` fence in there is source again, so one block costs one parse. */
+const plainMarkdown = new Marked({ async: false });
+
+/** The parse a sink hands its text to: `false` from a renderer method is marked's "the built-in one".
+ * The nested HTML goes into this output, so the one `sanitizeHTML` call covers a fenced document. */
+const embeddingMarkdown = new Marked({ async: false }).use({
+    renderer: {
+        code({ lang, text }) {
+            // `lang` is the whole info string, not just the tag.
+            if (lang?.trim().split(/\s+/)[0].toLowerCase() !== RENDERED_FENCE_TAG) return false;
+            return plainMarkdown.parse(text, { async: false });
+        },
+    },
+});
+
+/**
  * Markdown authored outside this app, rendered and sanitized in one step — the shape
  * every chat-side sink needs. `async: false` is not a style choice: without it
  * `marked` returns a promise and the sink would stringify a `[object Promise]`.
@@ -93,7 +115,7 @@ export function sanitizeHTML(html: string, forbidTags?: readonly string[]): stri
  * directly).
  */
 export function markdownToSafeHTML(markdown: string): string {
-    return sanitizeHTML(marked.parse(markdown, { async: false }) as string);
+    return sanitizeHTML(embeddingMarkdown.parse(markdown, { async: false }));
 }
 
 /**
