@@ -148,7 +148,7 @@ STYLE_SINKS: dict[tuple[str, str], str] = {
         "contains:var(-- — getSymbolColor maps a fixed LSP kind onto a token",
     ("src/lib/components/BranchSymbols.svelte", "getSymbolColor(symbol.kind)"):
         "contains:var(-- — getSymbolColor maps a fixed LSP kind onto a token",
-    ("src/lib/components/GitStatusPanel.svelte", "getStatusBadge(entry).color"):
+    ("src/lib/components/GitStatusPanel.svelte", "getStatusBadge(row).color"):
         "hex-colors:self — getStatusBadge in this file returns a hex color per status",
     ("src/lib/components/DiffViewer.svelte", "badge.color"):
         "hex-colors:lib/utils/diff-parser — getStatusBadge there returns a hex color per status",
