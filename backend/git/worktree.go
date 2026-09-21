@@ -154,7 +154,7 @@ func IsGitIgnored(repoRoot, relPath string) bool {
 	}
 	if filepath.IsAbs(relPath) {
 		rel, err := filepath.Rel(repoRoot, relPath)
-		if err != nil || strings.HasPrefix(rel, "..") {
+		if err != nil || !fsutil.RelInsideRoot(rel) {
 			return false
 		}
 	}

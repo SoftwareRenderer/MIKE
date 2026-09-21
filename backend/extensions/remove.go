@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"mike/backend/fsutil"
 	"mike/pkg/logging"
 )
 
@@ -94,8 +95,5 @@ func unsafeDirName(name string) string {
 // extension and is never the thing being deleted.
 func insideDir(root, path string) bool {
 	rel, err := filepath.Rel(root, path)
-	if err != nil || rel == "." || rel == ".." {
-		return false
-	}
-	return !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	return err == nil && fsutil.RelBelowRoot(rel)
 }

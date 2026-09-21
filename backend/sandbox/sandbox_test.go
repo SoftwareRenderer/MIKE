@@ -632,7 +632,7 @@ func TestBuildImage(t *testing.T) {
 	projectName := "test-build-proj"
 
 	// Build the image
-	err := sm.BuildImage(projectName, dockerfile)
+	err := sm.BuildImageWithProgress(projectName, dockerfile, nil)
 	if err != nil {
 		t.Fatalf("build image: %v", err)
 	}
@@ -660,7 +660,7 @@ func TestBuildImage_InvalidDockerfile(t *testing.T) {
 		t.Fatalf("write dockerfile: %v", err)
 	}
 
-	err := sm.BuildImage("test-invalid-proj", dockerfile)
+	err := sm.BuildImageWithProgress("test-invalid-proj", dockerfile, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid Dockerfile")
 	}
@@ -672,7 +672,7 @@ func TestBuildImage_MissingFile(t *testing.T) {
 		t.Skip("gVisor not available, skipping build test")
 	}
 
-	err := sm.BuildImage("test-missing-proj", "/nonexistent/path/Dockerfile")
+	err := sm.BuildImageWithProgress("test-missing-proj", "/nonexistent/path/Dockerfile", nil)
 	if err == nil {
 		t.Fatal("expected error for missing Dockerfile")
 	}
@@ -1316,7 +1316,7 @@ func TestCreate_PlanModeReadonlyMount(t *testing.T) {
 	taskID := "test-plan-task"
 
 	// Create with plan mode (read-only mount)
-	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{PlanMode: true})
+	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{WorktreeReadOnly: true})
 	if err != nil {
 		t.Fatalf("create sandbox with plan mode: %v", err)
 	}

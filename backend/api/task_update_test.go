@@ -205,9 +205,8 @@ func TestPUTTask_MalformedBodyIsRejectedNotIgnored(t *testing.T) {
 }
 
 // TestPOSTTask_FieldWrongTypeIsRejected covers the create path, which decodes into types.Task
-// directly and so never had the assertion problem - except for attachments and the legacy
-// plan_mode bool, the two values read out of the raw fields, and operating_mode which no path
-// validated at all before this.
+// directly and so never had the assertion problem - except for attachments, the one value read out
+// of the raw fields, and operating_mode which no path validated at all before this.
 func TestPOSTTask_FieldWrongTypeIsRejected(t *testing.T) {
 	h, s, _ := newTestTaskHandler(t)
 	setupTaskValidationProject(t, h, s)
@@ -216,7 +215,6 @@ func TestPOSTTask_FieldWrongTypeIsRejected(t *testing.T) {
 
 	for _, tc := range []struct{ name, body string }{
 		{"attachments is a number", `{"title":"t","attachments":42}`},
-		{"plan_mode is a string", `{"title":"t","plan_mode":"yes"}`},
 		{"operating_mode unknown", `{"title":"t","operating_mode":"autocomplete"}`},
 		{"operating_mode wrong type", `{"title":"t","operating_mode":9}`},
 	} {
@@ -226,19 +224,6 @@ func TestPOSTTask_FieldWrongTypeIsRejected(t *testing.T) {
 				t.Fatalf("status = %d, want 400 (body %s)", rr.Code, rr.Body.String())
 			}
 		})
-	}
-
-	// And the shape that must still work: a plan task created by the legacy flag.
-	rr := doTaskRequest(t, mux, http.MethodPost, path, json.RawMessage(`{"title":"planned","plan_mode":true}`))
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("legacy plan_mode POST: status %d body %s, want 201", rr.Code, rr.Body.String())
-	}
-	var created types.Task
-	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode created task: %v", err)
-	}
-	if created.OperatingMode != types.ModePlan {
-		t.Errorf("operating_mode = %q, want plan from plan_mode:true", created.OperatingMode)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"mike/backend/fsutil"
 	"mike/backend/httputil"
 	"mike/backend/types"
 	"mike/pkg/logging"
@@ -1799,7 +1800,7 @@ func resolveProxyTemplate(template string, config map[string]any) string {
 func servedURLFromDir(extensionsDir, dir string) string {
 	extensionsDir = filepath.Clean(extensionsDir)
 	rel, err := filepath.Rel(extensionsDir, dir)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if err != nil || !fsutil.RelBelowRoot(rel) {
 		return ""
 	}
 	segments := strings.Split(rel, string(filepath.Separator))

@@ -140,7 +140,8 @@ Sends the fields you want and reads the row back. The ones a headless caller nor
 - Anything you leave out takes the server's task defaults, including the model and the merge flags.
   Anything you send wins.
 - Unknown `operating_mode`, an unknown `status`, or a `parent_task_id` that is not a task of this
-  project is a `400` naming the problem. The response is the created task, with its `id`.
+  project is a `400` naming the problem, and so is a body carrying `plan_mode`: the answer names
+  `operating_mode`, which is the field that decides. The response is the created task, with its `id`.
 
 ```bash
 curl -sS -X POST -H "Authorization: Bearer $MIKE_TOKEN" -H 'Content-Type: application/json' \

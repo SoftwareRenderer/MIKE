@@ -518,8 +518,8 @@ func (s *Server) deleteThreadBranch(taskID string, branchName string) {
 // Parks the worktree's changes for threadID. A clean worktree returns "" with no error: nothing to save.
 func (s *Server) stashWorktreeState(projectID, taskID, threadID, label string) (string, error) {
 	wm := s.executor.WorktreeMgr()
-	// The status is read here rather than through HasWorktreeChanges, which reports a worktree it cannot
-	// read as clean — and an unreadable worktree is exactly what a caller must not overwrite.
+	// The status is read here rather than through a yes/no helper: a worktree this cannot read must
+	// never answer "clean", and an unreadable worktree is exactly what a caller must not overwrite.
 	status, err := wm.GitStatus(taskID)
 	if err != nil {
 		return "", fmt.Errorf("read the worktree state: %w", err)

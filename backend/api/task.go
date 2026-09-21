@@ -127,6 +127,13 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusBadRequest, "unknown operating mode")
 			return
 		}
+		// plan_mode is the retired boolean spelling of operating_mode. Two spellings deciding one
+		// mode is how the older one wins over an explicit operating_mode in the same body, so a
+		// request that still carries it is refused rather than reinterpreted.
+		if rawBody.has("plan_mode") {
+			httputil.JSONError(w, http.StatusBadRequest, "plan_mode is not a task field: send operating_mode (act, plan or explore)")
+			return
+		}
 		task.ID = types.GenerateTaskID()
 		// Ensure uniqueness
 		for {
@@ -165,19 +172,10 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 				}
 				types.ApplyTaskCreationDefaults(&task, cfg, parentTask, skipFields)
 
-				if !rawBody.has("operating_mode") && !rawBody.has("plan_mode") {
+				if !rawBody.has("operating_mode") {
 					if cfg.DefaultOperatingMode != nil {
 						task.OperatingMode = *cfg.DefaultOperatingMode
 					}
-				}
-				// Backward compat: if client sends plan_mode (bool), convert to operating_mode
-				var planMode bool
-				if _, err := rawBody.decode("plan_mode", &planMode); err != nil {
-					httputil.JSONError(w, http.StatusBadRequest, err.Error())
-					return
-				}
-				if planMode {
-					task.OperatingMode = types.ModePlan
 				}
 				// Default to act if nothing set it: the zero OperatingMode is "", which is
 				// not a mode, and an empty mode gets the act tool set by fall-through while

@@ -17,7 +17,7 @@
  "docs/adr/README.md": {
   "history": 0,
   "longsent": 0,
-  "words": 557
+  "words": 579
  },
  "docs/agent-extensions.md": {
   "history": 0,
@@ -32,7 +32,7 @@
  "docs/api.md": {
   "history": 0,
   "longsent": 2,
-  "words": 1687
+  "words": 1704
  },
  "docs/auto-answer.md": {
   "history": 0,
@@ -57,7 +57,7 @@
  "docs/confinement.md": {
   "history": 0,
   "longsent": 13,
-  "words": 2167
+  "words": 2201
  },
  "docs/extension-dependency-cache.md": {
   "history": 4,
@@ -72,7 +72,7 @@
  "docs/extension-tools.md": {
   "history": 0,
   "longsent": 4,
-  "words": 1369
+  "words": 1366
  },
  "docs/frontend-updates.md": {
   "history": 2,
@@ -137,12 +137,12 @@
  "docs/reconnection.md": {
   "history": 6,
   "longsent": 31,
-  "words": 5777
+  "words": 5775
  },
  "docs/sandbox-bridge.md": {
-  "history": 4,
+  "history": 3,
   "longsent": 6,
-  "words": 2479
+  "words": 2447
  },
  "docs/sandbox-runtime.md": {
   "history": 0,

@@ -37,10 +37,12 @@ projects too because the server process enforces them.
   (`store.GetTask(project.ID, taskID)`) before either is honoured. `resolveWorktreeForFile` calls it too,
   because the preview asset root is derived from the same resolution and a preview token is read without
   a session.
-- Both jails go through `fsutil.Contained`, which requires the lexical path *and* the symlink-resolved
-  path to sit inside a root — a task with an rw bind mount can plant `link -> /etc` in its own worktree,
-  and a lexical prefix check reads right through it. The preview asset root uses the same
-  `fsutil.Contained` call rather than resolving both sides by hand.
+- Both jails go through `fsutil.Contained`, which needs the lexical path *and* the symlink-resolved path
+  inside a root: a task with an rw bind mount can plant `link -> /etc` in its own worktree and a lexical
+  check reads through it. The preview asset root calls it too.
+- **Whether a `filepath.Rel` landed inside its root is `fsutil.RelInsideRoot` / `RelBelowRoot`**, never a
+  hand-written `..` test: the two differ by `"."`, the root itself, and the loose `HasPrefix(rel, "..")`
+  also refuses the legal name `..foo`. Lexical half only — a jail adds `Contained` for the symlink half.
 - **A write goes through `fsWriteTarget` then `writeContainedFile`** instead of repeating the steps:
   `fsWorktreeRoot` → `requireSandboxAvailable` → `ContainerToHost` → `validateFSPath` are each the jail
   for the next, so a handler that drops one — or passes `""` where the worktree root belongs — writes
