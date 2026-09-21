@@ -1667,6 +1667,11 @@ const catalog = {
     'git.pullFailed': 'Pull failed',
     'git.pushedToRemote': 'Pushed to remote',
     'git.pushFailed': 'Push failed',
+    'git.pullFromRemote': 'Pull from remote',
+    'git.pushToRemote': 'Push to remote',
+    'git.commitsBehind': { one: '{marker}{count} commit behind', other: '{marker}{count} commits behind' },
+    'git.commitsAhead': { one: '{marker}{count} commit ahead', other: '{marker}{count} commits ahead' },
+    'git.countsAsOfLastSync': 'as of the last pull or push',
     'git.repoChangedTitle': 'Repository has changed',
     'git.repoChangedMessage':
         'The repository has been modified since you opened this panel (e.g., a merge or checkout). Refresh before committing?',

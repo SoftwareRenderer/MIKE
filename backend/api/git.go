@@ -374,13 +374,39 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	if emailOut, err := git.Command("", "-C", project.Path, "config", "user.email").CombinedOutput(); err == nil {
 		authorEmail = strings.TrimSpace(string(emailOut))
 	}
+	ahead, behind := remoteAheadBehind(project.Path)
 	httputil.JSONResponse(w, http.StatusOK, map[string]any{
 		"clean":       clean,
 		"status":      string(out),
 		"head":        headHash,
 		"authorName":  authorName,
 		"authorEmail": authorEmail,
+		"ahead":       ahead,
+		"behind":      behind,
 	})
+}
+
+// remoteAheadBehind reads refs/remotes/…, so the count moves when something fetches and never
+// contacts the remote itself — which is why the caller marks it approximate. A missing upstream, a
+// detached HEAD and an unborn branch answer 0/0: the status snapshot has to keep answering.
+func remoteAheadBehind(dir string) (ahead, behind int) {
+	c := git.Command("", "-C", dir, "rev-list", "--left-right", "--count", "HEAD...@{upstream}")
+	// stdout only, so a git warning on stderr cannot reach the parse.
+	out, err := c.Output()
+	if err != nil {
+		return 0, 0
+	}
+	// The two counts are tab-separated; the left one is HEAD's side.
+	fields := strings.Fields(string(out))
+	if len(fields) != 2 {
+		return 0, 0
+	}
+	a, aerr := strconv.Atoi(fields[0])
+	b, berr := strconv.Atoi(fields[1])
+	if aerr != nil || berr != nil {
+		return 0, 0
+	}
+	return a, b
 }
 
 // HandleProjectDiffFile returns the diff for one file in the project, plus its full working-tree

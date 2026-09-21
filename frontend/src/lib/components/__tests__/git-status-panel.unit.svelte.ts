@@ -71,7 +71,7 @@ function baseProps() {
 beforeEach(() => {
     vi.clearAllMocks();
     // Clean working tree by default.
-    getGitStatus.mockResolvedValue({ clean: true, status: '', head: 'h1', authorName: 'Test', authorEmail: 'test@test.com' });
+    getGitStatus.mockResolvedValue({ clean: true, status: '', head: 'h1', authorName: 'Test', authorEmail: 'test@test.com', ahead: 0, behind: 0 });
     getProjectDiffFiles.mockResolvedValue([]);
     getProjectDiffFile.mockRejectedValue(new Error('no untracked files'));
     getGitLogFull.mockResolvedValue({ commits: [COMMIT], current_branch: 'main' });
@@ -110,7 +110,7 @@ describe('GitStatusPanel header actions', () => {
     });
 
     it('enables the Commit button when there are staged entries', async () => {
-        getGitStatus.mockResolvedValue({ clean: false, status: 'M  staged.txt', head: 'h1', authorName: 'Test', authorEmail: 'test@test.com' });
+        getGitStatus.mockResolvedValue({ clean: false, status: 'M  staged.txt', head: 'h1', authorName: 'Test', authorEmail: 'test@test.com', ahead: 0, behind: 0 });
 
         const { container } = render(GitStatusPanel, { props: baseProps() });
         const btn = container.querySelector<HTMLButtonElement>('.panel-commit-btn');
@@ -123,12 +123,10 @@ describe('GitStatusPanel header actions', () => {
     it('renders Pull and Push buttons with tooltips', () => {
         const { container } = render(GitStatusPanel, { props: baseProps() });
 
-        const pull = container.querySelector('button[aria-label="Pull from remote"]');
-        const push = container.querySelector('button[aria-label="Push to remote"]');
+        const pull = container.querySelector('button[aria-label^="Pull from remote"]');
+        const push = container.querySelector('button[aria-label^="Push to remote"]');
         expect(pull).not.toBeNull();
         expect(push).not.toBeNull();
-        expect(pull!.getAttribute('title')).toBe('Pull from remote');
-        expect(push!.getAttribute('title')).toBe('Push to remote');
 
         // The in-panel Refresh button is gone — rely on the browser's reload.
         expect(container.querySelector('button[aria-label="Refresh"]')).toBeNull();
@@ -137,7 +135,7 @@ describe('GitStatusPanel header actions', () => {
     it('pull button calls the pull API, shows a success toast, and fires onUpdated', async () => {
         const onUpdated = vi.fn();
         const { container } = render(GitStatusPanel, { props: { ...baseProps(), onUpdated } });
-        const pull = container.querySelector('button[aria-label="Pull from remote"]') as HTMLButtonElement;
+        const pull = container.querySelector('button[aria-label^="Pull from remote"]') as HTMLButtonElement;
 
         pull.click();
 
@@ -151,7 +149,7 @@ describe('GitStatusPanel header actions', () => {
     it('push button calls the push API, shows a success toast, and fires onUpdated', async () => {
         const onUpdated = vi.fn();
         const { container } = render(GitStatusPanel, { props: { ...baseProps(), onUpdated } });
-        const push = container.querySelector('button[aria-label="Push to remote"]') as HTMLButtonElement;
+        const push = container.querySelector('button[aria-label^="Push to remote"]') as HTMLButtonElement;
 
         push.click();
 
@@ -167,7 +165,7 @@ describe('GitStatusPanel header actions', () => {
         pushProject.mockRejectedValue(new Error('git push failed: fatal: The current branch main has no upstream branch.'));
 
         const { container } = render(GitStatusPanel, { props: { ...baseProps(), onUpdated } });
-        const push = container.querySelector('button[aria-label="Push to remote"]') as HTMLButtonElement;
+        const push = container.querySelector('button[aria-label^="Push to remote"]') as HTMLButtonElement;
 
         push.click();
 
@@ -178,5 +176,67 @@ describe('GitStatusPanel header actions', () => {
             )
         );
         expect(onUpdated).not.toHaveBeenCalled();
+    });
+});
+
+describe('GitStatusPanel pull/push commit counts', () => {
+    function counts(container: HTMLElement) {
+        const spans = container.querySelectorAll('.panel-icon-btn .panel-count');
+        return { pull: spans[0]?.textContent, push: spans[1]?.textContent };
+    }
+
+    it('puts the behind count on Pull and the ahead count on Push, marked approximate before this panel has synced', async () => {
+        getGitStatus.mockResolvedValue({ clean: true, status: '', head: 'h1', authorName: 'Test', authorEmail: 'test@test.com', ahead: 2, behind: 3 });
+
+        const { container } = render(GitStatusPanel, { props: baseProps() });
+        await waitFor(() => expect(counts(container).pull).toBe('~3'));
+        expect(counts(container).push).toBe('~2');
+
+        // The visible span is aria-hidden, so the numbers have to ride the accessible name.
+        const pull = container.querySelector('button[aria-label^="Pull from remote"]')!;
+        expect(pull.getAttribute('aria-label')).toBe('Pull from remote (~3 commits behind) — as of the last pull or push');
+        expect(pull.querySelector('.panel-count')?.getAttribute('aria-hidden')).toBe('true');
+    });
+
+    it('shows the singular and the exact label once the panel has synced', async () => {
+        getGitStatus.mockResolvedValue({ clean: true, status: '', head: 'h1', authorName: 'Test', authorEmail: 'test@test.com', ahead: 1, behind: 0 });
+        const { container } = render(GitStatusPanel, { props: baseProps() });
+        const push = container.querySelector('button[aria-label^="Push to remote"]') as HTMLButtonElement;
+
+        push.click();
+        await waitFor(() => expect(pushProject).toHaveBeenCalled());
+
+        await waitFor(() => expect(counts(container).push).toBe('1'));
+        expect(push.getAttribute('aria-label')).toBe('Push to remote (1 commit ahead)');
+    });
+
+    it('renders 0 for a branch that is in sync or has no upstream', async () => {
+        const { container } = render(GitStatusPanel, { props: baseProps() });
+
+        await waitFor(() => expect(counts(container).pull).toBe('~0'));
+        expect(counts(container).push).toBe('~0');
+    });
+
+    it('marks the counts exact after a pull, which fetched', async () => {
+        getGitStatus.mockResolvedValue({ clean: true, status: '', head: 'h1', authorName: 'Test', authorEmail: 'test@test.com', ahead: 0, behind: 4 });
+        const { container } = render(GitStatusPanel, { props: baseProps() });
+        await waitFor(() => expect(counts(container).pull).toBe('~4'));
+
+        (container.querySelector('button[aria-label^="Pull from remote"]') as HTMLButtonElement).click();
+
+        await waitFor(() => expect(counts(container).pull).toBe('4'));
+        expect(counts(container).push).toBe('0');
+    });
+
+    it('leaves the counts marked approximate when the remote call fails', async () => {
+        getGitStatus.mockResolvedValue({ clean: true, status: '', head: 'h1', authorName: 'Test', authorEmail: 'test@test.com', ahead: 3, behind: 0 });
+        pushProject.mockRejectedValue(new Error('git push failed: rejected'));
+        const { container } = render(GitStatusPanel, { props: baseProps() });
+        await waitFor(() => expect(counts(container).push).toBe('~3'));
+
+        (container.querySelector('button[aria-label^="Push to remote"]') as HTMLButtonElement).click();
+        await waitFor(() => expect(pushProject).toHaveBeenCalled());
+
+        expect(counts(container).push).toBe('~3');
     });
 });

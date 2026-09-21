@@ -452,10 +452,12 @@
         loadDiffViewer();
         try {
             // Fetch git status for sidebar
-            const { status, head, authorName: author, authorEmail: email } = await getGitStatus(projectId);
+            const { status, head, authorName: author, authorEmail: email, ahead, behind } = await getGitStatus(projectId);
             headHash = head;
             authorName = author;
             authorEmail = email;
+            aheadCommits = ahead;
+            behindCommits = behind;
             const staged: StatusEntry[] = [];
             const unstaged: StatusEntry[] = [];
             const untrackedPaths: string[] = [];
@@ -647,12 +649,25 @@
     let pulling = $state(false);
     let pushing = $state(false);
 
+    // The counts come from the upstream's remote-tracking ref, so they move when something fetches
+    // rather than when the remote moves. `remoteFresh` is set by a pull or a push, and the `~`
+    // prefix marks everything counted before that.
+    let aheadCommits = $state(0);
+    let behindCommits = $state(0);
+    let remoteFresh = $state(false);
+
+    const countMarker = $derived(remoteFresh ? '' : '~');
+    const syncNote = $derived(remoteFresh ? '' : ` — ${t('git.countsAsOfLastSync')}`);
+    const pullLabel = $derived(`${t('git.pullFromRemote')} (${t('git.commitsBehind', { count: behindCommits, marker: countMarker })})${syncNote}`);
+    const pushLabel = $derived(`${t('git.pushToRemote')} (${t('git.commitsAhead', { count: aheadCommits, marker: countMarker })})${syncNote}`);
+
     /** Pull from the remote, then refresh the panel in place. */
     async function handlePull() {
         if (pulling || pushing) return;
         pulling = true;
         try {
             await pullProject(projectId);
+            remoteFresh = true;
             dialogStore.showToast(t('git.pulledFromRemote'), 'success');
             const hasChanges = await loadData(true);
             await updateCompareMode(hasChanges);
@@ -670,6 +685,8 @@
         pushing = true;
         try {
             await pushProject(projectId);
+            // A push that was not rejected proves the branch is not behind and leaves nothing ahead.
+            remoteFresh = true;
             dialogStore.showToast(t('git.pushedToRemote'), 'success');
             const hasChanges = await loadData(true);
             await updateCompareMode(hasChanges);
@@ -918,7 +935,7 @@
 
         <!-- Pull / Push / Commit — pinned to the right edge of the header -->
         <div class="panel-actions">
-            <button class="panel-icon-btn" onclick={handlePull} disabled={pulling || pushing} title={pulling ? 'Pulling…' : 'Pull from remote'} aria-label="Pull from remote">
+            <button class="panel-icon-btn" onclick={handlePull} disabled={pulling || pushing} title={pulling ? 'Pulling…' : pullLabel} aria-label={pullLabel}>
                 {#if pulling}
                     <span class="mini-spinner" aria-hidden="true"></span>
                 {:else}
@@ -927,8 +944,9 @@
                         <path d="M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                     </svg>
                 {/if}
+                <span class="panel-count" aria-hidden="true">{countMarker}{behindCommits}</span>
             </button>
-            <button class="panel-icon-btn" onclick={handlePush} disabled={pulling || pushing} title={pushing ? 'Pushing…' : 'Push to remote'} aria-label="Push to remote">
+            <button class="panel-icon-btn" onclick={handlePush} disabled={pulling || pushing} title={pushing ? 'Pushing…' : pushLabel} aria-label={pushLabel}>
                 {#if pushing}
                     <span class="mini-spinner" aria-hidden="true"></span>
                 {:else}
@@ -937,6 +955,7 @@
                         <path d="M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                     </svg>
                 {/if}
+                <span class="panel-count" aria-hidden="true">{countMarker}{aheadCommits}</span>
             </button>
             <button
                 class="panel-commit-btn"
@@ -1324,9 +1343,10 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 22px;
+        gap: 3px;
+        min-width: 22px;
         height: 22px;
-        padding: 0;
+        padding: 0 4px;
         border: none;
         background: transparent;
         color: var(--color-text-secondary);
@@ -1378,6 +1398,12 @@
         border-top-color: transparent;
         border-radius: 50%;
         animation: spin 0.6s linear infinite;
+    }
+
+    .panel-count {
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
+        line-height: 1;
     }
 
     /* Loading / Empty */

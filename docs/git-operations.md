@@ -180,3 +180,15 @@ used to hold the per-project mutex for the full ssh timeout), and the extension 
 `clone`/`checkout`/`rev-parse`. The other ~61 local git call sites behind the three helpers (`gitRun`,
 `gitRunInGitDir`, `gitRunOutput`) are deliberately context-less: they run against a local repository, and
 threading a context through them buys nothing at the sites that never block on a network.
+
+## Ahead/behind counts never touch the remote
+
+`remoteAheadBehind` (`backend/api/git.go`) answers the Pull/Push numbers on
+`GET /api/projects/{projectID}/git/status` with `git rev-list --left-right --count HEAD...@{upstream}`:
+ahead then behind, read off `refs/remotes/…`, so the count is what the last fetch saw and the status
+path never opens a connection to a remote. A repository with no upstream, a detached HEAD and an unborn
+branch all fail that rev-list, and each answers `0`/`0` rather than an error — the status snapshot must
+still answer. The pair is exact only for the moment the panel last spoke to the remote, so
+`GitStatusPanel` prints each number behind a `~` until it has pulled or pushed once.
+
+Tests: `backend/api/git_test.go` — ahead, behind, and no-upstream.
