@@ -40,6 +40,20 @@ export interface EntryMeta {
 }
 
 /**
+ * The calls on screen that are still waiting for an answer. An unanswered call is the evidence that the
+ * screen is behind the task, so this is what a rebuild of the transcript has to carry over.
+ */
+export function pendingToolIds(entries: ChatEntry[]): Set<string> {
+    const ids = new Set<string>();
+    for (const entry of entries) {
+        for (const tc of entry.toolCalls ?? []) {
+            if (tc.isPending) ids.add(tc.toolId);
+        }
+    }
+    return ids;
+}
+
+/**
  * Compute the set of user message IDs that have no assistant/tool_call entry after them.
  * Used to determine whether to show "Send" or "New Thread" in the edit form.
  */

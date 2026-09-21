@@ -506,6 +506,32 @@ describe('createStreamHandler', () => {
         expect(stream.state.entries.length).toBe(0);
     });
 
+    describe('a running frame and the calls it supersedes', () => {
+        it('re-draws a call whose card it discarded, because its announcement comes again', () => {
+            const { stream, handleEvent } = setup();
+            // An entry that is only the tool call.
+            handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'bash', args: {} } }, false);
+            handleEvent({ type: 'status', data: { state: 'running' } }, false);
+            expect(stream.state.entries.length).toBe(0);
+
+            // The announcement arrives again, and a card is owed.
+            handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'bash', args: { command: 'make' } } }, false);
+            const ids = stream.state.entries.flatMap(e => (e.toolCalls ?? []).map(tc => tc.toolId));
+            expect(ids).toEqual(['tc1']);
+        });
+
+        it('still draws one card for a call that survives the frame and is announced twice', () => {
+            const { stream, handleEvent } = setup();
+            handleEvent({ type: 'token', data: { text: 'Working on it.' } }, false);
+            handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'bash', args: {} } }, false);
+            // The entry also holds text, so a running frame leaves it standing.
+            handleEvent({ type: 'status', data: { state: 'running' } }, false);
+            handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'bash', args: {} } }, false);
+            const ids = stream.state.entries.flatMap(e => (e.toolCalls ?? []).map(tc => tc.toolId));
+            expect(ids).toEqual(['tc1']);
+        });
+    });
+
     it('diff_changed calls onRefreshDiff callback', () => {
         const { cb, handleEvent } = setup();
         handleEvent({ type: 'diff_changed', data: { files: {} } }, false);

@@ -1,13 +1,12 @@
-// The `..` row names the folder above the listing, so no file operation runs on it. It is still a
-// folder for a paste target.
-
 interface SelectableRow {
     path: string;
-    /** false for `..` */
+    /** false for `..`, which is never a target for a file operation but is still a paste target. */
     selectable: boolean;
+    /** Rows sharing a group are one range: a shift extends inside its own group only. Omitted for a
+     *  listing that is a single run of rows. */
+    group?: string;
 }
 
-/** The rows in the order they are rendered. */
 export type RowOrder = readonly SelectableRow[];
 
 /** The selected paths, plus the row index a shift-click extends from (-1 for none). */
@@ -24,7 +23,6 @@ export interface ClickModifiers {
     shift: boolean;
 }
 
-/** The selection after a click on `index`. */
 export function applyRowClick(rows: RowOrder, current: FileSelection, index: number, mods: ClickModifiers): FileSelection {
     const row = rows[index];
     if (!row) return current;
@@ -36,12 +34,13 @@ export function applyRowClick(rows: RowOrder, current: FileSelection, index: num
     }
 
     if (mods.shift) {
-        // Without an anchor, the range is just the clicked row.
-        const from = current.anchor >= 0 ? current.anchor : index;
-        const range = indexPaths(rows, from, index);
+        // An anchor in another group is not the end of a range in this one.
+        const group = row.group;
+        const anchor = current.anchor >= 0 && rows[current.anchor]?.group === group ? current.anchor : index;
+        const range = indexPaths(rows, anchor, index, group);
         const paths = mods.ctrl ? new Set(current.paths) : new Set<string>();
         for (const path of range) paths.add(path);
-        return { paths, anchor: current.anchor >= 0 ? current.anchor : index };
+        return { paths, anchor };
     }
 
     const paths = new Set(current.paths);
@@ -65,15 +64,29 @@ export function pruneSelection(rows: RowOrder, selection: FileSelection): FileSe
     return { paths, anchor: paths.size === 0 ? -1 : selection.anchor };
 }
 
-/** The selectable paths between `from` and `to`, both ends included. */
-export function indexPaths(rows: RowOrder, from: number, to: number): string[] {
+/** The selectable paths between `from` and `to`, both ends included. With `withinGroup` a range drawn
+ *  across a group boundary stops at the edge of the one it started in. */
+export function indexPaths(rows: RowOrder, from: number, to: number, withinGroup?: string): string[] {
     const lo = Math.max(0, Math.min(from, to));
     const hi = Math.min(rows.length - 1, Math.max(from, to));
     const out: string[] = [];
     for (let i = lo; i <= hi; i++) {
-        if (rows[i].selectable) out.push(rows[i].path);
+        if (!rows[i].selectable) continue;
+        if (withinGroup !== undefined && rows[i].group !== withinGroup) continue;
+        out.push(rows[i].path);
     }
     return out;
+}
+
+/** How many names a destructive confirmation lists before counting the rest. */
+export const CONFIRM_LIST_MAX = 8;
+
+/** The names a confirm dialog lists: at most `CONFIRM_LIST_MAX`, then one line counting the rest, which
+ *  `more` words because the phrase lives in the catalog. */
+export function confirmList(names: string[], more: (count: number) => string): string[] {
+    const listed = names.slice(0, CONFIRM_LIST_MAX);
+    const rest = names.length - listed.length;
+    return rest > 0 ? [...listed, more(rest)] : listed;
 }
 
 /** Where a paste goes: the clicked folder, the folder holding the clicked file, or the listed folder. */
@@ -90,13 +103,11 @@ export function parentDir(path: string): string {
     return cut === 0 ? '/' : path.slice(0, cut);
 }
 
-/** The last segment of a path. */
 export function baseName(path: string): string {
     const cut = path.lastIndexOf('/');
     return cut < 0 ? path : path.slice(cut + 1);
 }
 
-/** Whether file operations can run on this row. */
 export function rowIsSelectable(entry: { name: string }): boolean {
     return entry.name !== '..';
 }

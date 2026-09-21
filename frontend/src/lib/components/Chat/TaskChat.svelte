@@ -1,8 +1,8 @@
 <script lang="ts">
     import { onMount, onDestroy, untrack, tick } from 'svelte';
-    import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData, TaskMessage } from '$lib/types';
+    import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData, TaskMessage, Task } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getQueuedTaskIds, getDroppedTaskIds, getTask } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getQueuedTaskIds, getDroppedTaskIds, getTask, isFromCache, type AppStream } from '$lib/api';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
     import { StreamState } from '$lib/services/stream-state.svelte';
@@ -16,8 +16,9 @@
     import { DRAFT_SAVE_DEBOUNCE_MS } from '$lib/constants';
     import { mergeQueuedUpdate, taskIsInFlight } from '$lib/utils/task-utils';
     import { effectiveStartTaskKey, matchShortcut } from '$lib/utils/keyboard';
+    import { trustedExecutionState } from '$lib/utils/execution-state';
     import { reselectProvider, getProviderDisplayName } from '$lib/utils/providers';
-    import { getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, mergeLoadedHistory, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
+    import { getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, mergeLoadedHistory, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, type EntryMeta } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { wsConnection } from '$lib/stores/connection';
     import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments, type DraftAttachment } from '$lib/storage';
@@ -38,6 +39,8 @@
     const follow = createChatFollow();
     // True while the initial conversation history is being fetched
     let historyLoading = $state(false);
+    /** Set when the transcript may not be current: read from this device's mirror, or not read at all. */
+    let historyNotice = $state<'cached' | 'failed' | null>(null);
     /** Rows every window has delivered, oldest first; the transcript is rebuilt from these. */
     let historyRows: TaskMessage[] = [];
     /** Where the next-older window starts, and whether there is one. */
@@ -150,6 +153,18 @@
     let suppressEvents = $state(true);
     $effect(() => { suppressEvents = taskStatus !== 'in_progress' && !isLoading; });
 
+    /** The task's own `execution_state` and the board's copy it was read against. */
+    let rowExecutionState = $state<string | null>(null);
+    let rowStateBoardCopy = $state('');
+    let knownExecutionState = $derived(
+        trustedExecutionState(rowExecutionState, rowStateBoardCopy, taskExecutionState),
+    );
+    /** Record a reading of the task's own row. */
+    function noteTaskRow(executionState: string | undefined) {
+        rowExecutionState = executionState || null;
+        rowStateBoardCopy = taskExecutionState;
+    }
+
     let lastExecutionState: string | undefined;
     $effect(() => {
         const was = lastExecutionState;
@@ -171,7 +186,7 @@
     // After page refresh, streamingIds is empty but execution_state preserves running state.
     let streamingIds = getStreamingContext();
     // streamingIds is from context (not appStore), accessed via $derived with context auto-subscription
-    let isLoading = $derived(!stopping && ($streamingIds.has(taskId) || taskExecutionState === 'running'));
+    let isLoading = $derived(!stopping && ($streamingIds.has(taskId) || knownExecutionState === 'running'));
 
     // Last entry index for regenerate button gating
     let lastEntryIdx = $derived(entries.length - 1);
@@ -480,22 +495,26 @@
         stream.state.contextState = { ...stream.state.contextState, limit: (model as { context_window?: number })?.context_window || 0 };
     }
 
-    /** `executionState` decides whether a pending tool call is work or a leftover. A caller that just
-     * read the task row passes it; the board copy can be a turn behind. */
-    async function loadHistory(scrollAfter = false, executionState = taskExecutionState) {
+    /** `executionState` decides whether an unanswered tool call is work or a leftover: pass the task row,
+     * not the board's copy. */
+    async function loadHistory(scrollAfter = false, executionState = knownExecutionState) {
         try {
             const window = await getTaskMessages(projectId, taskId);
             historyRows = window.messages;
             earlierCursor = window.before;
             hasEarlier = window.hasMore;
+            historyNotice = isFromCache(window) ? 'cached' : null;
             renderHistory(scrollAfter, executionState);
         } catch (e) {
             // Task may have been deleted — clear stale draft
             if (e instanceof Error && (e.message.includes('Not found') || e.message.includes('404'))) {
                 clearDraftText(taskId).catch(() => {});
                 draftAttachments = [];
+                return;
             }
-            // Otherwise: no history yet, ignore
+            // Anything else: what is on screen may be the last thing read, so say that rather than stay
+            // silent about a transcript that looks empty.
+            historyNotice = 'failed';
         }
     }
 
@@ -541,7 +560,7 @@
             historyRows = prependRows(historyRows, older.messages);
             earlierCursor = older.before;
             hasEarlier = older.hasMore;
-            renderHistory(false, taskExecutionState);
+            renderHistory(false, knownExecutionState);
             await tick();
             if (el && anchor) await settleOnRow(el, anchor);
         } catch {
@@ -907,14 +926,18 @@
         stream.dropUnresolvedToolCalls();
         stream.state.entries = stream.state.entries.filter(e => e.id !== streamingId);
         stream.state.processedToolIds = new Set();
+        // The row the stop returns is the freshest reading, so the rebuild needs no waiting for the board.
+        let stoppedState = 'paused';
         try {
-            await stopTask(projectId, taskId);
+            const stopped = await stopTask(projectId, taskId);
+            stoppedState = stopped?.execution_state || 'paused';
         } catch (e) {
             console.error('Failed to stop task:', e);
         }
+        noteTaskRow(stoppedState);
         // Reload history from DB to discard any unpersisted (streaming) entries
         // so they don't appear as duplicates when the task is restarted
-        await loadHistory();
+        await loadHistory(false, stoppedState);
     }
 
     $effect(() => {
@@ -960,7 +983,7 @@
                 stream.state.awaitingResponse = true;
             }
             // Reload history to show any system messages from merge conflict resolution
-            await loadHistory();
+            await loadHistory(false, updated?.execution_state || knownExecutionState);
             if (updated) onTaskDone?.();
         } catch (e) {
             dialogStore.showToast(String(e));
@@ -981,7 +1004,7 @@
         try {
             const updated = await moveTask(projectId, taskId, 'done');
             mergeTaskIntoBoard(updated);
-            await loadHistory();
+            await loadHistory(false, updated?.execution_state || knownExecutionState);
             if (updated) onTaskDone?.();
         } catch (e) {
             dialogStore.showToast(String(e));
@@ -1193,6 +1216,9 @@
         // Run async init in a promise chain; cleanup is returned synchronously.
         let unsubTaskEvent: (() => void) | null = null;
         let unsubViewport: (() => void) | null | undefined = null;
+        /** The stream this chat holds its task key on, and whether the chat is still mounted. */
+        let heldStream: AppStream | null = null;
+        let unmounted = false;
         const handleUrlChange = () => syncThreadFromUrl();
         window.addEventListener('urlchanged', handleUrlChange);
         // Providers come from the $effect on appStore.config above — it runs at mount too.
@@ -1224,6 +1250,16 @@
                     }
                 }
             }
+            // 0. The task's own row: the `execution_state` reading known to be current. `docs/reconnection.md`
+            let taskRow: Task | null = null;
+            try {
+                taskRow = await getTask(projectId, taskId);
+                noteTaskRow(taskRow.execution_state);
+            } catch {
+                // Deleted or unreachable: fall back to the board's copy.
+            }
+            if (unmounted) return;
+
             // 1. Set up task event handler FIRST (before subscribing to task).
             unsubTaskEvent = taskEventContext.subscribe((event) => {
                 if (event && event.task_id === taskId) {
@@ -1238,12 +1274,12 @@
                 markNotStreaming();
             }
 
-            // 3. Subscribe to this task directly (triggers buffer replay from server).
-            // Handler is already set up above, so buffer events won't be missed.
-            // App's $effect also subscribes, but the buffer is NOT cleared on re-subscribe.
-            const appStream = getAppStreamRef();
-            if (appStream) {
-                appStream.subscribeTask(projectId, taskId);
+            // 3. Take this task's key: that frame is what earns the server's replay buffer, which is the
+            // only source for a call already in flight. Released when this chat goes.
+            if (unmounted) return;
+            heldStream = getAppStreamRef();
+            if (heldStream) {
+                heldStream.subscribeTask(projectId, taskId);
             }
 
             // 4. Load history from DB (merges with buffer entries via ID-based dedup).
@@ -1260,25 +1296,22 @@
             // 6. Initial focus (skipped on mobile — auto-focus pops the virtual keyboard)
             if (!destroyed && !isMobile) chatFormComp?.focus();
 
-            // Override model selection with task-specific values if set
-            try {
-                const task = await (await import('$lib/api')).getTask(projectId, taskId);
-                if (task.llama_server_url) {
-                    selectedUrl = task.llama_server_url;
+            // Task-specific model selection, from the row already read.
+            if (taskRow) {
+                if (taskRow.llama_server_url) {
+                    selectedUrl = taskRow.llama_server_url;
                 }
-                if (task.model_name) {
-                    selectedModel = task.model_name;
+                if (taskRow.model_name) {
+                    selectedModel = taskRow.model_name;
                 }
-                if (task.reasoning_effort) {
-                    selectedReasoningEffort = task.reasoning_effort;
+                if (taskRow.reasoning_effort) {
+                    selectedReasoningEffort = taskRow.reasoning_effort;
                 }
                 // Restore session cost from the persisted task value so the badge
                 // appears for non-streaming tasks.
-                stream.state.sessionCost = task.session_cost || 0;
+                stream.state.sessionCost = taskRow.session_cost || 0;
                 // Recalculate context limit now that task-specific model is set
                 updateContextLimit();
-            } catch {
-                // Task may not exist yet
             }
             // Scroll to bottom after history is loaded and rendered.
             // pin() re-pins for a few frames, so the list need not be final yet.
@@ -1287,7 +1320,7 @@
             // assistant response yet, show the "awaiting LLM" spinner until first token/tool_call.
             // Only for a task the server says is running: a stalled one answers with the Restart
             // bar, and `awaitingResponse` is what holds that bar off the chat input.
-            if (taskIsInFlight(taskExecutionState)) {
+            if (taskIsInFlight(knownExecutionState)) {
                 const lastEntry = entries[entries.length - 1];
                 if (lastEntry?.role === 'user') {
                     stream.state.awaitingResponse = true;
@@ -1306,6 +1339,10 @@
             unsubViewport?.();
             unsubTaskEvent?.();
             returnWatcher.destroy();
+            // Release on the stream that was asked to hold it, not on whatever is current now.
+            heldStream?.unsubscribeTask(projectId, taskId);
+            heldStream = null;
+            unmounted = true;
         };
     });
 
@@ -1383,7 +1420,9 @@
      * the event — a value kept from earlier is the stale view itself. */
     function mayBeBehind(): boolean {
         return isLoading
-            || taskIsInFlight(taskExecutionState)
+            || taskIsInFlight(knownExecutionState)
+            // A turn open on screen is mid-flight, so a frame lost while away has no other way back.
+            || stream.state.currentAssistantId !== null
             || entries.some(e => e.toolCalls?.some(tc => tc.isPending))
             || stream.state.unresolvedToolIds.size > 0;
     }
@@ -1396,13 +1435,14 @@
         let executionState = taskExecutionState;
         try {
             executionState = (await getTask(projectId, taskId)).execution_state;
+            noteTaskRow(executionState);
         } catch {
             // Deleted or unreachable: the state on screen is the best reading available.
         }
         if (!taskIsInFlight(executionState)) dropStaleStreamingState();
         await loadHistory(false, executionState);
-        // The rows are authoritative now: nothing is owed a card any more.
-        stream.state.unresolvedToolIds = new Set();
+        // What the rows left unanswered is still owed a card; nothing else is.
+        stream.state.unresolvedToolIds = pendingToolIds(stream.state.entries);
     }
 
     // Drop stale streaming entries and reset streaming UI. Turns finished
@@ -1454,6 +1494,8 @@
         {onToggleFullscreen}
         {isChatFullscreen}
         {historyLoading}
+        historyNotice={historyNotice}
+        onRetryHistory={() => { void reconcileAfterAbsence(); }}
         hasEarlier={hasEarlier}
         loadingEarlier={loadingEarlier}
         onLoadEarlier={loadEarlierMessages}

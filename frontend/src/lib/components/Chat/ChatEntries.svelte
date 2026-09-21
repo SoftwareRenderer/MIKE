@@ -43,6 +43,8 @@
         isChatFullscreen,
         follow,
         historyLoading = false,
+        historyNotice = null,
+        onRetryHistory,
         hasEarlier = false,
         loadingEarlier = false,
         onLoadEarlier,
@@ -82,6 +84,10 @@
         /** Older rows exist beyond the window on screen; scrolling to the top edge asks for them. */
         hasEarlier?: boolean;
         loadingEarlier?: boolean;
+        /** Why what is on screen may not be the newest copy of the conversation. */
+        historyNotice?: 'cached' | 'failed' | null;
+        /** Ask the server again — what the notice offers beside the fact it reports. */
+        onRetryHistory?: () => void;
         /** Fetch the next-older window, called when the reader reaches the top edge. */
         onLoadEarlier?: () => Promise<void>;
     } = $props();
@@ -305,6 +311,17 @@
                 </button>
             {/if}
         </div>
+    {/if}
+
+    {#if historyNotice}
+        <p class="history-notice" role="status">
+            {historyNotice === 'cached' ? t('chat.entries.historyCached') : t('chat.entries.historyFailed')}
+            {#if onRetryHistory}
+                <button class="history-notice-retry" onclick={() => onRetryHistory()}>
+                    {t('chat.entries.historyRetry')}
+                </button>
+            {/if}
+        </p>
     {/if}
 
     {#if entries.length === 0}
@@ -611,6 +628,29 @@
         height: 100%;
     }
     .chat-loading p { font-size: 0.875rem; margin: 0; font-weight: 500; }
+    .history-notice {
+        margin: 0;
+        padding: 6px 12px;
+        flex-shrink: 0;
+        font-size: 0.75rem;
+        color: var(--color-warning);
+        background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+    }
+    .history-notice-retry {
+        margin-left: 8px;
+        padding: 0 4px;
+        border: none;
+        border-radius: 4px;
+        background: none;
+        color: inherit;
+        font: inherit;
+        font-weight: 600;
+        text-decoration: underline;
+        cursor: pointer;
+    }
+    .history-notice-retry:hover {
+        background: color-mix(in srgb, var(--color-warning) 18%, transparent);
+    }
     .chat-loading .spinner {
         width: 20px;
         height: 20px;

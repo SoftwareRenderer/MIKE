@@ -339,7 +339,21 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                         if (!entry || (!entry.content && !entry.reasoningContent)) stream.closeCurrentAssistant();
                     }
                     s.activeToolCalls = new Map();
-                    s.entries = s.entries.filter(e => !(e.toolCalls && e.toolCalls.some((tc: ToolCallInfo) => tc.isPending) && !e.content && !e.reasoningContent));
+                    // An entry that is only an unanswered call belongs to the run this frame ends, so it
+                    // goes — and its ids leave `processedToolIds` with it, or that set swallows the call's
+                    // next announcement. `docs/reconnection.md`.
+                    const discarded: string[] = [];
+                    const kept = s.entries.filter(e => {
+                        const pending = e.toolCalls?.filter((tc: ToolCallInfo) => tc.isPending) ?? [];
+                        if (pending.length === 0 || e.content || e.reasoningContent) return true;
+                        discarded.push(...pending.map(tc => tc.toolId));
+                        return false;
+                    });
+                    s.entries = kept;
+                    if (discarded.length > 0) {
+                        const gone = new Set(discarded);
+                        s.processedToolIds = new Set([...s.processedToolIds].filter(id => !gone.has(id)));
+                    }
                     s.queuePosition = 0;
                     s.queueEstimatedWait = 0;
                     markStreaming();
