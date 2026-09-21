@@ -1,88 +1,70 @@
 /**
- * Sticky-header computation for the Task Chat.
- *
- * The header names the user message to jump to next: the latest one above the line
- * it sits over, excluding whichever message already rests on that line. Tapping it
- * lands that message there, so the header always holds the next step backwards.
- *
- * All positions are in "content space": offsets from the top of the scroll content,
- * independent of where the container sits on screen.
+ * The sticky header names the user message to jump to next: the latest one above the sticky line,
+ * excluding whichever message already rests on it. Positions are in content space — offsets from the
+ * top of the scroll content, whatever the container's place on screen.
  */
 
 /** A rendered user message and its measured position in content space. */
 export interface StickyUserMessage {
-    /** Index of the message in the full entries list. */
     entryIdx: number;
-    /** First line of the message — what the header displays. */
     firstLine: string;
-    /** Offset of the message's top edge from the content top. */
     top: number;
-    /** Offset of the message's bottom edge from the content top. */
     bottom: number;
 }
 
 export interface StickyHeaderState {
-    /** First line to display. */
     firstLine: string;
-    /** Index of the entry the header refers to, -1 when none. */
+    /** The entry the header refers to, -1 when none. */
     entryIdx: number;
-    /** Whether the sticky header should be visible. */
     show: boolean;
+    /**
+     * The next step back is a row this window does not hold, so older rows should be fetched. One
+     * agent turn is routinely a hundred rows of a 120-row window, so the previous user message is
+     * often not in the document at all.
+     */
+    needsEarlier: boolean;
 }
 
 /**
- * Distance to the sticky line when the overlay cannot be measured (unmounted, or no
- * layout at all): ~46px of overlay plus an 8px gap. `stickyLineOffset` measures the
- * real height whenever the header is on screen, so this is rarely used.
- */
-export const STICKY_LINE_FALLBACK = 54;
-
-/**
- * A message resting on the line is the one at the top of the chat, so the header
- * names the message before it — the next tap at the same spot goes back a turn.
- *
- * The exclusion needs slack because the browser nudges a landing: entries above
- * realize their height late and scroll anchoring shifts `scrollTop` to hold the view
- * steady (measured 8px). A message left a few pixels above the line would still be
- * named, and the next tap would land it again instead of going back. 12px absorbs
- * that and equals a message's own top padding, so no line of text is skipped.
+ * A message resting on the line is the one at the top of the chat, so the header names the message
+ * before it. The slack covers the browser nudging a landing — entries above realize their height late
+ * and scroll anchoring moves `scrollTop` by a measured 8px — and equals a message's own top padding.
  */
 const TOP_MESSAGE_TOLERANCE = 12;
 
 /**
- * Pick the message for the sticky header at a given scroll position. `topInset` is
- * the distance from the container's top edge to the sticky line (0 for the raw edge).
+ * Pick the header's message at a scroll position. `topInset` is the measured distance from the
+ * container's top edge to the sticky line — never an estimate, because the choice below turns on it.
  *
- * The header stays hidden until the first user message has scrolled out, so it never
- * overlaps that message. The returned entryIdx identifies the exact entry, which
- * keeps the jump target right when first lines repeat.
- *
- * `tappedIdx` is the message the header last jumped to. If that message is still the
- * one above the line, the header names the message before it, so a tap always goes
- * back one turn.
+ * `tappedIdx`: the message the header last jumped to. `olderRowsBeyond`: rows older than the rendered
+ * ones exist and have not been fetched.
  */
 export function computeStickyHeader(
     userMessages: StickyUserMessage[],
     scrollTop: number,
     topInset = 0,
     tappedIdx = -1,
+    olderRowsBeyond = false,
 ): StickyHeaderState {
     if (userMessages.length === 0) {
-        return { firstLine: '', entryIdx: -1, show: false };
+        return { firstLine: '', entryIdx: -1, show: false, needsEarlier: false };
     }
     const line = scrollTop + topInset;
-    let latest: StickyUserMessage | null = null;
+    let above: StickyUserMessage | null = null;
     for (const m of userMessages) {
-        if (m.top < line - TOP_MESSAGE_TOLERANCE) latest = m;
+        if (m.top < line - TOP_MESSAGE_TOLERANCE) above = m;
     }
-    if (latest && latest.entryIdx === tappedIdx) {
-        const at = userMessages.indexOf(latest);
+    let latest = above;
+    if (above && above.entryIdx === tappedIdx) {
+        const at = userMessages.indexOf(above);
         latest = at > 0 ? userMessages[at - 1] : null;
     }
-    const show = latest !== null && scrollTop >= userMessages[0].bottom;
+    // The gate is about the conversation's first message, and a page edge is not that.
+    const show = latest !== null && (olderRowsBeyond || scrollTop >= userMessages[0].bottom);
     return {
         firstLine: latest ? latest.firstLine : '',
         entryIdx: latest ? latest.entryIdx : -1,
         show,
+        needsEarlier: olderRowsBeyond && above === userMessages[0],
     };
 }

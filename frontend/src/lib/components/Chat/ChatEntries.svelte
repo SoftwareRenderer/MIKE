@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { Thread, ChatEntry, LockWait } from '$lib/types';
     import { advisoryLabel, type EntryMeta } from '$lib/utils/chat-entries';
-    import { computeStickyHeader, STICKY_LINE_FALLBACK, type StickyUserMessage } from '$lib/utils/chat-sticky-header';
+    import { computeStickyHeader, type StickyUserMessage } from '$lib/utils/chat-sticky-header';
     import { scrollToLine } from '$lib/utils/settle-scroll';
     import { isAtBottom, type ChatFollow } from '$lib/composables/use-chat-follow.svelte';
     import { atTopOfList } from '$lib/utils/chat-window';
@@ -174,27 +174,24 @@
     // The overlay hangs over the top of the scroller, so it decides where a message
     // has to land to be readable rather than behind it.
     let stickyHeaderEl: HTMLElement | null = $state(null);
-    // The message the header last jumped to. Until the reader scrolls by hand again, the
-    // header names the message before it, rather than trusting where the jump ended up.
     let tapped: { entryIdx: number; intent: number } | null = null;
 
-    /**
-     * The sticky line: the overlay's bottom edge, measured. A tapped message lands on
-     * it and the header selects against it, so tapping the same spot walks back one
-     * message at a time.
-     */
-    function stickyLineOffset(): number {
+    // the overlay's bottom edge
+    function stickyLineOffset(): number | null {
         const scroller = chatScrollEl;
         const header = stickyHeaderEl;
-        if (!scroller || !header) return STICKY_LINE_FALLBACK;
-        const line = header.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top;
-        // 0 everywhere there is no layout (jsdom) and while the overlay has no box.
-        return line > 0 ? line : STICKY_LINE_FALLBACK;
+        if (!scroller || !header) return null;
+        const containerBox = scroller.getBoundingClientRect();
+        if (containerBox.height <= 0) return null;
+        const line = header.getBoundingClientRect().bottom - containerBox.top;
+        return line > 0 ? line : null;
     }
 
     function computeStickyFromScroll() {
         const el = chatScrollEl;
-        if (!el || entries.length === 0) {
+        // No measurable line means no choice — a hidden column and an empty chat both arrive here.
+        const line = stickyLineOffset();
+        if (!el || line === null) {
             computedStickyMessage = '';
             stickyEntryIdx = -1;
             computedShowHeader = false;
@@ -215,12 +212,14 @@
                 bottom: rect.bottom - containerTop + scrollTop,
             });
         }
-        // The reader scrolled by hand after the tap, so choose by position again.
-        if (tapped && follow.intent !== tapped.intent) tapped = null;
-        const sticky = computeStickyHeader(userMessages, scrollTop, stickyLineOffset(), tapped?.entryIdx ?? -1);
+
+        if (tapped && (follow.intent !== tapped.intent || follow.atBottom)) tapped = null;
+        const sticky = computeStickyHeader(userMessages, scrollTop, line, tapped?.entryIdx ?? -1, hasEarlier);
         computedStickyMessage = sticky.firstLine;
         stickyEntryIdx = sticky.entryIdx;
         computedShowHeader = sticky.show;
+
+        if (sticky.needsEarlier && !follow.atBottom && !loadingEarlier) void onLoadEarlier?.();
     }
 
     /** Land the message the header names on the sticky line, under the overlay. */
@@ -231,11 +230,13 @@
         // lives in the entry, so the entry starts a divider-height too early.
         const target = scroller.querySelector<HTMLElement>(`.sticky-user-message[data-entry-idx="${stickyEntryIdx}"]`);
         if (!target) return;
+        const line = stickyLineOffset();
+        if (line === null) return;
         // Declare the takeover, or the follow tracker's pin loop writes scrollTop
         // against us.
         follow.noteUserIntent();
         tapped = { entryIdx: stickyEntryIdx, intent: follow.intent };
-        scrollToLine(scroller, target, stickyLineOffset());
+        scrollToLine(scroller, target, line);
         // A tap that moves nothing fires no scroll event, so update the header here too.
         computeStickyFromScroll();
     }
@@ -244,7 +245,7 @@
     function handleCombinedScroll() {
         follow.handleScroll();
         computeStickyFromScroll();
-        // Reaching the top edge is the request for what is above it; there is no control asking for it.
+        // Reaching the top edge represents a request for the previous
         if (chatScrollEl && hasEarlier && !loadingEarlier && atTopOfList(chatScrollEl.scrollTop)) {
             void onLoadEarlier?.();
         }
@@ -254,8 +255,31 @@
     // pinned while the user is following (pin() is a no-op once they scroll up).
     $effect(() => {
         entries.length;
+        // A turn arriving or an older page landing changes which message is the previous one.
+        tapped = null;
         computeStickyFromScroll();
         follow.pin();
+    });
+
+    /**
+     * What is above the line moves with layout and no scroll event: the keyboard or auto-maximize
+     * resizing the column, the tab switch that hides it, entries realizing their height, scroll
+     * anchoring. The follow tracker watches these nodes too, but for who owns `scrollTop`.
+     */
+    $effect(() => {
+        const nodes = [chatScrollEl, chatContentEl, stickyHeaderEl];
+        if (typeof ResizeObserver === 'undefined') return;
+        let frame = 0;
+        const observer = new ResizeObserver(() => {
+            // A landing page of entries resizes on every row that realizes.
+            if (frame) return;
+            frame = requestAnimationFrame(() => { frame = 0; computeStickyFromScroll(); });
+        });
+        for (const node of nodes) if (node) observer.observe(node);
+        return () => {
+            if (frame) cancelAnimationFrame(frame);
+            observer.disconnect();
+        };
     });
 
     /** Force a pin: the button is explicit intent, even if state says otherwise. */
@@ -265,8 +289,11 @@
 </script>
 
 <div class="chat-messages-wrapper" style={!follow.ready ? 'opacity: 0;' : ''}>
-    {#if entries.length > 0 && computedShowHeader}
-        <div class="chat-sticky-header" bind:this={stickyHeaderEl} role="status" aria-live="polite">
+    {#if entries.length > 0}
+        <!-- Mounted whenever there are entries and hidden by class: the sticky line is this element's
+             measured bottom edge. -->
+        <div class="chat-sticky-header" class:hidden-header={!computedShowHeader} bind:this={stickyHeaderEl}
+             role="status" aria-live="polite">
             <button class="chat-sticky-bubble" onclick={handleStickyClickInternal} title={t('chat.entries.scrollToMessage')} aria-label={t('chat.entries.scrollToMessage')}>{computedStickyMessage}</button>
             {#if onToggleFullscreen}
                 <button type="button" class="chat-sticky-fullscreen" onclick={onToggleFullscreen} title={fullscreenTitle} aria-label={t('chat.entries.toggleFullscreen')}>
@@ -514,6 +541,10 @@
         border-bottom-right-radius: 1.125rem;
         /* Only its own controls take a click, so what lies under it stays reachable. */
         pointer-events: none;
+    }
+    /* Hidden but laid out: the sticky line is this element's measured height. */
+    .chat-sticky-header.hidden-header {
+        visibility: hidden;
     }
     .chat-sticky-bubble {
         font-size: 0.8125rem;

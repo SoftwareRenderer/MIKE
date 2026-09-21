@@ -9,7 +9,7 @@ const C = { entryIdx: 4, firstLine: 'Third message', top: 900, bottom: 1020 };
 
 describe('computeStickyHeader', () => {
     it('hides the header when there are no user messages', () => {
-        expect(computeStickyHeader([], 500)).toEqual({ firstLine: '', entryIdx: -1, show: false });
+        expect(computeStickyHeader([], 500)).toEqual({ firstLine: '', entryIdx: -1, show: false, needsEarlier: false });
     });
 
     it('hides the header while the first user message is still in view', () => {
@@ -123,6 +123,43 @@ describe('computeStickyHeader', () => {
         it('names the tapped message again once a later one is above the line', () => {
             // C is the message above the line now, so the tap on B no longer applies.
             expect(computeStickyHeader([A, B, C], landedAt(C.top) + 30, INSET, B.entryIdx).entryIdx).toBe(4);
+        });
+    });
+
+    // Why a page with one user message matters: see `StickyHeaderState.needsEarlier`.
+    describe('beyond the loaded window', () => {
+        const alpha = { entryIdx: 0, firstLine: 'Alpha request', top: 300, bottom: 900 };
+        const beta = { entryIdx: 2, firstLine: 'Bravo request', top: 1000, bottom: 1120 };
+
+        it('hides at the start of the conversation, which a page edge is not', () => {
+            // Alpha has not scrolled out, so the header would overlap it.
+            expect(computeStickyHeader([alpha], 500, INSET).show).toBe(false);
+            // Older rows are unfetched, so this is only where the fetch happened to start.
+            const r = computeStickyHeader([alpha], 500, INSET, -1, true);
+            expect(r.show).toBe(true);
+            expect(r.entryIdx).toBe(0);
+        });
+
+        it('asks for older rows when the oldest loaded one is the message above the line', () => {
+            expect(computeStickyHeader([alpha, beta], 500, INSET, -1, true).needsEarlier).toBe(true);
+        });
+
+        it('asks for nothing while the oldest loaded message is still below the line', () => {
+            const r = computeStickyHeader([alpha, beta], 100, INSET, -1, true);
+            expect(r.show).toBe(false);
+            expect(r.needsEarlier).toBe(false);
+        });
+
+        it('asks for nothing when the window holds the whole conversation', () => {
+            expect(computeStickyHeader([alpha, beta], 500, INSET).needsEarlier).toBe(false);
+        });
+
+        it('asks for older rows when the tap landed the oldest loaded message', () => {
+            // Alpha rests on the line and nothing older is rendered, so the header is empty and the
+            // next step back is a row nobody has fetched.
+            const r = computeStickyHeader([alpha, beta], landedAt(alpha.top) + 30, INSET, alpha.entryIdx, true);
+            expect(r.show).toBe(false);
+            expect(r.needsEarlier).toBe(true);
         });
     });
 });

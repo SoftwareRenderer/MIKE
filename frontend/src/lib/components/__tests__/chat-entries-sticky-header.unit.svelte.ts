@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { render } from '@testing-library/svelte';
 
 // Mock all sub-components that ChatEntries depends on.
@@ -19,6 +19,28 @@ vi.mock('$lib/constants', () => ({
 
 import ChatEntries from '$lib/components/Chat/ChatEntries.svelte';
 import { createChatFollow, type ChatFollow } from '$lib/composables/use-chat-follow.svelte';
+
+// jsdom has no ResizeObserver, and layout changing without a scroll event is half of what the
+// sticky header has to survive. Controllable, installed before the component is created.
+let roCallbacks: Array<() => void>;
+class FakeResizeObserver {
+    constructor(cb: () => void) { roCallbacks.push(cb); }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+}
+function fireResize() {
+    for (const cb of [...roCallbacks]) cb();
+}
+
+const realRO = (globalThis as { ResizeObserver?: unknown }).ResizeObserver;
+beforeEach(() => {
+    roCallbacks = [];
+    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = FakeResizeObserver;
+});
+afterEach(() => {
+    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = realRO;
+});
 
 // Effects flush on microtasks and the mount effect pins on the next frame; drain
 // both so nothing moves scrollTop after the test set it.
@@ -65,6 +87,9 @@ const baseProps = {
     onMsgSend: vi.fn(),
     onRegenerate: vi.fn(),
     onNavigateTask: vi.fn(),
+    hasEarlier: false,
+    loadingEarlier: false,
+    onLoadEarlier: () => Promise.resolve(),
 };
 
 // The two user messages share a first line on purpose: only the scroll position a
@@ -125,6 +150,11 @@ function stubRect(el: Element, value: () => { top: number; bottom: number }) {
 function mountGeometry(container: HTMLElement, follow: ChatFollow, geometry?: Map<number, number[]>) {
     const el = container.querySelector<HTMLElement>('.chat-messages')!;
     let top = 0;
+    // The mobile tab switch leaves this component mounted with the column `display: none`,
+    // where every rect the browser reports is a zero.
+    let laidOut = true;
+    let scrollEvents = 0;
+    el.addEventListener('scroll', () => { scrollEvents++; });
     Object.defineProperty(el, 'scrollTop', {
         configurable: true,
         get: () => top,
@@ -133,28 +163,36 @@ function mountGeometry(container: HTMLElement, follow: ChatFollow, geometry?: Ma
         },
     });
     Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => SCROLL_HEIGHT });
-    Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => CONTAINER_HEIGHT });
-    stubRect(el, () => ({ top: CONTAINER_TOP, bottom: CONTAINER_TOP + CONTAINER_HEIGHT }));
+    Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => (laidOut ? CONTAINER_HEIGHT : 0) });
+    stubRect(el, () => (laidOut ? { top: CONTAINER_TOP, bottom: CONTAINER_TOP + CONTAINER_HEIGHT } : { top: 0, bottom: 0 }));
 
-    const geom = geometry ?? new Map([[0, [A_TOP, A_BOTTOM]], [2, [B_TOP, B_BOTTOM]]]);
-    el.querySelectorAll<HTMLElement>('.sticky-user-message').forEach((node) => {
-        const [msgTop, msgBottom] = geom.get(Number(node.dataset.entryIdx)) ?? [0, 0];
-        stubRect(node, () => ({
-            top: CONTAINER_TOP + msgTop - top,
-            bottom: CONTAINER_TOP + msgBottom - top,
-        }));
-        // A checkpoint divider above the message lives in the wrapper entry, so the
-        // entry starts DIVIDER_HEIGHT earlier than the message.
-        const entry = node.closest<HTMLElement>('.chat-entry')!;
-        stubRect(entry, () => ({
-            top: CONTAINER_TOP + msgTop - DIVIDER_HEIGHT - top,
-            bottom: CONTAINER_TOP + msgBottom - top,
-        }));
-    });
+    let geom = geometry ?? new Map([[0, [A_TOP, A_BOTTOM]], [2, [B_TOP, B_BOTTOM]]]);
 
-    // The overlay is a sibling of the scroller, pinned to its top edge.
-    const header = container.querySelector<HTMLElement>('.chat-sticky-header');
-    if (header) stubRect(header, () => ({ top: CONTAINER_TOP, bottom: CONTAINER_TOP + HEADER_HEIGHT }));
+    // The overlay is a sibling of the scroller, pinned to its top edge — and mounted whenever
+    // there are entries, so the sticky line is always its measured bottom edge.
+    const header = container.querySelector<HTMLElement>('.chat-sticky-header')!;
+    stubRect(header, () => (laidOut ? { top: CONTAINER_TOP, bottom: CONTAINER_TOP + HEADER_HEIGHT } : { top: 0, bottom: 0 }));
+
+    /** Apply the geometry map to the user messages in the document now. */
+    function stubMessages() {
+        el.querySelectorAll<HTMLElement>('.sticky-user-message').forEach((node) => {
+            const idx = Number(node.dataset.entryIdx);
+            stubRect(node, () => {
+                if (!laidOut) return { top: 0, bottom: 0 };
+                const [msgTop, msgBottom] = geom.get(idx) ?? [0, 0];
+                return { top: CONTAINER_TOP + msgTop - top, bottom: CONTAINER_TOP + msgBottom - top };
+            });
+            // A checkpoint divider above the message lives in the wrapper entry, so the
+            // entry starts DIVIDER_HEIGHT earlier than the message.
+            const entry = node.closest<HTMLElement>('.chat-entry')!;
+            stubRect(entry, () => {
+                if (!laidOut) return { top: 0, bottom: 0 };
+                const [msgTop, msgBottom] = geom.get(idx) ?? [0, 0];
+                return { top: CONTAINER_TOP + msgTop - DIVIDER_HEIGHT - top, bottom: CONTAINER_TOP + msgBottom - top };
+            });
+        });
+    }
+    stubMessages();
 
     return {
         /** The user scrolled. The gesture is declared because a viewport gaining a
@@ -172,7 +210,22 @@ function mountGeometry(container: HTMLElement, follow: ChatFollow, geometry?: Ma
             el.dispatchEvent(new Event('scroll'));
             await flush();
         },
+        /** The tab switch: no scroll event, only the layout appearing and disappearing. */
+        async hidden(on: boolean) {
+            laidOut = !on;
+            fireResize();
+            await flush();
+        },
+        /** A page landed above the reader: rows the component had never seen, at new offsets. */
+        async relaidOut(next: Map<number, number[]>) {
+            geom = next;
+            stubMessages();
+            fireResize();
+            await flush();
+        },
         at: () => top,
+        /** How many scroll events have reached the component — a layout change sends none. */
+        scrollEvents: () => scrollEvents,
         el,
     };
 }
@@ -186,20 +239,38 @@ async function tapHeader(container: HTMLElement, view: ReturnType<typeof mountGe
 }
 
 function headerText(container: HTMLElement) {
-    return container.querySelector<HTMLElement>('.chat-sticky-bubble')?.textContent;
+    return container.querySelector<HTMLElement>('.chat-sticky-header')?.textContent?.trim();
 }
 
-async function renderChat(metas?: ReturnType<typeof makeMeta>[], list: ReturnType<typeof makeEntry>[] = entries) {
+/** The overlay stays mounted so its box can be measured; hidden is a class, not an unmount. */
+function headerHidden(container: HTMLElement) {
+    return container.querySelector<HTMLElement>('.chat-sticky-header')?.classList.contains('hidden-header') ?? true;
+}
+
+/** The Latest button — a viewport move that carries no gesture with it. */
+async function clickJumpLatest(container: HTMLElement, view: ReturnType<typeof mountGeometry>) {
+    container.querySelector<HTMLElement>('.chat-jump-latest')!.click();
+    await flush();
+    view.el.dispatchEvent(new Event('scroll')); // jsdom sends none for a scrollTop write
+    await flush();
+}
+
+async function renderChat(
+    metas?: ReturnType<typeof makeMeta>[],
+    list: ReturnType<typeof makeEntry>[] = entries,
+    extra: Record<string, unknown> = {},
+) {
     const follow = createChatFollow();
-    const { container } = render(ChatEntries, {
+    const { container, rerender } = render(ChatEntries, {
         ...baseProps,
         entries: list,
         entryMetas: metas ?? list.map(() => makeMeta()),
         lastEntryIdx: list.length - 1,
         follow,
+        ...extra,
     });
     await flush();
-    return { container, follow };
+    return { container, follow, rerender };
 }
 
 describe('ChatEntries — sticky user-message header', () => {
@@ -207,7 +278,7 @@ describe('ChatEntries — sticky user-message header', () => {
         const { container, follow } = await renderChat();
         const view = mountGeometry(container, follow);
         await view.to(0);
-        expect(container.querySelector('.chat-sticky-header')).toBeNull();
+        expect(headerHidden(container)).toBe(true);
     });
 
     it('shows the user message above the sticky line (measured, not estimated)', async () => {
@@ -217,7 +288,7 @@ describe('ChatEntries — sticky user-message header', () => {
         // overlay. An estimate of A's height would name B.
         await view.to(420);
         expect(headerText(container)).toBe('Fix the bug');
-        expect(container.querySelector('.chat-sticky-header')).toBeTruthy();
+        expect(headerHidden(container)).toBe(false);
     });
 
     it('lands the named message below the overlay, not behind it', async () => {
@@ -248,7 +319,7 @@ describe('ChatEntries — sticky user-message header', () => {
         // A is the first message: clamped at the top, and the header retires rather
         // than sit over the message the user asked to read.
         expect(view.at()).toBe(0);
-        expect(container.querySelector('.chat-sticky-header')).toBeNull();
+        expect(headerHidden(container)).toBe(true);
     });
 
     it('targets the message the header names, not its checkpoint divider', async () => {
@@ -265,12 +336,12 @@ describe('ChatEntries — sticky user-message header', () => {
         const { container, follow } = await renderChat();
         const view = mountGeometry(container, follow);
         await view.to(420);
-        expect(container.querySelector('.chat-sticky-header')).toBeTruthy();
+        expect(headerHidden(container)).toBe(false);
 
         await tapHeader(container, view);
 
         expect(view.at()).toBe(0);
-        expect(container.querySelector('.chat-sticky-header')).toBeNull();
+        expect(headerHidden(container)).toBe(true);
     });
 
     // A message can come to rest more than 12px above the line, past the tolerance,
@@ -295,7 +366,7 @@ describe('ChatEntries — sticky user-message header', () => {
 
         await tapHeader(container, view);
         expect(view.at()).toBe(0);
-        expect(container.querySelector('.chat-sticky-header')).toBeNull();
+        expect(headerHidden(container)).toBe(true);
     });
 
     it('names the message it jumped to once the reader scrolls by hand', async () => {
@@ -308,5 +379,103 @@ describe('ChatEntries — sticky user-message header', () => {
         // The reader scrolled by hand, so the header names the message above the line again.
         await view.to(430);
         expect(headerText(container)).toBe('Charlie request');
+    });
+
+    it('names the message above the line again after the Latest button', async () => {
+        const { container, follow } = await renderChat(undefined, namedEntries3);
+        const view = mountGeometry(container, follow, THREE_GEOMETRY);
+        await view.to(560);
+        await tapHeader(container, view);
+        await view.nudge(24);
+        expect(headerText(container)).toBe('Bravo request');
+
+        // The Latest button moves the viewport without a gesture, so only reaching the latest turn
+        // ends the handover.
+        await clickJumpLatest(container, view);
+        expect(headerText(container)).toBe('Charlie request');
+    });
+
+    it('ends the tap handover when the entry list changes', async () => {
+        const { container, follow, rerender } = await renderChat(undefined, namedEntries3);
+        const view = mountGeometry(container, follow, THREE_GEOMETRY);
+        await view.to(560);
+        await tapHeader(container, view);
+        await view.nudge(24);
+        expect(headerText(container)).toBe('Bravo request');
+
+        const withNewTurn = [...namedEntries3, makeEntry('a-4', 'assistant', 'Noted')];
+        rerender({ entries: withNewTurn, entryMetas: withNewTurn.map(() => makeMeta()) });
+        await flush();
+        expect(headerText(container)).toBe('Charlie request');
+    });
+
+    it('hides rather than guessing while the column has no layout, and recovers with no scroll event', async () => {
+        const { container, follow } = await renderChat(undefined, namedEntries);
+        const view = mountGeometry(container, follow);
+        await view.to(420);
+        expect(headerText(container)).toBe('Alpha request');
+        const scrolls = view.scrollEvents();
+
+        // With every rect zero, every message reads as above the line, so the choice would land on
+        // the newest one.
+        await view.hidden(true);
+        expect(headerHidden(container)).toBe(true);
+        expect(headerText(container)).toBe('');
+
+        await view.hidden(false);
+        expect(headerHidden(container)).toBe(false);
+        expect(headerText(container)).toBe('Alpha request');
+        // The layout changed and nothing scrolled: the observer is what noticed.
+        expect(view.scrollEvents()).toBe(scrolls);
+    });
+
+    // One user message in the loaded window — see `StickyHeaderState.needsEarlier` for why that is
+    // the normal case.
+    const oneTurn = [
+        makeEntry('u-a', 'user', 'Alpha request\nmore'),
+        makeEntry('a-1', 'assistant', 'On it'),
+    ];
+    const TALL_A = new Map<number, number[]>([[0, [300, 900]]]);
+
+    it('shows at the top of a loaded page and asks for what is older', async () => {
+        const onLoadEarlier = vi.fn(() => Promise.resolve());
+        const { container, follow } = await renderChat(undefined, oneTurn, { hasEarlier: true, onLoadEarlier });
+        const view = mountGeometry(container, follow, TALL_A);
+        // 500 is past the 240px top-edge trigger, so a request here comes from the header having
+        // nothing older to name.
+        await view.to(500);
+        expect(headerText(container)).toBe('Alpha request');
+        expect(headerHidden(container)).toBe(false);
+        expect(onLoadEarlier).toHaveBeenCalled();
+    });
+
+    it('still hides at the top when nothing older exists', async () => {
+        const onLoadEarlier = vi.fn(() => Promise.resolve());
+        const { container, follow } = await renderChat(undefined, oneTurn, { hasEarlier: false, onLoadEarlier });
+        const view = mountGeometry(container, follow, TALL_A);
+        await view.to(500);
+        expect(headerHidden(container)).toBe(true);
+        expect(onLoadEarlier).not.toHaveBeenCalled();
+    });
+
+    it('names the older message once the page lands', async () => {
+        const onLoadEarlier = vi.fn(() => Promise.resolve());
+        const { container, follow, rerender } = await renderChat(undefined, oneTurn, { hasEarlier: true, onLoadEarlier });
+        const view = mountGeometry(container, follow, TALL_A);
+        await view.to(500);
+        expect(headerText(container)).toBe('Alpha request');
+
+        const olderTurn = [
+            makeEntry('u-0', 'user', 'Zulu request\nmore'),
+            makeEntry('a-0', 'assistant', 'First reply'),
+            ...oneTurn,
+        ];
+        rerender({ entries: olderTurn, entryMetas: olderTurn.map(() => makeMeta()) });
+        await flush();
+        // The reader is settled back onto their own row, so the page that landed above is what the
+        // header has to name now.
+        await view.relaidOut(new Map([[0, [0, 120]], [2, [400, 1000]]]));
+        await view.nudge(-146);
+        expect(headerText(container)).toBe('Zulu request');
     });
 });
