@@ -1109,6 +1109,84 @@ func TestHandlePush_NotAGitRepo_ErrorIncludesGitOutput(t *testing.T) {
 	}
 }
 
+// --- git/status ahead/behind ---
+
+// statusAheadBehind stores a project and reads GET git/status over the route the server registers.
+// The status code and the body shape are checked here so a handler that stopped answering cannot
+// pass on two zero values.
+func statusAheadBehind(t *testing.T, s *store.Store, h *GitHandler, id, projPath string) (ahead, behind int) {
+	t.Helper()
+	if err := s.CreateProject(&types.Project{ID: id, Name: id, Path: projPath}); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/projects/{projectID}/git/status", h.HandleStatus)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/projects/"+id+"/git/status", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from git/status, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Ahead  *int `json:"ahead"`
+		Behind *int `json:"behind"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode status body: %v: %s", err, rec.Body.String())
+	}
+	if body.Ahead == nil || body.Behind == nil {
+		t.Fatalf("status body carries no ahead/behind pair: %s", rec.Body.String())
+	}
+	return *body.Ahead, *body.Behind
+}
+
+func TestHandleStatus_CountsCommitsAheadOfUpstream(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	addBareRemote(t, projPath)
+
+	createFile(t, projPath, "local.txt", "local\n")
+	testgit.Git(t, projPath, "add", "local.txt")
+	testgit.Git(t, projPath, "commit", "-m", "local commit")
+
+	if ahead, behind := statusAheadBehind(t, s, h, "status-ahead-proj", projPath); ahead != 1 || behind != 0 {
+		t.Fatalf("one unpushed commit: got ahead=%d behind=%d, want ahead=1 behind=0", ahead, behind)
+	}
+}
+
+func TestHandleStatus_CountsCommitsBehindUpstream(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	bare := addBareRemote(t, projPath)
+
+	// The fetch is what moves refs/remotes/…, which is where the count is read from.
+	clone := t.TempDir()
+	testgit.Git(t, "", "clone", bare, clone)
+	createFile(t, clone, "remote-file.txt", "from remote\n")
+	testgit.Git(t, clone, "add", "remote-file.txt")
+	testgit.Git(t, clone, "commit", "-m", "remote commit")
+	testgit.Git(t, clone, "push")
+	testgit.Git(t, projPath, "fetch", "origin")
+
+	if ahead, behind := statusAheadBehind(t, s, h, "status-behind-proj", projPath); ahead != 0 || behind != 1 {
+		t.Fatalf("one fetched remote commit: got ahead=%d behind=%d, want ahead=0 behind=1", ahead, behind)
+	}
+}
+
+func TestHandleStatus_WithoutUpstreamAnswersZeroCounts(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+
+	// A local-only repository has nothing to be ahead or behind, and the snapshot answers 0/0 rather
+	// than an unresolvable-ref error.
+	if ahead, behind := statusAheadBehind(t, s, h, "status-noupstream-proj", projPath); ahead != 0 || behind != 0 {
+		t.Fatalf("no upstream: got ahead=%d behind=%d, want 0/0", ahead, behind)
+	}
+}
+
 // --- HandleProjectStageFile_DashFPathNotForceAdd ---
 // TestHandleProjectStageFile_DashFPathNotForceAdd verifies that a path of
 // exactly "-f" is treated as a filename (via '--'), not as the --force flag.

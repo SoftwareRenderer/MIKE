@@ -746,8 +746,6 @@ const catalog = {
     'updates.enable': 'Check for new releases',
     'updates.enableDesc': 'Check {host} for updates once per day. Nothing is installed until you click Install.',
     'updates.managed': 'Updates are managed by your organization.',
-    'updates.off': 'Status: Auto Updates are disabled.',
-    'updates.noneKnown': 'MIKE has not checked for a new release yet.',
     'updates.available': 'Release {version} is available',
     'updates.upToDate': 'You are up to date — {version} is the latest release',
     'updates.lastChecked': 'Last checked {time}',
@@ -1015,7 +1013,7 @@ const catalog = {
     // security copy — say exactly what happens. Capability names (CAP_*), paths and
     // port numbers are data, and the DANGER_ZONE refusal is the server's own message.
     'sandbox.title': 'Sandbox Configuration',
-    'sandbox.lockedNotice': 'Cannot change sandbox settings while tasks are In Progress. The settings below are shown for reference only.',
+    'sandbox.lockedNotice': 'Cannot change sandbox settings while tasks are In Progress',
     'sandbox.enabled': 'Enabled',
     'sandbox.disabled': 'Disabled',
     'sandbox.default': 'Default',
@@ -1668,6 +1666,11 @@ const catalog = {
     'git.pullFailed': 'Pull failed',
     'git.pushedToRemote': 'Pushed to remote',
     'git.pushFailed': 'Push failed',
+    'git.pullFromRemote': 'Pull from remote',
+    'git.pushToRemote': 'Push to remote',
+    'git.commitsBehind': { one: '{marker}{count} commit behind', other: '{marker}{count} commits behind' },
+    'git.commitsAhead': { one: '{marker}{count} commit ahead', other: '{marker}{count} commits ahead' },
+    'git.countsAsOfLastSync': 'as of the last pull or push',
     'git.repoChangedTitle': 'Repository has changed',
     'git.repoChangedMessage':
         'The repository has been modified since you opened this panel (e.g., a merge or checkout). Refresh before committing?',

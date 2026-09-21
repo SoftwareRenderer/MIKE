@@ -36,12 +36,12 @@
     // A version that cannot be compared is not "up to date", so the server's note takes this row.
     const verdict = $derived.by(() => {
         const st = status;
-        if (!st) return t('updates.noneKnown');
+        if (!st) return '';
         if (st.available && st.latest) return t('updates.available', { version: st.latest });
         if (st.note) return st.note;
         if (st.last_error) return st.last_error;
         if (st.latest) return t('updates.upToDate', { version: st.latest });
-        return t('updates.noneKnown');
+        return '';
     });
 
     const checkedAt = $derived(status?.checked_at ? formatRelativeTime(status.checked_at) : '');
@@ -76,7 +76,9 @@
     </div>
 
     {#if enabledNow}
-        <p class="update-verdict" data-testid="update-verdict">{verdict}</p>
+        {#if verdict}
+            <p class="update-verdict" data-testid="update-verdict">{verdict}</p>
+        {/if}
         {#if checkedAt}
             <p class="update-meta">{t('updates.lastChecked', { time: checkedAt })}</p>
         {/if}
@@ -167,8 +169,6 @@
         {#if updateCheck.fault}
             <p class="update-fault" role="status">{updateCheck.fault}</p>
         {/if}
-    {:else if !managed}
-        <p class="update-off" role="status">{t('updates.off')}</p>
     {/if}
 </div>
 
@@ -207,7 +207,6 @@
         color: var(--color-text-primary);
     }
 
-    .update-off,
     .update-meta {
         margin: 4px 0 0;
         font-size: 12px;
