@@ -2,11 +2,19 @@
     import { onMount, onDestroy } from 'svelte';
     import type { DiffFile } from '$lib/types/diff';
     import { gitStatusLabel, gitStatusAbsentFromHead } from '$lib/utils/git-status';
+    import { confirmList } from '$lib/utils/file-selection';
     import { t } from '$lib/i18n';
     import { getGitStatus, getProjectDiffFiles, getCommitDiffFiles, getProjectDiffFile, stageProjectFile, commitProject, discardProjectFile, pullProject, pushProject, getGitLogFull } from '$lib/api';
     import type { GitCommit } from '$lib/types';
     import { dialogStore } from '$lib/stores';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
+    import { useFileSelection } from '$lib/composables/use-file-selection.svelte';
+    import FileContextMenu, { type FileMenuItem } from './FileContextMenu.svelte';
+    import SelectionActionBar from './SelectionActionBar.svelte';
+    import Icon from './Icon.svelte';
+    import stageIcon from '$lib/assets/icons/stage.svg?raw';
+    import unstageIcon from '$lib/assets/icons/unstage.svg?raw';
+    import discardIcon from '$lib/assets/icons/discard.svg?raw';
     // Lazy-loaded on first diff view
     let DiffViewerComponent: typeof import('./DiffViewer.svelte').default | null = $state(null);
     let diffViewerLoading = $state(false);
@@ -445,6 +453,129 @@
     let sortedStagedFiles = $derived(sortFiles(stagedDiffFiles));
     let sortedUnstagedFiles = $derived(sortFiles(unstagedDiffFiles));
 
+    // ── The sidebar's rows, their selection, and the menu that acts on them ──
+
+    // loadData lists a path in one section only, so a path names one row and can key the selection.
+
+    type ChangesSection = 'staged' | 'unstaged';
+
+    interface ChangesRow {
+        path: string;
+        status: string;
+        /** Also the boundary a shift range stops at. */
+        group: ChangesSection;
+        /** Position in the flat row order; the selection addresses rows by index. */
+        index: number;
+        /** Always true: the row type is shared with the Explorer, whose listing has a `..` row. */
+        selectable: true;
+    }
+
+    interface ChangesGroup {
+        id: ChangesSection;
+        label: string;
+        allLabel: string;
+        run: () => void;
+        rows: ChangesRow[];
+    }
+
+    let groups = $derived.by((): ChangesGroup[] => {
+        const flat: ChangesRow[] = [];
+        const sections: [ChangesSection, StatusEntry[]][] = [
+            ['staged', sortedStagedEntries],
+            ['unstaged', sortedUnstagedEntries],
+        ];
+        return sections.map(([id, entries]) => {
+            const list = entries.map(entry => {
+                const row: ChangesRow = { path: entry.path, status: entry.status, group: id, index: flat.length, selectable: true };
+                flat.push(row);
+                return row;
+            });
+            return {
+                id,
+                label: t(id === 'staged' ? 'diff.staged' : 'diff.unstaged'),
+                allLabel: t(id === 'staged' ? 'git.unstageAll' : 'git.stageAll'),
+                run: () => handleStagePaths(list.map(row => row.path), id !== 'staged'),
+                rows: list,
+            };
+        });
+    });
+
+    /** In render order, which is the order a shift range runs across. */
+    let rows = $derived(groups.flatMap(group => group.rows));
+
+    const selection = useFileSelection({ rows: () => rows });
+
+    let selectedRows = $derived(rows.filter(row => selection.isSelected(row.path)));
+    /** Stage takes the working-tree rows, Unstage the indexed ones; a mixed selection has both. */
+    let selectedBySection = $derived.by(() => {
+        const of = (group: ChangesSection) => selectedRows.filter(row => row.group === group).map(row => row.path);
+        return { staged: of('staged'), unstaged: of('unstaged') };
+    });
+
+    let menu = $state<{ x: number; y: number; onRow: boolean } | null>(null);
+
+    function handleRowClick(e: MouseEvent, row: ChangesRow): void {
+        // A plain click moves the diff; ctrl and shift only change the selection.
+        if (selection.handleClick(e, row.index)) selectedPath = row.path;
+    }
+
+    function openMenuAt(e: MouseEvent | KeyboardEvent, x: number, y: number, row: ChangesRow): void {
+        e.preventDefault();
+        selection.selectRow(row.index);
+        menu = { x, y, onRow: true };
+    }
+
+    // The space below the rows is where the section-wide actions live.
+    function handleListContextmenu(e: MouseEvent): void {
+        if ((e.target as HTMLElement).closest('.changes-file-row')) return;
+        e.preventDefault();
+        menu = { x: e.clientX, y: e.clientY, onRow: false };
+    }
+
+    const menuItems = $derived.by((): FileMenuItem[] => {
+        const asked = menu;
+        if (!asked) return [];
+        if (!asked.onRow) {
+            return groups
+                .filter(group => group.rows.length > 0)
+                .map((group): FileMenuItem => ({
+                    label: group.allLabel,
+                    icon: group.id === 'staged' ? 'unstage' : 'stage',
+                    run: group.run,
+                }));
+        }
+        return [
+            {
+                label: t('git.stage'),
+                icon: 'stage',
+                disabled: selectedBySection.unstaged.length === 0,
+                run: () => handleStagePaths(selectedBySection.unstaged, true),
+            },
+            {
+                label: t('git.unstage'),
+                icon: 'unstage',
+                disabled: selectedBySection.staged.length === 0,
+                run: () => handleStagePaths(selectedBySection.staged, false),
+            },
+            {
+                label: t('explorer.shared.discard'),
+                icon: 'discard',
+                destructive: true,
+                disabled: selectedRows.length === 0,
+                run: () => handleDiscardRows(selectedRows),
+            },
+        ];
+    });
+
+    function handleListKeydown(e: KeyboardEvent): void {
+        const key = selection.handleKeydown(e);
+        if (key?.kind === 'handled') return;
+        if (key?.kind === 'menu') {
+            const row = rows[key.index];
+            if (row) openMenuAt(e, key.at.x, key.at.y, row);
+        }
+    }
+
     async function loadData(silent = false): Promise<boolean> {
         // Silent reloads (triggered by stage/unstage) update the panel in place
         if (!silent) loading = true;
@@ -613,64 +744,82 @@
         await updateCompareMode(hasChanges);
     }
 
-    /** Stage or unstage a single file. */
-    function handleStageFile(path: string, stage: boolean) {
-        enqueueGitWrite(async () => {
+    /** One request per path; the git endpoints take a single file. A refusal stops nothing, since the
+     *  paths are independent and the reload reads git's own state. */
+    async function writeEach(
+        paths: string[],
+        write: (path: string) => Promise<unknown>,
+    ): Promise<{ landed: number; failed: number; reason: string }> {
+        let landed = 0;
+        let failed = 0;
+        let reason = '';
+        for (const path of paths) {
             try {
-                await stageProjectFile(projectId, path, stage);
-                await refreshAfterWrite();
+                await write(path);
+                landed++;
             } catch (e) {
-                console.error('Failed to stage/unstage file:', e);
+                failed++;
+                if (e instanceof Error) reason = e.message;
+            }
+        }
+        return { landed, failed, reason };
+    }
+
+    /** Stage or unstage every path given, then reload once. Refusals are reported by count and git's
+     *  first reason. */
+    function handleStagePaths(paths: string[], stage: boolean): void {
+        if (paths.length === 0) return;
+        enqueueGitWrite(async () => {
+            const { landed, failed, reason } = await writeEach(paths, path => stageProjectFile(projectId, path, stage));
+            if (landed > 0) await refreshAfterWrite();
+            if (failed > 0) {
+                dialogStore.showToast(t(stage ? 'git.stageFailed' : 'git.unstageFailed', { count: failed, error: reason }), 'error');
             }
         });
     }
 
-    /** Stage all unstaged files. */
-    function handleStageAll() {
-        enqueueGitWrite(async () => {
-            try {
-                await Promise.all(unstagedEntries.map(e => stageProjectFile(projectId, e.path, true)));
-                await refreshAfterWrite();
-            } catch (e) {
-                console.error('Failed to stage all:', e);
-            }
-        });
+    function pathsOf(section: ChangesSection): string[] {
+        return groups.find(group => group.id === section)?.rows.map(row => row.path) ?? [];
     }
 
-    /** Unstage all staged files. */
-    function handleUnstageAll() {
-        enqueueGitWrite(async () => {
-            try {
-                await Promise.all(stagedEntries.map(e => stageProjectFile(projectId, e.path, false)));
-                await refreshAfterWrite();
-            } catch (e) {
-                console.error('Failed to unstage all:', e);
-            }
-        });
-    }
-
-    /** Revert one file to HEAD, or delete it if HEAD never held it. A discard cannot be undone, so the
+    /** Revert every row to HEAD, or delete the ones HEAD never held. A discard cannot be undone, so the
      * confirm dialog is the only guard. */
-    async function handleDiscardFile(path: string, status: string): Promise<void> {
+    async function handleDiscardRows(targets: ChangesRow[]): Promise<void> {
+        if (targets.length === 0) return;
+        const paths = targets.map(row => row.path);
+        const message = targets.length > 1
+            ? t('git.discardBatchMessage')
+            : gitStatusAbsentFromHead(targets[0].status)
+                ? t('git.discardUntrackedMessage')
+                : t('git.discardTrackedMessage');
         const proceed = await dialogStore.showConfirm({
             title: t('git.discardTitle'),
-            message: gitStatusAbsentFromHead(status) ? t('git.discardUntrackedMessage') : t('git.discardTrackedMessage'),
-            items: [path],
+            message,
+            items: confirmList(paths, count => t('explorer.shared.deleteMore', { count })),
             confirmText: t('explorer.shared.discard'),
             cancelText: t('git.cancel'),
             variant: 'destructive',
         });
         if (!proceed) return;
         enqueueGitWrite(async () => {
-            try {
-                await discardProjectFile(projectId, path);
-                dialogStore.showToast(t('git.discarded'), 'success');
-                // Drop the selection if it was this file; its diff is gone.
-                if (selectedPath === path) selectedPath = '';
-                await refreshAfterWrite();
-            } catch (e: any) {
-                dialogStore.showToast(e.message || t('git.discardFailed'), 'error');
+            const { landed, failed, reason } = await writeEach(paths, path => discardProjectFile(projectId, path));
+            if (landed === 0) {
+                // Nothing moved, so there is nothing to reread.
+                dialogStore.showToast(paths.length === 1
+                    // One refusal: git's own words are the whole report.
+                    ? reason || t('git.discardFailed')
+                    : t('git.discardFailedCount', { count: failed, error: reason }), 'error');
+                return;
             }
+            // The diff being shown may be one of these.
+            if (paths.includes(selectedPath)) selectedPath = '';
+            await refreshAfterWrite();
+            dialogStore.showToast(
+                failed === 0
+                    ? t(paths.length === 1 ? 'git.discarded' : 'git.discardedCount', { count: paths.length })
+                    : t('git.discardFailedCount', { count: failed, error: reason }),
+                failed === 0 ? 'success' : 'error',
+            );
         });
     }
 
@@ -774,9 +923,10 @@
     }
 
     function handleKeydown(e: KeyboardEvent) {
-        if (e.key === 'Escape') {
-            onClose();
-        }
+        if (e.key !== 'Escape') return;
+        // Rows a person is holding get the key first: giving them back is not "close the panel".
+        if (selection.releaseSelection()) return;
+        onClose();
     }
 
     onMount(() => {
@@ -1019,117 +1169,135 @@
         <div class="panel-body">
             <!-- Left: Changes file list sidebar -->
             <div class="changes-sidebar" class:hidden={isMobile} style="width: {sidebarWidth}px">
-                <div class="changes-scroll">
-                    <!-- Staged entries -->
-                    {#if sortedStagedEntries.length > 0}
-                    <div class="changes-section">
-                        <button class="changes-section-header" type="button" onclick={() => toggleSection('staged-files')} aria-expanded={!collapsedSections.has('staged-files')}>
-                            <svg class="changes-chevron" class:expanded={!collapsedSections.has('staged-files')} width="10" height="10" viewBox="0 0 16 16" fill="none">
-                                <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                            <span>{t('diff.staged')}</span>
-                            <span class="changes-section-count">{sortedStagedEntries.length}</span>
-                            <span class="changes-section-action" onclick={(e) => { e.stopPropagation(); handleUnstageAll(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleUnstageAll(); } }} title="Unstage all" role="button" tabindex="0" aria-label="Unstage all">
-                                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                            </span>
-                        </button>
-                        {#if !collapsedSections.has('staged-files')}
-                        <div class="changes-section-body">
-                            {#each sortedStagedEntries as entry}
-                                {@const { folder, name } = splitPath(entry.path)}
-                                <div class="changes-file-row">
-                                    <button
-                                        class="changes-file-item"
-                                        class:selected={selectedPath === entry.path}
-                                        onclick={() => selectedPath = entry.path}
-                                        title={entry.path}
-                                    >
-                                        <span class="changes-file-basename">{name}</span>
-                                        {#if folder}<span class="changes-file-folder">{folder}</span>{/if}
-                                        <span class="changes-file-badge" style="color: {getStatusBadge(entry).color}" title={gitStatusLabel(entry.status)}>
-                                            {entry.status}
-                                        </span>
-                                    </button>
-                                    <button
-                                        class="changes-stage-btn"
-                                        type="button"
-                                        onclick={() => handleStageFile(entry.path, false)}
-                                        title="Unstage {entry.path}"
-                                        aria-label="Unstage {entry.path}"
-                                    >
-                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                                    </button>
-                                    <button
-                                        class="changes-discard-btn"
-                                        type="button"
-                                        onclick={() => handleDiscardFile(entry.path, entry.status)}
-                                        title="Discard {entry.path}"
-                                        aria-label="Discard {entry.path}"
-                                    >
-                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                    </button>
-                                </div>
-                            {/each}
+                <!-- svelte-ignore a11y_interactive_supports_focus — its rows are what a keyboard reaches. -->
+                <div
+                    class="changes-scroll"
+                    role="tree"
+                    aria-label={t('git.changesListAria')}
+                    oncontextmenu={handleListContextmenu}
+                    onkeydown={handleListKeydown}
+                >
+                    {#each groups as group}
+                        {#if group.rows.length > 0}
+                        <div class="changes-section">
+                            <button class="changes-section-header" type="button" onclick={() => toggleSection(group.id)} aria-expanded={!collapsedSections.has(group.id)}>
+                                <svg class="changes-chevron" class:expanded={!collapsedSections.has(group.id)} width="10" height="10" viewBox="0 0 16 16" fill="none">
+                                    <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                                <span>{group.label}</span>
+                                <span class="changes-section-count">{group.rows.length}</span>
+                                <span class="changes-section-action" onclick={(e) => { e.stopPropagation(); group.run(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); group.run(); } }} title={group.allLabel} role="button" tabindex="0" aria-label={group.allLabel}>
+                                    {#if group.id === 'staged'}
+                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                                    {:else}
+                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                                    {/if}
+                                </span>
+                            </button>
+                            {#if !collapsedSections.has(group.id)}
+                            <div class="changes-section-body" role="group" aria-label={group.label}>
+                                {#each group.rows as row}
+                                    {@const { folder, name } = splitPath(row.path)}
+                                    {@const indexed = row.group === 'staged'}
+                                    <div class="changes-file-row">
+                                        <button
+                                            class="changes-file-item"
+                                            class:selected={selectedPath === row.path || selection.isSelected(row.path)}
+                                            role="treeitem"
+                                            aria-selected={selection.isSelected(row.path)}
+                                            data-index={row.index}
+                                            onclick={(e) => handleRowClick(e, row)}
+                                            oncontextmenu={(e) => openMenuAt(e, e.clientX, e.clientY, row)}
+                                            onpointerdown={(e) => selection.handlePointerDown(e, row.index)}
+                                            onpointermove={selection.handlePointerMove}
+                                            onpointerup={selection.cancelLongPress}
+                                            onpointercancel={selection.cancelLongPress}
+                                            title={row.path}
+                                        >
+                                            <span class="changes-file-basename">{name}</span>
+                                            {#if folder}<span class="changes-file-folder">{folder}</span>{/if}
+                                            <span class="changes-file-badge" style="color: {getStatusBadge(row).color}" title={gitStatusLabel(row.status)}>
+                                                {row.status === '?' ? '??' : row.status}
+                                            </span>
+                                        </button>
+                                        <button
+                                            class="changes-stage-btn"
+                                            type="button"
+                                            onclick={() => handleStagePaths([row.path], !indexed)}
+                                            title={t(indexed ? 'git.unstageFile' : 'git.stageFile', { path: row.path })}
+                                            aria-label={t(indexed ? 'git.unstageFile' : 'git.stageFile', { path: row.path })}
+                                        >
+                                            <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                                                {#if indexed}
+                                                    <path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                                                {:else}
+                                                    <path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                                                {/if}
+                                            </svg>
+                                        </button>
+                                        <button
+                                            class="changes-discard-btn"
+                                            type="button"
+                                            onclick={() => handleDiscardRows([row])}
+                                            title={t('git.discardFile', { path: row.path })}
+                                            aria-label={t('git.discardFile', { path: row.path })}
+                                        >
+                                            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                        </button>
+                                    </div>
+                                {/each}
+                            </div>
+                            {/if}
                         </div>
                         {/if}
-                    </div>
-                    {/if}
-
-                    <!-- Unstaged entries -->
-                    {#if sortedUnstagedEntries.length > 0}
-                    <div class="changes-section">
-                        <button class="changes-section-header" type="button" onclick={() => toggleSection('unstaged-files')} aria-expanded={!collapsedSections.has('unstaged-files')}>
-                            <svg class="changes-chevron" class:expanded={!collapsedSections.has('unstaged-files')} width="10" height="10" viewBox="0 0 16 16" fill="none">
-                                <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                            <span>{t('diff.unstaged')}</span>
-                            <span class="changes-section-count">{sortedUnstagedEntries.length}</span>
-                            <span class="changes-section-action" onclick={(e) => { e.stopPropagation(); handleStageAll(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleStageAll(); } }} title="Stage all" role="button" tabindex="0" aria-label="Stage all">
-                                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                            </span>
-                        </button>
-                        {#if !collapsedSections.has('unstaged-files')}
-                        <div class="changes-section-body">
-                            {#each sortedUnstagedEntries as entry}
-                                {@const { folder, name } = splitPath(entry.path)}
-                                <div class="changes-file-row">
-                                    <button
-                                        class="changes-file-item"
-                                        class:selected={selectedPath === entry.path}
-                                        onclick={() => selectedPath = entry.path}
-                                        title={entry.path}
-                                    >
-                                        <span class="changes-file-basename">{name}</span>
-                                        {#if folder}<span class="changes-file-folder">{folder}</span>{/if}
-                                        <span class="changes-file-badge" style="color: {getStatusBadge(entry).color}" title={gitStatusLabel(entry.status)}>
-                                            {entry.status === '?' ? '??' : entry.status}
-                                        </span>
-                                    </button>
-                                    <button
-                                        class="changes-stage-btn"
-                                        type="button"
-                                        onclick={() => handleStageFile(entry.path, true)}
-                                        title="Stage {entry.path}"
-                                        aria-label="Stage {entry.path}"
-                                    >
-                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                                    </button>
-                                    <button
-                                        class="changes-discard-btn"
-                                        type="button"
-                                        onclick={() => handleDiscardFile(entry.path, entry.status)}
-                                        title="Discard {entry.path}"
-                                        aria-label="Discard {entry.path}"
-                                    >
-                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                    </button>
-                                </div>
-                            {/each}
-                        </div>
-                        {/if}
-                    </div>
-                    {/if}
+                    {/each}
                 </div>
+
+                {#if selection.showActionBar}
+                    <SelectionActionBar count={selectedRows.length} onClear={selection.clear}>
+                        {#snippet actions()}
+                            <button
+                                type="button"
+                                class="selection-btn"
+                                disabled={selectedBySection.unstaged.length === 0}
+                                title={t('git.stage')}
+                                aria-label={t('git.stage')}
+                                onclick={() => handleStagePaths(selectedBySection.unstaged, true)}
+                            >
+                                <Icon src={stageIcon} width={14} height={14} />
+                            </button>
+                            <button
+                                type="button"
+                                class="selection-btn"
+                                disabled={selectedBySection.staged.length === 0}
+                                title={t('git.unstage')}
+                                aria-label={t('git.unstage')}
+                                onclick={() => handleStagePaths(selectedBySection.staged, false)}
+                            >
+                                <Icon src={unstageIcon} width={14} height={14} />
+                            </button>
+                            <button
+                                type="button"
+                                class="selection-btn destructive"
+                                title={t('explorer.shared.discard')}
+                                aria-label={t('explorer.shared.discard')}
+                                onclick={() => handleDiscardRows(selectedRows)}
+                            >
+                                <Icon src={discardIcon} width={14} height={14} />
+                            </button>
+                        {/snippet}
+                    </SelectionActionBar>
+                {/if}
+
+                {#if menu}
+                    <FileContextMenu
+                        x={menu.x}
+                        y={menu.y}
+                        items={menuItems}
+                        ariaLabel={t('explorer.shared.menuAria')}
+                        onClose={() => menu = null}
+                    />
+                {/if}
             </div>
 
             <!-- Resize handle: sidebar ↔ diff -->
@@ -1168,9 +1336,9 @@
                             unstagedFiles={sortedUnstagedFiles}
                             unstagedUntracked={unstagedUntracked}
                             selectedPath={selectedPath}
-                            onStageFile={handleStageFile}
-                            onStageAll={handleStageAll}
-                            onUnstageAll={handleUnstageAll}
+                            onStageFile={(path, stage) => handleStagePaths([path], stage)}
+                            onStageAll={() => handleStagePaths(pathsOf('unstaged'), true)}
+                            onUnstageAll={() => handleStagePaths(pathsOf('staged'), false)}
                             onExpandUntracked={loadUntrackedFile}
                             onLineClick={handleLineClick}
                         />
@@ -1488,6 +1656,8 @@
     /* Changes sidebar */
     .changes-sidebar {
         flex-shrink: 0;
+        /* The selection bar is placed against this box. */
+        position: relative;
         border-right: 1px solid var(--color-border);
         background: var(--color-surface-1);
         display: flex;

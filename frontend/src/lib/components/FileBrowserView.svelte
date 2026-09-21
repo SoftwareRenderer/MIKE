@@ -1,21 +1,20 @@
 <script lang="ts">
-    import { onDestroy, onMount, tick } from 'svelte';
+    import { onMount, tick } from 'svelte';
     import {
         copyFsPaths, deleteFsPaths, ensureCsrfToken, moveFsPaths, renameFsPath,
         type FsOpsResult,
     } from '$lib/api';
     import { dialogStore } from '$lib/stores';
     import { useFileDropUpload } from '$lib/composables/use-file-drop-upload.svelte';
+    import { useFileSelection } from '$lib/composables/use-file-selection.svelte';
     import FileContextMenu, { type FileMenuItem } from '$lib/components/FileContextMenu.svelte';
     import FileDropProgress from '$lib/components/FileDropProgress.svelte';
     import Icon from '$lib/components/Icon.svelte';
+    import SelectionActionBar from '$lib/components/SelectionActionBar.svelte';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
     import { t, type MessageKey } from '$lib/i18n';
-    import {
-        allSelectablePaths, applyRowClick, baseName, emptySelection, pasteTarget, pruneSelection,
-        rowIsSelectable, type FileSelection,
-    } from '$lib/utils/file-selection';
+    import { baseName, confirmList, pasteTarget, rowIsSelectable } from '$lib/utils/file-selection';
     import type { FsEvent } from '$lib/utils/fs-event';
 
     type Entry = { name: string; isDir: boolean; path: string };
@@ -187,8 +186,7 @@
             }
             missingDirRetries = 0;
             firstLoadComplete = true;
-            if (sameDir) selection = pruneSelection(rows, selection);
-            else clearSelection();
+            if (!sameDir) selection.clear();
         } catch (e) {
             if (!retrying) {
                 error = String(e);
@@ -374,18 +372,8 @@
 
     // ── Selection, the context menu, and the clipboard ──
     //
-    // A shift range needs the order the rows are rendered in, so the selection lives here. The
-    // clipboard belongs to this panel alone: a cut must not survive a project switch.
+    // The clipboard belongs to this panel alone: a cut must not survive a project switch.
 
-    const LONG_PRESS_MS = 450;
-    const LONG_PRESS_SLOP = 10;
-    // How many names the delete confirmation lists before counting the rest.
-    const CONFIRM_LIST_MAX = 8;
-
-    let selection = $state<FileSelection>(emptySelection());
-    // Set when a gesture selects on purpose (long press, ctrl-click, select-all), which shows the
-    // action bar even for one row.
-    let selectionMode = $state(false);
     let clipboard = $state<{ mode: 'copy' | 'cut'; paths: string[] } | null>(null);
     let menu = $state<{ x: number; y: number; entry: Entry | null } | null>(null);
     let renaming = $state<string | null>(null);
@@ -395,8 +383,8 @@
     let mutating = $state(false);
 
     let rows = $derived(entries.map(e => ({ path: e.path, selectable: rowIsSelectable(e) })));
-    let selectedPaths = $derived([...selection.paths]);
-    let showActionBar = $derived(selection.paths.size > 1 || (selectionMode && selection.paths.size > 0));
+    const selection = useFileSelection({ rows: () => rows });
+    let selectedPaths = $derived(selection.selectedPaths);
 
     function opsScope() {
         return { projectId, taskId: taskId || undefined };
@@ -406,65 +394,17 @@
         return clipboard?.mode === 'cut' && clipboard.paths.includes(path);
     }
 
-    function clearSelection(): void {
-        selection = emptySelection();
-        selectionMode = false;
-    }
-
     function handleRowClick(e: MouseEvent, entry: Entry, index: number): void {
-        if (swallowClick) { swallowClick = false; return; }
         if (renaming === entry.path) return;
-        selection = applyRowClick(rows, selection, index, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
-        // Only a plain click opens the file; ctrl and shift just change the selection.
-        if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
-            selectionMode = false;
-            openEntry(entry, false);
-        }
+        if (selection.handleClick(e, index)) openEntry(entry, false);
     }
-
-    // Touch has no ctrl key, so holding a row is the multi-select gesture.
-    let longPressTimer: ReturnType<typeof setTimeout> | null = null;
-    let pressAt = { x: 0, y: 0 };
-    // Set by a long press, so the click that follows doesn't also open the row.
-    let swallowClick = false;
-
-    function handleRowPointerDown(e: PointerEvent, index: number): void {
-        // Clear this so a long press that never got its click doesn't swallow the next one.
-        swallowClick = false;
-        if (e.pointerType !== 'touch') return;
-        cancelLongPress();
-        pressAt = { x: e.clientX, y: e.clientY };
-        longPressTimer = setTimeout(() => {
-            longPressTimer = null;
-            swallowClick = true;
-            selectionMode = true;
-            selection = applyRowClick(rows, selection, index, { ctrl: true, shift: false });
-        }, LONG_PRESS_MS);
-    }
-
-    function handleRowPointerMove(e: PointerEvent): void {
-        if (!longPressTimer) return;
-        if (Math.abs(e.clientX - pressAt.x) > LONG_PRESS_SLOP || Math.abs(e.clientY - pressAt.y) > LONG_PRESS_SLOP) {
-            cancelLongPress();
-        }
-    }
-
-    function cancelLongPress(): void {
-        if (!longPressTimer) return;
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-    }
-
-    onDestroy(cancelLongPress);
 
     // suppress native right-click menu
     function openMenuAt(e: MouseEvent | KeyboardEvent, x: number, y: number, entry: Entry | null, index: number): void {
         if (renaming) return;
         e.preventDefault();
         // Right-clicking a row outside the selection selects it first.
-        if (entry && rowIsSelectable(entry) && !selection.paths.has(entry.path)) {
-            selection = { paths: new Set([entry.path]), anchor: index };
-        }
+        if (entry) selection.selectRow(index);
         menu = { x, y, entry };
     }
 
@@ -553,14 +493,10 @@
     async function deletePaths(paths: string[]): Promise<void> {
         if (paths.length === 0 || mutating) return;
         const names = paths.map(baseName);
-        const listed = names.slice(0, CONFIRM_LIST_MAX);
-        if (names.length > listed.length) {
-            listed.push(t('explorer.shared.deleteMore', { count: names.length - listed.length }));
-        }
         const confirmed = await dialogStore.showConfirm({
             title: t('explorer.shared.deleteTitle'),
             message: t('explorer.shared.deleteMessage', { count: paths.length, name: names[0] }),
-            items: listed,
+            items: confirmList(names, count => t('explorer.shared.deleteMore', { count })),
             confirmText: t('explorer.shared.menuDelete'),
             cancelText: t('explorer.shared.cancel'),
             variant: 'destructive',
@@ -569,7 +505,7 @@
         mutating = true;
         try {
             const res = await deleteFsPaths(opsScope(), paths);
-            clearSelection();
+            selection.clear();
             reportOps(res, 'explorer.shared.deletedCount');
             onDeleted?.(res.done.map(d => d.from));
             await afterMutation();
@@ -625,18 +561,10 @@
         const mod = e.ctrlKey || e.metaKey;
         const paths = selectedPaths;
 
-        if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
-            const row = e.target instanceof HTMLElement ? e.target : null;
-            const index = Number(row?.dataset.index);
-            if (!row || !Number.isInteger(index) || !entries[index]) return;
-            const rect = row.getBoundingClientRect();
-            openMenuAt(e, rect.left + 16, rect.bottom, entries[index], index);
-            return;
-        }
-        if (mod && (e.key === 'a' || e.key === 'A')) {
-            e.preventDefault();
-            selection = { paths: allSelectablePaths(rows), anchor: -1 };
-            selectionMode = true;
+        const key = selection.handleKeydown(e);
+        if (key?.kind === 'handled') return;
+        if (key?.kind === 'menu') {
+            openMenuAt(e, key.at.x, key.at.y, entries[key.index], key.index);
             return;
         }
         if (mod && (e.key === 'x' || e.key === 'X')) {
@@ -664,13 +592,6 @@
         if ((e.key === 'Delete' || e.key === 'Backspace') && paths.length > 0) {
             e.preventDefault();
             void deletePaths(paths);
-            return;
-        }
-        if (e.key === 'Escape' && paths.length > 0) {
-            // Clear the selection; stop here so the panel behind it stays open.
-            e.preventDefault();
-            e.stopPropagation();
-            clearSelection();
         }
     }
 </script>
@@ -801,7 +722,7 @@
         {/if}
         {#each entries as entry, i}
             {@const badge = extraEntryInfo ? extraEntryInfo(entry) : null}
-            {@const isSelected = selection.paths.has(entry.path)}
+            {@const isSelected = selection.isSelected(entry.path)}
             {#if renaming === entry.path}
                 <div class="file-browser-item is-renaming" role="treeitem" aria-selected="true">
                     {#if entry.isDir}
@@ -833,10 +754,10 @@
                     onclick={(e) => handleRowClick(e, entry, i)}
                     ondblclick={() => openEntry(entry, true)}
                     oncontextmenu={(e) => openMenuAt(e, e.clientX, e.clientY, entry, i)}
-                    onpointerdown={(e) => handleRowPointerDown(e, i)}
-                    onpointermove={handleRowPointerMove}
-                    onpointerup={cancelLongPress}
-                    onpointercancel={cancelLongPress}
+                    onpointerdown={(e) => selection.handlePointerDown(e, i)}
+                    onpointermove={selection.handlePointerMove}
+                    onpointerup={selection.cancelLongPress}
+                    onpointercancel={selection.cancelLongPress}
                 >
                     {#if entry.isDir}
                         <Icon src={folderIcon} color="currentColor" width={14} height={14} class="file-icon folder-icon" />
@@ -860,55 +781,49 @@
     </div>
 
     <!-- Touch equivalent of the context menu: a phone can select rows but has no right button. -->
-    {#if showActionBar}
-        <div class="file-selection-bar" role="toolbar" aria-label={t('explorer.shared.selectionAria')}>
-            <span class="selection-count">{t('explorer.shared.selectedCount', { count: selection.paths.size })}</span>
-            <button
-                type="button"
-                class="selection-btn"
-                disabled={mutating}
-                title={t('explorer.shared.menuCut')}
-                aria-label={t('explorer.shared.menuCut')}
-                onclick={() => setClipboard('cut', selectedPaths)}
-            >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
-                    <line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/>
-                </svg>
-            </button>
-            <button
-                type="button"
-                class="selection-btn"
-                disabled={mutating}
-                title={t('explorer.shared.menuCopy')}
-                aria-label={t('explorer.shared.menuCopy')}
-                onclick={() => setClipboard('copy', selectedPaths)}
-            >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
-                </svg>
-            </button>
-            <button
-                type="button"
-                class="selection-btn destructive"
-                disabled={mutating}
-                title={t('explorer.shared.menuDelete')}
-                aria-label={t('explorer.shared.menuDelete')}
-                onclick={() => void deletePaths(selectedPaths)}
-            >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                    <path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-                </svg>
-            </button>
-            <button
-                type="button"
-                class="selection-btn"
-                title={t('explorer.shared.selectionClear')}
-                aria-label={t('explorer.shared.selectionClear')}
-                onclick={clearSelection}
-            >✕</button>
-        </div>
+    {#if selection.showActionBar}
+        <SelectionActionBar count={selection.selectedPaths.length} onClear={selection.clear}>
+            {#snippet actions()}
+                <button
+                    type="button"
+                    class="selection-btn"
+                    disabled={mutating}
+                    title={t('explorer.shared.menuCut')}
+                    aria-label={t('explorer.shared.menuCut')}
+                    onclick={() => setClipboard('cut', selectedPaths)}
+                >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
+                        <line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/>
+                    </svg>
+                </button>
+                <button
+                    type="button"
+                    class="selection-btn"
+                    disabled={mutating}
+                    title={t('explorer.shared.menuCopy')}
+                    aria-label={t('explorer.shared.menuCopy')}
+                    onclick={() => setClipboard('copy', selectedPaths)}
+                >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+                    </svg>
+                </button>
+                <button
+                    type="button"
+                    class="selection-btn destructive"
+                    disabled={mutating}
+                    title={t('explorer.shared.menuDelete')}
+                    aria-label={t('explorer.shared.menuDelete')}
+                    onclick={() => void deletePaths(selectedPaths)}
+                >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                        <path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                    </svg>
+                </button>
+            {/snippet}
+        </SelectionActionBar>
     {/if}
 
     {#if menu}

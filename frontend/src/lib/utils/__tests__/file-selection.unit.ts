@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-    allSelectablePaths, applyRowClick, baseName, emptySelection, indexPaths,
-    parentDir, pasteTarget, pruneSelection, rowIsSelectable,
+    allSelectablePaths, applyRowClick, baseName, confirmList, emptySelection, indexPaths,
+    parentDir, pasteTarget, pruneSelection, rowIsSelectable, CONFIRM_LIST_MAX,
     type RowOrder,
 } from '$lib/utils/file-selection';
 
@@ -78,6 +78,58 @@ describe('applyRowClick', () => {
     });
 });
 
+describe('a shift range inside one group', () => {
+    // The Review Changes sidebar: two sections of one listing, staged rows first.
+    const grouped: RowOrder = [
+        { path: 's1.ts', selectable: true, group: 'staged' },
+        { path: 's2.ts', selectable: true, group: 'staged' },
+        { path: 'u1.ts', selectable: true, group: 'unstaged' },
+        { path: 'u2.ts', selectable: true, group: 'unstaged' },
+    ];
+
+    it('reaches every row of the group the click landed in', () => {
+        const anchored = { paths: new Set(['u1.ts']), anchor: 2 };
+        const next = applyRowClick(grouped, anchored, 3, { ctrl: false, shift: true });
+        expect([...next.paths].sort()).toEqual(['u1.ts', 'u2.ts']);
+        expect(next.anchor).toBe(2);
+    });
+
+    it('selects only the row it landed on when the anchor sits in another group', () => {
+        const anchored = { paths: new Set(['s1.ts']), anchor: 0 };
+        const next = applyRowClick(grouped, anchored, 3, { ctrl: false, shift: true });
+        expect([...next.paths]).toEqual(['u2.ts']);
+        expect(next.anchor).toBe(3);
+    });
+
+    it('re-anchors where it landed, so the next shift extends inside that group', () => {
+        const crossed = applyRowClick(grouped, { paths: new Set(['s1.ts']), anchor: 0 }, 2, { ctrl: false, shift: true });
+        expect([...crossed.paths]).toEqual(['u1.ts']);
+        expect(crossed.anchor).toBe(2);
+        const extended = applyRowClick(grouped, crossed, 3, { ctrl: false, shift: true });
+        expect([...extended.paths].sort()).toEqual(['u1.ts', 'u2.ts']);
+    });
+
+    it('still reaches a row of its own group across a row of the other one', () => {
+        const interleaved: RowOrder = [
+            { path: 'a', selectable: true, group: 'x' },
+            { path: 'b', selectable: true, group: 'y' },
+            { path: 'c', selectable: true, group: 'x' },
+        ];
+        const next = applyRowClick(interleaved, { paths: new Set<string>(), anchor: 0 }, 2, { ctrl: false, shift: true });
+        expect([...next.paths]).toEqual(['a', 'c']);
+    });
+
+    it('keeps rows of both groups when ctrl-click adds them', () => {
+        const next = applyRowClick(grouped, { paths: new Set(['s1.ts']), anchor: 0 }, 3, { ctrl: true, shift: false });
+        expect([...next.paths].sort()).toEqual(['s1.ts', 'u2.ts']);
+    });
+
+    it('names only that group when a range is asked for one', () => {
+        expect(indexPaths(grouped, 0, 3, 'staged')).toEqual(['s1.ts', 's2.ts']);
+        expect(indexPaths(grouped, 0, 3)).toEqual(['s1.ts', 's2.ts', 'u1.ts', 'u2.ts']);
+    });
+});
+
 describe('selection over a changed listing', () => {
     it('select-all takes every selectable row', () => {
         expect([...allSelectablePaths(rows)].sort()).toEqual(['/p/a.ts', '/p/b.ts', '/p/c.ts', '/p/docs']);
@@ -146,5 +198,30 @@ describe('paths as the listing spells them', () => {
         expect(rowIsSelectable({ name: '..' })).toBe(false);
         expect(rowIsSelectable({ name: '.env' })).toBe(true);
         expect(rowIsSelectable({ name: 'docs' })).toBe(true);
+    });
+});
+
+describe('the names a confirmation lists', () => {
+    const more = (count: number) => `${count} more`;
+
+    it('lists every name when there is room for all of them', () => {
+        expect(confirmList(['a.ts', 'b.ts'], more)).toEqual(['a.ts', 'b.ts']);
+    });
+
+    it('counts the rest once the list is cut', () => {
+        const names = Array.from({ length: CONFIRM_LIST_MAX + 3 }, (_, i) => `f${i}.ts`);
+        const listed = confirmList(names, more);
+        expect(listed).toEqual([...names.slice(0, CONFIRM_LIST_MAX), '3 more']);
+    });
+
+    it('cuts at the cap and says nothing about a rest that does not exist', () => {
+        const exact = Array.from({ length: CONFIRM_LIST_MAX }, (_, i) => `f${i}.ts`);
+        expect(confirmList(exact, more)).toEqual(exact);
+    });
+
+    it('leaves the called list alone', () => {
+        const names = Array.from({ length: CONFIRM_LIST_MAX + 1 }, (_, i) => `f${i}.ts`);
+        confirmList(names, more);
+        expect(names).toHaveLength(CONFIRM_LIST_MAX + 1);
     });
 });

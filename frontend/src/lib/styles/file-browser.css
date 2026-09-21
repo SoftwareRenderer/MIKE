@@ -279,57 +279,8 @@
 :global(.file-browser .git-status-unmerged) { color: var(--color-status-orange, #d29922); }
 :global(.file-browser .git-status-copied) { color: var(--color-status-blue, #58a6ff); }
 
-/* The touch equivalent of the context menu: what is selected and what to do with it. */
-:global(.file-browser .file-selection-bar) {
-    position: absolute;
-    left: 8px;
-    right: 8px;
-    bottom: 8px;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 6px;
-    background: var(--color-surface-1);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-}
-
-:global(.file-browser .selection-count) {
-    flex: 1;
-    padding-left: 4px;
-    font-size: 0.75rem;
-    color: var(--color-text-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-:global(.file-browser .selection-btn) {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    padding: 0;
-    border: none;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--color-text-secondary);
-    font-size: 0.8125rem;
-    cursor: pointer;
-}
-:global(.file-browser .selection-btn:hover:not(:disabled)) {
-    background: var(--color-surface-3);
-    color: var(--color-text-primary);
-}
-:global(.file-browser .selection-btn.destructive) {
-    color: var(--color-status-red, #f85149);
-}
-:global(.file-browser .selection-btn:disabled) {
-    opacity: 0.4;
-    cursor: default;
-}
+/* The selection action bar and its buttons belong to SelectionActionBar.svelte, which the file
+   listing and the Review Changes sidebar both render. */
 
 /* Tap targets. The drop overlay in file-drop.css takes the same widening there, and for the same
    reason: these are rows and buttons a thumb has to hit. */
@@ -358,13 +309,6 @@
         padding: 8px 12px;
         font-size: 0.9375rem;
         gap: 10px;
-    }
-    :global(.file-browser .selection-btn) {
-        width: 36px;
-        height: 36px;
-    }
-    :global(.file-browser .selection-count) {
-        font-size: 0.8125rem;
     }
     :global(.file-browser .file-browser-error),
     :global(.file-browser .file-browser-loading),
