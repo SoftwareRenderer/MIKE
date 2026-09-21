@@ -1,7 +1,6 @@
 package extensions
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -88,7 +87,6 @@ type extensionSandboxState struct {
 	// every consumer gets its own connection and the agent keeps its session on that connection.
 	sessions      map[*bridge.Client]*exec.Cmd
 	ports         []types.AssignedPort
-	createdAt     time.Time
 	lastCheckedAt time.Time
 	isAlive       bool
 	// stopTimer fires after ExtensionStopGracePeriod when refcount hits 0.
@@ -172,7 +170,7 @@ func (sm *ExtensionSandboxManager) SetWorkspaceDir(dir string) {
 }
 
 // MountPolicy returns the host roots an extension sandbox may mount: workspace dir, registered
-// project paths, the extensions dir, the temp dir, the EnvMountRoots extras, and the paths
+// project paths, the extensions dir, the temp dir, the startup.Config.ExtMountRoots extras, and the paths
 // projects declare in their own Sandbox Configuration. Which of those a sandbox may write is
 // ForceReadOnly's rule. Built on demand, so new projects apply without a restart.
 //
@@ -558,7 +556,6 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 	sm.states[ext.ID] = &extensionSandboxState{
 		containerName:   containerName,
 		memLimitMB:      int64(extensionMemoryLimit(ext)),
-		createdAt:       time.Now(),
 		lastCheckedAt:   time.Now(),
 		isAlive:         true,
 		mountedProjects: mountedProjects,
@@ -949,23 +946,18 @@ func (sm *ExtensionSandboxManager) ListRunning() map[string]ExtensionRuntimeStat
 	for extID, state := range sm.states {
 		running, _ := sm.rt.IsRunning(state.containerName)
 		result[extID] = ExtensionRuntimeStatus{
-			Running:   running,
-			Container: state.containerName,
-			Ports:     state.ports,
-			RefCount:  sm.refs[extID],
-			CreatedAt: state.createdAt,
+			Running: running,
+			Ports:   state.ports,
 		}
 	}
 	return result
 }
 
-// ExtensionRuntimeStatus describes the runtime state of an extension sandbox.
+// ExtensionRuntimeStatus is what one running extension sandbox holds. It is not a payload:
+// toResponse copies these two answers into the extension's own response.
 type ExtensionRuntimeStatus struct {
-	Running   bool                 `json:"running"`
-	Container string               `json:"container"`
-	Ports     []types.AssignedPort `json:"ports,omitempty"`
-	RefCount  int                  `json:"ref_count"`
-	CreatedAt time.Time            `json:"created_at"`
+	Running bool                 `json:"running"`
+	Ports   []types.AssignedPort `json:"ports,omitempty"`
 }
 
 // pullsMissingRemoteImage reports whether a missing extension image has to be pulled to exist. A
@@ -1076,16 +1068,4 @@ func (sm *ExtensionSandboxManager) findLocalDockerfile(name string) (string, err
 		return "", err
 	}
 	return found, nil
-}
-
-// MarshalJSON implements json.Marshaler for ExtensionRuntimeStatus.
-func (s ExtensionRuntimeStatus) MarshalJSON() ([]byte, error) {
-	type Alias ExtensionRuntimeStatus
-	return json.Marshal(&struct {
-		CreatedAt string `json:"created_at"`
-		*Alias
-	}{
-		CreatedAt: s.CreatedAt.Format(time.RFC3339),
-		Alias:     (*Alias)(&s),
-	})
 }

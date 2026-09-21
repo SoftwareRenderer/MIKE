@@ -11,10 +11,11 @@ import (
 	"strings"
 )
 
-// Environment variable names. The consumer packages keep their own constants where the name is part
-// of a user-facing refusal (fsutil.AllowRootFSEnv, sandbox.DangerZoneEnv, extensions.EnvMountRoots);
-// TestEnvNamesMatchTheirOwners holds this copy and those together, because two spellings of one
-// variable drift in exactly the way that ends with a documented flag doing nothing.
+// Environment variable names. Every read of a variable happens here; a consumer keeps a constant of
+// its own only where the name is part of a refusal it prints (fsutil.AllowRootFSEnv,
+// updates.EnvDisableUpdates), and TestEnvNamesMatchTheirOwners holds this copy and those together,
+// because two spellings of one variable drift in exactly the way that ends with a documented flag
+// doing nothing.
 const (
 	EnvPort           = "MIKE_PORT"
 	EnvListen         = "MIKE_LISTEN"

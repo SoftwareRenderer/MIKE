@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"mike/backend/fsutil"
 	"mike/pkg/logging"
 )
 
@@ -228,7 +229,7 @@ func (s *Service) backup(ctx context.Context, files []swapFile, stale []string) 
 	}
 	for _, f := range files {
 		rel, err := filepath.Rel(s.install.Dir, f.dst)
-		if err != nil || strings.HasPrefix(rel, "..") {
+		if err != nil || !fsutil.RelInsideRoot(rel) {
 			rel = filepath.Base(f.dst)
 		}
 		dst := filepath.Join(dir, rel)
@@ -244,7 +245,7 @@ func (s *Service) backup(ctx context.Context, files []swapFile, stale []string) 
 	}
 	for _, old := range stale {
 		rel, err := filepath.Rel(s.install.Dir, old)
-		if err != nil || strings.HasPrefix(rel, "..") {
+		if err != nil || !fsutil.RelInsideRoot(rel) {
 			continue
 		}
 		dst := filepath.Join(dir, rel)
@@ -422,10 +423,7 @@ func splitFirst(clean string) (string, string) {
 // within reports whether target sits under root, after both are cleaned.
 func within(root, target string) bool {
 	rel, err := filepath.Rel(root, target)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)))
+	return err == nil && fsutil.RelInsideRoot(rel)
 }
 
 func copyFile(ctx context.Context, src, dst string) error {

@@ -223,13 +223,6 @@ func (g *MemoryGate) Capacity() int64 {
 	return g.capacity
 }
 
-// Used returns the reservations held for tasks whose container is not yet accounted, in MB.
-func (g *MemoryGate) Used() int64 {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.used
-}
-
 // InUse returns what counts against the ceiling: MIKE's own charge plus the reservations.
 func (g *MemoryGate) InUse() int64 {
 	g.mu.Lock()

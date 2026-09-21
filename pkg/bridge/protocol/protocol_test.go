@@ -216,10 +216,10 @@ func TestMethodString(t *testing.T) {
 		{MethodBash, "bash"},
 		{MethodBashCancel, "bash_cancel"},
 		{MethodLSP, "lsp"},
-		{MethodWriteBytes, "write_bytes"},
-		// 0x05-0x08 were the retired shell methods; they must stay unassigned.
+		// 0x05-0x08 were the retired shell methods and 0x0B was write_bytes; all stay unassigned.
 		{0x05, "unknown(5)"},
 		{0x08, "unknown(8)"},
+		{0x0B, "unknown(11)"},
 		{0xFF, "unknown(255)"},
 	}
 	for _, tc := range cases {
@@ -265,33 +265,21 @@ func TestLargePayload(t *testing.T) {
 	}
 }
 
-// The control case is the shape the text write keeps: the same bytes through WriteParams are
-// where the corruption happens.
-func TestWriteBytesParamsHoldBytesThatAreNotText(t *testing.T) {
+// Why a file's bytes cannot be sent as WriteParams.Content: a Go string carrying arbitrary bytes
+// goes through encoding/json as UTF-8 and comes back with every invalid sequence replaced.
+func TestWriteParamsContentCannotCarryArbitraryBytes(t *testing.T) {
 	raw := []byte{0x89, 'P', 'N', 'G', 0xff, 0xfe, 0x00, 0x80, 0xc3, 0x28, 0xa0}
 
-	payload, err := json.Marshal(WriteBytesParams{Path: "/tmp/shot.png", Data: raw})
+	payload, err := json.Marshal(WriteParams{Path: "/tmp/shot.png", Content: string(raw)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var bytesBack WriteBytesParams
-	if err := json.Unmarshal(payload, &bytesBack); err != nil {
+	var back WriteParams
+	if err := json.Unmarshal(payload, &back); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(bytesBack.Data, raw) {
-		t.Errorf("params changed the bytes:\n got %x\nwant %x", bytesBack.Data, raw)
-	}
-
-	text, err := json.Marshal(WriteParams{Path: "/tmp/shot.png", Content: string(raw)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var textBack WriteParams
-	if err := json.Unmarshal(text, &textBack); err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Equal([]byte(textBack.Content), raw) {
-		t.Error("encoding/json no longer rewrites invalid UTF-8 in a string, which is the whole " +
-			"reason MethodWriteBytes is a method and not a field on MethodWrite — re-read both")
+	if bytes.Equal([]byte(back.Content), raw) {
+		t.Error("encoding/json no longer rewrites invalid UTF-8 in a string, so the retired 0x0B " +
+			"would no longer be needed for a binary write — re-read protocol.MethodWriteBytes")
 	}
 }

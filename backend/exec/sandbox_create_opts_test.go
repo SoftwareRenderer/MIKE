@@ -34,8 +34,8 @@ func TestSandboxCreateOpts_CarriesEveryConfiguredField(t *testing.T) {
 	if opts.BaseImage != "localhost/sandbox-example.com" {
 		t.Errorf("BaseImage = %q, want the image the caller passed in", opts.BaseImage)
 	}
-	if !opts.PlanMode {
-		t.Error("PlanMode = false, want the mode the caller passed in")
+	if !opts.WorktreeReadOnly {
+		t.Error("WorktreeReadOnly = false, want the value the caller passed in")
 	}
 	if !opts.NetworkIsolation {
 		t.Error("NetworkIsolation = false, want the project's setting")

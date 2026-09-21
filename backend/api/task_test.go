@@ -102,6 +102,56 @@ func setupTaskValidationProject(t *testing.T, h *TaskHandler, s *store.Store) {
 	}
 }
 
+// --- POST create: operating_mode is the only spelling of the mode ---
+//
+// The refusal is what an old client sees; converting the alias instead would let it keep winning
+// over an explicit operating_mode in the same body.
+func TestTaskHandler_POST_RefusesTheRetiredPlanMode(t *testing.T) {
+	h, s, _ := newTestTaskHandler(t)
+	if err := s.CreateProject(&types.Project{ID: "pm-proj", Name: "pm-proj", Path: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	mux := newTaskMux(h)
+
+	for _, body := range []map[string]any{
+		{"prompt": "Fix the CLI flag", "plan_mode": true},
+		{"prompt": "Fix the CLI flag", "plan_mode": false},
+		{"prompt": "Fix the CLI flag", "plan_mode": true, "operating_mode": "act"},
+		{"prompt": "Fix the CLI flag", "plan_mode": "yes"},
+	} {
+		rr := doTaskRequest(t, mux, http.MethodPost, "/api/projects/pm-proj/tasks", body)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("plan_mode=%v: status = %d, want 400: %s", body["plan_mode"], rr.Code, rr.Body.String())
+			continue
+		}
+		if !strings.Contains(rr.Body.String(), "operating_mode") {
+			t.Errorf("refusal %q does not name the field to send instead", rr.Body.String())
+		}
+	}
+
+	// The retired field is refused before anything is written: the four bodies above created no rows.
+	tasks, err := s.GetTasksByProject("pm-proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("%d tasks were created by refused requests, want none", len(tasks))
+	}
+
+	rr := doTaskRequest(t, mux, http.MethodPost, "/api/projects/pm-proj/tasks",
+		map[string]any{"prompt": "Fix the CLI flag", "operating_mode": "plan"})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("operating_mode=plan: status = %d, want 201: %s", rr.Code, rr.Body.String())
+	}
+	var created types.Task
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.OperatingMode != types.ModePlan {
+		t.Errorf("operating_mode = %q, want %q", created.OperatingMode, types.ModePlan)
+	}
+}
+
 // --- PUT handler git-ref validation ---
 //
 // TestTaskHandler_PUT_RefValidation is the whole validation matrix for the three

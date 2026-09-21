@@ -58,26 +58,10 @@ func TestOperatingModeRoundTrip(t *testing.T) {
 	}
 }
 
-// TestOperatingModeIsReadOnly pins which modes may not write. It is asserted as a set rather
-// than per-mode so adding a fourth mode cannot quietly make it writable by default.
-func TestOperatingModeIsReadOnly(t *testing.T) {
-	readOnly := map[OperatingMode]bool{ModePlan: true, ModeExplore: true, ModeAct: false}
-	for m, want := range readOnly {
-		if got := m.IsReadOnly(); got != want {
-			t.Errorf("%q.IsReadOnly() = %v, want %v", m, got, want)
-		}
-	}
-	// The zero value is not read-only, and must not be: a task whose mode was never set gets
-	// the act tool set by fall-through, so claiming otherwise would hide a real write path.
-	if OperatingMode("").IsReadOnly() {
-		t.Error("the empty mode reports read-only, but an unset mode gets the act tool set")
-	}
-}
-
-// TestTaskModeHelpersAgreeWithIsReadOnly: IsPlanMode/IsExploreMode are the old per-mode callers
-// and IsReadOnly is the derived question. If they ever disagree, a caller that asked the derived
-// question and a caller that named a mode get different answers about the same task.
-func TestTaskModeHelpersAgreeWithIsReadOnly(t *testing.T) {
+// TestTaskModeHelpers: the per-mode helpers are the whole vocabulary this package offers for
+// "what may this turn do". Which of them mounts the worktree read-only is decided where the
+// container arguments are built, not here.
+func TestTaskModeHelpers(t *testing.T) {
 	for _, m := range []OperatingMode{ModeAct, ModePlan, ModeExplore, ""} {
 		task := &Task{OperatingMode: m}
 		if got, want := task.IsPlanMode(), m == ModePlan; got != want {
@@ -85,9 +69,6 @@ func TestTaskModeHelpersAgreeWithIsReadOnly(t *testing.T) {
 		}
 		if got, want := task.IsExploreMode(), m == ModeExplore; got != want {
 			t.Errorf("mode %q: IsExploreMode() = %v, want %v", m, got, want)
-		}
-		if derived, named := task.OperatingMode.IsReadOnly(), task.IsPlanMode() || task.IsExploreMode(); derived != named {
-			t.Errorf("mode %q: IsReadOnly() = %v but the named modes say %v", m, derived, named)
 		}
 	}
 }

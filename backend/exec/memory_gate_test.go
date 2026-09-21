@@ -21,8 +21,8 @@ func TestMemoryGateAcquireFitsImmediately(t *testing.T) {
 	if err := g.Acquire(context.Background(), 500, nil); err != nil {
 		t.Fatal(err)
 	}
-	if g.Used() != 500 {
-		t.Errorf("expected used=500, got %d", g.Used())
+	if g.Budget().ReservationsMB != 500 {
+		t.Errorf("expected used=500, got %d", g.Budget().ReservationsMB)
 	}
 }
 
@@ -68,8 +68,8 @@ func TestMemoryGateReleaseUnblocksWaiter(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("waiter not served after release")
 	}
-	if g.Used() != 600 {
-		t.Errorf("expected used=600 after handoff, got %d", g.Used())
+	if g.Budget().ReservationsMB != 600 {
+		t.Errorf("expected used=600 after handoff, got %d", g.Budget().ReservationsMB)
 	}
 }
 
@@ -94,8 +94,8 @@ func TestMemoryGateCancelCleansUp(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("cancelled Acquire did not return")
 	}
-	if g.Used() != 500 {
-		t.Errorf("cancel must not change used; got %d", g.Used())
+	if g.Budget().ReservationsMB != 500 {
+		t.Errorf("cancel must not change used; got %d", g.Budget().ReservationsMB)
 	}
 }
 
@@ -149,8 +149,8 @@ func TestMemoryGateReleaseClampsZero(t *testing.T) {
 	g := &MemoryGate{}
 	g.SetCapacity(100)
 	g.Release(200) // release more than held
-	if g.Used() != 0 {
-		t.Errorf("used must clamp to 0, got %d", g.Used())
+	if g.Budget().ReservationsMB != 0 {
+		t.Errorf("used must clamp to 0, got %d", g.Budget().ReservationsMB)
 	}
 }
 
@@ -290,17 +290,17 @@ func TestMemSlotReservationCoversAHostRun(t *testing.T) {
 	if !te.acquireMemSlot(setup) {
 		t.Fatal("acquireMemSlot refused a run that fits under the capacity")
 	}
-	if got := te.memGate.Used(); got != 512 {
+	if got := te.memGate.Budget().ReservationsMB; got != 512 {
 		t.Errorf("reservations = %d MB, want 512 for a host run on a project limited to 512", got)
 	}
 
 	te.confirmMemReservation(setup)
-	if got := te.memGate.Used(); got != 512 {
+	if got := te.memGate.Budget().ReservationsMB; got != 512 {
 		t.Errorf("reservations = %d MB after confirm, want 512: a host run has no container to be counted instead", got)
 	}
 
 	te.releaseMemSlot(setup)
-	if got := te.memGate.Used(); got != 0 {
+	if got := te.memGate.Budget().ReservationsMB; got != 0 {
 		t.Errorf("reservations = %d MB after the run ended, want 0", got)
 	}
 	if setup.memAcquiredMB != 0 {
@@ -317,7 +317,7 @@ func TestMemSlotReservationIsSpentAtContainerCreation(t *testing.T) {
 		t.Fatal("acquireMemSlot refused a run that fits under the capacity")
 	}
 	te.confirmMemReservation(setup)
-	if got := te.memGate.Used(); got != 0 {
+	if got := te.memGate.Budget().ReservationsMB; got != 0 {
 		t.Errorf("reservations = %d MB after the container exists, want 0", got)
 	}
 }
@@ -330,7 +330,7 @@ func TestMemSlotReservationOfAnUncappedProjectIsNothing(t *testing.T) {
 	if !te.acquireMemSlot(setup) {
 		t.Fatal("acquireMemSlot refused a run that books nothing")
 	}
-	if got := te.memGate.Used(); got != 0 {
+	if got := te.memGate.Budget().ReservationsMB; got != 0 {
 		t.Errorf("reservations = %d MB, want 0 for a project with no memory limit", got)
 	}
 }
