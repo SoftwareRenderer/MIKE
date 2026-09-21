@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { gitStatusLabel, gitStatusClass, gitStatusPriority } from '../git-status';
+import { gitStatusLabel, gitStatusClass, gitStatusPriority, gitStatusAbsentFromHead } from '../git-status';
 
 describe('gitStatusLabel', () => {
     it('names every letter git reports for a changed path', () => {
@@ -60,5 +60,20 @@ describe('gitStatusPriority', () => {
     it('ranks nothing for an unknown letter', () => {
         expect(gitStatusPriority('T')).toBe(0);
         expect(gitStatusPriority('')).toBe(0);
+    });
+});
+
+describe('gitStatusAbsentFromHead', () => {
+    it('calls the letters naming a path no commit holds absent from HEAD', () => {
+        for (const c of ['?', 'A', 'C', 'R']) {
+            expect(gitStatusAbsentFromHead(c)).toBe(true);
+        }
+    });
+
+    it('keeps a deletion restorable, because HEAD holds the path it removed', () => {
+        for (const c of ['D', 'M', 'U']) {
+            expect(gitStatusAbsentFromHead(c)).toBe(false);
+        }
+        expect(gitStatusAbsentFromHead('T')).toBe(false);
     });
 });

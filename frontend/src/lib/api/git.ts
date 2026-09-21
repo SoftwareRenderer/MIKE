@@ -111,9 +111,11 @@ export async function checkoutBranch(projectId: string, branch: string): Promise
 }
 
 /** Fetch git status (porcelain format) for a project.
- * Returns { clean: boolean, status: string, head: string, authorName: string, authorEmail: string }.
- * Status is the raw `git status --porcelain` output. Author fields are from project git config. */
-export async function getGitStatus(projectId: string): Promise<{ clean: boolean; status: string; head: string; authorName: string; authorEmail: string }> {
+ * Returns { clean: boolean, status: string, head: string, authorName: string, authorEmail: string,
+ * ahead: number, behind: number }. Status is the raw `git status --porcelain` output. Author fields
+ * are from project git config. `ahead`/`behind` are counted against the upstream's remote-tracking
+ * ref, so a fetch moves them, not the remote moving. */
+export async function getGitStatus(projectId: string): Promise<{ clean: boolean; status: string; head: string; authorName: string; authorEmail: string; ahead: number; behind: number }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/status`);
     if (!res.ok) throw await apiError(res, t('api.fetchGitStatus'));
     return res.json();
@@ -141,6 +143,18 @@ export async function stageProjectFile(projectId: string, path: string, stage: b
         body: JSON.stringify({ path, stage }),
     });
     if (!res.ok) throw await apiError(res, stage ? t('api.stageFile') : t('api.unstageFile'));
+    return res.json();
+}
+
+/** Discard one file's changes in the project repo: back to HEAD, or removed when HEAD never held it. */
+export async function discardProjectFile(projectId: string, path: string): Promise<{ status: string }> {
+    const csrfToken = await ensureCsrfToken();
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/discard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
+        body: JSON.stringify({ path }),
+    });
+    if (!res.ok) throw await apiError(res, t('api.discardFile'));
     return res.json();
 }
 

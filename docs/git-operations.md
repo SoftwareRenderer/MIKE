@@ -123,6 +123,22 @@ live branches kept), `backend/git/branch_listing_test.go` (both markers, slug pr
   used instead of an index lock because a locked index blocks the forced checkout too, so the loss never
   happens and the test passes vacuously).
 
+## Discard: one file back to HEAD, or off disk
+
+`POST /api/projects/{projectID}/git/discard` (`discardFile`) reverts one path in `project.Path` — the
+checkout every other Review Changes button writes to.
+
+- **HEAD decides revert from delete** (`ls-tree --name-only HEAD -- p`): the index cannot answer it, a
+  staged deletion holds no entry either.
+- **Revert is `checkout HEAD -- p` alone** — it writes the index along with the worktree, so the staged half
+  of an edit and a staged deletion both go.
+- **Delete is `reset -q HEAD -- p`, then `clean -f -q -- p`, never `os.Remove`:** the reset unstages a file
+  staged as new; clean skips ignored files and directories another repository owns.
+- Nothing parks the work — no stash entry, no snapshot ref — so the panel's confirmation dialog is the
+  whole guard, worded from the status letter (`?`, `A`, `C`, `R` are the letters HEAD holds no path under).
+- Tests: `backend/api/git_discard_test.go`, the discard block of `git-status-panel.unit.svelte.ts`,
+  `review-changes-discard.spec.ts`.
+
 ## Client-supplied refs are validated, then fenced
 
 `types.ValidateGitRef` (`backend/types/validate.go`) is deliberately tighter than `ValidateBranchName`
@@ -180,3 +196,15 @@ used to hold the per-project mutex for the full ssh timeout), and the extension 
 `clone`/`checkout`/`rev-parse`. The other ~61 local git call sites behind the three helpers (`gitRun`,
 `gitRunInGitDir`, `gitRunOutput`) are deliberately context-less: they run against a local repository, and
 threading a context through them buys nothing at the sites that never block on a network.
+
+## Ahead/behind counts never touch the remote
+
+`remoteAheadBehind` (`backend/api/git.go`) answers the Pull/Push numbers on
+`GET /api/projects/{projectID}/git/status` with `git rev-list --left-right --count HEAD...@{upstream}`:
+ahead then behind, read off `refs/remotes/…`, so the count is what the last fetch saw and the status
+path never opens a connection to a remote. A repository with no upstream, a detached HEAD and an unborn
+branch all fail that rev-list, and each answers `0`/`0` rather than an error — the status snapshot must
+still answer. The pair is exact only for the moment the panel last spoke to the remote, so
+`GitStatusPanel` prints each number behind a `~` until it has pulled or pushed once.
+
+Tests: `backend/api/git_test.go` — ahead, behind, and no-upstream.

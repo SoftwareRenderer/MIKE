@@ -374,13 +374,39 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	if emailOut, err := git.Command("", "-C", project.Path, "config", "user.email").CombinedOutput(); err == nil {
 		authorEmail = strings.TrimSpace(string(emailOut))
 	}
+	ahead, behind := remoteAheadBehind(project.Path)
 	httputil.JSONResponse(w, http.StatusOK, map[string]any{
 		"clean":       clean,
 		"status":      string(out),
 		"head":        headHash,
 		"authorName":  authorName,
 		"authorEmail": authorEmail,
+		"ahead":       ahead,
+		"behind":      behind,
 	})
+}
+
+// remoteAheadBehind reads refs/remotes/…, so the count moves when something fetches and never
+// contacts the remote itself — which is why the caller marks it approximate. A missing upstream, a
+// detached HEAD and an unborn branch answer 0/0: the status snapshot has to keep answering.
+func remoteAheadBehind(dir string) (ahead, behind int) {
+	c := git.Command("", "-C", dir, "rev-list", "--left-right", "--count", "HEAD...@{upstream}")
+	// stdout only, so a git warning on stderr cannot reach the parse.
+	out, err := c.Output()
+	if err != nil {
+		return 0, 0
+	}
+	// The two counts are tab-separated; the left one is HEAD's side.
+	fields := strings.Fields(string(out))
+	if len(fields) != 2 {
+		return 0, 0
+	}
+	a, aerr := strconv.Atoi(fields[0])
+	b, berr := strconv.Atoi(fields[1])
+	if aerr != nil || berr != nil {
+		return 0, 0
+	}
+	return a, b
 }
 
 // HandleProjectDiffFile returns the diff for one file in the project, plus its full working-tree
@@ -1204,6 +1230,91 @@ func (h *GitHandler) HandleProjectStageFile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "action": stageActionName(req.Stage)})
+}
+
+// discardFile reverts one file in dir to HEAD, or removes it when HEAD holds no such path.
+//
+// Removal is `git clean` rather than deleting the path: clean leaves ignored files alone, and a folder
+// another repository owns is not this one's to delete.
+func discardFile(dir, path string) error {
+	inHead, err := headHasPath(dir, path)
+	if err != nil {
+		return err
+	}
+	if inHead {
+		// checkout writes the index along with the worktree, so it drops the staged half too.
+		if out, err := git.Command("", "-C", dir, "checkout", "HEAD", "--", path).CombinedOutput(); err != nil {
+			return gitStepError("git checkout", err, out)
+		}
+		return nil
+	}
+	// A file staged as new leaves the index here; an untracked path is not in the index at all.
+	if out, err := git.Command("", "-C", dir, "reset", "-q", "HEAD", "--", path).CombinedOutput(); err != nil {
+		return gitStepError("git reset", err, out)
+	}
+	if out, err := git.Command("", "-C", dir, "clean", "-f", "-q", "--", path).CombinedOutput(); err != nil {
+		return gitStepError("git clean", err, out)
+	}
+	return nil
+}
+
+// headHasPath reports whether HEAD holds path, which is what decides a revert from a removal.
+func headHasPath(dir, path string) (bool, error) {
+	// An unborn HEAD fails this with exit 1, which is an answer rather than a fault.
+	if _, err := git.Command("", "-C", dir, "rev-parse", "--verify", "--quiet", "HEAD").Output(); err != nil {
+		if code, ok := git.GitExitCode(err); ok && code == 1 {
+			return false, nil
+		}
+		return false, gitStepError("git rev-parse", err, nil)
+	}
+	out, err := git.Command("", "-C", dir, "ls-tree", "--name-only", "HEAD", "--", path).Output()
+	if err != nil {
+		return false, gitStepError("git ls-tree", err, nil)
+	}
+	return strings.TrimSpace(string(out)) != "", nil
+}
+
+// gitStepError names the failed git step and carries git's own words for the log; the response never
+// repeats them.
+func gitStepError(step string, err error, out []byte) error {
+	if len(out) == 0 {
+		return fmt.Errorf("%s: %w", step, err)
+	}
+	return fmt.Errorf("%s: %w: %s", step, err, strings.TrimSpace(string(out)))
+}
+
+// HandleProjectDiscardFile reverts one file in the project repo to HEAD, removing it when HEAD holds no
+// path of that name.
+// POST /api/projects/{projectID}/git/discard
+// Body: {"path": "file.c"}
+func (h *GitHandler) HandleProjectDiscardFile(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	project, err := h.store.GetProject(projectID)
+	if err != nil {
+		httputil.Fail(w, err, "get project", "project not found")
+		return
+	}
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "path required")
+		return
+	}
+	// A path outside the repository is refused here, as a 400 naming the field.
+	if _, err := repoFilePath(project.Path, req.Path); err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// Acquire per-project mutex: a discard writes the same index and worktree stage and commit do.
+	if h.getProjectMutex != nil {
+		defer h.getProjectMutex(projectID)()
+	}
+	if err := discardFile(project.Path, req.Path); err != nil {
+		httputil.Fault(w, "git discard", err)
+		return
+	}
+	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // HandleProjectCommit commits staged changes in the project repo.

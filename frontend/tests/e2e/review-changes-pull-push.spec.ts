@@ -42,6 +42,11 @@ async function openChangesPanel(page: Page) {
     await expect(page.locator('.panel-title:has-text("Changes")')).toBeVisible({ timeout: 10000 });
 }
 
+// The panel's Pull/Push buttons. Their accessible names carry the ahead/behind counts, so each is matched
+// by the words it starts with.
+const pullButton = (page: Page) => page.locator('button[aria-label^="Pull from remote"]');
+const pushButton = (page: Page) => page.locator('button[aria-label^="Push to remote"]');
+
 test.describe.serial('Review Changes: commit button + pull/push', () => {
     let projectId = '';
 
@@ -108,8 +113,8 @@ test.describe.serial('Review Changes: commit button + pull/push', () => {
         // for this single-commit fixture repo; its only file is README.md).
         await expect(page.locator('.sr-only', { hasText: 'Showing diff with 1 file' })).toBeVisible({ timeout: 15000 });
 
-        const pullBtn = page.locator('button[aria-label="Pull from remote"]');
-        const pushBtn = page.locator('button[aria-label="Push to remote"]');
+        const pullBtn = pullButton(page);
+        const pushBtn = pushButton(page);
         await expect(pullBtn).toBeVisible();
         await expect(pushBtn).toBeVisible();
     });
@@ -135,7 +140,7 @@ test.describe.serial('Review Changes: commit button + pull/push', () => {
         // Commit via CLI (the commit dialog flow is covered by commit-dialog.spec.ts),
         // then push through the panel's Push button.
         git(REPO, `commit -m "push fixture ${uniqueId}"`);
-        await page.locator('button[aria-label="Push to remote"]').click();
+        await pushButton(page).click();
         await expect(page.locator('.toast.success', { hasText: 'Pushed to remote' })).toBeVisible({ timeout: 15000 });
 
         // The bare remote's HEAD must now match the local HEAD (a bare repo
@@ -158,7 +163,7 @@ test.describe.serial('Review Changes: commit button + pull/push', () => {
         git(CLONE, `commit -m "remote fixture ${uniqueId}"`);
         git(CLONE, 'push');
 
-        await page.locator('button[aria-label="Pull from remote"]').click();
+        await pullButton(page).click();
         await expect(page.locator('.toast.success', { hasText: 'Pulled from remote' })).toBeVisible({ timeout: 15000 });
 
         // The pulled commit must be in the local repo.
@@ -168,7 +173,7 @@ test.describe.serial('Review Changes: commit button + pull/push', () => {
     test('Push without upstream shows an error toast and keeps the panel open', async ({ page }) => {
         git(REPO, 'branch --unset-upstream');
 
-        await page.locator('button[aria-label="Push to remote"]').click();
+        await pushButton(page).click();
         const errorToast = page.locator('.toast.error');
         await expect(errorToast).toBeVisible({ timeout: 15000 });
         await expect(errorToast).toContainText(/upstream/i);

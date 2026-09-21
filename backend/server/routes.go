@@ -190,6 +190,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/projects/{projectID}/git/status", s.gitHandler.HandleStatus)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/git/stage", s.gitHandler.HandleProjectStageFile)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/git/commit", s.gitHandler.HandleProjectCommit)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/git/discard", s.gitHandler.HandleProjectDiscardFile)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/git/checkout", s.gitHandler.HandleCheckout)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/git/pull", s.gitHandler.HandlePull)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/git/push", s.gitHandler.HandlePush)

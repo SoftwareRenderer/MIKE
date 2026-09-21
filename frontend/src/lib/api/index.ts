@@ -119,6 +119,7 @@ export {
     getGitStatus,
     stageProjectFile,
     commitProject,
+    discardProjectFile,
     pullProject,
     pushProject,
     getTaskGitLog,

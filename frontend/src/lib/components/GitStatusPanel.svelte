@@ -1,9 +1,9 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import type { DiffFile } from '$lib/types/diff';
-    import { gitStatusLabel } from '$lib/utils/git-status';
+    import { gitStatusLabel, gitStatusAbsentFromHead } from '$lib/utils/git-status';
     import { t } from '$lib/i18n';
-    import { getGitStatus, getProjectDiffFiles, getCommitDiffFiles, getProjectDiffFile, stageProjectFile, commitProject, pullProject, pushProject, getGitLogFull } from '$lib/api';
+    import { getGitStatus, getProjectDiffFiles, getCommitDiffFiles, getProjectDiffFile, stageProjectFile, commitProject, discardProjectFile, pullProject, pushProject, getGitLogFull } from '$lib/api';
     import type { GitCommit } from '$lib/types';
     import { dialogStore } from '$lib/stores';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
@@ -452,10 +452,12 @@
         loadDiffViewer();
         try {
             // Fetch git status for sidebar
-            const { status, head, authorName: author, authorEmail: email } = await getGitStatus(projectId);
+            const { status, head, authorName: author, authorEmail: email, ahead, behind } = await getGitStatus(projectId);
             headHash = head;
             authorName = author;
             authorEmail = email;
+            aheadCommits = ahead;
+            behindCommits = behind;
             const staged: StatusEntry[] = [];
             const unstaged: StatusEntry[] = [];
             const untrackedPaths: string[] = [];
@@ -598,19 +600,25 @@
         return { folder: path.substring(0, idx), name: path.substring(idx + 1) };
     }
 
-    // Serialize stage/unstage operations
-    let stageQueue: Promise<void> = Promise.resolve();
-    function enqueueStage(task: () => Promise<void>): void {
-        stageQueue = stageQueue.then(task).catch(() => {});
+    // Serialize the panel's git writes: each one reloads the panel, so two in flight would read each
+    // other's half-applied state.
+    let gitWriteQueue: Promise<void> = Promise.resolve();
+    function enqueueGitWrite(task: () => Promise<void>): void {
+        gitWriteQueue = gitWriteQueue.then(task).catch(() => {});
+    }
+
+    /** Reread the panel after a git write, and move the compare selectors to what git now reports. */
+    async function refreshAfterWrite(): Promise<void> {
+        const hasChanges = await loadData(true);
+        await updateCompareMode(hasChanges);
     }
 
     /** Stage or unstage a single file. */
     function handleStageFile(path: string, stage: boolean) {
-        enqueueStage(async () => {
+        enqueueGitWrite(async () => {
             try {
                 await stageProjectFile(projectId, path, stage);
-                const hasChanges = await loadData(true);
-                await updateCompareMode(hasChanges);
+                await refreshAfterWrite();
             } catch (e) {
                 console.error('Failed to stage/unstage file:', e);
             }
@@ -619,11 +627,10 @@
 
     /** Stage all unstaged files. */
     function handleStageAll() {
-        enqueueStage(async () => {
+        enqueueGitWrite(async () => {
             try {
                 await Promise.all(unstagedEntries.map(e => stageProjectFile(projectId, e.path, true)));
-                const hasChanges = await loadData(true);
-                await updateCompareMode(hasChanges);
+                await refreshAfterWrite();
             } catch (e) {
                 console.error('Failed to stage all:', e);
             }
@@ -632,13 +639,37 @@
 
     /** Unstage all staged files. */
     function handleUnstageAll() {
-        enqueueStage(async () => {
+        enqueueGitWrite(async () => {
             try {
                 await Promise.all(stagedEntries.map(e => stageProjectFile(projectId, e.path, false)));
-                const hasChanges = await loadData(true);
-                await updateCompareMode(hasChanges);
+                await refreshAfterWrite();
             } catch (e) {
                 console.error('Failed to unstage all:', e);
+            }
+        });
+    }
+
+    /** Revert one file to HEAD, or delete it if HEAD never held it. A discard cannot be undone, so the
+     * confirm dialog is the only guard. */
+    async function handleDiscardFile(path: string, status: string): Promise<void> {
+        const proceed = await dialogStore.showConfirm({
+            title: t('git.discardTitle'),
+            message: gitStatusAbsentFromHead(status) ? t('git.discardUntrackedMessage') : t('git.discardTrackedMessage'),
+            items: [path],
+            confirmText: t('explorer.shared.discard'),
+            cancelText: t('git.cancel'),
+            variant: 'destructive',
+        });
+        if (!proceed) return;
+        enqueueGitWrite(async () => {
+            try {
+                await discardProjectFile(projectId, path);
+                dialogStore.showToast(t('git.discarded'), 'success');
+                // Drop the selection if it was this file; its diff is gone.
+                if (selectedPath === path) selectedPath = '';
+                await refreshAfterWrite();
+            } catch (e: any) {
+                dialogStore.showToast(e.message || t('git.discardFailed'), 'error');
             }
         });
     }
@@ -647,12 +678,25 @@
     let pulling = $state(false);
     let pushing = $state(false);
 
+    // The counts come from the upstream's remote-tracking ref, so they move when something fetches
+    // rather than when the remote moves. `remoteFresh` is set by a pull or a push, and the `~`
+    // prefix marks everything counted before that.
+    let aheadCommits = $state(0);
+    let behindCommits = $state(0);
+    let remoteFresh = $state(false);
+
+    const countMarker = $derived(remoteFresh ? '' : '~');
+    const syncNote = $derived(remoteFresh ? '' : ` — ${t('git.countsAsOfLastSync')}`);
+    const pullLabel = $derived(`${t('git.pullFromRemote')} (${t('git.commitsBehind', { count: behindCommits, marker: countMarker })})${syncNote}`);
+    const pushLabel = $derived(`${t('git.pushToRemote')} (${t('git.commitsAhead', { count: aheadCommits, marker: countMarker })})${syncNote}`);
+
     /** Pull from the remote, then refresh the panel in place. */
     async function handlePull() {
         if (pulling || pushing) return;
         pulling = true;
         try {
             await pullProject(projectId);
+            remoteFresh = true;
             dialogStore.showToast(t('git.pulledFromRemote'), 'success');
             const hasChanges = await loadData(true);
             await updateCompareMode(hasChanges);
@@ -670,6 +714,8 @@
         pushing = true;
         try {
             await pushProject(projectId);
+            // A push that was not rejected proves the branch is not behind and leaves nothing ahead.
+            remoteFresh = true;
             dialogStore.showToast(t('git.pushedToRemote'), 'success');
             const hasChanges = await loadData(true);
             await updateCompareMode(hasChanges);
@@ -918,7 +964,7 @@
 
         <!-- Pull / Push / Commit — pinned to the right edge of the header -->
         <div class="panel-actions">
-            <button class="panel-icon-btn" onclick={handlePull} disabled={pulling || pushing} title={pulling ? 'Pulling…' : 'Pull from remote'} aria-label="Pull from remote">
+            <button class="panel-icon-btn" onclick={handlePull} disabled={pulling || pushing} title={pulling ? 'Pulling…' : pullLabel} aria-label={pullLabel}>
                 {#if pulling}
                     <span class="mini-spinner" aria-hidden="true"></span>
                 {:else}
@@ -927,8 +973,9 @@
                         <path d="M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                     </svg>
                 {/if}
+                <span class="panel-count" aria-hidden="true">{countMarker}{behindCommits}</span>
             </button>
-            <button class="panel-icon-btn" onclick={handlePush} disabled={pulling || pushing} title={pushing ? 'Pushing…' : 'Push to remote'} aria-label="Push to remote">
+            <button class="panel-icon-btn" onclick={handlePush} disabled={pulling || pushing} title={pushing ? 'Pushing…' : pushLabel} aria-label={pushLabel}>
                 {#if pushing}
                     <span class="mini-spinner" aria-hidden="true"></span>
                 {:else}
@@ -937,6 +984,7 @@
                         <path d="M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                     </svg>
                 {/if}
+                <span class="panel-count" aria-hidden="true">{countMarker}{aheadCommits}</span>
             </button>
             <button
                 class="panel-commit-btn"
@@ -1011,6 +1059,15 @@
                                     >
                                         <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                                     </button>
+                                    <button
+                                        class="changes-discard-btn"
+                                        type="button"
+                                        onclick={() => handleDiscardFile(entry.path, entry.status)}
+                                        title="Discard {entry.path}"
+                                        aria-label="Discard {entry.path}"
+                                    >
+                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                    </button>
                                 </div>
                             {/each}
                         </div>
@@ -1056,6 +1113,15 @@
                                         aria-label="Stage {entry.path}"
                                     >
                                         <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                                    </button>
+                                    <button
+                                        class="changes-discard-btn"
+                                        type="button"
+                                        onclick={() => handleDiscardFile(entry.path, entry.status)}
+                                        title="Discard {entry.path}"
+                                        aria-label="Discard {entry.path}"
+                                    >
+                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                                     </button>
                                 </div>
                             {/each}
@@ -1324,9 +1390,10 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 22px;
+        gap: 3px;
+        min-width: 22px;
         height: 22px;
-        padding: 0;
+        padding: 0 4px;
         border: none;
         background: transparent;
         color: var(--color-text-secondary);
@@ -1378,6 +1445,12 @@
         border-top-color: transparent;
         border-radius: 50%;
         animation: spin 0.6s linear infinite;
+    }
+
+    .panel-count {
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
+        line-height: 1;
     }
 
     /* Loading / Empty */
@@ -1551,7 +1624,8 @@
     }
 
     /* Stage/unstage button in sidebar */
-    .changes-stage-btn {
+    .changes-stage-btn,
+    .changes-discard-btn {
         display: flex;
         align-items: center;
         justify-content: center;
@@ -1567,12 +1641,19 @@
         opacity: 0;
         transition: opacity 0.1s ease;
     }
-    .changes-file-row:hover .changes-stage-btn {
+    .changes-file-row:hover .changes-stage-btn,
+    .changes-file-row:hover .changes-discard-btn,
+    .changes-stage-btn:focus-visible,
+    .changes-discard-btn:focus-visible {
         opacity: 1;
     }
     .changes-stage-btn:hover {
         background: var(--color-surface-3);
         color: var(--color-text-primary);
+    }
+    .changes-discard-btn:hover {
+        background: var(--color-surface-3);
+        color: var(--color-status-red);
     }
 
     /* Diff viewer area */
