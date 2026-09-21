@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findLastUserMessageBefore, trimEntriesForRegenerate, buildCheckpointStateMap, mergeToolCallsIntoAssistant, computeLastUserMessageIds, getCheckpointThreads, buildEntriesFromMessages, advisoryLabel, systemNoteText } from '$lib/utils/chat-entries';
+import { findLastUserMessageBefore, trimEntriesForRegenerate, buildCheckpointStateMap, mergeToolCallsIntoAssistant, computeLastUserMessageIds, getCheckpointThreads, buildEntriesFromMessages, advisoryLabel, systemNoteText, pendingToolIds } from '$lib/utils/chat-entries';
 import type { ChatEntry, Thread } from '$lib/types';
 
 function entry(role: string, content: string): ChatEntry {
@@ -686,5 +686,35 @@ describe('systemNoteText', () => {
             'Connection interrupted, retrying the request.');
         expect(systemNoteText(undefined, 'Merge conflict detected during commit')).toBe(
             'Merge conflict detected during commit');
+    });
+});
+
+describe('pendingToolIds', () => {
+    function withCalls(id: string, calls: Array<{ toolId: string; isPending: boolean }>): ChatEntry {
+        return {
+            id, role: 'assistant', content: '', isStreaming: false, createdAt: new Date().toISOString(),
+            toolCalls: calls.map(c => ({ toolId: c.toolId, toolName: 'bash', isPending: c.isPending })),
+        } as unknown as ChatEntry;
+    }
+
+    it('names the calls a rebuild left waiting for an answer', () => {
+        const entries = [
+            withCalls('a', [{ toolId: 'call-1', isPending: true }]),
+            withCalls('b', [{ toolId: 'call-2', isPending: false }]),
+        ];
+        expect([...pendingToolIds(entries)]).toEqual(['call-1']);
+    });
+
+    it('settles every call of a rebuild that carries none waiting', () => {
+        const entries = [entry('assistant', 'the turn that was stopped')];
+        expect(pendingToolIds(entries).size).toBe(0);
+    });
+
+    it('reports each call of one entry separately', () => {
+        const entries = [withCalls('a', [
+            { toolId: 'call-1', isPending: false },
+            { toolId: 'call-2', isPending: true },
+        ])];
+        expect([...pendingToolIds(entries)]).toEqual(['call-2']);
     });
 });

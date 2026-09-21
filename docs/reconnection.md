@@ -62,6 +62,64 @@ before `taskBufMu`). Split into two steps, a subscribe landing between them got 
 and a hole in a replay is something the client cannot see. **Tests:**
 `backend/stream/app_stream_subscribe_race_test.go`.
 
+## Who holds a task key, and for how long
+
+`TaskChat` takes the task key when it mounts and releases it when it is destroyed, and it is the only
+place that does either. The key lives exactly as long as the screen that reads it, so every mount is a
+genuine new take — which is what earns a replay.
+
+A key held across closing the detail is a dead end. Frames pour into a connection with no reader, and
+while the key is held the client's per-key dedupe swallows the reopen's `subscribeTask`, so **no
+`subscribe_task` frame goes out and the replay is never asked for**. That chat has only the rows, and a
+tool call announced while its chat was closed has no card among them: the `tool_result` that lands later
+has nothing to resolve, and nothing asks again.
+
+Two consequences the client depends on. `subscribeTask`'s dedupe is about frames, not chances: a key is
+deduped only while it is held, so the release on destroy is what makes the next mount's subscribe real
+(`stream-subscription.unit.ts`). The replay also arrives while the mount is still loading its rows. So the
+gate that drops frames for a task this screen does not believe is running must already be open: it opens
+on the task row (below), never on the board's copy.
+
+**Tests:** e2e `away-and-back.spec.ts` holds the rows shut while the chat is closed and reopened, so the
+card it draws can only have come from the replay. Run it against a stale `frontend/dist` and it proves
+nothing.
+
+## The row decides, not the board's copy
+
+`mergeLoadedHistory` takes a running flag. Given the truth it is right in both directions: `false` for a
+task that is running rebuilds a pending `tool_call` row with its card hidden — the message stays, the work
+vanishes; `true` for a stopped task leaves a leftover card spinning forever. The flag's *input* is the
+thin half: `loadHistory` takes it from the `taskExecutionState` prop, the board's copy, and a board copy
+is whatever arrived before this chat opened. Read a board from the mirror, or miss one `task_updated`, and
+the rebuild hides a tool call that is running.
+
+So the task's own row answers until the board's copy moves under it; `trustedExecutionState`
+(`$lib/utils/execution-state.ts`) states the rule and says why a superseded row is not a second opinion.
+`TaskChat` reads that row as the first thing its mount does, which costs nothing because the mount already
+read it for the model and session cost. Every caller that *makes* a transition passes the row it got back:
+the stop's `paused`, `commitAndDone`'s and `moveTask`'s updated task. The same value answers the frame
+gate (`isLoading` → `suppressEvents`), which is why a replayed `tool_call` now reaches the screen for a
+task the board still lists under Review.
+
+**Tests:** `src/lib/utils/__tests__/execution-state.unit.ts` (the rule) and
+`chat-history-merge.unit.ts` (the merge given the truth, both directions). E2E `away-and-back.spec.ts`
+swallows a task's frames so its board copy stays stale while its tool call runs; the row read is then the
+only thing that can draw the card.
+
+## A discarded card releases its id
+
+The `status: running` frame announces a run, and it discards any entry that is nothing but an unanswered
+tool call — that call belongs to the run the frame ends, not the one it opens. The claim goes with the
+entry. `processedToolIds` is what stops a second announcement of one id opening a second card. An id still
+held when its card is discarded **swallows the announcement that follows** — the replayed one, or the
+event `taskEventContext` delivers the instant a chat subscribes. Every frame of that call is then refused
+as a duplicate and the card is never drawn: the `tool_result` resolves nothing, because the id was never
+rendered and `unresolvedToolIds` never learns either. So `processedToolIds` lets go of exactly the ids it
+discarded, and `unresolvedToolIds` keeps them — an unanswered call is still evidence that a card is owed.
+
+**Tests:** `src/lib/services/__tests__/stream-handler.unit.ts` (re-announced after being discarded draws
+one card; a call that survives the frame and is announced twice still draws one).
+
 ## The slow client is released, not timed out
 
 Every frame for a connection goes through that connection's own queue (`sendQueue`) and one sender
@@ -165,7 +223,24 @@ reasoning and none of its tool calls.
 
 Being in progress is what separates a pending `tool_call` row that is work from one that is a leftover:
 a stopped task will never write the missing result, so that card is hidden while the message around it —
-its text, its thinking, the cards that did finish — stays.
+its text, its thinking, the cards that did finish — stays. Where the running flag comes from is its own
+rule (*The row decides, not the board's copy*); this section is only about what the merge does with it.
+
+## A read that did not answer says so
+
+`getTaskMessages` answers from this device's mirror when the network call fails (`api/tasks.ts`).
+`loadHistory` ignores everything its read throws except a 404, so the transcript can be the last window
+this browser saved, or nothing at all — indistinguishable from a task with no conversation.
+`historyNotice` tells them apart: `'cached'` when the window carried `isFromCache`, `'failed'` for any other
+failure but a missing task. `ChatEntries` renders it above the list with **Retry beside it** — the only
+thing that asks again, since `mayBeBehind()` is false for an idle task with an empty transcript. A live read
+clears the notice, so it never outlives its answer.
+
+It is not a chat entry: the transcript is rebuilt from the rows on every read, so a synthetic entry would
+be appended again by each rebuild.
+
+**Tests:** e2e `away-and-back.spec.ts` — a read aborted from the first open with no cached copy,
+retried once the server answers again, and a reload onto the stored copy.
 
 ## The tab that comes back
 
@@ -177,7 +252,7 @@ and the rule collapses them to a single call, never twice inside `RETURN_DEDUPE_
 | view | what says it could be behind | what it refetches |
 |---|---|---|
 | board (`App.svelte`) | always — a stale list looks current whatever the socket did | `refreshBoard()`, plus `checkStale()` / `reconnectNow()` for the socket |
-| chat (`TaskChat.svelte`) | in flight, a card still pending, or a call it owes a card for | the task row, then the messages |
+| chat (`TaskChat.svelte`) | in flight, a card still pending, a turn still open on screen, or a call it owes a card for | the task row, then the messages |
 | diff (`CardDetail.svelte`) | in flight or streaming | `loadDiff()` |
 
 `visibilitychange` reconciles whenever the view says it could be behind; `focus` and `pageshow` only after
@@ -193,16 +268,21 @@ false once the turn has ended, which is exactly when the missed frames have alre
 them — `dropUnresolvedToolCalls` removes the entry whose call was never answered. `unresolvedToolIds` is
 the evidence that survives the card: a tool call this screen saw announced and holds no answered card for,
 settled when an answer lands on a card (an answer with **no** card to land on is itself the evidence, which
-is how a lost `tool_call` frame is caught), and cleared by any rebuild from the rows.
+is how a lost `tool_call` frame is caught). A rebuild from the rows narrows it to the calls still waiting
+(`pendingToolIds`) rather than clearing it. A call the rebuild left answered is settled, and one it left
+pending is still owed; a call it left no card for is settled too, because the card was hidden for a task
+that left flight and no answer is coming for it.
 
 `reconcileAfterAbsence` then decides work-vs-leftover from the row it just read — `getTask().execution_state`
-through `taskIsInFlight` — and passes that into `loadHistory`, never the board copy. The merge drops live
+through `taskIsInFlight` — and passes that into `loadHistory`, never the board copy, and records the reading
+so the next rebuild starts from it too (*The row decides, not the board's copy*). The merge drops live
 pending cards when told the task is not in flight, and the board can carry an `idle` from a
 duplicate-message answer (`backend/exec/handler_http.go`) while the call is still running.
 
-A turn's first frames are not part of this story: `suppressEvents` is a board-status rule and lags the turn
-it gates, so `isLoading` joins it — the `status: running` frame is not gated by that flag and so opens the
-gate for the turn it announces. `scheduleScroll` likewise does nothing while the tab is hidden (rAF is
+A turn's first frames are not part of this story: `suppressEvents` is a rule about the task this screen
+believes is running — the column plus `isLoading`, whose `execution_state` comes from the row (*The row
+decides, not the board's copy*) — and it lags the turn it gates. The `status: running` frame is not gated by
+that flag and so opens the gate for the turn it announces. `scheduleScroll` likewise does nothing while the tab is hidden (rAF is
 paused there; the follow tracker re-pins on return).
 
 **Tests:** e2e `tab-return-chat.spec.ts` swallows `tool_result` task events at the socket (a listener added

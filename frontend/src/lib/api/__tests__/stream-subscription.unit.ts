@@ -204,6 +204,40 @@ describe('the frames a reconnect owes', () => {
             { type: 'subscribe_task', data: { project_id: 'p1', task_id: 't1' } },
         ]);
     });
+    it('reopens a task as a real subscribe frame, which is what answers it with the replay', async () => {
+        const socket = start();
+        socket.open();
+
+        // Only a new take of the key is answered with the replay, so the reopen must write a real frame.
+        stream!.subscribeTask('p1', 't1');
+        stream!.unsubscribeTask('p1', 't1');
+        stream!.subscribeTask('p1', 't1');
+        await settle();
+
+        expect(socket.typed('unsubscribe_task')).toEqual([
+            { type: 'unsubscribe_task', data: { project_id: 'p1', task_id: 't1' } },
+        ]);
+        expect(socket.typed('subscribe_task')).toEqual([
+            { type: 'subscribe_task', data: { project_id: 'p1', task_id: 't1' } },
+            { type: 'subscribe_task', data: { project_id: 'p1', task_id: 't1' } },
+        ]);
+    });
+
+    it('holds one key per chat: a second chat on the same task takes it again', async () => {
+        const socket = start();
+        socket.open();
+
+        // Only a hold that never released is a duplicate.
+        stream!.subscribeTask('p1', 't1');
+        stream!.subscribeTask('p1', 't1');
+        await settle();
+        expect(socket.typed('subscribe_task')).toHaveLength(1);
+
+        stream!.unsubscribeTask('p1', 't1');
+        stream!.subscribeTask('p1', 't1');
+        await settle();
+        expect(socket.typed('subscribe_task')).toHaveLength(2);
+    });
 });
 
 describe('the known_stats handshake', () => {

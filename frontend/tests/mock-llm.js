@@ -49,6 +49,7 @@ const toolCallSummarize = loadFixture('tool_call_summarize');
 const textResponseReasoning = loadFixture('text_response_reasoning');
 const toolCallSandboxSleep = loadFixture('tool_call_sandbox_sleep');
 const toolCallBashLong = loadFixture('tool_call_bash_long');
+const toolCallLongRunning = loadFixture('tool_call_long_running');
 const toolCallSlow = loadFixture('tool_call_slow');
 const toolCallSandboxMemhog = loadFixture('tool_call_sandbox_memhog');
 
@@ -200,6 +201,14 @@ function selectResponse(parsed) {
         return hasToolResults
             ? { chunks: toolCallComplete, chunkDelay: 1 }
             : { chunks: toolCallSlow, chunkDelay: 300 };
+    }
+
+    // Long-running tool probe: the call runs for 20s, so the spec has a wide window where it has started
+    // and has no result. Follow-up (tool result present): plain text ends the turn.
+    if (hasTools && /long-running-probe/i.test(lastUserMsg)) {
+        return hasToolResults
+            ? { chunks: toolCallComplete, chunkDelay: 1 }
+            : { chunks: toolCallLongRunning, chunkDelay: 1 };
     }
 
     // Sandbox memory e2e probes (keyword-gated to the probe tasks' prompts).

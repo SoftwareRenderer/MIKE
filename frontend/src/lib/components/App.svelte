@@ -434,27 +434,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     });
     $effect(() => { const v = appStore.config; if (v) cfg = v; });
 
-    // Manage task-level WebSocket subscription for real-time streaming events.
-    // Subscribes when a task is selected, unsubscribes only when switching to a
-    // different task (not when closing the task detail — avoids unnecessary
-    // unsubscribe/resubscribe when navigating board ↔ task).
-    let lastSubKey = '';
-    let lastSubStream: ReturnType<typeof createAppStream> | null = null;
-    $effect(() => {
-        const taskId = appStore.selectedTask?.id;
-        const project = currentProject;
-        const stream = appStream;
-        if (!stream || !project || !taskId) return;
-        const key = `${project.id}:${taskId}`;
-        if (key !== lastSubKey) {
-            if (lastSubKey) {
-                lastSubStream?.unsubscribeTask(lastSubKey.split(':')[0], lastSubKey.split(':')[1]);
-            }
-            stream.subscribeTask(project.id, taskId);
-            lastSubKey = key;
-            lastSubStream = stream;
-        }
-    });
+    // A task's frames belong to the chat that reads it: `TaskChat` takes and releases the key. `docs/reconnection.md`
 
     // Handle browser back/forward
     async function handlePopState() {
@@ -1011,17 +991,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         if (currentProject && appStream) {
             appStream.unsubscribeProject(currentProject.id);
         }
-        // The tracked task subscription belongs to the project being left, so it goes with it.
-        if (lastSubKey) {
-            const [subProjectId, subTaskId] = lastSubKey.split(':');
-            // The floating chat subscribed the same key itself and nothing re-subscribes after an
-            // unsubscribe, so a chat still open on screen keeps its stream.
-            if (uiStore.floatingTask?.taskId !== subTaskId) {
-                lastSubStream?.unsubscribeTask(subProjectId, subTaskId);
-                lastSubKey = '';
-            }
-        }
-        // Task unsubscribe on closing the detail is handled by the subscription effect.
     }
 
     /** Hydrate cached done-task stats (IndexedDB) into the in-memory cache and
