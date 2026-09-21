@@ -1,5 +1,5 @@
 <script lang="ts">
-    import type { Extension, RegistryEntry, ExtensionUpdate, SandboxMount, SandboxEnv } from '$lib/types';
+    import type { Extension, RegistryEntry, ExtensionUpdate, SandboxMount, SandboxEnv, ExtensionType } from '$lib/types';
     import { listExtensions, listLocalExtensions, getRegistryIndex, installExtension, installLocalExtension, deleteExtension, setExtensionEnabled, setDependencyCache, setAgentMount, getHomeDirectory, checkUpdates, updateExtension, updateExtensionImage, testExtensionUrl, type ExtensionUrlProbe } from '$lib/api';
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import BaseModal from '../BaseModal.svelte';
@@ -10,6 +10,7 @@
     import { timeAgo } from '$lib/utils/format-time';
     import { orderBrowseEntries } from '$lib/composables/use-browse-order';
     import { identityKey } from '$lib/utils/extension-identity';
+    import { countByCategory, filterByCategory, visibleCategories } from '$lib/utils/extension-categories';
     import { t } from '$lib/i18n';
 
     let { onExtensionsChanged }: { onExtensionsChanged?: () => void } = $props();
@@ -45,6 +46,8 @@
     let updatesAwaitingReview = $state<string[]>([]);
     let error = $state('');
     let searchQuery = $state('');
+    /** Categories (extension types) the lists are narrowed to; an empty set narrows nothing. */
+    let selectedCategories = $state<Set<ExtensionType>>(new Set());
 
     // Extension form state
     let editExtensionId = $state<string | null>(null);
@@ -715,13 +718,26 @@
         return timeAgo(builtAt, { scale: 'calendar', template: 'time.built' }) || t('time.built', { when: builtAt });
     }
 
-    // Filter extensions by search, with local (unpublished) extensions first
-    let filteredExtensions = $derived.by(() => {
+    function toggleCategory(category: ExtensionType) {
+        const next = new Set(selectedCategories);
+        if (next.has(category)) {
+            next.delete(category);
+        } else {
+            next.add(category);
+        }
+        selectedCategories = next;
+    }
+
+    // Extensions matching the text query, with local (unpublished) extensions first. The category
+    // badges count over this list rather than the narrowed one, so a number says what clicking that
+    // badge would show instead of collapsing to the selection already made.
+    let installedMatches = $derived.by(() => {
+        const query = searchQuery.toLowerCase();
         const list = searchQuery
             ? extensions.filter(ext =>
-                ext.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                ext.manifest.display_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                ext.type.includes(searchQuery.toLowerCase())
+                ext.name.toLowerCase().includes(query) ||
+                ext.manifest.display_name.toLowerCase().includes(query) ||
+                ext.type.includes(query)
             )
             : extensions;
         return [...list].sort((a, b) =>
@@ -747,7 +763,7 @@
     // the registry) extensions at the top, then featured (not yet installed)
     // registry entries, then the remaining registry entries. See
     // orderBrowseEntries in $lib/composables/use-browse-order.
-    let browseList = $derived.by(() =>
+    let browseMatches = $derived.by(() =>
         orderBrowseEntries(
             unpublished,
             registryEntries,
@@ -755,6 +771,15 @@
             searchQuery,
         )
     );
+
+    // The category badges narrow each view in place, so the local-first sort and the featured pin keep
+    // deciding position exactly as their own resolver describes it.
+    let filteredExtensions = $derived(filterByCategory(installedMatches, selectedCategories));
+    let browseList = $derived(filterByCategory(browseMatches, selectedCategories));
+
+    // The badge row follows the view that is on screen.
+    let categoryCounts = $derived(countByCategory(activeView === 'browse' ? browseMatches : installedMatches));
+    let categories = $derived(visibleCategories(categoryCounts));
 
     // Initialize on mount
     $effect(() => {
@@ -772,7 +797,7 @@
         </div>
     {/if}
 
-    <!-- Sticky header: view tabs + search -->
+    <!-- Sticky header: view tabs + search + category badges -->
     <div class="sticky-header">
         <!-- View Tabs -->
         <div class="view-tabs">
@@ -809,6 +834,28 @@
                 class="search-input"
             />
         </div>
+
+        <!-- Category quick-search: one badge per category the query left in the current view -->
+        {#if categories.length > 0 || selectedCategories.size > 0}
+            <div class="category-row" role="group" aria-label={t('settings.extensions.categoryGroup')}>
+                {#each categories as category}
+                    {@const count = categoryCounts.get(category) ?? 0}
+                    {@const label = typeBadge(category)}
+                    <button
+                        class="category-badge"
+                        class:active={selectedCategories.has(category)}
+                        aria-pressed={selectedCategories.has(category)}
+                        aria-label={t('settings.extensions.categoryAria', { label, count })}
+                        onclick={() => toggleCategory(category)}
+                    >{label}<span class="category-count">{count}</span></button>
+                {/each}
+                {#if selectedCategories.size > 0}
+                    <button class="category-clear" onclick={() => selectedCategories = new Set()}>
+                        {t('settings.extensions.clearCategories')}
+                    </button>
+                {/if}
+            </div>
+        {/if}
     </div>
 
     <!-- Installed View -->
@@ -1714,7 +1761,7 @@
         gap: 1rem;
     }
 
-    /* Sticky wrapper: view-tabs + search-row, flush with modal-header */
+    /* Sticky wrapper: view-tabs + search-row + category-row, flush with modal-header */
     .sticky-header {
         position: sticky;
         top: 0;
@@ -1974,6 +2021,67 @@
     .search-input:focus {
         outline: none;
         border-color: var(--color-accent);
+    }
+
+    /* Category quick-search badges under the search input */
+    .category-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        padding: 0 0 0.5rem;
+    }
+
+    .category-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        background: var(--color-bg-input);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: 999px;
+        padding: 0.2rem 0.6rem;
+        color: var(--color-text-secondary);
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+    .category-badge:hover {
+        color: var(--color-text-primary);
+        border-color: var(--color-accent);
+    }
+
+    .category-badge.active {
+        background: rgba(88, 166, 255, 0.15);
+        border-color: var(--color-accent);
+        color: var(--color-accent);
+    }
+
+    .category-count {
+        font-weight: 600;
+        color: var(--color-text-tertiary);
+    }
+
+    .category-badge.active .category-count {
+        color: var(--color-accent);
+    }
+
+    /* Not a category: the way out of the selection, so it reads as an action, not a fourth badge. */
+    .category-clear {
+        background: none;
+        border: none;
+        padding: 0.2rem 0.25rem;
+        color: var(--color-text-tertiary);
+        font-size: 0.72rem;
+        text-decoration: underline;
+        cursor: pointer;
+    }
+
+    .category-clear:hover {
+        color: var(--color-text-primary);
     }
 
     /* Updates section */
