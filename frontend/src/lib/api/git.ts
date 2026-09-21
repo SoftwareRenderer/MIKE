@@ -144,6 +144,18 @@ export async function stageProjectFile(projectId: string, path: string, stage: b
     return res.json();
 }
 
+/** Discard one file's changes in the project repo: back to HEAD, or removed when HEAD never held it. */
+export async function discardProjectFile(projectId: string, path: string): Promise<{ status: string }> {
+    const csrfToken = await ensureCsrfToken();
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/discard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
+        body: JSON.stringify({ path }),
+    });
+    if (!res.ok) throw await apiError(res, t('api.discardFile'));
+    return res.json();
+}
+
 /** Commit staged changes in the project repo. */
 export async function commitProject(projectId: string, message: string): Promise<{ status: string }> {
     const csrfToken = await ensureCsrfToken();

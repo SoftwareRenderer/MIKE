@@ -40,6 +40,11 @@ var detachedOperations = []sideEffectEntry{
 	{"POST /api/projects/{projectID}/tasks/{taskID}/diff/stage", "writes the worktree's git index"},
 	{"POST /api/projects/{projectID}/git/stage", "writes the git index"},
 	{"POST /api/projects/{projectID}/git/commit", "creates a commit"},
+	{
+		"POST /api/projects/{projectID}/git/discard",
+		"reverts one file to HEAD, or removes it: a stop between unstaging and removing leaves the file on " +
+			"disk with a cleared index, and a discarded file is not recoverable",
+	},
 	{"POST /api/projects/{projectID}/git/checkout", "moves HEAD and rewrites the working tree"},
 	{"POST /api/projects/{projectID}/git/pull", "fetches and merges; a partial fetch is what the stash bracket exists to survive"},
 	{"POST /api/projects/{projectID}/git/push", "publishes commits to the remote, which no later cancel can undo"},

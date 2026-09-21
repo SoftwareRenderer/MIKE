@@ -123,6 +123,22 @@ live branches kept), `backend/git/branch_listing_test.go` (both markers, slug pr
   used instead of an index lock because a locked index blocks the forced checkout too, so the loss never
   happens and the test passes vacuously).
 
+## Discard: one file back to HEAD, or off disk
+
+`POST /api/projects/{projectID}/git/discard` (`discardFile`) reverts one path in `project.Path` — the
+checkout every other Review Changes button writes to.
+
+- **HEAD decides revert from delete** (`ls-tree --name-only HEAD -- p`): the index cannot answer it, a
+  staged deletion holds no entry either.
+- **Revert is `checkout HEAD -- p` alone** — it writes the index along with the worktree, so the staged half
+  of an edit and a staged deletion both go.
+- **Delete is `reset -q HEAD -- p`, then `clean -f -q -- p`, never `os.Remove`:** the reset unstages a file
+  staged as new; clean skips ignored files and directories another repository owns.
+- Nothing parks the work — no stash entry, no snapshot ref — so the panel's confirmation dialog is the
+  whole guard, worded from the status letter (`?`, `A`, `C`, `R` are the letters HEAD holds no path under).
+- Tests: `backend/api/git_discard_test.go`, the discard block of `git-status-panel.unit.svelte.ts`,
+  `review-changes-discard.spec.ts`.
+
 ## Client-supplied refs are validated, then fenced
 
 `types.ValidateGitRef` (`backend/types/validate.go`) is deliberately tighter than `ValidateBranchName`

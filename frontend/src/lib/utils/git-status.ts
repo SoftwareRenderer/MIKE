@@ -47,6 +47,14 @@ export function gitStatusClass(char: string): string {
 }
 
 /**
+ * Whether discarding a path with this letter deletes the file instead of restoring it. `D` is not one of
+ * these letters: a deleted path is in HEAD, so it can be restored.
+ */
+export function gitStatusAbsentFromHead(char: string): boolean {
+    return char === '?' || char === 'A' || char === 'C' || char === 'R';
+}
+
+/**
  * Which letter wins when one path carries several statuses (higher = more significant).
  * A conflict outranks a deletion, which outranks a rename, and so on down to untracked.
  */

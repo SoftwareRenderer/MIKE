@@ -19,6 +19,7 @@ vi.mock('$lib/api/git', () => ({
     getProjectDiffFiles: vi.fn(),
     getProjectDiffFile: vi.fn(),
     stageProjectFile: vi.fn(),
+    discardProjectFile: vi.fn(),
     commitProject: vi.fn(),
     pullProject: vi.fn(),
     pushProject: vi.fn(),
@@ -48,6 +49,7 @@ const getProjectDiffFiles = gitApi.getProjectDiffFiles as ReturnType<typeof vi.f
 const getProjectDiffFile = gitApi.getProjectDiffFile as ReturnType<typeof vi.fn>;
 const pullProject = gitApi.pullProject as ReturnType<typeof vi.fn>;
 const pushProject = gitApi.pushProject as ReturnType<typeof vi.fn>;
+const discardProjectFile = gitApi.discardProjectFile as ReturnType<typeof vi.fn>;
 const getGitLogFull = gitApi.getGitLogFull as ReturnType<typeof vi.fn>;
 const getCommitDiffFiles = gitApi.getCommitDiffFiles as ReturnType<typeof vi.fn>;
 
@@ -78,6 +80,7 @@ beforeEach(() => {
     getCommitDiffFiles.mockResolvedValue([]);
     pullProject.mockResolvedValue({ status: 'pulled' });
     pushProject.mockResolvedValue({ status: 'pushed' });
+    discardProjectFile.mockResolvedValue({ status: 'ok' });
 });
 
 afterEach(() => {
@@ -178,5 +181,102 @@ describe('GitStatusPanel header actions', () => {
             )
         );
         expect(onUpdated).not.toHaveBeenCalled();
+    });
+});
+
+describe('GitStatusPanel discard', () => {
+    const STAGED_AND_UNSTAGED = 'M  staged.txt\nA  brand-new.txt\n M modified.txt\n?? scratch.txt';
+
+    beforeEach(() => {
+        getGitStatus.mockResolvedValue({
+            clean: false, status: STAGED_AND_UNSTAGED, head: 'h1', authorName: 'Test', authorEmail: 'test@test.com',
+        });
+    });
+
+    function discardBtn(container: HTMLElement, path: string): HTMLButtonElement {
+        const btn = container.querySelector<HTMLButtonElement>(`button[aria-label="Discard ${path}"]`);
+        if (!btn) throw new Error(`no discard button for ${path}`);
+        return btn;
+    }
+
+    it('offers discard on every listed row', async () => {
+        const { container } = render(GitStatusPanel, { props: baseProps() });
+
+        await waitFor(() => expect(container.querySelector('.changes-file-row')).not.toBeNull());
+        for (const path of ['staged.txt', 'brand-new.txt', 'modified.txt', 'scratch.txt']) {
+            expect(container.querySelector(`button[aria-label="Discard ${path}"]`)).not.toBeNull();
+        }
+    });
+
+    // A discard has no undo, so a declined dialog must send nothing at all.
+    it('sends nothing when the confirmation is declined', async () => {
+        (dialogStore.showConfirm as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false);
+        const { container } = render(GitStatusPanel, { props: baseProps() });
+        await waitFor(() => expect(container.querySelector('.changes-file-row')).not.toBeNull());
+
+        discardBtn(container, 'modified.txt').click();
+        await waitFor(() => expect(dialogStore.showConfirm).toHaveBeenCalled());
+        // A macrotask: the request is queued behind the dialog's promise, so the next microtask would
+        // pass even if the panel sent it.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(discardProjectFile).not.toHaveBeenCalled();
+        expect(dialogStore.showToast).not.toHaveBeenCalled();
+    });
+
+    // The wording each letter must produce. `A` and `?` name a path no commit holds, so those are
+    // destroyed; `M` goes back to HEAD.
+    const DISCARD_COPY: [string, string][] = [
+        ['staged.txt', 'goes back to its last commit'],
+        ['modified.txt', 'goes back to its last commit'],
+        ['brand-new.txt', 'deleted from disk'],
+        ['scratch.txt', 'deleted from disk'],
+    ];
+
+    it('names the file and says which shape of loss is coming', async () => {
+        const { container } = render(GitStatusPanel, { props: baseProps() });
+        await waitFor(() => expect(container.querySelector('.changes-file-row')).not.toBeNull());
+
+        let dialogs = 0;
+        for (const [path, words] of DISCARD_COPY) {
+            // Decline: an accepted dialog reloads the panel and replaces the rows this loop reads next.
+            (dialogStore.showConfirm as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false);
+            discardBtn(container, path).click();
+            dialogs++;
+            await waitFor(() => expect(vi.mocked(dialogStore.showConfirm).mock.calls).toHaveLength(dialogs));
+            expect(vi.mocked(dialogStore.showConfirm).mock.calls[dialogs - 1][0]).toMatchObject({
+                title: 'Discard changes?',
+                message: expect.stringContaining(words),
+                items: [path],
+                variant: 'destructive',
+            });
+        }
+    });
+
+    it('discards the confirmed file and reloads the panel', async () => {
+        const { container } = render(GitStatusPanel, { props: baseProps() });
+        await waitFor(() => expect(container.querySelector('.changes-file-row')).not.toBeNull());
+        const loadsBefore = getGitStatus.mock.calls.length;
+
+        discardBtn(container, 'staged.txt').click();
+
+        await waitFor(() => expect(discardProjectFile).toHaveBeenCalledWith('p1', 'staged.txt'));
+        expect(discardProjectFile).toHaveBeenCalledTimes(1);
+        await waitFor(() => expect(dialogStore.showToast).toHaveBeenCalledWith('Changes discarded', 'success'));
+        await waitFor(() => expect(getGitStatus.mock.calls.length).toBeGreaterThan(loadsBefore));
+    });
+
+    it('reports a failed discard and leaves the diff pane alone', async () => {
+        discardProjectFile.mockRejectedValue(new Error('git discard failed: index.lock exists'));
+        const { container } = render(GitStatusPanel, { props: baseProps() });
+        await waitFor(() => expect(container.querySelector('.changes-file-row')).not.toBeNull());
+        const loadsBefore = getGitStatus.mock.calls.length;
+
+        discardBtn(container, 'modified.txt').click();
+
+        await waitFor(() =>
+            expect(dialogStore.showToast).toHaveBeenCalledWith('git discard failed: index.lock exists', 'error')
+        );
+        expect(getGitStatus.mock.calls.length).toBe(loadsBefore);
     });
 });

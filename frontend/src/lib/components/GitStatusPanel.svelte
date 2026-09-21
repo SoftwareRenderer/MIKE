@@ -1,9 +1,9 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import type { DiffFile } from '$lib/types/diff';
-    import { gitStatusLabel } from '$lib/utils/git-status';
+    import { gitStatusLabel, gitStatusAbsentFromHead } from '$lib/utils/git-status';
     import { t } from '$lib/i18n';
-    import { getGitStatus, getProjectDiffFiles, getCommitDiffFiles, getProjectDiffFile, stageProjectFile, commitProject, pullProject, pushProject, getGitLogFull } from '$lib/api';
+    import { getGitStatus, getProjectDiffFiles, getCommitDiffFiles, getProjectDiffFile, stageProjectFile, commitProject, discardProjectFile, pullProject, pushProject, getGitLogFull } from '$lib/api';
     import type { GitCommit } from '$lib/types';
     import { dialogStore } from '$lib/stores';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
@@ -598,19 +598,25 @@
         return { folder: path.substring(0, idx), name: path.substring(idx + 1) };
     }
 
-    // Serialize stage/unstage operations
-    let stageQueue: Promise<void> = Promise.resolve();
-    function enqueueStage(task: () => Promise<void>): void {
-        stageQueue = stageQueue.then(task).catch(() => {});
+    // Serialize the panel's git writes: each one reloads the panel, so two in flight would read each
+    // other's half-applied state.
+    let gitWriteQueue: Promise<void> = Promise.resolve();
+    function enqueueGitWrite(task: () => Promise<void>): void {
+        gitWriteQueue = gitWriteQueue.then(task).catch(() => {});
+    }
+
+    /** Reread the panel after a git write, and move the compare selectors to what git now reports. */
+    async function refreshAfterWrite(): Promise<void> {
+        const hasChanges = await loadData(true);
+        await updateCompareMode(hasChanges);
     }
 
     /** Stage or unstage a single file. */
     function handleStageFile(path: string, stage: boolean) {
-        enqueueStage(async () => {
+        enqueueGitWrite(async () => {
             try {
                 await stageProjectFile(projectId, path, stage);
-                const hasChanges = await loadData(true);
-                await updateCompareMode(hasChanges);
+                await refreshAfterWrite();
             } catch (e) {
                 console.error('Failed to stage/unstage file:', e);
             }
@@ -619,11 +625,10 @@
 
     /** Stage all unstaged files. */
     function handleStageAll() {
-        enqueueStage(async () => {
+        enqueueGitWrite(async () => {
             try {
                 await Promise.all(unstagedEntries.map(e => stageProjectFile(projectId, e.path, true)));
-                const hasChanges = await loadData(true);
-                await updateCompareMode(hasChanges);
+                await refreshAfterWrite();
             } catch (e) {
                 console.error('Failed to stage all:', e);
             }
@@ -632,13 +637,37 @@
 
     /** Unstage all staged files. */
     function handleUnstageAll() {
-        enqueueStage(async () => {
+        enqueueGitWrite(async () => {
             try {
                 await Promise.all(stagedEntries.map(e => stageProjectFile(projectId, e.path, false)));
-                const hasChanges = await loadData(true);
-                await updateCompareMode(hasChanges);
+                await refreshAfterWrite();
             } catch (e) {
                 console.error('Failed to unstage all:', e);
+            }
+        });
+    }
+
+    /** Revert one file to HEAD, or delete it if HEAD never held it. A discard cannot be undone, so the
+     * confirm dialog is the only guard. */
+    async function handleDiscardFile(path: string, status: string): Promise<void> {
+        const proceed = await dialogStore.showConfirm({
+            title: t('git.discardTitle'),
+            message: gitStatusAbsentFromHead(status) ? t('git.discardUntrackedMessage') : t('git.discardTrackedMessage'),
+            items: [path],
+            confirmText: t('explorer.shared.discard'),
+            cancelText: t('git.cancel'),
+            variant: 'destructive',
+        });
+        if (!proceed) return;
+        enqueueGitWrite(async () => {
+            try {
+                await discardProjectFile(projectId, path);
+                dialogStore.showToast(t('git.discarded'), 'success');
+                // Drop the selection if it was this file; its diff is gone.
+                if (selectedPath === path) selectedPath = '';
+                await refreshAfterWrite();
+            } catch (e: any) {
+                dialogStore.showToast(e.message || t('git.discardFailed'), 'error');
             }
         });
     }
@@ -1011,6 +1040,15 @@
                                     >
                                         <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                                     </button>
+                                    <button
+                                        class="changes-discard-btn"
+                                        type="button"
+                                        onclick={() => handleDiscardFile(entry.path, entry.status)}
+                                        title="Discard {entry.path}"
+                                        aria-label="Discard {entry.path}"
+                                    >
+                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                    </button>
                                 </div>
                             {/each}
                         </div>
@@ -1056,6 +1094,15 @@
                                         aria-label="Stage {entry.path}"
                                     >
                                         <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                                    </button>
+                                    <button
+                                        class="changes-discard-btn"
+                                        type="button"
+                                        onclick={() => handleDiscardFile(entry.path, entry.status)}
+                                        title="Discard {entry.path}"
+                                        aria-label="Discard {entry.path}"
+                                    >
+                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                                     </button>
                                 </div>
                             {/each}
@@ -1551,7 +1598,8 @@
     }
 
     /* Stage/unstage button in sidebar */
-    .changes-stage-btn {
+    .changes-stage-btn,
+    .changes-discard-btn {
         display: flex;
         align-items: center;
         justify-content: center;
@@ -1567,12 +1615,19 @@
         opacity: 0;
         transition: opacity 0.1s ease;
     }
-    .changes-file-row:hover .changes-stage-btn {
+    .changes-file-row:hover .changes-stage-btn,
+    .changes-file-row:hover .changes-discard-btn,
+    .changes-stage-btn:focus-visible,
+    .changes-discard-btn:focus-visible {
         opacity: 1;
     }
     .changes-stage-btn:hover {
         background: var(--color-surface-3);
         color: var(--color-text-primary);
+    }
+    .changes-discard-btn:hover {
+        background: var(--color-surface-3);
+        color: var(--color-status-red);
     }
 
     /* Diff viewer area */
