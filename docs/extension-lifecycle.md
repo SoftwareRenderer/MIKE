@@ -185,3 +185,7 @@ and the `exthello` handshake: `docs/ui-extensions.md`.
 discovery (LSP availability = installed extensions). Frontend:
 `services/extension-manager.svelte.ts`, `ui-injector.svelte.ts`, `$lib/api/extensions.ts`,
 `ConfigModal/ExtensionsTab.svelte`.
+## Checking this
+
+`go test ./backend/extensions/` covers install, repair and deletion.
+`python3 scripts/gen-registry.py --check` answers for the registry text an install reads.

@@ -405,6 +405,10 @@ func TestTheUpdateHalvesRefuseAnInstallThatCannotTakeThem(t *testing.T) {
 	dir := releaseDir(t)
 	exe := filepath.Join(dir, "mike-server")
 	write(t, exe, "OLD-BINARY", 0o755)
+	// The marker is the test's own, so the refusal is decided here rather than by whether the machine
+	// running the suite happens to be a container.
+	marker := filepath.Join(t.TempDir(), ".containerenv")
+	write(t, marker, "MARKER", 0o644)
 	archive := goodArchive(t)
 	fetcher := &fakeFetcher{dlBody: archive, body: manifestDoc(t, map[string]any{"latest": "1.4.2"})}
 
@@ -414,7 +418,7 @@ func TestTheUpdateHalvesRefuseAnInstallThatCannotTakeThem(t *testing.T) {
 		Fetcher:          fetcher,
 		InstallDir:       dir,
 		Executable:       exe,
-		ContainerMarkers: []string{"/run/.containerenv"},
+		ContainerMarkers: []string{marker},
 		Now:              fixedClock(),
 	})
 	if err != nil {

@@ -4,7 +4,6 @@ import type { UpdateStatus } from '$lib/types';
 // The service touches IndexedDB, /api/updates/* and the dialog, so all three are faked: under test is
 // when it asks, what it downloads on its own, what the dot claims, and what an answer costs.
 
-const CHECK_DAY_KEY = 'update-check-last-day';
 const CONSENT_KEY = 'update-check-consent-asked';
 const PREPARE_KEY = 'update-prepare-stamp';
 
@@ -17,7 +16,7 @@ const api = vi.hoisted(() => ({
     restartToUpdate: vi.fn(),
 }));
 const configApi = vi.hoisted(() => ({ setUpdateCheckConsent: vi.fn(async (_enabled: boolean) => {}) }));
-type Asked = { title: string; message: string; confirmText: string; cancelText: string };
+type Asked = { title: string; message: string; confirmText: string; cancelText: string; variant?: string };
 const dialogs = vi.hoisted(() => ({ showConfirm: vi.fn(async (_asked: Asked) => false) }));
 
 vi.mock('$lib/storage', () => ({
@@ -26,7 +25,7 @@ vi.mock('$lib/storage', () => ({
 }));
 vi.mock('$lib/api/updates', () => ({
     fetchUpdateStatus: () => api.fetchUpdateStatus(),
-    checkForUpdates: () => api.checkForUpdates(),
+    checkForUpdates: (auto?: boolean) => api.checkForUpdates(auto),
     prepareUpdate: () => api.prepareUpdate(),
     applyUpdate: () => api.applyUpdate(),
     restartToUpdate: () => api.restartToUpdate(),
@@ -89,14 +88,26 @@ describe('the daily check', () => {
         expect(api.checkForUpdates).not.toHaveBeenCalled();
     });
 
-    it('asks once a day across boots, having stamped the day before it asked', async () => {
+    it('asks as the install when it boots, and as a person when the button is clicked', async () => {
         api.checkForUpdates.mockResolvedValue(status());
-        await updateCheck.start();
-        expect(store.db.get(CHECK_DAY_KEY)).toBeTypeOf('number');
 
+        await updateCheck.start();
+        expect(api.checkForUpdates).toHaveBeenLastCalledWith(true);
+
+        await updateCheck.checkNow();
+        expect(api.checkForUpdates).toHaveBeenLastCalledWith(false);
+    });
+
+    it('keeps no day of its own, because one browser is not one install', async () => {
+        api.checkForUpdates.mockResolvedValue(status());
+
+        await updateCheck.start();
         updateCheck.reset();
         await updateCheck.start();
-        expect(api.checkForUpdates).toHaveBeenCalledTimes(1);
+
+        // Both boots asked, and the install's day is what decided whether the manifest got dialled.
+        expect(api.checkForUpdates).toHaveBeenCalledTimes(2);
+        expect([...store.db.keys()].filter(key => key.includes('day'))).toEqual([]);
     });
 
     it('asks again when the button asked for it', async () => {
@@ -169,7 +180,9 @@ describe('the automatic download', () => {
     it('tries a newer release the day it appears', async () => {
         api.fetchUpdateStatus.mockResolvedValue(status({ latest: '1.4.2', available: true }));
         await updateCheck.start();
+        // The install knows the newer release by then, so both reads of it answer 1.5.0.
         api.fetchUpdateStatus.mockResolvedValue(status({ latest: '1.5.0', available: true }));
+        api.checkForUpdates.mockResolvedValue(status({ latest: '1.5.0', available: true }));
 
         updateCheck.reset();
         await updateCheck.start();
@@ -226,8 +239,8 @@ describe('the dot', () => {
     });
 });
 
-describe('the first-run question', () => {
-    it('asks once per browser and writes the answer it was given', async () => {
+describe('the opt-in question', () => {
+    it('asks while the answer is owed, and the written answer is what ends it', async () => {
         api.fetchUpdateStatus.mockResolvedValue(status({ answered: false }));
         api.checkForUpdates.mockResolvedValue(status());
         dialogs.showConfirm.mockResolvedValue(true);
@@ -235,12 +248,14 @@ describe('the first-run question', () => {
         await updateCheck.start();
 
         expect(configApi.setUpdateCheckConsent).toHaveBeenCalledWith(true);
-        expect(store.db.get(CONSENT_KEY)).toBeTypeOf('number');
 
-        // The stamp is what keeps a refused write from becoming a prompt on every boot.
+        // The answer did not land — a tab closed mid-question, a write that failed — so the install still
+        // owes it and the question comes again. Only the preference ends it, never a dismissal.
         updateCheck.status = status({ answered: false });
         await updateCheck.askConsent();
-        expect(dialogs.showConfirm).toHaveBeenCalledTimes(1);
+        expect(dialogs.showConfirm).toHaveBeenCalledTimes(2);
+        // Nothing is kept in the browser about having asked.
+        expect([...store.db.keys()]).not.toContain(CONSENT_KEY);
     });
 
     it('takes a decline as an answer too', async () => {
@@ -266,6 +281,8 @@ describe('the first-run question', () => {
         expect(asked.message).toBe('Would you like MIKE to automatically check for updates once per day?');
         expect(asked.cancelText).toBe('No');
         expect(asked.confirmText).toBe('Yes');
+        // A question, not a thing being undone, so it is not dressed in the destructive red.
+        expect(asked.variant).toBe('default');
     });
 });
 
@@ -299,7 +316,9 @@ describe('the install prompt', () => {
         expect(dialogs.showConfirm).toHaveBeenCalledTimes(1);
         const [asked] = dialogs.showConfirm.mock.calls[0];
         expect(asked.title).toContain('1.4.2');
-        expect(asked.confirmText).toBe('Install now');
+        // The destructive red is honest only because the label says what the click does: the files are
+        // replaced and the server restarts onto them.
+        expect(asked.confirmText).toBe('Install and Restart');
         expect(asked.cancelText).toBe('Later');
         expect(api.applyUpdate).toHaveBeenCalledTimes(1);
     });

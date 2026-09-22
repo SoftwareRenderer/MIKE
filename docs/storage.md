@@ -99,3 +99,7 @@ Task and thread IDs (`backend/types/idgen.go`) draw dictionary words through `cr
 A failing system source panics rather than issuing a guessable ID. Shape: `word-word-word`
 (`frost-amber-quartz`) for tasks, two words for threads (`GenerateThreadID()`), and the board URL is
 `/?task=frost-amber-quartz`. Test: `backend/types/idgen_test.go`.
+## Checking this
+
+`go test ./backend/store/` covers the transaction boundary, the migration probe chain, the stored instants
+and the ID shapes.

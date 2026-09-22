@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { dialogStore } from '$lib/stores';
+    import { dialogStore, type DialogVariant } from '$lib/stores';
     import { t } from '$lib/i18n';
     import { usePromiseDialog } from '$lib/composables/use-promise-dialog.svelte';
     import PromiseDialogShell from './PromiseDialogShell.svelte';
@@ -7,7 +7,7 @@
     let title = $state('');
     let message = $state('');
     let items = $state<string[]>([]);
-    let variant = $state<'default' | 'destructive'>('destructive');
+    let variant = $state<DialogVariant>('destructive');
     // Only the absence of a caller's label is copy; usePromiseDialog says why the default resolves
     // in a derived rather than into state.
     let confirmOverride = $state<string | null>(null);

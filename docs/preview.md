@@ -122,3 +122,7 @@ still blocked in flight; permissive posture opted into open network).
 Probes in `frontend/tests/e2e/html-preview.spec.ts` (egress listener + scripts-off/scripts-on mode
 tests, incl. meta-refresh and in-tree navigation probes) and the extension's colocated iframe harness
 (`MIKE-extensions/ui/html-preview/tests/`).
+## Checking this
+
+`go test ./backend/server/` covers the preview routes, the ref rewriting and the CSP that comes back with
+an asset.

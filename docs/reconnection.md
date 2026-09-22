@@ -490,3 +490,7 @@ queued notice under its own code (`send_refused`) rather than deleting it — a 
 
 **Tests:** `api/__tests__/queue-refused.unit.ts` (refused ≠ flushed, reported once, retired by a new
 write).
+## Checking this
+
+`cd frontend && npm test` covers `taskIsInFlight` and the offline queue.
+`cd frontend && npx playwright test reconnect-refresh ws-stale-reconnect` drives a lost connection.

@@ -30,6 +30,13 @@ Rules live here, mechanism in `docs/`, decisions in `docs/adr/`.
 | `docs/configuration.md` | the variables this fixture reads |
 """
 
+SUB_CHECK = """
+## Checking this
+
+`python3 scripts/check.py` catches a lie in the rule above. From its own directory it is
+`cd scripts && python3 check.py`.
+"""
+
 SUB = """# Sub
 
 The rules are in `AGENTS.md → Docs Index`.
@@ -37,11 +44,15 @@ The rules are in `AGENTS.md → Docs Index`.
 ## The rule
 
 One rule, naming `backend/thing.go` and MIKE_FOO.
-"""
+""" + SUB_CHECK
 
 CONFIG = """# Configuration
 
 MIKE_FOO — the only variable this fixture reads.
+
+## Checking this
+
+`python3 scripts/check.py` prints what the server resolved for MIKE_FOO.
 """
 
 ADR_README = """# Architectural Decision Records
@@ -82,9 +93,12 @@ const EnvFoo = "MIKE_FOO"
 THING = "package thing // reads MIKE_FOO\n"
 
 failures = []
+ran = 0  # counted as they run: a printed total derived from len(CASES) went stale the first time a check was added outside CASES
 
 
 def check(name, ok, detail=""):
+    global ran
+    ran += 1
     print(f"{'OK  ' if ok else 'FAIL'} {name}{'' if ok else '  — ' + detail}")
     if not ok:
         failures.append(name)
@@ -109,6 +123,7 @@ def fixture(root: Path, readme: bool = False):
     (root / "docs" / "adr" / "0001-the-decision.md").write_text(ADR_0001)
     (root / "backend" / "startup" / "config.go").write_text(STARTUP)
     (root / "backend" / "thing.go").write_text(THING)
+    (root / "scripts" / "check.py").write_text("#!/usr/bin/env python3\n")
     if readme:
         (root / "README.md").write_text("# Mike\n\n## Running it\n\n`make run`.\n")
     return root
@@ -170,6 +185,13 @@ def replaces(rel, old, new):
     return mutate
 
 
+def long_prose(count: int):
+    """`count` sentences over the length limit, as one block of text. Each one starts with a capital
+    because the gate ends a sentence at a full stop only when a capital follows it — a run of lowercase
+    lines is one sentence, however many full stops it holds."""
+    return "\n" + ("Word " + "word " * 45 + ".\n") * count
+
+
 # (name, rule label expected in the report, mutation, text expected in the report)
 CASES = [
     ("1 pointer to a heading that is not there", "1 pointers",
@@ -219,6 +241,12 @@ CASES = [
     ("8 a file not yet in the register", "8 the ratchet", None, "not in scripts/docscheck/baseline.json"),
     ("8 a sentence over the length limit", "8 the ratchet",
      appends("docs/sub.md", "\n" + " ".join(["word"] * 46) + ".\n"), "longsent grew"),
+    ("9 a doc that names no check", "9 the guideline",
+     replaces("docs/sub.md", SUB_CHECK, ""), "nothing here names a check"),
+    ("9 a command that does not exist", "9 the guideline",
+     replaces("docs/sub.md", "scripts/check.py", "scripts/gone.py"), "does not exist"),
+    ("9 a cd prefix that names no directory", "9 the guideline",
+     replaces("docs/sub.md", "cd scripts &&", "cd nowhere &&"), "does not exist"),
 ]
 
 
@@ -251,10 +279,6 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         root = fixture(Path(tmp))
         gate = prepare(root)
-        appends("docs/sub.md", "\nA second line, and a third.\n")(root)
-        code, out = run(gate, [])
-        check("8 words grow past the ceiling", code == 1 and "words grew" in out, out)
-
         appends("docs/sub.md", " This used to be different.\n")(root)
         code, out = run(gate, [])
         check("8 past-tense sentences grow", code == 1 and "history grew" in out, out)
@@ -265,11 +289,65 @@ def main() -> int:
 
         (root / "docs" / "sub.md").write_text(SUB)
         register = json.loads(gate.BASELINE.read_text())
-        register["docs/sub.md"] = {"words": len(SUB.split()) + 50, "history": 0,
+        register["docs/sub.md"] = {"history": 0,
                                    "longsent": register["docs/sub.md"]["longsent"]}
         gate.BASELINE.write_text(json.dumps(register))
         code, out = run(gate, [])
         check("8 shrinking is allowed", code == 0, out)
+
+        # The budget is a second, whole-tree cap: it refuses a doc that stayed inside its own ceiling,
+        # because paying for a long sentence somewhere else is the point of having one.
+        appends("docs/sub.md", long_prose(2))(root)
+        run(gate, ["--update"])
+        total = sum(len(gate.long_sentences(t)) for p, t in gate.doc_texts().items() if not gate.is_adr(p))
+        register = json.loads(gate.BASELINE.read_text())
+        register[gate.GLOBAL_KEY] = {"longsent": total - 1}
+        gate.BASELINE.write_text(json.dumps(register))
+        code, out = run(gate, [])
+        check("8 the whole-tree budget refuses what no file exceeded",
+              code == 1 and "whole-tree budget" in out, out)
+
+        register[gate.GLOBAL_KEY] = {"longsent": total}
+        gate.BASELINE.write_text(json.dumps(register))
+        code, out = run(gate, [])
+        check("8 a budget the docs sit exactly inside passes", code == 0, out)
+        check("8 the budget entry is not read as a missing file", "_global is in the register" not in out, out)
+
+    # The budget ratchets at the freeze, not at the check, so `--update` is the act that moves the docs:
+    # the freeze that creates it records the truth, every later one shaves, and growth cannot be laundered.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = fixture(Path(tmp))
+        gate = prepare(root, freeze=False)
+        appends("docs/sub.md", long_prose(30))(root)
+        total = sum(len(gate.long_sentences(t)) for p, t in gate.doc_texts().items() if not gate.is_adr(p))
+        check("8 the fixture holds enough long sentences to measure against", total > gate.LONG_SENTENCE_TARGET,
+              str(total))
+        run(gate, ["--update"])
+        first = json.loads(gate.BASELINE.read_text())[gate.GLOBAL_KEY]["longsent"]
+        check("8 the freeze that creates the budget records the truth", first == total, f"{first} vs {total}")
+
+        run(gate, ["--update"])
+        second = json.loads(gate.BASELINE.read_text())[gate.GLOBAL_KEY]["longsent"]
+        check("8 a later freeze shaves the budget", 0 < second < first, f"{second} vs {first}")
+
+        appends("docs/sub.md", long_prose(4))(root)
+        run(gate, ["--update"])
+        third = json.loads(gate.BASELINE.read_text())[gate.GLOBAL_KEY]["longsent"]
+        check("8 a freeze cannot raise the budget after the docs grew", third <= second, f"{third} vs {second}")
+        code, out = run(gate, [])
+        check("8 so the growth is still reported", code == 1 and "whole-tree budget" in out, out)
+
+        # A freeze cannot walk the number down by itself, and cannot push it under the target: the only way
+        # to the target is the edit that removes a long sentence.
+        settled = third
+        for _ in range(6):
+            run(gate, ["--update"])
+            after = json.loads(gate.BASELINE.read_text())[gate.GLOBAL_KEY]["longsent"]
+            check("8 repeated freezes move nothing", after == settled, f"{after} vs {settled}")
+            settled = after
+        check("8 the target is a floor, never a quota to freeze to",
+              gate.freeze_budget(30, 26) == 26 and gate.freeze_budget(10, 10) == 10,
+              f"{gate.freeze_budget(30, 26)} {gate.freeze_budget(10, 10)}")
 
     # The gate's own exemptions: an ADR is where history, a retired path and a figure live.
     with tempfile.TemporaryDirectory() as tmp:
@@ -281,7 +359,7 @@ def main() -> int:
         code, out = run(gate, [])
         check("docs/adr keeps history, retired paths and estimates", code == 0, out)
 
-    print(f"\n{len(CASES) + 9} checks, {len(failures)} failure(s).")
+    print(f"\n{ran} checks, {len(failures)} failure(s).")
     if failures:
         print("GATE SELF-TEST FAILED: " + "; ".join(failures))
         return 1

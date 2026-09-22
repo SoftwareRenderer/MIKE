@@ -85,4 +85,29 @@ describe('ConfirmationDialog', () => {
         await fireEvent.click(footerButton(container, 'Confirmer'));
         expect(answer).toBe(true);
     });
+
+    it('dresses the ordinary answer apart from the destructive one', async () => {
+        const { container } = render(ConfirmationDialog);
+        const asked = dialogStore.showConfirm({
+            title: 'Look for releases?', message: 'Once a day', confirmText: 'Yes', cancelText: 'No',
+            variant: 'default',
+        });
+        await flush();
+
+        const yes = footerButton(container, 'Yes');
+        expect(yes.className).not.toContain('destructive');
+        await fireEvent.click(yes);
+        expect(await asked).toBe(true);
+
+        cleanup();
+        const second = render(ConfirmationDialog);
+        const dropped = dialogStore.showConfirm({ title: 'Drop it', message: 'Three cards go' });
+        await flush();
+
+        // Naming nothing is still a destruction: that is what the default is for.
+        const confirm = footerButton(second.container, 'Confirm');
+        expect(confirm.className).toContain('destructive');
+        await fireEvent.click(confirm);
+        expect(await dropped).toBe(true);
+    });
 });

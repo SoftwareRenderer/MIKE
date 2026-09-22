@@ -162,3 +162,7 @@ point is safe where it does not exist (plain-http origin, webview, Safari's page
 No Playwright spec: a real notification permission cannot be driven headless, and neither a click on a
 notification nor the worker's own `notificationclick` can be reached without one. Everything that decides
 is pure or unit-tested above.
+## Checking this
+
+`cd frontend && npm test` covers the arrival rule and the counts ledger: `notifications.unit.ts`,
+`review-notify.unit.ts`, `notify-on-review-persist.unit.ts`.

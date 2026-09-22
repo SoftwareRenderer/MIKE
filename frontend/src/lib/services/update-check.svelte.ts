@@ -1,19 +1,16 @@
 /**
  * The server's release update as app state: whether a newer release is known, what this install may do
  * about it, and the clicks that lead from one to the other. Nothing runs on a timer — one pass per boot,
- * with the outbound check gated to once a day. The mechanism is docs/auto-update.md.
+ * whose outbound check the install's day gates. The mechanism is docs/auto-update.md.
  */
 import type { UpdateApplyResult, UpdatePreparedResult, UpdateRestartResult, UpdateStatus } from '$lib/types';
 import { applyUpdate, checkForUpdates, fetchUpdateStatus, prepareUpdate, restartToUpdate } from '$lib/api/updates';
 import { setUpdateCheckConsent } from '$lib/api/config';
 import { dialogStore } from '$lib/stores';
 import { loadAppSetting, saveAppSetting } from '$lib/storage';
+import { dayKey } from '$lib/utils/day-key';
 import { t } from '$lib/i18n';
 
-/** Also the repeat guard: a check that ran today does not run again on the next reload. */
-const LAST_CHECK_DAY_KEY = 'update-check-last-day';
-/** Once per browser, whatever the answer did to the server. */
-const CONSENT_ASKED_KEY = 'update-check-consent-asked';
 /** Which release was last fetched, and on which day. See stampPrepare. */
 const PREPARE_STAMP_KEY = 'update-prepare-stamp';
 
@@ -47,9 +44,9 @@ class UpdateCheckStore {
         // manifest about, and a slow manifest must not delay the dialog by its own round trip.
         await this.askConsent();
         if (this.status?.enabled) {
-            await this.checkOnceToday();
-            // Whatever the check's own day stamp decided, the answer the server holds may still name a
-            // release this install has never fetched. stampPrepare is what keeps that cheap.
+            await this.checkAutomatic();
+            // The pass may have been declined because the install already checked today, and the status it
+            // read may still name a release this install has never fetched. stampPrepare keeps that cheap.
             await this.autoPrepare();
         }
     }
@@ -88,27 +85,26 @@ class UpdateCheckStore {
         return this.phase !== 'idle';
     }
 
-    /** The once-a-day check, stamped before the request so a slow answer is not asked again on reload. */
-    async checkOnceToday(): Promise<void> {
-        if (!(await stampToday())) return;
-        await this.check();
+    /** The daily pass. The day belongs to the install, not to this browser: the server answers with what
+     *  its last check learned when today is spent, so a second browser costs one round trip and no egress. */
+    private async checkAutomatic(): Promise<void> {
+        await this.check(true);
     }
 
-    /** The button. Always asks, whatever the day stamp says. */
+    /** The button. Always asks, whoever asked last. */
     async checkNow(): Promise<void> {
-        await stampToday();
-        if (await this.check()) await this.autoPrepare();
+        if (await this.check(false)) await this.autoPrepare();
     }
 
     /** Whether the manifest answered. A check that did not is no licence to download the release an
      *  earlier one reported. */
-    private async check(): Promise<boolean> {
+    private async check(auto: boolean): Promise<boolean> {
         if (this.busy) return false;
         this.phase = 'checking';
         this.fault = '';
         let answered = false;
         try {
-            this.status = await checkForUpdates();
+            this.status = await checkForUpdates(auto);
             answered = true;
         } catch (e: any) {
             this.fault = messageOf(e);
@@ -197,19 +193,20 @@ class UpdateCheckStore {
     }
 
     /**
-     * The first-run question, once per browser: MIKE asks whether it may look for a newer release and,
-     * finding one, download it. A write that failed still counts as asked — a prompt that returns on
-     * every boot gets answered by accident.
+     * The opt-in question, asked on every boot while the install owes the answer. A dismissal is not an
+     * answer — only the written preference is — so a tab closed mid-question, or a write that failed, is
+     * asked again next boot rather than left holding a mark it has no way to clear.
      */
     async askConsent(): Promise<void> {
         if (!this.consentOwed) return;
-        if (await readStamp(CONSENT_ASKED_KEY)) return;
-        await saveAppSetting(CONSENT_ASKED_KEY, dayKey()).catch(() => {});
         const enabled = await dialogStore.showConfirm({
             title: t('updates.consent.title'),
             message: t('updates.consent.message'),
             confirmText: t('updates.consent.yes'),
             cancelText: t('updates.consent.no'),
+            // A question, not a thing being undone: the red is for the latter, and this Yes is the same
+            // blue as the Save button behind it.
+            variant: 'default',
         });
         await this.setConsent(enabled);
     }
@@ -229,27 +226,6 @@ function messageOf(e: any): string {
     return e?.message || String(e);
 }
 
-/** Read a stamp. Storage that will not answer reads as "not stamped", which asks at worst once more. */
-async function readStamp(key: string): Promise<boolean> {
-    try {
-        return (await loadAppSetting<number>(key, 0)) !== 0;
-    } catch {
-        return false;
-    }
-}
-
-async function stampToday(): Promise<boolean> {
-    const today = dayKey();
-    try {
-        if ((await loadAppSetting<number>(LAST_CHECK_DAY_KEY, 0)) === today) return false;
-        await saveAppSetting(LAST_CHECK_DAY_KEY, today);
-        return true;
-    } catch {
-        // A store that will not write is a store that cannot remember it asked, so it does not ask.
-        return false;
-    }
-}
-
 /**
  * One stamp entry naming the release last fetched and the day it was fetched. Naming the version is what
  * makes the gate per release: a download that failed today is not retried every reload, and a newer
@@ -264,12 +240,6 @@ async function stampPrepare(version: string): Promise<boolean> {
     } catch {
         return false;
     }
-}
-
-/** Compared, never shown — so no `Intl` and nothing locale-dependent at module scope. */
-function dayKey(): number {
-    const now = new Date();
-    return (now.getFullYear() * 100 + now.getMonth() + 1) * 100 + now.getDate();
 }
 
 export const updateCheck = new UpdateCheckStore();

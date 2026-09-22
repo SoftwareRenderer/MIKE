@@ -54,6 +54,15 @@ async function getBrowseSegments(page: Page) {
   };
 }
 
+// A card is addressed by `data-identity`, the author+name key the app itself compares on. A display
+// name is NOT unique in this list: the installed directory is per-machine and gitignored, so a
+// developer's own install can display the same name as a fixture entry while being a different
+// extension (different author), and both render as their own card.
+const browseCard = (page: Page, author: string, name: string) =>
+  page.locator(`.registry-card[data-identity="${identityKey(author, name)}"]`);
+const installedCard = (page: Page, author: string, name: string) =>
+  page.locator(`.extension-card[data-identity="${identityKey(author, name)}"]`);
+
 test.describe('Extensions Tab', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -174,8 +183,10 @@ test.describe('Extensions Tab', () => {
     await expect(unpublishedCards).toHaveCount(segments.unpublished.length);
     await expect(unpublishedCards.first().locator('.unpublished-badge')).toHaveText('Local');
 
-    // The published (registry) card must not be styled as unpublished.
-    const tsCard = page.locator('.registry-card', { hasText: 'TypeScript/JavaScript Language Server' });
+    // The published (registry) card must not be styled as unpublished. The registry fixture's own
+    // author+name, so a same-named local install on the developer's disk cannot answer for it.
+    const tsCard = browseCard(page, 'Microsoft', 'typescript-language-server');
+    await expect(tsCard.locator('.ext-name')).toHaveText('TypeScript/JavaScript Language Server');
     await expect(tsCard).not.toHaveClass(/unpublished-card/);
     await expect(tsCard.locator('.unpublished-badge')).toHaveCount(0);
   });
@@ -234,8 +245,8 @@ test.describe('Extensions Tab', () => {
     await page.click('.view-tab:has-text("Browse")');
     await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
 
-    // Click Install on a local (unpublished) card.
-    const svelteCard = page.locator('.registry-card', { hasText: 'Svelte Language Server' });
+    // Click Install on a local (unpublished) card: the seeded fixture, named by its manifest author.
+    const svelteCard = browseCard(page, 'Svelte Contributors', 'svelte-language-server');
     await expect(svelteCard).toBeVisible({ timeout: 10000 });
     await svelteCard.locator('button:has-text("Install")').click();
 
@@ -253,7 +264,7 @@ test.describe('Extensions Tab', () => {
     // Go to Browse and install the local "Light Mode" extension.
     await page.click('.view-tab:has-text("Browse")');
     await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
-    const lightCard = page.locator('.registry-card', { hasText: 'Light Mode' });
+    const lightCard = browseCard(page, 'SoftwareRenderer', 'mike-light');
     await expect(lightCard).toBeVisible({ timeout: 10000 });
     await lightCard.locator('button:has-text("Install")').click();
 
@@ -263,7 +274,7 @@ test.describe('Extensions Tab', () => {
     // Switch to Installed and verify the local card carries the same styling
     // (hazard-stripe card + "Local" badge).
     await page.click('.view-tab:has-text("Installed")');
-    const installedLight = page.locator('.extension-card', { hasText: 'Light Mode' });
+    const installedLight = installedCard(page, 'SoftwareRenderer', 'mike-light');
     await expect(installedLight).toBeVisible({ timeout: 10000 });
     await expect(installedLight).toHaveClass(/unpublished-card/);
     await expect(installedLight.locator('.unpublished-badge')).toHaveText('Local');

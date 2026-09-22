@@ -26,6 +26,18 @@ async function seedProvidersByIds(
     return idByName;
 }
 
+/**
+ * Open Settings on the Providers tab. Which tab the control opens is the app's decision, not the
+ * spec's: a Settings click lands on the tab the update dot points at (docs/auto-update.md), and on a
+ * fresh test database the opt-in answer is owed, so the dot lights as soon as the status read lands
+ * — possibly between two clicks of one test. A spec that works inside a provider card names the tab.
+ */
+async function openProviders(page: Page): Promise<void> {
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
+    await page.locator('[role="dialog"]').first().waitFor({ state: 'visible', timeout: 5000 });
+    await page.locator('button.tab-btn:has-text("Providers")').click();
+}
+
 // ─── Model Switcher Tests ───────────────────────────────────────────────────
 
 test.describe.serial('Model switcher in task view', () => {
@@ -237,8 +249,7 @@ test.describe.serial('Settings Model Delete', () => {
   });
 
   test('should delete the correct model when models are displayed in sorted order', async ({ page }) => {
-    await page.locator('.icon-btn[aria-label="Settings"]').click();
-    await page.waitForSelector('.modal', { timeout: 5000 });
+    await openProviders(page);
 
     const card = page.locator('.provider-card').first();
     // Expand card if collapsed
@@ -337,8 +348,7 @@ test.describe.serial('Reasoning effort setting', () => {
 
     test('should show reasoning effort suggestions when the input has focus', async ({ page }) => {
         // Open settings modal
-        await page.click('.icon-btn[aria-label="Settings"]');
-        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        await openProviders(page);
 
         // Expand a provider card
         const providerHeader = page.locator('.provider-card-header').first();
@@ -377,8 +387,7 @@ test.describe.serial('Reasoning effort setting', () => {
 
     test('should default to Default for new models', async ({ page }) => {
         // Open settings
-        await page.click('.icon-btn[aria-label="Settings"]');
-        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        await openProviders(page);
 
         // Expand first provider
         const providerHeader = page.locator('.provider-card-header').first();
@@ -417,8 +426,7 @@ test.describe.serial('Reasoning effort setting', () => {
 
     test('should persist reasoning effort after save', async ({ page }) => {
         // Open settings
-        await page.click('.icon-btn[aria-label="Settings"]');
-        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        await openProviders(page);
 
         // Expand first provider
         const providerHeader = page.locator('.provider-card-header').first();
@@ -441,8 +449,7 @@ test.describe.serial('Reasoning effort setting', () => {
             await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
 
             // Reopen settings
-            await page.click('.icon-btn[aria-label="Settings"]');
-            await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+            await openProviders(page);
 
             // Expand first provider again
             await providerHeader.click();
@@ -461,8 +468,7 @@ test.describe.serial('Reasoning effort setting', () => {
             await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
 
             // Reopen settings and verify 'default' persisted
-            await page.click('.icon-btn[aria-label="Settings"]');
-            await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+            await openProviders(page);
             await providerHeader.click();
             await expect(page.locator('.provider-details')).toBeVisible({ timeout: 3000 });
             const finalValue = await page.locator('.reasoning-effort-input').first().inputValue();
@@ -480,8 +486,7 @@ test.describe.serial('Reasoning effort setting', () => {
 
     test('should persist a custom reasoning effort after save', async ({ page }) => {
         // Open settings
-        await page.click('.icon-btn[aria-label="Settings"]');
-        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        await openProviders(page);
 
         // Expand first provider
         const providerHeader = page.locator('.provider-card-header').first();
@@ -509,8 +514,7 @@ test.describe.serial('Reasoning effort setting', () => {
         expect(modelA.reasoning_effort).toBe('xhigh');
 
         // Reopen settings and verify the input shows the custom value
-        await page.click('.icon-btn[aria-label="Settings"]');
-        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        await openProviders(page);
         await providerHeader.click();
         await expect(page.locator('.provider-details')).toBeVisible({ timeout: 5000 });
         await expect(page.locator('.reasoning-effort-input').first()).toHaveValue('xhigh');
@@ -563,8 +567,7 @@ test.describe.serial('Primary Providers', () => {
     });
 
     test('should display Worker and Utility rows with provider/model dropdowns', async ({ page }) => {
-        await page.click('.icon-btn[aria-label="Settings"]');
-        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        await openProviders(page);
 
         // Primary Providers section exists
         await expect(page.locator('.primary-provider-row')).toHaveCount(2);
@@ -583,8 +586,7 @@ test.describe.serial('Primary Providers', () => {
     });
 
     test('should block save when Worker pair is not selected', async ({ page }) => {
-        await page.click('.icon-btn[aria-label="Settings"]');
-        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        await openProviders(page);
 
         // Clear the worker provider selection
         const workerProviderSelect = page.locator('.primary-provider-row').nth(0).locator('.primary-provider-select').nth(0);
@@ -598,8 +600,7 @@ test.describe.serial('Primary Providers', () => {
     });
 
     test('should persist worker/utility after save', async ({ page }) => {
-        await page.click('.icon-btn[aria-label="Settings"]');
-        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        await openProviders(page);
 
         // Change worker model to model-a2
         const workerModelSelect = page.locator('.primary-provider-row').nth(0).locator('.primary-provider-select').nth(1);
@@ -683,8 +684,7 @@ test.describe.serial('Provider max requests per second', () => {
 
     test('should show and persist Max requests/sec in the provider card UI', async ({ page }) => {
         // Open Settings (seeded provider shows max_requests_per_second: 5)
-        await page.click('.icon-btn[aria-label="Settings"]');
-        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        await openProviders(page);
 
         // Expand the (single) provider card
         const card = page.locator('.provider-card').first();
@@ -710,8 +710,7 @@ test.describe.serial('Provider max requests per second', () => {
         expect(provider.max_requests_per_second).toBe(3);
 
         // Re-open Settings — the card shows the saved value
-        await page.click('.icon-btn[aria-label="Settings"]');
-        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        await openProviders(page);
         if (!await card.locator('.provider-details').isVisible().catch(() => false)) {
             await card.locator('.provider-card-header').click();
         }
@@ -729,8 +728,7 @@ test.describe.serial('Provider max requests per second', () => {
 
     test('should default to 0 for a newly added provider', async ({ page }) => {
         // Open Settings
-        await page.click('.icon-btn[aria-label="Settings"]');
-        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        await openProviders(page);
 
         // Add a fresh LLM provider — the new card is expanded by default
         await page.getByRole('button', { name: '+ Add Provider' }).click();
@@ -781,8 +779,7 @@ test.describe.serial('Test connection with empty model list', () => {
             if (req.url().includes('/api/config/test-connection')) requestOrder.push('test-connection');
         });
 
-        await page.click('.icon-btn[aria-label="Settings"]');
-        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        await openProviders(page);
 
         const card = page.locator('.provider-card').first();
         if (!await card.locator('.provider-details').isVisible().catch(() => false)) {
@@ -838,8 +835,7 @@ test.describe.serial('Test connection with empty model list', () => {
             if (req.url().includes('/api/config/test-connection')) requestOrder.push('test-connection');
         });
 
-        await page.click('.icon-btn[aria-label="Settings"]');
-        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        await openProviders(page);
 
         const card = page.locator('.provider-card').first();
         if (!await card.locator('.provider-details').isVisible().catch(() => false)) {
@@ -892,8 +888,7 @@ test.describe.serial('Add provider scroll', () => {
         await page.goto('/');
         await page.waitForSelector('.card', { timeout: 10000 });
 
-        await page.click('.icon-btn[aria-label="Settings"]');
-        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        await openProviders(page);
 
         // Expand both provider cards so the list extends well past the fold.
         const cards = page.locator('.provider-card');
@@ -941,8 +936,7 @@ test.describe.serial('Add provider scroll', () => {
         await page.goto('/');
         await page.waitForSelector('.card', { timeout: 10000 });
 
-        await page.click('.icon-btn[aria-label="Settings"]');
-        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        await openProviders(page);
         const scrollTopBefore = await page.$eval('.modal-body', el => el.scrollTop);
 
         await page.getByRole('button', { name: '+ Add Provider' }).click();

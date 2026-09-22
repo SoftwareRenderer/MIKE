@@ -143,3 +143,7 @@ loopback admitted only for the named host, the metadata address refused even whe
 failure class its own sentence), `backend/exec/tool_extension_offer_test.go` and
 `tool_extension_run_test.go` (the offer in all three modes; twelve calls over the real dispatch path with
 an injected egress seam, so no test needs a socket).
+## Checking this
+
+`go test ./backend/extensions/ ./backend/exec/` covers the tool manifest grammar and the run behind it,
+which is where a `url` grant is honoured or refused.

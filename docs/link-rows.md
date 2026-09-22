@@ -105,3 +105,6 @@ Sidebar project rows and task cards are real links, so the browser's own link ac
 - **Task card** root stays `<div class="card" role="button" tabindex="0" draggable>` with a full-cover `<a class="card-open-link" aria-hidden tabindex="-1" draggable="false">` overlay (`inset:0; z-index:1`) as last child — a root anchor is impossible (nested subtask `Card`s → anchor-in-anchor).
 - **Stacking contract** (`Card.svelte`): `.card-title` is deliberately NOT lifted so the overlay still covers the title; instead `.card-actions`, `.subtask-progress-bar`, `.subtask-list` carry `z-index: 2`, and `.card.queued > *` is scoped `> :not(.card-open-link)`.
 - **Never** re-tune these rows with `<button>`/`<div>` + a faked context menu — the link menu is DOM-level and unsynthesizable. Keep selectors tag-agnostic (`.project-item`, not `button.project-item`).
+## Checking this
+
+`cd frontend && npm test` covers the row and card markup in `link-rows.unit.svelte.ts`.

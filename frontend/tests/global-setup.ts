@@ -32,6 +32,11 @@ const STORAGE_STATE_FILE_ISOLATED = '/tmp/kanban-test-storage-state.json.isolate
 const KANBAN_BIN = 'go';
 const KANBAN_RUN_ARGS = ['run', '.'];
 const TEST_PASSWORD = 'test-password-1234';
+// Release updates are switched off for the run. The boot pass (`updateCheck.start()` in App.svelte)
+// asks the opt-in question of every fresh browser and, once the answer is yes, dials the manifest
+// host — neither belongs in a hermetic suite. `disabled` is the posture the client stops on: no dot,
+// no question, no prompt (docs/auto-update.md). A spec that wants the dot stubs /api/updates/status.
+const NO_UPDATES_ENV = { MIKE_DISABLE_UPDATES: '1' };
 // Point the test servers at a local registry fixture so e2e registry tests are
 // deterministic and never depend on the hosted online registry.
 //
@@ -90,7 +95,7 @@ async function setup(): Promise<void> {
     kanbanServer = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR], {
         cwd: PROJECT_ROOT,
         // The fixture repos and worktrees live under /tmp, outside the host directory jail.
-        env: { ...process.env, MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_LOGIN_PASSWORD: TEST_PASSWORD, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, MIKE_TLS: '0', DANGER_ZONE: '1', MIKE_ALLOW_ROOT_FS: '1' },
+        env: { ...process.env, ...NO_UPDATES_ENV, MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_LOGIN_PASSWORD: TEST_PASSWORD, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, MIKE_TLS: '0', DANGER_ZONE: '1', MIKE_ALLOW_ROOT_FS: '1' },
         stdio: 'ignore',
         detached: true,
     });
@@ -178,7 +183,7 @@ async function setup(): Promise<void> {
     console.log('[global-setup] Starting isolated kanban server...');
     kanbanServerIsolated = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR_ISOLATED, '--port', String(KANBAN_PORT_ISOLATED)], {
         cwd: PROJECT_ROOT,
-        env: { ...process.env, MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_LOGIN_PASSWORD: TEST_PASSWORD, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, MIKE_TLS: '0', DANGER_ZONE: '1', MIKE_ALLOW_ROOT_FS: '1' },
+        env: { ...process.env, ...NO_UPDATES_ENV, MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_LOGIN_PASSWORD: TEST_PASSWORD, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, MIKE_TLS: '0', DANGER_ZONE: '1', MIKE_ALLOW_ROOT_FS: '1' },
         stdio: 'ignore',
         detached: true,
     });

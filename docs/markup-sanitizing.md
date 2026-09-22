@@ -113,3 +113,7 @@ The same argument covers its `style` attribute, which interpolates the `color` p
 not the control there, because inside a `style` attribute a `;` simply starts another declaration and
 `url()` is a fetch. `safeCSSValue` refuses a value that can do either, and the sizes are coerced through
 `Number` so a value that broke the `number` type cannot arrive as text.
+## Checking this
+
+`cd frontend && npm run check:sinks` audits every sink, URL and style binding, and audits its own claim.
+`npm run check:sinks-test` proves that audit is capable of failing.

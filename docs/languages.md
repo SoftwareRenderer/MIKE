@@ -185,3 +185,7 @@ share one class: a tag with no parent needs its own row, or it inherits a color 
 - `frontend/tests/lsp-hover-highlight-check.mjs` — hover a real `fmt.Println` and read the computed colors off the
   tooltip, then check a TypeScript file in the same workspace: the grammar follows the open file, not the
   connection.
+## Checking this
+
+`go test ./backend/extensions/ ./backend/lsp/` covers the manifest read on both sides.
+`python3 scripts/gen-registry.py --check` answers for the registry a syntax is read from.

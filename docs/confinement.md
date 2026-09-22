@@ -198,3 +198,8 @@ occurrence).
 accessor-only: there are deliberately no exported `GitAuthorName`/`GitAuthorEmail` variables, because the
 add-project flow writes the identity while tasks are committing. Making it per-`WorktreeManager` is still
 open.
+## Checking this
+
+`go test ./backend/api/ ./backend/fsutil/ ./backend/server/` covers the jails and the caps.
+`make check-race` runs the same packages with the race detector, which is where a jail that holds only
+under concurrency shows it.

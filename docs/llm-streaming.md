@@ -83,3 +83,7 @@ egress, update checks) keeps its own defaults.
   a refusal is still one call.
 - `backend/config/config_test.go` — an unset or negative `stream_idle_seconds` means no ceiling.
 - `backend/httputil/client_test.go` — the streaming client has no timeout and does not share `sharedTransport`.
+## Checking this
+
+`go test ./backend/stream/ ./backend/llama/` covers the frame grammar and the token accounting.
+`make check-race` runs the stream package, where the one-writer-per-socket rule lives.

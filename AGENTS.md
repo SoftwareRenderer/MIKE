@@ -456,6 +456,15 @@ Every diagnostic goes through `pkg/logging`; a `log.Printf` in non-test code is 
   write concurrently), never `log.SetOutput`: that idiom captures nothing, and a test asserting on an empty
   buffer passes.
 
+## Writing a doc
+
+A doc is a guideline for whoever changes that subsystem next. It answers four questions in order: what the
+subsystem owns, what must stay true, how the code holds it, and which one command fails when the doc has
+stopped being true. Put the load-bearing rule first. Size is never a finding; past tense, a sentence that
+has to be held in your head, and a doc that names no check all are. A thing the doc itself does not check
+is a claim, not a rule — measure it or move it to an ADR. **`docs/documentation.md → What a doc owes the
+reader`**.
+
 ## Docs Index
 
 Read the file before editing that subsystem — each holds the mechanism, history and tests this file
@@ -498,3 +507,4 @@ deliberately omits.
 | `docs/frontend-updates.md` | stale-asset detection, the build-id tag contract, prompt-mode worker, the day gate |
 | `docs/auto-update.md` | the release manifest, the opt-in ladder, the install shapes that refuse, staging and restart |
 | `docs/adding-a-preference.md` | the recipes for a shortcut or a `*bool` preference |
+| `docs/documentation.md` | what a doc is for, the four questions it answers, the nine rules of the docs gate, the long-sentence budget |

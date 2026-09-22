@@ -208,3 +208,7 @@ still answer. The pair is exact only for the moment the panel last spoke to the 
 `GitStatusPanel` prints each number behind a `~` until it has pulled or pushed once.
 
 Tests: `backend/api/git_test.go` — ahead, behind, and no-upstream.
+## Checking this
+
+`go test ./backend/git/` covers the command constructor, the hook fence, the stash bracket and the clone
+transports. `make check-race` runs it again with the worktree locks watched.

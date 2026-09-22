@@ -1,187 +1,157 @@
 {
  "AGENTS.md": {
   "history": 4,
-  "longsent": 8,
-  "words": 5539
+  "longsent": 8
+ },
+ "_global": {
+  "longsent": 217
  },
  "docs/adding-a-preference.md": {
   "history": 0,
-  "longsent": 0,
-  "words": 798
+  "longsent": 0
  },
  "docs/adr/0001-key-decisions-are-recorded.md": {
   "history": 0,
-  "longsent": 0,
-  "words": 472
+  "longsent": 0
  },
  "docs/adr/README.md": {
   "history": 0,
-  "longsent": 0,
-  "words": 579
+  "longsent": 0
  },
  "docs/agent-extensions.md": {
   "history": 0,
-  "longsent": 2,
-  "words": 1534
+  "longsent": 2
  },
  "docs/api-contract.md": {
   "history": 1,
-  "longsent": 30,
-  "words": 4767
+  "longsent": 30
  },
  "docs/api.md": {
   "history": 0,
-  "longsent": 2,
-  "words": 1704
+  "longsent": 2
  },
  "docs/auto-answer.md": {
   "history": 0,
-  "longsent": 0,
-  "words": 882
+  "longsent": 0
  },
  "docs/auto-update.md": {
   "history": 4,
-  "longsent": 6,
-  "words": 2689
+  "longsent": 6
  },
  "docs/commit-and-done.md": {
   "history": 0,
-  "longsent": 4,
-  "words": 588
+  "longsent": 4
  },
  "docs/configuration.md": {
   "history": 0,
-  "longsent": 0,
-  "words": 2168
+  "longsent": 0
  },
  "docs/confinement.md": {
   "history": 0,
-  "longsent": 13,
-  "words": 2201
+  "longsent": 13
+ },
+ "docs/documentation.md": {
+  "history": 0,
+  "longsent": 0
  },
  "docs/extension-dependency-cache.md": {
   "history": 4,
-  "longsent": 3,
-  "words": 1256
+  "longsent": 3
  },
  "docs/extension-lifecycle.md": {
   "history": 0,
-  "longsent": 9,
-  "words": 1854
+  "longsent": 9
  },
  "docs/extension-tools.md": {
   "history": 0,
-  "longsent": 4,
-  "words": 1366
+  "longsent": 4
  },
  "docs/frontend-updates.md": {
   "history": 2,
-  "longsent": 6,
-  "words": 1795
+  "longsent": 6
  },
  "docs/git-operations.md": {
   "history": 2,
-  "longsent": 4,
-  "words": 2196
+  "longsent": 4
  },
  "docs/i18n.md": {
   "history": 2,
-  "longsent": 18,
-  "words": 5772
+  "longsent": 18
  },
  "docs/languages.md": {
   "history": 0,
-  "longsent": 9,
-  "words": 1963
+  "longsent": 9
  },
  "docs/lifecycle.md": {
   "history": 0,
-  "longsent": 2,
-  "words": 598
+  "longsent": 2
  },
  "docs/link-rows.md": {
   "history": 0,
-  "longsent": 4,
-  "words": 1073
+  "longsent": 4
  },
  "docs/llm-streaming.md": {
   "history": 0,
-  "longsent": 1,
-  "words": 1018
+  "longsent": 1
  },
  "docs/locking.md": {
   "history": 0,
-  "longsent": 4,
-  "words": 751
+  "longsent": 4
  },
  "docs/markup-sanitizing.md": {
   "history": 0,
-  "longsent": 5,
-  "words": 1282
+  "longsent": 5
  },
  "docs/navigation.md": {
   "history": 0,
-  "longsent": 0,
-  "words": 258
+  "longsent": 0
  },
  "docs/notifications.md": {
   "history": 1,
-  "longsent": 2,
-  "words": 1857
+  "longsent": 2
  },
  "docs/preview.md": {
   "history": 0,
-  "longsent": 6,
-  "words": 1226
+  "longsent": 6
  },
  "docs/reconnection.md": {
   "history": 6,
-  "longsent": 31,
-  "words": 5775
+  "longsent": 31
  },
  "docs/sandbox-bridge.md": {
   "history": 3,
-  "longsent": 6,
-  "words": 2447
+  "longsent": 6
  },
  "docs/sandbox-runtime.md": {
   "history": 0,
-  "longsent": 11,
-  "words": 2679
+  "longsent": 11
  },
  "docs/sessions.md": {
   "history": 0,
-  "longsent": 1,
-  "words": 457
+  "longsent": 1
  },
  "docs/storage.md": {
   "history": 0,
-  "longsent": 5,
-  "words": 952
+  "longsent": 5
  },
  "docs/testing.md": {
   "history": 4,
-  "longsent": 14,
-  "words": 4480
+  "longsent": 14
  },
  "docs/threads-checkpoints.md": {
   "history": 2,
-  "longsent": 9,
-  "words": 2003
+  "longsent": 9
  },
  "docs/tls.md": {
   "history": 0,
-  "longsent": 1,
-  "words": 809
+  "longsent": 1
  },
  "docs/typography.md": {
   "history": 0,
-  "longsent": 1,
-  "words": 363
+  "longsent": 1
  },
  "docs/ui-extensions.md": {
   "history": 0,
-  "longsent": 8,
-  "words": 1686
+  "longsent": 8
  }
 }

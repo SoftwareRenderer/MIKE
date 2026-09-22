@@ -124,6 +124,17 @@ and in pairs). One lane server answers all the workers and queues executor turns
 the task to go idle" is a race against everyone else's turns. Any new turn-bound wait must say so in its budget (use the
 `waitForSendButton(page, timeout)` turn budgets in `helpers.ts`, not the 10s `expect.timeout`).
 
+- **A spec that opens Settings names the tab it works in.** The Settings control opens the tab the update
+  dot points at (`docs/auto-update.md`). The dot comes from the pass that runs at boot:
+  `updateCheck.start()` sits in `loadAppData`, which both boot paths reach. So it can be lit before a
+  spec clicks anything — that is how `settings-provider.spec.ts` timed out waiting for
+  `.provider-card-header` with the About panel on screen. Click the `button.tab-btn` you need, the idiom
+  `settings-api-tokens.spec.ts` already uses. The routing rule belongs to `settings-update-dot.spec.ts`.
+- **A Browse or Installed extension card is addressed by `data-identity`, never by its display name.**
+  Identity is author+name (`$lib/utils/extension-identity`), and `extensions/` is per-machine and
+  gitignored. A developer's own install can therefore display a fixture's name while being a different
+  extension: two cards, one name, and a `hasText` locator that breaks on that machine only.
+
 ## Mock LLM server
 
 `frontend/tests/mock-llm.js` (Node, port 9999). Selects a fixture by request body (tools present +
@@ -266,6 +277,12 @@ Test servers are spawned via `go run .` and **inherit your shell environment** �
 `MIKE_ENCRYPTION_KEY` before running e2e, or global-setup fails with "Server on port 3000 did not start
 within 15000ms".
 
+They also start with `MIKE_DISABLE_UPDATES=1`, so no run is ever a browser that owes the release opt-in.
+The boot pass would ask the question of every fresh context, and a yes there means an outbound check to
+the manifest host. `disabled` is the posture the client stops on — no dot, no question
+(`docs/auto-update.md`). A spec that wants the dot stubs `/api/updates/status`, as
+`settings-update-dot.spec.ts` does.
+
 ### A run must leave nothing behind
 
 `globalTeardown` is `tests/global-teardown.ts`, whose default export is *only* teardown — naming
@@ -363,6 +380,15 @@ the base image never pulls. Check it with `podman images` on nothing running: a 
 suites, with that error in the log, is a reading about the machine.
 
 ## Tests that fail only under load
+
+- **What runs short is memory, and it is usually already gone before the run starts.** `/tmp` is tmpfs
+  on this machine, so anything large under it is RAM. A project's `rw` sandbox mount at
+  `/tmp/kanban-mount` — 11 GB of Go build cache — left 4 GB available at idle, and `free -m` read 0
+  partway through a run. Under that shortage the failures rotate: turn-bound chat waits report neither
+  send nor stop, and a middle-click tab opens but its navigation stalls. Check `df -h /tmp` before
+  believing a red that names a spec on this list. Measured on the starved machine: `workers: 4` failed 5,
+  `--workers=3` failed 8, and raising the popup wait from 20 s to 30 s changed nothing. The worker count
+  is not the variable; the free memory is.
 
 - **`backend/extensions`' `TestHandleInstall_BuildFailureLeavesNoRowAndNoFiles`** fails on roughly 1 in 3
   `make check` / `-parallel 8` runs **on a CPU-loaded machine** and never alone or unloaded, so a red

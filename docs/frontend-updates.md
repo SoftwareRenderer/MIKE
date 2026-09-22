@@ -8,6 +8,10 @@ navigation, so a tab that is never closed does not merely keep its old component
 that install is served the document that was cached with them. This is what makes an install go stale
 and what `app-update.ts` exists to prevent.
 
+This is the asset path, and it is not the release path. It compares this browser's build with the server it
+is already talking to, so it owes nobody a consent answer and its once-a-day gate is correctly kept per
+browser. A release of the server itself, asked of the manifest host, is `docs/auto-update.md`.
+
 ## What counts as one build
 
 `frontend/scripts/build-id.ts` is a Vite plugin (`apply: 'build'`, `enforce: 'post'`) that runs after
@@ -162,3 +166,6 @@ and a page that the worker controls sees `registration.waiting` appear when `dis
 reloads when `SKIP_WAITING` is posted to it. Re-running that by hand means editing `dist/sw.js` (append
 a comment) and reloading the page once first so the worker controls the document — without that reload
 nothing ever queues behind anything, which reads exactly like the feature being broken.
+## Checking this
+
+`cd frontend && npm test` covers the stale-asset probe and the day gate in `app-update.unit.ts`.

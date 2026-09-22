@@ -27,6 +27,9 @@ Glyph advance cannot tell faces apart (CJK glyphs are em-width, so every face me
 `document.fonts.check()` answers `true` for a family that is not installed, because *a* fallback can
 render the text. Rasterize the same string into a canvas under both stacks and compare the bytes.
 
+Nothing in `make check` does this. `make run`, open a CJK locale, and compare the two canvases in the
+browser: a wrong face is a rendering fact, and no unit test in either language can see it.
+
 ## Related
 
 `document.documentElement.lang` has exactly one writer — the i18n runtime (`docs/i18n.md`);

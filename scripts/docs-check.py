@@ -2,7 +2,7 @@
 """The documentation gate: `AGENTS.md` holds rules, `docs/<subsystem>.md` holds the rules and
 invariants for one subsystem, `docs/adr/` holds the decisions with their evidence.
 
-Eight rules, all mechanical, plus one ratchet:
+Nine rules, all mechanical; 8 is the ratchet, the rest are absolute:
 
 1. a `file.md → Section` pointer names a heading that is there, in a file that is there;
 2. every doc is listed in an index (`AGENTS.md` for subsystem docs, `docs/adr/README.md` for ADRs);
@@ -14,18 +14,23 @@ Eight rules, all mechanical, plus one ratchet:
    and names the rule or doc it grounds;
 7. a backticked path is a path: a tree-relative one that resolves to nothing is a rename that
    happened after the doc was written;
-8. a file's word count and its count of past-tense sentences only shrink — the register in
-   `scripts/docscheck/baseline.json` is the ceiling, and `--update` re-freezes it. Words, not lines:
-   breaking one 300-word paragraph into a list of reasons is the edit this file asks for, and it adds lines.
-9. and so does its count of sentences over 45 words, which is where a doc stopped being a list of short
-   statements and became an argument the reader has to hold in their head at once.
+8. a file's count of past-tense sentences, and of sentences over 45 words, only shrink — the register in
+   `scripts/docscheck/baseline.json` is the ceiling, and `--update` re-freezes it. Past tense in a doc of
+   rules is a changelog getting in, and a sentence over 45 words is where a doc stopped being a list of
+   short statements and became an argument the reader has to hold in their head at once. The same counts
+   are budgeted once across the whole register: `--update` shaves at least 5% off that budget every time
+   and can never raise it, toward `LONG_SENTENCE_TARGET`.
+9. a doc the index sends a contributor to names the command that would catch a lie in it, and that
+   command exists — `make <target>` in the Makefile, `go test ./pkg/` on disk, `python3 scripts/x.py`
+   on disk, `npm run <gate>` in `frontend/package.json`. A doc nobody can check is a doc nobody can fix;
 
 Past tense, estimates and superseded paths are welcome in `docs/adr/`, which is what they are for;
 rules and mechanism stay present tense, so those checks skip that directory — as they skip the long-sentence
 count, because a record is allowed to be an argument.
 
     python3 scripts/docs-check.py            # exit 0 = clean, 1 = violations listed
-    python3 scripts/docs-check.py --update   # re-freeze the register at today's counts
+    python3 scripts/docs-check.py --update   # re-freeze the register: counts per file, and one step down
+                                             # on the long-sentence budget
 """
 
 import argparse
@@ -38,6 +43,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
 ADR_DIR = DOCS / "adr"
 BASELINE = ROOT / "scripts" / "docscheck" / "baseline.json"
+# The register's one entry that is not a file: the long-sentence budget for the whole tree.
+GLOBAL_KEY = "_global"
 AGENTS = ROOT / "AGENTS.md"
 CONFIG_DOC = DOCS / "configuration.md"
 
@@ -304,6 +311,10 @@ def check_paths(texts):
 
 SENTENCE_RE = re.compile(r"(?<=[.!?:])\s+(?=[A-Z\"(X])")
 LONG_SENTENCE_WORDS = 45
+# Where the long-sentence budget is heading. The gate is only that the budget shrinks; the target is what
+# makes that a direction rather than a tax, and it is the number a contributor may read as "this many long
+# sentences is normal" — it is not, it is the floor the budget stops at.
+LONG_SENTENCE_TARGET = 25
 
 
 def long_sentences(text: str):
@@ -332,34 +343,140 @@ def long_sentences(text: str):
 # --- rule 8: the ratchet --------------------------------------------------------------------
 
 def counts_for(path, text):
-    # Words, not lines: a line count measures how the file is wrapped, so it punished the bulleted list that a
-    # wall of prose should become. The count is still a ceiling that only moves down.
-    prose = re.sub(r"```.*?```", "", text, flags=re.S)
-    return {"words": len(prose.split()),
-            "history": len(HISTORY_RE.findall(text)) if not is_adr(path) else 0,
+    # Nothing here measures size: a doc is allowed to be as long as its subsystem needs, and a ceiling on
+    # words only ever punished the act of writing one down. What stays capped is prose quality.
+    return {"history": len(HISTORY_RE.findall(text)) if not is_adr(path) else 0,
             "longsent": len(long_sentences(text)) if not is_adr(path) else 0}
+
+
+def freeze_budget(total, previous):
+    """The whole-tree long-sentence budget. The freeze that creates it records what is there; every later
+    one shaves at least 5% off, and nothing raises it — so `--update` moves the docs toward the target even
+    when the run that asked for it added nothing. Never below the target, and never below what the docs
+    already hold, which is what stops a small fixture being told to shrink to 25."""
+    if previous is None:
+        return total
+    return max(min(LONG_SENTENCE_TARGET, total), min(previous, total * 19 // 20))
+
+
+def freeze(texts, baseline):
+    data = {rel(p): counts_for(p, t) for p, t in sorted(texts.items())}
+    total = sum(v["longsent"] for v in data.values())
+    data[GLOBAL_KEY] = {"longsent": freeze_budget(total, baseline.get(GLOBAL_KEY, {}).get("longsent"))}
+    return data
 
 
 def check_ratchet(texts, baseline, update):
     if update:
         return []
     bad = []
+    total = 0
     for path, text in sorted(texts.items()):
         rel_path = rel(path)
         got = counts_for(path, text)
+        total += got["longsent"]
         allowed = baseline.get(rel_path)
         if allowed is None:
-            bad.append((path, 1, f"not in scripts/docscheck/baseline.json ({got['words']} words, "
-                                 f"{got['history']} past-tense, {got['longsent']} long sentences) — "
-                                 f"run `make docs-check UPDATE=1`"))
+            bad.append((path, 1, f"not in scripts/docscheck/baseline.json ({got['history']} past-tense, "
+                                 f"{got['longsent']} long sentences) — run `make docs-check UPDATE=1`"))
             continue
         for key, ceiling in allowed.items():
             if got[key] > ceiling:
                 bad.append((path, 1, f"{key} grew: {got[key]} against a ceiling of {ceiling} — "
                                      f"the register only shrinks"))
+    budget = baseline.get(GLOBAL_KEY, {}).get("longsent")
+    if budget is None:
+        bad.append((ROOT, 1, f"the register has no {GLOBAL_KEY} long-sentence budget — "
+                             f"run `make docs-check UPDATE=1`"))
+    elif total > budget:
+        bad.append((ROOT, 1, f"{total} long sentences against a whole-tree budget of {budget} — the budget "
+                             f"only shrinks, toward {LONG_SENTENCE_TARGET}; "
+                             f"`docs/documentation.md → Long sentences` says what to do about it"))
     for rel_path in baseline:
-        if rel_path not in {rel(p) for p in texts}:
+        if rel_path != GLOBAL_KEY and rel_path not in {rel(p) for p in texts}:
             bad.append((ROOT, 1, f"{rel_path} is in the register and no longer exists — drop the entry"))
+    return bad
+
+
+# --- rule 9: a doc says how its claims get checked -------------------------------------------
+
+DOCS_INDEX_ROW = re.compile(r"^\| `(docs/[^`]+\.md)` \|", re.M)
+BACKTICK = re.compile(r"`([^`\n]+)`")
+CD_PREFIX = re.compile(r"^cd\s+(\S+)\s+&&\s+")
+COMMAND_FAMILY = re.compile(r"^(make|go test|go vet|go build|npm run|npm test|npx|python3|pytest)\b")
+
+
+def npm_scripts():
+    pkg = ROOT / "frontend" / "package.json"
+    try:
+        return set(json.loads(pkg.read_text()).get("scripts", {}))
+    except (OSError, ValueError):
+        return set()
+
+
+def named_commands(text):
+    """Every backticked command in a doc, as `(family, argument, directory it runs in)`. The directory
+    comes from a `cd <dir> &&` prefix, which is how a doc says "this one is not run from the root"."""
+    for span in BACKTICK.findall(text):
+        span, base = span.strip(), ROOT
+        moved = CD_PREFIX.match(span)
+        if moved:
+            target = base / moved.group(1)
+            if not target.is_dir():
+                yield "cd", moved.group(1), base
+                continue
+            base, span = target, span[moved.end():]
+        family = COMMAND_FAMILY.match(span)
+        if family:
+            yield family.group(1), span[len(family.group(1)):].strip(), base
+
+
+def command_resolves(family, arg, where, makefile, scripts):
+    """Whether a command a doc names exists. `npx` resolves at run time and is taken on trust; anything
+    with an address in the tree is looked up, because a doc that names a command nobody wrote is worse
+    than one that names none."""
+    words = arg.split()
+    if family == "cd":
+        return False
+    if family == "make":
+        target = words[0] if words else ""
+        return bool(target) and bool(re.search(rf"^{re.escape(target)}:", makefile, re.M))
+    if family == "python3":
+        found = re.match(r"([A-Za-z0-9._/-]+\.py)", arg)
+        return bool(found) and (where / found.group(1)).is_file()
+    if family in ("go test", "go vet", "go build"):
+        found = re.search(r"(\./[A-Za-z0-9._/*-]*)", arg)
+        if not found:
+            return True
+        pkg = found.group(1).rstrip("/")
+        if pkg.endswith("/..."):
+            pkg = pkg[:-4]
+        return pkg in ("", ".") or (where / pkg).is_dir()
+    if family == "npm run":
+        return bool(words) and words[0] in scripts
+    if family == "npm test":
+        return "test" in scripts
+    return True
+
+
+def check_guideline(texts):
+    makefile = (ROOT / "Makefile").read_text() if (ROOT / "Makefile").is_file() else ""
+    scripts = npm_scripts()
+    bad = []
+    for doc in DOCS_INDEX_ROW.findall(texts[AGENTS]):
+        path = ROOT / doc
+        if not path.is_file() or is_adr(path):
+            continue
+        named = list(named_commands(texts.get(path, path.read_text())))
+        dead = [f"{f} {a}".strip() for f, a, where in named
+                if not command_resolves(f, a, where, makefile, scripts)]
+        if not named:
+            bad.append((path, 1, "nothing here names a check — say which command catches a lie in these "
+                                 "lines (`make <target>`, `go test ./pkg/`, `python3 scripts/<gate>.py`); "
+                                 "`docs/documentation.md → What a doc owes the reader`"))
+        elif dead:
+            bad.append((path, 1, "names a command that does not exist: "
+                                 + ", ".join(f"`{d}`" for d in dead[:3])))
     return bad
 
 
@@ -372,7 +489,8 @@ def rel(path: Path) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--update", action="store_true", help="re-freeze the register at today's counts")
+    ap.add_argument("--update", action="store_true",
+                    help="re-freeze the register: per-file counts, and one step down on the long-sentence budget")
     args = ap.parse_args()
 
     texts = doc_texts()
@@ -382,9 +500,10 @@ def main() -> int:
 
     if args.update:
         BASELINE.parent.mkdir(parents=True, exist_ok=True)
-        data = {rel(p): counts_for(p, t) for p, t in sorted(texts.items())}
+        data = freeze(texts, baseline)
         BASELINE.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n")
-        print(f"register frozen: {len(data)} file(s) -> {rel(BASELINE)}")
+        print(f"register frozen: {len(data) - 1} file(s) plus a long-sentence budget of "
+              f"{data[GLOBAL_KEY]['longsent']} -> {rel(BASELINE)}")
         return 0
 
     sections = [
@@ -396,6 +515,7 @@ def main() -> int:
         ("6 ADR shape   ", check_adrs()),
         ("7 paths       ", check_paths(texts)),
         ("8 the ratchet ", check_ratchet(texts, baseline, update=False)),
+        ("9 the guideline", check_guideline(texts)),
     ]
 
     failed = 0
@@ -408,15 +528,19 @@ def main() -> int:
                 break
         failed += len(rows)
 
-    print(f"\nscanned {len(texts)} markdown file(s); register holds {len(baseline)} entries.")
+    print(f"\nscanned {len(texts)} markdown file(s); register holds {len(baseline) - 1} file entries "
+          f"plus the budget.")
     long_total = sum(len(long_sentences(t)) for p, t in texts.items() if not is_adr(p))
-    print(f"{long_total} sentence(s) over {LONG_SENTENCE_WORDS} words outside docs/adr/ "
-          f"(the register caps that number per file).")
+    budget = baseline.get(GLOBAL_KEY, {}).get("longsent")
+    print(f"{long_total} sentence(s) over {LONG_SENTENCE_WORDS} words outside docs/adr/, against a "
+          f"whole-tree budget of {budget if budget is not None else 'unset'} heading for "
+          f"{LONG_SENTENCE_TARGET}; each file is capped by its own entry and the tree by that budget.")
     if failed:
         print(f"GATE FAILED: {failed} documentation violation(s) above.")
         return 1
     print("GATE PASSED: pointers resolve, every doc is indexed, no line numbers, every path is "
-          "there, the environment table agrees with the code, and no register entry grew.")
+          "there, the environment table agrees with the code, no register entry grew, and every "
+          "indexed doc names a check that exists.")
     return 0
 
 

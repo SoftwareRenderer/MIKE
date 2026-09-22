@@ -38,3 +38,8 @@ live in `CardDetail.svelte`'s window keydown listener, using pure resolvers from
 - Up/Down dispatch on the focused column (overview cards / page-scroll chat / diff file headers).
 
 Tests: `composables/__tests__/task-detail-column-nav.unit.ts`, e2e `task-view-column-nav.spec.ts`.
+## Checking this
+
+`cd frontend && npm test` covers the resolvers (`board-arrow-nav.unit.ts` is one of them).
+`cd frontend && npx playwright test ui-navigation focus-management` proves real focus moves, which a unit
+test cannot.

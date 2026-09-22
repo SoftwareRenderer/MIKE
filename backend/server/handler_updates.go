@@ -44,8 +44,16 @@ func (s *Server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 // handleUpdateCheck fetches the manifest now rather than answering from the cache. It answers with the
 // status either way: a failed check leaves the last good answer true, and the failure rides in the body as
 // `last_error`.
+//
+// `?auto=1` is the daily pass speaking rather than a person, and the install's day gates it (CheckAutomatic).
+// The button sends no flag and always fetches.
 func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
-	status, err := s.updatesService.Check(r.Context(), s.updateSettings())
+	set := s.updateSettings()
+	check := s.updatesService.Check
+	if r.URL.Query().Get("auto") == "1" {
+		check = s.updatesService.CheckAutomatic
+	}
+	status, err := check(r.Context(), set)
 	if err != nil {
 		// Checks being off is the caller's own doing, and the answer says which switch said so.
 		httputil.Fail(w, err, "check for updates", "no update result is known")

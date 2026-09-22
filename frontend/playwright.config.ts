@@ -24,6 +24,9 @@ const ISOLATED_SPECS = [
   'provider-task-concurrency',
   'settings-extension-dependency-cache',
   'settings-provider',
+  // Saves Settings, which is what reads the update status the dot is made of — a config write, so it
+  // cannot share the lane every other chromium spec reads.
+  'settings-update-dot',
   'settings-sessions',
   // Issues and revokes API tokens on the lane server, and asserts what a token can reach.
   'settings-api-tokens',

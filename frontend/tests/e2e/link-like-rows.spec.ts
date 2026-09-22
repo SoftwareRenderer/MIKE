@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { getProjectId, createTaskViaApi, waitForTaskState, csrfFetch } from './helpers';
 
 
@@ -17,6 +17,22 @@ async function markDocument(page: Page) {
 /** True while the same document is still loaded (no full page navigation). */
 async function sameDocument(page: Page): Promise<boolean> {
   return await page.evaluate(() => (window as any).__docMark) === 'alive';
+}
+
+/**
+ * Middle-click `target` and hand back the tab the browser opened.
+ *
+ * A locator click, never boundingBox + mouse.click: the board re-renders underneath (diff stats
+ * arrive, heights change), and coordinates taken before the click land on a neighbour — no popup.
+ * Measured on a failing run: `mousedown` and `auxclick` both reach the anchor unpreventeded and the
+ * tab opens, so the click is not the fragile part. When one of these tests fails, the machine has run
+ * out of memory and the new tab's navigation is what stalls (docs/testing.md → Tests that fail only
+ * under load). No budget here reaches past that.
+ */
+async function middleClickTab(context: BrowserContext, target: Locator): Promise<Page> {
+  const popup = context.waitForEvent('page', { timeout: 20000 });
+  await target.click({ button: 'middle' });
+  return popup;
 }
 
 async function openBoard(page: Page) {
@@ -145,13 +161,7 @@ test.describe.serial('Task cards are links', () => {
   });
 
   test('middle-clicking the card opens the task in a new tab', async ({ page, context }) => {
-    // A locator click, not boundingBox + mouse.click: the board re-renders underneath
-    // (diff stats arrive, heights change), and coordinates taken before the click then
-    // hit a neighbouring card — no popup, timeout.
-    const popupPromise = context.waitForEvent('page', { timeout: 20000 });
-    await page.locator(`.card[data-task-id="${taskId}"] .card-title-text`).click({ button: 'middle' });
-
-    const tab = await popupPromise;
+    const tab = await middleClickTab(context, page.locator(`.card[data-task-id="${taskId}"] .card-title-text`));
     try {
       await tab.waitForSelector('.task-detail-page', { timeout: 15000 });
       expect(tab.url()).toContain(`task=${taskId}`);
@@ -259,9 +269,7 @@ test.describe.serial('Explorer and Terminal buttons are links', () => {
     const button = page.locator('.explorer-btn');
     await expect(button).toBeVisible({ timeout: 10000 });
 
-    const popupPromise = context.waitForEvent('page', { timeout: 20000 });
-    await button.click({ button: 'middle' });
-    const tab = await popupPromise;
+    const tab = await middleClickTab(context, button);
     try {
       await tab.waitForSelector('.explorer-view', { timeout: 15000 });
       expect(tab.url()).toContain('view=explorer');
@@ -288,9 +296,7 @@ test.describe.serial('Explorer and Terminal buttons are links', () => {
     const button = page.locator('.task-detail-page [aria-label="Open explorer"]');
     await expect(button).toBeVisible({ timeout: 15000 });
 
-    const popupPromise = context.waitForEvent('page', { timeout: 20000 });
-    await button.click({ button: 'middle' });
-    const tab = await popupPromise;
+    const tab = await middleClickTab(context, button);
     try {
       await tab.waitForSelector('.explorer-view', { timeout: 15000 });
       expect(tab.url()).toContain(`task=${taskId}`);
@@ -320,9 +326,7 @@ test.describe.serial('Explorer and Terminal buttons are links', () => {
     const button = page.locator('.top-bar .terminal-btn');
     await expect(button).toBeVisible({ timeout: 10000 });
 
-    const popupPromise = context.waitForEvent('page', { timeout: 20000 });
-    await button.click({ button: 'middle' });
-    const tab = await popupPromise;
+    const tab = await middleClickTab(context, button);
     try {
       await tab.waitForSelector('.terminal-panel', { timeout: 15000 });
       expect(tab.url()).toContain('view=terminal');
@@ -343,9 +347,7 @@ test.describe.serial('Explorer and Terminal buttons are links', () => {
     await expect(button).toBeVisible({ timeout: 15000 });
     await expect(button).toHaveAttribute('href', `/?project=${projectId}&task=${taskId}&view=terminal`);
 
-    const popupPromise = context.waitForEvent('page', { timeout: 20000 });
-    await button.click({ button: 'middle' });
-    const tab = await popupPromise;
+    const tab = await middleClickTab(context, button);
     try {
       // The tab restores the task and creates its worktree before the shell appears.
       await tab.waitForSelector('.terminal-panel', { timeout: 30000 });

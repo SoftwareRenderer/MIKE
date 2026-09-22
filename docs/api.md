@@ -209,3 +209,7 @@ message or an absolute path into someone's working directory.
 `backend/server/handler_tokens_test.go`, `backend/server/token_auth_test.go` (the allowlist, in both
 directions), `frontend/src/lib/api/__tests__/tokens.unit.ts`, and the e2e
 `frontend/tests/e2e/settings-api-tokens.spec.ts`.
+## Checking this
+
+`go test ./backend/auth/ ./backend/server/` covers issuance, the route allowlist and what a bearer token
+is allowed to answer for.

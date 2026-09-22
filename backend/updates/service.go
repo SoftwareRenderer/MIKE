@@ -333,14 +333,53 @@ func (s *Service) Status(set Settings) Status {
 	}
 }
 
+// CheckAutomatic is the daily pass on a browser's behalf. The day belongs to the install, not to whichever
+// browser asked first: the first one today gets the fetch, and every later one is answered from what that
+// fetch learned. A check that ran and failed spent the day like one that succeeded, because `record`
+// timestamps every check that runs.
+func (s *Service) CheckAutomatic(ctx context.Context, set Settings) (Status, error) {
+	// The refusal is answered before the day is consulted, and no day is spent on a check that will not
+	// run: a person's later yes gets its first answer on the next boot rather than tomorrow.
+	if err := s.checkRefusal(set); err != nil {
+		return s.Status(set), err
+	}
+	if s.checkedToday() {
+		return s.Status(set), nil
+	}
+	return s.Check(ctx, set)
+}
+
+// checkRefusal is why a check may not dial the manifest, or nil. Both entry points ask it before dialling,
+// so the daily pass cannot answer a spent day over the sentence that names the switch which forbids it.
+func (s *Service) checkRefusal(set Settings) error {
+	if err := s.forbidden(); err != nil {
+		return err
+	}
+	if !set.Enabled {
+		return errDisabled()
+	}
+	return nil
+}
+
+// checkedToday reports whether a check has run since the UTC day turned. A stored instant that will not
+// parse reads as unspent: an unknown is a reason to ask, not a reason to stay quiet.
+func (s *Service) checkedToday() bool {
+	s.mu.Lock()
+	raw := s.state.CheckedAt
+	s.mu.Unlock()
+	at, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return false
+	}
+	const day = "2006-01-02"
+	return at.UTC().Format(day) == s.now().UTC().Format(day)
+}
+
 // Check fetches the manifest and records what it says. A refusal is returned as (status, err): a check
 // that failed must still tell a person what the last good answer was.
 func (s *Service) Check(ctx context.Context, set Settings) (Status, error) {
-	if err := s.forbidden(); err != nil {
+	if err := s.checkRefusal(set); err != nil {
 		return s.Status(set), err
-	}
-	if !set.Enabled {
-		return s.Status(set), errDisabled()
 	}
 	body, err := s.fetcher.Get(ctx, s.manifestURL)
 	if err != nil {

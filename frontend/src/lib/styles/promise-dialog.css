@@ -35,11 +35,13 @@
     background: var(--color-surface-4);
 }
 
+/* The ordinary yes is the Save button's blue (`BaseModal`'s `.modal-footer .btn-primary`): the same
+ * answer should not be blue in one dialog and sky-blue in another. */
 :global(.promise-dialog .btn-confirm) {
     padding: 6px 14px;
     border-radius: var(--radius-md);
     border: none;
-    background: var(--color-status-blue);
+    background: var(--color-accent-dark);
     color: white;
     font-size: 0.875rem;
     font-weight: 500;

@@ -325,3 +325,98 @@ func TestAnUnreadableStoreIsNotFatal(t *testing.T) {
 		t.Errorf("an unreadable store should be reported")
 	}
 }
+
+// The day belongs to the install, not to whichever browser asked first: the first automatic pass of the
+// day fetches and every later one is answered from what that fetch learned. docs/auto-update.md.
+func TestAutomaticCheckRunsOncePerInstallDay(t *testing.T) {
+	s, fetcher, _ := testService(t, Options{})
+
+	for _, who := range []string{"first browser of the day", "second browser of the day"} {
+		if _, err := s.CheckAutomatic(context.Background(), Settings{Enabled: true, Answered: true}); err != nil {
+			t.Fatalf("%s: %v", who, err)
+		}
+	}
+	if fetcher.getCalls != 1 {
+		t.Errorf("two automatic passes made %d manifest requests, want 1", fetcher.getCalls)
+	}
+	// A declined pass answers with what is known rather than nothing: its dot is the install's dot.
+	if s.Status(Settings{}).State.Latest == "" {
+		t.Errorf("the install knows no release after a check that ran")
+	}
+}
+
+// What spends the day, and what does not. The day is a bound on manifest requests, so only a pass that
+// made one — or a person's own check — may spend it.
+func TestWhatSpendsTheInstallDay(t *testing.T) {
+	t.Run("a manual check spends it, because it fetched", func(t *testing.T) {
+		s, fetcher, _ := testService(t, Options{})
+		if _, err := s.Check(context.Background(), Settings{Enabled: true, Answered: true}); err != nil {
+			t.Fatalf("manual check: %v", err)
+		}
+		if _, err := s.CheckAutomatic(context.Background(), Settings{Enabled: true, Answered: true}); err != nil {
+			t.Fatalf("automatic check: %v", err)
+		}
+		if fetcher.getCalls != 1 {
+			t.Errorf("%d manifest requests after a manual check, want 1", fetcher.getCalls)
+		}
+	})
+
+	t.Run("a check that failed spent it", func(t *testing.T) {
+		fetcher := &fakeFetcher{getErr: errors.New("no route to host")}
+		s, _, _ := testService(t, Options{Fetcher: fetcher})
+		if _, err := s.CheckAutomatic(context.Background(), Settings{Enabled: true, Answered: true}); err == nil {
+			t.Fatalf("the first pass hid the failure")
+		}
+		// The second pass is declined rather than faulty: it dials nothing and answers with the status,
+		// which carries the first pass's failure in `last_error`.
+		st, err := s.CheckAutomatic(context.Background(), Settings{Enabled: true, Answered: true})
+		if err != nil {
+			t.Fatalf("a spent day is not a fault: %v", err)
+		}
+		if st.State.LastError == "" {
+			t.Errorf("the declined pass answered without the failure the install is carrying")
+		}
+		if fetcher.getCalls != 1 {
+			t.Errorf("%d manifest requests after a failed check, want 1: a failure costs the day like a success", fetcher.getCalls)
+		}
+	})
+
+	t.Run("checks being off spends nothing", func(t *testing.T) {
+		s, fetcher, _ := testService(t, Options{})
+		if _, err := s.CheckAutomatic(context.Background(), Settings{Enabled: false, Answered: true}); err == nil {
+			t.Fatalf("the pass ran with the preference off")
+		}
+		if _, err := s.CheckAutomatic(context.Background(), Settings{Enabled: true, Answered: true}); err != nil {
+			t.Fatalf("the pass after a yes: %v", err)
+		}
+		if fetcher.getCalls != 1 {
+			t.Errorf("%d manifest requests, want the one a yes owed", fetcher.getCalls)
+		}
+	})
+
+	t.Run("the next UTC day asks again", func(t *testing.T) {
+		day := time.Date(2026, 9, 18, 23, 30, 0, 0, time.UTC)
+		s, fetcher, _ := testService(t, Options{Now: func() time.Time { return day }})
+		if _, err := s.CheckAutomatic(context.Background(), Settings{Enabled: true, Answered: true}); err != nil {
+			t.Fatalf("first day: %v", err)
+		}
+		day = day.Add(45 * time.Minute)
+		if _, err := s.CheckAutomatic(context.Background(), Settings{Enabled: true, Answered: true}); err != nil {
+			t.Fatalf("second day: %v", err)
+		}
+		if fetcher.getCalls != 2 {
+			t.Errorf("%d manifest requests across a day boundary, want 2", fetcher.getCalls)
+		}
+	})
+
+	t.Run("a stored instant that will not parse is not today", func(t *testing.T) {
+		store := &fakeStore{values: map[string]string{stateKey: `{"checked_at":"yesterday, probably"}`}}
+		s, fetcher, _ := testService(t, Options{Store: store})
+		if _, err := s.CheckAutomatic(context.Background(), Settings{Enabled: true, Answered: true}); err != nil {
+			t.Fatalf("automatic check: %v", err)
+		}
+		if fetcher.getCalls != 1 {
+			t.Errorf("%d manifest requests against an unreadable stamp, want 1: an unknown is a reason to ask", fetcher.getCalls)
+		}
+	})
+}

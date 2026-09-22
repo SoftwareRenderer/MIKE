@@ -56,3 +56,7 @@ authenticates the routes listed in `docs/api.md`.
 `backend/store/sessions_test.go`, `backend/auth/session_test.go`,
 `backend/server/handler_sessions_test.go`, `backend/types/idgen_test.go`,
 `frontend/src/lib/api/__tests__/sessions.unit.ts`, e2e `settings-sessions.spec.ts` (isolated).
+## Checking this
+
+`go test ./backend/auth/` covers the digest comparison, the hashed session and the token store.
+`cd frontend && npx playwright test settings-sessions` drives Settings → About, where a token is issued.

@@ -8,6 +8,7 @@
 import { Workbox } from 'workbox-window';
 import { apiFetch } from '$lib/api/helpers';
 import { loadAppSetting, saveAppSetting } from '$lib/storage';
+import { dayKey } from '$lib/utils/day-key';
 
 const SW_URL = '/sw.js';
 const VERSION_URL = '/api/version';
@@ -88,12 +89,6 @@ async function stampToday(): Promise<boolean> {
     } catch {
         return false;
     }
-}
-
-/** Compared, never shown — so no `Intl` and nothing locale-dependent at module scope. */
-function dayKey(): number {
-    const now = new Date();
-    return (now.getFullYear() * 100 + now.getMonth() + 1) * 100 + now.getDate();
 }
 
 async function compareAndApply(mayApply: () => boolean): Promise<UpdateOutcome> {

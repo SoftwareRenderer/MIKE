@@ -56,3 +56,7 @@ peer that connects and sends nothing stalls every later handshake, and returning
 dead listener, ends `Serve` and kills the process. `Accept()` waits on a queue a per-connection goroutine
 fills. Silent peers are closed and logged per host, never handed to `net/http`.
 Test: `backend/server/listener_test.go`.
+## Checking this
+
+`make check-race` runs `./backend/server/`, where the tests boot a server and take it down again: the
+shutdown stages, the base-context registry and the TLS listener.

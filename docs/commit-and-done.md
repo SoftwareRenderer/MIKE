@@ -26,3 +26,7 @@ merge/commit half of `backend/exec/merge.go`.
   `TestHandleCommitAndDone_ArmsClickForConflictResolution`,
   `TestHandleCommitAndDone_DoneWhenOnlyTheProjectOwnsTheConflict`), `backend/exec/merge_restore_test.go`
   (`TestMergedDeliveredReadsTheMergeNotTheRestore`), `merge_conflict_resolution_test.go` (`TestCommitConflictResolution_DoesNotSweepUntrackedFiles`, `…_CommitAndDoneClickMergesWithAutoMergeOff`, `…_NoClickNoMergeWithAutoMergeOff`, `…_StillConflictedKeepsTheClick`), `commit_and_done_test.go`, `backend/git/worktree_test.go` (`TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus`, `…_NoExcludeWhenWorktreesOutsideProject`), e2e `commit-and-done-unstaged.spec.ts`.
+## Checking this
+
+`go test ./backend/exec/` covers the arming rule and what is allowed to reach Done.
+`cd frontend && npx playwright test commit-and-done-unstaged` drives the click itself.

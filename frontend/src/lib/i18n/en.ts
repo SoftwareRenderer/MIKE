@@ -778,7 +778,7 @@ const catalog = {
     'updates.dot.question': 'MIKE is asking whether it may check for new releases',
     'updates.ready.title': 'Release {version} is downloaded and verified',
     'updates.ready.message': 'Install it now? The server will restart to run it.',
-    'updates.ready.install': 'Install now',
+    'updates.ready.install': 'Install and Restart',
     'updates.ready.later': 'Later',
     'updates.consent.title': 'Enable automatic updates?',
     'updates.consent.message': 'Would you like MIKE to automatically check for updates once per day?',

@@ -186,6 +186,32 @@ func TestUpdateCheckAgainstAHostTheOperatorNamed(t *testing.T) {
 	}
 }
 
+// The daily pass says so with `?auto=1`, and the install's day gates it: the second browser to boot today
+// is answered from the fetch the first one's pass caused. The button sends no flag, because a person who
+// asked is never told the day is spent. docs/auto-update.md.
+func TestUpdateAutomaticCheckIsGatedByTheInstallDay(t *testing.T) {
+	manifest := fixtureManifest(t, "9.9.9")
+	s := testServerWith(t, func(c *startup.Config) { c.UpdateManifestURL = manifest.URL })
+	setPreference(t, s, true)
+
+	for _, who := range []string{"first", "second"} {
+		rec := testResponseAuth(t, s, testRequest(http.MethodPost, "/api/updates/check?auto=1", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s automatic pass: %d %s", who, rec.Code, rec.Body)
+		}
+	}
+	if got := manifest.hits(); got != 1 {
+		t.Errorf("two automatic passes made %d manifest requests, want 1", got)
+	}
+
+	if rec := testResponseAuth(t, s, testRequest(http.MethodPost, "/api/updates/check", nil)); rec.Code != http.StatusOK {
+		t.Fatalf("manual check: %d %s", rec.Code, rec.Body)
+	}
+	if got := manifest.hits(); got != 2 {
+		t.Errorf("a manual check left the manifest at %d requests, want 2", got)
+	}
+}
+
 // A manifest that will not answer is a server fault and is answered as one. The About tab shows what the
 // local status route still holds, so the failure costs nothing a re-read cannot put back.
 func TestUpdateCheckReportsAFailureWithoutLosingTheAnswer(t *testing.T) {

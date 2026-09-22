@@ -968,6 +968,7 @@
                         {@const isLocal = ext.install_source === 'local'}
                         <div
                             class="extension-card"
+                            data-identity={identityKey(ext.author, ext.name)}
                             class:disabled={!ext.enabled}
                             class:unpublished-card={isLocal}
                             class:card-setup-focus={setupFocusId === ext.id}
@@ -1640,7 +1641,9 @@
                         {@const needsSetup = requiresSetupAfterInstall(entry.capabilities)}
                         {@const setupDep = dependencyCacheDeclaration(entry.capabilities)}
                         {@const setupAgentMounts = agentMountDeclaration(entry.capabilities)}
-                        <div class="extension-card registry-card" class:unpublished-card={isUnpublished}>
+                        <!-- Two extensions can display one name (author is part of the identity, not of the
+                             display name), so a card is addressed by `data-identity`, never by its text. -->
+                        <div class="extension-card registry-card" data-identity={identityKey(entry.author, entry.name)} class:unpublished-card={isUnpublished}>
                             <div class="card-header">
                                 <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'} class:ext-agent={entry.type === 'agent'} class:ext-llm={entry.type === 'llm'} class:ext-i18n={entry.type === 'i18n'}>
                                     {typeBadge(entry.type)}

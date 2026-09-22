@@ -114,12 +114,13 @@ Nothing outside `backend/startup` reads the variable. The preference arrives per
 `updates.Settings{Enabled, Answered}`; the switch is a fact the service is constructed with, so no caller
 can forget to apply it. One `Info` per boot names which posture the process came up on.
 
-The first-run question is the client's, not the server's: `update-check.svelte.ts` asks once per browser
-when the status says `answered: false` and nothing forbids it, stamping the ask in IndexedDB so a write that
-fails does not turn the prompt into a boot ritual. **No** and **Yes** both write the preference — the
-question is answered either way, and a decline must be kept for the same reason an acceptance is. The
-catalog text is dictated (`updates.consent.*`); what turning it on also downloads is said in `About`, where
-the switch lives, rather than in the dialog.
+The question is the client's, not the server's: only a browser can ask it. `update-check.svelte.ts` asks on
+every boot whose status says `answered: false` and nothing forbids it, and it keeps no record of having
+asked. A dismissal is not an answer, so a tab closed mid-question is asked again — a mark on the Settings
+control that the browser has stopped offering to clear is worse than being asked twice. **No** and **Yes**
+both write the preference — the question is answered either way, and a decline must be kept for the same
+reason an acceptance is. The catalog text is dictated (`updates.consent.*`); what turning it on also
+downloads is said in `About`, where the switch lives, rather than in the dialog.
 
 ## What this install is
 
@@ -213,7 +214,9 @@ before anything is promised, and the About tab shows that sentence.
 All five declare their verb in the pattern, none is in `tokenScope` (a bearer token is what a headless client
 carries, and no headless client needs to replace this server's binary), and all five are session + CSRF.
 `check` answers its refusal with a 409 whose sentence the About tab shows; `status` is what the client
-re-reads after one, because the last good answer is still true. `prepare` and `apply` run on
+re-reads after one, because the last good answer is still true. `?auto=1` says the daily pass is asking
+rather than a person, and only that flag is gated by the install's day. The button sends none: a person who
+asked is never told the day is spent. `prepare` and `apply` run on
 `Server.Detached()` — a tab closing halfway through a 20 MB download must not decide whether this install
 ever gets the release, and a shutdown must still be able to stop the copy phase before the renames
 (`sideeffects.go`). The in-flight-task refusal sits on `apply` alone: fetching renames nothing.
@@ -229,22 +232,44 @@ install button would survive onto the release already applied, because the next 
 
 `$lib/services/update-check.svelte.ts` owns the state; `$lib/components/UpdateDot.svelte` renders it and
 `Settings → About → UpdatesSection` is the only place it is explained. One pass per app open reads the status
-(a local read, no egress), asks the first-run question if it is owed, then runs the outbound check at most
-once a day and prepares whatever that check found. Both are stamped *before* the request, like
-`app-update.ts`: the check stamps the day, and the download stamps the **release and** the day, so a fetch
-that failed for no space on the device is retried once a day rather than once a reload, while a newer release
-appearing today is still fetched today. There is no timer and no loop here. A download that the automatic
-pass skipped is one button away in About, which is why the refusal a permanent failure produces is shown
-rather than swallowed.
+(a local read, no egress), asks the first-run question if it is owed, then sends the daily check and prepares
+whatever the answer names. There is no timer and no loop here.
+
+### Whose day it is
+
+The day belongs to the install, and `backend/updates` owns it. `Service.CheckAutomatic` dials the manifest
+only when `update_check_result`'s `checked_at` predates the current UTC day; `Service.Check` dials whenever
+it is called. So N browsers booting today cost one manifest GET between them, and each of the later ones is
+answered with the status that GET produced — a declined pass is a 200 carrying what is known, never a fault,
+which is why its dot is the install's dot. A `checked_at` that will not parse reads as unspent: an unknown is
+a reason to ask.
+
+Any check that runs spends the day. That includes a failed one, because `record` timestamps every check, and
+a person's own *Check now*. A pass refused for `MIKE_DISABLE_UPDATES` or an off preference spends nothing, so
+the first yes is answered on the next boot rather than tomorrow. The client keeps no day counter of its own:
+`?auto=1` is the whole of its contribution, because one browser is not one install. Two browsers booting in
+the same second can both fetch — the day is a bound on egress, not a lock — which costs one extra GET of a
+small document and no correctness.
+
+The **download** gate stays in the browser and stamps release **and** day (`update-prepare-stamp`): what it
+bounds is a reload ritual, not egress, and the server refuses a second release whatever the stamp says. A
+download that the automatic pass skipped is one button away in About, which is why the refusal a permanent
+failure produces is shown rather than swallowed.
+
+`go test ./backend/updates/ ./backend/server/ -run 'Automatic|InstallDay'` fails when the day stops being the
+install's.
 
 The dot is on every Settings control (sidebar row, top-bar icon, the empty state's gear): green for a
 release with an archive for this machine, ringed when a release is downloaded and waiting for the install
 click, outlined for the opt-in answer still owed. Clicking any of them opens Settings **on About**, because a
-mark on a control should lead to the row that explains it. `container` and `source` installs get the reason
-and the command where the buttons would be.
+mark on a control should lead to the row that explains it; `settings-update-dot.spec.ts` fails when the click
+stops following the mark. Which tab Settings opened on is therefore never a spec's assumption
+(`docs/testing.md → E2E conventions`). `container` and `source` installs get the reason and the command
+where the buttons would be.
 
-A finished download is announced once, in the browser that was open when it landed: *Install now* runs the
-apply, *Later* leaves the release waiting and the dot and the About row carry it. The prompt is a
+A finished download is announced once, in the browser that was open when it landed. Two answers: *Install
+and Restart* runs the apply, and the label names the restart that red button means; *Later* leaves the
+release waiting, and the dot and the About row carry it. The prompt is a
 convenience, not the gate — dismissing it is a normal answer, not a deferral that expires, and the same
 install is reachable from About afterwards.
 

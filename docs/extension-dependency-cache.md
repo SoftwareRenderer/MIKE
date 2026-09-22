@@ -67,3 +67,7 @@ Both go through the same shape rule (`checkGrantShape`), each with its own wordi
 credential stores, the homes and the system trees: a grant is readable from a container that runs
 extension-supplied or agent-supplied code, and what that code does with a file it can open is nobody's
 promise. Tests: `backend/extensions/agent_mount_test.go`, `backend/extensions/dependency_grant_test.go`.
+## Checking this
+
+`go test ./backend/extensions/ ./pkg/sandboxruntime/` covers the two fields, the read-only mount and the
+capability that refuses without one.

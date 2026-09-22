@@ -88,3 +88,7 @@ Persisted as `keyboard_shortcuts` JSON in the `config` table through the shared 
 ### UI Preferences (Settings → Preferences → UI)
 
 Top-level `*bool` config fields (`parseBoolPtr` in `GetConfig`, `omitempty` in `configResponse`) with the same Save/Cancel plumbing as shortcuts. Example: `hide_model_badge` gates `.model-badge` in `Card.svelte`.
+## Checking this
+
+`go test ./backend/config/` covers the stored shape.
+`cd frontend && npx playwright test preferences-keyboard` covers the round trip through Settings.

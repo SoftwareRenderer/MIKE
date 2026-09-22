@@ -2,6 +2,14 @@
 import { TOAST_DURATION_MS } from '$lib/constants';
 import { t } from '$lib/i18n';
 
+/**
+ * How a promise-backed dialog colours its own answer. `destructive` is the thing being undone; `default`
+ * is the ordinary yes, in the blue the Save button uses. `showConfirm` answers with `destructive` when a
+ * caller names no variant, because most of what gets confirmed here destroys something — a question that
+ * asks permission is the exception and says so.
+ */
+export type DialogVariant = 'default' | 'destructive';
+
 export class DialogStore {
     public toast = $state<{ message: string; type: 'error' | 'success' } | null>(null);
     public confirmation = $state<{
@@ -10,7 +18,7 @@ export class DialogStore {
         items?: string[];
         confirmText?: string;
         cancelText?: string;
-        variant?: 'default' | 'destructive';
+        variant?: DialogVariant;
         /** Set by showNotice: the dialog gets a single button. */
         okText?: string;
         _resolve?: (value: boolean) => void;
@@ -65,7 +73,7 @@ export class DialogStore {
         items?: string[];
         confirmText?: string;
         cancelText?: string;
-        variant?: 'default' | 'destructive';
+        variant?: DialogVariant;
     }): Promise<boolean> {
         return new Promise((resolve) => {
             this.confirmation = {

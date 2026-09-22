@@ -9,6 +9,7 @@
      * claiming those two names for the whole app.
      */
     import type { Snippet } from 'svelte';
+    import type { DialogVariant } from '$lib/stores';
     import BaseModal from './BaseModal.svelte';
 
     let {
@@ -34,7 +35,7 @@
         confirmLabel: string;
         /** Show only the confirm button: the dialog reports something rather than asking. */
         dismissOnly?: boolean;
-        variant?: 'default' | 'destructive';
+        variant?: DialogVariant;
         onConfirm: () => void;
         onCancel: () => void;
         children?: Snippet;

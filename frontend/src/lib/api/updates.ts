@@ -12,9 +12,11 @@ export async function fetchUpdateStatus(): Promise<UpdateStatus> {
     return res.json();
 }
 
-/** Fetch the manifest now. A refusal answers 409 with the sentence to show. */
-export async function checkForUpdates(): Promise<UpdateStatus> {
-    const res = await apiFetch(`${API_BASE}/updates/check`, { method: 'POST' });
+/** Fetch the manifest now. A refusal answers 409 with the sentence to show. `auto` is the daily pass
+ *  speaking rather than a person, and the install's day gates it server-side: a pass that arrives after
+ *  the day is spent answers 200 with what is already known and fetches nothing. */
+export async function checkForUpdates(auto = false): Promise<UpdateStatus> {
+    const res = await apiFetch(`${API_BASE}/updates/check${auto ? '?auto=1' : ''}`, { method: 'POST' });
     if (!res.ok) throw await apiError(res, t('api.checkForUpdates'));
     return res.json();
 }

@@ -750,6 +750,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         // Mark initial load as done. Reconnects now trigger silentRefresh()
         // to pick up changes that occurred while offline.
         initialLoadComplete = true;
+        // One release pass per boot, from the one place both boot paths land on; `start()` guards
+        // itself, so a path that runs twice costs nothing. Its opt-in question cannot interrupt the
+        // loading screen, because it is asked only after the status read and the stamp read behind it.
+        // Nothing leaves the process until that question is answered yes.
+        void updateCheck.start();
     }
 
     // Initialize context providers
@@ -894,8 +899,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         extensionManager.loadExtensions()
             .then(() => localeOffer.detect())
             .catch(() => {});
-        // The opt-in question it may ask belongs to a settled screen, not the loading one.
-        void updateCheck.start();
     }
 
     // Detect external URL changes (e.g., page.goto() in Playwright, direct URL navigation).

@@ -170,3 +170,7 @@ shape is here because building it the other way means paying twice:
   regenerate of the thread's last user message starts it and does not store the message twice.
 - e2e: `thread-switch.spec.ts`, `thread-new-thread.spec.ts` (the fork becomes active, holds the edited
   question once, and gets an answer).
+## Checking this
+
+`go test ./backend/exec/ ./backend/api/ ./backend/config/` covers a checkpoint, the pin that keeps it and
+the diff that reads it.
