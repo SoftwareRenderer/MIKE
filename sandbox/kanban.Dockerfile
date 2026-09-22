@@ -56,18 +56,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # ── gVisor (runsc) + podman ─────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    bzip2 \
     podman \
     && rm -rf /var/lib/apt/lists/*
 
+ARG GVISOR_RELEASE=latest
 RUN ARCH="$(uname -m)" && \
-    URL="https://storage.googleapis.com/gvisor/releases/release/latest/${ARCH}" && \
+    URL="https://storage.googleapis.com/gvisor/releases/release/${GVISOR_RELEASE}/${ARCH}" && \
     TMPDIR="$(mktemp -d)" && \
-    wget -q "${URL}/runsc" -O "${TMPDIR}/runsc" && \
-    wget -q "${URL}/runsc.sha512" -O "${TMPDIR}/runsc.sha512" && \
-    (cd "$TMPDIR" && sha512sum -c runsc.sha512) && \
-    chmod a+rx "${TMPDIR}/runsc" && \
-    mv "${TMPDIR}/runsc" /usr/local/bin/runsc \
-    && rm -rf "$TMPDIR"
+    wget -q "${URL}/gvisor.tar.bz2" -O "${TMPDIR}/gvisor.tar.bz2" && \
+    wget -q "${URL}/gvisor.tar.bz2.sha512" -O "${TMPDIR}/gvisor.tar.bz2.sha512" && \
+    (cd "$TMPDIR" && sha512sum -c gvisor.tar.bz2.sha512) && \
+    tar -xjf "${TMPDIR}/gvisor.tar.bz2" -C "$TMPDIR" runsc && \
+    install -m 0755 "${TMPDIR}/runsc" /usr/local/bin/runsc \
+    && rm -rf "$TMPDIR" && \
+    runsc --version
 
 # ── Playwright browsers (e2e tests) ──────────────────────────
 # Setting the environment variable to allow system dependencies installation cleanly
