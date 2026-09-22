@@ -759,7 +759,8 @@
 
     // Combined list for the browse view: unpublished (filesystem-only, not in
     // the registry) extensions at the top, then featured (not yet installed)
-    // registry entries, then the remaining registry entries. See
+    // registry entries, then the not-yet-installed translation pack for the
+    // browser's language, then the remaining registry entries. See
     // orderBrowseEntries in $lib/composables/use-browse-order.
     let browseMatches = $derived.by(() =>
         orderBrowseEntries(
@@ -767,10 +768,11 @@
             registryEntries,
             entry => installedKeys.has(identityKey(entry.author, entry.name)),
             searchQuery,
+            typeof navigator === 'undefined' ? '' : navigator.language ?? '',
         )
     );
 
-    // The category badges narrow each view in place, so the local-first sort and the featured pin keep
+    // The category badges narrow each view in place, so the local-first sort and the two pins keep
     // deciding position exactly as their own resolver describes it.
     let filteredExtensions = $derived(filterByCategory(installedMatches, selectedCategories));
     let browseList = $derived(filterByCategory(browseMatches, selectedCategories));

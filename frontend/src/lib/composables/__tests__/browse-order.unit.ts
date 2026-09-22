@@ -105,4 +105,106 @@ describe('orderBrowseEntries', () => {
         const result = orderBrowseEntries(local, registry, () => false, 'no-such-extension');
         expect(result).toEqual([]);
     });
+
+    describe('the browser-language tier', () => {
+        const pack = (name: string, locale: string, extra: Partial<RegistryEntry> = {}) =>
+            entry(name, 'author', {
+                type: 'i18n',
+                capabilities: { i18n: { locale } },
+                ...extra,
+            });
+
+        it('lists the pack for the browser language after the featured entries', () => {
+            const registry = [
+                entry('reg-a'),
+                entry('feat', 'a', { featured: true }),
+                pack('pack-zh', 'zh'),
+                entry('reg-b'),
+            ];
+            const result = orderBrowseEntries([], registry, () => false, '', 'zh-CN');
+            expect(result.map(e => e.name)).toEqual(['feat', 'pack-zh', 'reg-a', 'reg-b']);
+        });
+
+        it('keeps local entries above the locale pack', () => {
+            const registry = [entry('reg-a'), pack('pack-zh', 'zh')];
+            const result = orderBrowseEntries([entry('local-a', 'l')], registry, () => false, '', 'zh-CN');
+            expect(result.map(e => e.name)).toEqual(['local-a', 'pack-zh', 'reg-a']);
+        });
+
+        it('does not promote an installed pack for the browser language', () => {
+            const registry = [
+                entry('reg-a'),
+                pack('pack-zh', 'zh'),
+                entry('reg-b'),
+                entry('feat', 'f', { featured: true }),
+            ];
+            const result = orderBrowseEntries([], registry, e => e.name === 'pack-zh', '', 'zh-CN');
+            expect(result.map(e => e.name)).toEqual(['feat', 'reg-a', 'pack-zh', 'reg-b']);
+        });
+
+        it('lists a featured locale pack once, in the featured tier', () => {
+            const registry = [
+                entry('reg-a'),
+                pack('pack-zh', 'zh', { featured: true }),
+                entry('reg-b'),
+            ];
+            const result = orderBrowseEntries([], registry, () => false, '', 'zh-CN');
+            expect(result.map(e => e.name)).toEqual(['pack-zh', 'reg-a', 'reg-b']);
+        });
+
+        it('matches on the primary subtag on both sides', () => {
+            const registry = [entry('reg-a'), pack('pack-zh', 'zh')];
+            const promoted = ['pack-zh', 'reg-a'];
+            const unmoved = ['reg-a', 'pack-zh'];
+            expect(orderBrowseEntries([], registry, () => false, '', 'zh-CN').map(e => e.name)).toEqual(promoted);
+            expect(orderBrowseEntries([], registry, () => false, '', 'zh-Hans-CN').map(e => e.name)).toEqual(promoted);
+            expect(orderBrowseEntries([], registry, () => false, '', 'ZH').map(e => e.name)).toEqual(promoted);
+            expect(orderBrowseEntries([], registry, () => false, '', 'pt_BR').map(e => e.name)).toEqual(unmoved);
+        });
+
+        it('promotes nothing for a fallback-locale browser, a garbage tag, or no tag', () => {
+            const registry = [entry('reg-a'), pack('pack-en', 'en'), pack('pack-zh', 'zh')];
+            const plain = ['reg-a', 'pack-en', 'pack-zh'];
+            for (const tag of ['en-US', 'en', 'en-GB', '*', 'x-pig', '', null, undefined]) {
+                expect(orderBrowseEntries([], registry, () => false, '', tag).map(e => e.name)).toEqual(plain);
+            }
+        });
+
+        it('ignores an entry that declares no i18n locale', () => {
+            const registry = [
+                entry('reg-a'),
+                entry('ui-zh', 'u', { capabilities: { ui: {} } }),
+                entry('bare-zh', 'b', { type: 'i18n' }),
+                pack('pack-zh', 'zh'),
+            ];
+            const result = orderBrowseEntries([], registry, () => false, '', 'zh-CN');
+            expect(result.map(e => e.name)).toEqual(['pack-zh', 'reg-a', 'ui-zh', 'bare-zh']);
+        });
+
+        it('keeps two packs for one language in registry order', () => {
+            const registry = [
+                entry('reg-a'),
+                pack('pack-zh-b', 'zh'),
+                pack('pack-zh-a', 'zh'),
+                entry('reg-b'),
+            ];
+            const result = orderBrowseEntries([], registry, () => false, '', 'zh-CN');
+            expect(result.map(e => e.name)).toEqual(['pack-zh-b', 'pack-zh-a', 'reg-a', 'reg-b']);
+        });
+
+        it('keeps the locale pack above other matches while searching', () => {
+            const registry = [
+                entry('alpha-one'),
+                pack('alpha-pack', 'zh'),
+                entry('alpha-two'),
+            ];
+            const result = orderBrowseEntries([], registry, () => false, 'alpha', 'zh-CN');
+            expect(result.map(e => e.name)).toEqual(['alpha-pack', 'alpha-one', 'alpha-two']);
+        });
+
+        it('orders as before when the caller passes no browser language at all', () => {
+            const registry = [entry('reg-a'), pack('pack-zh', 'zh')];
+            expect(orderBrowseEntries([], registry, () => false, '').map(e => e.name)).toEqual(['reg-a', 'pack-zh']);
+        });
+    });
 });

@@ -13,7 +13,11 @@ test.describe.configure({ mode: 'parallel' });
 //  2. featured — registry entries with featured: true that are not yet
 //     installed; must render second (pinned to the top of the registry
 //     section).
-//  3. rest — the remaining registry entries in API order.
+//  3. the registry's translation pack for the browser's own language, when it
+//     is not installed; must render third. The suite's default locale is the
+//     fallback (`en`), so it promotes nothing and these two segments are the
+//     whole list — see the `zh-CN` describe below for the tier itself.
+//  4. rest — the remaining registry entries in API order.
 // Also returns the card counts the DOM must reach before ordering assertions
 // are safe (local + registry entries load asynchronously, so the rendered
 // card set can be transiently partial).
@@ -222,6 +226,40 @@ test.describe('Extensions Tab', () => {
 
     // The featured entry is not installed, so it still offers Install.
     await expect(featuredCard.locator('button:has-text("Install")')).toBeVisible();
+  });
+
+  // The registry fixture is pinned: `Test/featured-demo` is the featured entry, `TestDev/locale-zh`
+  // is the only translation pack (declaring the bare subtag `zh`), and
+  // `Microsoft/typescript-language-server` is neither.
+  test.describe('Browse with a browser that speaks the pack language', () => {
+    test.use({ locale: 'zh-CN' });
+
+    test('should list the browser language pack after the featured entry and before the rest', async ({ page }) => {
+      await page.click('.icon-btn[aria-label="Settings"]');
+      await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+      await page.click('text=Extensions');
+      await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+
+      const { localCount, registryCount, featured } = await getBrowseSegments(page);
+      expect(featured.length).toBeGreaterThan(0);
+
+      await page.click('.view-tab:has-text("Browse")');
+      await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('.registry-card')).toHaveCount(localCount + registryCount, { timeout: 10000 });
+
+      const order = await page
+        .locator('.registry-card')
+        .evaluateAll((els) => els.map((e) => e.getAttribute('data-identity') ?? ''));
+      const featuredIdx = order.indexOf(identityKey('Test', 'featured-demo'));
+      const packIdx = order.indexOf(identityKey('TestDev', 'locale-zh'));
+      const otherIdx = order.indexOf(identityKey('Microsoft', 'typescript-language-server'));
+
+      // The local block keeps the top, and the pack sits between the featured
+      // entry and the registry entry that neither is featured nor matches `zh`.
+      expect(featuredIdx).toBeGreaterThanOrEqual(localCount);
+      expect(packIdx).toBeGreaterThan(featuredIdx);
+      expect(otherIdx).toBeGreaterThan(packIdx);
+    });
   });
 
   test('should install a local extension via the install-local endpoint', async ({ page }) => {

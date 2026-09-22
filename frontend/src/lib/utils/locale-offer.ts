@@ -81,14 +81,14 @@ export function primarySubtag(tag: unknown): string {
 
 /**
  * The locale a registry entry offers, or `''` when the entry is not an offerable
- * translation pack.
+ * translation pack. Two readers: the first-run offer here, and the Browse list
+ * promotion (`use-browse-order`).
  *
  * Keyed on the capability *declaration* rather than `type === 'i18n'`, which is
  * what `inferExtensionType` inferred for routing — the same rule `resolveI18NPack`
- * and `Extension.GetI18N` use, so the three ends cannot disagree about what a
- * pack is.
+ * and `Extension.GetI18N` use, so the ends cannot disagree about what a pack is.
  */
-function offeredLocale(entry: RegistryEntry): string {
+export function offeredLocale(entry: RegistryEntry): string {
     const cfg = entry.capabilities?.i18n as { locale?: unknown } | undefined;
     if (!cfg || typeof cfg.locale !== 'string') return '';
     return cfg.locale.trim();
