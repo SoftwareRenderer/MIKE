@@ -145,6 +145,12 @@ describe('the category row', () => {
         expect(container.querySelector('.category-clear')).toBeNull();
     });
 
+    it('writes the category alone on the badge, so the number stays in the accessible name', async () => {
+        const { container } = await renderTab();
+        expect([...container.querySelectorAll('.category-badge')]
+            .map((b) => b.textContent?.trim())).toEqual(['LSP', 'AGENT', 'CSS']);
+    });
+
     it('narrows the installed list to the clicked category and marks the badge pressed', async () => {
         const { container } = await renderTab();
         await clickBadge(container, 'LSP');

@@ -728,9 +728,7 @@
         selectedCategories = next;
     }
 
-    // Extensions matching the text query, with local (unpublished) extensions first. The category
-    // badges count over this list rather than the narrowed one, so a number says what clicking that
-    // badge would show instead of collapsing to the selection already made.
+    // Extensions matching the text query, with local (unpublished) extensions first
     let installedMatches = $derived.by(() => {
         const query = searchQuery.toLowerCase();
         const list = searchQuery
@@ -868,7 +866,7 @@
                         aria-pressed={selectedCategories.has(category)}
                         aria-label={t('settings.extensions.categoryAria', { label, count })}
                         onclick={() => toggleCategory(category)}
-                    >{label}<span class="category-count">{count}</span></button>
+                    >{label}</button>
                 {/each}
                 {#if selectedCategories.size > 0}
                     <button class="category-clear" onclick={() => selectedCategories = new Set()}>
@@ -2031,7 +2029,6 @@
     .category-badge {
         display: inline-flex;
         align-items: center;
-        gap: 0.35rem;
         background: var(--color-bg-input);
         border: 1px solid var(--color-border-subtle);
         border-radius: 999px;
@@ -2053,15 +2050,6 @@
     .category-badge.active {
         background: rgba(88, 166, 255, 0.15);
         border-color: var(--color-accent);
-        color: var(--color-accent);
-    }
-
-    .category-count {
-        font-weight: 600;
-        color: var(--color-text-tertiary);
-    }
-
-    .category-badge.active .category-count {
         color: var(--color-accent);
     }
 
