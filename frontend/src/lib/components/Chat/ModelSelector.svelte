@@ -381,6 +381,12 @@
     {/if}
 </div>
 
+{#snippet selectedTick()}
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+{/snippet}
+
 <!-- Provider dropdown (rendered in shadow DOM to escape overflow clipping) -->
 {#if providerDropdownOpen && providerRect}
     <svelte:element this={"div"} class="portal-provider-dropdown" role="listbox" aria-label={t('chat.model.selectProvider')} style="position:fixed;top:{providerRect.top}px;left:{providerRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
@@ -393,9 +399,7 @@
                 </svg>
                 <span class="provider-name">{agentProvider ? getProviderDisplayName(agentProvider, providers) : t('settings.provider.agentFallback')}</span>
                 {#if isAgentSelected}
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                        <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
+                    {@render selectedTick()}
                 {/if}
             </button>
         {/if}
@@ -404,9 +408,7 @@
                 <span class="provider-name">{getProviderDisplayName(provider, providers)}</span>
                 <span class="model-count">{t('chat.model.count', { count: provider.models.length })}</span>
                 {#if provider.url === selectedProviderUrl}
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                        <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
+                    {@render selectedTick()}
                 {/if}
             </button>
         {/each}
@@ -427,9 +429,7 @@
                     <button type="button" class="model-option" class:active={isActive} onclick={() => selectModel(m.name)} role="option" aria-selected={isActive}>
                         <span class="option-name">{m.name}</span>
                         {#if isActive}
-                            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
+                            {@render selectedTick()}
                         {/if}
                     </button>
                 {/each}
@@ -445,9 +445,7 @@
                         <span class="effort-badge">{m.effort}</span>
                     {/if}
                     {#if isActive}
-                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                            <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
+                        {@render selectedTick()}
                     {/if}
                 </button>
             {/each}

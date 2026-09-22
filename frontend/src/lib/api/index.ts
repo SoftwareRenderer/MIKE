@@ -141,7 +141,8 @@ export { fetchLSPSandboxMemory } from './lsp';
 export { uploadTaskFile } from './task-upload';
 
 // -- A file's own bytes, for an `<img>` src --
-export { rawFileURL } from './fs';
+export { rawFileURL, listFsDirectory } from './fs';
+export type { FsEntry, FsListing } from './fs';
 export { deleteFsPaths, copyFsPaths, moveFsPaths, renameFsPath } from './fs-ops';
 export type { FsOpsScope, FsOpsItem, FsOpsResult } from './fs-ops';
 

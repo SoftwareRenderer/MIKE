@@ -110,19 +110,20 @@
 
 </script>
 
-{#if virtualized}
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-    <div
-        class="virtual-scroll"
-        bind:this={scrollEl}
-        role={role}
-        aria-label={ariaLabel}
-        tabindex="0"
-        onscroll={onscroll}
-        onwheel={onwheel}
-        ontouchstart={ontouchstart}
-        onkeydown={handleKeydown}
-    >
+<!-- One scroll container: crossing minThreshold changes the rows, not the element. -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<div
+    class="virtual-scroll"
+    bind:this={scrollEl}
+    role={role}
+    aria-label={ariaLabel}
+    tabindex="0"
+    onscroll={onscroll}
+    onwheel={onwheel}
+    ontouchstart={ontouchstart}
+    onkeydown={handleKeydown}
+>
+    {#if virtualized}
         <div class="virtual-spacer" style="height: {totalHeight}px">
             <div class="virtual-content" style="transform: translateY({visibleOffset}px)">
                 {#each items as item, idx}
@@ -132,25 +133,12 @@
                 {/each}
             </div>
         </div>
-    </div>
-{:else}
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-    <div
-        class="virtual-scroll"
-        bind:this={scrollEl}
-        role={role}
-        aria-label={ariaLabel}
-        tabindex="0"
-        onscroll={onscroll}
-        onwheel={onwheel}
-        ontouchstart={ontouchstart}
-        onkeydown={handleKeydown}
-    >
+    {:else}
         {#each items as item, index}
             {@render children({ item, index })}
         {/each}
-    </div>
-{/if}
+    {/if}
+</div>
 
 <style>
     .virtual-scroll {

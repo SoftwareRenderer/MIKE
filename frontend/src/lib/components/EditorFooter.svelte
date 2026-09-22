@@ -169,10 +169,9 @@
         border: 2px solid currentColor;
         border-top-color: transparent;
         border-radius: 50%;
-        animation: lsp-spin 0.6s linear infinite;
+        animation: spin 0.6s linear infinite;
         opacity: 0.6;
     }
-    @keyframes lsp-spin { to { transform: rotate(360deg); } }
     .lsp-tooltip {
         position: absolute;
         bottom: calc(100% + 4px);

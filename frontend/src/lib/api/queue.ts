@@ -1,6 +1,6 @@
 import { API_BASE, apiFetch, apiError, ensureCsrfToken, generateId, isAborted, registerSetOffline } from './helpers';
 import { loadQueue as loadQueueFromStorage, saveQueue as saveQueueToStorage, type QueuedAction as StoredQueuedAction } from '../storage';
-import type { Config, MemoryAlertAckPayload, Project, Task, TaskMessage, Thread } from '../types';
+import type { Config, MemoryAlertAckPayload, Project, ProjectUpdates, Task, TaskMessage, Thread } from '../types';
 import { t } from '$lib/i18n';
 
 // Re-export QueuedAction from storage (canonical definition)
@@ -426,7 +426,7 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
     const taskId = resolveId(p.taskId);
     switch (action.type) {
         case 'sendTaskMessage':
-            await sendTaskMessageRaw(p.projectId, taskId, p.content, p.modelName, p.serverUrl, p.attachments, undefined, p.regenerate);
+            await sendTaskMessageRaw(p.projectId, taskId, p.content, p.modelName, p.serverUrl, p.attachments, p.reasoningEffort, p.regenerate);
             break;
         case 'createTaskMessage':
             await createTaskMessageRaw(p.projectId, taskId, p.role, p.content);
@@ -533,7 +533,7 @@ async function createProjectRaw(path: string, sandboxEnabled = false, gitUrl?: s
     return res.json();
 }
 
-async function updateProjectRaw(id: string, updates: { name?: string; sandbox_enabled?: boolean; sandbox_network_isolation?: boolean; sandbox_image?: string; sandbox_dockerfile_path?: string; sandbox_memory_limit?: number }): Promise<Project> {
+async function updateProjectRaw(id: string, updates: ProjectUpdates): Promise<Project> {
     const res = await apiFetch(`${API_BASE}/projects/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },

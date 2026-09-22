@@ -2,13 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock storage functions before importing helpers
 vi.mock('$lib/storage', () => ({
-    loadCollapsedTasks: vi.fn(async () => new Set<string>()),
     saveCollapsedTasks: vi.fn(async () => {}),
+    pruneCollapsedTasks: vi.fn(async () => new Set<string>()),
     loadAppSetting: vi.fn(async () => false),
     saveAppSetting: vi.fn(async () => {}),
 }));
 
-import { persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/stores/app.svelte';
+import { persistCollapsedTasks, initExpandedTasks } from '$lib/stores/app.svelte';
 import * as storage from '$lib/storage';
 
 describe('persistCollapsedTasks', () => {
@@ -49,44 +49,13 @@ describe('persistCollapsedTasks', () => {
     });
 });
 
-describe('cleanupCollapsedTasks', () => {
-    beforeEach(() => {
-        vi.clearAllMocks();
-    });
-
-    it('removes stale task IDs that no longer exist', async () => {
-        (storage.loadCollapsedTasks as any).mockResolvedValue(new Set(['t1', 't2', 't3']));
-        const allIds = new Set(['t1', 't3']); // t2 is stale
-        const result = await cleanupCollapsedTasks(allIds);
-        expect(result.has('t1')).toBe(true);
-        expect(result.has('t2')).toBe(false);
-        expect(result.has('t3')).toBe(true);
-        expect(storage.saveCollapsedTasks).toHaveBeenCalled();
-    });
-
-    it('does not save when no stale entries exist', async () => {
-        (storage.loadCollapsedTasks as any).mockResolvedValue(new Set(['t1', 't2']));
-        const allIds = new Set(['t1', 't2', 't3']);
-        await cleanupCollapsedTasks(allIds);
-        expect(storage.saveCollapsedTasks).not.toHaveBeenCalled();
-    });
-
-    it('returns cleaned set', async () => {
-        (storage.loadCollapsedTasks as any).mockResolvedValue(new Set(['stale1', 'stale2']));
-        const allIds = new Set<string>(); // none exist
-        const result = await cleanupCollapsedTasks(allIds);
-        expect(result.size).toBe(0);
-        expect(storage.saveCollapsedTasks).toHaveBeenCalled();
-    });
-});
-
 describe('initExpandedTasks', () => {
     beforeEach(() => {
         vi.clearAllMocks();
     });
 
     it('returns all parent IDs minus collapsed ones', async () => {
-        (storage.loadCollapsedTasks as any).mockResolvedValue(new Set(['t2']));
+        (storage.pruneCollapsedTasks as any).mockResolvedValue(new Set(['t2']));
         const parents = new Set(['t1', 't2', 't3']);
         const expanded = await initExpandedTasks(parents);
         expect(expanded.has('t1')).toBe(true);
@@ -94,20 +63,18 @@ describe('initExpandedTasks', () => {
         expect(expanded.has('t3')).toBe(true);
     });
 
-    it('removes stale collapsed entries before computing', async () => {
-        (storage.loadCollapsedTasks as any).mockResolvedValue(new Set(['t2', 'stale']));
+    it('prunes against its own parent set, so a stale entry cannot survive a reload', async () => {
+        (storage.pruneCollapsedTasks as any).mockResolvedValue(new Set(['t2']));
         const parents = new Set(['t1', 't2', 't3']);
         const expanded = await initExpandedTasks(parents);
+        expect(storage.pruneCollapsedTasks).toHaveBeenCalledWith(parents);
         expect(expanded.size).toBe(2);
         expect(expanded.has('t1')).toBe(true);
         expect(expanded.has('t3')).toBe(true);
-        // saveCollapsedTasks should be called with cleaned set
-        const saved = (storage.saveCollapsedTasks as any).mock.calls[0][0];
-        expect(saved.has('stale')).toBe(false);
     });
 
     it('returns all parents when none are collapsed', async () => {
-        (storage.loadCollapsedTasks as any).mockResolvedValue(new Set<string>());
+        (storage.pruneCollapsedTasks as any).mockResolvedValue(new Set<string>());
         const parents = new Set(['t1', 't2']);
         const expanded = await initExpandedTasks(parents);
         expect(expanded.has('t1')).toBe(true);
@@ -115,7 +82,7 @@ describe('initExpandedTasks', () => {
     });
 
     it('returns empty set when all parents are collapsed', async () => {
-        (storage.loadCollapsedTasks as any).mockResolvedValue(new Set(['t1', 't2']));
+        (storage.pruneCollapsedTasks as any).mockResolvedValue(new Set(['t1', 't2']));
         const parents = new Set(['t1', 't2']);
         const expanded = await initExpandedTasks(parents);
         expect(expanded.size).toBe(0);

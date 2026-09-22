@@ -280,13 +280,7 @@
 </form>
 
 <!-- @ file mention dropdown (rendered as portal overlay) -->
-<FileMentionDropdown
-    results={mention.results}
-    position={mention.position}
-    activeIndex={mention.activeIndex}
-    onSelect={(path) => mention.select(path)}
-    onClose={() => mention.handleClose()}
-/>
+<FileMentionDropdown {...mention.dropdownProps} />
 
 <style>
     .chat-form {

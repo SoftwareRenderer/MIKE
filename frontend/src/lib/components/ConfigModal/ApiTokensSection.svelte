@@ -120,10 +120,10 @@
     });
 </script>
 
-<section class="section tokens-section">
+<section class="settings-section tokens-section">
     <div class="section-header">
-        <h3 class="section-label">{t('settings.tokens.title')}</h3>
-        <div class="section-actions">
+        <h3 class="settings-section-title">{t('settings.tokens.title')}</h3>
+        <div class="settings-section-actions">
             <button
                 type="button"
                 class="btn-small"
@@ -205,33 +205,14 @@
 </section>
 
 <style>
-    /* Matches the About tab's section chrome (ConfigModal.svelte, SessionsSection.svelte). */
-    .section {
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        padding: 16px;
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-    }
-    .section-label {
-        margin: 0;
-        font-size: 0.875rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--color-text-secondary);
-    }
+    @import '$lib/styles/settings-section.css';
+
     .section-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 8px;
         flex-wrap: wrap;
-    }
-    .section-actions {
-        display: flex;
-        gap: 8px;
     }
 
     .tokens-section {

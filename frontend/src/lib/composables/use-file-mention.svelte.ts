@@ -44,6 +44,17 @@ export class FileMention {
         return this.position !== null && this.results.length > 0;
     }
 
+    /** `<FileMentionDropdown>`'s props, so the three inputs do not each spell the mapping out. */
+    get dropdownProps() {
+        return {
+            results: this.results,
+            position: this.position,
+            activeIndex: this.activeIndex,
+            onSelect: (path: string) => this.select(path),
+            onClose: () => this.handleClose(),
+        };
+    }
+
     /** Call from the textarea's `oninput`. Detects a trigger and searches. */
     handleInput() {
         const textarea = this.opts.getTextarea();

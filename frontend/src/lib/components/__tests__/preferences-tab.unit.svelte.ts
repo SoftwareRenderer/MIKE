@@ -80,8 +80,8 @@ describe('PreferencesTab hide-model-badge toggle', () => {
         expect(toggle()).toBeTruthy();
         expect(toggle()?.getAttribute('aria-checked')).toBe('false');
         // The toggle lives in a dedicated UI section, not under Keyboard Shortcuts.
-        const section = toggle()!.closest('.section');
-        expect(section?.querySelector('.section-label')?.textContent).toBe('UI');
+        const section = toggle()!.closest('.settings-section');
+        expect(section?.querySelector('.settings-section-title')?.textContent).toBe('UI');
         expect(getByText('Hide model badge')).toBeTruthy();
     });
 
@@ -158,7 +158,7 @@ describe('PreferencesTab notify-on-review toggle', () => {
         stubNotification('granted');
         const { getByText, toggle, desc } = renderNotifyTab();
         expect(toggle()?.getAttribute('aria-checked')).toBe('false');
-        expect(toggle()!.closest('.section')?.querySelector('.section-label')?.textContent).toBe('UI');
+        expect(toggle()!.closest('.settings-section')?.querySelector('.settings-section-title')?.textContent).toBe('UI');
         expect(getByText('Notify when a task enters Review')).toBeTruthy();
         expect(desc()).toBe('Send a browser notification when a task starts waiting for you while you are looking elsewhere');
     });

@@ -28,6 +28,7 @@
     import { matchesCreateTaskSubmitKey, effectiveCreateTaskSubmitKey, formatShortcut, shortcutHintsHidden } from '$lib/utils/keyboard';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     import { MODE_DESCRIPTIONS } from '$lib/constants/modes';
+    import BranchPicker from './BranchPicker.svelte';
 
     let { projectId, onClose, onTaskCreated, parentId, currentBranch, onOptimisticTaskCreated, onReplaceOptimisticTask, onRemoveOptimisticTask, initialPrompt = '', lineTask = false, onOpenTask = null }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void; parentId?: string; currentBranch?: string; onOptimisticTaskCreated?: (task: Task) => void; onReplaceOptimisticTask?: (optimisticId: string, realTask: Task) => void; onRemoveOptimisticTask?: (optimisticId: string) => void; initialPrompt?: string; lineTask?: boolean; onOpenTask?: ((task: Task) => void) | null } = $props();
 
@@ -64,51 +65,6 @@
     // Branch selection
     let branchDraft = $state('');
     let branches = $state<string[]>([]);
-    let branchDropdownOpen = $state(false);
-    let branchActiveIndex = $state(0);
-
-    // Filtered branches matching the current input text
-    let filteredBranches = $derived.by(() => {
-        const query = branchDraft.trim().toLowerCase();
-        if (!query) return branches;
-        return branches.filter(b => b.toLowerCase().includes(query));
-    });
-
-    function openBranchDropdown() {
-        branchDropdownOpen = true;
-        branchActiveIndex = 0;
-    }
-
-    function closeBranchDropdown() {
-        branchDropdownOpen = false;
-        branchActiveIndex = 0;
-    }
-
-    function handleBranchInput() {
-        openBranchDropdown();
-    }
-
-    function handleBranchKeydown(e: KeyboardEvent) {
-        if (!branchDropdownOpen || filteredBranches.length === 0) return;
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            branchActiveIndex = (branchActiveIndex + 1) % filteredBranches.length;
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            branchActiveIndex = (branchActiveIndex - 1 + filteredBranches.length) % filteredBranches.length;
-        } else if (e.key === 'Enter' && branchActiveIndex >= 0 && branchActiveIndex < filteredBranches.length) {
-            e.preventDefault();
-            branchDraft = filteredBranches[branchActiveIndex];
-            closeBranchDropdown();
-        } else if (e.key === 'Escape') {
-            closeBranchDropdown();
-        }
-    }
-
-    function selectBranch(branch: string) {
-        branchDraft = branch;
-        closeBranchDropdown();
-    }
 
     let promptTextarea: HTMLTextAreaElement | null = $state(null);
 
@@ -244,8 +200,6 @@
             }
         }
     });
-
-
 
     function handleModelSelect(_providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) {
         selectedModel = modelName;
@@ -478,30 +432,7 @@
                     <span class="config-desc">{t('app.task.branchDesc')}</span>
                 </div>
             </div>
-            <div class="branch-input-wrapper">
-                <input
-                    type="text"
-                    bind:value={branchDraft}
-                    placeholder={targetBranch}
-                    class="branch-input"
-                    oninput={handleBranchInput}
-                    onkeydown={handleBranchKeydown}
-                    onfocus={openBranchDropdown}
-                    onblur={() => setTimeout(() => closeBranchDropdown(), 150)}
-                />
-                {#if branchDropdownOpen && filteredBranches.length > 0}
-                    <ul class="branch-dropdown" role="listbox">
-                        {#each filteredBranches as branch, i (branch)}
-                            <li
-                                class="branch-option {i === branchActiveIndex ? 'active' : ''}"
-                                role="option"
-                                aria-selected={i === branchActiveIndex}
-                                onmousedown={(e) => { e.preventDefault(); selectBranch(branch); }}
-                            >{branch}</li>
-                        {/each}
-                    </ul>
-                {/if}
-            </div>
+            <BranchPicker bind:value={branchDraft} {branches} placeholder={targetBranch} />
         </div>
         {/if}
         <div class="config-row">
@@ -534,13 +465,7 @@
 </BaseModal>
 
 <!-- @ file mention dropdown — must be outside BaseModal (floating element) -->
-<FileMentionDropdown
-    results={mention.results}
-    position={mention.position}
-    activeIndex={mention.activeIndex}
-    onSelect={(path) => mention.select(path)}
-    onClose={() => mention.handleClose()}
-/>
+<FileMentionDropdown {...mention.dropdownProps} />
 
 <style>
     @import '$lib/styles/shared.css';
@@ -720,53 +645,6 @@
         font-family: var(--font-mono);
         vertical-align: baseline;
         line-height: 1.2;
-    }
-    .branch-input-wrapper {
-        position: relative;
-    }
-    .branch-input {
-        width: 160px;
-        font-size: 0.8125rem;
-        color: var(--color-text-primary);
-        background: var(--color-surface-2);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        padding: 5px 8px;
-        font-family: var(--font-mono, monospace);
-        outline: none;
-        text-align: right;
-    }
-    .branch-input:focus {
-        border-color: var(--color-accent);
-    }
-    .branch-dropdown {
-        position: absolute;
-        z-index: 100;
-        max-height: 200px;
-        overflow-y: auto;
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-        margin: 0;
-        padding: 0;
-        list-style: none;
-        min-width: 160px;
-    }
-    .branch-option {
-        padding: 6px 10px;
-        font-size: 0.8125rem;
-        font-family: var(--font-mono, monospace);
-        color: var(--color-text-primary);
-        cursor: pointer;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .branch-option:hover,
-    .branch-option.active {
-        background: var(--color-surface-3);
-        color: var(--color-accent);
     }
     .config-desc {
         font-size: 0.75rem;

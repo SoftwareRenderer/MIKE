@@ -1,4 +1,4 @@
-import type { Board, Project, ProjectCounts, ProjectStats } from '../types';
+import type { Board, Project, ProjectCounts, ProjectStats, ProjectUpdates } from '../types';
 import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
 import {
     getOfflineStatus,
@@ -207,7 +207,7 @@ async function cloneProjectRaw(
 }
 
 /** Update project metadata (name, sandbox settings). Queued when offline. */
-export async function updateProject(id: string, updates: { name?: string; sandbox_enabled?: boolean; sandbox_network_isolation?: boolean; sandbox_image?: string; sandbox_dockerfile_path?: string; sandbox_memory_limit?: number; sandbox_forward_ports?: { container_port: number }[] }): Promise<Project> {
+export async function updateProject(id: string, updates: ProjectUpdates): Promise<Project> {
     if (getOfflineStatus()) {
         return await queueWrite('updateProject', { id, updates }, { id, ...updates } as Project);
     }

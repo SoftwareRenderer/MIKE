@@ -1114,10 +1114,6 @@
         flex-shrink: 0;
         animation: spin 1s linear infinite;
     }
-    @keyframes spin {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
-    }
     .card:hover:not(:has(.card:hover)) > .card-title > .card-title-text,
     .card:focus-within:not(:has(.card:focus-within)) > .card-title > .card-title-text,
     .card.selected > .card-title > .card-title-text {

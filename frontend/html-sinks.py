@@ -34,7 +34,7 @@ ALLOW: dict[str, str] = {
     "src/lib/components/CommitDiffOverlay.svelte": "highlighter output — text escaped, classes from a fixed list",
     "src/lib/components/FileSearchPanel.svelte": "escapeHtml on the line and on every match",
     "src/lib/components/Icon.svelte": "singleSvgMarkup — a lone sanitized <svg> root, from an *.svg?raw import",
-    "src/lib/components/ConfigModal.svelte": "{@html pwaIcon} — an *.svg?raw import",
+    "src/lib/components/ConfigModal.svelte": "{@html mikeLogo} — an *.svg?raw import",
     "src/lib/components/TerminalPanel.svelte": "two literal SVG path strings on created <svg> elements",
     "src/lib/utils/sticky-scroll.ts": "clones CodeMirror's own line DOM; the fallback is escapeHtml",
     "src/lib/extensions/channel.ts": "innerHTML = '' — a clear, not an injection",

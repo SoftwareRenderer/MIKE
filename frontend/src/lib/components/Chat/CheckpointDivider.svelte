@@ -97,11 +97,7 @@
         opacity: 0.7;
     }
     .checkpoint-spinner {
-        animation: checkpoint-spin 1s linear infinite;
-    }
-    @keyframes checkpoint-spin {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
+        animation: spin 1s linear infinite;
     }
     .divider-actions {
         display: flex;

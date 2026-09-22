@@ -647,6 +647,22 @@
             bar.style.top = `${selTop - 36}px`;
         };
 
+        /** Drag the grabbed corner under the finger, two rows up so the selection stays visible. */
+        const dragHandleTo = (touch: Touch) => {
+            const { row, col } = pageToChar(touch.pageX, touch.pageY);
+            const offsetRow = Math.max(0, row - 2);
+            if (draggingHandle === 'start') {
+                selStartRow = offsetRow;
+                selStartCol = col;
+            } else {
+                selEndRow = offsetRow;
+                selEndCol = col;
+            }
+            applySelection();
+            positionHandles();
+            if (btnBarEl) positionBtnBar(btnBarEl);
+        };
+
         const setupDragListeners = () => {
             const handleTouchStart = (which: 'start' | 'end') => (e: TouchEvent) => {
                 e.preventDefault();
@@ -659,20 +675,7 @@
             docTouchMoveHandler = (e: TouchEvent) => {
                 if (!draggingHandle) return;
                 e.preventDefault();
-                const t = e.touches[0];
-                const { row, col } = pageToChar(t.pageX, t.pageY);
-                // Offset up 2 rows so selection visible above finger.
-                const offsetRow = Math.max(0, row - 2);
-                if (draggingHandle === 'start') {
-                    selStartRow = offsetRow;
-                    selStartCol = col;
-                } else {
-                    selEndRow = offsetRow;
-                    selEndCol = col;
-                }
-                applySelection();
-                positionHandles();
-                if (btnBarEl) positionBtnBar(btnBarEl);
+                dragHandleTo(e.touches[0]);
             };
             docTouchEndHandler = () => {
                 if (draggingHandle) draggingHandle = null;
@@ -709,19 +712,7 @@
 
             if (selMode && draggingHandle) {
                 e.preventDefault();
-                const t = e.touches[0];
-                const { row, col } = pageToChar(t.pageX, t.pageY);
-                const offsetRow = Math.max(0, row - 2);
-                if (draggingHandle === 'start') {
-                    selStartRow = offsetRow;
-                    selStartCol = col;
-                } else {
-                    selEndRow = offsetRow;
-                    selEndCol = col;
-                }
-                applySelection();
-                positionHandles();
-                if (btnBarEl) positionBtnBar(btnBarEl);
+                dragHandleTo(e.touches[0]);
                 return;
             }
 

@@ -1,7 +1,8 @@
 import { uploadFsFile, type UploadResult } from '$lib/api/fs-upload';
 import { dialogStore } from '$lib/stores';
 import { t } from '$lib/i18n';
-import { collectDroppedFiles, collectPickedFiles, dragCarriesFiles, MAX_DROP_FILES, MAX_UPLOAD_BYTES, type DroppedFile, type DroppedSelection } from '$lib/utils/file-drop';
+import { collectDroppedFiles, collectPickedFiles, MAX_DROP_FILES, MAX_UPLOAD_BYTES, type DroppedFile, type DroppedSelection } from '$lib/utils/file-drop';
+import { useFileDropZone } from './use-file-drop-zone.svelte';
 
 /**
  * The drop zone of a file list: files or whole folders dragged in are written into the
@@ -37,8 +38,6 @@ interface UploadSlot {
 }
 
 export function useFileDropUpload(options: FileDropUploadOptions) {
-    /** A file drag is hovering the list. */
-    let isOver = $state(false);
     /** A run is in flight (or still being collected). */
     let uploading = $state(false);
     let filesDone = $state(0);
@@ -47,42 +46,18 @@ export function useFileDropUpload(options: FileDropUploadOptions) {
     let bytesTotal = $state(0);
     let currentFile = $state('');
 
-    /** Nesting of dragenter/dragleave over the zone and its children. */
-    let dragDepth = 0;
     let controller: AbortController | null = null;
 
     const percent = $derived(bytesTotal > 0 ? Math.min(100, Math.round((bytesDone / bytesTotal) * 100)) : 0);
 
-    function handleDragEnter(e: DragEvent) {
-        if (!dragCarriesFiles(e.dataTransfer)) return;
-        e.preventDefault();
-        dragDepth++;
-        isOver = true;
-    }
-
-    function handleDragOver(e: DragEvent) {
-        if (!dragCarriesFiles(e.dataTransfer)) return;
-        // Without this the browser refuses the drop and opens the file in the tab.
-        e.preventDefault();
-        if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-        isOver = true;
-    }
-
-    function handleDragLeave(e: DragEvent) {
-        if (!dragCarriesFiles(e.dataTransfer)) return;
-        dragDepth = Math.max(0, dragDepth - 1);
-        if (dragDepth === 0) isOver = false;
-    }
-
-    function handleDrop(e: DragEvent) {
-        if (!dragCarriesFiles(e.dataTransfer) || !e.dataTransfer) return;
-        e.preventDefault();
-        dragDepth = 0;
-        isOver = false;
+    /** A file drag is hovering the list; the drop starts the run. */
+    const dropZone = useFileDropZone((e) => {
         const dataTransfer = e.dataTransfer;
+        if (!dataTransfer) return;
         if (!begin()) return;
         void collectDroppedFiles(dataTransfer).then(run).catch(reportUnexpected).finally(endRun);
-    }
+    });
+    const { handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = dropZone;
 
     /**
      * The pointer-free path into the same run: files chosen by an `<input type="file">`
@@ -116,7 +91,7 @@ export function useFileDropUpload(options: FileDropUploadOptions) {
 
     function endRun() {
         uploading = false;
-        isOver = false;
+        dropZone.clearHover();
         currentFile = '';
         controller = null;
     }
@@ -267,7 +242,7 @@ export function useFileDropUpload(options: FileDropUploadOptions) {
     }
 
     return {
-        get isOver() { return isOver; },
+        get isOver() { return dropZone.isOver; },
         get uploading() { return uploading; },
         get filesDone() { return filesDone; },
         get filesTotal() { return filesTotal; },

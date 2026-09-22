@@ -377,6 +377,20 @@ import { slide } from 'svelte/transition';
     </div>
 {/snippet}
 
+<!-- A binary file the diff cannot show as text: its size, and the image viewer when there is one. -->
+{#snippet binaryNotice(image: DiffImageRequest | null, size: number | undefined)}
+    <div class="diff-binary-notice">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M4 2h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z" stroke="currentColor" stroke-width="1.2"/>
+            <path d="M6 6l4 4M10 6l-4 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+        </svg>
+        <span>{t('diff.binaryWithSize', { size: formatBytes(size ?? 0) })}</span>
+        {#if image}
+            <button type="button" class="diff-view-image-btn" onclick={() => { imageModal = image }}>{t('diff.viewImage')}</button>
+        {/if}
+    </div>
+{/snippet}
+
 {#snippet diffFileBody(path: string, items: DiffDisplayItem[], truncated: boolean | undefined, onExpand: ((path: string) => void) | undefined)}
     <div class="diff-file-content">
         <div class="diff-file-body">
@@ -501,16 +515,7 @@ import { slide } from 'svelte/transition';
                     <div class="diff-line-scroll">
                         <div class="diff-line-content-wrapper">
                             {#if file.isBinary}
-                            <div class="diff-binary-notice">
-                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                    <path d="M4 2h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z" stroke="currentColor" stroke-width="1.2"/>
-                                    <path d="M6 6l4 4M10 6l-4 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-                                </svg>
-                                <span>{t('diff.binaryWithSize', { size: formatBytes(file.fileSize) })}</span>
-                                {#if image}
-                                    <button type="button" class="diff-view-image-btn" onclick={() => { imageModal = image }}>{t('diff.viewImage')}</button>
-                                {/if}
-                            </div>
+                                {@render binaryNotice(image, file.fileSize)}
                             {:else}
                             <div class="diff-large-file-notice">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -592,16 +597,7 @@ import { slide } from 'svelte/transition';
                     <div class="diff-line-scroll">
                         <div class="diff-line-content-wrapper">
                             {#if isBin}
-                            <div class="diff-binary-notice">
-                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                    <path d="M4 2h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z" stroke="currentColor" stroke-width="1.2"/>
-                                    <path d="M6 6l4 4M10 6l-4 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-                                </svg>
-                                <span>{t('diff.binaryWithSize', { size: formatBytes(entry.fileSize ?? 0) })}</span>
-                                {#if image}
-                                    <button type="button" class="diff-view-image-btn" onclick={() => { imageModal = image }}>{t('diff.viewImage')}</button>
-                                {/if}
-                            </div>
+                                {@render binaryNotice(image, entry.fileSize)}
                             {:else}
                             <div class="diff-large-file-notice">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">

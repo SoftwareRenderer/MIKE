@@ -27,7 +27,7 @@
     const modeDescription = $derived(MODE_DESCRIPTIONS[defaultOperatingMode] || '');
 </script>
 
-<fieldset class="section">
+<fieldset class="settings-section task-defaults">
     <h3 class="section-label">{t('settings.tab.taskDefaults')}</h3>
     <p class="section-description">{t('settings.defaults.description')}</p>
 
@@ -84,10 +84,10 @@
 </fieldset>
 
 <style>
-    .section {
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        padding: 16px;
+    @import '$lib/styles/settings-section.css';
+
+    /* The panel box comes from settings-section.css. */
+    .task-defaults {
         margin-bottom: 16px;
     }
     .section-label {

@@ -7,7 +7,7 @@
     import { bindForInput, formatAssignedHost, formatForwardPort, formatForwardPorts, normalizeBind, portRowError } from '$lib/utils/sandbox-ports';
     import { appStore, dialogStore } from '$lib/stores';
     import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/server-tool-network';
-    import type { PortForward, AssignedPort, SandboxMount, SandboxEnv } from '$lib/types';
+    import type { PortForward, AssignedPort, ProjectUpdates, SandboxEnv, SandboxMount } from '$lib/types';
     import Icon from '$lib/components/Icon.svelte';
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
@@ -513,17 +513,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         error = '';
         saveWarning = '';
 
-        const changes: {
-            sandbox_enabled?: boolean;
-            sandbox_network_isolation?: boolean;
-            sandbox_image?: string;
-            sandbox_dockerfile_path?: string;
-            sandbox_memory_limit?: number;
-            sandbox_forward_ports?: PortForward[];
-            sandbox_mounts?: SandboxMount[];
-            sandbox_envs?: SandboxEnv[];
-            sandbox_capabilities?: string[];
-        } = {};
+        const changes: ProjectUpdates = {};
         let needsConfirmation = false;
 
         if (sandboxEnabled !== (project.sandbox_enabled ?? false)) {
@@ -1857,11 +1847,6 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
     .footer-wrapper {
         display: contents;
-    }
-
-    @keyframes spin {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
     }
 
     .spin {

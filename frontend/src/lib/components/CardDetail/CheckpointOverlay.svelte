@@ -1,24 +1,13 @@
 <script lang="ts">
     import type { DiffFile, DiffImageSource } from '$lib/types/diff';
     import { t } from '$lib/i18n';
-    import { reportChunkFailure } from '$lib/services/chunk-failure';
-    // DiffViewer is lazy-loaded by CardDetail — use dynamic import here too
-    let DiffViewerComponent: typeof import('../DiffViewer.svelte').default | null = $state(null);
-    let diffViewerLoading = $state(false);
-    function loadDiffViewer(): void {
-        if (DiffViewerComponent || diffViewerLoading) return;
-        diffViewerLoading = true;
-        import('../DiffViewer.svelte').then((mod) => {
-            DiffViewerComponent = mod.default;
-            diffViewerLoading = false;
-        }).catch((e) => {
-            reportChunkFailure(e);
-            diffViewerLoading = false;
-        });
-    }
+    import { useLazyComponent } from '$lib/composables/use-lazy-component.svelte';
+
+    // A static import here would pull DiffViewer back into this component's own chunk.
+    const diffViewer = useLazyComponent(() => import('../DiffViewer.svelte'));
 
     $effect(() => {
-        loadDiffViewer();
+        diffViewer.load();
     });
 
     let { files, untracked, loading, onClose, onExpandFile, onLineClick, imageSource }: {
@@ -55,8 +44,8 @@
         </div>
     {:else}
         <div class="checkpoint-diff-body">
-            {#if DiffViewerComponent}
-                {@const DiffViewer = DiffViewerComponent}
+            {#if diffViewer.component}
+                {@const DiffViewer = diffViewer.component}
                 <DiffViewer stagedFiles={[]} unstagedFiles={files} stagedUntracked={[]} unstagedUntracked={untracked} onExpandFile={onExpandFile} onExpandUntracked={onExpandFile} onLineClick={onLineClick} imageSource={imageSource} />
             {:else}
                 <div class="checkpoint-diff-loading">
@@ -135,10 +124,6 @@
         height: 100%;
     }
     .checkpoint-spinner {
-        animation: checkpoint-spin 1s linear infinite;
-    }
-    @keyframes checkpoint-spin {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
+        animation: spin 1s linear infinite;
     }
 </style>

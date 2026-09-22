@@ -684,9 +684,8 @@
         border: 2px solid currentColor;
         border-right-color: transparent;
         border-radius: 50%;
-        animation: tool-spin 0.6s linear infinite;
+        animation: spin 0.6s linear infinite;
     }
-    @keyframes tool-spin { to { transform: rotate(360deg); } }
     .tool-result {
         background: var(--color-surface-0);
         padding: 6px 8px;

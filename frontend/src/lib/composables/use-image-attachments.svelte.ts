@@ -1,7 +1,7 @@
 import { dialogStore } from '$lib/stores';
 import { t } from '$lib/i18n';
 import type { DraftAttachment } from '$lib/storage';
-import { dragCarriesFiles } from '$lib/utils/file-drop';
+import { useFileDropZone } from './use-file-drop-zone.svelte';
 import {
     MAX_IMAGES,
     describeRejectedImages,
@@ -34,9 +34,6 @@ export interface ImageAttachmentsOptions {
 }
 
 export function useImageAttachments(options: ImageAttachmentsOptions) {
-    let isOver = $state(false);
-    let dragDepth = 0;
-
     function insert(text: string) {
         const value = options.getValue();
         const textarea = options.getTextarea();
@@ -114,40 +111,16 @@ export function useImageAttachments(options: ImageAttachmentsOptions) {
         void intake(sortTransferFiles(files));
     }
 
-    function handleDragEnter(e: DragEvent) {
-        if (!dragCarriesFiles(e.dataTransfer)) return;
-        e.preventDefault();
-        dragDepth++;
-        isOver = true;
-    }
-
-    function handleDragOver(e: DragEvent) {
-        if (!dragCarriesFiles(e.dataTransfer)) return;
-        // Without this the browser refuses the drop and opens the file in the tab.
-        e.preventDefault();
-        if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-        isOver = true;
-    }
-
-    function handleDragLeave(e: DragEvent) {
-        if (!dragCarriesFiles(e.dataTransfer)) return;
-        dragDepth = Math.max(0, dragDepth - 1);
-        if (dragDepth === 0) isOver = false;
-    }
-
-    function handleDrop(e: DragEvent) {
-        if (!dragCarriesFiles(e.dataTransfer)) return;
-        e.preventDefault();
-        dragDepth = 0;
-        isOver = false;
+    const dropZone = useFileDropZone((e) => {
         const taken = takeTransfer(e);
         if (!taken) return;
         void intake(taken);
-    }
+    });
+    const { handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = dropZone;
 
     return {
         get isOver() {
-            return isOver;
+            return dropZone.isOver;
         },
         insert,
         handlePaste,

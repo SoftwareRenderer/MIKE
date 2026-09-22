@@ -790,6 +790,27 @@
 </script>
 
 <div class="extensions-tab">
+    {#snippet buildRow(key: string)}
+        {@const bp = buildProgress[key]}
+        {#if bp}
+            <div class="ext-build" class:ext-build-error={!!bp.error}>
+                <div class="ext-build-bar"><div class="ext-build-fill" style="--pct: {bp.progress}%"></div></div>
+                <span class="ext-build-text">{bp.error || bp.message}</span>
+            </div>
+        {/if}
+    {/snippet}
+
+    {#snippet localPathRow(p: string | undefined)}
+        <div class="local-path">
+            <span class="local-path-label">{t('settings.extensions.path')}</span>
+            {#if p}
+                <code class="local-path-code" title={p}>{p}</code>
+            {:else}
+                <span class="local-path-unknown">{t('settings.extensions.pathUnavailable')}</span>
+            {/if}
+        </div>
+    {/snippet}
+
     {#if error}
         <div class="error-banner" role="button" tabindex="0" onclick={() => error = ''} onkeydown={(e) => e.key === 'Enter' && (error = '')}>
             {error}
@@ -1082,23 +1103,9 @@
                                     {/if}
                                 </div>
                             {/if}
-                            {#if buildProgress[ext.name]}
-                                {@const bp = buildProgress[ext.name]}
-                                <div class="ext-build" class:ext-build-error={!!bp.error}>
-                                    <div class="ext-build-bar"><div class="ext-build-fill" style="--pct: {bp.progress}%"></div></div>
-                                    <span class="ext-build-text">{bp.error || bp.message}</span>
-                                </div>
-                            {/if}
+                            {@render buildRow(ext.name)}
                             {#if isLocal && revealedLocalPath === ext.id}
-                                {@const p = ext.local_path}
-                                <div class="local-path">
-                                    <span class="local-path-label">{t('settings.extensions.path')}</span>
-                                    {#if p}
-                                        <code class="local-path-code" title={p}>{p}</code>
-                                    {:else}
-                                        <span class="local-path-unknown">{t('settings.extensions.pathUnavailable')}</span>
-                                    {/if}
-                                </div>
+                                {@render localPathRow(ext.local_path)}
                             {/if}
                             {#if ext.manifest.description}
                                 <p class="ext-description">{ext.manifest.description}</p>
@@ -1698,23 +1705,9 @@
                                     {/if}
                                 </div>
                             </div>
-                            {#if buildProgress[entry.name]}
-                                {@const bp = buildProgress[entry.name]}
-                                <div class="ext-build" class:ext-build-error={!!bp.error}>
-                                    <div class="ext-build-bar"><div class="ext-build-fill" style="--pct: {bp.progress}%"></div></div>
-                                    <span class="ext-build-text">{bp.error || bp.message}</span>
-                                </div>
-                            {/if}
+                            {@render buildRow(entry.name)}
                             {#if isUnpublished && revealedLocalPath === identityKey(entry.author, entry.name)}
-                                {@const p = entry.local_path}
-                                <div class="local-path">
-                                    <span class="local-path-label">{t('settings.extensions.path')}</span>
-                                    {#if p}
-                                        <code class="local-path-code" title={p}>{p}</code>
-                                    {:else}
-                                        <span class="local-path-unknown">{t('settings.extensions.pathUnavailable')}</span>
-                                    {/if}
-                                </div>
+                                {@render localPathRow(entry.local_path)}
                             {/if}
                             {#if entry.description}
                                 <p class="ext-description">{entry.description}</p>
@@ -2922,10 +2915,6 @@
         margin-right: 0.35rem;
     }
 
-    @keyframes spin {
-        to { transform: rotate(360deg); }
-    }
-
     .field-label {
         display: block;
         font-size: 0.8rem;
@@ -3144,5 +3133,4 @@
         border-color: var(--color-accent);
         color: var(--color-accent);
     }
-
 </style>

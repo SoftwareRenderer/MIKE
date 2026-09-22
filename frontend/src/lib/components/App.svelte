@@ -20,20 +20,18 @@
     import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
     import { useBoardArrowNav } from '$lib/composables/use-board-arrow-nav';
     import { createTabReturn } from '$lib/composables/use-tab-return';
-    import kanbanIcon from '$lib/assets/icons/kanban.svg';
+    import mikeIcon from '$lib/assets/icons/mike.svg';
     import type { Project, Task, Config, StreamEvent, SandboxMemoryStats, DiffStatsEntry, Board as BoardData } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
     import { setAppStreamRef } from '$lib/stream-ref';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
     import { localeOffer } from '$lib/services/locale-offer.svelte';
-    import { reportChunkFailure } from '$lib/services/chunk-failure';
     import { sandboxImageStatus } from '$lib/services/sandbox-image-status.svelte';
     import { updateCheck } from '$lib/services/update-check.svelte';
+    import { useLazyComponent } from '$lib/composables/use-lazy-component.svelte';
     import UpdateDot from './UpdateDot.svelte';
     const LAST_PROJECT_KEY = 'lastProjectId';
 
-    let TerminalPanelComponent: typeof import('./TerminalPanel.svelte').default | null = $state(null);
-    let terminalLoading = $state(false);
     import CreateTaskModal from './CreateTaskModal.svelte';
     import EditTaskModal from './Card/EditTaskModal.svelte';
     import ConfigModal from './ConfigModal.svelte';
@@ -52,18 +50,20 @@
     import TopBar from './App/TopBar.svelte';
     import LocaleOffer from './LocaleOffer.svelte';
 
-    function loadTerminalPanel(): void {
-        if (TerminalPanelComponent || terminalLoading) return;
-        terminalLoading = true;
-        import('./TerminalPanel.svelte').then((mod) => {
-            TerminalPanelComponent = mod.default;
-            terminalLoading = false;
-        }).catch((e) => {
-            // No latch: the next click asks again.
-            reportChunkFailure(e);
-            terminalLoading = false;
-        });
-    }
+    const terminalPanel = useLazyComponent(() => import('./TerminalPanel.svelte'));
+
+    /** The reconnect banner both stream connections drive. */
+    const reconnectCountdown = () => ({
+        onConnected: handleWsConnection,
+        onReconnectScheduled: (nextAttemptAt: number) => {
+            nextReconnectAt = nextAttemptAt;
+            startCountdown();
+        },
+        onConnectAttempt: () => {
+            stopCountdown();
+            countdownSeconds = 0;
+        },
+    });
 
     /**
      * Open the project terminal (terminal button and open-terminal shortcut).
@@ -71,7 +71,7 @@
      * it does not exist yet.
      */
     async function openTerminal(): Promise<void> {
-        loadTerminalPanel();
+        terminalPanel.load();
         const task = appStore.selectedTask;
         if (uiStore.showCardDetail && task && !task.worktree_exists && !task.branch) {
             try {
@@ -353,7 +353,7 @@
     });
 
     async function openTerminalScreen(key: string, projectId: string, task: Task | null): Promise<void> {
-        loadTerminalPanel();
+        terminalPanel.load();
         if (task && !task.worktree_exists && !task.branch) {
             try {
                 await initTask(projectId, task.id);
@@ -647,15 +647,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     taskEventContext.set({ task_id, ...event });
                 }
             },
-            onConnected: handleWsConnection,
-            onReconnectScheduled: (nextAttemptAt) => {
-                nextReconnectAt = nextAttemptAt;
-                startCountdown();
-            },
-            onConnectAttempt: () => {
-                stopCountdown();
-                countdownSeconds = 0;
-            },
+            ...reconnectCountdown(),
             onProjectPorts: (ports) => {
                 appStore.projectTerminalPorts = ports;
             },
@@ -888,15 +880,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onTaskDeleted: () => {},
             onCommitStatus: () => {},
             onTaskEvent: () => {},
-            onConnected: handleWsConnection,
-            onReconnectScheduled: (nextAttemptAt) => {
-                nextReconnectAt = nextAttemptAt;
-                startCountdown();
-            },
-            onConnectAttempt: () => {
-                stopCountdown();
-                countdownSeconds = 0;
-            },
+            ...reconnectCountdown(),
             onExtensionChange: handleExtensionChange,
         });
         setAppStreamRef(appStream);
@@ -1409,12 +1393,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 <!-- Login gate -->
 {#if isLoadingAuth}
     <div class="loading-screen">
-        <img class="loading-icon" src={kanbanIcon} width="96" height="96" alt="Loading" />
+        <img class="loading-icon" src={mikeIcon} width="96" height="96" alt="Loading" />
         {#if bootSlow}<p class="loading-slow">{t('app.bootSlow.title')}</p>{/if}
     </div>
 {:else if hasLocalCache}
     <div class="offline-screen">
-        <img class="offline-icon" src={kanbanIcon} width="96" height="96" alt="Offline" />
+        <img class="offline-icon" src={mikeIcon} width="96" height="96" alt="Offline" />
         <p class="offline-text">{bootSlow ? t('app.bootSlow.title') : t('app.offline.title')}</p>
         <button class="offline-btn" onclick={loadFromCache}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="6,3 20,12 6,21"/></svg>
@@ -1489,8 +1473,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     <!-- Main Content -->
     <main id="main-content" class="main" tabindex="-1">
         {#if terminalOnlyVal}
-            {#if terminalScreen.key !== '' && !terminalScreen.failed && TerminalPanelComponent}
-                {@const Terminal = TerminalPanelComponent}
+            {#if terminalScreen.key !== '' && !terminalScreen.failed && terminalPanel.component}
+                {@const Terminal = terminalPanel.component}
                 {#if Terminal}
                     <Terminal standalone />
                 {/if}
@@ -1500,7 +1484,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 </div>
             {:else}
                 <div class="loading-screen">
-                    <img class="loading-icon" src={kanbanIcon} width="96" height="96" alt="Loading" />
+                    <img class="loading-icon" src={mikeIcon} width="96" height="96" alt="Loading" />
                 </div>
             {/if}
         {:else if currentProject}
@@ -1709,9 +1693,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onSignOut={handleLogout}
         />
     {/if}
-    {#if uiStore.showTerminal && TerminalPanelComponent}
+    {#if uiStore.showTerminal && terminalPanel.component}
         {#key currentProject?.id + '-' + (currentProject?.sandbox_enabled ?? '')}
-            {@const Terminal = TerminalPanelComponent}
+            {@const Terminal = terminalPanel.component}
             {#if Terminal}
                 <Terminal />
             {/if}
@@ -1876,11 +1860,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
         to {
             transform: translateY(0);
-        }
-    }
-    @keyframes spin {
-        to {
-            transform: rotate(360deg);
         }
     }
     /* Shift app content down when banner is visible */

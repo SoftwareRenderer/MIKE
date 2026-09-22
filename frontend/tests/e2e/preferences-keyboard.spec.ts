@@ -462,7 +462,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await expect(page.locator(MULTI_CHIP)).not.toHaveText('Now modifier+click...');
 
         await page.locator(MULTI_CHIP).click();
-        await page.locator('.config-modal .section-label').first().click({ modifiers: ['Shift'] });
+        await page.locator('.config-modal .settings-section-title').first().click({ modifiers: ['Shift'] });
         await expect(page.locator(MULTI_CHIP)).toHaveText('Shift+Click');
 
         await page.locator(SAVE_BTN).click();

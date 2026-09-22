@@ -153,6 +153,8 @@
 {/if}
 
 <style>
+    @import '$lib/styles/shared.css';
+
     .chat-review-bar {
         display: flex;
         align-items: center;
@@ -237,14 +239,4 @@
         opacity: 0.5;
         cursor: not-allowed;
     }
-    .spinner-inline {
-        display: inline-block;
-        width: 14px;
-        height: 14px;
-        border: 2px solid currentColor;
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
 </style>

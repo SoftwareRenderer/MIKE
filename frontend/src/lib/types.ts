@@ -81,6 +81,21 @@ export interface Project {
     updated_at: string;
 }
 
+/** What `PUT /api/projects/{id}` takes — a partial update, so an absent field is left alone —
+ * mirroring `UpdateProjectRequest` in `backend/types/request.go`. */
+export interface ProjectUpdates {
+    name?: string;
+    sandbox_enabled?: boolean;
+    sandbox_network_isolation?: boolean;
+    sandbox_image?: string;
+    sandbox_dockerfile_path?: string;
+    sandbox_memory_limit?: number;
+    sandbox_forward_ports?: PortForward[];
+    sandbox_mounts?: SandboxMount[];
+    sandbox_envs?: SandboxEnv[];
+    sandbox_capabilities?: string[];
+}
+
 /** A dismissed memory alert and the numbers it showed, as the task row carries them. */
 export interface MemoryAlertAckPayload {
     peak_mb: number;

@@ -123,11 +123,6 @@
         border: 2px solid rgba(255, 255, 255, 0.3);
         border-top-color: rgba(255, 255, 255, 0.9);
         border-radius: 50%;
-        animation: image-spin 0.8s linear infinite;
-    }
-    @keyframes image-spin {
-        to {
-            transform: rotate(360deg);
-        }
+        animation: spin 0.8s linear infinite;
     }
 </style>

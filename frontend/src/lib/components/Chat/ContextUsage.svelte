@@ -132,7 +132,4 @@
         animation: spin 0.6s linear infinite;
         flex-shrink: 0;
     }
-    @keyframes spin {
-        to { transform: rotate(360deg); }
-    }
 </style>

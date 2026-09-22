@@ -11,13 +11,14 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import BaseModal from './BaseModal.svelte';
     import TaskDefaults from './ConfigModal/TaskDefaults.svelte';
+    import type { ProviderDraft } from './ConfigModal/drafts';
     import PreferencesTab from './ConfigModal/PreferencesTab.svelte';
     import ProviderCard from './ConfigModal/ProviderCard.svelte';
     import ExtensionsTab from './ConfigModal/ExtensionsTab.svelte';
     import SessionsSection from './ConfigModal/SessionsSection.svelte';
     import ApiTokensSection from './ConfigModal/ApiTokensSection.svelte';
     import UpdatesSection from './ConfigModal/UpdatesSection.svelte';
-    import pwaIcon from '$lib/assets/icons/pwa-icon.svg?raw';
+    import mikeLogo from '$lib/assets/icons/mike.svg?raw';
     import { checkNow, type UpdateOutcome } from '$lib/services/app-update';
     import { updateCheck } from '$lib/services/update-check.svelte';
 
@@ -73,47 +74,6 @@
     const currencySymbol = $derived(usdSymbol());
 
     // -- Provider management --
-    interface ModelEntry {
-        name: string;
-        readonly: boolean; // true = fetched from API, not editable
-        reasoning_effort?: string; // known level or custom value (passed through to the server)
-        context_window?: number | null; // nil if not reported by LLM; editable in UI
-        // Per-model overrides; null = inherit provider default
-        input_price?: number | null;
-        output_price?: number | null;
-        cache_read_price?: number | null;
-        cache_write_price?: number | null;
-        power_consumption_w?: number | null;
-    }
-
-    interface ProviderDraft {
-        uid: string; // stable key for {#each} — never changes after creation
-        id: number; // stable identifier for LLM providers; 0 = new/unsaved
-        name: string; // agent provider name (manifest-derived); empty for LLM providers
-        display_name?: string; // only agent providers carry a manifest-derived display name
-        kind: 'llm' | 'agent';
-        url: string;
-        api_key: string; // full value when editing, masked ("••••••••••") when loaded from config
-        agent_config_dir?: string;
-        models: ModelEntry[];
-        concurrency: number;
-        max_requests_per_second: number; // 0 = unlimited; max new LLM request starts per second
-        stream_idle_seconds: number; // 0 = no ceiling
-        // Pricing (USD per 1M tokens)
-        input_price: number;
-        output_price: number;
-        cache_read_price: number;
-        cache_write_price: number;
-        // Power & electricity
-        power_consumption_w: number;
-        electricity_cost_per_kwh: number;
-        fetchingModels: boolean;
-        fetchError: string;
-        expanded: boolean; // card expansion state
-        testingConnection: boolean;
-        testResult: { success: boolean; message: string } | null;
-    }
-
     /** The reference string for a provider: its stable ID (LLM) or name (agent). */
     function providerRef(p: { id?: number; name?: string; kind?: string }): string {
         return p.kind === 'agent' ? (p.name || '') : String(p.id ?? 0);
@@ -709,9 +669,9 @@
 
         <!-- Providers Tab -->
         {#if activeTab === 'providers'}
-            <div class="section">
+            <div class="settings-section">
                 <div class="section-header">
-                    <h3 class="section-label">{t('settings.primaryProviders')}</h3>
+                    <h3 class="settings-section-title">{t('settings.primaryProviders')}</h3>
                     <span class="field-help">{t('settings.primaryProvidersHelp')}</span>
                 </div>
                 <div class="primary-providers-list">
@@ -780,10 +740,10 @@
                 </div>
             </div>
 
-            <div class="section">
+            <div class="settings-section">
                 <div class="section-header">
-                    <h3 class="section-label">{t('settings.providers')}</h3>
-                    <div class="section-actions">
+                    <h3 class="settings-section-title">{t('settings.providers')}</h3>
+                    <div class="settings-section-actions">
                         <button type="button" class="btn-small" onclick={addProvider} title={t('settings.addProviderHint')}>{t('settings.addProvider')}</button>
                     </div>
                 </div>
@@ -856,11 +816,11 @@
 
         <!-- About Tab -->
         {#if activeTab === 'about'}
-            <div class="section">
+            <div class="settings-section">
                 <div class="about-header">
-                    <div class="about-icon">{@html pwaIcon}</div>
+                    <div class="about-icon">{@html mikeLogo}</div>
                     <div>
-                        <h3 class="section-label">{t('settings.aboutTitle')} <span class="about-version">{config?.version || 'dev'}</span></h3>
+                        <h3 class="settings-section-title">{t('settings.aboutTitle')} <span class="about-version">{config?.version || 'dev'}</span></h3>
                         <p class="about-description">{t('app.copyright', { year: 2026, name: 'Mike Wren' })}</p>
                         <p class="about-description">
                             <a href="https://github.com/SoftwareRenderer" target="_blank" rel="noopener noreferrer">
@@ -888,8 +848,8 @@
             <UpdatesSection bind:enabled={updateCheckEnabled} onDirty={markDirty} />
 
             {#if appStore.pwaInstallPrompt}
-            <div class="section">
-                <h3 class="section-label">{t('settings.pwa')}</h3>
+            <div class="settings-section">
+                <h3 class="settings-section-title">{t('settings.pwa')}</h3>
                 <button type="button" class="btn-pwa-install" onclick={handlePwaInstall} title={t('settings.pwaInstallHint')}>
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                         <path d="M8 2v9M5 8l3 3 3-3M3 12v2h10v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -899,8 +859,8 @@
             </div>
             {/if}
 
-            <div class="section">
-                <h3 class="section-label">{t('settings.systemInfo')}</h3>
+            <div class="settings-section">
+                <h3 class="settings-section-title">{t('settings.systemInfo')}</h3>
                 <div class="field-label">
                     <span class="field-label-inline">{t('settings.worktreesDir')}</span>
                     <div class="readonly-value">{config?.workspace_dir || '\u2014'}</div>
@@ -973,6 +933,7 @@
 
 <style>
     @import '$lib/styles/shared.css';
+    @import '$lib/styles/settings-section.css';
 
     /* Fixed modal size */
     :global(.config-modal) {
@@ -1065,31 +1026,11 @@
         padding-top: 8px;
     }
 
-    /* Section cards */
-    .section {
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        padding: 16px;
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-    }
-    .section-label {
-        margin: 0;
-        font-size: 0.875rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--color-text-secondary);
-    }
+    /* The panel box comes from settings-section.css; only the header row is here. */
     .section-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
-    }
-    .section-actions {
-        display: flex;
-        gap: 8px;
     }
     /* Field labels */
     .field-label {

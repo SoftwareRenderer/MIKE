@@ -194,9 +194,9 @@
     }
 </script>
 
-<section class="section">
+<section class="settings-section">
     <div class="section-header">
-        <h3 class="section-label">{t('settings.preferences.keyboard')}</h3>
+        <h3 class="settings-section-title">{t('settings.preferences.keyboard')}</h3>
     </div>
 
     <div class="shortcut-row">
@@ -251,9 +251,9 @@
     {/if}
 </section>
 
-<section class="section">
+<section class="settings-section">
     <div class="section-header">
-        <h3 class="section-label">{t('settings.preferences.ui')}</h3>
+        <h3 class="settings-section-title">{t('settings.preferences.ui')}</h3>
     </div>
     <div class="shortcut-row">
         <div class="shortcut-info">
@@ -300,28 +300,14 @@
 </section>
 
 <style>
-    .section {
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        padding: 16px;
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-    }
+    @import '$lib/styles/settings-section.css';
+
     .section-header {
         display: flex;
         align-items: baseline;
         justify-content: space-between;
         gap: 8px;
         flex-wrap: wrap;
-    }
-    .section-label {
-        margin: 0;
-        font-size: 0.875rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--color-text-secondary);
     }
     .shortcut-row {
         display: flex;

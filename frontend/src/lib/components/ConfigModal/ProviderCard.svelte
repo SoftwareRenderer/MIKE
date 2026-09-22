@@ -3,46 +3,11 @@
     import { dialogStore } from '$lib/stores';
     import { getProviderDisplayName } from '$lib/utils/providers';
     import { t } from '$lib/i18n';
+    import type { ProviderDraft } from './drafts';
     import AgentSection from './AgentSection.svelte';
     import HelpIcon from './HelpIcon.svelte';
     import ModelList from './ModelList.svelte';
     import PricingSection from './PricingSection.svelte';
-
-    interface ModelEntry {
-        name: string;
-        readonly: boolean;
-        reasoning_effort?: string; // known level or custom value (passed through to the server)
-        context_window?: number | null;
-        input_price?: number | null;
-        output_price?: number | null;
-        cache_read_price?: number | null;
-        cache_write_price?: number | null;
-        power_consumption_w?: number | null;
-    }
-
-    interface ProviderDraft {
-        name: string;
-        display_name?: string; // only agent providers carry a manifest-derived display name
-        kind: 'llm' | 'agent';
-        url: string;
-        api_key: string;
-        agent_config_dir?: string;
-        models: ModelEntry[];
-        concurrency: number;
-        max_requests_per_second: number; // 0 = unlimited; max new LLM request starts per second
-        stream_idle_seconds: number; // 0 = no ceiling; seconds a response may stay silent
-        input_price: number;
-        output_price: number;
-        cache_read_price: number;
-        cache_write_price: number;
-        power_consumption_w: number;
-        electricity_cost_per_kwh: number;
-        fetchingModels: boolean;
-        fetchError: string;
-        expanded: boolean;
-        testingConnection: boolean;
-        testResult: { success: boolean; message: string } | null;
-    }
 
     let { providers, provider, index, currencySymbol, onDragStart, onRemove, onFetchModels, onTestConnection, onAddModel, onRemoveModel, isDragging, onDirty }: {
         providers: ProviderDraft[];
@@ -424,9 +389,6 @@
     }
     .spin-icon {
         animation: spin 1s linear infinite;
-    }
-    @keyframes spin {
-        to { transform: rotate(360deg); }
     }
     .fetch-error {
         display: flex;

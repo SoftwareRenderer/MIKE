@@ -89,13 +89,7 @@
         border: 2px solid var(--color-border-bright);
         border-top-color: var(--color-accent-dark);
         border-radius: 50%;
-        animation: sandbox-image-spin 0.8s linear infinite;
-    }
-
-    @keyframes sandbox-image-spin {
-        to {
-            transform: rotate(360deg);
-        }
+        animation: spin 0.8s linear infinite;
     }
 
     .sandbox-image-status-error {

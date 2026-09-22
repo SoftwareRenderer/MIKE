@@ -668,7 +668,6 @@
         border-radius: 50%;
         animation: spin 0.6s linear infinite;
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
     /* Error entry styles */
     .error-entry {
         padding: 6px 0;
@@ -914,5 +913,4 @@
         color: var(--color-text-tertiary);
         font-style: italic;
     }
-
 </style>

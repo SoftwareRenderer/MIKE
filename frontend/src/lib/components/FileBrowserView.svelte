@@ -1,8 +1,8 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import {
-        copyFsPaths, deleteFsPaths, ensureCsrfToken, moveFsPaths, renameFsPath,
-        type FsOpsResult,
+        copyFsPaths, deleteFsPaths, ensureCsrfToken, listFsDirectory, moveFsPaths, renameFsPath,
+        type FsOpsResult, type FsEntry,
     } from '$lib/api';
     import { dialogStore } from '$lib/stores';
     import { useFileDropUpload } from '$lib/composables/use-file-drop-upload.svelte';
@@ -16,8 +16,6 @@
     import { t, type MessageKey } from '$lib/i18n';
     import { baseName, confirmList, pasteTarget, rowIsSelectable } from '$lib/utils/file-selection';
     import type { FsEvent } from '$lib/utils/fs-event';
-
-    type Entry = { name: string; isDir: boolean; path: string };
 
     /** A row's extra badge — the project explorer's git status letter and nothing else. */
     type EntryBadge = { char: string; cls: string; title: string; ariaLabel: string };
@@ -75,7 +73,7 @@
         onMutated?: () => void;
         /** Paths that no longer exist, so the editor can close any tab open on them. */
         onDeleted?: (paths: string[]) => void;
-        extraEntryInfo?: (entry: Entry) => EntryBadge | null;
+        extraEntryInfo?: (entry: FsEntry) => EntryBadge | null;
         /** Names the listing and its rows are addressed by outside this file. */
         listingClass?: string;
         rowClass?: string;
@@ -87,7 +85,7 @@
         onToggleFind?: () => void;
     } = $props();
 
-    let entries = $state<Entry[]>([]);
+    let entries = $state<FsEntry[]>([]);
     let currentPath = $state('');
     let loading = $state(true);
     let firstLoadComplete = $state(false);
@@ -155,39 +153,33 @@
         onPathChange(target);
         let retrying = false;
         try {
-            const res = await fetch(`/api/fs?path=${encodeURIComponent(target)}&files=1&${fsQuery()}`);
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                const msg = err.error || t('explorer.shared.errReadDir');
-                // 'directory not found' is the server's own error string — a wire value
-                // this retry guard compares against, never display copy, so it is not a key.
-                if (retryMissingDir && msg === 'directory not found' && missingDirRetries < MISSING_DIR_RETRIES) {
-                    missingDirRetries++;
-                    setTimeout(() => loadDir(target), MISSING_DIR_RETRY_MS);
-                    retrying = true;
-                }
-                throw new Error(msg);
-            }
-            const data = await res.json();
-            entries = (data.entries || [])
-                .filter((e: any) => {
+            const listing = await listFsDirectory({ path: target, files: true, project: projectId, task: taskId });
+            entries = listing.entries
+                .filter(e => {
                     if (e.name === '..') return false; // the listing prepends its own
                     if (!showDotFiles && e.name.startsWith('.')) return false;
                     if (e.isDir && ignoredDirs.has(e.name)) return false;
                     return true;
                 })
-                .sort((a: any, b: any) => {
+                .sort((a, b) => {
                     // Directories first, then files, alphabetical within each group
                     if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
                     return a.name.localeCompare(b.name);
                 });
             if (target !== rootPath) {
-                entries = [{ name: '..', isDir: true, path: target.split('/').slice(0, -1).join('/') }, ...entries];
+                entries = [{ name: '..', isDir: true, path: target.split('/').slice(0, -1).join('/'), isGitRepo: false }, ...entries];
             }
             missingDirRetries = 0;
             firstLoadComplete = true;
             if (!sameDir) selection.clear();
         } catch (e) {
+            // The server's own error string: a wire value this guard compares against, not copy.
+            if (retryMissingDir && e instanceof Error && e.message === 'directory not found'
+                && missingDirRetries < MISSING_DIR_RETRIES) {
+                missingDirRetries++;
+                setTimeout(() => loadDir(target), MISSING_DIR_RETRY_MS);
+                retrying = true;
+            }
             if (!retrying) {
                 error = String(e);
                 entries = [];
@@ -268,7 +260,7 @@
         }
     }
 
-    function openEntry(entry: Entry, pin: boolean) {
+    function openEntry(entry: FsEntry, pin: boolean) {
         if (entry.isDir) {
             loadDir(entry.path);
         } else {
@@ -375,7 +367,7 @@
     // The clipboard belongs to this panel alone: a cut must not survive a project switch.
 
     let clipboard = $state<{ mode: 'copy' | 'cut'; paths: string[] } | null>(null);
-    let menu = $state<{ x: number; y: number; entry: Entry | null } | null>(null);
+    let menu = $state<{ x: number; y: number; entry: FsEntry | null } | null>(null);
     let renaming = $state<string | null>(null);
     let renameValue = $state('');
     let renameInput = $state<HTMLInputElement | null>(null);
@@ -394,13 +386,13 @@
         return clipboard?.mode === 'cut' && clipboard.paths.includes(path);
     }
 
-    function handleRowClick(e: MouseEvent, entry: Entry, index: number): void {
+    function handleRowClick(e: MouseEvent, entry: FsEntry, index: number): void {
         if (renaming === entry.path) return;
         if (selection.handleClick(e, index)) openEntry(entry, false);
     }
 
     // suppress native right-click menu
-    function openMenuAt(e: MouseEvent | KeyboardEvent, x: number, y: number, entry: Entry | null, index: number): void {
+    function openMenuAt(e: MouseEvent | KeyboardEvent, x: number, y: number, entry: FsEntry | null, index: number): void {
         if (renaming) return;
         e.preventDefault();
         // Right-clicking a row outside the selection selects it first.

@@ -370,24 +370,4 @@
         font-family: var(--font-mono);
         font-size: 0.75rem;
     }
-
-    @keyframes fade-in {
-        from { opacity: 0; }
-        to { opacity: 1; }
-    }
-
-    @keyframes scale-in {
-        from {
-            opacity: 0;
-            transform: scale(0.95);
-        }
-        to {
-            opacity: 1;
-            transform: scale(1);
-        }
-    }
-
-    @keyframes spin {
-        to { transform: rotate(360deg); }
-    }
 </style>

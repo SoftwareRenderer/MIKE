@@ -7,4 +7,4 @@ export const appStore = new AppStore();
 export const uiStore = new UiStore();
 export const dialogStore = new DialogStore();
 
-export { persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, updateTaskInBoard, removeTaskFromBoard } from './app.svelte';
+export { persistCollapsedTasks, initExpandedTasks, updateTaskInBoard, removeTaskFromBoard } from './app.svelte';

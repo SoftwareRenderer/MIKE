@@ -474,7 +474,7 @@ export async function saveCollapsedDiffFiles(ids: Set<string>): Promise<void> {
  * @param projectId  Optional current project ID; if provided, also cleans stale message/diff caches for that project
  */
 export async function gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>, allProjectIds?: Set<string>, projectId?: string): Promise<void> {
-    await cleanCollapsedTasks(allTaskIds);
+    await pruneCollapsedTasks(allTaskIds);
 
     await cleanDraftTexts(allTaskIds);
 
@@ -503,8 +503,9 @@ export async function gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>,
     }
 }
 
-/** Remove collapsed task entries for deleted tasks. */
-async function cleanCollapsedTasks(allTaskIds: Set<string>): Promise<void> {
+/** Drop the collapsed entries whose task no longer exists and return the rest, judged against the
+ * set the caller names. */
+export async function pruneCollapsedTasks(allTaskIds: Set<string>): Promise<Set<string>> {
     const collapsed = await loadCollapsedTasks();
     let changed = false;
     for (const id of collapsed) {
@@ -516,6 +517,7 @@ async function cleanCollapsedTasks(allTaskIds: Set<string>): Promise<void> {
     if (changed) {
         await saveCollapsedTasks(collapsed);
     }
+    return collapsed;
 }
 
 /** Remove draft text entries for deleted tasks. */

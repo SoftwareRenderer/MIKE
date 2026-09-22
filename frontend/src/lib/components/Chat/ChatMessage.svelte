@@ -299,21 +299,26 @@
     {/if}
 {/snippet}
 
+{#snippet editForm(submitMode?: 'auto' | 'save')}
+    <EditForm
+        {content}
+        {attachments}
+        {isFirstUserMessage}
+        {isLastUserMessage}
+        {taskStatus}
+        {projectId}
+        taskId={msgTaskId}
+        {isSubmitting}
+        {submitMode}
+        onSubmit={submitEdit}
+        onCancel={cancelEdit}
+    />
+{/snippet}
+
 {#snippet userMessage()}
     <div class="message-wrapper user-wrapper">
         {#if isEditing && !isMobileCtx.isMobile}
-            <EditForm
-                {content}
-                {attachments}
-                {isFirstUserMessage}
-                {isLastUserMessage}
-                {taskStatus}
-                {projectId}
-                taskId={msgTaskId}
-                {isSubmitting}
-                onSubmit={submitEdit}
-                onCancel={cancelEdit}
-            />
+            {@render editForm()}
         {:else}
             {#if attachments && attachments.length > 0}
                 <div class="message-images">
@@ -351,19 +356,7 @@
 {#snippet assistantMessage()}
     <div class="message-wrapper assistant-wrapper">
         {#if isEditing && !isMobileCtx.isMobile}
-            <EditForm
-                {content}
-                {attachments}
-                {isFirstUserMessage}
-                {isLastUserMessage}
-                {taskStatus}
-                {projectId}
-                taskId={msgTaskId}
-                {isSubmitting}
-                submitMode={onEditSummary ? 'save' : 'auto'}
-                onSubmit={submitEdit}
-                onCancel={cancelEdit}
-            />
+            {@render editForm(onEditSummary ? 'save' : 'auto')}
         {:else}
             {#if interleavedLayout}
                 {@render interleavedContent()}
@@ -499,6 +492,8 @@
 {/snippet}
 
 <style>
+    @import '$lib/styles/shared.css';
+
     .chat-message {
         padding: 12px 0;
     }
@@ -949,14 +944,4 @@
         justify-content: center;
         padding: 0;
     }
-    .spinner-inline {
-        display: inline-block;
-        width: 14px;
-        height: 14px;
-        border: 2px solid currentColor;
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
 </style>

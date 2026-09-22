@@ -52,8 +52,8 @@
     }
 </script>
 
-<div class="section update-section">
-    <h3 class="section-label">{t('updates.title')}</h3>
+<div class="settings-section update-section">
+    <h3 class="settings-section-title">{t('updates.title')}</h3>
 
     <div class="update-row">
         <div class="update-row-info">
@@ -173,7 +173,9 @@
 </div>
 
 <style>
-    .update-section .section-label {
+    @import '$lib/styles/settings-section.css';
+
+    .update-section .settings-section-title {
         margin-bottom: 8px;
     }
 

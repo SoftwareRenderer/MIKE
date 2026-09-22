@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import BaseModal from './BaseModal.svelte';
-    import { ensureCsrfToken } from '$lib/api';
+    import { ensureCsrfToken, listFsDirectory, type FsEntry } from '$lib/api';
     import Icon from '$lib/components/Icon.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     // UI extension injection point — re-render when extensions change
@@ -29,7 +29,7 @@
     let sandboxEnabled = $state(true);
 
     let currentPath = $state('');
-    let entries = $state<{ name: string; isDir: boolean; path: string; isGitRepo: boolean }[]>([]);
+    let entries = $state<FsEntry[]>([]);
     let isGitRepo = $state(false);
     let loading = $state(false);
     let error = $state('');
@@ -57,15 +57,10 @@
         error = '';
         currentPath = path;
         try {
-            const res = await fetch(`/api/fs?path=${encodeURIComponent(path)}`);
-            if (!res.ok) {
-                const err = await res.json();
-                throw new Error(err.error || t('explorer.shared.errReadDir'));
-            }
-            const data = await res.json();
+            const listing = await listFsDirectory({ path });
             if (seq !== loadSeq) return; // a newer load won — keep its result
-            entries = data.entries || [];
-            isGitRepo = data.isGitRepo || false;
+            entries = listing.entries;
+            isGitRepo = listing.isGitRepo;
         } catch (e) {
             if (seq !== loadSeq) return;
             error = String(e);
@@ -75,7 +70,7 @@
         }
     }
 
-    function handleClick(entry: { isDir: boolean; path: string; isGitRepo: boolean }) {
+    function handleClick(entry: FsEntry) {
         if (entry.isGitRepo) {
             onSelect(entry.path, sandboxEnabled);
         } else if (entry.isDir) {
@@ -678,5 +673,4 @@
         cursor: pointer;
         accent-color: var(--color-primary);
     }
-
 </style>

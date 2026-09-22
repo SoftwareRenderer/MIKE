@@ -12,7 +12,7 @@
     import { LSPClient, serverCompletion, signatureHelp, serverDiagnostics, formatKeymap, renameKeymap, findReferencesKeymap } from '@codemirror/lsp-client';
     import { lspDefinitionActions } from '$lib/utils/lsp-hover-actions';
     import { isInsideWorkspace, relativeToRoot, type DefinitionTarget } from '$lib/utils/lsp-definition';
-    import { requestLSPChannel, type VirtualTransport } from '$lib/utils/lsp-connection-manager';
+    import { requestLSPChannel, type LSPTransportOptions, type VirtualTransport } from '$lib/utils/lsp-connection-manager';
     import { lspClientConfig } from '$lib/utils/lsp-client-config';
     import { isLSPAvailable } from '$lib/utils/lsp-connection-manager';
     import { SaveController, EDITOR_SAVE_SETTLED } from '$lib/utils/save-state';
@@ -1284,6 +1284,34 @@
         keymap.of([...formatKeymap, ...renameKeymap, ...findReferencesKeymap]),
     ];
 
+    /** The callbacks every LSP channel this editor opens answers to; `onReady` is a thunk because
+     * the resolver belongs to the connect call. */
+    const lspChannelOptions = (workspace: string, filePath: string, onReady: () => void): LSPTransportOptions => ({
+        workspace,
+        filePath,
+        onDisconnected: () => {
+            lspReady = false;
+            lspWorkspace = ''; // clear workspace on disconnect
+        },
+        onServerInfo: (name, version) => {
+            lspServerName = name;
+            if (version) {
+                try {
+                    const parsed = JSON.parse(version);
+                    lspServerVersion = parsed.Main?.Version || parsed.Version || version;
+                } catch {
+                    lspServerVersion = version;
+                }
+            } else {
+                lspServerVersion = '';
+            }
+        },
+        onReady: () => {
+            lspReady = true;
+            onReady();
+        },
+    });
+
     // The one config for both clients an editor builds (initial connect and reconnect).
     const lspClientConfigFor = (workspaceRoot: string) =>
         lspClientConfig({
@@ -1328,31 +1356,7 @@
 
                 // Request a virtual transport from the shared connection manager.
                 // All editors in the same workspace share one WebSocket.
-                const virtTransport = await requestLSPChannel({
-                    workspace: _wsRoot!,
-                    filePath: lspFilePath,
-                    onDisconnected: () => {
-                        lspReady = false;
-                        lspWorkspace = ''; // clear workspace on disconnect
-                    },
-                    onServerInfo: (name, version) => {
-                        lspServerName = name;
-                        if (version) {
-                            try {
-                                const parsed = JSON.parse(version);
-                                lspServerVersion = parsed.Main?.Version || parsed.Version || version;
-                            } catch {
-                                lspServerVersion = version;
-                            }
-                        } else {
-                            lspServerVersion = '';
-                        }
-                    },
-                    onReady: () => {
-                        lspReady = true;
-                        resolveReady();
-                    },
-                });
+                const virtTransport = await requestLSPChannel(lspChannelOptions(_wsRoot!, lspFilePath, () => resolveReady()));
                 lspTransport = virtTransport;
 
                 lspClient = new LSPClient(lspClientConfigFor(_wsRoot!));
@@ -1438,31 +1442,7 @@
                 lspTransport = null;
                 _lspClient?.disconnect();
 
-                const virtTransport = await requestLSPChannel({
-                    workspace: _wsRoot!,
-                    filePath: lspFilePath,
-                    onDisconnected: () => {
-                        lspReady = false;
-                        lspWorkspace = '';
-                    },
-                    onServerInfo: (name, version) => {
-                        lspServerName = name;
-                        if (version) {
-                            try {
-                                const parsed = JSON.parse(version);
-                                lspServerVersion = parsed.Main?.Version || parsed.Version || version;
-                            } catch {
-                                lspServerVersion = version;
-                            }
-                        } else {
-                            lspServerVersion = '';
-                        }
-                    },
-                    onReady: () => {
-                        lspReady = true;
-                        resolveReady();
-                    },
-                });
+                const virtTransport = await requestLSPChannel(lspChannelOptions(_wsRoot!, lspFilePath, () => resolveReady()));
                 lspTransport = virtTransport;
 
                 const newClient = new LSPClient(lspClientConfigFor(_wsRoot!));
@@ -1858,9 +1838,6 @@
     .file-editor.diff .save-spinner {
         animation: spin 0.8s linear infinite;
         transform-origin: center;
-    }
-    @keyframes spin {
-        to { transform: rotate(360deg); }
     }
     .file-editor.diff .confirm-overlay {
         position: absolute;

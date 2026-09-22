@@ -136,12 +136,6 @@
         border: 2px solid var(--color-border);
         border-top-color: var(--color-text-primary);
         border-radius: 50%;
-        animation: locale-offer-spin 0.8s linear infinite;
-    }
-
-    @keyframes locale-offer-spin {
-        to {
-            transform: rotate(360deg);
-        }
+        animation: spin 0.8s linear infinite;
     }
 </style>

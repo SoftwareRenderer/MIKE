@@ -57,6 +57,36 @@ describe('sendTaskMessage queueing on network failure', () => {
         expect(queue).toHaveLength(0);
     });
 
+    // A replay that loses the effort runs the task at the model's configured default instead
+    // (exec/loop.go falls back to GetModelReasoningEffort when the request carries none).
+    it('replays a queued send with the reasoning effort chosen for it', async () => {
+        const { sendTaskMessage } = await import('$lib/api/tasks');
+        const { loadQueue, flushQueueNow } = await import('$lib/api/queue');
+        mockRejectedFetch('TypeError');
+
+        await sendTaskMessage('p1', 't1', 'think harder', 'model-a', undefined, undefined, 'high');
+        expect((await loadQueue())[0].params).toMatchObject({ reasoningEffort: 'high' });
+
+        const sends: { url: string; body: string }[] = [];
+        vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: RequestInit) => {
+            const href = String(url);
+            if (href.includes('/api/auth/session')) {
+                return { ok: true, status: 200, json: async () => ({ authenticated: true, csrf_token: 'tok' }) };
+            }
+            sends.push({ url: href, body: String(init?.body) });
+            return { ok: true, status: 200, json: async () => ({ id: 'm1', role: 'user', content: 'think harder' }) };
+        }) as unknown as typeof fetch);
+
+        await flushQueueNow();
+
+        expect(sends.map(s => s.url)).toEqual(['/api/projects/p1/tasks/t1/send']);
+        expect(JSON.parse(sends[0].body)).toMatchObject({
+            content: 'think harder',
+            model_name: 'model-a',
+            reasoning_effort: 'high',
+        });
+    });
+
     it('does NOT queue and rejects on non-transient server errors (HTTP 500)', async () => {
         const { sendTaskMessage } = await import('$lib/api/tasks');
         const { loadQueue } = await import('$lib/api/queue');

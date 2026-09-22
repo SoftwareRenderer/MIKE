@@ -484,10 +484,7 @@
     border: 2px solid var(--color-border);
     border-top-color: var(--color-accent);
     border-radius: 50%;
-    animation: diff-spin 0.6s linear infinite;
-}
-@keyframes diff-spin {
-    to { transform: rotate(360deg); }
+    animation: spin 0.6s linear infinite;
 }
 
 /* Section grouping (Staged / Unstaged) */
@@ -575,7 +572,3 @@
     flex-direction: column;
     gap: 8px;
 }
-
-
-
-

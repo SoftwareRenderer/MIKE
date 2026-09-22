@@ -24,44 +24,19 @@
     import { t, type MessageKey } from '$lib/i18n';
     import TaskChat from './Chat/TaskChat.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
-    // Lazy-loaded on first diff view
-    let DiffViewerComponent: typeof import('./DiffViewer.svelte').default | null = $state(null);
-    let diffViewerLoading = $state(false);
-    function loadDiffViewer(): void {
-        if (DiffViewerComponent || diffViewerLoading) return;
-        diffViewerLoading = true;
-        import('./DiffViewer.svelte').then((mod) => {
-            DiffViewerComponent = mod.default;
-            diffViewerLoading = false;
-        }).catch((e) => {
-            reportChunkFailure(e);
-            diffViewerLoading = false;
-        });
-    }
     import CheckpointOverlay from './CardDetail/CheckpointOverlay.svelte';
     import DiffComparison from './CardDetail/DiffComparison.svelte';
-    // Lazy-loaded on first file edit (the diff-panel editor is FileEditor in 'diff' mode)
-    let FileEditorComponent: typeof import('./FileEditor.svelte').default | null = $state(null);
-    let fileEditorLoading = $state(false);
-    function loadDiffEditor(): void {
-        if (FileEditorComponent || fileEditorLoading) return;
-        fileEditorLoading = true;
-        import('./FileEditor.svelte').then((mod) => {
-            FileEditorComponent = mod.default;
-            fileEditorLoading = false;
-        }).catch((e) => {
-            reportChunkFailure(e);
-            fileEditorLoading = false;
-        });
-    }
     import MobileTabBar from './CardDetail/MobileTabBar.svelte';
     import { useMemoryAlert } from '$lib/composables/use-memory-alert.svelte';
-    import { reportChunkFailure } from '$lib/services/chunk-failure';
+    import { useLazyComponent } from '$lib/composables/use-lazy-component.svelte';
     import { memoryAlertAction, memoryAlertSentences, projectMemoryLimitMB } from '$lib/utils/memory-stats';
     import TaskHeader from './CardDetail/TaskHeader.svelte';
     import BoardOverview from './CardDetail/BoardOverview.svelte';
     import MultiSelectBar from './MultiSelectBar.svelte';
     import { useMultiSelectActions } from '$lib/composables/use-multi-select-actions.svelte';
+
+    const diffViewer = useLazyComponent(() => import('./DiffViewer.svelte'));
+    const diffEditor = useLazyComponent(() => import('./FileEditor.svelte'));
 
     let { task, tasks, projectPath, projectName, workspaceDir, sandboxEnabled, fsEventQueue, onClose, onSelectTask, onRefreshBoard, onOpenTerminal, onOpenExplorer, onOpenTask, activeTab: activeTabProp = 'chat', onActiveTabChange, floating = false }: { task: Task; tasks?: Task[]; projectPath?: string; projectName?: string; workspaceDir?: string; sandboxEnabled?: boolean; fsEventQueue?: { op: 'create' | 'delete'; path: string }[]; onClose: (status?: string) => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; onOpenTerminal?: () => void; onOpenExplorer?: () => void; onOpenTask?: () => void; activeTab?: 'context' | 'chat' | 'diff' | 'checkpoint'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff' | 'checkpoint') => void; /** Floating task view: narrow mobile-style window (Chat only) fixed at
      *  bottom-right over the current view — no navigation, app stays behind. */
@@ -262,7 +237,7 @@
     function handleDiffLineClick(relativePath: string, lineNumber: number) {
         const fullPath = resolveFilePath(relativePath);
         if (!fullPath) return;
-        loadDiffEditor();
+        diffEditor.load();
 
         if (shouldAutoFullscreenDiffEditor(diffColEl?.offsetWidth ?? 0, mobile)) {
             editorFullscreen = true;
@@ -408,12 +383,10 @@
     $effect(() => {
         const status = task.status;
         const branch = task.branch;
-        if (status !== 'backlog' && branch && !DiffViewerComponent && !diffViewerLoading) {
+        if (status !== 'backlog' && branch && !diffViewer.component && !diffViewer.loading) {
             loadDiff();
         }
     });
-
-
 
     // Status badge
     let badge = $derived.by(() => {
@@ -612,8 +585,6 @@
         const val = Number.parseFloat(String(v));
         if (!isNaN(val) && val > 0) chatRatio = val;
     }).catch(() => {});
-
-
 
     let detailEl: HTMLDivElement | null = null;
     let previousFocus: HTMLElement | null = null;
@@ -865,7 +836,7 @@
         diffLoading = true;
         diffReloadQueued = false;
         // Preload the diff viewer chunk while fetching diff data
-        loadDiffViewer();
+        diffViewer.load();
         try {
             // For done tasks, fetch the diff of committed changes.
             // Use branch_tip (captured at commit time) if available, otherwise fall back to branch name.
@@ -1103,8 +1074,8 @@
                 <div class="diff-content">
                     {#if editingFile}
                         <!-- Inline file editor (lazy-loaded) -->
-                        {#if FileEditorComponent}
-                            {@const FileEditor = FileEditorComponent}
+                        {#if diffEditor.component}
+                            {@const FileEditor = diffEditor.component}
                             <FileEditor
                                 mode="diff"
                                 filePath={editingFilePath}
@@ -1140,8 +1111,8 @@
                                     onToggleFullscreen={toggleDiffFullscreen}
                                     isFullscreen={diffFullscreen}
                                 />
-                                {#if DiffViewerComponent}
-                                    {@const DiffViewer = DiffViewerComponent}
+                                {#if diffViewer.component}
+                                    {@const DiffViewer = diffViewer.component}
                                     <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} loading={diffLoading} mergedLabel={isDoneTask ? t('task.diff.merged') : hasMergedSubtasks ? t('task.diff.mergedFromSubtasks') : t('task.diff.committedInTask')} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} imageSource={diffImageSource} />
                                 {:else}
                                     <div class="diff-viewer-loading">{t('task.loadingDiffViewer')}</div>

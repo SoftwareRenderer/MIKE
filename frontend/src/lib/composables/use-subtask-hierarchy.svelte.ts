@@ -1,5 +1,6 @@
 import type { Task } from '$lib/types';
-import { persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, appStore } from '$lib/stores';
+import { persistCollapsedTasks, initExpandedTasks, appStore } from '$lib/stores';
+import { pruneCollapsedTasks } from '$lib/storage';
 import { sortByLastMoved } from '$lib/utils/sort-tasks';
 
 /** Composable for subtask hierarchy management.
@@ -71,7 +72,7 @@ export function useSubtaskHierarchy(getAllTasks: () => Task[], expandedTasksCont
             expandedInitialized = true;
             (async () => {
                 const allIds = new Set(getAllTasks().map(t => t.id));
-                await cleanupCollapsedTasks(allIds);
+                await pruneCollapsedTasks(allIds);
                 expandedTasksContext.set(await initExpandedTasks(parentTaskIds));
             })().catch(() => {});
         }
@@ -123,7 +124,7 @@ export function useSubtaskHierarchy(getAllTasks: () => Task[], expandedTasksCont
         expandedTasksContext.set(next);
         const allIds = new Set(getAllTasks().map(t => t.id));
         persistCollapsedTasks(next, parentTaskIds).catch(() => {});
-        cleanupCollapsedTasks(allIds).catch(() => {});
+        pruneCollapsedTasks(allIds).catch(() => {});
     }
 
     return {

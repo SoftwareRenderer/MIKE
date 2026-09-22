@@ -9,24 +9,16 @@
     import { dialogStore } from '$lib/stores';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
     import { useFileSelection } from '$lib/composables/use-file-selection.svelte';
+    import { useLazyComponent } from '$lib/composables/use-lazy-component.svelte';
     import FileContextMenu, { type FileMenuItem } from './FileContextMenu.svelte';
     import SelectionActionBar from './SelectionActionBar.svelte';
     import Icon from './Icon.svelte';
     import stageIcon from '$lib/assets/icons/stage.svg?raw';
     import unstageIcon from '$lib/assets/icons/unstage.svg?raw';
     import discardIcon from '$lib/assets/icons/discard.svg?raw';
-    // Lazy-loaded on first diff view
-    let DiffViewerComponent: typeof import('./DiffViewer.svelte').default | null = $state(null);
-    let diffViewerLoading = $state(false);
-    function loadDiffViewer(): void {
-        if (DiffViewerComponent || diffViewerLoading) return;
-        diffViewerLoading = true;
-        import('./DiffViewer.svelte').then((mod) => {
-            DiffViewerComponent = mod.default;
-            diffViewerLoading = false;
-        }).catch(() => { diffViewerLoading = false; });
-    }
     import ResizeHandle from './ResizeHandle.svelte';
+
+    const diffViewer = useLazyComponent(() => import('./DiffViewer.svelte'));
 
     let { projectId, projectPath, onClose, isMobile, onCommitted, onUpdated, onEditFile }: {
         projectId: string;
@@ -346,7 +338,7 @@
         compareError = '';
         compareDiff = [];
         // Preload the diff viewer chunk
-        loadDiffViewer();
+        diffViewer.load();
         try {
             compareDiff = await getCommitDiffFiles(projectId, fromCommit, toCommit);
         } catch (e: any) {
@@ -580,7 +572,7 @@
         // Silent reloads (triggered by stage/unstage) update the panel in place
         if (!silent) loading = true;
         // Preload the diff viewer chunk while fetching data
-        loadDiffViewer();
+        diffViewer.load();
         try {
             // Fetch git status for sidebar
             const { status, head, authorName: author, authorEmail: email, ahead, behind } = await getGitStatus(projectId);
@@ -950,6 +942,33 @@
         <span class="panel-title">{t('git.changes')}</span>
         <!-- Commit comparison dropdowns -->
         <div class="commit-selectors" role="group" aria-label="Compare commits">
+            {#snippet commitList(commits: GitCommit[], selected: string, idBase: string, query: string, onPick: (commit: GitCommit) => void, onKeydown: (e: KeyboardEvent) => void, onFocusItem: (index: number) => void)}
+                {#each commits as commit, i}
+                    <button
+                        id={`${idBase}-item-${i}`}
+                        class="commit-dropdown-item"
+                        class:active={commit.hash === selected}
+                        onclick={() => onPick(commit)}
+                        onkeydown={onKeydown}
+                        onfocus={() => onFocusItem(i)}
+                        role="option"
+                        aria-selected={commit.hash === selected}
+                    >
+                        {#if commit.hash === selected}
+                            <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
+                                <polyline points="1.5,4 3,5.5 6.5,2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        {:else}
+                            <span class="commit-check-empty"></span>
+                        {/if}
+                        <span class="commit-dropdown-hash">{commit.short}</span>
+                        <span class="commit-dropdown-subject" title={commit.subject}>{commit.subject}</span>
+                    </button>
+                {/each}
+                {#if commits.length === 0 && query.trim()}
+                    <div class="commit-dropdown-empty">{t('git.noMatchingCommits')}</div>
+                {/if}
+            {/snippet}
             <div class="commit-selector" class:open={showFromDropdown} bind:this={fromDropdownEl}>
                 <div class="commit-combobox">
                     <svg class="commit-combobox-icon" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -1007,31 +1026,9 @@
                             <span class="commit-dropdown-hash" style="color: var(--color-status-green)">●</span>
                             <span class="commit-dropdown-subject">{t('git.current')}</span>
                         </button>
-                        {#each filteredFromCommits as commit, i}
-                            <button
-                                id={`compare-from-item-${i}`}
-                                class="commit-dropdown-item"
-                                class:active={commit.hash === fromCommit}
-                                onclick={() => { fromCommit = commit.hash; fromInputValue = commit.short; showFromDropdown = false; fromInputEl?.blur(); }}
-                                onkeydown={handleFromKeydown}
-                                onfocus={() => handleListItemFocus(i, 'from')}
-                                role="option"
-                                aria-selected={commit.hash === fromCommit}
-                            >
-                                {#if commit.hash === fromCommit}
-                                    <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
-                                        <polyline points="1.5,4 3,5.5 6.5,2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                    </svg>
-                                {:else}
-                                    <span class="commit-check-empty"></span>
-                                {/if}
-                                <span class="commit-dropdown-hash">{commit.short}</span>
-                                <span class="commit-dropdown-subject" title={commit.subject}>{commit.subject}</span>
-                            </button>
-                        {/each}
-                        {#if filteredFromCommits.length === 0 && fromInputValue.trim()}
-                            <div class="commit-dropdown-empty">{t('git.noMatchingCommits')}</div>
-                        {/if}
+                        {@render commitList(filteredFromCommits, fromCommit, 'compare-from', fromInputValue,
+                            (commit) => { fromCommit = commit.hash; fromInputValue = commit.short; showFromDropdown = false; fromInputEl?.blur(); },
+                            handleFromKeydown, (i) => handleListItemFocus(i, 'from'))}
                     </div>
                 {/if}
             </div>
@@ -1077,31 +1074,9 @@
                 </div>
                 {#if showToDropdown}
                     <div id="compare-to-listbox" class="commit-dropdown-list" role="listbox" aria-labelledby="compare-to-input">
-                        {#each filteredToCommits as commit, i}
-                            <button
-                                id={`compare-to-item-${i}`}
-                                class="commit-dropdown-item"
-                                class:active={commit.hash === toCommit}
-                                onclick={() => { toCommit = commit.hash; toInputValue = commit.short; showToDropdown = false; toInputEl?.blur(); }}
-                                onkeydown={handleToKeydown}
-                                onfocus={() => handleListItemFocus(i, 'to')}
-                                role="option"
-                                aria-selected={commit.hash === toCommit}
-                            >
-                                {#if commit.hash === toCommit}
-                                    <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
-                                        <polyline points="1.5,4 3,5.5 6.5,2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                    </svg>
-                                {:else}
-                                    <span class="commit-check-empty"></span>
-                                {/if}
-                                <span class="commit-dropdown-hash">{commit.short}</span>
-                                <span class="commit-dropdown-subject" title={commit.subject}>{commit.subject}</span>
-                            </button>
-                        {/each}
-                        {#if filteredToCommits.length === 0 && toInputValue.trim()}
-                            <div class="commit-dropdown-empty">{t('git.noMatchingCommits')}</div>
-                        {/if}
+                        {@render commitList(filteredToCommits, toCommit, 'compare-to', toInputValue,
+                            (commit) => { toCommit = commit.hash; toInputValue = commit.short; showToDropdown = false; toInputEl?.blur(); },
+                            handleToKeydown, (i) => handleListItemFocus(i, 'to'))}
                     </div>
                 {/if}
             </div>
@@ -1314,8 +1289,8 @@
             <div class="changes-diff">
                 {#if fromCommit !== CURRENT_TREE}
                     <!-- Commit comparison diff -->
-                    {#if DiffViewerComponent}
-                        {@const DiffViewer = DiffViewerComponent}
+                    {#if diffViewer.component}
+                        {@const DiffViewer = diffViewer.component}
                         <DiffViewer
                             committedFiles={compareDiff}
                             stagedFiles={[]}
@@ -1329,8 +1304,8 @@
                         <div class="compare-error" role="alert">{compareError}</div>
                     {/if}
                 {:else if stagedEntries.length > 0 || unstagedEntries.length > 0 || unstagedUntracked.length > 0 || fromCommit === CURRENT_TREE}
-                    {#if DiffViewerComponent}
-                        {@const DiffViewer = DiffViewerComponent}
+                    {#if diffViewer.component}
+                        {@const DiffViewer = diffViewer.component}
                         <DiffViewer
                             stagedFiles={sortedStagedFiles}
                             unstagedFiles={sortedUnstagedFiles}
@@ -1643,7 +1618,6 @@
         border-radius: 50%;
         animation: spin 0.6s linear infinite;
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
 
     /* Body: two-column layout */
     .panel-body {

@@ -1,5 +1,5 @@
 import type { Project, Board, Config, Task, Provider } from '$lib/types';
-import { loadCollapsedTasks, saveCollapsedTasks, loadAppSetting, saveAppSetting } from '$lib/storage';
+import { saveCollapsedTasks, pruneCollapsedTasks, loadAppSetting, saveAppSetting } from '$lib/storage';
 import { getConfig } from '$lib/api/config';
 import { isFromCache } from '$lib/api/cache';
 
@@ -119,32 +119,9 @@ export async function persistCollapsedTasks(expanded: Set<string>, parentTaskIds
     await saveCollapsedTasks(collapsed);
 }
 
-/** Clean stale entries from IndexedDB. */
-export async function cleanupCollapsedTasks(allTaskIds: Set<string>): Promise<Set<string>> {
-    const collapsed = await loadCollapsedTasks();
-    let changed = false;
-    for (const id of collapsed) {
-        if (!allTaskIds.has(id)) {
-            collapsed.delete(id);
-            changed = true;
-        }
-    }
-    if (changed) {
-        await saveCollapsedTasks(collapsed);
-    }
-    return collapsed;
-}
-
 /** Init expanded task IDs from IndexedDB. */
 export async function initExpandedTasks(parentTaskIds: Set<string>): Promise<Set<string>> {
-    const collapsed = await loadCollapsedTasks();
-    // Clean stale entries
-    for (const id of collapsed) {
-        if (!parentTaskIds.has(id)) {
-            collapsed.delete(id);
-        }
-    }
-    await saveCollapsedTasks(collapsed);
+    const collapsed = await pruneCollapsedTasks(parentTaskIds);
     // Expanded = all parent IDs minus collapsed
     const expanded = new Set<string>();
     for (const id of parentTaskIds) {

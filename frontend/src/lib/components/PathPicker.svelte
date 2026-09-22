@@ -5,8 +5,7 @@
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
     import { t } from '$lib/i18n';
-
-    interface Entry { name: string; isDir: boolean; path: string }
+    import { listFsDirectory, type FsEntry as Entry } from '$lib/api';
 
     let { title, initialPath, emptyLabel, selectTitle, fileFilter, onClose, onSelect }: {
         title: string;
@@ -50,15 +49,8 @@
         currentPath = path;
         selected = fileMode ? null : path; // selecting the directory itself
         try {
-            const res = await fetch(`/api/fs?path=${encodeURIComponent(path)}${fileMode ? '&files=1' : ''}`);
-            if (!res.ok) {
-                const err = await res.json();
-                throw new Error(err.error || t('explorer.shared.errReadDir'));
-            }
-            const data = await res.json();
-            entries = (data.entries || []).filter((e: Entry) =>
-                e.isDir || (fileFilter && fileFilter(e.name))
-            );
+            const listing = await listFsDirectory({ path, files: fileMode });
+            entries = listing.entries.filter(e => e.isDir || (fileFilter && fileFilter(e.name)));
         } catch (e) {
             error = String(e);
             entries = [];

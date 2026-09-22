@@ -55,6 +55,9 @@ function makeAgentExtension(): Extension {
 
 function makeProvider(kind: 'llm' | 'agent') {
     return {
+        // The same uid rule buildProviderDraft uses: an agent is keyed by name, a new LLM has no id yet.
+        uid: kind === 'agent' ? 'pi' : 'new-1',
+        id: 0,
         name: kind === 'agent' ? 'pi' : '',
         display_name: kind === 'agent' ? 'Pi Coding Agent' : '',
         kind,
