@@ -85,12 +85,39 @@ from `appStore.selectedTask` at mount: it waits for the project (and for the URL
 one), then creates the worktree with `initTask` — what `openTerminal()` does before it opens the panel —
 and shows the loading screen meanwhile, or the failure sentence when the worktree cannot be created.
 
+## Explorer file rows
+
+A row in either explorer's file list can open its own window two ways: **Open in new window** in the file
+menu, and a middle `mousedown` on the row (`button === 1`, cancelled so the browser's own autoscroll
+stays out). `openInNewWindow` in `FileBrowserView.svelte` is the one function both gestures reach, and
+`mousedown` is the event that carries the user activation a popup needs.
+
+**The rows are `<button>`s, and that is deliberate.** The file list owns right-click: it calls
+`preventDefault()` and draws its own menu, so the browser's link menu is unreachable on a row whatever
+the markup. An anchor's remaining offer is a middle click that opens a *tab*, and a window is what this
+row promises, so the handler cancels that default too. Keeping the row a button also keeps its
+`role="treeitem"` semantics and its long-press multi-select untouched.
+
+**The link is one the app already writes.** `explorerPathHref` in `$lib/utils/app-link.ts` builds
+`?project=&[task=&]view=explorer|task-explorer&file=<path>`; `explorerPathHref(…, isDir)` marks a folder
+by ending the value in `/`, and `parseExplorerFile` is the reader that tells the two apart. A folder link
+seeds the listing and opens no tab. A file link opens the tab, and the new window merges it into the tabs
+IndexedDB restores: both windows hold the same store, so a file link always arrives against a stored list.
+
+**Both explorer screens take `initialFile`,** and each clamps it twice: `explorerPathRoots` with
+`fileWithinRoots` decide in `handlePopState` which roots a `file=` may sit under (the checkout, the URL
+task's worktree, and each container mount), and `ExplorerCore.isPathSafe` clamps again where the path is
+opened. The `..` row is refused by both entrances through `rowIsSelectable`.
+
 ## Tests
 
 `components/__tests__/link-rows.unit.svelte.ts` (hrefs, click/modifier routing, Space, cloning,
 overlay attributes), `components/__tests__/explorer-buttons-are-links.unit.svelte.ts` (both Explorer
 buttons), `components/__tests__/terminal-buttons-are-links.unit.svelte.ts` (the three terminal links and
-the link each explorer hands its header), `utils/__tests__/app-link.unit.ts` (the hrefs and the reader),
+the link each explorer hands its header),
+`components/__tests__/file-browser-context-menu.unit.svelte.ts` (the file rows' window item, the URL it
+carries, and the middle-button gesture), `utils/__tests__/app-link.unit.ts` (the hrefs, the reader, the
+file param's roots),
 `utils/__tests__/keyboard.unit.ts` (click bindings), e2e
 `link-like-rows.spec.ts` (middle-click opens a real tab, no document navigation on left click, drag
 source is the card not the link, second tab lands on the linked project/task/explorer, and the terminal

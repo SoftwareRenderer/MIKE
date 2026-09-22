@@ -3,11 +3,13 @@
     import { t } from '$lib/i18n';
     import { taskRelativeFsPath, type FsEvent } from '$lib/utils/fs-event';
 
-    let { projectId, projectName, taskId, taskPath, sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange, onToggleFind, onDeleted }: {
+    let { projectId, projectName, taskId, taskPath, initialPath = '', sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange, onToggleFind, onDeleted }: {
         projectId: string;
         projectName: string;
         taskId: string;
         taskPath: string;
+        /** Where the first listing opens — the folder a deep link named, when there was one. */
+        initialPath?: string;
         sandboxEnabled: boolean;
         unsavedFiles: string[];
         pendingFsEvent: FsEvent | null;
@@ -39,6 +41,7 @@
     {projectId}
     {taskId}
     {rootPath}
+    {initialPath}
     navMode="breadcrumb"
     showDotFiles={false}
     retryMissingDir

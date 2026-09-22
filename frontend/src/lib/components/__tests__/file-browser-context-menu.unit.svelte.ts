@@ -13,6 +13,9 @@ const LISTING: Record<string, { name: string; isDir: boolean; path: string }[]> 
         { name: 'a.txt', isDir: false, path: `${ROOT}/a.txt` },
         { name: 'b.txt', isDir: false, path: `${ROOT}/b.txt` },
     ],
+    [`${ROOT}/src`]: [
+        { name: 'main.go', isDir: false, path: `${ROOT}/src/main.go` },
+    ],
 };
 
 // Every POST the listing made, in order.
@@ -59,11 +62,11 @@ afterEach(() => {
     dialogStore.toast = null;
 });
 
-function openBrowser() {
+function openBrowser({ taskId = TASK }: { taskId?: string } = {}) {
     return render(FileBrowserView, {
         props: {
             projectId: PROJECT,
-            taskId: TASK,
+            taskId,
             rootPath: ROOT,
             navMode: 'path',
             unsavedFiles: [] as string[],
@@ -83,6 +86,12 @@ async function loadRoot(container: HTMLElement) {
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(container.querySelectorAll('.file-browser-item').length).toBe(3));
+}
+
+// A folder row is how a listing goes down one level and answers with the `..` row it prepends.
+async function enterFolder(container: HTMLElement, path: string) {
+    await fireEvent.click(rowEl(container, path)!);
+    await waitFor(() => expect(rowEl(container, path.substring(0, path.lastIndexOf('/')))).toBeTruthy());
 }
 
 const rowEl = (container: HTMLElement, path: string) =>
@@ -112,7 +121,7 @@ describe('the file list context menu', () => {
 
         await openRowMenu(container, `${ROOT}/a.txt`);
         expect(rowEl(container, `${ROOT}/a.txt`)?.getAttribute('aria-selected')).toBe('true');
-        expect(menuLabels()).toEqual(['Open', 'Cut', 'Copy', 'Rename', 'Delete']);
+        expect(menuLabels()).toEqual(['Open', 'Open in new window', 'Cut', 'Copy', 'Rename', 'Delete']);
         expect(menuEl()?.getAttribute('aria-label')).toBe('File actions');
     });
 
@@ -125,7 +134,7 @@ describe('the file list context menu', () => {
         await openRowMenu(container, `${ROOT}/a.txt`);
         expect(rowEl(container, `${ROOT}/b.txt`)?.getAttribute('aria-selected')).toBe('true');
         // A batch of two has no single name to rename.
-        expect(menuLabels()).toEqual(['Open', 'Cut', 'Copy', 'Delete']);
+        expect(menuLabels()).toEqual(['Open', 'Open in new window', 'Cut', 'Copy', 'Delete']);
     });
 
     // fireEvent returns false once the handler has prevented the default, which is what keeps the
@@ -270,5 +279,84 @@ describe('the file list context menu', () => {
 
         await waitFor(() => expect(dialogStore.toast?.type).toBe('error'));
         expect(dialogStore.toast?.message).toBe('1 item was not changed: it no longer exists');
+    });
+});
+
+describe('opening a row in a new window', () => {
+    // jsdom has no window.open, and the popup's geometry is not what these tests are about.
+    function stubOpen() {
+        const open = vi.fn((_href: string, _target: string, _features: string) => null);
+        vi.stubGlobal('open', open);
+        return open;
+    }
+
+    // A middle button is a `mousedown` whose default the listing cancels: the browser's own
+    // autoscroll has to go, and the click event never fires for button 1.
+    async function middlePress(el: Element): Promise<MouseEvent> {
+        const ev = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 1, buttons: 1 });
+        await fireEvent(el, ev);
+        return ev;
+    }
+
+    it('hands the task explorer a link to the file the row names', async () => {
+        const open = stubOpen();
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        await openRowMenu(container, `${ROOT}/a.txt`);
+        menuItem('Open in new window')!.click();
+
+        expect(open).toHaveBeenCalledTimes(1);
+        expect(open.mock.calls[0][0]).toBe(`/?project=${PROJECT}&task=${TASK}&view=task-explorer&file=${ROOT}/a.txt`);
+        expect(open.mock.calls[0][2].startsWith('popup=yes')).toBe(true);
+    });
+
+    it('names the project explorer when the listing belongs to no task', async () => {
+        const open = stubOpen();
+        const { container } = openBrowser({ taskId: '' });
+        await loadRoot(container);
+
+        await openRowMenu(container, `${ROOT}/a.txt`);
+        menuItem('Open in new window')!.click();
+
+        expect(open.mock.calls[0][0]).toBe(`/?project=${PROJECT}&view=explorer&file=${ROOT}/a.txt`);
+    });
+
+    it('marks a folder link with the slash that tells the new window to list it', async () => {
+        const open = stubOpen();
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        await openRowMenu(container, `${ROOT}/src`);
+        menuItem('Open in new window')!.click();
+
+        expect(open.mock.calls[0][0]).toBe(`/?project=${PROJECT}&task=${TASK}&view=task-explorer&file=${ROOT}/src/`);
+    });
+
+    it('opens on a middle click, which the row cancels out of the browser’s hands', async () => {
+        const open = stubOpen();
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        const press = await middlePress(rowEl(container, `${ROOT}/a.txt`)!);
+
+        expect(press.defaultPrevented).toBe(true);
+        expect(open).toHaveBeenCalledTimes(1);
+        expect(open.mock.calls[0][0]).toBe(`/?project=${PROJECT}&task=${TASK}&view=task-explorer&file=${ROOT}/a.txt`);
+    });
+
+    it('is not offered for the row above the root, which no explorer will open', async () => {
+        const open = stubOpen();
+        const { container } = openBrowser();
+        await loadRoot(container);
+        await enterFolder(container, `${ROOT}/src`);
+
+        await openRowMenu(container, ROOT);
+        expect(menuLabels()).not.toContain('Open in new window');
+
+        const press = await middlePress(rowEl(container, ROOT)!);
+
+        expect(press.defaultPrevented).toBe(false);
+        expect(open).not.toHaveBeenCalled();
     });
 });

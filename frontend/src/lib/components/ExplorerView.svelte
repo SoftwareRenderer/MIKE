@@ -2,9 +2,9 @@
     import { onMount, onDestroy } from 'svelte';
     import { getGitLogFull, getGitBranches, checkoutBranch, getCommitDiffFiles } from '$lib/api';
     import { toHomeRelative } from '$lib/utils/path';
-    import { projectTerminalHref } from '$lib/utils/app-link';
+    import { projectTerminalHref, parseExplorerFile } from '$lib/utils/app-link';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
-    import { fromPersistedTabs } from '$lib/utils/editor-tabs';
+    import { fromPersistedTabs, mergeRestoredTabs } from '$lib/utils/editor-tabs';
     import { ExplorerCore, type ExplorerProps } from '$lib/services/explorer-core.svelte';
     import { ExplorerLayout } from '$lib/services/explorer-layout.svelte';
     import { t } from '$lib/i18n';
@@ -28,7 +28,7 @@
     let loadingBranches = $state(true);
     let checkoutLoading = $state(false);
     let showDropdown = $state(false);
-    let currentFolderPath = $state('');
+    let navigatedFolder = $state('');
 
     const core = new ExplorerCore({
         storageKey: () => projectId,
@@ -52,7 +52,14 @@
 
     const layout = new ExplorerLayout(isMobileCtx);
 
-    let initialSafeFile = $derived(core.isPathSafe(initialFile) ? initialFile : '');
+    /** What the URL hands this explorer: a path inside it, and whether it names a folder to list. */
+    let urlTarget = $derived.by(() => {
+        const target = parseExplorerFile(initialFile);
+        return core.isPathSafe(target.path) ? target : { path: '', isDir: false };
+    });
+    let urlFolder = $derived(urlTarget.path.substring(0, urlTarget.isDir ? urlTarget.path.length : urlTarget.path.lastIndexOf('/')));
+    /** The folder the listing shows: the URL's until the user navigates, then theirs. */
+    let currentFolderPath = $derived(navigatedFolder || urlFolder || (sandboxEnabled ? mountPath : projectPath));
 
     // Sync selectedBranch when the parent updates currentBranch via WebSocket
     $effect(() => {
@@ -113,8 +120,10 @@
         if (branch) void core.loadCommits();
     });
 
-    // Clear open files when project changes, then restore from IndexedDB. The project view adopts
-    // the stored list as it stands — unlike the task view, its tabs are not filtered to one root.
+    // Clear open files when project changes, then restore from IndexedDB. The project view keeps the
+    // stored list as it stands — unlike the task view, its tabs are not filtered to one root — but
+    // merges in a tab that arrived while the restore was in flight, which is what a window opened from
+    // a file link brings: its own tab, ahead of the ones the other window left behind.
     $effect(() => {
         const _ = projectId;
         core.resetTabs();
@@ -122,17 +131,20 @@
             if (!saved) return;
             core.scrollTops = saved.scrollTops ?? {};
             core.fileListScroll = saved.fileListScroll ?? 0;
-            if (saved.openFiles.length > 0) {
-                core.applyTabs(fromPersistedTabs(saved.openFiles), saved.activeFilePath, new Set(saved.pinnedFiles));
-                core.updateFile(saved.activeFilePath || null);
-            }
+            if (saved.openFiles.length === 0) return;
+            const openWas = core.activeFilePath;
+            const restored = mergeRestoredTabs(core.openFiles, fromPersistedTabs(saved.openFiles));
+            const active = openWas || saved.openFiles.find(f => f.path === saved.activeFilePath)?.path || '';
+            core.applyTabs(restored, active, new Set(saved.pinnedFiles));
+            if (!openWas) core.updateFile(active || null);
         }).catch(() => {});
     });
 
-    // Sync selected file from URL on mount and when initialFile updates
+    // Sync selected file from URL on mount and when initialFile updates. A folder link opens no tab:
+    // it only seeds the listing, which currentFolderPath does.
     $effect(() => {
-        const file = initialFile;
-        if (file && core.isPathSafe(file) && core.openFiles.length === 0) {
+        const file = urlTarget.path;
+        if (file && !urlTarget.isDir && core.openFiles.length === 0) {
             core.openFiles = [{ path: file, targetLine: 0, reveal: 0 }];
             core.activeFilePath = file;
         }
@@ -145,10 +157,7 @@
     $effect(() => {
         if (projectPath && seededForProject !== projectPath) {
             seededForProject = projectPath;
-            currentFolderPath = '';
-        }
-        if (!currentFolderPath) {
-            currentFolderPath = initialSafeFile ? initialSafeFile.substring(0, initialSafeFile.lastIndexOf('/')) : (sandboxEnabled ? mountPath : projectPath);
+            navigatedFolder = '';
         }
     });
 
@@ -256,7 +265,7 @@
                 pendingFsEvent={core.pendingFsEvent}
                 onFileSelected={core.handleFileSelected}
                 onDeleted={core.handleFilesDeleted}
-                onPathChange={(p) => currentFolderPath = p}
+                onPathChange={(p) => navigatedFolder = p}
                 onToggleFind={core.toggleFind}
             />
         {/snippet}

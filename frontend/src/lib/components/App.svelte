@@ -13,7 +13,7 @@
     import { dataAgeText } from '$lib/utils/format-time';
     import { resolveBoardLandingColumn, resolveClosedTaskColumn, mergeTaskUpdateIntoBoard } from '$lib/utils/task-utils';
     import { resolveLandingProject } from '$lib/utils/project-landing';
-    import { TERMINAL_VIEW, asksForTerminal } from '$lib/utils/app-link';
+    import { TERMINAL_VIEW, asksForTerminal, explorerPathRoots, fileWithinRoots } from '$lib/utils/app-link';
     import { reviewNotifier } from '$lib/services/review-notifications.svelte';
     import { getBoardCache, getBoardCacheEntry, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, clearAll, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
@@ -443,14 +443,14 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         const taskId = params.get('task');
         const fileParam = params.get('file') || '';
         const fileProject = (projectId ? projects.find(p => p.id === projectId) : null) ?? currentProject;
-        const fileProjectPath = fileProject?.path ?? '';
-        const fileProjectBase = fileProjectPath.split('/').filter(Boolean).pop() ?? '';
-        const fileSandboxMount = fileProject?.sandbox_enabled && fileProjectBase
-            ? '/home/sandbox/' + fileProjectBase
-            : '';
-        const fileInBounds = (fileProjectPath && fileParam.startsWith(fileProjectPath)) ||
-            (fileSandboxMount && fileParam.startsWith(fileSandboxMount));
-        urlFileId = fileParam && fileInBounds ? fileParam : '';
+        const fileRoots = fileProject
+            ? explorerPathRoots({
+                projectPath: fileProject.path, projectName: fileProject.name,
+                sandboxEnabled: !!fileProject.sandbox_enabled, workspaceDir: cfg?.workspace_dir,
+                projectId: fileProject.id, taskId: taskId || undefined,
+            })
+            : [];
+        urlFileId = fileWithinRoots(fileParam, fileRoots) ? fileParam : '';
 
         if (!projectId && currentProject) {
             const landing = await landingProject();
@@ -1527,10 +1527,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         taskPath={cfg?.workspace_dir ? `${cfg.workspace_dir}/${currentProject.id}/${appStore.selectedTask.id}` : ''}
                         taskBranch={appStore.selectedTask.branch || ''}
                         taskStatus={appStore.selectedTask.status || ''}
+                        initialFile={urlFileId || ''}
                         sandboxEnabled={currentProject.sandbox_enabled ?? false}
                         fsEventQueue={fsEventQueue}
                         onOpenTerminal={openTerminal}
-                        onUpdateFile={(path: string | null) => { if (path) updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: urlChangesOpen ? 'task-review' : 'task-explorer', file: path }, false, true); }}
+                        onUpdateFile={(path: string | null) => updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: urlChangesOpen ? 'task-review' : 'task-explorer', file: path }, false, !!path)}
                         changesOpen={urlChangesOpen}
                         onChangesOpen={(open: boolean) => updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: open ? 'task-review' : 'task-explorer' }, false, open)}
                         onClose={() => { showTaskExplorerVal = false; updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: null, file: null }, false, true); fsEventQueue = []; }}

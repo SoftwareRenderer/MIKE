@@ -14,6 +14,7 @@
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
     import { t, type MessageKey } from '$lib/i18n';
+    import { explorerPathHref } from '$lib/utils/app-link';
     import { baseName, confirmList, pasteTarget, rowIsSelectable } from '$lib/utils/file-selection';
     import type { FsEvent } from '$lib/utils/fs-event';
 
@@ -268,6 +269,22 @@
         }
     }
 
+    /**
+     * The row in a window of its own: the same deep link the app writes for this explorer, opened on
+     * this path. A popup rather than a tab because a window is what was asked for.
+     */
+    function openInNewWindow(entry: FsEntry): void {
+        const width = Math.round(window.innerWidth * 0.8);
+        const height = Math.round(window.innerHeight * 0.8);
+        const left = Math.max(0, Math.round((window.screen.availWidth - width) / 2));
+        const top = Math.max(0, Math.round((window.screen.availHeight - height) / 2));
+        window.open(
+            explorerPathHref(projectId, taskId, entry.path, entry.isDir),
+            '_blank',
+            `popup=yes,width=${width},height=${height},left=${left},top=${top}`,
+        );
+    }
+
     /** Resolve a typed path against the root, so `..` cannot walk out of the project. */
     function resolveWithinRoot(typed: string) {
         const rootParts = rootPath.replace(/\/$/, '').split('/').filter(Boolean);
@@ -391,6 +408,14 @@
         if (selection.handleClick(e, index)) openEntry(entry, false);
     }
 
+    // `mousedown` rather than `auxclick`: it is the event that carries the user activation a popup
+    // needs, and cancelling it is what stops the browser's own middle-button autoscroll.
+    function handleRowMiddleClick(e: MouseEvent, entry: FsEntry): void {
+        if (e.button !== 1 || renaming === entry.path || !rowIsSelectable(entry)) return;
+        e.preventDefault();
+        openInNewWindow(entry);
+    }
+
     // suppress native right-click menu
     function openMenuAt(e: MouseEvent | KeyboardEvent, x: number, y: number, entry: FsEntry | null, index: number): void {
         if (renaming) return;
@@ -413,6 +438,10 @@
         const paths = selectedPaths;
         const items: FileMenuItem[] = [];
         if (entry) items.push({ label: t('explorer.shared.menuOpen'), icon: 'open', run: () => openEntry(entry, false) });
+        // `..` points above the root this listing is jailed to, so it has no window of its own.
+        if (entry && rowIsSelectable(entry)) {
+            items.push({ label: t('explorer.shared.menuOpenWindow'), icon: 'window', run: () => openInNewWindow(entry) });
+        }
         if (paths.length > 0) {
             items.push({ label: t('explorer.shared.menuCut'), icon: 'cut', disabled: mutating, run: () => setClipboard('cut', paths) });
             items.push({ label: t('explorer.shared.menuCopy'), icon: 'copy', disabled: mutating, run: () => setClipboard('copy', paths) });
@@ -745,6 +774,7 @@
                     data-index={i}
                     onclick={(e) => handleRowClick(e, entry, i)}
                     ondblclick={() => openEntry(entry, true)}
+                    onmousedown={(e) => handleRowMiddleClick(e, entry)}
                     oncontextmenu={(e) => openMenuAt(e, e.clientX, e.clientY, entry, i)}
                     onpointerdown={(e) => selection.handlePointerDown(e, i)}
                     onpointermove={selection.handlePointerMove}

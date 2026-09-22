@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { getTaskGitLog, getTaskCommitDiffFiles, initTask } from '$lib/api';
     import { toHomeRelative, toExplorerPath } from '$lib/utils/path';
-    import { taskTerminalHref } from '$lib/utils/app-link';
+    import { taskTerminalHref, parseExplorerFile } from '$lib/utils/app-link';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { fromPersistedTabs, mergeRestoredTabs } from '$lib/utils/editor-tabs';
     import { ExplorerCore, type ExplorerProps } from '$lib/services/explorer-core.svelte';
@@ -12,12 +12,14 @@
     import ExplorerWorkspace from './ExplorerWorkspace.svelte';
     import TaskFileBrowser from './TaskFileBrowser.svelte';
 
-    let { projectId, projectName, taskId, taskPath, taskBranch, taskStatus, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile, changesOpen, onChangesOpen }: ExplorerProps & {
+    let { projectId, projectName, taskId, taskPath, taskBranch, taskStatus, initialFile, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile, changesOpen, onChangesOpen }: ExplorerProps & {
         projectName: string;
         taskId: string;
         taskPath: string;
         taskBranch: string;
         taskStatus: string;
+        /** The path the URL names: inside this task's worktree, or its container mount. */
+        initialFile: string;
     } = $props();
 
     const isMobileCtx = useIsMobile();
@@ -26,7 +28,7 @@
     let mountPath = $derived(sandboxEnabled ? '/home/sandbox/' + projectName : '');
 
     let selectedBranch = $state('');
-    let currentFolderPath = $state('');
+    let navigatedFolder = $state('');
 
     const core = new ExplorerCore({
         storageKey: () => projectId,
@@ -45,6 +47,15 @@
     });
 
     const layout = new ExplorerLayout(isMobileCtx);
+
+    /** What the URL hands this explorer: a path inside the worktree, and whether it names a folder. */
+    let urlTarget = $derived.by(() => {
+        const target = parseExplorerFile(initialFile);
+        return core.isPathSafe(target.path) ? target : { path: '', isDir: false };
+    });
+    let urlFolder = $derived(urlTarget.path.substring(0, urlTarget.isDir ? urlTarget.path.length : urlTarget.path.lastIndexOf('/')));
+    /** The folder the listing shows: the URL's until the user navigates, then theirs. */
+    let currentFolderPath = $derived(navigatedFolder || urlFolder || (sandboxEnabled ? mountPath : taskPath));
 
     /** An unassigned task has no worktree yet, and there is nothing to read until it gets one. */
     async function ensureWorktree(): Promise<boolean> {
@@ -90,9 +101,14 @@
         }).catch(() => {});
     });
 
+    // Sync selected file from URL on mount and when initialFile updates. A folder link opens no tab:
+    // it only seeds the listing, which currentFolderPath does. Through handleFileSelected, so the open
+    // waits for the worktree a task that has never run has yet to be given one.
     $effect(() => {
-        if (!currentFolderPath) {
-            currentFolderPath = sandboxEnabled ? mountPath : taskPath;
+        const file = urlTarget.path;
+        if (file && !urlTarget.isDir && core.openFiles.length === 0) {
+            core.handleFileSelected(file);
+            core.activeTab = 'editor';
         }
     });
 
@@ -156,12 +172,13 @@
                 projectName={projectName}
                 taskId={taskId}
                 taskPath={taskPath}
+                initialPath={currentFolderPath}
                 sandboxEnabled={sandboxEnabled}
                 unsavedFiles={[...core.unsavedFiles]}
                 pendingFsEvent={core.pendingFsEvent}
                 onFileSelected={core.handleFileSelected}
                 onDeleted={core.handleFilesDeleted}
-                onPathChange={(p) => currentFolderPath = p}
+                onPathChange={(p) => navigatedFolder = p}
                 onToggleFind={core.toggleFind}
             />
         {/snippet}

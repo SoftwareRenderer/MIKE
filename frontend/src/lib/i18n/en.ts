@@ -112,6 +112,7 @@ const catalog = {
     // Used by both the project explorer and the task explorer.
     'explorer.shared.menuAria': 'File actions',
     'explorer.shared.menuOpen': 'Open',
+    'explorer.shared.menuOpenWindow': 'Open in new window',
     'explorer.shared.menuCut': 'Cut',
     'explorer.shared.menuCopy': 'Copy',
     'explorer.shared.menuPaste': 'Paste into folder',
