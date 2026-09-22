@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"mike/backend/fsutil"
 	"mike/backend/llmadapter"
 	"mike/pkg/logging"
 )
@@ -92,7 +93,7 @@ func mappingsFilePath(extensionsDir, author, name, file string) (string, bool) {
 	full := filepath.Join(dir, file)
 	// Re-containment check after Join (which collapses lexical .. segments).
 	rel, err := filepath.Rel(dir, filepath.Clean(full))
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if err != nil || !fsutil.RelBelowRoot(rel) {
 		return "", false
 	}
 	return filepath.Clean(full), true

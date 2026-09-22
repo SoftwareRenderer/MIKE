@@ -113,7 +113,9 @@ type SandboxOpts struct {
 	SandboxMounts    []types.SandboxMount
 	SandboxEnvs      []types.SandboxEnv
 	Capabilities     []string
-	PlanMode         bool
+	// WorktreeReadOnly mounts the task's worktree read-only in the container. Plan mode is the
+	// only operating mode that asks for it; explore writes, like act.
+	WorktreeReadOnly bool
 }
 
 // shellTERM is what an attached terminal reports. It belongs to the terminal
@@ -426,7 +428,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 		}
 	}
 	worktreeMode := "rw"
-	if opts.PlanMode {
+	if opts.WorktreeReadOnly {
 		worktreeMode = "ro"
 	}
 	// No -e here: the container's environment comes from containerEnvArgs below.
@@ -1328,13 +1330,6 @@ func buildPodmanBuildArgs(imageName, contextDir string, noCache bool) []string {
 		args = append(args, "--no-cache")
 	}
 	return append(args, contextDir)
-}
-
-// BuildImage builds a container image from a Dockerfile and tags it with the
-// project-specific name. The Dockerfile is copied to a temp directory for the build.
-// The temp directory is cleaned up after the build completes.
-func (sm *SandboxManager) BuildImage(projectName, dockerfilePath string) error {
-	return sm.BuildImageWithProgress(projectName, dockerfilePath, nil)
 }
 
 // BuildImageWithProgress builds a container image, streaming progress lines via onProgress.

@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -360,16 +361,16 @@ func TestGitPollerDetectsChanges(t *testing.T) {
 	worktreePath := filepath.Join(worktreesDir, projID, taskID)
 
 	// Initial state — no changes
-	if wm.HasWorktreeChanges(taskID) {
-		t.Fatal("expected no worktree changes before file creation")
+	if out, err := wm.GitStatus(taskID); err != nil || strings.TrimSpace(out) != "" {
+		t.Fatalf("expected a clean worktree before file creation, got %q (err %v)", out, err)
 	}
 
 	// Make a change
 	writeFile(t, worktreePath, "new_file.txt", "Hello, world!\n")
 
 	// After change — the worktree manager should detect the new file
-	if !wm.HasWorktreeChanges(taskID) {
-		t.Fatal("expected worktree manager to detect changes after file creation")
+	if out, err := wm.GitStatus(taskID); err != nil || strings.TrimSpace(out) == "" {
+		t.Fatalf("expected git status to report the new file, got %q (err %v)", out, err)
 	}
 
 	// Verify full diff is available (untracked files show in Untracked, not Diff)

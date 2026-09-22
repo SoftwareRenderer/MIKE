@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"mike/backend/fsutil"
 	"mike/backend/git"
 	"mike/pkg/sandboxruntime"
 	"mike/pkg/subproc"
@@ -370,7 +371,7 @@ func validateSubdir(subdir string) error {
 		return nil
 	}
 	clean := filepath.Clean(subdir)
-	if strings.HasPrefix(clean, "..") || strings.HasPrefix(clean, "/") || filepath.IsAbs(clean) {
+	if filepath.IsAbs(clean) || !fsutil.RelInsideRoot(clean) {
 		return fmt.Errorf("invalid subdir: %q", subdir)
 	}
 	return nil

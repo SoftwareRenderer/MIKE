@@ -12,6 +12,7 @@ import (
 	"text/template"
 	"unicode/utf8"
 
+	"mike/backend/fsutil"
 	"mike/backend/prompts"
 )
 
@@ -362,7 +363,7 @@ func packFilePath(packDir, rel string) (string, bool) {
 	}
 	full := filepath.Clean(filepath.Join(packDir, rel))
 	inside, err := filepath.Rel(filepath.Clean(packDir), full)
-	if err != nil || inside == "." || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+	if err != nil || !fsutil.RelBelowRoot(inside) {
 		return "", false
 	}
 	return full, true

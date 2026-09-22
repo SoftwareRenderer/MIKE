@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"mike/backend/fsutil"
 )
 
 // errEditOutsideWorkspace indicates a rename edit targets a path outside the
@@ -186,7 +188,7 @@ func workspaceEditTargets(workspaceRoot string, uris []string) (map[string]strin
 		if err != nil {
 			return nil, fmt.Errorf("resolve %q against workspace: %w", uri, err)
 		}
-		if r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+		if !fsutil.RelInsideRoot(r) {
 			return nil, fmt.Errorf("%w: %q", errEditOutsideWorkspace, p)
 		}
 		rel[uri] = r

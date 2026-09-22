@@ -101,6 +101,8 @@ type clientState struct {
 	// keepalive pinger, which takes it with TryLock (httputil.Keepalive).
 	writeMu sync.Mutex
 	out     *sendQueue
+	// traffic counts what this connection was sent, by frame type, for the disconnect line.
+	traffic *trafficLedger
 
 	// A project's first-data pass is read by one worker per connection, in the order the
 	// subscriptions arrived. initMu guards the passes waiting to run; initOrder is exactly the
@@ -174,6 +176,7 @@ type AppStreamManager struct {
 type taskFrame struct {
 	data   []byte
 	toolID string
+	bucket string
 }
 
 // NewAppStreamManager creates a new AppStreamManager with filesystem watchers.
@@ -332,7 +335,7 @@ func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, task
 	// cleared. One batch, so the stats land after the replay they extend; behind any replay already
 	// queued and ahead of the live frames, so no live frame lands inside either.
 	if statsFrame := asm.latestSandboxStatsFrame(projectID, taskID); statsFrame != nil {
-		buf = append(buf, statsFrame)
+		buf = append(buf, *statsFrame)
 	}
 	client.out.pushReplay(buf)
 	return true
@@ -341,7 +344,7 @@ func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, task
 // latestSandboxStatsFrame returns the task_event frame carrying the
 // provider's latest known sandbox memory stats for the task, or nil when no
 // provider is registered or it reports no known stats.
-func (asm *AppStreamManager) latestSandboxStatsFrame(projectID, taskID string) []byte {
+func (asm *AppStreamManager) latestSandboxStatsFrame(projectID, taskID string) *outboundFrame {
 	asm.mu.RLock()
 	provider := asm.sandboxStatsProvider
 	asm.mu.RUnlock()
@@ -352,11 +355,13 @@ func (asm *AppStreamManager) latestSandboxStatsFrame(projectID, taskID string) [
 	if stats == nil {
 		return nil
 	}
-	frame, err := json.Marshal(TaskEventPayload(taskID, types.StreamEvent{Type: types.WSTypeSandboxStats, Data: stats}))
+	event := types.StreamEvent{Type: types.WSTypeSandboxStats, Data: stats}
+	frame := TaskEventPayload(taskID, event)
+	msg, err := json.Marshal(frame)
 	if err != nil {
 		return nil
 	}
-	return frame
+	return &outboundFrame{data: msg, bucket: string(event.Type)}
 }
 
 // SetSandboxStatsProvider registers the source of latest-known sandbox memory
@@ -433,17 +438,17 @@ func (asm *AppStreamManager) allClients() []*clientState {
 
 // -- Broadcast methods --
 
-func (asm *AppStreamManager) sendBoardPayload(projectID string, payload any) {
+func (asm *AppStreamManager) sendBoardPayload(projectID string, frame map[string]any) {
 	asm.mu.RLock()
 	targets := asm.subscribers(projectSubs, projectID)
 	asm.mu.RUnlock()
 
-	frame, err := json.Marshal(payload)
+	msg, err := json.Marshal(frame)
 	if err != nil {
 		return
 	}
 
-	asm.deliver(targets, frame)
+	asm.deliver(targets, msg, frameBucket(frame))
 }
 
 // appFrame builds one app-stream frame. The "type" key and the event name are written here and nowhere
@@ -517,17 +522,17 @@ var terminalTurnStates = map[string]bool{
 	"paused":    true,
 }
 
-func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, payload any) {
+func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, frame map[string]any) {
 	key := projectID + ":" + taskID
-	frame, err := json.Marshal(payload)
+	msg, err := json.Marshal(frame)
 	if err != nil {
 		return
 	}
 	// tool_id rides the buffered frame so a replay can collapse one call's frames; it is read
 	// here because the hub lock taken below must not be held across JSON parsing.
 	var toolID string
-	if bytes.Contains(frame, toolCallMarker) {
-		toolID = extractToolID(frame)
+	if bytes.Contains(msg, toolCallMarker) {
+		toolID = extractToolID(msg)
 	}
 
 	// Handing the frame to the subscribers and adding it to the replay buffer are one step, and so
@@ -536,17 +541,17 @@ func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, payload a
 	// arrives over the socket. Split apart, a subscribe landing between the two steps got the frame
 	// twice or never, and never is a hole the client cannot see.
 	asm.mu.Lock()
-	asm.deliver(asm.subscribers(taskSubs, key), frame)
-	asm.bufferTaskLocked(key, frame, toolID)
+	asm.deliver(asm.subscribers(taskSubs, key), msg, frameBucket(frame))
+	asm.bufferTaskLocked(key, msg, toolID, frameBucket(frame))
 	asm.mu.Unlock()
 }
 
 // BroadcastAll sends a raw message to all connected clients.
-func (asm *AppStreamManager) BroadcastAll(msg []byte) {
+func (asm *AppStreamManager) BroadcastAll(msg []byte, bucket string) {
 	asm.mu.RLock()
 	targets := asm.allClients()
 	asm.mu.RUnlock()
-	asm.deliver(targets, msg)
+	asm.deliver(targets, msg, bucket)
 }
 
 // BroadcastProjectCounts computes and broadcasts task counts for all projects.
@@ -556,7 +561,7 @@ func (asm *AppStreamManager) BroadcastProjectCounts() {
 	}
 	counts := asm.store.GetAllProjectCounts()
 	msg, _ := json.Marshal(appFrame(types.WSTypeProjectCounts, map[string]any{"data": counts}))
-	asm.BroadcastAll(msg)
+	asm.BroadcastAll(msg, string(types.WSTypeProjectCounts))
 }
 
 // -- One-shot event broadcasts: board, explorer, diff, extension --
@@ -655,7 +660,7 @@ func ComputeDiffHash(diff string, committedDiff string, untracked []git.Untracke
 // them marshals into something the client reads as a task.
 func (asm *AppStreamManager) BroadcastTaskUpdated(projectID string, task *types.Task) {
 	asm.sendBoardPayload(projectID, appFrame(types.WSTypeTaskUpdated, map[string]any{
-		"task": task,
+		"task": TaskForBrowser(task),
 	}))
 	asm.BroadcastProjectCounts()
 }
@@ -692,15 +697,14 @@ func (asm *AppStreamManager) BroadcastProjectPorts(projectID string, ports []typ
 // BroadcastExtensionChange sends an extension_change event to all connected clients.
 // This triggers the frontend to reload extensions and refresh UI injection slots.
 func (asm *AppStreamManager) BroadcastExtensionChange() {
-	msg, _ := json.Marshal(map[string]any{
-		"type": string(types.WSTypeExtensionChange),
-	})
-	asm.BroadcastAll(msg)
+	frame := appFrame(types.WSTypeExtensionChange, nil)
+	msg, _ := json.Marshal(frame)
+	asm.BroadcastAll(msg, frameBucket(frame))
 }
 
 // -- Task replay buffer --
 
-func (asm *AppStreamManager) bufferTaskLocked(taskKey string, frame []byte, toolID string) {
+func (asm *AppStreamManager) bufferTaskLocked(taskKey string, frame []byte, toolID, bucket string) {
 	// Skip large frames to prevent memory exhaustion
 	if len(frame) > maxFrameBufferSize {
 		return
@@ -716,7 +720,7 @@ func (asm *AppStreamManager) bufferTaskLocked(taskKey string, frame []byte, tool
 	// Copy frame to avoid aliasing
 	frameCopy := make([]byte, len(frame))
 	copy(frameCopy, frame)
-	buf := append(asm.taskBuffers[taskKey], taskFrame{data: frameCopy, toolID: toolID})
+	buf := append(asm.taskBuffers[taskKey], taskFrame{data: frameCopy, toolID: toolID, bucket: bucket})
 
 	loaded := asm.taskBufLoad[taskKey] + len(frameCopy)
 	for len(buf) > asm.taskBufSize || (loaded > asm.taskBufBound && len(buf) > 1) {
@@ -767,21 +771,21 @@ func extractToolID(frame []byte) string {
 // A frame carrying the whole args supersedes what was collected (args only grow), and a delta is
 // appended to the whole held so far. A delta with no whole ahead of it — the head has been trimmed
 // from the buffer — stays a delta: there is nothing to join it to, and dropping it would hide the call.
-func foldToolCallFrames(buf []taskFrame) [][]byte {
-	out := make([][]byte, 0, len(buf))
+func foldToolCallFrames(buf []taskFrame) []outboundFrame {
+	out := make([]outboundFrame, 0, len(buf))
 	heldAt := map[string]int{}
 	for _, f := range buf {
 		if f.toolID == "" {
-			out = append(out, f.data)
+			out = append(out, outboundFrame{data: f.data, bucket: f.bucket})
 			continue
 		}
 		at, seen := heldAt[f.toolID]
 		if !seen {
 			heldAt[f.toolID] = len(out)
-			out = append(out, f.data)
+			out = append(out, outboundFrame{data: f.data, bucket: f.bucket})
 			continue
 		}
-		out[at] = foldToolCall(out[at], f.data)
+		out[at].data = foldToolCall(out[at].data, f.data)
 	}
 	return out
 }
@@ -921,7 +925,7 @@ func (asm *AppStreamManager) sendDoneTaskInitialDiff(client *clientState, projec
 		frame[k] = v
 	}
 	msg, _ := json.Marshal(frame)
-	client.out.push(msg)
+	client.out.push(msg, frameBucket(frame))
 }
 
 // HandleStream is the HTTP handler for the /api/stream WebSocket endpoint.
@@ -970,6 +974,9 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 
 		for projectID := range client.projectSub {
 			asm.releaseProjectWatchers(projectID)
+		}
+		if frames, _ := client.traffic.totals(); frames > 0 {
+			logging.For(logging.Stream).Debugf("connection closed: %s", client.traffic.report())
 		}
 	}()
 
@@ -1122,7 +1129,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			filesN := stats.VisibleTracked + stats.VisibleUntracked
 			// Check if task branch commits are already merged into the target branch.
 			stats.AlreadyMerged = asm.computeAlreadyMerged(projectID, task)
-			statsMsg, _ := json.Marshal(appFrame(types.WSTypeTaskDiffStats, map[string]any{
+			statsFrame := appFrame(types.WSTypeTaskDiffStats, map[string]any{
 				"task_id":               task.ID,
 				"hash":                  hash,
 				"short_stat":            diffResult.ShortStat,
@@ -1135,8 +1142,9 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 				"staged_paths":          filterInternalPathsFromList(diffResult.StagedPaths),
 				"has_committed_changes": diffResult.CommittedDiff != "",
 				"already_merged":        stats.AlreadyMerged,
-			}))
-			client.out.push(statsMsg)
+			})
+			statsMsg, _ := json.Marshal(statsFrame)
+			client.out.push(statsMsg, frameBucket(statsFrame))
 			// No per-file task_diff manifest frame is broadcast: no component reads it, and the
 			// task detail view fetches its data from the REST diff endpoint.
 		}
@@ -1145,9 +1153,10 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 	branch, _ := asm.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
 	branch = strings.TrimSpace(branch)
 	if branch != "" {
-		msg, _ := json.Marshal(appFrame(types.WSTypeProjectBranch, map[string]any{
+		frame := appFrame(types.WSTypeProjectBranch, map[string]any{
 			"branch": branch,
-		}))
-		client.out.push(msg)
+		})
+		msg, _ := json.Marshal(frame)
+		client.out.push(msg, frameBucket(frame))
 	}
 }

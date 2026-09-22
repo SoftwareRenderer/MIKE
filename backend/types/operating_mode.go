@@ -12,8 +12,11 @@ const (
 	// ModeAct is the default: the agent may write, edit and run.
 	ModeAct OperatingMode = "act"
 	// ModePlan offers read-only tools and a read-only mount, for a turn that produces a plan.
+	// It is the only mode whose worktree is mounted read-only.
 	ModePlan OperatingMode = "plan"
-	// ModeExplore offers read-only tools and a read-only mount, for a turn that reads code.
+	// ModeExplore is a turn that reads code: the act tool set plus the task-board tools, and a
+	// writable mount, because exploring includes running the thing. It differs from act in never
+	// getting a loop hint, and in staying out of the autostart auto-answer path.
 	ModeExplore OperatingMode = "explore"
 )
 
@@ -31,11 +34,4 @@ func ParseOperatingMode(s string) (OperatingMode, bool) {
 	default:
 		return "", false
 	}
-}
-
-// IsReadOnly reports whether a mode mounts the worktree read-only. The two read-only modes
-// differ in the prompt and the tool set they are offered, not in what they may write, so every
-// caller that only needs to know "may this turn write" asks this instead of naming a mode.
-func (m OperatingMode) IsReadOnly() bool {
-	return m == ModePlan || m == ModeExplore
 }

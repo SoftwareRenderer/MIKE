@@ -86,8 +86,8 @@ the permission rather than a string:
 `extensions.ToolRegistry` answers from the stored rows on every question — enabling an extension, editing
 its address or installing another one all change the answer, and a cached one shows a tool that is gone or
 hides one that exists. A tool is offered only when a call could succeed: the extension enabled, the
-declaration still valid, and its `url` property filled. `Unmet()` says why not for the ones that are not,
-which is the difference between an absent tool and one a person can fix.
+declaration still valid, and its `url` property filled. The debug log (`component=extensions`) carries each
+refusal reason — the difference between an absent tool and one a person can fix.
 
 - Appended in `toolDefinitionsFor` for plan, explore and act alike, through `Deps.ExtensionTools`;
   `llama.ContributedToolDefinitions` turns `types.ToolSpec` into the provider's definition. `types` is

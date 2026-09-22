@@ -141,7 +141,7 @@ func TestABacklogStillWritingWhenThePeerVanishesReleasesTheWriteLock(t *testing.
 	// enough to stay inside the queue's bound — this is about the write, not about a drop.
 	frame := []byte(`{"type":"board_refresh","pad":"` + strings.Repeat("a", 200*1024) + `"}`)
 	for i := 0; i < 40; i++ {
-		asm.BroadcastAll(frame)
+		asm.BroadcastAll(frame, "board_refresh")
 	}
 
 	conn.CloseNow()
@@ -172,11 +172,11 @@ func TestSilentPeerCannotStallTheFanOut(t *testing.T) {
 
 	big := []byte(`{"type":"board_refresh","pad":"` + strings.Repeat("a", 200*1024) + `"}`)
 	// Nothing is read on that socket, so its sender is proved stuck writing once the socket fills.
-	awaitStuckSender(t, stalledClient, func() { asm.deliver([]*clientState{stalledClient}, big) })
+	awaitStuckSender(t, stalledClient, func() { asm.deliver([]*clientState{stalledClient}, big, "board_refresh") })
 
 	probe, _ := json.Marshal(map[string]any{"type": "board_refresh", "probe": "still-here"})
 	started := time.Now()
-	asm.deliver([]*clientState{stalledClient, liveClient}, probe)
+	asm.deliver([]*clientState{stalledClient, liveClient}, probe, "board_refresh")
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("the fan-out into a stalled peer took %v; it queues and returns", elapsed)
 	}

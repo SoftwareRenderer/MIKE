@@ -12,8 +12,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
+	"mike/backend/fsutil"
 	"mike/pkg/logging"
 )
 
@@ -99,7 +99,7 @@ func PromptDirInPack(packDir, rel string) (string, bool) {
 		return "", false
 	}
 	inside, err := filepath.Rel(resolvedPack, resolved)
-	if err != nil || inside == "." || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+	if err != nil || !fsutil.RelBelowRoot(inside) {
 		return "", false
 	}
 	return resolved, true

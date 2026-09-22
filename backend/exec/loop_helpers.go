@@ -653,11 +653,12 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 }
 
 // sandboxCreateOpts is the sandbox configuration for creating (or recreating) setup's
-// container on the given image, in the given operating mode. Four paths create this
+// container on the given image, with the worktree mounted read-only when readOnly says so.
+// Four paths create this
 // container (start, plan/build-mode switch, agent config change, bridge recovery) and share
 // it, so a new field cannot be set in three of them. Only the image comes from the caller -
 // only EnsureImageForProject knows what it settled on.
-func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, planMode bool) sandbox.SandboxOpts {
+func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, readOnly bool) sandbox.SandboxOpts {
 	// The host folders this container may see are the ones the project configured, plus the ones the user
 	// approved for the agent this task runs. No other installed extension contributes a folder.
 	return sandbox.SandboxOpts{
@@ -670,7 +671,7 @@ func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, pl
 		SandboxMounts:    setup.sandboxOpts.SandboxMounts,
 		SandboxEnvs:      setup.sandboxOpts.SandboxEnvs,
 		Capabilities:     setup.sandboxOpts.Capabilities,
-		PlanMode:         planMode,
+		WorktreeReadOnly: readOnly,
 	}
 }
 

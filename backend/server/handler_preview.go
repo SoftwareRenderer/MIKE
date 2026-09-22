@@ -324,7 +324,7 @@ func (s *Server) HandlePreviewServe(w http.ResponseWriter, r *http.Request) {
 		fileName = filepath.Base(hostPath)
 		baseDir = worktreeRoot // widened asset root: the whole worktree
 		rel, err := filepath.Rel(worktreeRoot, dir)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		if err != nil || !fsutil.RelInsideRoot(rel) {
 			// The file is outside the worktree (a workspace-only path): use
 			// its own directory as the asset root instead.
 			baseDir = dir

@@ -27,7 +27,7 @@ services:
       dockerfile: Dockerfile
       args:
         VERSION: ${MIKE_VERSION:-compose}
-        GVIZOR_RELEASE: ${GVIZOR_RELEASE:-latest}
+        GVISOR_RELEASE: ${GVISOR_RELEASE:-latest}
     image: getmike/mike:${MIKE_IMAGE_TAG:-local}
     restart: unless-stopped
     # The server's own shutdown budget is 15s (backend/server/shutdown.go) and it then waits

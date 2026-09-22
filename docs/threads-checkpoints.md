@@ -57,8 +57,8 @@ details carry the same rule:
 - If the pin fails, the stash entry is deliberately left where it is. Dropped and unpinned, the snapshot
   is git's to prune; a visible entry that outlives its thread is the lesser evil.
 
-`stashWorktreeState` reads `GitStatus` itself rather than `HasWorktreeChanges`, which reports a worktree it
-cannot read as clean — and an unreadable worktree is exactly what must not be overwritten. A switch also
+`stashWorktreeState` reads `GitStatus` itself rather than asking whether the worktree is clean: one it
+cannot read must never answer "clean", which is exactly what must not be overwritten. A switch also
 stops the task before capturing, and a refusal records and broadcasts that stop: a card still showing
 "running" after nothing happened is a lie about the board.
 

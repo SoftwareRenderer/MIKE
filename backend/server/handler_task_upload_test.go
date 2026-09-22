@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"mike/backend/exec"
 	"mike/backend/types"
-	"mike/pkg/bridge/protocol"
 )
 
 // taskUploadProject seeds an unsandboxed project whose directory is a real git repository, one task, and
@@ -138,7 +138,7 @@ func TestTaskUploadRefusesRequestsWithoutAFileOrWithoutATask(t *testing.T) {
 func TestTaskUploadRefusesAFileOverTheLimit(t *testing.T) {
 	s, _ := taskUploadProject(t, "up-size")
 
-	oversize := bytes.Repeat([]byte("x"), protocol.MaxWriteBytes+1)
+	oversize := bytes.Repeat([]byte("x"), exec.MaxUploadBytes+1)
 	rr := postTaskUpload(t, s, "up-size", "t1", "big.bin", oversize)
 	if rr.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413: %s", rr.Code, rr.Body.String())

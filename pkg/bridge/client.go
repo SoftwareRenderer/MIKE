@@ -442,17 +442,6 @@ func (c *Client) WriteFile(ctx context.Context, path, content string) (int64, er
 	return c.sendUint64(ctx, "write", protocol.MethodWrite, protocol.WriteParams{Path: path, Content: content})
 }
 
-// WriteFileBytes writes bytes the guest must not interpret to a file in the sandbox. Returns the
-// number of bytes written. The limit is checked here as well as in the guest, so a caller cannot
-// ask this process to serialise a payload the frame would refuse anyway.
-func (c *Client) WriteFileBytes(ctx context.Context, path string, data []byte) (int64, error) {
-	if len(data) > protocol.MaxWriteBytes {
-		return 0, fmt.Errorf("%w: %s is %d bytes, limit %d",
-			protocol.ErrResponseTooLarge, path, len(data), protocol.MaxWriteBytes)
-	}
-	return c.sendUint64(ctx, "write_bytes", protocol.MethodWriteBytes, protocol.WriteBytesParams{Path: path, Data: data})
-}
-
 // EditFile applies text replacements to a file in the sandbox.
 // Returns the number of bytes written.
 func (c *Client) EditFile(ctx context.Context, path string, edits []protocol.Edit) (int64, error) {

@@ -6,6 +6,7 @@ import (
 	"mike/backend/config"
 	"mike/backend/httputil"
 	"mike/backend/store"
+	"mike/backend/stream"
 	"mike/backend/types"
 )
 
@@ -61,5 +62,7 @@ func (h *BoardHandler) HandleBoard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	httputil.JSONResponse(w, http.StatusOK, types.Board{Tasks: tasks})
+	// The board is the row the browser renders, so it is the same projection the task_updated frame
+	// carries — including no agent result text. A single task read still answers in full.
+	httputil.JSONResponse(w, http.StatusOK, types.Board{Tasks: stream.BrowserRows(tasks)})
 }

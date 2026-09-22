@@ -31,7 +31,7 @@ type sendQueue struct {
 	byte  int
 
 	mu       sync.Mutex
-	live     [][]byte
+	live     []outboundFrame
 	replayed int // the leading frames of live, held with mu, that a replay put there
 	bytes    int
 	dropped  int
@@ -47,13 +47,13 @@ func newSendQueue(frameBound, byteBound int) *sendQueue {
 }
 
 // push appends a live frame. It never blocks and never waits on the socket.
-func (q *sendQueue) push(frame []byte) {
+func (q *sendQueue) push(frame []byte, bucket string) {
 	q.mu.Lock()
 	if q.closed {
 		q.mu.Unlock()
 		return
 	}
-	q.live = append(q.live, frame)
+	q.live = append(q.live, outboundFrame{data: frame, bucket: bucket})
 	q.bytes += len(frame)
 	q.trimLocked()
 	q.mu.Unlock()
@@ -64,7 +64,7 @@ func (q *sendQueue) push(frame []byte) {
 // keep the order they were asked for, and ahead of every live frame, so a replay is never
 // interrupted by what the task said meanwhile. The frames the bound cannot hold are the oldest in
 // the queue, which is how a truncated replay already reads.
-func (q *sendQueue) pushReplay(batch [][]byte) {
+func (q *sendQueue) pushReplay(batch []outboundFrame) {
 	if len(batch) == 0 {
 		return
 	}
@@ -73,14 +73,14 @@ func (q *sendQueue) pushReplay(batch [][]byte) {
 		q.mu.Unlock()
 		return
 	}
-	merged := make([][]byte, 0, len(q.live)+len(batch))
+	merged := make([]outboundFrame, 0, len(q.live)+len(batch))
 	merged = append(merged, q.live[:q.replayed]...)
 	merged = append(merged, batch...)
 	merged = append(merged, q.live[q.replayed:]...)
 	q.live = merged
 	q.replayed += len(batch)
 	for _, frame := range batch {
-		q.bytes += len(frame)
+		q.bytes += len(frame.data)
 	}
 	q.trimLocked()
 	q.mu.Unlock()
@@ -88,19 +88,19 @@ func (q *sendQueue) pushReplay(batch [][]byte) {
 }
 
 // pop takes the next frame owed.
-func (q *sendQueue) pop() ([]byte, bool) {
+func (q *sendQueue) pop() (outboundFrame, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if len(q.live) == 0 {
-		return nil, false
+		return outboundFrame{}, false
 	}
 	frame := q.live[0]
-	q.live[0] = nil
+	q.live[0] = outboundFrame{}
 	q.live = q.live[1:]
 	if q.replayed > 0 {
 		q.replayed--
 	}
-	q.bytes -= len(frame)
+	q.bytes -= len(frame.data)
 	if len(q.live) == 0 {
 		q.live = nil // release the array the trimming walked past
 	}
@@ -128,12 +128,12 @@ func (q *sendQueue) close() {
 func (q *sendQueue) trimLocked() {
 	for len(q.live) > 1 && (len(q.live) > q.frame || q.bytes > q.byte) {
 		frame := q.live[0]
-		q.live[0] = nil
+		q.live[0] = outboundFrame{}
 		q.live = q.live[1:]
 		if q.replayed > 0 {
 			q.replayed--
 		}
-		q.bytes -= len(frame)
+		q.bytes -= len(frame.data)
 		q.dropped++
 	}
 }
@@ -155,14 +155,15 @@ func newClientState(conn *websocket.Conn, asm *AppStreamManager) *clientState {
 		taskSub:     make(map[string]struct{}),
 		initPending: make(map[string]AppStreamSubscription),
 		out:         newSendQueue(asm.queueFrames, asm.queueBytes),
+		traffic:     newTrafficLedger(),
 	}
 }
 
 // deliver hands a marshalled frame to each target's queue. Returning here means the frame is
 // queued, not written: which client is slow is that client's problem.
-func (asm *AppStreamManager) deliver(targets []*clientState, frame []byte) {
+func (asm *AppStreamManager) deliver(targets []*clientState, frame []byte, bucket string) {
 	for _, client := range targets {
-		client.out.push(frame)
+		client.out.push(frame, bucket)
 	}
 }
 
@@ -183,11 +184,12 @@ func (asm *AppStreamManager) runSender(ctx context.Context, client *clientState)
 				break
 			}
 			client.writeMu.Lock()
-			err := httputil.WriteText(ctx, client.conn, frame, asm.writeTimeout)
+			err := httputil.WriteText(ctx, client.conn, frame.data, asm.writeTimeout)
 			client.writeMu.Unlock()
 			if err != nil {
 				return // the peer is gone; its read loop unregisters the client
 			}
+			client.traffic.record(frame.bucket, len(frame.data))
 		}
 		if missed := client.out.droppedFrames(); missed > 0 {
 			endConnectionForResync(client, missed)

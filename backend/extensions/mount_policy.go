@@ -20,15 +20,6 @@ import (
 // sandboxruntime.ValidateCapability) and, where it is granted, the runtime pairing
 // sandboxruntime.GVisorIsolationForCaps describes.
 
-// EnvMountRoots names the variable listing extra host roots an extension sandbox may mount from,
-// separated by os.PathListSeparator (':' on Linux). The implicit roots are the
-// workspace dir, registered project paths, the extensions dir and the system
-// temp dir; this is for deployments that keep extension data elsewhere. The value is resolved once
-// into startup.Config.ExtMountRoots; this constant is the name, quoted by startup's table of names.
-// The two literals are mirrored, not shared: startup's test package imports this one, so importing
-// startup here would be an import cycle in the test build.
-const EnvMountRoots = "MIKE_EXT_MOUNT_ROOTS"
-
 // MountPolicy is an allowlist of host roots an extension sandbox may
 // bind-mount from. A nil policy is valid and fails closed: nothing is inside an
 // empty allowlist.

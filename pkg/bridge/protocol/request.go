@@ -6,10 +6,12 @@ import (
 	"fmt"
 )
 
-// Method identifiers. 0x05-0x08 (shell_open / shell_io / shell_resize / shell_close) are retired
-// and stay reserved rather than being reused: terminals are served by a host-side PTY (see
-// backend/sandbox and backend/term), and a stale bridge binary still sending one of these must get
-// a clean "unknown method" error instead of reaching an unrelated handler.
+// Method identifiers. A retired ID stays reserved rather than being reused, so a stale bridge binary
+// still speaking the older protocol gets a clean "unknown method" error instead of reaching an
+// unrelated handler: 0x05-0x08 are the shell methods (a terminal is a host-side PTY, see
+// backend/sandbox and backend/term) and 0x0B is write_bytes, which no host path sends. A params
+// change is a new ID for the same reason — a guest that does not know a new field answers success
+// anyway.
 const (
 	MethodRead       uint8 = 0x01
 	MethodWrite      uint8 = 0x02
@@ -17,12 +19,7 @@ const (
 	MethodBash       uint8 = 0x04
 	MethodBashCancel uint8 = 0x09
 	MethodLSP        uint8 = 0x0A
-	MethodWriteBytes uint8 = 0x0B
 )
-
-// MethodWriteBytes is a method of its own rather than an `encoding` field on MethodWrite: a bridge
-// that predates the change must answer "unknown method", where a new field parses happily and it
-// writes base64 text over the user's file. Its params are ordinary JSON, so it is not isBinaryMethod.
 
 func methodString(m uint8) string {
 	switch m {
@@ -38,8 +35,6 @@ func methodString(m uint8) string {
 		return "bash_cancel"
 	case MethodLSP:
 		return "lsp"
-	case MethodWriteBytes:
-		return "write_bytes"
 	default:
 		return fmt.Sprintf("unknown(%d)", m)
 	}

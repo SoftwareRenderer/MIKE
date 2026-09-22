@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"mike/backend/fsutil"
 	"mike/backend/types"
 
 	"mike/backend/git"
@@ -339,13 +340,13 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 	}
 
 	relPath, _ := filepath.Rel(info.path, event.Name)
-	if !strings.HasPrefix(relPath, "..") && git.ShouldIgnorePath(relPath) {
+	if fsutil.RelInsideRoot(relPath) && git.ShouldIgnorePath(relPath) {
 		ww.mu.Unlock()
 		return
 	}
 
 	// Watch new directories created inside the worktree.
-	if event.Op&(fsnotify.Create|fsnotify.Write) != 0 && !strings.HasPrefix(relPath, "..") {
+	if event.Op&(fsnotify.Create|fsnotify.Write) != 0 && fsutil.RelInsideRoot(relPath) {
 		if absPath, err := filepath.Abs(event.Name); err == nil {
 			if dirInfo, err := filepath.EvalSymlinks(absPath); err == nil {
 				if fi, err := os.Stat(dirInfo); err == nil && fi.IsDir() {
@@ -370,7 +371,7 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 	} else if event.Op&fsnotify.Rename != 0 {
 		fsOp = "delete"
 	}
-	if fsOp != "" && ww.fsBroadcast != nil && !strings.HasPrefix(relPath, "..") {
+	if fsOp != "" && ww.fsBroadcast != nil && fsutil.RelInsideRoot(relPath) {
 		if timer, exists := ww.fsDebounces[taskID]; exists {
 			timer.Stop()
 		}

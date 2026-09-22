@@ -191,8 +191,6 @@ func (h *handler) dispatch(conn net.Conn, req *protocol.Request) {
 		err = handleRead(h, conn, req)
 	case protocol.MethodWrite:
 		err = handleWrite(h, conn, req)
-	case protocol.MethodWriteBytes:
-		err = handleWriteBytes(h, conn, req)
 	case protocol.MethodEdit:
 		err = handleEdit(h, conn, req)
 	case protocol.MethodBash:

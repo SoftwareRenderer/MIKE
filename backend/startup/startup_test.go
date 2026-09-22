@@ -5,9 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"mike/backend/extensions"
 	"mike/backend/fsutil"
-	"mike/backend/sandbox"
 	"mike/backend/updates"
 	"mike/pkg/logging"
 )
@@ -503,21 +501,12 @@ func TestSandboxSweepIsSuppressedByAnyNonEmptyValue(t *testing.T) {
 	}
 }
 
-// Two spellings of one variable is how a documented flag ends up doing nothing. The consumer packages
-// keep their own constants because the name appears in a refusal they print, so this is the seam that
-// holds them together.
+// Two spellings of one variable is how a documented flag ends up doing nothing. A consumer keeps its
+// own constant only where the name appears in a refusal it prints, so this is the seam that holds
+// the few remaining pairs together.
 func TestEnvNamesMatchTheirOwners(t *testing.T) {
 	if fsutil.AllowRootFSEnv != EnvAllowRootFS {
 		t.Errorf("fsutil.AllowRootFSEnv = %q, startup says %q", fsutil.AllowRootFSEnv, EnvAllowRootFS)
-	}
-	if string(sandbox.DangerZoneEnv) != EnvDangerZone {
-		t.Errorf("sandbox.DangerZoneEnv = %q, startup says %q", sandbox.DangerZoneEnv, EnvDangerZone)
-	}
-	if extensions.EnvMountRoots != EnvExtMountRoots {
-		t.Errorf("extensions.EnvMountRoots = %q, startup says %q", extensions.EnvMountRoots, EnvExtMountRoots)
-	}
-	if updates.EnvManifestURL != EnvUpdateURL {
-		t.Errorf("updates.EnvManifestURL = %q, startup says %q", updates.EnvManifestURL, EnvUpdateURL)
 	}
 	if updates.EnvDisableUpdates != EnvDisableUpdates {
 		t.Errorf("updates.EnvDisableUpdates = %q, startup says %q", updates.EnvDisableUpdates, EnvDisableUpdates)

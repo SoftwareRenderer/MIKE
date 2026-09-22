@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"mike/backend/fsutil"
 	"mike/backend/store"
 	"mike/backend/types"
 	"mike/pkg/logging"
@@ -305,22 +306,12 @@ func taskSlugPrefixSet(store *store.Store, projectID string) map[string]bool {
 	return set
 }
 
-// HasWorktreeChanges returns true if the worktree has uncommitted changes
-// (modified, staged, or untracked files). Uses git status --porcelain.
-func (wm *WorktreeManager) HasWorktreeChanges(taskID string) bool {
-	out, err := wm.GitStatus(taskID)
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(out) != ""
-}
-
 // ensureWorktreesExcluded keeps untracked worktree files out of the project's git status by excluding the
 // worktrees dir when it is inside the project. Best-effort: never blocks worktree creation.
 func (wm *WorktreeManager) ensureWorktreesExcluded(project *types.Project, worktreesDir string) {
 	cleanRoot := filepath.Clean(project.Path)
 	rel, err := filepath.Rel(cleanRoot, filepath.Clean(worktreesDir))
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if err != nil || !fsutil.RelBelowRoot(rel) {
 		return // worktrees dir is not inside the project
 	}
 

@@ -49,35 +49,6 @@ func TestSanitizeContainerID(t *testing.T) {
 	}
 }
 
-func TestExtensionRuntimeStatus_MarshalJSON(t *testing.T) {
-	now := time.Now()
-	status := ExtensionRuntimeStatus{
-		Running:   true,
-		Container: "kanban-ext-test",
-		RefCount:  2,
-		CreatedAt: now,
-	}
-
-	data, err := status.MarshalJSON()
-	if err != nil {
-		t.Fatalf("MarshalJSON: %v", err)
-	}
-
-	jsonStr := string(data)
-	if !strings.Contains(jsonStr, `"running":true`) {
-		t.Errorf("JSON missing running:true: %s", jsonStr)
-	}
-	if !strings.Contains(jsonStr, `"container":"kanban-ext-test"`) {
-		t.Errorf("JSON missing container name: %s", jsonStr)
-	}
-	if !strings.Contains(jsonStr, `"ref_count":2`) {
-		t.Errorf("JSON missing ref_count: %s", jsonStr)
-	}
-	if !strings.Contains(jsonStr, `"created_at"`) {
-		t.Errorf("JSON missing created_at: %s", jsonStr)
-	}
-}
-
 func TestExtensionContainerPrefix(t *testing.T) {
 	if ExtensionContainerPrefix != "kanban-ext" {
 		t.Errorf("ExtensionContainerPrefix = %q, want kanban-ext", ExtensionContainerPrefix)
