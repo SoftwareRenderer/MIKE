@@ -1305,6 +1305,13 @@ const catalog = {
     'chat.context.clickToCancel': ' · click to cancel',
     'chat.context.sessionCost': 'Session cost',
 
+    // ── Chat/ContextUsage.svelte — aborting a running summarization ──
+    // The dismiss answer is not "Cancel": one of the two keeps the run going.
+    'chat.compress.cancelTitle': 'Cancel Summarization',
+    'chat.compress.cancelBody': 'Summarization is still running. Cancelling discards the summary being written and leaves the context as it is now.',
+    'chat.compress.cancelConfirm': 'Cancel summarization',
+    'chat.compress.cancelKeep': 'Keep running',
+
     // ── Chat/ReasoningBlock.svelte — one message per state, not a split ──
     'chat.reasoning.hide': 'Hide reasoning',
     'chat.reasoning.show': 'Show reasoning',

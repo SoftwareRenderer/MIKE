@@ -1,6 +1,7 @@
 <script lang="ts">
     import ContextDonut from './ContextDonut.svelte';
     import { formatTokens, formatCost } from '$lib/utils/format';
+    import { dialogStore } from '$lib/stores';
     import { t } from '$lib/i18n';
 
     interface Props {
@@ -23,10 +24,23 @@
             : t('chat.context.usedTokens', { used: formatTokens(used) })
     );
 
+    // Cancelling throws away the summary being written, so the click asks first — on the keyboard
+    // path too. A spinner nothing can cancel has nothing to confirm.
+    async function requestCancel() {
+        if (!onSummarizeCancel) return;
+        const confirmed = await dialogStore.showConfirm({
+            title: t('chat.compress.cancelTitle'),
+            message: t('chat.compress.cancelBody'),
+            confirmText: t('chat.compress.cancelConfirm'),
+            cancelText: t('chat.compress.cancelKeep'),
+        });
+        if (confirmed) onSummarizeCancel();
+    }
+
     async function handleClick() {
         if (!onSummarize) return;
         if (isSummarizing) {
-            onSummarizeCancel?.();
+            await requestCancel();
             return;
         }
         await onSummarize();
@@ -35,7 +49,7 @@
     function handleKeyDown(e: KeyboardEvent) {
         if (isSummarizing && onSummarizeCancel && (e.key === 'Enter' || e.key === ' ')) {
             e.preventDefault();
-            onSummarizeCancel();
+            void requestCancel();
         } else if (!isSummarizing && onSummarize && (e.key === 'Enter' || e.key === ' ')) {
             e.preventDefault();
             onSummarize();

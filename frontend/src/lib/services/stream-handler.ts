@@ -499,7 +499,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 break;
             }
             case 'summarization': {
-                const data = event.data as { id?: string; summary: string; created_at?: string; prompt_tokens?: number; predicted_tokens?: number; prompt_ms?: number; predicted_ms?: number; model_name?: string };
+                const data = event.data as { id?: string; summary: string; created_at?: string; prompt_tokens?: number; predicted_tokens?: number; prompt_ms?: number; predicted_ms?: number; model_name?: string; context_used?: number };
                 // The same id twice is an edit of the summary, not a second one: the row keeps its
                 // place in the conversation and only its text moves.
                 if (data.id && s.entries.some(e => e.id === data.id)) {
@@ -517,6 +517,12 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     s.entries = [...s.entries.slice(0, firstQueuedIdx), summaryEntry, ...s.entries.slice(firstQueuedIdx)];
                 } else {
                     s.entries = [...s.entries, summaryEntry];
+                }
+                // Every later `used` is rebuilt from `lastPromptTokens`, not from `contextState`,
+                // so a compressed window has to move that number too.
+                if (typeof data.context_used === 'number' && data.context_used > 0) {
+                    s.lastPromptTokens = data.context_used;
+                    s.contextState = { ...s.contextState, used: data.context_used };
                 }
                 break;
             }

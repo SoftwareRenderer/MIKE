@@ -1,13 +1,12 @@
-// Package agent defines the contract between MIKE and an agent adapter: the event stream
-// (tokens, reasoning, tool calls, status, stats, persistence, turn completion) and the
-// adapter interface a WASM module implements. It has no server dependencies on purpose, so
-// an adapter can be built and tested without importing the backend.
+// Package agent defines the contract between MIKE and an agent adapter: the event stream and the
+// adapter interface a WASM module implements. It has no server dependencies on purpose, so an adapter
+// can be built and tested without importing the backend.
 package agent
 
 import "context"
 
-// Event is a generic agent event, JSON-serialized across the WASM boundary: the adapter (extension)
-// produces them, the runner (backend) streams them to the executor.
+// Event is one agent event, JSON-encoded across the WASM boundary. The adapter produces it and the
+// runner streams it to the executor.
 type Event struct {
 	Type           string           `json:"type"`
 	Text           string           `json:"text,omitempty"`            // for EventTypeToken
@@ -54,8 +53,7 @@ type SessionStatsData struct {
 	Cost            float64 `json:"cost"`
 }
 
-// PersistEntry is a pre-parsed message the adapter fills at turn-end and the executor persists
-// generically.
+// PersistEntry is a message the adapter hands over at turn-end for the executor to persist.
 type PersistEntry struct {
 	Role             string  `json:"role"` // "assistant" or "tool_call"
 	Content          string  `json:"content,omitempty"`
@@ -64,27 +62,25 @@ type PersistEntry struct {
 	ProviderName     string  `json:"provider_name,omitempty"`
 	PromptTokens     int     `json:"prompt_tokens,omitempty"`
 	PredictedTokens  int     `json:"predicted_tokens,omitempty"`
-	PromptMs         int64   `json:"prompt_ms,omitempty"`    // prompt processing time (ms)
-	PredictedMs      int64   `json:"predicted_ms,omitempty"` // generation time (ms)
-	Duration         int64   `json:"duration,omitempty"`
+	PromptMs         int64   `json:"prompt_ms,omitempty"`        // prompt processing time (ms)
+	PredictedMs      int64   `json:"predicted_ms,omitempty"`     // generation time (ms)
 	Cost             float64 `json:"cost,omitempty"`             // per-message cost from usage.cost.total
 	ToolCallsJSON    string  `json:"tool_calls_json,omitempty"`  // JSON of tool call data (role=tool_call)
 	ToolResultJSON   string  `json:"tool_result_json,omitempty"` // JSON of tool result data (role=tool_call)
 }
 
-// Event type constants. This package is a published cross-repo contract: the
-// WASM adapters (see ../MIKE-extensions/agent/*) compile against it, so these
-// exported names have consumers that a scan of this repository cannot see.
+// Event type constants are a contract with the WASM adapters in ../MIKE-extensions/agent/*, a tree this
+// repository cannot build. Before deleting one, grep that tree and check the shipped module:
+// `strings ../MIKE-extensions/agent/pi/pi.wasm | grep <name>`.
 const (
-	EventTypeToken        = "token"
-	EventTypeReasoning    = "reasoning"
-	EventTypeToolCall     = "tool_call"
-	EventTypeToolResult   = "tool_result"
-	EventTypeStatus       = "status"
-	EventTypeStats        = "stats"
-	EventTypeError        = "error"
-	EventTypePersist      = "persist"
-	EventTypeTurnComplete = "turn_complete"
+	EventTypeToken      = "token"
+	EventTypeReasoning  = "reasoning"
+	EventTypeToolCall   = "tool_call"
+	EventTypeToolResult = "tool_result"
+	EventTypeStatus     = "status"
+	EventTypeStats      = "stats"
+	EventTypeError      = "error"
+	EventTypePersist    = "persist"
 )
 
 // Command type constants (passed to EncodeCommand).
@@ -98,7 +94,7 @@ const (
 	CommandAbort         = "abort"
 )
 
-// SubprocessConfig names the agent process to spawn: returned by the adapter, consumed by the runner.
+// SubprocessConfig names the agent process to spawn: the adapter returns it, the runner uses it.
 type SubprocessConfig struct {
 	Binary string   `json:"binary"`
 	Args   []string `json:"args"`
@@ -112,39 +108,29 @@ type AgentModel struct {
 }
 
 // AgentAdapter is the boundary between the runner (backend) and a WASM adapter: the runner loads the
-// module and wraps its exports, the adapter owns ALL protocol logic — command encoding, output
-// parsing, state management.
+// module and wraps its exports, the adapter owns all protocol logic. Every ctx is the caller's and is
+// used only to cancel the call in flight.
 type AgentAdapter interface {
 	// Init initializes the adapter with extension config JSON.
-	// ctx is used for cancellation during initialization.
 	Init(ctx context.Context, config []byte) error
 
-	// SubprocessConfig returns the agent or process configuration.
-	// The runner spawns this binary with these args/env.
-	// ctx is used for cancellation during the subprocess config lookup.
+	// SubprocessConfig returns the agent process the runner spawns, with its args and env.
 	SubprocessConfig(ctx context.Context) SubprocessConfig
 
-	// EncodeCommand encodes a high-level command into protocol bytes for agent stdin.
-	// cmd is one of CommandPrompt, CommandCompact, CommandStats, CommandGetState, CommandAbort.
-	// data is command-specific JSON (e.g., {"message":"...","behavior":"..."} for prompt).
-	// ctx is used for cancellation during encoding.
+	// EncodeCommand encodes a high-level command into protocol bytes for agent stdin. cmd is one of the
+	// Command constants and data is command-specific JSON.
 	EncodeCommand(ctx context.Context, cmd string, data []byte) []byte
 
-	// ParseOutput parses raw agent stdout bytes into structured events.
-	// The adapter maintains state across calls (e.g., line buffering, turn state).
-	// Returns multiple events if multiple protocol messages are in the input.
-	// ctx is used for cancellation during parsing.
+	// ParseOutput parses raw agent stdout bytes into events. The adapter keeps state across calls (line
+	// buffering, turn state) and may return several events for one input.
 	ParseOutput(ctx context.Context, data []byte) []Event
 
-	// HandleUIRequest generates response bytes for an agent UI request (e.g., cancel a dialog).
-	// Returns nil if no response should be sent.
-	// ctx is used for cancellation during handling.
+	// HandleUIRequest generates response bytes for an agent UI request (e.g., cancel a dialog), or nil
+	// when no response should be sent.
 	HandleUIRequest(ctx context.Context, id, method string) []byte
 
-	// ListModels returns the list of models available from the agent.
-	// The adapter is responsible for discovering models (e.g., via CLI flags or RPC).
-	// Returns an empty list if model discovery is not supported.
-	// ctx is used for cancellation during the discovery process.
+	// ListModels returns the models available from the agent, or an empty list when the agent cannot
+	// discover them.
 	ListModels(ctx context.Context) []AgentModel
 
 	// Close cleans up adapter state.
@@ -160,7 +146,7 @@ type CompactResult struct {
 	Err     error
 }
 
-// WASM function names that the adapter module must export.
+// WASM function names the adapter module must export.
 const (
 	WasmFnInit             = "Init"
 	WasmFnSubprocessConfig = "SubprocessConfig"
