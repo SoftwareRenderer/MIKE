@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
   apiGetJson,
+  clearBoardExcept,
   createTaskViaApi,
   csrfFetch,
   getProjectId,
@@ -67,22 +68,39 @@ async function expectOnBoard(page: Page, taskId: string): Promise<void> {
 }
 
 /**
- * Column the narrow board is showing: the one nearest the scroller's centre, or null while the
- * smooth scroll is still moving.
+ * Column the narrow board comes to rest on.
+ *
+ * The scroll after a Done click is smooth and begins a tick after the task view closes, and at
+ * `scrollLeft` 0 the column nearest the centre is already Backlog — so the first sample reads as
+ * whatever the fresh board opens on. This waits for the scroller's position to stop moving, then
+ * reads it: five unchanged samples, never fewer than five samples.
  */
-async function centredColumn(page: Page): Promise<string | null> {
-  return page.evaluate(() => {
+async function restingColumn(page: Page): Promise<string | null> {
+  return page.evaluate(async () => {
     const board = document.querySelector<HTMLElement>('.board');
     if (!board) return null;
-    const centre = board.scrollLeft + board.clientWidth / 2;
-    let winner: { label: string; distance: number; width: number } | null = null;
-    for (const col of Array.from(document.querySelectorAll<HTMLElement>('.board > .column'))) {
-      const distance = Math.abs(col.offsetLeft + col.clientWidth / 2 - centre);
-      if (!winner || distance < winner.distance) {
-        winner = { label: col.getAttribute('aria-label') || '', distance, width: col.clientWidth };
+    const nearest = (): string | null => {
+      const centre = board.scrollLeft + board.clientWidth / 2;
+      let winner: { label: string; distance: number; width: number } | null = null;
+      for (const col of Array.from(document.querySelectorAll<HTMLElement>('.board > .column'))) {
+        const distance = Math.abs(col.offsetLeft + col.clientWidth / 2 - centre);
+        if (!winner || distance < winner.distance) {
+          winner = { label: col.getAttribute('aria-label') || '', distance, width: col.clientWidth };
+        }
+      }
+      return winner && winner.distance < winner.width / 2 ? winner.label.replace(' column', '') : null;
+    };
+    let still = 0;
+    let last = -1;
+    for (let i = 0; i < 50 && (still < 5 || i < 5); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (board.scrollLeft === last) still++;
+      else {
+        still = 0;
+        last = board.scrollLeft;
       }
     }
-    return winner && winner.distance < winner.width / 2 ? winner.label.replace(' column', '') : null;
+    return nearest();
   });
 }
 
@@ -164,9 +182,9 @@ test.describe.serial('Done returns to the board', () => {
   });
 });
 
-// A Done move leaves the board on Review when another task is waiting there, rather than on the
-// Done column the card just joined.
-test.describe('Done lands on the remaining review', () => {
+// A Done move leaves the board on Review when another task is waiting there, and on Backlog when
+// none is — the finished card's own column is not where the next task comes from.
+test.describe('Done lands the board on the next work', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await gotoProject(page);
@@ -191,6 +209,26 @@ test.describe('Done lands on the remaining review', () => {
     await page.locator('.btn-move', { hasText: 'Done' }).click();
 
     await expectOnBoard(page, finishing);
-    await expect.poll(() => centredColumn(page), { timeout: 10000 }).toBe('Review');
+    await expect.poll(() => restingColumn(page), { timeout: 10000 }).toBe('Review');
+  });
+
+  test('a Done move with nothing left in Review centres the Backlog column', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    // A worker's project outlives the spec that filled it, and the board skips a scroll to an empty
+    // column — so Review has to start empty and Backlog has to hold a card to land on.
+    await clearBoardExcept(page, projectId, ['backlog']);
+    await createTaskViaApi(page, projectId, `next-in-backlog-${Date.now()}`);
+    const finishing = await createTaskViaApi(page, projectId, `review-only-${Date.now()}`);
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${finishing}/move`, {
+      method: 'POST',
+      body: { status: 'review' },
+    });
+
+    await navigateToTask(page, finishing, projectId);
+    await expect(page.locator(REVIEW_BAR)).toBeVisible({ timeout: 15000 });
+    await page.locator('.btn-move', { hasText: 'Done' }).click();
+
+    await expectOnBoard(page, finishing);
+    await expect.poll(() => restingColumn(page), { timeout: 10000 }).toBe('Backlog');
   });
 });
