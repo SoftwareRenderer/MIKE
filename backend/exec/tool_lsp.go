@@ -11,105 +11,122 @@ import (
 	"mike/backend/git"
 )
 
-// The LSP tools. Each one resolves a symbol by text search in the task's own file access, then asks
-// the language server about that position.
+// The LSP tools: each resolves a symbol by text search over the task's own file access, then asks the
+// language server about that position.
 
-// handleLSPSymbolRequest resolves a symbol name to a position via text search,
-// then calls the given LSP method at that position. ctx bounds the language-server
-// round trip, so stopping the task stops the tool. The file is read through the task's
-// own file access, so a sandboxed task resolves its symbol in the container.
-func (r *toolRunner) handleLSPSymbolRequest(ctx context.Context, args map[string]any, worktreePath string, method string, extraParams map[string]any, read readFunc) (string, error) {
+// lspSymbolTarget is the position, workspace and textDocument/position params every request about a
+// resolved symbol carries.
+type lspSymbolTarget struct {
+	mgr          lspManager
+	path         string
+	symbol       string
+	absWorkspace string
+	params       map[string]any
+}
+
+// resolveLSPSymbol is the half every LSP tool shares before it asks the language server anything: the
+// file-type check, the read through the task's own file access, the text search that turns a name into a
+// position, and the params for it. `required` names the args that must all be non-empty.
+func (r *toolRunner) resolveLSPSymbol(ctx context.Context, args map[string]any, worktreePath string, read readFunc, required ...string) (*lspSymbolTarget, string, error) {
 	mgr := r.lspMgr()
 	if mgr == nil {
-		return "", fmt.Errorf("LSP manager not available")
+		return nil, "", fmt.Errorf("LSP manager not available")
+	}
+	var missing []string
+	for _, key := range required {
+		if v, _ := args[key].(string); v == "" {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, "", fmt.Errorf("%s are required", andList(missing))
 	}
 	path, _ := args["path"].(string)
 	symbol, _ := args["symbol"].(string)
-	if path == "" || symbol == "" {
-		return "", fmt.Errorf("path and symbol are required")
-	}
 
-	// Check if tool calls are enabled for the LSP extension that handles this file
 	if !mgr.IsToolCallsEnabledForFile(path) {
-		return "", fmt.Errorf("LSP tool calls are disabled for this file type")
+		return nil, "", fmt.Errorf("LSP tool calls are disabled for this file type")
 	}
 
-	absPath := filepath.Join(worktreePath, path)
 	absWorkspace, err := filepath.Abs(worktreePath)
 	if err != nil {
 		absWorkspace = worktreePath
 	}
 
-	// Read the file and find the symbol by text search
 	content, err := read(ctx, path)
 	if err != nil {
-		return "", fmt.Errorf("read file: %w", err)
+		return nil, "", fmt.Errorf("read file: %w", err)
 	}
 	position := findSymbolInText(string(content), symbol)
 	if position == nil {
-		return fmt.Sprintf("Symbol %q not found in %s. Use read_file to inspect the file.", symbol, path), nil
+		// Not a failure: the sentence is the answer the model gets.
+		return nil, fmt.Sprintf("Symbol %q not found in %s. Use read_file to inspect the file.", symbol, path), nil
 	}
 
-	// Build the LSP request with the resolved position
-	uri := "file://" + absPath
-	params := map[string]any{
-		"textDocument": map[string]any{"uri": uri},
-		"position":     position,
+	return &lspSymbolTarget{
+		mgr:          mgr,
+		path:         path,
+		symbol:       symbol,
+		absWorkspace: absWorkspace,
+		params: map[string]any{
+			"textDocument": map[string]any{"uri": "file://" + filepath.Join(worktreePath, path)},
+			"position":     position,
+		},
+	}, "", nil
+}
+
+// andList renders argument names the way the tool's error messages read: "path and symbol".
+func andList(names []string) string {
+	switch len(names) {
+	case 1:
+		return names[0]
+	case 2:
+		return names[0] + " and " + names[1]
+	default:
+		return strings.Join(names[:len(names)-1], ", ") + ", and " + names[len(names)-1]
 	}
+}
+
+// handleLSPSymbolRequest resolves a symbol by text search and calls the given LSP method at that
+// position. ctx bounds the round trip, so stopping the task stops the tool.
+func (r *toolRunner) handleLSPSymbolRequest(ctx context.Context, args map[string]any, worktreePath string, method string, extraParams map[string]any, read readFunc) (string, error) {
+	target, answer, err := r.resolveLSPSymbol(ctx, args, worktreePath, read, "path", "symbol")
+	if err != nil {
+		return "", err
+	}
+	if target == nil {
+		return answer, nil
+	}
+
+	params := target.params
 	for k, v := range extraParams {
 		params[k] = v
 	}
 
-	response, err := mgr.LSPRequest(ctx, absWorkspace, path, method, params)
+	response, err := target.mgr.LSPRequest(ctx, target.absWorkspace, target.path, method, params)
 	if err != nil {
 		return "", err
 	}
 
-	return formatLSPResponse(response, method, absWorkspace), nil
+	return formatLSPResponse(response, method, target.absWorkspace), nil
 }
 
-// handleLSPRename renames a symbol across files with textDocument/rename, validating with
-// prepareRename first and then applying the returned WorkspaceEdit to every target file (all
-// must be inside the workspace). Writes go through the same sandbox-aware callbacks as
-// write_file, so a rename lands as one checkpoint's worth of changes in the task diff.
+// handleLSPRename renames a symbol with textDocument/rename after prepareRename, then applies the
+// returned WorkspaceEdit to every target file, all of which must be inside the workspace. Writes go
+// through the same sandbox-aware callbacks as write_file, so a rename lands as one checkpoint.
 func (r *toolRunner) handleLSPRename(ctx context.Context, args map[string]any, worktreePath string, read readFunc, write writeFunc) (string, error) {
-	mgr := r.lspMgr()
-	if mgr == nil {
-		return "", fmt.Errorf("LSP manager not available")
+	target, answer, err := r.resolveLSPSymbol(ctx, args, worktreePath, read, "path", "symbol", "new_name")
+	if err != nil {
+		return "", err
 	}
-	path, _ := args["path"].(string)
-	symbol, _ := args["symbol"].(string)
+	if target == nil {
+		return answer, nil
+	}
+	mgr, path, symbol, absWorkspace := target.mgr, target.path, target.symbol, target.absWorkspace
 	newName, _ := args["new_name"].(string)
-	if path == "" || symbol == "" || newName == "" {
-		return "", fmt.Errorf("path, symbol, and new_name are required")
-	}
-	if !mgr.IsToolCallsEnabledForFile(path) {
-		return "", fmt.Errorf("LSP tool calls are disabled for this file type")
-	}
+	baseParams := target.params
 
-	absPath := filepath.Join(worktreePath, path)
-	absWorkspace, err := filepath.Abs(worktreePath)
-	if err != nil {
-		absWorkspace = worktreePath
-	}
-
-	// Resolve the symbol position by text search (same as the other LSP tools).
-	content, err := read(ctx, path)
-	if err != nil {
-		return "", fmt.Errorf("read file: %w", err)
-	}
-	position := findSymbolInText(string(content), symbol)
-	if position == nil {
-		return fmt.Sprintf("Symbol %q not found in %s. Use read_file to inspect the file.", symbol, path), nil
-	}
-
-	uri := "file://" + absPath
-	baseParams := map[string]any{
-		"textDocument": map[string]any{"uri": uri},
-		"position":     position,
-	}
-
-	// prepareRename: a null result means the symbol cannot be renamed.
+	// A null prepareRename result means the symbol cannot be renamed.
 	prepareResp, err := mgr.LSPRequest(ctx, absWorkspace, path, "textDocument/prepareRename", baseParams)
 	if err != nil {
 		return "", err
@@ -124,7 +141,6 @@ func (r *toolRunner) handleLSPRename(ctx context.Context, args map[string]any, w
 		return fmt.Sprintf("Symbol %q in %s is not renamable by the language server.", symbol, path), nil
 	}
 
-	// rename
 	renameParams := map[string]any{
 		"textDocument": baseParams["textDocument"],
 		"position":     baseParams["position"],
@@ -142,7 +158,6 @@ func (r *toolRunner) handleLSPRename(ctx context.Context, args map[string]any, w
 		return fmt.Sprintf("Rename of %q produced no edits (symbol may not be renamable).", symbol), nil
 	}
 
-	// Validate all targets are inside the workspace.
 	uris := make([]string, 0, len(edits))
 	for uri := range edits {
 		uris = append(uris, uri)
@@ -152,9 +167,8 @@ func (r *toolRunner) handleLSPRename(ctx context.Context, args map[string]any, w
 		return "", err
 	}
 
-	// Apply file by file (deterministic order). Any failure aborts; files
-	// already written are part of the same checkpoint, so the diff shows the
-	// partial state and the agent can recover.
+	// Sorted so the writes land in a fixed order. A failure aborts: files already written stay in the
+	// same checkpoint, so the diff shows the partial state.
 	sort.Strings(uris)
 	var fileSummary []string
 	for _, uri := range uris {

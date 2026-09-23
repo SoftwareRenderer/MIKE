@@ -25,7 +25,7 @@ func TestShutdownOrderIsWhatWeDeclared(t *testing.T) {
 			t.Fatalf("register %s: %v", stageNames[st], err)
 		}
 	}
-	if err := s.Shutdown(context.Background()); err != nil {
+	if err := s.Shutdown(); err != nil {
 		t.Fatalf("shutdown: %v", err)
 	}
 
@@ -79,7 +79,7 @@ func TestShutdownRunsOnlyWhatWasRegistered(t *testing.T) {
 	if err := s.reg(stageTerminalSessions, "terminal sessions", func() { ran = append(ran, "terminal sessions") })(); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if err := s.Shutdown(context.Background()); err != nil {
+	if err := s.Shutdown(); err != nil {
 		t.Fatalf("shutdown: %v", err)
 	}
 	if len(ran) != 1 || ran[0] != "terminal sessions" {
@@ -156,7 +156,7 @@ func TestShutdownCancelsTheBaseForEverythingStillRunning(t *testing.T) {
 	if detached.Err() != nil {
 		t.Fatalf("a detached context is dead before shutdown: %v", detached.Err())
 	}
-	if err := s.Shutdown(context.Background()); err != nil {
+	if err := s.Shutdown(); err != nil {
 		t.Fatalf("shutdown: %v", err)
 	}
 	if detached.Err() == nil {
