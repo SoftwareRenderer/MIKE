@@ -1365,6 +1365,8 @@
 
         const returnWatcher = createTabReturn({
             mayBeBehind,
+            // True because this transcript arrives on `task_event` frames and nowhere else.
+            hiddenIsEvidence: true,
             msSinceFrame: () => getAppStreamRef()?.msSinceFrame() ?? null,
             onReturn: () => { void reconcileAfterAbsence(); },
         });

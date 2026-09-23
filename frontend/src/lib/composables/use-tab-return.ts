@@ -7,6 +7,8 @@ import { needsReturnReconcile, type ReturnSource } from '$lib/utils/tab-return';
 export interface TabReturnOptions {
     /** True while this screen could be showing something the server has moved past. */
     mayBeBehind: () => boolean;
+    /** Passed through to `ReturnSignal.hiddenIsEvidence`. */
+    hiddenIsEvidence?: boolean;
     msSinceFrame?: () => number | null;
     /** Called at most once per return gesture. */
     onReturn: (source: ReturnSource) => void;
@@ -28,6 +30,7 @@ export function createTabReturn(opts: TabReturnOptions): TabReturn {
             msSinceFrame: opts.msSinceFrame?.() ?? null,
             msSinceReconcile: Date.now() - lastReconcileAt,
             mayBeBehind: opts.mayBeBehind(),
+            hiddenIsEvidence: opts.hiddenIsEvidence ?? false,
         })) {
             return;
         }
