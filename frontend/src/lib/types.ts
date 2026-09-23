@@ -222,6 +222,8 @@ export interface ChatEntry {
     };
     createdAt?: string;
     queued?: boolean;
+    /** The queue action this outgoing entry came from, so a re-derive does not draw it twice. */
+    actionId?: string;
 }
 
 export type DiffData = {

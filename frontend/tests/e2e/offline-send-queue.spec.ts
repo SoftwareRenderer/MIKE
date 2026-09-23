@@ -7,7 +7,10 @@ import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch } from './hel
  * - It stays visible as an outgoing (queued) message.
  * - A visible but NON-persisted error notice appears.
  * - The ReviewBar "Resume" button is displayed (last non-error entry is the queued user message).
- * - Once the network is restored and the queue flushes, the message is sent and the notice is gone.
+ * - A reload while still offline shows the message again, still pending: it has no row, so the queue
+ *   is its only record — clock, notice and Resume all come back from there.
+ * - Once the network is restored and the queue flushes, the message is sent, the applied row is on
+ *   screen (not only on the server), and the notice is gone.
  */
 
 /** Read the offline-queue action count from IndexedDB. */
@@ -77,6 +80,17 @@ test.describe.serial('Offline send queue', () => {
             expect(await queuedActionCount(page)).toBeGreaterThan(0);
         }).toPass({ timeout: 10000 });
 
+        // 5. A reload while still offline shows it as pending again.
+        await page.reload();
+        await page.waitForSelector('.card', { timeout: 10000 });
+        await navigateToTask(page, taskId, projectId);
+
+        const reloadedMsg = page.locator('.chat-message').filter({ hasText: msgContent });
+        await expect(reloadedMsg.first()).toBeVisible({ timeout: 15000 });
+        await expect(reloadedMsg.first().locator('.queued-indicator')).toBeVisible();
+        await expect(page.locator('.error-card', { hasText: 'queued' })).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('.chat-review-bar .btn-commit-done', { hasText: 'Resume' })).toBeVisible({ timeout: 10000 });
+
         // Restore the network and reload — the queue flushes on page load.
         await page.route(`**/api/projects/*/tasks/*/send`, async (route) => {
             await route.continue();
@@ -85,7 +99,7 @@ test.describe.serial('Offline send queue', () => {
         await page.waitForSelector('.card', { timeout: 10000 });
         await navigateToTask(page, taskId, projectId);
 
-        // 5. The message is now persisted on the server.
+        // 6. The message is on the server, and on screen.
         await expect(async () => {
             const present = await page.evaluate(async ({ pid, tid, content }) => {
                 const res = await fetch(`/api/projects/${pid}/tasks/${tid}/messages`);
@@ -96,12 +110,16 @@ test.describe.serial('Offline send queue', () => {
             expect(present).toBe(true);
         }).toPass({ timeout: 15000 });
 
-        // 6. The queue is drained.
+        const applied = page.locator('.chat-message').filter({ hasText: msgContent });
+        await expect(applied.first()).toBeVisible({ timeout: 15000 });
+        await expect(applied.locator('.queued-indicator')).toHaveCount(0);
+
+        // 7. The queue is drained.
         await expect(async () => {
             expect(await queuedActionCount(page)).toBe(0);
         }).toPass({ timeout: 10000 });
 
-        // 7. The queued error notice is gone (client-side only — never persisted to the DB).
+        // 8. The queued error notice is gone (client-side only — never persisted to the DB).
         await expect(page.locator('.error-card', { hasText: 'queued' })).toHaveCount(0);
     });
 });

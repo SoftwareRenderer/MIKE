@@ -16,6 +16,7 @@
     import { TERMINAL_VIEW, asksForTerminal, explorerPathRoots, fileWithinRoots } from '$lib/utils/app-link';
     import { reviewNotifier } from '$lib/services/review-notifications.svelte';
     import { getBoardCache, getBoardCacheEntry, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, clearAll, loadAppSetting, saveAppSetting } from '$lib/storage';
+    import { flushBoardMirror, mirrorBoard } from '$lib/services/board-mirror';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
     import { useBoardArrowNav } from '$lib/composables/use-board-arrow-nav';
@@ -174,12 +175,28 @@
      * Put a board on screen, if the project it was fetched for is still the one being looked at.
      * Each async board path captures the id before its awaits and hands it here, so a response for
      * a project the user has switched away from cannot replace the board they are now on.
+     *
+     * `'live'` is a board the server answered, so it is mirrored and resets the age line. `'mirror'`
+     * keeps the age it carries and gets this browser's queued writes replayed onto it.
      */
-    function applyBoard(board: BoardData, projectId: string): boolean {
+    function applyBoard(board: BoardData, projectId: string, source: 'live' | 'mirror'): boolean {
         if (!board || currentProject?.id !== projectId) return false;
-        tasks = board.tasks || [];
-        appStore.board = board;
+        if (source === 'live') {
+            mirrorBoard(projectId, board);
+            lastSyncedAt = Date.now();
+            tasks = board.tasks || [];
+            appStore.board = board;
+            return true;
+        }
+        const withQueue = applyQueuedActionsToBoard(board.tasks || [], projectId);
+        tasks = withQueue;
+        appStore.board = { ...board, tasks: withQueue };
         return true;
+    }
+
+    /** A board the fetch answered from the mirror is a mirror landing: same age rule, same replay. */
+    function boardSource(board: BoardData): 'live' | 'mirror' {
+        return isFromCache(board) ? 'mirror' : 'live';
     }
 
     /** The counts frame is the arrival signal for projects whose board is not on screen. */
@@ -593,6 +610,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 if (!merged) return;
                 tasks = merged;
                 appStore.board = { ...appStore.board!, tasks };
+                // A frame this connection was sent is server-answered state, so the mirror and the
+                // age line follow it.
+                if (currentProject) {
+                    mirrorBoard(currentProject.id, { tasks });
+                    lastSyncedAt = Date.now();
+                }
                 if (appStore.selectedTask?.id === updatedTask.id) {
                     appStore.selectedTask = updatedTask;
                 }
@@ -604,6 +627,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 if (remaining.length !== tasks.length) {
                     tasks = remaining;
                     appStore.board = { ...appStore.board!, tasks };
+                    if (currentProject) {
+                        mirrorBoard(currentProject.id, { tasks });
+                        lastSyncedAt = Date.now();
+                    }
                 }
                 sandboxStatsStore.remove(task_id);
                 if (appStore.selectedTask && appStore.selectedTask.id === task_id) {
@@ -720,12 +747,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 if (targetProject) {
                     await selectProject(targetProject, false);
                 }
-                // Replay queued actions onto cached board so UI reflects user's last actions —
-                // this project's actions only; the queue holds every project's writes.
-                if (currentProject) {
-                    tasks = applyQueuedActionsToBoard(tasks, currentProject.id);
-                    appStore.board = { ...appStore.board!, tasks };
-                }
+                // The landing replayed this project's queued writes already; a second pass opens a
+                // second card.
                 // Check if data was served from cache
                 servingFromCache = isFromCache(projs);
             }
@@ -845,6 +868,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     window.addEventListener('online', handleBrowserOnline);
     window.addEventListener('offline', handleBrowserOffline);
 
+    // A snapshot still in the coalescing window goes with the page unless it is written here.
+    function flushMirrorOnPageHide() {
+        void flushBoardMirror();
+    }
+    window.addEventListener('pagehide', flushMirrorOnPageHide);
+
     function rejectStrayFileDrop(e: DragEvent) {
         if (!dragCarriesFiles(e.dataTransfer)) return;
         e.preventDefault();
@@ -861,6 +890,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         returnWatcher.destroy();
         window.removeEventListener('online', handleBrowserOnline);
         window.removeEventListener('offline', handleBrowserOffline);
+        window.removeEventListener('pagehide', flushMirrorOnPageHide);
+        void flushBoardMirror();
         window.removeEventListener('dragover', rejectStrayFileDrop);
         window.removeEventListener('drop', rejectStrayFileDrop);
         disconnectBoardStream();
@@ -946,7 +977,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             try {
                 // Refresh board to pick up tasks created via API
                 const b = await getBoard(projectId);
-                if (!applyBoard(b, projectId)) return;
+                if (!applyBoard(b, projectId, boardSource(b))) return;
                 task = tasks.find(t => t.id === taskId);
                 if (!task) {
                     // The task belongs to another project, so the detail on screen is not the URL's:
@@ -1026,7 +1057,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
         const cached = entry?.data as BoardData | undefined;
         if (!cached || appStore.board || currentProject?.id !== projectId) return;
-        if (!applyBoard(cached, projectId)) return;
+        if (!applyBoard(cached, projectId, 'mirror')) return;
         lastSyncedAt = entry!.cachedAt;
         // The banner says "this is the newest copy there is", which is only true with no socket to
         // bring the live board in; a slow-but-connected switch must not flash it.
@@ -1041,7 +1072,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             // Wait for pending queue flush
             await waitForFlush();
             const b = await getBoard(projectId);
-            if (!applyBoard(b, projectId)) return;
+            if (!applyBoard(b, projectId, boardSource(b))) return;
             void hydrateDoneTaskStats(projectId, tasks);
             // Update selected task reference to point to fresh object from API
             const task = appStore.selectedTask;
@@ -1053,8 +1084,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             }
             // Live data received — clear cache indicator
             servingFromCache = isFromCache(b);
-            // A mirror board is not data that just arrived; it keeps the age it had.
-            if (!isFromCache(b)) lastSyncedAt = Date.now();
         } catch (e) {
             if (currentProject?.id !== projectId) return;
             // When offline, sync tasks from appStore (has optimistic updates)
@@ -1083,7 +1112,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             if (currentProject) {
                 const projectId = currentProject.id;
                 const b = await getBoard(projectId);
-                if (applyBoard(b, projectId)) {
+                if (applyBoard(b, projectId, boardSource(b))) {
                     // Update selected task reference
                     { const sel = appStore.selectedTask; if (sel) {
                         const fresh = tasks.find(t => t.id === sel.id);
@@ -1163,14 +1192,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
         try {
             const b = await getBoard(p.id);
-            if (!applyBoard(b, p.id)) return;
+            if (!applyBoard(b, p.id, boardSource(b))) return;
             const boardTasks = tasks;
             // Mobile: land the board on the column that has work
             if (wasDifferentProject && isMobileCtx.isMobile) {
                 boardFocus = { projectId: p.id, column: resolveBoardLandingColumn(boardTasks) };
             }
             servingFromCache = isFromCache(b);
-            if (!servingFromCache) lastSyncedAt = Date.now();
             // Restore task from URL after board loads (await so task detail renders before return)
             await restoreTaskFromUrl();
             // Hydrate cached done-task stats BEFORE subscribing so the
@@ -1187,7 +1215,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             // Fallback: load board from cache if available
             try {
                 const cachedBoard = await getBoardCache<BoardData>(boardCacheKey(p.id));
-                if (cachedBoard && applyBoard(cachedBoard, p.id)) {
+                if (cachedBoard && applyBoard(cachedBoard, p.id, 'mirror')) {
                     servingFromCache = true;
                     await restoreTaskFromUrl();
                 }
