@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,6 +18,10 @@ const DefaultMemSupervisorInterval = 5 * time.Second
 // "Paused by user" is what the shared stop transition writes for every pause, including this one.
 const memoryPauseOutput = "Paused for memory pressure — resumes automatically when memory frees"
 
+// defaultIdleSandboxGrace is how long a container may belong to a task that is not working before the
+// supervisor may take it back.
+const defaultIdleSandboxGrace = 5 * time.Minute
+
 // memorySupervisorActions is the surface MemorySupervisor uses to pause, resume and annotate tasks.
 // TaskExecutor implements it; tests substitute a recording mock.
 type memorySupervisorActions interface {
@@ -25,6 +30,7 @@ type memorySupervisorActions interface {
 	startSubtask(projectID, taskID string) error
 	noteMemoryPause(taskID string)
 	noteMemoryResume(taskID string)
+	reclaimSandbox(taskID string) bool
 }
 
 // MemorySupervisor keeps sandbox memory inside the budget. With a non-empty gate queue it pauses the
@@ -40,6 +46,11 @@ type MemorySupervisor struct {
 	charges  liveCharges // the cost of each live container; nil when no container manager is wired
 	actions  memorySupervisorActions
 	interval time.Duration
+	reclaim  SandboxReclaim
+
+	// idleSince is when this process first saw each live container of a task that was not working. No
+	// stored column answers that; docs/sandbox-runtime.md.
+	idleSince map[string]time.Time
 
 	stopOnce sync.Once
 	stopCh   chan struct{}
@@ -53,17 +64,42 @@ type liveCharges interface {
 	Charges() map[string]int64
 }
 
+// SandboxReclaim is the wiring for releasing the container of a task waiting on a person; the zero value
+// never does. Each field is read on the tick that uses it, so the preference needs no restart.
+type SandboxReclaim struct {
+	// Enabled is the stored preference. nil means nobody ever switched it on.
+	Enabled func() bool
+	// Holds reports that a terminal session owns this container.
+	Holds func(taskID string) bool
+	Now   func() time.Time // nil = time.Now
+}
+
+func (r SandboxReclaim) active() bool { return r.Enabled != nil && r.Enabled() }
+
+func (r SandboxReclaim) clock() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now()
+}
+
+func (r SandboxReclaim) heldByOther(taskID string) bool {
+	return r.Holds != nil && r.Holds(taskID)
+}
+
 // NewMemorySupervisor builds a supervisor. A nil charges means there are no container readings, so
 // every task is costed at the reserve the budget holds for it.
-func NewMemorySupervisor(store *store.Store, gate *MemoryGate, charges liveCharges, actions memorySupervisorActions, interval time.Duration) *MemorySupervisor {
+func NewMemorySupervisor(store *store.Store, gate *MemoryGate, charges liveCharges, actions memorySupervisorActions, interval time.Duration, reclaim SandboxReclaim) *MemorySupervisor {
 	return &MemorySupervisor{
-		store:    store,
-		gate:     gate,
-		charges:  charges,
-		actions:  actions,
-		interval: interval,
-		stopCh:   make(chan struct{}),
-		done:     make(chan struct{}),
+		store:     store,
+		gate:      gate,
+		charges:   charges,
+		actions:   actions,
+		interval:  interval,
+		reclaim:   reclaim,
+		idleSince: make(map[string]time.Time),
+		stopCh:    make(chan struct{}),
+		done:      make(chan struct{}),
 	}
 }
 
@@ -119,28 +155,37 @@ func (s *MemorySupervisor) TickOnce() {
 	// soon is why it is tight, so the supervisor has to free memory now.
 	queueBlocked := s.gate.QueueLen() > 0
 	emergency := s.gate.HostMemoryTight()
-	if (queueBlocked || emergency) && len(running) > 0 {
-		victim, cost := s.smallestReserve(running)
-		if err := s.actions.stopTask(victim.ID); err != nil {
-			logging.For(logging.Exec).With(logging.TaskID, victim.ID).Warnf("memory supervisor: pause failed: %v", err)
+	charges := s.liveCharges()
+	now := s.reclaim.clock()
+	// Tracked whether or not the preference is on: the clock has to predate anyone switching it on.
+	s.trackIdleContainers(charges, running, now)
+	if queueBlocked || emergency {
+		if len(running) > 0 {
+			victim, cost := s.smallestReserve(running, charges)
+			if err := s.actions.stopTask(victim.ID); err != nil {
+				logging.For(logging.Exec).With(logging.TaskID, victim.ID).Warnf("memory supervisor: pause failed: %v", err)
+				return
+			}
+			// Set after stopTask returns: StopTask waits for the executor to exit, so a
+			// concurrent user start during the stop window won't be overwritten.
+			if err := s.store.SetMemorySupervisorPaused(victim.ID, true); err != nil {
+				logging.For(logging.Exec).With(logging.TaskID, victim.ID).Warnf("memory supervisor: setting paused flag: %v", err)
+			}
+			// After the flag: the note promises the auto-resume that flag arms.
+			s.actions.noteMemoryPause(victim.ID)
+			if emergency {
+				logging.For(logging.Exec).With(logging.TaskID, victim.ID).Warnf(
+					"memory supervisor: host has %d MB free, under %d%% of its RAM — paused (frees %d MB), waiting on the host itself, queued %d",
+					budget.AvailableMB, memoryAvailableFloorPct, cost, s.gate.QueueLen())
+			} else {
+				logging.For(logging.Exec).With(logging.TaskID, victim.ID).Infof(
+					"memory supervisor: paused (frees %d MB) to free memory for queued task(s)", cost)
+			}
 			return
 		}
-		// Set after stopTask returns: StopTask waits for the executor to exit, so a
-		// concurrent user start during the stop window won't be overwritten.
-		if err := s.store.SetMemorySupervisorPaused(victim.ID, true); err != nil {
-			logging.For(logging.Exec).With(logging.TaskID, victim.ID).Warnf("memory supervisor: setting paused flag: %v", err)
-		}
-		// After the flag: the note promises the auto-resume that flag arms.
-		s.actions.noteMemoryPause(victim.ID)
-		if emergency {
-			logging.For(logging.Exec).With(logging.TaskID, victim.ID).Warnf(
-				"memory supervisor: host has %d MB free, under %d%% of its RAM — paused (frees %d MB), waiting on the host itself, queued %d",
-				budget.AvailableMB, memoryAvailableFloorPct, cost, s.gate.QueueLen())
-		} else {
-			logging.For(logging.Exec).With(logging.TaskID, victim.ID).Infof(
-				"memory supervisor: paused (frees %d MB) to free memory for queued task(s)", cost)
-		}
-		return
+		// Nothing in flight can be paused: what the budget counts sits in containers of tasks waiting on a
+		// person, and no user action is coming to free it.
+		s.reclaimIdleSandbox(charges, budget.AvailableMB, emergency, now)
 	}
 
 	// Resume path: no queue and a paused task fits.
@@ -218,12 +263,7 @@ func (te *TaskExecutor) noteMemoryTransition(taskID, kind, severity, content str
 // smallestReserve picks the running task whose pause costs the memory budget least. A task with no
 // live container is costed at the reserve the budget holds for it rather than at zero, so it cannot
 // become the permanent first choice. Tasks of equal cost keep the order the store returns.
-func (s *MemorySupervisor) smallestReserve(running []types.Task) (types.Task, int64) {
-	var charges map[string]int64
-	if s.charges != nil {
-		charges = s.charges.Charges()
-	}
-
+func (s *MemorySupervisor) smallestReserve(running []types.Task, charges map[string]int64) (types.Task, int64) {
 	var best types.Task
 	var bestCost int64
 	for i, task := range running {
@@ -236,4 +276,75 @@ func (s *MemorySupervisor) smallestReserve(running []types.Task) (types.Task, in
 		}
 	}
 	return best, bestCost
+}
+
+// liveCharges reads what each live container costs the budget, or nil when no container manager is wired.
+func (s *MemorySupervisor) liveCharges() map[string]int64 {
+	if s.charges == nil {
+		return nil
+	}
+	return s.charges.Charges()
+}
+
+// trackIdleContainers aligns idleSince with the containers alive right now: one that is gone, or whose row
+// is in flight, stops counting, and one seen idle for the first time starts counting now.
+func (s *MemorySupervisor) trackIdleContainers(charges map[string]int64, running []types.Task, now time.Time) {
+	inFlight := make(map[string]bool, len(running))
+	for i := range running {
+		inFlight[running[i].ID] = true
+	}
+	for id := range s.idleSince {
+		if _, alive := charges[id]; !alive || inFlight[id] {
+			delete(s.idleSince, id)
+		}
+	}
+	for id := range charges {
+		if inFlight[id] {
+			continue
+		}
+		if _, seen := s.idleSince[id]; !seen {
+			s.idleSince[id] = now
+		}
+	}
+}
+
+// idleContainer is one reclaim candidate.
+type idleContainer struct {
+	id    string
+	since time.Time
+	cost  int64
+}
+
+// reclaimIdleSandbox releases the container of the task that has waited longest, after pausing anything in
+// flight. Candidates come off the idle clock alone — whether the row still allows a release is the action's
+// decision — so the oldest candidate can be refused and the next one asked.
+func (s *MemorySupervisor) reclaimIdleSandbox(charges map[string]int64, availableMB int64, emergency bool, now time.Time) {
+	if !s.reclaim.active() {
+		return
+	}
+	var idle []idleContainer
+	for id, cost := range charges {
+		since, seen := s.idleSince[id]
+		if !seen || now.Sub(since) < defaultIdleSandboxGrace || s.reclaim.heldByOther(id) {
+			continue
+		}
+		idle = append(idle, idleContainer{id: id, since: since, cost: cost})
+	}
+	sort.Slice(idle, func(i, j int) bool { return idle[i].since.Before(idle[j].since) })
+
+	for _, cand := range idle {
+		if !s.actions.reclaimSandbox(cand.id) {
+			continue // refused: ask the next candidate
+		}
+		if emergency {
+			logging.For(logging.Exec).With(logging.TaskID, cand.id).Warnf(
+				"memory supervisor: host has %d MB free, under %d%% of its RAM — released the sandbox container of an idle task (frees %d MB), waited %s",
+				availableMB, memoryAvailableFloorPct, cand.cost, now.Sub(cand.since).Truncate(time.Second))
+			return
+		}
+		logging.For(logging.Exec).With(logging.TaskID, cand.id).Infof(
+			"memory supervisor: released the sandbox container of a task idle %s (frees %d MB) for %d queued task(s)",
+			now.Sub(cand.since).Truncate(time.Second), cand.cost, s.gate.QueueLen())
+		return
+	}
 }

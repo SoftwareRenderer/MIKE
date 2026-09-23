@@ -252,6 +252,7 @@ func setupGoldenFixture(t *testing.T) (tmpRoots []string, s *Server) {
 	cfg.UtilityProvider, cfg.UtilityModel = "Golden Provider", "golden-model"
 	cfg.DefaultAutoCommit, cfg.DefaultOperatingMode = &yes, &plan
 	cfg.HideModelBadge, cfg.RunSiblingsParallel, cfg.SortOldestFirst = &yes, &yes, &yes
+	cfg.ReclaimIdleSandbox = &yes
 	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{CreateTask: &disabled}
 	if err := s.configStore.UpdateConfig(cfg); err != nil {
 		t.Fatalf("update config: %v", err)

@@ -38,6 +38,7 @@
       "url": "https://llm.invalid/v1"
     }
   ],
+  "reclaim_idle_sandbox": true,
   "run_siblings_parallel": true,
   "sort_oldest_first": true,
   "tls_ca_available": false,

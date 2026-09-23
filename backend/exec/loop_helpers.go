@@ -174,7 +174,7 @@ func (te *TaskExecutor) startGateQueuePoller(gate *ConcurrencyGate, providerURL,
 
 // applyStopTransition transitions an in-flight task row out of its running state
 func applyStopTransition(task *types.Task) bool {
-	if task.ExecutionState != types.ExecStateRunning && task.ExecutionState != types.ExecStatePullingImage {
+	if !task.ExecutionState.InFlight() {
 		return false
 	}
 	switch task.Status {

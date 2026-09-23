@@ -24,6 +24,26 @@ func TestExecutionStateWireFormatIsFrozen(t *testing.T) {
 	}
 }
 
+// InFlight is the set a pause, a move or a container reclaim may interrupt: working, not waiting. The SQL
+// copy is held to the same answer by store.TestInFlightStatesSQLIsTheGoSet.
+func TestInFlightIsWorkingRatherThanWaiting(t *testing.T) {
+	for _, tc := range []struct {
+		state ExecutionState
+		want  bool
+	}{
+		{ExecStateRunning, true},
+		{ExecStatePullingImage, true},
+		{ExecStateIdle, false},
+		{ExecStatePaused, false},
+		{ExecStateCompleted, false},
+		{ExecStateFailed, false},
+	} {
+		if got := tc.state.InFlight(); got != tc.want {
+			t.Errorf("%q.InFlight() = %t, want %t", tc.state, got, tc.want)
+		}
+	}
+}
+
 func TestParseExecutionState(t *testing.T) {
 	for _, s := range []string{"idle", "running", "pulling_image", "paused", "completed", "failed"} {
 		if _, ok := ParseExecutionState(s); !ok {

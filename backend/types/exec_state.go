@@ -26,6 +26,13 @@ const (
 	ExecStateFailed ExecutionState = "failed"
 )
 
+// InFlight reports whether a run is live rather than waiting. store.inFlightStates is the same set in
+// SQL; terminalTurnStates (backend/stream) and taskIsInFlight (frontend) also count "paused", and are a
+// different question.
+func (s ExecutionState) InFlight() bool {
+	return s == ExecStateRunning || s == ExecStatePullingImage
+}
+
 // ParseExecutionState maps a client-supplied string onto an ExecutionState,
 // reporting whether it is one of the six.
 //

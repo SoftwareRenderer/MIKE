@@ -121,6 +121,13 @@ func TestUIFlagPreferences(t *testing.T) {
 			get:  func(c *types.Config) *bool { return c.AutoMaximizeChatMobile },
 		},
 		{
+			// Off until a person turns it on.
+			name:     "reclaim_idle_sandbox",
+			set:      func(c *types.Config, v *bool) { c.ReclaimIdleSandbox = v },
+			get:      func(c *types.Config) *bool { return c.ReclaimIdleSandbox },
+			accessor: func(cs *ConfigStore) bool { return cs.GetReclaimIdleSandbox() },
+		},
+		{
 			// Unset is "never asked", not "off": a stored answer must not dissolve back into
 			// never-asked, and only the round-trip rows tell them apart.
 			name: "update_check_enabled",

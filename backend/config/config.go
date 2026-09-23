@@ -282,7 +282,7 @@ var configRowKeys = []string{
 	"default_auto_commit", "default_auto_merge", "default_subtasks_auto_merge",
 	"default_operating_mode", "default_max_failed_turns", "default_auto_summarize_threshold",
 	"hide_model_badge", "update_check_enabled", "run_siblings_parallel", "sort_oldest_first",
-	"auto_maximize_chat_mobile", "keyboard_shortcuts",
+	"auto_maximize_chat_mobile", "reclaim_idle_sandbox", "keyboard_shortcuts",
 }
 
 func (cs *ConfigStore) snapshot() (*configSnapshot, error) {
@@ -366,6 +366,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	runSiblingsParallelRaw := rows["run_siblings_parallel"]
 	sortOldestFirstRaw := rows["sort_oldest_first"]
 	autoMaximizeChatMobileRaw := rows["auto_maximize_chat_mobile"]
+	reclaimIdleSandboxRaw := rows["reclaim_idle_sandbox"]
 	keyboardShortcutsRaw := rows["keyboard_shortcuts"]
 
 	cfg := &types.Config{
@@ -424,6 +425,9 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	}
 	if v, err := parseBoolPtr(autoMaximizeChatMobileRaw); err == nil && v != nil {
 		cfg.AutoMaximizeChatMobile = v
+	}
+	if v, err := parseBoolPtr(reclaimIdleSandboxRaw); err == nil && v != nil {
+		cfg.ReclaimIdleSandbox = v
 	}
 	cfg.KeyboardShortcuts = normalizeKeyboardShortcuts(cfg.KeyboardShortcuts)
 	return cfg, nil
@@ -558,6 +562,11 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			return err
 		}
 	}
+	if c.ReclaimIdleSandbox != nil {
+		if err := cs.db.SetConfigValue("reclaim_idle_sandbox", fmt.Sprintf("%t", *c.ReclaimIdleSandbox)); err != nil {
+			return err
+		}
+	}
 	if c.KeyboardShortcuts != nil {
 		ksJSON, err := json.Marshal(c.KeyboardShortcuts)
 		if err != nil {
@@ -591,6 +600,7 @@ type configResponse struct {
 	RunSiblingsParallel           *bool                    `json:"run_siblings_parallel,omitempty"`
 	SortOldestFirst               *bool                    `json:"sort_oldest_first,omitempty"`
 	AutoMaximizeChatMobile        *bool                    `json:"auto_maximize_chat_mobile,omitempty"`
+	ReclaimIdleSandbox            *bool                    `json:"reclaim_idle_sandbox,omitempty"`
 	KeyboardShortcuts             *types.KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
 	EncryptionEnabled             bool                     `json:"encryption_enabled"`
 	// TLSCAAvailable tells the UI to offer the CA download (GET /api/tls/ca). The
@@ -706,6 +716,7 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		RunSiblingsParallel:           cfg.RunSiblingsParallel,
 		SortOldestFirst:               cfg.SortOldestFirst,
 		AutoMaximizeChatMobile:        cfg.AutoMaximizeChatMobile,
+		ReclaimIdleSandbox:            cfg.ReclaimIdleSandbox,
 		KeyboardShortcuts:             normalizeKeyboardShortcuts(cfg.KeyboardShortcuts),
 		EncryptionEnabled:             cs.box != nil,
 		TLSCAAvailable:                cs.tlsCAAvailable,
@@ -770,6 +781,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		current.RunSiblingsParallel = updates.boolPtrOr("run_siblings_parallel", current.RunSiblingsParallel)
 		current.SortOldestFirst = updates.boolPtrOr("sort_oldest_first", current.SortOldestFirst)
 		current.AutoMaximizeChatMobile = updates.boolPtrOr("auto_maximize_chat_mobile", current.AutoMaximizeChatMobile)
+		current.ReclaimIdleSandbox = updates.boolPtrOr("reclaim_idle_sandbox", current.ReclaimIdleSandbox)
 		current.DefaultMaxFailedTurns = updates.intPtrOr("default_max_failed_turns", current.DefaultMaxFailedTurns)
 		current.DefaultAutoSummarizeThreshold = updates.intPtrOr("default_auto_summarize_threshold", current.DefaultAutoSummarizeThreshold)
 		if threshold := current.DefaultAutoSummarizeThreshold; threshold != nil {
@@ -842,6 +854,16 @@ func (cs *ConfigStore) AutoSummarizeThreshold() int {
 // when the value is unset or invalid.
 func (cs *ConfigStore) GetRunSiblingsParallel() bool {
 	raw, _ := cs.db.GetConfigValue("run_siblings_parallel")
+	if v, err := parseBoolPtr(raw); err == nil && v != nil {
+		return *v
+	}
+	return false
+}
+
+// GetReclaimIdleSandbox reports whether the memory supervisor may release the container of a task idle
+// past the reclaim grace. Unset or unparseable means off.
+func (cs *ConfigStore) GetReclaimIdleSandbox() bool {
+	raw, _ := cs.db.GetConfigValue("reclaim_idle_sandbox")
 	if v, err := parseBoolPtr(raw); err == nil && v != nil {
 		return *v
 	}

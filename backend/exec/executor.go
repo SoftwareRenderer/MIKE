@@ -1762,6 +1762,30 @@ func (te *TaskExecutor) StopSandbox(taskID string) {
 	}
 }
 
+// reclaimSandbox releases a task's container to the memory budget and reports whether it did; nothing else
+// is touched, so the row keeps its status. The row is read here because the task may have started since the
+// supervisor decided, and a task that loses that race is healed by recoverBridgeForTask.
+func (te *TaskExecutor) reclaimSandbox(taskID string) bool {
+	if te.sandboxMgr == nil {
+		return false
+	}
+	return te.reclaimSandboxFrom(te.sandboxMgr, taskID)
+}
+
+// reclaimSandboxFrom is reclaimSandbox with the manager named, so the row guard is testable without a
+// live gVisor container — the seam recoverBridgeForTask uses for the same reason.
+func (te *TaskExecutor) reclaimSandboxFrom(mgr bridgeSandboxManager, taskID string) bool {
+	task, err := te.store.GetTaskByID(taskID)
+	if err != nil || task.ExecutionState.InFlight() {
+		return false
+	}
+	if err := mgr.Stop(taskID); err != nil {
+		logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("reclaim: stop error: %v", err)
+		return false
+	}
+	return true
+}
+
 // RetryTask retries a failed task.
 func (te *TaskExecutor) RetryTask(projectID, taskID string) error {
 	task, err := te.store.GetTask(projectID, taskID)

@@ -773,3 +773,35 @@ func TestAttachRefusesAClosingSession(t *testing.T) {
 	// The maps stay usable: a client leaving a closed session is routine.
 	sess.removeConnSize(newTestConn(t))
 }
+
+// A session with nobody connected still holds its container: a closed tab is not permission to kill the
+// process inside it.
+func TestHasSessionHoldsAClosedTerminal(t *testing.T) {
+	dir := t.TempDir()
+	s, cs := newTestConfigStore(t)
+	mock := newMockSandbox(t)
+	tm := NewTerminalManager(s, cs, mock, nil, dangerZoneForTest)
+
+	const projID = "test-proj-hold"
+	if err := s.CreateProject(&types.Project{
+		ID: projID, Name: "Hold Project", Path: dir, SandboxEnabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	key := "proj:" + projID
+	if _, err := tm.getOrCreate(key, key, dir, projID); err != nil {
+		t.Fatalf("getOrCreate: %v", err)
+	}
+
+	if !tm.HasSession(key) {
+		t.Error("a session with no connected client must still report itself")
+	}
+	if tm.HasSession("task-nobody") {
+		t.Error("a key with no session must report nothing")
+	}
+
+	tm.RemoveSession(key)
+	if tm.HasSession(key) {
+		t.Error("a removed session stops holding the container")
+	}
+}
