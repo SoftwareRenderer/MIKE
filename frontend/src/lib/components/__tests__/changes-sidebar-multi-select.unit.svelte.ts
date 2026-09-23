@@ -52,6 +52,13 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
+// A finger's tap: the press the listing reads, then the click the browser sends once the finger is up.
+async function tap(row: HTMLElement) {
+    await fireEvent.pointerDown(row, { pointerType: 'touch', clientX: 40, clientY: 40 });
+    await fireEvent.pointerUp(row, { pointerType: 'touch' });
+    await fireEvent.click(row, { pointerType: 'touch' });
+}
+
 describe('the changes list selection', () => {
     it('selects the row it landed on and shows nothing else selected', async () => {
         const { container } = await openPanel();
@@ -111,6 +118,25 @@ describe('the changes list selection', () => {
         // The long press ends in a click, which must not move the diff the panel shows.
         await fireEvent.click(row, { pointerType: 'touch' });
         expect(selectedPaths(container)).toEqual(['modified.ts']);
+    });
+
+    it('taps toggle rows while a finger holds a selection', async () => {
+        const { container } = await openPanel();
+        const held = rowEl(container, 'staged-a.ts')!;
+        const row = rowEl(container, 'modified.ts')!;
+
+        await fireEvent.pointerDown(held, { pointerType: 'touch', clientX: 40, clientY: 40 });
+        await new Promise(r => setTimeout(r, 550)); // LONG_PRESS_MS is 450
+
+        await tap(row);
+        expect(selectedPaths(container)).toEqual(['staged-a.ts', 'modified.ts']);
+
+        await tap(row);
+        expect(selectedPaths(container)).toEqual(['staged-a.ts']);
+
+        await tap(held);
+        expect(selectedPaths(container)).toEqual([]);
+        expect(bar(container)).toBeNull();
     });
 
     it('gives back a held row when the phone raises its context menu as well', async () => {

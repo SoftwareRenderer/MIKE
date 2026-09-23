@@ -408,6 +408,11 @@
         if (selection.handleClick(e, index)) openEntry(entry, false);
     }
 
+    // A double tap must not open what its two taps only toggled.
+    function handleRowDblClick(entry: FsEntry): void {
+        if (!selection.tapMode) openEntry(entry, true);
+    }
+
     // `mousedown` rather than `auxclick`: it is the event that carries the user activation a popup
     // needs, and cancelling it is what stops the browser's own middle-button autoscroll.
     function handleRowMiddleClick(e: MouseEvent, entry: FsEntry): void {
@@ -774,7 +779,7 @@
                     title={entry.path}
                     data-index={i}
                     onclick={(e) => handleRowClick(e, entry, i)}
-                    ondblclick={() => openEntry(entry, true)}
+                    ondblclick={() => handleRowDblClick(entry)}
                     onmousedown={(e) => handleRowMiddleClick(e, entry)}
                     oncontextmenu={(e) => openMenuAt(e, e.clientX, e.clientY, entry, i)}
                     onpointerdown={(e) => selection.handlePointerDown(e, i)}

@@ -38,10 +38,19 @@ export function useFileSelection({ rows }: FileSelectionOptions) {
     let held = $state<FileSelection>(emptySelection());
     // Set when a gesture selects on purpose, which shows the action bar even for one row.
     let selectionMode = $state(false);
+    // The selection came from a finger, so taps are what edits it. Written where a gesture selects.
+    let touchSelection = $state(false);
 
     let selection = $derived(pruneSelection(rows(), held));
     let selectedPaths = $derived([...selection.paths]);
     let showActionBar = $derived(selection.paths.size > 1 || (selectionMode && selection.paths.size > 0));
+    /**
+     * A phone's multi-select is a mode as well as a set: while a finger holds rows, a tap belongs to the
+     * selection — an unheld row joins it, a held row leaves it — because a phone has no ctrl key and a
+     * hold per row is too slow to repeat. Holding the last row back ends the mode and a tap opens again;
+     * so does `clear`, and so does tapping the folder above, which is never selectable.
+     */
+    let tapMode = $derived(touchSelection && selection.paths.size > 0);
 
     function isSelected(path: string): boolean {
         return selection.paths.has(path);
@@ -50,6 +59,7 @@ export function useFileSelection({ rows }: FileSelectionOptions) {
     function clear(): void {
         held = emptySelection();
         selectionMode = false;
+        touchSelection = false;
     }
 
     function selectAll(): void {
@@ -74,12 +84,21 @@ export function useFileSelection({ rows }: FileSelectionOptions) {
         return true;
     }
 
-    /** True when the row itself should open: a plain click does, a modifier only moves the selection. */
+    /** True when the row itself should open: a plain click does, a modifier or a tap inside a phone's
+     *  selection only moves the selection. */
     function handleClick(e: MouseEvent, index: number): boolean {
+        const fromFinger = pressWasTouch;
+        // Consume it here: a click from the keyboard or from an older press must not read this press.
+        pressWasTouch = false;
         if (swallowClick) {
             swallowClick = false;
             return false;
         }
+        if (fromFinger && tapMode && rows()[index]?.selectable) {
+            held = applyRowClick(rows(), selection, index, { ctrl: true, shift: false });
+            return false;
+        }
+        touchSelection = false;
         const mods = { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey };
         held = applyRowClick(rows(), selection, index, mods);
         if (mods.ctrl || mods.shift) return false;
@@ -95,18 +114,23 @@ export function useFileSelection({ rows }: FileSelectionOptions) {
     // The pointer type of the press that is down, which is what makes a `contextmenu` from a finger
     // mean something other than a `contextmenu` from a right button.
     let pressType: string | null = null;
+    // Whether the press behind the next click was a finger: a phone sends the click after `pointerup`,
+    // when no live pointer is left to ask.
+    let pressWasTouch = false;
 
     function handlePointerDown(e: PointerEvent, index: number): void {
         // Clear this so a long press that never got its click doesn't swallow the next one.
         swallowClick = false;
         cancelLongPress();
         pressType = e.pointerType;
+        pressWasTouch = e.pointerType === 'touch';
         if (e.pointerType !== 'touch') return;
         pressAt = { x: e.clientX, y: e.clientY };
         longPressTimer = setTimeout(() => {
             longPressTimer = null;
             swallowClick = true;
             selectionMode = true;
+            touchSelection = true;
             held = applyRowClick(rows(), selection, index, { ctrl: true, shift: false });
         }, LONG_PRESS_MS);
     }
@@ -164,6 +188,7 @@ export function useFileSelection({ rows }: FileSelectionOptions) {
     return {
         get selectedPaths() { return selectedPaths; },
         get showActionBar() { return showActionBar; },
+        get tapMode() { return tapMode; },
         isSelected,
         handleClick,
         handlePointerDown,

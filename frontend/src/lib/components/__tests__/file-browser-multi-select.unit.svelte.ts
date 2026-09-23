@@ -90,6 +90,13 @@ async function hold(row: HTMLElement, withMenu = false) {
     if (withMenu) await fireEvent.contextMenu(row);
 }
 
+// A finger's tap: the press the listing reads, then the click the browser sends once the finger is up.
+async function tap(row: HTMLElement) {
+    await fireEvent.pointerDown(row, { pointerType: 'touch', clientX: 40, clientY: 40 });
+    await fireEvent.pointerUp(row, { pointerType: 'touch' });
+    await fireEvent.click(row, { pointerType: 'touch' });
+}
+
 const menuEl = (container: HTMLElement) => container.querySelector('.file-context-menu');
 
 // Click a folder row to go into it; the new listing has a `..` row to come back.
@@ -205,6 +212,65 @@ describe('the file list selection', () => {
         await hold(a, true);
         expect(selectedTitles(container)).toEqual([`${ROOT}/c.txt`]);
         expect(menuEl(container), 'a held finger is the select gesture, not a menu request').toBeNull();
+    });
+
+    it('taps toggle rows while a finger holds a selection', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+        const a = rowEl(container, `${ROOT}/a.txt`)!;
+        const b = rowEl(container, `${ROOT}/b.txt`)!;
+        const c = rowEl(container, `${ROOT}/c.txt`)!;
+
+        await hold(a);
+        await tap(b);
+        expect(selectedTitles(container)).toEqual([`${ROOT}/a.txt`, `${ROOT}/b.txt`]);
+        expect(opened, 'a tap in the selection selects, it does not open').toEqual([]);
+
+        await tap(b);
+        expect(selectedTitles(container)).toEqual([`${ROOT}/a.txt`]);
+        await tap(c);
+        expect(selectedTitles(container)).toEqual([`${ROOT}/a.txt`, `${ROOT}/c.txt`]);
+
+        // Nothing held leaves the mode, so the next tap is just a tap.
+        await tap(a);
+        await tap(c);
+        expect(selectedTitles(container)).toEqual([]);
+        expect(bar(container)).toBeNull();
+        await tap(b);
+        expect(opened).toEqual([`${ROOT}/b.txt`]);
+    });
+
+    it('does not open a row that a double tap only toggled twice', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+        const a = rowEl(container, `${ROOT}/a.txt`)!;
+        const b = rowEl(container, `${ROOT}/b.txt`)!;
+
+        await hold(a);
+        await tap(b);
+        await tap(b);
+        await fireEvent.doubleClick(b, { pointerType: 'touch' });
+
+        expect(opened).toEqual([]);
+        expect(selectedTitles(container)).toEqual([`${ROOT}/a.txt`]);
+    });
+
+    it('still navigates on a tap of the folder above, which ends the mode', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+        await enterFolder(container, `${ROOT}/src`);
+
+        await hold(rowEl(container, `${ROOT}/src/main.go`)!);
+        expect(selectedTitles(container)).toEqual([`${ROOT}/src/main.go`]);
+
+        await tap(rowEl(container, ROOT)!);
+        await waitFor(() => expect(rowEls(container).length).toBe(LISTING[ROOT].length));
+        expect(paths[paths.length - 1]).toBe(ROOT);
+        expect(bar(container)).toBeNull();
+
+        // The mode went with the folder, so a tap opens again.
+        await tap(rowEl(container, `${ROOT}/a.txt`)!);
+        expect(opened).toEqual([`${ROOT}/a.txt`]);
     });
 
     it('clears the selection on Escape without handing the key to the panel behind it', async () => {
