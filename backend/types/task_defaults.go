@@ -43,6 +43,17 @@ func ApplyTaskCreationDefaults(task *Task, cfg *Config, parent *Task, skipFields
 	}
 }
 
+// ClearSubtaskBaseBranch enforces where a base branch may live: only a root task has one, because a
+// task with a parent merges into that parent's branch. A base_ref left on a nested task would still
+// be read as its merge target and as its diff baseline, and so would the commit pinned from it.
+func ClearSubtaskBaseBranch(task *Task) {
+	if task.ParentTaskID == "" {
+		return
+	}
+	task.BaseRef = ""
+	task.BaseCommit = ""
+}
+
 // SubtaskStatusFor is the status a new subtask gets from its parent's status.
 //
 // A started parent gets an in_progress child (callers pair it with ExecStateIdle, the

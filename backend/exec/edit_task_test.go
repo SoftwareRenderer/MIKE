@@ -252,3 +252,62 @@ func TestHandleEditTask_StartedParentAccepted(t *testing.T) {
 		t.Errorf("AutoMerge = true, want false (inherited from the new parent)")
 	}
 }
+
+// TestHandleEditTask_NestingClearsBaseBranch: nesting moves the work to the parent's branch, so the
+// task's own base branch must not stay on the row.
+func TestHandleEditTask_NestingClearsBaseBranch(t *testing.T) {
+	te := newTestExecutorWithConfig(t, false, false)
+	parent := createParentTask(t, te.store, "parent-base-1", "proj-base-edit", "backlog")
+
+	target := editTaskTarget(t, te.store, "proj-base-edit", "target-base-1", false, false, false, "")
+	target.BaseRef = "test"
+	target.BaseCommit = "0123456789abcdef0123456789abcdef01234567"
+	if err := te.store.UpdateTask(target); err != nil {
+		t.Fatalf("configure base branch: %v", err)
+	}
+
+	if _, err := te.tools.handleEditTask(map[string]any{
+		"task_id":        "target-base-1",
+		"parent_task_id": "parent-base-1",
+	}, parent); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	updated, err := te.store.GetTaskByID("target-base-1")
+	if err != nil {
+		t.Fatalf("get updated task: %v", err)
+	}
+	if updated.BaseRef != "" {
+		t.Errorf("base_ref = %q on a nested task, want empty", updated.BaseRef)
+	}
+	if updated.BaseCommit != "" {
+		t.Errorf("base_commit = %q on a nested task, want empty: it pins the base branch", updated.BaseCommit)
+	}
+}
+
+// TestHandleEditTask_TitleOnlyEditKeepsBaseBranch: only the parent link drops the base branch.
+func TestHandleEditTask_TitleOnlyEditKeepsBaseBranch(t *testing.T) {
+	te := newTestExecutorWithConfig(t, false, false)
+	current := createParentTask(t, te.store, "current-base-2", "proj-base-edit-2", "backlog")
+
+	target := editTaskTarget(t, te.store, "proj-base-edit-2", "target-base-2", false, false, false, "")
+	target.BaseRef = "test"
+	if err := te.store.UpdateTask(target); err != nil {
+		t.Fatalf("configure base branch: %v", err)
+	}
+
+	if _, err := te.tools.handleEditTask(map[string]any{
+		"task_id": "target-base-2",
+		"title":   "Renamed",
+	}, current); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	updated, err := te.store.GetTaskByID("target-base-2")
+	if err != nil {
+		t.Fatalf("get updated task: %v", err)
+	}
+	if updated.BaseRef != "test" {
+		t.Errorf("base_ref = %q after a title-only edit, want %q", updated.BaseRef, "test")
+	}
+}

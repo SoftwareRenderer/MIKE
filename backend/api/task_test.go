@@ -1476,3 +1476,70 @@ func TestHandleCommitAndDone_DoneWhenOnlyTheProjectOwnsTheConflict(t *testing.T)
 		t.Error("nothing tells the user which file is left conflicted and which stash entry holds their version")
 	}
 }
+
+// --- base_ref is a root task's own: nesting a task drops it ---
+
+func TestTaskHandler_POST_DropsBaseBranchSentWithAParent(t *testing.T) {
+	h, s, _ := newTestTaskHandler(t)
+	if err := s.CreateProject(&types.Project{ID: "bb-proj", Name: "bb-proj", Path: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateTask(&types.Task{
+		ID: "bb-parent", ProjectID: "bb-proj", Title: "parent", Status: types.StatusBacklog,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mux := newTaskMux(h)
+
+	rr := doTaskRequest(t, mux, http.MethodPost, "/api/projects/bb-proj/tasks", map[string]any{
+		"prompt":         "Part of the plan",
+		"parent_task_id": "bb-parent",
+		"base_ref":       "test",
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rr.Code, rr.Body.String())
+	}
+	var created types.Task
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.ParentTaskID != "bb-parent" {
+		t.Fatalf("parent_task_id = %q, want bb-parent", created.ParentTaskID)
+	}
+	stored, err := s.GetTask("bb-proj", created.ID)
+	if err != nil {
+		t.Fatalf("get created task: %v", err)
+	}
+	if stored.BaseRef != "" {
+		t.Errorf("base_ref = %q on a subtask, want empty", stored.BaseRef)
+	}
+}
+
+func TestTaskHandler_PUT_NestingClearsBaseBranch(t *testing.T) {
+	h, s, _ := newTestTaskHandler(t)
+	setupTaskValidationProject(t, h, s)
+	if err := s.CreateTask(&types.Task{
+		ID: "bb-put-parent", ProjectID: "task-val-proj", Title: "parent", Status: types.StatusBacklog,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mux := newTaskMux(h)
+
+	if rr := doTaskRequest(t, mux, http.MethodPut,
+		"/api/projects/task-val-proj/tasks/task-val-task", map[string]string{"base_ref": "test"}); rr.Code != http.StatusOK {
+		t.Fatalf("configure base branch: status = %d: %s", rr.Code, rr.Body.String())
+	}
+
+	if rr := doTaskRequest(t, mux, http.MethodPut,
+		"/api/projects/task-val-proj/tasks/task-val-task", map[string]string{"parent_task_id": "bb-put-parent"}); rr.Code != http.StatusOK {
+		t.Fatalf("nest task: status = %d: %s", rr.Code, rr.Body.String())
+	}
+
+	task, err := s.GetTask("task-val-proj", "task-val-task")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.BaseRef != "" {
+		t.Errorf("base_ref = %q after nesting, want empty", task.BaseRef)
+	}
+}
