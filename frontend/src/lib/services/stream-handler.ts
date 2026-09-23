@@ -345,7 +345,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     const discarded: string[] = [];
                     const kept = s.entries.filter(e => {
                         const pending = e.toolCalls?.filter((tc: ToolCallInfo) => tc.isPending) ?? [];
-                        if (pending.length === 0 || e.content || e.reasoningContent) return true;
+                        if (pending.length === 0 || e.content || e.reasoningContent || pending.some(tc => !!tc.messageId)) return true;
                         discarded.push(...pending.map(tc => tc.toolId));
                         return false;
                     });

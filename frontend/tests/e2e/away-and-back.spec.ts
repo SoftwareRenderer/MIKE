@@ -7,6 +7,9 @@ import {
 // A reopened chat has to ask for the server's replay: a call that started while its chat was closed is
 // announced once, its row only says the tool began, and no later frame puts the card back. The row read is
 // held shut during the away-and-back, so what the chat draws can only have come from the replay.
+//
+// The last describe is the mirror image: the rows are read and the announcement is the thing that is lost,
+// so the rows are the only evidence the screen holds and the turn's own status frame must not undo them.
 
 isolatedProject();
 
@@ -15,6 +18,7 @@ const PENDING = '.tool-status.pending';
 const NOTICE = '.history-notice';
 const RETRY = '.history-notice-retry';
 const OUTPUT = 'SLOW-TOOL-PROBE-DONE';
+const LONG_RUNNING_OUTPUT = 'LONG-RUNNING-PROBE-DONE';
 
 /** Delay the task's rows by `ms`: what the chat draws in that window came from the stream. */
 async function holdRows(page: Page, projectId: string, taskId: string, ms: number) {
@@ -61,6 +65,45 @@ async function deafToTask(page: Page, taskId: string): Promise<void> {
       }
     };
   }, taskId);
+}
+
+/**
+ * Hold the turn's frames back by `delayMs` so the chat always reads its rows first, and lose this task's
+ * `tool_call` frames on the way in. The announcement is broadcast once, so from here the rows are the
+ * only evidence the screen will ever get that the call began.
+ */
+async function slowStreamLosingTheCall(page: Page, taskId: string, delayMs: number): Promise<void> {
+  await page.addInitScript(({ id, delay }) => {
+    const w = window as any;
+    w.__lostAnnouncements = 0;
+    const Real = window.WebSocket;
+    class Slow extends Real {
+      __h: ((e: MessageEvent) => void) | null = null;
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        if (!String(url).includes('/api/stream')) return;
+        const self = this as any;
+        Real.prototype.addEventListener.call(this, 'message', (e: MessageEvent) => {
+          let frame: any;
+          try { frame = JSON.parse(String(e.data)); } catch { /* not a frame this spec reads */ }
+          if (frame?.type === 'task_event' && frame?.task_id === id && frame?.event === 'tool_call') {
+            w.__lostAnnouncements++;
+            e.stopImmediatePropagation();
+            return;
+          }
+          setTimeout(() => { if (self.__h) self.__h.call(self, e); }, delay);
+        });
+        // The app assigns `onmessage`; a class field would be overwritten by it, so the socket's own
+        // delivery goes through the same property the app writes.
+        Object.defineProperty(this, 'onmessage', {
+          get() { return self.__h; },
+          set(fn: (e: MessageEvent) => void) { self.__h = fn; },
+          configurable: true,
+        });
+      }
+    }
+    window.WebSocket = Slow as any;
+  }, { id: taskId, delay: delayMs });
 }
 
 test.describe('Returning to a task whose turn ran while its chat was closed', () => {
@@ -131,6 +174,41 @@ test.describe('Returning to a task whose turn ran while its chat was closed', ()
     await expect(page.locator(CARD).first(),
       'the task you left came back without the call it was running').toBeVisible({ timeout: 8000 });
     await expect(page.locator(CARD).filter({ hasText: OUTPUT }).first()).toBeVisible({ timeout: 60_000 });
+  });
+});
+
+test.describe('A call whose announcement never reaches the screen', () => {
+  // `long-running-probe` runs one bash call for 20s. The rows say the call began; the frames that
+  // announced it reach a late screen as a replay only, and here that replay loses them — the shape a
+  // trimmed buffer or a gated frame leaves behind.
+  test('the rows alone keep the card, because the turn\'s status frame cannot undo a row', async ({ page }) => {
+    test.setTimeout(150_000);
+    const projectId = ownProjectId();
+    const stamp = Date.now();
+    const prompt = `lost-announcement long-running-probe ${stamp}`;
+    const taskId = await createTaskViaApi(page, projectId, prompt);
+    await ensureTaskStarted(page, projectId, taskId);
+    await waitForToolStart(page, projectId, taskId);
+
+    await slowStreamLosingTheCall(page, taskId, 3000);
+    await gotoProject(page);
+    const cardLink = page.locator('.card', { hasText: prompt }).first();
+    await expect(cardLink).toBeVisible({ timeout: 15_000 });
+    await cardLink.click();
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 15_000 });
+
+    // Read from the rows, before the turn's replay has been read at all.
+    await expect(page.locator(CARD).first(),
+      'the rows never drew the call').toBeVisible({ timeout: 3000 });
+    await expect(page.locator(PENDING).first()).toBeVisible();
+
+    // Past the replay: a running frame reaching a screen that already read the rows used to delete the
+    // entry it read, and nothing re-added it — the call ran to its end with no card at all.
+    await page.waitForTimeout(5000);
+    expect(await page.evaluate(() => (window as any).__lostAnnouncements),
+      'no tool_call frame was lost, so this run never tested the rows as the only evidence')
+      .toBeGreaterThan(0);
+    await expect(page.locator(CARD).filter({ hasText: LONG_RUNNING_OUTPUT }).first()).toBeVisible({ timeout: 60_000 });
   });
 });
 

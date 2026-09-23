@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { StreamState } from '$lib/services/stream-state.svelte';
 import { createStreamHandler, type StreamHandlerCallbacks } from '$lib/services/stream-handler';
+import { buildEntriesFromMessages, mergeLoadedHistory } from '$lib/utils/chat-entries';
 
 function makeCallbacks(overrides: Partial<StreamHandlerCallbacks> = {}): StreamHandlerCallbacks {
     return {
@@ -529,6 +530,29 @@ describe('createStreamHandler', () => {
             handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'bash', args: {} } }, false);
             const ids = stream.state.entries.flatMap(e => (e.toolCalls ?? []).map(tc => tc.toolId));
             expect(ids).toEqual(['tc1']);
+        });
+
+        it('leaves standing a call the database has a row for, which this frame says nothing about', () => {
+            const { stream, handleEvent } = setup();
+            // What a history read draws for a silent turn whose tool is still running. The announcement of
+            // that call is something this screen never saw: it is broadcast once, and the replay lost it.
+            const messages = [
+                { id: 'u1', role: 'user', content: 'run it', created_at: '2026-09-10T10:00:00Z' },
+                { id: 'a1', role: 'assistant', content: '', created_at: '2026-09-10T10:00:01Z' },
+                {
+                    id: 'm1', role: 'tool_call', content: '', created_at: '2026-09-10T10:00:02Z',
+                    tool_calls: JSON.stringify({ tool_id: 'tc1', tool_name: 'bash', args: { command: 'make' } }),
+                },
+            ];
+            stream.state.entries = mergeLoadedHistory(
+                buildEntriesFromMessages(messages).entries, messages.map(m => m.id), [], true);
+            const ids = () => stream.state.entries.flatMap(e => (e.toolCalls ?? []).map(tc => tc.toolId));
+            expect(ids()).toEqual(['tc1']);
+
+            // The turn's replay reaches the screen after the rows that describe it.
+            handleEvent({ type: 'status', data: { state: 'running' } }, false);
+
+            expect(ids()).toEqual(['tc1']);
         });
     });
 

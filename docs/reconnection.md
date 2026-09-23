@@ -109,7 +109,15 @@ only thing that can draw the card.
 ## A discarded card releases its id
 
 The `status: running` frame announces a run, and it discards any entry that is nothing but an unanswered
-tool call — that call belongs to the run the frame ends, not the one it opens. The claim goes with the
+tool call — that call belongs to the run the frame ends, not the one it opens. What the frame supersedes is
+what this screen saw announced, never what it read. A pending call carrying `messageId` is a row the server
+wrote; a frame about the run says nothing about that row. The `tool_call` event is broadcast once (*The
+reload meets the replay buffer*), so the replay carrying this frame may have lost the announcement that
+would redraw the card. Delete the row's copy then, and the call has no card for the rest of the run: its
+`tool_result` resolves nothing, and nothing asks again. That is why the machine that watched the run shows
+the running card, and the one that opens the task does not.
+
+The claim goes with the
 entry. `processedToolIds` is what stops a second announcement of one id opening a second card. An id still
 held when its card is discarded **swallows the announcement that follows** — the replayed one, or the
 event `taskEventContext` delivers the instant a chat subscribes. Every frame of that call is then refused
@@ -117,8 +125,9 @@ as a duplicate and the card is never drawn: the `tool_result` resolves nothing, 
 rendered and `unresolvedToolIds` never learns either. So `processedToolIds` lets go of exactly the ids it
 discarded, and `unresolvedToolIds` keeps them — an unanswered call is still evidence that a card is owed.
 
-**Tests:** `src/lib/services/__tests__/stream-handler.unit.ts` (re-announced after being discarded draws
-one card; a call that survives the frame and is announced twice still draws one).
+**Tests:** `src/lib/services/__tests__/stream-handler.unit.ts`. E2E `away-and-back.spec.ts` holds the whole
+stream back until the rows are read, then loses the call's announcement; the rows are the only evidence
+the screen holds.
 
 ## The slow client is released, not timed out
 
