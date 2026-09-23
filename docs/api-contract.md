@@ -227,7 +227,12 @@ The scroll
 position is preserved by re-finding the entry under the top edge of the viewport (`data-entry-id`), never
 by a pixel guess, and re-applied over the frames after the insert. Entries are `content-visibility: auto`,
 so the rows above report placeholder heights when a page lands and grow after it; measured, one landing
-slid the reader 156 px off their row before this settled. The reader's own scroll ends the settling.
+slid the reader 156 px off their row before this settled. **The reader's own scroll ends the settling, and
+it is read off the position, not off a gesture event**: a kinetic scroll fires no `wheel`, `touchstart` or
+`keydown` once the finger leaves the screen, so on touch the listeners cannot see it and the settle writes
+against the fling (measured on a phone viewport: 28 writes in 91 frames). `readerScrolledUp` is the rule —
+an upward move the loop did not write is the reader's — and a move downward is not, because scroll
+anchoring writes that direction too.
 The offline cache holds **the newest window plus the rows this browser already saw above it**, bounded by
 `CACHED_ROWS_FLOOR`. A window of five answers is fewer rows than an earlier open may have read, and an
 offline reload opens on the bigger of the two. A page fetched by cursor is still not cached on its own —
@@ -248,7 +253,9 @@ Tests:
 `backend/server/handler_message_window_test.go`, `frontend/src/lib/utils/__tests__/chat-window.unit.ts`.
 `frontend/tests/e2e/chat-window-scroll.spec.ts` answers what only a browser can: nothing is rendered asking
 the reader to fetch a page, reaching the top edge fetches it unasked, and the page leaves the reader on the
-row they were reading.
+row they were reading. `frontend/tests/e2e/chat-scroll-jitter.spec.ts` answers the touch half, which the
+wheel spec cannot: it tags every `scrollTop` write so an app write is distinguishable from the browser's
+kinetic scroll and anchoring, and asserts the settle leaves a fling alone and a still reader on their row.
 
 ## Diffs
 

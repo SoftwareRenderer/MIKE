@@ -76,6 +76,18 @@ export function anchorScrollDelta(anchor: ScrollAnchor, anchorTopNow: number): n
     return anchorTopNow - anchor.top;
 }
 
+/**
+ * Whether the reader moved the viewport up since the anchoring loop wrote it.
+ *
+ * A kinetic scroll fires no `wheel`, `touchstart` or `keydown` once the finger leaves the screen, so the
+ * position is the only evidence that someone is driving. A move the other way is not a takeover: scroll
+ * anchoring raises `scrollTop` to hold a row in place when rows land above it, which is the same
+ * direction this loop writes in.
+ */
+export function readerScrolledUp(writtenTop: number, topNow: number, slack = 2): boolean {
+    return writtenTop - topNow > slack;
+}
+
 /** How far above the top edge older rows are fetched, as a multiple of the viewport, so a page lands while
  * the reader is still heading toward the top. */
 const EARLIER_EDGE_VIEWPORTS = 1.5;

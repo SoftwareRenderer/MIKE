@@ -26,7 +26,7 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { t } from '$lib/i18n';
     import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
-    import { prependRows, resolveAnchor, anchorScrollDelta, noticeForWindowRead, type MeasuredEntry, type ScrollAnchor, type WindowReadNotice } from '$lib/utils/chat-window';
+    import { prependRows, resolveAnchor, anchorScrollDelta, readerScrolledUp, noticeForWindowRead, type MeasuredEntry, type ScrollAnchor, type WindowReadNotice } from '$lib/utils/chat-window';
     import { createTabReturn } from '$lib/composables/use-tab-return';
     import ChatForm from './ChatForm.svelte';
     import ChatEntries from './ChatEntries.svelte';
@@ -623,22 +623,19 @@
      * are `content-visibility: auto`, so a page that lands is placeholder-sized at first. A scroll stops
      * it: the reader is driving. */
     async function settleOnRow(el: HTMLElement, anchor: ScrollAnchor): Promise<void> {
-        let takenOver = false;
-        const stop = () => { takenOver = true; };
-        for (const kind of ['wheel', 'touchstart', 'keydown']) el.addEventListener(kind, stop, { passive: true });
-        try {
-            let steady = 0;
-            for (let frame = 0; frame < ANCHOR_SETTLE_FRAMES && steady < 2; frame++) {
-                await new Promise(resolve => requestAnimationFrame(resolve));
-                const node = el.querySelector<HTMLElement>(`[data-entry-id="${anchor.id}"]`);
-                if (!node) return;
-                const delta = anchorScrollDelta(anchor, node.getBoundingClientRect().top - el.getBoundingClientRect().top);
-                if (takenOver || Math.abs(delta) < 1) { steady++; continue; }
-                steady = 0;
-                el.scrollTop += delta;
-            }
-        } finally {
-            for (const kind of ['wheel', 'touchstart', 'keydown']) el.removeEventListener(kind, stop);
+        let written = el.scrollTop;
+        let steady = 0;
+        for (let frame = 0; frame < ANCHOR_SETTLE_FRAMES && steady < 2; frame++) {
+            await new Promise(resolve => requestAnimationFrame(resolve));
+
+            if (readerScrolledUp(written, el.scrollTop)) return;
+            const node = el.querySelector<HTMLElement>(`[data-entry-id="${anchor.id}"]`);
+            if (!node) return;
+            const delta = anchorScrollDelta(anchor, node.getBoundingClientRect().top - el.getBoundingClientRect().top);
+            if (Math.abs(delta) < 1) { steady++; continue; }
+            steady = 0;
+            el.scrollTop += delta;
+            written = el.scrollTop;
         }
     }
 

@@ -3,6 +3,7 @@ import {
     prependRows,
     resolveAnchor,
     anchorScrollDelta,
+    readerScrolledUp,
     atTopOfList,
     mergeCachedRows,
     noticeForWindowRead,
@@ -83,6 +84,30 @@ describe('anchorScrollDelta', () => {
 
     it('moves nothing when the anchor did not move', () => {
         expect(anchorScrollDelta({ id: 'c', top: 12 }, 12)).toBe(0);
+    });
+});
+
+describe('readerScrolledUp', () => {
+    it('reads an upward move the loop did not write as the reader taking over', () => {
+        // A kinetic scroll fires no wheel, touchstart or keydown after the finger lifts: the position is
+        // the only signal, so the takeover cannot be left to a gesture listener.
+        expect(readerScrolledUp(1000, 954)).toBe(true);
+    });
+
+    it('is not moved by the position it wrote, nor by the clamp at the bottom of the list', () => {
+        expect(readerScrolledUp(1000, 1000)).toBe(false);
+        // Read back after the write: a clamped write is this loop's own doing.
+        expect(readerScrolledUp(1000, 1002)).toBe(false);
+    });
+
+    it('is not moved by scroll anchoring, which raises scrollTop to hold a row when rows land above', () => {
+        expect(readerScrolledUp(1000, 2210)).toBe(false);
+    });
+
+    it('absorbs the fractional layout a zoomed or scaled page leaves behind', () => {
+        expect(readerScrolledUp(1000, 999)).toBe(false);
+        expect(readerScrolledUp(1000, 998)).toBe(false);
+        expect(readerScrolledUp(1000, 997)).toBe(true);
     });
 });
 
