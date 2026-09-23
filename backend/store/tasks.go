@@ -211,7 +211,8 @@ func (s *Store) GetMemorySupervisorPausedTasks() ([]types.Task, error) {
 	return s.queryTasks(`memory_supervisor_paused = 1 AND status = 'in_progress' AND execution_state = 'paused' ORDER BY sandbox_memory_peak_mb ASC`)
 }
 
-// inFlightStates are the execution_state values that mean a run is live.
+// inFlightStates are the execution_state values that mean a run is live: types.ExecutionState.InFlight
+// in SQL. TestInFlightStatesSQLIsTheGoSet fails if the two stop agreeing.
 const inFlightStates = "('running','pulling_image')"
 
 // UpdateTask updates all fields of the task. Ownership guard: it must not move a row into an

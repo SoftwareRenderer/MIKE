@@ -438,8 +438,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	// Stop the executor if the task is moved out of In Progress.
 	// This ensures the goroutine exits and HasRunningTasks() reflects the new state.
 	if originalStatus == types.StatusInProgress && targetStatus != types.StatusInProgress && h.executor != nil {
-		wasTurn := task.ExecutionState == types.ExecStateRunning || task.ExecutionState == types.ExecStatePullingImage ||
-			task.ExecutionState == types.ExecStatePaused
+		wasTurn := task.ExecutionState.InFlight() || task.ExecutionState == types.ExecStatePaused
 		_ = h.executor.StopTask(taskID)
 		if wasTurn {
 			task.ExecutionState = types.ExecStateIdle
@@ -604,7 +603,7 @@ func (h *TaskHandler) moveAllDescendants(projectID, taskID string, targetStatus 
 	for i := len(descendants) - 1; i >= 0; i-- {
 		d := &descendants[i]
 		// Skip in-flight descendants
-		if d.ExecutionState == types.ExecStateRunning || d.ExecutionState == types.ExecStatePullingImage {
+		if d.ExecutionState.InFlight() {
 			continue
 		}
 		// Moving to In Progress is a start: only backlog descendants join. Review
@@ -1458,7 +1457,7 @@ func (h *TaskHandler) StopTaskAndDescendants(taskID string) error {
 	// Stop all in-flight descendants (leaf-first order: reverse the list)
 	for i := len(descendants) - 1; i >= 0; i-- {
 		d := descendants[i]
-		if d.ExecutionState == types.ExecStateRunning || d.ExecutionState == types.ExecStatePullingImage {
+		if d.ExecutionState.InFlight() {
 			if err := h.executor.StopTask(d.ID); err != nil {
 				logging.For(logging.Exec).Warnf("failed to stop descendant %s: %v", d.ID, err)
 			}

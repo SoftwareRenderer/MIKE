@@ -11,6 +11,7 @@
         defaultMaxFailedTurns = $bindable(3),
         defaultAutoSummarizeThreshold = $bindable(90),
         runSiblingsParallel = $bindable(false),
+        reclaimIdleSandbox = $bindable(false),
         originBranch,
         onDirty,
     }: {
@@ -20,6 +21,7 @@
         defaultMaxFailedTurns?: number;
         defaultAutoSummarizeThreshold?: number;
         runSiblingsParallel?: boolean;
+        reclaimIdleSandbox?: boolean;
         originBranch: string;
         onDirty?: () => void;
     } = $props();
@@ -72,6 +74,14 @@
             <span id="toggle-run-parallel-desc" class="toggle-desc">{t('settings.defaults.runParallelDesc')}</span>
         </div>
         <ToggleSwitch bind:checked={runSiblingsParallel} ariaLabel={t('settings.defaults.runParallel')} ariaDescribedby="toggle-run-parallel-desc" onChange={() => onDirty?.()} />
+    </div>
+
+    <div class="toggle-field">
+        <div class="toggle-label-group">
+            <span id="toggle-reclaim-sandbox-label" class="toggle-label">{t('settings.defaults.reclaimSandbox')}</span>
+            <span id="toggle-reclaim-sandbox-desc" class="toggle-desc">{t('settings.defaults.reclaimSandboxDesc')}</span>
+        </div>
+        <ToggleSwitch bind:checked={reclaimIdleSandbox} ariaLabel={t('settings.defaults.reclaimSandboxAria')} ariaDescribedby="toggle-reclaim-sandbox-desc" onChange={() => onDirty?.()} />
     </div>
 
     <div class="toggle-field">

@@ -429,6 +429,15 @@ func (tm *TerminalManager) RemoveSession(taskID string) {
 	}
 }
 
+// HasSession reports whether a terminal session is registered for this task or project key. A session with
+// no connected client still counts.
+func (tm *TerminalManager) HasSession(key string) bool {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	_, ok := tm.sessions[key]
+	return ok
+}
+
 // activeSessionCount reports how many terminal sessions are registered.
 func (tm *TerminalManager) activeSessionCount() int {
 	tm.mu.RLock()

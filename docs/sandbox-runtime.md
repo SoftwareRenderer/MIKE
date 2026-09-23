@@ -167,7 +167,7 @@ create and `PUT` (400 naming the field).
   `frontend/src/lib/utils/__tests__/memory-stats.unit.ts`,
   `frontend/src/lib/components/__tests__/{task-header-sandbox-dot,sandbox-panel-memory,card-memory-pill}.unit.svelte.ts`.
 
-## The memory budget: what admits a task, and what pauses one
+## The memory budget: what admits a task, what pauses one, and what it can take back
 
 - **One rule**, in `exec.MemoryGate`: `mikeMB + reservations + candidate ≤ capacity`. `mikeMB` is what MIKE
   itself costs — every container it started plus its own process — and capacity is
@@ -199,6 +199,44 @@ create and `PUT` (400 naming the field).
   is `MemAvailable` under 5 % of `MemTotal` (`memoryAvailableFloorPct`), which pauses with an empty queue and
   logs at `Warn`, naming the task and what it waits on. Resume happens only when
   `InUse() + reserve ≤ capacity`, so a resume cannot immediately re-queue.
+- **A queue with nothing in flight is the wedge.** Every megabyte the budget counts can belong to a
+  container of a task waiting on a person. Their reservations went back when they went idle, no user action
+  is coming, and the pause pool (`inFlightStates`) has no victim.
+- **The supervisor can take such a container back, and `reclaim_idle_sandbox` decides whether it may.**
+  The preference lives in Settings → Task Defaults and is off unless stored true.
+  `ConfigStore.GetReclaimIdleSandbox` is read on the tick that decides, so the setting needs no restart.
+- **It runs only after the in-flight pause branch declined for want of a victim**, one container per tick,
+  the idle-longest first. A candidate comes off the supervisor's clock alone: idle past
+  `defaultIdleSandboxGrace` (5 min) and held by no terminal session.
+- **`MemorySupervisor.reclaimIdleSandbox` picks and `TaskExecutor.reclaimSandbox` releases.** The action
+  reads the row before podman is touched: a start that landed in between refuses the release, and so does a
+  charge with no task row behind it. A refused candidate does not spend the tick — the next idle one is
+  asked. A task that lost that race is healed by `recoverBridgeForTask`, which creates the container from
+  scratch when it is gone.
+- **What is taken back is the container only, and it is silent.** `status`, `execution_state` and
+  `memory_supervisor_paused` keep their values: a pause would arm the auto-resume and start a turn nobody
+  asked for. No note is recorded, so the task reads exactly as it did.
+- **`Stop` still writes the run's final peak**, so the card's memory figures survive the release.
+  `sandbox_stats` follows containers, so the panel falls back to that recorded peak, as it does after any
+  stop.
+- **What the task loses is what lived inside the container** — installed packages, `$HOME`, `/tmp`, a
+  daemon it started. Forwarded host ports are ephemeral per create, so a published port gets a new URL. The
+  worktree, its `.mike-uploads`, git state and checkpoints are bind-mounted and unaffected.
+- **The idle clock is the supervisor's own observation, not a column.** `updated_at` moves on unrelated
+  writes, and `moved_at` predates every turn since the card last changed column. Neither one answers "how
+  long has this container been waiting".
+- **`idleSince` stamps a container the first tick that sees it not in flight**, and keeps stamping while the
+  preference is off. So switching the preference on asks which containers have waited over five minutes,
+  instead of waiting five more.
+- **The clock drops a container that goes away**, which is what makes a recreated one a new arrival. A
+  restart restarts the clock; that errs towards leaving a container up.
+- **A live terminal holds its container** (`TerminalManager.HasSession`, wired in `backend/server`). The
+  shell inside belongs to the person who opened it, and a closed tab is not permission to kill it.
+- **A charge with no task row is nobody's to take** — the project's `proj:` terminal container stays up.
+- Tests: `backend/exec/memory_supervisor_test.go` (the order, the grace, the untouched row, the hold, the
+  clock), `backend/term/terminal_test.go`, `backend/config/config_test.go` (off unless stored). Which runs
+  are pauseable at all is `types.ExecutionState.InFlight`, whose SQL spelling `store.inFlightStates` is
+  held to the same set by `TestInFlightStatesSQLIsTheGoSet` in `backend/store/tasks_test.go`.
 - **Both transitions write to the task's own history, because the paused row cannot say it.**
   `noteMemoryPause` / `noteMemoryResume` (`backend/exec/memory_supervisor.go`) record a `system` note on the
   current thread through `systemNote`, whose rule lives with the role: a system row is display-only, since

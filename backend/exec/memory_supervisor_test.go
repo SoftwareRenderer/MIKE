@@ -13,14 +13,16 @@ import (
 	"mike/backend/types"
 )
 
-// recordingSupervisorActions records every stopTask/startTask/startSubtask call.
+// recordingSupervisorActions records every stopTask/startTask/startSubtask/reclaimSandbox call.
 type recordingSupervisorActions struct {
-	mu       sync.Mutex
-	stopped  []string
-	started  []string // "P/T" for root, "P/T:parent" for subtask
-	noted    []string // "pause:T" / "resume:T" for the history notes
-	stopErr  error
-	startErr error
+	mu        sync.Mutex
+	stopped   []string
+	started   []string // "P/T" for root, "P/T:parent" for subtask
+	noted     []string // "pause:T" / "resume:T" for the history notes
+	reclaimed []string // containers released to the budget without touching the row
+	refused   map[string]bool
+	stopErr   error
+	startErr  error
 }
 
 func (a *recordingSupervisorActions) stopTask(taskID string) error {
@@ -42,6 +44,16 @@ func (a *recordingSupervisorActions) startSubtask(projectID, taskID string) erro
 	defer a.mu.Unlock()
 	a.started = append(a.started, projectID+"/"+taskID+":parent")
 	return a.startErr
+}
+
+func (a *recordingSupervisorActions) reclaimSandbox(taskID string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.refused[taskID] {
+		return false
+	}
+	a.reclaimed = append(a.reclaimed, taskID)
+	return true
 }
 
 func (a *recordingSupervisorActions) noteMemoryPause(taskID string) {
@@ -66,6 +78,12 @@ func (a *recordingSupervisorActions) stoppedIDs() []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return append([]string(nil), a.stopped...)
+}
+
+func (a *recordingSupervisorActions) reclaimedIDs() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.reclaimed...)
 }
 
 func (a *recordingSupervisorActions) startedIDs() []string {
@@ -126,7 +144,7 @@ func TestSupervisorPausesSmallestLiveChargeFirst(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	actions := &recordingSupervisorActions{}
-	NewMemorySupervisor(s, gate, charges, actions, time.Second).TickOnce()
+	NewMemorySupervisor(s, gate, charges, actions, time.Second, SandboxReclaim{}).TickOnce()
 
 	stopped := actions.stoppedIDs()
 	if len(stopped) != 1 || stopped[0] != "task-light" {
@@ -166,7 +184,7 @@ func TestSupervisorFallsBackToReserveWithoutContainerCharges(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	actions := &recordingSupervisorActions{}
-	NewMemorySupervisor(s, gate, nil, actions, time.Second).TickOnce()
+	NewMemorySupervisor(s, gate, nil, actions, time.Second, SandboxReclaim{}).TickOnce()
 
 	stopped := actions.stoppedIDs()
 	if len(stopped) != 1 || stopped[0] != "task-narrow" {
@@ -186,7 +204,7 @@ func TestSupervisorPausesOnHostMemoryFloorWithEmptyQueue(t *testing.T) {
 	gate.SetMeasurements(500, 500, 90, 2000)
 
 	actions := &recordingSupervisorActions{}
-	NewMemorySupervisor(s, gate, fixedCharges{"task-a": 500}, actions, time.Second).TickOnce()
+	NewMemorySupervisor(s, gate, fixedCharges{"task-a": 500}, actions, time.Second, SandboxReclaim{}).TickOnce()
 
 	stopped := actions.stoppedIDs()
 	if len(stopped) != 1 || stopped[0] != "task-a" {
@@ -209,7 +227,7 @@ func TestSupervisorNoPauseWhenQueueEmpty(t *testing.T) {
 	}
 
 	actions := &recordingSupervisorActions{}
-	NewMemorySupervisor(s, gate, nil, actions, time.Second).TickOnce()
+	NewMemorySupervisor(s, gate, nil, actions, time.Second, SandboxReclaim{}).TickOnce()
 
 	if len(actions.stoppedIDs()) > 0 {
 		t.Errorf("empty queue must not cause a pause, got %v", actions.stoppedIDs())
@@ -221,7 +239,7 @@ func TestSupervisorDisablesWhenZeroCapacity(t *testing.T) {
 	seedRunningTask(t, s, "task-x", 9999)
 
 	actions := &recordingSupervisorActions{}
-	NewMemorySupervisor(s, &MemoryGate{}, nil, actions, time.Second).TickOnce()
+	NewMemorySupervisor(s, &MemoryGate{}, nil, actions, time.Second, SandboxReclaim{}).TickOnce()
 
 	if len(actions.stoppedIDs()) > 0 {
 		t.Errorf("zero capacity must disable the supervisor, got %v", actions.stoppedIDs())
@@ -253,7 +271,7 @@ func TestSupervisorResumesLowestPausedTask(t *testing.T) {
 	gate.SetCapacity(2000)
 
 	actions := &recordingSupervisorActions{}
-	NewMemorySupervisor(s, gate, nil, actions, time.Second).TickOnce()
+	NewMemorySupervisor(s, gate, nil, actions, time.Second, SandboxReclaim{}).TickOnce()
 
 	started := actions.startedIDs()
 	if len(started) != 1 || started[0] != "proj-mem/task-b" {
@@ -280,7 +298,7 @@ func TestSupervisorNeverResumesTaskWhoseCapExceedsCapacity(t *testing.T) {
 	gate.SetCapacity(1000)
 
 	actions := &recordingSupervisorActions{}
-	NewMemorySupervisor(s, gate, nil, actions, time.Second).TickOnce()
+	NewMemorySupervisor(s, gate, nil, actions, time.Second, SandboxReclaim{}).TickOnce()
 
 	if started := actions.startedIDs(); len(started) > 0 {
 		t.Errorf("must not resume a task that cannot fit its own cap, got %v", started)
@@ -310,7 +328,7 @@ func TestSupervisorResumesSubtaskViaStartSubtask(t *testing.T) {
 	gate.SetCapacity(2000)
 
 	actions := &recordingSupervisorActions{}
-	NewMemorySupervisor(s, gate, nil, actions, time.Second).TickOnce()
+	NewMemorySupervisor(s, gate, nil, actions, time.Second, SandboxReclaim{}).TickOnce()
 
 	started := actions.startedIDs()
 	if len(started) != 1 || started[0] != "proj-mem/sub-1:parent" {
@@ -337,7 +355,7 @@ func TestSupervisorDoesNotResumeWhenWouldRequeue(t *testing.T) {
 	}
 
 	actions := &recordingSupervisorActions{}
-	NewMemorySupervisor(s, gate, nil, actions, time.Second).TickOnce()
+	NewMemorySupervisor(s, gate, nil, actions, time.Second, SandboxReclaim{}).TickOnce()
 
 	if len(actions.startedIDs()) > 0 {
 		t.Errorf("must not resume a task that immediately re-queues, got %v", actions.startedIDs())
@@ -349,7 +367,7 @@ func TestSupervisorStartAndStop(t *testing.T) {
 	gate := &MemoryGate{}
 	gate.SetCapacity(1000)
 	// Short interval so Start exercises the ticker.
-	sup := NewMemorySupervisor(s, gate, nil, &recordingSupervisorActions{}, 50*time.Millisecond)
+	sup := NewMemorySupervisor(s, gate, nil, &recordingSupervisorActions{}, 50*time.Millisecond, SandboxReclaim{})
 	sup.Start()
 	time.Sleep(150 * time.Millisecond)
 	sup.Stop()
@@ -455,7 +473,7 @@ func TestSupervisorNotesOnlyFollowASuccessfulTransition(t *testing.T) {
 		gate.SetMeasurements(500, 500, 90, 2000) // under the free-memory floor: pauses with an empty queue
 
 		actions := &recordingSupervisorActions{stopErr: errors.New("executor gone")}
-		NewMemorySupervisor(s, gate, fixedCharges{"task-a": 500}, actions, time.Second).TickOnce()
+		NewMemorySupervisor(s, gate, fixedCharges{"task-a": 500}, actions, time.Second, SandboxReclaim{}).TickOnce()
 
 		if notes := actions.noteKinds(); len(notes) != 0 {
 			t.Errorf("a stop that failed must record no note, got %v", notes)
@@ -478,7 +496,7 @@ func TestSupervisorNotesOnlyFollowASuccessfulTransition(t *testing.T) {
 		gate.SetCapacity(2000)
 
 		actions := &recordingSupervisorActions{startErr: errors.New("slot refused")}
-		NewMemorySupervisor(s, gate, nil, actions, time.Second).TickOnce()
+		NewMemorySupervisor(s, gate, nil, actions, time.Second, SandboxReclaim{}).TickOnce()
 
 		if notes := actions.noteKinds(); len(notes) != 0 {
 			t.Errorf("a resume that failed must record no note, got %v", notes)
@@ -598,5 +616,365 @@ func TestMemoryTransitionNoteNeedsAThread(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Errorf("a threadless task must record no note, got %+v", rows)
+	}
+}
+
+// --- memory supervisor reclaim tests ---
+
+// memSupClock is a clock the test moves by hand, so a grace period costs no sleeping.
+type memSupClock struct{ at time.Time }
+
+func (c *memSupClock) now() time.Time { return c.at }
+func (c *memSupClock) advance(d time.Duration) {
+	c.at = c.at.Add(d)
+}
+
+// memSupQueuedGate is a gate whose queue holds one waiter that can never fit — the condition the
+// supervisor acts on. The cleanup releases it, so no goroutine outlives the test.
+func memSupQueuedGate(t *testing.T, capacity, held int64) *MemoryGate {
+	t.Helper()
+	gate := &MemoryGate{}
+	gate.SetCapacity(capacity)
+	if err := gate.Acquire(context.Background(), held, nil); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() { _ = gate.Acquire(ctx, capacity, nil) }()
+	for deadline := time.Now().Add(time.Second); gate.QueueLen() == 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("the queued waiter never reached the gate")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return gate
+}
+
+// seedWaitingTask plants a row that holds a container without working.
+func seedWaitingTask(t *testing.T, s *store.Store, id string, status types.Status, state types.ExecutionState) {
+	t.Helper()
+	now := time.Now().UTC()
+	if err := s.CreateTask(&types.Task{
+		ID: id, ProjectID: "proj-mem", Title: id,
+		Status: status, ExecutionState: state,
+		SandboxMemoryPeakMB: 40, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func alwaysOn() bool { return true }
+
+// TestSupervisorReclaimsIdleContainerWhenNothingInFlight: every container belongs to a task waiting on a
+// person, so there is nothing to pause. The container goes and the row does not move.
+func TestSupervisorReclaimsIdleContainerWhenNothingInFlight(t *testing.T) {
+	s := newMemSupTestStore(t)
+	seedWaitingTask(t, s, "task-wait", types.StatusReview, types.ExecStateIdle)
+
+	gate := memSupQueuedGate(t, 900, 800)
+	clock := &memSupClock{at: time.Now()}
+	actions := &recordingSupervisorActions{}
+	sup := NewMemorySupervisor(s, gate, fixedCharges{"task-wait": 900}, actions, time.Second,
+		SandboxReclaim{Enabled: alwaysOn, Now: clock.now})
+
+	sup.TickOnce()
+	if got := actions.reclaimedIDs(); len(got) != 0 {
+		t.Fatalf("the tick that first sees a container must only start its clock, got %v", got)
+	}
+
+	clock.advance(6 * time.Minute)
+	sup.TickOnce()
+	if got := actions.reclaimedIDs(); len(got) != 1 || got[0] != "task-wait" {
+		t.Fatalf("a container idle past the grace must be released, got %v", got)
+	}
+
+	row, err := s.GetTaskByID("task-wait")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Status != types.StatusReview || row.ExecutionState != types.ExecStateIdle {
+		t.Errorf("releasing a container must leave the row alone: status=%q state=%q", row.Status, row.ExecutionState)
+	}
+	if row.MemorySupervisorPaused {
+		t.Error("a reclaimed container is not a pause: nothing may arm the auto-resume")
+	}
+	if notes := actions.noteKinds(); len(notes) != 0 {
+		t.Errorf("the reclaim is silent; no note may be recorded, got %v", notes)
+	}
+}
+
+// TestSupervisorKeepsAContainerInsideTheGrace: a container seen 4 minutes ago is kept whatever the tick
+// count, and released once the grace has passed on that same clock.
+func TestSupervisorKeepsAContainerInsideTheGrace(t *testing.T) {
+	s := newMemSupTestStore(t)
+	seedWaitingTask(t, s, "task-wait", types.StatusReview, types.ExecStateIdle)
+
+	gate := memSupQueuedGate(t, 900, 800)
+	clock := &memSupClock{at: time.Now()}
+	actions := &recordingSupervisorActions{}
+	sup := NewMemorySupervisor(s, gate, fixedCharges{"task-wait": 900}, actions, time.Second,
+		SandboxReclaim{Enabled: alwaysOn, Now: clock.now})
+
+	sup.TickOnce()
+	for _, d := range []time.Duration{time.Minute, 2 * time.Minute, 1 * time.Minute} {
+		clock.advance(d)
+		sup.TickOnce()
+		if got := actions.reclaimedIDs(); len(got) != 0 {
+			t.Fatalf("4 minutes of idleness is inside a 5 minute grace, got %v", got)
+		}
+	}
+	clock.advance(time.Minute)
+	sup.TickOnce()
+	if got := actions.reclaimedIDs(); len(got) != 1 {
+		t.Fatalf("6 minutes of idleness is outside a 5 minute grace, got %v", got)
+	}
+}
+
+// TestSupervisorReclaimsOnlyWhenThePreferenceIsOn: nothing is released until a person asks.
+func TestSupervisorReclaimsOnlyWhenThePreferenceIsOn(t *testing.T) {
+	off := false
+	never := func() bool { return off }
+	for _, tc := range []struct {
+		name    string
+		reclaim SandboxReclaim
+	}{
+		{"unset preference (zero wiring)", SandboxReclaim{}},
+		{"preference stored false", SandboxReclaim{Enabled: never}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newMemSupTestStore(t)
+			seedWaitingTask(t, s, "task-wait", types.StatusReview, types.ExecStateIdle)
+
+			gate := memSupQueuedGate(t, 900, 800)
+			clock := &memSupClock{at: time.Now()}
+			actions := &recordingSupervisorActions{}
+			reclaim := tc.reclaim
+			reclaim.Now = clock.now
+			sup := NewMemorySupervisor(s, gate, fixedCharges{"task-wait": 900}, actions, time.Second, reclaim)
+
+			sup.TickOnce()
+			clock.advance(time.Hour)
+			sup.TickOnce()
+			if got := actions.reclaimedIDs(); len(got) != 0 {
+				t.Fatalf("no container may be released while the preference is off, got %v", got)
+			}
+		})
+	}
+}
+
+// TestSupervisorPausesRunningBeforeReclaimingIdle: an in-flight task is always the victim first. The idle
+// task passes its grace before the running one exists, so the tick that decides sees both.
+func TestSupervisorPausesRunningBeforeReclaimingIdle(t *testing.T) {
+	s := newMemSupTestStore(t)
+	seedWaitingTask(t, s, "task-wait", types.StatusReview, types.ExecStateIdle)
+
+	gate := memSupQueuedGate(t, 900, 800)
+	clock := &memSupClock{at: time.Now()}
+	actions := &recordingSupervisorActions{}
+	charges := fixedCharges{"task-wait": 800}
+	sup := NewMemorySupervisor(s, gate, charges, actions, time.Second,
+		SandboxReclaim{Enabled: alwaysOn, Now: clock.now})
+
+	sup.TickOnce() // task-wait starts counting, and is the only thing holding memory
+	clock.advance(time.Hour)
+	seedRunningTask(t, s, "task-running", 400)
+	charges["task-running"] = 400
+	sup.TickOnce()
+
+	if got := actions.reclaimedIDs(); len(got) != 0 {
+		t.Fatalf("a running task must be paused before any container is released, got %v", got)
+	}
+	if got := actions.stoppedIDs(); len(got) != 1 || got[0] != "task-running" {
+		t.Fatalf("expected the in-flight task paused, got %v", got)
+	}
+}
+
+// The host floor triggers the same order with nothing queued.
+func TestSupervisorReclaimsUnderHostFloorWithEmptyQueue(t *testing.T) {
+	s := newMemSupTestStore(t)
+	seedWaitingTask(t, s, "task-wait", types.StatusInProgress, types.ExecStateIdle)
+
+	gate := &MemoryGate{}
+	gate.SetCapacity(900)
+	gate.SetMeasurements(900, 900, 90, 2000) // 90 MB free of 2000: under the 5 % floor, empty queue
+
+	clock := &memSupClock{at: time.Now()}
+	actions := &recordingSupervisorActions{}
+	sup := NewMemorySupervisor(s, gate, fixedCharges{"task-wait": 900}, actions, time.Second,
+		SandboxReclaim{Enabled: alwaysOn, Now: clock.now})
+
+	sup.TickOnce()
+	clock.advance(6 * time.Minute)
+	sup.TickOnce()
+
+	if got := actions.reclaimedIDs(); len(got) != 1 || got[0] != "task-wait" {
+		t.Fatalf("the host floor must release an idle container with nothing queued, got %v", got)
+	}
+}
+
+// TestSupervisorReclaimOffersNeitherAHeldNorARefusedContainer: a held container is never offered, and a
+// candidate the action refuses does not spend the tick — the next idle one is asked.
+func TestSupervisorReclaimOffersNeitherAHeldNorARefusedContainer(t *testing.T) {
+	s := newMemSupTestStore(t)
+	for _, id := range []string{"task-held", "task-refused", "task-takes-it"} {
+		seedWaitingTask(t, s, id, types.StatusReview, types.ExecStateIdle)
+	}
+
+	gate := memSupQueuedGate(t, 900, 800)
+	clock := &memSupClock{at: time.Now()}
+	actions := &recordingSupervisorActions{refused: map[string]bool{"proj-p1": true, "task-refused": true}}
+	// proj-p1 is the project's terminal container: a charge with no task row.
+	charges := fixedCharges{"proj-p1": 700, "task-refused": 700, "task-held": 700, "task-takes-it": 700}
+	sup := NewMemorySupervisor(s, gate, charges, actions, time.Second,
+		SandboxReclaim{
+			Enabled: alwaysOn,
+			Holds:   func(taskID string) bool { return taskID == "task-held" },
+			Now:     clock.now,
+		})
+
+	sup.TickOnce()
+	clock.advance(time.Hour)
+	sup.TickOnce()
+
+	if got := actions.reclaimedIDs(); len(got) != 1 || got[0] != "task-takes-it" {
+		t.Fatalf("a held container is out of bounds and a refused one is not the tick's last word, got %v", got)
+	}
+}
+
+// TestSupervisorReclaimsTheLongestIdleFirst: the container that has waited longest goes first.
+func TestSupervisorReclaimsTheLongestIdleFirst(t *testing.T) {
+	s := newMemSupTestStore(t)
+	seedWaitingTask(t, s, "task-old", types.StatusReview, types.ExecStateIdle)
+	seedWaitingTask(t, s, "task-new", types.StatusReview, types.ExecStateIdle)
+
+	gate := memSupQueuedGate(t, 900, 800)
+	clock := &memSupClock{at: time.Now()}
+	actions := &recordingSupervisorActions{}
+	charges := fixedCharges{"task-old": 900}
+	sup := NewMemorySupervisor(s, gate, charges, actions, time.Second,
+		SandboxReclaim{Enabled: alwaysOn, Now: clock.now})
+
+	sup.TickOnce() // task-old starts counting
+	charges["task-new"] = 900
+	clock.advance(time.Minute)
+	sup.TickOnce() // task-new starts counting
+
+	clock.advance(time.Hour)
+	sup.TickOnce()
+	if got := actions.reclaimedIDs(); len(got) != 1 || got[0] != "task-old" {
+		t.Fatalf("the longest-idle container goes first, got %v", got)
+	}
+}
+
+// TestSupervisorReclaimsOneContainerPerTick: one release per tick, whatever the number of idle containers.
+func TestSupervisorReclaimsOneContainerPerTick(t *testing.T) {
+	s := newMemSupTestStore(t)
+	seedWaitingTask(t, s, "task-a", types.StatusReview, types.ExecStateIdle)
+	seedWaitingTask(t, s, "task-b", types.StatusReview, types.ExecStateIdle)
+
+	gate := memSupQueuedGate(t, 900, 800)
+	clock := &memSupClock{at: time.Now()}
+	actions := &recordingSupervisorActions{}
+	sup := NewMemorySupervisor(s, gate, fixedCharges{"task-a": 600, "task-b": 600}, actions, time.Second,
+		SandboxReclaim{Enabled: alwaysOn, Now: clock.now})
+
+	sup.TickOnce()
+	clock.advance(time.Hour)
+	sup.TickOnce()
+
+	if got := actions.reclaimedIDs(); len(got) != 1 {
+		t.Fatalf("one container per tick, got %v", got)
+	}
+}
+
+// TestSupervisorIdleClockRestartsWhenTheContainerGoes: a container that left and came back is a new
+// arrival.
+func TestSupervisorIdleClockRestartsWhenTheContainerGoes(t *testing.T) {
+	s := newMemSupTestStore(t)
+	seedWaitingTask(t, s, "task-wait", types.StatusReview, types.ExecStateIdle)
+
+	gate := memSupQueuedGate(t, 900, 800)
+	clock := &memSupClock{at: time.Now()}
+	actions := &recordingSupervisorActions{}
+	charges := fixedCharges{"task-wait": 900}
+	sup := NewMemorySupervisor(s, gate, charges, actions, time.Second,
+		SandboxReclaim{Enabled: alwaysOn, Now: clock.now})
+
+	sup.TickOnce()
+	delete(charges, "task-wait")
+	clock.advance(time.Hour)
+	sup.TickOnce() // the container is gone: its clock goes with it
+	charges["task-wait"] = 900
+	sup.TickOnce() // seen again now: the grace starts over
+
+	if got := actions.reclaimedIDs(); len(got) != 0 {
+		t.Fatalf("a container that came back is idle from now, got %v", got)
+	}
+}
+
+// TestSupervisorIdleClockCountsWhileThePreferenceIsOff: the clock runs before the toggle moves, so turning
+// the preference on asks which containers have already waited past the grace.
+func TestSupervisorIdleClockCountsWhileThePreferenceIsOff(t *testing.T) {
+	s := newMemSupTestStore(t)
+	seedWaitingTask(t, s, "task-wait", types.StatusReview, types.ExecStateIdle)
+
+	gate := memSupQueuedGate(t, 900, 800)
+	clock := &memSupClock{at: time.Now()}
+	actions := &recordingSupervisorActions{}
+	sup := NewMemorySupervisor(s, gate, fixedCharges{"task-wait": 900}, actions, time.Second, SandboxReclaim{
+		Now: clock.now,
+	})
+
+	sup.TickOnce() // off, and still stamping
+	clock.advance(6 * time.Minute)
+	sup.reclaim.Enabled = alwaysOn // the operator flips the preference; same supervisor object
+	sup.TickOnce()
+
+	if got := actions.reclaimedIDs(); len(got) != 1 || got[0] != "task-wait" {
+		t.Fatalf("the grace is measured from when the container went idle, not from when the toggle moved, got %v", got)
+	}
+}
+
+// TestReclaimRefusesATaskThatStartedInTheMeantime: the action's own row read is the last check before
+// podman is touched.
+func TestReclaimRefusesATaskThatStartedInTheMeantime(t *testing.T) {
+	te, s := newTestExecutorWithStore(t)
+	if err := s.CreateProject(&types.Project{
+		ID: "proj-r", Name: "reclaim", Path: t.TempDir(), SandboxEnabled: true, SandboxMemoryLimit: 1024,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		id    string
+		state types.ExecutionState
+	}{
+		{"task-running", types.ExecStateRunning},
+		{"task-pulling", types.ExecStatePullingImage},
+		{"task-idle", types.ExecStateIdle},
+		{"task-paused", types.ExecStatePaused},
+	} {
+		if err := te.store.CreateTask(&types.Task{
+			ID: tc.id, ProjectID: "proj-r", Title: tc.id, Status: types.StatusInProgress,
+			ExecutionState: tc.state, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, tc := range []struct {
+		id    string
+		steps int
+	}{
+		{"task-running", 0}, {"task-pulling", 0}, {"task-idle", 1}, {"task-paused", 1},
+		{"task-never-created", 0}, // no row: nothing to reclaim, and no error to answer with
+	} {
+		mgr := newFakeSandboxMgr(tc.id)
+		if got := te.reclaimSandboxFrom(mgr, tc.id); got != (tc.steps == 1) {
+			t.Errorf("reclaimSandboxFrom(%s) = %t, want a stop of %d", tc.id, got, tc.steps)
+		}
+		if mgr.stopCalls != tc.steps {
+			t.Errorf("reclaimSandboxFrom(%s) stopped %d containers, want %d", tc.id, mgr.stopCalls, tc.steps)
+		}
 	}
 }

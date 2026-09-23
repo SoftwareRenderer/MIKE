@@ -46,13 +46,21 @@ the submit and fullscreen bindings, so a new widget-level shortcut does not need
 Example in-repo: `hide_model_badge` gates `.model-badge` in `Card.svelte`
 (`appStore.config?.hide_model_badge === true`).
 
-1. `*bool` in `types.Config` + read in `GetConfig` / write in `UpdateConfig` + field in
-   `configResponse` + PUT merge in `HandleConfig` (all `backend/config/config.go`;
-   `parseBoolPtr` on read, `omitempty` on the response so an unset flag stays unset).
+1. `*bool` in `types.Config`, then five places in `backend/config/config.go`: read in `GetConfig`
+   (`parseBoolPtr`), write in `UpdateConfig`, field in `configResponse` (`omitempty`, so an unset flag
+   stays unset), PUT merge in `HandleConfig`, and **its key in `configRowKeys`**. A key missing from that
+   list is never read from the `config` table, so the flag answers nil whatever was saved. Add a
+   `ConfigStore` accessor returning a plain `bool` when a Go consumer needs one, and say in it what an
+   unset value means — `GetReclaimIdleSandbox` reads unset as off.
 2. Field in `Config` (`$lib/types.ts`).
 3. State / hydrate / save payload in `ConfigModal.svelte`.
-4. Toggle row in `ConfigModal/PreferencesTab.svelte` (UI section).
-5. Consume from `appStore.config` in the target component.
+4. Toggle row in `ConfigModal/PreferencesTab.svelte` (UI section) — or in
+   `ConfigModal/TaskDefaults.svelte` when the preference is a *behaviour* default rather than something this
+   browser renders (`run_siblings_parallel`, `reclaim_idle_sandbox`).
+5. Consume it. A browser-side preference reads `appStore.config` in the target component. A server-side
+   one reads the accessor where the decision is made: `MemorySupervisor` calls `GetReclaimIdleSandbox` on
+   the tick that decides. A stored preference is not a startup decision, so
+   `AGENTS.md → Configuration`'s resolve-once rule does not apply to it.
 
 **A flag that is on by default** (`auto_maximize_chat_mobile`) is the same plumbing read the other
 way: nil means on, so the client consumes `!== false`, hydrates `!== false` and defaults the tab
@@ -61,7 +69,10 @@ its regression is the explicit-false one, not the unset one.
 
 **Tests to add/update:** `backend/config/config_test.go` (round-trip + omitted-when-nil),
 `preferences-tab.unit.svelte.ts`, a component test for the gated widget (e.g.
-`card-model-badge.unit.svelte.ts`), e2e `preferences-hide-model-badge.spec.ts` (isolated).
+`card-model-badge.unit.svelte.ts`), e2e `preferences-hide-model-badge.spec.ts` (isolated). A Task Defaults
+row instead extends `task-defaults.unit.svelte.ts` and the save-payload rows in
+`config-modal-run-parallel-save.unit.svelte.ts`; a preference a browser never acts on needs no spec — the
+Go round trip and the payload assertion are the round trip.
 
 ## When the preference belongs to a browser
 

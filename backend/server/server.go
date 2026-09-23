@@ -546,7 +546,12 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 			cfgStore.SetMemoryBudget(capacityMB, totalMB, memPct)
 		}
 		memSup := kanbanexec.NewMemorySupervisor(store, s.executor.MemGate(), s.sandboxMgr, s.executor,
-			kanbanexec.DefaultMemSupervisorInterval)
+			kanbanexec.DefaultMemSupervisorInterval,
+			// The stored preference and the terminal hold; see kanbanexec.SandboxReclaim.
+			kanbanexec.SandboxReclaim{
+				Enabled: cfgStore.GetReclaimIdleSandbox,
+				Holds:   s.terminalMgr.HasSession,
+			})
 		memSup.Start()
 		defer s.reg(stageMemorySupervisor, "memory supervisor", memSup.Stop)()
 		logging.For(logging.Startup).Infof("memory supervisor: gate capacity %d MB (%d%% of %d MB total, %s)",

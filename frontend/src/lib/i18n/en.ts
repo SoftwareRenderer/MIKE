@@ -350,6 +350,9 @@ const catalog = {
     'settings.defaults.autoSummarizeDesc': "Summarize context when it reaches this % of the model's context window",
     'settings.defaults.runParallel': 'Run subtasks in parallel',
     'settings.defaults.runParallelDesc': 'Start available subtasks in parallel',
+    'settings.defaults.reclaimSandbox': 'Release idle sandboxes',
+    "settings.defaults.reclaimSandboxDesc": "When enabled, containers associated with tasks will be stopped after 5 minues of inactivity to free memory.",
+    'settings.defaults.reclaimSandboxAria': 'Release a waiting task sandbox container',
     'settings.defaults.maxFailed': 'Max failed turns',
     'settings.defaults.maxFailedDesc': 'Stop task after this many consecutive LLM failures',
 

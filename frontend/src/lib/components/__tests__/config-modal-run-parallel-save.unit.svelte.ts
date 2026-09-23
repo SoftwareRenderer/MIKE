@@ -85,3 +85,54 @@ describe('ConfigModal run-siblings-in-parallel save payload', () => {
         expect(vi.mocked(updateConfig).mock.calls[0][0]).toMatchObject({ run_siblings_parallel: false });
     });
 });
+
+const RECLAIM = 'button[aria-label="Release a waiting task sandbox container"]';
+const TASK_DEFAULTS_TAB = 'Task Defaults';
+
+// The payload is what makes the row real: an omitted field keeps whatever was stored.
+describe('ConfigModal release-idle-sandboxes save payload', () => {
+    async function openDefaults(container: HTMLElement) {
+        await waitFor(() => expect(container.querySelector('button.tab-btn')).toBeTruthy(), { timeout: 1000 });
+        const tabs = Array.from(container.querySelectorAll('button.tab-btn'));
+        fireEvent.click(tabs.find((b) => b.textContent?.trim() === TASK_DEFAULTS_TAB)!);
+        await waitFor(() => expect(container.querySelector(RECLAIM)).toBeTruthy(), { timeout: 1000 });
+    }
+
+    it('sends reclaim_idle_sandbox: true when the toggle is on', async () => {
+        vi.mocked(updateConfig).mockResolvedValue(makeConfig());
+        const { container } = render(ConfigModal, {
+            props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() },
+        });
+        await openDefaults(container);
+
+        fireEvent.click(container.querySelector(RECLAIM)!);
+        fireEvent.click(container.querySelector('button[title="Save settings"]')!);
+        await waitFor(() => expect(updateConfig).toHaveBeenCalledTimes(1), { timeout: 1000 });
+
+        expect(vi.mocked(updateConfig).mock.calls[0][0]).toMatchObject({ reclaim_idle_sandbox: true });
+    });
+
+    it('sends reclaim_idle_sandbox: false when the toggle is left off', async () => {
+        vi.mocked(updateConfig).mockResolvedValue(makeConfig());
+        const { container } = render(ConfigModal, {
+            props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() },
+        });
+        await openDefaults(container);
+
+        fireEvent.click(container.querySelector('button[title="Save settings"]')!);
+        await waitFor(() => expect(updateConfig).toHaveBeenCalledTimes(1), { timeout: 1000 });
+
+        expect(vi.mocked(updateConfig).mock.calls[0][0]).toMatchObject({ reclaim_idle_sandbox: false });
+    });
+
+    it('hydrates the toggle from a stored preference', async () => {
+        const stored = { ...makeConfig(), reclaim_idle_sandbox: true };
+        vi.mocked(updateConfig).mockResolvedValue(stored);
+        const { container } = render(ConfigModal, {
+            props: { config: stored, onClose: vi.fn(), onSaved: vi.fn() },
+        });
+        await openDefaults(container);
+
+        expect(container.querySelector(RECLAIM)?.getAttribute('aria-checked')).toBe('true');
+    });
+});

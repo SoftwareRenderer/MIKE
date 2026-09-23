@@ -1328,3 +1328,17 @@ func TestSetMemoryPressurePausedOutputGuard(t *testing.T) {
 		t.Error("a row whose flag a start cleared is no longer the supervisor's to annotate")
 	}
 }
+
+// TestInFlightStatesSQLIsTheGoSet: the pool GetRunningSandboxedTasks hands the supervisor to pause must be
+// what types.ExecutionState.InFlight says. Both sides are derived here.
+func TestInFlightStatesSQLIsTheGoSet(t *testing.T) {
+	for _, state := range []types.ExecutionState{
+		types.ExecStateIdle, types.ExecStateRunning, types.ExecStatePullingImage,
+		types.ExecStatePaused, types.ExecStateCompleted, types.ExecStateFailed,
+	} {
+		inSQL := strings.Contains(inFlightStates, "'"+string(state)+"'")
+		if inSQL != state.InFlight() {
+			t.Errorf("%q: inFlightStates says %t, types.ExecutionState.InFlight says %t", state, inSQL, state.InFlight())
+		}
+	}
+}

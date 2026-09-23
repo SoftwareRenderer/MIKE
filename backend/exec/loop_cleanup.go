@@ -21,7 +21,8 @@ import (
 // function that the panic unwound through, so a helper cannot own it.
 //
 // What is deliberately absent: the stream and the sandbox container. The broadcaster lives as long as its
-// clients are connected, and the container lives until the task is deleted (RemoveStream in cleanupTask).
+// clients are connected, and the container lives until the task is deleted (RemoveStream in cleanupTask)
+// or the memory supervisor reclaims it (docs/sandbox-runtime.md).
 
 // persistSessionCost writes the cost accumulated during this run. It takes the loop context rather than
 // the store's state because the cost lives only in memory while the loop runs.
