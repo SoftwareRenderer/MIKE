@@ -237,7 +237,8 @@ thing that asks again, since `mayBeBehind()` is false for an idle task with an e
 clears the notice, so it never outlives its answer.
 
 It is not a chat entry: the transcript is rebuilt from the rows on every read, so a synthetic entry would
-be appended again by each rebuild.
+be appended again by each rebuild. What the queue holds is rebuilt too — see *A pending outgoing message is
+the queue's projection* — so a read that failed does not hide a message this browser wrote.
 
 **Tests:** e2e `away-and-back.spec.ts` — a read aborted from the first open with no cached copy,
 retried once the server answers again, and a reload onto the stored copy.
@@ -314,11 +315,29 @@ While a switched-to project's live board is in flight the screen holds that proj
 the list is emptied before the switch is painted. The cache banner stays off unless the socket is down,
 so a slow but live switch does not claim to be stale.
 
+## The mirror follows the server, and the queue carries intent
+
+`board:<projectId>` holds what this browser received and nothing else: a board response it fetched, or the
+board its own frames left it holding. Nothing is fetched in order to populate it — no background sync, and no
+read whose only purpose is to fill the store. A board read out of the mirror is never written back, because
+`cachedAt` is what the age line counts from.
+
+Pending intent is not in the mirror either. `offline-queue` is the record of a write the server has not
+answered, and `applyBoard(…, 'mirror')` replays it onto every mirror landing — the one place that replays it,
+because `applyQueuedActionsToBoard` is not idempotent and a second pass opens a second card. Keeping guessed
+state out of the mirror is what keeps two sentences checkable: *Viewing cached data* means the server answered
+what is on screen, and a write the server refused cannot settle in as a permanent card.
+
+**Tests:** `src/lib/services/__tests__/board-mirror.unit.ts` (one write per coalescing window; an empty flush
+rewrites nothing), `src/lib/api/__tests__/queue-mirror-landing.unit.ts` (one row per pending write, and the
+replay is not idempotent), e2e `mirror-follows-frames.spec.ts` (a card moved by a frame is in its new column
+after a mirror reload).
+
 ## The age line measures data, not the socket
 
 While there is no stream, the banner adds "Data from {age}". The clock it counts from is the moment
-data **landed** — `refreshBoard`, `silentRefresh` and `selectProject` write it, and a board read from
-the mirror keeps the mirror's own `cachedAt`. `null` (nothing has landed since this client opened)
+data **landed** — a live board landing or a `task_updated` / `task_deleted` frame writes it, and a board read
+from the mirror keeps the mirror's own `cachedAt`. `null` (nothing has landed since this client opened)
 answers an empty string, and the line is left out: never "just now".
 
 Two things used to make the line unable to leave "just now", and neither is a clock any more: it was
@@ -345,6 +364,32 @@ socket stayed up — `selectProject`'s fallback after a failed board fetch, and 
 is the only route back: `retryLiveNow` skips the socket's backoff and runs `silentRefresh()`, which puts
 live data on screen or leaves the banner exactly where it was. The button is hidden while the socket is
 down, because the reconnecting banner already offers it. No spec covers the button itself.
+
+## A pending outgoing message is the queue's projection
+
+A message queued while offline has no row: nothing reached `finalizeTurn`, and the mirrored window holds rows
+the server answered. So the transcript derives its pending rows from `offline-queue` on every rebuild
+(`pendingSendEntries`, `$lib/utils/pending-sends.ts`) — the clock, the one notice beside them, and the
+ReviewBar's *Resume*, which reads the last non-error entry. Deriving rather than remembering keeps the
+mirror's claim true and survives a reload. A row is named for the queue action, so a rebuild draws the same row
+instead of a second one; an entry this session already drew is skipped by the action id it carries
+(`ChatEntry.actionId`).
+
+A refusal has already left the queue, so its verdict is stored with the text
+(`queued-failed:<projectId>:<taskId>`) and returns as the `send_refused` row; a fresh send for that task
+retires it. A refused message is never simply gone.
+
+When a flush ends, `TaskChat` re-reads the window. The read that filled the transcript went out before the
+flush applied anything, and without that re-read an applied send goes from visible to nothing until some
+unrelated reload.
+
+One use of the same clock stays session-local: the message the executor will take after a summarization is a
+row that exists, and nothing on it says it waited, so a reload cannot badge it.
+
+**Tests:** `src/lib/utils/__tests__/pending-sends.unit.ts` holds the clock for what waits, none for what was
+refused, the order, and the skip. `src/lib/api/__tests__/queue-refused-send.unit.ts` holds the verdict
+outliving the queue entry, and a fresh send retiring it. E2E `offline-send-queue.spec.ts` shows the pending
+message after a reload while still offline, and the applied row reaching the screen.
 
 ## The behaviour, in full
 
@@ -492,5 +537,6 @@ queued notice under its own code (`send_refused`) rather than deleting it — a 
 write).
 ## Checking this
 
-`cd frontend && npm test` covers `taskIsInFlight` and the offline queue.
-`cd frontend && npx playwright test reconnect-refresh ws-stale-reconnect` drives a lost connection.
+`cd frontend && npm test` covers `taskIsInFlight`, the offline queue, the mirror's coalescing and the pending
+rows derived from the queue. `cd frontend && npx playwright test reconnect-refresh ws-stale-reconnect` drives a
+lost connection; `mirror-follows-frames offline-send-queue` drive the mirror and the queue across a reload.

@@ -25,6 +25,8 @@ export {
     isTransientError,
     getQueuedTaskIds,
     getQueuedDeleteTaskIds,
+    getQueuedSends,
+    getRefusedSends,
     getDroppedTaskIds,
     getDroppedActions,
     flushQueueNow,

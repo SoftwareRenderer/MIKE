@@ -607,10 +607,11 @@ async function cleanTaskContentCache(allTaskIds: Set<string>, projectId: string)
     const keys = await dbGetAllKeys(STORE_BOARD_CACHE);
     const toDelete = keys.filter(key => {
         const parts = key.split(':');
-        // 'diff:<pid>:<tid>' (current worktree diff), 'diff:<pid>:<tid>:<headSHA>'
-        // (done-task branch-tip diff), and 'done-stats:<pid>:<tid>' all carry the
-        // task id at parts[2] and are swept when the task disappears.
-        if (parts[0] !== 'messages' && parts[0] !== 'message-full' && parts[0] !== 'diff' && parts[0] !== 'done-stats') return false;
+        // 'diff:<pid>:<tid>', 'diff:<pid>:<tid>:<headSHA>', 'done-stats:<pid>:<tid>' and
+        // 'queued-failed:<pid>:<tid>' all carry the task id at parts[2] and are swept when the task
+        // disappears.
+        if (parts[0] !== 'messages' && parts[0] !== 'message-full' && parts[0] !== 'diff'
+            && parts[0] !== 'done-stats' && parts[0] !== 'queued-failed') return false;
         if (parts[1] !== projectId) return false; // only current project
         const taskId = parts[2];
         return !allTaskIds.has(taskId);
@@ -627,6 +628,7 @@ async function cleanTaskContentCache(allTaskIds: Set<string>, projectId: string)
 //   'messages:<projectId>:<taskId>',
 //   'message-full:<projectId>:<taskId>:<messageId>',
 //   'diff:<projectId>:<taskId>'
+//   'queued-failed:<projectId>:<taskId>'
 
 export interface BoardCacheEntry {
     data: unknown;
@@ -661,6 +663,11 @@ export function doneDiffCacheKey(projectId: string, taskId: string, headRef: str
 /** Cache key for a done task's cached diff stats + the updated_at they were observed at. */
 export function doneStatsCacheKey(projectId: string, taskId: string): string {
     return `done-stats:${projectId}:${taskId}`;
+}
+
+/** Cache key for the sends the server refused on one task. */
+export function refusedSendsCacheKey(projectId: string, taskId: string): string {
+    return `queued-failed:${projectId}:${taskId}`;
 }
 
 /** Save a value to the board cache. */

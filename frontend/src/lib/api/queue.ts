@@ -1,5 +1,7 @@
 import { API_BASE, apiFetch, apiError, ensureCsrfToken, generateId, isAborted, registerSetOffline } from './helpers';
 import { loadQueue as loadQueueFromStorage, saveQueue as saveQueueToStorage, type QueuedAction as StoredQueuedAction } from '../storage';
+import { getBoardCache, refusedSendsCacheKey, removeBoardCache, setBoardCache } from '../storage';
+import type { PendingSend } from '../utils/pending-sends';
 import type { Config, MemoryAlertAckPayload, Project, ProjectUpdates, Task, TaskMessage, Thread } from '../types';
 import { t } from '$lib/i18n';
 
@@ -132,6 +134,10 @@ export async function enqueueAction(action: { type: ActionType; params: Record<s
     if (action.params.taskId) {
         droppedActions = droppedActions.filter(a => a.params.taskId !== action.params.taskId);
     }
+    // Otherwise a refused row outlives the retry that replaced it.
+    if (SEND_ACTIONS.has(action.type) && action.params.projectId && action.params.taskId) {
+        void clearRefusedSends(action.params.projectId, action.params.taskId);
+    }
     actionQueue.push(item);
     await saveQueue();
     return item;
@@ -174,6 +180,48 @@ export function getQueuedDeleteTaskIds(): Set<string> {
         }
     }
     return ids;
+}
+
+// The sends the queue still owes, or the server refused. `pendingSendEntries` owns how they read.
+
+const SEND_ACTIONS: Set<string> = new Set(['sendTaskMessage', 'createTaskMessage']);
+
+function isSendAction(action: QueuedAction): boolean {
+    return SEND_ACTIONS.has(action.type) && !!action.params?.projectId && !!action.params?.taskId;
+}
+
+function toPendingSend(action: QueuedAction): PendingSend {
+    return {
+        actionId: action.id,
+        content: String(action.params?.content ?? ''),
+        attachments: action.params?.attachments,
+        timestamp: action.timestamp,
+    };
+}
+
+/** The sends still waiting to be applied for one task, in the order they were written. */
+export function getQueuedSends(projectId: string, taskId: string): PendingSend[] {
+    return actionQueue
+        .filter(a => isSendAction(a) && a.params.projectId === projectId && a.params.taskId === taskId)
+        .map(toPendingSend);
+}
+
+/** The sends the server refused for one task; they have left the queue, so the verdict is stored. */
+export async function getRefusedSends(projectId: string, taskId: string): Promise<PendingSend[]> {
+    const stored = await getBoardCache<PendingSend[]>(refusedSendsCacheKey(projectId, taskId));
+    return Array.isArray(stored) ? stored : [];
+}
+
+async function recordRefusedSend(action: QueuedAction): Promise<void> {
+    const key = refusedSendsCacheKey(action.params.projectId, action.params.taskId);
+    const stored = await getBoardCache<PendingSend[]>(key);
+    const known = Array.isArray(stored) ? stored : [];
+    if (known.some(s => s.actionId === action.id)) return;
+    await setBoardCache(key, [...known, toPendingSend(action)]);
+}
+
+async function clearRefusedSends(projectId: string, taskId: string): Promise<void> {
+    await removeBoardCache(refusedSendsCacheKey(projectId, taskId));
 }
 
 
@@ -232,6 +280,10 @@ async function doFlush(onTransientError?: (e: unknown) => boolean): Promise<Map<
                 // Recorded before it leaves the queue, so the UI can say "refused" rather than
                 // reading its absence as "applied".
                 droppedActions.push(action);
+                if (isSendAction(action)) {
+                    // The verdict has to outlive the queue entry it came from.
+                    await recordRefusedSend(action).catch(() => {});
+                }
                 actionQueue.shift();
                 await saveQueue();
             }

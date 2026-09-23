@@ -26,7 +26,8 @@ OUTSIDE_SRC = ("index.html", "public/host-client.js")
 
 # Every file in core that turns a string into elements, with the reason it is safe.
 ALLOW: dict[str, str] = {
-    "src/lib/components/Chat/ChatMessage.svelte": "utils/sanitize over marked (assistant/system markdown)",
+    "src/lib/components/Chat/ChatMessage.svelte": "escapeHtml on the user's own text (assistant markdown renders in Chat/MarkdownBody)",
+    "src/lib/components/Chat/MarkdownBody.svelte": "utils/sanitize over marked (assistant markdown; a top-level fence renders as Chat/CodeFence instead)",
     "src/lib/components/Chat/ToolCall.svelte": "utils/sanitize over marked (question, summary, tool result)",
     "src/lib/components/ConfigModal/AgentSection.svelte": "utils/sanitize over marked (manifest description/setup)",
     "src/lib/utils/lsp-hover-actions.ts": "utils/sanitize with the hr tag forbidden, over the LSP plugin's docToHTML",
@@ -43,7 +44,8 @@ ALLOW: dict[str, str] = {
 
 # How each file above keeps untrusted text from becoming markup. See rule 4.
 METHOD: dict[str, str] = {
-    "src/lib/components/Chat/ChatMessage.svelte": "sanitizer",
+    "src/lib/components/Chat/ChatMessage.svelte": "escaped-by:lib/utils/format",
+    "src/lib/components/Chat/MarkdownBody.svelte": "sanitizer",
     "src/lib/components/Chat/ToolCall.svelte": "sanitizer",
     "src/lib/components/ConfigModal/AgentSection.svelte": "sanitizer",
     "src/lib/utils/lsp-hover-actions.ts": "sanitizer",

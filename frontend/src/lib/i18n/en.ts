@@ -1281,6 +1281,9 @@ const catalog = {
     'chat.actions.regenerate': 'Regenerate response',
     'chat.actions.editSummary': 'Edit the summarized context',
 
+    'chat.code.copy': 'Copy code',
+    'chat.code.copied': 'Copied',
+
     // ── Chat/QueueIndicator.svelte ──
     'chat.queue.targetAgent': 'agent',
     'chat.queue.targetLlm': 'LLM provider',

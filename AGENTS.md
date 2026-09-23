@@ -410,7 +410,10 @@ what it owes the server is its current state per project or task key, coalesced 
 has open, because two holds of one key are undone by one release. **A task's status is never the answer to
 "is it still running"** — a stopped task keeps `status = in_progress` and only moves `execution_state` to
 `paused`, and `taskIsInFlight` (`$lib/utils/task-utils.ts`), mirrored server-side by `terminalTurnStates`
-(`stream/app_stream.go`), is what decides whether an unanswered tool call is work or a leftover. Mechanisms: `docs/reconnection.md`.
+(`stream/app_stream.go`), is what decides whether an unanswered tool call is work or a leftover. **The offline
+mirror holds only what this browser received** — a board response or a frame it was sent — and pending intent
+stays in the queue, replayed onto every mirror landing rather than mirrored; a queued message on screen is the
+queue's projection. Mechanisms: `docs/reconnection.md`.
 
 ## Licensing
 

@@ -2,7 +2,8 @@
     import { onMount, onDestroy, untrack, tick } from 'svelte';
     import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData, TaskMessage, Task } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getQueuedTaskIds, getDroppedTaskIds, getTask, isFromCache, type AppStream } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, onQueueFlushed, getQueuedTaskIds, getQueuedSends, getRefusedSends, getDroppedTaskIds, getTask, isFromCache, type AppStream } from '$lib/api';
+    import { PENDING_SEND_ID_PREFIX, pendingSendEntries } from '$lib/utils/pending-sends';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
     import { StreamState } from '$lib/services/stream-state.svelte';
@@ -383,12 +384,17 @@
      * A send was queued due to a network failure. Mark the optimistic entry as
      * queued and append a visible error notice. The notice lives only in the UI
      * (never persisted to the DB) and is cleared when the queue flushes.
+     *
+     * The action id keeps a re-derive of the queue from drawing the message twice.
      */
-    function handleQueuedSend(content: string, entryId?: string) {
+    function handleQueuedSend(content: string, entryId?: string, actionId?: string) {
         const entry = entryId
             ? stream.state.entries.find(e => e.id === entryId)
             : [...stream.state.entries].reverse().find(e => e.role === 'user' && e.content === content);
-        if (entry) entry.queued = true;
+        if (entry) {
+            entry.queued = true;
+            if (actionId) entry.actionId = actionId;
+        }
         appendErrorEntry('send_queued', t('chat.task.sendQueued'));
     }
 
@@ -516,6 +522,35 @@
             // silent about a transcript that looks empty.
             historyNotice = 'failed';
         }
+        // A queued send has no row, so no read can bring it; the queue is read either way.
+        await renderPendingSends();
+    }
+
+    /**
+     * Put back the sends this browser wrote and the server has not answered, derived from
+     * `offline-queue` on every rebuild rather than remembered in the mirror.
+     */
+    async function renderPendingSends(): Promise<void> {
+        let additions;
+        try {
+            const pending = getQueuedSends(projectId, taskId);
+            const refused = await getRefusedSends(projectId, taskId);
+            const rendered = stream.state.entries
+                .filter(e => !e.id.startsWith(PENDING_SEND_ID_PREFIX))
+                .map(e => e.actionId)
+                .filter((id): id is string => !!id);
+            additions = pendingSendEntries({
+                pending,
+                refused,
+                rendered,
+                copy: { queued: t('chat.task.sendQueued'), refused: t('chat.task.sendRefused') },
+                threadId: activeThreadId,
+            });
+        } catch {
+            return; // an unreadable queue: what is on screen is the best reading available
+        }
+        const kept = stream.state.entries.filter(e => !e.id.startsWith(PENDING_SEND_ID_PREFIX));
+        stream.state.entries = [...kept, ...additions];
     }
 
     /** Draws the transcript from the rows loaded so far. Rebuilding it whole keeps a turn the window cut
@@ -705,7 +740,7 @@
             if (result.queued) {
                 // Network failure — the message was queued (not lost). Keep it as an
                 // outgoing message and surface a visible, non-persisted notice.
-                handleQueuedSend(msg, entryId);
+                handleQueuedSend(msg, entryId, result.actionId);
             }
             scroll(true);
         } finally {
@@ -847,7 +882,7 @@
         if (result.queued) {
             // Network failure — regeneration is queued; keep the last user message
             // visible as outgoing and surface a non-persisted notice.
-            handleQueuedSend(lastUser.content);
+            handleQueuedSend(lastUser.content, undefined, result.actionId);
         }
         // Regenerate is a user-initiated action — jump to the latest message.
         scroll(true);
@@ -1098,7 +1133,7 @@
             // regenerate: the fork already wrote the edited question into the new thread, so this send is
             // "answer what the thread holds", not a second copy of the same message.
             const result = await sendWithTracking(newContent, attachments, true);
-            if (result?.queued) handleQueuedSend(newContent);
+            if (result?.queued) handleQueuedSend(newContent, undefined, result.actionId);
         } catch (e) {
             dialogStore.showToast(String(e));
         }
@@ -1137,7 +1172,7 @@
         const newMsg = await createTaskMessage(projectId, taskId, 'user', newContent);
         stream.state.entries = [...stream.state.entries, { id: newMsg.id, role: 'user', content: newContent, attachments, threadId: activeThreadId, isStreaming: false, createdAt: newMsg.created_at || new Date().toISOString() }];
         const result = await sendWithTracking(newContent, attachments);
-        if (result?.queued) handleQueuedSend(newContent);
+        if (result?.queued) handleQueuedSend(newContent, undefined, result.actionId);
         // Edit-and-send is a user-initiated send — jump to the latest message.
         scroll(true);
     }
@@ -1354,6 +1389,7 @@
         // The card falls back to execution_state === 'running' for the authoritative state.
         markNotStreaming();
         unsubQueue?.();
+        unsubFlushed?.();
         unsubWsConn?.();
         window.removeEventListener('beforeunload', handleBeforeUnload);
         // Flush pending draft save on navigation/component destroy
@@ -1382,23 +1418,28 @@
 
     // Clear queued flags when queue changes (actions flushed)
     let unsubQueue: (() => void) | null = null;
+    let unsubFlushed: (() => void) | null = null;
     onMount(() => {
         unsubQueue = onQueueChanged(() => {
             // Two different reasons for an empty queue: an applied action, or one the server
             // refused. Only the first means the notice can go away.
-            if (getQueuedTaskIds().has(taskId)) return;
-            const cleared = stream.state.entries.map(e => (e.queued ? { ...e, queued: false } : e));
-            if (!getDroppedTaskIds().has(taskId)) {
-                stream.state.entries = cleared.filter(e => !(e.role === 'error' && e.error?.code === 'send_queued'));
-                return;
+            if (!getQueuedTaskIds().has(taskId)) {
+                const cleared = stream.state.entries.map(e => (e.queued ? { ...e, queued: false } : e));
+                stream.state.entries = getDroppedTaskIds().has(taskId)
+                    // Its own code: a refusal keeps its notice even after the next flush clears the record.
+                    ? cleared.map(e =>
+                        e.role === 'error' && e.error?.code === 'send_queued'
+                            ? { ...e, content: t('chat.task.sendRefused'), error: { ...e.error, code: 'send_refused', message: t('chat.task.sendRefused') } }
+                            : e
+                    )
+                    : cleared.filter(e => !(e.role === 'error' && e.error?.code === 'send_queued'));
             }
-            // Its own code: a refusal keeps its notice even after the next flush clears the record.
-            const message = t('chat.task.sendRefused');
-            stream.state.entries = cleared.map(e =>
-                e.role === 'error' && e.error?.code === 'send_queued'
-                    ? { ...e, content: message, error: { ...e.error, code: 'send_refused', message } }
-                    : e
-            );
+            void renderPendingSends();
+        });
+        // The read that filled this transcript went out before the flush applied anything, so the end
+        // of a flush is the signal that the applied row belongs on screen.
+        unsubFlushed = onQueueFlushed(() => {
+            void loadHistory(false, knownExecutionState);
         });
     });
 
