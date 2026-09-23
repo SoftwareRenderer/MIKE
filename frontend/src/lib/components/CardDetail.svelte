@@ -745,8 +745,8 @@
         }
         window.addEventListener('keydown', handleKey);
 
-        // The diff is as frame-driven as the chat, and only a task doing work can move under it, so
-        // an idle one is not re-fetched — a full diff reload is not free.
+        // The diff is mirrored by `task_diff_stats` on the project channel, so this screen can answer for
+        // itself. A reload is not free either: it closes the open file and the checkpoint overlay.
         const returnWatcher = createTabReturn({
             mayBeBehind: () => taskIsInFlight(task.execution_state) || streamingIds.has(task.id),
             msSinceFrame: () => getAppStreamRef()?.msSinceFrame() ?? null,

@@ -12,6 +12,7 @@ const signal = (over: Partial<ReturnSignal> = {}): ReturnSignal => ({
     msSinceFrame: 0,
     msSinceReconcile: 60_000,
     mayBeBehind: true,
+    hiddenIsEvidence: false,
     ...over,
 });
 
@@ -19,6 +20,7 @@ describe('needsReturnReconcile', () => {
     it('never reconciles while the document is hidden', () => {
         expect(needsReturnReconcile(signal({ hidden: true }))).toBe(false);
         expect(needsReturnReconcile(signal({ hidden: true, msSinceFrame: WAKE_FRAME_GAP_MS }))).toBe(false);
+        expect(needsReturnReconcile(signal({ hidden: true, mayBeBehind: false, hiddenIsEvidence: true }))).toBe(false);
     });
 
     it('never reconciles a screen that cannot be behind', () => {
@@ -26,6 +28,19 @@ describe('needsReturnReconcile', () => {
         expect(
             needsReturnReconcile(signal({ source: 'focus', msSinceFrame: WAKE_FRAME_GAP_MS, mayBeBehind: false })),
         ).toBe(false);
+    });
+
+    it('a missed turn leaves no evidence, so a hidden screen cannot vouch for itself', () => {
+        expect(needsReturnReconcile(signal({ mayBeBehind: false, hiddenIsEvidence: true }))).toBe(true);
+    });
+
+    it('leaves a window that was never hidden to answer for itself', () => {
+        expect(needsReturnReconcile(signal({
+            source: 'focus', msSinceFrame: WAKE_FRAME_GAP_MS, mayBeBehind: false, hiddenIsEvidence: true,
+        }))).toBe(false);
+        expect(needsReturnReconcile(signal({
+            source: 'pageshow', msSinceFrame: WAKE_FRAME_GAP_MS, mayBeBehind: false, hiddenIsEvidence: true,
+        }))).toBe(false);
     });
 
     it('answers a tab becoming visible whatever the socket was doing', () => {

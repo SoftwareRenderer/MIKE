@@ -109,7 +109,15 @@ only thing that can draw the card.
 ## A discarded card releases its id
 
 The `status: running` frame announces a run, and it discards any entry that is nothing but an unanswered
-tool call — that call belongs to the run the frame ends, not the one it opens. The claim goes with the
+tool call — that call belongs to the run the frame ends, not the one it opens. What the frame supersedes is
+what this screen saw announced, never what it read. A pending call carrying `messageId` is a row the server
+wrote; a frame about the run says nothing about that row. The `tool_call` event is broadcast once (*The
+reload meets the replay buffer*), so the replay carrying this frame may have lost the announcement that
+would redraw the card. Delete the row's copy then, and the call has no card for the rest of the run: its
+`tool_result` resolves nothing, and nothing asks again. That is why the machine that watched the run shows
+the running card, and the one that opens the task does not.
+
+The claim goes with the
 entry. `processedToolIds` is what stops a second announcement of one id opening a second card. An id still
 held when its card is discarded **swallows the announcement that follows** — the replayed one, or the
 event `taskEventContext` delivers the instant a chat subscribes. Every frame of that call is then refused
@@ -117,8 +125,9 @@ as a duplicate and the card is never drawn: the `tool_result` resolves nothing, 
 rendered and `unresolvedToolIds` never learns either. So `processedToolIds` lets go of exactly the ids it
 discarded, and `unresolvedToolIds` keeps them — an unanswered call is still evidence that a card is owed.
 
-**Tests:** `src/lib/services/__tests__/stream-handler.unit.ts` (re-announced after being discarded draws
-one card; a call that survives the frame and is announced twice still draws one).
+**Tests:** `src/lib/services/__tests__/stream-handler.unit.ts`. E2E `away-and-back.spec.ts` holds the whole
+stream back until the rows are read, then loses the call's announcement; the rows are the only evidence
+the screen holds.
 
 ## The slow client is released, not timed out
 
@@ -232,9 +241,10 @@ rule (*The row decides, not the board's copy*); this section is only about what 
 `loadHistory` ignores everything its read throws except a 404, so the transcript can be the last window
 this browser saved, or nothing at all — indistinguishable from a task with no conversation.
 `historyNotice` tells them apart: `'cached'` when the window carried `isFromCache`, `'failed'` for any other
-failure but a missing task. `ChatEntries` renders it above the list with **Retry beside it** — the only
-thing that asks again, since `mayBeBehind()` is false for an idle task with an empty transcript. A live read
-clears the notice, so it never outlives its answer.
+failure but a missing task. `ChatEntries` renders it above the list with **Retry beside it** — the way to ask
+again without leaving the view. `mayBeBehind()` is false for an idle task with an empty transcript, so a
+return from a hidden window (*The tab that comes back*) is the other thing that refetches by itself. A live
+read clears the notice, so it never outlives its answer.
 
 It is not a chat entry: the transcript is rebuilt from the rows on every read, so a synthetic entry would
 be appended again by each rebuild. What the queue holds is rebuilt too — see *A pending outgoing message is
@@ -253,16 +263,27 @@ and the rule collapses them to a single call, never twice inside `RETURN_DEDUPE_
 | view | what says it could be behind | what it refetches |
 |---|---|---|
 | board (`App.svelte`) | always — a stale list looks current whatever the socket did | `refreshBoard()`, plus `checkStale()` / `reconnectNow()` for the socket |
-| chat (`TaskChat.svelte`) | in flight, a card still pending, a turn still open on screen, or a call it owes a card for | the task row, then the messages |
+| chat (`TaskChat.svelte`) | after a window that was hidden: nothing, because `hiddenIsEvidence` is set. Otherwise: in flight, a card still pending, a turn still open on screen, or a call it owes a card for | the task row, then the messages |
 | diff (`CardDetail.svelte`) | in flight or streaming | `loadDiff()` |
 
-`visibilitychange` reconciles whenever the view says it could be behind; `focus` and `pageshow` only after
-the stream has been silent for `WAKE_FRAME_GAP_MS`, read from `AppStream.msSinceFrame()` (which restarts its
-clock at the last close, so a dead socket counts as silence). A window that merely lost focus keeps
-receiving frames, so silence is the only evidence the machine slept or the socket went zombie without the
-tab ever going hidden — and with two windows open on one app, `document.hidden` never becomes true at all.
+**A window that was hidden is its own evidence, for a view that cannot see its own gap.**
+`visibilitychange`→visible says this screen ran unread. What the gate reads — a pending card, an open
+assistant id, `unresolvedToolIds` — is what a turn missed whole takes with it. No card was drawn, no id was
+opened, nothing was left unresolved. Ask such a screen whether it is behind and it answers no, which is the
+shape of a chat left on a stale transcript while its task answered twice. So `ReturnSignal` carries
+`hiddenIsEvidence`, the chat sets it, and a `visible` return reconciles without the screen's own answer. The
+diff does not set it: its content is mirrored by `task_diff_stats` on the project channel, the same frames
+that move the board's copy it gates on. And `loadDiff()` resets the open file, the checkpoint overlay and the
+from/to comparison — reloading it on every tab switch is a loss the chat does not pay.
 
-**The chat's gate is `StreamState.unresolvedToolIds`, not the task's status.** `isLoading` and
+A `focus` or `pageshow` return never hid the page, so it still needs the view's own answer *and* the stream
+silent for `WAKE_FRAME_GAP_MS`, read from `AppStream.msSinceFrame()` (which restarts its clock at the last
+close, so a dead socket counts as silence). A window that merely lost focus keeps receiving frames, so
+silence is the only evidence the machine slept or the socket went zombie without the tab ever going hidden —
+and with two windows open on one app, `document.hidden` never becomes true at all.
+
+**The chat's gate is `StreamState.unresolvedToolIds`, not the task's status — for the signals that never hid
+the page.** `isLoading` and
 `task.status !== 'in_progress'` were the gate, and both fail in the direction that matters: a stopped task
 stays `in_progress` (see *A tool call reads as running only while its task is in flight*), and both are
 false once the turn has ended, which is exactly when the missed frames have already taken the card with
@@ -290,7 +311,8 @@ paused there; the follow tracker re-pins on return).
 in the wrapped constructor runs before the app's `onmessage`, so `stopImmediatePropagation` is where the
 frame can be removed) and asserts they really were swallowed; the turn ends with the card gone, and one
 `visibilitychange` must bring it back holding the stored output. `tab-return.unit.ts` holds the gate rule
-itself.
+itself, including that a screen which cannot see its own gap reconciles on the hidden signal alone and one
+that was never hidden does not.
 
 ## The board on screen belongs to one project
 
@@ -393,7 +415,7 @@ message after a reload while still offline, and the applied row reaching the scr
 
 ## The behaviour, in full
 
-`onConnected(true)` in `App.svelte` runs `silentRefresh()` once `initialLoadComplete`; `TaskChat` reloads history from the DB on reconnect because **turns completed while offline are never replayed** (buffer cleared at turn end). `offline` queues writes immediately, except a value that carries a secret — an unmasked provider key, or a clone URL with credentials in it — which is refused because the queue is persisted; `online` flushes the queue and calls `reconnectNow()` to skip backoff; `visibilitychange` refreshes the board (phone-sleep), and the open task's chat and diff answer the same signal together with the window's own `focus` and a bfcache `pageshow` — gated on the screen being able to be behind, never on the task's status. Project re-subscription forces a re-send of `task_diff_stats`.
+`onConnected(true)` in `App.svelte` runs `silentRefresh()` once `initialLoadComplete`; `TaskChat` reloads history from the DB on reconnect because **turns completed while offline are never replayed** (buffer cleared at turn end). `offline` queues writes immediately, except a value that carries a secret — an unmasked provider key, or a clone URL with credentials in it — which is refused because the queue is persisted; `online` flushes the queue and calls `reconnectNow()` to skip backoff; `visibilitychange` refreshes the board (phone-sleep), and the open task's chat and diff answer the same signal together with the window's own `focus` and a bfcache `pageshow` — the chat whatever it believes, because a missed turn leaves no local trace, the diff only while the task looks able to move under it, never on the task's status. Project re-subscription forces a re-send of `task_diff_stats`.
 
 ### How a request ends: cancelled, or unanswered
 

@@ -20,11 +20,14 @@ export interface ReturnSignal {
     msSinceReconcile: number;
     /** True when the screen may be showing something the server has moved past. */
     mayBeBehind: boolean;
+    /** True when a missed frame leaves nothing on this screen that could report it, so the only evidence is
+     * that the page was hidden — `docs/reconnection.md → The tab that comes back`. */
+    hiddenIsEvidence: boolean;
 }
 
 export function needsReturnReconcile(s: ReturnSignal): boolean {
-    if (s.hidden || !s.mayBeBehind) return false;
+    if (s.hidden) return false;
     if (s.msSinceReconcile < RETURN_DEDUPE_MS) return false;
-    if (s.source === 'visible') return true;
-    return s.msSinceFrame !== null && s.msSinceFrame >= WAKE_FRAME_GAP_MS;
+    if (s.source === 'visible') return s.hiddenIsEvidence || s.mayBeBehind;
+    return s.mayBeBehind && s.msSinceFrame !== null && s.msSinceFrame >= WAKE_FRAME_GAP_MS;
 }
