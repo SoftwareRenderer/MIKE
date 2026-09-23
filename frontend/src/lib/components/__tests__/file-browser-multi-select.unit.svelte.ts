@@ -82,6 +82,16 @@ async function loadRoot(container: HTMLElement) {
     await waitFor(() => expect(rowEls(container).length).toBe(LISTING[ROOT].length));
 }
 
+// Hold a row long enough to be a multi-select gesture. A phone also raises `contextmenu` while the
+// finger is down, which `withMenu` reproduces.
+async function hold(row: HTMLElement, withMenu = false) {
+    await fireEvent.pointerDown(row, { pointerType: 'touch', clientX: 40, clientY: 40 });
+    await new Promise(r => setTimeout(r, 550)); // LONG_PRESS_MS is 450
+    if (withMenu) await fireEvent.contextMenu(row);
+}
+
+const menuEl = (container: HTMLElement) => container.querySelector('.file-context-menu');
+
 // Click a folder row to go into it; the new listing has a `..` row to come back.
 async function enterFolder(container: HTMLElement, path: string) {
     await fireEvent.click(rowEl(container, path)!);
@@ -150,8 +160,7 @@ describe('the file list selection', () => {
         await loadRoot(container);
         const row = rowEl(container, `${ROOT}/b.txt`)!;
 
-        await fireEvent.pointerDown(row, { pointerType: 'touch', clientX: 40, clientY: 40 });
-        await new Promise(r => setTimeout(r, 550)); // LONG_PRESS_MS is 450
+        await hold(row);
 
         expect(selectedTitles(container)).toEqual([`${ROOT}/b.txt`]);
         expect(bar(container)?.querySelector('.selection-count')?.textContent).toBe('1 selected');
@@ -160,6 +169,42 @@ describe('the file list selection', () => {
         await fireEvent.click(row, { pointerType: 'touch' });
         expect(opened).toEqual([]);
         expect(selectedTitles(container)).toEqual([`${ROOT}/b.txt`]);
+    });
+
+    it('gives back a held row when a finger holds it again', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+        const a = rowEl(container, `${ROOT}/a.txt`)!;
+        const c = rowEl(container, `${ROOT}/c.txt`)!;
+
+        await hold(a);
+        await hold(c);
+        expect(selectedTitles(container)).toEqual([`${ROOT}/a.txt`, `${ROOT}/c.txt`]);
+
+        await hold(a);
+        expect(selectedTitles(container)).toEqual([`${ROOT}/c.txt`]);
+        await fireEvent.click(a, { pointerType: 'touch' });
+        expect(opened).toEqual([]);
+        expect(selectedTitles(container)).toEqual([`${ROOT}/c.txt`]);
+
+        // Holding the last row leaves the selection mode, so the bar goes with the selection.
+        await hold(c);
+        expect(selectedTitles(container)).toEqual([]);
+        expect(bar(container)).toBeNull();
+    });
+
+    it('gives back a held row when the phone raises its context menu as well', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+        const a = rowEl(container, `${ROOT}/a.txt`)!;
+        const c = rowEl(container, `${ROOT}/c.txt`)!;
+
+        await hold(a);
+        await hold(c);
+
+        await hold(a, true);
+        expect(selectedTitles(container)).toEqual([`${ROOT}/c.txt`]);
+        expect(menuEl(container), 'a held finger is the select gesture, not a menu request').toBeNull();
     });
 
     it('clears the selection on Escape without handing the key to the panel behind it', async () => {

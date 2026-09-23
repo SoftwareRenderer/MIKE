@@ -419,6 +419,7 @@
     // suppress native right-click menu
     function openMenuAt(e: MouseEvent | KeyboardEvent, x: number, y: number, entry: FsEntry | null, index: number): void {
         if (renaming) return;
+        if (selection.handleContextmenu(e)) return;
         e.preventDefault();
         // Right-clicking a row outside the selection selects it first.
         if (entry) selection.selectRow(index);
