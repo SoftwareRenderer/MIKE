@@ -27,3 +27,20 @@ func TestSubtaskStatusFor(t *testing.T) {
 		}
 	}
 }
+
+// TestClearSubtaskBaseBranch pins where a base branch may live.
+func TestClearSubtaskBaseBranch(t *testing.T) {
+	pinned := "0123456789abcdef0123456789abcdef01234567"
+
+	root := &Task{BaseRef: "test", BaseCommit: pinned}
+	ClearSubtaskBaseBranch(root)
+	if root.BaseRef != "test" || root.BaseCommit != pinned {
+		t.Errorf("a root task kept %q/%q, want its own base branch and pinned commit", root.BaseRef, root.BaseCommit)
+	}
+
+	child := &Task{ParentTaskID: "parent-1", BaseRef: "test", BaseCommit: pinned}
+	ClearSubtaskBaseBranch(child)
+	if child.BaseRef != "" || child.BaseCommit != "" {
+		t.Errorf("a nested task kept %q/%q, want both cleared", child.BaseRef, child.BaseCommit)
+	}
+}

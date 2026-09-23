@@ -309,12 +309,11 @@ func (m *mergeOrchestrator) logSystemMessage(taskID, threadID, severity, content
 // a root task into base_ref or the project's origin branch.
 func (m *mergeOrchestrator) ResolveMergeTarget(projectID string, task *types.Task) string {
 	if task.ParentTaskID != "" {
-		parent, err := m.store.GetTaskByID(task.ParentTaskID)
-		if err == nil && parent.Branch != "" {
+		// mergeInto creates the parent's branch on demand, so the child's own base_ref is never its target.
+		if parent, err := m.store.GetTaskByID(task.ParentTaskID); err == nil && parent.Branch != "" {
 			return parent.Branch
 		}
-	}
-	if task.BaseRef != "" {
+	} else if task.BaseRef != "" {
 		return task.BaseRef
 	}
 	project, err := m.store.GetProject(projectID)

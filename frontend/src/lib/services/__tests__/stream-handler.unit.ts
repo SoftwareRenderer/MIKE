@@ -1242,4 +1242,29 @@ describe('summarization frame', () => {
         handleEvent({ type: 'summarization', data: { id: 'sum-1', summary: '' } }, false);
         expect(stream.state.entries[0].content).toBe('the stored text');
     });
+
+    it('moves the context meter to the compressed window the frame reports', () => {
+        const { stream, handleEvent } = setup();
+        // What the conversation cost before it was compressed.
+        stream.state.lastPromptTokens = 30000;
+        stream.state.contextState = { used: 30000, limit: 32000 };
+
+        handleEvent({ type: 'summarization', data: { id: 'sum-1', summary: 'the summary', context_used: 4000 } }, false);
+        expect(stream.state.contextState.used).toBe(4000);
+        expect(stream.state.lastPromptTokens).toBe(4000);
+    });
+
+    it('leaves the meter alone when the frame carries no estimate', () => {
+        const { stream, handleEvent } = setup();
+        stream.state.lastPromptTokens = 30000;
+        stream.state.contextState = { used: 30000, limit: 32000 };
+
+        handleEvent({ type: 'summarization', data: { id: 'sum-1', summary: 'the summary', context_used: 4000 } }, false);
+        // An edit reports no number, and neither does a summary that arrives without one.
+        handleEvent({ type: 'summarization', data: { id: 'sum-1', summary: 'the edited summary' } }, false);
+        handleEvent({ type: 'summarization', data: { id: 'sum-2', summary: 'another summary' } }, false);
+
+        expect(stream.state.contextState.used).toBe(4000);
+        expect(stream.state.lastPromptTokens).toBe(4000);
+    });
 });

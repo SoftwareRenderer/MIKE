@@ -2813,3 +2813,57 @@ func TestAutoStartNextSibling_SkipsLiveExecutorSiblings(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveMergeTarget_ChildNeverAnswersItsOwnBaseRef: a base_ref left on a child must not be what
+// the board, the Review message or the commit-and-done line reports as its target.
+func TestResolveMergeTarget_ChildNeverAnswersItsOwnBaseRef(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+	if err := te.store.UpdateProjectOriginBranch(projectID, "master"); err != nil {
+		t.Fatalf("set origin branch: %v", err)
+	}
+
+	now := time.Now().UTC()
+	parent := &types.Task{
+		ID:             "stale-target-parent",
+		ProjectID:      projectID,
+		Title:          "Parent",
+		Status:         types.StatusBacklog,
+		Branch:         "task/stale-target-parent-x7q2",
+		LlamaServerURL: "http://localhost:8080",
+		ModelName:      "test-model",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := te.store.CreateTask(parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	child := &types.Task{
+		ID:             "stale-target-child",
+		ProjectID:      projectID,
+		Title:          "Child",
+		Status:         types.StatusInProgress,
+		ParentTaskID:   parent.ID,
+		BaseRef:        "release",
+		BaseCommit:     "0123456789abcdef0123456789abcdef01234567",
+		LlamaServerURL: "http://localhost:8080",
+		ModelName:      "test-model",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := te.store.CreateTask(child); err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+
+	if got := te.ResolveMergeTarget(projectID, child); got != parent.Branch {
+		t.Errorf("merge target = %q, want the parent's branch %q", got, parent.Branch)
+	}
+
+	// mergeInto creates the parent's branch later, so an unbranched parent reads as the origin branch.
+	parent.Branch = ""
+	if err := te.store.UpdateTask(parent); err != nil {
+		t.Fatalf("clear parent branch: %v", err)
+	}
+	if got := te.ResolveMergeTarget(projectID, child); got != "master" {
+		t.Errorf("merge target with an unbranched parent = %q, want %q", got, "master")
+	}
+}

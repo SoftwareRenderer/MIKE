@@ -73,6 +73,13 @@ func (r *toolRunner) handleCreateTask(args map[string]any, parent *types.Task, s
 		UpdatedAt:                 now,
 	}
 
+	// A created root task is one the person could have created themselves, so it inherits the
+	// originating task's base branch. A subtask has none to give, and the name must be one git accepts
+	// because mergeInto creates a branch by it when it is missing.
+	if actualParentID == "" && parent.ParentTaskID == "" && types.ValidateBranchName(parent.BaseRef) == nil {
+		newTask.BaseRef = parent.BaseRef
+	}
+
 	// Apply config defaults + parent inheritance (same logic as UI task creation)
 	if r.configStore != nil {
 		if cfg, err := r.configStore.GetConfig(); err == nil {
@@ -277,6 +284,7 @@ func (r *toolRunner) handleEditTask(args map[string]any, currentTask *types.Task
 			r.applyAutoMergeOnParentChange(target, nil)
 		}
 	}
+	types.ClearSubtaskBaseBranch(target)
 
 	if hasTitle {
 		target.Title = title

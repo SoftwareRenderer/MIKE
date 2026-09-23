@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
@@ -13,7 +12,7 @@ func TestRunShutdownWithDeadlineReturnsAtDeadline(t *testing.T) {
 	released := make(chan struct{})
 	defer close(released) // unblock the wedged step when the test ends
 
-	err := runShutdownWithDeadline(100*time.Millisecond, func(ctx context.Context) error {
+	err := runShutdownWithDeadline(100*time.Millisecond, func() error {
 		<-released
 		return nil
 	})
@@ -30,7 +29,7 @@ func TestRunShutdownWithDeadlineReturnsAtDeadline(t *testing.T) {
 func TestRunShutdownWithDeadlinePropagatesCleanResult(t *testing.T) {
 	cleanupErr := errors.New("database close failed")
 	calls := 0
-	err := runShutdownWithDeadline(5*time.Second, func(ctx context.Context) error {
+	err := runShutdownWithDeadline(5*time.Second, func() error {
 		calls++
 		return cleanupErr
 	})

@@ -15,13 +15,9 @@ import (
 	"mike/pkg/logging"
 )
 
-// mapSensitiveConfig applies transform to every config value the schema declares sensitive and
-// copies the rest unchanged. Encrypting, decrypting and masking share it, including the guard:
-// with no schema nothing is known to be secret, so nothing is touched — guessing by key name
-// would encrypt a non-secret. A transform returns ok=false to leave a value alone.
-//
-// The result is always a copy: these maps reach both the store and the browser, and mutating the
-// input could leak a decrypted secret into a cached response.
+// mapSensitiveConfig applies transform to every config value the schema declares sensitive and copies
+// the rest unchanged; with no schema nothing is known to be secret, so nothing is touched. The result is
+// always a copy, because these maps reach both the store and the browser.
 func mapSensitiveConfig(config map[string]any, schema *ConfigSchema, transform func(key string, value any) (any, bool)) map[string]any {
 	if schema == nil || len(schema.Properties) == 0 || config == nil {
 		return config
@@ -61,7 +57,7 @@ func encryptConfigValues(box *crypto.Box, extID string, config map[string]any, s
 		}
 		record := crypto.Record(extID, key)
 		if box.Opens(extensionKeyPurpose, record, plain) {
-			return nil, false // already this key's record
+			return nil, false // this key's record already
 		}
 		encrypted, err := box.Encrypt(extensionKeyPurpose, record, plain)
 		if err != nil {
@@ -72,10 +68,8 @@ func encryptConfigValues(box *crypto.Box, extID string, config map[string]any, s
 	})
 }
 
-// decryptConfigValues decrypts sensitive config values based on the manifest's config_schema.
-//
-// A record that will not open answers as no value; a value that could not be a record at all passes
-// through unchanged.
+// decryptConfigValues decrypts the sensitive values the manifest declares. A record that will not open
+// answers as no value; a value that could not be a record at all passes through unchanged.
 func decryptConfigValues(box *crypto.Box, extID string, config map[string]any, schema *ConfigSchema) map[string]any {
 	return mapSensitiveConfig(config, schema, func(key string, v any) (any, bool) {
 		strVal, okStr := v.(string)
@@ -97,8 +91,8 @@ func decryptConfigValues(box *crypto.Box, extID string, config map[string]any, s
 	})
 }
 
-// rawSQL is this package's whole database need. The extensions table is its schema, not the
-// store's, so it speaks SQL - but it must not inherit the store's typed accessors with it.
+// rawSQL is this package's whole database need. The extensions table is its schema, not the store's, so
+// it speaks SQL without inheriting the store's typed accessors.
 type rawSQL interface {
 	Exec(query string, args ...any) (sql.Result, error)
 	Query(query string, args ...any) (*sql.Rows, error)
@@ -115,9 +109,7 @@ type projectPaths interface {
 type ExtensionStore struct {
 	db       rawSQL
 	projects projectPaths
-	// box seals the config values a manifest marks sensitive. Nil means a secret is dropped rather than
-	// stored in the clear.
-	box *crypto.Box
+	box      *crypto.Box // seals the values a manifest marks sensitive; nil drops a secret
 }
 
 // NewExtensionStore creates a new ExtensionStore.
@@ -167,10 +159,9 @@ CREATE TABLE IF NOT EXISTS extension_storage (
 		return err
 	}
 
-	// Migrate: rename updated_at → built_at for existing tables
+	// Idempotent migrations: an already-applied statement erroring is the expected outcome.
 	_, _ = es.db.Exec(`ALTER TABLE extensions RENAME COLUMN updated_at TO built_at`)
 
-	// Migrate: add git source columns (no-op if already present)
 	for _, stmt := range []string{
 		`ALTER TABLE extensions ADD COLUMN repo TEXT DEFAULT ''`,
 		`ALTER TABLE extensions ADD COLUMN commit_sha TEXT DEFAULT ''`,
@@ -190,9 +181,8 @@ func (es *ExtensionStore) List() ([]Extension, error) {
 	return es.GetByType("")
 }
 
-// ListProjectPaths returns the host path of every registered project. These paths
-// are part of the extension-sandbox mount allowlist (see MountPolicy): an
-// extension may mount what the app already mounts for its workspaces, nothing more.
+// ListProjectPaths returns the host path of every registered project. These paths are the
+// extension-sandbox mount allowlist: an extension may mount what the app already mounts, nothing more.
 func (es *ExtensionStore) ListProjectPaths() ([]string, error) {
 	if es == nil || es.projects == nil {
 		return nil, nil
@@ -211,8 +201,8 @@ func (es *ExtensionStore) ListProjectPaths() ([]string, error) {
 }
 
 // ListProjectSandboxMountPaths returns the host paths every project declares in its Sandbox
-// Configuration. The task sandbox already bind-mounts them, so the LSP sandbox may borrow them too,
-// but read-only: see MountPolicy.ForceReadOnly.
+// Configuration. The task sandbox already bind-mounts them, so the LSP sandbox may borrow them,
+// read-only (MountPolicy.ForceReadOnly).
 func (es *ExtensionStore) ListProjectSandboxMountPaths() ([]string, error) {
 	if es == nil || es.projects == nil {
 		return nil, nil
@@ -232,8 +222,8 @@ func (es *ExtensionStore) ListProjectSandboxMountPaths() ([]string, error) {
 	return paths, nil
 }
 
-// extensionColumns is the SELECT list shared by every extensions query; the
-// order must match scanExtension's argument order.
+// extensionColumns is the SELECT list every extensions query shares; the order must match
+// scanExtension's argument order.
 const extensionColumns = `id, name, author, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir`
 
 // GetByType returns extensions filtered by type (empty = all).
@@ -283,9 +273,8 @@ func (es *ExtensionStore) GetByID(id string) (*Extension, error) {
 	return ext, nil
 }
 
-// GetByAuthorName retrieves an extension by its author/name identity key — the
-// pair is the extension's stable identity (IDs are timestamped, so the same
-// tool installed twice is one identity).
+// GetByAuthorName retrieves an extension by its author/name identity key. IDs are timestamped, so the
+// pair is what makes two installs of one tool the same extension.
 func (es *ExtensionStore) GetByAuthorName(author, name string) (*Extension, error) {
 	ext, err := es.queryOne(`WHERE author = ? AND name = ?`, author, name)
 	if err == sql.ErrNoRows {
@@ -297,10 +286,8 @@ func (es *ExtensionStore) GetByAuthorName(author, name string) (*Extension, erro
 	return ext, nil
 }
 
-// queryOne runs a single-row extensions query and decodes it. The WHERE clause
-// is a literal fragment (never built from caller data); values are always bound
-// as parameters. sql.ErrNoRows is returned unwrapped so the caller can name the
-// identity it looked up.
+// queryOne runs a single-row extensions query. The WHERE clause is a literal fragment, never built from
+// caller data; sql.ErrNoRows comes back unwrapped so the caller can name the identity it looked up.
 func (es *ExtensionStore) queryOne(where string, args ...any) (*Extension, error) {
 	ext, err := es.scanExtension(es.db.QueryRow(
 		`SELECT `+extensionColumns+` FROM extensions `+where, args...))
@@ -313,6 +300,42 @@ func (es *ExtensionStore) queryOne(where string, args ...any) (*Extension, error
 	return ext, nil
 }
 
+// extensionRowJSON is one extension row's four JSON columns, ready for the INSERT/UPDATE
+// parameter list.
+type extensionRowJSON struct {
+	manifest  string
+	config    string
+	container string
+	sandbox   string
+}
+
+// rowJSON renders those columns, encrypting sensitive config values against this extension's schema.
+func (es *ExtensionStore) rowJSON(id string, ext *Extension) (extensionRowJSON, error) {
+	manifestJSON, err := json.Marshal(ext.Manifest)
+	if err != nil {
+		return extensionRowJSON{}, fmt.Errorf("marshal manifest: %w", err)
+	}
+	configToStore := encryptConfigValues(es.box, id, ext.Config, ext.Manifest.ConfigSchema)
+	configJSON, err := json.Marshal(configToStore)
+	if err != nil {
+		return extensionRowJSON{}, fmt.Errorf("marshal config: %w", err)
+	}
+	containerJSON, err := json.Marshal(ext.ContainerConfig)
+	if err != nil {
+		return extensionRowJSON{}, fmt.Errorf("marshal container config: %w", err)
+	}
+	sandboxJSON, err := json.Marshal(ext.SandboxConfig)
+	if err != nil {
+		return extensionRowJSON{}, fmt.Errorf("marshal sandbox config: %w", err)
+	}
+	return extensionRowJSON{
+		manifest:  string(manifestJSON),
+		config:    string(configJSON),
+		container: string(containerJSON),
+		sandbox:   string(sandboxJSON),
+	}, nil
+}
+
 // Create inserts a new extension.
 func (es *ExtensionStore) Create(ext *Extension) error {
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -323,37 +346,14 @@ func (es *ExtensionStore) Create(ext *Extension) error {
 		ext.BuiltAt = now
 	}
 
-	manifestJSON, err := json.Marshal(ext.Manifest)
+	columns, err := es.rowJSON(ext.ID, ext)
 	if err != nil {
-		return fmt.Errorf("marshal manifest: %w", err)
-	}
-	// Encrypt sensitive config values before storage
-	configToStore := encryptConfigValues(es.box, ext.ID, ext.Config, ext.Manifest.ConfigSchema)
-	configJSON, err := json.Marshal(configToStore)
-	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
-	}
-	if configJSON == nil {
-		configJSON = []byte("{}")
-	}
-	containerConfigJSON, err := json.Marshal(ext.ContainerConfig)
-	if err != nil {
-		return fmt.Errorf("marshal container config: %w", err)
-	}
-	if containerConfigJSON == nil {
-		containerConfigJSON = []byte("{}")
-	}
-	sandboxConfigJSON, err := json.Marshal(ext.SandboxConfig)
-	if err != nil {
-		return fmt.Errorf("marshal sandbox config: %w", err)
-	}
-	if sandboxConfigJSON == nil {
-		sandboxConfigJSON = []byte("{}")
+		return err
 	}
 
 	_, err = es.db.Exec(
 		`INSERT INTO extensions (id, name, author, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ext.ID, ext.Name, ext.Author, ext.Version, ext.Type, string(manifestJSON), string(configJSON), string(containerConfigJSON), string(sandboxConfigJSON), ext.InstallSource, ext.ImageRef, store.B2I(ext.Enabled), ext.InstalledAt, ext.BuiltAt, ext.Repo, ext.Commit, ext.Subdir,
+		ext.ID, ext.Name, ext.Author, ext.Version, ext.Type, columns.manifest, columns.config, columns.container, columns.sandbox, ext.InstallSource, ext.ImageRef, store.B2I(ext.Enabled), ext.InstalledAt, ext.BuiltAt, ext.Repo, ext.Commit, ext.Subdir,
 	)
 	if err != nil {
 		return fmt.Errorf("insert extension: %w", err)
@@ -363,37 +363,14 @@ func (es *ExtensionStore) Create(ext *Extension) error {
 
 // Update updates an existing extension.
 func (es *ExtensionStore) Update(id string, ext *Extension) error {
-	manifestJSON, err := json.Marshal(ext.Manifest)
+	columns, err := es.rowJSON(id, ext)
 	if err != nil {
-		return fmt.Errorf("marshal manifest: %w", err)
-	}
-	// Encrypt sensitive config values before storage
-	configToStore := encryptConfigValues(es.box, id, ext.Config, ext.Manifest.ConfigSchema)
-	configJSON, err := json.Marshal(configToStore)
-	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
-	}
-	if configJSON == nil {
-		configJSON = []byte("{}")
-	}
-	containerConfigJSON, err := json.Marshal(ext.ContainerConfig)
-	if err != nil {
-		return fmt.Errorf("marshal container config: %w", err)
-	}
-	if containerConfigJSON == nil {
-		containerConfigJSON = []byte("{}")
-	}
-	sandboxConfigJSON, err := json.Marshal(ext.SandboxConfig)
-	if err != nil {
-		return fmt.Errorf("marshal sandbox config: %w", err)
-	}
-	if sandboxConfigJSON == nil {
-		sandboxConfigJSON = []byte("{}")
+		return err
 	}
 
 	result, err := es.db.Exec(
 		`UPDATE extensions SET version = ?, manifest = ?, config = ?, container_config = ?, sandbox_config = ?, image_ref = ?, repo = ?, commit_sha = ?, subdir = ? WHERE id = ?`,
-		ext.Version, string(manifestJSON), string(configJSON), string(containerConfigJSON), string(sandboxConfigJSON), ext.ImageRef, ext.Repo, ext.Commit, ext.Subdir, id,
+		ext.Version, columns.manifest, columns.config, columns.container, columns.sandbox, ext.ImageRef, ext.Repo, ext.Commit, ext.Subdir, id,
 	)
 	if err != nil {
 		return fmt.Errorf("update extension: %w", err)
@@ -434,9 +411,9 @@ func (es *ExtensionStore) SetEnabled(id string, enabled bool) error {
 	return nil
 }
 
-// SetImageRef records the image an extension's sandbox runs, in both places it is kept: image_ref (the
-// UI and the delete path) and container_config.image (the container create). Only those two columns -
-// the caller's copy of the manifest or config may predate another writer.
+// SetImageRef records the image an extension's sandbox runs in both places it is kept: image_ref (the UI
+// and the delete path) and container_config.image (the container create). Only those two columns; the
+// caller's copy of the manifest or config may predate another writer.
 func (es *ExtensionStore) SetImageRef(id, imageRef string, containerConfig ContainerConfig) error {
 	containerConfigJSON, err := json.Marshal(containerConfig)
 	if err != nil {
@@ -476,8 +453,8 @@ func (es *ExtensionStore) SetBuiltAt(id string) error {
 	return nil
 }
 
-// StorageGet returns the value for a single key in an extension's namespace.
-// Returns (nil, nil) if the key does not exist.
+// StorageGet returns the value for one key in an extension's namespace, or (nil, nil) when the key does
+// not exist.
 func (es *ExtensionStore) StorageGet(extID, namespace, key string) (*KVEntry, error) {
 	var value, updatedAt string
 	err := es.db.QueryRow(
@@ -525,8 +502,8 @@ func (es *ExtensionStore) StorageList(extID, namespace, prefix string) ([]KVEntr
 	return entries, nil
 }
 
-// StorageSet writes (or overwrites) a key in an extension's namespace.
-// The value must be valid JSON. Returns the stored entry.
+// StorageSet writes a key in an extension's namespace; the value must be valid JSON. It returns the
+// stored entry.
 func (es *ExtensionStore) StorageSet(extID, namespace, key string, value json.RawMessage) (*KVEntry, error) {
 	if len(value) == 0 || !json.Valid(value) {
 		return nil, fmt.Errorf("value must be valid JSON")
@@ -546,7 +523,7 @@ func (es *ExtensionStore) StorageSet(extID, namespace, key string, value json.Ra
 	return &KVEntry{Key: key, Value: value, UpdatedAt: now}, nil
 }
 
-// StorageDelete removes a key from an extension's namespace. No-op if missing.
+// StorageDelete removes a key from an extension's namespace; a missing key is not an error.
 func (es *ExtensionStore) StorageDelete(extID, namespace, key string) error {
 	_, err := es.db.Exec(
 		`DELETE FROM extension_storage WHERE ext_id = ? AND namespace = ? AND key = ?`,
@@ -558,8 +535,7 @@ func (es *ExtensionStore) StorageDelete(extID, namespace, key string) error {
 	return nil
 }
 
-// StorageDeleteAll removes ALL storage for an extension. Used when the
-// extension is deleted so its scoped data is not orphaned in the database.
+// StorageDeleteAll removes every stored value for an extension, so deleting one leaves no rows behind.
 func (es *ExtensionStore) StorageDeleteAll(extID string) error {
 	_, err := es.db.Exec(
 		`DELETE FROM extension_storage WHERE ext_id = ?`,
@@ -571,7 +547,6 @@ func (es *ExtensionStore) StorageDeleteAll(extID string) error {
 	return nil
 }
 
-// scanExtension scans a row into an Extension.
 func (es *ExtensionStore) scanExtension(s scanner) (*Extension, error) {
 	var ext Extension
 	var manifestJSON, configJSON, containerConfigJSON, sandboxConfigJSON, imageRef sql.NullString
@@ -599,8 +574,7 @@ func (es *ExtensionStore) scanExtension(s scanner) (*Extension, error) {
 		if err := json.Unmarshal([]byte(manifestJSON.String), &ext.Manifest); err != nil {
 			return nil, fmt.Errorf("unmarshal manifest: %w", err)
 		}
-		// A manifest stored before file types existed is normalized here, so every reader sees one
-		// shape and none carries a legacy branch; idempotent, so no migration.
+		// Normalized here rather than migrated, so every reader sees one shape.
 		ext.Manifest.Capabilities.GetLSP().NormalizeFileTypes()
 	}
 	if configJSON.Valid {
@@ -610,7 +584,6 @@ func (es *ExtensionStore) scanExtension(s scanner) (*Extension, error) {
 	} else {
 		ext.Config = map[string]any{}
 	}
-	// Decrypt sensitive config values after loading
 	ext.Config = decryptConfigValues(es.box, ext.ID, ext.Config, ext.Manifest.ConfigSchema)
 	if containerConfigJSON.Valid {
 		if err := json.Unmarshal([]byte(containerConfigJSON.String), &ext.ContainerConfig); err != nil {

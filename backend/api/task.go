@@ -207,6 +207,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 				task.ExecutionState = types.ExecStateIdle
 			}
 		}
+		types.ClearSubtaskBaseBranch(&task)
 		// If the first line is short (≤5 words), use it as the title directly
 		if isShortTitle(task.Prompt) {
 			task.TitleGenerating = false
@@ -339,6 +340,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			}
 			types.ApplyTaskCreationDefaults(task, cfg, parentTask, skipFields)
 		}
+		types.ClearSubtaskBaseBranch(task)
 		task.UpdatedAt = time.Now()
 		// Auto-commit is a prerequisite for auto-merge
 		if task.AutoMerge {

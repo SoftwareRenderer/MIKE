@@ -804,3 +804,135 @@ func TestExecuteTool_CreateTask_ErrorFeedback(t *testing.T) {
 		t.Errorf("child under a done parent = %s, want backlog", child.Status)
 	}
 }
+
+// createOriginTask seeds the task a create_task call runs in.
+func createOriginTask(t *testing.T, s *store.Store, id, projectID, parentID, baseRef string) *types.Task {
+	t.Helper()
+	createProject(t, s, projectID, projectID)
+	if parentID != "" {
+		createTaskInProject(t, s, projectID, parentID)
+	}
+	now := time.Now().UTC()
+	task := &types.Task{
+		ID:             id,
+		ProjectID:      projectID,
+		Title:          "Origin Task",
+		Prompt:         "Origin prompt",
+		Status:         types.StatusInProgress,
+		ExecutionState: types.ExecStateRunning,
+		LlamaServerURL: "http://test:8080",
+		ModelName:      "test-model",
+		OperatingMode:  types.ModePlan,
+		ParentTaskID:   parentID,
+		BaseRef:        baseRef,
+		BaseCommit:     "0123456789abcdef0123456789abcdef01234567",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create origin task: %v", err)
+	}
+	return task
+}
+
+// createdTask reads back the task a create_task result reports.
+func createdTask(t *testing.T, s *store.Store, result string) *types.Task {
+	t.Helper()
+	var resp map[string]string
+	if err := json.Unmarshal([]byte(result), &resp); err != nil {
+		t.Fatalf("expected a JSON response, got: %s", result)
+	}
+	task, err := s.GetTaskByID(resp["task_id"])
+	if err != nil {
+		t.Fatalf("get created task %q: %v", resp["task_id"], err)
+	}
+	return task
+}
+
+// TestHandleCreateTask_RootInheritsOriginBaseBranch: a created root task lands on the base branch
+// the person set on the originating task.
+func TestHandleCreateTask_RootInheritsOriginBaseBranch(t *testing.T) {
+	te := newTestExecutor(t)
+	origin := createOriginTask(t, te.store, "origin-branch-1", "proj-branch-1", "", "test")
+
+	result, err := te.tools.handleCreateTask(map[string]any{
+		"title":  "Independent Task",
+		"prompt": "Work on the test branch",
+	}, origin, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	created := createdTask(t, te.store, result)
+	if created.ParentTaskID != "" {
+		t.Errorf("expected a root task, got parent %q", created.ParentTaskID)
+	}
+	if created.BaseRef != "test" {
+		t.Errorf("base_ref = %q, want the originating task's %q", created.BaseRef, "test")
+	}
+	if created.BaseCommit != "" {
+		t.Errorf("base_commit = %q, want empty until the task starts", created.BaseCommit)
+	}
+}
+
+// TestHandleCreateTask_SubtaskGetsNoBaseBranch: a nested task merges into its parent's branch, so it
+// carries no base branch of its own.
+func TestHandleCreateTask_SubtaskGetsNoBaseBranch(t *testing.T) {
+	te := newTestExecutor(t)
+	origin := createOriginTask(t, te.store, "origin-branch-2", "proj-branch-2", "", "test")
+
+	result, err := te.tools.handleCreateTask(map[string]any{
+		"title":          "Subtask",
+		"prompt":         "Part of the plan",
+		"parent_task_id": "origin-branch-2",
+	}, origin, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	created := createdTask(t, te.store, result)
+	if created.ParentTaskID != "origin-branch-2" {
+		t.Errorf("expected parent origin-branch-2, got %q", created.ParentTaskID)
+	}
+	if created.BaseRef != "" {
+		t.Errorf("base_ref = %q on a subtask, want empty: its work lands on the parent's branch", created.BaseRef)
+	}
+}
+
+// TestHandleCreateTask_RootFromSubtaskOriginGetsNoBaseBranch: a subtask's base_ref is its parent's
+// branch, not a configured one, so it passes no base branch on.
+func TestHandleCreateTask_RootFromSubtaskOriginGetsNoBaseBranch(t *testing.T) {
+	te := newTestExecutor(t)
+	origin := createOriginTask(t, te.store, "origin-branch-3", "proj-branch-3", "origin-branch-3-parent", "task/origin-branch-3-x7q2")
+
+	result, err := te.tools.handleCreateTask(map[string]any{
+		"title":  "Independent Task",
+		"prompt": "Work outside the subtree",
+	}, origin, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if created := createdTask(t, te.store, result); created.BaseRef != "" {
+		t.Errorf("base_ref = %q, want empty: a subtask configures no base branch", created.BaseRef)
+	}
+}
+
+// TestHandleCreateTask_SkipsOriginBaseBranchThatIsNotABranchName: mergeInto creates a branch named by
+// base_ref when it is missing, so a name git would refuse is not copied.
+func TestHandleCreateTask_SkipsOriginBaseBranchThatIsNotABranchName(t *testing.T) {
+	te := newTestExecutor(t)
+	origin := createOriginTask(t, te.store, "origin-branch-4", "proj-branch-4", "", "release..next")
+
+	result, err := te.tools.handleCreateTask(map[string]any{
+		"title":  "Independent Task",
+		"prompt": "Work on a branch git accepts",
+	}, origin, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if created := createdTask(t, te.store, result); created.BaseRef != "" {
+		t.Errorf("base_ref = %q, want empty for a name git would refuse", created.BaseRef)
+	}
+}

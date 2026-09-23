@@ -5,21 +5,19 @@ package server
 import "context"
 
 // stage is one step of the shutdown sequence. Its zero value is the first stage on purpose: a step that
-// forgets to name its stage lands at the front of the sequence, where a missing "close the containers"
-// step is noticed as a wedged run rather than at the end, where it looks like a clean exit.
+// forgets to name its stage lands at the front, where a missing teardown wedges the run instead of
+// looking like a clean exit.
 type stage int
 
 const (
-	// stageDetachedWork first: cancelling the base context is the only step that asks work to stop
-	// itself, and the only one that cannot wedge (a cancel does not wait). Everything the cancelled work
-	// might still touch — the database, the container it is streaming from — is alive for the rest of the
-	// sequence, so asking first is the one order that gives an in-flight write a chance to land before the
-	// machinery under it goes away.
+	// stageDetachedWork first: cancelling the base context is the only step that asks work to stop itself
+	// and the only one that cannot wedge. Everything that work may still touch — the database, the
+	// container it streams from — stays alive for the rest of the sequence.
 	stageDetachedWork stage = iota
 	// stagePreviewSweeper next: the sweeper owns goroutines nothing else can reap.
 	stagePreviewSweeper
-	// stageWebsocketWatchers before everything they touch: a watcher runs git and container work on
-	// its own goroutines, and everything it can reach is torn down below it.
+	// stageWebsocketWatchers before anything a watcher can reach: it runs git and container work on its
+	// own goroutines.
 	stageWebsocketWatchers
 	// stageTerminalSessions before the sandbox containers: a shell whose container is already gone is
 	// a shell left running.
@@ -29,8 +27,8 @@ const (
 	stageExtensionSandboxManager
 	// stageMemorySupervisor before the containers it can start.
 	stageMemorySupervisor
-	// stageSandboxStatsSampler before the containers it samples, or it samples a container that is
-	// already gone and reports a sandbox that no longer exists.
+	// stageSandboxStatsSampler before the containers it samples, or it reports a sandbox that no longer
+	// exists.
 	stageSandboxStatsSampler
 	stageSandboxContainers
 	stageLoginRateLimiter
@@ -39,8 +37,7 @@ const (
 	stageCount
 )
 
-// stageNames is indexed by stage. TestShutdownStagesAreDeclaredEntirely fails if the two ever disagree,
-// which is what makes adding a stage a deliberate act instead of a silent off-by-one.
+// stageNames is indexed by stage; TestShutdownStagesAreDeclaredEntirely fails if the two disagree.
 var stageNames = [stageCount]string{
 	stageDetachedWork:            "detached work",
 	stagePreviewSweeper:          "preview sweeper",
@@ -56,12 +53,10 @@ var stageNames = [stageCount]string{
 	stageDatabase:                "database",
 }
 
-// Shutdown runs every registered step in the declared order. Each step logs its name *before* running:
-// none of them can be interrupted, so when the shutdown deadline fires, the last line in the log is the
-// only thing that names what wedged. The deadline itself is server.RunShutdownWithDeadline's, and it is
-// enforced by leaving rather than by cancelling — every step waits on something that cannot be
-// interrupted (a container not answering podman, a bridge whose peer died).
-func (s *Server) Shutdown(ctx context.Context) error {
+// Shutdown runs every registered step in the declared order, logging each name before running it: no
+// step can be interrupted, so the last line in the log is what names a wedged shutdown. The deadline is
+// RunShutdownWithDeadline's and is enforced by leaving, not by cancelling.
+func (s *Server) Shutdown() error {
 	for st := stage(0); st < stageCount; st++ {
 		run := s.shutdown[st]
 		if run == nil {
@@ -77,6 +72,6 @@ func (s *Server) Detached() (context.Context, context.CancelFunc) {
 	return context.WithCancel(s.base)
 }
 
-// RestartRequests is the channel the update restart route sends on: main.go's signal select reads it, so
-// a restart takes the declared stage list rather than a second one invented for it.
+// RestartRequests is the channel the update restart route sends on, so a restart takes the declared
+// stage list rather than a second one.
 func (s *Server) RestartRequests() <-chan struct{} { return s.restart }

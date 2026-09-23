@@ -26,7 +26,31 @@ merge/commit half of `backend/exec/merge.go`.
   `TestHandleCommitAndDone_ArmsClickForConflictResolution`,
   `TestHandleCommitAndDone_DoneWhenOnlyTheProjectOwnsTheConflict`), `backend/exec/merge_restore_test.go`
   (`TestMergedDeliveredReadsTheMergeNotTheRestore`), `merge_conflict_resolution_test.go` (`TestCommitConflictResolution_DoesNotSweepUntrackedFiles`, `…_CommitAndDoneClickMergesWithAutoMergeOff`, `…_NoClickNoMergeWithAutoMergeOff`, `…_StillConflictedKeepsTheClick`), `commit_and_done_test.go`, `backend/git/worktree_test.go` (`TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus`, `…_NoExcludeWhenWorktreesOutsideProject`), e2e `commit-and-done-unstaged.spec.ts`.
+### Where the work lands — the base branch
+
+- **A base branch belongs to a root task.** `base_ref` is the branch a person chose for a task that has
+  no parent. A task with a parent merges into that parent's branch instead, so it owns no base branch.
+- **One helper owns the rule.** `types.ClearSubtaskBaseBranch` (`backend/types/task_defaults.go`) drops
+  `base_ref` and the `base_commit` pinned from it whenever a row ends up with a parent. The task API's
+  create and update handlers and `handleEditTask` (`backend/exec/tool_board.go`) each call it once the
+  parent is settled.
+- **`create_task` hands a created root task the base branch of the task that created it**, so a
+  plan-mode run set to `test` decomposes onto `test`. Only a root originating task passes one on: a
+  subtask's `base_ref` is its parent's branch, never a person's choice.
+- **The reported target follows the same rule.** `ResolveMergeTarget` (`backend/exec/merge.go`) answers
+  a child with its parent's branch, or with the project's origin branch until that parent has one, and
+  never with the child's own `base_ref`.
+- **Tests:** `backend/types/task_defaults_test.go` (`TestClearSubtaskBaseBranch`),
+  `backend/exec/create_task_test.go` (`TestHandleCreateTask_RootInheritsOriginBaseBranch`,
+  `…_SubtaskGetsNoBaseBranch`, `…_RootFromSubtaskOriginGetsNoBaseBranch`,
+  `…_SkipsOriginBaseBranchThatIsNotABranchName`), `backend/exec/edit_task_test.go`
+  (`TestHandleEditTask_NestingClearsBaseBranch`, `…_TitleOnlyEditKeepsBaseBranch`),
+  `backend/exec/subtask_merge_test.go` (`TestResolveMergeTarget_ChildNeverAnswersItsOwnBaseRef`),
+  `backend/api/task_test.go` (`TestTaskHandler_POST_DropsBaseBranchSentWithAParent`,
+  `TestTaskHandler_PUT_NestingClearsBaseBranch`).
+
 ## Checking this
 
 `go test ./backend/exec/` covers the arming rule and what is allowed to reach Done.
+`go test ./backend/types/ ./backend/api/` covers who may hold a base branch.
 `cd frontend && npx playwright test commit-and-done-unstaged` drives the click itself.
