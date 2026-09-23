@@ -512,6 +512,7 @@
     }
 
     function openMenuAt(e: MouseEvent | KeyboardEvent, x: number, y: number, row: ChangesRow): void {
+        if (selection.handleContextmenu(e)) return;
         e.preventDefault();
         selection.selectRow(row.index);
         menu = { x, y, onRow: true };

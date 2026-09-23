@@ -92,12 +92,16 @@ export function useFileSelection({ rows }: FileSelectionOptions) {
     let pressAt = { x: 0, y: 0 };
     // Set by a long press, so the click that follows doesn't also open the row.
     let swallowClick = false;
+    // The pointer type of the press that is down, which is what makes a `contextmenu` from a finger
+    // mean something other than a `contextmenu` from a right button.
+    let pressType: string | null = null;
 
     function handlePointerDown(e: PointerEvent, index: number): void {
         // Clear this so a long press that never got its click doesn't swallow the next one.
         swallowClick = false;
-        if (e.pointerType !== 'touch') return;
         cancelLongPress();
+        pressType = e.pointerType;
+        if (e.pointerType !== 'touch') return;
         pressAt = { x: e.clientX, y: e.clientY };
         longPressTimer = setTimeout(() => {
             longPressTimer = null;
@@ -115,9 +119,22 @@ export function useFileSelection({ rows }: FileSelectionOptions) {
     }
 
     function cancelLongPress(): void {
+        pressType = null;
         if (!longPressTimer) return;
         clearTimeout(longPressTimer);
         longPressTimer = null;
+    }
+
+    /**
+     * Whether a `contextmenu` on a row is a menu request. A held finger raises one about when the hold
+     * fires, and that gesture already went to the selection — answering it again would point the
+     * selection back at the row the hold just released. A touch listing has no right button, and its
+     * menu is the action bar. True when the gesture already answered it, so the host opens no menu.
+     */
+    function handleContextmenu(e: MouseEvent | KeyboardEvent): boolean {
+        if (pressType !== 'touch') return false;
+        e.preventDefault();
+        return true;
     }
 
     onDestroy(cancelLongPress);
@@ -151,6 +168,7 @@ export function useFileSelection({ rows }: FileSelectionOptions) {
         handleClick,
         handlePointerDown,
         handlePointerMove,
+        handleContextmenu,
         cancelLongPress,
         handleKeydown,
         selectRow,
