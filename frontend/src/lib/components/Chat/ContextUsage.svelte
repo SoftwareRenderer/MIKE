@@ -10,10 +10,9 @@
         onSummarize?: () => void;
         onSummarizeCancel?: () => void;
         isSummarizing?: boolean;
-        disabled?: boolean;
     }
 
-    let { used = 0, limit = 0, sessionCost = 0, onSummarize, onSummarizeCancel, isSummarizing = false, disabled = false }: Props = $props();
+    let { used = 0, limit = 0, sessionCost = 0, onSummarize, onSummarizeCancel, isSummarizing = false }: Props = $props();
 
     let percentage = $derived(limit > 0 ? Math.round((used / limit) * 100) : 0);
     let show = $derived(used > 0 || sessionCost > 0);
@@ -37,7 +36,7 @@
         if (isSummarizing && onSummarizeCancel && (e.key === 'Enter' || e.key === ' ')) {
             e.preventDefault();
             onSummarizeCancel();
-        } else if (!isSummarizing && !disabled && onSummarize && (e.key === 'Enter' || e.key === ' ')) {
+        } else if (!isSummarizing && onSummarize && (e.key === 'Enter' || e.key === ' ')) {
             e.preventDefault();
             onSummarize();
         }
@@ -49,10 +48,9 @@
         <button
             type="button"
             class="context-usage"
-            class:clickable={!!onSummarize && !disabled}
+            class:clickable={!!onSummarize}
             class:summarizing={isSummarizing}
-            disabled={disabled}
-            title="{tooltip}{onSummarize && !disabled ? (isSummarizing ? t('chat.context.clickToCancel') : t('chat.context.clickToSummarize')) : ''}"
+            title="{tooltip}{onSummarize ? (isSummarizing ? t('chat.context.clickToCancel') : t('chat.context.clickToSummarize')) : ''}"
             onclick={handleClick}
             onkeydown={handleKeyDown}
             aria-label="{tooltip}"
@@ -95,7 +93,7 @@
     .context-usage.clickable {
         cursor: pointer;
     }
-    .context-usage.clickable:hover:not(:disabled) {
+    .context-usage.clickable:hover {
         background: var(--color-surface-3);
         border-color: var(--color-accent);
     }

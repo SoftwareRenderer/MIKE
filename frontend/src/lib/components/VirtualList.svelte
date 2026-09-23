@@ -19,29 +19,24 @@
         items,
         itemHeight = 28,
         minThreshold = 50,
-        buffer = 5,
         onScrollElChange,
         role,
         'aria-label': ariaLabel,
-        scrollTop: scrollTopProp,
         children,
         onscroll,
-        onwheel,
-        ontouchstart,
     }: {
         items: any[];
         itemHeight?: number;
         minThreshold?: number;
-        buffer?: number;
         onScrollElChange?: (el: HTMLElement | null) => void;
         role?: string;
         'aria-label'?: string;
-        scrollTop?: number;
         children: Snippet<[{ item: any; index: number }]>;
         onscroll?: () => void;
-        onwheel?: () => void;
-        ontouchstart?: () => void;
     } = $props();
+
+    // Rows rendered beyond the viewport on each side.
+    const ROW_BUFFER = 5;
 
     // Scroll container ref
     // svelte-ignore non_reactive_update
@@ -70,10 +65,9 @@
         }
     }
 
-    // Track internal scroll position and container height
-    let internalScrollTop = $state(0);
+    // Scroll position and container height, read from the container's own events
+    let scrollTop = $state(0);
     let containerHeight = $state(0);
-    let scrollTop = $derived(scrollTopProp ?? internalScrollTop);
 
     // Notify parent when scroll element is available
     $effect(() => {
@@ -84,12 +78,12 @@
 
     let virtualized = $derived(items.length >= minThreshold);
     let totalHeight = $derived(items.length * itemHeight);
-    let startIndex = $derived(Math.max(0, Math.floor(scrollTop / itemHeight) - buffer));
-    let endIndex = $derived(Math.min(items.length, Math.ceil((scrollTop + containerHeight) / itemHeight) + buffer));
+    let startIndex = $derived(Math.max(0, Math.floor(scrollTop / itemHeight) - ROW_BUFFER));
+    let endIndex = $derived(Math.min(items.length, Math.ceil((scrollTop + containerHeight) / itemHeight) + ROW_BUFFER));
     let visibleOffset = $derived(startIndex * itemHeight);
 
     function handleScroll() {
-        if (scrollEl) internalScrollTop = scrollEl.scrollTop;
+        if (scrollEl) scrollTop = scrollEl.scrollTop;
     }
 
     function handleResize() {
@@ -119,8 +113,6 @@
     aria-label={ariaLabel}
     tabindex="0"
     onscroll={onscroll}
-    onwheel={onwheel}
-    ontouchstart={ontouchstart}
     onkeydown={handleKeydown}
 >
     {#if virtualized}

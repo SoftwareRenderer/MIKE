@@ -4,7 +4,6 @@ import {
     memoryAlertAckCovers,
     memoryAlertAction,
     memoryAlertPayloadOf,
-    memoryDotSeverity,
     taskMemoryAlert,
     taskMemoryStats,
     visibleMemoryAlert,
@@ -94,32 +93,6 @@ describe('memoryAlertAckCovers', () => {
     it('covers nothing when there is no acknowledgement', () => {
         expect(memoryAlertAckCovers(null, alert)).toBe(false);
         expect(memoryAlertAckCovers(undefined, alert)).toBe(false);
-    });
-});
-
-describe('memoryDotSeverity', () => {
-    it('warns at the ratio, in red only once the limit is reached', () => {
-        expect(memoryDotSeverity(stats({ memory_current_mb: 820 }))).toBe('warning');
-        expect(memoryDotSeverity(stats({ memory_current_mb: 819 }))).toBeNull();
-        expect(memoryDotSeverity(stats({ memory_current_mb: 820, memory_peak_mb: 1024 }))).toBe('alert');
-    });
-
-    it('keeps alerting while the task sits idle with nowhere to go', () => {
-        expect(memoryDotSeverity(stats({ running: false, memory_current_mb: 0, memory_peak_mb: 1024 }))).toBe('alert');
-    });
-
-    it('drops to no dot once the alert is acknowledged', () => {
-        const ack = { peakMB: 1024, oomKills: 0, limitMB: 1024 };
-        expect(memoryDotSeverity(stats({ memory_peak_mb: 1024 }), ack)).toBeNull();
-    });
-
-    it('shows live pressure under an acknowledged alert', () => {
-        const ack = { peakMB: 1024, oomKills: 0, limitMB: 1024 };
-        expect(memoryDotSeverity(stats({ memory_current_mb: 900, memory_peak_mb: 1024 }), ack)).toBe('warning');
-    });
-
-    it('answers null for a task that never ran sandboxed', () => {
-        expect(memoryDotSeverity(null)).toBeNull();
     });
 });
 

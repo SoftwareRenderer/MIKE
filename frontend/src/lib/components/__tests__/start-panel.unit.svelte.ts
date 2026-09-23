@@ -30,7 +30,6 @@ function renderPanel(config: unknown = null, overrides: Record<string, unknown> 
             selectedReasoningEffort: '',
             operatingMode: 'act',
             isStarting: false,
-            disabled: false,
             isAgentSelected: () => false,
             onModelSelect: vi.fn(),
             onOperatingModeToggle,
@@ -98,10 +97,7 @@ describe('StartPanel rendering', () => {
         expect(renderPanel(null, { providers: [LLM], selectedModel: 'gpt-test' }).button()?.disabled).toBe(false);
     });
 
-    it('disables the button when the caller says so', () => {
-        expect(renderPanel(null, { disabled: true }).button()?.disabled).toBe(true);
     });
-});
 
 describe('StartPanel start-task key hint', () => {
     it('shows the platform default keycap: Ctrl+Enter on non-Mac', () => {

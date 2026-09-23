@@ -104,19 +104,6 @@ export function memoryAlertAckCovers(ack: MemoryAlertAck | null | undefined, ale
     return ack.limitMB === alert.limitMB && ack.oomKills >= alert.oomKills && ack.peakMB >= alert.peakMB;
 }
 
-/** Which colour the shield dot wears: red for something to act on, orange for pressure. */
-export type MemoryDotSeverity = 'alert' | 'warning';
-
-/** `alert` lasts until dismissed; `warning` is live pressure and ends with the number. */
-export function memoryDotSeverity(
-    stats: SandboxMemoryStats | null | undefined,
-    ack?: MemoryAlertAck | null,
-): MemoryDotSeverity | null {
-    const alert = memoryAlert(stats);
-    if (alert && !memoryAlertAckCovers(ack, alert)) return 'alert';
-    return isNearMemoryLimit(stats) ? 'warning' : null;
-}
-
 /** An unacknowledged or acknowledged alert on a task, with the state it was acknowledged in. */
 export interface TaskMemoryAlert {
     alert: MemoryAlert;

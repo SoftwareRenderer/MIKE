@@ -13,8 +13,6 @@
     import { countByCategory, filterByCategory, visibleCategories } from '$lib/utils/extension-categories';
     import { t } from '$lib/i18n';
 
-    let { onExtensionsChanged }: { onExtensionsChanged?: () => void } = $props();
-
     /** Validate a URL has an allowed scheme (http/https). Returns '#' for unsafe URLs. */
     function safeUrl(url: string): string {
         if (!url) return '#';
@@ -222,7 +220,6 @@
         setupFocusId = '';
         try {
             extensions = await listExtensions();
-            onExtensionsChanged?.();
         } catch (e: any) {
             error = e.message || t('settings.extensions.loadFailed');
         } finally {

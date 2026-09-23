@@ -83,7 +83,7 @@ function withBrowserLanguage(tag: string, run: () => Promise<void>) {
 
 async function renderBrowse(rows: Extension[], registry: RegistryEntry[]) {
     stubFetch(rows, registry);
-    const utils = render(ExtensionsTab, { props: { onExtensionsChanged: () => {} } });
+    const utils = render(ExtensionsTab);
     await waitFor(() => expect(utils.container.querySelector('.ext-name, .empty-state')).toBeTruthy());
     const tab = [...utils.container.querySelectorAll('.view-tab')].find((b) => b.textContent?.includes('Browse'));
     if (!tab) throw new Error('the Extensions tab has no Browse view');

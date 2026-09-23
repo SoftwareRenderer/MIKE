@@ -13,7 +13,6 @@ function renderBar(props: Record<string, unknown> = {}) {
             showRestartButton: false,
             isStarting: false,
             isCommitting: false,
-            disabled: false,
             hasStagedChanges: false,
             queueStatus: null,
             providers: [],

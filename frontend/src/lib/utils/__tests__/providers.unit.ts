@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolvePair, resolveWorker, resolveUtility, getModelName, displayModelName, extractDomain, getProviderDisplayName, reselectProvider } from '../providers';
+import { resolvePair, resolveWorker, getModelName, displayModelName, extractDomain, getProviderDisplayName, reselectProvider } from '../providers';
 import type { Config, Provider } from '$lib/types';
 
 function makeConfig(partial: Partial<Config>): Config {
@@ -102,7 +102,7 @@ describe('resolvePair', () => {
     });
 });
 
-describe('resolveWorker / resolveUtility', () => {
+describe('resolveWorker', () => {
     it('resolves worker pair from config by ID', () => {
         const cfg = makeConfig({
             providers: [llmProvider, agentProvider],
@@ -114,21 +114,8 @@ describe('resolveWorker / resolveUtility', () => {
         expect(r.url).toBe('http://llm:8010/v1');
     });
 
-    it('resolves utility pair from config', () => {
-        const cfg = makeConfig({
-            providers: [llmProvider, agentProvider],
-            utility_provider: 'pi',
-            utility_model: 'pi',
-        });
-        const r = resolveUtility(cfg);
-        expect(r.provider?.name).toBe('pi');
-        expect(r.modelName).toBe('pi');
-        expect(r.url).toBe('agent://pi');
-    });
-
-    it('returns empty for null config', () => {
+        it('returns empty for null config', () => {
         expect(resolveWorker(null).provider).toBeNull();
-        expect(resolveUtility(null).provider).toBeNull();
     });
 });
 

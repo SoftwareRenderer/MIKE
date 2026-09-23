@@ -12,7 +12,6 @@
         showRestartButton,
         isStarting,
         isCommitting,
-        disabled,
         hasStagedChanges,
         queueStatus,
         providers,
@@ -31,7 +30,6 @@
         showRestartButton: boolean;
         isStarting: boolean;
         isCommitting: boolean;
-        disabled: boolean;
         hasStagedChanges: boolean;
         queueStatus: string | null;
         providers: Provider[];
@@ -61,7 +59,7 @@
                 </button>
             </div>
         {/if}
-        <button class="btn-commit-done" onclick={onStartTask} disabled={isStarting || disabled} title={t('chat.review.resumePausedTip')}>
+        <button class="btn-commit-done" onclick={onStartTask} disabled={isStarting} title={t('chat.review.resumePausedTip')}>
             {#if isStarting}
                 <span class="spinner-inline"></span> {t('chat.review.resuming')}
             {:else}
@@ -94,7 +92,7 @@
             </div>
         {/if}
         {#if showResumeButton}
-            <button class="btn-commit-done" onclick={onStartTask} disabled={isStarting || disabled} title={t('chat.review.resumeFromMessageTip')}>
+            <button class="btn-commit-done" onclick={onStartTask} disabled={isStarting} title={t('chat.review.resumeFromMessageTip')}>
                 {#if isStarting}
                     <span class="spinner-inline"></span> {t('chat.review.resuming')}
                 {:else}
@@ -103,7 +101,7 @@
                 {/if}
             </button>
         {:else if hasStagedChanges}
-            <button class="btn-commit-done btn-commit-and-done" onclick={onCommitAndDone} disabled={isCommitting || disabled} title={t('chat.review.commitAndDoneTip')}>
+            <button class="btn-commit-done btn-commit-and-done" onclick={onCommitAndDone} disabled={isCommitting} title={t('chat.review.commitAndDoneTip')}>
                 {#if queueStatus === 'queued'}
                     <span class="spinner-inline"></span> {t('chat.review.inQueue')}
                 {:else if queueStatus === 'processing' || isCommitting}
@@ -114,7 +112,7 @@
                 {/if}
             </button>
         {:else}
-            <button class="btn-commit-done" onclick={onMoveToDone} disabled={isCommitting || disabled} title={t('chat.review.moveToDoneTip')}>
+            <button class="btn-commit-done" onclick={onMoveToDone} disabled={isCommitting} title={t('chat.review.moveToDoneTip')}>
                 {#if isCommitting}
                     <span class="spinner-inline"></span> {t('chat.review.moving')}
                 {:else}
@@ -138,7 +136,7 @@
                 />
             </div>
         {/if}
-        <button class="btn-restart-task" onclick={onStartTask} disabled={isStarting || disabled || (providers.length > 0 && !selectedModel)} title={t('chat.review.restartTip')}>
+        <button class="btn-restart-task" onclick={onStartTask} disabled={isStarting || (providers.length > 0 && !selectedModel)} title={t('chat.review.restartTip')}>
             {#if isStarting}
                 <span class="spinner-inline"></span> {t('chat.review.restarting')}
             {:else}

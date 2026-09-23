@@ -88,7 +88,7 @@ function stubFetch(h: Harness) {
 }
 
 async function renderWithUpdates() {
-    const utils = render(ExtensionsTab, { props: { onExtensionsChanged: () => {} } });
+    const utils = render(ExtensionsTab);
     await waitFor(() => expect(utils.container.querySelector('.ext-name')).toBeTruthy());
     const check = [...utils.container.querySelectorAll('button')]
         .find((b) => b.textContent?.includes('Check for Updates'));

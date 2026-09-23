@@ -7,7 +7,6 @@
         title = '',
         width = '640px',
         zIndex = 1000,
-        trapFocus = true,
         closeOnOverlayClick = true,
         floating = false,
         onBeforeClose,
@@ -24,7 +23,6 @@
         title: string;
         width?: string;
         zIndex?: number;
-        trapFocus?: boolean;
         closeOnOverlayClick?: boolean;
         /* Non-modal floating window */
         floating?: boolean;
@@ -48,7 +46,7 @@
 
     onMount(() => {
         triggerEl = document.activeElement as HTMLElement;
-        if (modalEl && trapFocus && !floating) {
+        if (modalEl && !floating) {
             focusTrap = createFocusTrap(modalEl, handleClose);
             queueMicrotask(() => focusTrap?.focusFirst());
         } else if (modalEl && floating) {

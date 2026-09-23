@@ -9,6 +9,7 @@
  */
 
 import type { Text } from '@codemirror/state';
+import { isUnderPath } from './path';
 
 /** LSP `Position` — 0-based line and character. */
 export interface LspPosition {
@@ -63,16 +64,11 @@ function normalizeRoot(root: string): string {
 }
 
 /**
- * True when `path` is `root` or lives under it.
- *
- * Segment-aware on purpose: a plain `startsWith` reports `/root/proj2/x.go` as
- * inside the workspace `/root/proj`, which would let a definition outside the
- * project be treated as one inside it.
+ * True when `path` is `root` or lives under it. The segment-aware comparison is
+ * `isUnderPath`'s; this only strips the trailing slash an LSP root can carry.
  */
 export function isInsideWorkspace(path: string, root: string): boolean {
-    const base = normalizeRoot(root);
-    if (!path || !base) return false;
-    return path === base || path.startsWith(base + '/');
+    return isUnderPath(path, normalizeRoot(root));
 }
 
 /**

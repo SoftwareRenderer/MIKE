@@ -70,7 +70,7 @@ function stubFetch(rows: Extension[], registry: RegistryEntry[]) {
 
 async function renderTab(rows: Extension[] = INSTALLED, registry: RegistryEntry[] = REGISTRY) {
     stubFetch(rows, registry);
-    const utils = render(ExtensionsTab, { props: { onExtensionsChanged: () => {} } });
+    const utils = render(ExtensionsTab);
     await waitFor(() => expect(utils.container.querySelector('.ext-name, .empty-state')).toBeTruthy());
     return utils;
 }

@@ -92,12 +92,6 @@ export function resolveWorker(cfg: Config | null): ResolvedPair {
     return resolvePair(cfg, cfg.worker_provider, cfg.worker_model);
 }
 
-/** Resolve the configured Utility provider/model pair. */
-export function resolveUtility(cfg: Config | null): ResolvedPair {
-    if (!cfg) return { provider: null, modelName: '', url: '' };
-    return resolvePair(cfg, cfg.utility_provider, cfg.utility_model);
-}
-
 /** The subset of provider fields needed to derive a display name. */
 export interface DisplayableProvider {
     name?: string;

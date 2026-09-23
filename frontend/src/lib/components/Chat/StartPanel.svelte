@@ -20,7 +20,6 @@
         selectedReasoningEffort,
         operatingMode,
         isStarting,
-        disabled,
         isAgentSelected,
         onModelSelect,
         onOperatingModeToggle,
@@ -32,7 +31,6 @@
         selectedReasoningEffort: string;
         operatingMode: string;
         isStarting: boolean;
-        disabled: boolean;
         isAgentSelected: () => boolean;
         onModelSelect: (providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) => void;
         onOperatingModeToggle: () => void;
@@ -55,7 +53,7 @@
         <ModeToggle variant="panel" mode={operatingMode} onToggle={onOperatingModeToggle} />
         {/if}
     </div>
-    <button class="btn-start-task" onclick={onStartTask} disabled={isStarting || disabled || (providers.length > 0 && !selectedModel)} title={startShortcutLabel ? t('chat.start.titleWithShortcut', { shortcut: startShortcutLabel }) : t('chat.start.title')}>
+    <button class="btn-start-task" onclick={onStartTask} disabled={isStarting || (providers.length > 0 && !selectedModel)} title={startShortcutLabel ? t('chat.start.titleWithShortcut', { shortcut: startShortcutLabel }) : t('chat.start.title')}>
         {#if isStarting}
             <span class="spinner-inline"></span> {t('chat.start.starting')}
         {:else}

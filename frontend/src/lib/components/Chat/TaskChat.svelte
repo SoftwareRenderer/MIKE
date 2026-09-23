@@ -33,7 +33,7 @@
     import ReviewBar from './ReviewBar.svelte';
     import StartPanel from './StartPanel.svelte';
 
-    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', disabled = false, taskSummarizing = false, hasStagedChanges: hasStagedChangesProp, onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff, onToggleFullscreen, isChatFullscreen, onChatInputFocus, onChatInputBlur, onMessageSent, onTaskDone }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; taskExecutionState?: string; disabled?: boolean; taskSummarizing?: boolean; hasStagedChanges?: boolean; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void; onToggleFullscreen?: () => void; isChatFullscreen?: boolean; /** Focus entered / left the chat input — the owner of the maximize decides what that means. */ onChatInputFocus?: () => void; onChatInputBlur?: () => void; /** A message was sent — the auto maximize ends with the send, whatever the request did next. */ onMessageSent?: () => void; /** A Done click in the review bar succeeded — the view that owns navigation decides what happens next. Fires on a commit deferred to a conflict-resolution turn too, where the task stays in progress: the click still meant "I'm finished with it". */ onTaskDone?: () => void } = $props();
+    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', taskSummarizing = false, hasStagedChanges: hasStagedChangesProp, onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff, onToggleFullscreen, isChatFullscreen, onChatInputFocus, onChatInputBlur, onMessageSent, onTaskDone }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; taskExecutionState?: string; taskSummarizing?: boolean; hasStagedChanges?: boolean; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void; onToggleFullscreen?: () => void; isChatFullscreen?: boolean; /** Focus entered / left the chat input — the owner of the maximize decides what that means. */ onChatInputFocus?: () => void; onChatInputBlur?: () => void; /** A message was sent — the auto maximize ends with the send, whatever the request did next. */ onMessageSent?: () => void; /** A Done click in the review bar succeeded — the view that owns navigation decides what happens next. Fires on a commit deferred to a conflict-resolution turn too, where the task stays in progress: the click still meant "I'm finished with it". */ onTaskDone?: () => void } = $props();
 
     // Owns everything about "follow the latest message" (scroll container,
     // atBottom, pinning). Shared with ChatEntries, which renders both.
@@ -694,7 +694,7 @@
     }
 
     async function handleSend(msg: string, attachments?: Array<{ mimeType: string; data: string }>) {
-        if ((!msg && (!attachments || attachments.length === 0)) || disabled) return;
+        if (!msg && (!attachments || attachments.length === 0)) return;
         // If LLM is streaming, cancel the current response by clearing partial assistant entry.
         if (isLoading) {
             stream.state.entries = stream.state.entries.filter(e => !e.isStreaming);
@@ -859,7 +859,7 @@
     }
 
     async function handleRegenerate(entryId: string) {
-        if (isLoading || disabled) return;
+        if (isLoading) return;
         const idx = entries.findIndex(e => e.id === entryId);
         if (idx === -1) return;
         // Find the last user message before this assistant message
@@ -889,7 +889,7 @@
     }
 
     async function handleStartTask() {
-        if (isStarting || disabled) return;
+        if (isStarting) return;
         // Ensure model is set on the task before starting
         if (selectedModel || selectedUrl) {
             try {
@@ -935,7 +935,7 @@
     $effect(() => {
         function handleKeydown(e: KeyboardEvent) {
             if (e.defaultPrevented || e.repeat) return;
-            if (!showStartButton || disabled) return;
+            if (!showStartButton) return;
             if (uiStore.showCreateTask || uiStore.showConfig || uiStore.showTerminal ||
                 uiStore.showStats || uiStore.showSandboxConfig ||
                 appStore.showEditTask || dialogStore.confirmation ||
@@ -993,7 +993,7 @@
     );
 
     async function handleCommitAndDone() {
-        if (isCommitting || disabled) return;
+        if (isCommitting) return;
         isCommitting = true;
         try {
             // Open dialog — it will stream the commit message from the backend
@@ -1034,7 +1034,7 @@
     }
 
     async function handleMoveToDone() {
-        if (isCommitting || disabled) return;
+        if (isCommitting) return;
         isCommitting = true;
         try {
             const updated = await moveTask(projectId, taskId, 'done');
@@ -1118,7 +1118,7 @@
             updateTask(projectId, taskId, { prompt: newContent }).catch(e => dialogStore.showToast(String(e)));
             return;
         }
-        if (isLoading || disabled) return;
+        if (isLoading) return;
         try {
             const fromThreadId = entry.threadId || activeThreadId;
             const forked = await forkTaskThread(projectId, taskId, fromThreadId, entryId, newContent);
@@ -1152,7 +1152,7 @@
             return;
         }
 
-        if (isLoading || disabled) return;
+        if (isLoading) return;
         stream.state.entries = stream.state.entries.slice(0, idx);
         stream.closeCurrentAssistant();
         try {
@@ -1549,7 +1549,6 @@
             {selectedReasoningEffort}
             {operatingMode}
             {isStarting}
-            {disabled}
             {isAgentSelected}
             onModelSelect={handleModelSelect}
             onOperatingModeToggle={handleOperatingModeToggle}
@@ -1564,7 +1563,6 @@
             {showRestartButton}
             {isStarting}
             {isCommitting}
-            {disabled}
             hasStagedChanges={hasStagedChanges}
             {queueStatus}
             {providers}
@@ -1582,7 +1580,6 @@
             bind:this={chatFormComp}
             bind:value={inputValue}
             bind:attachments={draftAttachments}
-            disabled={disabled}
             isLoading={isLoading}
             placeholder={t('chat.form.taskPlaceholder')}
             providers={providers}

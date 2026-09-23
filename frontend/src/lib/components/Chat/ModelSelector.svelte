@@ -10,11 +10,10 @@
         currentModel: string;
         currentUrl: string;
         currentReasoningEffort?: string;
-        disabled?: boolean;
         onSelect: (providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) => void;
     }
 
-    let { providers, currentModel, currentUrl, currentReasoningEffort = '', disabled = false, onSelect }: Props = $props();
+    let { providers, currentModel, currentUrl, currentReasoningEffort = '', onSelect }: Props = $props();
 
     let selectedProviderUrl = $state('');
     let providerDropdownOpen = $state(false);
@@ -168,7 +167,6 @@
     }
 
     function toggleProviderDropdown() {
-        if (disabled) return;
         if (!providerDropdownOpen) {
             providerRect = getRect(providerTriggerEl);
             modelDropdownOpen = false;
@@ -177,7 +175,6 @@
     }
 
     function toggleModelDropdown() {
-        if (disabled) return;
         if (!modelDropdownOpen) {
             modelRect = getRect(modelTriggerEl);
             providerDropdownOpen = false;
@@ -329,7 +326,6 @@
             type="button"
             class="selector-trigger provider-trigger"
             class:open={providerDropdownOpen}
-            class:disabled={disabled}
             bind:this={providerTriggerEl}
             onclick={toggleProviderDropdown}
             onkeydown={handleProviderKeydown}
@@ -356,7 +352,6 @@
             type="button"
             class="selector-trigger model-trigger"
             class:open={modelDropdownOpen}
-            class:disabled={disabled}
             bind:this={modelTriggerEl}
             onclick={toggleModelDropdown}
             onkeydown={handleModelKeydown}
@@ -476,7 +471,7 @@
         transition: all 0.15s ease;
         white-space: nowrap;
     }
-    .selector-trigger:hover:not(.disabled) {
+    .selector-trigger:hover {
         background: var(--color-surface-3);
         color: var(--color-text-primary);
         border-color: var(--color-accent);
@@ -486,11 +481,6 @@
         border-color: var(--color-accent);
         color: var(--color-text-primary);
     }
-    .selector-trigger.disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-    }
-
     .selector-label {
         max-width: 140px;
         overflow: hidden;

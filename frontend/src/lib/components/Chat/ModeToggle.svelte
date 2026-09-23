@@ -8,11 +8,10 @@
      * `panel` in the start panel. Whether a toggle exists at all stays the caller's question — an
      * agent provider has no modes, and the two callers answer it from different state.
      */
-    let { mode, onToggle, variant, disabled = false }: {
+    let { mode, onToggle, variant }: {
         mode: string;
         onToggle: () => void;
         variant: 'bar' | 'panel';
-        disabled?: boolean;
     } = $props();
 </script>
 
@@ -24,7 +23,6 @@
     onclick={onToggle}
     title={modeTip(mode)}
     aria-label={t('chat.mode.toggleAria')}
-    {disabled}
 >
     <ModeIcon {mode} />
     <span>{mode === 'plan' ? t('chat.mode.plan') : mode === 'explore' ? t('chat.mode.explore') : t('chat.mode.act')}</span>
