@@ -278,6 +278,16 @@ func setSystemPrompt(messages []types.ChatMessage, prompt string) []types.ChatMe
 	return append([]types.ChatMessage{{Role: "system", Content: prompt}}, messages...)
 }
 
+// installSummary returns the conversation as the next model call will see it — the marker row
+// appended and the summary rewritten into the system prompt, its only route to the model — and what
+// that call will consume. The number is estimated: no provider reports usage for a context that has
+// not been sent.
+func installSummary(messages []types.ChatMessage, task *types.Task, worktreePath, projectName string, sandboxEnabled bool, summary string) ([]types.ChatMessage, int) {
+	messages = append(messages, types.ChatMessage{Role: "summarization", Content: summary})
+	messages = setSystemPrompt(messages, composeSystemPrompt(task, worktreePath, projectName, sandboxEnabled, summary))
+	return messages, estimatePromptTokens(buildLLMContext(messages))
+}
+
 // injectProceedMessage persists and broadcasts a "Proceed" user message
 func (s *summarizeOrchestrator) injectProceedMessage(setup *taskExecSetup, lc *loopContext) {
 	msgID := uuid.New().String()
@@ -356,13 +366,7 @@ func (s *summarizeOrchestrator) applySummarization(setup *taskExecSetup, ctx con
 
 	_ = s.store.FixPostSummaryTimestamps(taskID, task.CurrentThreadID, summaryAnchor, summaryCreatedAt)
 
-	messages = append(messages, types.ChatMessage{
-		Role:    "summarization",
-		Content: sumResult.summary,
-	})
-
-	// The summary reaches the model through messages[0] only, never through the marker row.
-	messages = setSystemPrompt(messages, composeSystemPrompt(task, setup.worktreePath, setup.projectName(), setup.sandboxEnabled, sumResult.summary))
+	messages, compressedUsed := installSummary(messages, task, setup.worktreePath, setup.projectName(), setup.sandboxEnabled, sumResult.summary)
 
 	s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeSummarization, Data: map[string]any{
 		"id":               summaryMsgID,
@@ -373,6 +377,7 @@ func (s *summarizeOrchestrator) applySummarization(setup *taskExecSetup, ctx con
 		"prompt_ms":        sumResult.promptMs,
 		"predicted_ms":     sumResult.predictedMs,
 		"model_name":       modelName,
+		"context_used":     compressedUsed,
 	}})
 	logging.For(logging.Summarize).With(logging.TaskID, taskID).Infof("summarized context (messages preserved, LLM context compressed)")
 
@@ -545,12 +550,14 @@ func (s *summarizeOrchestrator) HandleSummarize(w http.ResponseWriter, r *http.R
 		taskMsgs, _ := s.store.GetTaskMessages(task.ID, task.CurrentThreadID)
 		project, _ := s.store.GetProject(projectID)
 		projectName := ""
+		sandboxEnabled := false
 		if project != nil {
 			projectName = project.Name
+			sandboxEnabled = project.SandboxEnabled
 		}
 		worktreePath, _ := s.worktreeMgr.WorktreePath(taskID)
 
-		messages := buildMessagesFromDB(task, taskMsgs, worktreePath, projectName, false)
+		messages := buildMessagesFromDB(task, taskMsgs, worktreePath, projectName, sandboxEnabled)
 		previousSummary := extractPrevSummary(messages)
 
 		serverURL, modelName, _ := s.utilityTarget(task)
@@ -584,6 +591,9 @@ func (s *summarizeOrchestrator) HandleSummarize(w http.ResponseWriter, r *http.R
 			CreatedAt:       summaryCreatedAt,
 		})
 
+		// Only the estimate is wanted here; this path holds no live conversation.
+		_, compressedUsed := installSummary(messages, task, worktreePath, projectName, sandboxEnabled, sumResult.summary)
+
 		s.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeSummarization, Data: map[string]any{
 			"id":               summaryMsgID,
 			"summary":          sumResult.summary,
@@ -593,6 +603,7 @@ func (s *summarizeOrchestrator) HandleSummarize(w http.ResponseWriter, r *http.R
 			"prompt_ms":        sumResult.promptMs,
 			"predicted_ms":     sumResult.predictedMs,
 			"model_name":       task.ModelName,
+			"context_used":     compressedUsed,
 		}})
 
 		logging.For(logging.Summarize).With(logging.TaskID, taskID).Infof("manual summarization complete (messages preserved, LLM context compressed)")
