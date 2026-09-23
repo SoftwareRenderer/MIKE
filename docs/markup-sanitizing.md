@@ -43,6 +43,20 @@ covers both. `__tests__/sanitize.unit.ts` re-runs the payload list through a fen
 reason. `__tests__/chat-markdown-fence.unit.svelte.ts` proves the chat bubble and the tool card go
 through the same helper.
 
+### The chat bubble splits its fences out
+
+`Chat/MarkdownBody.svelte` renders an assistant message as segments rather than as one HTML string.
+`markdown-segments.ts` lexes the text and lifts every top-level code token into a segment of its own;
+the prose between two fences returns to `markdownToSafeHTML` as one run, so a fence cannot move the
+paragraphs around it. `isRenderedFence` is the tag decision the split and the renderer above share.
+`src/lib/utils/__tests__/markdown-segments.unit.ts` holds both claims: the segments are the message in
+order, and the prose renders as the whole message did.
+
+A code segment is `Chat/CodeFence.svelte`, so its copy control is a real element with a handler, scoped
+styles and a catalog key for its tooltip — button text never crosses the sanitizer, which is rule 2's
+reason read from the other side. A fence nested in a list item or a blockquote stays in the prose run and
+carries no control, and so does a fence whose body is empty.
+
 The tests are written as the payload list plus a control case for each refusal, proving it is this config
 and not DOMPurify's, each control written against the shape the defaults **keep** — a refusal tested only
 on the shape they already refuse proves nothing: `src/lib/utils/__tests__/sanitize.unit.ts`, scanned by

@@ -42,7 +42,7 @@ vi.mock('$lib/storage', () => ({
 }));
 
 import {
-    openPanel, seedPanel, rowEl, rowEls, selectedPaths, bar, list, STAGED, UNSTAGED,
+    openPanel, seedPanel, rowEl, rowEls, selectedPaths, bar, list, menu, STAGED, UNSTAGED,
 } from './git-panel-harness';
 
 beforeEach(() => {
@@ -111,6 +111,26 @@ describe('the changes list selection', () => {
         // The long press ends in a click, which must not move the diff the panel shows.
         await fireEvent.click(row, { pointerType: 'touch' });
         expect(selectedPaths(container)).toEqual(['modified.ts']);
+    });
+
+    it('gives back a held row when the phone raises its context menu as well', async () => {
+        const { container } = await openPanel();
+        const held = rowEl(container, 'staged-a.ts')!;
+        const row = rowEl(container, 'modified.ts')!;
+
+        for (const r of [held, row]) {
+            await fireEvent.pointerDown(r, { pointerType: 'touch', clientX: 40, clientY: 40 });
+            await new Promise(r2 => setTimeout(r2, 550)); // LONG_PRESS_MS is 450
+        }
+        expect(selectedPaths(container)).toEqual(['staged-a.ts', 'modified.ts']);
+
+        await fireEvent.pointerDown(row, { pointerType: 'touch', clientX: 40, clientY: 40 });
+        await new Promise(r => setTimeout(r, 550));
+        // A held finger raises contextmenu too; the hold already answered for that row.
+        await fireEvent.contextMenu(row);
+
+        expect(selectedPaths(container)).toEqual(['staged-a.ts']);
+        expect(menu(container)).toBeNull();
     });
 
     it('selects every row on Ctrl+A and gives them all back on Escape', async () => {
