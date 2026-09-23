@@ -212,6 +212,10 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 	if page.Before != "" {
 		w.Header().Set("X-Messages-Before", page.Before)
 	}
+	// A thread that has not moved answers as the same bytes, so a reopened task revalidates instead of
+	// refetching. CompressMiddleware computes the ETag, so this handler sets none of its own
+	// (docs/api-contract.md → Response headers).
+	w.Header().Set("Cache-Control", "no-cache")
 	JSONResponse(w, http.StatusOK, messages)
 }
 

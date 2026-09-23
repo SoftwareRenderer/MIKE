@@ -22,6 +22,11 @@ import (
 // client: frames it will never see. maxFrameBufferSize caps one frame, which is what makes the
 // frame bound a byte bound as well.
 //
+// A replay gets a smaller budget than the queue it is written into (replayFrame/replayByte): a frame the
+// queue discards is a hole in a live stream, while a frame a replay never queues is content the
+// subscriber reads from the database seconds later. Without the reservation, subscribing to a task whose
+// buffer fills the queue would force the resync the replay is meant to avoid.
+//
 // Over the bound the OLDEST frames go and never the newest: a client that stopped reading is
 // caught up on the tail. Every drop is counted, because a gap the client cannot see is a chat that
 // stays wrong until it is reloaded.
@@ -29,6 +34,9 @@ type sendQueue struct {
 	wake  chan struct{} // buffered 1; signals that the deque is non-empty
 	frame int
 	byte  int
+	// replayFrame and replayByte bound one replay batch.
+	replayFrame int
+	replayByte  int
 
 	mu       sync.Mutex
 	live     []outboundFrame
@@ -40,9 +48,23 @@ type sendQueue struct {
 
 func newSendQueue(frameBound, byteBound int) *sendQueue {
 	return &sendQueue{
-		wake:  make(chan struct{}, 1),
-		frame: frameBound,
-		byte:  byteBound,
+		wake:        make(chan struct{}, 1),
+		frame:       frameBound,
+		byte:        byteBound,
+		replayFrame: frameBound,
+		replayByte:  byteBound,
+	}
+}
+
+// replayBudget narrows what one replay may queue.
+func (q *sendQueue) replayBudget(frames, bytes int) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if frames > 0 && frames < q.replayFrame {
+		q.replayFrame = frames
+	}
+	if bytes > 0 && bytes < q.replayByte {
+		q.replayByte = bytes
 	}
 }
 
@@ -60,18 +82,20 @@ func (q *sendQueue) push(frame []byte, bucket string) {
 	q.notify()
 }
 
-// pushReplay queues the frames a subscriber missed: behind any replay already queued, so replays
-// keep the order they were asked for, and ahead of every live frame, so a replay is never
-// interrupted by what the task said meanwhile. The frames the bound cannot hold are the oldest in
-// the queue, which is how a truncated replay already reads.
-func (q *sendQueue) pushReplay(batch []outboundFrame) {
+// pushReplay queues the frames a subscriber missed: behind any replay already queued, so replays keep the
+// order they were asked for, and ahead of every live frame, so a replay is never interrupted by what the
+// task said meanwhile. A batch over the replay budget is trimmed here, oldest first, and the count left
+// behind is returned: those frames are not missed, because the subscriber reads the conversation from the
+// database right after asking.
+func (q *sendQueue) pushReplay(batch []outboundFrame) int {
 	if len(batch) == 0 {
-		return
+		return 0
 	}
 	q.mu.Lock()
+	batch, refused := fitToBudget(batch, q.replayFrame, q.replayByte)
 	if q.closed {
 		q.mu.Unlock()
-		return
+		return refused
 	}
 	merged := make([]outboundFrame, 0, len(q.live)+len(batch))
 	merged = append(merged, q.live[:q.replayed]...)
@@ -85,6 +109,23 @@ func (q *sendQueue) pushReplay(batch []outboundFrame) {
 	q.trimLocked()
 	q.mu.Unlock()
 	q.notify()
+	return refused
+}
+
+// fitToBudget trims a replay batch to the replay budget, oldest frames first. One frame always
+// survives: a subscriber owed something gets at least the newest of it.
+func fitToBudget(batch []outboundFrame, frames, bytes int) ([]outboundFrame, int) {
+	total := 0
+	for _, f := range batch {
+		total += len(f.data)
+	}
+	refused := 0
+	for len(batch) > 1 && (len(batch) > frames || total > bytes) {
+		total -= len(batch[0].data)
+		batch = batch[1:]
+		refused++
+	}
+	return batch, refused
 }
 
 // pop takes the next frame owed.
@@ -149,14 +190,18 @@ func (q *sendQueue) notify() {
 
 // newClientState builds the state HandleStream serves one connection from.
 func newClientState(conn *websocket.Conn, asm *AppStreamManager) *clientState {
-	return &clientState{
+	client := &clientState{
 		conn:        conn,
 		projectSub:  make(map[string]struct{}),
 		taskSub:     make(map[string]struct{}),
+		noRowsTask:  make(map[string]struct{}),
 		initPending: make(map[string]AppStreamSubscription),
 		out:         newSendQueue(asm.queueFrames, asm.queueBytes),
 		traffic:     newTrafficLedger(),
 	}
+	// Half the queue stays for live frames; see sendQueue.
+	client.out.replayBudget(asm.queueFrames/2, asm.queueBytes/2)
+	return client
 }
 
 // deliver hands a marshalled frame to each target's queue. Returning here means the frame is

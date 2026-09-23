@@ -35,10 +35,12 @@ const messageOrder = "ORDER BY created_at ASC, rowid ASC"
 // at the LIMIT.
 const newestFirstOrder = "ORDER BY created_at DESC, rowid DESC"
 
-// The ceiling bounds what one request may cost.
+// A window counts answers, not rows: an assistant row and the tool_call rows under it are one answer.
+// MessageRowCeiling bounds one response when the newest answers are long.
 const (
-	MessageWindowDefault = 120
-	MessageWindowMax     = 500
+	MessageWindowDefault = 5
+	MessageWindowMax     = 25
+	MessageRowCeiling    = 500
 )
 
 // MessagePage is one window of a conversation: its newest rows, oldest first.
@@ -113,27 +115,33 @@ func (s *Store) messageKeys(taskID, threadID string, cursor *messageKey, n int) 
 	return scanRows(rows, scanMessageKey)
 }
 
-// A window never opens mid-turn: a turn's work without the user row that asked for it reads as an answer
-// to nothing, and regenerate deletes from that user row. The reach back is bounded by one batch.
-const turnJoinBatch = 64
+// startsUnit is true for a row that opens an answer. A tool_call row belongs to the assistant row that
+// announced it, so a window must not cut between the two.
+func startsUnit(role string) bool { return role != "tool_call" }
 
-// continuesTurn is true for a row whose turn started earlier; a turn's head is its user row.
-func continuesTurn(role string) bool { return role == "assistant" || role == "tool_call" }
-
-// headOfReachBack is how far of a batch of older rows the window keeps: down to and including the first
-// row that starts a turn. batch is newest-first.
-func headOfReachBack(batch []messageKey) int {
-	for i, k := range batch {
-		if !continuesTurn(k.role) {
-			return i + 1
+// newestUnits keeps the newest `units` answers of a newest-first list of positions, cutting above the row
+// that opens the oldest answer held. An answer longer than the read's bound is cut inside, so the page
+// opens on a tool_call row and its opening rows arrive on the next page.
+func newestUnits(keys []messageKey, units int) []messageKey {
+	seen := 0
+	for i, k := range keys {
+		if !startsUnit(k.role) {
+			continue
+		}
+		seen++
+		if seen == units {
+			return keys[:i+1]
 		}
 	}
-	return len(batch)
+	return keys
 }
 
-// GetTaskMessagePage answers one window: the newest limit rows, oldest first, with before naming a cursor
-// an earlier call returned. Positions are read before rows, so the cut and the sort run over index
+// GetTaskMessagePage answers one window: the newest `limit` answers, oldest first, with before naming a
+// cursor an earlier call returned. Positions are read before rows, so the cut and the sort run over index
 // entries rather than the conversation's bytes.
+//
+// Together the pages hand over every row of the thread exactly once, which is why the cursor names the
+// oldest row this page holds.
 func (s *Store) GetTaskMessagePage(taskID, threadID string, limit int, before string) (*MessagePage, error) {
 	// The route refuses a window outside 1..MessageWindowMax; this covers a caller that is not a request.
 	if limit <= 0 || limit > MessageWindowMax {
@@ -151,19 +159,11 @@ func (s *Store) GetTaskMessagePage(taskID, threadID string, limit int, before st
 	defer s.mu.RUnlock()
 
 	page := &MessagePage{}
-	keys, err := s.messageKeys(taskID, threadID, cursor, limit)
+	keys, err := s.messageKeys(taskID, threadID, cursor, MessageRowCeiling)
 	if err != nil {
 		return nil, err
 	}
-	if len(keys) > 0 && continuesTurn(keys[len(keys)-1].role) {
-		older, err := s.messageKeys(taskID, threadID, &keys[len(keys)-1], turnJoinBatch)
-		if err != nil {
-			return nil, err
-		}
-		if len(older) > 0 {
-			keys = append(keys, older[:headOfReachBack(older)]...)
-		}
-	}
+	keys = newestUnits(keys, limit)
 	if len(keys) == 0 {
 		return page, nil
 	}

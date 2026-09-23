@@ -34,7 +34,7 @@ export interface AppStream {
     reconnectNow: () => void;
     subscribeProject: (projectId: string) => void;
     unsubscribeProject: (projectId: string) => void;
-    subscribeTask: (projectId: string, taskId: string) => void;
+    subscribeTask: (projectId: string, taskId: string, wholeBuffer?: boolean) => void;
     unsubscribeTask: (projectId: string, taskId: string) => void;
 }
 
@@ -75,7 +75,12 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
     let lastHeartbeatAt = Date.now();
     // Track active subscriptions for re-subscription on reconnect
     const subscribedProjects = new Set<string>();
-    const subscribedTasks = new Set<string>(); // "projectId:taskId"
+    /**
+     * Every task key this view holds, mapped to whether this browser has no copy of the conversation —
+     * the `no_rows` claim that tells the server its replay buffer must not be trimmed. A held key owes its
+     * current claim, which is what a reconnect replays.
+     */
+    const subscribedTasks = new Map<string, boolean>(); // "projectId:taskId"
     /**
      * What the server has not been told about these two sets: at most one frame per key, holding the
      * newest intent recorded for it, in the order those intents were formed. Keys are the sets' own — a
@@ -155,6 +160,12 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
         deliverOwed(projectId);
     }
 
+    function taskSubscription(projectId: string, taskId: string, wholeBuffer: boolean): Record<string, any> {
+        const data: Record<string, any> = { project_id: projectId, task_id: taskId };
+        if (wholeBuffer) data.no_rows = true;
+        return data;
+    }
+
     /**
      * Say to a new connection everything it does not already know: what the sets changed while it was
      * down, then one subscribe per key still held. A held key can only owe a subscribe, so a key the
@@ -169,10 +180,10 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
         for (const projectId of subscribedProjects) {
             if (!told.has(projectId)) requestProjectSubscribe(projectId);
         }
-        for (const key of subscribedTasks) {
+        for (const [key, wholeBuffer] of subscribedTasks) {
             if (told.has(key)) continue;
             const [projectId, taskId] = key.split(':');
-            oweSubscribe(key, { type: 'subscribe_task', data: { project_id: projectId, task_id: taskId } });
+            oweSubscribe(key, { type: 'subscribe_task', data: taskSubscription(projectId, taskId, wholeBuffer) });
         }
     }
 
@@ -351,11 +362,12 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
             subscribedProjects.delete(projectId);
             oweUnsubscribe(projectId, { type: 'unsubscribe_project', data: { project_id: projectId } });
         },
-        subscribeTask: (projectId: string, taskId: string) => {
+        subscribeTask: (projectId: string, taskId: string, wholeBuffer = false) => {
             const key = `${projectId}:${taskId}`;
-            if (subscribedTasks.has(key)) return;
-            subscribedTasks.add(key);
-            oweSubscribe(key, { type: 'subscribe_task', data: { project_id: projectId, task_id: taskId } });
+            // A key already held is re-declared, not re-taken, when the claim changes.
+            if (subscribedTasks.has(key) && subscribedTasks.get(key) === wholeBuffer) return;
+            subscribedTasks.set(key, wholeBuffer);
+            oweSubscribe(key, { type: 'subscribe_task', data: taskSubscription(projectId, taskId, wholeBuffer) });
         },
         unsubscribeTask: (projectId: string, taskId: string) => {
             const key = `${projectId}:${taskId}`;

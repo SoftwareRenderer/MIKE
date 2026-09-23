@@ -84,8 +84,8 @@ func TestGetTaskMessagePageWalksTheThreadOnce(t *testing.T) {
 	}
 }
 
-// Every window opens on a turn's head, never on its work.
-func TestGetTaskMessagePageNeverOpensInTheMiddleOfATurn(t *testing.T) {
+// Every window opens on an answer, never on a tool_call row whose assistant row it does not hold.
+func TestGetTaskMessagePageNeverOpensOnAToolCall(t *testing.T) {
 	s := testStore(t)
 	seedThread(t, s, "task-1", "thread-1", 21)
 
@@ -97,7 +97,7 @@ func TestGetTaskMessagePageNeverOpensInTheMiddleOfATurn(t *testing.T) {
 		if len(got.Messages) == 0 {
 			t.Fatalf("limit %d returned no rows", limit)
 		}
-		if oldest := got.Messages[0]; continuesTurn(oldest.Role) {
+		if oldest := got.Messages[0]; !startsUnit(oldest.Role) {
 			t.Fatalf("limit %d opened on a %s row (%s)", limit, oldest.Role, oldest.ID)
 		}
 	}
@@ -109,13 +109,159 @@ func TestGetTaskMessagePageNeverOpensInTheMiddleOfATurn(t *testing.T) {
 		if err != nil {
 			t.Fatalf("page %d: %v", page, err)
 		}
-		if len(got.Messages) > 0 && continuesTurn(got.Messages[0].Role) {
+		if len(got.Messages) > 0 && !startsUnit(got.Messages[0].Role) {
 			t.Fatalf("page %d opened on a %s row", page, got.Messages[0].Role)
 		}
 		if !got.HasMore {
 			break
 		}
 		cursor = got.Before
+	}
+}
+
+// An answer holding more rows than the read's ceiling cannot be cut at an answer boundary. What this pins
+// is that every row is still handed over exactly once, with the answer's opening row on the next page.
+func TestGetTaskMessagePageCutsInsideAnAnswerLongerThanTheCeiling(t *testing.T) {
+	s := testStore(t)
+	if err := s.CreateProject(newProject("proj-1", "test", "/tmp/test")); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	// Every row shares the assistant's instant, so rowid is what orders them.
+	at := time.Now().UTC().Add(-time.Hour)
+	head := newMessage("head-1", "task-1", "assistant", "one answer, too many calls")
+	head.ThreadID, head.CreatedAt = "thread-1", at
+	if err := s.CreateTaskMessage(head); err != nil {
+		t.Fatalf("create head: %v", err)
+	}
+	total := 1
+	for i := 0; i <= MessageRowCeiling; i++ {
+		call := newMessage(fmt.Sprintf("call-%04d", i), "task-1", "tool_call", "x")
+		call.ThreadID, call.CreatedAt, call.AssistantMsgID = "thread-1", at, head.ID
+		if err := s.CreateTaskMessage(call); err != nil {
+			t.Fatalf("create call: %v", err)
+		}
+		total++
+	}
+
+	first, err := s.GetTaskMessagePage("task-1", "thread-1", 1, "")
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if len(first.Messages) != MessageRowCeiling {
+		t.Fatalf("first page holds %d rows, want the ceiling of %d", len(first.Messages), MessageRowCeiling)
+	}
+	if startsUnit(first.Messages[0].Role) {
+		t.Fatalf("a cut inside one answer was expected to open on a tool_call row, got %s", first.Messages[0].Role)
+	}
+	if !first.HasMore || first.Before == "" {
+		t.Fatalf("the rows left behind must be one cursor away: more=%v cursor=%q", first.HasMore, first.Before)
+	}
+
+	second, err := s.GetTaskMessagePage("task-1", "thread-1", 1, first.Before)
+	if err != nil {
+		t.Fatalf("second page: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, m := range append(append([]types.TaskMessage{}, first.Messages...), second.Messages...) {
+		if seen[m.ID] {
+			t.Fatalf("row %s arrived on two pages", m.ID)
+		}
+		seen[m.ID] = true
+	}
+	if !seen[head.ID] {
+		t.Fatalf("the row that opened the answer never arrived: %d of %d rows seen", len(seen), total)
+	}
+	if len(seen) != total {
+		t.Fatalf("the two pages cover %d of the thread's %d rows", len(seen), total)
+	}
+}
+
+// A page is counted in answers: the newest five assistant rows and their tool calls, however many rows
+// that is, and the answers older than the fifth are one cursor away.
+func TestGetTaskMessagePageCountsAnswersNotRows(t *testing.T) {
+	s := testStore(t)
+	if err := s.CreateProject(newProject("proj-1", "test", "/tmp/test")); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	base := time.Now().UTC().Add(-time.Hour)
+	// One turn: a user row, then 40 answers, each carrying two tool calls.
+	turn := []*types.TaskMessage{newMessage("turn-head", "task-1", "user", "the turn's prompt")}
+	for i := 0; i < 40; i++ {
+		a := newMessage(fmt.Sprintf("a-%02d", i), "task-1", "assistant", fmt.Sprintf("answer %02d", i))
+		turn = append(turn, a)
+		for j := 0; j < 2; j++ {
+			c := newMessage(fmt.Sprintf("c-%02d-%d", i, j), "task-1", "tool_call", "call")
+			c.AssistantMsgID = a.ID
+			turn = append(turn, c)
+		}
+	}
+	for i, m := range turn {
+		m.ThreadID = "thread-1"
+		m.CreatedAt = base.Add(time.Duration(i) * time.Millisecond)
+		if err := s.CreateTaskMessage(m); err != nil {
+			t.Fatalf("create message: %v", err)
+		}
+	}
+
+	got, err := s.GetTaskMessagePage("task-1", "thread-1", 5, "")
+	if err != nil {
+		t.Fatalf("window: %v", err)
+	}
+	var answers, calls int
+	for _, m := range got.Messages {
+		switch m.Role {
+		case "assistant":
+			answers++
+		case "tool_call":
+			calls++
+		}
+	}
+	if answers != 5 || calls != 10 {
+		t.Errorf("window holds %d answers and %d tool calls, want 5 and 10", answers, calls)
+	}
+	if !got.HasMore {
+		t.Error("a 40-answer turn answered with 5 answers but says nothing older exists")
+	}
+	if got.Messages[0].ID != "a-35" {
+		t.Errorf("window opens on %s, want the oldest answer the page holds", got.Messages[0].ID)
+	}
+
+	// Paging walks back to the turn's user row without repeating or skipping a row.
+	seen := map[string]bool{}
+	for m := range got.Messages {
+		seen[got.Messages[m].ID] = true
+	}
+	cursor := got.Before
+	for page := 0; cursor != ""; page++ {
+		if page > 40 {
+			t.Fatal("paging did not terminate")
+		}
+		older, err := s.GetTaskMessagePage("task-1", "thread-1", 5, cursor)
+		if err != nil {
+			t.Fatalf("page %d: %v", page, err)
+		}
+		for _, m := range older.Messages {
+			if seen[m.ID] {
+				t.Fatalf("row %s arrived on two pages", m.ID)
+			}
+			seen[m.ID] = true
+		}
+		cursor = older.Before
+		if !older.HasMore && cursor != "" {
+			t.Fatal("a page named a cursor it did not need")
+		}
+	}
+	if len(seen) != len(turn) {
+		t.Fatalf("the pages cover %d of the turn's %d rows", len(seen), len(turn))
+	}
+	if !seen["turn-head"] {
+		t.Error("paging never reached the turn's user row")
 	}
 }
 
@@ -130,8 +276,8 @@ func TestGetTaskMessagePageRefusesACursorItDidNotIssue(t *testing.T) {
 	}
 }
 
-// Rows sharing one instant still hand over exactly once, and a window of two over a four-row turn reaches
-// back to the turn's head.
+// Rows sharing one instant still hand over exactly once, and a window of two over a four-row turn still
+// opens on a row that starts an answer.
 func TestGetTaskMessagePageCutsATurnSharedAcrossOneInstant(t *testing.T) {
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-1", "test", "/tmp/test")); err != nil {

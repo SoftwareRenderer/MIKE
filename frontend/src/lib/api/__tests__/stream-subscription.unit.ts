@@ -238,6 +238,38 @@ describe('the frames a reconnect owes', () => {
         await settle();
         expect(socket.typed('subscribe_task')).toHaveLength(2);
     });
+
+    it('declares the no-rows claim, releases it, and carries it onto the reconnect', async () => {
+        const socket = start();
+        socket.open();
+
+        // The claim rides the frame that takes the key.
+        stream!.subscribeTask('p1', 't1', true);
+        await settle();
+        expect(socket.typed('subscribe_task')).toEqual([
+            { type: 'subscribe_task', data: { project_id: 'p1', task_id: 't1', no_rows: true } },
+        ]);
+
+        // A key the server already holds is how a client changes its claim without earning a second replay.
+        stream!.subscribeTask('p1', 't1');
+        await settle();
+        expect(socket.typed('subscribe_task')).toHaveLength(2);
+        expect(socket.typed('subscribe_task')[1]).toEqual({ type: 'subscribe_task', data: { project_id: 'p1', task_id: 't1' } });
+
+        // Saying what the server already knows costs no frame.
+        stream!.subscribeTask('p1', 't1');
+        await settle();
+        expect(socket.typed('subscribe_task')).toHaveLength(2);
+
+        // The claim a socket died holding is what the next connection is told.
+        stream!.subscribeTask('p1', 't1', true);
+        const next = dropAndFail();
+        await settle();
+        next.open();
+        await settle();
+        const reopened = next.typed('subscribe_task');
+        expect(reopened).toEqual([{ type: 'subscribe_task', data: { project_id: 'p1', task_id: 't1', no_rows: true } }]);
+    });
 });
 
 describe('the known_stats handshake', () => {

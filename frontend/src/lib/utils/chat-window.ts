@@ -17,6 +17,38 @@ export function prependRows<T extends PagedRow>(held: T[], older: T[]): T[] {
     return [...fresh, ...held];
 }
 
+/** How a window read ended, as far as the transcript on screen is concerned. */
+export type WindowRead = 'answered' | 'cached' | 'failed';
+
+/** Why what is on screen may not be the whole conversation, and whether anything can still arrive. */
+export type WindowReadNotice = 'cached' | 'failed' | 'owing' | null;
+
+/**
+ * What to tell the reader about the transcript on screen. `'owing'` means a read failed on a running task
+ * this browser holds a key for: the turn still arriving on the stream is all that will come.
+ */
+export function noticeForWindowRead(read: WindowRead, seen: { holdsTaskKey: boolean; taskInFlight: boolean }): WindowReadNotice {
+    if (read === 'answered') return null;
+    if (read === 'cached') return 'cached';
+    return seen.holdsTaskKey && seen.taskInFlight ? 'owing' : 'failed';
+}
+
+/** The fewest rows one task keeps in the cache. A window is five answers, which can be fewer rows than an
+ * earlier open read, so an offline reload does not open on less than what was already shown. */
+export const CACHED_ROWS_FLOOR = 60;
+
+/** The rows to leave in the cache after a read: the window just answered, with the rows the cache held
+ * above it, up to the floor. */
+export function mergeCachedRows<T extends PagedRow>(fresh: T[], held: T[]): T[] {
+    if (held.length === 0) return fresh;
+    const seen = new Set(fresh.map(r => r.id));
+    const room = Math.max(CACHED_ROWS_FLOOR, fresh.length) - fresh.length;
+    if (room <= 0) return fresh;
+    const above = held.filter(r => !seen.has(r.id));
+    if (above.length === 0) return fresh;
+    return [...above.slice(-room), ...fresh];
+}
+
 /** Where the reader is looking. */
 export interface ScrollAnchor {
     id: string;
@@ -44,10 +76,11 @@ export function anchorScrollDelta(anchor: ScrollAnchor, anchorTopNow: number): n
     return anchorTopNow - anchor.top;
 }
 
-/** How close to the top of the list counts as "the reader wants what is above". */
-export const EARLIER_EDGE_PX = 240;
+/** How far above the top edge older rows are fetched, as a multiple of the viewport, so a page lands while
+ * the reader is still heading toward the top. */
+const EARLIER_EDGE_VIEWPORTS = 1.5;
 
-/** Whether the viewport is at the top of the list, where older rows are fetched from. */
-export function atTopOfList(scrollTop: number, edgePx: number = EARLIER_EDGE_PX): boolean {
-    return scrollTop <= edgePx;
+/** Whether the reader is inside the distance where older rows are wanted. */
+export function atTopOfList(scrollTop: number, viewportHeight: number): boolean {
+    return scrollTop <= Math.round(EARLIER_EDGE_VIEWPORTS * viewportHeight);
 }

@@ -4,7 +4,9 @@ import {
     resolveAnchor,
     anchorScrollDelta,
     atTopOfList,
-    EARLIER_EDGE_PX,
+    mergeCachedRows,
+    noticeForWindowRead,
+    CACHED_ROWS_FLOOR,
     type MeasuredEntry,
 } from '../chat-window';
 
@@ -85,9 +87,70 @@ describe('anchorScrollDelta', () => {
 });
 
 describe('atTopOfList', () => {
-    it('is true within the edge distance and false below it', () => {
-        expect(atTopOfList(0)).toBe(true);
-        expect(atTopOfList(EARLIER_EDGE_PX)).toBe(true);
-        expect(atTopOfList(EARLIER_EDGE_PX + 1)).toBe(false);
+    it('is true within a viewport and a half of the top edge and false below it', () => {
+        expect(atTopOfList(0, 600)).toBe(true);
+        // The boundaries are literals, so a rule that fetches at another distance fails here.
+        expect(atTopOfList(900, 600)).toBe(true);
+        expect(atTopOfList(901, 600)).toBe(false);
+    });
+
+    it('scales with the viewport, so a short screen prefetches a short distance', () => {
+        expect(atTopOfList(600, 400)).toBe(true);
+        expect(atTopOfList(601, 400)).toBe(false);
+        expect(atTopOfList(1350, 900)).toBe(true);
+        expect(atTopOfList(1351, 900)).toBe(false);
+    });
+});
+
+describe('mergeCachedRows', () => {
+    it('keeps the rows the mirror already held above the window just read', () => {
+        // An offline reload must not open on less than this browser has already shown.
+        const held = rows('a', 'b', 'c', 'd', 'e');
+        const fresh = rows('d', 'e', 'f');
+        expect(mergeCachedRows(fresh, held).map(r => r.id)).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+    });
+
+    it('takes the newest of the rows above, bounded by the floor', () => {
+        const held = Array.from({ length: 200 }, (_, i) => ({ id: `h${i}` }));
+        const fresh = Array.from({ length: 3 }, (_, i) => ({ id: `f${i}` }));
+        const merged = mergeCachedRows(fresh, held);
+        expect(merged).toHaveLength(CACHED_ROWS_FLOOR);
+        expect(merged[0].id).toBe(`h${200 - (CACHED_ROWS_FLOOR - 3)}`);
+        expect(merged[merged.length - 1].id).toBe('f2');
+    });
+
+    it('leaves a window bigger than the floor alone', () => {
+        const fresh = Array.from({ length: CACHED_ROWS_FLOOR + 5 }, (_, i) => ({ id: `f${i}` }));
+        const held = rows('a', 'b');
+        expect(mergeCachedRows(fresh, held)).toBe(fresh);
+    });
+
+    it('is the window itself when the mirror holds nothing new', () => {
+        const fresh = rows('d', 'e');
+        expect(mergeCachedRows(fresh, [])).toBe(fresh);
+        expect(mergeCachedRows(fresh, rows('d', 'e'))).toBe(fresh);
+    });
+});
+
+describe('noticeForWindowRead', () => {
+    const holding = { holdsTaskKey: true, taskInFlight: true };
+
+    it('says nothing when a read answered', () => {
+        expect(noticeForWindowRead('answered', holding)).toBeNull();
+    });
+
+    it('names the mirror when the read came from it', () => {
+        // A transcript drawn from this device is stale, not owed.
+        expect(noticeForWindowRead('cached', holding)).toBe('cached');
+    });
+
+    it('says the server owes the transcript when a read failed on a running task', () => {
+        expect(noticeForWindowRead('failed', holding)).toBe('owing');
+    });
+
+    it('says so plainly when nothing can arrive', () => {
+        // No key held means no stream to wait on; an idle task means no turn left to arrive.
+        expect(noticeForWindowRead('failed', { holdsTaskKey: false, taskInFlight: true })).toBe('failed');
+        expect(noticeForWindowRead('failed', { holdsTaskKey: true, taskInFlight: false })).toBe('failed');
     });
 });

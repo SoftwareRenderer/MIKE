@@ -6,6 +6,7 @@ package stream
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -98,21 +99,19 @@ func TestTrafficLedgerCountsWhatTheSenderWrote(t *testing.T) {
 	live.await(t, 5*time.Second, func(f map[string]any) bool {
 		return f["type"] == "task_event" && f["event"] == "token"
 	}, 2, "two token frames on the wire")
-	awaitLedgerBytes(t, client, "token", 2*len(tokenFrame))
+	awaitLedger(t, client, "token", func(_, bytes int) bool { return bytes == 2*len(tokenFrame) },
+		fmt.Sprintf("%d bytes", 2*len(tokenFrame)))
 
 	task := &types.Task{ID: taskID, ProjectID: projectID, Title: "traffic"}
 	asm.BroadcastTaskUpdated(projectID, task)
 	live.await(t, 5*time.Second, func(f map[string]any) bool { return f["type"] == "task_updated" },
 		1, "task_updated on the wire")
-	if got := client.traffic.bucketFrames("task_updated"); got != 1 {
-		t.Fatalf("task_updated counted %d frames, want 1", got)
-	}
+	awaitLedger(t, client, "task_updated", func(frames, _ int) bool { return frames == 1 }, "1 frame")
 
 	// A frame the connection never received is not bandwidth. The counts frames are counted because they were
 	// written: one when the connection opened, one with the update.
-	if got := client.traffic.bucketFrames("project_counts"); got < 2 {
-		t.Fatalf("project_counts counted %d frames, want the connect frame and the update's", got)
-	}
+	awaitLedger(t, client, "project_counts", func(frames, _ int) bool { return frames >= 2 },
+		"the connect frame and the update's")
 	report := client.traffic.report()
 	for _, want := range []string{"token 2/", "task_updated 1/", "project_counts"} {
 		if !strings.Contains(report, want) {
@@ -121,19 +120,20 @@ func TestTrafficLedgerCountsWhatTheSenderWrote(t *testing.T) {
 	}
 }
 
-// awaitLedgerBytes waits for the sender to record a byte total. The record lands just after the write, so a
-// frame the client has already read may not be counted yet when the read returns.
-func awaitLedgerBytes(t *testing.T, client *clientState, bucket string, want int) {
+// awaitLedger waits for the sender's own count of one bucket to satisfy the test. A record lands just after
+// its write, so a frame the client has read may not be counted yet.
+func awaitLedger(t *testing.T, client *clientState, bucket string, settled func(frames, bytes int) bool, want string) {
 	t.Helper()
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
 	for {
-		if got := client.traffic.bucketBytes(bucket); got == want {
+		if settled(client.traffic.bucketFrames(bucket), client.traffic.bucketBytes(bucket)) {
 			return
 		}
 		select {
 		case <-deadline.C:
-			t.Fatalf("bucket %q holds %d bytes, want %d", bucket, client.traffic.bucketBytes(bucket), want)
+			t.Fatalf("bucket %q never held %s (frames=%d bytes=%d)", bucket, want,
+				client.traffic.bucketFrames(bucket), client.traffic.bucketBytes(bucket))
 		case <-time.After(time.Millisecond):
 		}
 	}

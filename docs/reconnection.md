@@ -32,15 +32,15 @@ answers it with `project_counts` and whatever its own `subscribe_project` answer
 happened while it was down. That is why `onConnected(true)` runs `silentRefresh()`, why the wake-up path
 refetches the board over HTTP, and why `TaskChat` reloads history from the DB. The one replay that
 survives a reconnect is the **per-task** one (`taskBufferFrames`, replayed on `subscribe_task`): it is
-keyed by what the client asks for again, not by the socket it lost, which is why a task's buffer is
+keyed by what the client asks for again, not by the socket it lost. That is also why a task's buffer is
 cleared the moment its turn ends.
 
 That replay holds **one frame per tool call**, because two frames for one call replay as two cards. The
 live path sends a call's whole args and then only its growth, so the frames of one call are joined where
-the replay is read (`foldToolCallFrames`): the frame handed over carries the whole input, not the last
-delta, or a card opened mid-call would start mid-JSON. Joining at the read costs one pass per subscribe
+the replay is read (`foldToolCallFrames`). The frame handed over carries the whole input, not the last
+delta: a card opened mid-call would otherwise start mid-JSON. Joining at the read costs one pass per subscribe
 instead of one per frame, and it runs on the frames copied out of the buffer rather than inside the hub
-lock — a full buffer of one call's deltas measured 26 ms of JSON there, and 0.9 ms for the same pass with
+lock. A full buffer of one call's deltas measured 26 ms of JSON there, and 0.9 ms for the same pass with
 nothing to join. A delta whose start has already been trimmed stays a delta — there is nothing to fold it
 into, and dropping it would hide the call.
 
@@ -48,14 +48,16 @@ into, and dropping it would hide the call.
 kept as it arrived).
 
 A replay is never written on the goroutine that asks for it: it is queued into the connection's own sender
-(`sendQueue.pushReplay`) and comes out of it in order — behind any replay already queued, so two replays
-keep the order they were asked for, and ahead of every live frame, so a replay is not interrupted by what
-the task said meanwhile. A replay is therefore subject to the queue's bound like any other frame, and a
-backlog too large for it is truncated at the oldest end and ends the connection rather than reaching the
-browser in pieces — see *The slow client is released, not timed out*. No replay path writes the socket
-itself: the read loop and the initial-data worker both hand frames over.
+(`sendQueue.pushReplay`) and comes out of it in order. It goes behind any replay already queued, so two
+replays keep the order they were asked for, and ahead of every live frame, so a replay is not interrupted by what
+the task said meanwhile. A replay gets **half the queue's budget**, not the queue's bound. A frame the queue
+discards is a hole in a live stream; a frame a replay leaves behind is content the subscriber reads from the
+database seconds later. So `pushReplay` trims its own batch to that budget, oldest first, and logs the count
+naming the task — it is not a missed frame, and see *The slow client is released, not timed out*. A buffer
+that could fill the whole queue would let the act of subscribing force the resync it exists to avoid. No
+replay path writes the socket itself: the read loop and the initial-data worker both hand frames over.
 
-A task's frame reaches a connection **exactly once**, which is a locking rule rather than a client one: the
+A task's frame reaches a connection **exactly once**, which is a locking rule rather than a client one. The
 hub hands the frame to the task's subscribers and adds it to that task's replay buffer in one step, and
 `subscribe_task` reads the buffer in the same step that makes the connection a subscriber (`asm.mu`, taken
 before `taskBufMu`). Split into two steps, a subscribe landing between them got the frame twice or never,
@@ -137,6 +139,11 @@ bounded by frame count and bytes; over the bound the **oldest** frames go, which
 receives a contiguous tail with a hole behind it — and a chat holding a hole never becomes right by
 waiting.
 
+**A replay never fills the queue.** It arrives with half the budget (*What a reconnect brings back*)
+because it is a head start and not a reservation: what it cannot queue, the subscriber fetches from the
+database in the same breath it asked. A truncated replay is a log line naming the task and the count, never
+a resync.
+
 So once such a queue has drained, the server ends the connection (`StatusTryAgainLater`, one
 `component=stream` warning naming how many frames were missed) and the client's existing path does the
 rest: `onclose` → `onConnected(false)` → reconnect → `onConnected(true)` →
@@ -147,7 +154,8 @@ until someone reloads. Nothing here puts a deadline on a wait for this server (A
 Reconnection & Offline); a slow client is degraded, not timed out.
 
 **Tests:** `backend/stream/app_stream_sender_test.go` (a stalled subscriber does not hold the turn, the
-queue's two bounds drop the oldest, the missed-frames connection is ended).
+queue's two bounds drop the oldest, the missed-frames connection is ended). A task whose buffer holds more
+than the replay budget keeps its connection and gets the newest frames.
 
 ## One frame per key: what a reconnect may say
 
@@ -221,37 +229,68 @@ belongs to the attempt).
 
 ## The reload meets the replay buffer
 
-`loadHistory` runs on reconnect, on task switch and after a stop, and it joins two incomplete views of
-one conversation: the DB rows, which lag the running turn (`finalizeTurn` writes the assistant row when
-an LLM call ends and each `tool_call` row just before its tool starts, so a multi-call turn reaches the
-DB one tool at a time), and the frames the server's per-task buffer kept. `mergeLoadedHistory`
-(`src/lib/utils/chat-entries.ts`) owns the rule and states it at its definition; the fact it is built on
-is that a `tool_call` event is broadcast once, so an entry discarded before its row exists loses that
-card until the page is reloaded — discarding on an approximation is what used to show a task with its
-reasoning and none of its tool calls.
+**The buffer holds exactly what is not a row yet.** The window read ends where durability ends, and the
+replay starts there. The two views of one conversation are complementary rather than overlapping: the read
+answers the rows, the replay answers what has no row.
+
+The executor is what says where that line is, by calling `AppStreamManager.DurableThrough` after a
+conversation write lands — the assistant row of an LLM call, and each `tool_call` row's result. Not at the
+`tool_result` frame: the loop sends that frame *before* its row is written, so trimming there would drop
+content no row holds. What a trim keeps is one table in `backend/stream/app_stream.go`: every frame of a
+call with no result yet, and the newest value of each event that is a current value rather than content
+(`status`, `stats`, `prompt_progress`, `queue`, `lock_wait`). What it drops is the text that is a row now —
+streamed tokens and thinking, a finished call's arguments and output, the user and summary rows. So a client
+opening a task mid-turn is owed seconds of stream rather than the turn, and the row read beside its
+subscribe brings the rest.
+
+One exception holds the whole rule up: **a client with no rows is owed the buffer as it stands.** The trim
+trades replay content for rows the client can read, so it cannot run while any subscriber holds the task
+with `no_rows` on its `subscribe_task` frame. For that connection the frames are the transcript. `TaskChat`
+sets the claim when a window read failed outright on a task still running, and clears it with the first read
+that answered. While it stands the chat says the running turn is all it has
+(`noticeForWindowRead` → `'owing'`). A second `subscribe_task` for a key the connection already holds is how
+that change is declared: it moves the claim and earns no replay. A replay the client already has is the
+doubled text the merge cannot undo.
+
+`loadHistory` runs on reconnect, on task switch and after a stop, and it still merges the two views by row
+id: `mergeLoadedHistory` (`src/lib/utils/chat-entries.ts`) owns the rule and states it at its definition.
+The fact it is built on is that a `tool_call` event is broadcast once, so an entry discarded before its row
+exists loses that card until the page is reloaded.
 
 Being in progress is what separates a pending `tool_call` row that is work from one that is a leftover:
 a stopped task will never write the missing result, so that card is hidden while the message around it —
-its text, its thinking, the cards that did finish — stays. Where the running flag comes from is its own
-rule (*The row decides, not the board's copy*); this section is only about what the merge does with it.
+its text, its thinking, the cards that did finish — stays. Where the running flag comes from is its own rule
+(*The row decides, not the board's copy*); this section is only about what the merge does with it.
+
+**Tests:** `backend/stream/app_stream_test.go` for the partition and the claim, and
+`backend/exec/durable_replay_test.go` for the seam — a real turn, a subscriber arriving after the result
+row, and no finished iteration in what it is sent. `DurableThrough` keeps a running call and the newest
+state; a client with `no_rows` is owed what a trim would drop. Removing either executor call site turns one
+of them red.
 
 ## A read that did not answer says so
 
 `getTaskMessages` answers from this device's mirror when the network call fails (`api/tasks.ts`).
 `loadHistory` ignores everything its read throws except a 404, so the transcript can be the last window
 this browser saved, or nothing at all — indistinguishable from a task with no conversation.
-`historyNotice` tells them apart: `'cached'` when the window carried `isFromCache`, `'failed'` for any other
-failure but a missing task. `ChatEntries` renders it above the list with **Retry beside it** — the way to ask
-again without leaving the view. `mayBeBehind()` is false for an idle task with an empty transcript, so a
-return from a hidden window (*The tab that comes back*) is the other thing that refetches by itself. A live
-read clears the notice, so it never outlives its answer.
+`noticeForWindowRead` (`$lib/utils/chat-window.ts`) is the one decision that tells them apart: `'cached'`
+when the window carried `isFromCache`, `'owing'` when the read failed on a running task this chat holds the
+key for, `'failed'` for anything else. `ChatEntries` renders the sentence above the list with **Retry beside
+it** — the way to ask again without leaving the view. The `'owing'` sentence is also what declares the claim
+described in *The reload meets the replay buffer*, which is the difference between a chat that fills in as
+the turn continues and one that stays empty. `mayBeBehind()` is false for an idle task with an empty
+transcript, so a return from a hidden window (*The tab that comes back*) is the other thing that refetches
+by itself. A live read clears the notice and the claim, so neither outlives its answer.
 
 It is not a chat entry: the transcript is rebuilt from the rows on every read, so a synthetic entry would
 be appended again by each rebuild. What the queue holds is rebuilt too — see *A pending outgoing message is
 the queue's projection* — so a read that failed does not hide a message this browser wrote.
 
 **Tests:** e2e `away-and-back.spec.ts` — a read aborted from the first open with no cached copy,
-retried once the server answers again, and a reload onto the stored copy.
+retried once the server answers again, and a reload onto the stored copy. `chat-window.unit.ts` holds the
+notice decision itself, including that a mirror read never reports `'owing'`.
+`chat-entries-history-notice.unit.svelte.ts` renders which sentence lands for which notice, and the Retry
+beside it.
 
 ## The tab that comes back
 

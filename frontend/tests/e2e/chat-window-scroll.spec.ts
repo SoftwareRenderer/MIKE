@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { EARLIER_EDGE_PX } from '../../src/lib/utils/chat-window';
+import { atTopOfList } from '../../src/lib/utils/chat-window';
 import {
   isolatedProject, gotoProject, getProjectId, csrfFetch, navigateToTask, waitForChatFormReady,
 } from './helpers';
@@ -76,8 +76,12 @@ async function parkOnList(page: any): Promise<void> {
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
 }
 
-function listScrollTop(page: any): Promise<number> {
-  return page.evaluate(() => (document.querySelector('.chat-messages') as HTMLElement).scrollTop);
+/** Where the reader is in the list and how tall their view of it is, as the app's own edge rule needs. */
+function listPosition(page: any): Promise<{ scrollTop: number; viewportHeight: number }> {
+  return page.evaluate(() => {
+    const el = document.querySelector('.chat-messages') as HTMLElement;
+    return { scrollTop: el.scrollTop, viewportHeight: el.clientHeight };
+  });
 }
 
 /**
@@ -97,12 +101,15 @@ async function wheelUp(page: any, notches: number): Promise<void> {
 /** The edge older rows are fetched from, however many notches the realized heights take. */
 async function wheelToTopEdge(page: any): Promise<void> {
   await parkOnList(page);
-  for (let i = 0; i < 60 && await listScrollTop(page) > EARLIER_EDGE_PX; i++) {
+  let at = await listPosition(page);
+  for (let i = 0; i < 60 && !atTopOfList(at.scrollTop, at.viewportHeight); i++) {
     await page.mouse.wheel(0, -WHEEL_NOTCH);
     await page.waitForTimeout(40);
+    at = await listPosition(page);
   }
-  const at = await listScrollTop(page);
-  expect(at, 'the wheel never reached the edge older rows are fetched from').toBeLessThanOrEqual(EARLIER_EDGE_PX);
+  expect(atTopOfList(at.scrollTop, at.viewportHeight),
+    `the wheel never reached the edge older rows are fetched from (scrollTop ${at.scrollTop} of a `
+    + `${at.viewportHeight}-pixel view)`).toBe(true);
 }
 
 /** Hold the next-older window in flight, so the reader's position can be read before it lands. */

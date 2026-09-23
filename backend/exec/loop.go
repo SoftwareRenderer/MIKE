@@ -1014,6 +1014,16 @@ func (te *TaskExecutor) contributedSpecs() []types.ToolSpec {
 	return specs
 }
 
+// rowsDurable tells the hub that the conversation up to here exists as rows, so its replay buffer keeps
+// only what no row answers. Call it where a write succeeded: a row that failed to land leaves the frames
+// as the only copy of what they say.
+func (te *TaskExecutor) rowsDurable(projectID, taskID string) {
+	if te.appStreamMgr == nil {
+		return
+	}
+	te.appStreamMgr.DurableThrough(projectID, taskID)
+}
+
 // finalizeTurn handles what follows one LLM call: persist the assistant message and run its tool calls,
 // settle on a text answer, or record a reasoning-only turn.
 func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, activeModel string, maxFailures int) turnOutcome {
@@ -1028,14 +1038,16 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 		logStatsSpeed(setup.task.ID, activeModel, promptTokens-cacheTokens, predictedTokens, promptMs, predictedMs)
 		assistantCreatedAt := time.Now().UTC()
 		assistantMsgID := uuid.New().String()
-		te.store.CreateTaskMessage(&types.TaskMessage{
+		if err := te.store.CreateTaskMessage(&types.TaskMessage{
 			ID: assistantMsgID, TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID, Role: "assistant",
 			Content: assistantText, ReasoningContent: lc.reasoningContent.String(),
 			ModelName: activeModel, ProviderName: lc.providerName,
 			PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
 			PromptMs: promptMs, PredictedMs: predictedMs,
 			Duration: time.Since(lc.callStartTime).Milliseconds(), CreatedAt: assistantCreatedAt,
-		})
+		}); err == nil {
+			te.rowsDurable(setup.projectID, setup.task.ID)
+		}
 
 		// Track if any tool call was a git command — needed because fsnotify
 		// can't detect diff state changes from git commit/checkout/merge
@@ -1142,6 +1154,8 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 			if err := te.store.UpdateTaskMessageToolResult(toolCallMsgID, string(resultJSON)); err != nil {
 				// The row keeps an empty result, which the chat renders as still running.
 				logging.For(logging.Tools).Warnf("FAILED to persist tool_result for msg=%s tool=%s: %v", toolCallMsgID, tc.Function.Name, err)
+			} else {
+				te.rowsDurable(setup.projectID, setup.task.ID)
 			}
 
 			turnFailures = append(turnFailures, turnResult{
@@ -1201,7 +1215,9 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 						toolResults[ri] = tr
 						// Persist the answer as this tool call's result.
 						resultJSON, _ := json.Marshal(map[string]any{"output": tr.output, "success": tr.success, "duration": tr.duration})
-						_ = te.store.UpdateTaskMessageToolResult(tr.messageID, string(resultJSON))
+						if err := te.store.UpdateTaskMessageToolResult(tr.messageID, string(resultJSON)); err == nil {
+							te.rowsDurable(setup.projectID, setup.task.ID)
+						}
 						// Re-broadcast so the UI shows the answer in place.
 						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: buildToolResultEvent(tr.toolCallID, llama.ToolAskQuestion, tr.output, tr.success, tr.duration, tr.args, tr.rawArgs, "", false, false, tr.messageID)})
 					}

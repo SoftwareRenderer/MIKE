@@ -27,6 +27,9 @@ import (
 
 var toolCallMarker = []byte(`"event":"tool_call"`)
 
+// toolResultMarker names the frame that reports a tool call's result.
+var toolResultMarker = []byte(`"event":"tool_result"`)
+
 func filterInternalPathsFromHashes(hashes map[string]string) map[string]string {
 	if len(hashes) == 0 {
 		return nil
@@ -97,6 +100,8 @@ type clientState struct {
 	conn       *websocket.Conn
 	projectSub map[string]struct{}
 	taskSub    map[string]struct{}
+	// noRowsTask is the subset of taskSub whose connections declared NoRows; see DurableThrough.
+	noRowsTask map[string]struct{}
 	// writeMu separates the two writers of conn: the sender goroutine draining out, and the
 	// keepalive pinger, which takes it with TryLock (httputil.Keepalive).
 	writeMu sync.Mutex
@@ -129,6 +134,10 @@ type AppStreamSubscription struct {
 	// task is skipped (the client renders from its own cache — the done-task
 	// diff is immutable, so identical updated_at means identical stats).
 	KnownStats map[string]string `json:"known_stats,omitempty"`
+	// NoRows declares that this browser has no stored copy of the conversation — its read of the messages
+	// window failed and it cached nothing — so the task's replay buffer is kept whole for it
+	// (DurableThrough). A client drops the claim as soon as a read answers.
+	NoRows bool `json:"no_rows,omitempty"`
 }
 
 // AppStreamManager manages the /api/stream WebSocket for all app events.
@@ -176,7 +185,10 @@ type AppStreamManager struct {
 type taskFrame struct {
 	data   []byte
 	toolID string
-	bucket string
+	// settlesToolID names the call a frame reports the result of. The replay fold matches frames by
+	// toolID, so a result's own id is held apart from it; see sendTaskPayload.
+	settlesToolID string
+	bucket        string
 }
 
 // NewAppStreamManager creates a new AppStreamManager with filesystem watchers.
@@ -300,8 +312,8 @@ func (asm *AppStreamManager) unsubscribeProject(conn *websocket.Conn, projectID 
 }
 
 // subscribeTask takes a task for this connection, held once per key exactly as subscribeProject
-// holds a project, and replays only on the frame that newly takes it.
-func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, taskID string) bool {
+// holds a project, and replays only on the frame that newly takes it. noRows: AppStreamSubscription.NoRows.
+func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, taskID string, noRows bool) bool {
 	key := projectID + ":" + taskID
 	asm.mu.Lock()
 	client := asm.clients[conn]
@@ -313,6 +325,8 @@ func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, task
 		client.taskSub = make(map[string]struct{})
 	}
 	if _, held := client.taskSub[key]; held {
+		// A second take of a key already held changes the claim and earns no replay.
+		asm.settleTaskClaim(client, projectID, taskID, noRows)
 		asm.mu.Unlock()
 		return false
 	}
@@ -323,6 +337,7 @@ func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, task
 		return false
 	}
 	client.taskSub[key] = struct{}{}
+	asm.settleTaskClaim(client, projectID, taskID, noRows)
 	// Read the buffer before releasing the lock that made this connection a subscriber, so a frame
 	// being sent right now is either already in it or will be delivered to this socket.
 	frames := asm.taskBufferFrames(key)
@@ -332,12 +347,14 @@ func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, task
 	// lock is gone; what the connection is owed was settled by the snapshot, not by the fold.
 	buf := foldToolCallFrames(frames)
 	// Then the latest sandbox stats, which the task view needs even when that buffer has been
-	// cleared. One batch, so the stats land after the replay they extend; behind any replay already
-	// queued and ahead of the live frames, so no live frame lands inside either.
+	// cleared. One batch, so the stats land after the replay they extend and share its budget.
 	if statsFrame := asm.latestSandboxStatsFrame(projectID, taskID); statsFrame != nil {
 		buf = append(buf, *statsFrame)
 	}
-	client.out.pushReplay(buf)
+	if refused := client.out.pushReplay(buf); refused > 0 {
+		logging.For(logging.Stream).With(logging.TaskID, taskID).With(logging.ProjectID, projectID).
+			Warnf("replay trimmed to the connection's budget: %d frame(s) not sent", refused)
+	}
 	return true
 }
 
@@ -373,12 +390,31 @@ func (asm *AppStreamManager) SetSandboxStatsProvider(fn func(projectID, taskID s
 	asm.mu.Unlock()
 }
 
-// unsubscribeTask releases the task; see subscribeProject for what a connection holds.
+// settleTaskClaim records or drops one connection's NoRows claim on a task it holds. The caller holds
+// asm.mu for writing.
+func (asm *AppStreamManager) settleTaskClaim(client *clientState, projectID, taskID string, noRows bool) {
+	key := projectID + ":" + taskID
+	_, claimed := client.noRowsTask[key]
+	if noRows == claimed {
+		return
+	}
+	if !noRows {
+		delete(client.noRowsTask, key)
+		return
+	}
+	client.noRowsTask[key] = struct{}{}
+	logging.For(logging.Stream).With(logging.TaskID, taskID).With(logging.ProjectID, projectID).
+		Warn("client has no conversation rows: owing it the whole replay buffer")
+}
+
+// unsubscribeTask releases the task; see subscribeTask for what a connection holds.
 func (asm *AppStreamManager) unsubscribeTask(conn *websocket.Conn, projectID, taskID string) {
 	asm.mu.Lock()
 	client := asm.clients[conn]
 	if client != nil {
-		delete(client.taskSub, projectID+":"+taskID)
+		key := projectID + ":" + taskID
+		delete(client.taskSub, key)
+		delete(client.noRowsTask, key)
 	}
 	asm.mu.Unlock()
 }
@@ -528,11 +564,15 @@ func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, frame map
 	if err != nil {
 		return
 	}
-	// tool_id rides the buffered frame so a replay can collapse one call's frames; it is read
-	// here because the hub lock taken below must not be held across JSON parsing.
-	var toolID string
-	if bytes.Contains(msg, toolCallMarker) {
+	// tool_id rides the buffered frame so a replay can collapse one call's frames; it is read here
+	// because the hub lock taken below must not be held across JSON parsing. A result frame's id is held
+	// apart from toolID because the fold would otherwise let it replace the call's own frame.
+	var toolID, settles string
+	switch {
+	case bytes.Contains(msg, toolCallMarker):
 		toolID = extractToolID(msg)
+	case bytes.Contains(msg, toolResultMarker):
+		settles = extractToolID(msg)
 	}
 
 	// Handing the frame to the subscribers and adding it to the replay buffer are one step, and so
@@ -542,7 +582,7 @@ func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, frame map
 	// twice or never, and never is a hole the client cannot see.
 	asm.mu.Lock()
 	asm.deliver(asm.subscribers(taskSubs, key), msg, frameBucket(frame))
-	asm.bufferTaskLocked(key, msg, toolID, frameBucket(frame))
+	asm.bufferTaskLocked(key, msg, toolID, settles, frameBucket(frame))
 	asm.mu.Unlock()
 }
 
@@ -704,7 +744,88 @@ func (asm *AppStreamManager) BroadcastExtensionChange() {
 
 // -- Task replay buffer --
 
-func (asm *AppStreamManager) bufferTaskLocked(taskKey string, frame []byte, toolID, bucket string) {
+// bufferContentFrames are the buffered events whose content a conversation row carries once the turn has
+// written it, and a trim drops them. Every other event on the task channel is a current value — turn
+// state, token count, queue position — and a trim keeps the newest of each.
+var bufferContentFrames = map[string]bool{
+	string(types.WSTypeToken):         true,
+	string(types.WSTypeReasoning):     true,
+	string(types.WSTypeToolCall):      true,
+	string(types.WSTypeToolProgress):  true,
+	string(types.WSTypeToolOutput):    true,
+	string(types.WSTypeToolResult):    true,
+	string(types.WSTypeUserMessage):   true,
+	string(types.WSTypeSummarization): true,
+	string(types.WSTypeError):         true,
+}
+
+// trimTaskBufferToUndurable keeps what the conversation rows cannot answer: every frame of a call with no
+// result row yet, and the newest value of each state event. The window read ends where durability ends and
+// the replay starts there, which is why a mid-turn open is owed seconds of stream rather than the turn.
+func (asm *AppStreamManager) trimTaskBufferToUndurable(taskKey string) {
+	asm.taskBufMu.Lock()
+	defer asm.taskBufMu.Unlock()
+	buf, held := asm.taskBuffers[taskKey]
+	if !held {
+		return
+	}
+
+	settled := make(map[string]bool)
+	newestState := map[string]int{}
+	for i, f := range buf {
+		if f.settlesToolID != "" {
+			settled[f.settlesToolID] = true
+		}
+		if !bufferContentFrames[f.bucket] {
+			newestState[f.bucket] = i
+		}
+	}
+	kept := make([]taskFrame, 0, len(buf))
+	loaded := 0
+	for i, f := range buf {
+		running := f.toolID != "" && !settled[f.toolID]
+		latestState := !bufferContentFrames[f.bucket] && newestState[f.bucket] == i
+		if !running && !latestState {
+			continue
+		}
+		kept = append(kept, f)
+		loaded += len(f.data)
+	}
+	if len(kept) == 0 {
+		// Nothing is owed but the rows, so this key gives up its buffer.
+		asm.dropTaskBufferLocked(taskKey)
+		return
+	}
+	asm.taskBuffers[taskKey] = kept
+	asm.taskBufLoad[taskKey] = loaded
+}
+
+// holdsTaskWithoutRowsLocked reports whether any live connection holds this task while declaring it has no
+// rows, which is what stops a trim. The caller holds at least asm.mu.
+func (asm *AppStreamManager) holdsTaskWithoutRowsLocked(taskKey string) bool {
+	for _, client := range asm.clients {
+		if _, ok := client.noRowsTask[taskKey]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// DurableThrough tells the hub that everything the task has said up to now is a conversation row, so its
+// buffer keeps only what no row answers. The executor calls it where a row lands, never at the frame that
+// precedes the row: a `tool_result` frame arrives before its row is written.
+func (asm *AppStreamManager) DurableThrough(projectID, taskID string) {
+	key := projectID + ":" + taskID
+	asm.mu.RLock()
+	owed := asm.holdsTaskWithoutRowsLocked(key)
+	asm.mu.RUnlock()
+	if owed {
+		return
+	}
+	asm.trimTaskBufferToUndurable(key)
+}
+
+func (asm *AppStreamManager) bufferTaskLocked(taskKey string, frame []byte, toolID, settlesToolID, bucket string) {
 	// Skip large frames to prevent memory exhaustion
 	if len(frame) > maxFrameBufferSize {
 		return
@@ -720,7 +841,7 @@ func (asm *AppStreamManager) bufferTaskLocked(taskKey string, frame []byte, tool
 	// Copy frame to avoid aliasing
 	frameCopy := make([]byte, len(frame))
 	copy(frameCopy, frame)
-	buf := append(asm.taskBuffers[taskKey], taskFrame{data: frameCopy, toolID: toolID, bucket: bucket})
+	buf := append(asm.taskBuffers[taskKey], taskFrame{data: frameCopy, toolID: toolID, settlesToolID: settlesToolID, bucket: bucket})
 
 	loaded := asm.taskBufLoad[taskKey] + len(frameCopy)
 	for len(buf) > asm.taskBufSize || (loaded > asm.taskBufBound && len(buf) > 1) {
@@ -842,9 +963,9 @@ func (asm *AppStreamManager) taskBufferFrames(taskKey string) []taskFrame {
 	return frames
 }
 
-func (asm *AppStreamManager) clearTaskBuffer(taskKey string) {
-	asm.taskBufMu.Lock()
-	defer asm.taskBufMu.Unlock()
+// dropTaskBufferLocked retires one task's buffer and removes it from the eviction order, whose keys are
+// always exactly the buffers held. The caller holds asm.taskBufMu.
+func (asm *AppStreamManager) dropTaskBufferLocked(taskKey string) {
 	delete(asm.taskBuffers, taskKey)
 	delete(asm.taskBufLoad, taskKey)
 	for i, key := range asm.taskBufOrder {
@@ -853,6 +974,12 @@ func (asm *AppStreamManager) clearTaskBuffer(taskKey string) {
 			break
 		}
 	}
+}
+
+func (asm *AppStreamManager) clearTaskBuffer(taskKey string) {
+	asm.taskBufMu.Lock()
+	defer asm.taskBufMu.Unlock()
+	asm.dropTaskBufferLocked(taskKey)
 }
 
 // ClearTaskBuffer removes the per-task ring buffer.
@@ -1026,7 +1153,7 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 		case "subscribe_task":
 			var sub AppStreamSubscription
 			if err := json.Unmarshal(input.Data, &sub); err == nil && sub.ProjectID != "" && sub.TaskID != "" {
-				if asm.subscribeTask(conn, sub.ProjectID, sub.TaskID) {
+				if asm.subscribeTask(conn, sub.ProjectID, sub.TaskID, sub.NoRows) {
 					logging.For(logging.Stream).With(logging.TaskID, sub.TaskID).With(logging.ProjectID, sub.ProjectID).
 						Info("subscribed")
 				}

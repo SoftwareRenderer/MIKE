@@ -73,8 +73,30 @@ describe('offline message cache', () => {
         const result = await getTaskMessages('p1', 't1');
 
         expect(result).toEqual({ messages, hasMore: true, before: 'cursor-9' });
-        const cached = await storage.getBoardCache(storage.messagesCacheKey('p1', 't1'));
-        expect(cached).toEqual(result);
+        // The cache is written beside the read, so the entry appears shortly after the window lands.
+        await vi.waitFor(async () => {
+            expect(await storage.getBoardCache(storage.messagesCacheKey('p1', 't1'))).toEqual(result);
+        });
+    });
+
+    it('keeps the rows this browser already saw above a smaller window', async () => {
+        const storage = await import('$lib/storage');
+        const older = Array.from({ length: 8 }, (_, i) => ({
+            id: `old-${i}`, task_id: 't1', thread_id: '', role: 'user', content: `older ${i}`,
+            created_at: `2026-01-01T00:00:0${i}Z`,
+        }));
+        const seed = { messages: older, hasMore: false, before: '' };
+        await storage.setBoardCache(storage.messagesCacheKey('p1', 't1'), seed);
+        mockResolvedFetch(messages, windowHeaders);
+
+        const { getTaskMessages } = await import('$lib/api/tasks');
+        await getTaskMessages('p1', 't1');
+
+        // An offline reload opens on the bigger of the two reads.
+        await vi.waitFor(async () => {
+            const cached = await storage.getBoardCache<any>(storage.messagesCacheKey('p1', 't1'));
+            expect(cached?.messages.map((m: any) => m.id)).toEqual([...older.map(m => m.id), 'm1', 'm2']);
+        });
     });
 
     it('sends the cursor of the window it is asking for', async () => {

@@ -85,7 +85,7 @@
         hasEarlier?: boolean;
         loadingEarlier?: boolean;
         /** Why what is on screen may not be the newest copy of the conversation. */
-        historyNotice?: 'cached' | 'failed' | null;
+        historyNotice?: 'cached' | 'failed' | 'owing' | null;
         /** Ask the server again — what the notice offers beside the fact it reports. */
         onRetryHistory?: () => void;
         /** Fetch the next-older window, called when the reader reaches the top edge. */
@@ -251,8 +251,7 @@
     function handleCombinedScroll() {
         follow.handleScroll();
         computeStickyFromScroll();
-        // Reaching the top edge represents a request for the previous
-        if (chatScrollEl && hasEarlier && !loadingEarlier && atTopOfList(chatScrollEl.scrollTop)) {
+        if (chatScrollEl && hasEarlier && !loadingEarlier && atTopOfList(chatScrollEl.scrollTop, chatScrollEl.clientHeight)) {
             void onLoadEarlier?.();
         }
     }
@@ -315,7 +314,11 @@
 
     {#if historyNotice}
         <p class="history-notice" role="status">
-            {historyNotice === 'cached' ? t('chat.entries.historyCached') : t('chat.entries.historyFailed')}
+            {historyNotice === 'cached'
+                ? t('chat.entries.historyCached')
+                : historyNotice === 'owing'
+                    ? t('chat.entries.historyOwing')
+                    : t('chat.entries.historyFailed')}
             {#if onRetryHistory}
                 <button class="history-notice-retry" onclick={() => onRetryHistory()}>
                     {t('chat.entries.historyRetry')}

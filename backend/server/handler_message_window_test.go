@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -70,7 +71,28 @@ func TestMessagesRouteAnswersTheNewestWindow(t *testing.T) {
 		t.Error("X-Messages-Before is missing while older rows exist")
 	}
 
-	// The default window is the store's, and it covers a thread this small.
+	// The default window is the store's own, and this thread is longer than it.
+	def, headers := readWindow(t, s, path)
+	if len(def) != store.MessageWindowDefault {
+		t.Fatalf("default window holds %d rows, want %d", len(def), store.MessageWindowDefault)
+	}
+	if headers.Get("X-Messages-More") != "true" {
+		t.Errorf("X-Messages-More = %q on a thread longer than the window, want true", headers.Get("X-Messages-More"))
+	}
+}
+
+// A thread shorter than the window is answered whole, and says there is nothing older.
+func TestMessagesRouteAnswersAShortThreadWhole(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Whole")
+	path := "/api/projects/" + projID + "/tasks/" + taskID + "/messages"
+	seedWindow(t, s, projID, taskID, 2)
+	all, err := s.store.GetTaskMessages(taskID, "")
+	if err != nil {
+		t.Fatalf("read the thread: %v", err)
+	}
+
 	whole, headers := readWindow(t, s, path)
 	if len(whole) != len(all) {
 		t.Fatalf("default window holds %d rows, want all %d", len(whole), len(all))
@@ -161,7 +183,7 @@ func TestMessagesRouteRefusesABadWindowRequest(t *testing.T) {
 	}
 }
 
-// A window stays a window: the rows beyond it are not sent.
+// A window stays a window: the rows beyond it are not sent, and the rows it does send are whole answers.
 func TestMessagesWindowHoldsOnlyItsWindow(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
@@ -169,8 +191,8 @@ func TestMessagesWindowHoldsOnlyItsWindow(t *testing.T) {
 	seedWindow(t, s, projID, taskID, 12)
 
 	messages, _ := readWindow(t, s, "/api/projects/"+projID+"/tasks/"+taskID+"/messages?limit=2")
-	if len(messages) > 2+3 {
-		t.Fatalf("window holds %d rows, want the requested window plus one turn at most", len(messages))
+	if len(messages) != 2 {
+		t.Fatalf("window holds %d rows, want the 2 units asked for", len(messages))
 	}
 }
 
@@ -200,5 +222,69 @@ func TestMessagesWindowStillRedacts(t *testing.T) {
 	full, _ := readWindow(t, s, path+"&full=1")
 	if full[len(full)-1].ReasoningContent == "[HIDDEN]" || full[len(full)-1].ReasoningContent == "" {
 		t.Errorf("full=1 lost the reasoning: %q", full[len(full)-1].ReasoningContent)
+	}
+}
+
+// Opening the same task twice asks the same question, so the second answer is a 304 with no body. The
+// handler owns the lifetime and CompressMiddleware owns the digest, so this route sets no ETag of its own.
+func TestMessagesWindowIsStoredThenRevalidated(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Revalidated")
+	path := "/api/projects/" + projID + "/tasks/" + taskID + "/messages"
+	seedWindow(t, s, projID, taskID, 4)
+
+	get := func(url, ifNoneMatch string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := testRequest("GET", url, nil)
+		if ifNoneMatch != "" {
+			req.Header.Set("If-None-Match", ifNoneMatch)
+		}
+		return testResponseAuth(t, s, req)
+	}
+
+	first := get(path, "")
+	if first.Code != http.StatusOK {
+		t.Fatalf("GET %s = %d, want 200: %s", path, first.Code, first.Body.String())
+	}
+	if got := first.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Errorf("Cache-Control = %q, want %q", got, "no-cache")
+	}
+	etag := first.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("the window carried no ETag, so a stored copy could not be revalidated")
+	}
+
+	reopen := get(path, etag)
+	if reopen.Code != http.StatusNotModified {
+		t.Fatalf("reopening an unchanged thread answered %d, want 304", reopen.Code)
+	}
+	if reopen.Body.Len() != 0 {
+		t.Errorf("the 304 carried %d bytes of body", reopen.Body.Len())
+	}
+	for name, want := range map[string]string{"ETag": etag, "Cache-Control": "no-cache"} {
+		if got := reopen.Header().Get(name); got != want {
+			t.Errorf("the 304 repeated %s as %q, want %q", name, got, want)
+		}
+	}
+
+	// A row that lands after the stored copy moves the digest, so the stored copy cannot be shown.
+	seedMessage(t, s, projID, taskID, &types.TaskMessage{Role: "user", Content: "and now this"})
+	moved := get(path, etag)
+	if moved.Code == http.StatusNotModified {
+		t.Fatal("a thread that gained a row still answered 304")
+	}
+	if moved.Header().Get("ETag") == etag {
+		t.Error("the digest did not move when the thread did")
+	}
+
+	// Another window of the same thread is another answer, so it carries another digest.
+	if other := get(path+"?limit=2", "").Header().Get("ETag"); other == etag {
+		t.Error("?limit=2 shares the whole window's digest")
+	}
+
+	// A response holding provider keys is not worth storing anywhere.
+	if got := get("/api/config", "").Header().Get("Cache-Control"); got != "" {
+		t.Errorf("GET /api/config declares Cache-Control %q", got)
 	}
 }

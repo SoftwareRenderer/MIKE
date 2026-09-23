@@ -284,6 +284,65 @@ func TestReplayGoesAheadOfWhatIsAlreadyQueued(t *testing.T) {
 	}
 }
 
+// TestStatsFrameOnAFullReplayKeepsTheConnectionOpen: a replay buffer at the queue's whole bound, plus the
+// sandbox_stats frame every subscriber is owed — the smallest replay that put its own queue over the bound,
+// dropped the oldest frame, and ended the connection that asked for it.
+func TestStatsFrameOnAFullReplayKeepsTheConnectionOpen(t *testing.T) {
+	asm := NewAppStreamManager(nil, nil)
+	t.Cleanup(asm.Close)
+	// A task's replay buffer and a connection's queue share one bound.
+	asm.taskBufSize = 40
+	asm.queueFrames = 40
+	asm.SetSandboxStatsProvider(func(_, _ string) *types.SandboxMemoryStats {
+		return &types.SandboxMemoryStats{CurrentMB: 120, LimitMB: 512}
+	})
+
+	const projectID, taskID = "proj-full", "task-full"
+	for i := 0; i < 50; i++ {
+		asm.SendTaskEvent(projectID, taskID, tokenEvent(fmt.Sprintf("warm-%d", i)))
+	}
+	asm.taskBufMu.Lock()
+	held := len(asm.taskBuffers[projectID+":"+taskID])
+	asm.taskBufMu.Unlock()
+	if held != 40 {
+		t.Fatalf("the buffer holds %d frames, want the queue's whole bound of 40", held)
+	}
+
+	logs, restore := logging.TestSink()
+	defer restore()
+
+	c := dialStream(t, asm)
+	c.sendSubscription(t, "subscribe_task", projectID, taskID)
+
+	saw := map[string]bool{}
+	deadline := time.After(2 * time.Second)
+drain:
+	for {
+		select {
+		case frame, ok := <-c.frames:
+			if !ok {
+				t.Fatalf("the connection that subscribed to a full task buffer was ended, having received %d frames", len(saw))
+			}
+			if data, _ := frame["data"].(map[string]any); data != nil {
+				if text, _ := data["text"].(string); text != "" {
+					saw[text] = true
+				}
+			}
+		case <-deadline:
+			break drain
+		}
+	}
+	if !saw["warm-49"] {
+		t.Error("the replay did not carry the newest frame of the buffer")
+	}
+	if saw["warm-0"] {
+		t.Error("the replay carried the buffer's oldest frame, so it was trimmed at the wrong end")
+	}
+	if !strings.Contains(logs.String(), "replay trimmed") {
+		t.Errorf("a truncated replay went unreported: %s", logs.String())
+	}
+}
+
 // TestAConnectionThatMissedFramesIsEndedSoTheClientResyncs: the app's one resync belongs to a new
 // connection — onConnected(true) drives silentRefresh and TaskChat.loadHistory — so a connection
 // with a hole in it is ended rather than left streaming a view that will never be right.

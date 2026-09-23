@@ -414,3 +414,14 @@ suites, with that error in the log, is a reading about the machine.
   was logged and the refusal path logs nothing, so the observation stands with no explanation. What remains
   established is that a test which starts a sandboxed task and expects a container depends on the gate
   admitting it.
+- **A `t.TempDir()` cleanup failing with `unlinkat …: directory not empty`** means a subprocess is still
+  writing while the removal walks. Two tests carry it here: `backend/exec`'s
+  `TestToolCallWithIntactArgumentsRunsTheSameCommand`, and `backend/server`'s
+  `TestCommitAndDoneMergeConflictSystemMessage` under `make check-race`. The exec one showed once inside
+  `make check` at `-parallel 8` and in 4 of 61 filtered single-test runs on one branch, against 0 of 50 with
+  that branch's new `backend/exec` test file set aside and 0 of 21 at the revision before it. No
+  full-package run of either package shows it. The turn's own goroutine is waited for — the start helper
+  cancels it and waits (`llm_crash_test.go`) — so the writer is something the harness does not join, and a
+  context-less local git call survives that cancel. Unestablished: which call, and why the rate moves with a
+  test file that does not run. A red naming one of these while other packages run concurrently is a reading
+  about the machine — re-run the package alone before believing it, and the single test if that passes.

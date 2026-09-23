@@ -91,13 +91,25 @@ func dialFrameStream(t *testing.T, wsURL string) *frameStream {
 // format. An empty taskID means the project-level variant.
 func (fs *frameStream) sendSubscription(t *testing.T, action, projectID, taskID string) {
 	t.Helper()
-	body := map[string]any{"type": action, "data": map[string]string{"project_id": projectID, "task_id": taskID}}
+	fs.writeFrame(t, map[string]any{"type": action, "data": map[string]any{"project_id": projectID, "task_id": taskID}})
+}
+
+// subscribeTaskWithoutRows takes a task declaring this connection has no conversation rows.
+func (fs *frameStream) subscribeTaskWithoutRows(t *testing.T, projectID, taskID string) {
+	t.Helper()
+	fs.writeFrame(t, map[string]any{"type": "subscribe_task", "data": map[string]any{
+		"project_id": projectID, "task_id": taskID, "no_rows": true,
+	}})
+}
+
+func (fs *frameStream) writeFrame(t *testing.T, body any) {
+	t.Helper()
 	frame, err := json.Marshal(body)
 	if err != nil {
-		t.Fatalf("marshal %s: %v", action, err)
+		t.Fatalf("marshal %v: %v", body, err)
 	}
 	if err := fs.conn.Write(fs.ctx, websocket.MessageText, frame); err != nil {
-		t.Fatalf("write %s: %v", action, err)
+		t.Fatalf("write %v: %v", body, err)
 	}
 }
 
@@ -561,6 +573,187 @@ func TestToolCallDeltaSurvivesAReplayWithNothingToJoinItTo(t *testing.T) {
 
 func tokenText(text string) types.StreamEvent {
 	return types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": text}}
+}
+
+func toolResult(data map[string]any) types.StreamEvent {
+	return types.StreamEvent{Type: types.WSTypeToolResult, Data: data}
+}
+
+// replayEvents names what a subscriber of the task is owed, one entry per frame: the event, plus the call
+// a tool frame belongs to.
+func replayEvents(t *testing.T, asm *AppStreamManager, taskKey string) []string {
+	t.Helper()
+	var names []string
+	for _, frame := range replayedFrames(asm, taskKey) {
+		var envelope struct {
+			Event string `json:"event"`
+			Data  struct {
+				ToolID string `json:"tool_id"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(frame, &envelope); err != nil {
+			t.Fatalf("replayed frame does not read as JSON: %v", err)
+		}
+		name := envelope.Event
+		if envelope.Data.ToolID != "" {
+			name += "/" + envelope.Data.ToolID
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+// TestDurabilityTrimKeepsWhatNoRowAnswers: once the executor marks the conversation durable, the buffer
+// keeps only what no row answers — the call still running, and the newest value of each state event.
+func TestDurabilityTrimKeepsWhatNoRowAnswers(t *testing.T) {
+	asm := NewAppStreamManager(nil, nil)
+	send := func(events ...types.StreamEvent) {
+		for _, e := range events {
+			asm.SendTaskEvent("proj-1", "task-1", e)
+		}
+	}
+
+	send(tokenText("thinking out loud"))
+	send(toolCall(map[string]any{"tool_id": "call_1", "tool_name": "bash", "raw_args": `{"command":"ls"}`}))
+	send(toolResult(map[string]any{"tool_id": "call_1", "output": "a  b  c"}))
+	send(tokenText("and then"))
+	send(toolCall(map[string]any{"tool_id": "call_2", "tool_name": "bash", "raw_args": `{"command":"pwd"}`}))
+	send(toolResult(map[string]any{"tool_id": "call_2", "output": "/tmp"}))
+	// A call whose result has not arrived: no row answers for it yet.
+	send(toolCall(map[string]any{"tool_id": "call_3", "tool_name": "bash", "raw_args": `{"command":"date"}`}))
+	send(
+		types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{"prompt_tokens": 1}},
+		types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{"prompt_tokens": 2}},
+		types.StreamEvent{Type: types.WSTypeQueue, Data: map[string]any{"position": 1}},
+		types.TurnStatusEvent("running", "generating"),
+	)
+
+	asm.DurableThrough("proj-1", "task-1")
+
+	want := []string{
+		"tool_call/call_3",
+		"stats",
+		"queue",
+		"status",
+	}
+	got := replayEvents(t, asm, "proj-1:task-1")
+	if len(got) != len(want) {
+		t.Fatalf("trim left %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("trim left %v, want %v", got, want)
+		}
+	}
+	// The state value it kept is the newest one, not the first.
+	last := replayedFrames(asm, "proj-1:task-1")[1]
+	if data := toolCallArgs(last); data["prompt_tokens"] != float64(2) {
+		t.Fatalf("stats kept %v, want the newest value", data["prompt_tokens"])
+	}
+}
+
+// A buffer the trim empties gives up its slot, so an idle task holds none of the 64 buffers forever.
+func TestDurabilityTrimRetiresABufferWithNothingLeft(t *testing.T) {
+	asm := NewAppStreamManager(nil, nil)
+	asm.SendTaskEvent("proj-1", "task-1", tokenText("x"))
+	asm.SendTaskEvent("proj-1", "task-1", toolCall(map[string]any{"tool_id": "call_1", "tool_name": "bash"}))
+	asm.SendTaskEvent("proj-1", "task-1", toolResult(map[string]any{"tool_id": "call_1", "output": "done"}))
+
+	asm.DurableThrough("proj-1", "task-1")
+
+	if got := len(replayedFrames(asm, "proj-1:task-1")); got != 0 {
+		t.Fatalf("trim left %d frames, want none: every one of them is a row now", got)
+	}
+	if held := len(asm.taskBuffers); held != 0 {
+		t.Fatalf("%d task buffers held after the trim, want the key retired", held)
+	}
+}
+
+// TestAClientWithoutRowsIsOwedWhatATrimWouldDrop: the trim trades replay content for rows the client can
+// read, so it cannot run for a client whose read failed.
+func TestAClientWithoutRowsIsOwedWhatATrimWouldDrop(t *testing.T) {
+	asm := NewAppStreamManager(nil, nil)
+	fs := dialStream(t, asm)
+	fs.subscribeTaskWithoutRows(t, "proj-1", "task-1")
+	awaitNoRowsClaim(t, asm, "proj-1:task-1", true)
+
+	asm.SendTaskEvent("proj-1", "task-1", tokenText("all of it"))
+	asm.SendTaskEvent("proj-1", "task-1", toolCall(map[string]any{"tool_id": "call_1", "tool_name": "bash"}))
+	asm.SendTaskEvent("proj-1", "task-1", toolResult(map[string]any{"tool_id": "call_1", "output": "done"}))
+	asm.DurableThrough("proj-1", "task-1")
+
+	if got := len(replayedFrames(asm, "proj-1:task-1")); got != 3 {
+		t.Fatalf("a client with no rows was trimmed to %d frames, want the whole buffer", got)
+	}
+
+	// Releasing the key releases the claim, so a later trim of that task runs as it does for everyone else.
+	fs.sendSubscription(t, "unsubscribe_task", "proj-1", "task-1")
+	awaitNoRowsClaim(t, asm, "proj-1:task-1", false)
+	asm.DurableThrough("proj-1", "task-1")
+	if got := len(replayedFrames(asm, "proj-1:task-1")); got != 0 {
+		t.Fatalf("after the release the trim left %d frames, want none", got)
+	}
+}
+
+// TestDurabilityTrimLeavesTheUndurableTail keeps the trim's size claim: `go test ./backend/stream -run
+// DurabilityTrimLeaves -v` prints what a 60-iteration turn owed a mid-turn subscriber before and after.
+func TestDurabilityTrimLeavesTheUndurableTail(t *testing.T) {
+	asm := NewAppStreamManager(nil, nil)
+	body := strings.Repeat("func example() int { return 1 }\n", (6<<10)/29)
+	for i := 0; i < 60; i++ {
+		call := fmt.Sprintf("call_%02d", i)
+		asm.SendTaskEvent("proj-1", "task-1", tokenText("thinking about the tree"))
+		asm.SendTaskEvent("proj-1", "task-1", toolCall(map[string]any{"tool_id": call, "tool_name": "edit_file", "raw_args": body}))
+		asm.SendTaskEvent("proj-1", "task-1", toolResult(map[string]any{"tool_id": call, "output": body, "success": true}))
+		asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{"prompt_tokens": i}})
+	}
+	before := measureReplay(asm, "proj-1:task-1")
+
+	// The call the next subscriber is owed: announced, no result row yet.
+	asm.SendTaskEvent("proj-1", "task-1", toolCall(map[string]any{"tool_id": "call_running", "tool_name": "bash", "raw_args": `{"command":"make"}`}))
+	asm.DurableThrough("proj-1", "task-1")
+	after := measureReplay(asm, "proj-1:task-1")
+
+	t.Logf("a mid-turn subscriber was owed %d frames / %d KiB before the trim, %d frames / %d KiB after",
+		before.frames, before.bytes>>10, after.frames, after.bytes>>10)
+	if after.bytes*20 > before.bytes {
+		t.Errorf("the trim left %d of the buffer's %d bytes: the rows already answer the rest", after.bytes, before.bytes)
+	}
+	if got := replayEvents(t, asm, "proj-1:task-1"); len(got) != 2 || got[0] != "stats" || got[1] != "tool_call/call_running" {
+		t.Errorf("after the trim a subscriber is owed %v, want the newest stats and the running call", got)
+	}
+}
+
+type replayFootprint struct{ frames, bytes int }
+
+func measureReplay(asm *AppStreamManager, taskKey string) replayFootprint {
+	var size replayFootprint
+	for _, frame := range replayedFrames(asm, taskKey) {
+		size.frames++
+		size.bytes += len(frame)
+	}
+	return size
+}
+
+// awaitNoRowsClaim waits for the hub to record (or, with want=false, drop) a connection's NoRows claim. A
+// subscribe frame is answered with a replay rather than an ack, so nothing read proves the claim landed.
+func awaitNoRowsClaim(t *testing.T, asm *AppStreamManager, taskKey string, want bool) {
+	t.Helper()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for {
+		asm.mu.RLock()
+		held := asm.holdsTaskWithoutRowsLocked(taskKey)
+		asm.mu.RUnlock()
+		if held == want {
+			return
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("claim on %s = %v, want %v", taskKey, held, want)
+		case <-time.After(time.Millisecond):
+		}
+	}
 }
 
 func toolCall(data map[string]any) types.StreamEvent {

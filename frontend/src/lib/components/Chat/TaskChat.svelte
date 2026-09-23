@@ -26,7 +26,7 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { t } from '$lib/i18n';
     import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
-    import { prependRows, resolveAnchor, anchorScrollDelta, type MeasuredEntry, type ScrollAnchor } from '$lib/utils/chat-window';
+    import { prependRows, resolveAnchor, anchorScrollDelta, noticeForWindowRead, type MeasuredEntry, type ScrollAnchor, type WindowReadNotice } from '$lib/utils/chat-window';
     import { createTabReturn } from '$lib/composables/use-tab-return';
     import ChatForm from './ChatForm.svelte';
     import ChatEntries from './ChatEntries.svelte';
@@ -41,7 +41,9 @@
     // True while the initial conversation history is being fetched
     let historyLoading = $state(false);
     /** Set when the transcript may not be current: read from this device's mirror, or not read at all. */
-    let historyNotice = $state<'cached' | 'failed' | null>(null);
+    let historyNotice = $state<'cached' | 'failed' | 'owing' | null>(null);
+    /** The stream this chat holds its task key on, set while the chat is mounted. */
+    let heldStream: AppStream | null = null;
     /** Rows every window has delivered, oldest first; the transcript is rebuilt from these. */
     let historyRows: TaskMessage[] = [];
     /** Where the next-older window starts, and whether there is one. */
@@ -509,7 +511,8 @@
             historyRows = window.messages;
             earlierCursor = window.before;
             hasEarlier = window.hasMore;
-            historyNotice = isFromCache(window) ? 'cached' : null;
+            historyNotice = noticeForWindowRead(isFromCache(window) ? 'cached' : 'answered', readContext(executionState));
+            declareRows(historyNotice);
             renderHistory(scrollAfter, executionState);
         } catch (e) {
             // Task may have been deleted — clear stale draft
@@ -520,10 +523,21 @@
             }
             // Anything else: what is on screen may be the last thing read, so say that rather than stay
             // silent about a transcript that looks empty.
-            historyNotice = 'failed';
+            historyNotice = noticeForWindowRead('failed', readContext(executionState));
+            declareRows(historyNotice);
         }
         // A queued send has no row, so no read can bring it; the queue is read either way.
         await renderPendingSends();
+    }
+
+    function readContext(executionState: string) {
+        return { holdsTaskKey: heldStream !== null, taskInFlight: taskIsInFlight(executionState) };
+    }
+
+    /** Tell the hub whether this screen has a copy of the conversation: with none, the replay buffer is all
+     * it has and must not be trimmed. Re-declaring what the hub already knows sends nothing. */
+    function declareRows(notice: WindowReadNotice) {
+        heldStream?.subscribeTask(projectId, taskId, notice === 'owing');
     }
 
     /**
@@ -1251,8 +1265,6 @@
         // Run async init in a promise chain; cleanup is returned synchronously.
         let unsubTaskEvent: (() => void) | null = null;
         let unsubViewport: (() => void) | null | undefined = null;
-        /** The stream this chat holds its task key on, and whether the chat is still mounted. */
-        let heldStream: AppStream | null = null;
         let unmounted = false;
         const handleUrlChange = () => syncThreadFromUrl();
         window.addEventListener('urlchanged', handleUrlChange);

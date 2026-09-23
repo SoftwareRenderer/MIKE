@@ -1,6 +1,7 @@
 import type { MemoryAlertAckPayload, Task, TaskMessage } from '../types';
 import { API_BASE, apiFetch, apiError, generateId } from './helpers';
 import { setBoardCache, getBoardCache, messagesCacheKey, messageFullCacheKey } from '../storage';
+import { mergeCachedRows } from '../utils/chat-window';
 import { markCached } from './cache';
 import { REVIEW_STATUS } from '../utils/review-notify';
 import { reviewNotifier } from '../services/review-notifications.svelte';
@@ -195,15 +196,31 @@ export async function getTaskMessages(projectId: string, taskId: string, before 
             hasMore: res.headers.get('X-Messages-More') === 'true',
             before: res.headers.get('X-Messages-Before') ?? '',
         };
-        // Only the newest window is worth caching: paging needs the network anyway, and an older page
-        // left in the cache is what an offline reload would open on.
-        if (!before) setBoardCache(messagesCacheKey(projectId, taskId), window).catch(() => {});
+        // Only the newest window is cached; an older page cached on its own is what a reload would open on.
+        if (!before) widenCache(projectId, taskId, window).catch(() => {});
         return window;
     } catch (e) {
         const cached = await getBoardCache<MessageWindow>(messagesCacheKey(projectId, taskId));
         if (cached) return markCached(cached);
         throw e;
     }
+}
+
+/** Cache a fresh window together with the rows the cache already held above it, so an offline reload opens
+ * on the larger of the two reads. */
+async function widenCache(projectId: string, taskId: string, window: MessageWindow): Promise<void> {
+    const key = messagesCacheKey(projectId, taskId);
+    let merged = window;
+    try {
+        const held = await getBoardCache<MessageWindow>(key);
+        // An entry written by an older build may hold no rows array at all.
+        if (Array.isArray(held?.messages)) {
+            merged = { ...window, messages: mergeCachedRows(window.messages, held.messages) };
+        }
+    } catch {
+        // A cache this browser cannot read is no reason to lose the window it just read.
+    }
+    await setBoardCache(key, merged);
 }
 
 /** Fetch a single message with full content (uncompressed reasoning_content, tool_calls).

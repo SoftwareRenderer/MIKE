@@ -46,6 +46,9 @@ fetch can run on a detached context while the swap stays behind a click; the rou
 - Inbound frames are `stream.AppStreamMessage` (`Data` is `json.RawMessage`). **Outbound** frames are
   flat maps built where they're broadcast (no shared envelope struct in Go) — a `task_event` carries
   `task_id`/`event` beside `data`, so the client reads `msg.task_id`, **not** `msg.data.task_id`.
+- `subscribe_task` carries `no_rows`: this connection holds no conversation rows of its own, so the task's
+  replay buffer is kept whole for it. `docs/reconnection.md → The reload meets the replay buffer` owns that
+  rule and what clears the claim.
 - A frame that is not a JSON object is dropped and reported once (`parseStreamFrame` in
   `api/helpers.ts`, the one reader of both sockets' `onmessage`). A `JSON.parse` throw inside `onmessage`
   is swallowed by the event loop: the frame is lost, the socket stays open, and the app believes it is
@@ -177,42 +180,56 @@ Tests: `backend/server/handler_message_ownership_test.go`, `backend/api/git_diff
 thread: the body stays the flat array of rows (chronological, oldest first) and the window rides two
 response headers — `X-Messages-More`, and `X-Messages-Before`, the opaque cursor that asks for the
 next-older page. Nothing counts the conversation: a row total is a second walk of it, and no client asks
-for one. `?limit=` sizes the window (default 120, ceiling 500; outside that a 400 naming the parameter)
-and `?before=<cursor>` walks back. A cursor the route never issued is a 400, not an empty page: a client
+for one. `?limit=` sizes the window **in units of conversation, not rows**. An assistant row and the
+`tool_call` rows whose `assistant_msg_id` names it are one answer; a user row is one on its own. Opening a
+task wants the newest handful of answers, and the row count of five answers depends on how much tool work
+each one did. Default 5, ceiling 25 — outside that a 400 naming the parameter — and `?before=<cursor>` walks
+back. A cursor the route never issued is a 400, not an empty page: a client
 must not read its own bad token as "no history". `full=1` changes only the redaction, never the window,
 and `GET …/messages/{messageID}` is unchanged.
 
-Two invariants hold the transcript together under paging. **A page never opens in the middle of a turn**:
-the read reaches back to the user row that started the row it cut on, so the newest page carries an
-assistant's text with its own tool cards, and *regenerate* — which deletes from that user row forwards —
-finds something to act on. **The client owns the merge**: `TaskChat` keeps every row it has fetched and
-rebuilds the transcript from all of them (`prependRows` in `$lib/utils/chat-window.ts` dedups by row id),
-so a turn longer than a page is still one entry once both pages are held. **Scrolling is the only
-affordance** — no control asks the reader to fetch anything; the list edge is the request. The scroll
+Two invariants hold the transcript together under paging. **A page never opens on a row it cannot explain**.
+The cut falls at a unit boundary, so a window never starts on a `tool_call` whose assistant row is missing:
+a card is never drawn for a response the page never received. The one case that breaks it is an answer
+holding more rows than the read's own row ceiling, which the read cannot see past; that page opens mid-answer and
+the row that opened the answer arrives on the next page. One turn can hold more answers than a
+window, so a page may open mid-turn. `X-Messages-More` is what says older content exists. **Every row is handed
+over exactly once across the pages.** The cursor names the oldest row this page holds, so the next page
+starts older. Nothing between two reads is skipped or repeated.
+
+**The client owns the merge.** `TaskChat` keeps every row it has fetched and rebuilds the transcript from
+all of them. `prependRows` in `$lib/utils/chat-window.ts` dedups by row id, so a turn longer than a page is
+still one entry once both pages are held. **Scrolling is the only
+affordance** — no control asks the reader to fetch anything. The list edge is the request, and it fires a
+viewport and a half before the reader gets there (`earlierEdgePx`) so the page lands while they are still
+reading toward it.
+
+The scroll
 position is preserved by re-finding the entry under the top edge of the viewport (`data-entry-id`), never
-by a pixel guess, and re-applied over the frames after the insert: entries are `content-visibility: auto`,
-so the rows above report placeholder heights when a page lands and grow after it (measured: one landing
-slid the reader 156 px off their row before this settled). The reader's own scroll ends the settling.
-The offline cache holds **the newest window only**: asking for an older page needs the network anyway, and
-a mid-thread page is the wrong thing to open a task on when the request fails.
+by a pixel guess, and re-applied over the frames after the insert. Entries are `content-visibility: auto`,
+so the rows above report placeholder heights when a page lands and grow after it; measured, one landing
+slid the reader 156 px off their row before this settled. The reader's own scroll ends the settling.
+The offline cache holds **the newest window plus the rows this browser already saw above it**, bounded by
+`CACHED_ROWS_FLOOR`. A window of five answers is fewer rows than an earlier open may have read, and an
+offline reload opens on the bigger of the two. A page fetched by cursor is still not cached on its own —
+that is what the merge is for.
 
-The read walks the covering index for the window's positions (one row further when the cut falls inside a
-turn, and the answer to "is there an older page" is one bounded `EXISTS` on the same index), then fetches
-those rows by `rowid`. The sort, the cut and the redaction pass are therefore proportional to the window,
-not to the thread — a 4 400-row thread went from 14.5 MB and 224 ms to 0.39 MB and 12 ms at the p50, and a
-1 200-row one from 3.9 MB and 126 ms to 0.4 MB and 21 ms.
+The read walks the covering index for the window's positions, then fetches those rows by `rowid`. Positions
+come first, so the cut and the sort run over index entries, and the answer to "is there an older page" is
+one bounded `EXISTS` on the same index. The sort, the cut and the redaction pass are therefore
+proportional to the window, not to the thread.
 
-**The window bounds rows, not bytes.** A conversation of a few enormous rows — the newest 120 rows holding
-18 MB of tool output — is bounded by the same rows either way, so it costs what reading those rows costs
-(measured the same as the whole-thread read, and no more). Keeping that case bounded is a byte budget over
-the window, which this does not have.
+**The window bounds rows, not bytes.** The read takes at most `MessageRowCeiling` positions, which is the
+response guard when the newest few answers are enormous; a conversation of a few rows holding tool output
+costs what reading those rows costs. Keeping that case bounded by bytes is a budget over the window, which
+this does not have.
 
 Tests:
 `backend/store/messages_window_test.go` (including the `EXPLAIN QUERY PLAN` claim),
-`backend/server/handler_message_window_test.go`, `frontend/src/lib/utils/__tests__/chat-window.unit.ts`,
-and `frontend/tests/e2e/chat-window-scroll.spec.ts` for what only a browser answers — that nothing is
-rendered asking the reader to fetch a page, that reaching the top edge fetches it unasked, and that the
-page leaves the reader on the row they were reading.
+`backend/server/handler_message_window_test.go`, `frontend/src/lib/utils/__tests__/chat-window.unit.ts`.
+`frontend/tests/e2e/chat-window-scroll.spec.ts` answers what only a browser can: nothing is rendered asking
+the reader to fetch a page, reaching the top edge fetches it unasked, and the page leaves the reader on the
+row they were reading.
 
 ## Diffs
 
@@ -328,13 +345,16 @@ breaks the extension iframe and the preview's own assets.
 `CompressMiddleware` puts a strong ETag — a digest of the body — on every GET it buffers, and answers
 `If-None-Match` with a 304 that repeats the `ETag` and whatever `Cache-Control` the handler set. A
 handler that sets its **own** `ETag` therefore loses the 304: the middleware skips the `If-None-Match`
-check when a tag is already there. What a handler decides is the lifetime, and the extension lists
-decide `Cache-Control: no-cache` — "keep a copy, ask before showing it" — so Settings → Extensions →
+check when a tag is already there. What a handler decides is the lifetime. The
+extension lists decide `Cache-Control: no-cache` — "keep a copy, ask before showing it" — so Settings → Extensions →
 Browse can paint from a stored index only after this server agreed it has not moved
-(`HandleList`, `HandleRegistryIndex`, `HandleLocalExtensions`). An answer holding arbitrary extension
+(`HandleList`, `HandleRegistryIndex`, `HandleLocalExtensions`). `handleTaskMessages` decides the same
+lifetime: reopening a task asks the same question, and a thread that has not moved answers `304` with no
+body. An answer holding arbitrary extension
 data is not worth storing anywhere, so `GET /api/extensions/{id}/storage` declares no lifetime at all.
 SSE and `GET /api/fs/raw` image bytes are passed through unbuffered and carry no ETag.
-Tests: `backend/server/handler_headers_test.go`, `backend/server/compress_test.go`.
+Tests: `backend/server/handler_headers_test.go`, `backend/server/compress_test.go`,
+`backend/server/handler_message_window_test.go`.
 
 ## WebSocket upgrades
 

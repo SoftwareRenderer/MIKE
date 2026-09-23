@@ -43,7 +43,7 @@ func TestASubscribeDuringATurnNeitherLosesNorRepeatsTheFrame(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			asm.subscribeTask(conn, "proj-race", taskID)
+			asm.subscribeTask(conn, "proj-race", taskID, false)
 		}()
 	}
 	wg.Wait()
