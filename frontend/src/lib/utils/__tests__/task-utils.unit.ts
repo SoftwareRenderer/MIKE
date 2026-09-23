@@ -115,14 +115,20 @@ describe('resolveClosedTaskColumn', () => {
         expect(resolveClosedTaskColumn('done', tasks, 't-2')).toBe('review');
     });
 
-    it('lands on Done when nothing else is in review', () => {
+    it('lands on Backlog when nothing else is in review', () => {
+        const tasks = withStatuses({ 't-1': 'backlog', 't-2': 'done' });
+        expect(resolveClosedTaskColumn('done', tasks, 't-2')).toBe('backlog');
+    });
+
+    it('lands on Backlog rather than In Progress after a Done move', () => {
+        // Deliberately not the project-switch preference, which would answer In Progress.
         const tasks = withStatuses({ 't-1': 'in_progress', 't-2': 'done' });
-        expect(resolveClosedTaskColumn('done', tasks, 't-2')).toBe('done');
+        expect(resolveClosedTaskColumn('done', tasks, 't-2')).toBe('backlog');
     });
 
     it('does not count the task that just closed, whose row still says review', () => {
         const tasks = withStatuses({ 't-1': 'review' });
-        expect(resolveClosedTaskColumn('done', tasks, 't-1')).toBe('done');
+        expect(resolveClosedTaskColumn('done', tasks, 't-1')).toBe('backlog');
     });
 
     it('lands on the task\'s own column for any other status', () => {
