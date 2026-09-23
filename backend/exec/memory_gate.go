@@ -8,58 +8,44 @@ import (
 	"mike/pkg/logging"
 )
 
-// memoryGatePollInterval is the re-check interval when no Release signal arrives.
-// Kept well below DefaultMemSupervisorInterval so a Release-triggered grant beats the supervisor tick.
+// memoryGatePollInterval is how often a waiter re-checks when no Release signal arrives. It stays well
+// under DefaultMemSupervisorInterval so a Release-triggered grant beats the supervisor tick.
 const memoryGatePollInterval = 500 * time.Millisecond
 
-// memWaiter is one goroutine blocked in Acquire. done is buffered so Release can signal without blocking.
+// memWaiter is one goroutine blocked in Acquire. done is buffered so Release can signal without
+// blocking.
 type memWaiter struct {
 	amountMB int64
 	done     chan struct{}
-	// served is set by Release before it signals. It is a wake-up hint; the grant
-	// is confirmed by re-reading used under mu.
+	// served is set by Release before it signals. It is only a hint: the grant is confirmed by
+	// re-reading used under mu.
 	served bool
 }
 
-func (w *memWaiter) signal() {
-	select {
-	case w.done <- struct{}{}:
-	default:
-	}
-}
-
-// MemoryGate is a blocking resource gate counting megabytes, not slots.
-// capacity 0 disables the gate: every Acquire succeeds immediately.
-//
-// Admission is `mikeMB + reservations + candidate <= capacity`, with capacity a percentage of
-// installed RAM. mikeMB is what MIKE's own containers and processes cost — each container at
-// max(held, limit) — so the ceiling is MIKE's share of the machine and the other users of the host are
-// not in the sum. Host free RAM is kept only for HostMemoryTight, which is what pauses tasks when the
-// machine itself is nearly out.
+// MemoryGate is a blocking resource gate counting megabytes, not slots; capacity 0 disables it.
+// Admission is `mikeMB + reservations + candidate <= capacity`, where mikeMB is what MIKE's own
+// containers and processes cost, so the ceiling is MIKE's share of the machine and the other users of
+// the host stay out of the sum.
 type MemoryGate struct {
 	mu       sync.Mutex
-	used     int64 // reservations for tasks that are admitted but have no container yet
+	used     int64 // reserved by tasks admitted but with no container yet
 	capacity int64
-	queue    []*memWaiter
+	queue    waitQueue[*memWaiter]
 
-	mikeMB      int64 // what MIKE's containers and its own process cost the ceiling, limits included
-	heldMB      int64 // what they actually hold, reported beside mikeMB so a cap-dominated budget reads clearly
+	mikeMB      int64 // what MIKE's containers and its own process cost, limits included
+	heldMB      int64 // what they actually hold; reported, never admitted against
 	availableMB int64 // MemAvailable at the last sample
 	totalMB     int64 // MemTotal at the last sample
-	measured    bool  // false until the first sample arrives, while the reservations alone decide
+	measured    bool  // false until the first sample; until then the reservations alone decide
 }
 
-// memoryAvailableFloorPct is the percentage of total RAM below which the host is nearly out, and
-// making a task wait is then how an OOM kill happens: the supervisor pauses one instead. The
-// admission ceiling answers a different question — how much of the machine MIKE may hold — and is set
-// in backend/server from MIKE_MEMORY_BUDGET_PCT.
+// memoryAvailableFloorPct is the share of total RAM below which a task is made to wait rather than the
+// host being pushed into an OOM kill. The admission ceiling answers a different question and is set in
+// backend/server from MIKE_MEMORY_BUDGET_PCT.
 const memoryAvailableFloorPct = 5
 
-// SetMeasurements records one budget tick's readings, and wakes the waiters the new numbers admit.
-// mikeMB is what MIKE's own containers and processes cost (each container at its limit when the limit
-// is the larger figure) and heldMB what they actually hold, which the ceiling does not use but the
-// budget log reports beside it. The two host figures decide only the pause floor. A gate that has never
-// been measured decides from its reservations alone.
+// SetMeasurements records one budget tick's readings. mikeMB is what MIKE's containers and process
+// cost, heldMB what they actually hold; the two host figures decide only the pause floor.
 func (g *MemoryGate) SetMeasurements(mikeMB, heldMB, availableMB, totalMB int64) {
 	g.mu.Lock()
 	g.mikeMB, g.heldMB, g.availableMB, g.totalMB, g.measured = mikeMB, heldMB, availableMB, totalMB, true
@@ -77,9 +63,8 @@ func (g *MemoryGate) HostMemoryTight() bool {
 	return g.availableMB*100 < g.totalMB*memoryAvailableFloorPct
 }
 
-// pressureLocked returns what MIKE itself holds against the ceiling: its containers and processes at
-// their limit. A gate that has never been sampled answers 0 and leaves the decision to the reservation
-// ledger. Caller holds mu.
+// pressureLocked returns what MIKE itself costs the ceiling; a gate that has never been sampled answers
+// 0 and leaves the reservation ledger to decide. Caller holds mu.
 func (g *MemoryGate) pressureLocked() int64 {
 	if !g.measured {
 		return 0
@@ -87,9 +72,8 @@ func (g *MemoryGate) pressureLocked() int64 {
 	return g.mikeMB
 }
 
-// roomLocked reports whether amountMB more fits under the ceiling. Caller holds mu. A candidate of
-// zero size is admitted only while the budget is already under the ceiling, because there is no
-// reservation to test.
+// roomLocked reports whether amountMB more fits under the ceiling; caller holds mu. A zero-size
+// candidate is admitted only while the budget is already under the ceiling.
 func (g *MemoryGate) roomLocked(amountMB int64) bool {
 	if g.capacity == 0 {
 		return true
@@ -108,10 +92,9 @@ func (g *MemoryGate) SetCapacity(capMB int64) {
 	g.mu.Unlock()
 }
 
-// Acquire blocks until amountMB are available, or ctx is cancelled.
-// A zero/negative amountMB or capacity 0 succeeds immediately.
-// On grant the caller owns amountMB and must call Release with the same amount;
-// on cancellation the caller owns nothing and must not call Release.
+// Acquire blocks until amountMB are available or ctx is cancelled; a non-positive amount and a capacity
+// of 0 succeed at once. On grant the caller owns amountMB and must Release the same amount; on
+// cancellation it owns nothing.
 func (g *MemoryGate) Acquire(ctx context.Context, amountMB int64, onEnqueued func(*memWaiter)) error {
 
 	g.mu.Lock()
@@ -126,7 +109,7 @@ func (g *MemoryGate) Acquire(ctx context.Context, amountMB int64, onEnqueued fun
 	}
 
 	w := &memWaiter{amountMB: amountMB, done: make(chan struct{}, 1)}
-	g.queue = append(g.queue, w)
+	g.queue.push(w)
 	g.mu.Unlock()
 
 	if onEnqueued != nil {
@@ -135,12 +118,12 @@ func (g *MemoryGate) Acquire(ctx context.Context, amountMB int64, onEnqueued fun
 
 	for {
 		g.mu.Lock()
-		idx := g.indexOfLocked(w)
+		idx := g.queue.index(w)
 		if idx == -1 {
 			served := w.served
 			g.mu.Unlock()
 			if served {
-				// Release already bumped used for us. If ctx cancelled in the same window, give it back.
+				// Release took this amount already. If ctx ended in the same window, give it back.
 				if ctx.Err() != nil {
 					g.Release(amountMB)
 					return ctx.Err()
@@ -155,7 +138,7 @@ func (g *MemoryGate) Acquire(ctx context.Context, amountMB int64, onEnqueued fun
 
 		front := g.frontLocked()
 		if front == idx && g.roomLocked(amountMB) {
-			g.removeLocked(w)
+			g.queue.remove(w)
 			g.used += amountMB
 			g.mu.Unlock()
 			if ctx.Err() != nil {
@@ -173,7 +156,7 @@ func (g *MemoryGate) Acquire(ctx context.Context, amountMB int64, onEnqueued fun
 		case <-ctx.Done():
 			timer.Stop()
 			g.mu.Lock()
-			// Release may have served us between the last check and this cancel; return the slot.
+			// Release may have served us between the last check and this cancel.
 			if w.served {
 				g.used -= amountMB
 				if g.used < 0 {
@@ -182,7 +165,7 @@ func (g *MemoryGate) Acquire(ctx context.Context, amountMB int64, onEnqueued fun
 				g.mu.Unlock()
 				return ctx.Err()
 			}
-			g.removeLocked(w)
+			g.queue.remove(w)
 			g.mu.Unlock()
 			return ctx.Err()
 		case <-timer.C:
@@ -190,8 +173,8 @@ func (g *MemoryGate) Acquire(ctx context.Context, amountMB int64, onEnqueued fun
 	}
 }
 
-// Release returns amountMB to the pool and signals the front waiter if there is now room.
-// Releasing more than was acquired clamps to zero rather than going negative.
+// Release returns amountMB to the pool and serves the front waiter when there is room. Releasing more
+// than was acquired clamps to zero.
 func (g *MemoryGate) Release(amountMB int64) {
 	if amountMB <= 0 {
 		return
@@ -203,13 +186,13 @@ func (g *MemoryGate) Release(amountMB int64) {
 		g.used = 0
 	}
 	if idx := g.frontLocked(); idx != -1 {
-		w := g.queue[idx]
+		w := g.queue.entries[idx]
 		if g.roomLocked(w.amountMB) {
-			g.removeLocked(w)
+			g.queue.remove(w)
 			g.used += w.amountMB
 			w.served = true
 			g.mu.Unlock()
-			w.signal()
+			wake(w.done)
 			return
 		}
 	}
@@ -230,9 +213,8 @@ func (g *MemoryGate) InUse() int64 {
 	return g.pressureLocked() + g.used
 }
 
-// BudgetSnapshot is one read of everything the gate decides and reports with, taken under the lock: a
-// struct because the figures travel together to one log line, and a positional return of this many
-// megabytes is a mistake waiting to be made.
+// BudgetSnapshot is one read of everything the gate decides and reports with, taken under the lock. The
+// figures travel to one log line together.
 type BudgetSnapshot struct {
 	CapacityMB     int64
 	InUseMB        int64 // MikeMB + ReservationsMB
@@ -263,34 +245,14 @@ func (g *MemoryGate) Budget() BudgetSnapshot {
 func (g *MemoryGate) QueueLen() int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return len(g.queue)
+	return g.queue.Len()
 }
 
-// indexOfLocked returns the index of w in g.queue, or -1. Caller must hold g.mu.
-func (g *MemoryGate) indexOfLocked(w *memWaiter) int {
-	for i, e := range g.queue {
-		if e == w {
-			return i
-		}
-	}
-	return -1
-}
-
-// frontLocked returns 0 if the queue is non-empty, else -1.
-// Every waiter in the queue is live: served and cancelled entries are removed under mu before returning.
+// frontLocked returns 0 when the queue holds a waiter, else -1. Every entry in it is live: served and
+// cancelled entries are removed under mu.
 func (g *MemoryGate) frontLocked() int {
-	if len(g.queue) == 0 {
+	if len(g.queue.entries) == 0 {
 		return -1
 	}
 	return 0
-}
-
-// removeLocked removes w from the queue. Caller must hold g.mu.
-func (g *MemoryGate) removeLocked(w *memWaiter) {
-	for i, e := range g.queue {
-		if e == w {
-			g.queue = append(g.queue[:i], g.queue[i+1:]...)
-			return
-		}
-	}
 }

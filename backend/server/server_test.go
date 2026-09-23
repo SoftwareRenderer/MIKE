@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -99,7 +98,7 @@ func testServerWithAssets(t *testing.T, assets fs.FS, mutate func(*startup.Confi
 	if err != nil {
 		t.Fatalf("create test server: %v", err)
 	}
-	t.Cleanup(func() { _ = s.Shutdown(context.TODO()) })
+	t.Cleanup(func() { _ = s.Shutdown() })
 	return s
 }
 

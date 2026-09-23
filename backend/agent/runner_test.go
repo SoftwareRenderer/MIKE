@@ -342,7 +342,6 @@ func TestEventTypes(t *testing.T) {
 		agent.EventTypeStats,
 		agent.EventTypeError,
 		agent.EventTypePersist,
-		agent.EventTypeTurnComplete,
 	}
 	seen := make(map[string]bool)
 	for _, typ := range types {
@@ -481,7 +480,6 @@ func TestPersistEntry_Serialization(t *testing.T) {
 		ModelName:        "test-model",
 		PromptTokens:     100,
 		PredictedTokens:  50,
-		Duration:         1500,
 	}
 
 	data, err := json.Marshal(entry)
