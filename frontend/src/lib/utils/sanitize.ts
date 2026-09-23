@@ -88,6 +88,16 @@ export function sanitizeHTML(html: string, forbidTags?: readonly string[]): stri
  */
 const RENDERED_FENCE_TAG = 'markdown';
 
+/** The first word of a fence's info string, which is the whole string; `marked` keeps its case. */
+export function fenceTag(lang: string | undefined): string {
+    return lang?.trim().split(/\s+/)[0] ?? '';
+}
+
+/** Whether a fence names the rendered document rather than a language to show. */
+export function isRenderedFence(lang: string | undefined): boolean {
+    return fenceTag(lang).toLowerCase() === RENDERED_FENCE_TAG;
+}
+
 /** Markdown parsed the default way, for inside a rendered fence. With no renderer of its own, a
  * `RENDERED_FENCE_TAG` fence in there is source again, so one block costs one parse. */
 const plainMarkdown = new Marked({ async: false });
@@ -97,8 +107,7 @@ const plainMarkdown = new Marked({ async: false });
 const embeddingMarkdown = new Marked({ async: false }).use({
     renderer: {
         code({ lang, text }) {
-            // `lang` is the whole info string, not just the tag.
-            if (lang?.trim().split(/\s+/)[0].toLowerCase() !== RENDERED_FENCE_TAG) return false;
+            if (!isRenderedFence(lang)) return false;
             return plainMarkdown.parse(text, { async: false });
         },
     },

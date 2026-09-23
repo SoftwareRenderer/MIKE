@@ -1,11 +1,13 @@
 <script lang="ts">
-    import { markdownToSafeHTML } from '$lib/utils/sanitize';
     import ToolCall from './ToolCall.svelte';
     import MessageActions from './MessageActions.svelte';
+    import MarkdownBody from './MarkdownBody.svelte';
     import EditForm from './EditForm.svelte';
     import ReasoningBlock from './ReasoningBlock.svelte';
     import MessageStats from './MessageStats.svelte';
     import { formatTimestamp } from '$lib/utils/format-time';
+    import { escapeHtml } from '$lib/utils/format';
+    import { copyText } from '$lib/utils/clipboard';
     import { computeInterleavedLayout } from '$lib/utils/chat-layout';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { imageSrc } from '$lib/utils/attachments';
@@ -87,38 +89,10 @@
 
     let timestampInfo = $derived(timestamp ? formatTimestamp(timestamp) : { display: '', tooltip: '' });
 
-    // Memoized markdown / HTML rendering — avoids re-parsing on unrelated state changes
-    const renderCache = new Map<string, string>();
-    const CACHE_MAX = 100;
-
-    function memoizedRender(role: string, content: string): string {
-        const key = role + '\x00' + content;
-        const cached = renderCache.get(key);
-        if (cached !== undefined) return cached;
-        let result: string;
-        if (role === 'user') {
-            result = content.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
-        } else {
-            result = markdownToSafeHTML(content);
-        }
-        if (renderCache.size >= CACHE_MAX) {
-            const firstKey = renderCache.keys().next().value;
-            if (firstKey) renderCache.delete(firstKey);
-        }
-        renderCache.set(key, result);
-        return result;
-    }
-
-    // Markdown rendering
-    let renderedHtml = $derived(
-        (role === 'assistant' || role === 'system')
-            ? memoizedRender(role, content || '')
-            : ''
-    );
-
+    // The person's own text is escaped, never parsed: it says what was typed, markdown included.
     let userHtml = $derived(
         role === 'user'
-            ? memoizedRender('user', content)
+            ? escapeHtml(content).replace(/\n/g, '<br>')
             : ''
     );
 
@@ -134,23 +108,8 @@
     }
 
     async function handleCopy() {
-        try {
-            await navigator.clipboard.writeText(content);
-        } catch {
-            try {
-                const textarea = document.createElement('textarea');
-                textarea.value = content;
-                textarea.style.position = 'fixed';
-                textarea.style.opacity = '0';
-                document.body.appendChild(textarea);
-                textarea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textarea);
-            } catch (err) {
-                console.error('Failed to copy to clipboard:', err);
-            }
-        }
-        copied = true;
+        copied = await copyText(content);
+        if (!copied) return;
         setTimeout(() => copied = false, 2000);
     }
 
@@ -413,7 +372,7 @@
     {#if interleavedLayout!.trailingContent}
         <div class="message-bubble assistant-bubble">
             <div class="message-text" class:streaming={isStreaming}>
-                {@html memoizedRender('assistant', interleavedLayout!.trailingContent)}
+                <MarkdownBody content={interleavedLayout!.trailingContent} />
                 {#if isStreaming}
                     <span class="cursor-blink"></span>
                 {/if}
@@ -445,7 +404,7 @@
     {#if content}
         <div class="message-bubble assistant-bubble">
             <div class="message-text" class:streaming={isStreaming}>
-                {@html renderedHtml}
+                <MarkdownBody {content} />
                 {#if isStreaming}
                     <span class="cursor-blink"></span>
                 {/if}
