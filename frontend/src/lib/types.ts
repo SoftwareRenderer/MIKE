@@ -190,6 +190,7 @@ export interface ChatEntry {
         originalBytes?: number;
         messageId?: string;
         success?: boolean;
+        interrupted?: boolean; // stopped by a user message, not a failure
         duration?: number;
         isPending?: boolean;
         bytesWritten?: number;

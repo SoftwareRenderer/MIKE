@@ -976,7 +976,8 @@ type turnOutcome int
 const (
 	// turnWaitIdle: the turn is settled; block for the user before the next LLM call.
 	turnWaitIdle turnOutcome = iota
-	// turnNextLLMCall: tool results (or a summarization) are in the context; call the LLM now.
+	// turnNextLLMCall: the context is ready for another call - tool results or a summarization
+	// landed, or a user message interrupted the turn's tool calls and the loop folds it in next.
 	turnNextLLMCall
 	// turnStop: the run is over - cancelled, failed, loop-detected or max-turns reached. The
 	// reason is already persisted and broadcast by the branch that decided it.
@@ -1055,6 +1056,12 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 		hadGitCmd := false
 		hadRequestReview := false // request_review detected in this turn
 
+		// What cancelling this kills, and what it must never reach, is in toolCallContext.
+		toolCtx, cancelTools := toolCallContext(setup)
+		defer cancelTools()
+		// A task stop is a stop, and its own path reports it; only a message is an interrupt.
+		interrupted := func() bool { return toolCtx.Err() != nil && setup.ctx.Err() == nil }
+
 		for _, tc := range lc.pendingToolCalls {
 			if tc.ID == "" || tc.Function.Name == "" {
 				logging.For(logging.Tools).Infof("skipping incomplete tool call (id=%q, name=%q)", tc.ID, tc.Function.Name)
@@ -1105,22 +1112,27 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 			refusal := unparseableToolArgs(tc.Function.Arguments, args)
 			var result string
 			var success bool
-			var toolStart time.Time
+			toolStart := time.Now()
 			streamed := false
-			if refusal != "" {
-				result, success = refusal, false
+			// skipped: nothing ran, so nothing was committed, touched or put up for review.
+			skipped := false
+			wasInterrupted := false
+			switch {
+			case interrupted():
+				result, success, skipped, wasInterrupted = interruptedToolResult, false, true, true
+			case refusal != "":
+				result, success, skipped = refusal, false, true
 				logging.For(logging.Tools).With(logging.TaskID, setup.task.ID).Warnf("refused %s: arguments that did not decode", tc.Function.Name)
-			} else {
+			default:
 				// tool_call event already sent during streaming, just execute and send result
 				logging.For(logging.Tools).Infof("executing %s for setup.task=%s", tc.Function.Name, setup.task.ID)
-				toolStart = time.Now()
 				te.taskMu.Lock()
 				state := te.tasks[setup.task.ID]
 				te.taskMu.Unlock()
 				// runToolProtected holds the worktree lock for this block and turns a panic
 				// into a failed result, so the tool_result below is always sent and stored.
 				result, success = te.runToolProtected(setup.task.ID, tc.Function.Name, func() (string, bool) {
-					result, success := te.executeTool(setup.ctx, tc.Function.Name, args, setup.worktreePath, setup.task, state, func(toolID string, text string) {
+					result, success := te.executeTool(toolCtx, tc.Function.Name, args, setup.worktreePath, setup.task, state, func(toolID string, text string) {
 						streamed = true
 						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolOutput, Data: map[string]any{"tool_id": tc.ID, "text": text}})
 					})
@@ -1139,17 +1151,23 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 					}
 					return result, success
 				})
+				if interrupted() {
+					// A killed call answers what a skipped one does, and its partial output goes with
+					// the stop.
+					result, success, wasInterrupted = interruptedToolResult, false, true
+				}
 			}
 			toolDuration := time.Since(toolStart).Milliseconds()
 			isSandboxed := (lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)) || isLSPTool(tc.Function.Name)
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: buildToolResultEvent(tc.ID, tc.Function.Name, result, success, toolDuration, args, tc.Function.Arguments, extractPathFromArgs(tc.Function.Arguments), isSandboxed, streamed, toolCallMsgID)})
+			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: buildToolResultEvent(tc.ID, tc.Function.Name, result, success, wasInterrupted, toolDuration, args, tc.Function.Arguments, extractPathFromArgs(tc.Function.Arguments), isSandboxed, streamed, toolCallMsgID)})
 			toolResults = append(toolResults, toolResult{toolCallID: tc.ID, output: result, messageID: toolCallMsgID, args: args, rawArgs: tc.Function.Arguments, success: success, duration: toolDuration})
 
 			// Update tool_call message with result after execution completes.
 			resultJSON, _ := json.Marshal(map[string]any{
-				"output":   result,
-				"success":  success,
-				"duration": toolDuration,
+				"output":      result,
+				"success":     success,
+				"interrupted": wasInterrupted,
+				"duration":    toolDuration,
 			})
 			if err := te.store.UpdateTaskMessageToolResult(toolCallMsgID, string(resultJSON)); err != nil {
 				// The row keeps an empty result, which the chat renders as still running.
@@ -1163,8 +1181,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 				success:   success,
 			})
 
-			if refusal != "" {
-				// Nothing ran, so nothing was committed, touched or put up for review.
+			if skipped {
 				continue
 			}
 
@@ -1182,6 +1199,15 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 		// Post-tool git check: broadcast diff if a git command changed the state
 		if hadGitCmd {
 			te.broadcastDiffIfGitCmd(setup.projectID, setup.task.ID, setup.task)
+		}
+
+		if interrupted() {
+			// Nothing this turn started gets settled: no failure counted, no question awaited, no
+			// commit, merge or Done, and the armed commit-and-done click stays armed. The message that
+			// stopped it is still queued, so the next iteration folds it in before the provider runs.
+			logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("user message interrupted the turn's tool calls")
+			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("cancelled", "Response cancelled, processing new message"))
+			return turnNextLLMCall
 		}
 
 		// ask_question: auto-started tasks auto-answer from parent context and
@@ -1219,7 +1245,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 							te.rowsDurable(setup.projectID, setup.task.ID)
 						}
 						// Re-broadcast so the UI shows the answer in place.
-						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: buildToolResultEvent(tr.toolCallID, llama.ToolAskQuestion, tr.output, tr.success, tr.duration, tr.args, tr.rawArgs, "", false, false, tr.messageID)})
+						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: buildToolResultEvent(tr.toolCallID, llama.ToolAskQuestion, tr.output, tr.success, false, tr.duration, tr.args, tr.rawArgs, "", false, false, tr.messageID)})
 					}
 					autoAnswered = true
 					logging.For(logging.Tools).With(logging.TaskID, setup.task.ID).Infof("auto-answered %d question(s) from parent context", len(answers))
@@ -1919,16 +1945,17 @@ func logStatsSpeed(taskID, model string, processedTokens, predictedTokens, promp
 // buildToolResultEvent constructs the data payload for a WSTypeToolResult event.
 // For bash and read_file tools, the output is truncated to ~1KB/10 lines with
 // metadata about the full output. For all other tools, the full output is sent.
-func buildToolResultEvent(toolID, toolName, result string, success bool, duration int64,
+func buildToolResultEvent(toolID, toolName, result string, success, interrupted bool, duration int64,
 	args map[string]any, rawArgs, path string, sandbox, streamed bool, messageID string) map[string]any {
 	data := map[string]any{
-		"tool_id":  toolID,
-		"success":  success,
-		"duration": duration,
-		"args":     args,
-		"raw_args": rawArgs,
-		"path":     path,
-		"sandbox":  sandbox,
+		"tool_id":     toolID,
+		"success":     success,
+		"interrupted": interrupted,
+		"duration":    duration,
+		"args":        args,
+		"raw_args":    rawArgs,
+		"path":        path,
+		"sandbox":     sandbox,
 	}
 
 	if toolName == llama.ToolBash || toolName == llama.ToolReadFile {

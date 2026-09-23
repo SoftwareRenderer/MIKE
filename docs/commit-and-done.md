@@ -22,6 +22,11 @@ merge/commit half of `backend/exec/merge.go`.
   running `git add`, which is git's signal that the conflict is resolved, and these are the person's own
   words. A merge that failed *and* conflicted on the restore is not this — `mergeInto` classifies on
   whether the merge landed, never on what the joined error contains.
+- **A message that stops the turn stops the click with it.** A `request_review` inside an interrupted
+  turn commits nothing: `finalizeTurn` (`backend/exec/loop.go`) leaves the turn as soon as a call was
+  interrupted, which is before the commit/merge/Done block, and the armed click stays armed for the turn
+  that finishes the work. Test: `TestInterruptedTurnDoesNotCommitOrFinish`
+  (`backend/exec/interrupt_tool_call_test.go`).
 - **Tests:** `task_test.go` (`TestHandleCommitAndDone_ExcludesUnstagedFiles`,
   `TestHandleCommitAndDone_ArmsClickForConflictResolution`,
   `TestHandleCommitAndDone_DoneWhenOnlyTheProjectOwnsTheConflict`), `backend/exec/merge_restore_test.go`

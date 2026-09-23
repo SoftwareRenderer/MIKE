@@ -68,6 +68,43 @@ describe('StreamState', () => {
     });
 });
 
+// Only the frame's own field tells a stopped call from a failed one: success is false for both, and
+// the card colours them yellow and red.
+describe('tool_result interrupted flag', () => {
+    function setup() {
+        const stream = new StreamState();
+        const handleEvent = createStreamHandler(stream, makeCallbacks());
+        return { stream, handleEvent };
+    }
+
+    it('marks the call that was stopped, including one that never started', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-1', tool_name: 'bash', args: { command: 'make build' } } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-2', tool_name: 'bash', args: { command: 'make test' } } }, false);
+
+        handleEvent({ type: 'tool_result', data: { tool_id: 'tc-1', success: false, interrupted: true, output: 'Interrupted', duration: 12 } }, false);
+        handleEvent({ type: 'tool_result', data: { tool_id: 'tc-2', success: false, interrupted: true, output: 'Interrupted', duration: 0 } }, false);
+
+        const [first, second] = stream.state.entries[0].toolCalls!;
+        expect(first.interrupted).toBe(true);
+        expect(first.success).toBe(false);
+        expect(first.result).toBe('Interrupted');
+        expect(first.isPending).toBe(false);
+        expect(second.interrupted).toBe(true);
+        expect(second.isPending).toBe(false);
+    });
+
+    it('clears the flag on a call that settled, so a card cannot stay yellow', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-3', tool_name: 'bash', args: { command: 'make build' } } }, false);
+        handleEvent({ type: 'tool_result', data: { tool_id: 'tc-3', success: true, interrupted: false, output: 'built', duration: 12 } }, false);
+
+        expect(stream.state.entries[0].toolCalls![0].interrupted).toBe(false);
+    });
+});
+
 describe('tool_result truncation metadata', () => {
     function setup() {
         const cb = makeCallbacks();

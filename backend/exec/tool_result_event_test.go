@@ -7,13 +7,37 @@ import (
 
 // --- buildToolResultEvent Tests ---
 
+// The card has to tell a call the user stopped from one that failed, which is more than success
+// says, so the frame carries the distinction and always carries it.
+func TestBuildToolResultEvent_Interrupted(t *testing.T) {
+	interrupted := buildToolResultEvent("call_i", "bash", interruptedToolResult, false, true, 12,
+		map[string]any{"command": "sleep 120"},
+		`{"command":"sleep 120"}`,
+		"", false, true, "msg-i")
+	if interrupted["interrupted"] != true {
+		t.Errorf("interrupted = %v, want true", interrupted["interrupted"])
+	}
+	if interrupted["success"] != false {
+		t.Error("an interrupted call is not a successful one")
+	}
+
+	settled := buildToolResultEvent("call_ok", "bash", "done", true, false, 12,
+		map[string]any{"command": "true"},
+		`{"command":"true"}`,
+		"", false, false, "msg-ok")
+	if settled["interrupted"] != false {
+		t.Errorf("interrupted = %v, want false: the key is always present so the frame shape is stable",
+			settled["interrupted"])
+	}
+}
+
 func TestBuildToolResultEvent_BashStreamed(t *testing.T) {
 	// Large bash output that will be truncated
 	largeOutput := strings.Repeat("line of output text\n", 20)
 	msgID := "test-msg-id-123"
 	toolID := "call_abc123"
 
-	data := buildToolResultEvent(toolID, "bash", largeOutput, true, 150,
+	data := buildToolResultEvent(toolID, "bash", largeOutput, true, false, 150,
 		map[string]any{"command": "ls -la"},
 		`{"command":"ls -la"}`,
 		"", false, true, msgID)
@@ -65,7 +89,7 @@ func TestBuildToolResultEvent_BashNotStreamed(t *testing.T) {
 	msgID := "test-msg-id-456"
 	toolID := "call_def456"
 
-	data := buildToolResultEvent(toolID, "bash", largeOutput, true, 200,
+	data := buildToolResultEvent(toolID, "bash", largeOutput, true, false, 200,
 		map[string]any{"command": "cat file.txt"},
 		`{"command":"cat file.txt"}`,
 		"/path/to/file", true, false, msgID)
@@ -95,7 +119,7 @@ func TestBuildToolResultEvent_BashShortOutput(t *testing.T) {
 	msgID := "test-msg-short"
 	toolID := "call_short"
 
-	data := buildToolResultEvent(toolID, "bash", shortOutput, true, 50,
+	data := buildToolResultEvent(toolID, "bash", shortOutput, true, false, 50,
 		map[string]any{"command": "echo hello"},
 		`{"command":"echo hello"}`,
 		"", false, true, msgID)
@@ -118,7 +142,7 @@ func TestBuildToolResultEvent_ReadFileStreamed(t *testing.T) {
 	msgID := "readfile-msg"
 	toolID := "call_read"
 
-	data := buildToolResultEvent(toolID, "read_file", largeContent, true, 10,
+	data := buildToolResultEvent(toolID, "read_file", largeContent, true, false, 10,
 		map[string]any{"path": "src/large.ts"},
 		`{"path":"src/large.ts"}`,
 		"src/large.ts", false, true, msgID)
@@ -150,7 +174,7 @@ func TestBuildToolResultEvent_ReadFileNotStreamed(t *testing.T) {
 	msgID := "readfile-not-streamed"
 	toolID := "call_read2"
 
-	data := buildToolResultEvent(toolID, "read_file", largeContent, true, 5,
+	data := buildToolResultEvent(toolID, "read_file", largeContent, true, false, 5,
 		map[string]any{"path": "src/file.ts"},
 		`{"path":"src/file.ts"}`,
 		"src/file.ts", false, false, msgID)
@@ -173,7 +197,7 @@ func TestBuildToolResultEvent_ReadFileShort(t *testing.T) {
 	msgID := "read-short"
 	toolID := "call_read_short"
 
-	data := buildToolResultEvent(toolID, "read_file", shortContent, true, 3,
+	data := buildToolResultEvent(toolID, "read_file", shortContent, true, false, 3,
 		map[string]any{"path": "main.go"},
 		`{"path":"main.go"}`,
 		"main.go", false, false, msgID)
@@ -196,7 +220,7 @@ func TestBuildToolResultEvent_WriteFile(t *testing.T) {
 	msgID := "writefile-msg"
 	toolID := "call_write"
 
-	data := buildToolResultEvent(toolID, "write_file", output, true, 50,
+	data := buildToolResultEvent(toolID, "write_file", output, true, false, 50,
 		map[string]any{"path": "src/large-file.ts", "content": "long content..."},
 		`{"path":"src/large-file.ts","content":"long content..."}`,
 		"src/large-file.ts", false, false, msgID)
@@ -222,7 +246,7 @@ func TestBuildToolResultEvent_EditFile(t *testing.T) {
 	msgID := "editfile-msg"
 	toolID := "call_edit"
 
-	data := buildToolResultEvent(toolID, "edit_file", output, true, 30,
+	data := buildToolResultEvent(toolID, "edit_file", output, true, false, 30,
 		map[string]any{"path": "src/file.ts"},
 		`{"path":"src/file.ts"}`,
 		"src/file.ts", false, false, msgID)
@@ -241,7 +265,7 @@ func TestBuildToolResultEvent_RequestReview(t *testing.T) {
 	msgID := "review-msg"
 	toolID := "call_review"
 
-	data := buildToolResultEvent(toolID, "request_review", output, true, 0,
+	data := buildToolResultEvent(toolID, "request_review", output, true, false, 0,
 		map[string]any{},
 		`{}`,
 		"", false, false, msgID)
@@ -260,7 +284,7 @@ func TestBuildToolResultEvent_AskQuestion(t *testing.T) {
 	msgID := "ask-msg"
 	toolID := "call_ask"
 
-	data := buildToolResultEvent(toolID, "ask_question", output, true, 0,
+	data := buildToolResultEvent(toolID, "ask_question", output, true, false, 0,
 		map[string]any{"question": "What framework should I use?"},
 		`{"question":"What framework should I use?"}`,
 		"", false, false, msgID)
@@ -279,7 +303,7 @@ func TestBuildToolResultEvent_UnknownTool(t *testing.T) {
 	msgID := "unknown-msg"
 	toolID := "call_unknown"
 
-	data := buildToolResultEvent(toolID, "mystery_tool", output, false, 0,
+	data := buildToolResultEvent(toolID, "mystery_tool", output, false, false, 0,
 		map[string]any{},
 		`{}`,
 		"", false, false, msgID)
@@ -303,7 +327,7 @@ func TestBuildToolResultEvent_BashWithArgs(t *testing.T) {
 	args := map[string]any{"command": "ls -la /tmp", "timeout": float64(30)}
 	rawArgs := `{"command":"ls -la /tmp","timeout":30}`
 
-	data := buildToolResultEvent(toolID, "bash", largeOutput, true, 100,
+	data := buildToolResultEvent(toolID, "bash", largeOutput, true, false, 100,
 		args, rawArgs, "", false, true, msgID)
 
 	argsData, ok := data["args"].(map[string]any)
@@ -324,7 +348,7 @@ func TestBuildToolResultEvent_BashSingleLongLine(t *testing.T) {
 	msgID := "longline-msg"
 	longLine := strings.Repeat("x", 2000)
 
-	data := buildToolResultEvent(toolID, "bash", longLine, true, 50,
+	data := buildToolResultEvent(toolID, "bash", longLine, true, false, 50,
 		map[string]any{"command": "echo long"},
 		`{"command":"echo long"}`,
 		"", false, false, msgID)
@@ -356,7 +380,7 @@ func TestBuildToolResultEvent_BashEmptyOutput(t *testing.T) {
 	toolID := "call_empty"
 	msgID := "empty-msg"
 
-	data := buildToolResultEvent(toolID, "bash", "", true, 10,
+	data := buildToolResultEvent(toolID, "bash", "", true, false, 10,
 		map[string]any{"command": "true"},
 		`{"command":"true"}`,
 		"", false, true, msgID)

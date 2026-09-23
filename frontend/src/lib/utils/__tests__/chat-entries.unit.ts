@@ -547,6 +547,21 @@ describe('buildEntriesFromMessages', () => {
         expect(entries[0].toolCalls![0].toolId).toBe('t1');
     });
 
+    // A reload reads the stored row: without the flag, a call the user stopped comes back as a red
+    // Failed.
+    it('restores the interrupted flag from the stored tool result', () => {
+        const messages = [
+            { id: 'a1', role: 'assistant', content: 'thinking', created_at: '2025-01-01T00:00:00Z' },
+            { id: 'tc1', role: 'tool_call', content: '', created_at: '2025-01-01T00:00:01Z', tool_calls: JSON.stringify({ tool_id: 't1', tool_name: 'bash', args: { command: 'make build' } }), tool_result: JSON.stringify({ output: 'Interrupted', success: false, interrupted: true, duration: 12 }) },
+            { id: 'tc2', role: 'tool_call', content: '', created_at: '2025-01-01T00:00:02Z', tool_calls: JSON.stringify({ tool_id: 't2', tool_name: 'read_file', args: { path: 'foo.ts' } }), tool_result: JSON.stringify({ output: 'content', success: true, duration: 50 }) },
+        ];
+        const { entries } = buildEntriesFromMessages(messages);
+        const byId = (id: string) => entries[0].toolCalls!.find(tc => tc.toolId === id);
+        expect(byId('t1')!.interrupted).toBe(true);
+        expect(byId('t1')!.result).toBe('Interrupted');
+        expect(byId('t2')!.interrupted).toBe(false);
+    });
+
     it('parses string attachments', () => {
         const messages = [
             { id: 'u1', role: 'user', content: 'see image', created_at: '2025-01-01T00:00:00Z', attachments: JSON.stringify([{ mimeType: 'image/png', data: 'base64data' }]) },

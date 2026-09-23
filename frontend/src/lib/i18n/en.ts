@@ -1435,6 +1435,7 @@ const catalog = {
     'chat.tool.writingBytes': 'Writing: {bytes}',
     'chat.tool.writingPathBytes': 'Writing: {path}: {bytes}',
     'chat.tool.failed': 'Failed',
+    'chat.tool.interrupted': 'Interrupted',
     'chat.tool.completed': 'Completed',
     'chat.tool.sandboxed': 'Sandboxed',
     'chat.tool.notSandboxed': 'Not sandboxed',

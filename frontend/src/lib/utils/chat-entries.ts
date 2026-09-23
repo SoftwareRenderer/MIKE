@@ -252,6 +252,7 @@ export function buildEntriesFromMessages(
                     originalBytes: result?.original_bytes,
                     messageId: m.id,
                     success: result?.success ?? true,
+                    interrupted: result?.interrupted === true,
                     duration: result?.duration,
                     isPending,
                     startedAt,

@@ -84,6 +84,25 @@ state and clears when the retried call streams (`clearAwaiting`) or when the tur
 call never reached `finalizeTurn`, which is what persists it — so the client drops the half-streamed
 text with `dropAbandonedTurn()` and the retry streams the answer in its place.
 
+### A tool call the user stopped says so in a field
+
+A user message does not queue behind the tool call that is running. `toolCallContext`
+(`backend/exec/interrupt.go`) cancels the context one turn's tool calls run on: a command dies with its
+process group, and the calls that have not started never start. Every call of that turn answers
+`Interrupted` — the killed one and each one that never ran — because the assistant row already asked
+for them, and the card and the provider are both waiting on a result.
+
+`tool_result` carries `interrupted` beside `success` because `success: false` covers a crash and a stop
+alike, and the card colours them differently (green, red, yellow). The same key rides the row's
+`tool_result` JSON, so a reload keeps the colour. An interrupted turn settles nothing: no failure
+counted, no question awaited, no commit, merge or Done (`docs/commit-and-done.md`). The message that
+stopped it is the next call's input.
+
+A task stop is not a message. It cancels the wider context, so the call reports the command failing and
+the run ends instead of looping. Tests: `TestUserMessageInterruptsRunningToolCall` and
+`TestStoppingATaskIsNotAnInterrupt` (`backend/exec/interrupt_tool_call_test.go`),
+`TestBuildToolResultEvent_Interrupted`, `stream-handler.unit.ts`, `chat-entries.unit.ts`.
+
 ## Provider routing
 
 `PUT /api/config` is a partial update with two required pairs:

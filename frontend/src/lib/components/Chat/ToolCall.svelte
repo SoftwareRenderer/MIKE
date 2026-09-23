@@ -30,6 +30,7 @@
             path?: string;
             result?: string;
             success?: boolean;
+            interrupted?: boolean; // the user's message stopped it; yellow, not red
             isPending?: boolean;
             sandbox?: boolean;
             duration?: number;
@@ -440,10 +441,13 @@
         undefined
     );
     let timeoutBadge = $derived(bashTimeout !== undefined ? t('chat.tool.timeout', { elapsed: formatElapsed(bashTimeout * 1000) }) : '');
+
+    // A stopped call is already yellow in the header, so its text is not painted as a failure.
+    let resultIsError = $derived(!tc.success && !tc.interrupted);
 </script>
 
 <div class="tool-call-entry">
-    <div class="tool-call-card" style="border-left-color: {tc.isPending ? 'var(--color-accent)' : (tc.success ? 'var(--color-status-green)' : 'var(--color-status-red)')}">
+    <div class="tool-call-card" style="border-left-color: {tc.isPending ? 'var(--color-accent)' : tc.interrupted ? 'var(--color-status-yellow)' : (tc.success ? 'var(--color-status-green)' : 'var(--color-status-red)')}">
         <div class="tool-call-header">
             {#if tc.sandbox}
                 <Icon class="tool-sandbox-icon" src={shieldGreenIcon} color="var(--color-status-green)" width={14} height={14} title={t('chat.tool.sandboxed')} />
@@ -483,6 +487,8 @@
             {/if}
             {#if tc.isPending}
                 <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{progressText}</span></span>
+            {:else if tc.interrupted}
+                <span class="tool-status interrupted">{t('chat.tool.interrupted')}</span>
             {:else if !tc.success}
                 <span class="tool-status error">{t('chat.tool.failed')}</span>
             {:else}
@@ -521,7 +527,7 @@
                     {/each}
                 </div>
             {/if}
-            {#if !tc.success && tc.result && tc.result.trim()}
+            {#if resultIsError && tc.result && tc.result.trim()}
                 <pre class="tool-result tool-result-error">{tc.result}</pre>
             {/if}
             {#if tc.duration !== undefined}
@@ -547,7 +553,7 @@
                     </button>
                 </div>
             {:else}
-                <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
+                <pre class="tool-result" class:tool-result-error={resultIsError}>{tc.result}</pre>
             {/if}
         {:else if tc.toolName === 'edit_task' && tc.result}
             {#if editResult && editResult.task_id && editResult.title}
@@ -556,7 +562,7 @@
                     <span class="edit-task-title">{editResult.title as string}</span>
                 </div>
             {:else}
-                <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
+                <pre class="tool-result" class:tool-result-error={resultIsError}>{tc.result}</pre>
             {/if}
         {:else if tc.toolName === 'view_tasks' && tc.result}
             {#if viewTasksResult !== null}
@@ -573,7 +579,7 @@
                     {/each}
                 </div>
             {:else}
-                <pre class="tool-result" class:tool-result-error={!tc.success}>{tc.result}</pre>
+                <pre class="tool-result" class:tool-result-error={resultIsError}>{tc.result}</pre>
             {/if}
         {:else if tc.toolName === 'ask_question' && tc.args && tc.args.question}
             <div class="tool-result tool-result-question">{@html renderedQuestionHtml}</div>
@@ -588,13 +594,13 @@
         {:else if tc.result && tc.result.trim()}
             {#if resultNeedsTruncation}
                 <div class="tool-result-wrapper">
-                    <pre class="tool-result" class:tool-result-error={!tc.isPending && !tc.success} class:tool-result-expanded={resultExpanded} bind:this={scrollEl} onscroll={handleResultScroll}>{#if resultLoading}{t('chat.common.loading')}{:else}{resultExpanded ? effectiveResult : getTruncatedResult(effectiveResult)}{/if}</pre>
+                    <pre class="tool-result" class:tool-result-error={!tc.isPending && resultIsError} class:tool-result-expanded={resultExpanded} bind:this={scrollEl} onscroll={handleResultScroll}>{#if resultLoading}{t('chat.common.loading')}{:else}{resultExpanded ? effectiveResult : getTruncatedResult(effectiveResult)}{/if}</pre>
                     <button class="tool-result-expand" onclick={() => handleResultToggle()} aria-expanded={resultExpanded} disabled={resultLoading}>
                         {resultLoading ? t('chat.common.loading') : (resultExpanded ? t('chat.tool.collapse') : t('chat.tool.showAll', { lines: bashResultStats.lineCount, size: bashResultStats.fullLength > 1024 ? (bashResultStats.fullLength / 1024).toFixed(1) + 'KB' : bashResultStats.fullLength + 'B' }))}
                     </button>
                 </div>
             {:else}
-                <pre class="tool-result" class:tool-result-error={!tc.isPending && !tc.success} bind:this={scrollEl} onscroll={handleResultScroll}>{effectiveResult}</pre>
+                <pre class="tool-result" class:tool-result-error={!tc.isPending && resultIsError} bind:this={scrollEl} onscroll={handleResultScroll}>{effectiveResult}</pre>
             {/if}
         {/if}
         {#if tc.duration !== undefined && tc.toolName !== 'request_review' && tc.toolName !== 'ask_question' && tc.toolName !== 'edit_file'}
@@ -676,6 +682,7 @@
     .lines-added { color: var(--color-status-green); }
     .lines-removed { color: var(--color-status-red); }
     .tool-status.error { color: var(--color-status-red); }
+    .tool-status.interrupted { color: var(--color-status-yellow); }
     .tool-status.success { color: var(--color-status-green); }
     .spinner {
         display: inline-block;

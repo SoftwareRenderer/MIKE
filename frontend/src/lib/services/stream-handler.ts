@@ -178,7 +178,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 break;
             }
             case 'tool_result': {
-                const data = event.data as { tool_id: string; success: boolean; output: string; duration: number; args?: Record<string, unknown>; raw_args?: string; sandbox?: boolean; path?: string; result_truncated?: boolean; original_lines?: number; original_bytes?: number; streamed?: boolean; message_id?: string };
+                const data = event.data as { tool_id: string; success: boolean; interrupted?: boolean; output: string; duration: number; args?: Record<string, unknown>; raw_args?: string; sandbox?: boolean; path?: string; result_truncated?: boolean; original_lines?: number; original_bytes?: number; streamed?: boolean; message_id?: string };
                 // Resolve the live tool call: the ref's entryId may have been invalidated
                 // by a history reload, and then the result would be dropped with the card
                 // left "Running" forever.
@@ -199,6 +199,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                         tc.result = data.output;
                     }
                     tc.success = data.success;
+                    tc.interrupted = data.interrupted === true;
                     tc.duration = data.duration;
                     tc.isPending = false;
                     if (data.args) tc.args = data.args;

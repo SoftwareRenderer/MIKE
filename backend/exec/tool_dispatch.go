@@ -12,6 +12,7 @@ import (
 
 	"mike/backend/config"
 	"mike/backend/extensions"
+	"mike/backend/fsutil"
 	"mike/backend/git"
 	"mike/backend/llama"
 	"mike/backend/store"
@@ -187,7 +188,9 @@ func (e *toolEnv) hostWrite() writeFunc {
 		if err := os.MkdirAll(filepath.Dir(norm), 0o700); err != nil {
 			return err
 		}
-		return os.WriteFile(norm, []byte(c), 0o644)
+		// Atomic: an interrupted write costs the temporary, never the file. Both watchers skip
+		// fsutil's temporary names.
+		return fsutil.WriteFileAtomic(norm, []byte(c))
 	}
 }
 

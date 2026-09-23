@@ -151,9 +151,13 @@ func (te *TaskExecutor) newLlamaClient(serverURL, modelName, reasoningEffort, ap
 //     this state through the map already holds it.
 //   - ctx, cancel and the channels are set once at construction, so they need no lock.
 type executionState struct {
-	ctx             context.Context
-	cancel          context.CancelFunc
-	userMsgChan     chan stream.UserMessage
+	ctx         context.Context
+	cancel      context.CancelFunc
+	userMsgChan chan stream.UserMessage
+	// msgWake hints that userMsgChan grew; nothing is read off it as a message, so the executor
+	// goroutine stays that channel's only consumer, and a stale hint interrupts nothing because a
+	// waiter re-reads the channel.
+	msgWake         chan struct{}
 	summarizeCh     chan *summarizeRequest // send a request, receives result via resultCh
 	activeSummarize struct {
 		mu      sync.Mutex
@@ -1134,6 +1138,7 @@ type taskExecSetup struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	userMsgChan    chan stream.UserMessage
+	msgWake        chan struct{}          // hints that userMsgChan grew; see executionState.msgWake
 	summarizeCh    chan *summarizeRequest // channel for manual summarization requests
 	initialContent string                 // user message content for lazy-start (empty for normal start)
 	regenerate     bool
@@ -1280,6 +1285,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 
 	ctx, cancel := context.WithCancel(context.Background())
 	userMsgChan := make(chan stream.UserMessage, 16)
+	msgWake := make(chan struct{}, 1)
 	summarizeCh := make(chan *summarizeRequest, 16)
 
 	project, err := te.store.GetProject(projectID)
@@ -1313,7 +1319,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	}
 	doneCh := make(chan struct{})
 	finishedCh := make(chan struct{})
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, projectName: project.Name, sandboxEnabled: project.SandboxEnabled, executorType: execType, done: doneCh, finished: finishedCh}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, msgWake: msgWake, summarizeCh: summarizeCh, projectName: project.Name, sandboxEnabled: project.SandboxEnabled, executorType: execType, done: doneCh, finished: finishedCh}
 	te.taskMu.Unlock()
 
 	return &taskExecSetup{
@@ -1326,6 +1332,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		ctx:            ctx,
 		cancel:         cancel,
 		userMsgChan:    userMsgChan,
+		msgWake:        msgWake,
 		summarizeCh:    summarizeCh,
 		sandboxEnabled: project.SandboxEnabled,
 		sandboxOpts: sandbox.SandboxOpts{
@@ -1415,6 +1422,7 @@ func (te *TaskExecutor) getAgentRunner(projectID, taskID string) (*agent.AgentRu
 		ctx:            setup.ctx,
 		cancel:         setup.cancel,
 		userMsgChan:    setup.userMsgChan,
+		msgWake:        setup.msgWake,
 		summarizeCh:    setup.summarizeCh,
 		agentRunner:    runner,
 		projectName:    setup.project.Name,
@@ -1716,6 +1724,7 @@ func (te *TaskExecutor) ForwardUserMessage(projectID, taskID string, um stream.U
 		}
 		select {
 		case state.userMsgChan <- um:
+			wake(state.msgWake) // a turn mid-tool-call interrupts on this
 		default:
 			logging.For(logging.Exec).With(logging.TaskID, taskID).Infof("channel full, dropping message")
 		}
@@ -1747,6 +1756,7 @@ func (te *TaskExecutor) NotifyContextChanged(taskID string) {
 	}
 	select {
 	case state.userMsgChan <- stream.UserMessage{ContextChanged: true}:
+		wake(state.msgWake)
 	default:
 		logging.For(logging.Exec).With(logging.TaskID, taskID).Infof("channel full, dropping notification")
 	}
