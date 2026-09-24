@@ -468,7 +468,6 @@ func (te *TaskExecutor) automatedAnswers(ctx context.Context, subtask *types.Tas
 	systemPrompt, userPrompt, err := prompts.RenderAnswerQuestionPrompt(prompts.AnswerQuestionData{
 		ParentTitle:  parent.Title,
 		ParentPrompt: parent.Prompt,
-		SubtaskTitle: subtask.Title,
 		Questions:    questions,
 	})
 	if err != nil {
@@ -1106,10 +1105,9 @@ func (te *TaskExecutor) InitTask(projectID, taskID string) (*types.Task, error) 
 	return task, nil
 }
 
-// pinBaselineAndWatch records the base ref's commit hash and starts diff watching on it.
-// The hash is taken now because a fast-forward merge moves the branch pointer, and a
-// done-task diff needs the original commit. Watching the commit keeps card stats matching
-// the panel. Both are no-ops without a base ref.
+// pinBaselineAndWatch records the base ref's commit hash and starts diff watching on the worktree. The
+// hash is taken now because a fast-forward merge moves the branch pointer, and a done-task diff needs the
+// original commit.
 func (te *TaskExecutor) pinBaselineAndWatch(projectID string, task *types.Task) {
 	if task.BaseCommit == "" && task.BaseRef != "" {
 		if project, _ := te.store.GetProject(projectID); project != nil {
@@ -1120,11 +1118,7 @@ func (te *TaskExecutor) pinBaselineAndWatch(projectID string, task *types.Task) 
 		}
 	}
 
-	watchBaseRef := task.BaseRef
-	if task.BaseCommit != "" {
-		watchBaseRef = task.BaseCommit
-	}
-	te.appStreamMgr.WatchWorktree(task.ID, projectID, watchBaseRef)
+	te.appStreamMgr.WatchWorktree(task.ID, projectID)
 }
 
 // taskExecSetup holds the shared state prepared for task execution.

@@ -130,7 +130,7 @@ func TestNoOverlayRendersCoreBytesForEveryEntryPoint(t *testing.T) {
 	})
 
 	t.Run("answer question pair", func(t *testing.T) {
-		data := AnswerQuestionData{ParentTitle: "PT", SubtaskTitle: "ST", Questions: []string{"Q1"}}
+		data := AnswerQuestionData{ParentTitle: "PT", ParentPrompt: "PP", Questions: []string{"Q1"}}
 		sys, user, err := RenderAnswerQuestionPrompt(data)
 		if err != nil {
 			t.Fatalf("render: %v", err)

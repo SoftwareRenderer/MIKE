@@ -26,6 +26,13 @@ func addToolExtension(t *testing.T, es *ExtensionStore, id, name, address string
 	return ext
 }
 
+// What the registry withheld, and why. Production reads only the offered half and logs this one at
+// debug, so the question is asked here.
+func withheld(reg *ToolRegistry) []ToolProblem {
+	_, problems := reg.survey()
+	return problems
+}
+
 // The offer needs the extension enabled and pointed at an address.
 func TestToolRegistryOffersConfiguredExtension(t *testing.T) {
 	es := testStore(t)
@@ -34,7 +41,7 @@ func TestToolRegistryOffersConfiguredExtension(t *testing.T) {
 
 	offered := reg.Contributed()
 	if len(offered) != 1 {
-		t.Fatalf("offered %d tools, want 1: %+v", len(offered), reg.Unmet())
+		t.Fatalf("offered %d tools, want 1: %+v", len(offered), withheld(reg))
 	}
 	spec := offered[0].Spec
 	if spec.Name != "web_search" || spec.DisplayName != "Search" || spec.Extension != "searxng" {
@@ -64,7 +71,7 @@ func TestToolRegistryWithholds(t *testing.T) {
 		if offered := reg.Contributed(); len(offered) != 0 {
 			t.Fatalf("an extension with no address offered %+v", offered)
 		}
-		unmet := reg.Unmet()
+		unmet := withheld(reg)
 		if len(unmet) != 1 || !strings.Contains(unmet[0].Reason, "set base_url") {
 			t.Fatalf("unmet = %+v, want the reason naming base_url", unmet)
 		}
@@ -91,7 +98,7 @@ func TestToolRegistryWithholds(t *testing.T) {
 		if offered := reg.Contributed(); len(offered) != 0 {
 			t.Fatalf("a trailing-slash address offered %+v", offered)
 		}
-		if unmet := reg.Unmet(); len(unmet) != 1 || !strings.Contains(unmet[0].Reason, "trailing slash") {
+		if unmet := withheld(reg); len(unmet) != 1 || !strings.Contains(unmet[0].Reason, "trailing slash") {
 			t.Fatalf("unmet = %+v, want the address's own refusal", unmet)
 		}
 	})
@@ -101,7 +108,7 @@ func TestToolRegistryWithholds(t *testing.T) {
 		addToolExtension(t, es, "ext-search", "searxng", "https://searx.example", func(tool *ToolConfig) {
 			tool.Name = "bash"
 		})
-		unmet := NewToolRegistry(es).Unmet()
+		unmet := withheld(NewToolRegistry(es))
 		if len(unmet) != 1 || !strings.Contains(unmet[0].Reason, "core tool") {
 			t.Fatalf("unmet = %+v, want the core-name refusal", unmet)
 		}
@@ -119,7 +126,7 @@ func TestToolRegistryWithholds(t *testing.T) {
 		if len(offered) != 1 || offered[0].Spec.Extension != "alpha-search" {
 			t.Fatalf("offered = %+v, want the first extension's tool only", offered)
 		}
-		unmet := reg.Unmet()
+		unmet := withheld(reg)
 		if len(unmet) != 1 || !strings.Contains(unmet[0].Reason, "already contributes") {
 			t.Fatalf("unmet = %+v, want the duplicate-name reason", unmet)
 		}
@@ -135,7 +142,7 @@ func TestToolRegistryWithholds(t *testing.T) {
 	// A registry with nothing behind it is a normal state (an executor built without one), not a crash.
 	t.Run("nil registry", func(t *testing.T) {
 		var reg *ToolRegistry
-		if len(reg.Contributed()) != 0 || len(reg.Unmet()) != 0 {
+		if len(reg.Contributed()) != 0 || len(withheld(reg)) != 0 {
 			t.Error("a nil registry answered with something")
 		}
 		if _, ok := reg.Lookup("web_search"); ok {

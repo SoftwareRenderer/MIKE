@@ -261,7 +261,6 @@ func RenderSummarizePrompt(data SummarizeData) (string, string, error) {
 type AnswerQuestionData struct {
 	ParentTitle  string   // parent task title
 	ParentPrompt string   // parent task description/prompt (the context to answer from)
-	SubtaskTitle string   // the subtask asking the questions
 	Questions    []string // all questions asked in this turn, in order
 }
 

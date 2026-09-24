@@ -43,13 +43,11 @@ type diffCacheUpdateFn func(taskID string, taskDiff *git.TaskDiff)
 type diffJob struct {
 	taskID    string
 	projectID string
-	baseRef   string
 }
 
 type worktreeInfo struct {
 	projectID   string
 	path        string
-	baseRef     string
 	gitIndexDir string              // git index dir (in main repo for worktrees)
 	ignoredDirs map[string]struct{} // hardcoded + git-ignored directory names
 }
@@ -113,8 +111,9 @@ func NewWorktreeWatcher(worktreeMgr *git.WorktreeManager, broadcast diffBroadcas
 	return ww, nil
 }
 
-// Watch starts monitoring a task's worktree directory for file changes.
-func (ww *WorktreeWatcher) Watch(taskID, projectID, baseRef string) error {
+// Watch starts monitoring a task's worktree directory for file changes. The diff baseline is not part of a
+// watch: a thread can fork, or the target branch move, while the watch is live.
+func (ww *WorktreeWatcher) Watch(taskID, projectID string) error {
 	path, err := ww.worktreeMgr.WorktreePath(taskID)
 	if err != nil {
 		return err
@@ -139,7 +138,6 @@ func (ww *WorktreeWatcher) Watch(taskID, projectID, baseRef string) error {
 	ww.worktrees[taskID] = worktreeInfo{
 		projectID:   projectID,
 		path:        path,
-		baseRef:     baseRef,
 		ignoredDirs: ignored,
 	}
 
@@ -240,7 +238,7 @@ func (ww *WorktreeWatcher) isClosed() bool {
 
 // scheduleDiff queues a diff compute for the task. It re-arms while a compute is in flight rather than
 // drop the pending change, which would leave the diff panel stale until the next filesystem event.
-func (ww *WorktreeWatcher) scheduleDiff(taskID, projectID, baseRef string) {
+func (ww *WorktreeWatcher) scheduleDiff(taskID, projectID string) {
 	ww.mu.Lock()
 	if ww.isClosed() {
 		ww.mu.Unlock()
@@ -248,7 +246,7 @@ func (ww *WorktreeWatcher) scheduleDiff(taskID, projectID, baseRef string) {
 	}
 	if ww.inFlight[taskID] {
 		ww.throttles[taskID] = time.AfterFunc(250*time.Millisecond, func() {
-			ww.scheduleDiff(taskID, projectID, baseRef)
+			ww.scheduleDiff(taskID, projectID)
 		})
 		ww.mu.Unlock()
 		return
@@ -258,7 +256,7 @@ func (ww *WorktreeWatcher) scheduleDiff(taskID, projectID, baseRef string) {
 	ww.mu.Unlock()
 
 	select {
-	case ww.jobCh <- diffJob{taskID: taskID, projectID: projectID, baseRef: baseRef}:
+	case ww.jobCh <- diffJob{taskID: taskID, projectID: projectID}:
 	default:
 		ww.mu.Lock()
 		delete(ww.inFlight, taskID)
@@ -396,10 +394,9 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 	}
 
 	projectID := info.projectID
-	baseRef := info.baseRef
 
 	ww.throttles[taskID] = time.AfterFunc(1000*time.Millisecond, func() {
-		ww.scheduleDiff(taskID, projectID, baseRef)
+		ww.scheduleDiff(taskID, projectID)
 	})
 	ww.mu.Unlock()
 }
@@ -412,14 +409,14 @@ func (ww *WorktreeWatcher) worker() {
 			if !ok {
 				return
 			}
-			ww.computeAndBroadcast(job.taskID, job.projectID, job.baseRef)
+			ww.computeAndBroadcast(job.taskID, job.projectID)
 		case <-ww.doneCh:
 			return
 		}
 	}
 }
 
-func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string) {
+func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID string) {
 	defer func() {
 		ww.mu.Lock()
 		delete(ww.inFlight, taskID)
@@ -427,6 +424,7 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 	}()
 
 	task, err := ww.worktreeMgr.GetTaskByID(taskID)
+	baseRef := ww.worktreeMgr.TaskDiffBaseline(task)
 	headRef := ""
 	if err == nil && task.Status == types.StatusDone {
 		headRef = task.BranchTip
@@ -455,7 +453,9 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 
 	newHashes := diffResult.GetPerFileHashes()
 	changedHashes, removedFiles := computeDiffDelta(taskID, newHashes, diffResult, &ww.diffCache)
-	if ww.updateCache != nil {
+	// A done task's diff is BaseCommit..BranchTip, not the working tree, so it is not the answer the
+	// per-file route should give.
+	if ww.updateCache != nil && headRef == "" {
 		ww.updateCache(taskID, diffResult)
 	}
 

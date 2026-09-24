@@ -193,10 +193,7 @@ func TestResolveDiffBaseline_RejectsFatalBaseRef(t *testing.T) {
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	// A "fatal:" baseRef should be treated as empty
-	result, err := wm.ResolveDiffBaseline(taskID, "fatal: Needed a single revision", "task/test-task", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	result := wm.resolveDiffBaseline(taskID, "fatal: Needed a single revision", "task/test-task", "")
 	if result != "" {
 		t.Errorf("expected empty string for fatal baseRef, got %q", result)
 	}
@@ -206,10 +203,7 @@ func TestResolveDiffBaseline_ValidBaseRef(t *testing.T) {
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	// A valid baseRef should be returned as-is (original thread)
-	result, err := wm.ResolveDiffBaseline(taskID, "master", "task/test-task", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	result := wm.resolveDiffBaseline(taskID, "master", "task/test-task", "")
 	if result != "master" {
 		t.Errorf("expected master, got %q", result)
 	}
@@ -318,28 +312,28 @@ func TestResolveTaskBaseline_Usability(t *testing.T) {
 	task := &types.Task{Branch: "task/baseline-check"}
 
 	// No recorded baseline → divergence point.
-	if got := wm.ResolveTaskBaseline(repoDir, mainBranch, task); got != forkPoint {
+	if got := wm.resolveTaskBaseline(repoDir, mainBranch, task); got != forkPoint {
 		t.Errorf("empty baseline = %q, want divergence point %q", got, forkPoint)
 	}
 
 	// Base == the task's own branch (structurally empty diff) → divergence point.
 	own := *task
 	own.BaseRef = "task/baseline-check"
-	if got := wm.ResolveTaskBaseline(repoDir, mainBranch, &own); got != forkPoint {
+	if got := wm.resolveTaskBaseline(repoDir, mainBranch, &own); got != forkPoint {
 		t.Errorf("own-branch baseline = %q, want divergence point %q", got, forkPoint)
 	}
 
 	// Custom base name that doesn't exist in the repo → divergence point.
 	missing := *task
 	missing.BaseRef = "explore/idea"
-	if got := wm.ResolveTaskBaseline(repoDir, mainBranch, &missing); got != forkPoint {
+	if got := wm.resolveTaskBaseline(repoDir, mainBranch, &missing); got != forkPoint {
 		t.Errorf("missing-branch baseline = %q, want divergence point %q", got, forkPoint)
 	}
 
 	// A valid, different base is kept as-is.
 	valid := *task
 	valid.BaseRef = mainBranch
-	if got := wm.ResolveTaskBaseline(repoDir, mainBranch, &valid); got != mainBranch {
+	if got := wm.resolveTaskBaseline(repoDir, mainBranch, &valid); got != mainBranch {
 		t.Errorf("valid baseline = %q, want %q", got, mainBranch)
 	}
 
@@ -347,14 +341,14 @@ func TestResolveTaskBaseline_Usability(t *testing.T) {
 	hash := *task
 	hash.BaseRef = "explore/idea"
 	hash.BaseCommit = forkPoint
-	if got := wm.ResolveTaskBaseline(repoDir, mainBranch, &hash); got != forkPoint {
+	if got := wm.resolveTaskBaseline(repoDir, mainBranch, &hash); got != forkPoint {
 		t.Errorf("BaseCommit should win, got %q", got)
 	}
 
 	// A task without a branch passes the recorded baseline through untouched
 	// (nothing to resolve a divergence point against).
 	noBranch := &types.Task{BaseRef: "explore/idea"}
-	if got := wm.ResolveTaskBaseline(repoDir, mainBranch, noBranch); got != "explore/idea" {
+	if got := wm.resolveTaskBaseline(repoDir, mainBranch, noBranch); got != "explore/idea" {
 		t.Errorf("no-branch baseline = %q, want pass-through %q", got, "explore/idea")
 	}
 }
@@ -404,7 +398,7 @@ func TestCreateWorktree_EarlyReturn_SanitizesFatalBranch(t *testing.T) {
 	// But we need to test the "fatal:" case specifically
 	// Since we can't easily mock gitCurrentBranch, we verify the logic by
 	// checking that the early return path sanitizes the value.
-	// The actual sanitization is tested via ResolveDiffBaseline above.
+	// The actual sanitization is tested via resolveDiffBaseline above.
 	// Here we just verify the early return works without error.
 	_, baseRef, err := wm.CreateWorktree("test-project", taskID, branchName, "")
 	if err != nil {
@@ -1402,7 +1396,7 @@ func TestGetTaskDiff_StagedFileWithBaseRef(t *testing.T) {
 	t.Logf("unstaged diff:\n%s", unstaged)
 	t.Logf("staged diff:\n%s", staged)
 
-	// Use "master" as baseRef (like ResolveDiffBaseline returns)
+	// Use "master" as baseRef (like resolveDiffBaseline returns)
 	result, err := wm.GetTaskDiff(taskID, "master", "")
 	if err != nil {
 		t.Fatalf("GetTaskDiff: %v", err)

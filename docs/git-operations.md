@@ -139,6 +139,24 @@ checkout every other Review Changes button writes to.
 - Tests: `backend/api/git_discard_test.go`, the discard block of `git-status-panel.unit.svelte.ts`,
   `review-changes-discard.spec.ts`.
 
+## A task's diff has one baseline
+
+`(*WorktreeManager).TaskDiffBaseline(task)` (`backend/git/diff.go`) is the only way this repo names the ref a
+task's diff, commit list and diff stats are computed against. It reads the task, its project and its current
+thread, and returns one string. The chain is the commit pinned in `BaseCommit` at task start else `BaseRef`;
+the divergence point when that ref resolves to nothing; then the merge-base with the thread's branch when the
+thread was forked off the task branch. No caller composes those steps, and none takes a `baseRef` argument
+for a task diff — `GetDiffManifest(task)` and `WorktreeWatcher.Watch(taskID, projectID)` resolve it at
+compute time, because both outlive the moment they were told about the task.
+
+A baseline chosen somewhere else is not an error anywhere: it is a diff that shows commits the task never
+made, under the stats of the comparison the panel actually ran. Two facts make that easy to reach. `BaseRef`
+is a branch, and merges move it. A fork moves the baseline again, mid-session, while a watch is live.
+
+Tests: `backend/git/task_diff_baseline_test.go` — pinned commit against a moved branch, a deleted base ref,
+a forked thread, a thread that *is* the task branch. `backend/api/git_diff_identity_test.go` and
+`backend/stream/worktree_watcher_baseline_test.go` hold the two routes that once got it wrong.
+
 ## Client-supplied refs are validated, then fenced
 
 `types.ValidateGitRef` (`backend/types/validate.go`) is deliberately tighter than `ValidateBranchName`
@@ -210,5 +228,5 @@ still answer. The pair is exact only for the moment the panel last spoke to the 
 Tests: `backend/api/git_test.go` — ahead, behind, and no-upstream.
 ## Checking this
 
-`go test ./backend/git/` covers the command constructor, the hook fence, the stash bracket and the clone
-transports. `make check-race` runs it again with the worktree locks watched.
+`go test ./backend/git/` covers the command constructor, the hook fence, the stash bracket, the clone
+transports and the diff baseline. `make check-race` runs it again with the worktree locks watched.

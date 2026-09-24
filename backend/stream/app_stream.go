@@ -230,9 +230,9 @@ func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *
 }
 
 // WatchWorktree starts filesystem monitoring for a task's worktree.
-func (asm *AppStreamManager) WatchWorktree(taskID, projectID, baseRef string) {
+func (asm *AppStreamManager) WatchWorktree(taskID, projectID string) {
 	if asm.watcher != nil {
-		_ = asm.watcher.Watch(taskID, projectID, baseRef)
+		_ = asm.watcher.Watch(taskID, projectID)
 	}
 }
 
@@ -987,30 +987,6 @@ func (asm *AppStreamManager) ClearTaskBuffer(projectID, taskID string) {
 	asm.clearTaskBuffer(projectID + ":" + taskID)
 }
 
-// resolveTaskDiffBaseline resolves a task's diff baseline the way every path
-// does: pinned BaseCommit/BaseRef (via ResolveTaskBaseline), divergence
-// fallback for diverged forks, fork-thread merge-base resolution.
-func resolveTaskDiffBaseline(st *store.Store, wm *git.WorktreeManager, projectID string, task *types.Task) (string, error) {
-	thread, _ := st.GetThread(task.CurrentThreadID)
-	forkBranch := ""
-	if thread != nil {
-		forkBranch = thread.GitBranch
-	}
-	projectPath, originBranch := "", ""
-	if project, err := st.GetProject(projectID); err == nil && project != nil {
-		projectPath, originBranch = project.Path, project.OriginBranch
-	}
-	return wm.ResolveDiffBaseline(task.ID, wm.ResolveTaskBaseline(projectPath, originBranch, task), task.Branch, forkBranch)
-}
-
-func (asm *AppStreamManager) getDiffBaseline(task types.Task) string {
-	if task.Branch == "" || asm.worktreeMgr == nil {
-		return task.BaseRef
-	}
-	baseRef, _ := resolveTaskDiffBaseline(asm.store, asm.worktreeMgr, task.ProjectID, &task)
-	return baseRef
-}
-
 // computeAlreadyMerged reports whether the task's branch commits are already
 // merged into the target branch — a single git merge-base call in the project
 // repo, no worktree required.
@@ -1244,11 +1220,10 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			asm.sendDoneTaskInitialDiff(client, projectID, task, sub)
 			continue
 		}
-		baseRef := asm.getDiffBaseline(task)
+		baseRef := asm.worktreeMgr.TaskDiffBaseline(&task)
 		// Watch worktrees for tasks in active states or with an initialized worktree.
-		// Use resolved baseline (same as panel) so card stats match panel display.
 		if task.Status == types.StatusInProgress || task.Status == types.StatusReview || task.Branch != "" {
-			asm.WatchWorktree(task.ID, projectID, baseRef)
+			asm.WatchWorktree(task.ID, projectID)
 		}
 		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0 || diffResult.CommittedDiff != "") {
 			hash := ComputeDiffHash(diffResult.Diff, diffResult.CommittedDiff, diffResult.Untracked, diffResult.StagedHash)

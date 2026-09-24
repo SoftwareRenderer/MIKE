@@ -328,23 +328,15 @@ func (te *TaskExecutor) broadcastDiffIfGitCmd(projectID, taskID string, task *ty
 	state := te.tasks[taskID]
 	te.taskMu.Unlock()
 	if state != nil {
-		te.checkAndBroadcastDiff(projectID, taskID, task, state, "")
+		te.checkAndBroadcastDiff(projectID, taskID, task, state)
 	}
 }
 
 // checkAndBroadcastDiff computes the task diff and broadcasts stats only if the hash
 // differs from the last broadcast. This avoids duplicate broadcasts when fsnotify
-// already caught the same change. If forkBranch is provided, it resolves the thread
-// to get the fork branch for diff baseline.
-func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *types.Task, state *executionState, forkBranch string) {
-	// Use BaseCommit (fixed hash) when available, matches API handler
-	project, pErr := te.store.GetProject(projectID)
-	projectPath, originBranch := "", ""
-	if pErr == nil && project != nil {
-		projectPath, originBranch = project.Path, project.OriginBranch
-	}
-	baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, te.worktreeMgr.ResolveTaskBaseline(projectPath, originBranch, task), task.Branch, forkBranch)
-	diffResult, err := te.worktreeMgr.GetTaskDiff(taskID, baseRef, "")
+// already caught the same change.
+func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *types.Task, state *executionState) {
+	diffResult, err := te.worktreeMgr.GetTaskDiff(taskID, te.worktreeMgr.TaskDiffBaseline(task), "")
 	if err != nil || (diffResult.Diff == "" && len(diffResult.Untracked) == 0) {
 		return
 	}
@@ -393,12 +385,7 @@ func (te *TaskExecutor) computeTaskDiffStats(projectID, taskID string) *stream.D
 	if err != nil || project == nil || project.Path == "" {
 		return nil
 	}
-	thread, _ := te.store.GetThread(task.CurrentThreadID)
-	forkBranch := ""
-	if thread != nil {
-		forkBranch = thread.GitBranch
-	}
-	baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(taskID, te.worktreeMgr.ResolveTaskBaseline(project.Path, project.OriginBranch, task), task.Branch, forkBranch)
+	baseRef := te.worktreeMgr.TaskDiffBaseline(task)
 	headRef := ""
 	if task.Status == types.StatusDone {
 		headRef = task.BranchTip

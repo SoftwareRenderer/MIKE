@@ -237,16 +237,6 @@ func (c *Catalog) set(key, value string) {
 	c.Values[key] = value
 }
 
-// Keys returns every key, sorted.
-func (c *Catalog) Keys() []string {
-	out := make([]string, 0, len(c.Values))
-	for k := range c.Values {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // englishOnlyNamespaces are keys a pack must NOT carry, for the reason en.ts states: the
 // first-run offer (`i18n.offer.*`) renders only while no pack is installed — a Chinese UI does
 // not offer to install Chinese — and `i18n.test.*` renders nowhere but the runtime's own tests.

@@ -525,11 +525,8 @@ func countFileChanges(diff string) map[string]FileChangeStats {
 	var currentPath string
 	for line := range strings.SplitSeq(diff, "\n") {
 		if strings.HasPrefix(line, "diff --git ") {
-			match := fileRe.FindStringSubmatch(line)
-			currentPath = "unknown"
-			if match != nil {
-				currentPath = match[1]
-			}
+			// diffBlockPath keeps these counts and the parser's file keys agreeing.
+			currentPath = diffBlockPath(line)
 			continue
 		}
 		if currentPath == "" {
@@ -775,8 +772,8 @@ func (wm *WorktreeManager) baselineUsable(projectPath, baseline, taskBranch stri
 	return err == nil && strings.TrimSpace(out) != ""
 }
 
-// ResolveTaskBaseline returns the git ref to diff a task against: its recorded BaseCommit
-func (wm *WorktreeManager) ResolveTaskBaseline(projectPath, originBranch string, task *types.Task) string {
+// resolveTaskBaseline returns the git ref to diff a task against: its recorded BaseCommit
+func (wm *WorktreeManager) resolveTaskBaseline(projectPath, originBranch string, task *types.Task) string {
 	baseline := task.BaseRef
 	if task.BaseCommit != "" {
 		baseline = task.BaseCommit
@@ -1027,8 +1024,6 @@ func StashMessageForSwitch(taskID string) string {
 func StashMessageForFork(taskID string) string {
 	return stashMessageWithPrefix(stashLabelFork, taskID)
 }
-
-var fileRe = regexp.MustCompile(`^diff --git a/(.+?) b/`)
 
 // IsGitRepo checks if a path is a git repository.
 func IsGitRepo(path string) bool {

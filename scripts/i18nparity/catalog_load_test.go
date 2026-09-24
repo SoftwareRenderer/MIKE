@@ -60,7 +60,7 @@ export const en = {
 		}
 	}
 	if len(c.Values) != len(want) {
-		t.Errorf("got %d keys (%v), want %d", len(c.Values), c.Keys(), len(want))
+		t.Errorf("got %d keys (%v), want %d", len(c.Values), catalogKeys(c), len(want))
 	}
 }
 

@@ -679,6 +679,9 @@
         const currentIdx = statuses.indexOf(task.status as typeof statuses[number]);
         const nextIdx = (currentIdx + 1) % statuses.length;
         const nextStatus = statuses[nextIdx];
+
+        const thisTask = task;
+        const thisProjectId = projectId;
         try {
             let updated: Task;
             if (nextStatus === 'done' && hasChanges) {
@@ -689,22 +692,22 @@
                         message: '',
                         confirmText: t('board.card.commitAndDone'),
                         cancelText: t('board.confirm.cancel'),
-                        projectId: projectId!,
-                        taskId: task.id,
+                        projectId: thisProjectId,
+                        taskId: thisTask.id,
                         _resolve: resolve,
                     };
                 });
                 if (!confirmedMessage) {
                     return; // User cancelled
                 }
-                updated = await commitAndDone(projectId, task.id, confirmedMessage);
-                // Clear stale diff stats immediately so the button updates right away
-                taskDiffStatsStore.update(map => { delete map[task.id]; return { ...map }; });
+                updated = await commitAndDone(thisProjectId, thisTask.id, confirmedMessage);
+                // Clear stale diff stats
+                taskDiffStatsStore.update(map => { delete map[thisTask.id]; return { ...map }; });
             } else {
-                updated = await moveTask(projectId, task.id, nextStatus);
+                updated = await moveTask(thisProjectId, thisTask.id, nextStatus);
             }
-            Object.assign(task, mergeQueuedUpdate(task, updated));
-            updateTaskInBoard(appStore, task.id, task);
+            Object.assign(thisTask, mergeQueuedUpdate(thisTask, updated));
+            updateTaskInBoard(appStore, thisTask.id, thisTask);
         } catch (err) {
             console.error('Failed to move task:', err);
         }

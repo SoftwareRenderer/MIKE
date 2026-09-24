@@ -81,7 +81,7 @@ func TestWorktreeWatcherRetriesWhileInFlight(t *testing.T) {
 	go ww.StartEventLoop()
 	defer ww.Close()
 
-	if err := ww.Watch(taskID, projID, ""); err != nil {
+	if err := ww.Watch(taskID, projID); err != nil {
 		t.Fatalf("watch task: %v", err)
 	}
 
