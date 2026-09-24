@@ -305,7 +305,7 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 		}
 		if taskID == "" {
 			// Fall back to a cached ancestor directory of the event.
-			taskID, _ = lookupWatchedOwner(ww.pathCache, event.Name)
+			taskID = lookupWatchedOwner(ww.pathCache, event.Name)
 		}
 	}
 

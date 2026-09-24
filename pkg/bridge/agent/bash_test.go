@@ -44,7 +44,7 @@ func newBashHarness(t *testing.T) *bashHarness {
 			frames <- f
 		}
 	}()
-	go func() { _ = h.handleConn(&testPipeConn{reader: testToAgentR, writer: agentToTestW}) }()
+	go func() { _ = h.handleConn(testToAgentR, agentToTestW) }()
 
 	bh := &bashHarness{t: t, h: h, toAgent: testToAgentW, frames: frames}
 	t.Cleanup(func() {

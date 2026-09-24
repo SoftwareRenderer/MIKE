@@ -191,8 +191,8 @@ func isQuestionMark(r rune) bool {
 // toolCalls: the tool calls made this turn (nil or empty for text-only).
 // assistantText: the text content of the response.
 // finishReason: the LLM's finish_reason ("stop", "tool_calls", etc.).
-// Returns (loopType, toolName, rawArgs) where toolName/rawArgs identify the repeated call.
-func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText, finishReason string) (LoopType, string, string) {
+// Returns (loopType, rawArgs) where rawArgs is the argument text of the repeated call.
+func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText, finishReason string) (LoopType, string) {
 	hasToolCalls := len(toolCalls) > 0 && toolCalls[0].Function.Name != ""
 
 	if hasToolCalls {
@@ -209,7 +209,7 @@ func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText,
 			if isReadOnlyCall(tc.Function.Name, tc.Function.Arguments) {
 				// Read-only call: check if it repeats the last read (same tool + same args)
 				if d.lastReadToolName != "" && tc.Function.Name == d.lastReadToolName && tc.Function.Arguments == d.lastReadArgs {
-					return LoopTool, tc.Function.Name, tc.Function.Arguments
+					return LoopTool, tc.Function.Arguments
 				}
 				d.lastReadToolName = tc.Function.Name
 				d.lastReadArgs = tc.Function.Arguments
@@ -225,19 +225,19 @@ func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText,
 		// another reason (e.g., tool_calls with no valid calls), don't penalize.
 		if finishReason != "stop" {
 			d.loopStreak = 0
-			return LoopNone, "", ""
+			return LoopNone, ""
 		}
 		if asksInLastParagraph(assistantText) {
 			d.loopStreak = 0
-			return LoopNone, "", ""
+			return LoopNone, ""
 		}
-		return LoopStatement, "", ""
+		return LoopStatement, ""
 	}
 
 	// No loop detected: reset consecutive loop counter
 	d.loopStreak = 0
 
-	return LoopNone, "", ""
+	return LoopNone, ""
 }
 
 // checkStreamingText feeds accumulated streaming text into the phrase and block detectors.

@@ -194,13 +194,13 @@ func TestLoopDetector_ToolLoop(t *testing.T) {
 	args1 := map[string]string{"path": "src/main.go"}
 	args1JSON, _ := json.Marshal(args1)
 	tc1 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
-	if loopType, _, _ := d.recordTurn(tc1, "", "tool_calls"); loopType != LoopNone {
+	if loopType, _ := d.recordTurn(tc1, "", "tool_calls"); loopType != LoopNone {
 		t.Error("first read should not trigger loop")
 	}
 
 	// Second read of same file
 	tc2 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
-	if loopType, _, _ := d.recordTurn(tc2, "", "tool_calls"); loopType != LoopTool {
+	if loopType, _ := d.recordTurn(tc2, "", "tool_calls"); loopType != LoopTool {
 		t.Error("second read of same file should trigger LoopTool")
 	}
 }
@@ -239,7 +239,7 @@ func TestLoopDetector_ValidTurnResetsLoopStreak(t *testing.T) {
 	args := map[string]string{"path": "src/other.go"}
 	argsJSON, _ := json.Marshal(args)
 	tc := []types.ChatToolCall{makeToolCall("read_file", string(argsJSON))}
-	loopType, _, _ := d.recordTurn(tc, "", "tool_calls")
+	loopType, _ := d.recordTurn(tc, "", "tool_calls")
 	if loopType != LoopNone {
 		t.Fatalf("expected LoopNone, got %v", loopType)
 	}
@@ -258,7 +258,7 @@ func TestLoopDetector_LoopStreakResetsOnValidTurn(t *testing.T) {
 	args := map[string]string{"path": "src/other.go"}
 	argsJSON, _ := json.Marshal(args)
 	tc := []types.ChatToolCall{makeToolCall("read_file", string(argsJSON))}
-	loopType, _, _ := d.recordTurn(tc, "", "tool_calls")
+	loopType, _ := d.recordTurn(tc, "", "tool_calls")
 	if loopType != LoopNone {
 		t.Fatalf("expected LoopNone, got %v", loopType)
 	}
@@ -270,8 +270,8 @@ func TestLoopDetector_LoopStreakResetsOnValidTurn(t *testing.T) {
 	args = map[string]string{"path": "src/main.go"}
 	argsJSON, _ = json.Marshal(args)
 	tc = []types.ChatToolCall{makeToolCall("read_file", string(argsJSON))}
-	d.recordTurn(tc, "", "tool_calls")                  // first read, valid (loopStreak stays 0)
-	loopType, _, _ = d.recordTurn(tc, "", "tool_calls") // second read, loop
+	d.recordTurn(tc, "", "tool_calls")               // first read, valid (loopStreak stays 0)
+	loopType, _ = d.recordTurn(tc, "", "tool_calls") // second read, loop
 	if loopType != LoopTool {
 		t.Fatal("expected LoopTool")
 	}
@@ -309,7 +309,7 @@ func TestLoopDetector_LoopStreakWindowTextOnly(t *testing.T) {
 		"The deployment pipeline is configured with proper error handling and notification hooks for the staging environment",
 	}
 	for _, text := range texts {
-		loopType, _, _ := d.recordTurn(nil, text, "stop")
+		loopType, _ := d.recordTurn(nil, text, "stop")
 		if loopType != LoopStatement {
 			t.Fatalf("expected LoopStatement, got %v", loopType)
 		}
@@ -667,7 +667,7 @@ func TestLoopDetector_ToolLoopReturnsRepeatedArgs(t *testing.T) {
 
 	// Second read of same file — returned args should match
 	tc2 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
-	loopType, _, returnedArgs := d.recordTurn(tc2, "", "tool_calls")
+	loopType, returnedArgs := d.recordTurn(tc2, "", "tool_calls")
 	if loopType != LoopTool {
 		t.Fatal("expected LoopTool")
 	}
@@ -686,14 +686,14 @@ func TestLoopDetector_ToolLoopMultiCall(t *testing.T) {
 	args1JSON, _ := json.Marshal(args1)
 
 	tc1 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
-	loopType, _, _ := d.recordTurn(tc1, "", "tool_calls")
+	loopType, _ := d.recordTurn(tc1, "", "tool_calls")
 	if loopType != LoopNone {
 		t.Error("first read should not trigger loop")
 	}
 
 	// Second turn: same read_file — should trigger loop
 	tc2 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
-	loopType, _, returnedArgs := d.recordTurn(tc2, "", "tool_calls")
+	loopType, returnedArgs := d.recordTurn(tc2, "", "tool_calls")
 	if loopType != LoopTool {
 		t.Fatal("expected LoopTool on repeated read")
 	}
@@ -713,10 +713,10 @@ func TestLoopDetector_ToolLoopDifferentTargets(t *testing.T) {
 	tc1 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
 	tc2 := []types.ChatToolCall{makeToolCall("read_file", string(args2JSON))}
 
-	if loopType, _, _ := d.recordTurn(tc1, "", "tool_calls"); loopType != LoopNone {
+	if loopType, _ := d.recordTurn(tc1, "", "tool_calls"); loopType != LoopNone {
 		t.Error("first read should not trigger loop")
 	}
-	if loopType, _, _ := d.recordTurn(tc2, "", "tool_calls"); loopType != LoopNone {
+	if loopType, _ := d.recordTurn(tc2, "", "tool_calls"); loopType != LoopNone {
 		t.Error("read of different file should not trigger loop")
 	}
 }
@@ -728,10 +728,10 @@ func TestLoopDetector_TextLoop(t *testing.T) {
 	text1 := "I need to carefully analyze the requirements and implement the solution step by step to make sure everything works correctly."
 	text2 := "I must carefully analyze the requirements and implement the solution step by step to make sure everything works correctly."
 
-	if loopType, _, _ := d.recordTurn(nil, text1, "stop"); loopType != LoopStatement {
+	if loopType, _ := d.recordTurn(nil, text1, "stop"); loopType != LoopStatement {
 		t.Errorf("expected LoopStatement for first text, got %v", loopType)
 	}
-	if loopType, _, _ := d.recordTurn(nil, text2, "stop"); loopType != LoopStatement {
+	if loopType, _ := d.recordTurn(nil, text2, "stop"); loopType != LoopStatement {
 		t.Errorf("expected LoopStatement for second text, got %v", loopType)
 	}
 }
@@ -740,7 +740,7 @@ func TestLoopDetector_StatementOnlyWhenLLMDone(t *testing.T) {
 	d := newLoopDetector()
 
 	// Text-only response with finish_reason="stop" (LLM chose to end) -> LoopStatement
-	loopType, _, _ := d.recordTurn(nil, "I have analyzed the code.", "stop")
+	loopType, _ := d.recordTurn(nil, "I have analyzed the code.", "stop")
 	if loopType != LoopStatement {
 		t.Errorf("expected LoopStatement with finish_reason=stop, got %v", loopType)
 	}
@@ -749,7 +749,7 @@ func TestLoopDetector_StatementOnlyWhenLLMDone(t *testing.T) {
 
 	// Text-only response with finish_reason="tool_calls" but no actual tool calls
 	// -> LLM signaled it wanted tools but none were produced; don't penalize
-	loopType, _, _ = d.recordTurn(nil, "I have analyzed the code.", "tool_calls")
+	loopType, _ = d.recordTurn(nil, "I have analyzed the code.", "tool_calls")
 	if loopType != LoopNone {
 		t.Errorf("expected LoopNone with finish_reason=tool_calls, got %v", loopType)
 	}
@@ -757,7 +757,7 @@ func TestLoopDetector_StatementOnlyWhenLLMDone(t *testing.T) {
 	d = newLoopDetector()
 
 	// Text-only response with empty finish_reason (streaming not complete) -> don't penalize
-	loopType, _, _ = d.recordTurn(nil, "I have analyzed the code.", "")
+	loopType, _ = d.recordTurn(nil, "I have analyzed the code.", "")
 	if loopType != LoopNone {
 		t.Errorf("expected LoopNone with empty finish_reason, got %v", loopType)
 	}
@@ -773,7 +773,7 @@ func TestLoopDetector_QuestionDoesNotTriggerStatement(t *testing.T) {
 		"Could you clarify the requirements?",
 	}
 	for _, q := range questions {
-		loopType, _, _ := d.recordTurn(nil, q, "stop")
+		loopType, _ := d.recordTurn(nil, q, "stop")
 		if loopType != LoopNone {
 			t.Errorf("expected LoopNone for question %q, got %v", q, loopType)
 		}
@@ -791,7 +791,7 @@ func TestLoopDetector_QuestionInEarlierParagraphStillStatement(t *testing.T) {
 	// Only the closing paragraph can be waiting for the user, so an earlier question does
 	// not spare a response that ends in a statement.
 	ended := "Should I use React or Vue for this project?\n\nI'll go with React and wire up the router."
-	if loopType, _, _ := d.recordTurn(nil, ended, "stop"); loopType != LoopStatement {
+	if loopType, _ := d.recordTurn(nil, ended, "stop"); loopType != LoopStatement {
 		t.Errorf("expected LoopStatement when only an earlier paragraph asks, got %v", loopType)
 	}
 	if d.loopStreak != 2 {
@@ -799,7 +799,7 @@ func TestLoopDetector_QuestionInEarlierParagraphStillStatement(t *testing.T) {
 	}
 
 	asks := "I'll go with React and wire up the router.\n\nWant me to add tests too?"
-	if loopType, _, _ := d.recordTurn(nil, asks, "stop"); loopType != LoopNone {
+	if loopType, _ := d.recordTurn(nil, asks, "stop"); loopType != LoopNone {
 		t.Errorf("expected LoopNone when the last paragraph asks, got %v", loopType)
 	}
 	if d.loopStreak != 0 {
@@ -815,7 +815,7 @@ func TestLoopDetector_NonASCIIQuestionMarkDoesNotTriggerStatement(t *testing.T) 
 	}
 	for _, text := range asks {
 		d := newLoopDetector()
-		if loopType, _, _ := d.recordTurn(nil, text, "stop"); loopType != LoopNone {
+		if loopType, _ := d.recordTurn(nil, text, "stop"); loopType != LoopNone {
 			t.Errorf("expected LoopNone for %q, got %v", text, loopType)
 		}
 	}
@@ -826,7 +826,7 @@ func TestLoopDetector_NonASCIIQuestionMarkDoesNotTriggerStatement(t *testing.T) 
 func TestLoopDetector_MultiParagraphNotPenalisedWhenNotDone(t *testing.T) {
 	d := newLoopDetector()
 	for _, reason := range []string{"tool_calls", "length", ""} {
-		if loopType, _, _ := d.recordTurn(nil, "Analyzing the module.\n\nNext I'll rewrite it.", reason); loopType != LoopNone {
+		if loopType, _ := d.recordTurn(nil, "Analyzing the module.\n\nNext I'll rewrite it.", reason); loopType != LoopNone {
 			t.Errorf("expected LoopNone for finish_reason %q, got %v", reason, loopType)
 		}
 	}

@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,28 +18,25 @@ import (
 	"mike/pkg/logging"
 )
 
-// pipeConn wraps separate read/write pipes as a net.Conn.
-// Used when the Client connects to the agent via podman exec stdin/stdout.
+// pipeConn is the pair of podman exec pipes, spoken to as a stream: the host writes requests to the
+// bridge's stdin and reads its answers from stdout. It is deliberately not a net.Conn — the bridge has
+// no address and no deadlines, and a SetDeadline that reported success while doing nothing would be a
+// lie a caller could act on.
 type pipeConn struct {
 	reader io.ReadCloser
 	writer io.WriteCloser
 }
 
-func (c *pipeConn) Read(b []byte) (int, error)         { return c.reader.Read(b) }
-func (c *pipeConn) Write(b []byte) (int, error)        { return c.writer.Write(b) }
-func (c *pipeConn) Close() error                       { return c.reader.Close() }
-func (c *pipeConn) LocalAddr() net.Addr                { return &net.UnixAddr{Net: "pipe", Name: "stdin"} }
-func (c *pipeConn) RemoteAddr() net.Addr               { return &net.UnixAddr{Net: "pipe", Name: "stdout"} }
-func (c *pipeConn) SetDeadline(t time.Time) error      { return nil }
-func (c *pipeConn) SetReadDeadline(t time.Time) error  { return nil }
-func (c *pipeConn) SetWriteDeadline(t time.Time) error { return nil }
+func (c *pipeConn) Read(b []byte) (int, error)  { return c.reader.Read(b) }
+func (c *pipeConn) Write(b []byte) (int, error) { return c.writer.Write(b) }
+func (c *pipeConn) Close() error                { return c.reader.Close() }
 
 // Client connects to a sandbox bridge.
 // It handles request/response correlation and chunk streaming.
 type Client struct {
 	mu      sync.Mutex
 	writeMu sync.Mutex // serializes writes to conn (see writeFrame)
-	conn    net.Conn
+	conn    io.ReadWriteCloser
 	nextID  atomic.Uint32
 	pending map[uint32]*pendingReq
 

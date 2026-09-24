@@ -5,33 +5,13 @@
 package main
 
 import (
-	"io"
 	"log"
-	"net"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"mike/pkg/logging"
 )
-
-// stdioConn implements net.Conn using stdin/stdout pipes.
-// The bridge communicates with the host-side relay over podman exec
-// stdin/stdout.
-type stdioConn struct {
-	r io.Reader
-	w io.Writer
-}
-
-func (c *stdioConn) Read(b []byte) (int, error)         { return c.r.Read(b) }
-func (c *stdioConn) Write(b []byte) (int, error)        { return c.w.Write(b) }
-func (c *stdioConn) Close() error                       { return nil }
-func (c *stdioConn) LocalAddr() net.Addr                { return &net.UnixAddr{Net: "unix", Name: "stdin"} }
-func (c *stdioConn) RemoteAddr() net.Addr               { return &net.UnixAddr{Net: "unix", Name: "stdout"} }
-func (c *stdioConn) SetDeadline(t time.Time) error      { return nil }
-func (c *stdioConn) SetReadDeadline(t time.Time) error  { return nil }
-func (c *stdioConn) SetWriteDeadline(t time.Time) error { return nil }
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
@@ -39,10 +19,8 @@ func main() {
 
 	// Bridge agent: communicates over stdin/stdout with the host-side relay.
 	// Runs inside gVisor containers via `podman exec -i ... /sandbox-bridge`.
-	conn := &stdioConn{
-		r: os.Stdin,
-		w: os.Stdout,
-	}
+	// The two pipes are the whole transport: no listener, no port, no deadline a socket
+	// could carry, so nothing here is typed as a connection.
 	h := newHandler()
 	h.closed.Store(false)
 
@@ -57,5 +35,5 @@ func main() {
 		os.Exit(0)
 	}()
 
-	h.handleConn(conn)
+	h.handleConn(os.Stdin, os.Stdout)
 }

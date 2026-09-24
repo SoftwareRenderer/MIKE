@@ -283,7 +283,7 @@ func TestBashCancel(t *testing.T) {
 	// Start handler in background
 	handlerDone := make(chan struct{})
 	go func() {
-		_ = h.handleConn(&testPipeConn{reader: testToAgentPr, writer: agentToTestPw})
+		_ = h.handleConn(testToAgentPr, agentToTestPw)
 		close(handlerDone)
 	}()
 
@@ -349,21 +349,6 @@ func TestBashCancel(t *testing.T) {
 	agentToTestPw.Close()
 	<-handlerDone
 }
-
-// testPipeConn wraps separate read/write pipes as a net.Conn.
-type testPipeConn struct {
-	reader io.ReadCloser
-	writer io.WriteCloser
-}
-
-func (c *testPipeConn) Read(b []byte) (int, error)         { return c.reader.Read(b) }
-func (c *testPipeConn) Write(b []byte) (int, error)        { return c.writer.Write(b) }
-func (c *testPipeConn) Close() error                       { return c.writer.Close() }
-func (c *testPipeConn) LocalAddr() net.Addr                { return nil }
-func (c *testPipeConn) RemoteAddr() net.Addr               { return nil }
-func (c *testPipeConn) SetDeadline(t time.Time) error      { return nil }
-func (c *testPipeConn) SetReadDeadline(t time.Time) error  { return nil }
-func (c *testPipeConn) SetWriteDeadline(t time.Time) error { return nil }
 
 // readFrameChan reads a single frame and returns it on a channel.
 func readFrameChan(r io.Reader) <-chan *protocol.Frame {
