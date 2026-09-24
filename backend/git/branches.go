@@ -72,7 +72,7 @@ func (wm *WorktreeManager) listBranchNames(dir, prefix string) ([]string, error)
 	if !strings.HasSuffix(pattern, "*") {
 		pattern += "*"
 	}
-	out, err := wm.gitRunOutput(dir, "for-each-ref", "--format=%(refname:short)", pattern)
+	out, err := Run(dir, "for-each-ref", "--format=%(refname:short)", pattern)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func (wm *WorktreeManager) listBranchNames(dir, prefix string) ([]string, error)
 // deleteBranch force-deletes a branch and puts what git printed in the error, since git gives its
 // reason on stderr. -D, not -d: the row that owned the branch is already gone.
 func (wm *WorktreeManager) deleteBranch(dir, branch string) error {
-	out, err := wm.gitRunOutput(dir, "branch", "-D", branch)
+	out, err := Run(dir, "branch", "-D", branch)
 	if err == nil {
 		return nil
 	}
@@ -104,12 +104,12 @@ func (wm *WorktreeManager) branchExistsInProject(projectID, branch string) bool 
 
 // branchExistsInRepo checks if a branch exists in the given git repo.
 func (wm *WorktreeManager) branchExistsInRepo(repoPath, branchName string) bool {
-	_, err := wm.gitRunOutput(repoPath, "rev-parse", "--verify", branchName)
+	_, err := Run(repoPath, "rev-parse", "--verify", branchName)
 	return err == nil
 }
 
 func (wm *WorktreeManager) gitCurrentBranch(dir string) (string, error) {
-	out, err := wm.gitRunOutput(dir, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := Run(dir, "rev-parse", "--abbrev-ref", "HEAD")
 	return strings.TrimSpace(out), err
 }
 
@@ -140,7 +140,7 @@ func (wm *WorktreeManager) DivergenceBase(projectPath, mainBranch, taskBranch st
 		// Detached HEAD — no main branch to measure divergence from.
 		return ""
 	}
-	out, err := wm.gitRunOutput(projectPath, "merge-base", taskBranch, mainBranch)
+	out, err := Run(projectPath, "merge-base", taskBranch, mainBranch)
 	if err != nil {
 		return ""
 	}

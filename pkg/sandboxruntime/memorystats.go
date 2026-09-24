@@ -25,6 +25,47 @@ func ChargeMB(usage MemoryUsageMB, capMB int64) (heldMB, chargeMB int64) {
 	return usage.Current, charge
 }
 
+// MemoryUsage is the part of the memory tracker a sandbox manager calls: one container's usage, and
+// dropping the cached path of one that is gone. Both managers take this shape, so the accounting rule
+// they share has one definition and can be tested without podman.
+type MemoryUsage interface {
+	Usage(containerName string) MemoryUsageMB
+	Forget(containerName string)
+}
+
+// NoMemory answers "no data" for a manager with no tracker; a container is removed regardless.
+type NoMemory struct{}
+
+func (NoMemory) Usage(string) MemoryUsageMB { return MemoryUsageMB{} }
+func (NoMemory) Forget(string)              {}
+
+// MemoryOrDefault answers the tracker to use: the one given, or NoMemory when there is none.
+func MemoryOrDefault(tracker MemoryUsage) MemoryUsage {
+	if tracker == nil {
+		return NoMemory{}
+	}
+	return tracker
+}
+
+// ContainerCharge is one live container and the memory limit it was created with, in MB, or 0 when
+// it is unlimited. A manager records the limit it created with rather than re-reading the
+// configuration, which can change while the container runs.
+type ContainerCharge struct {
+	Name  string
+	CapMB int64
+}
+
+// SumCharge is what a set of containers holds and what it costs the memory budget, each one priced
+// by ChargeMB.
+func SumCharge(mem MemoryUsage, containers []ContainerCharge) (heldMB, chargeMB int64) {
+	for _, c := range containers {
+		held, charge := ChargeMB(mem.Usage(c.Name), c.CapMB)
+		heldMB += held
+		chargeMB += charge
+	}
+	return heldMB, chargeMB
+}
+
 // MemoryTracker answers "how much memory is this container using" for the sandbox managers and the
 // memory budget. A resolved cgroup directory is cached, and a read that fails drops it, so a path
 // left behind by a stopped container is not read forever. The peak is a high-water mark MIKE keeps

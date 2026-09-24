@@ -464,7 +464,7 @@ func TestCreateWorktree_GeneratesBranchNameWhenEmpty(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	currentBranch, _ := wm.gitRunOutput(wtPath, "rev-parse", "--abbrev-ref", "HEAD")
+	currentBranch, _ := Run(wtPath, "rev-parse", "--abbrev-ref", "HEAD")
 	currentBranch = strings.TrimSpace(currentBranch)
 	if currentBranch != "task/"+taskID {
 		t.Errorf("expected branch 'task/%s', got %q", taskID, currentBranch)
@@ -479,7 +479,7 @@ func TestCreateWorktree_GeneratesBranchNameWhen40Hex(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	currentBranch, _ := wm.gitRunOutput(wtPath, "rev-parse", "--abbrev-ref", "HEAD")
+	currentBranch, _ := Run(wtPath, "rev-parse", "--abbrev-ref", "HEAD")
 	currentBranch = strings.TrimSpace(currentBranch)
 	if currentBranch != "task/"+taskID {
 		t.Errorf("expected branch 'task/%s', got %q", taskID, currentBranch)
@@ -1397,8 +1397,8 @@ func TestGetTaskDiff_StagedFileWithBaseRef(t *testing.T) {
 	runGit(t, worktreePath, "add", "hello.txt")
 
 	// Debug: print raw git output
-	unstaged, _ := wm.gitRunOutput(worktreePath, "diff")
-	staged, _ := wm.gitRunOutput(worktreePath, "diff", "--staged", "master")
+	unstaged, _ := Run(worktreePath, "diff")
+	staged, _ := Run(worktreePath, "diff", "--staged", "master")
 	t.Logf("unstaged diff:\n%s", unstaged)
 	t.Logf("staged diff:\n%s", staged)
 
@@ -1515,7 +1515,7 @@ func TestPushStash_MessageBased(t *testing.T) {
 	}
 
 	// Verify the hash is valid
-	resolved, err := wm.gitRunOutput(worktreePath, "rev-parse", hash)
+	resolved, err := Run(worktreePath, "rev-parse", hash)
 	if err != nil {
 		t.Fatalf("hash %q is not a valid git ref: %v", hash, err)
 	}
@@ -1531,7 +1531,7 @@ func TestPushStash_MessageBased(t *testing.T) {
 	}
 
 	// Verify our stash is gone but stale entry remains
-	listOut, _ := wm.gitRunOutput(worktreePath, "stash", "list", "--format=%s")
+	listOut, _ := Run(worktreePath, "stash", "list", "--format=%s")
 	if strings.Contains(listOut, msg) {
 		t.Error("stash entry should have been dropped")
 	}
@@ -1595,7 +1595,7 @@ func TestPushStash_MultipleEntries(t *testing.T) {
 	}
 
 	// Verify A still exists
-	listOut, _ := wm.gitRunOutput(worktreePath, "stash", "list", "--format=%s")
+	listOut, _ := Run(worktreePath, "stash", "list", "--format=%s")
 	if !strings.Contains(listOut, msgA) {
 		t.Error("stash entry A should still exist after dropping B")
 	}

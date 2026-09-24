@@ -33,47 +33,17 @@ type MountPolicy struct {
 	readOnlyRoots []string
 }
 
-// normalizeRoots makes each root absolute, symlink-resolved and cleaned, dropping
-// blanks and duplicates, so a candidate path is compared against the same form it
-// will be resolved to.
-func normalizeRoots(roots []string) []string {
-	out := make([]string, 0, len(roots))
-	seen := map[string]bool{}
-	for _, raw := range roots {
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
-			continue
-		}
-		abs := raw
-		if !filepath.IsAbs(abs) {
-			if a, err := filepath.Abs(abs); err == nil {
-				abs = a
-			}
-		}
-		abs = filepath.Clean(abs)
-		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-			abs = filepath.Clean(resolved)
-		}
-		if seen[abs] {
-			continue
-		}
-		seen[abs] = true
-		out = append(out, abs)
-	}
-	return out
-}
-
 // newMountPolicy builds a policy from raw root paths. Each is made absolute and
 // symlink-resolved (a root that does not exist yet keeps its cleaned absolute
 // form) so it matches the resolved form of a candidate path.
 func newMountPolicy(roots []string) *MountPolicy {
-	return &MountPolicy{roots: normalizeRoots(roots)}
+	return &MountPolicy{roots: fsutil.NormalizeRoots(roots)}
 }
 
 // newMountPolicyWithReadOnly is newMountPolicy plus the subset of those roots that
 // may only ever be bind-mounted read-only.
 func newMountPolicyWithReadOnly(roots, readOnlyRoots []string) *MountPolicy {
-	return &MountPolicy{roots: normalizeRoots(roots), readOnlyRoots: normalizeRoots(readOnlyRoots)}
+	return &MountPolicy{roots: fsutil.NormalizeRoots(roots), readOnlyRoots: fsutil.NormalizeRoots(readOnlyRoots)}
 }
 
 // Roots returns a copy of the policy's allowlist roots.
@@ -124,22 +94,12 @@ func resolvePath(p string) (string, error) {
 	return fsutil.ResolveSymlinks(p)
 }
 
-// insideAny reports whether the resolved path is one of roots or below it.
-func insideAny(resolved string, roots []string) bool {
-	for _, root := range roots {
-		if resolved == root || strings.HasPrefix(resolved, root+string(filepath.Separator)) {
-			return true
-		}
-	}
-	return false
-}
-
 // insideRoot reports whether the resolved path is one of the roots or below it.
 func (p *MountPolicy) insideRoot(resolved string) bool {
 	if p == nil {
 		return false
 	}
-	return insideAny(resolved, p.roots)
+	return fsutil.InsideRoots(resolved, p.roots)
 }
 
 // ForceReadOnly reports whether a host path is one the sandbox may only read, whatever mode the
@@ -149,7 +109,7 @@ func (p *MountPolicy) ForceReadOnly(resolved string) bool {
 	if p == nil {
 		return true
 	}
-	return insideAny(resolved, p.readOnlyRoots)
+	return fsutil.InsideRoots(resolved, p.readOnlyRoots)
 }
 
 // ValidateHostPath checks a mount's host path: absolute, no ".." segment, and

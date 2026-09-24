@@ -9,7 +9,7 @@ import (
 )
 
 // The six exported GitRun* spellings are three places × two modes, and the modes are not interchangeable:
-// gitRun pins GIT_DIR=<dir>/.git, gitRunOutput runs plain. That is the only difference between the silent
+// gitRun pins GIT_DIR=<dir>/.git, Run runs plain. That is the only difference between the silent
 // and the output spelling of the same place, so it is pinned here in both directions — equal where every
 // caller lives, and deliberately different where no caller may go. Merging the spellings on the theory that
 // they are one mechanism (as the Phase 0 review predicted) would silently move 16 write call sites from
@@ -28,7 +28,7 @@ func TestGitRunModesResolveIdenticallyAtRepositoryRoots(t *testing.T) {
 	// about the worktree, not the checkout the pointer leads to.
 	for _, dir := range []string{repo, worktree} {
 		for _, probe := range []struct{ flag, want string }{{"--show-toplevel", dir}, {"--abbrev-ref", ""}} {
-			plain, plainErr := wm.gitRunOutput(dir, "rev-parse", probe.flag, "HEAD")
+			plain, plainErr := Run(dir, "rev-parse", probe.flag, "HEAD")
 			pinned, pinnedErr := wm.gitRunInGitDir(dir, "rev-parse", probe.flag, "HEAD")
 			if plainErr != nil || pinnedErr != nil {
 				t.Fatalf("%s %s: plain=%v pinned=%v", filepath.Base(dir), probe.flag, plainErr, pinnedErr)
@@ -60,7 +60,7 @@ func TestGitRunModesResolveIdenticallyAtRepositoryRoots(t *testing.T) {
 
 func mustRun(t *testing.T, wm *WorktreeManager, dir string) string {
 	t.Helper()
-	out, err := wm.gitRunOutput(dir, "diff", "--cached", "--name-only")
+	out, err := Run(dir, "diff", "--cached", "--name-only")
 	if err != nil {
 		t.Fatalf("diff --cached in %s: %v", dir, err)
 	}
@@ -80,7 +80,7 @@ func TestGitRunPinnedModeRefusesASubdirectoryThatPlainModeWouldWalkUp(t *testing
 		t.Fatal(err)
 	}
 
-	out, err := wm.gitRunOutput(sub, "rev-parse", "--show-toplevel")
+	out, err := Run(sub, "rev-parse", "--show-toplevel")
 	if err != nil {
 		t.Fatalf("fixture: plain mode should resolve upward, got %v", err)
 	}

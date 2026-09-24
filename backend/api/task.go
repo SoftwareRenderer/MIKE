@@ -1107,7 +1107,7 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 		// finishTitleGeneration still has to run, or the task shows "title coming" forever.
 		if h.executor == nil {
 			logging.For(logging.Generate).With(logging.TaskID, taskID).Infof("skipping: no executor configured")
-			h.finishTitleGeneration(projectID, taskID, true)
+			h.finishTitleGeneration(projectID, taskID)
 			return
 		}
 
@@ -1118,13 +1118,13 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 		task, err := h.store.GetTask(projectID, taskID)
 		if err != nil {
 			logging.For(logging.Generate).With(logging.TaskID, taskID).Infof("skipping: %v", err)
-			h.finishTitleGeneration(projectID, taskID, true)
+			h.finishTitleGeneration(projectID, taskID)
 			return
 		}
 		serverURL, modelName := h.executor.ResolveUtilityTarget(task)
 		if serverURL == "" || modelName == "" {
 			logging.For(logging.Generate).With(logging.TaskID, taskID).Infof("skipping: no LLM config on task")
-			h.finishTitleGeneration(projectID, taskID, true)
+			h.finishTitleGeneration(projectID, taskID)
 			return
 		}
 
@@ -1137,13 +1137,13 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 		usage, title, err := h.executor.ChatCompletion(ctx, serverURL, modelName, messages, &exec.ChatCompletionOpts{MaxTokens: &maxTokens, ReasoningEffort: "off"})
 		if err != nil {
 			logging.For(logging.Generate).With(logging.TaskID, taskID).Warnf("LLM call failed: %v", err)
-			h.finishTitleGeneration(projectID, taskID, true)
+			h.finishTitleGeneration(projectID, taskID)
 			return
 		}
 
 		if title == "" {
 			logging.For(logging.Generate).With(logging.TaskID, taskID).Infof("empty title from LLM")
-			h.finishTitleGeneration(projectID, taskID, true)
+			h.finishTitleGeneration(projectID, taskID)
 			return
 		}
 
@@ -1187,7 +1187,7 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 }
 
 // finishTitleGeneration sets title_generating to false without changing the title.
-func (h *TaskHandler) finishTitleGeneration(projectID, taskID string, broadcast bool) {
+func (h *TaskHandler) finishTitleGeneration(projectID, taskID string) {
 	task, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
 		return
@@ -1199,10 +1199,8 @@ func (h *TaskHandler) finishTitleGeneration(projectID, taskID string, broadcast 
 		logging.For(logging.Generate).With(logging.TaskID, taskID).Warnf("finish update failed: %v", err)
 		return
 	}
-	if broadcast {
-		if updated, err := h.store.GetTask(projectID, taskID); err == nil {
-			h.boardStreamMgr.BroadcastTaskUpdated(projectID, updated)
-		}
+	if updated, err := h.store.GetTask(projectID, taskID); err == nil {
+		h.boardStreamMgr.BroadcastTaskUpdated(projectID, updated)
 	}
 }
 

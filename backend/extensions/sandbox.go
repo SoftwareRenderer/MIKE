@@ -30,24 +30,9 @@ const (
 	ExtensionStopGracePeriod = 15 * time.Minute
 )
 
-// memoryUsage is the part of the memory tracker this manager calls. Declaring it here lets the
-// accounting be tested without a container; backend/sandbox declares the same shape.
-type memoryUsage interface {
-	Usage(containerName string) sandboxruntime.MemoryUsageMB
-	Forget(containerName string)
-}
-
-// noMemory is used when a manager has no tracker, and answers that there is no data.
-type noMemory struct{}
-
-func (noMemory) Usage(string) sandboxruntime.MemoryUsageMB { return sandboxruntime.MemoryUsageMB{} }
-func (noMemory) Forget(string)                             {}
-
-func (sm *ExtensionSandboxManager) memory() memoryUsage {
-	if sm.mem == nil {
-		return noMemory{}
-	}
-	return sm.mem
+// memory answers the tracker to call; the nil-tracker rule is sandboxruntime.MemoryOrDefault's.
+func (sm *ExtensionSandboxManager) memory() sandboxruntime.MemoryUsage {
+	return sandboxruntime.MemoryOrDefault(sm.mem)
 }
 
 // ExtensionSandboxManager manages gVisor sandbox containers for extensions.
@@ -56,7 +41,7 @@ type ExtensionSandboxManager struct {
 	rt            *sandboxruntime.Runtime
 	refs          map[string]int                    // extID -> active bridge-connection count
 	states        map[string]*extensionSandboxState // extID -> runtime state
-	mem           memoryUsage                       // each container's memory, looked up by containerName
+	mem           sandboxruntime.MemoryUsage        // each container's memory, looked up by containerName
 	registry      *RegistryClient
 	store         *ExtensionStore
 	available     bool
@@ -368,7 +353,7 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 			}
 		}
 		createArgs = append(createArgs,
-			"-v", hostPath+":"+containerPath+":rprivate,ro",
+			"-v", sandboxruntime.BindMountSpec(hostPath, containerPath, "ro"),
 		)
 		mountedProjects = append(mountedProjects, hostPath)
 	}
@@ -410,7 +395,7 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 			bindEnv = nil
 		}
 		createArgs = append(createArgs,
-			"-v", fmt.Sprintf("%s:%s:rprivate,%s", bind.Mount.HostPath, bind.Mount.ContainerPath, bind.Mount.Mode),
+			"-v", sandboxruntime.BindMountSpec(bind.Mount.HostPath, bind.Mount.ContainerPath, bind.Mount.Mode),
 		)
 		createArgs = append(createArgs, bindEnv...)
 		logging.For(logging.Sandbox).Infof("ext=%s mounted the granted dependency directory %s at %s (%s) and assigned %s=%s", ext.ID, bind.Mount.HostPath, bind.Mount.ContainerPath, bind.Mount.Mode, bind.Env.Key, bind.Env.Value)
@@ -445,7 +430,7 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 			mode = "rw"
 		}
 		createArgs = append(createArgs,
-			"-v", fmt.Sprintf("%s:%s:rprivate,%s", resolved, m.ContainerPath, mode),
+			"-v", sandboxruntime.BindMountSpec(resolved, m.ContainerPath, mode),
 		)
 	}
 
@@ -795,23 +780,18 @@ func (sm *ExtensionSandboxManager) ApplyMemoryLimit(extID string, limitMB int) e
 }
 
 // MemoryAccounting returns, in MB, what the live extension sandboxes hold and what they cost the
-// memory budget. The cost of one container is sandboxruntime.ChargeMB.
+// memory budget.
 func (sm *ExtensionSandboxManager) MemoryAccounting() (heldMB, chargeMB int64) {
 	sm.mu.Lock()
-	names := make(map[string]int64, len(sm.states))
+	containers := make([]sandboxruntime.ContainerCharge, 0, len(sm.states))
 	for _, state := range sm.states {
 		if state != nil {
-			names[state.containerName] = state.memLimitMB
+			containers = append(containers, sandboxruntime.ContainerCharge{Name: state.containerName, CapMB: state.memLimitMB})
 		}
 	}
 	sm.mu.Unlock()
 
-	for name, cap := range names {
-		used, charge := sandboxruntime.ChargeMB(sm.memory().Usage(name), cap)
-		heldMB += used
-		chargeMB += charge
-	}
-	return heldMB, chargeMB
+	return sandboxruntime.SumCharge(sm.memory(), containers)
 }
 
 // GetMemoryStats reads the extension sandbox's cgroup v2 memory controller, returning zero stats
@@ -831,14 +811,7 @@ func (sm *ExtensionSandboxManager) GetMemoryStats(extID string) *types.SandboxMe
 		return &types.SandboxMemoryStats{}
 	}
 
-	usage := sm.memory().Usage(containerName)
-	return &types.SandboxMemoryStats{
-		Running:   usage.Known,
-		CurrentMB: usage.Current,
-		LimitMB:   usage.Limit,
-		PeakMB:    usage.Peak,
-		OOMKills:  usage.OOMKills,
-	}
+	return types.NewSandboxMemoryStats(sm.memory().Usage(containerName))
 }
 
 // IsRunning checks if an extension sandbox is running.

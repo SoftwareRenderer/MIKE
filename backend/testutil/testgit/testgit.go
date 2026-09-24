@@ -57,8 +57,7 @@ func GitOutput(t *testing.T, dir string, args ...string) string {
 func gitCmd(t *testing.T, dir string, args ...string) *exec.Cmd {
 	t.Helper()
 	all := append(append([]string{}, identityArgs...), args...)
-	cmd := git.Command("", all...)
-	cmd.Dir = dir
+	cmd := git.Command(dir, all...)
 	return cmd
 }
 

@@ -80,11 +80,11 @@ func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, map[string]bool{"authenticated": false})
 }
 
-// setSessionCookie sets the SESSION cookie with secure flags. The Secure flag is decided per
-// request (see requestIsHTTPS), never once at boot: the same server answers cleartext on loopback
-// for development and HTTPS behind a proxy, and a boot-time answer is wrong for one of them.
-func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token string, maxAge int) {
-	http.SetCookie(w, &http.Cookie{
+// sessionCookie is the SESSION cookie with its secure flags. The Secure flag is decided per request
+// (see requestIsHTTPS), never once at boot: the same server answers cleartext on loopback for
+// development and HTTPS behind a proxy, and a boot-time answer is wrong for one of them.
+func (s *Server) sessionCookie(r *http.Request, token string, maxAge int) *http.Cookie {
+	return &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    token,
 		Path:     "/",
@@ -92,20 +92,17 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token 
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 		Secure:   requestIsHTTPS(r, s.settings.TrustProxy),
-	})
+	}
+}
+
+// setSessionCookie sets the SESSION cookie.
+func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token string, maxAge int) {
+	http.SetCookie(w, s.sessionCookie(r, token, maxAge))
 }
 
 // clearSessionCookie removes the SESSION cookie. It has to be written with the same Secure flag it
 // was set with, or the browser keeps the cookie it already has and "logout" leaves a live session
 // in the jar.
 func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   requestIsHTTPS(r, s.settings.TrustProxy),
-	})
+	http.SetCookie(w, s.sessionCookie(r, "", -1))
 }

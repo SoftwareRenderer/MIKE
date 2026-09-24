@@ -66,19 +66,18 @@ func NewStreamClient() *http.Client {
 	return &http.Client{Transport: streamTransport}
 }
 
+// refuseRedirects is the single-attempt rule every client here carries: the domain allowlist is
+// checked against the URL the caller asked for, so following a redirect would send the request, and
+// any credential on it, to a host nothing validated. The 3xx is returned to the caller to report.
+var refuseRedirects = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
 // NewSingleAttemptClient refuses redirects instead of following them. Use it for any URL an
 // extension or a request influenced.
-//
-// The domain allowlist is checked against the URL the caller asked for, so following a redirect
-// would send the request, and any credential on it, to a host nothing validated. The 3xx is
-// returned to the caller to report.
 func NewSingleAttemptClient(timeout time.Duration) *http.Client {
 	return &http.Client{
-		Timeout:   timeout,
-		Transport: sharedTransport,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
+		Timeout:       timeout,
+		Transport:     sharedTransport,
+		CheckRedirect: refuseRedirects,
 	}
 }
 
@@ -99,11 +98,9 @@ var ErrInternalAddress = errors.New("target resolves to a non-public address")
 // to this host. RFC1918 stays allowed — a LAN service is a real extension target.
 func NewExtensionEgressClient(timeout time.Duration) *http.Client {
 	return &http.Client{
-		Timeout:   timeout,
-		Transport: egressTransport,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
+		Timeout:       timeout,
+		Transport:     egressTransport,
+		CheckRedirect: refuseRedirects,
 	}
 }
 
@@ -189,7 +186,7 @@ func NewExtensionEgressClientGranting(timeout time.Duration, grantedHosts []stri
 	return &http.Client{
 		Timeout:       timeout,
 		Transport:     transport,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		CheckRedirect: refuseRedirects,
 	}
 }
 

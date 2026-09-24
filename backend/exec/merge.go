@@ -459,7 +459,7 @@ func (m *mergeOrchestrator) CommitAndMerge(projectID, taskID, worktreePath, comm
 	release := m.commitQueue.Acquire(projectID)
 	defer release()
 
-	gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg, "--allow-empty")...)
+	_, _ = git.Run(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg, "--allow-empty")...)
 
 	if autoMerge {
 		task, _ := m.store.GetTaskByID(taskID)
@@ -493,8 +493,7 @@ func (m *mergeOrchestrator) MergeBranch(projectID, taskID string, task *types.Ta
 	}
 
 	// A branch that no longer resolves is a skipped merge, not a failure; try a stale sibling first.
-	cmd := git.Command("", "rev-parse", "--verify", "--quiet", taskBranch)
-	cmd.Dir = project.Path
+	cmd := git.Command(project.Path, "rev-parse", "--verify", "--quiet", taskBranch)
 	if err := cmd.Run(); err != nil {
 		recovered := m.recoverMissingBranch(projectID, taskID, taskBranch)
 		if recovered != "" {
@@ -572,8 +571,7 @@ func (m *mergeOrchestrator) MergeBranch(projectID, taskID string, task *types.Ta
 	targetBranch = strings.TrimSpace(targetBranch)
 	// Create target branch if it doesn't exist (user-specified base_ref).
 	if task.ParentTaskID == "" && task.BaseRef != "" && targetBranch == task.BaseRef {
-		cmd := git.Command("", "rev-parse", "--verify", "--quiet", "refs/heads/"+targetBranch)
-		cmd.Dir = project.Path
+		cmd := git.Command(project.Path, "rev-parse", "--verify", "--quiet", "refs/heads/"+targetBranch)
 		if cmd.Run() != nil {
 			startPoint := project.OriginBranch
 			if startPoint == "" {
@@ -762,8 +760,7 @@ func (m *mergeOrchestrator) findWorktreeForBranch(projectID, branch string) stri
 	if err != nil {
 		return ""
 	}
-	cmd := git.Command("", "worktree", "list", "--porcelain")
-	cmd.Dir = project.Path
+	cmd := git.Command(project.Path, "worktree", "list", "--porcelain")
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -790,16 +787,14 @@ func (m *mergeOrchestrator) findWorktreeForBranch(projectID, branch string) stri
 // currentCheckoutRef returns dir's HEAD as a branch name, or a SHA when detached. "" means
 // unknown, and the merge then leaves the checkout where it ends up.
 func currentCheckoutRef(dir string) string {
-	cmd := git.Command("", "rev-parse", "--abbrev-ref", "HEAD")
-	cmd.Dir = dir
+	cmd := git.Command(dir, "rev-parse", "--abbrev-ref", "HEAD")
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
 	ref := strings.TrimSpace(string(out))
 	if ref == "" || ref == "HEAD" {
-		cmd = git.Command("", "rev-parse", "HEAD")
-		cmd.Dir = dir
+		cmd = git.Command(dir, "rev-parse", "HEAD")
 		out, err = cmd.Output()
 		if err != nil {
 			return ""
@@ -824,8 +819,7 @@ func (m *mergeOrchestrator) syncTargetIntoTask(projectID, taskID, targetBranch, 
 	}
 
 	// merge-base is the common ancestor: if it equals the target's HEAD, the target has not moved.
-	mergeBaseCmd := git.Command("", "merge-base", taskBranch, targetBranch)
-	mergeBaseCmd.Dir = project.Path
+	mergeBaseCmd := git.Command(project.Path, "merge-base", taskBranch, targetBranch)
 	mergeBaseOut, err := mergeBaseCmd.Output()
 	if err != nil {
 		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("could not compute merge-base: %v, skipping sync", err)
@@ -833,8 +827,7 @@ func (m *mergeOrchestrator) syncTargetIntoTask(projectID, taskID, targetBranch, 
 	}
 	mergeBase := strings.TrimSpace(string(mergeBaseOut))
 
-	targetHeadCmd := git.Command("", "rev-parse", targetBranch)
-	targetHeadCmd.Dir = project.Path
+	targetHeadCmd := git.Command(project.Path, "rev-parse", targetBranch)
 	targetHeadOut, err := targetHeadCmd.Output()
 	if err != nil {
 		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("could not resolve target HEAD: %v, skipping sync", err)
@@ -925,7 +918,7 @@ func (m *mergeOrchestrator) tryResolveMergeConflicts(dir, taskID, targetBranch, 
 	// An empty conflict list means git resolved it itself; let it finish.
 	if len(conflictedFiles) == 0 {
 		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("no conflicted files found, trying merge --continue")
-		continueErr := gitRun(dir, append(git.GitAuthorFlags(), "merge", "--continue")...)
+		_, continueErr := git.Run(dir, append(git.GitAuthorFlags(), "merge", "--continue")...)
 		if continueErr == nil {
 			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("merge auto-resolved via --continue")
 			m.logMergeComplete(taskID, task.CurrentThreadID, taskBranch, targetBranch)
@@ -933,7 +926,7 @@ func (m *mergeOrchestrator) tryResolveMergeConflicts(dir, taskID, targetBranch, 
 		}
 		statusOutput := getMergeStatusOutput(dir)
 		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("merge --continue failed: %v. Status: %s", continueErr, statusOutput)
-		_ = gitRun(dir, "merge", "--abort")
+		_, _ = git.Run(dir, "merge", "--abort")
 		return fmt.Errorf("merge conflict but no conflicted files found (status: %s)", statusOutput)
 	}
 
@@ -942,7 +935,7 @@ func (m *mergeOrchestrator) tryResolveMergeConflicts(dir, taskID, targetBranch, 
 	m.logSystemMessage(taskID, task.CurrentThreadID, "error",
 		fmt.Sprintf("Merge conflict detected in: %s", strings.Join(conflictedFiles, ", ")))
 
-	_ = gitRun(dir, "merge", "--abort")
+	_, _ = git.Run(dir, "merge", "--abort")
 	return fmt.Errorf("merge conflict in %d file(s): %s", len(conflictedFiles), strings.Join(conflictedFiles, ", "))
 }
 
@@ -1018,7 +1011,7 @@ func (m *mergeOrchestrator) stageResolvedConflicts(taskID, worktreePath string) 
 		return true
 	}
 	addArgs := append([]string{"add", "--"}, conflictedFiles...)
-	if err := gitRun(worktreePath, addArgs...); err != nil {
+	if _, err := git.Run(worktreePath, addArgs...); err != nil {
 		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("git add failed: %v", err)
 		return false
 	}
@@ -1028,7 +1021,7 @@ func (m *mergeOrchestrator) stageResolvedConflicts(taskID, worktreePath string) 
 // commitMergeConflictResolution records a resolution as a commit. Both resolution paths commit
 // here so the message and author stay identical.
 func (m *mergeOrchestrator) commitMergeConflictResolution(taskID, worktreePath string) bool {
-	if err := gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
+	if _, err := git.Run(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
 		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("git commit failed: %v", err)
 		return false
 	}
@@ -1049,15 +1042,14 @@ func (m *mergeOrchestrator) commitConflictResolution(projectID, taskID, worktree
 		commitOK = m.stageResolvedConflicts(taskID, worktreePath)
 	} else {
 		// Final-merge conflict: worktree has no MERGE_HEAD.
-		checkCmd := git.Command("", "diff", "--quiet")
-		checkCmd.Dir = worktreePath
+		checkCmd := git.Command(worktreePath, "diff", "--quiet")
 		if checkCmd.Run() == nil {
 			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("no changes to commit for conflict resolution")
 			commitOK = false
 		}
 		if commitOK {
 			// `add -u` stages only tracked changes — never sweeps untracked files.
-			if err := gitRun(worktreePath, "add", "-u"); err != nil {
+			if _, err := git.Run(worktreePath, "add", "-u"); err != nil {
 				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("git add -u failed: %v", err)
 				commitOK = false
 			}

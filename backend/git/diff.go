@@ -14,19 +14,19 @@ import (
 	"mike/pkg/logging"
 )
 
+// maxDiffSize is the largest file whose contents a diff carries: past it the hunk is replaced by a
+// size annotation, because the panel cannot show a megabyte of text and the model cannot read one.
+const maxDiffSize = 1 << 20
+
 // GetTaskDiff returns the git diff for a task's worktree.
 // baseRef is the branch/ref to diff against (e.g., "master"). If empty, uses HEAD.
 // headRef is an optional second ref for comparing two commits (git diff baseRef..headRef).
 // When headRef is set, untracked files are omitted (commit-to-commit diff).
 // If skipTruncate is true, the diff is not truncated (used for ?full=1 API requests).
 func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTruncate ...bool) (*TaskDiff, error) {
-	worktreePath, err := wm.WorktreePath(taskID)
+	worktreePath, err := wm.taskWorktree(taskID)
 	if err != nil {
 		return nil, err
-	}
-
-	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		return nil, ErrWorktreeNotFound
 	}
 
 	// Reject invalid baseRef values (e.g. git error messages like "fatal: ...")
@@ -44,7 +44,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 		if target == "" {
 			target = "HEAD"
 		}
-		diffOut, err = wm.gitRunOutput(worktreePath, "diff", fmt.Sprintf("%s..%s", target, headRef))
+		diffOut, err = Run(worktreePath, "diff", fmt.Sprintf("%s..%s", target, headRef))
 		if err != nil {
 			return nil, fmt.Errorf("git diff: %w", err)
 		}
@@ -54,7 +54,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 	} else {
 		// Working tree vs HEAD: only uncommitted changes, since committed ones are handled
 		// separately below. Checkpoints use stash create+store, so changes stay visible here.
-		diffOut, err = wm.gitRunOutput(worktreePath, "diff", "HEAD")
+		diffOut, err = Run(worktreePath, "diff", "HEAD")
 		if err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 				// Changes exist, diffOut has the output — continue
@@ -66,12 +66,11 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 		diffOut, annotations = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
 
 		// Get untracked files from git status --porcelain (lines starting with "?? ")
-		statusOut, err := wm.gitRunOutput(worktreePath, "status", "--porcelain")
+		statusOut, err := Run(worktreePath, "status", "--porcelain")
 		if err != nil {
 			return nil, fmt.Errorf("git status: %w", err)
 		}
 
-		const maxDiffSize = 1 << 20 // 1MB
 		for line := range strings.SplitSeq(statusOut, "\n") {
 			if len(line) >= 4 && strings.HasPrefix(line, "?? ") {
 				path := strings.TrimSpace(line[3:])
@@ -142,7 +141,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 	var stagedPaths map[string]struct{}
 	if headRef == "" {
 		// git diff exits 1 when changes exist — output is still valid.
-		stagedOut, stagedErr := wm.gitRunOutput(worktreePath, "diff", "--cached", "HEAD")
+		stagedOut, stagedErr := Run(worktreePath, "diff", "--cached", "HEAD")
 		if stagedErr != nil {
 			if exitErr, ok := stagedErr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 				stagedHash = fmt.Sprintf("%x", sha256.Sum256([]byte(stagedOut)))
@@ -151,7 +150,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 			stagedHash = fmt.Sprintf("%x", sha256.Sum256([]byte(stagedOut)))
 		}
 		// Get set of staged file paths to mark Staged on tracked entries.
-		stagedNames, namesErr := wm.gitRunOutput(worktreePath, "diff", "--cached", "--name-only", "HEAD")
+		stagedNames, namesErr := Run(worktreePath, "diff", "--cached", "--name-only", "HEAD")
 		if namesErr != nil {
 			if exitErr, ok := namesErr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 				// Changes exist, output is valid
@@ -176,7 +175,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 	}
 	var committedDiff string
 	if baseRef != "" {
-		committedOut, err := wm.gitRunOutput(worktreePath, "diff", fmt.Sprintf("%s..HEAD", baseRef))
+		committedOut, err := Run(worktreePath, "diff", fmt.Sprintf("%s..HEAD", baseRef))
 		if err == nil && committedOut != "" {
 			committedDiff = committedOut
 			committedOut, committedAnnotations := wm.filterLargeBinaryDiffs(worktreePath, committedOut)
@@ -552,7 +551,6 @@ func (wm *WorktreeManager) filterLargeBinaryDiffs(worktreePath, diffText string)
 	if diffText == "" {
 		return diffText, nil
 	}
-	const maxDiffSize = 1 << 20 // 1MB
 	annotations := make(map[string]*fileAnnotation)
 	var result strings.Builder
 	lines := strings.Split(diffText, "\n")
@@ -688,7 +686,7 @@ func (wm *WorktreeManager) TaskDiffFromRepo(repoPath, baseRef, headRef string, s
 	if target == "" {
 		target = "HEAD"
 	}
-	diffOut, err := wm.gitRunOutput(repoPath, "diff", fmt.Sprintf("%s..%s", target, headRef))
+	diffOut, err := Run(repoPath, "diff", fmt.Sprintf("%s..%s", target, headRef))
 	if err != nil {
 		return nil, fmt.Errorf("git diff: %w", err)
 	}
@@ -766,7 +764,7 @@ func (wm *WorktreeManager) ResolveDiffBaseline(taskID, baseRef, taskBranch, fork
 	if err != nil {
 		return baseRef, err
 	}
-	mb, err := wm.gitRunOutput(worktreePath, "merge-base", forkBranch, taskBranch)
+	mb, err := Run(worktreePath, "merge-base", forkBranch, taskBranch)
 	if err != nil {
 		return baseRef, fmt.Errorf("git merge-base: %w", err)
 	}
@@ -823,7 +821,7 @@ func UntrackedReadTarget(worktreePath, rel string) (string, int64, error) {
 // stash commit made with -u. Git keeps those files only in the third parent, so reading the stash
 // commit's own tree would lose them.
 func (wm *WorktreeManager) stashUntrackedCommit(dir, hash string) (string, bool) {
-	out, err := wm.gitRunOutput(dir, "rev-list", "--parents", "-n1", hash)
+	out, err := Run(dir, "rev-list", "--parents", "-n1", hash)
 	if err != nil {
 		return "", false
 	}
@@ -832,7 +830,7 @@ func (wm *WorktreeManager) stashUntrackedCommit(dir, hash string) (string, bool)
 		return "", false // not a stash commit with an untracked parent
 	}
 	candidate := ancestors[3]
-	files, err := wm.gitRunOutput(dir, "ls-tree", "-r", "--name-only", candidate)
+	files, err := Run(dir, "ls-tree", "-r", "--name-only", candidate)
 	if err != nil || strings.TrimSpace(files) == "" {
 		return "", false // nothing to overlay
 	}

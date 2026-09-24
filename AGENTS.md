@@ -34,9 +34,9 @@ record there rather than arguing inside the rule. When you learn something, *rep
   regression: `lint` (gofmt → vet → staticcheck → deadcode, both roots) → `archgate` + `test-archgate`
   (structural debt against its frozen baselines) → `docs-check` + `test-docs-check` (the same, for docs) →
   `bridge-check` → build → `check-release` → the Go suite → `svelte-check` → the frontend gates. Run it
-  before claiming done, and `make check-race` on whatever you touched (`RACE_PKGS`: git, exec, server,
-  stream, api) — a package's own green tests prove nothing about code that only runs when a task does.
-  `make lint` is the static half alone.
+  before claiming done, and `make check-race` on whatever you touched — a package's own green tests prove
+  nothing about code that only runs when a task does. `RACE_PKGS` in the Makefile names the packages,
+  and `docs/testing.md` names the ones it omits. `make lint` is the static half alone.
 - **E2E runs kill your dev server** (global-setup owns ports 3000/3001/9999) — restart with `make run`
   afterwards.
 - Run the dev server in **background** (`&`).
@@ -90,7 +90,8 @@ code, the change is arguing with itself.
   child.** Every git and podman subprocess comes from a constructor that sets one. A context exists only
   where a caller has something worth cancelling (clone, pull/push, extension install); local git calls are
   deliberately context-less. If you add a long-running subprocess, give it both.
-- **`environment` on an LSP extension always reports "healthy"** — the check is declared and validated; nothing runs it.
+- **An LSP extension's `environment` check decides nothing** — core stores and validates the declaration and
+  runs no check, so no health verdict exists anywhere to read. `docs/extension-dependency-cache.md`.
 - **A translation pack overlays `*.tmpl` prompt templates, not `prompts/skills/`** — skill bodies stay
   English whatever pack is enabled (`docs/i18n.md`).
 
@@ -114,9 +115,8 @@ curl -sk https://localhost:3000/api/config   # 401 JSON = up; use http:// with -
 - **Every base context in the tree is registered with a reason** (`root`, `detached`, `legacy`) by the
   `ctxroot` archgate rule; `backend/server/sideeffects.go` states the same classification for HTTP
   handlers. `docs/lifecycle.md`.
-- **The TLS/plain first-byte sniff must not run inside `Accept()`** — `net/http` accepts serially, so one
-  silent peer stalls every later handshake and reads as a dead listener. Queue and per-connection reader:
-  `docs/lifecycle.md`.
+- **The TLS/plain first-byte sniff must not run inside `Accept()`** — a queue and a per-connection reader
+  hold it instead. **`docs/lifecycle.md`**.
 
 ## Configuration
 
@@ -132,8 +132,7 @@ curl -sk https://localhost:3000/api/config   # 401 JSON = up; use http:// with -
 
 ```bash
 make check | make lint | make check-race                 # gate / static half / -race over the lock packages
-go test ./backend/... ./pkg/... -count=1 -parallel 8     # Go unit
-cd frontend && npm test                                  # vitest (+ the frontend gates via make test-frontend)
+make test-go | make test-frontend                        # Go unit / vitest + the frontend gates
 cd frontend && npx playwright test [spec|--grep name]    # e2e (mock LLM, own servers)
 python3 scripts/gen-registry.py --check                  # registry.json matches the manifests
 ```

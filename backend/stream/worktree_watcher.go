@@ -131,12 +131,7 @@ func (ww *WorktreeWatcher) Watch(taskID, projectID, baseRef string) error {
 			_ = ww.watcher.Remove(info.gitIndexDir)
 			delete(ww.indexDirToTask, info.gitIndexDir)
 		}
-		prefix := info.path + string(filepath.Separator)
-		for p := range ww.pathCache {
-			if p == info.path || strings.HasPrefix(p, prefix) {
-				delete(ww.pathCache, p)
-			}
-		}
+		dropWatchedTree(ww.pathCache, info.path)
 	}
 
 	ignored := loadIgnoredDirs(path)
@@ -186,16 +181,10 @@ func (ww *WorktreeWatcher) Unwatch(taskID string) {
 	}
 
 	_ = ww.watcher.Remove(info.path)
-	delete(ww.pathCache, info.path+string(filepath.Separator))
+	dropWatchedTree(ww.pathCache, info.path)
 	if info.gitIndexDir != "" {
 		_ = ww.watcher.Remove(info.gitIndexDir)
 		delete(ww.indexDirToTask, info.gitIndexDir)
-	}
-	prefix := info.path + string(filepath.Separator)
-	for p := range ww.pathCache {
-		if p == info.path || strings.HasPrefix(p, prefix) {
-			delete(ww.pathCache, p)
-		}
 	}
 	delete(ww.worktrees, taskID)
 
@@ -305,7 +294,7 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 		}
 		if taskID == "" {
 			// Fall back to a cached ancestor directory of the event.
-			taskID, _ = lookupWatchedOwner(ww.pathCache, event.Name)
+			taskID = lookupWatchedOwner(ww.pathCache, event.Name)
 		}
 	}
 
@@ -634,8 +623,7 @@ func loadIgnoredDirs(repoRoot string) map[string]struct{} {
 		return result
 	}
 
-	cmd := git.Command("", "check-ignore", "--stdin")
-	cmd.Dir = repoRoot
+	cmd := git.Command(repoRoot, "check-ignore", "--stdin")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return result

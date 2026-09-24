@@ -129,6 +129,14 @@ func CommandContext(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	return configureGit(exec.CommandContext(ctx, gitBinary, args...), dir)
 }
 
+// Run runs one git command to completion in dir and returns what git printed, because git writes its
+// reason for refusing to stderr and an exit code alone tells the caller nothing. It is the only way
+// this repo waits for a git subprocess.
+func Run(dir string, args ...string) (string, error) {
+	out, err := Command(dir, args...).CombinedOutput()
+	return string(out), err
+}
+
 // GitWaitDelay bounds how long a git subprocess may keep its output pipes open after it exits, or
 // after a cancelled context kills it. A cancelled context is not the bound: cmd.Wait waits for the
 // pipes, so a git wedged on a locked index keeps the request goroutine with it. Generous because

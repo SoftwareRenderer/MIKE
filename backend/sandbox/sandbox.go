@@ -23,6 +23,7 @@ import (
 
 	"github.com/creack/pty"
 
+	"mike/backend/prompts"
 	"mike/backend/toolresult"
 	"mike/backend/types"
 	"mike/pkg/bridge"
@@ -47,6 +48,17 @@ const (
 	// Avoids expensive podman inspect calls on every FS operation.
 	livenessTTL = 5 * time.Minute
 )
+
+// projectKeyPrefix marks the container and terminal session a project owns directly, which has no
+// task to be keyed by.
+const projectKeyPrefix = "proj:"
+
+// ProjectKey is the key a project's own container and its project terminal are held under, because
+// neither has a task ID. A key of any other shape is a task's.
+func ProjectKey(projectID string) string { return projectKeyPrefix + projectID }
+
+// IsProjectKey reports whether a key names a project's own container or terminal rather than a task's.
+func IsProjectKey(key string) bool { return strings.HasPrefix(key, projectKeyPrefix) }
 
 // MountPath is the in-container path of projectName's worktree. The result is
 // cleaned, so a project name stored before ValidateProjectName rejected ".."
@@ -118,6 +130,22 @@ type SandboxOpts struct {
 	WorktreeReadOnly bool
 }
 
+// ProjectOpts is the container configuration a project's own row asks for. What a caller decides
+// rather than the project — the image it settled on, the folders an agent extension was granted, and
+// whether the worktree mounts read-only — is set on the result, so a new project column reaches
+// every container a project gets.
+func ProjectOpts(project *types.Project) SandboxOpts {
+	return SandboxOpts{
+		NetworkIsolation: project.SandboxNetworkIsolation,
+		MemoryLimit:      project.SandboxMemoryLimit,
+		ForwardPorts:     project.ForwardPorts,
+		SkillsDir:        prompts.SkillsDir(),
+		SandboxMounts:    project.SandboxMounts,
+		SandboxEnvs:      project.SandboxEnvs,
+		Capabilities:     project.SandboxCapabilities,
+	}
+}
+
 // shellTERM is what an attached terminal reports. It belongs to the terminal
 // session, not to the sandbox, so it is set on the shell's own exec.
 const shellTERM = "xterm-256color"
@@ -181,36 +209,21 @@ type agentConn struct {
 	stdout io.ReadCloser
 }
 
-// memoryUsage answers one container's memory usage and drops the cached cgroup path of one that
-// is gone. An interface so Stop's capture-on-teardown rule is testable without podman.
-type memoryUsage interface {
-	Usage(containerName string) sandboxruntime.MemoryUsageMB
-	Forget(containerName string)
-}
-
-// noMemory answers "no data" for a manager with no tracker; a container is removed regardless.
-type noMemory struct{}
-
-func (noMemory) Usage(string) sandboxruntime.MemoryUsageMB { return sandboxruntime.MemoryUsageMB{} }
-func (noMemory) Forget(string)                             {}
-
-func (sm *SandboxManager) memory() memoryUsage {
-	if sm.mem == nil {
-		return noMemory{}
-	}
-	return sm.mem
+// memory answers the tracker to call; the nil-tracker rule is sandboxruntime.MemoryOrDefault's.
+func (sm *SandboxManager) memory() sandboxruntime.MemoryUsage {
+	return sandboxruntime.MemoryOrDefault(sm.mem)
 }
 
 // SandboxManager manages gVisor sandbox containers for tasks.
 type SandboxManager struct {
 	mu            sync.Mutex
 	rt            *sandboxruntime.Runtime
-	active        map[string]string         // taskID -> containerName
-	mountPaths    map[string]string         // taskID -> mount path inside container
-	agents        map[string]*agentConn     // taskID -> agent pipes + process
-	clients       map[string]*bridge.Client // taskID -> agent client (cached)
-	livenessCache map[string]time.Time      // taskID -> last time running was confirmed
-	mem           memoryUsage               // taskID -> container memory, via containerName
+	active        map[string]string          // taskID -> containerName
+	mountPaths    map[string]string          // taskID -> mount path inside container
+	agents        map[string]*agentConn      // taskID -> agent pipes + process
+	clients       map[string]*bridge.Client  // taskID -> agent client (cached)
+	livenessCache map[string]time.Time       // taskID -> last time running was confirmed
+	mem           sandboxruntime.MemoryUsage // taskID -> container memory, via containerName
 	// capsMB is each live container's limit in MB as it was created, or 0 when it is unlimited. It is
 	// recorded here because the project's configured limit can change while the container is running.
 	capsMB map[string]int64
@@ -433,7 +446,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	}
 	// No -e here: the container's environment comes from containerEnvArgs below.
 	createArgs = append(createArgs,
-		"-v", absWorktree+":"+mountPath+":rprivate,"+worktreeMode,
+		"-v", sandboxruntime.BindMountSpec(absWorktree, mountPath, worktreeMode),
 	)
 	if opts.NetworkIsolation {
 		createArgs = append(createArgs, "--network", "none")
@@ -473,7 +486,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 		gitDir := filepath.Join(projectPath, ".git")
 		if _, err := os.Stat(gitDir); err == nil {
 			createArgs = append(createArgs,
-				"-v", gitDir+":"+gitDir+":rprivate,ro",
+				"-v", sandboxruntime.BindMountSpec(gitDir, gitDir, "ro"),
 			)
 			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("mounting .git read-only: %s", gitDir)
 		}
@@ -504,7 +517,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 				mountMode = "ro"
 			}
 			createArgs = append(createArgs,
-				"-v", absHost+":"+m.ContainerPath+":rprivate,"+mountMode,
+				"-v", sandboxruntime.BindMountSpec(absHost, m.ContainerPath, mountMode),
 			)
 			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("mounting agent sandbox %s -> %s (%s)", absHost, m.ContainerPath, mountMode)
 		}
@@ -517,7 +530,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("skipping skills mount: invalid path %s: %v", opts.SkillsDir, err)
 		} else if _, err := os.Stat(absSkillsDir); err == nil {
 			createArgs = append(createArgs,
-				"-v", absSkillsDir+":"+SkillsMount+":rprivate,ro",
+				"-v", sandboxruntime.BindMountSpec(absSkillsDir, SkillsMount, "ro"),
 			)
 			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("mounting skills read-only: %s -> %s", absSkillsDir, SkillsMount)
 		}
@@ -542,7 +555,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 			mode = "rw" // default to rw
 		}
 		createArgs = append(createArgs,
-			"-v", hostPath+":"+m.ContainerPath+":rprivate,"+mode,
+			"-v", sandboxruntime.BindMountSpec(hostPath, m.ContainerPath, mode),
 		)
 		logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("mounting %s -> %s (%s)", hostPath, m.ContainerPath, mode)
 	}
@@ -738,7 +751,7 @@ func (sm *SandboxManager) StartShell(taskID, worktreePath string, project *types
 // creating it on demand if it doesn't exist. Returns the combined stdout/stderr.
 // This is for project-level filesystem operations (read, write, search, etc.).
 func (sm *SandboxManager) ExecProject(project *types.Project, command string, opts SandboxOpts) (string, error) {
-	taskID := "proj:" + project.ID
+	taskID := ProjectKey(project.ID)
 	if err := sm.ensureProjectContainer(taskID, project, opts); err != nil {
 		return "", err
 	}
@@ -790,7 +803,7 @@ func (sm *SandboxManager) ensureProjectContainer(taskID string, project *types.P
 // ExecProjectWithInput runs a command inside the project's sandbox container
 // with stdin input, creating the container on demand if needed.
 func (sm *SandboxManager) ExecProjectWithInput(project *types.Project, command string, stdin []byte, opts SandboxOpts) (string, error) {
-	taskID := "proj:" + project.ID
+	taskID := ProjectKey(project.ID)
 	if err := sm.ensureProjectContainer(taskID, project, opts); err != nil {
 		return "", err
 	}
@@ -1219,14 +1232,7 @@ func (sm *SandboxManager) GetMemoryStats(taskID string) *types.SandboxMemoryStat
 		return &types.SandboxMemoryStats{}
 	}
 
-	usage := sm.memory().Usage(name)
-	return &types.SandboxMemoryStats{
-		Running:   usage.Known,
-		CurrentMB: usage.Current,
-		LimitMB:   usage.Limit,
-		PeakMB:    usage.Peak,
-		OOMKills:  usage.OOMKills,
-	}
+	return types.NewSandboxMemoryStats(sm.memory().Usage(name))
 }
 
 // ImageReady reports whether image is available locally. An empty image means the app-wide
@@ -1390,7 +1396,7 @@ func (sm *SandboxManager) BuildImageWithOptions(projectName, dockerfilePath stri
 
 // StopProjectContainers stops all sandbox containers associated with a project.
 // This includes task-level containers (identified by taskIDs) and the project-level
-// container (identified by "proj:" + projectID). Used when sandbox settings change
+// container (identified by ProjectKey). Used when sandbox settings change
 // so containers are recreated with the new settings on next use.
 func (sm *SandboxManager) StopProjectContainers(projectID string, taskIDs []string) {
 	// Stop task-level containers
@@ -1398,7 +1404,7 @@ func (sm *SandboxManager) StopProjectContainers(projectID string, taskIDs []stri
 		_ = sm.Stop(taskID)
 	}
 	// Stop project-level container
-	_ = sm.Stop("proj:" + projectID)
+	_ = sm.Stop(ProjectKey(projectID))
 }
 
 // Cleanup removes all active sandbox containers.

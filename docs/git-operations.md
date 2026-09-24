@@ -114,8 +114,8 @@ live branches kept), `backend/git/branch_listing_test.go` (both markers, slug pr
   `PopStashByHash` checks `git diff --name-only --diff-filter=U` after a failed apply and returns
   `*RestoreConflictError` (the paths and the entry's hash, classified with `errors.As`) only when the
   index is unmerged: a conflict is a file a person has to resolve, a refusal left the tree alone, and
-  git's phrasing does not tell them apart. What a caller does with it is in *Commit and Done*
-  (`docs/commit-and-done.md`) — the merge paths finish the task on it, which is why the git layer states
+  git's phrasing does not tell them apart. What a caller does with it is
+  `docs/commit-and-done.md → Commit and Move to Done` — the merge paths finish the task on it, which is why the git layer states
   it separately instead of returning one error for the bracket.
 - Tests: `backend/git/stash_identity_test.go`, `push_stash_test.go`, `stash_bracket_test.go`,
   `stash_restore_conflict_test.go`, `backend/exec/sync_merge_test.go`

@@ -1335,16 +1335,9 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		msgWake:        msgWake,
 		summarizeCh:    summarizeCh,
 		sandboxEnabled: project.SandboxEnabled,
-		sandboxOpts: sandbox.SandboxOpts{
-			NetworkIsolation: project.SandboxNetworkIsolation,
-			MemoryLimit:      project.SandboxMemoryLimit,
-			ForwardPorts:     project.ForwardPorts,
-			SandboxMounts:    project.SandboxMounts,
-			SandboxEnvs:      project.SandboxEnvs,
-			Capabilities:     project.SandboxCapabilities,
-		},
-		done:     doneCh,
-		finished: finishedCh,
+		sandboxOpts:    sandbox.ProjectOpts(project),
+		done:           doneCh,
+		finished:       finishedCh,
 	}, nil
 }
 
@@ -1392,7 +1385,7 @@ func (te *TaskExecutor) getAgentRunner(projectID, taskID string) (*agent.AgentRu
 	// of idle tasks, we create it here so the agent subprocess can run.
 	if setup.sandboxEnabled {
 		if !te.sandboxMgr.ContainerIsRunning(task.ID) {
-			if _, _, _, err := te.setupSandbox(setup); err != nil {
+			if _, _, err := te.setupSandbox(setup); err != nil {
 				return nil, fmt.Errorf("create sandbox for compaction: %w", err)
 			}
 		}
@@ -1606,11 +1599,11 @@ func (te *TaskExecutor) RecoverStaleTasks() int {
 // when nothing can be mid-queue, and skips what is legitimately pending: a live executor,
 // a parent with unfinished subtasks, and a thread whose newest row is a user message —
 // work that never ran is a dropped message, not a finished turn, so it is only reported.
-func (te *TaskExecutor) normalizePendingTasks() int {
+func (te *TaskExecutor) normalizePendingTasks() {
 	pending, err := te.store.GetPendingIdleTasks()
 	if err != nil {
 		logging.For(logging.Recovery).Warnf("list pending tasks failed: %v", err)
-		return 0
+		return
 	}
 	normalized := 0
 	for _, task := range pending {
@@ -1651,7 +1644,6 @@ func (te *TaskExecutor) normalizePendingTasks() int {
 	if normalized > 0 {
 		logging.For(logging.Recovery).Infof("%d task(s) moved to review: pending with nothing pending", normalized)
 	}
-	return normalized
 }
 
 // HasRunningTasks returns true if any task in the given project has an active

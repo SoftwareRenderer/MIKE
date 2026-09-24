@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"net"
 	"os/exec"
 	"sync"
 	"sync/atomic"
@@ -13,12 +12,12 @@ import (
 	"mike/pkg/procterm"
 )
 
-// handler manages request dispatch for a single client connection.
+// handler manages request dispatch for one bridge connection.
 type handler struct {
 	mu        sync.Mutex
 	bashProcs map[uint32]*bashProc // msgID → running bash process
 	lsp       *lspState            // LSP server state (one per connection)
-	writeMu   sync.Mutex           // serializes all writes to conn (bash streaming + dispatch + read loop)
+	writeMu   sync.Mutex           // serializes all writes to the connection's write end (bash streaming + dispatch + read loop)
 	closed    atomic.Bool          // set true when connection is torn down (atomic: accessed from readLoop + close)
 	fileLocks sync.Map             // path → *sync.Mutex, prevents concurrent read-modify-write on same file
 }
@@ -83,14 +82,14 @@ func newHandler() *handler {
 }
 
 // recoverPanic is a deferred recovery for handler goroutines
-func (h *handler) recoverPanic(conn net.Conn, msgID uint32) {
+func (h *handler) recoverPanic(out io.Writer, msgID uint32) {
 	if r := recover(); r != nil {
 		logging.For(logging.Bridge).Warnf("agent: recovered panic (MsgID=%d): %v", msgID, r)
 		// Best-effort: report the error to the host so the pending request resolves
 		// instead of hanging until a timeout. Notifications (msgID 0) have no
 		// pending request to resolve.
 		if msgID != 0 {
-			_ = h.writeFrame(conn, protocol.NewError(msgID, fmt.Sprintf("agent panic: %v", r)))
+			_ = h.writeFrame(out, protocol.NewError(msgID, fmt.Sprintf("agent panic: %v", r)))
 		}
 	}
 }
@@ -98,14 +97,14 @@ func (h *handler) recoverPanic(conn net.Conn, msgID uint32) {
 // errHandlerClosed is returned once the handler has been closed.
 var errHandlerClosed = fmt.Errorf("handler closed")
 
-// writeFrame sends a frame to conn under the write lock.
-func (h *handler) writeFrame(conn net.Conn, frame *protocol.Frame) error {
+// writeFrame sends a frame to out under the write lock.
+func (h *handler) writeFrame(out io.Writer, frame *protocol.Frame) error {
 	h.writeMu.Lock()
 	defer h.writeMu.Unlock()
 	if h.closed.Load() {
 		return errHandlerClosed
 	}
-	return protocol.WriteFrame(conn, frame)
+	return protocol.WriteFrame(out, frame)
 }
 
 func (h *handler) close() {
@@ -126,11 +125,11 @@ func (h *handler) close() {
 	h.mu.Unlock()
 }
 
-// handleConn reads frames and dispatches them: binary methods (bash_cancel) synchronously on
-// this goroutine, JSON methods on their own.
-func (h *handler) handleConn(conn net.Conn) error {
+// handleConn reads frames from in and dispatches them to out: binary methods (bash_cancel)
+// synchronously on this goroutine, JSON methods on their own.
+func (h *handler) handleConn(in io.Reader, out io.Writer) error {
 	for {
-		frame, err := protocol.ReadFrame(conn)
+		frame, err := protocol.ReadFrame(in)
 		if err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				return nil // clean disconnect
@@ -148,7 +147,7 @@ func (h *handler) handleConn(conn net.Conn) error {
 		case protocol.TypeNotification:
 			// Notifications (e.g., LSP notifications like initialized, didOpen)
 			if method == protocol.MethodLSP {
-				go h.handleLSPNotify(conn, frame)
+				go h.handleLSPNotify(frame)
 			}
 			continue
 
@@ -159,10 +158,10 @@ func (h *handler) handleConn(conn net.Conn) error {
 				req, err := protocol.ParseRequest(frame)
 				if err != nil {
 					logging.For(logging.Bridge).Infof("agent: parse request MsgID %d: %v", frame.MsgID, err)
-					_ = h.writeFrame(conn, protocol.NewError(frame.MsgID, err.Error()))
+					_ = h.writeFrame(out, protocol.NewError(frame.MsgID, err.Error()))
 					continue
 				}
-				go h.handleLSP(conn, req)
+				go h.handleLSP(out, req)
 				continue
 			case protocol.MethodBashCancel:
 				h.handleBashCancel(frame)
@@ -173,36 +172,36 @@ func (h *handler) handleConn(conn net.Conn) error {
 			req, err := protocol.ParseRequest(frame)
 			if err != nil {
 				logging.For(logging.Bridge).Infof("agent: parse request MsgID %d: %v", frame.MsgID, err)
-				_ = h.writeFrame(conn, protocol.NewError(frame.MsgID, err.Error()))
+				_ = h.writeFrame(out, protocol.NewError(frame.MsgID, err.Error()))
 				continue
 			}
 
-			go h.dispatch(conn, req)
+			go h.dispatch(out, req)
 		}
 	}
 }
 
 // dispatch parses JSON params and routes to the appropriate handler.
-func (h *handler) dispatch(conn net.Conn, req *protocol.Request) {
-	defer h.recoverPanic(conn, req.MsgID)
+func (h *handler) dispatch(out io.Writer, req *protocol.Request) {
+	defer h.recoverPanic(out, req.MsgID)
 	var err error
 	switch req.Method {
 	case protocol.MethodRead:
-		err = handleRead(h, conn, req)
+		err = handleRead(h, out, req)
 	case protocol.MethodWrite:
-		err = handleWrite(h, conn, req)
+		err = handleWrite(h, out, req)
 	case protocol.MethodEdit:
-		err = handleEdit(h, conn, req)
+		err = handleEdit(h, out, req)
 	case protocol.MethodBash:
-		err = handleBash(h, conn, req)
+		err = handleBash(h, out, req)
 	default:
-		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, fmt.Sprintf("unknown method: %s", req.MethodString())))
+		_ = h.writeFrame(out, protocol.NewError(req.MsgID, fmt.Sprintf("unknown method: %s", req.MethodString())))
 		return
 	}
 
 	if err != nil {
 		logging.For(logging.Bridge).Warnf("agent: MsgID %d method %s error: %v", req.MsgID, req.MethodString(), err)
-		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, err.Error()))
+		_ = h.writeFrame(out, protocol.NewError(req.MsgID, err.Error()))
 	}
 }
 

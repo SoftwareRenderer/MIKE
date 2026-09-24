@@ -126,8 +126,8 @@ create and `PUT` (400 naming the field).
   database lock is otherwise a caller that never returns with nothing in the log naming what it waits
   on. This is the same instrument the git-family locks use: report, keep waiting. No podman operation
   has a deadline.
-- Shutdown order follows from that: websocket watchers → terminal sessions → lsp → extensions → sandbox
-  containers → database, so a session's shell is killed while its container can still receive it.
+- Shutdown order follows from that rule — a session's shell dies while its container can still receive it
+  — and the stage list itself is `docs/lifecycle.md → Shutdown is a declared stage list`.
 - Tests: `backend/sandbox/podman_wait_test.go`, `TestTerminalManagerClose`, `pkg/subproc/subproc_test.go`,
   `TestPodmanLabelNamesTheOperation`, `pkg/sandboxruntime/podmanenv_test.go`.
 

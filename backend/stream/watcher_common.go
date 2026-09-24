@@ -3,6 +3,7 @@ package stream
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/fsnotify/fsnotify"
 
@@ -57,25 +58,36 @@ func addRecursiveWatcher(w *fsnotify.Watcher, pathCache map[string]string, dir, 
 	})
 }
 
+// dropWatchedTree removes a directory and every key recorded below it, undoing
+// addRecursiveWatcher. Callers must hold the lock guarding pathCache.
+func dropWatchedTree(pathCache map[string]string, dir string) {
+	prefix := dir + string(filepath.Separator)
+	for p := range pathCache {
+		if p == dir || strings.HasPrefix(p, prefix) {
+			delete(pathCache, p)
+		}
+	}
+}
+
 // lookupWatchedOwner resolves which watched tree owns path, returning the value
-// recorded by addRecursiveWatcher. It checks path itself and then every ancestor
-// directory, because fsnotify reports events for files *inside* a watched dir
+// recorded by addRecursiveWatcher, or "" when no watched tree holds it. It checks path itself and
+// then every ancestor directory, because fsnotify reports events for files *inside* a watched dir
 // while pathCache is keyed by directory. Both the bare path and the path+separator
 // forms are consulted, mirroring the two keys the setter writes.
 //
 // Callers must hold the lock guarding pathCache; this reads the map as-is.
-func lookupWatchedOwner(pathCache map[string]string, path string) (string, bool) {
+func lookupWatchedOwner(pathCache map[string]string, path string) string {
 	dir := path
 	for {
 		if value, ok := pathCache[dir]; ok {
-			return value, true
+			return value
 		}
 		if value, ok := pathCache[dir+string(filepath.Separator)]; ok {
-			return value, true
+			return value
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", false
+			return ""
 		}
 		dir = parent
 	}

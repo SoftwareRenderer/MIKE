@@ -12,13 +12,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	"mike/backend/agent"
 	"mike/backend/config"
 	"mike/backend/httputil"
-	"mike/backend/prompts"
 	"mike/backend/sandbox"
 	"mike/backend/store"
 	"mike/backend/types"
@@ -218,22 +216,15 @@ func (tm *TerminalManager) SetAgentRegistry(ar *agent.AgentRegistry) {
 // options. A dependency directory granted to an LSP extension is not in it: a shell sees the host only
 // through the project's Sandbox Configuration mounts, like every other container here.
 func (tm *TerminalManager) shellSandboxOpts(image string, proj *types.Project, agentSandbox *types.AgentSandbox) sandbox.SandboxOpts {
-	return sandbox.SandboxOpts{
-		BaseImage:        image,
-		NetworkIsolation: proj.SandboxNetworkIsolation,
-		MemoryLimit:      proj.SandboxMemoryLimit,
-		ForwardPorts:     proj.ForwardPorts,
-		AgentSandbox:     agentSandbox,
-		SkillsDir:        prompts.SkillsDir(),
-		SandboxMounts:    proj.SandboxMounts,
-		SandboxEnvs:      proj.SandboxEnvs,
-		Capabilities:     proj.SandboxCapabilities,
-	}
+	opts := sandbox.ProjectOpts(proj)
+	opts.BaseImage = image
+	opts.AgentSandbox = agentSandbox
+	return opts
 }
 
 // A project-level terminal has no task, so it gets no folders.
 func (tm *TerminalManager) agentGrantForShell(projectID, taskID string) *types.AgentSandbox {
-	if tm.agentRegistry == nil || strings.HasPrefix(taskID, "proj:") {
+	if tm.agentRegistry == nil || sandbox.IsProjectKey(taskID) {
 		return nil
 	}
 	task, err := tm.store.GetTask(projectID, taskID)
@@ -290,7 +281,7 @@ func (tm *TerminalManager) GetProjectPorts(projectID string) []types.AssignedPor
 	if tm.sandboxMgr == nil {
 		return nil
 	}
-	ports, _ := tm.sandboxMgr.GetContainerPorts("proj:" + projectID)
+	ports, _ := tm.sandboxMgr.GetContainerPorts(sandbox.ProjectKey(projectID))
 	return ports
 }
 
@@ -347,7 +338,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		// the task starts (or the task was never started), so we create it here as needed.
 		// Only mount .git/ for task-level containers (not project-level terminals)
 		shellProject := proj
-		if strings.HasPrefix(taskID, "proj:") {
+		if sandbox.IsProjectKey(taskID) {
 			shellProject = &types.Project{ID: proj.ID, Name: proj.Name}
 		}
 		shell, assignedPorts, err := tm.sandboxMgr.StartShell(taskID, worktreePath, shellProject, tm.shellSandboxOpts(imageToUse, proj, agentSandbox))
@@ -357,10 +348,10 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		}
 		// Notify caller of assigned ports
 		if len(assignedPorts) > 0 {
-			if !strings.HasPrefix(taskID, "proj:") && tm.onPortsAssigned != nil {
+			if !sandbox.IsProjectKey(taskID) && tm.onPortsAssigned != nil {
 				// Task-level terminal: broadcast via callback
 				tm.onPortsAssigned(taskID, projectID, assignedPorts)
-			} else if strings.HasPrefix(taskID, "proj:") && tm.onProjectPortsAssigned != nil {
+			} else if sandbox.IsProjectKey(taskID) && tm.onProjectPortsAssigned != nil {
 				// Project-level terminal: broadcast via callback
 				tm.onProjectPortsAssigned(projectID, assignedPorts)
 			}
@@ -407,7 +398,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		logging.For(logging.Terminal).Infof("removed session %s after shell exit", sessionKey)
 		// For project-level sandbox terminals, stop the container when the shell exits.
 		// Task-level containers are managed by the task executor lifecycle.
-		if strings.HasPrefix(sessionKey, "proj:") && sandboxEnabled && tm.sandboxMgr != nil {
+		if sandbox.IsProjectKey(sessionKey) && sandboxEnabled && tm.sandboxMgr != nil {
 			tm.sandboxMgr.Stop(sessionKey)
 		}
 	}
@@ -489,7 +480,7 @@ func (tm *TerminalManager) RemoveProjectSessions(projectID string) {
 	for _, task := range tasks {
 		tm.RemoveSession(task.ID)
 	}
-	tm.RemoveSession("proj:" + projectID)
+	tm.RemoveSession(sandbox.ProjectKey(projectID))
 }
 
 // readLoop reads from the PTY, buffers all output, and broadcasts to connected clients.
@@ -611,7 +602,7 @@ func (tm *TerminalManager) HandleProjectTerminal(w http.ResponseWriter, r *http.
 		return
 	}
 
-	sessionKey := "proj:" + projectID
+	sessionKey := sandbox.ProjectKey(projectID)
 	tm.handleTerminalWSWithSetup(w, r, sessionKey, sessionKey, project.Path, projectID)
 }
 

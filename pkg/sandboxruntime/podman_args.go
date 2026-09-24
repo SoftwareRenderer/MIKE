@@ -2,8 +2,9 @@ package sandboxruntime
 
 // The parts of a `podman create` command line that are a security decision: the isolation preface
 // every container MIKE builds starts from (GVisorCreateArgs), the one append path for a capability
-// grant (AppendCapabilities), and the values that arrive from outside this process — a capability
-// name, and a bind mount's in-container path. Mounts carry the weight: one mount of "/" hands the
+// grant (AppendCapabilities), the one way a bind mount's `-v` value is written (BindMountSpec), and
+// the values that arrive from outside this process — a capability name, and a bind mount's
+// in-container path. Mounts carry the weight: one mount of "/" hands the
 // sandbox the host tree, and a ":" or "," in a container path rewrites the mount's options — an
 // "ro" becomes "rw". A capability is judged by shape instead, because every container MIKE creates
 // runs under gVisor with `--cap-drop ALL` (GVisorIsolationForCaps records what was measured) and
@@ -60,6 +61,14 @@ func ValidateContainerPath(containerPath string) error {
 		return fmt.Errorf("mount container path %q must not contain '..'", containerPath)
 	}
 	return nil
+}
+
+// BindMountSpec renders the value of one `-v` argument: "<host>:<container>:rprivate,<mode>". It is
+// the only place that writes the spec, so a mount reaches podman in the same shape that
+// ValidateContainerPath checked it for: the option suffix is the last field, and a path carrying ':'
+// or ',' would move it.
+func BindMountSpec(hostPath, containerPath, mode string) string {
+	return hostPath + ":" + containerPath + ":rprivate," + mode
 }
 
 // ValidateCapability rejects a capability string that is not a plain capability name.

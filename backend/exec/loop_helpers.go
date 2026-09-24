@@ -652,39 +652,32 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 	return false // continue
 }
 
-// sandboxCreateOpts is the sandbox configuration for creating (or recreating) setup's
-// container on the given image, with the worktree mounted read-only when readOnly says so.
-// Four paths create this
-// container (start, plan/build-mode switch, agent config change, bridge recovery) and share
-// it, so a new field cannot be set in three of them. Only the image comes from the caller -
-// only EnsureImageForProject knows what it settled on.
+// sandboxCreateOpts is the sandbox configuration for creating (or recreating) setup's container on
+// the given image, with the worktree mounted read-only when readOnly says so. Four paths create this
+// container (start, plan/build-mode switch, agent config change, bridge recovery) and share it. Only
+// the image and the mode come from the caller — only EnsureImageForProject knows what the image
+// settled on; the project's own configuration is sandbox.ProjectOpts's.
 func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, readOnly bool) sandbox.SandboxOpts {
-	// The host folders this container may see are the ones the project configured, plus the ones the user
-	// approved for the agent this task runs. No other installed extension contributes a folder.
-	return sandbox.SandboxOpts{
-		BaseImage:        image,
-		NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
-		MemoryLimit:      setup.sandboxOpts.MemoryLimit,
-		ForwardPorts:     setup.sandboxOpts.ForwardPorts,
-		AgentSandbox:     te.agentRegistry.AgentSandboxForURL(setup.providerURL()),
-		SkillsDir:        prompts.SkillsDir(),
-		SandboxMounts:    setup.sandboxOpts.SandboxMounts,
-		SandboxEnvs:      setup.sandboxOpts.SandboxEnvs,
-		Capabilities:     setup.sandboxOpts.Capabilities,
-		WorktreeReadOnly: readOnly,
-	}
+	// The host folders this container may see are the ones the project configured, plus the ones the
+	// user approved for the agent this task runs. No other installed extension contributes a folder.
+	opts := setup.sandboxOpts
+	opts.BaseImage = image
+	opts.AgentSandbox = te.agentRegistry.AgentSandboxForURL(setup.providerURL())
+	opts.WorktreeReadOnly = readOnly
+	return opts
 }
 
-// setupSandbox creates or reuses a sandbox container and connects to the agent.
-// Returns the image used, the agent client, and any assigned ports.
-// The caller is responsible for creating callbacks from the agent client.
-func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Client, []types.AssignedPort, error) {
+// setupSandbox creates or reuses a sandbox container and connects to the agent. Returns the image
+// used and the agent client; the caller builds its callbacks from the latter. Assigned ports are not
+// returned: they are carried on setup.task and broadcast here, which is the only path that may write
+// task.AssignedPorts.
+func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Client, error) {
 	task := setup.task
 	projectID := setup.projectID
 	worktreePath := setup.worktreePath
 
 	if te.sandboxMgr == nil || !te.sandboxMgr.IsAvailable() {
-		return "", nil, nil, fmt.Errorf("gVisor not available")
+		return "", nil, fmt.Errorf("gVisor not available")
 	}
 
 	// Make the project's sandbox image exist, building it from its Dockerfile or pulling it. This
@@ -706,7 +699,7 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Clie
 		}
 	})
 	if imgErr != nil {
-		return "", nil, nil, fmt.Errorf("failed to prepare sandbox image: %w", imgErr)
+		return "", nil, fmt.Errorf("failed to prepare sandbox image: %w", imgErr)
 	}
 
 	// Reuse existing container (lazy-start). Create only if none exists or if stopped/crashed.
@@ -715,7 +708,7 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Clie
 		var createErr error
 		assignedPorts, createErr = te.sandboxMgr.Create(task.ID, worktreePath, setup.project, te.sandboxCreateOpts(setup, imageToUse, task.IsPlanMode()))
 		if createErr != nil {
-			return "", nil, nil, fmt.Errorf("failed to create sandbox: %w", createErr)
+			return "", nil, fmt.Errorf("failed to create sandbox: %w", createErr)
 		}
 		logging.For(logging.Sandbox).With(logging.TaskID, task.ID).Infof("sandbox created with image %s", imageToUse)
 		// Store and broadcast assigned ports (carried on the task object)
@@ -732,8 +725,8 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Clie
 	// Get agent client for tool calls (required — sandbox creation ensures agent is running)
 	agentClient, err := te.sandboxMgr.GetClient(task.ID)
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("failed to connect to sandbox bridge: %w", err)
+		return "", nil, fmt.Errorf("failed to connect to sandbox bridge: %w", err)
 	}
 
-	return imageToUse, agentClient, assignedPorts, nil
+	return imageToUse, agentClient, nil
 }

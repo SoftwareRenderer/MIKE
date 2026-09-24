@@ -451,7 +451,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 	if setup.sandboxEnabled {
 		var agentClient *bridge.Client
 		var err error
-		imageToUse, agentClient, _, err = te.setupSandbox(setup)
+		imageToUse, agentClient, err = te.setupSandbox(setup)
 		if err != nil {
 			te.failTask(setup.task, setup.projectID, err.Error(), "sandbox_setup_failed")
 			return
@@ -1447,7 +1447,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 		te.flushAdvisories(setup, lc)
 
 		// Loop detection: record this turn and check for repetition
-		loopType, _, toolArgs := lc.detector.recordTurn(lc.pendingToolCalls, assistantText, lc.finishReason)
+		loopType, toolArgs := lc.detector.recordTurn(lc.pendingToolCalls, assistantText, lc.finishReason)
 		if loopType != LoopNone {
 			target := ""
 			if loopType == LoopTool {
@@ -1499,7 +1499,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 		lc.reasoningContent.Reset()
 
 		// Loop detection for text-only responses
-		loopType, _, _ := lc.detector.recordTurn(nil, assistantText, lc.finishReason)
+		loopType, _ := lc.detector.recordTurn(nil, assistantText, lc.finishReason)
 		lc.finishReason = ""
 		// Also check for phrase repetition detected during streaming.
 		// Skip if the response contains a question (natural question, not a loop).
@@ -1900,14 +1900,6 @@ func userMessagesEqual(a, b types.ChatMessage) bool {
 	}
 	// Plain text comparison
 	return a.Content == b.Content
-}
-
-// gitRun runs one git command in dir and discards its output.
-func gitRun(dir string, args ...string) error {
-	c := git.Command("", args...)
-	c.Dir = dir
-	_, err := c.CombinedOutput()
-	return err
 }
 
 // failTask sets the task to failed/review state, persists it, broadcasts the

@@ -136,35 +136,32 @@ func (wm *WorktreeManager) UnpinMessageSnapshots(taskID string, messageIDs []str
 	return nil
 }
 
-// splitSnapshotRef breaks a snapshot ref into (taskID, ownerID), or returns nil when ref is not a
-// well-formed ref inside the snapshot namespace.
-func splitSnapshotRef(ref string) (taskID, ownerID string, ok bool) {
+// isSnapshotRef reports whether ref is a well-formed ref inside the snapshot namespace. Nothing reads
+// the task ID and owner ID out of a ref — the namespace is what a delete is allowed to touch — so only
+// the shape is decided here.
+func isSnapshotRef(ref string) bool {
 	prefix := SnapshotRefPrefix + "/"
 	if !strings.HasPrefix(ref, prefix) {
-		return "", "", false
+		return false
 	}
-	rest := ref[len(prefix):]
-	taskID, ownerID, found := strings.Cut(rest, "/")
+	taskID, ownerID, found := strings.Cut(ref[len(prefix):], "/")
 	if !found || taskID == "" || ownerID == "" {
-		return "", "", false
+		return false
 	}
-	if !validSnapshotPart(taskID) || !validSnapshotPart(ownerID) {
-		return "", "", false
-	}
-	return taskID, ownerID, true
+	return validSnapshotPart(taskID) && validSnapshotPart(ownerID)
 }
 
 // PinSnapshot makes hash reachable under ref so git cannot garbage-collect it. Idempotent. The object must
 // exist: a ref to something unresolvable would fail on every later use, so a failed pin is reported rather
 // than stored.
 func (wm *WorktreeManager) PinSnapshot(repoPath, ref, hash string) error {
-	if _, _, ok := splitSnapshotRef(ref); !ok {
+	if !isSnapshotRef(ref) {
 		return fmt.Errorf("%w: %q", ErrInvalidSnapshotRef, ref)
 	}
 	if hash == "" {
 		return fmt.Errorf("%w: %s has no object to pin", ErrInvalidSnapshotRef, ref)
 	}
-	if _, err := wm.gitRunOutput(repoPath, "rev-parse", "--verify", hash+"^{commit}"); err != nil {
+	if _, err := Run(repoPath, "rev-parse", "--verify", hash+"^{commit}"); err != nil {
 		return fmt.Errorf("pin snapshot %s: object %s is not reachable in this repository: %w", ref, hash, err)
 	}
 	if err := wm.gitRun(repoPath, "update-ref", ref, hash); err != nil {
@@ -175,7 +172,7 @@ func (wm *WorktreeManager) PinSnapshot(repoPath, ref, hash string) error {
 
 // UnpinSnapshot deletes ref. A ref that is already gone is not an error.
 func (wm *WorktreeManager) UnpinSnapshot(repoPath, ref string) error {
-	if _, _, ok := splitSnapshotRef(ref); !ok {
+	if !isSnapshotRef(ref) {
 		return fmt.Errorf("%w: %q", ErrInvalidSnapshotRef, ref)
 	}
 	if err := wm.gitRun(repoPath, "update-ref", "-d", ref); err != nil {
@@ -188,7 +185,7 @@ func (wm *WorktreeManager) DeleteSnapshotRefsUnder(repoPath, prefix string) (int
 	if prefix != SnapshotRefPrefix && !strings.HasPrefix(prefix, SnapshotRefPrefix+"/") {
 		return 0, fmt.Errorf("%w: refusing to delete refs under %q", ErrInvalidSnapshotRef, prefix)
 	}
-	out, err := wm.gitRunOutput(repoPath, "for-each-ref", "--format=%(refname)", prefix)
+	out, err := Run(repoPath, "for-each-ref", "--format=%(refname)", prefix)
 	if err != nil {
 		return 0, fmt.Errorf("list snapshot refs under %s: %w", prefix, err)
 	}
@@ -198,7 +195,7 @@ func (wm *WorktreeManager) DeleteSnapshotRefsUnder(repoPath, prefix string) (int
 		if ref == "" {
 			continue
 		}
-		if _, _, ok := splitSnapshotRef(ref); !ok {
+		if !isSnapshotRef(ref) {
 			continue // never delete outside the namespace
 		}
 		if err := wm.gitRun(repoPath, "update-ref", "-d", ref); err != nil {
