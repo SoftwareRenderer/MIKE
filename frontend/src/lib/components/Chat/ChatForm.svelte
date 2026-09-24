@@ -98,7 +98,7 @@
         textareaEl?.focus();
     }
 
-    export function resetHeight() {
+    function resetHeight() {
         if (textareaEl) {
             textareaEl.style.height = 'auto';
         }

@@ -351,7 +351,7 @@ const catalog = {
     'settings.defaults.runParallel': 'Run subtasks in parallel',
     'settings.defaults.runParallelDesc': 'Start available subtasks in parallel',
     'settings.defaults.reclaimSandbox': 'Release idle sandboxes',
-    "settings.defaults.reclaimSandboxDesc": "When enabled, containers associated with tasks will be stopped after 5 minues of inactivity to free memory.",
+    "settings.defaults.reclaimSandboxDesc": "Free memory held by a task that is waiting on you: its container stops after 5 idle minutes and returns with your next message. Worktree files survive; anything installed inside the container does not.",
     'settings.defaults.reclaimSandboxAria': 'Release a waiting task sandbox container',
     'settings.defaults.maxFailed': 'Max failed turns',
     'settings.defaults.maxFailedDesc': 'Stop task after this many consecutive LLM failures',
