@@ -1,28 +1,22 @@
-import type { Extension, RegistryEntry, ExtensionUpdate } from '$lib/types';
-import { listExtensions, getRegistryIndex, installExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension } from '$lib/api';
+import type { Extension } from '$lib/types';
+import { listExtensions } from '$lib/api';
 import { uiInjector } from './ui-injector.svelte';
-import { t } from '$lib/i18n';
 import { loadI18NFromExtensions } from '$lib/i18n/load-pack';
 
-/** Runtime status of an extension sandbox. */
-type ExtensionStatus = 'running' | 'stopped' | 'error' | 'unknown';
-
-/** ExtensionManager is a reactive singleton that manages extension state. */
+/**
+ * Reactive holder of the installed-extension list.
+ *
+ * Settings → Extensions reads the server directly (it owns the install/update/config flows its own
+ * rows drive); this singleton is the app-wide copy every other reader consults, refreshed by
+ * `App.svelte` on start and on each `extension_change` broadcast.
+ */
 class ExtensionManager {
     state = $state({
         extensions: [] as Extension[],
-        registry: [] as RegistryEntry[],
-        updates: [] as ExtensionUpdate[],
-        loading: false,
-        loadingRegistry: false,
-        loadingUpdates: false,
-        error: '',
     });
 
     /** Load all installed extensions from the server. */
     async loadExtensions() {
-        this.state.loading = true;
-        this.state.error = '';
         try {
             this.state.extensions = await listExtensions();
             uiInjector.registerFromExtensions(this.state.extensions);
@@ -38,10 +32,8 @@ class ExtensionManager {
             } catch (e) {
                 console.error('[i18n] could not reconcile the active language:', e);
             }
-        } catch (e: any) {
-            this.state.error = e.message || t('api.loadExtensions');
-        } finally {
-            this.state.loading = false;
+        } catch (e) {
+            console.error('[extensions] could not load the installed extensions:', e);
         }
     }
 
@@ -56,111 +48,6 @@ class ExtensionManager {
      */
     getEnabledLSPExtensions(): Extension[] {
         return this.state.extensions.filter(ext => ext.type === 'lsp' && ext.enabled);
-    }
-
-    /** Enabled LSP extensions whose editor LSP features are on — the ones a channel may open for. */
-    getEditorLSPExtensions(): Extension[] {
-        return this.getEnabledLSPExtensions().filter(
-            ext => ext.manifest.capabilities?.lsp?.editor_enabled !== false
-        );
-    }
-
-    /** Get extension runtime status. */
-    getExtensionStatus(extId: string): ExtensionStatus {
-        const ext = this.state.extensions.find(e => e.id === extId);
-        if (!ext) return 'unknown';
-        if (ext.running) return 'running';
-        if (!ext.enabled) return 'stopped';
-        return 'stopped';
-    }
-
-    /** Load registry index. */
-    async loadRegistry() {
-        this.state.loadingRegistry = true;
-        this.state.error = '';
-        try {
-            this.state.registry = await getRegistryIndex();
-        } catch (e: any) {
-            this.state.error = e.message || t('api.loadRegistry');
-        } finally {
-            this.state.loadingRegistry = false;
-        }
-    }
-
-    /** Install an extension from the registry (consumes the SSE stream). */
-    async install(name: string) {
-        this.state.error = '';
-        try {
-            for await (const ev of installExtension(name)) {
-                if (ev.done && ev.error) {
-                    this.state.error = ev.error;
-                    return;
-                }
-            }
-            await this.loadExtensions();
-        } catch (e: any) {
-            this.state.error = e.message || t('api.installExtension');
-        }
-    }
-
-    /** Delete an extension. */
-    async remove(id: string) {
-        this.state.error = '';
-        try {
-            await deleteExtension(id);
-            await this.loadExtensions();
-        } catch (e: any) {
-            this.state.error = e.message || t('api.deleteExtension');
-        }
-    }
-
-    /** Toggle extension enabled state. */
-    async toggleEnabled(id: string, enabled: boolean) {
-        this.state.error = '';
-        try {
-            await setExtensionEnabled(id, enabled);
-            await this.loadExtensions();
-        } catch (e: any) {
-            this.state.error = e.message || t('api.updateExtension');
-        }
-    }
-
-    /** Check for available updates. */
-    async checkUpdates() {
-        this.state.loadingUpdates = true;
-        this.state.error = '';
-        try {
-            this.state.updates = await checkUpdates();
-        } catch (e: any) {
-            this.state.error = e.message || t('api.checkForUpdates');
-        } finally {
-            this.state.loadingUpdates = false;
-        }
-    }
-
-    /** Update extension config. */
-    async updateConfig(id: string, config: Record<string, any>) {
-        this.state.error = '';
-        try {
-            await updateExtension(id, { config });
-            await this.loadExtensions();
-        } catch (e: any) {
-            this.state.error = e.message || t('api.updateExtension');
-        }
-    }
-
-    /** Check if an extension is installed by name. */
-    isInstalled(name: string): boolean {
-        return this.state.extensions.some(ext => ext.name === name);
-    }
-
-    /** Get installed extension by name. */
-    getByname(name: string): Extension | undefined {
-        return this.state.extensions.find(ext => ext.name === name);
-    }
-
-    clearError() {
-        this.state.error = '';
     }
 }
 

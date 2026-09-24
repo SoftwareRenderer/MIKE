@@ -11,7 +11,7 @@ export interface FsOpsScope {
 }
 
 /** One path of the answer. `from` is the path as the caller sent it; `to` is where it landed. */
-export interface FsOpsItem {
+interface FsOpsItem {
     from: string;
     to?: string;
     /** The name was taken, so the item landed under a different one. */

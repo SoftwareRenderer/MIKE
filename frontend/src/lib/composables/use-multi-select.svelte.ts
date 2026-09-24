@@ -13,10 +13,6 @@ export class MultiSelect {
         return this.selectedIds.size > 0;
     }
 
-    get hasMultiSelection(): boolean {
-        return this.selectedIds.size > 1;
-    }
-
     /** Toggle a task's selection state. */
     toggle(taskId: string): void {
         const next = new Set(this.selectedIds);
@@ -55,11 +51,6 @@ export class MultiSelect {
     /** Select all provided task IDs. */
     selectAll(ids: Iterable<string>): void {
         this.selectedIds = new Set(ids);
-    }
-
-    /** Filter selected tasks by a predicate and return matching IDs. */
-    filterSelected(predicate: (taskId: string) => boolean): string[] {
-        return [...this.selectedIds].filter(predicate);
     }
 
     /** Get selected task IDs as an array. */

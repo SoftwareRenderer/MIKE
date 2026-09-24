@@ -122,7 +122,6 @@ describe('localeOffer.detect', () => {
         await localeOffer.dismiss();
         await localeOffer.detect('ja');
         expect(localeOffer.state.phase).toBe('idle');
-        expect(localeOffer.checkedOnce).toBe(true);
     });
 });
 

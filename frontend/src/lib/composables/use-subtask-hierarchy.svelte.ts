@@ -133,7 +133,6 @@ export function useSubtaskHierarchy(getAllTasks: () => Task[], expandedTasksCont
         get consolidatedSubtaskIds() { return consolidatedSubtaskIds; },
         get parentTaskIds() { return parentTaskIds; },
         get expandedTasks() { return expandedTasks; },
-        autoExpandParent,
         toggleTaskExpanded,
     };
 }

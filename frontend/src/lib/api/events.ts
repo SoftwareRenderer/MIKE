@@ -8,7 +8,6 @@
 /** @knipignore */
 export type AppStreamEventType =
    'token'
-    | 'token'
     | 'reasoning'
     | 'tool_call'
     | 'tool_progress'

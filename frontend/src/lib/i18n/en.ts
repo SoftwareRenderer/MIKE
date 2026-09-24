@@ -1009,9 +1009,6 @@ const catalog = {
     'api.applyUpdate': 'Failed to install the release',
     'api.restartToUpdate': 'Failed to restart the server',
     'api.fetchThreads': 'Failed to fetch threads',
-    'api.loadExtensions': 'Failed to load extensions',
-    'api.loadRegistry': 'Failed to load registry',
-    'api.installExtension': 'Failed to install extension',
     'api.uploadFile': 'Failed to upload file',
 
     // ═══ sandbox.* — sandbox surface ═══

@@ -136,12 +136,12 @@ LSP Features, all **independent** of each other. `editor_enabled` and `tool_call
 enabled; `chat_diagnostics_enabled` defaults to **disabled** (see below).
 
 - `editor_enabled` gates the *browser's* LSP features: the server only stores and serves the flag, while
-  `extension-manager.getEditorLSPExtensions()` filters and `lsp-connection-manager.isLSPAvailable()`
-  decides whether a channel opens. **It is not a highlighting gate**: `editor-language.resolveFile()`
-  answers the file type, wire id and syntax profile from `getEnabledLSPExtensions()` (installed and
-  switched on, gate or no gate), because a grammar is data the manifest shipped and the toggle is sold as
-  "diagnostics, completions, go-to-definition, and hover". The gate reaches the rest of the editor as the
-  single `ResolvedFile.editorLSP` field, which nothing but `isLSPAvailable` reads.
+  `lsp-connection-manager.isLSPAvailable()` decides whether a channel opens. **It is not a highlighting
+  gate**: `editor-language.resolveFile()` answers the file type, wire id and syntax profile from
+  `extension-manager.getEnabledLSPExtensions()` (installed and switched on, gate or no gate), because a
+  grammar is data the manifest shipped and the toggle is sold as "diagnostics, completions, go-to-definition,
+  and hover". The gate reaches the rest of the editor as the single `ResolvedFile.editorLSP` field, which
+  nothing but `isLSPAvailable` reads.
 - `tool_calls_enabled` gates the *agent's* LSP tools and is enforced server-side
   (`ExtensionRegistry.IsToolCallsEnabledForFile`, checked before an LSP tool runs).
 - `chat_diagnostics_enabled` gates the turn-boundary pass that hands the files a turn edited to their

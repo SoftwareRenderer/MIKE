@@ -91,19 +91,9 @@ export {
 export {
     getConfig,
     updateConfig,
-    setUpdateCheckConsent,
     testConnection,
     fetchModels,
 } from './config';
-
-// -- Release updates (Settings → About; docs/auto-update.md) --
-export {
-    fetchUpdateStatus,
-    checkForUpdates,
-    prepareUpdate,
-    applyUpdate,
-    restartToUpdate,
-} from './updates';
 
 // -- Git --
 export {
@@ -136,17 +126,14 @@ export type { AppStream } from './stream';
 // -- Terminal --
 export { createTerminal, createProjectTerminal, isTerminalStale } from './terminal';
 
-// -- LSP --
-export { fetchLSPSandboxMemory } from './lsp';
-
 // -- Pasted/dropped files written into the task's own environment --
 export { uploadTaskFile } from './task-upload';
 
 // -- A file's own bytes, for an `<img>` src --
 export { rawFileURL, listFsDirectory } from './fs';
-export type { FsEntry, FsListing } from './fs';
+export type { FsEntry } from './fs';
 export { deleteFsPaths, copyFsPaths, moveFsPaths, renameFsPath } from './fs-ops';
-export type { FsOpsScope, FsOpsItem, FsOpsResult } from './fs-ops';
+export type { FsOpsResult } from './fs-ops';
 
 // -- Sessions (login sessions, Settings → About) --
 export {

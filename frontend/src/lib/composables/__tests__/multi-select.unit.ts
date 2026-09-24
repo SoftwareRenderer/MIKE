@@ -6,7 +6,6 @@ describe('MultiSelect', () => {
         const ms = new MultiSelect();
         expect(ms.count).toBe(0);
         expect(ms.hasSelection).toBe(false);
-        expect(ms.hasMultiSelection).toBe(false);
     });
 
     it('toggles a task into selection', () => {
@@ -31,7 +30,6 @@ describe('MultiSelect', () => {
         ms.toggle('task-2');
         ms.toggle('task-3');
         expect(ms.count).toBe(3);
-        expect(ms.hasMultiSelection).toBe(true);
         expect(ms.isSelected('task-1')).toBe(true);
         expect(ms.isSelected('task-2')).toBe(true);
         expect(ms.isSelected('task-3')).toBe(true);
@@ -77,17 +75,6 @@ describe('MultiSelect', () => {
         expect(ms.isSelected('task-a')).toBe(true);
         expect(ms.isSelected('task-b')).toBe(true);
         expect(ms.isSelected('task-c')).toBe(true);
-    });
-
-    it('filters selected tasks by predicate', () => {
-        const ms = new MultiSelect();
-        ms.toggle('backlog-1');
-        ms.toggle('backlog-2');
-        ms.toggle('running-1');
-        const backlogIds = ms.filterSelected(id => id.startsWith('backlog'));
-        expect(backlogIds).toHaveLength(2);
-        expect(backlogIds).toContain('backlog-1');
-        expect(backlogIds).toContain('backlog-2');
     });
 
     it('converts selection to array', () => {

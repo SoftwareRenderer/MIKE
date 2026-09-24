@@ -429,10 +429,6 @@ export class UIInjector {
         this.extensionsFingerprint = '';
     }
 
-    hasContent(point: InjectionPoint): boolean {
-        return this.getRegistrations(point).length > 0;
-    }
-
     private destroyAll() {
         for (const ac of this.channels.values()) {
             for (const ch of ac.values()) ch.destroy();

@@ -53,11 +53,6 @@ class LocaleOfferStore {
     /** One detection pass per boot — see the class comment. */
     private checked = false;
 
-    /** Whether a detection pass has already run (tests and callers that must not double-ask). */
-    get checkedOnce(): boolean {
-        return this.checked;
-    }
-
     /**
      * Ask the four questions and show the offer if all four hold.
      *
