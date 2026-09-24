@@ -496,7 +496,6 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 			// Use Timings for per-frame token counts (updates every frame during streaming)
 			usage.PromptTokens = cr.Timings.PromptN + cr.Timings.CacheN
 			usage.CompletionTokens = cr.Timings.PredictedN
-			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 			usage.PromptTokensDetails.CachedTokens = cr.Timings.CacheN
 			usage.PromptMs = int64(cr.Timings.PromptMs)
 			usage.PredictedMs = int64(cr.Timings.PredictedMs)
@@ -663,7 +662,6 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 		usage = &types.ChatUsage{
 			PromptTokens:     result.Timings.PromptN + result.Timings.CacheN,
 			CompletionTokens: result.Timings.PredictedN,
-			TotalTokens:      result.Timings.PromptN + result.Timings.CacheN + result.Timings.PredictedN,
 			PromptMs:         int64(result.Timings.PromptMs),
 			PredictedMs:      int64(result.Timings.PredictedMs),
 		}

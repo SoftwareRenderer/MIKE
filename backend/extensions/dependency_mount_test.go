@@ -77,8 +77,8 @@ func TestBuildExtensionCreateArgs_UnmountableGrantIsReportedAndSkipped(t *testin
 	missing := filepath.Join(grant, "removed-after-granting")
 
 	// The stored grant still points at it (the directory was deleted afterwards). The extension has
-	// to start anyway: its own environment check will say the project cannot be resolved, which is
-	// true, whereas refusing to build the container would leave the editor with nothing at all.
+	// to start anyway: a missing cache costs it resolved dependencies, whereas refusing to build the
+	// container would leave the editor with nothing at all.
 	ext := grantedExtension(missing)
 	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-dep-missing", "ubuntu:latest", nil, newMountPolicy([]string{grant}))
 	if specs := mountSpecs(args); len(specs) != 0 {

@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"mike/backend/extensions"
 	"mike/backend/store"
@@ -108,9 +107,6 @@ func TestFilesChangedEndsOnlyTheWorkspaceWhoseProjectChanged(t *testing.T) {
 	changed.extension = ext
 	untouched := newSandboxClient(nil, "/ws/b", "go", ext.ID, map[string]string{})
 	untouched.extension = ext
-	// A verdict exists for the workspace being recycled; it describes a server that is about
-	// to be gone, so it must not outlive the connection.
-	m.environments[processKey("/ws/a", "go")] = envStatus{healthy: false, checked: true}
 
 	m.clients[processKey("/ws/a", "go")] = changed
 	m.clients[processKey("/ws/b", "go")] = untouched
@@ -123,9 +119,6 @@ func TestFilesChangedEndsOnlyTheWorkspaceWhoseProjectChanged(t *testing.T) {
 	}
 	if _, ok := m.clients[processKey("/ws/a", "go")]; ok {
 		t.Error("the recycled connection is still installed — its holders would reuse a server with the old graph")
-	}
-	if _, ok := m.environments[processKey("/ws/a", "go")]; ok {
-		t.Error("the stale environment verdict outlived its connection")
 	}
 	if untouched.dead.Load() {
 		t.Error("another workspace's connection was ended — it did not change its project")
@@ -151,34 +144,5 @@ func TestFilesChangedIgnoresAFileTheExtensionDidNotDeclare(t *testing.T) {
 	}
 	if m.FilesChanged("/ws/a", nil) {
 		t.Error("an empty changed list cannot mean anything")
-	}
-}
-
-func TestConnectionCarriesItsExtensionsGate(t *testing.T) {
-	// The gate travels with the connection because it is the *server* that may be unable to
-	// load the workspace; EnvironmentSummary reads it back off the live connections.
-	m := NewExtensionLSPManager(nil, nil, nil)
-	ext := &extensions.Extension{ID: "go-team-gopls"}
-	ext.SandboxConfig.Environment = &extensions.EnvironmentGate{
-		Note:          "gopls cannot see this project's packages",
-		SuppressCodes: []string{"BrokenImport"},
-	}
-	sc := newSandboxClient(nil, "/ws/a", "go", ext.ID, map[string]string{})
-	sc.extension = ext
-	sc.gate = ext.SandboxConfig.Environment
-	m.clients[processKey("/ws/a", "go")] = sc
-	// The check has actually run: "no verdict yet" and "verdict: cannot resolve" are different
-	// states, and only the second is worth telling the user about.
-	m.environments[processKey("/ws/a", "go")] = envStatus{healthy: false, checked: true, checkedAt: time.Now()}
-
-	healthy, note := m.EnvironmentSummary(ext.ID)
-	if healthy || note != ext.SandboxConfig.Environment.Note {
-		t.Errorf("EnvironmentSummary = (%v, %q), want unhealthy with the manifest's note", healthy, note)
-	}
-
-	// An extension that never ran its check reports nothing — the absence of a verdict is not
-	// evidence that the project is broken.
-	if h, n := m.EnvironmentSummary("other-ext"); !h || n != "" {
-		t.Errorf("unknown extension reported (%v, %q), want (true, \"\")", h, n)
 	}
 }

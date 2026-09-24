@@ -189,8 +189,7 @@ occurrence).
   genuinely needs it.
 - `os.Environ()` survives in exactly one sanctioned place: `term.hostShellEnv` under `DANGER_ZONE=1`,
   because there the shell is the operator's own.
-- Tests: `backend/agent/env_test.go`, `backend/git/env_test.go`, `pkg/sandboxruntime/podmanenv_test.go`,
-  `pkg/shlex/shlex_test.go`.
+- Tests: `backend/agent/env_test.go`, `backend/git/env_test.go`, `pkg/sandboxruntime/podmanenv_test.go`.
 
 ## The git author identity
 

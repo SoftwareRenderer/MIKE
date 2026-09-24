@@ -90,7 +90,8 @@ code, the change is arguing with itself.
   child.** Every git and podman subprocess comes from a constructor that sets one. A context exists only
   where a caller has something worth cancelling (clone, pull/push, extension install); local git calls are
   deliberately context-less. If you add a long-running subprocess, give it both.
-- **`environment` on an LSP extension always reports "healthy"** — the check is declared and validated; nothing runs it.
+- **An LSP extension's `environment` check decides nothing** — core stores and validates the declaration and
+  runs no check, so no health verdict exists anywhere to read. `docs/extension-dependency-cache.md`.
 - **A translation pack overlays `*.tmpl` prompt templates, not `prompts/skills/`** — skill bodies stay
   English whatever pack is enabled (`docs/i18n.md`).
 
