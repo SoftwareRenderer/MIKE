@@ -546,13 +546,13 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("projectID")
 	switch r.Method {
 	case http.MethodGet:
-		h.handleGetProject(w, r, id)
+		h.handleGetProject(w, id)
 
 	case http.MethodPut:
 		h.handleUpdateProject(w, r, id)
 
 	case http.MethodDelete:
-		h.handleDeleteProject(w, r, id)
+		h.handleDeleteProject(w, id)
 
 	default:
 		httputil.MethodNotAllowed(w)
@@ -561,7 +561,7 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 
 // handleGetProject answers the project row plus the ports its terminal sessions are holding open, which is
 // live state the row does not own.
-func (h *ProjectHandler) handleGetProject(w http.ResponseWriter, r *http.Request, id string) {
+func (h *ProjectHandler) handleGetProject(w http.ResponseWriter, id string) {
 	p, err := h.store.GetProject(id)
 	if err != nil {
 		httputil.Fail(w, err, "get project", "project not found")
@@ -746,7 +746,7 @@ func (h *ProjectHandler) stopProjectSandbox(projectID string) {
 // handleDeleteProject deletes a project by deleting its tasks, so each task's executor, sandbox
 // container and uploaded files go before its row does. Nothing removes a container once its task row is
 // gone: the startup sweep skips containers that are running.
-func (h *ProjectHandler) handleDeleteProject(w http.ResponseWriter, r *http.Request, id string) {
+func (h *ProjectHandler) handleDeleteProject(w http.ResponseWriter, id string) {
 	tasks, err := h.store.GetTasksByProject(id)
 	if err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, "failed to list tasks for cleanup")

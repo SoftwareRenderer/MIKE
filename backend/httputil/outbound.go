@@ -85,8 +85,10 @@ func (a *OutboundAnswer) RateLimited() bool { return a.StatusCode == http.Status
 // ErrDownloadTooLarge says a response body went past the caller's limit.
 var ErrDownloadTooLarge = errors.New("download exceeds its limit")
 
-// DownloadToFile streams one GET to dest and returns the byte count and the digest.
-func DownloadToFile(ctx context.Context, client *http.Client, rawURL, dest string, limit int64) (int64, string, error) {
+// DownloadToFileGranting streams one GET to dest over the egress client that admits the hosts a
+// person named, and returns the byte count and the digest.
+func DownloadToFileGranting(ctx context.Context, rawURL, dest string, limit int64, grantedHosts []string) (int64, string, error) {
+	client := NewExtensionEgressClientGranting(0, grantedHosts)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return 0, "", err
@@ -115,11 +117,6 @@ func DownloadToFile(ctx context.Context, client *http.Client, rawURL, dest strin
 		return 0, "", fmt.Errorf("%w: %s sent more than %d bytes", ErrDownloadTooLarge, rawURL, limit)
 	}
 	return n, hex.EncodeToString(hasher.Sum(nil)), nil
-}
-
-// DownloadToFileGranting is DownloadToFile over the egress client that admits the hosts a person named.
-func DownloadToFileGranting(ctx context.Context, rawURL, dest string, limit int64, grantedHosts []string) (int64, string, error) {
-	return DownloadToFile(ctx, NewExtensionEgressClientGranting(0, grantedHosts), rawURL, dest, limit)
 }
 
 // RefusedForCredentials reports a refusal outright or a lack of authority.

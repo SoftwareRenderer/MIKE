@@ -349,9 +349,6 @@ func PanicRecoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// csrfKey is the context key for the CSRF token.
-type csrfKey struct{}
-
 // CSRFMiddleware validates the X-CSRF-Token header against the stored token.
 // GET, HEAD, and OPTIONS requests are exempt. Public paths are exempt.
 func (s *Server) CSRFMiddleware(next http.Handler) http.Handler {
@@ -404,8 +401,6 @@ func (s *Server) CSRFMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Inject CSRF token into context
-		ctx := context.WithValue(r.Context(), csrfKey{}, storedCSRF)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(w, r)
 	})
 }
