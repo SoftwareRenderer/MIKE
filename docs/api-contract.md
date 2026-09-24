@@ -315,13 +315,23 @@ kinetic scroll and anchoring, and asserts the settle leaves a fling alone and a 
 
 `?parsed=1` is a contract every path on `/tasks/{id}/diff` must honour, including the fast ones. The panel
 renders `parsed_files` and never re-parses patch text, so `git.ParseUnifiedDiff`
-(`backend/git/worktree.go`, served through `git.SortedParsedFiles`) is the only diff grammar in the
+(`backend/git/diff.go`, served through `git.SortedParsedFiles`) is the only diff grammar in the
 product. `GET /api/projects/{id}/git/diff` answers that grammar unconditionally — it has no raw mode and
 reads no `parsed` flag — while `/tasks/{id}/diff` still branches on `?parsed=1`, because its manifest and
 `TaskDiff` answers carry per-file data rather than patch text. The immutable done-task snapshot stores its
 body *as the parsed body* (`doneDiffResponse.ParsedFiles`) and stays a byte-for-byte write: a response
 missing that key renders "No changes since last commit" over a diff it still carries. Tests:
 `backend/stream/done_snapshot_test.go`, `backend/api/git_diff_parsed_test.go`.
+
+**One comparison per task in the file cache.** `GET /api/projects/{id}/tasks/{taskID}/diff/file` names a
+path and no refs, so it can answer for one comparison only: the task's worktree against HEAD at the baseline
+`git.WorktreeManager.TaskDiffBaseline` names for that task. `api.taskDiffCache` (`backend/api/git.go`) holds
+exactly that, one entry per task. A request that compares two refs — `?base=`, `?head=`, `?checkpointIdx=` —
+carries its own content and never enters the cache, and the worktree watcher's cache update skips a done task
+because for a done task it computes `BaseCommit..BranchTip`. The panel lists files from one diff and then
+fetches their rows by path, so a second comparison stored under the same task id arrives labelled with the
+stats above it: the reader sees lines the task never touched, and no request failed. Tests:
+`backend/api/git_diff_identity_test.go`, `backend/stream/worktree_watcher_baseline_test.go`.
 
 ## Raw file bytes
 

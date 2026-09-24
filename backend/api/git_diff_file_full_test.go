@@ -16,7 +16,7 @@ import (
 // path came from git status and the size is whatever the task wrote, so the read needs the same
 // jail and cap as the listing.
 
-// taskDiffFileFixture builds a project, a task, a real worktree for it, and a diffCache entry
+// taskDiffFileFixture builds a project, a task, a real worktree for it, and an entry in the task diff cache
 // whose one untracked entry is truncated — the state the Changes panel is in when it asks for
 // the full file.
 func taskDiffFileFixture(t *testing.T, projID, taskID string) (*GitHandler, *http.ServeMux, string) {
@@ -42,7 +42,7 @@ func taskDiffFileFixture(t *testing.T, projID, taskID string) (*GitHandler, *htt
 }
 
 func cacheOneUntracked(h *GitHandler, taskID, path string) {
-	h.diffCache.Store(taskID, &git.TaskDiff{
+	h.diffCache.put(taskID, &git.TaskDiff{
 		Tracked:   map[string]*git.TrackedDiffFile{},
 		Untracked: []git.UntrackedFile{{Path: path, Lines: []string{"cached line"}, Truncated: true}},
 	})

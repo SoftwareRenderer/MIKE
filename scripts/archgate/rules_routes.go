@@ -339,8 +339,9 @@ var storeMutation = regexp.MustCompile(`\b\w*[sS]tore\.(Create|Update|Delete|Set
 // over a real writable GET. The verb leads the identifier, so the pattern matches a lower-case verb.
 var writeNamedCall = regexp.MustCompile(`\b(Materialize|Persist|Upsert|Save|Record|Append)\w*\(`)
 
-// cacheWrite is the third signal: an in-memory memo populated on a read path.
-var cacheWrite = regexp.MustCompile(`\.\w*[Cc]ache\.Store\(`)
+// cacheWrite is the third signal: an in-memory memo populated on a read path. It reads the field's name, not
+// its type, so a memo field stays in this rule's sight by being named for what it is.
+var cacheWrite = regexp.MustCompile(`\.\w*[Cc]ache\.(Store|put)\(`)
 
 func scanCancellableWrites(root string) ([]Finding, int, error) {
 	routes, err := loadRoutes(root)

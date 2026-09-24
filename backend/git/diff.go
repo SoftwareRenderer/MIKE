@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"mike/backend/fsutil"
+	"mike/backend/types"
 	"mike/pkg/logging"
 )
 
@@ -336,11 +337,16 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 			continue
 		}
 		if strings.HasPrefix(line, "@@") {
-			inHunk = true
-			if m := hunkRe.FindStringSubmatch(line); m != nil {
-				oldLine, _ = strconv.Atoi(m[1])
-				newLine, _ = strconv.Atoi(m[3])
+			m := hunkRe.FindStringSubmatch(line)
+			if m == nil {
+				// With no numbers there is nothing to number rows with, and the previous hunk's counters
+				// would place them at lines the file does not have.
+				inHunk = false
+				continue
 			}
+			inHunk = true
+			oldLine, _ = strconv.Atoi(m[1])
+			newLine, _ = strconv.Atoi(m[3])
 			continue
 		}
 		if !inHunk || current == nil {
@@ -352,15 +358,20 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 		}
 
 		var variant string
-		if len(line) > 0 && line[0] == '+' {
+		switch {
+		case strings.HasPrefix(line, "+"):
 			variant = "added"
 			current.Added++
-		} else if len(line) > 0 && line[0] == '-' {
+		case strings.HasPrefix(line, "-"):
 			variant = "removed"
 			current.Removed++
-		} else if len(line) > 0 && line[0] == ' ' {
+		case strings.HasPrefix(line, " "):
 			variant = "context"
-		} else {
+		case line == "":
+			// An unchanged empty line is sometimes written as nothing rather than " "; dropping it would
+			// shift every later number in the hunk.
+			variant = "context"
+		default:
 			continue
 		}
 
@@ -368,10 +379,14 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 		if variant == "removed" {
 			ln = oldLine
 		}
+		var text string
+		if len(line) > 0 {
+			text = line[1:]
+		}
 		row := DiffRow{
 			LineNumber: &ln,
 			Variant:    variant,
-			Text:       line[1:],
+			Text:       text,
 		}
 		current.Rows = append(current.Rows, row)
 
@@ -435,12 +450,8 @@ func truncateDiffLines(diff string, maxChangeLines int) (string, []string) {
 			if cur != nil {
 				blocks = append(blocks, *cur)
 			}
-			match := fileRe.FindStringSubmatch(line)
-			path := "unknown"
-			if match != nil {
-				path = match[1]
-			}
-			cur = &fileBlock{path: path, lines: []string{line}}
+			// Named by diffBlockPath, so the truncation is reported to the right file.
+			cur = &fileBlock{path: diffBlockPath(line), lines: []string{line}}
 			continue
 		}
 		if cur != nil {
@@ -489,15 +500,20 @@ func truncateDiffLines(diff string, maxChangeLines int) (string, []string) {
 				if keptChanges >= maxChangeLines {
 					break
 				}
+				m := hunkRe.FindStringSubmatch(line)
+				if m == nil {
+					// A header this function cannot read is one it must not rewrite.
+					inHunk = false
+					result = append(result, line)
+					continue
+				}
 				inHunk = true
 				hunkResultIdx = len(result)
 				hunkOldLines = 0
 				hunkNewLines = 0
-				if m := hunkRe.FindStringSubmatch(line); m != nil {
-					hunkOldStart, _ = strconv.Atoi(m[1])
-					hunkNewStart, _ = strconv.Atoi(m[3])
-					hunkContext = m[5]
-				}
+				hunkOldStart, _ = strconv.Atoi(m[1])
+				hunkNewStart, _ = strconv.Atoi(m[3])
+				hunkContext = m[5]
 				result = append(result, line)
 				continue
 			}
@@ -743,32 +759,60 @@ func extractDiffPaths(line string) (aPath, bPath string) {
 	return aPath, bPath
 }
 
-// ResolveDiffBaseline computes the ref to diff a task against: baseRef for the original thread, the
-// merge-base of forkBranch and taskBranch for a fork, and baseRef again when the task branch *is*
-// the thread branch, because all its changes live there.
-func (wm *WorktreeManager) ResolveDiffBaseline(taskID, baseRef, taskBranch, forkBranch string) (string, error) {
+// diffBlockPath names the file a `diff --git` header opens. An unreadable header gets "unknown", a key no
+// file ever asks for.
+func diffBlockPath(line string) string {
+	if _, bPath := extractDiffPaths(line); bPath != "" {
+		return bPath
+	}
+	return "unknown"
+}
+
+// TaskDiffBaseline is the ref a task's diff, commit list and diff stats are computed against, and the only
+// way to ask. It answers the pinned commit, else a divergence point when the recorded ref is gone, else the
+// fork thread's merge-base, degrading to the next link instead of failing.
+func (wm *WorktreeManager) TaskDiffBaseline(task *types.Task) string {
+	if wm == nil || wm.store == nil || task == nil {
+		return ""
+	}
+	projectPath, originBranch := "", ""
+	if project, err := wm.store.GetProject(task.ProjectID); err == nil && project != nil {
+		projectPath, originBranch = project.Path, project.OriginBranch
+	}
+	baseRef := wm.resolveTaskBaseline(projectPath, originBranch, task)
+	forkBranch := ""
+	if thread, err := wm.store.GetThread(task.CurrentThreadID); err == nil && thread != nil {
+		forkBranch = thread.GitBranch
+	}
+	return wm.resolveDiffBaseline(task.ID, baseRef, task.Branch, forkBranch)
+}
+
+// resolveDiffBaseline computes the ref to diff a task against: baseRef for the original thread, the
+// merge-base of forkBranch and taskBranch for a fork, and baseRef again when the task branch *is* the thread
+// branch. A merge-base it cannot find is nothing a caller can act on, so it answers baseRef.
+func (wm *WorktreeManager) resolveDiffBaseline(taskID, baseRef, taskBranch, forkBranch string) string {
 	// Reject invalid baseRef values (e.g. git error messages like "fatal: ...")
 	if strings.HasPrefix(baseRef, "fatal:") {
 		baseRef = ""
 	}
 	if forkBranch == "" {
 		// Original thread — diff against base_ref
-		return baseRef, nil
+		return baseRef
 	}
 	if forkBranch == taskBranch {
 		// Task branch was switched to thread branch — diff against original baseline
-		return baseRef, nil
+		return baseRef
 	}
 	// Forked thread — find the divergence point via merge-base
 	worktreePath, err := wm.WorktreePath(taskID)
 	if err != nil {
-		return baseRef, err
+		return baseRef
 	}
 	mb, err := Run(worktreePath, "merge-base", forkBranch, taskBranch)
 	if err != nil {
-		return baseRef, fmt.Errorf("git merge-base: %w", err)
+		return baseRef
 	}
-	return strings.TrimSpace(mb), nil
+	return strings.TrimSpace(mb)
 }
 
 // shortStatFromDiff computes a git-style shortstat: "X file(s) changed, Y insertion(s)(+),

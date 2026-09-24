@@ -607,17 +607,11 @@ func (s *Server) getLastCommitHashInThread(threadID string) string {
 // TaskDiff (diff string + untracked array) so the frontend gets staged status
 // and per-file hashes in the WebSocket update.
 func (s *Server) broadcastTaskDiff(taskID string) {
-	task, _ := s.store.GetTaskByID(taskID)
-	if task == nil {
+	task, err := s.store.GetTaskByID(taskID)
+	if err != nil {
 		return
 	}
-	thread, _ := s.store.GetThread(task.CurrentThreadID)
-	forkBranch := ""
-	if thread != nil {
-		forkBranch = thread.GitBranch
-	}
-	baseRef, _ := s.executor.WorktreeMgr().ResolveDiffBaseline(taskID, task.BaseRef, task.Branch, forkBranch)
-	manifest, err := s.gitHandler.GetDiffManifest(taskID, baseRef)
+	manifest, err := s.gitHandler.GetDiffManifest(task)
 	if err != nil {
 		return
 	}

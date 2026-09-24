@@ -1147,6 +1147,24 @@ func TestWriteselectCatchesAWriteInTheGETBranch(t *testing.T) {
 	}
 }
 
+// A memo write on a read path is caught by the method name too: a memo writer named `put` is the same write.
+func TestWriteselectCatchesACachePutInTheGETBranch(t *testing.T) {
+	for _, shape := range []string{"switch", "if", "guard"} {
+		t.Run(shape, func(t *testing.T) {
+			root := dispatcherTree(t, shape, "	s.diffCache.put(id, value)")
+			var found bool
+			for _, d := range writeFindings(t, root) {
+				if strings.Contains(d, ".diffCache.put(") {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("%s shape: a memo write in the GET branch went unreported (findings=%v)", shape, writeFindings(t, root))
+			}
+		})
+	}
+}
+
 // A multi-verb handler with no recognisable dispatch is reported rather than passed: "cannot tell"
 // must not read as "clean".
 func TestWriteselectReportsAHandlerWhoseGETBranchItCannotFind(t *testing.T) {

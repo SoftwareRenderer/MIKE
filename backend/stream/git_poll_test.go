@@ -464,7 +464,7 @@ func TestWorktreeWatcherMultiTask(t *testing.T) {
 	defer ww.Close()
 
 	for _, taskID := range taskIDs {
-		err = ww.Watch(taskID, projID, "")
+		err = ww.Watch(taskID, projID)
 		if err != nil {
 			t.Fatalf("watch task %s: %v", taskID, err)
 		}
@@ -567,7 +567,7 @@ func TestWorktreeWatcherWorkerPoolBounds(t *testing.T) {
 	go ww.StartEventLoop()
 	defer ww.Close()
 
-	err = ww.Watch(taskID, projID, "")
+	err = ww.Watch(taskID, projID)
 	if err != nil {
 		t.Fatalf("watch task: %v", err)
 	}

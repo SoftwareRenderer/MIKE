@@ -75,7 +75,7 @@ func TestCloseDoesNotWaitHoldingTheLock(t *testing.T) {
 	}
 	// No StartEventLoop: handleEvent is the same path an fsnotify event takes, and it keeps
 	// the test free of a watcher thread.
-	if err := ww.Watch(taskID, projID, ""); err != nil {
+	if err := ww.Watch(taskID, projID); err != nil {
 		t.Fatalf("watch task: %v", err)
 	}
 
@@ -116,13 +116,13 @@ func TestClosedWorktreeWatcherRunsNoArmedWork(t *testing.T) {
 		t.Skipf("skip closed-watcher test (inotify limit): %v", err)
 	}
 	ww.mu.Lock()
-	ww.worktrees["task-abc"] = worktreeInfo{projectID: "proj-1", path: "/tmp/proj-1/task-abc", baseRef: "master"}
+	ww.worktrees["task-abc"] = worktreeInfo{projectID: "proj-1", path: "/tmp/proj-1/task-abc"}
 	ww.pathCache["/tmp/proj-1/task-abc/file.txt"] = "task-abc"
 	ww.mu.Unlock()
 
 	ww.Close()
 
-	ww.scheduleDiff("task-abc", "proj-1", "master")
+	ww.scheduleDiff("task-abc", "proj-1")
 	ww.handleEvent(fsnotify.Event{Name: "/tmp/proj-1/task-abc/file.txt", Op: fsnotify.Write})
 
 	ww.mu.Lock()

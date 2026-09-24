@@ -47,10 +47,7 @@ func MaterializeDoneTaskDiff(st *store.Store, wm *git.WorktreeManager, projectID
 	if headRef == "" {
 		headRef = task.Branch
 	}
-	baseRef, err := resolveDoneTaskBaseRef(st, wm, projectID, task)
-	if err != nil {
-		return nil, err
-	}
+	baseRef := resolveDoneTaskBaseRef(wm, task)
 	// Only a pinned BranchTip SHA is immutable. Legacy done tasks without one
 	// diff against a branch name that can still advance — those compute live
 	// and never persist (same behavior as before snapshots existed).
@@ -139,11 +136,11 @@ func persistSnapshot(st *store.Store, task *types.Task, baseRef, headRef string,
 // diff: the pinned BaseCommit when captured (authoritative — required for a
 // correct diff after fast-forward merges, deliberately NOT re-resolved for
 // usability), otherwise the same resolved baseline the live paths use.
-func resolveDoneTaskBaseRef(st *store.Store, wm *git.WorktreeManager, projectID string, task *types.Task) (string, error) {
+func resolveDoneTaskBaseRef(wm *git.WorktreeManager, task *types.Task) string {
 	if task.BaseCommit != "" {
-		return task.BaseCommit, nil
+		return task.BaseCommit
 	}
-	return resolveTaskDiffBaseline(st, wm, projectID, task)
+	return wm.TaskDiffBaseline(task)
 }
 
 // computeDoneTaskDiff computes the canonical commit-to-commit diff, using the
