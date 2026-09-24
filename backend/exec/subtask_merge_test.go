@@ -21,6 +21,7 @@ import (
 // (parent.Branch == ""), the parent's branch is created so the subtask can
 // merge into it later. The parent stays in backlog.
 func TestEnsureParentBranch_CreatesBranchWhenParentNotStarted(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
 
 	// Create parent task in backlog (never started, no branch)
@@ -72,6 +73,7 @@ func TestEnsureParentBranch_CreatesBranchWhenParentNotStarted(t *testing.T) {
 // TestEnsureParentBranch_Idempotent verifies that calling ensureParentBranch
 // multiple times is safe (parent already has a branch).
 func TestEnsureParentBranch_Idempotent(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 
 	parentID := "parent-idempotent"
@@ -112,6 +114,7 @@ func TestEnsureParentBranch_Idempotent(t *testing.T) {
 // when prepareTaskExecution is called for a subtask whose parent hasn't started,
 // the parent's branch is created and the subtask's worktree branches from it.
 func TestPrepareTaskExecution_SubtaskCreatesParentBranch(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
 
 	// Create parent task in backlog (never started)
@@ -184,6 +187,7 @@ func TestPrepareTaskExecution_SubtaskCreatesParentBranch(t *testing.T) {
 // TestMergeBranch_SubtaskMergesIntoParentBranch verifies that MergeBranch
 // correctly merges a subtask's branch into the parent's branch (not origin).
 func TestMergeBranch_SubtaskMergesIntoParentBranch(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
 
 	// Create parent task with a branch
@@ -278,6 +282,7 @@ func TestMergeBranch_SubtaskMergesIntoParentBranch(t *testing.T) {
 // created from the project HEAD before the merge — so commit-and-done lands
 // the task's work on the new branch instead of failing at checkout.
 func TestMergeBranch_CreatesMissingBaseBranch(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
 
 	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
@@ -353,6 +358,7 @@ func TestMergeBranch_CreatesMissingBaseBranch(t *testing.T) {
 // restores the project's main checkout to where the user was working —
 // branch and uncommitted changes — after merging into the target branch.
 func TestMergeInto_RestoresProjectCheckout(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
 
 	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
@@ -440,6 +446,7 @@ func TestMergeInto_RestoresProjectCheckout(t *testing.T) {
 // create), each lands on the shared base, main stays clean, and the checkout
 // is restored.
 func TestMergeBranch_ConcurrentProjectMerges(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
 
 	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
@@ -527,6 +534,7 @@ func TestMergeBranch_ConcurrentProjectMerges(t *testing.T) {
 // wrong branch — and the stashed working-tree changes can pop onto the wrong
 // branch.
 func TestMergeBranch_ConcurrentDifferentTargets(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
 
 	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
@@ -629,6 +637,7 @@ func TestMergeBranch_ConcurrentDifferentTargets(t *testing.T) {
 // NEVER merges into origin. If the parent has no branch, MergeBranch creates
 // it on demand and merges into the parent's branch.
 func TestMergeBranch_SubtaskNeverMergesIntoOrigin(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	// Create parent task WITHOUT a branch
@@ -710,6 +719,7 @@ func TestMergeBranch_SubtaskNeverMergesIntoOrigin(t *testing.T) {
 // completes and auto-start triggers the parent, the parent's branch already
 // exists (created by ensureParentBranch during subtask preparation).
 func TestAutoStartNextSibling_ParentBranchExists(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
 
 	// Create parent in backlog
@@ -816,6 +826,7 @@ func setupExecutorWithGitForSubtask(t *testing.T) (*TaskExecutor, string, string
 // TestSubtaskMergeFullFlow is an integration test that simulates the full
 // subtask → parent → origin merge chain.
 func TestSubtaskMergeFullFlow(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	// Create parent in backlog
@@ -949,6 +960,7 @@ func runGitInDir(t *testing.T, dir string, args ...string) {
 // and LLM resolution is not available (no LLM config), the merge is aborted
 // gracefully and an error is returned.
 func TestMergeBranch_ConflictDetection(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 
 	// Create parent in backlog (will get branch via ensureParentBranch)
@@ -1042,6 +1054,7 @@ func TestMergeBranch_ConflictDetection(t *testing.T) {
 // subtask runs; siblings stay idle in In Progress until the user explicitly moves
 // the parent to In Progress.
 func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 
 	// Create parent in backlog
@@ -1146,6 +1159,7 @@ func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
 // in_progress and a subtask completes, the LLM selects the next sibling and
 // starts it.
 func TestAutoStartNextSibling_ParentInProgress(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 
 	// Create parent in in_progress
@@ -1253,6 +1267,7 @@ func TestAutoStartNextSibling_ParentInProgress(t *testing.T) {
 // TestStartTaskUserInitiatedNotAutostarted verifies that a direct user-initiated
 // StartTask leaves the task's Autostarted flag false, even overwriting a prior true.
 func TestStartTaskUserInitiatedNotAutostarted(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 
 	taskID := "user-start-task"
@@ -1292,6 +1307,7 @@ func TestStartTaskUserInitiatedNotAutostarted(t *testing.T) {
 // doesn't have its own LLM config, it inherits from the parent. This ensures
 // subtasks created by plan-mode decomposition can start without explicit model settings.
 func TestStartSubtask_InheritsModelConfig(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 
 	// Create parent with model config
@@ -1363,6 +1379,7 @@ func TestStartSubtask_InheritsModelConfig(t *testing.T) {
 // subtasks are done and the parent is in backlog, the parent is NOT auto-started.
 // The parent stays in backlog until the user explicitly starts or moves it.
 func TestAutoStartNextSibling_AllDoneParentStaysInBacklog(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 
 	// Create parent in backlog
@@ -1437,6 +1454,7 @@ func TestAutoStartNextSibling_AllDoneParentStaysInBacklog(t *testing.T) {
 // TestMergeBranch_CommitAndDonePath verifies that MergeBranch merges a subtask
 // into the parent branch, not origin.
 func TestMergeBranch_CommitAndDonePath(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	// Create parent with an explicit branch
@@ -1515,6 +1533,7 @@ func TestMergeBranch_CommitAndDonePath(t *testing.T) {
 // is called for a subtask whose parent has no branch, the parent branch is
 // created on demand (safety net for HandleCommitAndDone path).
 func TestMergeBranch_ParentBranchCreatedOnDemand(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	// Create parent in backlog (no branch)
@@ -1605,6 +1624,7 @@ func TestMergeBranch_ParentBranchCreatedOnDemand(t *testing.T) {
 // committed changes (drives the card's "Commit and move to done" button). The
 // parent was never started: it has a branch but no recorded base_ref/base_commit.
 func TestMergeBranch_ParentDiffStatsAfterSubtaskMerge(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	parentID := "parent-stats"
@@ -1696,6 +1716,7 @@ func hashKeys(m map[string]string) []string {
 // TestMergeBranch_RootTaskMergesIntoOriginBranch verifies that a root task
 // with a branch-name BaseRef merges into that branch (not some other ref).
 func TestMergeBranch_RootTaskMergesIntoOriginBranch(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
 
 	// Make a commit on master so we have something to merge against
@@ -1755,6 +1776,7 @@ func TestMergeBranch_RootTaskMergesIntoOriginBranch(t *testing.T) {
 // when a root task's BaseRef is a branch name (user-set, not a SHA),
 // MergeBranch merges into that branch.
 func TestMergeBranch_RootTaskWithBranchName_BaseRefUsesBranchName(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
 
 	// Create a "develop" branch
@@ -1818,6 +1840,7 @@ func getGitRevParse(t *testing.T, dir, ref string) string {
 // a parent is in backlog and a subtask is started manually.
 // It inspects every intermediate state to diagnose why the merge might fail.
 func TestSubtaskManualStart_MergeDiagnostic(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	// Create parent in backlog (never started, no branch)
@@ -1953,6 +1976,7 @@ func TestSubtaskManualStart_MergeDiagnostic(t *testing.T) {
 // to pick up the branch set by prepareTaskExecution, avoiding the stale
 // object bug where UpdateTask would overwrite branch back to "".
 func TestPrepareTaskExecution_BranchPersists(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 
 	// Create parent in backlog
@@ -2038,6 +2062,7 @@ func TestPrepareTaskExecution_BranchPersists(t *testing.T) {
 // branch is set in DB but missing in git (e.g., CreateWorktree failed on a
 // previous call), EnsureParentBranch recovers by creating the branch.
 func TestEnsureParentBranch_RecoverMissingBranch(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
 
 	parentID := "parent-recover-branch"
@@ -2069,6 +2094,7 @@ func TestEnsureParentBranch_RecoverMissingBranch(t *testing.T) {
 // TestEnsureParentBranch_FailsWhenRepoCorrupted verifies that when the git
 // repo is corrupted, EnsureParentBranch fails (can't create the branch).
 func TestEnsureParentBranch_FailsWhenRepoCorrupted(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
 
 	parentID := "parent-corrupted-repo"
@@ -2094,6 +2120,7 @@ func TestEnsureParentBranch_FailsWhenRepoCorrupted(t *testing.T) {
 // is missing in git (e.g., cleared and regenerated), MergeBranch finds the
 // old branch with the same slug and updates the task's branch reference.
 func TestMergeBranch_RecoverMissingBranch(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
 
 	// Create a task with a branch name that doesn't exist in git.
@@ -2176,6 +2203,7 @@ func containsTaskID(tasks []types.Task, id string) bool {
 // sibling waits while a deeper branch still has pending work, and becomes a
 // candidate once its subtree is done.
 func TestFindDeepestStartableSubtasks_DeepestFirst(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 
 	c1ID, c2ID, g1ID, g2ID := "c1-depth", "c2-depth", "g1-depth", "g2-depth"
@@ -2222,6 +2250,7 @@ func TestFindDeepestStartableSubtasks_DeepestFirst(t *testing.T) {
 // a child in Review is NOT startable (it must wait for the child to be moved
 // to Done), and that its other pending children are found instead.
 func TestFindDeepestStartableSubtasks_SkipsReviewBlocked(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 
 	c1ID, r1ID, r2ID := "c1-review", "r1-review", "r2-review"
@@ -2257,6 +2286,7 @@ func TestFindDeepestStartableSubtasks_SkipsReviewBlocked(t *testing.T) {
 // its branch is ready at, so a ready leaf does not wait on a deeper branch. No task is returned
 // together with one of its own descendants.
 func TestFindStartableSubtasks_AllDepths(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 
 	aID, bID, cID, g1ID, g2ID := "fa-a", "fa-b", "fa-c", "fa-g1", "fa-g2"
@@ -2306,6 +2336,7 @@ func TestFindStartableSubtasks_AllDepths(t *testing.T) {
 // releases every ready branch: the ready leaf and the ready task inside the sibling that is waiting
 // on children. That waiting sibling itself stays unstarted.
 func TestAutoStartNextSibling_ParallelStartsEachBranch(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 	if err := te.store.SetConfigValue("run_siblings_parallel", "true"); err != nil {
 		t.Fatal(err)
@@ -2335,6 +2366,7 @@ func TestAutoStartNextSibling_ParallelStartsEachBranch(t *testing.T) {
 // TestAutoStartNextSibling_SequentialStartsOneBranch is the same tree with the setting off: one
 // branch starts and the ready leaf keeps waiting for the next finish.
 func TestAutoStartNextSibling_SequentialStartsOneBranch(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 
 	fixture := newParallelChainFixture(t, te, projectID)
@@ -2358,6 +2390,7 @@ func TestAutoStartNextSibling_SequentialStartsOneBranch(t *testing.T) {
 // in that queue. Such a task can be a candidate because it waits inside a sibling that is itself only
 // started-but-pending.
 func TestAutoStartNextSibling_QueuedDescendantKeepsItsQueuePlace(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 	if err := te.store.SetConfigValue("run_siblings_parallel", "true"); err != nil {
 		t.Fatal(err)
@@ -2406,6 +2439,7 @@ func threeLeafParent(t *testing.T, te *TaskExecutor, projectID, parentID string)
 
 // Sequential (default) mode: one subtask, the deepest.
 func TestSubtasksToStart_Sequential(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 	parent := threeLeafParent(t, te, projectID, "st-seq-parent")
 	children, err := te.store.GetChildren(parent.ID)
@@ -2420,6 +2454,7 @@ func TestSubtasksToStart_Sequential(t *testing.T) {
 
 // Parallel mode: every currently startable subtask, so they all begin at once.
 func TestSubtasksToStart_Parallel(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 	parent := threeLeafParent(t, te, projectID, "st-par-parent")
 	if err := te.store.SetConfigValue("run_siblings_parallel", "true"); err != nil {
@@ -2438,6 +2473,7 @@ func TestSubtasksToStart_Parallel(t *testing.T) {
 // Parallel mode over a nested tree: the ready leaves are picked alongside the ready task inside a
 // sibling still waiting on its child.
 func TestSubtasksToStart_ParallelMixedDepth(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 	parent := threeLeafParent(t, te, projectID, "st-par-nest")
 	deep := &types.Task{ID: "st-par-nest-c-deep", ProjectID: projectID, Title: "deep", Prompt: "deep prompt", Status: types.StatusBacklog, ParentTaskID: "st-par-nest-c"}
@@ -2470,6 +2506,7 @@ func TestSubtasksToStart_ParallelMixedDepth(t *testing.T) {
 // StartReadySubtasks is what a start route calls. Every ready branch starts, and the one already
 // queued for a slot does not.
 func TestStartReadySubtasks_StartsReadyBranchesAndLeavesQueuedAlone(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 	if err := te.store.SetConfigValue("run_siblings_parallel", "true"); err != nil {
 		t.Fatal(err)
@@ -2570,6 +2607,7 @@ func newParallelChainFixture(t *testing.T, te *TaskExecutor, projectID string) p
 // TestAllChildrenDone covers the readiness predicate: no children, all done,
 // one in review, one in backlog.
 func TestAllChildrenDone(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 
 	parentID := "parent-child-done"
@@ -2616,6 +2654,7 @@ func TestAllChildrenDone(t *testing.T) {
 // all of an in_progress parent's children are done, the parent itself is
 // autostarted.
 func TestAutoStartNextSibling_StartsParentWhenAllChildrenDone(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 
 	parentID := "parent-start-when-done"
@@ -2654,6 +2693,7 @@ func TestAutoStartNextSibling_StartsParentWhenAllChildrenDone(t *testing.T) {
 // but bubbles up to start C2; R1 → Done unblocks C1; C1 → Done starts P;
 // P and C2 done → G starts (the root runs last).
 func TestAutoStartNextSibling_ReviewBlocksChainThenUnblocks(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 
 	gID, pID, c1ID, c2ID, r1ID := "g-root", "p-mid", "c1-mid2", "c2-side", "r1-leaf"
@@ -2756,6 +2796,7 @@ func idsOf(tasks []types.Task) []string {
 // hasLiveExecutor must reflect the presence of an active executor for a task
 // (either running or blocked waiting for a concurrency slot).
 func TestHasLiveExecutor(t *testing.T) {
+	t.Parallel()
 	te, _, _, _ := setupExecutorWithGit(t)
 
 	if te.hasLiveExecutor("nope") {
@@ -2780,6 +2821,7 @@ func TestHasLiveExecutor(t *testing.T) {
 // NOT restart such a sibling — it would cancel and requeue it, dropping its
 // position. This test proves the hasLiveExecutor guard skips them.
 func TestAutoStartNextSibling_SkipsLiveExecutorSiblings(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 
 	parentID := "psl-parent"
@@ -2817,6 +2859,7 @@ func TestAutoStartNextSibling_SkipsLiveExecutorSiblings(t *testing.T) {
 // TestResolveMergeTarget_ChildNeverAnswersItsOwnBaseRef: a base_ref left on a child must not be what
 // the board, the Review message or the commit-and-done line reports as its target.
 func TestResolveMergeTarget_ChildNeverAnswersItsOwnBaseRef(t *testing.T) {
+	t.Parallel()
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 	if err := te.store.UpdateProjectOriginBranch(projectID, "master"); err != nil {
 		t.Fatalf("set origin branch: %v", err)

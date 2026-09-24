@@ -23,6 +23,7 @@ import (
 // A wake that was already buffered, or whose message was consumed at the top of the loop, must not
 // stop a call that has a right to finish: only a channel that grew since the watch began counts.
 func TestToolCallContextIgnoresAStaleHint(t *testing.T) {
+	t.Parallel()
 	setup := &taskExecSetup{ctx: context.Background(), userMsgChan: make(chan stream.UserMessage, 16), msgWake: make(chan struct{}, 1)}
 	setup.msgWake <- struct{}{}
 
@@ -293,6 +294,7 @@ func storedResult(t *testing.T, row types.TaskMessage) map[string]any {
 // A user message must not queue behind a command that runs for minutes: it kills the call that is
 // running and the calls that have not started, and the provider is told both.
 func TestUserMessageInterruptsRunningToolCall(t *testing.T) {
+	t.Parallel()
 	run := newInterruptRun(t, &types.Task{Title: "Interrupt", Prompt: "Work"},
 		toolCallsScript(
 			scriptToolCall{id: "call_1", name: "bash", args: `{"command":"` + bashSleepThen + `","timeout":90}`},
@@ -356,6 +358,7 @@ func TestUserMessageInterruptsRunningToolCall(t *testing.T) {
 
 // The row exists before the call runs, so the frame naming it cannot wait for the answer.
 func TestRunningToolCallNamesItsRowWhileItRuns(t *testing.T) {
+	t.Parallel()
 	const marker = "started.txt"
 	running := toolCallsScript(scriptToolCall{id: "call_1", name: "bash", args: `{"command":"` + bashSleepThen + `","timeout":90}`})
 	run := newInterruptRun(t, &types.Task{Title: "Row id", Prompt: "Work"},
@@ -426,6 +429,7 @@ func frameEvents(frames []taskStreamFrame) string {
 // An interrupted turn settles nothing: a request_review in it does not commit, merge or mark Done,
 // because the work it was reporting on was stopped on the way.
 func TestInterruptedTurnDoesNotCommitOrFinish(t *testing.T) {
+	t.Parallel()
 	run := newInterruptRun(t, &types.Task{Title: "Interrupt review", Prompt: "Work", AutoCommit: true, AutoMerge: true},
 		toolCallsScript(
 			scriptToolCall{id: "call_1", name: "bash", args: `{"command":"` + bashSleepThen + `","timeout":90}`},
@@ -455,6 +459,7 @@ func TestInterruptedTurnDoesNotCommitOrFinish(t *testing.T) {
 // The user's own keystroke is not a model failure: turns cut short by a message never reach the
 // consecutive-failure count that would otherwise end the run.
 func TestInterruptIsNotATurnFailure(t *testing.T) {
+	t.Parallel()
 	const maxTurns = 2
 	run := newInterruptRun(t, &types.Task{
 		Title: "Repeat", Prompt: "Work",
@@ -487,6 +492,7 @@ func TestInterruptIsNotATurnFailure(t *testing.T) {
 // A stop is a stop: cancelling the task mid-command is reported as the command failing, not as an
 // interrupt, and the run makes no further provider call.
 func TestStoppingATaskIsNotAnInterrupt(t *testing.T) {
+	t.Parallel()
 	run := newInterruptRun(t, &types.Task{Title: "Stop", Prompt: "Work"},
 		toolCallsScript(
 			scriptToolCall{id: "call_1", name: "bash", args: `{"command":"` + bashSleepThen + `","timeout":90}`},

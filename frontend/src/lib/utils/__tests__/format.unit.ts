@@ -7,6 +7,8 @@ import { setLocale } from '$lib/i18n/runtime.svelte';
 
 describe('escapeHtml', () => {
     it('escapes every character that can break out of a text node or attribute', () => {
+        // Highlight and diff output is interpolated into HTML strings that also carry attributes, so
+        // quotes must be escaped too — the one reason this escaper escapes more than a text node needs.
         expect(escapeHtml(`<img src=x onerror="alert('1')"> & more`))
             .toBe('&lt;img src=x onerror=&quot;alert(&#39;1&#39;)&quot;&gt; &amp; more');
     });

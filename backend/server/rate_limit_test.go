@@ -148,7 +148,7 @@ func TestRateLimitMiddleware_LoginEndpoint(t *testing.T) {
 		req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
 			"password": "wrong-password",
 		})
-		rr := testResponseRateLimited(t, s, req)
+		rr := testResponse(t, s, req)
 		switch rr.Code {
 		case http.StatusOK, http.StatusUnauthorized:
 			successCount++
@@ -161,14 +161,6 @@ func TestRateLimitMiddleware_LoginEndpoint(t *testing.T) {
 	if rateLimitedCount == 0 {
 		t.Errorf("expected at least 1 rate limited request, got 0 (success=%d, limited=%d)", successCount, rateLimitedCount)
 	}
-}
-
-func testResponseRateLimited(t *testing.T, s *Server, req *http.Request) *httptest.ResponseRecorder {
-	t.Helper()
-	rr := httptest.NewRecorder()
-	handler := s.CORSMiddleware(s.SessionMiddleware(s.CSRFMiddleware(CompressMiddleware(s.mux))))
-	handler.ServeHTTP(rr, req)
-	return rr
 }
 
 // trustProxyForTest is the resolved MIKE_TRUST_PROXY decision the middleware tests run under when the
@@ -316,7 +308,7 @@ func TestLoginRouteRateLimitedWithZeroBudget(t *testing.T) {
 		req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
 			"password": "wrong-password",
 		})
-		rr := testResponseRateLimited(t, s, req)
+		rr := testResponse(t, s, req)
 		if rr.Code == http.StatusTooManyRequests {
 			limited = true
 			break

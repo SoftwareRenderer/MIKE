@@ -365,28 +365,18 @@ func createTestSubtaskWithLLM(t *testing.T, s *Server, projectID string, parentT
 	return result["id"].(string)
 }
 
+// The three readers below are one GET (getTask) plus the column the caller is asking about.
+
 // Helper: get a task by ID and return its status
 func getTaskStatus(t *testing.T, s *Server, projectID string, taskID string) string {
 	t.Helper()
-	req := testRequest("GET", "/api/projects/"+projectID+"/tasks/"+taskID, nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("get task: %d %s", rr.Code, rr.Body.String())
-	}
-	result := mustJSON[map[string]any](t, rr.Body)
-	return result["status"].(string)
+	return getTask(t, s, projectID, taskID)["status"].(string)
 }
 
 // Helper: get a task by ID and return its execution_state
 func getTaskExecutionState(t *testing.T, s *Server, projectID string, taskID string) string {
 	t.Helper()
-	req := testRequest("GET", "/api/projects/"+projectID+"/tasks/"+taskID, nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("get task: %d %s", rr.Code, rr.Body.String())
-	}
-	result := mustJSON[map[string]any](t, rr.Body)
-	if ss, ok := result["execution_state"].(string); ok {
+	if ss, ok := getTask(t, s, projectID, taskID)["execution_state"].(string); ok {
 		return ss
 	}
 	return ""
@@ -2149,13 +2139,7 @@ func getAllTasks(t *testing.T, s *Server, projectID string) []map[string]any {
 // Helper: get a task's auto_merge value
 func getTaskAutoMerge(t *testing.T, s *Server, projectID string, taskID string) bool {
 	t.Helper()
-	req := testRequest("GET", "/api/projects/"+projectID+"/tasks/"+taskID, nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("get task: %d %s", rr.Code, rr.Body.String())
-	}
-	result := mustJSON[map[string]any](t, rr.Body)
-	if v, ok := result["auto_merge"]; ok {
+	if v, ok := getTask(t, s, projectID, taskID)["auto_merge"]; ok {
 		return v.(bool)
 	}
 	return false

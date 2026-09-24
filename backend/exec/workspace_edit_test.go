@@ -14,6 +14,7 @@ func rng(s, e lspPosition) lspRange { return lspRange{Start: s, End: e} }
 // ─── applyTextEdits ──────────────────────────────────────────────────────────
 
 func TestApplyTextEdits_Single(t *testing.T) {
+	t.Parallel()
 	content := "foo bar baz"
 	edits := []lspTextEdit{{Range: rng(pos(0, 4), pos(0, 7)), NewText: "baz"}}
 	got, err := applyTextEdits(content, edits)
@@ -26,6 +27,7 @@ func TestApplyTextEdits_Single(t *testing.T) {
 }
 
 func TestApplyTextEdits_MultipleOutOfOrder(t *testing.T) {
+	t.Parallel()
 	// Edits delivered in reverse order of position — the classic offset
 	// invalidation trap. Both must land correctly.
 	content := "aaa bbb ccc"
@@ -43,6 +45,7 @@ func TestApplyTextEdits_MultipleOutOfOrder(t *testing.T) {
 }
 
 func TestApplyTextEdits_MultiLine(t *testing.T) {
+	t.Parallel()
 	content := "line one\nline two\nline three"
 	// Delete "line two\n" entirely (range spans two lines)
 	edits := []lspTextEdit{{Range: rng(pos(1, 0), pos(2, 0)), NewText: ""}}
@@ -56,6 +59,7 @@ func TestApplyTextEdits_MultiLine(t *testing.T) {
 }
 
 func TestApplyTextEdits_EmptySet(t *testing.T) {
+	t.Parallel()
 	got, err := applyTextEdits("unchanged", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -66,6 +70,7 @@ func TestApplyTextEdits_EmptySet(t *testing.T) {
 }
 
 func TestApplyTextEdits_Insertion(t *testing.T) {
+	t.Parallel()
 	content := "ab"
 	edits := []lspTextEdit{{Range: rng(pos(0, 1), pos(0, 1)), NewText: "XYZ"}}
 	got, err := applyTextEdits(content, edits)
@@ -78,6 +83,7 @@ func TestApplyTextEdits_Insertion(t *testing.T) {
 }
 
 func TestApplyTextEdits_AtEOF(t *testing.T) {
+	t.Parallel()
 	content := "end"
 	edits := []lspTextEdit{{Range: rng(pos(0, 3), pos(0, 3)), NewText: "!"}}
 	got, err := applyTextEdits(content, edits)
@@ -90,6 +96,7 @@ func TestApplyTextEdits_AtEOF(t *testing.T) {
 }
 
 func TestApplyTextEdits_InvalidRange(t *testing.T) {
+	t.Parallel()
 	edits := []lspTextEdit{{Range: rng(pos(1, 0), pos(0, 0)), NewText: "x"}}
 	if _, err := applyTextEdits("a\nb", edits); err == nil {
 		t.Error("expected error for end-before-start range")
@@ -97,6 +104,7 @@ func TestApplyTextEdits_InvalidRange(t *testing.T) {
 }
 
 func TestApplyTextEdits_Overlapping(t *testing.T) {
+	t.Parallel()
 	content := "0123456789"
 	edits := []lspTextEdit{
 		{Range: rng(pos(0, 2), pos(0, 5)), NewText: "A"},
@@ -108,6 +116,7 @@ func TestApplyTextEdits_Overlapping(t *testing.T) {
 }
 
 func TestApplyTextEdits_OutOfBoundsLine(t *testing.T) {
+	t.Parallel()
 	edits := []lspTextEdit{{Range: rng(pos(5, 0), pos(5, 1)), NewText: "x"}}
 	if _, err := applyTextEdits("one line", edits); err == nil {
 		t.Error("expected error for line past end of file")
@@ -117,6 +126,7 @@ func TestApplyTextEdits_OutOfBoundsLine(t *testing.T) {
 // ─── parseWorkspaceEdit ──────────────────────────────────────────────────────
 
 func TestParseWorkspaceEdit_ChangesMap(t *testing.T) {
+	t.Parallel()
 	resp := json.RawMessage(`{
 		"jsonrpc": "2.0", "id": 7,
 		"result": {
@@ -147,6 +157,7 @@ func TestParseWorkspaceEdit_ChangesMap(t *testing.T) {
 }
 
 func TestParseWorkspaceEdit_DocumentChanges(t *testing.T) {
+	t.Parallel()
 	resp := json.RawMessage(`{
 		"jsonrpc": "2.0", "id": 8,
 		"result": {
@@ -169,6 +180,7 @@ func TestParseWorkspaceEdit_DocumentChanges(t *testing.T) {
 }
 
 func TestParseWorkspaceEdit_UnknownChangeKind(t *testing.T) {
+	t.Parallel()
 	resp := json.RawMessage(`{
 		"jsonrpc": "2.0", "id": 9,
 		"result": {
@@ -187,6 +199,7 @@ func TestParseWorkspaceEdit_UnknownChangeKind(t *testing.T) {
 }
 
 func TestParseWorkspaceEdit_NullResult(t *testing.T) {
+	t.Parallel()
 	resp := json.RawMessage(`{"jsonrpc": "2.0", "id": 10, "result": null}`)
 	edits, err := parseWorkspaceEdit(resp)
 	if err != nil {
@@ -198,6 +211,7 @@ func TestParseWorkspaceEdit_NullResult(t *testing.T) {
 }
 
 func TestParseWorkspaceEdit_LSPError(t *testing.T) {
+	t.Parallel()
 	resp := json.RawMessage(`{"jsonrpc": "2.0", "id": 11, "error": {"code": -32602, "message": "Invalid newName"}}`)
 	_, err := parseWorkspaceEdit(resp)
 	if err == nil {
@@ -209,6 +223,7 @@ func TestParseWorkspaceEdit_LSPError(t *testing.T) {
 }
 
 func TestParseWorkspaceEdit_UnexpectedShape(t *testing.T) {
+	t.Parallel()
 	resp := json.RawMessage(`{"jsonrpc": "2.0", "id": 12, "result": {"foo": "bar"}}`)
 	if _, err := parseWorkspaceEdit(resp); err == nil {
 		t.Error("expected error for result without changes/documentChanges")
@@ -218,6 +233,7 @@ func TestParseWorkspaceEdit_UnexpectedShape(t *testing.T) {
 // ─── workspaceEditTargets ────────────────────────────────────────────────────
 
 func TestWorkspaceEditTargets_AllInside(t *testing.T) {
+	t.Parallel()
 	ws := "/home/u/work"
 	uris := []string{"file:///home/u/work/src/a.ts", "file:///home/u/work/b.ts"}
 	rel, err := workspaceEditTargets(ws, uris)
@@ -230,6 +246,7 @@ func TestWorkspaceEditTargets_AllInside(t *testing.T) {
 }
 
 func TestWorkspaceEditTargets_OutsideWorkspace(t *testing.T) {
+	t.Parallel()
 	ws := "/home/u/work"
 	uris := []string{"file:///home/u/work/a.ts", "file:///home/u/other/b.ts"}
 	if _, err := workspaceEditTargets(ws, uris); err == nil {
@@ -238,6 +255,7 @@ func TestWorkspaceEditTargets_OutsideWorkspace(t *testing.T) {
 }
 
 func TestWorkspaceEditTargets_PrefixTrick(t *testing.T) {
+	t.Parallel()
 	// /home/u/work-evil must NOT pass as inside /home/u/work
 	ws := "/home/u/work"
 	uris := []string{"file:///home/u/work-evil/a.ts"}
@@ -247,6 +265,7 @@ func TestWorkspaceEditTargets_PrefixTrick(t *testing.T) {
 }
 
 func TestWorkspaceEditTargets_NonFileURI(t *testing.T) {
+	t.Parallel()
 	ws := "/home/u/work"
 	if _, err := workspaceEditTargets(ws, []string{"http://example.com/a.ts"}); err == nil {
 		t.Fatal("expected error for non-file URI")
@@ -254,6 +273,7 @@ func TestWorkspaceEditTargets_NonFileURI(t *testing.T) {
 }
 
 func TestWorkspaceEditTargets_ErrorsWrap(t *testing.T) {
+	t.Parallel()
 	ws := "/home/u/work"
 	_, err := workspaceEditTargets(ws, []string{"file:///home/u/other/b.ts"})
 	if !errors.Is(err, errEditOutsideWorkspace) {

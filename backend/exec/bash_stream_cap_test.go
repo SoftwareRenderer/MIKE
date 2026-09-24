@@ -12,6 +12,7 @@ import (
 // toolresult.Truncate caps only what the LLM sees, and runs on a string that is already whole.
 
 func TestExecCommandStreamCapsHugeOutput(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	streamed := 0
@@ -39,6 +40,7 @@ func TestExecCommandStreamCapsHugeOutput(t *testing.T) {
 }
 
 func TestExecCommandStreamLeavesSmallOutputAlone(t *testing.T) {
+	t.Parallel()
 	out, err := execCommandStream(context.Background(), t.TempDir(), "printf 'one\\ntwo\\n'", 10, nil)
 	if err != nil {
 		t.Fatalf("execCommandStream: %v", err)

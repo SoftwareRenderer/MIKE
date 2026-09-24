@@ -16,6 +16,7 @@ import (
 // and a project that wants a task to fill such a directory declares it in its own Sandbox
 // Configuration, where the mount and the toolchain variable are both visible per project.
 func TestSandboxCreateOpts_CarriesEveryConfiguredField(t *testing.T) {
+	t.Parallel()
 	setup := &taskExecSetup{
 		task:    &types.Task{ID: "brave-amber-quartz"},
 		project: &types.Project{ID: "proj-1", Name: "example.com"},

@@ -116,8 +116,9 @@ func testRequest(method, path string, body any) *http.Request {
 	return req
 }
 
-// testResponse runs a request against the server and returns the response.
-// Uses the full middleware chain (CORS + Session + Compress).
+// testResponse runs a request through the whole middleware chain in front of the API mux
+// (CORS + Session + CSRF + Compress) — the answer a browser gets. routerResponse is the same chain
+// in front of the router, for the cases where the SPA fallback is what is under test.
 func testResponse(t *testing.T, s *Server, req *http.Request) *httptest.ResponseRecorder {
 	t.Helper()
 	rr := httptest.NewRecorder()

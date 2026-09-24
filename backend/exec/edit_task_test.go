@@ -26,6 +26,7 @@ func editTaskTarget(t *testing.T, s *store.Store, projectID, taskID string, auto
 // nesting a task under a parent whose "allow subtask to auto merge" preference
 // is off disables the task's auto_merge (it previously was true from config).
 func TestHandleEditTask_NestingRespectsParentSubtasksAutoMerge_False(t *testing.T) {
+	t.Parallel()
 	// Config defaults: auto_merge=true — but the parent explicitly disallows
 	// subtask auto-merge.
 	te := newTestExecutorWithConfig(t, true, true)
@@ -64,6 +65,7 @@ func TestHandleEditTask_NestingRespectsParentSubtasksAutoMerge_False(t *testing.
 // under a parent that allows subtask auto-merge enables the task's auto_merge
 // (with the auto_commit prerequisite).
 func TestHandleEditTask_NestingInheritsSubtasksAutoMergeTrue(t *testing.T) {
+	t.Parallel()
 	// Config defaults: auto_merge=false — but the parent allows subtask auto-merge.
 	te := newTestExecutorWithConfig(t, false, false)
 	parent := createParentTask(t, te.store, "parent-nest-2", "proj-nest-2", "backlog")
@@ -96,6 +98,7 @@ func TestHandleEditTask_NestingInheritsSubtasksAutoMergeTrue(t *testing.T) {
 // parent resets auto_merge/auto_commit to the server config defaults while
 // preserving the task's own subtasks_auto_merge.
 func TestHandleEditTask_UnnestResetsToConfigDefaults(t *testing.T) {
+	t.Parallel()
 	// Config defaults: auto_merge=true, subtasks_auto_merge=false.
 	te := newTestExecutorWithConfig(t, true, false)
 	parent := createParentTask(t, te.store, "parent-unnest-3", "proj-unnest-3", "backlog")
@@ -136,6 +139,7 @@ func TestHandleEditTask_UnnestResetsToConfigDefaults(t *testing.T) {
 // re-sending the current parent (a no-op reparent) leaves an explicit
 // auto_merge override untouched.
 func TestHandleEditTask_UnchangedParentDoesNotClobberAutoMerge(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutorWithConfig(t, true, true)
 	parent := createParentTask(t, te.store, "parent-same-4", "proj-same-4", "backlog")
 	parent.SubtasksAutoMerge = false
@@ -166,6 +170,7 @@ func TestHandleEditTask_UnchangedParentDoesNotClobberAutoMerge(t *testing.T) {
 // parent on an already-independent task leaves auto_merge untouched (no
 // unnecessary reset to config defaults).
 func TestHandleEditTask_UnnestWhenAlreadyIndependent(t *testing.T) {
+	t.Parallel()
 	// Config defaults: auto_merge=false.
 	te := newTestExecutorWithConfig(t, false, false)
 	createProject(t, te.store, "proj-ind-5", "proj-ind-5")
@@ -195,6 +200,7 @@ func TestHandleEditTask_UnnestWhenAlreadyIndependent(t *testing.T) {
 // TestHandleEditTask_TitleOnlyEditKeepsAutoMerge verifies that editing only the
 // title leaves auto-merge fields untouched.
 func TestHandleEditTask_TitleOnlyEditKeepsAutoMerge(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutorWithConfig(t, false, false)
 	createProject(t, te.store, "proj-title-6", "proj-title-6")
 	editTaskTarget(t, te.store, "proj-title-6", "target-title-6", true, true, true, "")
@@ -226,6 +232,7 @@ func TestHandleEditTask_TitleOnlyEditKeepsAutoMerge(t *testing.T) {
 // TestHandleEditTask_StartedParentAccepted: nesting a backlog task under a started parent
 // is accepted, and the child inherits that parent's subtasks_auto_merge.
 func TestHandleEditTask_StartedParentAccepted(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutorWithConfig(t, true, true)
 	parent := createParentTask(t, te.store, "parent-nb-7", "proj-nb-7", "in_progress")
 	parent.SubtasksAutoMerge = false
@@ -256,6 +263,7 @@ func TestHandleEditTask_StartedParentAccepted(t *testing.T) {
 // TestHandleEditTask_NestingClearsBaseBranch: nesting moves the work to the parent's branch, so the
 // task's own base branch must not stay on the row.
 func TestHandleEditTask_NestingClearsBaseBranch(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutorWithConfig(t, false, false)
 	parent := createParentTask(t, te.store, "parent-base-1", "proj-base-edit", "backlog")
 
@@ -287,6 +295,7 @@ func TestHandleEditTask_NestingClearsBaseBranch(t *testing.T) {
 
 // TestHandleEditTask_TitleOnlyEditKeepsBaseBranch: only the parent link drops the base branch.
 func TestHandleEditTask_TitleOnlyEditKeepsBaseBranch(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutorWithConfig(t, false, false)
 	current := createParentTask(t, te.store, "current-base-2", "proj-base-edit-2", "backlog")
 

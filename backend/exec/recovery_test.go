@@ -179,6 +179,7 @@ func runBashThroughState(t *testing.T, state *executionState, cmd string) (strin
 // ---------------------------------------------------------------------------
 
 func TestRecoverBridgeForTask_Tier1ClientReconnect(t *testing.T) {
+	t.Parallel()
 	f := newFakeSandboxMgr("task-tier1")
 	defer f.cleanup()
 	setup, state := recoveryTestSetup("task-tier1")
@@ -232,6 +233,7 @@ func TestRecoverBridgeForTask_Tier1ClientReconnect(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRecoverBridgeForTask_Tier2RecreateRunningContainer(t *testing.T) {
+	t.Parallel()
 	f := newFakeSandboxMgr("task-tier2")
 	defer f.cleanup()
 	setup, state := recoveryTestSetup("task-tier2")
@@ -283,6 +285,7 @@ func TestRecoverBridgeForTask_Tier2RecreateRunningContainer(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRecoverBridgeForTask_CreatesSandboxFromScratchWhenStopped(t *testing.T) {
+	t.Parallel()
 	f := newFakeSandboxMgr("task-stopped")
 	defer f.cleanup()
 	setup, state := recoveryTestSetup("task-stopped")
@@ -337,6 +340,7 @@ func TestRecoverBridgeForTask_CreatesSandboxFromScratchWhenStopped(t *testing.T)
 // ---------------------------------------------------------------------------
 
 func TestRecoverBridgeForTask_MaxAttemptsLatch(t *testing.T) {
+	t.Parallel()
 	f := newFakeSandboxMgr("task-max")
 	defer f.cleanup()
 	setup, state := recoveryTestSetup("task-max")
@@ -381,6 +385,7 @@ func TestRecoverBridgeForTask_MaxAttemptsLatch(t *testing.T) {
 // call clears the bridge-recovery failure latch, so a later transient sandbox
 // outage can still be recovered instead of being permanently stuck.
 func TestExecuteTool_SuccessResetsRecoveryLatch(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 	state := &executionState{
 		recoverBridge:          func() bool { return true },

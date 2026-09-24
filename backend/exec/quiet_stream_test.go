@@ -35,6 +35,7 @@ func streamsATokenThenGoesQuiet(quiet time.Duration) func(http.ResponseWriter) {
 // TestProviderThatGoesQuietMidAnswerFinishesTheTurn holds the rule the whole change exists for: a
 // stream that goes quiet and then speaks again is one answer, and the run is not a failed one.
 func TestProviderThatGoesQuietMidAnswerFinishesTheTurn(t *testing.T) {
+	t.Parallel()
 	srv, _ := crashLLM(t, streamsATokenThenGoesQuiet(1200*time.Millisecond))
 	te, _, projectID, initialSHA := setupExecutorWithGit(t)
 	const taskID = "quiet-then-finish"
@@ -67,6 +68,7 @@ func TestProviderThatGoesQuietMidAnswerFinishesTheTurn(t *testing.T) {
 // TestQuietStreamCeilingIsReportedAsSilence holds the other half: an operator who does set a ceiling
 // is told the stream went quiet, in seconds, and is never sent to check their network.
 func TestQuietStreamCeilingIsReportedAsSilence(t *testing.T) {
+	t.Parallel()
 	srv, _ := crashLLM(t, func(w http.ResponseWriter) {
 		f, ok := w.(http.Flusher)
 		if !ok {
@@ -113,6 +115,7 @@ func TestQuietStreamCeilingIsReportedAsSilence(t *testing.T) {
 // TestQuietProviderWaitIsAnnouncedOnceAndWithdrawn holds the notice itself: a wait a person is
 // watching says what it waits on, repeats at the same cadence a slow lock uses, and is taken back.
 func TestQuietProviderWaitIsAnnouncedOnceAndWithdrawn(t *testing.T) {
+	t.Parallel()
 	e := newTestExecutor(t)
 	now := time.Now().UTC()
 	proj := &types.Project{ID: "proj-quiet", Name: "Quiet", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
@@ -176,6 +179,7 @@ func waitForAssistantRow(t *testing.T, te *TaskExecutor, taskID, want string, wa
 // does not want the request again in 2. A transport fault keeps the short ladder, because there the
 // connection is gone and the next attempt is a different connection.
 func TestQuietStreamBackoffWaitsAtLeastTheSilenceItSaw(t *testing.T) {
+	t.Parallel()
 	quiet := &llama.ErrStreamSilent{Silent: 40 * time.Second, Phase: llama.StreamPhaseMidResponse}
 	if d := backoffFor(0, quiet); d < 40*time.Second {
 		t.Errorf("backoff after 40s of silence = %v, want at least the silence itself", d)

@@ -60,6 +60,10 @@ bridge-check: ## Fail if sandbox/sandbox-bridge was not built from this tree's s
 # under extensions/, which are not this tree.
 GO_SCOPE := ./backend/... ./pkg/... .
 
+# The packages holding a .go file this working tree changed, as `go test` takes them. The logic is
+# in a script because make ends `$(shell` at the first parenthesis and reads `$|` as a variable.
+GO_TOUCHED := $(shell bash scripts/touched-packages.sh)
+
 # Every Go file this repo owns, and only those. Not `.`: that also walks extensions/ (a pulled
 # artifact from another module) and node_modules/, and would recurse into backend/ and pkg/ and
 # report each violation twice.
@@ -74,9 +78,23 @@ GOFMT_DIRS := backend pkg scripts $(wildcard *.go)
 .PHONY: test
 test: test-go test-frontend ## Run all tests (Go unit + frontend unit)
 
+# `-parallel 4`, not 8: `backend/stream`'s `TestAConnectionThatMissedFramesIsEndedSoTheClientResyncs`
+# asserts a liveness property behind a 10 s bound and went red in 3 of 6 full-scope runs at 8, against 0
+# of 3 at 4. The concurrency is not what the flag buys — packages overlap, so the suite takes 43 s at 4
+# and 41 s at 8.
 .PHONY: test-go
-test-go: ## Run Go unit tests (~60s, parallel)
-	go test $(GO_SCOPE) -count=1 -parallel 8
+test-go: ## Run Go unit tests (parallel; the gate)
+	go test $(GO_SCOPE) -count=1 -parallel 4
+
+# The iteration lane: only the touched packages, and `go test`'s result cache left ON, which is the
+# whole saving. `test-go` remains the gate: this runs no dependent of a changed package, so the build
+# of the full scope is what catches a signature change that breaks one.
+.PHONY: test-diff
+test-diff: ## Go tests for the packages this working tree touched (cached)
+	@go build $(GO_SCOPE)
+	@pkgs='$(GO_TOUCHED)'; \
+	if [ -z "$$pkgs" ]; then echo "test-diff: no changed .go files under $(GO_SCOPE)"; \
+	else echo "==> go test $$pkgs"; go test -parallel 4 $$pkgs; fi
 
 # What each frontend gate enforces is in the doc that owns it: docs/markup-sanitizing.md (the HTML
 # sinks), docs/i18n.md (the surface count, the catalogue).
@@ -195,12 +213,12 @@ check: ## THE GATE: lint + archgate + docs-check + bridge-check + build + Go tes
 # the stream manager and the sandbox/terminal layers run ~120 of them between them. A -race sweep of
 # every package is ~4min and would not get run, so this is where races have actually hidden. AGENTS.md:
 # "A green ./backend/exec/ is not proof" - the executor's locking bugs surface only under -race in
-# ./backend/server/, so both are here. `-parallel` is lower than test-go's because the race detector
-# multiplies the work per test, and the sandbox packages need a working podman + runsc on top of it.
+# ./backend/server/, so both are here. `-parallel 4` because the race detector multiplies the work per
+# test, and the sandbox packages need a working podman + runsc on top of it.
 RACE_PKGS := ./backend/git/ ./backend/exec/ ./backend/server/ ./backend/stream/ ./backend/api/ ./pkg/logging/
 
 .PHONY: check-race
-check-race: ## -race over the executor/stream/terminal layers (~2min) — required for any concurrency change
+check-race: ## -race over the executor/stream/terminal layers (~5min) — required for any concurrency change
 	@echo "==> go test -race $(RACE_PKGS)"
 	@go test -race $(RACE_PKGS) -count=1 -parallel 4
 

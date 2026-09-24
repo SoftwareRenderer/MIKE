@@ -40,6 +40,7 @@ func waitForSnapshot(t *testing.T, what string, f func() bool) {
 }
 
 func TestCheckpointPinsItsSnapshot(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
 	s := te.store
 	const (

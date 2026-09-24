@@ -68,15 +68,23 @@ describe('DiffCache', () => {
         expect(cache.fileHashes).toEqual({});
     });
 
-    it('applyStagedPaths updates staged flags', () => {
+    it('applyStagedPaths replaces the files record and each entry, which is what Svelte reads', () => {
         const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.state.files = {
             'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
             'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: false },
         };
+        const before = cache.state.files;
+        const beforeA = before['a.ts'];
+
         cache.applyStagedPaths(['a.ts']);
+
         expect(cache.state.files['a.ts'].staged).toBe(true);
         expect(cache.state.files['b.ts'].staged).toBe(false);
+        // A `$derived` over the panel's files re-runs only when the object it reads is a different
+        // object, so writing the flag in place would leave the panel showing the old staging state.
+        expect(cache.state.files).not.toBe(before);
+        expect(cache.state.files['a.ts']).not.toBe(beforeA);
     });
 
     it('processStats with empty hash clears cache', () => {

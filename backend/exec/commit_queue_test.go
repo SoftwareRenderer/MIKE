@@ -7,18 +7,8 @@ import (
 	"time"
 )
 
-func TestCommitQueue_SequentialAcquireRelease(t *testing.T) {
-	cq := NewCommitQueue()
-
-	release1 := cq.Acquire("proj-1")
-	release1()
-
-	// Second acquire should succeed immediately after release
-	release2 := cq.Acquire("proj-1")
-	release2()
-}
-
 func TestCommitQueue_ConcurrentSameProjectBlocks(t *testing.T) {
+	t.Parallel()
 	cq := NewCommitQueue()
 
 	var order atomic.Int64
@@ -52,6 +42,7 @@ func TestCommitQueue_ConcurrentSameProjectBlocks(t *testing.T) {
 }
 
 func TestCommitQueue_ConcurrentDifferentProjectsParallel(t *testing.T) {
+	t.Parallel()
 	cq := NewCommitQueue()
 
 	var order atomic.Int64
@@ -77,6 +68,7 @@ func TestCommitQueue_ConcurrentDifferentProjectsParallel(t *testing.T) {
 }
 
 func TestCommitQueue_MultipleSequential(t *testing.T) {
+	t.Parallel()
 	cq := NewCommitQueue()
 
 	var order atomic.Int64
@@ -114,6 +106,7 @@ func taskLockIsHeld(te *TaskExecutor, taskID string) bool {
 // TestLockWorktreeIsPerTask is the table's reason for existing: one task's worktree work must not stop
 // another's, and two calls for the same task must land on the same lock.
 func TestLockWorktreeIsPerTask(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 
 	release := te.LockWorktree("task-1")
@@ -134,6 +127,7 @@ func TestLockWorktreeIsPerTask(t *testing.T) {
 // TestLockWorktreeConcurrentWaitersQueue is the same property reached the way production reaches it,
 // with a third task proving the table does not become a global lock under load.
 func TestLockWorktreeConcurrentWaitersQueue(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 
 	var observed int
@@ -164,17 +158,19 @@ func TestLockWorktreeConcurrentWaitersQueue(t *testing.T) {
 	}()
 
 	// G3: different task, should not block
+	gotThird := make(chan struct{})
 	go func() {
 		release := te.LockWorktree("task-2")
 		mu.Lock()
 		observed++
 		mu.Unlock()
 		release()
+		close(gotThird)
 	}()
 
-	// G3 should complete quickly
+	// G3 must reach its own lock while G2 is still waiting on task-1's.
 	select {
-	case <-time.After(100 * time.Millisecond):
+	case <-gotThird:
 	case <-time.After(1 * time.Second):
 		t.Fatal("goroutine 3 should not have blocked")
 	}

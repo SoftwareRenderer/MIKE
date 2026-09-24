@@ -3,6 +3,7 @@ package exec
 import "testing"
 
 func TestCountEditLines_CompleteJSON(t *testing.T) {
+	t.Parallel()
 	args := `{"path":"foo.go","edits":[{"oldText":"line1\nline2","newText":"line1\nline2\nline3"}]}`
 	added, removed := countEditLines(args)
 	if added != 2 {
@@ -14,6 +15,7 @@ func TestCountEditLines_CompleteJSON(t *testing.T) {
 }
 
 func TestCountEditLines_MultipleEdits(t *testing.T) {
+	t.Parallel()
 	args := `{"path":"foo.go","edits":[
 		{"oldText":"a\nb\nc","newText":"a\nb"},
 		{"oldText":"x\ny","newText":"x\ny\nz\nw"}
@@ -30,6 +32,7 @@ func TestCountEditLines_MultipleEdits(t *testing.T) {
 }
 
 func TestCountEditLines_EmptyEdits(t *testing.T) {
+	t.Parallel()
 	args := `{"path":"foo.go","edits":[]}`
 	added, removed := countEditLines(args)
 	if added != 0 || removed != 0 {
@@ -38,6 +41,7 @@ func TestCountEditLines_EmptyEdits(t *testing.T) {
 }
 
 func TestCountEditLines_NoEditsKey(t *testing.T) {
+	t.Parallel()
 	args := `{"path":"foo.go"}`
 	added, removed := countEditLines(args)
 	if added != 0 || removed != 0 {
@@ -46,6 +50,7 @@ func TestCountEditLines_NoEditsKey(t *testing.T) {
 }
 
 func TestCountEditLines_PartialJSON(t *testing.T) {
+	t.Parallel()
 	// Partial JSON — edits array not yet complete, parseToolArgs returns nil
 	args := `{"path":"foo.go","edits":[{"oldText":"line1`
 	added, removed := countEditLines(args)
@@ -55,6 +60,7 @@ func TestCountEditLines_PartialJSON(t *testing.T) {
 }
 
 func TestCountEditLines_SingleLineNoNewline(t *testing.T) {
+	t.Parallel()
 	args := `{"path":"foo.go","edits":[{"oldText":"single","newText":"replacement"}]}`
 	added, removed := countEditLines(args)
 	if added != 0 {
@@ -66,6 +72,7 @@ func TestCountEditLines_SingleLineNoNewline(t *testing.T) {
 }
 
 func TestPhraseDetector_Basic(t *testing.T) {
+	t.Parallel()
 	det := newPhraseDetector()
 	phrase := "This is a long enough phrase to be tracked by the detector. "
 
@@ -82,6 +89,7 @@ func TestPhraseDetector_Basic(t *testing.T) {
 }
 
 func TestPhraseDetector_MinWords(t *testing.T) {
+	t.Parallel()
 	det := newPhraseDetector()
 	shortPhrase := "Too short. "
 
@@ -93,6 +101,7 @@ func TestPhraseDetector_MinWords(t *testing.T) {
 }
 
 func TestBlockDetector_Basic(t *testing.T) {
+	t.Parallel()
 	det := newBlockDetector()
 	block := "This is a repeating block of text. "
 
@@ -108,6 +117,7 @@ func TestBlockDetector_Basic(t *testing.T) {
 }
 
 func TestBlockDetector_MinLength(t *testing.T) {
+	t.Parallel()
 	det := newBlockDetector()
 	shortBlock := "Short. "
 
@@ -119,6 +129,7 @@ func TestBlockDetector_MinLength(t *testing.T) {
 }
 
 func TestLoopDetector_CheckStreamingText(t *testing.T) {
+	t.Parallel()
 	ld := newLoopDetector()
 
 	t.Run("PhraseLoop", func(t *testing.T) {
@@ -144,6 +155,7 @@ func TestLoopDetector_CheckStreamingText(t *testing.T) {
 }
 
 func TestAsksInLastParagraph(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		text string

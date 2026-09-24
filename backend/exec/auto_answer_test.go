@@ -50,7 +50,8 @@ func mockAnswerLLM(answer string) *httptest.Server {
 func setupAutoAnswerTasks(t *testing.T) (*TaskExecutor, *types.Task, *types.Task) {
 	t.Helper()
 	// RenderAnswerQuestionPrompt loads prompts/answer_question.tmpl from the CWD —
-	// chdir to the repo root so the template is found (mirrors other prompt tests).
+	// chdir to the repo root so the template is found (mirrors other prompt tests). The callers are
+	// serial for the reason at chdirRepoRoot, and the CWD is left here on purpose.
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
 	if err := os.Chdir(repoRoot); err != nil {
@@ -156,6 +157,7 @@ func mkToolCall(id, name, args string) types.ChatToolCall {
 }
 
 func TestAskQuestionResults_AlignmentWithIncompleteCalls(t *testing.T) {
+	t.Parallel()
 	pending := []types.ChatToolCall{
 		mkToolCall("c0", "read_file", `{"path":"a"}`),
 		{ID: ""}, // incomplete — skipped, no result
@@ -177,6 +179,7 @@ func TestAskQuestionResults_AlignmentWithIncompleteCalls(t *testing.T) {
 }
 
 func TestAskQuestionResults_AllComplete(t *testing.T) {
+	t.Parallel()
 	pending := []types.ChatToolCall{
 		mkToolCall("c0", "ask_question", ""),
 		mkToolCall("c1", "bash", ""),
@@ -198,6 +201,7 @@ func TestAskQuestionResults_AllComplete(t *testing.T) {
 // as "the agent has a question", and an auto-started subtask must not answer it from the
 // parent's context. A real question in the same turn still does.
 func TestAskQuestionResults_SkipsFailedQuestions(t *testing.T) {
+	t.Parallel()
 	pending := []types.ChatToolCall{
 		mkToolCall("c0", "ask_question", `{}`),
 		mkToolCall("c1", "bash", `{"command":"ls"}`),
@@ -218,6 +222,7 @@ func TestAskQuestionResults_SkipsFailedQuestions(t *testing.T) {
 // With no question left there is nothing to ask, so the caller falls through to the next
 // LLM call instead of idling the task. A call with no result row is no question either.
 func TestAskQuestionResults_AllQuestionsFailed(t *testing.T) {
+	t.Parallel()
 	pending := []types.ChatToolCall{
 		mkToolCall("c0", "ask_question", `{"question":""}`),
 		mkToolCall("c1", "ask_question", `{"question":"never answered"}`),
@@ -232,6 +237,7 @@ func TestAskQuestionResults_AllQuestionsFailed(t *testing.T) {
 }
 
 func TestSplitNumberedAnswers(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		response string
 		n        int

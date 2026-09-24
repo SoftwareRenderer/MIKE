@@ -26,7 +26,7 @@ func TestWorktreeWatcherRetriesWhileInFlight(t *testing.T) {
 	runGit(t, repoDir, "init")
 	runGit(t, repoDir, "config", "user.email", "test@test.com")
 	runGit(t, repoDir, "config", "user.name", "Test")
-	writeFile(t, repoDir, "README.md", "# Test\n")
+	writeTestFile(t, repoDir, "README.md", "# Test\n")
 	runGit(t, repoDir, "add", "README.md")
 	runGit(t, repoDir, "commit", "-m", "Initial")
 
@@ -92,7 +92,7 @@ func TestWorktreeWatcherRetriesWhileInFlight(t *testing.T) {
 
 	// Trigger a filesystem change -> handleEvent arms the 1s throttle timer.
 	worktreePath := filepath.Join(worktreesDir, projID, taskID)
-	writeFile(t, worktreePath, "new.txt", "hello\n")
+	writeTestFile(t, worktreePath, "new.txt", "hello\n")
 
 	// Wait long enough for the 1s throttle to fire (while still in flight).
 	time.Sleep(1400 * time.Millisecond)

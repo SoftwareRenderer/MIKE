@@ -10,26 +10,10 @@ import (
 	"mike/backend/config"
 	"mike/backend/extensions"
 	"mike/backend/lsp"
-	"mike/backend/store"
-	"mike/backend/types"
-	"time"
 )
 
-// newLSPTestExecutor creates a TaskExecutor with no LSP manager for testing LSP tool error paths.
-func newLSPTestExecutor(t *testing.T, worktreePath string) *TaskExecutor {
-	t.Helper()
-	s := testStore(t)
-	appStreamMgr := newTestStreamMgr(t, s, nil)
-	// No LSPMgr: no LSP extension is installed.
-	return newTestExecutorWith(t, Deps{
-		Store:        s,
-		AppStreamMgr: appStreamMgr,
-		ConfigStore:  &config.ConfigStore{},
-	})
-}
-
-// newLSPTestExecutorWithMgr creates a TaskExecutor with an LSP manager and extensions.
-func newLSPTestExecutorWithMgr(t *testing.T, worktreePath string, exts ...*extensions.Extension) *TaskExecutor {
+// newToolTestExecutorWithMgr creates a TaskExecutor with an LSP manager and extensions.
+func newToolTestExecutorWithMgr(t *testing.T, worktreePath string, exts ...*extensions.Extension) *TaskExecutor {
 	t.Helper()
 	s := testStore(t)
 	es := extensions.NewExtensionStore(s, nil)
@@ -52,9 +36,10 @@ func newLSPTestExecutorWithMgr(t *testing.T, worktreePath string, exts ...*exten
 }
 
 func TestLSPTools_NoLSPManager(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	te := newLSPTestExecutor(t, dir)
-	task := makeTestTaskLSP(t, te.store, "proj-lsp-1", "task-lsp-1")
+	te := newToolTestExecutor(t, dir)
+	task := makeTestTask(t, te.store, "proj-lsp-1", "task-lsp-1")
 
 	for _, tc := range []struct {
 		name string
@@ -78,9 +63,10 @@ func TestLSPTools_NoLSPManager(t *testing.T) {
 }
 
 func TestLSPTools_MissingPath(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	te := newLSPTestExecutor(t, dir)
-	task := makeTestTaskLSP(t, te.store, "proj-lsp-2", "task-lsp-2")
+	te := newToolTestExecutor(t, dir)
+	task := makeTestTask(t, te.store, "proj-lsp-2", "task-lsp-2")
 
 	// lsp_references with no path
 	result, ok := te.executeTool(context.Background(), "lsp_references", map[string]any{
@@ -96,6 +82,7 @@ func TestLSPTools_MissingPath(t *testing.T) {
 }
 
 func TestLSPTools_ToolCallsDisabledForFile(t *testing.T) {
+	t.Parallel()
 	// Create Go extension with tool calls disabled
 	falseVal := false
 	goExt := &extensions.Extension{
@@ -120,8 +107,8 @@ func TestLSPTools_ToolCallsDisabledForFile(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	te := newLSPTestExecutorWithMgr(t, dir, goExt)
-	task := makeTestTaskLSP(t, te.store, "proj-lsp-3", "task-lsp-3")
+	te := newToolTestExecutorWithMgr(t, dir, goExt)
+	task := makeTestTask(t, te.store, "proj-lsp-3", "task-lsp-3")
 
 	// Create a Go file
 	goFile := filepath.Join(dir, "main.go")
@@ -145,6 +132,7 @@ func TestLSPTools_ToolCallsDisabledForFile(t *testing.T) {
 }
 
 func TestFormatLSPResponse_ErrorEnvelope(t *testing.T) {
+	t.Parallel()
 	resp := formatLSPResponse([]byte(`{"error":{"code":-32602,"message":"Invalid params"}}`), "textDocument/definition", "/tmp")
 	if resp != "LSP error -32602: Invalid params" {
 		t.Errorf("got %q", resp)
@@ -152,6 +140,7 @@ func TestFormatLSPResponse_ErrorEnvelope(t *testing.T) {
 }
 
 func TestFormatLSPResponse_EmptyResult(t *testing.T) {
+	t.Parallel()
 	resp := formatLSPResponse([]byte(`{"result":null}`), "textDocument/hover", "/tmp")
 	if resp != "(no result)" {
 		t.Errorf("got %q", resp)
@@ -159,6 +148,7 @@ func TestFormatLSPResponse_EmptyResult(t *testing.T) {
 }
 
 func TestFormatLSPResponse_References(t *testing.T) {
+	t.Parallel()
 	resp := formatLSPResponse([]byte(`{
 		"result": [
 			{"uri": "file:///tmp/proj/main.go", "range": {"start": {"line": 5, "character": 10}}},
@@ -172,6 +162,7 @@ func TestFormatLSPResponse_References(t *testing.T) {
 }
 
 func TestFormatLSPResponse_ReferencesEmpty(t *testing.T) {
+	t.Parallel()
 	resp := formatLSPResponse([]byte(`{"result":[]}`), "textDocument/references", "/tmp/proj")
 	if resp != "No references found" {
 		t.Errorf("got %q", resp)
@@ -179,6 +170,7 @@ func TestFormatLSPResponse_ReferencesEmpty(t *testing.T) {
 }
 
 func TestFormatLSPResponse_DefinitionSingle(t *testing.T) {
+	t.Parallel()
 	resp := formatLSPResponse([]byte(`{
 		"result": {
 			"uri": "file:///tmp/proj/pkg/utils.go",
@@ -192,6 +184,7 @@ func TestFormatLSPResponse_DefinitionSingle(t *testing.T) {
 }
 
 func TestFormatLSPResponse_Hover(t *testing.T) {
+	t.Parallel()
 	resp := formatLSPResponse([]byte(`{"result":{"contents":{"kind":"markdown","value":"func Foo() string\nReturns a foo."}}}`), "textDocument/hover", "/tmp/proj")
 
 	expected := "[markdown]\nfunc Foo() string\nReturns a foo."
@@ -201,6 +194,7 @@ func TestFormatLSPResponse_Hover(t *testing.T) {
 }
 
 func TestIsReadOnlyCall_LSPTools(t *testing.T) {
+	t.Parallel()
 	for _, toolName := range []string{"lsp_references", "lsp_definition", "lsp_hover"} {
 		if !isReadOnlyCall(toolName, `{"path":"main.go"}`) {
 			t.Errorf("isReadOnlyCall(%q) = false, want true", toolName)
@@ -208,31 +202,8 @@ func TestIsReadOnlyCall_LSPTools(t *testing.T) {
 	}
 }
 
-// makeTestTaskLSP creates a task for LSP tool tests.
-func makeTestTaskLSP(t *testing.T, s *store.Store, projectID, taskID string) *types.Task {
-	t.Helper()
-	createProject(t, s, projectID, projectID)
-	now := time.Now().UTC()
-	task := &types.Task{
-		ID:             taskID,
-		ProjectID:      projectID,
-		Title:          "Test Task",
-		Prompt:         "Test prompt",
-		Status:         types.StatusInProgress,
-		ExecutionState: types.ExecStateRunning,
-		LlamaServerURL: "http://test:8080",
-		ModelName:      "test-model",
-		OperatingMode:  "act",
-		CreatedAt:      now,
-		UpdatedAt:      now,
-	}
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	return task
-}
-
 func TestFindSymbolInText(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		content string
 		symbol  string
@@ -293,6 +264,7 @@ func TestFindSymbolInText(t *testing.T) {
 }
 
 func TestFindWordIndex(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		line string
 		word string

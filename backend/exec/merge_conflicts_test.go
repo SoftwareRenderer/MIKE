@@ -13,6 +13,7 @@ import (
 // TestIsMergeInProgress_ReturnsTrueWhenMergeHeadExists verifies that
 // isMergeInProgress returns true when .git/MERGE_HEAD is present.
 func TestIsMergeInProgress_ReturnsTrueWhenMergeHeadExists(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	runGit(t, tmpDir, "init")
 	runGit(t, tmpDir, "config", "user.email", "test@test.com")
@@ -49,6 +50,7 @@ func TestIsMergeInProgress_ReturnsTrueWhenMergeHeadExists(t *testing.T) {
 // TestIsMergeInProgress_ReturnsFalseWhenNoMerge verifies that
 // isMergeInProgress returns false when no merge is in progress.
 func TestIsMergeInProgress_ReturnsFalseWhenNoMerge(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	runGit(t, tmpDir, "init")
 	runGit(t, tmpDir, "config", "user.email", "test@test.com")
@@ -64,6 +66,7 @@ func TestIsMergeInProgress_ReturnsFalseWhenNoMerge(t *testing.T) {
 
 // TestGetConflictedFiles_DetectsUUConflicts verifies that standard UU (both modified) conflicts are detected.
 func TestGetConflictedFiles_DetectsUUConflicts(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	runGit(t, tmpDir, "init")
 	runGit(t, tmpDir, "config", "user.email", "test@test.com")
@@ -101,6 +104,7 @@ func TestGetConflictedFiles_DetectsUUConflicts(t *testing.T) {
 
 // TestGetConflictedFiles_DetectsMultipleConflicts verifies that multiple conflicted files are all detected.
 func TestGetConflictedFiles_DetectsMultipleConflicts(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	runGit(t, tmpDir, "init")
 	runGit(t, tmpDir, "config", "user.email", "test@test.com")
@@ -149,6 +153,7 @@ func TestGetConflictedFiles_DetectsMultipleConflicts(t *testing.T) {
 
 // TestGetConflictedFiles_ReturnsEmptyWhenNoConflicts verifies that no files are returned when there are no conflicts.
 func TestGetConflictedFiles_ReturnsEmptyWhenNoConflicts(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	runGit(t, tmpDir, "init")
 	runGit(t, tmpDir, "config", "user.email", "test@test.com")
@@ -166,6 +171,7 @@ func TestGetConflictedFiles_ReturnsEmptyWhenNoConflicts(t *testing.T) {
 // TestGetMergeStatusOutput_ReturnsDiagnostics verifies that the diagnostic
 // function returns meaningful output in various states.
 func TestGetMergeStatusOutput_ReturnsDiagnostics(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	runGit(t, tmpDir, "init")
 	runGit(t, tmpDir, "config", "user.email", "test@test.com")
@@ -192,6 +198,7 @@ func TestGetMergeStatusOutput_ReturnsDiagnostics(t *testing.T) {
 
 // TestGetMergeStatusOutput_NonGitDir verifies behavior in a non-git directory.
 func TestGetMergeStatusOutput_NonGitDir(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	output := getMergeStatusOutput(tmpDir)
 	if !strings.Contains(output, "git status failed") {
@@ -202,6 +209,7 @@ func TestGetMergeStatusOutput_NonGitDir(t *testing.T) {
 // TestMergeConflictFallback_ChainWithAutoResolve simulates the full fallback
 // chain: merge conflict where git auto-resolves (both deleted same file).
 func TestMergeConflictFallback_ChainWithAutoResolve(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	runGit(t, tmpDir, "init")
 	runGit(t, tmpDir, "config", "user.email", "test@test.com")
@@ -240,6 +248,7 @@ func TestMergeConflictFallback_ChainWithAutoResolve(t *testing.T) {
 // TestIsMergeInProgress_InWorktree verifies that isMergeInProgress works
 // correctly inside a git worktree (where .git is a file, not a directory).
 func TestIsMergeInProgress_InWorktree(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	mainRepo := filepath.Join(tmpDir, "main")
 	os.MkdirAll(mainRepo, 0o755)
@@ -285,6 +294,7 @@ func TestIsMergeInProgress_InWorktree(t *testing.T) {
 // TestMergeConflictFallback_NoMergeHead verifies that isMergeInProgress
 // returns false after merge --abort.
 func TestMergeConflictFallback_NoMergeHead(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	runGit(t, tmpDir, "init")
 	runGit(t, tmpDir, "config", "user.email", "test@test.com")
@@ -326,6 +336,7 @@ func TestMergeConflictFallback_NoMergeHead(t *testing.T) {
 // TestGetConflictedFiles_OptionsShapedAndQuotedNames checks that a conflicted file whose name git
 // would quote, or read as one of its own options, still comes back as a path and gets staged.
 func TestGetConflictedFiles_OptionsShapedAndQuotedNames(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	runGit(t, tmpDir, "init")
 	runGit(t, tmpDir, "config", "user.email", "test@test.com")

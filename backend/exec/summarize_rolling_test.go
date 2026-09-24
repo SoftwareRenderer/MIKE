@@ -256,6 +256,7 @@ func TestMaybeAutoSummarize_SecondPassFoldsSummaryPlusTail(t *testing.T) {
 // live context after a restart (see toAPIMessage), which is what the merge-conflict
 // instructions depend on.
 func TestFormatChatHistory_AdvisoryIsNotSummarized(t *testing.T) {
+	t.Parallel()
 	note := "LSP diagnostics for this turn's changes (1 file with findings):\n\n" +
 		"Fix issues in a.go:\n1. line 12, col 5 [compiler]: undefined: widget (error)"
 

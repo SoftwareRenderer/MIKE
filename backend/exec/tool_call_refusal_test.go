@@ -83,6 +83,7 @@ func toolCallRowWithResult(t *testing.T, msgs []types.TaskMessage) *types.TaskMe
 }
 
 func TestToolCallWithTruncatedArgumentsIsRefusedWithoutRunning(t *testing.T) {
+	t.Parallel()
 	const taskID = "refused-truncated-args"
 	worktreePath, msgs := runBashTurn(t, taskID, truncatedBashArgs())
 
@@ -120,6 +121,7 @@ func TestToolCallWithTruncatedArgumentsIsRefusedWithoutRunning(t *testing.T) {
 // TestToolCallWithIntactArgumentsRunsTheSameCommand: the refusal above is only meaningful if the same
 // command runs when its arguments survive.
 func TestToolCallWithIntactArgumentsRunsTheSameCommand(t *testing.T) {
+	t.Parallel()
 	const taskID = "ran-intact-args"
 	worktreePath, msgs := runBashTurn(t, taskID, `{"command": "touch marker.txt"}`)
 
@@ -133,6 +135,7 @@ func TestToolCallWithIntactArgumentsRunsTheSameCommand(t *testing.T) {
 }
 
 func TestUnparseableToolArgs_RefusesOnlyWhatCouldNotBeDecoded(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		rawArgs string
@@ -157,6 +160,7 @@ func TestUnparseableToolArgs_RefusesOnlyWhatCouldNotBeDecoded(t *testing.T) {
 // TestUnparseableToolArgs_QuotedArgumentsAreBounded: a call can be garbled for 24 KB, and its own text
 // must not cost the conversation that much on every later turn.
 func TestUnparseableToolArgs_QuotedArgumentsAreBounded(t *testing.T) {
+	t.Parallel()
 	raw := `{"command": "` + strings.Repeat("x", 24*1024)
 
 	got := unparseableToolArgs(raw, nil)
@@ -170,6 +174,7 @@ func TestUnparseableToolArgs_QuotedArgumentsAreBounded(t *testing.T) {
 }
 
 func TestBashToolWithoutCommandRunsNoShell(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 	dir := t.TempDir()
 

@@ -57,6 +57,7 @@ func registerStubAgent(t *testing.T) *stubAdapter {
 }
 
 func TestPrepareAgentProbesTheAdaptersOwnBinary(t *testing.T) {
+	t.Parallel()
 	registerStubAgent(t)
 	prober := &recordingProber{available: false}
 	te := newBareTestExecutor(t)
@@ -81,6 +82,7 @@ func TestPrepareAgentProbesTheAdaptersOwnBinary(t *testing.T) {
 // TestPrepareAgentRefusalNamesTheBinaryItMissed: naming the extension but not the binary leaves the
 // operator guessing what the container lacked.
 func TestPrepareAgentRefusalNamesTheBinaryItMissed(t *testing.T) {
+	t.Parallel()
 	registerStubAgent(t)
 	te := newBareTestExecutor(t)
 	te.agentBinaries = &recordingProber{available: false}
@@ -99,6 +101,7 @@ func TestPrepareAgentRefusalNamesTheBinaryItMissed(t *testing.T) {
 }
 
 func TestPrepareAgentWithBinaryPresentStartsNothingEarly(t *testing.T) {
+	t.Parallel()
 	adapter := registerStubAgent(t)
 	prober := &recordingProber{available: true}
 	te := newBareTestExecutor(t)
@@ -125,6 +128,7 @@ func TestPrepareAgentWithBinaryPresentStartsNothingEarly(t *testing.T) {
 // TestPrepareAgentHostModeAsksTheContainerNothing: the pre-flight is a container question, and an
 // unsandboxed project has no container to ask.
 func TestPrepareAgentHostModeAsksTheContainerNothing(t *testing.T) {
+	t.Parallel()
 	registerStubAgent(t)
 	prober := &recordingProber{available: false}
 	te := newBareTestExecutor(t)
@@ -145,6 +149,7 @@ func TestPrepareAgentHostModeAsksTheContainerNothing(t *testing.T) {
 // TestPrepareAgentWithoutContainerRefuses: a sandboxed task with no sandbox manager is an outage,
 // never a silent pass and never a nil dereference.
 func TestPrepareAgentWithoutContainerRefuses(t *testing.T) {
+	t.Parallel()
 	registerStubAgent(t)
 	te := newBareTestExecutor(t)
 
@@ -160,6 +165,7 @@ func TestPrepareAgentWithoutContainerRefuses(t *testing.T) {
 }
 
 func TestAgentStartErrorCode(t *testing.T) {
+	t.Parallel()
 	if got := agentStartErrorCode(errAgentBinaryNotAvailable); got != "agent_not_available" {
 		t.Errorf("agentStartErrorCode(missing binary) = %q, want agent_not_available", got)
 	}

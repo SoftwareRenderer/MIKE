@@ -217,6 +217,7 @@ func loaderDiagnostic(path string) LSPDiagnostic {
 // dependency problem the model has to be told about. Both arrive with source "go list", and
 // mistaking the second for the first is how a real broken import gets swallowed.
 func TestIsLoaderStateDiagnostic(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		diag LSPDiagnostic
@@ -262,6 +263,7 @@ func passExecutor(t *testing.T, s *store.Store, mgr lspManager) *TaskExecutor {
 // once per language, whatever number of files it reads. Attaching per file let each file's
 // Release be the last reference, so the next file cold-started a server that reported nothing.
 func TestCollectTurnDiagnostics_OneHandshakePerLanguage(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	setup := passSetup(t, s, "diag-proj", "diag-task")
 	// lspGoExtension leaves `language` out, which a manifest is allowed to do: the pass must
@@ -302,6 +304,7 @@ func TestCollectTurnDiagnostics_OneHandshakePerLanguage(t *testing.T) {
 // it will not report again and the pass must not wait for a notification that is not coming —
 // and with nothing new to say, the model must get nothing.
 func TestCollectTurnDiagnostics_UnchangedFilesProduceNoHint(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	setup := passSetup(t, s, "diag-proj", "diag-task")
 	registry := lspRegistryWith(t, lspGoExtension())
@@ -336,6 +339,7 @@ func TestCollectTurnDiagnostics_UnchangedFilesProduceNoHint(t *testing.T) {
 // TestCollectTurnDiagnostics_OneSessionPerLanguage: a turn that touched Go and TypeScript must
 // attach, handshake and release each server once.
 func TestCollectTurnDiagnostics_OneSessionPerLanguage(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	setup := passSetup(t, s, "diag-proj", "diag-task")
 	registry := lspRegistryWith(t, lspLanguageExtension("gopls", "go", "go"), lspLanguageExtension("typescript", "typescript", "ts"))
@@ -370,6 +374,7 @@ func TestCollectTurnDiagnostics_OneSessionPerLanguage(t *testing.T) {
 // TestCollectTurnDiagnostics_ReleasesEvenWhenNothingIsReported: every attached server gives
 // back its sandbox reference, or the extension sandbox never gets to stop.
 func TestCollectTurnDiagnostics_ReleasesEvenWhenNothingIsReported(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	setup := passSetup(t, s, "diag-proj", "diag-task")
 	registry := lspRegistryWith(t, lspGoExtension())
@@ -397,6 +402,7 @@ func TestCollectTurnDiagnostics_ReleasesEvenWhenNothingIsReported(t *testing.T) 
 // TestGroupByServerLanguage keeps the grouping honest: order preserved, one entry per
 // language, files no extension claims dropped rather than guessed at.
 func TestGroupByServerLanguage(t *testing.T) {
+	t.Parallel()
 	registry := lspRegistryWith(t, lspLanguageExtension("gopls", "go", "go"), lspLanguageExtension("typescript", "typescript", "ts"))
 
 	groups := groupByServerLanguage(registry, []string{"main.go", "app.ts", "util.ts", "pkg/a.go", "README.md"})
@@ -418,6 +424,7 @@ func TestGroupByServerLanguage(t *testing.T) {
 // unchanged file is the design; silence about a file the server was asked about means the
 // server is dead, and the turn loses its diagnostics with no other trace.
 func TestDiagnosticsPassReportWarning(t *testing.T) {
+	t.Parallel()
 	quiet := []struct {
 		name   string
 		report diagnosticsPassReport
@@ -450,6 +457,7 @@ func TestDiagnosticsPassReportWarning(t *testing.T) {
 // A server that answers the handshake and then nothing else: the pass must say so, per file,
 // rather than ending the turn as if the code were clean.
 func TestDiagnosticsPass_SilentServerIsReported(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	setup := passSetup(t, s, "diag-proj", "diag-task")
 	registry := lspRegistryWith(t, lspGoExtension())
@@ -480,6 +488,7 @@ func TestDiagnosticsPass_SilentServerIsReported(t *testing.T) {
 // Stopping the task is not a language server failure: the pass that ends because the user
 // stopped the task has to stay quiet.
 func TestDiagnosticsPass_StoppedTaskStaysQuiet(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	setup := passSetup(t, s, "diag-proj", "diag-task")
 	registry := lspRegistryWith(t, lspGoExtension())
@@ -508,6 +517,7 @@ func TestDiagnosticsPass_StoppedTaskStaysQuiet(t *testing.T) {
 // later. Taking the first frame told the model to "open a new workspace folder" and withheld
 // the syntax error it had just written — the reason this pass exists at all.
 func TestDiagnosticsPass_LoaderStateYieldsToTheSettledPublish(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	setup := passSetup(t, s, "diag-proj", "diag-task")
 	registry := lspRegistryWith(t, lspGoExtension())
@@ -539,6 +549,7 @@ func TestDiagnosticsPass_LoaderStateYieldsToTheSettledPublish(t *testing.T) {
 // is unknown, and unknown has to be reported as such — counting it clean is how a whole
 // workspace loses its diagnostics and looks healthy.
 func TestDiagnosticsPass_LoaderStateOnlyIsUnknownNotClean(t *testing.T) {
+	t.Parallel()
 	restore := lspLoaderSettleGrace
 	lspLoaderSettleGrace = 80 * time.Millisecond
 	defer func() { lspLoaderSettleGrace = restore }()
@@ -572,6 +583,7 @@ func TestDiagnosticsPass_LoaderStateOnlyIsUnknownNotClean(t *testing.T) {
 
 // Loader state travelling alongside a real finding must not smuggle itself into the advisory.
 func TestDiagnosticsPass_LoaderStateIsFilteredOutOfARealPublish(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	setup := passSetup(t, s, "diag-proj", "diag-task")
 	registry := lspRegistryWith(t, lspGoExtension())
@@ -602,6 +614,7 @@ func TestDiagnosticsPass_LoaderStateIsFilteredOutOfARealPublish(t *testing.T) {
 // handed back once. A second Release would take a reference that an editor reading the same
 // workspace still needs, and the third would be worse.
 func TestTurnLanguageServerReleasesExactlyOnce(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	registry := lspRegistryWith(t, lspGoExtension())
 	fake := newRecordingLSPManager(registry)

@@ -10,6 +10,7 @@ import (
 // The card has to tell a call the user stopped from one that failed, which is more than success
 // says, so the frame carries the distinction and always carries it.
 func TestBuildToolResultEvent_Interrupted(t *testing.T) {
+	t.Parallel()
 	interrupted := buildToolResultEvent("call_i", "bash", interruptedToolResult, false, true, 12,
 		map[string]any{"command": "sleep 120"},
 		`{"command":"sleep 120"}`,
@@ -32,6 +33,7 @@ func TestBuildToolResultEvent_Interrupted(t *testing.T) {
 }
 
 func TestBuildToolResultEvent_BashStreamed(t *testing.T) {
+	t.Parallel()
 	// Large bash output that will be truncated
 	largeOutput := strings.Repeat("line of output text\n", 20)
 	msgID := "test-msg-id-123"
@@ -84,6 +86,7 @@ func TestBuildToolResultEvent_BashStreamed(t *testing.T) {
 }
 
 func TestBuildToolResultEvent_BashNotStreamed(t *testing.T) {
+	t.Parallel()
 	// Large bash output but not streamed
 	largeOutput := strings.Repeat("line of output text\n", 20)
 	msgID := "test-msg-id-456"
@@ -114,6 +117,7 @@ func TestBuildToolResultEvent_BashNotStreamed(t *testing.T) {
 }
 
 func TestBuildToolResultEvent_BashShortOutput(t *testing.T) {
+	t.Parallel()
 	// Short bash output should not be truncated
 	shortOutput := "hello world\n"
 	msgID := "test-msg-short"
@@ -137,6 +141,7 @@ func TestBuildToolResultEvent_BashShortOutput(t *testing.T) {
 }
 
 func TestBuildToolResultEvent_ReadFileStreamed(t *testing.T) {
+	t.Parallel()
 	// Large read_file output that will be truncated
 	largeContent := strings.Repeat("const x = someValue;\n", 50)
 	msgID := "readfile-msg"
@@ -169,6 +174,7 @@ func TestBuildToolResultEvent_ReadFileStreamed(t *testing.T) {
 }
 
 func TestBuildToolResultEvent_ReadFileNotStreamed(t *testing.T) {
+	t.Parallel()
 	// Large read_file output, not streamed
 	largeContent := strings.Repeat("line of code\n", 20)
 	msgID := "readfile-not-streamed"
@@ -192,6 +198,7 @@ func TestBuildToolResultEvent_ReadFileNotStreamed(t *testing.T) {
 }
 
 func TestBuildToolResultEvent_ReadFileShort(t *testing.T) {
+	t.Parallel()
 	// Short read_file output should not be truncated
 	shortContent := "package main\n"
 	msgID := "read-short"
@@ -215,6 +222,7 @@ func TestBuildToolResultEvent_ReadFileShort(t *testing.T) {
 }
 
 func TestBuildToolResultEvent_WriteFile(t *testing.T) {
+	t.Parallel()
 	// write_file is NOT bash/read_file — should have full output, no truncation fields
 	output := "Wrote 12345 bytes to src/large-file.ts"
 	msgID := "writefile-msg"
@@ -241,6 +249,7 @@ func TestBuildToolResultEvent_WriteFile(t *testing.T) {
 }
 
 func TestBuildToolResultEvent_EditFile(t *testing.T) {
+	t.Parallel()
 	// edit_file is NOT bash/read_file — should have full output
 	output := "Edited 1 occurrences in src/file.ts"
 	msgID := "editfile-msg"
@@ -260,6 +269,7 @@ func TestBuildToolResultEvent_EditFile(t *testing.T) {
 }
 
 func TestBuildToolResultEvent_RequestReview(t *testing.T) {
+	t.Parallel()
 	// request_review — not bash/read_file
 	output := "Task complete"
 	msgID := "review-msg"
@@ -279,6 +289,7 @@ func TestBuildToolResultEvent_RequestReview(t *testing.T) {
 }
 
 func TestBuildToolResultEvent_AskQuestion(t *testing.T) {
+	t.Parallel()
 	// ask_question — not bash/read_file
 	output := "What framework should I use?"
 	msgID := "ask-msg"
@@ -298,6 +309,7 @@ func TestBuildToolResultEvent_AskQuestion(t *testing.T) {
 }
 
 func TestBuildToolResultEvent_UnknownTool(t *testing.T) {
+	t.Parallel()
 	// Unknown tool — not bash/read_file
 	output := "Unknown tool: mystery"
 	msgID := "unknown-msg"
@@ -320,6 +332,7 @@ func TestBuildToolResultEvent_UnknownTool(t *testing.T) {
 }
 
 func TestBuildToolResultEvent_BashWithArgs(t *testing.T) {
+	t.Parallel()
 	// Verify args and raw_args are preserved
 	largeOutput := strings.Repeat("output line\n", 15)
 	msgID := "args-msg"
@@ -343,6 +356,7 @@ func TestBuildToolResultEvent_BashWithArgs(t *testing.T) {
 }
 
 func TestBuildToolResultEvent_BashSingleLongLine(t *testing.T) {
+	t.Parallel()
 	// Single very long line (>1024 bytes) — tests rune-slicing path
 	toolID := "call_longline"
 	msgID := "longline-msg"
@@ -376,6 +390,7 @@ func TestBuildToolResultEvent_BashSingleLongLine(t *testing.T) {
 }
 
 func TestBuildToolResultEvent_BashEmptyOutput(t *testing.T) {
+	t.Parallel()
 	// Empty output — should not truncate
 	toolID := "call_empty"
 	msgID := "empty-msg"

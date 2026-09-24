@@ -18,6 +18,7 @@ import (
 // could reach the host shares the one guard and must answer the same way; the LSP tools carry the
 // same boundary and are pinned by TestLSPToolReadsThroughSandboxCallback below.
 func TestSandboxedTaskWithoutBridgeRefusesEveryHostTool(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		tool      string
@@ -70,7 +71,7 @@ func TestSandboxedTaskWithoutBridgeRefusesEveryHostTool(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			worktree := t.TempDir()
 			outside := t.TempDir()
-			te := newReadTestExecutor(t, worktree)
+			te := newToolTestExecutor(t, worktree)
 			task := makeTestTask(t, te.store, fmt.Sprintf("proj-hostguard-%d", i), fmt.Sprintf("task-hostguard-%d", i))
 
 			target := tc.target(worktree, outside)
@@ -98,8 +99,9 @@ func TestSandboxedTaskWithoutBridgeRefusesEveryHostTool(t *testing.T) {
 // A project with sandboxing disabled is the operator's choice of the host, so its reads and writes
 // are not jailed to the worktree.
 func TestUnsandboxedTaskReadsOutsideWorktree(t *testing.T) {
+	t.Parallel()
 	worktree := t.TempDir()
-	te := newReadTestExecutor(t, worktree)
+	te := newToolTestExecutor(t, worktree)
 	task := makeTestTask(t, te.store, "proj-hostguard-2", "task-hostguard-2")
 
 	outside := filepath.Join(t.TempDir(), "notes.txt")
@@ -144,6 +146,7 @@ func goplsExtension() *extensions.Extension {
 // The LSP tools read the file to find the symbol, so that read carries the same boundary as
 // read_file: a sandboxed task looks it up in the container, not at filepath.Join(worktree, "..").
 func TestLSPToolReadsThroughSandboxCallback(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	worktree := filepath.Join(root, "wt")
 	if err := os.MkdirAll(worktree, 0o755); err != nil {
@@ -153,8 +156,8 @@ func TestLSPToolReadsThroughSandboxCallback(t *testing.T) {
 	// the host, it gets past the not-found branch and this test cannot pass.
 	writeFile(t, filepath.Join(root, "outside.go"), "package other\n\nfunc hostSideSymbol() {}\n")
 
-	te := newLSPTestExecutorWithMgr(t, worktree, goplsExtension())
-	task := makeTestTaskLSP(t, te.store, "proj-lsp-guard", "task-lsp-guard")
+	te := newToolTestExecutorWithMgr(t, worktree, goplsExtension())
+	task := makeTestTask(t, te.store, "proj-lsp-guard", "task-lsp-guard")
 
 	var asked []string
 	state := &executionState{sandboxEnabled: true}
@@ -179,6 +182,7 @@ func TestLSPToolReadsThroughSandboxCallback(t *testing.T) {
 // A task with sandboxing disabled keeps the host read, so the position the tool asks about is the
 // one in the worktree copy.
 func TestLSPToolReadsWorktreeFileWhenUnsandboxed(t *testing.T) {
+	t.Parallel()
 	worktree := t.TempDir()
 	writeFile(t, filepath.Join(worktree, "main.go"), "package main\n\nfunc hostSymbol() {}\n")
 

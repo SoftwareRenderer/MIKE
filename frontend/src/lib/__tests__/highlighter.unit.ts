@@ -1,21 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { clearHighlightCache, highlightLinesAsync } from '$lib/highlighter';
-import { escapeHtml } from '$lib/utils/format';
 import { extensionManager } from '$lib/services/extension-manager.svelte';
 import type { Extension, SyntaxSpec } from '$lib/types';
-
-describe('escapeHtml', () => {
-    it('escapes every character that can break out of a text node or attribute', () => {
-        // Diff/highlight output is interpolated into HTML strings that also
-        // carry attributes, so quotes must be escaped too.
-        expect(escapeHtml(`<img src=x onerror="alert('1')"> & more`))
-            .toBe('&lt;img src=x onerror=&quot;alert(&#39;1&#39;)&quot;&gt; &amp; more');
-    });
-
-    it('does not double-escape ampersands it introduces', () => {
-        expect(escapeHtml(`&'"`)).toBe('&amp;&#39;&quot;');
-    });
-});
 
 /**
  * What a declared syntax profile paints in a diff. The editor and the diff read the same manifest, so

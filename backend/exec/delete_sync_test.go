@@ -12,6 +12,7 @@ import (
 // This is a regression test for: "When chat messages are deleted, why are they
 // still being sent to the LLM?"
 func TestDeletedMessagesNotSentToLLM(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	now := time.Now().UTC()
 
@@ -128,6 +129,7 @@ func TestDeletedMessagesNotSentToLLM(t *testing.T) {
 // TestDeletedMessagesWithRegenerate verifies that the regenerate path
 // (truncateForRegenerate) correctly handles deleted messages.
 func TestDeletedMessagesWithRegenerate(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	now := time.Now().UTC()
 
@@ -196,6 +198,7 @@ func TestDeletedMessagesWithRegenerate(t *testing.T) {
 // TestDeletedSingleMessageNotSentToLLM verifies that deleting a single message
 // (e.g., dismissing an error) is also synced.
 func TestDeletedSingleMessageNotSentToLLM(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	now := time.Now().UTC()
 

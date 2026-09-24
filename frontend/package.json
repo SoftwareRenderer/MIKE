@@ -16,6 +16,7 @@
     "check:sinks": "python3 html-sinks.py",
     "check:sinks-test": "python3 html-sinks_test.py",
     "test": "vitest run",
+    "test:related": "vitest related --run",
     "test:watch": "vitest"
   },
   "devDependencies": {

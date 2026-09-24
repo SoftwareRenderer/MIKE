@@ -102,6 +102,7 @@ func stopExecutorIfStarted(t *testing.T, te *TaskExecutor, taskID string) {
 // The agent asked something after the previous "Yes", so this "Yes" is a new answer:
 // it must be stored, move the task out of review and run it.
 func TestHandleSend_RepeatedAnswerAfterAgentReply_IsDelivered(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID, threadID := "dup-answer-task", "dup-answer-thread"
 	seedReviewTask(t, te, projectID, taskID, threadID,
@@ -128,6 +129,7 @@ func TestHandleSend_RepeatedAnswerAfterAgentReply_IsDelivered(t *testing.T) {
 // The same words again after an ask_question turn (assistant row + its tool_call row):
 // still a new answer.
 func TestHandleSend_ReplyAfterAskQuestionToolCall_IsDelivered(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID, threadID := "dup-ask-task", "dup-ask-thread"
 	seedReviewTask(t, te, projectID, taskID, threadID,
@@ -149,6 +151,7 @@ func TestHandleSend_ReplyAfterAskQuestionToolCall_IsDelivered(t *testing.T) {
 // The case the dedup exists for: the identical message is still the last row. Nothing new
 // is stored, no executor starts, and the task stays in review.
 func TestHandleSend_DoubleSubmit_IsDeduped_AndLeavesReview(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID, threadID := "dup-submit-task", "dup-submit-thread"
 	seedReviewTask(t, te, projectID, taskID, threadID,
@@ -177,6 +180,7 @@ func TestHandleSend_DoubleSubmit_IsDeduped_AndLeavesReview(t *testing.T) {
 
 // A genuinely new message still stores, flips review -> in_progress and starts.
 func TestHandleSend_NewMessage_StillStartsExecutor(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID, threadID := "new-msg-task", "new-msg-thread"
 	seedReviewTask(t, te, projectID, taskID, threadID,
@@ -218,6 +222,7 @@ func waitForExecutor(t *testing.T, te *TaskExecutor, taskID string, want bool) {
 // what "New Thread" does: the fork writes the edited question into the new thread, then the send runs it.
 // It must start, and must not store the same question a second time.
 func TestHandleSend_RegenerateOfLastUserMessage_RunsItWithoutInserting(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID, threadID := "regen-task", "regen-thread"
 	seedReviewTask(t, te, projectID, taskID, threadID,

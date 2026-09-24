@@ -2,7 +2,6 @@ package server
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"os/exec"
 	"strings"
 	"testing"
@@ -28,14 +27,6 @@ func createTestProjectWithPath(t *testing.T, s *Server) (string, string) {
 	return result["id"].(string), dir
 }
 
-func authenticatedRequest(t *testing.T, s *Server, req *http.Request) *httptest.ResponseRecorder {
-	t.Helper()
-	rr := httptest.NewRecorder()
-	handler := s.CORSMiddleware(s.SessionMiddleware(s.CSRFMiddleware(CompressMiddleware(s.mux))))
-	handler.ServeHTTP(rr, req)
-	return rr
-}
-
 func TestGitLog(t *testing.T) {
 	s := testServer(t)
 	projID, dir := createTestProjectWithPath(t, s)
@@ -46,7 +37,7 @@ func TestGitLog(t *testing.T) {
 	cookie, csrfToken := loginTestCSRF(t, s)
 	req := testRequest("GET", "/api/projects/"+projID+"/git/log?full=1", nil)
 	withAuthCSRF(req, cookie, csrfToken)
-	rr := authenticatedRequest(t, s, req)
+	rr := testResponse(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -116,7 +107,7 @@ func TestGitLogFullWithBranch(t *testing.T) {
 	cookie, csrfToken := loginTestCSRF(t, s)
 	req := testRequest("GET", "/api/projects/"+projID+"/git/log?full=1&branch=feature", nil)
 	withAuthCSRF(req, cookie, csrfToken)
-	rr := authenticatedRequest(t, s, req)
+	rr := testResponse(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -145,7 +136,7 @@ func TestGitLogNotFound(t *testing.T) {
 
 	req := testRequest("GET", "/api/projects/nonexistent/git/log?full=1", nil)
 	withAuthCSRF(req, cookie, csrfToken)
-	rr := authenticatedRequest(t, s, req)
+	rr := testResponse(t, s, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -162,7 +153,7 @@ func TestGitCheckout(t *testing.T) {
 		"branch": "master",
 	})
 	withAuthCSRF(req, cookie, csrfToken)
-	rr := authenticatedRequest(t, s, req)
+	rr := testResponse(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -187,7 +178,7 @@ func TestGitLogFullDecodesParents(t *testing.T) {
 	cookie, csrfToken := loginTestCSRF(t, s)
 	req := testRequest("GET", "/api/projects/"+projID+"/git/log?full=1", nil)
 	withAuthCSRF(req, cookie, csrfToken)
-	rr := authenticatedRequest(t, s, req)
+	rr := testResponse(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -238,7 +229,7 @@ func TestGitLogFullBranchesAndOrigin(t *testing.T) {
 	cookie, csrfToken := loginTestCSRF(t, s)
 	req := testRequest("GET", "/api/projects/"+projID+"/git/log?full=1", nil)
 	withAuthCSRF(req, cookie, csrfToken)
-	rr := authenticatedRequest(t, s, req)
+	rr := testResponse(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}

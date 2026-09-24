@@ -17,8 +17,8 @@ func TestShouldSkipFsEvent(t *testing.T) {
 	runGit(t, repo, "config", "user.email", "test@test.com")
 	runGit(t, repo, "config", "user.name", "Test")
 
-	writeFile(t, repo, ".gitignore", "*.log\nnode_modules/\n")
-	writeFile(t, repo, "README.md", "# readme\n")
+	writeTestFile(t, repo, ".gitignore", "*.log\nnode_modules/\n")
+	writeTestFile(t, repo, "README.md", "# readme\n")
 	runGit(t, repo, "add", ".gitignore", "README.md")
 	runGit(t, repo, "commit", "-m", "init")
 

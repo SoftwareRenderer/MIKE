@@ -130,7 +130,7 @@ func TestFSMkdirNoProject(t *testing.T) {
 
 	req := testRequest(http.MethodPost, "/api/fs/mkdir", map[string]string{"path": target})
 	withAuthCSRF(req, cookie, csrfToken)
-	rr := authenticatedRequest(t, s, req)
+	rr := testResponse(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}

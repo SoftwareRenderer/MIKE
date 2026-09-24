@@ -92,6 +92,7 @@ func definitionNames(defs []types.ChatTool) map[string]bool {
 
 // A search tool that worked only in act mode would disappear as soon as a task switched to plan.
 func TestContributedToolOfferedInEveryMode(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutorWith(t, Deps{ExtensionTools: toolRegistryWith(t, searchToolExtension("https://searx.example"))})
 
 	for _, mode := range []types.OperatingMode{types.ModeAct, types.ModePlan, types.ModeExplore} {
@@ -125,6 +126,7 @@ func TestContributedToolOfferedInEveryMode(t *testing.T) {
 
 // With no registry, or one that offers nothing, the tools offered are exactly the core set.
 func TestNoContributedToolsWithoutAnExtension(t *testing.T) {
+	t.Parallel()
 	core := definitionNames(newBareTestExecutor(t).toolDefinitionsFor(&types.Task{ID: "t"}))
 	if core["web_search"] {
 		t.Error("a bare executor offered a contributed tool")
@@ -143,6 +145,7 @@ func TestNoContributedToolsWithoutAnExtension(t *testing.T) {
 
 // TestContributedToolDisplayName: the card label comes from the manifest, and a core tool keeps its own.
 func TestContributedToolDisplayName(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutorWith(t, Deps{ExtensionTools: toolRegistryWith(t, searchToolExtension("https://searx.example"))})
 	if got := te.toolDisplayName("web_search"); got != "Search" {
 		t.Errorf("display name = %q, want the manifest's Search", got)

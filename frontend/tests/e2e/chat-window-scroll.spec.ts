@@ -40,7 +40,7 @@ function viewportAnchor(page: any): Promise<{ id: string; top: number } | null> 
   return page.evaluate(() => {
     const list = document.querySelector('.chat-messages') as HTMLElement;
     const top = list.getBoundingClientRect().top;
-    for (const node of Array.from(list.querySelectorAll<HTMLElement>('[data-entry-id]'))) {
+    for (const node of Array.from(list.querySelectorAll<HTMLElement>('.chat-entry[data-entry-id]'))) {
       const box = node.getBoundingClientRect();
       if (box.bottom > top) return { id: node.dataset.entryId as string, top: box.top - top };
     }
@@ -52,15 +52,17 @@ function viewportAnchor(page: any): Promise<{ id: string; top: number } | null> 
 function entryTop(page: any, id: string): Promise<number | null> {
   return page.evaluate((entryId) => {
     const list = document.querySelector('.chat-messages') as HTMLElement;
-    const node = list.querySelector<HTMLElement>(`[data-entry-id="${entryId}"]`);
+    const node = list.querySelector<HTMLElement>(`.chat-entry[data-entry-id="${entryId}"]`);
     return node ? node.getBoundingClientRect().top - list.getBoundingClientRect().top : null;
   }, id);
 }
 
 /** The ids rendered, oldest first — a repeat is one row held by two pages. */
 function renderedIds(page: any): Promise<string[]> {
+  // `.chat-entry` is the row; a user row nests a `.sticky-user-message` carrying the SAME
+  // data-entry-id, which is the pinned label, not a second copy of the row.
   return page.evaluate(() =>
-    Array.from(document.querySelectorAll<HTMLElement>('.chat-messages [data-entry-id]')).map(n => n.dataset.entryId as string));
+    Array.from(document.querySelectorAll<HTMLElement>('.chat-messages .chat-entry[data-entry-id]')).map(n => n.dataset.entryId as string));
 }
 
 /**

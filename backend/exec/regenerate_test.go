@@ -7,6 +7,7 @@ import (
 )
 
 func TestTruncateForRegenerate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    []types.ChatMessage
@@ -75,6 +76,7 @@ func TestTruncateForRegenerate(t *testing.T) {
 // identical text with a different image, a different part count, or a plain message next to
 // a ContentParts message are different user turns and must survive.
 func TestRemoveDuplicateUserMessage(t *testing.T) {
+	t.Parallel()
 	img := &types.ImageSource{Type: "base64", MediaType: "image/png", Data: "abc123"}
 	parts := func(text string, withImage bool) []types.ContentPart {
 		p := []types.ContentPart{{Type: "text", Text: text}}
@@ -177,6 +179,7 @@ func TestRemoveDuplicateUserMessage(t *testing.T) {
 // TestRegenerateFullFlow verifies that truncateForRegenerate + append
 // produces the correct context (no duplicate user messages).
 func TestRegenerateFullFlow(t *testing.T) {
+	t.Parallel()
 	// Simulate the hot path: lc.messages has the full conversation,
 	// a regenerate user message arrives, we truncate then append.
 	lcMessages := []types.ChatMessage{

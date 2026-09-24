@@ -25,6 +25,11 @@ import (
 
 // chdirRepoRoot makes prompts/summarize.tmpl and prompts/base.tmpl resolvable from
 // the CWD, mirroring how the running server resolves them.
+//
+// This is the rule for every prompt test in the package — here, chdirToRepoRoot, setupAutoAnswerTasks
+// and startTextStopRun: the calling test must not call t.Parallel(). The CWD is process-wide and
+// template resolution reads it on every render (prompts.resolvePromptDir), so another test's restore
+// moves it mid-turn and the failure reads "open prompts/summarize.tmpl: no such file or directory".
 func chdirRepoRoot(t *testing.T) {
 	t.Helper()
 	_, thisFile, _, _ := runtime.Caller(0)

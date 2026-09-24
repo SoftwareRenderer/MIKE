@@ -41,6 +41,7 @@ func repeatPhrase(d *phraseDetector, phrase string) bool {
 }
 
 func TestPhraseDetector_NoRepetition(t *testing.T) {
+	t.Parallel()
 	d := newPhraseDetector()
 
 	// Feed unique sentences
@@ -51,6 +52,7 @@ func TestPhraseDetector_NoRepetition(t *testing.T) {
 }
 
 func TestPhraseDetector_ExactRepetition(t *testing.T) {
+	t.Parallel()
 	d := newPhraseDetector()
 
 	if !repeatPhrase(d, testPhrase) {
@@ -59,6 +61,7 @@ func TestPhraseDetector_ExactRepetition(t *testing.T) {
 }
 
 func TestPhraseDetector_CaseInsensitive(t *testing.T) {
+	t.Parallel()
 	d := newPhraseDetector()
 
 	if !repeatPhrase(d, testPhrase) {
@@ -67,6 +70,7 @@ func TestPhraseDetector_CaseInsensitive(t *testing.T) {
 }
 
 func TestPhraseDetector_ShortPhraseIgnored(t *testing.T) {
+	t.Parallel()
 	d := newPhraseDetector()
 
 	// Short phrase (< 8 words) should be ignored
@@ -78,6 +82,7 @@ func TestPhraseDetector_ShortPhraseIgnored(t *testing.T) {
 }
 
 func TestPhraseDetector_WhitespaceNormalization(t *testing.T) {
+	t.Parallel()
 	d := newPhraseDetector()
 
 	if !repeatPhrase(d, testPhrase) {
@@ -86,6 +91,7 @@ func TestPhraseDetector_WhitespaceNormalization(t *testing.T) {
 }
 
 func TestPhraseDetector_FiresOnce(t *testing.T) {
+	t.Parallel()
 	d := newPhraseDetector()
 
 	repeatPhrase(d, testPhrase) // fires
@@ -96,6 +102,7 @@ func TestPhraseDetector_FiresOnce(t *testing.T) {
 }
 
 func TestPhraseDetector_Reset(t *testing.T) {
+	t.Parallel()
 	d := newPhraseDetector()
 
 	repeatPhrase(d, testPhrase) // fires
@@ -112,6 +119,7 @@ func TestPhraseDetector_Reset(t *testing.T) {
 }
 
 func TestPhraseDetector_MultipleSentencesInOneChunk(t *testing.T) {
+	t.Parallel()
 	d := newPhraseDetector()
 
 	// Feed the phrase multiple times in one chunk to reach threshold
@@ -122,6 +130,7 @@ func TestPhraseDetector_MultipleSentencesInOneChunk(t *testing.T) {
 }
 
 func TestPhraseDetector_NewlineBoundary(t *testing.T) {
+	t.Parallel()
 	d := newPhraseDetector()
 
 	if !repeatPhrase(d, testPhrase+"\n") {
@@ -130,6 +139,7 @@ func TestPhraseDetector_NewlineBoundary(t *testing.T) {
 }
 
 func TestPhraseDetector_DoubleNewlineBoundary(t *testing.T) {
+	t.Parallel()
 	d := newPhraseDetector()
 
 	if !repeatPhrase(d, testPhrase+"\n\n") {
@@ -138,6 +148,7 @@ func TestPhraseDetector_DoubleNewlineBoundary(t *testing.T) {
 }
 
 func TestPhraseDetector_CodeBlockNotTriggered(t *testing.T) {
+	t.Parallel()
 	d := newPhraseDetector()
 
 	// Code-like content without sentence boundaries
@@ -149,6 +160,7 @@ func TestPhraseDetector_CodeBlockNotTriggered(t *testing.T) {
 }
 
 func TestPhraseDetector_ExclamationBoundary(t *testing.T) {
+	t.Parallel()
 	d := newPhraseDetector()
 
 	if !repeatPhrase(d, "Wow this is really amazing and incredible stuff!") {
@@ -157,6 +169,7 @@ func TestPhraseDetector_ExclamationBoundary(t *testing.T) {
 }
 
 func TestPhraseDetector_QuestionBoundary(t *testing.T) {
+	t.Parallel()
 	d := newPhraseDetector()
 
 	if !repeatPhrase(d, "What do you think about this approach and implementation?") {
@@ -165,6 +178,7 @@ func TestPhraseDetector_QuestionBoundary(t *testing.T) {
 }
 
 func TestPhraseDetector_IncompleteSentenceAccumulates(t *testing.T) {
+	t.Parallel()
 	d := newPhraseDetector()
 
 	// Feed partial sentence, then complete it, then repeat enough times
@@ -188,6 +202,7 @@ func makeToolCall(name, argsJSON string) types.ChatToolCall {
 }
 
 func TestLoopDetector_ToolLoop(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 
 	// First read of file
@@ -208,6 +223,7 @@ func TestLoopDetector_ToolLoop(t *testing.T) {
 // --- Rolling Window Tests ---
 
 func TestLoopDetector_LoopStreakIncrementsOnConsecutiveLoops(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 
 	// Simulate handleLoopDetected: increments loopStreak, reset preserves it
@@ -230,6 +246,7 @@ func TestLoopDetector_LoopStreakIncrementsOnConsecutiveLoops(t *testing.T) {
 }
 
 func TestLoopDetector_ValidTurnResetsLoopStreak(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 
 	// Simulate 2 consecutive loop hints
@@ -249,6 +266,7 @@ func TestLoopDetector_ValidTurnResetsLoopStreak(t *testing.T) {
 }
 
 func TestLoopDetector_LoopStreakResetsOnValidTurn(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 
 	// Simulate loop streak
@@ -283,6 +301,7 @@ func TestLoopDetector_LoopStreakResetsOnValidTurn(t *testing.T) {
 }
 
 func TestLoopDetector_ResetClearsLoopStreak(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 
 	// Manually set loopStreak
@@ -296,6 +315,7 @@ func TestLoopDetector_ResetClearsLoopStreak(t *testing.T) {
 }
 
 func TestLoopDetector_LoopStreakWindowTextOnly(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 
 	// Simulate 2 consecutive loop hints
@@ -322,6 +342,7 @@ func TestLoopDetector_LoopStreakWindowTextOnly(t *testing.T) {
 }
 
 func TestHandleLoopDetected_IncrementsAndPreservesLoopStreak(t *testing.T) {
+	t.Parallel()
 	e := newTestExecutor(t)
 	now := time.Now().UTC()
 
@@ -367,6 +388,7 @@ func TestHandleLoopDetected_IncrementsAndPreservesLoopStreak(t *testing.T) {
 }
 
 func TestHandleLoopDetected_IdeationModeSuppressesHints(t *testing.T) {
+	t.Parallel()
 	e := newTestExecutor(t)
 	now := time.Now().UTC()
 
@@ -414,6 +436,7 @@ func TestHandleLoopDetected_IdeationModeSuppressesHints(t *testing.T) {
 // TestHandleLoopDetected_HintBroadcastCarriesMessageID verifies the hint
 // broadcast carries the persisted message ID (frontend dedupes on history reload).
 func TestHandleLoopDetected_HintBroadcastCarriesMessageID(t *testing.T) {
+	t.Parallel()
 	e := newTestExecutor(t)
 	now := time.Now().UTC()
 
@@ -603,6 +626,7 @@ func findTaskStreamEvent(frames []taskStreamFrame, event string) (taskStreamFram
 }
 
 func TestSendRetryHint_SystemRole(t *testing.T) {
+	t.Parallel()
 	e := newTestExecutor(t)
 	now := time.Now().UTC()
 
@@ -657,6 +681,7 @@ func TestSendRetryHint_SystemRole(t *testing.T) {
 }
 
 func TestLoopDetector_ToolLoopReturnsRepeatedArgs(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 
 	// First read
@@ -677,6 +702,7 @@ func TestLoopDetector_ToolLoopReturnsRepeatedArgs(t *testing.T) {
 }
 
 func TestLoopDetector_ToolLoopMultiCall(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 
 	// First turn: read_file then request_review (state-changing clears tracker)
@@ -703,6 +729,7 @@ func TestLoopDetector_ToolLoopMultiCall(t *testing.T) {
 }
 
 func TestLoopDetector_ToolLoopDifferentTargets(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 
 	args1 := map[string]string{"path": "src/main.go"}
@@ -722,6 +749,7 @@ func TestLoopDetector_ToolLoopDifferentTargets(t *testing.T) {
 }
 
 func TestLoopDetector_TextLoop(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 
 	// Statements (no question mark) trigger LoopStatement
@@ -737,6 +765,7 @@ func TestLoopDetector_TextLoop(t *testing.T) {
 }
 
 func TestLoopDetector_StatementOnlyWhenLLMDone(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 
 	// Text-only response with finish_reason="stop" (LLM chose to end) -> LoopStatement
@@ -764,6 +793,7 @@ func TestLoopDetector_StatementOnlyWhenLLMDone(t *testing.T) {
 }
 
 func TestLoopDetector_QuestionDoesNotTriggerStatement(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 
 	// Text whose final paragraph asks a question should NOT trigger LoopStatement
@@ -785,6 +815,7 @@ func TestLoopDetector_QuestionDoesNotTriggerStatement(t *testing.T) {
 }
 
 func TestLoopDetector_QuestionInEarlierParagraphStillStatement(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 	d.loopStreak = 2
 
@@ -808,6 +839,7 @@ func TestLoopDetector_QuestionInEarlierParagraphStillStatement(t *testing.T) {
 }
 
 func TestLoopDetector_NonASCIIQuestionMarkDoesNotTriggerStatement(t *testing.T) {
+	t.Parallel()
 	asks := []string{
 		"Should I merge this now\uff1f", // fullwidth
 		"Should I merge this now\u061f", // Arabic
@@ -824,6 +856,7 @@ func TestLoopDetector_NonASCIIQuestionMarkDoesNotTriggerStatement(t *testing.T) 
 // finish_reason is examined before the paragraph: a response that did not end by choice is
 // not penalised however it ends.
 func TestLoopDetector_MultiParagraphNotPenalisedWhenNotDone(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 	for _, reason := range []string{"tool_calls", "length", ""} {
 		if loopType, _ := d.recordTurn(nil, "Analyzing the module.\n\nNext I'll rewrite it.", reason); loopType != LoopNone {
@@ -833,6 +866,7 @@ func TestLoopDetector_MultiParagraphNotPenalisedWhenNotDone(t *testing.T) {
 }
 
 func TestLoopDetector_PhraseLoopViaStreaming(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 
 	// Simulate streaming chunks — repeat the same phrase.
@@ -854,6 +888,7 @@ func TestLoopDetector_PhraseLoopViaStreaming(t *testing.T) {
 }
 
 func TestLoopDetector_ResetClearsPhraseFlag(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 
 	chunk := "Let me think about this problem carefully and analyze the full requirements. "
@@ -868,6 +903,7 @@ func TestLoopDetector_ResetClearsPhraseFlag(t *testing.T) {
 }
 
 func TestLoopDetector_ToolCallResetsPhraseTracker(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 
 	// Feed phrase multiple times (not quite enough to fire)
@@ -889,6 +925,7 @@ func TestLoopDetector_ToolCallResetsPhraseTracker(t *testing.T) {
 }
 
 func TestLoopDetector_RemoveHints(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 
 	// Build a conversation with hints injected at indices 2 and 4
@@ -931,6 +968,7 @@ func TestLoopDetector_RemoveHints(t *testing.T) {
 }
 
 func TestLoopDetector_RemoveHints_Noop(t *testing.T) {
+	t.Parallel()
 	d := newLoopDetector()
 	messages := []types.ChatMessage{
 		{Role: "user", Content: "Hello"},
@@ -949,6 +987,7 @@ func TestLoopDetector_RemoveHints_Noop(t *testing.T) {
 // LoopNone must produce nothing at all, and the rest must not come back empty — an empty
 // hint means the loop is detected but the model is never told.
 func TestBuildHint(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		kind      LoopType
@@ -1016,6 +1055,7 @@ func TestBuildHint(t *testing.T) {
 // trailing punctuation must drop without eating the word it follows — or "hello world!!!"
 // stops matching "hello world".
 func TestNormalizePhrase(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   string
@@ -1042,6 +1082,7 @@ func TestNormalizePhrase(t *testing.T) {
 // the point of the table: splitSentences walks bytes, so a boundary scan that lands
 // mid-rune silently corrupts the text it is supposed to be only cutting.
 func TestSplitSentences(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   string
@@ -1106,6 +1147,7 @@ func TestSplitSentences(t *testing.T) {
 }
 
 func TestIsReadOnlyCommand(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		cmd  string
 		want bool
@@ -1133,6 +1175,7 @@ func TestIsReadOnlyCommand(t *testing.T) {
 // --- ExtractLastTurns Tests ---
 
 func TestExtractLastTurns_Empty(t *testing.T) {
+	t.Parallel()
 	result := ExtractLastTurns(nil, 3)
 	if len(result) != 0 {
 		t.Errorf("expected 0 messages, got %d", len(result))
@@ -1140,6 +1183,7 @@ func TestExtractLastTurns_Empty(t *testing.T) {
 }
 
 func TestExtractLastTurns_SystemOnly(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "You are a helpful assistant"},
 	}
@@ -1150,6 +1194,7 @@ func TestExtractLastTurns_SystemOnly(t *testing.T) {
 }
 
 func TestExtractLastTurns_SingleTurn(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "Hello"},
@@ -1165,6 +1210,7 @@ func TestExtractLastTurns_SingleTurn(t *testing.T) {
 }
 
 func TestExtractLastTurns_ThreeTurns(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "Turn 1 user"},
@@ -1185,6 +1231,7 @@ func TestExtractLastTurns_ThreeTurns(t *testing.T) {
 }
 
 func TestExtractLastTurns_MoreThanThreeTurns(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "Turn 1"},
@@ -1212,6 +1259,7 @@ func TestExtractLastTurns_MoreThanThreeTurns(t *testing.T) {
 }
 
 func TestExtractLastTurns_WithToolCalls(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "Read a file"},
@@ -1232,6 +1280,7 @@ func TestExtractLastTurns_WithToolCalls(t *testing.T) {
 }
 
 func TestExtractLastTurns_IncompleteTurn(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "Turn 1"},
@@ -1248,6 +1297,7 @@ func TestExtractLastTurns_IncompleteTurn(t *testing.T) {
 // --- FormatConversationTurns Tests ---
 
 func TestFormatConversationTurns_Basic(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "user", Content: "Hello"},
 		{Role: "assistant", Content: "Hi there"},
@@ -1259,6 +1309,7 @@ func TestFormatConversationTurns_Basic(t *testing.T) {
 }
 
 func TestFormatConversationTurns_WithToolResult(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
 			Name      string `json:"name"`
@@ -1283,6 +1334,7 @@ func TestFormatConversationTurns_WithToolResult(t *testing.T) {
 }
 
 func TestFormatConversationTurns_ToolResultSkipped(t *testing.T) {
+	t.Parallel()
 	// Standalone tool messages (without preceding assistant with matching ToolCalls)
 	// are skipped — they're already incorporated into the assistant line.
 	longContent := strings.Repeat("x", 600)
@@ -1297,6 +1349,7 @@ func TestFormatConversationTurns_ToolResultSkipped(t *testing.T) {
 }
 
 func TestFormatConversationTurns_TrimsTrailingNewlines(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "user", Content: "Fix the bug\n\n"},
 		{Role: "assistant", Content: "Let me check\n\n\n", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
@@ -1324,6 +1377,7 @@ func TestFormatConversationTurns_TrimsTrailingNewlines(t *testing.T) {
 // ones: two words, four words, an empty string and the dash-adjacent forms must all read as
 // prose, or a model's sentence starts being parsed as a task reference.
 func TestIsTaskID(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		id   string
 		want bool
@@ -1358,6 +1412,7 @@ func TestIsTaskID(t *testing.T) {
 // TestFormatToolAction covers the one-line label the commit-message generator sees instead
 // of a tool call's full arguments.
 func TestFormatToolAction(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		tool string
 		args string
@@ -1384,6 +1439,7 @@ func TestFormatToolAction(t *testing.T) {
 // FAILURE leaks (create_task/edit_task quote the error, other tools only say it failed).
 // The pending row matters too — a call with no recorded result must not claim success.
 func TestFormatToolResult(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		tool    string
@@ -1453,6 +1509,7 @@ func TestFormatToolResult(t *testing.T) {
 // --- FormatConversationTurns with create_task ---
 
 func TestFormatConversationTurns_CreateTask_Success(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
 			Name      string `json:"name"`
@@ -1471,6 +1528,7 @@ func TestFormatConversationTurns_CreateTask_Success(t *testing.T) {
 }
 
 func TestFormatConversationTurns_CreateTask_Failure(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
 			Name      string `json:"name"`
@@ -1485,6 +1543,7 @@ func TestFormatConversationTurns_CreateTask_Failure(t *testing.T) {
 }
 
 func TestFormatConversationTurns_EditTask_Success(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
 			Name      string `json:"name"`
@@ -1499,6 +1558,7 @@ func TestFormatConversationTurns_EditTask_Success(t *testing.T) {
 }
 
 func TestFormatConversationTurns_EditTask_Failure(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
 			Name      string `json:"name"`
@@ -1518,6 +1578,7 @@ func TestFormatConversationTurns_EditTask_Failure(t *testing.T) {
 // --- formatChatHistory with create_task ---
 
 func TestFormatChatHistory_CreateTask_Success(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "Create a new task"},
@@ -1541,6 +1602,7 @@ func TestFormatChatHistory_CreateTask_Success(t *testing.T) {
 }
 
 func TestFormatChatHistory_CreateTask_Failure(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "Create a task"},
@@ -1560,6 +1622,7 @@ func TestFormatChatHistory_CreateTask_Failure(t *testing.T) {
 }
 
 func TestFormatChatHistory_EditTask_Success(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "Edit a task"},
@@ -1579,6 +1642,7 @@ func TestFormatChatHistory_EditTask_Success(t *testing.T) {
 }
 
 func TestFormatChatHistory_EditTask_Failure(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "Edit a task"},
@@ -1601,6 +1665,7 @@ func TestFormatChatHistory_EditTask_Failure(t *testing.T) {
 }
 
 func TestBuildCommitConversation_MergesToolCallsIntoAssistant(t *testing.T) {
+	t.Parallel()
 	taskMsgs := []types.TaskMessage{
 		{Role: "user", Content: "Fix the bug"},
 		{Role: "assistant", Content: "Let me check the file"},
@@ -1640,6 +1705,7 @@ func TestBuildCommitConversation_MergesToolCallsIntoAssistant(t *testing.T) {
 }
 
 func TestBuildCommitConversation_OrphanToolRowsIgnored(t *testing.T) {
+	t.Parallel()
 	// A tool_call row with no assistant row to own it belongs to nothing. The utility
 	// conversation is built by the same groupTaskMessages the LLM context uses, so the row
 	// contributes neither a call nor a result here either — an orphan result with no call is
@@ -1657,6 +1723,7 @@ func TestBuildCommitConversation_OrphanToolRowsIgnored(t *testing.T) {
 }
 
 func TestBuildCommitConversation_AdvisoryRowKeepsToolRows(t *testing.T) {
+	t.Parallel()
 	// The same regression the LLM rebuild was fixed for, on the utility entry point: a note
 	// written between an assistant row and its tool_call rows must not cost the commit
 	// message that turn's calls and results.
@@ -1692,6 +1759,7 @@ func TestBuildCommitConversation_AdvisoryRowKeepsToolRows(t *testing.T) {
 }
 
 func TestFormatConversationTurns_FullPipeline(t *testing.T) {
+	t.Parallel()
 	// Test the full pipeline: DB messages -> BuildConversationFromTaskMessages -> ExtractLastTurns -> FormatConversationTurns
 	taskMsgs := []types.TaskMessage{
 		{Role: "user", Content: "Fix the login bug"},
@@ -1727,6 +1795,7 @@ func TestFormatConversationTurns_FullPipeline(t *testing.T) {
 // --- UTF-8 Tests (regression for CPU spike bug) ---
 
 func TestPhraseDetector_UTF8Streaming(t *testing.T) {
+	t.Parallel()
 	// Simulate streaming chunks containing multi-byte UTF-8 characters.
 	// This is the exact scenario that caused the CPU spike:
 	// small chunks with UTF-8 chars that get split across calls.
@@ -1760,6 +1829,7 @@ func TestPhraseDetector_UTF8Streaming(t *testing.T) {
 }
 
 func TestPhraseDetector_PendingBufferBound(t *testing.T) {
+	t.Parallel()
 	// Feed a very long text without sentence boundaries.
 	// The pending buffer should be bounded to maxPendingSize.
 	d := newPhraseDetector()
@@ -1778,6 +1848,7 @@ func TestPhraseDetector_PendingBufferBound(t *testing.T) {
 }
 
 func TestPhraseDetector_UTF8NoBufferBloat(t *testing.T) {
+	t.Parallel()
 	// Regression test: ensure UTF-8 text doesn't cause exponential pending growth.
 	// Before the fix, multi-byte chars were split into bytes, re-encoded as longer
 	// sequences, and the pending buffer grew exponentially with each call.
@@ -1802,6 +1873,7 @@ func TestPhraseDetector_UTF8NoBufferBloat(t *testing.T) {
 // --- StopProjectTasks Tests ---
 
 func TestStopProjectTasks(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	now := time.Now().UTC()
 
@@ -1869,6 +1941,7 @@ func TestStopProjectTasks(t *testing.T) {
 }
 
 func TestStopProjectTasks_NoRunningTasks(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	now := time.Now().UTC()
 	proj := &types.Project{ID: "proj-empty", Name: "Empty Project", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
@@ -1885,6 +1958,7 @@ func TestStopProjectTasks_NoRunningTasks(t *testing.T) {
 }
 
 func TestStopProjectTasks_DoesNotAffectNonRunningTasks(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	now := time.Now().UTC()
 	proj := &types.Project{ID: "proj-mixed", Name: "Mixed Project", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
@@ -1964,6 +2038,7 @@ func createTaskInProject(t *testing.T, s *store.Store, projectID, taskID string)
 // --- Reasoning Effort Tests ---
 
 func TestModelConfig_SetAndGet(t *testing.T) {
+	t.Parallel()
 	mc := &modelConfig{
 		serverURL: "http://old-server/v1",
 		modelName: "old-model",
@@ -1991,6 +2066,7 @@ func TestModelConfig_SetAndGet(t *testing.T) {
 }
 
 func TestModelConfig_ConcurrentAccess(t *testing.T) {
+	t.Parallel()
 	mc := &modelConfig{
 		serverURL: "http://initial/v1",
 		modelName: "initial-model",
@@ -2025,6 +2101,7 @@ func TestModelConfig_ConcurrentAccess(t *testing.T) {
 // --- Unstage New Binary Files Tests ---
 
 func TestIsImageFile(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		path string
 		want bool
@@ -2064,6 +2141,7 @@ func TestIsImageFile(t *testing.T) {
 // --- Helper Function Tests ---
 
 func TestUserMessageToChatMessage_PlainText(t *testing.T) {
+	t.Parallel()
 	um := stream.UserMessage{Content: "hello world"}
 	msg := userMessageToChatMessage(um)
 
@@ -2079,6 +2157,7 @@ func TestUserMessageToChatMessage_PlainText(t *testing.T) {
 }
 
 func TestUserMessageToChatMessage_WithAttachments(t *testing.T) {
+	t.Parallel()
 	atts, _ := json.Marshal([]struct {
 		MimeType string `json:"mimeType"`
 		Data     string `json:"data"`
@@ -2106,6 +2185,7 @@ func TestUserMessageToChatMessage_WithAttachments(t *testing.T) {
 }
 
 func TestUserMessageToChatMessage_StripsDataPrefix(t *testing.T) {
+	t.Parallel()
 	atts, _ := json.Marshal([]struct {
 		MimeType string `json:"mimeType"`
 		Data     string `json:"data"`
@@ -2124,6 +2204,7 @@ func TestUserMessageToChatMessage_StripsDataPrefix(t *testing.T) {
 }
 
 func TestUserMessageToChatMessage_DefaultMimeType(t *testing.T) {
+	t.Parallel()
 	atts, _ := json.Marshal([]struct {
 		MimeType string `json:"mimeType"`
 		Data     string `json:"data"`
@@ -2139,6 +2220,7 @@ func TestUserMessageToChatMessage_DefaultMimeType(t *testing.T) {
 }
 
 func TestUserMessageToChatMessage_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	um := stream.UserMessage{Content: "test", Attachments: "not-json"}
 	msg := userMessageToChatMessage(um)
 
@@ -2155,6 +2237,7 @@ func TestUserMessageToChatMessage_InvalidJSON(t *testing.T) {
 // matter: only the summarization role counts (an assistant message is not a summary), and
 // the LAST one wins — resuming from a stale summary would re-summarize from the wrong point.
 func TestExtractPrevSummary(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		messages []types.ChatMessage
@@ -2208,6 +2291,7 @@ func TestExtractPrevSummary(t *testing.T) {
 // --- buildLLMContext Tests ---
 
 func TestBuildLLMContext_NoSummary(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "hello"},
@@ -2226,6 +2310,7 @@ func TestBuildLLMContext_NoSummary(t *testing.T) {
 }
 
 func TestBuildLLMContext_WithSummary(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "old message 1"},
@@ -2263,6 +2348,7 @@ func TestBuildLLMContext_WithSummary(t *testing.T) {
 }
 
 func TestBuildLLMContext_DropsPreSummaryMessages(t *testing.T) {
+	t.Parallel()
 	// Pre-summary messages are dropped (their content is in the system prompt summary).
 	var messages []types.ChatMessage
 	messages = append(messages, types.ChatMessage{Role: "system", Content: "system prompt"})
@@ -2304,6 +2390,7 @@ func TestBuildLLMContext_DropsPreSummaryMessages(t *testing.T) {
 }
 
 func TestBuildLLMContext_MultipleSummaries(t *testing.T) {
+	t.Parallel()
 	// With re-summarization, only messages after the LAST summary are kept.
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
@@ -2336,6 +2423,7 @@ func TestBuildLLMContext_MultipleSummaries(t *testing.T) {
 }
 
 func TestBuildLLMContext_WithToolCalls(t *testing.T) {
+	t.Parallel()
 	assistantWithTool := types.ChatMessage{
 		Role:    "assistant",
 		Content: "ok",
@@ -2372,6 +2460,7 @@ func TestBuildLLMContext_WithToolCalls(t *testing.T) {
 // --- buildLLMContext request_review filter Tests ---
 
 func TestBuildLLMContext_FiltersTaskComplete(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "fix the bug"},
@@ -2417,6 +2506,7 @@ func TestBuildLLMContext_FiltersTaskComplete(t *testing.T) {
 }
 
 func TestBuildLLMContext_FiltersTaskCompleteWithToolResult(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "fix the bug"},
@@ -2442,6 +2532,7 @@ func TestBuildLLMContext_FiltersTaskCompleteWithToolResult(t *testing.T) {
 }
 
 func TestBuildLLMContext_KeepsOtherToolCalls(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "do stuff"},
@@ -2466,6 +2557,7 @@ func TestBuildLLMContext_KeepsOtherToolCalls(t *testing.T) {
 }
 
 func TestBuildLLMContext_FiltersOnlyTaskCompleteToolCall(t *testing.T) {
+	t.Parallel()
 	// Assistant message with mixed tool calls: bash + request_review
 	// The entire assistant message should be filtered since it contains request_review
 	messages := []types.ChatMessage{
@@ -2516,6 +2608,7 @@ func TestBuildLLMContext_FiltersOnlyTaskCompleteToolCall(t *testing.T) {
 // or threshold must never fire OR silently disable itself — an out-of-range threshold falls
 // back to the 90% default rather than being trusted.
 func TestShouldSummarize(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		tokens    int
@@ -2546,6 +2639,7 @@ func TestShouldSummarize(t *testing.T) {
 }
 
 func TestContextTokensUsed_RealUsagePreferred(t *testing.T) {
+	t.Parallel()
 	lc := &loopContext{
 		usage: &types.ChatUsage{PromptTokens: 8000, CompletionTokens: 2000},
 	}
@@ -2555,6 +2649,7 @@ func TestContextTokensUsed_RealUsagePreferred(t *testing.T) {
 }
 
 func TestContextTokensUsed_HeuristicFallback(t *testing.T) {
+	t.Parallel()
 	// No real usage available -> falls back to heuristic estimate of messages.
 	lc := &loopContext{
 		messages: []types.ChatMessage{
@@ -2756,6 +2851,7 @@ func TestMaybeAutoSummarize_InjectProceedWhenFeedingBack(t *testing.T) {
 }
 
 func TestMaybeAutoSummarize_NoTriggerBelowThreshold(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	te.gate = NewConcurrencyGate()
 	s := te.store
@@ -2809,6 +2905,7 @@ func TestMaybeAutoSummarize_NoTriggerBelowThreshold(t *testing.T) {
 // --- Reasoning-Only Loop Detection Tests ---
 
 func TestLoopDetector_ReasoningOnlyIncrementsHintCount(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	now := time.Now().UTC()
 
@@ -2863,6 +2960,7 @@ func TestLoopDetector_ReasoningOnlyIncrementsHintCount(t *testing.T) {
 // TestLoopDetector_ResetClearsStreak verifies that detector.reset() clears loopStreak,
 // which is the mechanism used when a user action (e.g., message delete) changes context.
 func TestLoopDetector_ResetClearsStreak(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	now := time.Now().UTC()
 
@@ -2913,6 +3011,7 @@ func TestLoopDetector_ResetClearsStreak(t *testing.T) {
 // TestNotifyContextChanged_SendsToChannel verifies that NotifyContextChanged
 // sends a UserMessage with ContextChanged=true to the executor channel.
 func TestNotifyContextChanged_SendsToChannel(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 
 	// Simulate an execution state with a userMsgChan
@@ -2949,69 +3048,24 @@ func TestNotifyContextChanged_SendsToChannel(t *testing.T) {
 // TestNotifyContextChanged_NoOpWhenNoTask verifies that NotifyContextChanged
 // is a no-op when no executor is running for the task.
 func TestNotifyContextChanged_NoOpWhenNoTask(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 
 	// Should not panic when no task is running
 	te.NotifyContextChanged("nonexistent-task")
-}
 
-// --- raw_args Delta Tests ---
-
-// computeToolCallData builds the data map for a tool_call WS event,
-// mirroring the logic in loop.go.
-// Returns the data map with either raw_args (full) or raw_args_delta (incremental).
-func computeToolCallData(args string, prevLen int, isNew bool) map[string]any {
-	data := map[string]any{
-		"tool_id": "call_test", "tool_name": "bash", "tool_display_name": "Run Command",
-		"args": nil, "path": "", "sandbox": false,
-	}
-	if isNew {
-		data["raw_args"] = args
-	} else {
-		data["raw_args_delta"] = args[prevLen:]
-	}
-	return data
-}
-
-func TestRawArgsDelta_NewToolCall(t *testing.T) {
-	// New tool call: sends full raw_args
-	args := `{"command":"ls -la"}`
-	data := computeToolCallData(args, 0, true)
-
-	if _, ok := data["raw_args"]; !ok {
-		t.Fatal("new tool call should have raw_args field")
-	}
-	if data["raw_args"] != args {
-		t.Errorf("expected raw_args=%q, got %q", args, data["raw_args"])
-	}
-	if _, ok := data["raw_args_delta"]; ok {
-		t.Error("new tool call should NOT have raw_args_delta field")
-	}
-}
-
-func TestRawArgsDelta_Update(t *testing.T) {
-	// Update: sends only the delta (new characters)
-	fullArgs := `{"command":"ls -la /home/user/projects"}`
-	prevArgs := `{"command":"ls -la"}`
-	prevLen := len(prevArgs)
-
-	data := computeToolCallData(fullArgs, prevLen, false)
-
-	if _, ok := data["raw_args"]; ok {
-		t.Error("update should NOT have raw_args field")
-	}
-	if _, ok := data["raw_args_delta"]; !ok {
-		t.Fatal("update should have raw_args_delta field")
-	}
-	expectedDelta := fullArgs[prevLen:] // " /home/user/projects"}
-	if data["raw_args_delta"] != expectedDelta {
-		t.Errorf("expected raw_args_delta=%q, got %q", expectedDelta, data["raw_args_delta"])
+	te.taskMu.Lock()
+	_, exists := te.tasks["nonexistent-task"]
+	te.taskMu.Unlock()
+	if exists {
+		t.Error("a notification for an unstarted task created execution state for it")
 	}
 }
 
 // --- streamFlusher Tests ---
 
 func TestStreamFlusher_TokenBatching(t *testing.T) {
+	t.Parallel()
 	var events []types.StreamEvent
 	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
 		events = append(events, e)
@@ -3042,6 +3096,7 @@ func TestStreamFlusher_TokenBatching(t *testing.T) {
 }
 
 func TestStreamFlusher_ReasoningBatching(t *testing.T) {
+	t.Parallel()
 	var events []types.StreamEvent
 	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
 		events = append(events, e)
@@ -3065,6 +3120,7 @@ func TestStreamFlusher_ReasoningBatching(t *testing.T) {
 }
 
 func TestStreamFlusher_ToolCallBatching(t *testing.T) {
+	t.Parallel()
 	var events []types.StreamEvent
 	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
 		events = append(events, e)
@@ -3094,6 +3150,7 @@ func TestStreamFlusher_ToolCallBatching(t *testing.T) {
 }
 
 func TestStreamFlusher_ToolCallUpdateDelta(t *testing.T) {
+	t.Parallel()
 	var events []types.StreamEvent
 	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
 		events = append(events, e)
@@ -3116,7 +3173,45 @@ func TestStreamFlusher_ToolCallUpdateDelta(t *testing.T) {
 	}
 }
 
+// TestStreamFlusher_ToolCallDeltaBoundsFallBackToFullArgs covers the third branch of the flush:
+// delta bounds that would slice out of range. The client gets the whole argument string rather than
+// the turn dying on a slice panic.
+func TestStreamFlusher_ToolCallDeltaBoundsFallBackToFullArgs(t *testing.T) {
+	t.Parallel()
+	const args = `{"command":"ls"}`
+	cases := []struct {
+		name           string
+		argLen, prevLn int
+	}{
+		{"start past current", 14, 20},
+		{"current past the recorded args", 99, 5},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var events []types.StreamEvent
+			flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
+				events = append(events, e)
+			}, newLoopDetector())
+
+			flusher.appendToolCall(fmt.Sprintf("call_bounds_%d", i), "bash", "Run Command", "", args, tc.argLen, tc.prevLn, false)
+			flusher.flush()
+
+			if len(events) != 1 {
+				t.Fatalf("expected 1 event, got %d", len(events))
+			}
+			data := events[0].Data.(map[string]any)
+			if data["raw_args"] != args {
+				t.Errorf("raw_args = %v, want the whole %q", data["raw_args"], args)
+			}
+			if _, ok := data["raw_args_delta"]; ok {
+				t.Errorf("raw_args_delta = %v, want no delta when the bounds are unusable", data["raw_args_delta"])
+			}
+		})
+	}
+}
+
 func TestStreamFlusher_MixedEvents(t *testing.T) {
+	t.Parallel()
 	var events []types.StreamEvent
 	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
 		events = append(events, e)
@@ -3143,6 +3238,7 @@ func TestStreamFlusher_MixedEvents(t *testing.T) {
 }
 
 func TestStreamFlusher_Reset(t *testing.T) {
+	t.Parallel()
 	var events []types.StreamEvent
 	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
 		events = append(events, e)
@@ -3163,6 +3259,7 @@ func TestStreamFlusher_Reset(t *testing.T) {
 }
 
 func TestStreamFlusher_MultipleToolCalls(t *testing.T) {
+	t.Parallel()
 	var events []types.StreamEvent
 	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
 		events = append(events, e)
@@ -3189,6 +3286,7 @@ func TestStreamFlusher_MultipleToolCalls(t *testing.T) {
 }
 
 func TestStreamFlusher_SecondFlush(t *testing.T) {
+	t.Parallel()
 	var events []types.StreamEvent
 	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
 		events = append(events, e)
@@ -3216,6 +3314,7 @@ func TestStreamFlusher_SecondFlush(t *testing.T) {
 // --- Reasoning Content Tests ---
 
 func TestBuildMessagesFromDB_KeepsReasoningSeparate(t *testing.T) {
+	t.Parallel()
 	// Simulate DB messages with reasoning content
 	taskMsgs := []types.TaskMessage{
 		{Role: "user", Content: "Build a feature"},
@@ -3261,6 +3360,7 @@ func TestBuildMessagesFromDB_KeepsReasoningSeparate(t *testing.T) {
 }
 
 func TestBuildMessagesFromDB_ExcludesLoopHints(t *testing.T) {
+	t.Parallel()
 	taskMsgs := []types.TaskMessage{
 		{Role: "user", Content: "Build a feature"},
 		{Role: "user", Content: "You repeated yourself in your last response.", IsLoopHint: true},
@@ -3283,6 +3383,7 @@ func TestBuildMessagesFromDB_ExcludesLoopHints(t *testing.T) {
 }
 
 func TestBuildMessagesFromDB_ToolCallWithReasoning(t *testing.T) {
+	t.Parallel()
 	taskMsgs := []types.TaskMessage{
 		{Role: "user", Content: "Read a file"},
 		{Role: "assistant", Content: "I'll read it", ReasoningContent: "Need to check the file first"},
@@ -3327,6 +3428,7 @@ func TestBuildMessagesFromDB_ToolCallWithReasoning(t *testing.T) {
 }
 
 func TestBuildMessagesFromDB_ReasoningOnlyWithToolCalls(t *testing.T) {
+	t.Parallel()
 	// Bug: assistant with only reasoning (no text content) + tool calls was
 	// invisible in chat history because ToolCalls were not merged from DB.
 	taskMsgs := []types.TaskMessage{
@@ -3372,6 +3474,7 @@ func TestBuildMessagesFromDB_ReasoningOnlyWithToolCalls(t *testing.T) {
 }
 
 func TestFormatChatHistory_ReasoningOnlyWithToolCalls(t *testing.T) {
+	t.Parallel()
 	// Verify that reasoning-only assistant messages with tool calls appear
 	// in chat history as "I used the X tool to..." lines.
 	messages := []types.ChatMessage{
@@ -3404,6 +3507,7 @@ func TestFormatChatHistory_ReasoningOnlyWithToolCalls(t *testing.T) {
 // --- removeDuplicateUserMessage Tests ---
 
 func TestBuildContextReplay_Empty(t *testing.T) {
+	t.Parallel()
 	result := buildContextReplay(nil)
 	if !strings.Contains(result, "<conversation_history>") {
 		t.Error("expected conversation_history tags")
@@ -3414,6 +3518,7 @@ func TestBuildContextReplay_Empty(t *testing.T) {
 }
 
 func TestBuildContextReplay_UserAndAssistant(t *testing.T) {
+	t.Parallel()
 	msgs := []types.TaskMessage{
 		{Role: "user", Content: "Build a todo app"},
 		{Role: "assistant", Content: "Sure, let me create the files."},
@@ -3432,6 +3537,7 @@ func TestBuildContextReplay_UserAndAssistant(t *testing.T) {
 }
 
 func TestBuildContextReplay_WithReasoning(t *testing.T) {
+	t.Parallel()
 	msgs := []types.TaskMessage{
 		{Role: "assistant", ReasoningContent: "Let me think about this...", Content: "Here's the answer."},
 	}
@@ -3445,6 +3551,7 @@ func TestBuildContextReplay_WithReasoning(t *testing.T) {
 }
 
 func TestBuildContextReplay_WithToolCalls(t *testing.T) {
+	t.Parallel()
 	toolCalls := `[{"id":"call_1","name":"write_file","display_name":"Write File","args":{"path":"test.js","content":"hello"}}]`
 	toolResult := `[{"id":"call_1","output":"File written","success":true}]`
 	msgs := []types.TaskMessage{
@@ -3466,6 +3573,7 @@ func TestBuildContextReplay_WithToolCalls(t *testing.T) {
 }
 
 func TestBuildContextReplay_WithSummarization(t *testing.T) {
+	t.Parallel()
 	msgs := []types.TaskMessage{
 		{Role: "user", Content: "First message"},
 		{Role: "summarization", Content: "Summary of earlier conversation"},
@@ -3491,6 +3599,7 @@ func assertBackoffWithin(t *testing.T, name string, got, min, max time.Duration)
 }
 
 func TestBackoffFor_RateLimitedWithRetryAfter(t *testing.T) {
+	t.Parallel()
 	// Retry-After is honored: delay + 1s + 250-500ms jitter, on every attempt.
 	err := &llama.LlamaError{StatusCode: 429, RetryAfter: 20 * time.Second}
 	min := 20*time.Second + time.Second + 250*time.Millisecond
@@ -3501,6 +3610,7 @@ func TestBackoffFor_RateLimitedWithRetryAfter(t *testing.T) {
 }
 
 func TestBackoffFor_RateLimitedRetryAfterUncapped(t *testing.T) {
+	t.Parallel()
 	// A huge Retry-After is honored uncapped: 10h + 1s + 250-500ms jitter.
 	err := &llama.LlamaError{StatusCode: 429, RetryAfter: 10 * time.Hour}
 	min := 10*time.Hour + time.Second + 250*time.Millisecond
@@ -3509,6 +3619,7 @@ func TestBackoffFor_RateLimitedRetryAfterUncapped(t *testing.T) {
 }
 
 func TestBackoffFor_RateLimitedExponential(t *testing.T) {
+	t.Parallel()
 	// No Retry-After -> exponential 2s, 4s, 8s.
 	err := &llama.LlamaError{StatusCode: 429}
 	wants := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
@@ -3520,6 +3631,7 @@ func TestBackoffFor_RateLimitedExponential(t *testing.T) {
 }
 
 func TestBackoffFor_GenericExponential(t *testing.T) {
+	t.Parallel()
 	// Non-rate-limit errors use the same exponential 2s, 4s, 8s schedule.
 	err := errors.New("connection reset")
 	wants := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
@@ -3531,6 +3643,7 @@ func TestBackoffFor_GenericExponential(t *testing.T) {
 }
 
 func TestBackoffFor_GenericLlamaErrorNotRateLimited(t *testing.T) {
+	t.Parallel()
 	// A LlamaError with a non-429 code uses the exponential schedule (Retry-After ignored).
 	err := &llama.LlamaError{StatusCode: 500, RetryAfter: 30 * time.Second}
 	if got := backoffFor(0, err); got != 2*time.Second {

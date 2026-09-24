@@ -41,6 +41,7 @@ func diagTestSetup(t *testing.T, s *store.Store, projectID, taskID string) *task
 }
 
 func TestFlushAdvisories_PersistsAdvisoryRoleAndKeepsOrder(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	te := newTestExecutorWith(t, Deps{Store: s})
 	setup := diagTestSetup(t, s, "adv-proj", "adv-task")
@@ -117,6 +118,7 @@ func TestFlushAdvisories_PersistsAdvisoryRoleAndKeepsOrder(t *testing.T) {
 }
 
 func TestFlushAdvisories_EmptyAndBlank(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	te := newTestExecutorWith(t, Deps{Store: s})
 	setup := diagTestSetup(t, s, "adv-proj2", "adv-task2")
@@ -187,6 +189,7 @@ func TestPrepareMergeConflictTurn_DeliversBeforeTheNextCall(t *testing.T) {
 }
 
 func TestComposeDiagnosticsAdvisory_SilentWhenNothingSurvives(t *testing.T) {
+	t.Parallel()
 	// The whole point of suppressing: no findings left means no note at all, not
 	// "Fix issues in …" with nothing under it.
 	if _, ok := composeDiagnosticsAdvisory(0, nil); ok {
@@ -236,6 +239,7 @@ func lspRegistryWith(t *testing.T, exts ...*extensions.Extension) *lsp.Extension
 }
 
 func TestFilterDiagnosticFiles(t *testing.T) {
+	t.Parallel()
 	registry := lspRegistryWith(t, lspGoExtension())
 
 	got := filterDiagnosticFiles(registry, "proj", []string{
@@ -261,6 +265,7 @@ func TestFilterDiagnosticFiles(t *testing.T) {
 }
 
 func TestTurnDiagnosticFiles_AskGitWhatTheShellChanged(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	es := extensions.NewExtensionStore(te.store, nil)
 	if err := es.InitSchema(); err != nil {
@@ -327,6 +332,7 @@ func TestTurnDiagnosticFiles_AskGitWhatTheShellChanged(t *testing.T) {
 }
 
 func TestFilterDiagnosticFiles_OnlyOptedInExtensions(t *testing.T) {
+	t.Parallel()
 	off := lspLanguageExtension("pyright", "python", "py")
 	falseVal := false
 	off.Manifest.Capabilities.LSP.ChatDiagnosticsEnabled = &falseVal
@@ -342,6 +348,7 @@ func TestFilterDiagnosticFiles_OnlyOptedInExtensions(t *testing.T) {
 }
 
 func TestCollectTurnDiagnostics_QueuesOneAdvisoryAndSuppressesRepeats(t *testing.T) {
+	t.Parallel()
 	// Without a reachable language server the pass has nothing to say; assert the shape of
 	// the decision instead of the round trip: compose + suppress.
 	lc := &loopContext{}
@@ -374,6 +381,7 @@ func TestCollectTurnDiagnostics_QueuesOneAdvisoryAndSuppressesRepeats(t *testing
 }
 
 func TestAdvisoriesWrittenAfterToolRowsSurviveTheRebuild(t *testing.T) {
+	t.Parallel()
 	// The regression this change rests on: a note written from inside tool execution landed
 	// between the turn's tool_call rows. The turn boundary is now the only writer, so the
 	// rows a turn produces read tool_call*, advisory — and the rebuild stays complete.
@@ -485,6 +493,7 @@ func installTSLSPExtension(t *testing.T, s *store.Store) *lsp.ExtensionRegistry 
 // TestCollectTurnDiagnostics_BoundedAndCancellable: the pass runs on the executor
 // goroutine, so it must bound the context it hands down and end when the task stops.
 func TestCollectTurnDiagnostics_BoundedAndCancellable(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	reg := installTSLSPExtension(t, s)
 

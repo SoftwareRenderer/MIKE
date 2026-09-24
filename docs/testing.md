@@ -358,6 +358,29 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
   Neither is on the load list — 10 rounds of the first and 8 of the second, run while a five-package `-race`
   sweep already loaded the machine, came back green.
 
+- **Tests inside a Go package run concurrently now.** `backend/exec` calls `t.Parallel()` in 664 of its
+  top-level tests and the package went 130 s → 43 s; it is `make test-go`'s critical path, so the suite went
+  131 s → 43 s. Serially, 13 tests each paid the 3 s `executorExitGrace` and three more waited out a real
+  provider-silence ceiling.
+- **The tests left serial are the ones touching a process global.** `t.Setenv` refuses to run in a parallel
+  test, which is why `bash_stream_test.go` is one file. The other global is the CWD: template resolution reads
+  it on every render (`prompts.resolvePromptDir`). So the 23 exec tests that chdir to the repo root cannot
+  overlap — a concurrent restore moves the CWD mid-turn, and the failure reads
+  "open prompts/summarize.tmpl: no such file or directory". The rule sits at `chdirRepoRoot`.
+- **`-parallel 4` in `test-go` is capacity, not a claim about the suite**, and its value is measured: see the
+  `backend/stream` entry under *Tests that fail only under load*.
+
+### Running less than the gate
+
+- `make test-diff` runs the Go packages holding a changed `.go` file — staged, unstaged or untracked — and
+  leaves `go test`'s result cache **on**, which is the saving. It builds `GO_SCOPE` first: it runs no
+  dependent of a changed package, so a signature change is caught by that build and not by a test. The list
+  is `scripts/touched-packages.sh`.
+- `npm run test:related -- <changed files>` runs the vitest files that import them. Measured on two library
+  files: 329 tests in 8 s, against 3227 in 36 s for the suite.
+- `npx playwright test --last-failed` re-runs the previous run's failures, `--only-changed` the files git
+  says moved. Neither is a gate: `make check` and a full e2e run stay the claims.
+
 ### Memory in a test
 
 A test that needs a container to hold memory builds its allocation with one command substitution
@@ -425,3 +448,10 @@ suites, with that error in the log, is a reading about the machine.
   context-less local git call survives that cancel. Unestablished: which call, and why the rate moves with a
   test file that does not run. A red naming one of these while other packages run concurrently is a reading
   about the machine — re-run the package alone before believing it, and the single test if that passes.
+- **`backend/stream`'s `TestAConnectionThatMissedFramesIsEndedSoTheClientResyncs`** waits up to 10 s for the
+  writer goroutine to end a connection with a hole in it, and fails with "still streaming a gap" when the
+  bound passes. It went red in 2 of 2 `make check` runs and 1 of 4 full-scope `go test -parallel 8` runs, and
+  in 0 of 3 at `-parallel 4` — which is why `test-go` runs 4. Alone it is green 5 of 5, three of those under a
+  12-way spinner load, so raw CPU load is not the trigger and the other packages are. No exec test file
+  reaches `backend/stream`'s binary, so the reading is one goroutine starved rather than a shared fixture;
+  *mechanism not established*.

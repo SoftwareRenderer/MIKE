@@ -55,6 +55,7 @@ func summarizeRebuild(msgs []types.ChatMessage) (roles []string, toolCallIDs, to
 // row's look-ahead, so the second call and BOTH results vanished from the rebuilt
 // conversation (and the assistant was rebuilt claiming it had only called A).
 func TestBuildMessagesFromDB_AdvisoryRowKeepsToolRows(t *testing.T) {
+	t.Parallel()
 	const owner = "asst-1"
 	rows := []types.TaskMessage{
 		{ID: "u1", Role: "user", Content: "fix it"},
@@ -80,6 +81,7 @@ func TestBuildMessagesFromDB_AdvisoryRowKeepsToolRows(t *testing.T) {
 // TestBuildMessagesFromDB_ContiguousTurnUnchanged pins the ordinary case: nothing about
 // a well-ordered turn moves.
 func TestBuildMessagesFromDB_ContiguousTurnUnchanged(t *testing.T) {
+	t.Parallel()
 	const owner = "asst-1"
 	rows := []types.TaskMessage{
 		{ID: "u1", Role: "user", Content: "fix it"},
@@ -102,6 +104,7 @@ func TestBuildMessagesFromDB_ContiguousTurnUnchanged(t *testing.T) {
 // assistant_msg_id existed: they must land on the assistant above them even when an
 // advisory row sits in between, which is exactly what the old adjacency scan got wrong.
 func TestBuildMessagesFromDB_LegacyRowsAttachToPrecedingAssistant(t *testing.T) {
+	t.Parallel()
 	rows := []types.TaskMessage{
 		{ID: "u1", Role: "user", Content: "fix it"},
 		{ID: "asst-1", Role: "assistant", Content: "editing"},
@@ -122,6 +125,7 @@ func TestBuildMessagesFromDB_LegacyRowsAttachToPrecedingAssistant(t *testing.T) 
 // TestBuildMessagesFromDB_OrphanToolRowsIgnored: a tool_call row with no assistant row
 // before it and no owner id belongs to nothing — it must not be attached to a later turn.
 func TestBuildMessagesFromDB_OrphanToolRowsIgnored(t *testing.T) {
+	t.Parallel()
 	rows := []types.TaskMessage{
 		{ID: "u1", Role: "user", Content: "fix it"},
 		toolRow(t, "", "A", "bash", `{}`, "orphaned output"),
@@ -140,6 +144,7 @@ func TestBuildMessagesFromDB_OrphanToolRowsIgnored(t *testing.T) {
 // TestBuildMessagesFromDB_LoopHintsExcludedKeepsGrouping: loop hints are UI-only, but
 // excluding them must not cost the turn its tool rows either.
 func TestBuildMessagesFromDB_LoopHintsExcludedKeepsGrouping(t *testing.T) {
+	t.Parallel()
 	const owner = "asst-1"
 	rows := []types.TaskMessage{
 		{ID: owner, Role: "assistant", Content: "editing"},
@@ -162,6 +167,7 @@ func TestBuildMessagesFromDB_LoopHintsExcludedKeepsGrouping(t *testing.T) {
 // TestBuildMessagesFromDB_MissingToolResultStaysMissing: a call that never produced a
 // result is still reported on the assistant message, but no result is invented for it.
 func TestBuildMessagesFromDB_MissingToolResultStaysMissing(t *testing.T) {
+	t.Parallel()
 	const owner = "asst-1"
 	rows := []types.TaskMessage{
 		{ID: owner, Role: "assistant", Content: "editing"},
@@ -181,6 +187,7 @@ func TestBuildMessagesFromDB_MissingToolResultStaysMissing(t *testing.T) {
 // The system prompt's summary is read off the rebuilt conversation, so a summarization row has to
 // survive that rebuild: a row dropped from the conversation is a summary missing from the prompt.
 func TestRebuildKeepsTheSummarizationRows(t *testing.T) {
+	t.Parallel()
 	rows := []types.TaskMessage{
 		{Role: "user", Content: "first request"},
 		{Role: "summarization", Content: "the superseded summary"},

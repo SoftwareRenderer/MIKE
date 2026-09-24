@@ -75,7 +75,7 @@ func TestWorktreeWatcherStageBroadcast(t *testing.T) {
 	runGit(t, repoDir, "init")
 	runGit(t, repoDir, "config", "user.email", "test@test.com")
 	runGit(t, repoDir, "config", "user.name", "Test")
-	writeFile(t, repoDir, "README.md", "# Test\n")
+	writeTestFile(t, repoDir, "README.md", "# Test\n")
 	runGit(t, repoDir, "add", "README.md")
 	runGit(t, repoDir, "commit", "-m", "Initial")
 
@@ -141,7 +141,7 @@ func TestWorktreeWatcherStageBroadcast(t *testing.T) {
 	drainBroadcasts(broadcasts)
 
 	// Modify a tracked file in the worktree.
-	writeFile(t, worktreePath, "README.md", "# Test\nchanged\n")
+	writeTestFile(t, worktreePath, "README.md", "# Test\nchanged\n")
 	waitForBroadcast(t, broadcasts, "file modification")
 
 	// Stage the file: git add. Expect a broadcast with README.md in StagedPaths.

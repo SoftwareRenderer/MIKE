@@ -89,6 +89,7 @@ func setupCommitAndMergeTest(t *testing.T) (*TaskExecutor, string, string, strin
 // is false, CommitAndMerge commits the changes but does NOT merge into the
 // target branch. The changes remain only on the task branch.
 func TestCommitAndMerge_AutoMergeFalse_SkipsMerge(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, wtPath := setupCommitAndMergeTest(t)
 
 	// feature.txt is unstaged on the task branch
@@ -131,6 +132,7 @@ func TestCommitAndMerge_AutoMergeFalse_SkipsMerge(t *testing.T) {
 // TestCommitAndMerge_AutoMergeTrue_MergesIntoTarget verifies that when auto_merge
 // is true, CommitAndMerge commits AND merges the changes into the target branch.
 func TestCommitAndMerge_AutoMergeTrue_MergesIntoTarget(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, wtPath := setupCommitAndMergeTest(t)
 
 	err := te.merge.CommitAndMerge(projectID, "test-task", wtPath, "Test commit", true)

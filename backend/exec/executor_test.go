@@ -87,6 +87,7 @@ func runGit(t *testing.T, dir string, args ...string) {
 // is restarted (worktree already exists), the stored BaseRef (commit SHA) is
 // preserved and not overwritten with the main repo's branch name.
 func TestPrepareTaskExecution_PreservesBaseRefOnRestart(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, initialSHA := setupExecutorWithGit(t)
 	taskID := "test-baseref-task"
 	branchName := "task/" + taskID
@@ -137,6 +138,7 @@ func TestPrepareTaskExecution_PreservesBaseRefOnRestart(t *testing.T) {
 // (no existing BaseRef), the BaseRef is correctly set from CreateWorktree
 // as a branch name (e.g. "master"), not a commit SHA.
 func TestPrepareTaskExecution_SetsBaseRefOnFirstRun(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID := "test-baseref-first-run"
 	branchName := "task/" + taskID
@@ -178,6 +180,7 @@ func TestPrepareTaskExecution_SetsBaseRefOnFirstRun(t *testing.T) {
 // TestInitTask_CreatesWorktree verifies that InitTask creates the worktree
 // and sets branch/BaseRef without starting LLM execution.
 func TestInitTask_CreatesWorktree(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, initialSHA := setupExecutorWithGit(t)
 	taskID := "test-init-task"
 
@@ -229,6 +232,7 @@ func TestInitTask_CreatesWorktree(t *testing.T) {
 
 // TestInitTask_Idempotent verifies that calling InitTask twice is safe.
 func TestInitTask_Idempotent(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID := "test-init-idempotent-task"
 
@@ -267,6 +271,7 @@ func TestInitTask_Idempotent(t *testing.T) {
 // TestInitTask_ThenPrepareTaskExecution verifies that prepareTaskExecution
 // works correctly after InitTask has already created the worktree.
 func TestInitTask_ThenPrepareTaskExecution(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, initialSHA := setupExecutorWithGit(t)
 	taskID := "test-init-then-start-task"
 
@@ -316,6 +321,7 @@ func TestInitTask_ThenPrepareTaskExecution(t *testing.T) {
 }
 
 func TestHasRunningTasks_InProgress(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID := "test-running-task"
 
@@ -338,6 +344,7 @@ func TestHasRunningTasks_InProgress(t *testing.T) {
 }
 
 func TestHasRunningTasks_BacklogStaleCleanup(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID := "test-backlog-task"
 
@@ -368,6 +375,7 @@ func TestHasRunningTasks_BacklogStaleCleanup(t *testing.T) {
 }
 
 func TestHasRunningTasks_ReviewStaleCleanup(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID := "test-review-task"
 
@@ -398,6 +406,7 @@ func TestHasRunningTasks_ReviewStaleCleanup(t *testing.T) {
 }
 
 func TestHasRunningTasks_NotInMap(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID := "test-not-running-task"
 
@@ -416,6 +425,7 @@ func TestHasRunningTasks_NotInMap(t *testing.T) {
 }
 
 func TestHasRunningTasks_MixedTasks(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 
 	// Task 1: in_progress + in map → considered running
@@ -455,6 +465,7 @@ func TestHasRunningTasks_MixedTasks(t *testing.T) {
 }
 
 func TestHasRunningTasks_NoTasks(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 
 	// Project exists but has no tasks
@@ -464,6 +475,7 @@ func TestHasRunningTasks_NoTasks(t *testing.T) {
 }
 
 func TestHasRunningTasks_InvalidProject(t *testing.T) {
+	t.Parallel()
 	te, _, _, _ := setupExecutorWithGit(t)
 
 	if te.HasRunningTasks("nonexistent-project") {
@@ -472,6 +484,7 @@ func TestHasRunningTasks_InvalidProject(t *testing.T) {
 }
 
 func TestCommitAndMerge_SerializesPerProject(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
 
 	// Create a task with a worktree so CommitAndMerge has something to commit
@@ -571,6 +584,7 @@ func TestCommitAndMerge_SerializesPerProject(t *testing.T) {
 }
 
 func TestSlugifyBranchName_NormalTitle(t *testing.T) {
+	t.Parallel()
 	slug := types.SlugifyBranchName("Fix login bug #123")
 	if slug != "fix-login-bug-123" {
 		t.Errorf("expected 'fix-login-bug-123', got %q", slug)
@@ -578,6 +592,7 @@ func TestSlugifyBranchName_NormalTitle(t *testing.T) {
 }
 
 func TestGenerateBranchName_FallsBackToTaskIDWhenSlugIsEmpty(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID := "frost-amber-quartz"
 	task := &types.Task{ID: taskID, ProjectID: projectID, Title: "###"}
@@ -592,6 +607,7 @@ func TestGenerateBranchName_FallsBackToTaskIDWhenSlugIsEmpty(t *testing.T) {
 }
 
 func TestGenerateBranchName_UsesSlugForNormalTitle(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID := "frost-amber-quartz"
 	task := &types.Task{ID: taskID, ProjectID: projectID, Title: "Fix login"}
@@ -606,6 +622,7 @@ func TestGenerateBranchName_UsesSlugForNormalTitle(t *testing.T) {
 }
 
 func TestGenerateBranchName_MaxLength(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID := "frost-amber-quartz"
 	// Title that slugifies to more than 45 chars (types.BranchSlugMaxLen)
@@ -621,6 +638,7 @@ func TestGenerateBranchName_MaxLength(t *testing.T) {
 // is injected into stored ToolCallsJSON for tool_call entries, so the frontend
 // can display the correct sandbox icon after page refresh.
 func TestPersistAgentTurnEntries_SandboxField(t *testing.T) {
+	t.Parallel()
 	e, _, projectID, _ := setupExecutorWithGit(t)
 	taskID := "test-sandbox-persist"
 	threadID := "test-thread"
@@ -713,6 +731,7 @@ func pkgagentPersistEntry(toolName, argsJSON string) string {
 }
 
 func TestForwardUserMessage_BlocksLazyStartDuringSummarize(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	te.gate = NewConcurrencyGate()
 	te.summarize.blockedMessages.tasks = make(map[string]struct{})
@@ -762,6 +781,7 @@ func TestForwardUserMessage_BlocksLazyStartDuringSummarize(t *testing.T) {
 // CreateWorktree fails after SetTaskBranchIfEmpty, the branch name is
 // cleared from the DB so it doesn't become an orphaned ref.
 func TestInitTask_ClearsOrphanedBranchOnWorktreeFailure(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
 	taskID := "test-orphaned-branch-task"
 
@@ -794,6 +814,7 @@ func TestInitTask_ClearsOrphanedBranchOnWorktreeFailure(t *testing.T) {
 // lock: a tool_call left without a result renders as "Running" forever, and the
 // stranded lock deadlocks every later write for the task.
 func TestRunToolProtected_PanicBecomesFailedResult(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 
 	result, ok := te.runToolProtected("task-panic", "bash", func() (string, bool) {
@@ -815,6 +836,7 @@ func TestRunToolProtected_PanicBecomesFailedResult(t *testing.T) {
 }
 
 func TestRunToolProtected_PassesResultThroughUnderLock(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 
 	var heldInside bool
@@ -842,6 +864,7 @@ func TestRunToolProtected_PassesResultThroughUnderLock(t *testing.T) {
 // transport maps to 409. It was returned as a bare fmt.Errorf("task already running"), which answered 500
 // and left the handler's errors.Is branch — and its 409 — unreachable.
 func TestPrepareTaskExecutionRefusesARunningTaskWithTheSentinel(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID := "task-already-running"
 	if err := te.store.CreateTask(&types.Task{
@@ -872,6 +895,7 @@ func TestPrepareTaskExecutionRefusesARunningTaskWithTheSentinel(t *testing.T) {
 // TestErrTaskAlreadyRunningClassifiesAsConflict holds the sentinel to what its comment claims: the
 // transport answers 409 because the error declares a conflict, not because a handler recognised its text.
 func TestErrTaskAlreadyRunningClassifiesAsConflict(t *testing.T) {
+	t.Parallel()
 	if !errs.IsConflict(ErrTaskAlreadyRunning) {
 		t.Error("ErrTaskAlreadyRunning does not classify as errs.ErrConflict, so the API answers 500")
 	}

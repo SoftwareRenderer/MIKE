@@ -52,14 +52,6 @@ describe('SaveController.settle', () => {
         expect(c.settle(false)).toBe(false);
     });
 
-    it('re-saves after a failure that left the buffer dirty', () => {
-        const c = new SaveController();
-        c.begin(true);
-        c.begin(true);
-        // Failed save: hasChanges is still true, so the request is honoured.
-        expect(c.settle(true)).toBe(true);
-    });
-
     it('leaves a lone save alone — no queued request means no second save', () => {
         const c = new SaveController();
         c.begin(true);

@@ -17,6 +17,7 @@ import (
 // Behavioural on purpose - grepping tools.go for `case "…"` would pass while the dispatcher was
 // broken and fail when someone reformatted it.
 func TestEveryDeclaredToolIsDispatched(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	worktree := t.TempDir()
 	task := &types.Task{ID: "dispatch-probe", ProjectID: "dispatch-proj", Title: "probe"}

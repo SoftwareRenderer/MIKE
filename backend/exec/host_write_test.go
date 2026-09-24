@@ -35,6 +35,7 @@ func assertNoAtomicTemps(t *testing.T, dirs ...string) {
 // A tool call can be interrupted while its write is in flight, so the write is visible in one step:
 // a refused or half-finished write must leave the bytes that were there, never a truncated file.
 func TestHostWrite_RefusedWriteKeepsTheFileBytes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.txt")
 	if err := os.WriteFile(target, []byte("original"), 0o644); err != nil {
@@ -61,6 +62,7 @@ func TestHostWrite_RefusedWriteKeepsTheFileBytes(t *testing.T) {
 }
 
 func TestHostWrite_LeavesNoTempAndMakesParents(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	w := hostWriter(t, dir)
 
@@ -81,6 +83,7 @@ func TestHostWrite_LeavesNoTempAndMakesParents(t *testing.T) {
 // edit_file builds its whole result before writing, so an interrupted edit leaves the file as the
 // read found it; only the write itself needs the atomic step.
 func TestHostEdit_RefusedReplacementKeepsTheFileBytes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "code.txt")
 	if err := os.WriteFile(target, []byte("alpha\n"), 0o644); err != nil {

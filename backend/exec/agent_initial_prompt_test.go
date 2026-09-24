@@ -11,6 +11,7 @@ import (
 // resumed session already contains the conversation, so sending the transcript again pays for it twice;
 // a fresh subprocess with no session has nothing, so the transcript is the only memory it gets.
 func TestAgentInitialPromptSendsEachThingOnce(t *testing.T) {
+	t.Parallel()
 	const prompt = "the task prompt"
 	const userMsg = "the message the user just sent"
 

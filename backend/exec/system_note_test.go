@@ -10,6 +10,7 @@ import (
 // The retry hint needs record's tolerance for an empty thread; the pause and merge notes want
 // recordOnThread.
 func TestSystemNoteRecordShapes(t *testing.T) {
+	t.Parallel()
 	_, s := newTestExecutorWithStore(t)
 	now := time.Now().UTC()
 	if err := s.CreateProject(&types.Project{ID: "proj-note2", Name: "note2", Path: t.TempDir()}); err != nil {

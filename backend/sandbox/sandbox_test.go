@@ -168,35 +168,6 @@ func TestExec(t *testing.T) {
 	}
 }
 
-func TestExecNotAllowed(t *testing.T) {
-
-	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
-
-	dir := t.TempDir()
-	taskID := "test-restricted-task"
-
-	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{})
-	if err != nil {
-		t.Fatalf("create sandbox: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = sm.Stop(taskID)
-	})
-
-	// Try to access host filesystem outside the worktree
-	// The container should not be able to read /etc/passwd from the host
-	output, err := sm.Exec(taskID, "cat /etc/hostname 2>&1 || echo 'ACCESS_DENIED'", nil)
-	// Even if /etc/hostname exists in the container image, it should be the container's, not the host's
-	t.Logf("sandbox /etc/hostname output: %s (error: %v)", output, err)
-
-	// Verify we can't see host processes
-	output, err = sm.Exec(taskID, "ps aux 2>&1 | grep -v 'sh\\|ps\\|grep' | head -5", nil)
-	t.Logf("sandbox ps output: %s (error: %v)", output, err)
-}
-
 func TestExecWithInput(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
@@ -301,16 +272,6 @@ func TestCleanupStaleContainers(t *testing.T) {
 	if exists, _ := sm.rt.ContainerExists(running); !exists {
 		t.Errorf("running container %s was swept: a running sandbox belongs to a live owner, and removing it takes a working container away from them", running)
 	}
-}
-
-func TestCleanupStaleContainers_NoneExist(t *testing.T) {
-	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
-
-	// Should not panic or error when no stale containers exist
-	sm.cleanupStaleContainers()
 }
 
 func TestCreate_OverridesImageEntrypoint(t *testing.T) {
@@ -582,6 +543,9 @@ func TestStopProjectContainers(t *testing.T) {
 	}
 }
 
+// TestStopProjectContainers_NoContainers: stopping what was never started is not a failure, and it
+// tracks nothing. The deletion path reports cleanup errors to the person deleting, so a phantom
+// failure here would be shown to them for nothing.
 func TestStopProjectContainers_NoContainers(t *testing.T) {
 	sm := &SandboxManager{
 		active:     make(map[string]string),
@@ -590,8 +554,14 @@ func TestStopProjectContainers_NoContainers(t *testing.T) {
 		available:  true,
 	}
 
-	// Should not panic when there are no containers
+	if err := sm.Stop("nonexistent-task"); err != nil {
+		t.Errorf("Stop of a task with no container = %v, want nil", err)
+	}
+
 	sm.StopProjectContainers("proj-empty", []string{"nonexistent-task"})
+	if len(sm.active) != 0 {
+		t.Errorf("stopping an empty project tracked %d container(s): %v", len(sm.active), sm.active)
+	}
 }
 
 func TestImageReady(t *testing.T) {

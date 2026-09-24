@@ -59,7 +59,7 @@ func TestTaskDiffFallbackDivergenceBaseline(t *testing.T) {
 		"status": "review",
 	})
 	withAuthCSRF(req, cookie, csrfToken)
-	rr := authenticatedRequest(t, s, req)
+	rr := testResponse(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("move to review: %d %s", rr.Code, rr.Body.String())
 	}
@@ -67,7 +67,7 @@ func TestTaskDiffFallbackDivergenceBaseline(t *testing.T) {
 	// /diff must list the merged file (committed rows, clean working tree).
 	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/diff", nil)
 	withAuthCSRF(req, cookie, csrfToken)
-	rr = authenticatedRequest(t, s, req)
+	rr = testResponse(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("diff: %d %s", rr.Code, rr.Body.String())
 	}
@@ -86,7 +86,7 @@ func TestTaskDiffFallbackDivergenceBaseline(t *testing.T) {
 	// report the divergence commit as base_commit.
 	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/commits", nil)
 	withAuthCSRF(req, cookie, csrfToken)
-	rr = authenticatedRequest(t, s, req)
+	rr = testResponse(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("commits: %d %s", rr.Code, rr.Body.String())
 	}
@@ -162,7 +162,7 @@ func TestTaskDiffUnusableBaselineFallsBack(t *testing.T) {
 			cookie, csrfToken := loginTestCSRF(t, s)
 			req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/diff", nil)
 			withAuthCSRF(req, cookie, csrfToken)
-			rr := authenticatedRequest(t, s, req)
+			rr := testResponse(t, s, req)
 			if rr.Code != http.StatusOK {
 				t.Fatalf("diff: %d %s", rr.Code, rr.Body.String())
 			}

@@ -17,8 +17,8 @@ import (
 	"mike/pkg/sandboxruntime"
 )
 
-// repairFixture is a handler whose extensions directory is an empty temp dir, plus that directory.
-func repairFixture(t *testing.T) (*ExtensionHandler, *ExtensionStore, string) {
+// handlerFixture is a handler whose extensions directory is an empty temp dir, plus that directory.
+func handlerFixture(t *testing.T) (*ExtensionHandler, *ExtensionStore, string) {
 	t.Helper()
 	extStore := testStore(t)
 	reg := NewRegistryClient()
@@ -76,7 +76,7 @@ func classifyByID(t *testing.T, h *ExtensionHandler) map[string]missingInstall {
 // A row is reported when its directory has no manifest it can be loaded from — and only then. A
 // half-written checkout has a directory; that is not an install.
 func TestClassifyMissingInstalls(t *testing.T) {
-	h, store, root := repairFixture(t)
+	h, store, root := handlerFixture(t)
 
 	writeManifest(t, root, "acme", "healthy", manifestBody("Acme", "1.0.0"))
 	createRow(t, store, "acme-healthy-1", "acme", "healthy", "registry", "https://example.invalid/r", strings.Repeat("a", 64), "ui/healthy")
@@ -177,7 +177,7 @@ func TestRepairMissingFiles_RestoresThePinnedCommit(t *testing.T) {
 		t.Fatal("fixture did not produce a second commit")
 	}
 
-	h, store, root := repairFixture(t)
+	h, store, root := handlerFixture(t)
 	createRow(t, store, "acme-x-1", "acme", "x", "registry", repo, pinned, "ui/x")
 
 	changed := 0
@@ -218,7 +218,7 @@ func TestRepairMissingFiles_RestoresThePinnedCommit(t *testing.T) {
 // A repair must not overwrite work in progress: the same in-flight guard an install or update takes.
 func TestRepairMissingFiles_SkipsInFlightExtension(t *testing.T) {
 	repo, commit := makeGitRepo(t, map[string]string{"ui/x/manifest.json": manifestBody("Acme", "1.0.0")})
-	h, store, root := repairFixture(t)
+	h, store, root := handlerFixture(t)
 	createRow(t, store, "acme-x-1", "acme", "x", "registry", repo, commit, "ui/x")
 
 	if !h.inFlightOps.begin("x") {
@@ -249,7 +249,7 @@ func TestRepairMissingFiles_NeverFetchesWhatItCannotTrust(t *testing.T) {
 	sentinel := filepath.Join(t.TempDir(), "pwned")
 	repo, commit := makeGitRepo(t, map[string]string{"ui/x/manifest.json": manifestBody("Acme", "1.0.0")})
 
-	h, store, root := repairFixture(t)
+	h, store, root := handlerFixture(t)
 	// No source at all.
 	createRow(t, store, "local-a-1", "local", "a", "local", "", "", "")
 	// An ext:: URL would run a host command if it reached git.
@@ -293,7 +293,7 @@ func TestRepairMissingFiles_RefusesWhatIsNotTheRecordedExtension(t *testing.T) {
 				files["ui/x/manifest.json"] = tc.content
 			}
 			repo, commit := makeGitRepo(t, files)
-			h, store, _ := repairFixture(t)
+			h, store, _ := handlerFixture(t)
 			createRow(t, store, "acme-x-1", "acme", "x", "registry", repo, commit, "ui/x")
 
 			changed := 0
@@ -318,7 +318,7 @@ func TestRepairMissingFiles_RefusesWhatIsNotTheRecordedExtension(t *testing.T) {
 // A cancelled context ends the pass instead of starting fetches nobody wants any more.
 func TestRepairMissingFiles_EndsWithTheContext(t *testing.T) {
 	repo, commit := makeGitRepo(t, map[string]string{"ui/x/manifest.json": manifestBody("Acme", "1.0.0")})
-	h, store, root := repairFixture(t)
+	h, store, root := handlerFixture(t)
 	createRow(t, store, "acme-x-1", "acme", "x", "registry", repo, commit, "ui/x")
 
 	ctx, cancel := context.WithCancel(context.Background())

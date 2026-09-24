@@ -128,6 +128,7 @@ func (f fixedCharges) Charges() map[string]int64 { return f }
 // TestSupervisorPausesSmallestLiveChargeFirst gives the two tasks a live cost the opposite way round
 // to their stored peaks, so a decision that read the task rows would pause the wrong one.
 func TestSupervisorPausesSmallestLiveChargeFirst(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
 	seedRunningTask(t, s, "task-heavy", 120) // last run's peak is the small one
 	seedRunningTask(t, s, "task-light", 900) // …and this one's is the big one
@@ -169,6 +170,7 @@ func TestSupervisorPausesSmallestLiveChargeFirst(t *testing.T) {
 
 // With no container reading, a task is costed at its reserve, never at zero.
 func TestSupervisorFallsBackToReserveWithoutContainerCharges(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
 	narrow := newNarrowMemProject(t, s, "proj-narrow", 256)
 	_ = narrow
@@ -194,6 +196,7 @@ func TestSupervisorFallsBackToReserveWithoutContainerCharges(t *testing.T) {
 
 // A host under its free-memory floor pauses tasks even with nothing queued.
 func TestSupervisorPausesOnHostMemoryFloorWithEmptyQueue(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
 	seedRunningTask(t, s, "task-a", 500)
 
@@ -217,6 +220,7 @@ func TestSupervisorPausesOnHostMemoryFloorWithEmptyQueue(t *testing.T) {
 }
 
 func TestSupervisorNoPauseWhenQueueEmpty(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
 	seedRunningTask(t, s, "task-a", 500)
 
@@ -235,6 +239,7 @@ func TestSupervisorNoPauseWhenQueueEmpty(t *testing.T) {
 }
 
 func TestSupervisorDisablesWhenZeroCapacity(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
 	seedRunningTask(t, s, "task-x", 9999)
 
@@ -247,6 +252,7 @@ func TestSupervisorDisablesWhenZeroCapacity(t *testing.T) {
 }
 
 func TestSupervisorResumesLowestPausedTask(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
 	now := time.Now().UTC()
 	for _, spec := range []struct {
@@ -284,6 +290,7 @@ func TestSupervisorResumesLowestPausedTask(t *testing.T) {
 
 // A task whose own cap exceeds the ceiling is never resumed.
 func TestSupervisorNeverResumesTaskWhoseCapExceedsCapacity(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t) // proj-mem caps a sandbox at 1024 MB
 	now := time.Now().UTC()
 	if err := s.CreateTask(&types.Task{
@@ -306,6 +313,7 @@ func TestSupervisorNeverResumesTaskWhoseCapExceedsCapacity(t *testing.T) {
 }
 
 func TestSupervisorResumesSubtaskViaStartSubtask(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
 	now := time.Now().UTC()
 	if err := s.CreateTask(&types.Task{
@@ -337,6 +345,7 @@ func TestSupervisorResumesSubtaskViaStartSubtask(t *testing.T) {
 }
 
 func TestSupervisorDoesNotResumeWhenWouldRequeue(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
 	now := time.Now().UTC()
 	if err := s.CreateTask(&types.Task{
@@ -362,14 +371,31 @@ func TestSupervisorDoesNotResumeWhenWouldRequeue(t *testing.T) {
 	}
 }
 
+// TestSupervisorStartAndStop: Start's ticker runs the pass. Every other supervisor test calls TickOnce,
+// so nothing else proves the wiring. Stop must be safe to call twice.
 func TestSupervisorStartAndStop(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
+	seedRunningTask(t, s, "task-heavy", 120)
+	seedRunningTask(t, s, "task-light", 900)
+
 	gate := &MemoryGate{}
-	gate.SetCapacity(1000)
-	// Short interval so Start exercises the ticker.
-	sup := NewMemorySupervisor(s, gate, nil, &recordingSupervisorActions{}, 50*time.Millisecond, SandboxReclaim{})
+	gate.SetCapacity(900)
+	if err := gate.Acquire(context.Background(), 800, nil); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = gate.Acquire(context.Background(), 300, nil) }()
+
+	actions := &recordingSupervisorActions{}
+	sup := NewMemorySupervisor(s, gate, fixedCharges{"task-heavy": 950, "task-light": 120}, actions,
+		20*time.Millisecond, SandboxReclaim{})
 	sup.Start()
-	time.Sleep(150 * time.Millisecond)
+	waitFor(t, 5*time.Second, "Start's ticker to run a pass that pauses a task",
+		func() bool { return len(actions.stoppedIDs()) > 0 })
+	if got := actions.stoppedIDs(); len(got) != 1 || got[0] != "task-light" {
+		t.Errorf("the pass must pause the smallest live charge, got %v", got)
+	}
+
 	sup.Stop()
 	sup.Stop() // idempotent
 }
@@ -403,6 +429,7 @@ func seedRunningTaskIn(t *testing.T, s *store.Store, id, projectID string, peakM
 // stay a run somebody is watching after a pause — that flag is what decides whether the parent's
 // context answers for the user.
 func TestSupervisorResumeKeepsRunProvenance(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name        string
 		autostarted bool
@@ -464,6 +491,7 @@ func TestSupervisorResumeKeepsRunProvenance(t *testing.T) {
 }
 
 func TestSupervisorNotesOnlyFollowASuccessfulTransition(t *testing.T) {
+	t.Parallel()
 	t.Run("failed stop leaves no pause note", func(t *testing.T) {
 		s := newMemSupTestStore(t)
 		seedRunningTask(t, s, "task-a", 500)
@@ -512,6 +540,7 @@ func TestSupervisorNotesOnlyFollowASuccessfulTransition(t *testing.T) {
 }
 
 func TestMemoryTransitionNotesAreSystemRowsOnTheThread(t *testing.T) {
+	t.Parallel()
 	te, s := newTestExecutorWithStore(t)
 	now := time.Now().UTC()
 	if err := s.CreateProject(&types.Project{ID: "proj-note", Name: "note", Path: t.TempDir(), SandboxEnabled: true}); err != nil {
@@ -560,6 +589,7 @@ func TestMemoryTransitionNotesAreSystemRowsOnTheThread(t *testing.T) {
 }
 
 func TestMemoryPauseNoteSkipsARowTheSupervisorNoLongerOwns(t *testing.T) {
+	t.Parallel()
 	te, s := newTestExecutorWithStore(t)
 	now := time.Now().UTC()
 	if err := s.CreateProject(&types.Project{ID: "proj-mine", Name: "mine", Path: t.TempDir(), SandboxEnabled: true}); err != nil {
@@ -595,6 +625,7 @@ func TestMemoryPauseNoteSkipsARowTheSupervisorNoLongerOwns(t *testing.T) {
 }
 
 func TestMemoryTransitionNoteNeedsAThread(t *testing.T) {
+	t.Parallel()
 	te, s := newTestExecutorWithStore(t)
 	now := time.Now().UTC()
 	if err := s.CreateProject(&types.Project{ID: "proj-nothread", Name: "nothread", Path: t.TempDir(), SandboxEnabled: true}); err != nil {
@@ -668,6 +699,7 @@ func alwaysOn() bool { return true }
 // TestSupervisorReclaimsIdleContainerWhenNothingInFlight: every container belongs to a task waiting on a
 // person, so there is nothing to pause. The container goes and the row does not move.
 func TestSupervisorReclaimsIdleContainerWhenNothingInFlight(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
 	seedWaitingTask(t, s, "task-wait", types.StatusReview, types.ExecStateIdle)
 
@@ -706,6 +738,7 @@ func TestSupervisorReclaimsIdleContainerWhenNothingInFlight(t *testing.T) {
 // TestSupervisorKeepsAContainerInsideTheGrace: a container seen 4 minutes ago is kept whatever the tick
 // count, and released once the grace has passed on that same clock.
 func TestSupervisorKeepsAContainerInsideTheGrace(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
 	seedWaitingTask(t, s, "task-wait", types.StatusReview, types.ExecStateIdle)
 
@@ -732,6 +765,7 @@ func TestSupervisorKeepsAContainerInsideTheGrace(t *testing.T) {
 
 // TestSupervisorReclaimsOnlyWhenThePreferenceIsOn: nothing is released until a person asks.
 func TestSupervisorReclaimsOnlyWhenThePreferenceIsOn(t *testing.T) {
+	t.Parallel()
 	off := false
 	never := func() bool { return off }
 	for _, tc := range []struct {
@@ -765,6 +799,7 @@ func TestSupervisorReclaimsOnlyWhenThePreferenceIsOn(t *testing.T) {
 // TestSupervisorPausesRunningBeforeReclaimingIdle: an in-flight task is always the victim first. The idle
 // task passes its grace before the running one exists, so the tick that decides sees both.
 func TestSupervisorPausesRunningBeforeReclaimingIdle(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
 	seedWaitingTask(t, s, "task-wait", types.StatusReview, types.ExecStateIdle)
 
@@ -791,6 +826,7 @@ func TestSupervisorPausesRunningBeforeReclaimingIdle(t *testing.T) {
 
 // The host floor triggers the same order with nothing queued.
 func TestSupervisorReclaimsUnderHostFloorWithEmptyQueue(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
 	seedWaitingTask(t, s, "task-wait", types.StatusInProgress, types.ExecStateIdle)
 
@@ -815,6 +851,7 @@ func TestSupervisorReclaimsUnderHostFloorWithEmptyQueue(t *testing.T) {
 // TestSupervisorReclaimOffersNeitherAHeldNorARefusedContainer: a held container is never offered, and a
 // candidate the action refuses does not spend the tick — the next idle one is asked.
 func TestSupervisorReclaimOffersNeitherAHeldNorARefusedContainer(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
 	for _, id := range []string{"task-held", "task-refused", "task-takes-it"} {
 		seedWaitingTask(t, s, id, types.StatusReview, types.ExecStateIdle)
@@ -843,6 +880,7 @@ func TestSupervisorReclaimOffersNeitherAHeldNorARefusedContainer(t *testing.T) {
 
 // TestSupervisorReclaimsTheLongestIdleFirst: the container that has waited longest goes first.
 func TestSupervisorReclaimsTheLongestIdleFirst(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
 	seedWaitingTask(t, s, "task-old", types.StatusReview, types.ExecStateIdle)
 	seedWaitingTask(t, s, "task-new", types.StatusReview, types.ExecStateIdle)
@@ -868,6 +906,7 @@ func TestSupervisorReclaimsTheLongestIdleFirst(t *testing.T) {
 
 // TestSupervisorReclaimsOneContainerPerTick: one release per tick, whatever the number of idle containers.
 func TestSupervisorReclaimsOneContainerPerTick(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
 	seedWaitingTask(t, s, "task-a", types.StatusReview, types.ExecStateIdle)
 	seedWaitingTask(t, s, "task-b", types.StatusReview, types.ExecStateIdle)
@@ -890,6 +929,7 @@ func TestSupervisorReclaimsOneContainerPerTick(t *testing.T) {
 // TestSupervisorIdleClockRestartsWhenTheContainerGoes: a container that left and came back is a new
 // arrival.
 func TestSupervisorIdleClockRestartsWhenTheContainerGoes(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
 	seedWaitingTask(t, s, "task-wait", types.StatusReview, types.ExecStateIdle)
 
@@ -915,6 +955,7 @@ func TestSupervisorIdleClockRestartsWhenTheContainerGoes(t *testing.T) {
 // TestSupervisorIdleClockCountsWhileThePreferenceIsOff: the clock runs before the toggle moves, so turning
 // the preference on asks which containers have already waited past the grace.
 func TestSupervisorIdleClockCountsWhileThePreferenceIsOff(t *testing.T) {
+	t.Parallel()
 	s := newMemSupTestStore(t)
 	seedWaitingTask(t, s, "task-wait", types.StatusReview, types.ExecStateIdle)
 
@@ -938,6 +979,7 @@ func TestSupervisorIdleClockCountsWhileThePreferenceIsOff(t *testing.T) {
 // TestReclaimRefusesATaskThatStartedInTheMeantime: the action's own row read is the last check before
 // podman is touched.
 func TestReclaimRefusesATaskThatStartedInTheMeantime(t *testing.T) {
+	t.Parallel()
 	te, s := newTestExecutorWithStore(t)
 	if err := s.CreateProject(&types.Project{
 		ID: "proj-r", Name: "reclaim", Path: t.TempDir(), SandboxEnabled: true, SandboxMemoryLimit: 1024,

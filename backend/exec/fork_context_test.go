@@ -47,6 +47,7 @@ func forkCtxStore(t *testing.T) *store.Store {
 // TestForkRebuildsTheParentsConversation forks at the last user message and asserts the fork's rows
 // rebuild into exactly the conversation the parent's rows do.
 func TestForkRebuildsTheParentsConversation(t *testing.T) {
+	t.Parallel()
 	s := forkCtxStore(t)
 	base := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
 

@@ -22,6 +22,7 @@ var conflictedRestore = &git.RestoreConflictError{
 }
 
 func TestMergedDeliveredReadsTheMergeNotTheRestore(t *testing.T) {
+	t.Parallel()
 	// mergeInto adds the sentinel only when the merge landed, which is the whole classification.
 	landed := fmt.Errorf("%w: %w", errMergedWithConflictedRestore, conflictedRestore)
 	// The bracket's own answer when the merge failed and the restore conflicted too: the restore conflict
@@ -75,6 +76,7 @@ func TestMergedDeliveredReadsTheMergeNotTheRestore(t *testing.T) {
 // TestConflictResolutionFinishesOnALandedMerge: the resolving turn's Done decision reads the same
 // predicate, or a click that survived a conflict is stopped by the restore that followed its merge.
 func TestConflictResolutionFinishesOnALandedMerge(t *testing.T) {
+	t.Parallel()
 	resolution := func(mergeErr error) conflictResolution {
 		return conflictResolution{
 			task:       &types.Task{ID: "resolving-task", AutoMerge: true},

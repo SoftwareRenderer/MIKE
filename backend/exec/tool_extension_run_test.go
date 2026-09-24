@@ -79,6 +79,7 @@ func runSearch(t *testing.T, address string, args map[string]any, fake *recorded
 
 // The manifest's template becomes the URL egress was called with, and the answer arrives as text.
 func TestContributedToolRunsTheDeclaredRequest(t *testing.T) {
+	t.Parallel()
 	fake := &recordedEgress{result: jsonResult(searxResults(3, 41))}
 	result, ok := runSearch(t, "https://searx.example", map[string]any{"query": "gVisor", "category": "it"}, fake)
 	if !ok {
@@ -121,6 +122,7 @@ func TestContributedToolRunsTheDeclaredRequest(t *testing.T) {
 
 // The default is the manifest's; a parameter resolving to nothing is dropped, not sent empty.
 func TestContributedToolDefaultsAnOmittedArgument(t *testing.T) {
+	t.Parallel()
 	fake := &recordedEgress{result: jsonResult(searxResults(1, 1))}
 	if _, ok := runSearch(t, "https://searx.example", map[string]any{"query": "x"}, fake); !ok {
 		t.Fatal("the call failed")
@@ -133,6 +135,7 @@ func TestContributedToolDefaultsAnOmittedArgument(t *testing.T) {
 
 // max_results limits how much of an answer reaches the model, and the answer says how much was left out.
 func TestContributedToolCapsWhatItRenders(t *testing.T) {
+	t.Parallel()
 	fake := &recordedEgress{result: jsonResult(searxResults(12, 12))}
 	result, ok := runSearch(t, "https://searx.example", map[string]any{"query": "x"}, fake)
 	if !ok {
@@ -151,6 +154,7 @@ func TestContributedToolCapsWhatItRenders(t *testing.T) {
 
 // A POST sends the declared parameters as a form: the model supplies arguments, never bytes.
 func TestContributedToolSendsAFormOnPost(t *testing.T) {
+	t.Parallel()
 	manifest := strings.Replace(searxngManifest, `"method": "GET"`, `"method": "POST"`, 1)
 	ext := searchToolExtension("http://127.0.0.1:8888")
 	var parsed extensions.ExtensionManifest
@@ -183,6 +187,7 @@ func TestContributedToolSendsAFormOnPost(t *testing.T) {
 
 // Each upstream failure names the misconfiguration a person can correct.
 func TestContributedToolFailuresSayWhatToFix(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		result  *extensions.EgressResult
@@ -214,6 +219,7 @@ func TestContributedToolFailuresSayWhatToFix(t *testing.T) {
 
 // A call that arrives with no address configured is refused, not guessed at.
 func TestContributedToolUnconfiguredRefusesTheCall(t *testing.T) {
+	t.Parallel()
 	fake := &recordedEgress{result: jsonResult(searxResults(1, 1))}
 	result, ok := runSearch(t, "", map[string]any{"query": "x"}, fake)
 	if ok {
@@ -229,6 +235,7 @@ func TestContributedToolUnconfiguredRefusesTheCall(t *testing.T) {
 
 // One field must not pull the whole upstream document into the context.
 func TestContributedToolClampsASnippet(t *testing.T) {
+	t.Parallel()
 	body, err := json.Marshal(map[string]any{
 		"number_of_results": 1,
 		"results":           []any{map[string]any{"title": "T", "url": "u", "content": strings.Repeat("word ", 400)}},
@@ -251,6 +258,7 @@ func TestContributedToolClampsASnippet(t *testing.T) {
 
 // No results is an answer, not an error.
 func TestContributedToolEmptyAnswerIsNotAFailure(t *testing.T) {
+	t.Parallel()
 	body, _ := json.Marshal(map[string]any{"number_of_results": 0, "results": []any{}})
 	fake := &recordedEgress{result: jsonResult(body)}
 	result, ok := runSearch(t, "https://searx.example", map[string]any{"query": "x"}, fake)

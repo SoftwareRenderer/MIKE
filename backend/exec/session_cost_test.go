@@ -52,6 +52,7 @@ func mockSessionCostLLM(firstChat chan<- struct{}) *httptest.Server {
 
 // A restarted run accumulates on top of the stored SessionCost; it never resets it.
 func TestExecuteTask_PreservesSessionCostAcrossRun(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	s := te.store
 
@@ -213,6 +214,7 @@ func TestExecuteTask_PreservesSessionCostAcrossRun(t *testing.T) {
 // through a different door: it re-reads the task from the store before adding, so the base it
 // accumulates onto is the stored row, not the copy the executor started with.
 func TestAccumulateAgentSessionCost_InheritsCarriedOverCost(t *testing.T) {
+	t.Parallel()
 	te, s := newTestExecutorWithStore(t)
 	proj := createProject(t, s, "proj-agent-cost", "Agent Cost Proj")
 
@@ -259,6 +261,7 @@ func TestAccumulateAgentSessionCost_InheritsCarriedOverCost(t *testing.T) {
 // TestAccumulateAgentSessionCost_ZeroCostRunKeepsTheCarriedValue pins the other half: a run that
 // spent nothing must neither touch the project stats nor drop the cost the task already carried.
 func TestAccumulateAgentSessionCost_ZeroCostRunKeepsTheCarriedValue(t *testing.T) {
+	t.Parallel()
 	te, s := newTestExecutorWithStore(t)
 	proj := createProject(t, s, "proj-agent-cost-zero", "Agent Cost Zero Proj")
 

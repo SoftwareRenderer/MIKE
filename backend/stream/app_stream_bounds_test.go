@@ -28,7 +28,7 @@ func TestTaskReplayBuffersStayInsideTheirByteAndKeyLimits(t *testing.T) {
 	t.Cleanup(asm.Close)
 
 	for i := 0; i < 20; i++ {
-		asm.SendTaskEvent("proj", "t0", tokenText(strings.Repeat("y", 900)))
+		asm.SendTaskEvent("proj", "t0", tokenEvent(strings.Repeat("y", 900)))
 	}
 	asm.taskBufMu.Lock()
 	held := asm.taskBufLoad["proj:t0"]
@@ -38,7 +38,7 @@ func TestTaskReplayBuffersStayInsideTheirByteAndKeyLimits(t *testing.T) {
 	}
 
 	for i := 1; i <= 5; i++ {
-		asm.SendTaskEvent("proj", fmt.Sprintf("t%d", i), tokenText("x"))
+		asm.SendTaskEvent("proj", fmt.Sprintf("t%d", i), tokenEvent("x"))
 	}
 	asm.taskBufMu.Lock()
 	keys := len(asm.taskBuffers)
@@ -67,7 +67,7 @@ func TestClosingATaskBufferTakesItsBookkeepingWithIt(t *testing.T) {
 	for i := 0; i < turns; i++ {
 		key := fmt.Sprintf("proj:t%d", i)
 		projectID, taskID := "proj", fmt.Sprintf("t%d", i)
-		asm.SendTaskEvent(projectID, taskID, tokenText("x"))
+		asm.SendTaskEvent(projectID, taskID, tokenEvent("x"))
 		asm.clearTaskBuffer(key)
 	}
 

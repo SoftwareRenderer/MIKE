@@ -571,10 +571,6 @@ func TestToolCallDeltaSurvivesAReplayWithNothingToJoinItTo(t *testing.T) {
 	}
 }
 
-func tokenText(text string) types.StreamEvent {
-	return types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": text}}
-}
-
 func toolResult(data map[string]any) types.StreamEvent {
 	return types.StreamEvent{Type: types.WSTypeToolResult, Data: data}
 }
@@ -613,10 +609,10 @@ func TestDurabilityTrimKeepsWhatNoRowAnswers(t *testing.T) {
 		}
 	}
 
-	send(tokenText("thinking out loud"))
+	send(tokenEvent("thinking out loud"))
 	send(toolCall(map[string]any{"tool_id": "call_1", "tool_name": "bash", "raw_args": `{"command":"ls"}`}))
 	send(toolResult(map[string]any{"tool_id": "call_1", "output": "a  b  c"}))
-	send(tokenText("and then"))
+	send(tokenEvent("and then"))
 	send(toolCall(map[string]any{"tool_id": "call_2", "tool_name": "bash", "raw_args": `{"command":"pwd"}`}))
 	send(toolResult(map[string]any{"tool_id": "call_2", "output": "/tmp"}))
 	// A call whose result has not arrived: no row answers for it yet.
@@ -655,7 +651,7 @@ func TestDurabilityTrimKeepsWhatNoRowAnswers(t *testing.T) {
 // A buffer the trim empties gives up its slot, so an idle task holds none of the 64 buffers forever.
 func TestDurabilityTrimRetiresABufferWithNothingLeft(t *testing.T) {
 	asm := NewAppStreamManager(nil, nil)
-	asm.SendTaskEvent("proj-1", "task-1", tokenText("x"))
+	asm.SendTaskEvent("proj-1", "task-1", tokenEvent("x"))
 	asm.SendTaskEvent("proj-1", "task-1", toolCall(map[string]any{"tool_id": "call_1", "tool_name": "bash"}))
 	asm.SendTaskEvent("proj-1", "task-1", toolResult(map[string]any{"tool_id": "call_1", "output": "done"}))
 
@@ -677,7 +673,7 @@ func TestAClientWithoutRowsIsOwedWhatATrimWouldDrop(t *testing.T) {
 	fs.subscribeTaskWithoutRows(t, "proj-1", "task-1")
 	awaitNoRowsClaim(t, asm, "proj-1:task-1", true)
 
-	asm.SendTaskEvent("proj-1", "task-1", tokenText("all of it"))
+	asm.SendTaskEvent("proj-1", "task-1", tokenEvent("all of it"))
 	asm.SendTaskEvent("proj-1", "task-1", toolCall(map[string]any{"tool_id": "call_1", "tool_name": "bash"}))
 	asm.SendTaskEvent("proj-1", "task-1", toolResult(map[string]any{"tool_id": "call_1", "output": "done"}))
 	asm.DurableThrough("proj-1", "task-1")
@@ -702,7 +698,7 @@ func TestDurabilityTrimLeavesTheUndurableTail(t *testing.T) {
 	body := strings.Repeat("func example() int { return 1 }\n", (6<<10)/29)
 	for i := 0; i < 60; i++ {
 		call := fmt.Sprintf("call_%02d", i)
-		asm.SendTaskEvent("proj-1", "task-1", tokenText("thinking about the tree"))
+		asm.SendTaskEvent("proj-1", "task-1", tokenEvent("thinking about the tree"))
 		asm.SendTaskEvent("proj-1", "task-1", toolCall(map[string]any{"tool_id": call, "tool_name": "edit_file", "raw_args": body}))
 		asm.SendTaskEvent("proj-1", "task-1", toolResult(map[string]any{"tool_id": call, "output": body, "success": true}))
 		asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{"prompt_tokens": i}})

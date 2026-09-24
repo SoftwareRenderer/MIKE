@@ -62,6 +62,7 @@ func createParentTask(t *testing.T, s *store.Store, id, projectID string, status
 }
 
 func TestHandleCreateTask_Basic(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-1", "proj-1", "backlog")
 
@@ -110,6 +111,7 @@ func TestHandleCreateTask_Basic(t *testing.T) {
 }
 
 func TestHandleCreateTask_InheritsSettings(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-2", "proj-1", "backlog")
 
@@ -145,6 +147,7 @@ func TestHandleCreateTask_InheritsSettings(t *testing.T) {
 }
 
 func TestHandleCreateTask_NestedSubtask(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-3", "proj-1", "backlog")
 
@@ -191,6 +194,7 @@ func TestHandleCreateTask_NestedSubtask(t *testing.T) {
 }
 
 func TestHandleCreateTask_CreatesThread(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-4", "proj-1", "backlog")
 
@@ -224,6 +228,7 @@ func TestHandleCreateTask_CreatesThread(t *testing.T) {
 }
 
 func TestHandleCreateTask_CreatesPromptMessage(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-5", "proj-1", "backlog")
 
@@ -258,6 +263,7 @@ func TestHandleCreateTask_CreatesPromptMessage(t *testing.T) {
 }
 
 func TestHandleCreateTask_MissingTitle(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-6", "proj-1", "backlog")
 
@@ -274,6 +280,7 @@ func TestHandleCreateTask_MissingTitle(t *testing.T) {
 }
 
 func TestHandleCreateTask_MissingPrompt(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-7", "proj-1", "backlog")
 
@@ -290,6 +297,7 @@ func TestHandleCreateTask_MissingPrompt(t *testing.T) {
 }
 
 func TestHandleCreateTask_ParentNotFound(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-8", "proj-1", "backlog")
 
@@ -310,6 +318,7 @@ func TestHandleCreateTask_ParentNotFound(t *testing.T) {
 // TestHandleCreateTask_ParentStatusPlacesChild: any parent may have a subtask, and its
 // status decides which column the child lands in.
 func TestHandleCreateTask_ParentStatusPlacesChild(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		parent string
 		want   types.Status
@@ -354,6 +363,7 @@ func TestHandleCreateTask_ParentStatusPlacesChild(t *testing.T) {
 }
 
 func TestHandleCreateTask_AllowsInProgressParent(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-10", "proj-1", "in_progress")
 
@@ -377,6 +387,7 @@ func TestHandleCreateTask_AllowsInProgressParent(t *testing.T) {
 }
 
 func TestHandleCreateTask_MultipleSubtasks(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-11", "proj-1", "backlog")
 
@@ -411,6 +422,7 @@ func TestHandleCreateTask_MultipleSubtasks(t *testing.T) {
 }
 
 func TestHandleCreateTask_TitleWithSpecialChars(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-12", "proj-1", "backlog")
 
@@ -434,6 +446,7 @@ func TestHandleCreateTask_TitleWithSpecialChars(t *testing.T) {
 }
 
 func TestTaskComplete_PlanMode_RequiresSubtasks(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "plan-task-1", "proj-1", "backlog")
 
@@ -452,6 +465,7 @@ func TestTaskComplete_PlanMode_RequiresSubtasks(t *testing.T) {
 }
 
 func TestTaskComplete_PlanMode_AllowsWithSubtasks(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "plan-parent-1", "proj-1", "backlog")
 
@@ -538,6 +552,7 @@ func seedCreateTaskHistory(t *testing.T, s *store.Store, planTaskID, threadID, c
 }
 
 func TestTaskComplete_PlanMode_CountsHistoryCreateTask(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	plan := createParentTask(t, te.store, "plan-task-h1", "proj-1", "backlog")
 
@@ -558,6 +573,7 @@ func TestTaskComplete_PlanMode_CountsHistoryCreateTask(t *testing.T) {
 }
 
 func TestTaskComplete_PlanMode_HistoryFailedCreateTaskDoesNotCount(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	plan := createParentTask(t, te.store, "plan-task-h2", "proj-1", "backlog")
 	thread := &types.TaskThread{ID: "thread-h2", TaskID: plan.ID, Name: "Main", IsActive: true, CreatedAt: time.Now().UTC()}
@@ -577,6 +593,7 @@ func TestTaskComplete_PlanMode_HistoryFailedCreateTaskDoesNotCount(t *testing.T)
 }
 
 func TestPlanCreatedTaskIDs_MergesHistoryAndState(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	plan := createParentTask(t, te.store, "plan-task-h4", "proj-1", "backlog")
 	thread := &types.TaskThread{ID: "thread-h4", TaskID: plan.ID, Name: "Main", IsActive: true, CreatedAt: time.Now().UTC()}
@@ -606,6 +623,7 @@ func TestPlanCreatedTaskIDs_MergesHistoryAndState(t *testing.T) {
 }
 
 func TestHandleCreateTask_UsesConfigDefaultsForAutoMerge(t *testing.T) {
+	t.Parallel()
 	autoMerge := true
 	subtasksAutoMerge := true
 	te := newTestExecutorWithConfig(t, autoMerge, subtasksAutoMerge)
@@ -641,6 +659,7 @@ func TestHandleCreateTask_UsesConfigDefaultsForAutoMerge(t *testing.T) {
 }
 
 func TestHandleCreateTask_SubtaskInheritsSubtasksAutoMergeAsAutoMerge(t *testing.T) {
+	t.Parallel()
 	// Config defaults: autoMerge=false, subtasksAutoMerge=true
 	te := newTestExecutorWithConfig(t, false, true)
 	// Parent has subtasks_auto_merge=true (from config or explicit)
@@ -680,6 +699,7 @@ func TestHandleCreateTask_SubtaskInheritsSubtasksAutoMergeAsAutoMerge(t *testing
 }
 
 func TestHandleCreateTask_NoConfigDefaults_UsesZeroValues(t *testing.T) {
+	t.Parallel()
 	// Config with defaults disabled
 	te := newTestExecutorWithConfig(t, false, false)
 	parent := createParentTask(t, te.store, "parent-no-defaults", "proj-nd", "backlog")
@@ -709,6 +729,7 @@ func TestHandleCreateTask_NoConfigDefaults_UsesZeroValues(t *testing.T) {
 }
 
 func TestTaskComplete_StandardMode_NoValidation(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	createProject(t, te.store, "proj-1", "proj-1")
 	now := time.Now().UTC()
@@ -742,6 +763,7 @@ func TestTaskComplete_StandardMode_NoValidation(t *testing.T) {
 // TestExecuteTool_CreateTask_ErrorFeedback verifies that create_task errors
 // are included in the result string returned to the LLM (not silently dropped).
 func TestExecuteTool_CreateTask_ErrorFeedback(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-feedback", "proj-fb", "backlog")
 
@@ -852,6 +874,7 @@ func createdTask(t *testing.T, s *store.Store, result string) *types.Task {
 // TestHandleCreateTask_RootInheritsOriginBaseBranch: a created root task lands on the base branch
 // the person set on the originating task.
 func TestHandleCreateTask_RootInheritsOriginBaseBranch(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	origin := createOriginTask(t, te.store, "origin-branch-1", "proj-branch-1", "", "test")
 
@@ -878,6 +901,7 @@ func TestHandleCreateTask_RootInheritsOriginBaseBranch(t *testing.T) {
 // TestHandleCreateTask_SubtaskGetsNoBaseBranch: a nested task merges into its parent's branch, so it
 // carries no base branch of its own.
 func TestHandleCreateTask_SubtaskGetsNoBaseBranch(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	origin := createOriginTask(t, te.store, "origin-branch-2", "proj-branch-2", "", "test")
 
@@ -902,6 +926,7 @@ func TestHandleCreateTask_SubtaskGetsNoBaseBranch(t *testing.T) {
 // TestHandleCreateTask_RootFromSubtaskOriginGetsNoBaseBranch: a subtask's base_ref is its parent's
 // branch, not a configured one, so it passes no base branch on.
 func TestHandleCreateTask_RootFromSubtaskOriginGetsNoBaseBranch(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	origin := createOriginTask(t, te.store, "origin-branch-3", "proj-branch-3", "origin-branch-3-parent", "task/origin-branch-3-x7q2")
 
@@ -921,6 +946,7 @@ func TestHandleCreateTask_RootFromSubtaskOriginGetsNoBaseBranch(t *testing.T) {
 // TestHandleCreateTask_SkipsOriginBaseBranchThatIsNotABranchName: mergeInto creates a branch named by
 // base_ref when it is missing, so a name git would refuse is not copied.
 func TestHandleCreateTask_SkipsOriginBaseBranchThatIsNotABranchName(t *testing.T) {
+	t.Parallel()
 	te := newTestExecutor(t)
 	origin := createOriginTask(t, te.store, "origin-branch-4", "proj-branch-4", "", "release..next")
 

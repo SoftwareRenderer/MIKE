@@ -13,8 +13,9 @@ import (
 	"mike/backend/types"
 )
 
-// newReadTestExecutor creates a TaskExecutor with a test store and worktree for testing read_file.
-func newReadTestExecutor(t *testing.T, worktreePath string) *TaskExecutor {
+// newToolTestExecutor creates a TaskExecutor with no LSP manager — the state a host-side tool call
+// runs against when no language extension is installed.
+func newToolTestExecutor(t *testing.T, worktreePath string) *TaskExecutor {
 	t.Helper()
 	s := testStore(t)
 	appStreamMgr := newTestStreamMgr(t, s, nil)
@@ -49,8 +50,9 @@ func makeTestTask(t *testing.T, s *store.Store, projectID, taskID string) *types
 }
 
 func TestReadFile_NoTruncation_SmallFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	te := newReadTestExecutor(t, dir)
+	te := newToolTestExecutor(t, dir)
 	task := makeTestTask(t, te.store, "proj-read-1", "task-read-1")
 
 	// Write a small file
@@ -76,8 +78,9 @@ func TestReadFile_NoTruncation_SmallFile(t *testing.T) {
 }
 
 func TestReadFile_Truncation_LargeFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	te := newReadTestExecutor(t, dir)
+	te := newToolTestExecutor(t, dir)
 	task := makeTestTask(t, te.store, "proj-read-2", "task-read-2")
 
 	// Write a file larger than 50KB
@@ -108,8 +111,9 @@ func TestReadFile_Truncation_LargeFile(t *testing.T) {
 }
 
 func TestReadFile_Offset_AppliedBeforeTruncation(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	te := newReadTestExecutor(t, dir)
+	te := newToolTestExecutor(t, dir)
 	task := makeTestTask(t, te.store, "proj-read-3", "task-read-3")
 
 	// Write a file larger than 50KB with identifiable line content
@@ -149,8 +153,9 @@ func TestReadFile_Offset_AppliedBeforeTruncation(t *testing.T) {
 }
 
 func TestReadFile_OffsetAndLimit(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	te := newReadTestExecutor(t, dir)
+	te := newToolTestExecutor(t, dir)
 	task := makeTestTask(t, te.store, "proj-read-4", "task-read-4")
 
 	// Write a file with 100 lines
@@ -186,8 +191,9 @@ func TestReadFile_OffsetAndLimit(t *testing.T) {
 }
 
 func TestReadFile_LimitOnly(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	te := newReadTestExecutor(t, dir)
+	te := newToolTestExecutor(t, dir)
 	task := makeTestTask(t, te.store, "proj-read-5", "task-read-5")
 
 	// Write a file with 50 lines
@@ -220,8 +226,9 @@ func TestReadFile_LimitOnly(t *testing.T) {
 }
 
 func TestReadFile_OffsetPastEnd(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	te := newReadTestExecutor(t, dir)
+	te := newToolTestExecutor(t, dir)
 	task := makeTestTask(t, te.store, "proj-read-6", "task-read-6")
 
 	// Write a file with 10 lines
@@ -254,8 +261,9 @@ func TestReadFile_OffsetPastEnd(t *testing.T) {
 // `slice bounds out of range [217:194]` (read_file with offset beyond the file's
 // line count must surface an error, never panic).
 func TestReadFile_OffsetPastEnd_NoPanic(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	te := newReadTestExecutor(t, dir)
+	te := newToolTestExecutor(t, dir)
 	task := makeTestTask(t, te.store, "proj-read-8", "task-read-8")
 
 	// 194 lines exactly (matches the panic: len(lines) == 194).
@@ -282,8 +290,9 @@ func TestReadFile_OffsetPastEnd_NoPanic(t *testing.T) {
 // TestReadFile_OffsetValid_LimitClamped verifies that a valid offset with an
 // oversized limit is silently clamped to the remaining lines (no error).
 func TestReadFile_OffsetValid_LimitClamped(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	te := newReadTestExecutor(t, dir)
+	te := newToolTestExecutor(t, dir)
 	task := makeTestTask(t, te.store, "proj-read-9", "task-read-9")
 
 	lines := make([]string, 100)
@@ -317,8 +326,9 @@ func TestReadFile_OffsetValid_LimitClamped(t *testing.T) {
 // TestReadFile_LimitOnly_Clamped verifies an oversized limit without an offset is
 // silently clamped to the total line count.
 func TestReadFile_LimitOnly_Clamped(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	te := newReadTestExecutor(t, dir)
+	te := newToolTestExecutor(t, dir)
 	task := makeTestTask(t, te.store, "proj-read-10", "task-read-10")
 
 	lines := make([]string, 50)
@@ -345,8 +355,9 @@ func TestReadFile_LimitOnly_Clamped(t *testing.T) {
 }
 
 func TestReadFile_OffsetAndLimit_AfterTruncationBoundary(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	te := newReadTestExecutor(t, dir)
+	te := newToolTestExecutor(t, dir)
 	task := makeTestTask(t, te.store, "proj-read-7", "task-read-7")
 
 	// Write a file larger than 50KB

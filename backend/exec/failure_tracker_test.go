@@ -29,6 +29,7 @@ func mixedResults(sigs []string) []turnResult {
 }
 
 func TestFailureTracker_SameCallFailingIncrements(t *testing.T) {
+	t.Parallel()
 	var ft failureTracker
 	sig := "read_file:{\"path\":\"foo.txt\"}"
 
@@ -44,6 +45,7 @@ func TestFailureTracker_SameCallFailingIncrements(t *testing.T) {
 }
 
 func TestFailureTracker_SuccessResets(t *testing.T) {
+	t.Parallel()
 	var ft failureTracker
 	sig := "read_file:{\"path\":\"foo.txt\"}"
 
@@ -65,6 +67,7 @@ func TestFailureTracker_SuccessResets(t *testing.T) {
 }
 
 func TestFailureTracker_DifferentCallResets(t *testing.T) {
+	t.Parallel()
 	var ft failureTracker
 	sigA := "read_file:{\"path\":\"foo.txt\"}"
 	sigB := "read_file:{\"path\":\"bar.txt\"}"
@@ -88,6 +91,7 @@ func TestFailureTracker_DifferentCallResets(t *testing.T) {
 }
 
 func TestFailureTracker_TextOnlyResets(t *testing.T) {
+	t.Parallel()
 	var ft failureTracker
 	sig := "read_file:{\"path\":\"foo.txt\"}"
 
@@ -105,6 +109,7 @@ func TestFailureTracker_TextOnlyResets(t *testing.T) {
 }
 
 func TestFailureTracker_MultipleIdenticalInOneTurnCountsAsOne(t *testing.T) {
+	t.Parallel()
 	var ft failureTracker
 	sig := "read_file:{\"path\":\"foo.txt\"}"
 
@@ -120,6 +125,7 @@ func TestFailureTracker_MultipleIdenticalInOneTurnCountsAsOne(t *testing.T) {
 }
 
 func TestFailureTracker_MixedSuccessFailureResets(t *testing.T) {
+	t.Parallel()
 	var ft failureTracker
 	sigA := "read_file:{\"path\":\"foo.txt\"}"
 	sigB := "write_file:{\"path\":\"bar.txt\"}"
@@ -135,6 +141,7 @@ func TestFailureTracker_MixedSuccessFailureResets(t *testing.T) {
 }
 
 func TestFailureTracker_ReachesMax(t *testing.T) {
+	t.Parallel()
 	var ft failureTracker
 	sig := "read_file:{\"path\":\"foo.txt\"}"
 	maxFailures := 3
@@ -153,6 +160,7 @@ func TestFailureTracker_ReachesMax(t *testing.T) {
 }
 
 func TestFailureTracker_DifferentFailuresInOneTurn(t *testing.T) {
+	t.Parallel()
 	var ft failureTracker
 	sigA := "read_file:{\"path\":\"foo.txt\"}"
 	sigB := "bash:{\"command\":\"ls\"}"
@@ -178,6 +186,7 @@ func TestFailureTracker_DifferentFailuresInOneTurn(t *testing.T) {
 }
 
 func TestFailureTracker_ResetClearsState(t *testing.T) {
+	t.Parallel()
 	var ft failureTracker
 	ft.lastFailureSig = "some_sig"
 	ft.failCount = 5

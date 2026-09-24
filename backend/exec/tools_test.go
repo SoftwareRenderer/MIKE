@@ -18,6 +18,7 @@ import (
 // --- isSandboxableTool Tests ---
 
 func TestIsSandboxableTool(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		want bool
@@ -40,6 +41,7 @@ func TestIsSandboxableTool(t *testing.T) {
 }
 
 func TestIsLSPTool(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		want bool
@@ -65,6 +67,7 @@ func TestIsLSPTool(t *testing.T) {
 // --- executeTool with sandbox callbacks ---
 
 func TestExecuteTool_ReadFile_Sandboxed(t *testing.T) {
+	t.Parallel()
 	// Create a temp file to simulate sandbox read
 	dir := t.TempDir()
 	testFile := filepath.Join(dir, "hello.txt")
@@ -91,6 +94,7 @@ func TestExecuteTool_ReadFile_Sandboxed(t *testing.T) {
 }
 
 func TestExecuteTool_ReadFile_HostFallback(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	testFile := filepath.Join(dir, "host.txt")
 	expectedContent := "hello from host"
@@ -111,6 +115,7 @@ func TestExecuteTool_ReadFile_HostFallback(t *testing.T) {
 }
 
 func TestExecuteTool_ReadFile_RelativeParentIsAHostPath(t *testing.T) {
+	t.Parallel()
 	// A task whose project runs without a sandbox works on the host: ".." resolves against
 	// the worktree and reads whatever it names. The boundary for such a task is the
 	// project's sandbox_enabled column; TestSandboxedTaskWithoutBridgeRefusesEveryHostTool
@@ -135,6 +140,7 @@ func TestExecuteTool_ReadFile_RelativeParentIsAHostPath(t *testing.T) {
 }
 
 func TestExecuteTool_WriteFile_Sandboxed(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	te := newBareTestExecutor(t)
 	var writtenPath, writtenContent string
@@ -176,6 +182,7 @@ func TestExecuteTool_WriteFile_Sandboxed(t *testing.T) {
 }
 
 func TestExecuteTool_WriteFile_HostFallback(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	te := newBareTestExecutor(t)
 
@@ -202,6 +209,7 @@ func TestExecuteTool_WriteFile_HostFallback(t *testing.T) {
 }
 
 func TestExecuteTool_WriteFile_WritesWhereThePathNames(t *testing.T) {
+	t.Parallel()
 	// The host write is the mirror of the host read: a relative path resolves against the
 	// worktree, ".." and absolute paths name whatever they name, and the parent chain is
 	// created as needed. A task that must not touch the host is a task whose project is
@@ -239,6 +247,7 @@ func TestExecuteTool_WriteFile_WritesWhereThePathNames(t *testing.T) {
 }
 
 func TestExecuteTool_WriteFile_CreatesNestedDirs(t *testing.T) {
+	t.Parallel()
 	// A brand-new nested subdirectory under the worktree is created on the way to the
 	// file (no sandboxWrite injected), which keeps the historical 0644 mode.
 	worktree := t.TempDir()
@@ -279,6 +288,7 @@ func TestExecuteTool_WriteFile_CreatesNestedDirs(t *testing.T) {
 }
 
 func TestExecuteTool_WriteFile_DirCreation(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	te := newBareTestExecutor(t)
 
@@ -326,6 +336,7 @@ func assertTreeEquals(t *testing.T, dir string, want []string) {
 }
 
 func TestExecuteTool_TaskComplete(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 	result, ok := te.executeTool(context.Background(), "request_review", map[string]any{}, "/tmp/worktree", &types.Task{}, &executionState{}, nil)
 	if !ok {
@@ -337,6 +348,7 @@ func TestExecuteTool_TaskComplete(t *testing.T) {
 }
 
 func TestExecuteTool_AskQuestion(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 	result, ok := te.executeTool(context.Background(), "ask_question", map[string]any{"question": "What framework should I use?"}, "/tmp/worktree", &types.Task{}, &executionState{}, nil)
 	if !ok {
@@ -348,6 +360,7 @@ func TestExecuteTool_AskQuestion(t *testing.T) {
 }
 
 func TestExecuteTool_AskQuestion_Empty(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 	result, ok := te.executeTool(context.Background(), "ask_question", map[string]any{"question": ""}, "/tmp/worktree", &types.Task{}, &executionState{}, nil)
 	if ok {
@@ -359,6 +372,7 @@ func TestExecuteTool_AskQuestion_Empty(t *testing.T) {
 }
 
 func TestExecuteTool_UnknownTool(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 	result, ok := te.executeTool(context.Background(), "unknown_tool", map[string]any{}, "/tmp/worktree", &types.Task{}, &executionState{}, nil)
 	if ok {
@@ -370,6 +384,7 @@ func TestExecuteTool_UnknownTool(t *testing.T) {
 }
 
 func TestExecuteTool_ReadFile_CallbackError(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 
 	sandboxRead := func(_ context.Context, path string) ([]byte, error) {
@@ -388,6 +403,7 @@ func TestExecuteTool_ReadFile_CallbackError(t *testing.T) {
 // --- read_file with offset/limit Tests ---
 
 func TestExecuteTool_ReadFile_OffsetLimit(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10"
 	testFile := filepath.Join(dir, "test.txt")
@@ -469,6 +485,7 @@ func TestExecuteTool_ReadFile_OffsetLimit(t *testing.T) {
 // --- edit_file Tests ---
 
 func TestExecuteTool_EditFile_SingleEdit(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := "hello world\nfoo bar\nbaz qux"
 	testFile := filepath.Join(dir, "test.txt")
@@ -500,6 +517,7 @@ func TestExecuteTool_EditFile_SingleEdit(t *testing.T) {
 }
 
 func TestExecuteTool_EditFile_MultipleEdits(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := "alpha\nbeta\ngamma\ndelta"
 	testFile := filepath.Join(dir, "test.txt")
@@ -573,6 +591,7 @@ func (r *sandboxEditRecorder) callback(dir string) editFunc {
 }
 
 func TestExecuteTool_EditFile_SandboxDelegation(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := "alpha\nbeta\ngamma\ndelta"
 	testFile := filepath.Join(dir, "test.txt")
@@ -631,6 +650,7 @@ func TestExecuteTool_EditFile_SandboxDelegation(t *testing.T) {
 }
 
 func TestExecuteTool_EditFile_SandboxDelegation_Error(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	testFile := filepath.Join(dir, "test.txt")
 	if err := os.WriteFile(testFile, []byte("hello world"), 0644); err != nil {
@@ -660,6 +680,7 @@ func TestExecuteTool_EditFile_SandboxDelegation_Error(t *testing.T) {
 }
 
 func TestExecuteTool_EditFile_SandboxDelegation_Recovery(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	testFile := filepath.Join(dir, "test.txt")
 	if err := os.WriteFile(testFile, []byte("line one\nline two\nline three"), 0644); err != nil {
@@ -747,6 +768,7 @@ func BenchmarkExecuteTool_EditFile(b *testing.B) {
 }
 
 func TestExecuteTool_EditFile_OldTextNotFound(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := "hello world"
 	testFile := filepath.Join(dir, "test.txt")
@@ -772,6 +794,7 @@ func TestExecuteTool_EditFile_OldTextNotFound(t *testing.T) {
 }
 
 func TestExecuteTool_EditFile_DuplicateOldText(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := "foo\nbar\nfoo\nbaz"
 	testFile := filepath.Join(dir, "test.txt")
@@ -797,6 +820,7 @@ func TestExecuteTool_EditFile_DuplicateOldText(t *testing.T) {
 }
 
 func TestExecuteTool_EditFile_OverlappingEdits(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := "abcdefgh"
 	testFile := filepath.Join(dir, "test.txt")
@@ -823,6 +847,7 @@ func TestExecuteTool_EditFile_OverlappingEdits(t *testing.T) {
 }
 
 func TestExecuteTool_EditFile_OutsideWorktreeIsAHostEdit(t *testing.T) {
+	t.Parallel()
 	// edit_file reads and writes the same path, so on a host task it edits whatever
 	// ".." names — one rule for both halves, never a middle ground where the read
 	// escapes and the write does not.
@@ -860,6 +885,7 @@ func TestExecuteTool_EditFile_OutsideWorktreeIsAHostEdit(t *testing.T) {
 }
 
 func TestExecuteTool_EditFile_EmptyOldText(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	testFile := filepath.Join(dir, "test.txt")
 	if err := os.WriteFile(testFile, []byte("content"), 0644); err != nil {
@@ -884,6 +910,7 @@ func TestExecuteTool_EditFile_EmptyOldText(t *testing.T) {
 }
 
 func TestExecuteTool_EditFile_NoEdits(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	testFile := filepath.Join(dir, "test.txt")
 	if err := os.WriteFile(testFile, []byte("content"), 0644); err != nil {
@@ -906,6 +933,7 @@ func TestExecuteTool_EditFile_NoEdits(t *testing.T) {
 }
 
 func TestExecuteTool_EditFile_Sandboxed(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := "original content"
 	testFile := filepath.Join(dir, "test.txt")
@@ -956,6 +984,7 @@ func TestExecuteTool_EditFile_Sandboxed(t *testing.T) {
 }
 
 func TestExecuteTool_EditFile_MissingFile(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 	editsJSON, _ := json.Marshal([]map[string]any{
 		{"oldText": "x", "newText": "y"},
@@ -976,6 +1005,7 @@ func TestExecuteTool_EditFile_MissingFile(t *testing.T) {
 // --- bash Tests ---
 
 func TestExecuteTool_Bash_Direct(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	te := newBareTestExecutor(t)
 
@@ -992,6 +1022,7 @@ func TestExecuteTool_Bash_Direct(t *testing.T) {
 }
 
 func TestExecuteTool_Bash_ANSIStripping(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	te := newBareTestExecutor(t)
 
@@ -1016,6 +1047,7 @@ func TestExecuteTool_Bash_ANSIStripping(t *testing.T) {
 }
 
 func TestExecuteTool_Bash_FailedWithANSI(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	te := newBareTestExecutor(t)
 
@@ -1045,6 +1077,7 @@ func TestExecuteTool_Bash_FailedWithANSI(t *testing.T) {
 // things that must SURVIVE — tabs, CRs, newlines and non-ASCII text. Progress bars and
 // test-runner output are the real inputs, so both the noise and the payload come from there.
 func TestStripANSI(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   string
@@ -1107,6 +1140,7 @@ func TestStripANSI(t *testing.T) {
 }
 
 func TestExecuteTool_WriteFile_CallbackError(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 
 	sandboxWrite := func(_ context.Context, path, content string) error {
@@ -1130,6 +1164,7 @@ func TestExecuteTool_WriteFile_CallbackError(t *testing.T) {
 // Callbacks return bridge errors, recoverBridge refreshes them, and the retry succeeds.
 
 func TestExecuteTool_ReadFile_BridgeRecovery(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 	dir := t.TempDir()
 	testFile := filepath.Join(dir, "hello.txt")
@@ -1171,6 +1206,7 @@ func TestExecuteTool_ReadFile_BridgeRecovery(t *testing.T) {
 }
 
 func TestExecuteTool_ReadFile_NoRecoveryOnNonBridgeError(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 
 	recoveryCalled := false
@@ -1197,6 +1233,7 @@ func TestExecuteTool_ReadFile_NoRecoveryOnNonBridgeError(t *testing.T) {
 }
 
 func TestExecuteTool_WriteFile_BridgeRecovery(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 	dir := t.TempDir()
 
@@ -1243,6 +1280,7 @@ func TestExecuteTool_WriteFile_BridgeRecovery(t *testing.T) {
 }
 
 func TestExecuteTool_Bash_BridgeRecovery(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 
 	execAttempts := 0
@@ -1279,6 +1317,7 @@ func TestExecuteTool_Bash_BridgeRecovery(t *testing.T) {
 }
 
 func TestExecuteTool_Bash_BridgeRecoveryStreaming(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 
 	execAttempts := 0
@@ -1324,6 +1363,7 @@ func TestExecuteTool_Bash_BridgeRecoveryStreaming(t *testing.T) {
 }
 
 func TestExecuteTool_Bash_NoRecoveryOnNonBridgeError(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 
 	execAttempts := 0
@@ -1359,6 +1399,7 @@ func TestExecuteTool_Bash_NoRecoveryOnNonBridgeError(t *testing.T) {
 }
 
 func TestExecuteTool_EditFile_BridgeRecovery(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 	dir := t.TempDir()
 	testFile := filepath.Join(dir, "test.txt")
@@ -1421,6 +1462,7 @@ func TestExecuteTool_EditFile_BridgeRecovery(t *testing.T) {
 }
 
 func TestExecuteTool_EditFile_WriteBridgeRecovery(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 	dir := t.TempDir()
 	testFile := filepath.Join(dir, "test.txt")
@@ -1474,6 +1516,7 @@ func TestExecuteTool_EditFile_WriteBridgeRecovery(t *testing.T) {
 }
 
 func TestExecuteTool_RecoveryReturnsNil(t *testing.T) {
+	t.Parallel()
 	// When recoverBridge returns nil (recovery failed), the error propagates
 	te := newBareTestExecutor(t)
 
@@ -1496,6 +1539,7 @@ func TestExecuteTool_RecoveryReturnsNil(t *testing.T) {
 }
 
 func TestExecuteTool_ReadFile_ClientClosedRecovery(t *testing.T) {
+	t.Parallel()
 	// "client closed" error (from Client.Close()) should trigger bridge recovery.
 	// This happens when the sandbox is recreated (e.g., operating mode change)
 	// and a tool call hits the old, closed client.
@@ -1539,6 +1583,7 @@ func TestExecuteTool_ReadFile_ClientClosedRecovery(t *testing.T) {
 }
 
 func TestExecuteTool_ReadFile_ConnectionClosedRecovery(t *testing.T) {
+	t.Parallel()
 	// "connection closed" error (from readLoop cleanup) should trigger bridge recovery.
 	// This happens when the bridge readLoop exits and delivers error frames to pending requests.
 	te := newBareTestExecutor(t)
@@ -1581,6 +1626,7 @@ func TestExecuteTool_ReadFile_ConnectionClosedRecovery(t *testing.T) {
 }
 
 func TestExecuteTool_Bash_ClientClosedRecovery(t *testing.T) {
+	t.Parallel()
 	// "client closed" error from bash tool should also trigger recovery.
 	te := newBareTestExecutor(t)
 

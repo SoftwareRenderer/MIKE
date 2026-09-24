@@ -91,6 +91,7 @@ func exCmd(t *testing.T, dir string, args ...string) string {
 }
 
 func TestWriteTaskFilePutsTheBytesWhereTheTasksActionsRun(t *testing.T) {
+	t.Parallel()
 	te, _, wtPath := uploadFixture(t, false)
 
 	path, err := te.WriteTaskFile("p1", "t1", "report.pdf", []byte("%PDF-1.7\x00\xff"))
@@ -120,6 +121,7 @@ func TestWriteTaskFilePutsTheBytesWhereTheTasksActionsRun(t *testing.T) {
 // name the path the tools open. The fixture builds no sandbox manager, so this also proves no container is
 // needed to write through — the bytes go to the host path that mount is backed by.
 func TestWriteTaskFileAnswersASandboxedTaskWithItsOwnMountPath(t *testing.T) {
+	t.Parallel()
 	te, _, wtPath := uploadFixture(t, true)
 
 	path, err := te.WriteTaskFile("p1", "t1", "archive.zip", []byte("PK\x03\x04"))
@@ -136,6 +138,7 @@ func TestWriteTaskFileAnswersASandboxedTaskWithItsOwnMountPath(t *testing.T) {
 }
 
 func TestWriteTaskFileGivesTwoUploadsOfOneNameTheirOwnPaths(t *testing.T) {
+	t.Parallel()
 	te, _, wtPath := uploadFixture(t, false)
 
 	first, err := te.WriteTaskFile("p1", "t1", "data.csv", []byte("a,b\n1,2\n"))
@@ -167,6 +170,7 @@ func TestWriteTaskFileGivesTwoUploadsOfOneNameTheirOwnPaths(t *testing.T) {
 // cannot do to an excluded directory — `add -A`, `stash -u`, `clean -fd`, a restore — is owned by
 // backend/git's exclude tests, which assert it against the pattern directly.
 func TestWriteTaskFileKeepsTheUploadOutOfGit(t *testing.T) {
+	t.Parallel()
 	te, _, wtPath := uploadFixture(t, false)
 
 	if _, err := te.WriteTaskFile("p1", "t1", "payload.bin", []byte("x")); err != nil {
@@ -178,6 +182,7 @@ func TestWriteTaskFileKeepsTheUploadOutOfGit(t *testing.T) {
 }
 
 func TestWriteTaskFileRefusesANameThatIsNotASingleFileName(t *testing.T) {
+	t.Parallel()
 	te, _, wtPath := uploadFixture(t, false)
 
 	for _, name := range []string{"../../etc/passwd", "../escape.txt", "a/b.txt", "/abs/path.txt", "."} {
@@ -191,6 +196,7 @@ func TestWriteTaskFileRefusesANameThatIsNotASingleFileName(t *testing.T) {
 }
 
 func TestWriteTaskFileRefusesAnEmptyFileAndOneOverTheLimit(t *testing.T) {
+	t.Parallel()
 	te, _, _ := uploadFixture(t, false)
 
 	if _, err := te.WriteTaskFile("p1", "t1", "empty.bin", nil); err == nil {
@@ -203,6 +209,7 @@ func TestWriteTaskFileRefusesAnEmptyFileAndOneOverTheLimit(t *testing.T) {
 }
 
 func TestWriteTaskFileNamesAMissingTaskAsNotFound(t *testing.T) {
+	t.Parallel()
 	te, _, _ := uploadFixture(t, false)
 
 	if _, err := te.WriteTaskFile("p1", "no-such-task", "note.txt", []byte("x")); !errs.IsNotFound(err) {
@@ -213,6 +220,7 @@ func TestWriteTaskFileNamesAMissingTaskAsNotFound(t *testing.T) {
 // A task without a worktree is refused rather than served by preparing one, which would create a branch and
 // rewrite the task row as a side effect of a paste.
 func TestWriteTaskFileRefusesATaskWithoutAWorktree(t *testing.T) {
+	t.Parallel()
 	te, _, wtPath := uploadFixture(t, true)
 
 	if err := os.RemoveAll(wtPath); err != nil {
@@ -229,6 +237,7 @@ func TestWriteTaskFileRefusesATaskWithoutAWorktree(t *testing.T) {
 
 // An executor built as a struct literal has no worktree manager; the answer is the same refusal, not a panic.
 func TestWriteTaskFileRefusesWhenThereIsNoWorktreeManager(t *testing.T) {
+	t.Parallel()
 	te, _, _ := uploadFixture(t, false)
 	te.worktreeMgr = nil
 
@@ -240,6 +249,7 @@ func TestWriteTaskFileRefusesWhenThereIsNoWorktreeManager(t *testing.T) {
 // A symlink planted where the uploads directory belongs must not be followed out of the worktree — the
 // task's own actions can create it.
 func TestWriteTaskFileDoesNotWriteThroughASymlinkedUploadsDir(t *testing.T) {
+	t.Parallel()
 	te, _, wtPath := uploadFixture(t, false)
 
 	outside := filepath.Join(t.TempDir(), "outside")

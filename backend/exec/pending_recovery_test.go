@@ -39,6 +39,7 @@ func seedPendingTask(t *testing.T, te *TaskExecutor, projectID, id string, roles
 // TestRecoverStaleTasksNormalizesPendingRows checks the startup cleanup of tasks stranded
 // in "In Progress + Pending", and that every legitimately pending row is left alone.
 func TestRecoverStaleTasksNormalizesPendingRows(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	proj := createProject(t, te.store, "proj-pend", "Pending")
 
@@ -111,6 +112,7 @@ func TestRecoverStaleTasksNormalizesPendingRows(t *testing.T) {
 // TestRecoverStaleTasksLeavesPendingCountReported pins that the return value stays the
 // count of recovered in-flight rows, so the startup log keeps the two jobs apart.
 func TestRecoverStaleTasksLeavesPendingCountReported(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	proj := createProject(t, te.store, "proj-pend-cnt", "Pending Count")
 

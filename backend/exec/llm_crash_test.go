@@ -204,6 +204,7 @@ func rolesInOrder(t *testing.T, te *TaskExecutor, taskID, threadID string) []str
 // dies mid-answer on a turn that already ran tools. The dead call must leave no assistant row: that
 // row is what marks its prompt as answered.
 func TestLLMCrashMidTurnWithToolCallLeavesNoPartialTurn(t *testing.T) {
+	t.Parallel()
 	srv, calls := crashLLM(t,
 		func(w http.ResponseWriter) { sseToolCall(w, "call_1", "no-such-file.txt") },
 		func(w http.ResponseWriter) { sseStreamedThenAbort(w, "Let me explain what I found so") },
@@ -285,6 +286,7 @@ func lastErrorRow(msgs []types.TaskMessage) string {
 // TestLLMProviderDiesBeforeFirstFrameRetriesThenFailsIntoReview covers the provider that dies after
 // the headers and before its first frame: the body ends cleanly, so the read reports no error.
 func TestLLMProviderDiesBeforeFirstFrameRetriesThenFailsIntoReview(t *testing.T) {
+	t.Parallel()
 	srv, calls := crashLLM(t, sseAbortedBeforeFirstFrame)
 	te, _, projectID, initialSHA := setupExecutorWithGit(t)
 	const taskID = "crash-no-frames"
@@ -314,6 +316,7 @@ func TestLLMProviderDiesBeforeFirstFrameRetriesThenFailsIntoReview(t *testing.T)
 // terminal frames and all - with no text, reasoning or tool call. Nothing to retry, nothing to
 // settle on, and no reason for the task to keep waiting.
 func TestLLMCompletionWithNoContentFailsIntoReview(t *testing.T) {
+	t.Parallel()
 	srv, calls := crashLLM(t, sseEmptyCompletion)
 	te, _, projectID, initialSHA := setupExecutorWithGit(t)
 	const taskID = "answered-with-nothing"
@@ -367,6 +370,7 @@ func mustMessages(t *testing.T, te *TaskExecutor, taskID, threadID string) []typ
 // TestAbortedStreamIsRetriedAndTheTurnCompletes: a provider that dies once is asked again by itself,
 // and the retry's answer is the turn's answer.
 func TestAbortedStreamIsRetriedAndTheTurnCompletes(t *testing.T) {
+	t.Parallel()
 	srv, calls := crashLLM(t,
 		func(w http.ResponseWriter) { sseStreamedThenAbort(w, "Let me explain what I found so") },
 		func(w http.ResponseWriter) { sseText(w, "The file is not there. Should I create it?") },

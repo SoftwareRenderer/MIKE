@@ -11,6 +11,7 @@ import (
 )
 
 func TestSyncTargetIntoTask_NoNewCommits(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	taskID := "task-no-new"
@@ -46,6 +47,7 @@ func TestSyncTargetIntoTask_NoNewCommits(t *testing.T) {
 }
 
 func TestSyncTargetIntoTask_CleanMerge(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	taskID := "task-clean"
@@ -93,6 +95,7 @@ func TestSyncTargetIntoTask_CleanMerge(t *testing.T) {
 
 // A conflicted sync enters merge_conflict and leaves the merge open for the model to resolve.
 func TestSyncTargetIntoTask_Conflict_EntersMergeConflictState(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	taskID := "task-conflict"
@@ -146,6 +149,7 @@ func TestSyncTargetIntoTask_Conflict_EntersMergeConflictState(t *testing.T) {
 }
 
 func TestSyncTargetIntoTask_WorktreeMissing(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	taskID := "task-no-worktree"
@@ -182,6 +186,7 @@ func TestSyncTargetIntoTask_WorktreeMissing(t *testing.T) {
 
 // A child syncs its parent's branch, not origin.
 func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	// Create parent task
@@ -262,6 +267,7 @@ func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 // warning, so the stash taken before it is the only thing protecting the task's unstaged work. When
 // that stash cannot be taken, the sync has to refuse.
 func TestSyncTargetIntoTask_KeepsUnstagedWorkWhenTheStashFails(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	taskID := "task-refuse"

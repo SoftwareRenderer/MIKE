@@ -48,6 +48,7 @@ func grantExecutor(t *testing.T, granted bool) *TaskExecutor {
 // task with no agent and for an agent with no approved folder, so a folder the user removed would otherwise
 // stay mounted in a running container.
 func TestAgentGrantHash_ChangeRebuildsTheContainer(t *testing.T) {
+	t.Parallel()
 	granted := grantExecutor(t, true)
 	plain := grantExecutor(t, false)
 
@@ -69,6 +70,7 @@ func TestAgentGrantHash_ChangeRebuildsTheContainer(t *testing.T) {
 // TestSandboxCreateOpts_GrantsOnlyTheTasksAgent: the create options carry the folders approved for the agent
 // this task runs, and none in any other case.
 func TestSandboxCreateOpts_GrantsOnlyTheTasksAgent(t *testing.T) {
+	t.Parallel()
 	te := grantExecutor(t, true)
 
 	grantedRun := &taskExecSetup{serverURL: agentURL}

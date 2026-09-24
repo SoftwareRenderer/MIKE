@@ -29,7 +29,7 @@ func TestBranchWatcherLifecycle(t *testing.T) {
 	runGit(t, repoDir, "init")
 	runGit(t, repoDir, "config", "user.email", "test@test.com")
 	runGit(t, repoDir, "config", "user.name", "Test")
-	writeFile(t, repoDir, "README.md", "# Test\n")
+	writeTestFile(t, repoDir, "README.md", "# Test\n")
 	runGit(t, repoDir, "add", "README.md")
 	runGit(t, repoDir, "commit", "-m", "Initial")
 
@@ -172,7 +172,7 @@ func TestBranchWatcherDetectsDetachedHEAD(t *testing.T) {
 	runGit(t, repoDir, "init")
 	runGit(t, repoDir, "config", "user.email", "test@test.com")
 	runGit(t, repoDir, "config", "user.name", "Test")
-	writeFile(t, repoDir, "README.md", "# Test\n")
+	writeTestFile(t, repoDir, "README.md", "# Test\n")
 	runGit(t, repoDir, "add", "README.md")
 	runGit(t, repoDir, "commit", "-m", "Initial")
 
@@ -244,7 +244,7 @@ func TestBranchWatcherDuplicateEvents(t *testing.T) {
 	runGit(t, repoDir, "init")
 	runGit(t, repoDir, "config", "user.email", "test@test.com")
 	runGit(t, repoDir, "config", "user.name", "Test")
-	writeFile(t, repoDir, "README.md", "# Test\n")
+	writeTestFile(t, repoDir, "README.md", "# Test\n")
 	runGit(t, repoDir, "add", "README.md")
 	runGit(t, repoDir, "commit", "-m", "Initial")
 
@@ -308,7 +308,7 @@ func TestGitPollerDetectsChanges(t *testing.T) {
 	runGit(t, repoDir, "init")
 	runGit(t, repoDir, "config", "user.email", "test@test.com")
 	runGit(t, repoDir, "config", "user.name", "Test")
-	writeFile(t, repoDir, "README.md", "# Test\n")
+	writeTestFile(t, repoDir, "README.md", "# Test\n")
 	runGit(t, repoDir, "add", "README.md")
 	runGit(t, repoDir, "commit", "-m", "Initial")
 
@@ -366,7 +366,7 @@ func TestGitPollerDetectsChanges(t *testing.T) {
 	}
 
 	// Make a change
-	writeFile(t, worktreePath, "new_file.txt", "Hello, world!\n")
+	writeTestFile(t, worktreePath, "new_file.txt", "Hello, world!\n")
 
 	// After change — the worktree manager should detect the new file
 	if out, err := wm.GitStatus(taskID); err != nil || strings.TrimSpace(out) == "" {
@@ -396,7 +396,7 @@ func TestWorktreeWatcherMultiTask(t *testing.T) {
 	runGit(t, repoDir, "init")
 	runGit(t, repoDir, "config", "user.email", "test@test.com")
 	runGit(t, repoDir, "config", "user.name", "Test")
-	writeFile(t, repoDir, "README.md", "# Test\n")
+	writeTestFile(t, repoDir, "README.md", "# Test\n")
 	runGit(t, repoDir, "add", "README.md")
 	runGit(t, repoDir, "commit", "-m", "Initial")
 
@@ -481,7 +481,7 @@ func TestWorktreeWatcherMultiTask(t *testing.T) {
 	// Write a file in each worktree and verify events are routed correctly
 	for _, taskID := range taskIDs {
 		worktreePath := filepath.Join(worktreesDir, projID, taskID)
-		writeFile(t, worktreePath, "test.txt", "content\n")
+		writeTestFile(t, worktreePath, "test.txt", "content\n")
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -511,7 +511,7 @@ func TestWorktreeWatcherWorkerPoolBounds(t *testing.T) {
 	runGit(t, repoDir, "init")
 	runGit(t, repoDir, "config", "user.email", "test@test.com")
 	runGit(t, repoDir, "config", "user.name", "Test")
-	writeFile(t, repoDir, "README.md", "# Test\n")
+	writeTestFile(t, repoDir, "README.md", "# Test\n")
 	runGit(t, repoDir, "add", "README.md")
 	runGit(t, repoDir, "commit", "-m", "Initial")
 
@@ -600,7 +600,7 @@ func TestBranchWatcherMultiProject(t *testing.T) {
 		runGit(t, repoDir, "init")
 		runGit(t, repoDir, "config", "user.email", "test@test.com")
 		runGit(t, repoDir, "config", "user.name", "Test")
-		writeFile(t, repoDir, "README.md", "# Test\n")
+		writeTestFile(t, repoDir, "README.md", "# Test\n")
 		runGit(t, repoDir, "add", "README.md")
 		runGit(t, repoDir, "commit", "-m", "Initial")
 		repoDirs = append(repoDirs, repoDir)
@@ -688,13 +688,5 @@ func runGit(t *testing.T, dir string, args ...string) {
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %s: %v: %s", args, err, out)
-	}
-}
-
-// writeFile writes content to a file in the specified directory.
-func writeFile(t *testing.T, dir, name, content string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
 	}
 }

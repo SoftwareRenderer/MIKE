@@ -13,8 +13,7 @@ import (
 )
 
 // chdirToRepoRoot points the CWD at the repo root so summarizeContext can render
-// prompts/summarize.tmpl. This package never uses t.Parallel(), so the
-// process-wide chdir is safe.
+// prompts/summarize.tmpl. Serial for the reason at chdirRepoRoot.
 func chdirToRepoRoot(t *testing.T) {
 	t.Helper()
 	_, thisFile, _, _ := runtime.Caller(0)
@@ -105,6 +104,7 @@ func TestSummarizeContext_NonEmptySummarySucceeds(t *testing.T) {
 // a summarization message exists, everything before it is dropped on the
 // assumption the summary captured it. An empty summary captures nothing.
 func TestBuildLLMContext_EmptySummaryErasesHistory(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "the entire conversation"},

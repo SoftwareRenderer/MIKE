@@ -34,12 +34,12 @@ func TestASubscribeDuringATurnNeitherLosesNorRepeatsTheFrame(t *testing.T) {
 		taskID := fmt.Sprintf("task-%d", i)
 		// The first frame is sent while nobody holds the task, so only the replay can bring it;
 		// the second races a subscribe for the same task.
-		asm.SendTaskEvent("proj-race", taskID, tokenText(fmt.Sprintf("seeded-%d", i)))
+		asm.SendTaskEvent("proj-race", taskID, tokenEvent(fmt.Sprintf("seeded-%d", i)))
 
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			asm.SendTaskEvent("proj-race", taskID, tokenText(fmt.Sprintf("raced-%d", i)))
+			asm.SendTaskEvent("proj-race", taskID, tokenEvent(fmt.Sprintf("raced-%d", i)))
 		}()
 		go func() {
 			defer wg.Done()

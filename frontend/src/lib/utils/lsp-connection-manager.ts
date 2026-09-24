@@ -78,7 +78,8 @@ interface Channel {
  * - Responses (has `id`) → routed by `_ch` hint or ID range check
  * - $server/lspReady → routed by `_ch` hint
  */
-class SharedLSPConnection {
+/** Exported so the routing tests can drive dispatchMessage without a socket. */
+export class SharedLSPConnection {
   private ws: WebSocket | null = null;
   private channels = new Map<number, Channel>();
   private nextChannelId = 0;

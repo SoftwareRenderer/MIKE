@@ -15,7 +15,7 @@ describe('app deep links', () => {
         expect(taskTerminalHref('p1', 't2')).toBe(`${path}?project=p1&task=t2&view=terminal`);
     });
 
-    it('encodes ids so they cannot add params of their own', () => {
+    it('encodes a project id so it cannot add params of its own', () => {
         expect(projectTerminalHref('a&x=1')).toBe(`${path}?project=a%26x%3D1&view=terminal`);
     });
 
@@ -24,7 +24,7 @@ describe('app deep links', () => {
         expect(asksForTerminal(taskViewHref('p1', 't2').slice(path.length))).toBe(false);
     });
 
-    it('encodes ids so they cannot add params of their own', () => {
+    it('encodes a task id so it cannot add params of its own', () => {
         expect(taskViewHref('p1', 'a&x=1')).toBe(`${path}?project=p1&task=a%26x%3D1`);
     });
 

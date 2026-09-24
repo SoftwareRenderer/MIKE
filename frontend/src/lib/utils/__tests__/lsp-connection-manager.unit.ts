@@ -1,17 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { isLSPAvailable } from '$lib/utils/lsp-connection-manager';
+import { isLSPAvailable, SharedLSPConnection } from '$lib/utils/lsp-connection-manager';
 import { extensionManager } from '$lib/services/extension-manager.svelte';
 import type { Extension } from '$lib/types';
 
 /**
- * Tests for the LSP connection manager's message routing logic.
+ * Tests for the LSP connection manager's message routing.
  *
- * The routing logic is extracted here for direct unit testing without
- * WebSocket mocking (jsdom WebSocket mocking is unreliable).
- * Connection lifecycle tests are covered by the backend handler tests.
+ * They drive the real SharedLSPConnection.dispatchMessage — it reads no socket, so no WebSocket
+ * mocking is needed (jsdom's is unreliable anyway). Connection lifecycle is covered by the backend
+ * handler tests.
  */
-
-const CHANNEL_ID_STEP = 1000;
 
 /** Helper to add a mock LSP extension to the manager. */
 function addMockLSPExt(name: string, language: string, extensions: string[]) {
@@ -93,87 +91,18 @@ interface Channel {
 }
 
 /**
- * Simulates the dispatchMessage logic from SharedLSPConnection.
- * This is the core routing logic that determines which channel gets which message.
- * Notifications are scoped by workspace (via textDocument.uri matching).
+ * The routing rules live in SharedLSPConnection.dispatchMessage, and the cast is only because the
+ * members are labelled private: dispatch reads no socket, so a connection built here is enough to
+ * drive it. A copy of the routing in this file would pin nothing — it did, until it was replaced.
  */
 function dispatchMessage(channels: Channel[], data: string): void {
-  let parsed: any;
-  try {
-    parsed = JSON.parse(data);
-  } catch {
-    // Not JSON — deliver to all
-    for (const ch of channels) ch.handler?.(data);
-    return;
-  }
-
-  // $server/lspReady — route to specific channel (or broadcast if no _ch)
-  if (parsed.method === '$/lspReady') {
-    if (parsed._ch != null) {
-      const target = channels.find(ch => ch.id === parsed._ch);
-      target?.onReady?.();
-    } else {
-      for (const ch of channels) ch.onReady?.();
-    }
-    return;
-  }
-
-  // Notification (no id, has method) → scope by workspace
-  if (parsed.id == null && parsed.method) {
-    const uri = parsed?.params?.textDocument?.uri;
-    if (uri && typeof uri === 'string') {
-      const uriPath = uri.replace(/^file:\/\//, '');
-      for (const ch of channels) {
-        if (uriPath.startsWith(ch.workspace)) {
-          ch.handler?.(data);
-        }
-      }
-      return;
-    }
-    // No workspace context — broadcast to all (e.g., $/progress, window/logMessage)
-    for (const ch of channels) ch.handler?.(data);
-    return;
-  }
-
-  // Response (has id) → route to owning channel
-  if (parsed.id != null) {
-    // Backend _ch hint (multiplex mode)
-    if (parsed._ch != null) {
-      const target = channels.find(ch => ch.id === parsed._ch);
-      if (target?.handler) {
-        // Extract serverInfo from initialize response
-        const si = parsed.result?.serverInfo;
-        if (si && target.onServerInfo) {
-          target.onServerInfo(si.name || '', si.version || null);
-        }
-        const clean = { ...parsed };
-        delete clean._ch;
-        target.handler(JSON.stringify(clean));
-      }
-      return;
-    }
-
-    // Fallback: ID range check (backward compat)
-    const idNum = Number(parsed.id);
-    if (!isNaN(idNum)) {
-      for (const ch of channels) {
-        const base = ch.id * CHANNEL_ID_STEP;
-        if (idNum >= base + 1 && idNum < base + CHANNEL_ID_STEP) {
-          // Extract serverInfo from initialize response
-          const si = parsed.result?.serverInfo;
-          if (si && ch.onServerInfo) {
-            ch.onServerInfo(si.name || '', si.version || null);
-          }
-          ch.handler?.(data);
-          return;
-        }
-      }
-    }
-    return;
-  }
-
-  // Unknown message type — deliver to all
-  for (const ch of channels) ch.handler?.(data);
+  const mgr = new SharedLSPConnection();
+  const internals = mgr as unknown as {
+    channels: Map<number, Channel>;
+    dispatchMessage(data: unknown): void;
+  };
+  internals.channels = new Map(channels.map((ch) => [ch.id, ch]));
+  internals.dispatchMessage(data);
 }
 
 describe('LSP connection manager — message routing', () => {
@@ -272,22 +201,12 @@ describe('LSP connection manager — message routing', () => {
     });
 
     it('broadcasts global notifications to all channels regardless of workspace', () => {
+      // The branch is "no textDocument.uri", so any method without one takes this path — `$/progress`
+      // included, which the single-workspace describe pins by name.
       dispatchMessage(channels, JSON.stringify({
         jsonrpc: '2.0',
         method: 'window/logMessage',
         params: { type: 1, message: 'info' },
-      }));
-
-      expect(received[0]).toHaveLength(1);
-      expect(received[1]).toHaveLength(1);
-      expect(received[2]).toHaveLength(1);
-    });
-
-    it('broadcasts progress notifications to all channels', () => {
-      dispatchMessage(channels, JSON.stringify({
-        jsonrpc: '2.0',
-        method: '$/progress',
-        params: { token: 'tok1', value: { kind: 'report' } },
       }));
 
       expect(received[0]).toHaveLength(1);

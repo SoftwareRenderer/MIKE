@@ -16,6 +16,7 @@ import (
 // stages ONLY the conflicted files (not all changes) before committing.
 // This ensures non-conflicted work-in-progress is not accidentally committed.
 func TestMergeConflictResolution_StagesOnlyConflictedFiles(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	taskID := "conflict-resolve-task"
@@ -156,6 +157,7 @@ func TestMergeConflictResolution_StagesOnlyConflictedFiles(t *testing.T) {
 // TestMergeConflictResolution_MultipleConflictedFiles verifies that when
 // multiple files have conflicts, ALL conflicted files are staged and committed.
 func TestMergeConflictResolution_MultipleConflictedFiles(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	taskID := "multi-conflict-task"
@@ -248,6 +250,7 @@ func TestMergeConflictResolution_MultipleConflictedFiles(t *testing.T) {
 // TestMergeConflictResolution_CommitMessage verifies that the conflict
 // resolution commit uses the correct message "Resolve merge conflicts".
 func TestMergeConflictResolution_CommitMessage(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	taskID := "commit-msg-task"
@@ -310,6 +313,7 @@ func TestMergeConflictResolution_CommitMessage(t *testing.T) {
 // TestMergeConflictResolution_WithFinalMerge verifies the full flow:
 // sync merge conflict → LLM resolution → commit (completes merge) → final merge into target.
 func TestMergeConflictResolution_WithFinalMerge(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	taskID := "full-flow-task"
@@ -402,6 +406,7 @@ func TestMergeConflictResolution_WithFinalMerge(t *testing.T) {
 // TestMergeConflictResolution_StashRestored verifies that user's unstaged
 // changes are properly restored after conflict resolution via stash pop.
 func TestMergeConflictResolution_StashRestored(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	taskID := "stash-restore-task"
@@ -491,6 +496,7 @@ func TestMergeConflictResolution_StashRestored(t *testing.T) {
 // when there are no conflicted files (git auto-resolved), the merge --continue
 // succeeds without needing an explicit commit.
 func TestMergeConflictResolution_NoConflictedFilesAutoContinues(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	taskID := "auto-resolve-task"
@@ -553,6 +559,7 @@ func TestMergeConflictResolution_NoConflictedFilesAutoContinues(t *testing.T) {
 // GetResolvedConflictedFiles returns nil and no commit is attempted.
 // This prevents committing files with conflict markers.
 func TestMergeConflictResolution_UnresolvedSkipped(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	taskID := "unresolved-task"
@@ -621,6 +628,7 @@ func TestMergeConflictResolution_UnresolvedSkipped(t *testing.T) {
 // TestMergeConflictResolution_SubtaskIntoParentBranch verifies the full
 // conflict resolution flow for a subtask merging into a parent branch.
 func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	// Create parent task
@@ -736,6 +744,7 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 // resolved before a merge commit can be made. The commit is skipped and the
 // LLM is re-prompted to fix the remaining conflicts.
 func TestMergeConflictResolution_PartialResolution_SkipsCommit(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	taskID := "partial-resolve-task"
@@ -814,6 +823,7 @@ func TestMergeConflictResolution_PartialResolution_SkipsCommit(t *testing.T) {
 // TestMergeConflictResolution_CommitIsMergeCommit verifies that the conflict
 // resolution commit is a proper merge commit (has two parents).
 func TestMergeConflictResolution_CommitIsMergeCommit(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	taskID := "merge-commit-task"
@@ -883,6 +893,7 @@ func TestMergeConflictResolution_CommitIsMergeCommit(t *testing.T) {
 
 // TestCommitConflictResolution_DoesNotSweepUntrackedFiles: `add -u` path skips untracked files.
 func TestCommitConflictResolution_DoesNotSweepUntrackedFiles(t *testing.T) {
+	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
 
 	taskID := "no-sweep-task"
@@ -1022,6 +1033,7 @@ func newSyncConflictFixture(t *testing.T, taskID, branch string, autoMerge bool)
 // TestCommitConflictResolution_CommitAndDoneClickMergesWithAutoMergeOff: the click means commit,
 // merge, Done, so a resolution has to reach the target branch even when auto_merge says no.
 func TestCommitConflictResolution_CommitAndDoneClickMergesWithAutoMergeOff(t *testing.T) {
+	t.Parallel()
 	fx := newSyncConflictFixture(t, "click-merge-task", "task/click-merge", false)
 	os.WriteFile(filepath.Join(fx.wtPath, "shared.txt"), []byte(syncResolved), 0o644)
 	fx.te.ArmCommitAndDone(fx.taskID)
@@ -1059,6 +1071,7 @@ func TestCommitConflictResolution_CommitAndDoneClickMergesWithAutoMergeOff(t *te
 // TestCommitConflictResolution_NoClickNoMergeWithAutoMergeOff: with no click behind the conflict,
 // auto_merge alone decides, and false keeps the resolution local and hands the task to the user.
 func TestCommitConflictResolution_NoClickNoMergeWithAutoMergeOff(t *testing.T) {
+	t.Parallel()
 	fx := newSyncConflictFixture(t, "noclick-merge-task", "task/noclick-merge", false)
 	os.WriteFile(filepath.Join(fx.wtPath, "shared.txt"), []byte(syncResolved), 0o644)
 
@@ -1082,6 +1095,7 @@ func TestCommitConflictResolution_NoClickNoMergeWithAutoMergeOff(t *testing.T) {
 // TestCommitConflictResolution_StillConflictedKeepsTheClick: a resolution that hits a fresh conflict
 // is not over, and spending the click here would leave the turn that does resolve it in Review.
 func TestCommitConflictResolution_StillConflictedKeepsTheClick(t *testing.T) {
+	t.Parallel()
 	fx := newSyncConflictFixture(t, "reconflict-task", "task/reconflict", false)
 	os.WriteFile(filepath.Join(fx.wtPath, "shared.txt"), []byte(syncResolved), 0o644)
 

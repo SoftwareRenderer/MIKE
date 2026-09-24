@@ -192,6 +192,7 @@ var (
 // queued (in_progress + execution_state idle = "Pending") while the first
 // task runs, and picks up the slot as soon as the first task goes idle.
 func TestTaskGate_SecondTaskQueues(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	s := te.store
 	proj := createProject(t, s, "proj-tg-queue", "TG Queue")
@@ -232,6 +233,7 @@ func TestTaskGate_SecondTaskQueues(t *testing.T) {
 // per provider URL: a task on provider B starts immediately even while
 // provider A's single slot is occupied.
 func TestTaskGate_PerProviderIsolation(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	s := te.store
 	proj := createProject(t, s, "proj-tg-iso", "TG Isolation")
@@ -270,6 +272,7 @@ func (emptyExtStore) GetByType(_ string) ([]ext.Extension, error) { return nil, 
 // do not go through the LLM running-task gate — the task is routed to the
 // agent executor (which fails here: no agent extension is installed).
 func TestTaskGate_AgentProviderBypasses(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	te.agentRegistry = agent.NewAgentRegistry(emptyExtStore{}, nil)
 	s := te.store
@@ -287,6 +290,7 @@ func TestTaskGate_AgentProviderBypasses(t *testing.T) {
 // task to another provider releases the old provider's task slot (freeing a
 // queued task there) and moves the task's slot to the new provider.
 func TestTaskGate_ProviderSwapFreesOldProvider(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	s := te.store
 	proj := createProject(t, s, "proj-tg-swap", "TG Swap")
@@ -336,6 +340,7 @@ func TestTaskGate_ProviderSwapFreesOldProvider(t *testing.T) {
 // (goes review/idle) releases its running-task slot, so a new task on the
 // same provider can start without queueing.
 func TestTaskSlotReleasedWhenIdle(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	s := te.store
 	proj := createProject(t, s, "proj-tg-release", "TG Release")
@@ -371,6 +376,7 @@ func TestTaskSlotReleasedWhenIdle(t *testing.T) {
 // task holds the provider's single in-flight LLM slot, a utility call
 // (ChatCompletion via RunWithGate) must queue until the slot is free.
 func TestUtilityCalls_RespectInFlightLimit(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	s := te.store
 	proj := createProject(t, s, "proj-tg-util", "TG Utility")
@@ -422,6 +428,7 @@ func TestUtilityCalls_RespectInFlightLimit(t *testing.T) {
 // in-flight streams, so they can complete while the executor already holds
 // its start-time row copy.
 func TestPersistTaskPreservesTitle(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	s := te.store
 	proj := createProject(t, s, "proj-tg-title", "TG Title")
@@ -465,6 +472,7 @@ func TestPersistTaskPreservesTitle(t *testing.T) {
 // real executor loop: a title is generated while a task is running, and the
 // executor's turn-complete writes must not revert it.
 func TestTaskGate_TitleSurvivesExecutorWrites(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	s := te.store
 	proj := createProject(t, s, "proj-tg-title2", "TG Title Run")

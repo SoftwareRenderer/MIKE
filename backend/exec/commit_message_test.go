@@ -16,6 +16,7 @@ func (s stubAgentLister) ToProviders() []types.Provider { return s.providers }
 // --- utilityTarget Tests ---
 
 func TestUtilityTarget_UsesConfiguredUtilityProvider(t *testing.T) {
+	t.Parallel()
 	e := newTestExecutor(t)
 
 	// Configure two providers and set utility to the second one.
@@ -52,6 +53,7 @@ func TestUtilityTarget_UsesConfiguredUtilityProvider(t *testing.T) {
 }
 
 func TestUtilityTarget_FallsBackToTaskWhenUnset(t *testing.T) {
+	t.Parallel()
 	e := newTestExecutor(t)
 
 	if err := e.configStore.UpdateConfig(&types.Config{
@@ -78,6 +80,7 @@ func TestUtilityTarget_FallsBackToTaskWhenUnset(t *testing.T) {
 }
 
 func TestUtilityTarget_AgentProvider(t *testing.T) {
+	t.Parallel()
 	e := newTestExecutor(t)
 
 	// Agent providers are registry-derived (enabled agent extensions), not
@@ -108,6 +111,7 @@ func TestUtilityTarget_AgentProvider(t *testing.T) {
 // --- ResolveUtilityTarget Tests ---
 
 func TestResolveUtilityTarget_UsesConfiguredUtilityProvider(t *testing.T) {
+	t.Parallel()
 	e := newTestExecutor(t)
 
 	providers := []types.Provider{
@@ -140,6 +144,7 @@ func TestResolveUtilityTarget_UsesConfiguredUtilityProvider(t *testing.T) {
 }
 
 func TestResolveUtilityTarget_FallsBackToTaskWhenUnset(t *testing.T) {
+	t.Parallel()
 	e := newTestExecutor(t)
 
 	if err := e.configStore.UpdateConfig(&types.Config{
@@ -165,6 +170,7 @@ func TestResolveUtilityTarget_FallsBackToTaskWhenUnset(t *testing.T) {
 // --- collectUniqueModels Tests ---
 
 func TestCollectUniqueModels_Empty(t *testing.T) {
+	t.Parallel()
 	models := collectUniqueModels(nil)
 	if len(models) != 0 {
 		t.Errorf("expected 0 models, got %d: %v", len(models), models)
@@ -172,6 +178,7 @@ func TestCollectUniqueModels_Empty(t *testing.T) {
 }
 
 func TestCollectUniqueModels_SingleModel(t *testing.T) {
+	t.Parallel()
 	msgs := []types.TaskMessage{
 		{Role: "assistant", ModelName: "gpt-4o"},
 		{Role: "assistant", ModelName: "gpt-4o"},
@@ -184,6 +191,7 @@ func TestCollectUniqueModels_SingleModel(t *testing.T) {
 }
 
 func TestCollectUniqueModels_MultipleModels(t *testing.T) {
+	t.Parallel()
 	msgs := []types.TaskMessage{
 		{Role: "assistant", ModelName: "gpt-4o"},
 		{Role: "assistant", ModelName: "gpt-4o"},
@@ -204,6 +212,7 @@ func TestCollectUniqueModels_MultipleModels(t *testing.T) {
 }
 
 func TestCollectUniqueModels_PreservesOrder(t *testing.T) {
+	t.Parallel()
 	msgs := []types.TaskMessage{
 		{Role: "assistant", ModelName: "second"},
 		{Role: "assistant", ModelName: "first"},
@@ -223,6 +232,7 @@ func TestCollectUniqueModels_PreservesOrder(t *testing.T) {
 }
 
 func TestCollectUniqueModels_SkipsEmptyModelName(t *testing.T) {
+	t.Parallel()
 	msgs := []types.TaskMessage{
 		{Role: "assistant", ModelName: ""},
 		{Role: "assistant", ModelName: "gpt-4o"},
@@ -242,6 +252,7 @@ func TestCollectUniqueModels_SkipsEmptyModelName(t *testing.T) {
 }
 
 func TestCollectUniqueModels_AllEmpty(t *testing.T) {
+	t.Parallel()
 	msgs := []types.TaskMessage{
 		{Role: "assistant", ModelName: ""},
 		{Role: "assistant", ModelName: ""},
@@ -253,6 +264,7 @@ func TestCollectUniqueModels_AllEmpty(t *testing.T) {
 }
 
 func TestCollectUniqueModels_UserMessagesIgnored(t *testing.T) {
+	t.Parallel()
 	// Only assistant messages have model names; user/tool/summarization messages are skipped
 	msgs := []types.TaskMessage{
 		{Role: "user", ModelName: ""},
@@ -268,6 +280,7 @@ func TestCollectUniqueModels_UserMessagesIgnored(t *testing.T) {
 // --- buildAssistedBy Tests ---
 
 func TestBuildAssistedBy_Empty(t *testing.T) {
+	t.Parallel()
 	result := buildAssistedBy(nil)
 	if result != "" {
 		t.Errorf("expected empty string, got %q", result)
@@ -275,6 +288,7 @@ func TestBuildAssistedBy_Empty(t *testing.T) {
 }
 
 func TestBuildAssistedBy_SingleModel(t *testing.T) {
+	t.Parallel()
 	result := buildAssistedBy([]string{"gpt-4o"})
 	expected := "\n\nAssisted-by: MIKE:gpt-4o"
 	if result != expected {
@@ -283,6 +297,7 @@ func TestBuildAssistedBy_SingleModel(t *testing.T) {
 }
 
 func TestBuildAssistedBy_StripsOrgPrefix(t *testing.T) {
+	t.Parallel()
 	result := buildAssistedBy([]string{"org/model"})
 	expected := "\n\nAssisted-by: MIKE:model"
 	if result != expected {
@@ -302,6 +317,7 @@ func TestBuildAssistedBy_StripsOrgPrefix(t *testing.T) {
 }
 
 func TestBuildAssistedBy_MultipleModels(t *testing.T) {
+	t.Parallel()
 	result := buildAssistedBy([]string{"gpt-4o", "claude-3.5", "llama-3"})
 	lines := strings.Split(result, "\n")
 	// "\n\n" splits into ["", "", "Assisted-by: gpt-4o", "Assisted-by: claude-3.5", "Assisted-by: llama-3"]
@@ -325,6 +341,7 @@ func TestBuildAssistedBy_MultipleModels(t *testing.T) {
 // --- buildCommitMessageWithAssistedBy Tests ---
 
 func TestBuildCommitMessageWithAssistedBy_SingleModel(t *testing.T) {
+	t.Parallel()
 	result := buildCommitMessageWithAssistedBy("Fix bug", []string{"gpt-4o"})
 	expected := "Fix bug\n\nAssisted-by: MIKE:gpt-4o"
 	if result != expected {
@@ -333,6 +350,7 @@ func TestBuildCommitMessageWithAssistedBy_SingleModel(t *testing.T) {
 }
 
 func TestBuildCommitMessageWithAssistedBy_MultipleModels(t *testing.T) {
+	t.Parallel()
 	result := buildCommitMessageWithAssistedBy("Add feature", []string{"gpt-4o", "claude-3.5"})
 	if !strings.HasPrefix(result, "Add feature\n\n") {
 		t.Errorf("should start with message body, got %q", result)
@@ -351,6 +369,7 @@ func TestBuildCommitMessageWithAssistedBy_MultipleModels(t *testing.T) {
 }
 
 func TestBuildCommitMessageWithAssistedBy_NoModels(t *testing.T) {
+	t.Parallel()
 	result := buildCommitMessageWithAssistedBy("Fix bug", nil)
 	if result != "Fix bug" {
 		t.Errorf("expected just the message, got %q", result)
@@ -358,6 +377,7 @@ func TestBuildCommitMessageWithAssistedBy_NoModels(t *testing.T) {
 }
 
 func TestBuildCommitMessageWithAssistedBy_EmptyModelList(t *testing.T) {
+	t.Parallel()
 	result := buildCommitMessageWithAssistedBy("Fix bug", []string{})
 	if result != "Fix bug" {
 		t.Errorf("expected just the message, got %q", result)
@@ -365,6 +385,7 @@ func TestBuildCommitMessageWithAssistedBy_EmptyModelList(t *testing.T) {
 }
 
 func TestBuildCommitMessageWithAssistedBy_PreservesMessageBody(t *testing.T) {
+	t.Parallel()
 	// Message body with newlines should be preserved
 	body := "Fix bug\n\nDetailed explanation of the fix"
 	result := buildCommitMessageWithAssistedBy(body, []string{"gpt-4o"})

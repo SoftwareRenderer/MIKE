@@ -20,6 +20,7 @@ var isPaused = func(st types.Status, es types.ExecutionState) bool { return st =
 // --- applyStopTransition (pure helper) ---
 
 func TestApplyStopTransition(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name        string
 		status      types.Status
@@ -79,6 +80,7 @@ func createTaskRow(t *testing.T, s *store.Store, id, projectID string, status ty
 // was running) must succeed and clear the stale running state — before this
 // fix StopTask returned "task not running" and the task was stuck "Running".
 func TestStopStaleRunningTask(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	s := te.store
 	proj := createProject(t, s, "proj-stop-stale", "Stop Stale")
@@ -98,6 +100,7 @@ func TestStopStaleRunningTask(t *testing.T) {
 // TestStopStaleNonInProgressTask verifies a stale in-flight row outside the
 // In Progress column settles to idle (not paused) when stopped.
 func TestStopStaleNonInProgressTask(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	s := te.store
 	proj := createProject(t, s, "proj-stop-stale-2", "Stop Stale 2")
@@ -113,6 +116,7 @@ func TestStopStaleNonInProgressTask(t *testing.T) {
 // TestStopStaleMissingTask verifies StopTask still errors for a task that does
 // not exist at all.
 func TestStopStaleMissingTask(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	if err := te.StopTask("no-such-task"); err == nil {
 		t.Fatal("StopTask on missing task must error")
@@ -126,6 +130,7 @@ func TestStopStaleMissingTask(t *testing.T) {
 // "stopped" error entry persisted, executor exited, and the provider slot
 // freed for the next task.
 func TestStopRunningTaskMidStream(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	s := te.store
 	proj := createProject(t, s, "proj-stop-live", "Stop Live")
@@ -217,6 +222,7 @@ func startExecTaskExisting(t *testing.T, te *TaskExecutor, proj *types.Project, 
 // real execution loop: stop a running task (paused), then start a fresh
 // executor for it (what /resume does) and confirm it runs again.
 func TestPauseResumeCycle(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	s := te.store
 	proj := createProject(t, s, "proj-pause-resume", "Pause Resume")
@@ -253,6 +259,7 @@ func TestPauseResumeCycle(t *testing.T) {
 // done+completed after its executor is cancelled (previously the loop's
 // handleStopped reverted it to review+idle).
 func TestStopDoesNotClobberMovedTask(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	s := te.store
 	proj := createProject(t, s, "proj-stop-clobber", "Stop Clobber")
@@ -299,6 +306,7 @@ func TestStopDoesNotClobberMovedTask(t *testing.T) {
 // row: in_progress -> paused (resumable), other columns -> idle; rows that
 // are not in-flight are untouched.
 func TestRecoverStaleTasks(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	s := te.store
 	proj := createProject(t, s, "proj-recover", "Recover")
@@ -328,6 +336,7 @@ func TestRecoverStaleTasks(t *testing.T) {
 // already from the assistant settles into review/idle — no executor, no stale "running"
 // row, and no "Pending" card for a conversation that is waiting on the user.
 func TestStartTaskAssistantLastSettleIdle(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	s := te.store
 
@@ -380,6 +389,7 @@ func TestStartTaskAssistantLastSettleIdle(t *testing.T) {
 // used to be a full-row write, which put "running" back after the stop and left
 // the task stuck until a second Stop.
 func TestStopWithAssignedPortsLeavesTaskPaused(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	s := te.store
 	proj := createProject(t, s, "proj-stop-ports", "Stop Ports")
@@ -447,6 +457,7 @@ func TestStopWithAssignedPortsLeavesTaskPaused(t *testing.T) {
 // TestStaleWriterCannotResurrectButRealClaimCan: after a stop a stale full-row
 // write must not restart the run, but the resumed run's own claim must work.
 func TestStaleWriterCannotResurrectButRealClaimCan(t *testing.T) {
+	t.Parallel()
 	te := newSessionCostTestExecutor(t)
 	s := te.store
 	proj := createProject(t, s, "proj-claim", "Claim")

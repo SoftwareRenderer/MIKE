@@ -121,7 +121,8 @@ type textStopRun struct {
 func startTextStopRun(t *testing.T, m *textStopMock, mutate func(*types.Task)) *textStopRun {
 	t.Helper()
 
-	// automatedAnswers renders prompts/answer_question.tmpl from the CWD.
+	// automatedAnswers renders prompts/answer_question.tmpl from the CWD; the callers are serial for
+	// the reason at chdirRepoRoot.
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
 	oldwd, err := os.Getwd()

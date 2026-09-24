@@ -12,6 +12,16 @@ test.describe.configure({ mode: 'parallel' });
 const TEST_NON_GIT = '/tmp/kanban-test-nongit';
 const TEST_NEW_FOLDER_PARENT = '/tmp/kanban-test-mkdir-parent';
 
+// The project-picker test makes a directory named for the clock, so each run leaves a NEW one behind
+// rather than reusing a fixed name. /tmp is tmpfs on this machine, so a leftover is RAM until reboot.
+const createdDirs: string[] = [];
+
+test.afterAll(() => {
+  for (const dir of createdDirs) {
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+});
+
 test.describe('File Browser Actions', () => {
   test.describe.configure({ mode: 'serial' });
 
@@ -143,6 +153,7 @@ test.describe('File Browser Actions', () => {
 
     // Navigate to a unique directory
     const uniqueDir = `/tmp/kanban-test-sandbox-off-${Date.now()}`;
+    createdDirs.push(uniqueDir);
     try { rmSync(uniqueDir, { recursive: true, force: true }); } catch { /* ignore */ }
     mkdirSync(uniqueDir, { recursive: true });
     execSync('git init', { cwd: uniqueDir });

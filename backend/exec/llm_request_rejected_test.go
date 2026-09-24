@@ -24,6 +24,7 @@ func refusedByProvider(status int, message string) func(http.ResponseWriter) {
 // retrying it sends the same bytes to the same answer, and reporting it as a connection problem sends
 // the user off to check their network.
 func TestRefusedRequestEndsTheRunInOneCall(t *testing.T) {
+	t.Parallel()
 	const reason = "Expecting value: line 1 column 111 (char 110)"
 	srv, calls := crashLLM(t, refusedByProvider(http.StatusBadRequest, reason))
 	te, _, projectID, initialSHA := setupExecutorWithGit(t)
@@ -68,6 +69,7 @@ func TestRefusedRequestEndsTheRunInOneCall(t *testing.T) {
 // TestRateLimitedRequestIsStillRetried holds the boundary the other side of the classification: a 429
 // is a 4xx that a later call can get an answer from.
 func TestRateLimitedRequestIsStillRetried(t *testing.T) {
+	t.Parallel()
 	srv, calls := crashLLM(t, refusedByProvider(http.StatusTooManyRequests, "rate limit"))
 	te, _, projectID, initialSHA := setupExecutorWithGit(t)
 	const taskID = "rate-limited"

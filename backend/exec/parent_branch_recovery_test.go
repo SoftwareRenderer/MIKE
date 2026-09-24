@@ -11,6 +11,7 @@ import (
 // names a branch git no longer has, which would fail the child's start with "invalid
 // reference", so branchChildFrom recreates it from HEAD.
 func TestBranchChildFrom_RecreatesMissingParentBranch(t *testing.T) {
+	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	now := time.Now().UTC()
 

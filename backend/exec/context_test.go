@@ -10,6 +10,7 @@ import (
 // --- Checkpoint Label Prompt Tests ---
 
 func TestCheckpointLabelPrompt_Exists(t *testing.T) {
+	t.Parallel()
 	if checkpointLabelPrompt == "" {
 		t.Error("checkpointLabelPrompt should not be empty")
 	}
@@ -19,12 +20,14 @@ func TestCheckpointLabelPrompt_Exists(t *testing.T) {
 }
 
 func TestCheckpointLabelPrompt_DifferentFromCommitPrompt(t *testing.T) {
+	t.Parallel()
 	if checkpointLabelPrompt == commitMessagePrompt {
 		t.Error("checkpointLabelPrompt should differ from commitMessagePrompt")
 	}
 }
 
 func TestCheckpointLabelPrompt_UseDescription(t *testing.T) {
+	t.Parallel()
 	// Label is only generated at fork time, not during checkpoint creation.
 	// See handleThreadFork -> generateCheckpointLabelForFork -> GenerateCheckpointLabel.
 	if !strings.Contains(checkpointLabelPrompt, "imperative mood") {
@@ -33,6 +36,7 @@ func TestCheckpointLabelPrompt_UseDescription(t *testing.T) {
 }
 
 func TestBuildCheckpointLabelMessages(t *testing.T) {
+	t.Parallel()
 	msgs := buildCheckpointLabelMessages("src/main.go | 10 ++++++++---", "User: Fix the bug\nAssistant: I'll patch it")
 
 	if len(msgs) != 2 {
@@ -55,6 +59,7 @@ func TestBuildCheckpointLabelMessages(t *testing.T) {
 // --- Checkpoint Context Tests ---
 
 func TestExtractLastTurns_FromSlicedMessages(t *testing.T) {
+	t.Parallel()
 	// The messages since the last checkpoint, as one turn's extraction sees them.
 
 	allMessages := []types.ChatMessage{
@@ -86,6 +91,7 @@ func TestExtractLastTurns_FromSlicedMessages(t *testing.T) {
 }
 
 func TestExtractLastTurns_NoNewMessages(t *testing.T) {
+	t.Parallel()
 	// Edge case: checkpointIdx == len(messages), no new messages
 	allMessages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
@@ -130,6 +136,7 @@ func contentOf(msgs []types.ChatMessage) []string {
 }
 
 func TestExtractCommitContext_FullConversation(t *testing.T) {
+	t.Parallel()
 	// Typical task: system + user (task prompt) + working turns + the assistant
 	// that requested the review. Only the first user message and the request_review
 	// turn (with its tool results) reach the commit generator.
@@ -189,6 +196,7 @@ func TestExtractCommitContext_FullConversation(t *testing.T) {
 }
 
 func TestExtractCommitContext_SingleTurn_NoRequestReview(t *testing.T) {
+	t.Parallel()
 	// Minimal conversation with no request_review turn: the task prompt is the only
 	// thing the commit generator gets — an assistant message that never requested a
 	// review says nothing the diff does not already say.
@@ -209,6 +217,7 @@ func TestExtractCommitContext_SingleTurn_NoRequestReview(t *testing.T) {
 }
 
 func TestExtractCommitContext_NoAssistant(t *testing.T) {
+	t.Parallel()
 	// Only a user message, no assistant response yet
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
@@ -227,6 +236,7 @@ func TestExtractCommitContext_NoAssistant(t *testing.T) {
 }
 
 func TestExtractCommitContext_Empty(t *testing.T) {
+	t.Parallel()
 	result := ExtractCommitContext(nil)
 	if len(result) != 0 {
 		t.Errorf("expected 0 messages, got %d", len(result))
@@ -234,6 +244,7 @@ func TestExtractCommitContext_Empty(t *testing.T) {
 }
 
 func TestExtractCommitContext_SkipsSystemMessages(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt 1"},
 		{Role: "system", Content: "system prompt 2"},
@@ -254,6 +265,7 @@ func TestExtractCommitContext_SkipsSystemMessages(t *testing.T) {
 }
 
 func TestExtractCommitContext_MultipleUserMessages(t *testing.T) {
+	t.Parallel()
 	// Multiple user messages — should pick the FIRST user message, not the last
 	messages := []types.ChatMessage{
 		{Role: "user", Content: "Add rate limiting to API endpoints"},
@@ -290,6 +302,7 @@ func TestExtractCommitContext_MultipleUserMessages(t *testing.T) {
 }
 
 func TestExtractCommitContext_IncludesRequestReviewToolResult(t *testing.T) {
+	t.Parallel()
 	// Last assistant has request_review tool call — include its tool result
 	messages := []types.ChatMessage{
 		{Role: "user", Content: "Build feature"},
@@ -323,6 +336,7 @@ func TestExtractCommitContext_IncludesRequestReviewToolResult(t *testing.T) {
 }
 
 func TestExtractCommitContext_LastAssistantNoRequestReview_NoEditsBetween(t *testing.T) {
+	t.Parallel()
 	// Last assistant has no request_review, and no edits between — skip last assistant
 	messages := []types.ChatMessage{
 		{Role: "user", Content: "Build feature"},
@@ -355,6 +369,7 @@ func TestExtractCommitContext_LastAssistantNoRequestReview_NoEditsBetween(t *tes
 }
 
 func TestExtractCommitContext_LaterEditsAfterRequestReview_AreNotIncluded(t *testing.T) {
+	t.Parallel()
 	// Work done after the review request is not commit context: the generator sees the
 	// request_review turn, not the follow-up edits.
 	messages := []types.ChatMessage{
@@ -399,6 +414,7 @@ func TestExtractCommitContext_LaterEditsAfterRequestReview_AreNotIncluded(t *tes
 }
 
 func TestExtractCommitContext_NonReviewToolResultsAreDropped(t *testing.T) {
+	t.Parallel()
 	// No request_review at all: not even a successful write_file result is kept.
 	// Tool results only ride along with an included assistant message.
 	messages := []types.ChatMessage{
@@ -419,6 +435,7 @@ func TestExtractCommitContext_NonReviewToolResultsAreDropped(t *testing.T) {
 }
 
 func TestExtractCommitContext_MultipleRequestReviewsUsesAll(t *testing.T) {
+	t.Parallel()
 	// Multiple request_review calls — should include ALL of them
 	messages := []types.ChatMessage{
 		{Role: "user", Content: "Build feature"},
@@ -476,6 +493,7 @@ func TestExtractCommitContext_MultipleRequestReviewsUsesAll(t *testing.T) {
 }
 
 func TestFormatToolAction_RequestReviewWithSummary(t *testing.T) {
+	t.Parallel()
 	args := `{"summary":"Added rate limiting middleware to all API endpoints with configurable max requests per minute"}`
 	action := formatToolAction("request_review", args)
 	expected := "request a review: Added rate limiting middleware to all API endpoints with configurable max requests per minute"
@@ -485,6 +503,7 @@ func TestFormatToolAction_RequestReviewWithSummary(t *testing.T) {
 }
 
 func TestFormatToolAction_RequestReviewNoSummary(t *testing.T) {
+	t.Parallel()
 	args := `{}`
 	action := formatToolAction("request_review", args)
 	if action != "request a review" {
@@ -493,6 +512,7 @@ func TestFormatToolAction_RequestReviewNoSummary(t *testing.T) {
 }
 
 func TestFormatToolAction_RequestReviewEmptySummary(t *testing.T) {
+	t.Parallel()
 	args := `{"summary":""}`
 	action := formatToolAction("request_review", args)
 	if action != "request a review" {
@@ -501,6 +521,7 @@ func TestFormatToolAction_RequestReviewEmptySummary(t *testing.T) {
 }
 
 func TestExtractCommitContext_RequestReviewWithOtherToolCalls(t *testing.T) {
+	t.Parallel()
 	// The request_review turn also carries other tool calls — the assistant message is
 	// included verbatim (all ToolCalls preserved) and all its tool results come along.
 	messages := []types.ChatMessage{
@@ -538,6 +559,7 @@ func TestExtractCommitContext_RequestReviewWithOtherToolCalls(t *testing.T) {
 // --- estimatePromptTokens Tests ---
 
 func TestEstimatePromptTokens_PlainContent(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "user", Content: "hello world this is a test"},
 	}
@@ -549,6 +571,7 @@ func TestEstimatePromptTokens_PlainContent(t *testing.T) {
 }
 
 func TestEstimatePromptTokens_WithReasoning(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "assistant", Content: "answer", ReasoningContent: "let me think about this carefully step by step"},
 	}
@@ -560,6 +583,7 @@ func TestEstimatePromptTokens_WithReasoning(t *testing.T) {
 }
 
 func TestEstimatePromptTokens_ContentParts(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "user", ContentParts: []types.ContentPart{
 			{Type: "text", Text: "check this image for me please"},
@@ -575,6 +599,7 @@ func TestEstimatePromptTokens_ContentParts(t *testing.T) {
 }
 
 func TestEstimatePromptTokens_ContentPartsOverridesContent(t *testing.T) {
+	t.Parallel()
 	messages := []types.ChatMessage{
 		{Role: "user", Content: "this should be ignored", ContentParts: []types.ContentPart{
 			{Type: "text", Text: "this should be counted"},

@@ -16,6 +16,7 @@ import (
 // A sandboxed command writes whatever it likes and the bridge hands over the whole stream, while
 // the result is truncated to 50 KB for the model: keeping everything buys nothing.
 func TestCaptureOutputStopsAtTheCaptureLimit(t *testing.T) {
+	t.Parallel()
 	const produced = 4 * toolresult.MaxCaptureBytes
 	out := captureOutput(io.LimitReader(strings.NewReader(strings.Repeat("x", produced)), produced))
 
@@ -33,6 +34,7 @@ func TestCaptureOutputStopsAtTheCaptureLimit(t *testing.T) {
 
 // The same rule GET /api/fs/read applies: stat first, refuse, do not read the host into memory.
 func TestReadFileCappedRefusesAFilePastTheLimit(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "huge.bin")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -53,6 +55,7 @@ func TestReadFileCappedRefusesAFilePastTheLimit(t *testing.T) {
 }
 
 func TestReadFileCappedReadsAFileWithinTheLimit(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "notes.txt")
 	if err := os.WriteFile(path, []byte("keep me"), 0o600); err != nil {
 		t.Fatal(err)
@@ -65,8 +68,9 @@ func TestReadFileCappedReadsAFileWithinTheLimit(t *testing.T) {
 
 // The tool path, not only the helper: the executor refuses and still answers the next call.
 func TestReadFileToolRefusesAFilePastTheLimit(t *testing.T) {
+	t.Parallel()
 	worktree := t.TempDir()
-	te := newReadTestExecutor(t, worktree)
+	te := newToolTestExecutor(t, worktree)
 	task := makeTestTask(t, te.store, "proj-readcap", "task-readcap")
 
 	path := filepath.Join(t.TempDir(), "huge.log")

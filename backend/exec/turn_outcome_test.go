@@ -63,6 +63,7 @@ func mockToolThenTextLLM(streamCalls *atomic.Int32) *httptest.Server {
 // worktreeMgr with no store, so a tool turn panics in createCheckpoint and executeTask's recover turns it
 // into a stored error message - hence setupExecutorWithGit and a real worktree here.
 func TestExecuteTask_ToolCallLoopsBackWithoutUserInput(t *testing.T) {
+	t.Parallel()
 	var streamCalls atomic.Int32
 	srv := mockToolThenTextLLM(&streamCalls)
 	defer srv.Close()

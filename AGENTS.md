@@ -133,6 +133,7 @@ curl -sk https://localhost:3000/api/config   # 401 JSON = up; use http:// with -
 ```bash
 make check | make lint | make check-race                 # gate / static half / -race over the lock packages
 make test-go | make test-frontend                        # Go unit / vitest + the frontend gates
+make test-diff                                           # only the touched Go packages, cache left on
 cd frontend && npx playwright test [spec|--grep name]    # e2e (mock LLM, own servers)
 python3 scripts/gen-registry.py --check                  # registry.json matches the manifests
 ```

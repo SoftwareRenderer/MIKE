@@ -30,7 +30,7 @@ func TestCloseDoesNotWaitHoldingTheLock(t *testing.T) {
 	runGit(t, repoDir, "init")
 	runGit(t, repoDir, "config", "user.email", "test@test.com")
 	runGit(t, repoDir, "config", "user.name", "Test")
-	writeFile(t, repoDir, "README.md", "# Test\n")
+	writeTestFile(t, repoDir, "README.md", "# Test\n")
 	runGit(t, repoDir, "add", "README.md")
 	runGit(t, repoDir, "commit", "-m", "Initial")
 
@@ -79,7 +79,7 @@ func TestCloseDoesNotWaitHoldingTheLock(t *testing.T) {
 		t.Fatalf("watch task: %v", err)
 	}
 
-	writeFile(t, worktreePath, "README.md", "# Test\nchanged\n")
+	writeTestFile(t, worktreePath, "README.md", "# Test\nchanged\n")
 	ww.handleEvent(fsnotify.Event{Op: fsnotify.Write, Name: filepath.Join(worktreePath, "README.md")})
 
 	select {

@@ -78,6 +78,7 @@ func replayedEvents(t *testing.T, asm *stream.AppStreamManager, projectID, taskI
 // TestAFreshSubscriberAfterAResultRowIsOwedTheTail pins where the executor marks the conversation durable:
 // the write of a tool call's result, not the frame that announces it.
 func TestAFreshSubscriberAfterAResultRowIsOwedTheTail(t *testing.T) {
+	t.Parallel()
 	// The second answer goes quiet for longer than the replay window, so the turn is still open when the
 	// replay is read.
 	srv, _ := crashLLM(t,

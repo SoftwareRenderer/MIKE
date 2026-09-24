@@ -2,7 +2,6 @@ package git
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,17 +15,6 @@ import (
 // backend/exec (`uploadsDirName`); it is spelled out here because a test in this package cannot import the
 // package that imports it, and the literal is what these tests are pinning.
 const uploadsPattern = ".mike-uploads/"
-
-func gitOut(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s: %s: %v", args, string(out), err)
-	}
-	return string(out)
-}
 
 // excludedUploadWorktree builds a task worktree, excludes the uploads directory the way the upload path
 // does, and leaves one uploaded file in it.
@@ -108,7 +96,7 @@ func TestEnsureExcludedFollowsAGitdirPointerToTheSharedGitDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, uploads, "report.pdf", "%PDF-1.7\n")
-	if out := strings.TrimSpace(gitOut(t, nested, "status", "--porcelain")); out != "" {
+	if out := strings.TrimSpace(runGitOutput(t, nested, "status", "--porcelain")); out != "" {
 		t.Errorf("the nested checkout does not obey the exclusion:\n%s", out)
 	}
 }
@@ -169,7 +157,7 @@ func TestExcludedUploadsAreHiddenInAWorktreeInsideTheProject(t *testing.T) {
 	if rel, err := filepath.Rel(repoDir, uploads); err != nil || strings.HasPrefix(rel, "..") {
 		t.Fatalf("the uploads dir is not below the checkout root, so this fixture proves nothing: %q", rel)
 	}
-	if out := strings.TrimSpace(gitOut(t, wtPath, "status", "--porcelain")); out != "" {
+	if out := strings.TrimSpace(runGitOutput(t, wtPath, "status", "--porcelain")); out != "" {
 		t.Errorf("the upload shows in git status below the checkout root:\n%s", out)
 	}
 }
@@ -179,7 +167,7 @@ func TestExcludedUploadsAreHiddenInAWorktreeInsideTheProject(t *testing.T) {
 func TestExcludedUploadsDoNotShowInTheTasksStatus(t *testing.T) {
 	_, wtPath, _ := excludedUploadWorktree(t, "wt-status")
 
-	if out := strings.TrimSpace(gitOut(t, wtPath, "status", "--porcelain")); out != "" {
+	if out := strings.TrimSpace(runGitOutput(t, wtPath, "status", "--porcelain")); out != "" {
 		t.Errorf("the upload shows in git status, want it invisible:\n%s", out)
 	}
 }
@@ -188,9 +176,9 @@ func TestExcludedUploadsAreNotStagedByAddAll(t *testing.T) {
 	_, wtPath, _ := excludedUploadWorktree(t, "wt-add")
 
 	writeFile(t, wtPath, "work.txt", "the agent's own file\n")
-	gitOut(t, wtPath, "add", "-A")
+	runGitOutput(t, wtPath, "add", "-A")
 
-	staged := strings.TrimSpace(gitOut(t, wtPath, "diff", "--cached", "--name-only"))
+	staged := strings.TrimSpace(runGitOutput(t, wtPath, "diff", "--cached", "--name-only"))
 	if strings.Contains(staged, ".mike-uploads") {
 		t.Errorf("git add -A staged the upload, want it skipped:\n%s", staged)
 	}
@@ -204,7 +192,7 @@ func TestExcludedUploadsAreNotSweptIntoAStash(t *testing.T) {
 
 	writeFile(t, wtPath, "README.md", "# changed\n")
 	writeFile(t, wtPath, "scratch.txt", "untracked\n")
-	gitOut(t, wtPath, "stash", "push", "-u", "-m", "wip")
+	runGitOutput(t, wtPath, "stash", "push", "-u", "-m", "wip")
 
 	if _, err := os.Stat(filepath.Join(wtPath, ".mike-uploads", "report.pdf")); err != nil {
 		t.Errorf("git stash -u took the upload: %v", err)
@@ -215,16 +203,16 @@ func TestExcludedUploadsSurviveACleanAndARestore(t *testing.T) {
 	_, wtPath, wm := excludedUploadWorktree(t, "wt-clean")
 
 	upload := filepath.Join(wtPath, ".mike-uploads", "report.pdf")
-	gitOut(t, wtPath, "clean", "-fd")
+	runGitOutput(t, wtPath, "clean", "-fd")
 	if _, err := os.Stat(upload); err != nil {
 		t.Errorf("git clean -fd deleted the upload: %v", err)
 	}
 
 	// A restore resets index and working tree to a snapshot; the snapshot has no upload in it.
 	writeFile(t, wtPath, "work.txt", "committed work\n")
-	gitOut(t, wtPath, "add", "work.txt")
-	gitOut(t, wtPath, "commit", "-m", "work")
-	snapshot := strings.TrimSpace(gitOut(t, wtPath, "rev-parse", "HEAD"))
+	runGitOutput(t, wtPath, "add", "work.txt")
+	runGitOutput(t, wtPath, "commit", "-m", "work")
+	snapshot := strings.TrimSpace(runGitOutput(t, wtPath, "rev-parse", "HEAD"))
 
 	writeFile(t, wtPath, "work.txt", "dirty again\n")
 	writeFile(t, wtPath, "scratch.txt", "untracked\n")
@@ -250,7 +238,7 @@ func TestExcludingUploadsLeavesTheProjectsOwnDirectoriesAlone(t *testing.T) {
 		}
 		writeFile(t, filepath.Join(wtPath, dir), "notes.txt", "the project's own file\n")
 	}
-	out := gitOut(t, wtPath, "status", "--porcelain")
+	out := runGitOutput(t, wtPath, "status", "--porcelain")
 	for _, dir := range []string{"uploads", ".uploads", "mike-uploads"} {
 		if !strings.Contains(out, "?? "+dir+"/") {
 			t.Errorf("%s/ is missing from git status, want only .mike-uploads/ excluded:\n%s", dir, out)

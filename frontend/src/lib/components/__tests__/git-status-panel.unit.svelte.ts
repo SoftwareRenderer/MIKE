@@ -38,6 +38,9 @@ vi.mock('$lib/stores', () => ({
 vi.mock('$lib/storage', () => ({
     loadAppSetting: vi.fn(async () => 240),
     saveAppSetting: vi.fn(async () => {}),
+    // The diff pane the panel preloads keeps its collapse state here.
+    loadCollapsedDiffFiles: vi.fn(async () => new Set<string>()),
+    saveCollapsedDiffFiles: vi.fn(async () => {}),
 }));
 
 import GitStatusPanel from '$lib/components/GitStatusPanel.svelte';

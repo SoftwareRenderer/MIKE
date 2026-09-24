@@ -7,6 +7,7 @@ import (
 )
 
 func TestAcquireRelease_SlotAvailable(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 
 	// First acquire should succeed immediately (no queue entry)
@@ -24,6 +25,7 @@ func TestAcquireRelease_SlotAvailable(t *testing.T) {
 }
 
 func TestAcquireRelease_ConcurrencyLimit(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 	ctx := context.Background()
 
@@ -75,6 +77,7 @@ func TestAcquireRelease_ConcurrencyLimit(t *testing.T) {
 }
 
 func TestAcquireRelease_PerProviderIsolation(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 	ctx := context.Background()
 
@@ -91,6 +94,7 @@ func TestAcquireRelease_PerProviderIsolation(t *testing.T) {
 }
 
 func TestAcquireRelease_FIFOOrdering(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 	ctx := context.Background()
 
@@ -141,6 +145,7 @@ func TestAcquireRelease_FIFOOrdering(t *testing.T) {
 }
 
 func TestAcquireRelease_ContextCancellation(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 
 	// Hold the only slot
@@ -183,6 +188,7 @@ func TestAcquireRelease_ContextCancellation(t *testing.T) {
 }
 
 func TestAcquireRelease_CancelledEntrySkipped(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 	ctx := context.Background()
 
@@ -240,6 +246,7 @@ func TestAcquireRelease_CancelledEntrySkipped(t *testing.T) {
 }
 
 func TestEstimateWait_NoHistory(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 	ctx := context.Background()
 
@@ -272,6 +279,7 @@ func TestEstimateWait_NoHistory(t *testing.T) {
 }
 
 func TestEstimateWait_WithHistory(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 	ctx := context.Background()
 
@@ -313,6 +321,7 @@ func TestEstimateWait_WithHistory(t *testing.T) {
 }
 
 func TestAcquireRelease_MultipleWaitersPositions(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 	ctx := context.Background()
 
@@ -365,6 +374,7 @@ func TestAcquireRelease_MultipleWaitersPositions(t *testing.T) {
 }
 
 func TestAcquireRelease_TrailingSlashNormalization(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 	ctx := context.Background()
 
@@ -404,6 +414,7 @@ func TestAcquireRelease_TrailingSlashNormalization(t *testing.T) {
 }
 
 func TestMinConcurrency_One(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 	ctx := context.Background()
 
@@ -435,6 +446,7 @@ func TestMinConcurrency_One(t *testing.T) {
 // sequential acquires on a provider are spaced at least one interval apart even
 // when concurrency slots are plentiful.
 func TestAcquire_RateLimit_Spacing(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 	ctx := context.Background()
 
@@ -461,6 +473,7 @@ func TestAcquire_RateLimit_Spacing(t *testing.T) {
 // TestAcquire_RateLimit_ZeroUnlimited verifies maxRPS=0 imposes no rate wait:
 // 10 sequential acquires complete well under any rate-limit interval.
 func TestAcquire_RateLimit_ZeroUnlimited(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 	ctx := context.Background()
 
@@ -479,6 +492,7 @@ func TestAcquire_RateLimit_ZeroUnlimited(t *testing.T) {
 // TestAcquire_RateLimit_PerProviderIsolation verifies one provider's rate window
 // does not delay acquires for a different provider.
 func TestAcquire_RateLimit_PerProviderIsolation(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 	ctx := context.Background()
 
@@ -502,6 +516,7 @@ func TestAcquire_RateLimit_PerProviderIsolation(t *testing.T) {
 // TestAcquire_RateLimit_Cancellation verifies a rate-blocked Acquire returns the
 // context error promptly when cancelled, and the gate stays consistent afterwards.
 func TestAcquire_RateLimit_Cancellation(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 	ctx := context.Background()
 
@@ -549,6 +564,7 @@ func TestAcquire_RateLimit_Cancellation(t *testing.T) {
 // with concurrency=1 and maxRPS=1, a second request that gains the slot at ~0.3s
 // still waits for the rate window (total from the first start >= ~1s).
 func TestAcquire_RateLimit_WithSlotWait(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 	ctx := context.Background()
 
@@ -589,6 +605,7 @@ func TestAcquire_RateLimit_WithSlotWait(t *testing.T) {
 // TestAcquire_RateLimit_FIFO verifies FIFO ordering is preserved when waiters
 // are blocked by both slot and rate: the first-enqueued waiter is served first.
 func TestAcquire_RateLimit_FIFO(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 	ctx := context.Background()
 
@@ -646,6 +663,7 @@ func TestAcquire_RateLimit_FIFO(t *testing.T) {
 // Release advances the rate window when it starts, spacing the next waiter
 // by a full interval.
 func TestAcquire_RateLimit_ReleaseServeSpacing(t *testing.T) {
+	t.Parallel()
 	g := NewConcurrencyGate()
 	ctx := context.Background()
 
@@ -718,6 +736,7 @@ func activeSlotsFor(g *ConcurrencyGate, providerURL string) int {
 }
 
 func TestAcquireRelease_CancelledAfterServeReturnsSlot(t *testing.T) {
+	t.Parallel()
 	const url = "http://rate-limited:8080/v1"
 	g := NewConcurrencyGate()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -783,6 +802,7 @@ func TestAcquireRelease_CancelledAfterServeReturnsSlot(t *testing.T) {
 // is TestAcquireRelease_CancelledAfterServeReturnsSlot above). Pre-fix it wedged
 // about once in every hundred cycles, with both goroutines stuck for good.
 func TestAcquireRelease_CancelDuringHandoffDoesNotWedge(t *testing.T) {
+	t.Parallel()
 	const url = "http://handoff-race:8080/v1"
 	for i := 0; i < 60; i++ {
 		g := NewConcurrencyGate()
@@ -825,6 +845,7 @@ func TestAcquireRelease_CancelDuringHandoffDoesNotWedge(t *testing.T) {
 // still be able to run 3 requests at once. Cancelling a waiter may never
 // shrink a provider's capacity.
 func TestConcurrencyGate_CapacitySurvivesCancelChurn(t *testing.T) {
+	t.Parallel()
 	const url = "http://churn:8080/v1"
 	g := NewConcurrencyGate()
 	ctx, cancel := context.WithCancel(context.Background())

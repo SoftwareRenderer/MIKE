@@ -12,18 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"mike/pkg/sandboxruntime"
 )
-
-func deleteFixture(t *testing.T) (*ExtensionHandler, *ExtensionStore, string) {
-	t.Helper()
-	extStore := testStore(t)
-	reg := NewRegistryClient()
-	dir := t.TempDir()
-	cfg := &ExtensionConfig{ExtensionsDir: dir}
-	return NewExtensionHandler(extStore, NewExtensionSandboxManager(reg, extStore, sandboxruntime.Boot{}), reg, cfg), extStore, dir
-}
 
 func storedExtension(t *testing.T, store *ExtensionStore, id, author, name, source string) *Extension {
 	t.Helper()
@@ -74,7 +63,7 @@ func exists(path string) bool {
 // TestHandleDelete_RemovesTheMaterializedDirectory: the row used to go and the files stayed, so the
 // extension kept being served from disk and came back through the local listing with its old manifest.
 func TestHandleDelete_RemovesTheMaterializedDirectory(t *testing.T) {
-	h, store, root := deleteFixture(t)
+	h, store, root := handlerFixture(t)
 	storedExtension(t, store, "go-team-gopls-1", "Go Team", "gopls", "registry")
 	storedExtension(t, store, "rust-analyzer-1", "Rust Analyzer Project", "rust-analyzer", "registry")
 
@@ -115,7 +104,7 @@ func TestHandleDelete_RemovesTheMaterializedDirectory(t *testing.T) {
 // TestHandleDelete_RemovesAFlatLocalExtension covers the older layout, where an extension with no
 // author folder lives directly under the root.
 func TestHandleDelete_RemovesAFlatLocalExtension(t *testing.T) {
-	h, _, root := deleteFixture(t)
+	h, _, root := handlerFixture(t)
 	storedExtension(t, h.store, "local-my-ui", "local", "my-ui", "local")
 	dir := filepath.Join(root, "my-ui")
 	writeExtensionFiles(t, dir)
@@ -134,7 +123,7 @@ func TestHandleDelete_RemovesAFlatLocalExtension(t *testing.T) {
 
 func TestHandleDelete_NeverDeletesOutsideTheExtensionsRoot(t *testing.T) {
 	t.Run("a name that is not a single path segment", func(t *testing.T) {
-		h, _, root := deleteFixture(t)
+		h, _, root := handlerFixture(t)
 		storedExtension(t, h.store, "evil-1", "acme", "../../outside", "registry")
 
 		outside := filepath.Join(filepath.Dir(root), "outside")
@@ -150,7 +139,7 @@ func TestHandleDelete_NeverDeletesOutsideTheExtensionsRoot(t *testing.T) {
 	})
 
 	t.Run("an author folder that is a symlink elsewhere", func(t *testing.T) {
-		h, _, root := deleteFixture(t)
+		h, _, root := handlerFixture(t)
 		storedExtension(t, h.store, "evil-2", "linked", "srv", "registry")
 
 		outside := filepath.Join(t.TempDir(), "acme")
@@ -178,7 +167,7 @@ func TestHandleDelete_ReportsFilesItCouldNotRemove(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("permissions do not bind the superuser")
 	}
-	h, _, root := deleteFixture(t)
+	h, _, root := handlerFixture(t)
 	storedExtension(t, h.store, "go-team-gopls-2", "Go Team", "gopls", "registry")
 	goplsDir := filepath.Join(root, "go-team", "gopls")
 	writeExtensionFiles(t, goplsDir)
@@ -205,7 +194,7 @@ func TestHandleDelete_ReportsFilesItCouldNotRemove(t *testing.T) {
 // TestHandleDelete_WithNoFilesAtAll: a record whose directory was never written (or was removed by
 // hand) is a normal delete, not a warning.
 func TestHandleDelete_WithNoFilesAtAll(t *testing.T) {
-	h, _, _ := deleteFixture(t)
+	h, _, _ := handlerFixture(t)
 	storedExtension(t, h.store, "never-written", "acme", "ghost", "registry")
 
 	body := deleteExtensionRequest(t, h, "never-written")

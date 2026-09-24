@@ -50,6 +50,7 @@ func renameArgs() map[string]any {
 }
 
 func TestHandleLSPRename_AppliesAllFiles(t *testing.T) {
+	t.Parallel()
 	ws := t.TempDir()
 	writeTestFile(t, filepath.Join(ws, "a.txt"), "foo := 1\nx := foo\n")
 	writeTestFile(t, filepath.Join(ws, "b.txt"), "y := foo\n")
@@ -113,6 +114,7 @@ func TestHandleLSPRename_AppliesAllFiles(t *testing.T) {
 }
 
 func TestHandleLSPRename_NotRenamable(t *testing.T) {
+	t.Parallel()
 	ws := t.TempDir()
 	writeTestFile(t, filepath.Join(ws, "a.txt"), "foo := 1\n")
 	before, _ := os.ReadFile(filepath.Join(ws, "a.txt"))
@@ -144,6 +146,7 @@ func TestHandleLSPRename_NotRenamable(t *testing.T) {
 }
 
 func TestHandleLSPRename_NullResult(t *testing.T) {
+	t.Parallel()
 	ws := t.TempDir()
 	writeTestFile(t, filepath.Join(ws, "a.txt"), "foo := 1\n")
 
@@ -172,6 +175,7 @@ func TestHandleLSPRename_NullResult(t *testing.T) {
 }
 
 func TestHandleLSPRename_LSPError(t *testing.T) {
+	t.Parallel()
 	ws := t.TempDir()
 	writeTestFile(t, filepath.Join(ws, "a.txt"), "foo := 1\n")
 
@@ -200,6 +204,7 @@ func TestHandleLSPRename_LSPError(t *testing.T) {
 }
 
 func TestHandleLSPRename_OutsideWorkspace(t *testing.T) {
+	t.Parallel()
 	ws := t.TempDir()
 	writeTestFile(t, filepath.Join(ws, "a.txt"), "foo := 1\n")
 	outside := filepath.Join(t.TempDir(), "outside.txt")
@@ -230,6 +235,7 @@ func TestHandleLSPRename_OutsideWorkspace(t *testing.T) {
 }
 
 func TestHandleLSPRename_RequiredArgs(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 	te.lspMgr = &fakeLSPManager{enabled: true}
 	read, write := osReadWrite(t.TempDir())
@@ -245,6 +251,7 @@ func TestHandleLSPRename_RequiredArgs(t *testing.T) {
 }
 
 func TestHandleLSPRename_NoLSPManager(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t) // lspMgr nil
 	read, write := osReadWrite(t.TempDir())
 	if _, err := te.tools.handleLSPRename(context.Background(), renameArgs(), t.TempDir(), read, write); err == nil {
@@ -253,6 +260,7 @@ func TestHandleLSPRename_NoLSPManager(t *testing.T) {
 }
 
 func TestHandleLSPRename_ToolCallsDisabled(t *testing.T) {
+	t.Parallel()
 	te := newBareTestExecutor(t)
 	te.lspMgr = &fakeLSPManager{enabled: false}
 	read, write := osReadWrite(t.TempDir())
@@ -262,6 +270,7 @@ func TestHandleLSPRename_ToolCallsDisabled(t *testing.T) {
 }
 
 func TestHandleLSPRename_SymbolNotFound(t *testing.T) {
+	t.Parallel()
 	ws := t.TempDir()
 	writeTestFile(t, filepath.Join(ws, "a.txt"), "baz := 1\n")
 	te := newBareTestExecutor(t)

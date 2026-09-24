@@ -1013,54 +1013,33 @@ func TestMultiWorkspaceSingleConnection(t *testing.T) {
 	}
 }
 
-func TestRouteServerRequest(t *testing.T) {
-	// A server request (id and method, e.g. window/workDoneProgress) is unhandled and must be
-	// dropped silently rather than logged as an error.
+// TestRouteDropsFramesItCannotDispatch: a server request (id and method), a frame with neither, and
+// an empty object have no destination. They must reach no client and must not stop the router — the
+// notification delivered last is what makes both halves observable, because a subscribed session
+// receives every notification, so it is the one frame this client may get and the first frame it gets
+// is the answer.
+func TestRouteDropsFramesItCannotDispatch(t *testing.T) {
 	mgr := newMockProcessManager()
-	reg := newTestRegistry()
-	handler := NewLSPHandler(reg, mgr)
+	handler := NewLSPHandler(newTestRegistry(), mgr)
 	defer handler.Close()
 
-	// Deliver a server request (has both id and method)
-	serverRequest := json.RawMessage(`{"jsonrpc":"2.0","id":99,"method":"window/workDoneProgress","params":{"token":"abc"}}`)
-	mgr.Deliver(serverRequest)
+	url := startTestServer(t, handler)
+	client := subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
 
-	// Give the router time to process
-	time.Sleep(50 * time.Millisecond)
+	for _, frame := range []json.RawMessage{
+		json.RawMessage(`{"jsonrpc":"2.0","id":99,"method":"window/workDoneProgress","params":{"token":"abc"}}`),
+		json.RawMessage(`{"jsonrpc":"2.0","result":{}}`),
+		json.RawMessage(`{}`),
+	} {
+		mgr.Deliver(frame)
+	}
 
-	// Should not panic or block — the message is silently dropped
-	// (We don't verify the absence of a log line here, just that it doesn't crash)
-}
+	mgr.Deliver(json.RawMessage(`{"jsonrpc":"2.0","method":"window/logMessage","params":{"type":3,"message":"probe"}}`))
 
-func TestRouteMalformedMessage(t *testing.T) {
-	// Messages with neither id nor method can occur during process teardown
-	// (partial reads dispatch truncated bodies). Should be silently dropped.
-	mgr := newMockProcessManager()
-	reg := newTestRegistry()
-	handler := NewLSPHandler(reg, mgr)
-	defer handler.Close()
-
-	// Deliver a malformed message (no id, no method)
-	malformed := json.RawMessage(`{"jsonrpc":"2.0","result":{}}`)
-	mgr.Deliver(malformed)
-
-	// Give the router time to process
-	time.Sleep(50 * time.Millisecond)
-
-	// Should not panic or block — the message is silently dropped
-}
-
-func TestRouteEmptyMessage(t *testing.T) {
-	// An empty JSON object should be silently dropped.
-	mgr := newMockProcessManager()
-	reg := newTestRegistry()
-	handler := NewLSPHandler(reg, mgr)
-	defer handler.Close()
-
-	empty := json.RawMessage(`{}`)
-	mgr.Deliver(empty)
-
-	time.Sleep(50 * time.Millisecond)
+	first := client.receive(t)
+	if !strings.Contains(string(first), "window/logMessage") {
+		t.Errorf("first frame after the undeliverable ones = %s, want the probe notification", first)
+	}
 }
 
 func TestUnknownExtensionRejected(t *testing.T) {

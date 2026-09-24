@@ -12,6 +12,7 @@ import (
 // if it were a new failure. One failure now means one stored error and one frame,
 // and nothing is handed to later subscribers of the task.
 func TestFailTask_PersistsOneErrorAndStopsReplayingIt(t *testing.T) {
+	t.Parallel()
 	e := newTestExecutor(t)
 	now := time.Now().UTC()
 
@@ -78,6 +79,7 @@ func TestFailTask_PersistsOneErrorAndStopsReplayingIt(t *testing.T) {
 // An agent-reported error is stored by the server too, so the client never has to
 // write one, and the run keeps its replay buffer — an agent error need not end it.
 func TestSendAgentStreamEvent_PersistsAgentError(t *testing.T) {
+	t.Parallel()
 	e := newTestExecutor(t)
 	now := time.Now().UTC()
 
