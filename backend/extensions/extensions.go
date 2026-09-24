@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"sort"
 	"strings"
-	"time"
 
 	"mike/backend/types"
 )
@@ -683,22 +682,8 @@ func (sc *SandboxConfig) DependencyGrant() string {
 type CommandRef struct {
 	Command string   `json:"command"`
 	Args    []string `json:"args,omitempty"`
-	// TimeoutSeconds bounds one run. 0 means the default; every value is clamped
-	// so a manifest cannot stall a turn.
+	// TimeoutSeconds is the declared bound for one run, in seconds.
 	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
-}
-
-// Timeout returns the declared bound, clamped to (0, max]. A manifest that
-// declares nothing gets def, and nothing declared may outrank max.
-func (c CommandRef) Timeout(def, max time.Duration) time.Duration {
-	if c.TimeoutSeconds <= 0 {
-		return def
-	}
-	t := time.Duration(c.TimeoutSeconds) * time.Second
-	if t > max {
-		return max
-	}
-	return t
 }
 
 // Argv is the command line to run, command first. Returns false when no command

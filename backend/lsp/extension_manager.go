@@ -78,10 +78,6 @@ type ExtensionLSPManager struct {
 	projects   projectPaths
 	mu         sync.Mutex
 	clients    map[string]*sandboxClient // workspaceKey → client state
-	// environments holds one workspace's last "can its server resolve the project"
-	// verdict, keyed like clients. It dies with the connection: a fresh server may
-	// find a different dependency root than the one that just stopped answering.
-	environments map[string]envStatus
 	// serverCh receives messages from all LSP servers (responses + notifications)
 	serverCh chan json.RawMessage
 	// subscribers receive a copy of all LSP server messages (for filtered listening)
@@ -120,16 +116,13 @@ type sandboxClient struct {
 	// connection outlives the server, so without this flag the map keeps handing out a
 	// connection whose every request answers `lsp server died`.
 	dead atomic.Bool
-	// extension is the installed record this connection was created from. Its manifest
-	// carries the environment check and the diagnostic codes that mean "could not load the
-	// project" — core never interprets either, it only forwards them.
+	// extension is the installed record this connection was created from: its manifest
+	// declares the workspace files whose change makes this server re-read the project, and
+	// core never interprets a file name.
 	extension *extensions.Extension
-	// gate is that extension's environment check, when it declared one. nil means the
-	// server's answers are always forwarded.
-	gate *extensions.EnvironmentGate
 	// There is no dependency-root field: that assignment is a container-level `-e` (see
-	// extensions.DependencyMount), not per connection, so the language server and the extension's own
-	// environment check get the same answer.
+	// extensions.DependencyMount), not per connection, so the language server sees the same
+	// dependency location the container was created with.
 }
 
 // usable reports whether requests may still go through this connection: both the bridge
@@ -242,13 +235,12 @@ type projectPaths interface {
 
 func NewExtensionLSPManager(extStore *extensions.ExtensionStore, extSandbox *extensions.ExtensionSandboxManager, projects projectPaths) *ExtensionLSPManager {
 	return &ExtensionLSPManager{
-		extStore:     extStore,
-		extSandbox:   extSandbox,
-		projects:     projects,
-		clients:      make(map[string]*sandboxClient),
-		environments: make(map[string]envStatus),
-		serverCh:     make(chan json.RawMessage, 256),
-		subscribers:  make([]chan json.RawMessage, 0),
+		extStore:    extStore,
+		extSandbox:  extSandbox,
+		projects:    projects,
+		clients:     make(map[string]*sandboxClient),
+		serverCh:    make(chan json.RawMessage, 256),
+		subscribers: make([]chan json.RawMessage, 0),
 	}
 }
 
@@ -358,7 +350,6 @@ func (m *ExtensionLSPManager) startSession(ctx context.Context, ext *extensions.
 
 	client := newSandboxClient(bridgeClient, workspacePath, language, ext.ID, projectMounts)
 	client.extension = ext
-	client.gate = ext.SandboxConfig.Environment
 	client.refs = refs
 
 	startCtx, cancelStart := context.WithTimeout(ctx, lspStartTimeout)
@@ -448,7 +439,6 @@ func (m *ExtensionLSPManager) retire(workspaceKey string, sc *sandboxClient) {
 		return
 	}
 	delete(m.clients, workspaceKey)
-	delete(m.environments, workspaceKey)
 	m.mu.Unlock()
 
 	m.closeConnection(workspaceKey, sc)

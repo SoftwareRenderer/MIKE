@@ -566,16 +566,6 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 
 	// Extensions are entirely registry-driven — there is no built-in bootstrap step.
 	s.extHandler = extensions.NewExtensionHandler(s.extStore, s.extSandboxMgr, extRegistry, extCfg)
-	// What Settings → Extensions shows when a language server cannot resolve the project it
-	// is serving: the state behind diagnostics core deliberately withheld rather than
-	// forwarded as fact.
-	s.extHandler.SetEnvironmentStatus(func(extID string) *extensions.EnvironmentStatus {
-		healthy, note := s.extLSPMgr.EnvironmentSummary(extID)
-		if healthy || note == "" {
-			return nil
-		}
-		return &extensions.EnvironmentStatus{Healthy: false, Note: note}
-	})
 	extLSPRegistry := lsp.NewExtensionRegistry(s.extStore)
 	s.lspHandler = lsp.NewLSPHandler(extLSPRegistry, s.extLSPMgr)
 	defer s.reg(stageLSPHandler, "lsp handler", s.lspHandler.Close)()

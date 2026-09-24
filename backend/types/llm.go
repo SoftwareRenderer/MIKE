@@ -155,7 +155,6 @@ type ChatUsage struct {
 	PromptTokens        int                 `json:"prompt_tokens"`
 	PromptTokensDetails PromptTokensDetails `json:"prompt_tokens_details"`
 	CompletionTokens    int                 `json:"completion_tokens"`
-	TotalTokens         int                 `json:"total_tokens"`
 	PromptMs            int64               `json:"-"` // populated from timings after parse
 	PredictedMs         int64               `json:"-"` // populated from timings after parse
 }
