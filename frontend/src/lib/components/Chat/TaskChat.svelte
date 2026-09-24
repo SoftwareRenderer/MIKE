@@ -27,7 +27,7 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { t } from '$lib/i18n';
     import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
-    import { prependRows, resolveAnchor, anchorScrollDelta, readerScrolledUp, noticeForWindowRead, type MeasuredEntry, type ScrollAnchor, type WindowReadNotice } from '$lib/utils/chat-window';
+    import { prependRows, resolveAnchor, anchorScrollDelta, readerScrolledUp, noticeForWindowRead, windowIsReading, type MeasuredEntry, type ScrollAnchor, type WindowRead, type WindowReadNotice } from '$lib/utils/chat-window';
     import { createTabReturn } from '$lib/composables/use-tab-return';
     import ChatForm from './ChatForm.svelte';
     import ChatEntries from './ChatEntries.svelte';
@@ -512,16 +512,21 @@
     }
 
     /** `executionState` decides whether an unanswered tool call is work or a leftover: pass the task row,
-     * not the board's copy. */
-    async function loadHistory(scrollAfter = false, executionState = knownExecutionState) {
+     * not the board's copy. The answer says how the read ended, so a caller can tell a mirror copy from
+     * the server's own rows. */
+    async function loadHistory(scrollAfter = false, executionState = knownExecutionState): Promise<WindowRead> {
+        let read: WindowRead = 'failed';
         try {
             const window = await getTaskMessages(projectId, taskId);
-            historyRows = window.messages;
-            earlierCursor = window.before;
-            hasEarlier = window.hasMore;
-            historyNotice = noticeForWindowRead(isFromCache(window) ? 'cached' : 'answered', readContext(executionState));
+            read = isFromCache(window) ? 'cached' : 'answered';
+            historyNotice = noticeForWindowRead(read, readContext(executionState));
             declareRows(historyNotice);
-            renderHistory(scrollAfter, executionState);
+            if (windowIsReading(read, historyRows.length > 0)) {
+                historyRows = window.messages;
+                earlierCursor = window.before;
+                hasEarlier = window.hasMore;
+                renderHistory(scrollAfter, executionState);
+            }
             // The transcript draws first: the prompts the header names arrive a moment later and relabel it.
             await readTurns(true);
         } catch (e) {
@@ -529,7 +534,7 @@
             if (e instanceof Error && (e.message.includes('Not found') || e.message.includes('404'))) {
                 clearDraftText(taskId).catch(() => {});
                 draftAttachments = [];
-                return;
+                return 'failed';
             }
             // Anything else: what is on screen may be the last thing read, so say that rather than stay
             // silent about a transcript that looks empty.
@@ -538,6 +543,7 @@
         }
         // A queued send has no row, so no read can bring it; the queue is read either way.
         await renderPendingSends();
+        return read;
     }
 
     function readContext(executionState: string) {
@@ -1545,17 +1551,18 @@
      * completed while away are never replayed, and a frame lost to a suspended tab has no other way back.
      */
     async function reconcileAfterAbsence(): Promise<void> {
-        let executionState = taskExecutionState;
+        let executionState = knownExecutionState;
         try {
             executionState = (await getTask(projectId, taskId)).execution_state;
             noteTaskRow(executionState);
         } catch {
-            // Deleted or unreachable: the state on screen is the best reading available.
+            // Deleted or unreachable: keep the reading from the last row read.
         }
         if (!taskIsInFlight(executionState)) dropStaleStreamingState();
-        await loadHistory(false, executionState);
-        // What the rows left unanswered is still owed a card; nothing else is.
-        stream.state.unresolvedToolIds = pendingToolIds(stream.state.entries);
+        const read = await loadHistory(false, executionState);
+        if (read === 'answered') {
+            stream.state.unresolvedToolIds = pendingToolIds(stream.state.entries);
+        }
     }
 
     // Drop stale streaming entries and reset streaming UI. Turns finished

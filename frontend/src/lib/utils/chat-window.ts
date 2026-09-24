@@ -33,6 +33,13 @@ export function noticeForWindowRead(read: WindowRead, seen: { holdsTaskKey: bool
     return seen.holdsTaskKey && seen.taskInFlight ? 'owing' : 'failed';
 }
 
+/** Whether a window read may redraw the transcript. A mirror copy is this browser's last answered read,
+ * so it is older than what the screen has been sent: it paints only a screen holding no rows. */
+export function windowIsReading(read: WindowRead, hasRows: boolean): boolean {
+    if (read === 'answered') return true;
+    return read === 'cached' && !hasRows;
+}
+
 /** The fewest rows one task keeps in the cache. A window is five answers, which can be fewer rows than an
  * earlier open read, so an offline reload does not open on less than what was already shown. */
 export const CACHED_ROWS_FLOOR = 60;

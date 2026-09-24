@@ -282,13 +282,21 @@ the turn continues and one that stays empty. `mayBeBehind()` is false for an idl
 transcript, so a return from a hidden window (*The tab that comes back*) is the other thing that refetches
 by itself. A live read clears the notice and the claim, so neither outlives its answer.
 
-It is not a chat entry: the transcript is rebuilt from the rows on every read, so a synthetic entry would
-be appended again by each rebuild. What the queue holds is rebuilt too — see *A pending outgoing message is
+**A mirror copy is not a reading of the server** — it does not redraw a transcript that has rows.
+`windowIsReading` (`$lib/utils/chat-window.ts`) is that gate. The stored window paints a screen holding no
+rows — the open that never reached the server — and nothing else. It is this browser's own last answered
+read, so every turn and card that arrived since is missing from it: redrawing from one at a return is how a
+transcript goes backwards. The notice and the `no_rows` claim still move on what the read was, so the reader
+is told and Retry still asks again.
+
+It is not a chat entry: a read that lands rebuilds the transcript, so a synthetic entry would be appended
+again by each rebuild. What the queue holds is rebuilt too — see *A pending outgoing message is
 the queue's projection* — so a read that failed does not hide a message this browser wrote.
 
 **Tests:** e2e `away-and-back.spec.ts` — a read aborted from the first open with no cached copy,
 retried once the server answers again, and a reload onto the stored copy. `chat-window.unit.ts` holds the
-notice decision itself, including that a mirror read never reports `'owing'`.
+notice decision itself, including that a mirror read never reports `'owing'`, and `windowIsReading`,
+including that a mirror copy never replaces rows the screen holds.
 `chat-entries-history-notice.unit.svelte.ts` renders which sentence lands for which notice, and the Retry
 beside it.
 
@@ -336,7 +344,13 @@ that left flight and no answer is coming for it.
 
 `reconcileAfterAbsence` then decides work-vs-leftover from the row it just read — `getTask().execution_state`
 through `taskIsInFlight` — and passes that into `loadHistory`, never the board copy, and records the reading
-so the next rebuild starts from it too (*The row decides, not the board's copy*). The merge drops live
+so the next rebuild starts from it too (*The row decides, not the board's copy*). A row read that did not
+answer keeps the reading of the last row this screen read — `knownExecutionState`, not `taskExecutionState`.
+A window that has been unread is the window whose board copy missed its frames, and that reading gates
+`dropStaleStreamingState`, which deletes the running turn's entries. The rebuild narrows `unresolvedToolIds`
+to the calls still waiting **only when the rows came from the server**. A mirror copy settles the id of a
+card that was lost; with the evidence gone `mayBeBehind()` answers no, and the next return asks for nothing.
+The merge drops live
 pending cards when told the task is not in flight, and the board can carry an `idle` from a
 duplicate-message answer (`backend/exec/handler_http.go`) while the call is still running.
 
@@ -351,7 +365,8 @@ in the wrapped constructor runs before the app's `onmessage`, so `stopImmediateP
 frame can be removed) and asserts they really were swallowed; the turn ends with the card gone, and one
 `visibilitychange` must bring it back holding the stored output. `tab-return.unit.ts` holds the gate rule
 itself, including that a screen which cannot see its own gap reconciles on the hidden signal alone and one
-that was never hidden does not.
+that was never hidden does not. `chat-window.unit.ts` holds the half the reconcile reads — that only a row
+read that reached the server redraws a transcript.
 
 ## The board on screen belongs to one project
 
