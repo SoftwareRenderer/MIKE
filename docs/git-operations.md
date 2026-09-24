@@ -193,8 +193,8 @@ to the completion of the TCP timeout, not of MIKE's patience.
 A cancelled context therefore exists only where a caller has something worth cancelling: `git clone`
 (`CloneContext`, on the request context, so closing the tab stops it), pull/push (`handleGitRemote`, which
 used to hold the per-project mutex for the full ssh timeout), and the extension install's
-`clone`/`checkout`/`rev-parse`. The other ~61 local git call sites behind the three helpers (`gitRun`,
-`gitRunInGitDir`, `gitRunOutput`) are deliberately context-less: they run against a local repository, and
+`clone`/`checkout`/`rev-parse`. The other ~60 local git call sites behind the three helpers (`Run`,
+`gitRun`, `gitRunInGitDir`) are deliberately context-less: they run against a local repository, and
 threading a context through them buys nothing at the sites that never block on a network.
 
 ## Ahead/behind counts never touch the remote

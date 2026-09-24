@@ -744,14 +744,6 @@ export interface Extension {
     built_at: string;
     repo?: string;
     commit?: string;
-    /**
-     * Runtime report for a language-server extension that declares an environment
-     * check: can it actually resolve the workspace it is serving? When it cannot,
-     * the server withholds that extension's unresolvable diagnostics instead of
-     * reporting them as errors in the user's code — `note` is the sentence that
-     * stands in for them. Absent for every other extension, and while healthy.
-     */
-    environment?: { healthy: boolean; note?: string };
 }
 
 export interface RegistryEntry {

@@ -1065,14 +1065,6 @@
                                     <ToggleSwitch class="card-toggle" checked={ext.enabled} onChange={() => handleToggleEnabled(ext.id, !ext.enabled)} />
                                 </div>
                             </div>
-                            {#if ext.environment && !ext.environment.healthy}
-                                <!-- One honest sentence for the state behind the diagnostics core
-                                     withheld: the server could not resolve this project, so its
-                                     "package not found" answers were never facts about the code. -->
-                                <div class="ext-env-note" role="status">
-                                    <span class="ext-env-note-text">{ext.environment.note || t('settings.extensions.envNote')}</span>
-                                </div>
-                            {/if}
                             <!-- Shows the approved folders. Changing them happens in the Edit dialog. -->
                             {#if agentMountDeclaration(ext.manifest.capabilities).length > 0}
                                 <!-- An agent has no container of its own, so clearing an approval here
@@ -1794,23 +1786,6 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-    }
-
-    /* The withheld-diagnostics state, in the extension's own words (its manifest
-       note). Wraps on purpose: it is a sentence to read, not a status to ellipsize. */
-    .ext-env-note {
-        margin: 0 0 0.75rem;
-        padding: 0.4rem 0.6rem;
-        border-left: 2px solid var(--color-status-yellow, #f0c000);
-        background: rgba(240, 192, 0, 0.07);
-        border-radius: 0 4px 4px 0;
-    }
-
-    .ext-env-note-text {
-        display: block;
-        font-size: 0.75rem;
-        line-height: 1.45;
-        color: var(--color-text-secondary);
     }
 
     /* The dependency-directory warning on a card: the Installed card shows a dot on the Edit icon and

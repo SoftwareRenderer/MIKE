@@ -1,4 +1,8 @@
 # archgate baseline: frozen violations, regenerated with -update.
+# ctxroot: every base context in production Go, classified. key = file|function|reason|x<count>.
+# root = a genuine entry point (nothing above it to cancel from). detached = a state-leaving write that
+# must outlive the request that began it (Decision 6). legacy = a caller has a context and does not pass
+# one; that count is the debt. See scripts/archgate/rules_ctxroot.go.
 # A key is <file>|<detail>; no line numbers, so unrelated edits do not churn this file.
 # Shrink it by fixing a violation, never by adding to it.
 backend/agent/loader.go|loadWasmAdapter|root|x1

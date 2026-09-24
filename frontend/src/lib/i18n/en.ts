@@ -652,7 +652,6 @@ const catalog = {
     'settings.extensions.localeHint': 'The language this pack translates',
     'settings.extensions.editNeedsSetup': 'Edit — its dependencies directory is not configured',
     'settings.extensions.edit': 'Edit',
-    'settings.extensions.envNote': 'This language server cannot resolve the project it is serving, so its unresolved-import diagnostics are being withheld.',
     'settings.extensions.path': 'Path',
     'settings.extensions.pathUnavailable': 'Path unavailable',
     'settings.extensions.connectsTo': 'Connects to:',
