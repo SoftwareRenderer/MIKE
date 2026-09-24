@@ -364,6 +364,16 @@ export function isAgentProvider(p: { kind?: string; url: string }): boolean {
     return p.kind === 'agent' || p.url.startsWith(AGENT_URL_PREFIX);
 }
 
+/**
+ * One prompt of a conversation, as the turn read answers it: enough to name the prompt and to find its row
+ * again. `text` is the head of the prompt, bounded by the server; its first line is what a header shows.
+ */
+export interface ChatTurn {
+    id: string;
+    created_at: string;
+    text: string;
+}
+
 export interface TaskMessage {
     id: string;
     task_id: string;

@@ -87,6 +87,14 @@ window`) is bounded by its window only because these two carry the order. The co
 the single-column one did, so those are dropped rather than left to cost every insert for nothing.
 `EXPLAIN QUERY PLAN` is asserted, not assumed: `backend/store/messages_window_test.go`.
 
+`idx_task_messages_user_thread(thread_id, created_at) WHERE role = 'user'` and its `task_id` twin
+(`doneUserTurnIndexesStamp`) are that order cut to prompts, and `GetUserTurnPage` reads through them
+(`docs/api-contract.md → The conversation is a window, not the thread`). Over the shared index the same read passes
+every row of the turn below the prompt it is looking for, so its cost is the turn's length. A partial index
+keeps `rowid` as its last key column, which is what lets the role filter keep the tie rule; putting `role`
+in the shared index instead pushes `rowid` back and puts a temp B-tree in every conversation read. Tests:
+`backend/store/messages_turns_test.go`, `TestMigration_AddsTheUserTurnIndexes`.
+
 ## File permissions
 
 Data dir `0700`; `kanban.db` plus `-wal`/`-shm` `0600` (`backend/store/store.go`); `kanban.trace` `0600`

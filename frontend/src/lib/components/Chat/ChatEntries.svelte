@@ -1,7 +1,8 @@
 <script lang="ts">
-    import type { Thread, ChatEntry, LockWait } from '$lib/types';
+    import { tick } from 'svelte';
+    import type { Thread, ChatEntry, LockWait, ChatTurn } from '$lib/types';
     import { advisoryLabel, type EntryMeta } from '$lib/utils/chat-entries';
-    import { computeStickyHeader, type StickyUserMessage } from '$lib/utils/chat-sticky-header';
+    import { computeStickyHeader, turnLabel, type StickyTurn } from '$lib/utils/chat-sticky-header';
     import { scrollToLine } from '$lib/utils/settle-scroll';
     import { isAtBottom, type ChatFollow } from '$lib/composables/use-chat-follow.svelte';
     import { atTopOfList } from '$lib/utils/chat-window';
@@ -48,6 +49,9 @@
         hasEarlier = false,
         loadingEarlier = false,
         onLoadEarlier,
+        turns = [],
+        turnsHasMore = false,
+        onJumpToTurn,
     }: {
         entries: ChatEntry[];
         entryMetas: EntryMeta[];
@@ -88,8 +92,15 @@
         historyNotice?: 'cached' | 'failed' | 'owing' | null;
         /** Ask the server again — what the notice offers beside the fact it reports. */
         onRetryHistory?: () => void;
-        /** Fetch the next-older window, called when the reader reaches the top edge. */
-        onLoadEarlier?: () => Promise<void>;
+        /** Fetch the next-older window, called when the reader reaches the top edge. Whether rows
+         * arrived is the jump's business; the top edge ignores the answer. */
+        onLoadEarlier?: () => Promise<unknown>;
+        /** The prompts the header can name, oldest first: what the prompt read answers. */
+        turns?: ChatTurn[];
+        /** Older prompts exist beyond that list. */
+        turnsHasMore?: boolean;
+        /** Fetch until the prompt the header names is on screen. True once it is. */
+        onJumpToTurn?: (entryId: string) => Promise<boolean>;
     } = $props();
 
     function isOptimisticId(id: string): boolean {
@@ -176,11 +187,39 @@
     // Compute the sticky chat header
     let computedStickyMessage = $state('');
     let computedShowHeader = $state(false);
-    let stickyEntryIdx = $state(-1);
+    let stickyNeedsRows = $state(false);
+    let stickyEntryId = $state('');
     // The overlay hangs over the top of the scroller, so it decides where a message
     // has to land to be readable rather than behind it.
     let stickyHeaderEl: HTMLElement | null = $state(null);
-    let tapped: { entryIdx: number; intent: number } | null = null;
+    let tapped: { entryId: string; intent: number } | null = null;
+
+    /**
+     * The prompts the header can name: the rendered ones where they sit, and the ones older than every
+     * rendered row from the prompt read, which names what a window of answers leaves out.
+     */
+    function stickyTurns(el: HTMLElement, containerTop: number, scrollTop: number): StickyTurn[] {
+        const rendered: StickyTurn[] = [];
+        for (const node of Array.from(el.querySelectorAll<HTMLElement>('.sticky-user-message'))) {
+            const entryIdx = Number(node.dataset.entryIdx);
+            if (!Number.isInteger(entryIdx)) continue;
+            const rect = node.getBoundingClientRect();
+            // Convert viewport-space rects to content space.
+            rendered.push({
+                entryId: node.dataset.entryId ?? '',
+                entryIdx,
+                firstLine: node.dataset.userMsgFirstLine ?? '',
+                top: rect.top - containerTop + scrollTop,
+                bottom: rect.bottom - containerTop + scrollTop,
+            });
+        }
+        const onScreen = new Set(rendered.map(turn => turn.entryId));
+        const earlier = turns
+            .filter(turn => !onScreen.has(turn.id))
+            .map(turn => ({ entryId: turn.id, entryIdx: -1, firstLine: turnLabel(turn.text), top: 0, bottom: 0 }));
+        // Unrendered prompts are always the older end: the window holds the newest rows of the thread.
+        return [...earlier, ...rendered];
+    }
 
     // the overlay's bottom edge
     function stickyLineOffset(): number | null {
@@ -199,49 +238,47 @@
         const line = stickyLineOffset();
         if (!el || line === null) {
             computedStickyMessage = '';
-            stickyEntryIdx = -1;
+            stickyNeedsRows = false;
+            stickyEntryId = '';
             computedShowHeader = false;
             return;
         }
         const containerTop = el.getBoundingClientRect().top;
         const scrollTop = el.scrollTop;
-        const userMessages: StickyUserMessage[] = [];
-        for (const node of Array.from(el.querySelectorAll<HTMLElement>('.sticky-user-message'))) {
-            const entryIdx = Number(node.dataset.entryIdx);
-            if (!Number.isInteger(entryIdx)) continue;
-            const rect = node.getBoundingClientRect();
-            // Convert viewport-space rects to content space.
-            userMessages.push({
-                entryIdx,
-                firstLine: node.dataset.userMsgFirstLine ?? '',
-                top: rect.top - containerTop + scrollTop,
-                bottom: rect.bottom - containerTop + scrollTop,
-            });
-        }
 
         if (tapped && (follow.intent !== tapped.intent || follow.atBottom)) tapped = null;
-        const sticky = computeStickyHeader(userMessages, scrollTop, line, tapped?.entryIdx ?? -1, hasEarlier);
+        // Without a prompt read the row window is all the header knows about what lies above, and
+        // `hasEarlier` is as much as it can claim.
+        const olderTurnsBeyond = turnsHasMore || (turns.length === 0 && hasEarlier);
+        const sticky = computeStickyHeader(
+            stickyTurns(el, containerTop, scrollTop), scrollTop, line, tapped?.entryId ?? '', olderTurnsBeyond,
+        );
         computedStickyMessage = sticky.firstLine;
-        stickyEntryIdx = sticky.entryIdx;
+        stickyNeedsRows = sticky.needsRows;
+        stickyEntryId = sticky.entryId;
         computedShowHeader = sticky.show;
-
-        if (sticky.needsEarlier && !follow.atBottom && !loadingEarlier) void onLoadEarlier?.();
     }
 
     /** Land the message the header names on the sticky line, under the overlay. */
-    function handleStickyClickInternal() {
+    async function handleStickyClickInternal() {
         const scroller = chatScrollEl;
-        if (stickyEntryIdx < 0 || !scroller) return;
+        if (!scroller || stickyEntryId === '') return;
+        // Declare the takeover before anything moves, or the follow tracker's pin loop and the settle
+        // loop of a page that lands write scrollTop against us.
+        follow.noteUserIntent();
+        tapped = { entryId: stickyEntryId, intent: follow.intent };
+        if (stickyNeedsRows) {
+            // The prompt is older than every row held: fetch until its row is on screen.
+            const landed = await (onJumpToTurn?.(stickyEntryId) ?? Promise.resolve(false));
+            if (!landed) return;
+            await tick();
+        }
         // The message, not its `.chat-entry`: a checkpoint divider above the message
         // lives in the entry, so the entry starts a divider-height too early.
-        const target = scroller.querySelector<HTMLElement>(`.sticky-user-message[data-entry-idx="${stickyEntryIdx}"]`);
+        const target = scroller.querySelector<HTMLElement>(`.sticky-user-message[data-entry-id="${CSS.escape(stickyEntryId)}"]`);
         if (!target) return;
         const line = stickyLineOffset();
         if (line === null) return;
-        // Declare the takeover, or the follow tracker's pin loop writes scrollTop
-        // against us.
-        follow.noteUserIntent();
-        tapped = { entryIdx: stickyEntryIdx, intent: follow.intent };
         scrollToLine(scroller, target, line);
         // A tap that moves nothing fires no scroll event, so update the header here too.
         computeStickyFromScroll();
@@ -260,6 +297,8 @@
     // pinned while the user is following (pin() is a no-op once they scroll up).
     $effect(() => {
         entries.length;
+        // A prompt read lands labels the rows on screen cannot carry, and nothing else wakes this.
+        void turns;
         // A turn arriving or an older page landing changes which message is the previous one.
         tapped = null;
         computeStickyFromScroll();
@@ -439,7 +478,7 @@
                         </div>
                     </div>
                 {:else if entry.role === 'user'}
-                    <div class="sticky-user-message" data-entry-idx={entryIdx} data-user-msg-first-line={entry.content.split('\n')[0]}>
+                    <div class="sticky-user-message" data-entry-idx={entryIdx} data-entry-id={entry.id} data-user-msg-first-line={turnLabel(entry.content)}>
                         <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} isOptimistic={isOptimisticId(entry.id)} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} onDelete={() => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => onRegenerate(entry.id) : undefined} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} reasoningExpandedOverride={reasoningExpandedOverrides[entry.id]} onReasoningToggle={(exp) => handleReasoningToggle(entry.id, exp)} resolvedReasoningOverride={resolvedReasoningOverrides[entry.id]} onReasoningResolved={(content) => handleReasoningResolved(entry.id, content)} />
                     </div>
                 {:else if entry.buildLog}

@@ -517,3 +517,54 @@ func TestZeroLegacySandboxPeaks(t *testing.T) {
 		t.Errorf("peak after a second start = %d, want 300 — the migration must run exactly once", peak)
 	}
 }
+
+// A database older than the prompt indexes gains them on the next start: the read that names the user
+// message above a position has nothing else to read through, and a missing index there is a walk over
+// every row of the turn below it.
+func TestMigration_AddsTheUserTurnIndexes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kanban.db")
+	s, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("create the database: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	for _, name := range []string{"idx_task_messages_user_thread", "idx_task_messages_user_task"} {
+		if _, err := db.Exec(`DROP INDEX IF EXISTS ` + name); err != nil {
+			t.Fatalf("drop %s to simulate an older database: %v", name, err)
+		}
+	}
+	if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, doneMessageOrderIndexesStamp)); err != nil {
+		t.Fatalf("stamp the older version: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close fixture: %v", err)
+	}
+
+	s, err = NewStore(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	for _, name := range []string{"idx_task_messages_user_thread", "idx_task_messages_user_task"} {
+		if !hasIndex(t, s, name) {
+			t.Errorf("index %s is missing after the upgrade", name)
+			continue
+		}
+		// The predicate is the index: without it the same read walks the answers too.
+		var ddl string
+		if err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`, name).Scan(&ddl); err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if !strings.Contains(ddl, "WHERE role = 'user'") {
+			t.Errorf("index %s is not partial on user rows: %s", name, ddl)
+		}
+	}
+}

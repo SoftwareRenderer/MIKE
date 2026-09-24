@@ -176,6 +176,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("DELETE /api/projects/{projectID}/tasks/{taskID}/messages", s.handleTaskMessages)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/messages/{messageID}", s.handleTaskMessageByID)
 	s.mux.HandleFunc("PATCH /api/projects/{projectID}/tasks/{taskID}/messages/{messageID}", s.handleTaskMessageByID)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/turns", s.handleTaskTurns)
 
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/threads", s.handleThreads)
 	s.mux.HandleFunc("DELETE /api/projects/{projectID}/tasks/{taskID}/threads", s.handleThreads)
