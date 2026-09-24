@@ -14,7 +14,8 @@ When the WebSocket drops and reconnects, the current view (board, task view) upd
   both refused, never persisted);
   `online` flushes the queue and calls `reconnectNow()` to skip backoff.
 - A window coming back refreshes the board, the open task's chat and its diff — phone-sleep included — on
-  the same signal as the window's own `focus` and a bfcache `pageshow`. See *The tab that comes back*. The
+  the same signal as the window's own `focus`, a bfcache `pageshow`, and a page that finds its own clock has
+  jumped. See *The tab that comes back*. The
   listener is on `window`, which is where the browser's own event bubbles to from `document` — a synthetic
   `new Event(...)` fired at `document` does not bubble and reaches nothing.
 
@@ -307,14 +308,15 @@ beside it.
 ## The tab that comes back
 
 `createTabReturn` (`$lib/composables/use-tab-return.ts`) is the one listener set for "this window has come
-back", and `needsReturnReconcile` (`$lib/utils/tab-return.ts`) is the one rule. Three signals answer for one
-gesture — `visibilitychange`→visible, the window's own `focus`, and `pageshow` from the back/forward cache —
-and the rule collapses them to a single call, never twice inside `RETURN_DEDUPE_MS`.
+back", and `needsReturnReconcile` (`$lib/utils/tab-return.ts`) is the one rule. Four signals answer for one
+gesture — `visibilitychange`→visible, the window's own `focus`, `pageshow` from the back/forward cache, and
+`resume` from a page that stopped running — and the rule collapses them to a single call, never twice inside
+`RETURN_DEDUPE_MS`.
 
 | view | what says it could be behind | what it refetches |
 |---|---|---|
 | board (`App.svelte`) | always — a stale list looks current whatever the socket did | `reconnectNow()`, then `refreshBoard()`, retried once after a second |
-| chat (`TaskChat.svelte`) | after a window that was hidden: nothing, because `hiddenIsEvidence` is set. Otherwise: in flight, a card still pending, a turn still open on screen, or a call it owes a card for | the task row, then the messages |
+| chat (`TaskChat.svelte`) | after a window that was hidden or stopped: nothing, because `unreadIsEvidence` is set. Otherwise: in flight, a card still pending, a turn still open on screen, or a call it owes a card for | the task row, then the messages |
 | diff (`CardDetail.svelte`) | in flight or streaming | `loadDiff()` |
 
 **A window that was hidden is its own evidence, for a view that cannot see its own gap.**
@@ -322,10 +324,22 @@ and the rule collapses them to a single call, never twice inside `RETURN_DEDUPE_
 assistant id, `unresolvedToolIds` — is what a turn missed whole takes with it. No card was drawn, no id was
 opened, nothing was left unresolved. Ask such a screen whether it is behind and it answers no, which is the
 shape of a chat left on a stale transcript while its task answered twice. So `ReturnSignal` carries
-`hiddenIsEvidence`, the chat sets it, and a `visible` return reconciles without the screen's own answer. The
+`unreadIsEvidence`, the chat sets it, and a `visible` or `resume` return reconciles without the screen's own
+answer. The
 diff does not set it: its content is mirrored by `task_diff_stats` on the project channel, the same frames
 that move the board's copy it gates on. And `loadDiff()` resets the open file, the checkpoint overlay and the
 from/to comparison — reloading it on every tab switch is a loss the chat does not pay.
+
+**A page that stopped running reports itself off its own clock.** `watchSuspension`
+(`$lib/utils/page-suspension.ts`) keeps one 5 s interval for the whole page. A tick later than its pace by
+`SUSPENDED_GAP_MS` is a page that did not run, because a running page fires within milliseconds of what it
+asked for. Chrome's `resume` event feeds the same source as a courtesy, not as the mechanism: a phone
+behind another app and a page thawed by iOS report nothing. Neither stream reading carries this case, and the
+burst is why. Frames queued behind the freeze reach JavaScript after the window has focus, so
+`msSinceUnpainted` stays unstamped, and the same burst stamps the liveness clock — which is also why no
+reconnect banner appears. So `resume` answers for `unreadIsEvidence` alone: the board reads the frames that
+move it, and the diff would close the file someone was reading. What this does not claim: a page that kept
+running, lost frames, and got no event at either edge has no evidence, and nothing here invents one.
 
 **A frame that arrived to an unfocused window is the evidence for a window that never hid.** A `focus` or
 `pageshow` return needs the view's own answer *and* one of two readings of the stream. The first is
@@ -387,9 +401,13 @@ paused there; the follow tracker re-pins on return).
 in the wrapped constructor runs before the app's `onmessage`, so `stopImmediatePropagation` is where the
 frame can be removed) and asserts they really were swallowed; the turn ends with the card gone, and one
 `visibilitychange` must bring it back holding the stored output. `tab-return.unit.ts` holds the gate rule
-itself, including that a screen which cannot see its own gap reconciles on the hidden signal alone, that one
-which was never hidden reconciles on unread content, and that content older than its own reconcile is not
-evidence. `stream-unpainted.unit.ts` holds the reading: the keepalive never marks content unread, neither
+itself. A screen which cannot see its own gap reconciles on the hidden signal or on a clock gap alone, and the
+other two views answer a `resume` with nothing. Unread content carries a window that was never hidden, and
+content older than its own reconcile is not evidence. `page-suspension.unit.ts` holds the clock reading: an
+on-time tick says nothing, one late tick says it once, and one interval serves every watcher. The e2e
+`away-window-chat.spec.ts` separates the four ways one missed turn is returned to, and counts the reads each
+cause produces. A frozen page with no event is the return only the clock answers, and a `threads` read beside
+the row would name a remount instead. `stream-unpainted.unit.ts` holds the reading: the keepalive never marks content unread, neither
 does a focused window's traffic, and the newest unread frame is the one counted. `chat-window.unit.ts` holds
 the half the reconcile reads — that only a row read that reached the server redraws a transcript.
 

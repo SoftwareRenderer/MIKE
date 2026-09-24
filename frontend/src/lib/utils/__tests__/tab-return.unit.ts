@@ -13,7 +13,7 @@ const signal = (over: Partial<ReturnSignal> = {}): ReturnSignal => ({
     msSinceReconcile: 60_000,
     msSinceUnpainted: null,
     mayBeBehind: true,
-    hiddenIsEvidence: false,
+    unreadIsEvidence: false,
     ...over,
 });
 
@@ -21,7 +21,8 @@ describe('needsReturnReconcile', () => {
     it('never reconciles while the document is hidden', () => {
         expect(needsReturnReconcile(signal({ hidden: true }))).toBe(false);
         expect(needsReturnReconcile(signal({ hidden: true, msSinceFrame: WAKE_FRAME_GAP_MS }))).toBe(false);
-        expect(needsReturnReconcile(signal({ hidden: true, mayBeBehind: false, hiddenIsEvidence: true }))).toBe(false);
+        expect(needsReturnReconcile(signal({ hidden: true, mayBeBehind: false, unreadIsEvidence: true }))).toBe(false);
+        expect(needsReturnReconcile(signal({ source: 'resume', hidden: true, unreadIsEvidence: true }))).toBe(false);
     });
 
     it('never reconciles a screen that cannot be behind', () => {
@@ -32,15 +33,27 @@ describe('needsReturnReconcile', () => {
     });
 
     it('a missed turn leaves no evidence, so a hidden screen cannot vouch for itself', () => {
-        expect(needsReturnReconcile(signal({ mayBeBehind: false, hiddenIsEvidence: true }))).toBe(true);
+        expect(needsReturnReconcile(signal({ mayBeBehind: false, unreadIsEvidence: true }))).toBe(true);
+    });
+
+    it('a page that was stopped is the same fact for the screen that cannot see its own gap', () => {
+        // A thawed page has no stream reading left: its queued frames arrive once the focus is back.
+        expect(needsReturnReconcile(signal({
+            source: 'resume', mayBeBehind: false, unreadIsEvidence: true, msSinceFrame: 0, msSinceUnpainted: null,
+        }))).toBe(true);
+    });
+
+    it('a stopped page does not pull along a screen that can answer for itself', () => {
+        expect(needsReturnReconcile(signal({ source: 'resume' }))).toBe(false);
+        expect(needsReturnReconcile(signal({ source: 'resume', msSinceFrame: WAKE_FRAME_GAP_MS * 4 }))).toBe(false);
     });
 
     it('leaves a window that was never hidden to answer for itself', () => {
         expect(needsReturnReconcile(signal({
-            source: 'focus', msSinceFrame: WAKE_FRAME_GAP_MS, mayBeBehind: false, hiddenIsEvidence: true,
+            source: 'focus', msSinceFrame: WAKE_FRAME_GAP_MS, mayBeBehind: false, unreadIsEvidence: true,
         }))).toBe(false);
         expect(needsReturnReconcile(signal({
-            source: 'pageshow', msSinceFrame: WAKE_FRAME_GAP_MS, mayBeBehind: false, hiddenIsEvidence: true,
+            source: 'pageshow', msSinceFrame: WAKE_FRAME_GAP_MS, mayBeBehind: false, unreadIsEvidence: true,
         }))).toBe(false);
     });
 
@@ -98,6 +111,10 @@ describe('needsReturnReconcile', () => {
     it('holds one signal per gesture even against content that arrived after it', () => {
         expect(needsReturnReconcile(signal({
             source: 'focus', msSinceUnpainted: 30_000, msSinceReconcile: RETURN_DEDUPE_MS - 1,
+        }))).toBe(false);
+        // One suspension can arrive twice: the browser's event, and the clock that noticed it.
+        expect(needsReturnReconcile(signal({
+            source: 'resume', unreadIsEvidence: true, msSinceReconcile: RETURN_DEDUPE_MS - 1,
         }))).toBe(false);
     });
 });

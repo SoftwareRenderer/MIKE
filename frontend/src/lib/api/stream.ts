@@ -4,6 +4,7 @@ import { isKeepaliveFrame } from './events';
 import { API_BASE, parseStreamFrame } from './helpers';
 import { STALE_THRESHOLD_MS, HEARTBEAT_INTERVAL_MS, RECONNECT_BASE_DELAY_MS, RECONNECT_MAX_DELAY_MS, SUSPENDED_GAP_MS } from '$lib/constants';
 import { WAKE_FRAME_GAP_MS } from '$lib/utils/tab-return';
+import { isSuspensionGap } from '$lib/utils/page-suspension';
 
 /**
  * App stream - single WebSocket for all real-time events.
@@ -199,7 +200,7 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
             const now = Date.now();
             const tickGap = now - lastHeartbeatAt;
             lastHeartbeatAt = now;
-            dropIfSilent(tickGap > HEARTBEAT_INTERVAL_MS + SUSPENDED_GAP_MS ? WAKE_FRAME_GAP_MS : STALE_THRESHOLD_MS);
+            dropIfSilent(isSuspensionGap(tickGap, HEARTBEAT_INTERVAL_MS) ? WAKE_FRAME_GAP_MS : STALE_THRESHOLD_MS);
         }, HEARTBEAT_INTERVAL_MS);
     }
 
