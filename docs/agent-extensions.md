@@ -112,9 +112,8 @@ into every task container of every sandboxed project is the thing this rule refu
   whole top level, the system trees, a home, anything containing a home, and the credential stores, so
   `~/.pi/agent` is grantable and `~/.ssh` is not.
 - The directory need not exist — the agent makes it on first login — but something above it must, so the
-  server never invents the top level of a path. `sandbox.Create` makes it (0755, like a project's own
-  mount), which is what makes an `rw` grant writable from inside: no `:U`, no userns option is involved,
-  the directory belongs to the server's user, which is what a rootless container's root maps to.
+  server never invents the top level of a path. `sandbox.Create` makes it, and the ownership that then
+  makes an `rw` grant writable from inside is `docs/sandbox-runtime.md → Extension sandbox mounts`.
 - `GetAgentSandbox` re-applies the rule when it reads (`refuseMount`), because a row can predate it and
   because `agent_config_dir` is a second way a host path reaches `Mounts[0]`. It applies only to a grant
   that already exists; with no grant it warns and mounts nothing.

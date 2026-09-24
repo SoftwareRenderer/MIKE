@@ -107,8 +107,7 @@ resolveDisable`). It is a refusal, not a UI state: `check`, `prepare`, `apply` a
 the service, so neither a cached "a newer release exists" row nor an archive some earlier process already
 fetched can get past it, and the refusal names the variable. `Status` answers `disabled`, which is what the
 client stops on — no dot, no first-run question, no install prompt — and About shows
-`Updates are managed by your organization` in place of everything clickable. It replaces
-`MIKE_UPDATE_CHECK`, which is read by nothing and only warns an `.env` still carrying it.
+`Updates are managed by your organization` in place of everything clickable.
 
 Nothing outside `backend/startup` reads the variable. The preference arrives per request as
 `updates.Settings{Enabled, Answered}`; the switch is a fact the service is constructed with, so no caller

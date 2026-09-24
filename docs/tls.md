@@ -58,6 +58,9 @@ Entries are matched literally — e.g. `MIKE_ALLOWED_HOSTS=kanban.example.com,19
 stripped on both sides, so an `example.com` entry answers `example.com:443`; a missing/empty `Host` is
 rejected too.
 
+Which bytes reach this decision is the listener's own rule — the TLS/plain first-byte sniff, the queue it
+feeds, and what may end `Serve`: `docs/lifecycle.md → The TLS/plain listener`.
+
 ## Weak master password + exposed listen address is fatal
 
 A `MIKE_LOGIN_PASSWORD` shorter than 8 characters, or one of the known defaults (`test`, `dev`,
@@ -68,8 +71,5 @@ Loopback + weak stays allowed so `make run` (password `test`) keeps working.
 
 `backend/tls/tls_test.go` (CA is a real CA, leaf verifies against it, SAN set + re-issue rules,
 CA/leaf reuse, `CertPEM` serves a certificate and nothing else), `backend/server/handler_tls_test.go`
-(the download: needs a session, 404 without a local CA, GET-only, and `tls_ca_available` tracks it),
-`backend/server/listener_test.go`.
-
-## The listener
-- **The TLS-vs-plain first-byte sniff must not run inside `hybridListener.Accept()`** (`backend/server/server.go`): `net/http` accepts **serially**, so one peer that connects and sends nothing stalls every later handshake, and returning its EOF/reset reads as a dead listener, ends `Serve` and kills the process. `Accept()` waits on a queue that a per-connection sniff goroutine fills — no worker pool, since N workers still block everyone at N silent peers. Sniffed-out peers are closed and logged per host, never handed to `net/http`; only the listener's own accept error may end `Serve`. Tests: `backend/server/listener_test.go`.
+(the download: needs a session, 404 without a local CA, GET-only, and `tls_ca_available` tracks it).
+The listener's test is listed in `docs/lifecycle.md`.
