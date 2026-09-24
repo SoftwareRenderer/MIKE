@@ -1040,6 +1040,9 @@
 
     async function handleCommitAndDone() {
         if (isCommitting) return;
+
+        const thisProjectId = projectId;
+        const thisTaskId = taskId;
         isCommitting = true;
         try {
             // Open dialog — it will stream the commit message from the backend
@@ -1049,15 +1052,15 @@
                     message: '',
                     confirmText: t('chat.review.commitAndDone'),
                     cancelText: t('chat.common.cancel'),
-                    projectId,
-                    taskId,
+                    projectId: thisProjectId,
+                    taskId: thisTaskId,
                     _resolve: resolve,
                 };
             });
             if (!confirmedMessage) {
                 return; // User cancelled
             }
-            const updated = await commitAndDone(projectId, taskId, confirmedMessage);
+            const updated = await commitAndDone(thisProjectId, thisTaskId, confirmedMessage);
             mergeTaskIntoBoard(updated);
 
             if (updated?.status === 'in_progress') {
@@ -1073,7 +1076,7 @@
             // Clear queue status for this project
             commitQueueStatus.update(map => {
                 const copy = { ...map };
-                delete copy[projectId];
+                delete copy[thisProjectId];
                 return copy;
             });
         }
