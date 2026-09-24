@@ -144,8 +144,9 @@ STYLE_SINKS: dict[tuple[str, str], str] = {
     ("src/lib/components/Chat/ContextDonut.svelte", "STROKE"):
         "contains:# — STROKE is a literal in this file",
     ("src/lib/components/Chat/ToolCall.svelte",
-     "tc.isPending ? 'var(--color-accent)' : (tc.success ? 'var(--color-status-green)' : 'var(--color-status-red)')"):
-        "literal — three tokens written in the template itself",
+     "tc.isPending ? 'var(--color-accent)' : tc.interrupted ? 'var(--color-status-yellow)' "
+     ": (tc.success ? 'var(--color-status-green)' : 'var(--color-status-red)')"):
+        "literal — four tokens written in the template itself",
     ("src/lib/components/BranchSymbols.svelte", "getSymbolColor(item.symbol.kind)"):
         "contains:var(-- — getSymbolColor maps a fixed LSP kind onto a token",
     ("src/lib/components/BranchSymbols.svelte", "getSymbolColor(symbol.kind)"):
