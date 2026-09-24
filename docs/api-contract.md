@@ -269,7 +269,14 @@ two reads share the cursor's encoding, not its meaning. Tests: `backend/store/me
 
 **The client owns the merge.** `TaskChat` keeps every row it has fetched and rebuilds the transcript from
 all of them. `prependRows` in `$lib/utils/chat-window.ts` dedups by row id, so a turn longer than a page is
-still one entry once both pages are held. **Scrolling is the only
+still one entry once both pages are held. **A newest-window read joins the rows held, it never replaces
+them**. The window is the newest answers, so every row it does not name is older than every row it does.
+`applyWindowRead` puts the window behind the older pages, and the cursor naming their oldest row keeps
+answering "what is above the screen". The transcript draws a read ahead of the entries it does not name, so
+a read that answers alone puts the newest answers above the older pages. The bottom of the list stops being
+the newest content, and the jump-to-latest button lands on an old row. A window that opens nowhere inside the
+rows held cannot be joined: another thread's read, or a truncation that cut the overlap away, answers alone.
+**Scrolling is the only
 affordance** — no control asks the reader to fetch anything. The list edge is the request, and it fires a
 viewport and a half before the reader gets there (`earlierEdgePx`) so the page lands while they are still
 reading toward it.
@@ -304,8 +311,9 @@ this does not have.
 
 Tests:
 `backend/store/messages_window_test.go` (including the `EXPLAIN QUERY PLAN` claim),
-`backend/server/handler_message_window_test.go`, `frontend/src/lib/utils/__tests__/chat-window.unit.ts`.
-`frontend/tests/e2e/chat-window-scroll.spec.ts` answers what only a browser can: nothing is rendered asking
+`backend/server/handler_message_window_test.go`,
+`frontend/src/lib/utils/__tests__/chat-window.unit.ts` (the page-up dedup and the join a newest-window read
+makes). `frontend/tests/e2e/chat-window-scroll.spec.ts` answers what only a browser can: nothing is rendered asking
 the reader to fetch a page, reaching the top edge fetches it unasked, and the page leaves the reader on the
 row they were reading. `frontend/tests/e2e/chat-scroll-jitter.spec.ts` answers the touch half, which the
 wheel spec cannot: it tags every `scrollTop` write so an app write is distinguishable from the browser's

@@ -27,7 +27,7 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { t } from '$lib/i18n';
     import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
-    import { prependRows, resolveAnchor, anchorScrollDelta, readerScrolledUp, noticeForWindowRead, windowIsReading, type MeasuredEntry, type ScrollAnchor, type WindowRead, type WindowReadNotice } from '$lib/utils/chat-window';
+    import { applyWindowRead, prependRows, resolveAnchor, anchorScrollDelta, readerScrolledUp, noticeForWindowRead, windowIsReading, type MeasuredEntry, type ScrollAnchor, type WindowRead, type WindowReadNotice } from '$lib/utils/chat-window';
     import { createTabReturn } from '$lib/composables/use-tab-return';
     import ChatForm from './ChatForm.svelte';
     import ChatEntries from './ChatEntries.svelte';
@@ -490,9 +490,13 @@
             historyNotice = noticeForWindowRead(read, readContext(executionState));
             declareRows(historyNotice);
             if (windowIsReading(read, historyRows.length > 0)) {
-                historyRows = window.messages;
-                earlierCursor = window.before;
-                hasEarlier = window.hasMore;
+                const joined = applyWindowRead(historyRows, window.messages);
+                historyRows = joined.rows;
+
+                if (!joined.keepsEarlier) {
+                    earlierCursor = window.before;
+                    hasEarlier = window.hasMore;
+                }
                 renderHistory(scrollAfter, executionState);
             }
             // The transcript draws first: the prompts the header names arrive a moment later and relabel it.
@@ -621,9 +625,15 @@
     async function readTurns(fromTheStart: boolean): Promise<void> {
         try {
             const page = await getTaskTurns(projectId, taskId, fromTheStart ? '' : turnsCursor);
-            chatTurns = fromTheStart ? page.turns : prependRows(chatTurns, page.turns);
-            turnsCursor = page.before;
-            turnsHasMore = page.hasMore;
+
+            const joined = fromTheStart
+                ? applyWindowRead(chatTurns, page.turns)
+                : { rows: prependRows(chatTurns, page.turns), keepsEarlier: false };
+            chatTurns = joined.rows;
+            if (!joined.keepsEarlier) {
+                turnsCursor = page.before;
+                turnsHasMore = page.hasMore;
+            }
         } catch {
             // What the rows on screen name is what the header has.
         }

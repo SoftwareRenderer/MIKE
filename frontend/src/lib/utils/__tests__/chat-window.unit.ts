@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+    applyWindowRead,
     prependRows,
     resolveAnchor,
     anchorScrollDelta,
@@ -39,6 +40,56 @@ describe('prependRows', () => {
         let held = pages[0];
         for (const page of pages.slice(1)) held = prependRows(held, page);
         expect(held.map(r => r.id)).toEqual(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l']);
+    });
+});
+
+describe('applyWindowRead', () => {
+    // A newest-window read answers the newest answers only. What the reader paged into above it is not in
+    // the read, and the transcript draws the read first and the entries the read does not name after it —
+    // so a read that answers alone puts the newest content above the older pages and takes it off the
+    // bottom of the screen.
+    it('keeps the older pages held in front of the newest window', () => {
+        const held = rows('a', 'b', 'c', 'd', 'e', 'f');
+        const read = applyWindowRead(held, rows('e', 'f'));
+        expect(read.rows.map(r => r.id)).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+        // The oldest row on screen is still the one the paging cursor names.
+        expect(read.keepsEarlier).toBe(true);
+    });
+
+    it('draws a row once when the window repeats one the reader holds', () => {
+        const read = applyWindowRead(rows('a', 'b', 'c'), rows('c', 'd'));
+        expect(read.rows.map(r => r.id)).toEqual(['a', 'b', 'c', 'd']);
+    });
+
+    it('answers with the window alone when nothing older is held', () => {
+        // A fresh open, and a reader whose oldest row is the one the window opens on.
+        expect(applyWindowRead([], rows('c', 'd')).rows.map(r => r.id)).toEqual(['c', 'd']);
+        expect(applyWindowRead(rows('c'), rows('c', 'd')).rows.map(r => r.id)).toEqual(['c', 'd']);
+        expect(applyWindowRead(rows('c'), rows('c', 'd')).keepsEarlier).toBe(false);
+    });
+
+    it('answers with the window alone when it cannot be joined to the rows held', () => {
+        // Another thread's window, or a truncation that cut the overlap away: nothing proves these rows
+        // are older, so joining them would invent a conversation.
+        const read = applyWindowRead(rows('a', 'b'), rows('x', 'y'));
+        expect(read.rows.map(r => r.id)).toEqual(['x', 'y']);
+        expect(read.keepsEarlier).toBe(false);
+    });
+
+    it('empties the transcript when the read holds no rows at all', () => {
+        const read = applyWindowRead(rows('a', 'b'), rows());
+        expect(read.rows).toEqual([]);
+        expect(read.keepsEarlier).toBe(false);
+    });
+
+    it('walks a conversation exactly once across a page-up and a read', () => {
+        // The reader pages up, then the window comes back over the rows they left behind.
+        let held = rows('j', 'k', 'l');
+        held = prependRows(held, rows('g', 'h', 'i'));
+        held = prependRows(held, rows('d', 'e', 'f'));
+        const read = applyWindowRead(held, rows('j', 'k', 'l', 'm'));
+        expect(read.rows.map(r => r.id)).toEqual(['d', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm']);
+        expect(read.keepsEarlier).toBe(true);
     });
 });
 
