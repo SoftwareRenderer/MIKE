@@ -413,7 +413,8 @@ has open, because two holds of one key are undone by one release. **A task's sta
 (`stream/app_stream.go`), is what decides whether an unanswered tool call is work or a leftover. **The offline
 mirror holds only what this browser received** — a board response or a frame it was sent — and pending intent
 stays in the queue, replayed onto every mirror landing rather than mirrored; a queued message on screen is the
-queue's projection. Mechanisms: `docs/reconnection.md`.
+queue's projection, and a mirror landing **paints a view that holds nothing rather than replacing one that
+holds something** (`windowIsReading`). Mechanisms: `docs/reconnection.md`.
 
 ## Licensing
 

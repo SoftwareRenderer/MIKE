@@ -7,6 +7,7 @@ import {
     atTopOfList,
     mergeCachedRows,
     noticeForWindowRead,
+    windowIsReading,
     CACHED_ROWS_FLOOR,
     type MeasuredEntry,
 } from '../chat-window';
@@ -177,5 +178,25 @@ describe('noticeForWindowRead', () => {
         // No key held means no stream to wait on; an idle task means no turn left to arrive.
         expect(noticeForWindowRead('failed', { holdsTaskKey: false, taskInFlight: true })).toBe('failed');
         expect(noticeForWindowRead('failed', { holdsTaskKey: true, taskInFlight: false })).toBe('failed');
+    });
+});
+
+describe('windowIsReading', () => {
+    it('redraws the transcript from a read that answered', () => {
+        expect(windowIsReading('answered', false)).toBe(true);
+        expect(windowIsReading('answered', true)).toBe(true);
+    });
+
+    it('paints a mirror copy onto a transcript that holds no rows', () => {
+        expect(windowIsReading('cached', false)).toBe(true);
+    });
+
+    it('never lets a mirror copy replace rows the screen holds', () => {
+        expect(windowIsReading('cached', true)).toBe(false);
+    });
+
+    it('gives a read that did not answer nothing to redraw', () => {
+        expect(windowIsReading('failed', false)).toBe(false);
+        expect(windowIsReading('failed', true)).toBe(false);
     });
 });
