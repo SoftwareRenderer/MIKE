@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { findLastUserMessageBefore, trimEntriesForRegenerate, buildCheckpointStateMap, mergeToolCallsIntoAssistant, computeLastUserMessageIds, getCheckpointThreads, buildEntriesFromMessages, advisoryLabel, systemNoteText, pendingToolIds } from '$lib/utils/chat-entries';
+import { findLastUserMessageBefore, trimEntriesForRegenerate, buildCheckpointStateMap, mergeToolCallsIntoAssistant, computeLastUserMessageIds, getCheckpointThreads, buildEntriesFromMessages, advisoryLabel, systemNoteText, pendingToolIds, editSubmitAction, takeEchoMatch, buildEntryMetas, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
 import type { ChatEntry, Thread } from '$lib/types';
+import { PENDING_SEND_ID_PREFIX } from '$lib/utils/pending-sends';
 
 function entry(role: string, content: string): ChatEntry {
     return { id: `${role}-${content}`, role, content, isStreaming: false, createdAt: new Date().toISOString() };
@@ -731,5 +732,176 @@ describe('pendingToolIds', () => {
             { toolId: 'call-2', isPending: true },
         ])];
         expect([...pendingToolIds(entries)]).toEqual(['call-2']);
+    });
+});
+
+describe('editSubmitAction', () => {
+    // The label and the callback are one decision, so every case names what the click does, not what it
+    // is called: a backlog task starts nothing, only the last message re-runs, everything else forks.
+    const shapes = {
+        backlogFirst: { isFirstUserMessage: true, isLastUserMessage: true, taskStatus: 'backlog' },
+        backlogMiddle: { isFirstUserMessage: false, isLastUserMessage: false, taskStatus: 'backlog' },
+        firstAndLast: { isFirstUserMessage: true, isLastUserMessage: true, taskStatus: 'in_progress' },
+        firstOnly: { isFirstUserMessage: true, isLastUserMessage: false, taskStatus: 'review' },
+        last: { isFirstUserMessage: false, isLastUserMessage: true, taskStatus: 'in_progress' },
+        middle: { isFirstUserMessage: false, isLastUserMessage: false, taskStatus: 'review' },
+    };
+
+    it('saves every message of a backlog task, whatever its position', () => {
+        // Both edit handlers return after persisting the text when the task has not run, so a backlog
+        // middle message that promised "New Thread" would fork nothing.
+        expect(editSubmitAction(shapes.backlogFirst)).toBe('save');
+        expect(editSubmitAction(shapes.backlogMiddle)).toBe('save');
+    });
+
+    it('sends the last message of a started task again', () => {
+        expect(editSubmitAction(shapes.last)).toBe('send');
+    });
+
+    it('forks from the first message even when it is also the last', () => {
+        // Re-answering the opening question must not erase the answer that follows it.
+        expect(editSubmitAction(shapes.firstAndLast)).toBe('fork');
+    });
+
+    it('forks from a first message that has been answered', () => {
+        expect(editSubmitAction(shapes.firstOnly)).toBe('fork');
+    });
+
+    it('forks from a message in the middle of the thread', () => {
+        expect(editSubmitAction(shapes.middle)).toBe('fork');
+    });
+
+    it('saves in place when the caller owns the text', () => {
+        // The summarized context and the mobile box rewrite where they stand regardless of position.
+        expect(editSubmitAction({ ...shapes.middle, forcedSave: true })).toBe('save');
+        expect(editSubmitAction({ ...shapes.last, forcedSave: true })).toBe('save');
+    });
+});
+
+describe('takeEchoMatch', () => {
+    const user = (id: string, content: string): ChatEntry =>
+        ({ id, role: 'user', content, isStreaming: false, createdAt: new Date().toISOString() });
+    const transcript = [user('old-row', 'deploy it'), user('a7k3m2qp', 'deploy it')];
+
+    it('renames the optimistic entry the id names, not the older identical message', () => {
+        // Two sends of the same words are one echo each; the content rule would hand the row id to the
+        // older message and leave the newer one a permanent stranger.
+        expect(takeEchoMatch(transcript, { entryId: 'a7k3m2qp', content: 'deploy it' })?.id).toBe('a7k3m2qp');
+    });
+
+    it('answers nothing when the id no longer resolves', () => {
+        // The transcript was rebuilt from rows while the request was in flight: appending the echo is the
+        // honest answer, renaming some other message is not.
+        expect(takeEchoMatch(transcript, { entryId: 'gone-1', content: 'deploy it' })).toBeNull();
+    });
+
+    it('matches the newest identical message when no id was carried', () => {
+        // A regenerate or a fork: the question is already a row, and the newest copy is the one answered.
+        expect(takeEchoMatch(transcript, { content: 'deploy it' })?.id).toBe('a7k3m2qp');
+    });
+
+    it('leaves a row derived from the offline queue alone', () => {
+        // That row is the queue's projection of a send; adopting it as a persisted row leaves it queued.
+        const only = [user(`${PENDING_SEND_ID_PREFIX}act-1`, 'deploy it')];
+        expect(takeEchoMatch(only, { content: 'deploy it' })).toBeNull();
+    });
+});
+
+describe('buildEntryMetas', () => {
+    const user = (id: string): ChatEntry =>
+        ({ id, role: 'user', content: `ask ${id}`, isStreaming: false, createdAt: new Date().toISOString() });
+    const assistant = (id: string): ChatEntry =>
+        ({ id, role: 'assistant', content: `answer ${id}`, isStreaming: false, createdAt: new Date().toISOString() });
+
+    // Two turns, each checkpointed: the hash is what makes an assistant a checkpoint at all.
+    const twoTurns = [user('u1'), assistant('a1'), user('u2'), assistant('a2')];
+    const hashes = new Map([['a1', 'c1'], ['a2', 'c2']]);
+    const base = {
+        entries: twoTurns,
+        pendingCheckpoints: new Set<string>(),
+        checkpointLabels: new Map<string, string>(),
+        checkpointCommitHashes: hashes,
+        threads: [],
+        lastUserMessageIds: new Set(['u2']),
+        streaming: false,
+    };
+    const metas = (over: Record<string, unknown> = {}) => buildEntryMetas({ ...base, ...over } as never);
+
+    it('calls the oldest loaded row the first message only when nothing older is unloaded', () => {
+        expect(metas()[0].isFirstUserMessage).toBe(true);
+        // The same window with older rows still to fetch: entry 0 is the oldest *loaded* row, and treating
+        // it as the thread's first hides its delete button and sends an edit down the wrong path.
+        expect(metas({ hasEarlier: true })[0].isFirstUserMessage).toBe(false);
+    });
+
+    it('never calls an assistant row the first message', () => {
+        expect(metas({ entries: [assistant('a1'), user('u1')], lastUserMessageIds: new Set(['u1']) })[0].isFirstUserMessage).toBe(false);
+    });
+
+    it('marks only the newest unanswered prompt as the last message', () => {
+        expect(metas().map(m => m.isLastUserMessage)).toEqual([false, false, true, false]);
+    });
+
+    it('leaves no prompt marked last while a turn is in flight', () => {
+        // Anything may still arrive for it, so "send this again" is not yet a true statement.
+        expect(metas({ streaming: true }).every(m => !m.isLastUserMessage)).toBe(true);
+    });
+
+    it('numbers checkpoints oldest first among the rows that carry one', () => {
+        expect(metas().map(m => m.checkpointIndex)).toEqual([0, -1, 1, -1]);
+    });
+});
+
+describe('a send that failed for good', () => {
+    const copy = { failed: 'The message could not be sent' };
+    const userRow = (id: string, content: string, extra: Partial<ChatEntry> = {}): ChatEntry =>
+        ({ id, role: 'user', content, isStreaming: false, createdAt: new Date().toISOString(), ...extra });
+    // The same words asked twice: only the row this send wrote may go.
+    const twice = [userRow('m1', 'deploy it'), { ...userRow('a1', 'not yet'), role: 'assistant' }, userRow('opt-9', 'deploy it')];
+
+    it('removes the optimistic row by its id and leaves the identical older question', () => {
+        const after = removeFailedSend(twice, { entryId: 'opt-9', copy });
+        expect(after.filter(e => e.role === 'user').map(e => e.id)).toEqual(['m1']);
+    });
+
+    it('removes exactly one row when the send carried no text', () => {
+        // The filter this replaced matched on content, and an attachments-only send has none: it removed
+        // every textless user row it could find and left the notice beside a message still on screen.
+        const attachmentsOnly = [userRow('m1', '', { attachments: [{ mimeType: 'image/png', data: 'AAA' }] }), userRow('opt-9', '')];
+        const after = removeFailedSend(attachmentsOnly, { entryId: 'opt-9', copy });
+        expect(after.filter(e => e.role === 'user')).toHaveLength(1);
+    });
+
+    it('appends a notice the dismiss handler can tell from a server row', () => {
+        const after = removeFailedSend([userRow('opt-9', 'deploy it')], { entryId: 'opt-9', copy });
+        const notice = after[after.length - 1]!;
+        expect([notice.role, notice.error?.code, notice.local]).toEqual(['error', 'send_failed', true]);
+        expect(notice.content).toBe(copy.failed);
+    });
+});
+
+describe('dismissing one entry', () => {
+    const notice: ChatEntry = { id: 'n1', role: 'error', content: 'queued', isStreaming: false, error: { code: 'send_queued', message: 'queued' }, createdAt: '', local: true };
+    const persisted: ChatEntry = { id: 'm2', role: 'error', content: 'boom', isStreaming: false, error: { code: 'llm_error', message: 'boom' }, createdAt: '' };
+    const queuedRow: ChatEntry = { id: 'q1', role: 'user', content: 'waiting', isStreaming: false, createdAt: '', queued: true };
+    const transcript = [notice, persisted, queuedRow];
+
+    it('drops a notice this browser wrote without asking the server', () => {
+        const { entries, deleteId } = removeDismissedError(transcript, 'n1');
+        expect(deleteId).toBeNull();
+        expect(entries.map(e => e.id)).toEqual(['m2', 'q1']);
+    });
+
+    it('asks the server for a row that is really in the database', () => {
+        const { entries, deleteId } = removeDismissedError(transcript, 'm2');
+        expect(deleteId).toBe('m2');
+        // The drawing changes only once the delete answers, which is the caller's step.
+        expect(entries.map(e => e.id)).toEqual(['n1', 'm2', 'q1']);
+    });
+
+    it('leaves a queued row alone — its send is still waiting in the queue', () => {
+        const { entries, deleteId } = removeDismissedError(transcript, 'q1');
+        expect(deleteId).toBeNull();
+        expect(entries).toHaveLength(3);
     });
 });

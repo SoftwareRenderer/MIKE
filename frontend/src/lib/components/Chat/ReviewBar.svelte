@@ -3,6 +3,7 @@
     import Icon from '$lib/components/Icon.svelte';
     import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
     import ModelSelector from './ModelSelector.svelte';
+    import { isTaskPaused } from '$lib/utils/execution-state';
     import { t } from '$lib/i18n';
 
     let {
@@ -43,11 +44,9 @@
         onModelSelect: (providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) => Promise<void>;
     } = $props();
 
-    // Paused: the task was stopped while in progress. It stays in the In
-    // Progress column — Resume continues the conversation from where it left
-    // off (the chat input below stays enabled for sending a new message), and
-    // Backlog sends it back with its branch, worktree and history intact.
-    let isPaused = $derived(taskExecutionState === 'paused');
+    // Stopped mid-run: the task stays in the In Progress column, Resume continues the conversation from
+    // where it left off, and Backlog sends it back with its branch and worktree intact.
+    let isPaused = $derived(isTaskPaused(taskExecutionState));
 </script>
 
 {#if isPaused}

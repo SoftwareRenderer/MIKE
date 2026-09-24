@@ -11,6 +11,7 @@
     import { useImageAttachments } from '$lib/composables/use-image-attachments.svelte';
     import { imageSrc } from '$lib/utils/attachments';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
+    import { tick } from 'svelte';
     import { t } from '$lib/i18n';
 
     interface Props {
@@ -98,6 +99,14 @@
         textareaEl?.focus();
     }
 
+    /** Hand the draft back after a send failed for good: the submit cleared it. The box grows to fit what
+     * comes back, which is what typing does. */
+    export function restoreDraft(text: string, images: Array<{ mimeType: string; data: string }> = []) {
+        value = text;
+        if (images.length) attachments = images as DraftAttachment[];
+        void tick().then(autoResize);
+    }
+
     function resetHeight() {
         if (textareaEl) {
             textareaEl.style.height = 'auto';
@@ -128,14 +137,9 @@
     }
 
     /**
-     * Escape semantics: the chat input never cancels generation with Escape (an
-     * in-flight turn is stopped only via the Stop button) — Escape must mean the
-     * same thing whether or not the model is streaming, because the textarea stays
-     * editable while a turn runs (drafting the next message).
-     * With the @ mention dropdown open, Escape closes it and keeps focus in the
-     * input. Otherwise Escape blurs the input and swallows the event, so the
-     * Task View's window-level "back to board" Escape fires on the NEXT press,
-     * not this one (blur-first).
+     * Escape never cancels a running turn - only the Stop button does - so it means the same thing whether or
+     * not the model is streaming. With the mention dropdown open it closes that; otherwise it blurs the input
+     * and swallows the event, so the window-level "back to board" Escape needs a second press.
      */
     function handleKeydown(e: KeyboardEvent) {
         if (mention.handleKeydown(e)) return;

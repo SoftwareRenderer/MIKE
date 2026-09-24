@@ -23,8 +23,8 @@ import {
     stopTaskRaw,
     resumeTaskRaw,
     sendTaskMessageRaw,
+    type SendResult,
     type SendTaskMessagePayload,
-    createTaskMessageRaw,
     deleteTaskMessagesAfterRaw,
     deleteTaskMessageRaw,
     updateTaskMessageRaw,
@@ -143,24 +143,12 @@ export async function resumeTask(projectId: string, taskId: string): Promise<Tas
 
 // -- Message endpoints --
 
-/** Send a user message via HTTP POST. Triggers executor and returns the created message. Supports image attachments. Queued when offline or on network failure. */
-export async function sendTaskMessage(
-    projectId: string,
-    taskId: string,
-    content: string,
-    modelName?: string,
-    serverUrl?: string,
-    attachments?: Array<{ mimeType: string; data: string }>,
-    reasoningEffort?: string,
-    regenerate = false
-): Promise<{ id: string; role: string; content: string; thread_id?: string; queued?: boolean; actionId?: string }> {
-    // The one place a send is assembled; the queue and the wire share it, so a field cannot be queued
-    // without being sent or sent without being queued.
-    const payload: SendTaskMessagePayload = { projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort, regenerate };
-    // Queue the message when offline or on network failure so it isn't lost.
+/** Send a user message, which starts a turn and returns its row. Queued when offline or on a network failure.
+ * The payload is what the queue persists and the wire carries, so a field cannot be queued without being sent. */
+export async function sendTaskMessage(payload: SendTaskMessagePayload): Promise<SendResult> {
     const queueMessage = () => {
         const id = generateId();
-        return queueWrite('sendTaskMessage', payload, { id, role: 'user', content });
+        return queueWrite('sendTaskMessage', { ...payload }, { id, role: 'user', content: payload.content });
     };
     if (getOfflineStatus()) {
         return await queueMessage();
@@ -187,9 +175,8 @@ export interface MessageWindow {
 }
 
 /** Fetch the newest window of a task's conversation, or an older one by cursor.
- * Always tries the network first — the isOffline flag tracks WebSocket state,
- * not HTTP availability. On mobile wake (tab resume), the WebSocket may be
- * disconnected but HTTP still works, so we must not short-circuit to cache. */
+ * Always tries the network first: the isOffline flag tracks the WebSocket, not whether HTTP works, so a
+ * resumed tab must not fall back to cache. */
 export async function getTaskMessages(projectId: string, taskId: string, before = ''): Promise<MessageWindow> {
     const query = before ? `?before=${encodeURIComponent(before)}` : '';
     try {
@@ -236,11 +223,11 @@ export interface TurnPage {
 }
 
 /**
- * Fetch the newest prompts of a task's conversation, or older ones by cursor. A window counted in answers
- * does not hold the prompt that opened a long turn, and this read does.
+ * Fetch the newest prompts of a task's conversation, or older ones by cursor: a window counted in answers
+ * does not hold the prompt that opened a long turn.
  *
- * Never cached: a prompt list is not a transcript, and an old copy would name a message this browser has
- * since deleted. A caller that cannot read it loses those labels, not the conversation.
+ * Never cached - an old copy would name a message this browser has since deleted, and a caller that cannot
+ * read it loses those labels, not the conversation.
  */
 export async function getTaskTurns(projectId: string, taskId: string, before = ''): Promise<TurnPage> {
     const query = before ? `?before=${encodeURIComponent(before)}` : '';
@@ -268,15 +255,6 @@ export async function getTaskMessageFull(projectId: string, taskId: string, mess
         if (cached) return markCached(cached);
         throw e;
     }
-}
-
-/** Create a message directly (e.g., for system messages). Queued when offline. */
-export async function createTaskMessage(projectId: string, taskId: string, role: string, content: string): Promise<TaskMessage> {
-    if (getOfflineStatus()) {
-        const id = generateId();
-        return await queueWrite('createTaskMessage', { projectId, taskId, role, content }, { id, task_id: taskId, thread_id: '', role, content, created_at: new Date().toISOString() });
-    }
-    return createTaskMessageRaw(projectId, taskId, role, content);
 }
 
 /** Delete a message and all messages after it. Set regenerate=true to trigger LLM regeneration. Queued when offline. */

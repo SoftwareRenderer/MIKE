@@ -10,3 +10,9 @@
 export function trustedExecutionState(row: string | null | undefined, readAgainst: string, boardCopy: string): string {
     return row && readAgainst === boardCopy ? row : boardCopy;
 }
+
+/** The user stopped an in-flight run, which resumes from here. Ask it of the value `trustedExecutionState`
+ * answers with, never of `status`: a stopped task stays `in_progress` and moves only `execution_state`. */
+export function isTaskPaused(executionState: string): boolean {
+    return executionState === 'paused';
+}

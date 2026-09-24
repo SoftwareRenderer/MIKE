@@ -1,5 +1,6 @@
 import type { ChatEntry, Thread } from '$lib/types';
 import { t } from '$lib/i18n';
+import { PENDING_SEND_ID_PREFIX } from './pending-sends';
 
 /** Checkpoint state for a single entry. */
 interface CheckpointState {
@@ -8,10 +9,7 @@ interface CheckpointState {
     commitHash?: string;
 }
 
-/**
- * Find the index of the last user message before the given entry index.
- * Returns -1 if no user message exists before that position.
- */
+/** Index of the last user message before `beforeIndex`, or -1 when there is none. */
 export function findLastUserMessageBefore(entries: ChatEntry[], beforeIndex: number): number {
     for (let i = beforeIndex - 1; i >= 0; i--) {
         if (entries[i].role === 'user') return i;
@@ -19,16 +17,79 @@ export function findLastUserMessageBefore(entries: ChatEntry[], beforeIndex: num
     return -1;
 }
 
-/**
- * Trim entries for regeneration: keep everything up to and including the last
- * user message before the clicked entry. The WebSocket echo will update this
- * entry's ID to match the server-assigned one. All entries after the last user
- * message (the assistant response being regenerated plus anything after it) are removed.
- */
+/** Cut the transcript back to the user message before the clicked entry; the echo of the re-send renames that row. */
 export function trimEntriesForRegenerate(entries: ChatEntry[], entryIndex: number): ChatEntry[] {
     const lastUserIdx = findLastUserMessageBefore(entries, entryIndex);
     if (lastUserIdx === -1) return entries;
     return entries.slice(0, lastUserIdx + 1);
+}
+
+/** What submitting an edited message does. The button's label and the click both read this. */
+export type EditSubmit = 'save' | 'send' | 'fork';
+
+/** Where an edited message goes: a task in the backlog only saves, and in a started task only the thread's
+ * last user message can be re-sent, so any other edit opens a new thread. `forcedSave` is the caller's own
+ * in-place rewrite (summarized context, the mobile editor) and outranks the position. */
+export function editSubmitAction(args: {
+    isLastUserMessage: boolean;
+    isFirstUserMessage?: boolean;
+    taskStatus?: string;
+    forcedSave?: boolean;
+}): EditSubmit {
+    if (args.forcedSave) return 'save';
+    if (args.taskStatus === 'backlog') return 'save';
+    if (!args.isFirstUserMessage && args.isLastUserMessage) return 'send';
+    return 'fork';
+}
+
+/** The entry a `user_message` echo renames to its row id: the optimistic id while it is still on screen, else
+ * the newest identical user message that is not queue-derived. An id that no longer resolves answers `null`
+ * rather than renaming an older message that happens to share the words. */
+export function takeEchoMatch(
+    entries: ChatEntry[],
+    echo: { entryId?: string | null; content: string },
+): ChatEntry | null {
+    if (echo.entryId) return entries.find(e => e.id === echo.entryId) ?? null;
+    for (let i = entries.length - 1; i >= 0; i--) {
+        const e = entries[i]!;
+        if (e.role === 'user' && e.content === echo.content && !e.id.startsWith(PENDING_SEND_ID_PREFIX)) return e;
+    }
+    return null;
+}
+
+/** The notice a failed send leaves behind, named for its row so a re-derive does not draw a second copy. */
+const FAILED_SEND_NOTICE_ID_PREFIX = 'send-failed:';
+
+/** Drop a failed send's optimistic row by its id and append the notice. Matching on the text would remove
+ * every message with those words, and an attachments-only send has no text to match. */
+export function removeFailedSend(
+    entries: ChatEntry[],
+    args: { entryId: string; copy: { failed: string } },
+): ChatEntry[] {
+    const failed = args.copy.failed;
+    return [...entries.filter(e => e.id !== args.entryId), {
+        id: `${FAILED_SEND_NOTICE_ID_PREFIX}${args.entryId}`,
+        role: 'error',
+        content: failed,
+        isStreaming: false,
+        error: { code: 'send_failed', message: failed },
+        createdAt: new Date().toISOString(),
+        local: true,
+    }];
+}
+
+/** What dismissing one entry means: `entries` is what to draw now, `deleteId` the row to ask the server for.
+ * A row this browser wrote has no row to delete, and a queued row's send is still in the queue, so neither is
+ * removed. */
+export function removeDismissedError(
+    entries: ChatEntry[],
+    id: string,
+): { entries: ChatEntry[]; deleteId: string | null } {
+    const entry = entries.find(e => e.id === id);
+    if (!entry) return { entries, deleteId: null };
+    if (entry.local) return { entries: entries.filter(e => e.id !== id), deleteId: null };
+    if (entry.queued) return { entries, deleteId: null };
+    return { entries, deleteId: id };
 }
 
 /** Per-entry metadata for the chat list. */
@@ -37,11 +98,52 @@ export interface EntryMeta {
     cpThread: Thread | null;
     checkpointIndex: number; // 0-based index among checkpoints (oldest first)
     isLastUserMessage: boolean;
+    /** The thread's first row: editing it forks, and deleting it takes the thread. Only true while nothing
+     * older is unloaded — the oldest loaded row of a mid-thread window is not it. */
+    isFirstUserMessage: boolean;
 }
 
-/**
- * The calls on screen that are still waiting for an answer. An unanswered call is the evidence that the
- * screen is behind the task, so this is what a rebuild of the transcript has to carry over.
+/** The per-entry metadata the chat list renders, in one pass. `hasEarlier` is what makes `isFirstUserMessage`
+ * mean the thread's first row rather than the window's. Checkpoint indices count every checkpoint oldest
+ * first, hashless ones included, because the backend resolves a stash by index. */
+export function buildEntryMetas(args: {
+    entries: ChatEntry[];
+    pendingCheckpoints: Set<string>;
+    checkpointLabels: Map<string, string>;
+    checkpointCommitHashes: Map<string, string>;
+    threads: Thread[];
+    hasEarlier: boolean;
+    lastUserMessageIds: Set<string>;
+    streaming: boolean;
+}): EntryMeta[] {
+    const { entries, threads } = args;
+    const cpStateMap = buildCheckpointStateMap(
+        entries, args.pendingCheckpoints, args.checkpointLabels, args.checkpointCommitHashes,
+    );
+    const activeThread = threads.find(t => t.is_active);
+    const metas: EntryMeta[] = new Array(entries.length);
+    let cpIdx = 0;
+    for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i]!;
+        if (entry.role !== 'user') {
+            metas[i] = { cpState: null, cpThread: null, checkpointIndex: -1, isLastUserMessage: false, isFirstUserMessage: false };
+            continue;
+        }
+        const cpState = cpStateMap.get(i) ?? null;
+        const isFirstUserMessage = i === 0 && !args.hasEarlier;
+        metas[i] = {
+            cpState,
+            cpThread: threads.length > 0 ? getCheckpointThreads(entry, threads, activeThread, isFirstUserMessage) : null,
+            checkpointIndex: cpState ? cpIdx++ : -1,
+            isLastUserMessage: args.lastUserMessageIds.has(entry.id) && !args.streaming,
+            isFirstUserMessage,
+        };
+    }
+    return metas;
+}
+
+/** The tool calls on screen still waiting for an answer. They are the evidence that this screen is behind the
+ * task, so a rebuild of the transcript carries them over.
  */
 export function pendingToolIds(entries: ChatEntry[]): Set<string> {
     const ids = new Set<string>();
@@ -53,10 +155,7 @@ export function pendingToolIds(entries: ChatEntry[]): Set<string> {
     return ids;
 }
 
-/**
- * Compute the set of user message IDs that have no assistant/tool_call entry after them.
- * Used to determine whether to show "Send" or "New Thread" in the edit form.
- */
+/** The user messages with nothing after them — the ones whose edit offers "Send" rather than "New Thread". */
 export function computeLastUserMessageIds(entries: ChatEntry[]): Set<string> {
     const ids = new Set<string>();
     let lastUserId: string | null = null;
@@ -71,10 +170,8 @@ export function computeLastUserMessageIds(entries: ChatEntry[]): Set<string> {
     return ids;
 }
 
-/**
- * Merge tool-call-only entries into the preceding assistant entry.
- * DB ordering: assistant(text+reasoning) → tool_call → assistant(response to tool) → tool_call...
- * This ensures tool calls appear below the assistant's reasoning/text in the UI.
+/** Fold tool-call-only entries into the assistant entry before them, so a card sits under the text that called
+ * it rather than in its own row.
  */
 export function mergeToolCallsIntoAssistant(allEntries: ChatEntry[]): ChatEntry[] {
     const merged: ChatEntry[] = [];
@@ -94,12 +191,8 @@ export function mergeToolCallsIntoAssistant(allEntries: ChatEntry[]): ChatEntry[
     return merged;
 }
 
-/**
- * Find the thread whose label should be shown at a given checkpoint.
- * Walks from the active thread up to root. Returns the most specific ancestor
- * whose fork point is at or before the entry time.
- * When requireOptions is true, only returns a thread if 2+ threads are
- * relevant at this checkpoint.
+/** The thread whose label a checkpoint shows: the nearest ancestor of the active thread forked at or before
+ * the entry. With `requireOptions`, answer only when 2+ threads are relevant there.
  */
 export function getCheckpointThreads(
     entry: ChatEntry,
@@ -173,11 +266,7 @@ export function isRepeatError(entries: ChatEntry[], data: ErrorEventData): boole
     return last?.role === 'error' && last.error?.code === code && last.content === message;
 }
 
-/**
- * Build checkpoint entries from DB messages.
- * Filters out title messages, restores error entries, merges tool calls,
- * and parses attachments.
- */
+/** Turn DB rows into chat entries, and collect each row's checkpoint hash. */
 export function buildEntriesFromMessages(
     messages: Array<{
         id: string;
@@ -212,14 +301,12 @@ export function buildEntriesFromMessages(
     const dbEntries = messages.filter(m => m.role !== 'title').map(m => {
         const base = { threadId: m.thread_id || undefined };
 
-        // Error entries
         if (m.role === 'error') {
             const content = m.content || '';
             const match = content.match(/^\[([^\]]+)\]\s*(.*)/);
             const code = match ? match[1] : 'error';
             const message = match ? match[2] : content;
-            // Older builds stored a "stopped" error row when a task was paused. Stopping
-            // is a normal state, so those rows are not failures and stay hidden.
+            // Older builds stored a stop as an error row; stopping is a normal state, not a failure.
             if (code === 'stopped') return null;
             return {
                 ...base, id: m.id, role: 'error' as const, content: message, isStreaming: false, createdAt: m.created_at,
@@ -227,10 +314,8 @@ export function buildEntriesFromMessages(
             };
         }
 
-        // Tool call entries — merged into preceding assistant entry
         if (m.role === 'tool_call') {
-            // Old forks copied the role but dropped the payload, so there is nothing to render.
-            // Falling through to the generic renderer below drew one blank card per row.
+            // A fork that copied the role but lost the payload has nothing to render.
             if (!m.tool_calls) return null;
             const tc = JSON.parse(m.tool_calls);
             const result = m.tool_result ? JSON.parse(m.tool_result) : null;
@@ -260,7 +345,6 @@ export function buildEntriesFromMessages(
             };
         }
 
-        // Parse attachments
         let parsedAttachments: Array<{ mimeType: string; data: string }> | undefined;
         if (m.attachments) {
             try {
@@ -304,19 +388,12 @@ export function buildEntriesFromMessages(
 }
 
 /**
- * Combine the DB rows of a task with the entries the browser is already showing. Neither is
- * complete — the DB lags the running turn, the replay buffer holds only the frames it kept — so the
- * DB wins for every row it has and a live entry keeps only what the DB provably lacks: a tool_call
- * event is broadcast once, so an entry dropped before its row exists loses that card until reload.
+ * Combine the DB rows of a task with the entries the browser already shows. The DB wins for every row it has,
+ * and a live entry stays only when the DB provably lacks it: a tool_call event is sent once, and the rows carry
+ * the identity, so an entry whose tool id already has a row is a duplicate.
  *
- * The rows carry the identity: a tool_call row exists from the moment its tool starts and holds the
- * tool_id the event carried, and a turn's assistant row is written before any of its tools run — so
- * a shared tool id means the DB's copy of that turn is on screen with its text, thinking and stats.
- *
- * `dbMessageIds` is every row id the response carried, including tool_call rows that never became
- * entry ids. `taskIsRunning` decides whether a pending tool call is work or a leftover, and it comes
- * from `taskIsInFlight(execution_state)` — never from the task's status, which stays `in_progress`
- * when a task is stopped.
+ * `taskIsRunning` decides whether a pending tool call is work or a leftover, and it must come from
+ * `taskIsInFlight(execution_state)`, never from the task's status, which stays `in_progress` after a stop.
  */
 export function mergeLoadedHistory(
     dbEntries: ChatEntry[],
@@ -324,9 +401,8 @@ export function mergeLoadedHistory(
     liveEntries: ChatEntry[],
     taskIsRunning: boolean,
 ): ChatEntry[] {
-    // A stopped task never writes the result a pending row waits for. Hide that card, not the
-    // message: tool calls live inside the assistant entry, so dropping the entry would take the
-    // turn's text, thinking and finished cards with it.
+    // Hide a card a stopped task will never answer, not the message holding it: dropping the entry
+    // would take the turn's text and finished cards too.
     const settled = taskIsRunning ? dbEntries : dbEntries.map(withoutStalePendingCards).filter((e): e is ChatEntry => e !== null);
 
     const dbIds = new Set(dbMessageIds);
@@ -364,9 +440,8 @@ export function mergeLoadedHistory(
             continue;
         }
 
-        // No shared id here. Text is the one field the response never redacts or truncates, so an
-        // exact match with the newest row proves persistence — proof a streaming entry cannot give,
-        // since its text grows into that match while its row is unwritten.
+        // Text is the one field the response never truncates, so matching the newest row means it is
+        // stored. A streaming entry cannot prove that: its row is not written yet.
         if (!e.isStreaming && e.role === 'assistant' && e.content && lastDb?.role === 'assistant' && lastDb.content === e.content) continue;
 
         merged.push(e);
@@ -391,9 +466,8 @@ function withoutStalePendingCards(entry: ChatEntry): ChatEntry | null {
     return { ...entry, toolCalls: settledCalls.length > 0 ? settledCalls : undefined };
 }
 
-// collapseRepeatErrors drops an error entry that repeats the one right before it.
-// Databases written before the server became the only writer of errors hold one
-// copy of a failure per page view.
+// Drop an error entry repeating the one right before it: old databases hold one copy of a failure per
+// page view.
 function collapseRepeatErrors(entries: ChatEntry[]): ChatEntry[] {
     return entries.filter((e, i) => {
         if (e.role !== 'error') return true;
@@ -403,15 +477,9 @@ function collapseRepeatErrors(entries: ChatEntry[]): ChatEntry[] {
 }
 
 /**
- * Build a map from user-entry index to checkpoint state in O(n) time.
- *
- * The checkpoint above a user message represents the repo state BEFORE that
- * message's work was applied. So prefer the last SAVED checkpoint (assistant with
- * a commit hash) that PRECEDES the user (backward scan, bounded by the previous
- * user). Prefer a hashed assistant over a tool-call-only one, since the "view
- * changes" button needs a commit hash. Only when nothing precedes it — e.g. the
- * very first message or a fork point — fall back to the NEXT qualifying assistant
- * (forward scan, stopping at the first assistant after the user).
+ * Map each user message to the checkpoint above it, which shows the repo state before that message's
+ * work. Prefer the last saved assistant before it, since "view changes" needs a commit hash, and fall
+ * back to the next qualifying one only when nothing precedes it (the first message, a fork point).
  */
 export function buildCheckpointStateMap(
     entries: ChatEntry[],
@@ -422,9 +490,7 @@ export function buildCheckpointStateMap(
     const result = new Map<number, CheckpointState | null>();
     const n = entries.length;
 
-    // Phase 1: Precompute forward scan targets.
-    // For each user, find the index of the next assistant (any) in forward direction.
-    // This is the entry the forward scan would stop at.
+    // Index of the next assistant at or after each position: where a forward scan would stop.
     const nextAssistant = new Int32Array(n).fill(-1);
     for (let i = n - 2; i >= 0; i--) {
         if (entries[i + 1].role === 'assistant') {
@@ -434,7 +500,7 @@ export function buildCheckpointStateMap(
         }
     }
 
-    // Phase 2: Single forward pass — resolve forward scan and track backward targets.
+    // One forward pass, tracking the candidate checkpoints seen since the previous user message.
     let lastQualifyingAssistant: number | null = null;
     let lastHashAssistant: number | null = null;
 
@@ -453,12 +519,9 @@ export function buildCheckpointStateMap(
         }
 
         if (entry.role === 'user') {
-            // Backward scan: the state before this message is the last SAVED checkpoint
-            // (assistant with a commit hash). Prefer it over a tool-call-only assistant,
-            // which has no commit and would drop the "view changes" button.
+            // Only a committed assistant can show the changes link, so it wins over a tool-only one.
             const bwdIdx = lastHashAssistant ?? lastQualifyingAssistant;
             const bwd = bwdIdx !== null ? entries[bwdIdx] : null;
-            // Forward scan: next assistant after this user (stops at the first one).
             const fwdIdx = nextAssistant[i];
             const fwd = fwdIdx >= 0 ? entries[fwdIdx] : null;
             const fwdQualifying = fwd !== null && ((fwd.toolCalls && fwd.toolCalls.length > 0) || checkpointCommitHashes.has(fwd.id));
@@ -484,11 +547,9 @@ export function buildCheckpointStateMap(
 }
 
 /**
- * Title for an advisory note (an environment note the model had to see but the user never
- * said). Keyed on `kind`, the sub-classification the executor records on the row: severity
- * only decides how loudly the card is drawn, so titling by severity would render a merge
- * conflict as "Workspace diagnostics". Unknown and missing kinds (rows written before the
- * kind existed) fall back to the generic note.
+ * Title for an advisory note — something the model had to see that the user never sent. Keyed on the
+ * `kind` the executor stores, not on severity, which only picks how the card is drawn; a kind that is
+ * unknown or missing gets the generic note.
  */
 export function advisoryLabel(kind?: string): string {
     switch (kind) {

@@ -1,15 +1,7 @@
 import type { ChatEntry, LockWait, ToolCallInfo } from '$lib/types';
 import { findToolCall } from '$lib/utils/tool-call-lookup';
 
-/**
- * Reactive class holding all stream-processing state.
- * Uses Svelte 5 $state() for deep reactivity — no version bumper needed.
- *
- * Usage:
- *   const stream = new StreamState();
- *   // Read directly from stream.state in templates:
- *   {#each stream.state.entries as entry}
- */
+/** All stream-processing state in one reactive object, read directly as `stream.state` in templates. */
 export class StreamState {
     /** Reactive state — deeply tracked by Svelte 5. */
     state = $state({
@@ -18,9 +10,8 @@ export class StreamState {
         activeToolCalls: new Map<string, { entryId: string; toolCall: ToolCallInfo }>(),
         processedToolIds: new Set<string>(),
         /**
-         * A tool call this screen has seen but holds no answered card for — pending, or answered with
-         * no card to land on. A `tool_call` is broadcast once, so such a card is gone until the
-         * transcript is read from the database again.
+         * A tool call this screen saw but holds no answered card for. A `tool_call` is broadcast once, so such
+         * a card is gone until the transcript is read from the database again.
          */
         unresolvedToolIds: new Set<string>(),
         awaitingResponse: false,
@@ -73,10 +64,9 @@ export class StreamState {
     }
 
     /**
-     * Re-point `activeToolCalls` at the tool calls currently in `entries`, dropping
-     * refs whose tool call is gone. Call after anything that replaces the entry list
-     * (loadHistory): the new entries carry new ids, so refs captured while streaming
-     * are detached and would keep writing into a copy nobody renders.
+     * Re-point `activeToolCalls` at the tool calls currently in `entries`. Call this after anything that
+     * replaces the entry list: the new entries carry new ids, so refs captured while streaming would keep
+     * writing into a copy nobody renders.
      */
     reconcileActiveToolCalls() {
         if (this.state.activeToolCalls.size === 0) return;
@@ -89,10 +79,9 @@ export class StreamState {
     }
 
     /**
-     * Drop the entries holding a tool call the server never answered. Correct only once the
-     * task is out of flight (`taskIsInFlight`). The entry goes with the card: the turn that
-     * abandoned the call was cancelled before `finalizeTurn`, which is what persists the
-     * assistant text and the `tool_call` row, so a rebuild from the DB shows neither.
+     * Drop the entries holding a tool call the server never answered. Correct only once the task is out of
+     * flight (`taskIsInFlight`): the turn that abandoned the call was cancelled before `finalizeTurn`, so a
+     * rebuild from the database shows neither its text nor its card.
      */
     dropUnresolvedToolCalls() {
         if (!this.state.entries.some(e => e.toolCalls?.some(tc => tc.isPending))) return;
@@ -112,6 +101,14 @@ export class StreamState {
         this.state.processedToolIds = new Set();
     }
 
+    /** `resetStreaming` plus the rows it does not own. Old rows hold the tool calls `mayBeBehind` reads, so
+     * leaving them keeps the tab-return gate open for a turn that no longer exists here. */
+    resetForThreadSwitch() {
+        this.resetStreaming();
+        this.state.entries = [];
+        this.state.currentAssistantId = null;
+    }
+
     /** Reset streaming state (thread switch). */
     resetStreaming() {
         this.closeCurrentAssistant();
@@ -120,9 +117,7 @@ export class StreamState {
         this.state.unresolvedToolIds = new Set();
         this.state.streamTokenCount = 0;
         this.state.awaitingResponse = false;
-        // Note: sessionCost is NOT reset here — it reflects the task's accumulated
-        // session cost, which persists across thread switches and is restored
-        // from the persisted task.session_cost on load.
+        // sessionCost stays: it is the task's accumulated cost, restored from the stored task on load.
     }
 
     /** Clear retry state. */

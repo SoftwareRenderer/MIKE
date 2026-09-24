@@ -101,7 +101,9 @@ So the task's own row answers until the board's copy moves under it; `trustedExe
 read it for the model and session cost. Every caller that *makes* a transition passes the row it got back:
 the stop's `paused`, `commitAndDone`'s and `moveTask`'s updated task. The same value answers the frame
 gate (`isLoading` → `suppressEvents`), which is why a replayed `tool_call` now reaches the screen for a
-task the board still lists under Review.
+task the board still lists under Review. The two panels that *decide* from the state — the awaiting/queue
+line in `ChatEntries` and `ReviewBar`'s paused bar — are handed that same value, not the prop, because both
+are the question `isTaskPaused` and `isLoading` answer.
 
 **Tests:** `src/lib/utils/__tests__/execution-state.unit.ts` (the rule) and
 `chat-history-merge.unit.ts` (the merge given the truth, both directions). E2E `away-and-back.spec.ts`

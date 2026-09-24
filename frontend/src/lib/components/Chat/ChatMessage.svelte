@@ -12,7 +12,7 @@
     import { computeInterleavedLayout } from '$lib/utils/chat-layout';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { imageSrc } from '$lib/utils/attachments';
-    import { systemNoteText } from '$lib/utils/chat-entries';
+    import { systemNoteText, editSubmitAction } from '$lib/utils/chat-entries';
     import type { ToolCallInfo } from '$lib/types';
     import { t } from '$lib/i18n';
 
@@ -38,6 +38,8 @@
         onEditSummary?: (content: string) => Promise<void>;
         isLastUserMessage?: boolean;
         isFirstUserMessage?: boolean;
+        /** A turn of this task is running, so no row may be edited into it. */
+        turnInFlight?: boolean;
         taskStatus?: string;
         onNavigateTask?: (taskId: string) => void;
         queued?: boolean;
@@ -51,7 +53,7 @@
         onReasoningResolved?: (content: string) => void;
     }
 
-    let { role, severity = '', kind = '', content, reasoningContent, hasReasoning = false, isStreaming = false, isOptimistic = false, timestamp, messageId, attachments, stats, toolCalls = [], onDelete, onFork, onSend, onRegenerate, onEditSummary, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, editDiffOverrides = {}, onToggleEditDiff = () => {}, projectId = '', taskId: msgTaskId = '', reasoningExpandedOverride, onReasoningToggle, resolvedReasoningOverride, onReasoningResolved }: Props = $props();
+    let { role, severity = '', kind = '', content, reasoningContent, hasReasoning = false, isStreaming = false, isOptimistic = false, timestamp, messageId, attachments, stats, toolCalls = [], onDelete, onFork, onSend, onRegenerate, onEditSummary, isLastUserMessage = false, isFirstUserMessage = false, turnInFlight = false, taskStatus = 'backlog', onNavigateTask, queued = false, editDiffOverrides = {}, onToggleEditDiff = () => {}, projectId = '', taskId: msgTaskId = '', reasoningExpandedOverride, onReasoningToggle, resolvedReasoningOverride, onReasoningResolved }: Props = $props();
 
     // Edit state
     let isEditing = $state(false);
@@ -103,24 +105,24 @@
         isEditing = false;
     }
 
+    /** Submit an edit. An attachment alone is a message, which the form's own submit already allows. */
     async function submitEdit(newContent: string, newAttachments?: Array<{ mimeType: string; data: string }>) {
-        if (newContent.trim() && messageId) {
-            isSubmitting = true;
-            try {
-                // The summarized context is the one text a turn did not write, so it is rewritten in
-                // place; every other edit keeps its rule of never rewriting history — the first message
-                // always forks a thread, and only the last one can be sent again.
-                if (onEditSummary) {
-                    await onEditSummary(newContent.trim());
-                } else if (!isFirstUserMessage && isLastUserMessage && onSend) {
-                    await onSend(messageId, content, newContent.trim(), newAttachments?.length ? newAttachments : undefined);
-                } else {
-                    await onFork?.(messageId, content, newContent.trim(), newAttachments?.length ? newAttachments : undefined);
-                }
-            } finally {
-                isEditing = false;
-                isSubmitting = false;
+        const text = newContent.trim();
+        const atts = newAttachments?.length ? newAttachments : undefined;
+        if (!messageId || (!text && !atts)) return;
+        isSubmitting = true;
+        try {
+            // The summarized context is the one text a turn did not write, so it is rewritten in place.
+            if (onEditSummary) {
+                await onEditSummary(text);
+            } else if (editSubmitAction({ isFirstUserMessage, isLastUserMessage, taskStatus }) === 'fork') {
+                await onFork?.(messageId, content, text, atts);
+            } else {
+                await onSend?.(messageId, content, text, atts);
             }
+        } finally {
+            isEditing = false;
+            isSubmitting = false;
         }
     }
 
@@ -208,7 +210,7 @@
                 timestampTooltip={timestampInfo.tooltip}
                 onCopy={handleCopy}
                 onDelete={!isFirstUserMessage ? onDelete : undefined}
-                onFork={startEdit}
+                onFork={turnInFlight ? undefined : startEdit}
                 {copied}
             />
         {/if}
