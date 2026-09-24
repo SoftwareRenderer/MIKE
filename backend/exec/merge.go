@@ -83,6 +83,9 @@ func (te *TaskExecutor) ArmCommitAndDone(taskID string) {
 	te.merge.ArmCommitAndDone(taskID)
 }
 
+// CommitAndDonePending reads the armed click back without consuming it. The merge path consults the
+// orchestrator itself; this forward is how backend/api's tests watch the arming rule, which lives
+// behind the unexported te.merge.
 func (te *TaskExecutor) CommitAndDonePending(taskID string) bool {
 	return te.merge.CommitAndDonePending(taskID)
 }

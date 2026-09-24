@@ -58,13 +58,10 @@ const lspStartTimeout = 8 * time.Second
 // worktree lock.
 const lspRequestTimeout = 15 * time.Second
 
-// lspSendTimeout and lspNotifyTimeout ceiling one sandbox-bridge round trip. Both are derived
-// from the caller's context so the caller's deadline always wins; minted from
-// context.Background() they would make every budget in the caller advisory.
-const (
-	lspSendTimeout   = 30 * time.Second
-	lspNotifyTimeout = 10 * time.Second
-)
+// lspSendTimeout ceilings one sandbox-bridge round trip. It is derived from the caller's context so
+// the caller's deadline always wins; minted from context.Background() it would make every budget in
+// the caller advisory.
+const lspSendTimeout = 30 * time.Second
 
 // lspInitReplyTimeout bounds the initialize response at four times the slowest healthy reply.
 // A server that never finishes initializing must not look like a slow one for half a minute.
@@ -654,35 +651,6 @@ func (m *ExtensionLSPManager) SendToServer(ctx context.Context, process *LSPProc
 	return nil
 }
 
-// LSPNotify sends a JSON-RPC notification without waiting for a response, translating file
-// URIs host → container. See lspNotifyTimeout for the caller's deadline.
-func (m *ExtensionLSPManager) LSPNotify(ctx context.Context, process *LSPProcess, msg json.RawMessage) error {
-	workspaceKey := processKey(process.Workspace, process.Language)
-
-	sc := m.liveClient(workspaceKey, false)
-	if sc == nil {
-		return fmt.Errorf("sandbox client %w for workspace=%s lang=%s", errStaleClient, process.Workspace, process.Language)
-	}
-
-	translated := translateURIsToContainer(msg, sc.workspace, sc.projectMounts)
-
-	notifyCtx, cancel := context.WithTimeout(ctx, lspNotifyTimeout)
-	defer cancel()
-
-	if err := sc.bridgeClient.LSPNotify(notifyCtx, translated); err != nil {
-		// Drop the connection so the next call reconnects, as in SendToServer.
-		m.retire(workspaceKey, sc)
-		// A stalled write means the bridge stopped reading. Closing it makes the next
-		// GetOrCreate start a fresh bridge: extension sandboxes get new pipes.
-		if errors.Is(err, bridge.ErrWriteStalled) {
-			logging.For(logging.LSP).Infof("bridge write stalled for workspace=%s lang=%s, retiring client", process.Workspace, process.Language)
-			_ = sc.bridgeClient.Close()
-		}
-		return fmt.Errorf("notify LSP server: %w", err)
-	}
-	return nil
-}
-
 // ServerMessageCh returns a channel that receives messages from LSP servers.
 func (m *ExtensionLSPManager) ServerMessageCh() <-chan json.RawMessage {
 	return m.serverCh
@@ -1266,25 +1234,6 @@ func (r *ExtensionRegistry) HasAnyLSPToolCallsExtension() bool {
 		}
 	}
 	return false
-}
-
-// GetConfig returns the ServerConfig for a given language.
-func (r *ExtensionRegistry) GetConfig(language string) *ServerConfig {
-	extensions, err := r.extStore.GetByType(extensions.ExtensionTypeLSP)
-	if err != nil {
-		return nil
-	}
-
-	for _, ext := range extensions {
-		if !ext.Enabled {
-			continue
-		}
-		lspCfg := ext.Manifest.Capabilities.GetLSP()
-		if lspCfg != nil && lspCfg.Language == language {
-			return r.toServerConfig(&ext)
-		}
-	}
-	return nil
 }
 
 // toServerConfig converts an Extension to a ServerConfig.

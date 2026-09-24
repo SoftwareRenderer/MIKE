@@ -57,6 +57,8 @@ func (c *Capture) String() string {
 	return c.buf.String() + CaptureMarker(c.dropped)
 }
 
+// Truncated reports whether bytes were dropped and how many. String carries the marker a person
+// reads; this is the same fact without parsing that sentence.
 func (c *Capture) Truncated() (bool, int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

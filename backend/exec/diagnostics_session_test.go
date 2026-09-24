@@ -70,14 +70,6 @@ func (m *recordingLSPManager) Release(_, language string) {
 	m.released = append(m.released, language)
 }
 
-func (m *recordingLSPManager) SendToServer(context.Context, *lsp.LSPProcess, json.RawMessage) error {
-	return nil
-}
-
-func (m *recordingLSPManager) LSPNotify(context.Context, *lsp.LSPProcess, json.RawMessage) error {
-	return nil
-}
-
 func (m *recordingLSPManager) Subscribe() chan json.RawMessage {
 	m.mu.Lock()
 	defer m.mu.Unlock()

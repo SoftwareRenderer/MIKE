@@ -131,11 +131,6 @@ func (sm *ExtensionSandboxManager) cleanupStaleContainers() {
 	sm.rt.CleanupStaleContainers("ext-sandbox", ExtensionContainerPrefix+"-")
 }
 
-// IsAvailable returns true if extension sandboxing is available.
-func (sm *ExtensionSandboxManager) IsAvailable() bool {
-	return sm.available
-}
-
 // SetExtensionsDir records the directory extension files are materialized in: a mount-allowlist
 // root, and where findLocalDockerfile looks.
 func (sm *ExtensionSandboxManager) SetExtensionsDir(dir string) {

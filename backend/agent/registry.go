@@ -41,24 +41,8 @@ func NewAgentRegistry(store ExtensionStore, configStore ConfigStore) *AgentRegis
 	return r
 }
 
-// Lookup resolves an agent://<name> URL to the matching extension.
-// Returns nil if no matching agent extension is found.
-func (r *AgentRegistry) Lookup(url string) *ext.Extension {
-	name, ok := types.ParseAgentURL(url)
-	if !ok {
-		return nil
-	}
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	ext, ok := r.agents[name]
-	if !ok || !ext.Enabled {
-		return nil
-	}
-	return ext
-}
-
-// LookupByName resolves an agent by extension name.
+// LookupByName resolves an agent by extension name. A caller holding an agent://<name> provider URL
+// parses it first: types.ParseAgentURL owns the grammar, this owns the enabled check.
 func (r *AgentRegistry) LookupByName(name string) *ext.Extension {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -67,20 +51,6 @@ func (r *AgentRegistry) LookupByName(name string) *ext.Extension {
 		return nil
 	}
 	return ext
-}
-
-// List returns all enabled agent extensions.
-func (r *AgentRegistry) List() []ext.Extension {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	result := make([]ext.Extension, 0, len(r.enabled))
-	for _, name := range r.enabled {
-		if ext, ok := r.agents[name]; ok && ext.Enabled {
-			result = append(result, *ext)
-		}
-	}
-	return result
 }
 
 // ToProviders converts agent extensions to provider entries for the UI.

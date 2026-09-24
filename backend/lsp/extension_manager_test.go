@@ -185,7 +185,9 @@ func TestExtensionRegistry_Lookup_Disabled(t *testing.T) {
 	}
 }
 
-func TestExtensionRegistry_GetConfig(t *testing.T) {
+// TestExtensionRegistry_InitParamsOverrideReachesTheServer: an override the manifest declares rides
+// into the config a task's language server is started with.
+func TestExtensionRegistry_InitParamsOverrideReachesTheServer(t *testing.T) {
 	store := testExtensionStore(t)
 	if err := store.InitSchema(); err != nil {
 		t.Fatalf("InitSchema: %v", err)
@@ -200,28 +202,15 @@ func TestExtensionRegistry_GetConfig(t *testing.T) {
 	}
 
 	reg := NewExtensionRegistry(store)
-	cfg := reg.GetConfig("go")
+	cfg := reg.Lookup("main.go")
 	if cfg == nil {
-		t.Fatal("GetConfig(go) = nil, want config")
+		t.Fatal("Lookup(main.go) = nil, want config")
 	}
 	if cfg.Language != "go" {
 		t.Errorf("Language = %q, want go", cfg.Language)
 	}
 	if cfg.InitParamsOverride == nil {
 		t.Error("InitParamsOverride = nil, want non-nil")
-	}
-}
-
-func TestExtensionRegistry_GetConfig_NotFound(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-
-	reg := NewExtensionRegistry(store)
-	cfg := reg.GetConfig("unknown")
-	if cfg != nil {
-		t.Errorf("GetConfig(unknown) = %+v, want nil", cfg)
 	}
 }
 

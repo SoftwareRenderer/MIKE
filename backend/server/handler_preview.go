@@ -50,7 +50,7 @@ const previewDocCSPNetwork = "default-src * data: blob: 'unsafe-inline'; script-
 // produce a fresh record.
 type previewNavRecord struct {
 	path  string // token-relative path ("" = the doc's own dir)
-	ok    bool   // the response committed (2xx)
+	ok    bool   // always true: only a committed (2xx) response records one. The extension's navigation decision reads this key, so it stays.
 	isDoc bool   // the doc's own content (dir URL or self-reference)
 }
 
@@ -216,12 +216,14 @@ func (ps *previewStore) delete(token string) {
 	delete(ps.docs, token)
 }
 
-func (ps *previewStore) recordNav(token, rel string, ok, isDoc bool) {
+// recordNav notes a committed page load. Only the success paths reach it, so a record always says
+// the response committed.
+func (ps *previewStore) recordNav(token, rel string, isDoc bool) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	if doc, exists := ps.docs[token]; exists {
 		doc.navSeq++
-		doc.lastNav = previewNavRecord{path: rel, ok: ok, isDoc: isDoc}
+		doc.lastNav = previewNavRecord{path: rel, ok: true, isDoc: isDoc}
 	}
 }
 
@@ -390,7 +392,7 @@ func (s *Server) HandlePreviewGet(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, doc.content)
 		}
 		if isDocNav() {
-			s.previewStore.recordNav(token, rel, true, true)
+			s.previewStore.recordNav(token, rel, true)
 		}
 	}
 
@@ -469,7 +471,7 @@ func (s *Server) HandlePreviewGet(w http.ResponseWriter, r *http.Request) {
 		// otherwise the posture could be skipped by linking to a sibling .html.
 		w.Header().Set("Content-Security-Policy", previewDocCSP(doc))
 		if isDocNav() {
-			s.previewStore.recordNav(token, rel, true, false)
+			s.previewStore.recordNav(token, rel, false)
 		}
 	}
 	w.WriteHeader(http.StatusOK)

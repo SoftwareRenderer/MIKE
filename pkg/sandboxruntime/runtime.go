@@ -133,7 +133,9 @@ func NewRuntimeWithBoot(boot Boot) *Runtime {
 	return &Runtime{boot: boot}
 }
 
-// Boot returns the decisions this Runtime was built with.
+// Boot returns the decisions this Runtime was built with. A consumer receives the value at
+// construction and never asks again, so this is how the zero-value refusal of the host sweep stays
+// pinned by TestBootDeclinesTheHostSweepByDefault.
 func (r *Runtime) Boot() Boot { return r.boot }
 
 // PodmanWaitDelay bounds how long a podman subprocess may hold its output pipes after it exits or

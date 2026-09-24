@@ -37,71 +37,6 @@ func (m *mockConfigStore) GetAgentProvider() *types.Provider {
 	return m.agentProvider
 }
 
-// TestRegistry_Lookup tests URL resolution.
-func TestRegistry_Lookup(t *testing.T) {
-	store := &mockExtensionStore{
-		extensions: []ext.Extension{
-			{
-				Name:    "pi",
-				Type:    ext.ExtensionTypeAgent,
-				Enabled: true,
-				Manifest: ext.ExtensionManifest{
-					DisplayName:  "My Coding Agent",
-					Version:      "1.0.0",
-					Capabilities: &ext.Capabilities{Agent: &ext.AgentConfig{}},
-				},
-			},
-			{
-				Name:    "disabled-agent",
-				Type:    ext.ExtensionTypeAgent,
-				Enabled: false,
-			},
-			{
-				Name:    "lsp-server",
-				Type:    ext.ExtensionTypeLSP,
-				Enabled: true,
-			},
-		},
-	}
-
-	registry := NewAgentRegistry(store, nil)
-
-	// Valid agent URL
-	ext := registry.Lookup("agent://pi")
-	if ext == nil {
-		t.Fatal("Lookup(agent://pi) returned nil")
-	}
-	if ext.Name != "pi" {
-		t.Errorf("Name = %q, want %q", ext.Name, "pi")
-	}
-
-	ext = registry.Lookup("agent://disabled-agent")
-	if ext != nil {
-		t.Errorf("Lookup(agent://disabled-agent) = %v, want nil", ext)
-	}
-
-	// Non-agent URL
-	ext = registry.Lookup("http://example.com")
-	if ext != nil {
-		t.Errorf("Lookup(http://...) = %v, want nil", ext)
-	}
-
-	// Non-existent agent
-	ext = registry.Lookup("agent://nonexistent")
-	if ext != nil {
-		t.Errorf("Lookup(agent://nonexistent) = %v, want nil", ext)
-	}
-
-	// Agent URL with trailing slash
-	ext = registry.Lookup("agent://pi/")
-	if ext == nil {
-		t.Fatal("Lookup(agent://pi/) returned nil")
-	}
-	if ext.Name != "pi" {
-		t.Errorf("Name = %q, want %q", ext.Name, "pi")
-	}
-}
-
 // TestRegistry_LookupByName tests name-based lookup.
 func TestRegistry_LookupByName(t *testing.T) {
 	store := &mockExtensionStore{
@@ -126,33 +61,6 @@ func TestRegistry_LookupByName(t *testing.T) {
 	ext = registry.LookupByName("nonexistent")
 	if ext != nil {
 		t.Errorf("LookupByName(nonexistent) = %v, want nil", ext)
-	}
-}
-
-// TestRegistry_List tests listing enabled agents.
-func TestRegistry_List(t *testing.T) {
-	store := &mockExtensionStore{
-		extensions: []ext.Extension{
-			{Name: "pi", Type: ext.ExtensionTypeAgent, Enabled: true},
-			{Name: "agent2", Type: ext.ExtensionTypeAgent, Enabled: true},
-			{Name: "disabled", Type: ext.ExtensionTypeAgent, Enabled: false},
-			{Name: "lsp", Type: ext.ExtensionTypeLSP, Enabled: true},
-		},
-	}
-
-	registry := NewAgentRegistry(store, nil)
-	agents := registry.List()
-
-	if len(agents) != 2 {
-		t.Fatalf("List() returned %d agents, want 2", len(agents))
-	}
-
-	names := make(map[string]bool)
-	for _, a := range agents {
-		names[a.Name] = true
-	}
-	if !names["pi"] || !names["agent2"] {
-		t.Errorf("List() names = %v, want pi and agent2", names)
 	}
 }
 
@@ -216,7 +124,7 @@ func TestRegistry_Reload(t *testing.T) {
 	registry := NewAgentRegistry(store, nil)
 
 	// Initially has pi
-	if registry.Lookup("agent://pi") == nil {
+	if registry.LookupByName("pi") == nil {
 		t.Fatal("expected pi to be found")
 	}
 
@@ -226,7 +134,7 @@ func TestRegistry_Reload(t *testing.T) {
 	// Reload should pick up the change
 	registry.Reload()
 
-	if registry.Lookup("agent://pi") != nil {
+	if registry.LookupByName("pi") != nil {
 		t.Error("expected pi to be nil after reload (disabled)")
 	}
 
@@ -239,7 +147,7 @@ func TestRegistry_Reload(t *testing.T) {
 
 	registry.Reload()
 
-	if registry.Lookup("agent://new-agent") == nil {
+	if registry.LookupByName("new-agent") == nil {
 		t.Error("expected new-agent to be found after reload")
 	}
 }
@@ -249,12 +157,8 @@ func TestRegistry_EmptyStore(t *testing.T) {
 	store := &mockExtensionStore{extensions: []ext.Extension{}}
 	registry := NewAgentRegistry(store, nil)
 
-	if registry.Lookup("agent://anything") != nil {
+	if registry.LookupByName("anything") != nil {
 		t.Error("expected nil lookup on empty store")
-	}
-
-	if agents := registry.List(); len(agents) != 0 {
-		t.Errorf("expected empty list, got %d", len(agents))
 	}
 
 	if providers := registry.ToProviders(); len(providers) != 0 {
@@ -666,14 +570,19 @@ func TestRegistry_EmittedProviderURLsParseBack(t *testing.T) {
 		if name != p.Name {
 			t.Errorf("ParseAgentURL(%q) = %q, want the provider's own name %q", p.URL, name, p.Name)
 		}
-		if got := registry.Lookup(p.URL); got == nil || got.Name != p.Name {
-			t.Errorf("Lookup(%q) resolved to %v, want extension %q", p.URL, got, p.Name)
+		if got := registry.LookupByName(name); got == nil || got.Name != p.Name {
+			t.Errorf("%q named extension %v, want %q", p.URL, got, p.Name)
 		}
 	}
 
-	for _, want := range registry.List() {
-		if !emitted[want.Name] {
-			t.Errorf("enabled agent %q has no provider row", want.Name)
+	// Expected straight from the fixture, so the check does not lean on the registry to describe
+	// itself: every enabled agent row of any kind is the input a provider row must come from.
+	for _, e := range store.extensions {
+		if e.Type != ext.ExtensionTypeAgent || !e.Enabled {
+			continue
+		}
+		if !emitted[e.Name] {
+			t.Errorf("enabled agent %q has no provider row", e.Name)
 		}
 	}
 	for _, forbidden := range []string{"disabled-agent", "gopls"} {

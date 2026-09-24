@@ -148,16 +148,6 @@ func TestNewExtensionSandboxManager(t *testing.T) {
 	// (it just won't be able to create sandboxes)
 }
 
-// TestIsAvailable: the answer is the host probe taken at construction, so a manager cannot offer a
-// sandbox the host cannot provide (and cannot withhold one it has).
-func TestIsAvailable(t *testing.T) {
-	sm := NewExtensionSandboxManager(NewRegistryClient(), nil, sandboxruntime.Boot{})
-
-	if got, want := sm.IsAvailable(), checkExtensionSandboxAvailable(); got != want {
-		t.Errorf("IsAvailable() = %v, want this host's probe %v", got, want)
-	}
-}
-
 func TestListRunning_Empty(t *testing.T) {
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})

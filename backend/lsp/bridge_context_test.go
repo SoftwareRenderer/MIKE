@@ -3,7 +3,6 @@ package lsp
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"testing"
 	"time"
@@ -66,52 +65,22 @@ func TestSendToServerEndsAtCallerDeadline(t *testing.T) {
 	}
 }
 
-func TestLSPNotifyEndsAtCallerDeadline(t *testing.T) {
-	m, proc := wedgedManager(t)
-	didOpen, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": "textDocument/didOpen"})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-
-	start := time.Now()
-	err = m.LSPNotify(ctx, proc, didOpen)
-	elapsed := time.Since(start)
-
-	if err == nil {
-		t.Fatal("LSPNotify wrote to a bridge that never reads; the wedged fixture is being bypassed")
-	}
-	if elapsed > 3*time.Second {
-		t.Errorf("LSPNotify took %v: the caller's 200ms deadline must end the write, not the %v ceiling", elapsed, lspNotifyTimeout)
-	}
-	if !errors.Is(err, bridge.ErrWriteStalled) {
-		t.Logf("notify error (expected the stalled-write path): %v", err)
-	}
-}
-
-func TestSendAndNotifyReturnOnCancelledContext(t *testing.T) {
+func TestSendReturnsOnCancelledContext(t *testing.T) {
 	m, proc := wedgedManager(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	done := make(chan error, 2)
-	go func() {
-		done <- m.LSPNotify(ctx, proc, json.RawMessage(`{"jsonrpc":"2.0","method":"initialized"}`))
-	}()
+	done := make(chan error, 1)
 	go func() {
 		done <- m.SendToServer(ctx, proc, json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
 	}()
 
-	for i := 0; i < 2; i++ {
-		select {
-		case err := <-done:
-			if err == nil {
-				t.Error("a call on an already-cancelled context reported success")
-			}
-		case <-time.After(3 * time.Second):
-			t.Fatal("a call on an already-cancelled context is still waiting; stopping a task must end it at once")
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a call on an already-cancelled context reported success")
 		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("a call on an already-cancelled context is still waiting; stopping a task must end it at once")
 	}
 }

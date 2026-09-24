@@ -13,8 +13,6 @@ type lspManager interface {
 	GetRegistry() *lsp.ExtensionRegistry
 	GetOrCreate(ctx context.Context, workspacePath, language string) (*lsp.LSPProcess, error)
 	Release(workspacePath, language string)
-	SendToServer(ctx context.Context, proc *lsp.LSPProcess, msg json.RawMessage) error
-	LSPNotify(ctx context.Context, proc *lsp.LSPProcess, msg json.RawMessage) error
 	EnsureInitialized(ctx context.Context, workspacePath string, cfg *lsp.ServerConfig) error
 	SyncDocument(ctx context.Context, workspacePath, filePath string, cfg *lsp.ServerConfig) (string, bool, error)
 	Subscribe() chan json.RawMessage
