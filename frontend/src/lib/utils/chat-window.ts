@@ -17,6 +17,33 @@ export function prependRows<T extends PagedRow>(held: T[], older: T[]): T[] {
     return [...fresh, ...held];
 }
 
+/** What a newest-window read leaves on screen, and which paging edge describes it. */
+export interface WindowReadRows<T> {
+    rows: T[];
+    /** True when the older pages the reader paged into still stand in front of the window, which means the
+     * cursor naming the oldest row held still names the oldest row of `rows`. */
+    keepsEarlier: boolean;
+}
+
+/**
+ * Join a newest-window read to the rows on screen.
+ *
+ * The window is the newest answers of the conversation, so every row it does not name is older than every
+ * row it does: the pages the reader paged into stay in front of it, and the window replaces the rows it
+ * overlaps. Drawing the window alone would strand those pages behind it — `mergeLoadedHistory` appends the
+ * entries the read does not name, so the newest answers would land above the older ones and the bottom of
+ * the transcript would stop being the newest content.
+ *
+ * A window that opens nowhere inside the rows held cannot be joined: a thread switch reads a different
+ * conversation, and a truncation can cut the overlap away. The window then stands alone.
+ */
+export function applyWindowRead<T extends PagedRow>(held: T[], fresh: T[]): WindowReadRows<T> {
+    const oldest = fresh[0];
+    const joinsAt = oldest ? held.findIndex(r => r.id === oldest.id) : -1;
+    if (joinsAt > 0) return { rows: [...held.slice(0, joinsAt), ...fresh], keepsEarlier: true };
+    return { rows: fresh, keepsEarlier: false };
+}
+
 /** How a window read ended, as far as the transcript on screen is concerned. */
 export type WindowRead = 'answered' | 'cached' | 'failed';
 
