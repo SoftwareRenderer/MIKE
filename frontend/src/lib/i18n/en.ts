@@ -1686,8 +1686,8 @@ const catalog = {
     'git.pushFailed': 'Push failed',
     'git.pullFromRemote': 'Pull from remote',
     'git.pushToRemote': 'Push to remote',
-    'git.commitsBehind': { one: '{marker}{count} commit behind', other: '{marker}{count} commits behind' },
-    'git.commitsAhead': { one: '{marker}{count} commit ahead', other: '{marker}{count} commits ahead' },
+    'git.commitsBehind': { one: '{count} commit behind', other: '{count} commits behind' },
+    'git.commitsAhead': { one: '{count} commit ahead', other: '{count} commits ahead' },
     'git.countsAsOfLastSync': 'as of the last pull or push',
     'git.repoChangedTitle': 'Repository has changed',
     'git.repoChangedMessage':

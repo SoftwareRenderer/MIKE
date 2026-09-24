@@ -820,17 +820,13 @@
     let pulling = $state(false);
     let pushing = $state(false);
 
-    // The counts come from the upstream's remote-tracking ref, so they move when something fetches
-    // rather than when the remote moves. `remoteFresh` is set by a pull or a push, and the `~`
-    // prefix marks everything counted before that.
     let aheadCommits = $state(0);
     let behindCommits = $state(0);
     let remoteFresh = $state(false);
 
-    const countMarker = $derived(remoteFresh ? '' : '~');
     const syncNote = $derived(remoteFresh ? '' : ` — ${t('git.countsAsOfLastSync')}`);
-    const pullLabel = $derived(`${t('git.pullFromRemote')} (${t('git.commitsBehind', { count: behindCommits, marker: countMarker })})${syncNote}`);
-    const pushLabel = $derived(`${t('git.pushToRemote')} (${t('git.commitsAhead', { count: aheadCommits, marker: countMarker })})${syncNote}`);
+    const pullLabel = $derived(`${t('git.pullFromRemote')} (${t('git.commitsBehind', { count: behindCommits })})${syncNote}`);
+    const pushLabel = $derived(`${t('git.pushToRemote')} (${t('git.commitsAhead', { count: aheadCommits })})${syncNote}`);
 
     /** Pull from the remote, then refresh the panel in place. */
     async function handlePull() {
@@ -1099,7 +1095,7 @@
                         <path d="M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                     </svg>
                 {/if}
-                <span class="panel-count" aria-hidden="true">{countMarker}{behindCommits}</span>
+                <span class="panel-count" aria-hidden="true">{behindCommits}</span>
             </button>
             <button class="panel-icon-btn" onclick={handlePush} disabled={pulling || pushing} title={pushing ? 'Pushing…' : pushLabel} aria-label={pushLabel}>
                 {#if pushing}
@@ -1110,7 +1106,7 @@
                         <path d="M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                     </svg>
                 {/if}
-                <span class="panel-count" aria-hidden="true">{countMarker}{aheadCommits}</span>
+                <span class="panel-count" aria-hidden="true">{aheadCommits}</span>
             </button>
             <button
                 class="panel-commit-btn"
