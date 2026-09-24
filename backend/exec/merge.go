@@ -333,7 +333,7 @@ type SSEFlusher interface {
 func (m *mergeOrchestrator) GenerateCommitMessage(ctx context.Context, task *types.Task) string {
 	taskMsgs, _ := m.store.GetTaskMessages(task.ID, task.CurrentThreadID)
 	conversation := BuildConversationFromTaskMessages(taskMsgs)
-	commitMsg := m.generateCommitMessageLLM(ctx, task, FormatConversationTurns(ExtractCommitContext(conversation)))
+	commitMsg := m.generateCommitMessageLLM(ctx, task, commitContextText(conversation))
 	// The LLM's generic answer when it could not run; the title says more.
 	if commitMsg == "file changes" && task.Title != "" {
 		commitMsg = task.Title
@@ -391,7 +391,7 @@ func (m *mergeOrchestrator) StreamCommitMessage(w SSEFlusher, taskID string, tas
 
 	taskMsgs, _ := m.store.GetTaskMessages(taskID, task.CurrentThreadID)
 	conversation := BuildConversationFromTaskMessages(taskMsgs)
-	turnText := FormatConversationTurns(ExtractCommitContext(conversation))
+	turnText := commitContextText(conversation)
 	labelMessages := buildCommitMessages(turnText)
 
 	models := collectUniqueModels(taskMsgs)

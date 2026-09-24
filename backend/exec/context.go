@@ -62,7 +62,7 @@ func formatToolAction(name, arguments string) string {
 			return "execute `" + cmd + "`"
 		}
 	case llama.ToolRequestReview:
-		if summary, ok := args["summary"].(string); ok && summary != "" {
+		if summary := reviewSummary(arguments); summary != "" {
 			return "request a review: " + summary
 		}
 		return "request a review"
@@ -103,6 +103,17 @@ func formatToolAction(name, arguments string) string {
 		}
 	}
 	return "perform an action"
+}
+
+// reviewSummary reads the summary out of a request_review call's arguments; empty means the
+// call carried none.
+func reviewSummary(arguments string) string {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return ""
+	}
+	summary, _ := args["summary"].(string)
+	return strings.TrimSpace(summary)
 }
 
 // formatToolStatus checks the tool result to determine success/failure.
@@ -643,8 +654,22 @@ func ExtractLastTurns(messages []types.ChatMessage, n int) []types.ChatMessage {
 	return result
 }
 
-// FormatConversationTurns formats a slice of chat messages into readable text.
+// FormatConversationTurns formats a slice of chat messages into readable text: one labelled
+// block per message, which is what the checkpoint-label prompt reads.
 func FormatConversationTurns(messages []types.ChatMessage) string {
+	return formatTurns(messages, false)
+}
+
+// commitContextText builds the context the commit message generator reads: the messages
+// ExtractCommitContext selected, as one assistant block. A task reviewed more than once
+// contributed more than one change, so each summary is a line under its own text, not a turn.
+func commitContextText(conversation []types.ChatMessage) string {
+	return formatTurns(ExtractCommitContext(conversation), true)
+}
+
+// formatTurns renders messages as prompt text. With consolidate set, consecutive assistant
+// messages share one "Assistant:" label, written before the first line that needs one.
+func formatTurns(messages []types.ChatMessage, consolidate bool) string {
 	// Map tool IDs to results for status lookup.
 	toolResults := make(map[string]string)
 	for _, m := range messages {
@@ -654,44 +679,84 @@ func FormatConversationTurns(messages []types.ChatMessage) string {
 	}
 
 	var sb strings.Builder
+	inBlock := false
+	endBlock := func() {
+		if inBlock {
+			sb.WriteString("\n\n")
+			inBlock = false
+		}
+	}
 	for _, m := range messages {
 		switch m.Role {
 		case "user":
+			endBlock()
 			sb.WriteString("User: ")
 			sb.WriteString(strings.TrimRight(m.Content, "\n"))
 			sb.WriteString("\n\n")
-		case "assistant":
-			sb.WriteString("Assistant: ")
-			// Reasoning rides in its own field after the rebuild (groupTaskMessages keeps it
-			// there so toAPIMessage can send it as reasoning_content); this renderer only reads
-			// Content, so the text it used to get pre-merged is folded in here.
-			text := m.Content
-			if m.ReasoningContent != "" {
-				text = m.ReasoningContent + "\n" + m.Content
-			}
-			if text != "" {
-				sb.WriteString(strings.TrimRight(text, "\n"))
-			}
-			if len(m.ToolCalls) > 0 {
-				for _, tc := range m.ToolCalls {
-					action := formatToolAction(tc.Function.Name, tc.Function.Arguments)
-					status := formatToolStatus(tc.ID, toolResults)
-					result := formatToolResult(tc.Function.Name, tc.ID, status, toolResults)
-					if tc.Function.Name == llama.ToolRequestReview {
-						sb.WriteString(fmt.Sprintf("\nAssistant: %s", action))
-					} else {
-						sb.WriteString(fmt.Sprintf("\nAssistant: (I used the %s tool to %s %s)",
-							tc.Function.Name, action, result))
-					}
-
-				}
-			}
-			sb.WriteString("\n\n")
+			continue
 		case "tool":
 			// Standalone tool message (no preceding assistant with ToolCalls).
 			// Already incorporated into assistant line when ToolCalls are present.
 			continue
 		}
+
+		if !consolidate {
+			sb.WriteString("Assistant: ")
+		}
+		// Reasoning rides in its own field after the rebuild (groupTaskMessages keeps it
+		// there so toAPIMessage can send it as reasoning_content); this renderer only reads
+		// Content, so the text it used to get pre-merged is folded in here.
+		text := m.Content
+		if m.ReasoningContent != "" {
+			text = m.ReasoningContent + "\n" + m.Content
+		}
+		if text != "" {
+			if consolidate {
+				if inBlock {
+					sb.WriteString("\n\n")
+				} else {
+					sb.WriteString("Assistant: ")
+					inBlock = true
+				}
+			}
+			sb.WriteString(strings.TrimRight(text, "\n"))
+		}
+		for _, tc := range m.ToolCalls {
+			action := formatToolAction(tc.Function.Name, tc.Function.Arguments)
+			if tc.Function.Name == llama.ToolRequestReview {
+				if consolidate {
+					summary := reviewSummary(tc.Function.Arguments)
+					if summary == "" {
+						continue
+					}
+					if inBlock {
+						sb.WriteString("\n")
+					} else {
+						sb.WriteString("Assistant: ")
+						inBlock = true
+					}
+					sb.WriteString(summary)
+					continue
+				}
+				sb.WriteString(fmt.Sprintf("\nAssistant: %s", action))
+				continue
+			}
+			status := formatToolStatus(tc.ID, toolResults)
+			result := formatToolResult(tc.Function.Name, tc.ID, status, toolResults)
+			// This line carries its own label.
+			if consolidate {
+				if inBlock {
+					sb.WriteString("\n")
+				}
+				inBlock = true
+			}
+			sb.WriteString(fmt.Sprintf("Assistant: (I used the %s tool to %s %s)",
+				tc.Function.Name, action, result))
+		}
+		if !consolidate {
+			sb.WriteString("\n\n")
+		}
 	}
+	endBlock()
 	return sb.String()
 }
