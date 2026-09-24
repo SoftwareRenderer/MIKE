@@ -383,6 +383,15 @@ decides, not the board's copy*) — and it lags the turn it gates. The `status: 
 that flag and so opens the gate for the turn it announces. `scheduleScroll` likewise does nothing while the tab is hidden (rAF is
 paused there; the follow tracker re-pins on return).
 
+**The read answers the newest answers; the screen may be holding more than that**. A reader who paged up
+holds rows above the window the wake-up read returns, and the transcript draws a read ahead of every entry
+the read does not name. A read that replaces the rows held therefore moves the newest answers above the older
+pages and leaves an old row at the bottom, where the jump-to-latest button then lands. `applyWindowRead` joins
+the window onto the pages held (`docs/api-contract.md → The conversation is a window, not the thread`), so the
+reconcile lands the newest content below the reader instead of above them. The reader's own row needs nothing: scroll anchoring
+holds it, which is exactly why a replaced page is invisible — nothing on screen looks wrong, only what is
+missing is.
+
 **Tests:** e2e `tab-return-chat.spec.ts` swallows `tool_result` task events at the socket (a listener added
 in the wrapped constructor runs before the app's `onmessage`, so `stopImmediatePropagation` is where the
 frame can be removed) and asserts they really were swallowed; the turn ends with the card gone, and one
@@ -391,7 +400,9 @@ itself, including that a screen which cannot see its own gap reconciles on the h
 which was never hidden reconciles on unread content, and that content older than its own reconcile is not
 evidence. `stream-unpainted.unit.ts` holds the reading: the keepalive never marks content unread, neither
 does a focused window's traffic, and the newest unread frame is the one counted. `chat-window.unit.ts` holds
-the half the reconcile reads — that only a row read that reached the server redraws a transcript.
+the half the reconcile reads — that only a row read that reached the server redraws a transcript. E2E
+`tab-return-scroll.spec.ts` holds the join over a real transcript: a reader who paged up, left the tab and came
+back keeps the newest message at the bottom of the list and their own row under the viewport.
 
 ## The board on screen belongs to one project
 

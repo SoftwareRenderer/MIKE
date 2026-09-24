@@ -520,6 +520,106 @@ func TestFormatToolAction_RequestReviewEmptySummary(t *testing.T) {
 	}
 }
 
+// reviewCallWithSummary builds a request_review call carrying a summary.
+func reviewCallWithSummary(id, summary string) types.ToolCallMsg {
+	tc := toolCallMsg(id, "request_review")
+	tc.Function.Arguments = `{"summary":"` + summary + `"}`
+	return tc
+}
+
+func TestCommitContextText_ConsecutiveReviewsShareOneAssistantBlock(t *testing.T) {
+	t.Parallel()
+	// Both summaries must reach the generator under one Assistant label: a second label reads
+	// as a second turn.
+	conversation := []types.ChatMessage{
+		{Role: "system", Content: "You are a coding assistant"},
+		{Role: "user", Content: "Add retry with backoff to the LLM client"},
+		{Role: "assistant", Content: "I'll start with the retry loop.", ToolCalls: []types.ToolCallMsg{toolCallMsg("c1", "edit_file")}},
+		{Role: "tool", Content: "edited client.go", ToolCallID: "c1"},
+		{Role: "assistant", Content: "Retry is in place.", ToolCalls: []types.ToolCallMsg{reviewCallWithSummary("c2", "Added bounded retry with exponential backoff")}},
+		{Role: "tool", Content: "review requested", ToolCallID: "c2"},
+		{Role: "user", Content: "Make the ceiling per-provider"},
+		{Role: "assistant", Content: "Now it comes from provider config.", ToolCalls: []types.ToolCallMsg{toolCallMsg("c3", "edit_file")}},
+		{Role: "tool", Content: "error: no such file", ToolCallID: "c3"},
+		{Role: "assistant", Content: "Per-provider ceiling is wired up.", ToolCalls: []types.ToolCallMsg{reviewCallWithSummary("c4", "Made the ceiling per-provider")}},
+		{Role: "tool", Content: "review requested", ToolCallID: "c4"},
+	}
+
+	want := "User: Add retry with backoff to the LLM client\n\n" +
+		"Assistant: Retry is in place.\nAdded bounded retry with exponential backoff\n\n" +
+		"Per-provider ceiling is wired up.\nMade the ceiling per-provider\n\n"
+
+	got := commitContextText(conversation)
+	if got != want {
+		t.Errorf("commit context =\n%q\nwant\n%q", got, want)
+	}
+	if strings.Contains(got, "request a review") {
+		t.Errorf("consolidated text still narrates the review call:\n%s", got)
+	}
+}
+
+func TestCommitContextText_SummaryWithoutTextOpensTheBlock(t *testing.T) {
+	t.Parallel()
+	conversation := []types.ChatMessage{
+		{Role: "user", Content: "Build feature"},
+		{Role: "assistant", ToolCalls: []types.ToolCallMsg{reviewCallWithSummary("c1", "Fixed the ceiling")}},
+		{Role: "tool", Content: "review requested", ToolCallID: "c1"},
+	}
+
+	want := "User: Build feature\n\nAssistant: Fixed the ceiling\n\n"
+	if got := commitContextText(conversation); got != want {
+		t.Errorf("commit context = %q, want %q", got, want)
+	}
+}
+
+func TestCommitContextText_ReviewWithoutSummaryAddsNothing(t *testing.T) {
+	t.Parallel()
+	conversation := []types.ChatMessage{
+		{Role: "user", Content: "Build feature"},
+		{Role: "assistant", ToolCalls: []types.ToolCallMsg{reviewCall("c1")}},
+		{Role: "tool", Content: "review requested", ToolCallID: "c1"},
+	}
+
+	want := "User: Build feature\n\n"
+	if got := commitContextText(conversation); got != want {
+		t.Errorf("commit context = %q, want %q", got, want)
+	}
+}
+
+func TestCommitContextText_OtherToolCallKeepsItsOwnLabel(t *testing.T) {
+	t.Parallel()
+	// A review call can share an assistant message with working calls, whose lines keep their
+	// own label.
+	edit := toolCallMsg("c2", "edit_file")
+	edit.Function.Arguments = `{"path":"a.go"}`
+	conversation := []types.ChatMessage{
+		{Role: "user", Content: "Build feature"},
+		{Role: "assistant", Content: "Ran it down.", ToolCalls: []types.ToolCallMsg{reviewCallWithSummary("c1", "Fixed the ceiling"), edit}},
+		{Role: "tool", Content: "review requested", ToolCallID: "c1"},
+		{Role: "tool", Content: "edited a.go", ToolCallID: "c2"},
+	}
+
+	want := "User: Build feature\n\n" +
+		"Assistant: Ran it down.\nFixed the ceiling\n" +
+		"Assistant: (I used the edit_file tool to edit `a.go` which was successful)\n\n"
+	if got := commitContextText(conversation); got != want {
+		t.Errorf("commit context =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestFormatConversationTurns_RequestReviewStaysALabelledTurn(t *testing.T) {
+	t.Parallel()
+	// The checkpoint-label prompt reads whole turns, unchanged by the commit context.
+	messages := []types.ChatMessage{
+		{Role: "assistant", Content: "Done", ToolCalls: []types.ToolCallMsg{reviewCallWithSummary("c1", "Fixed the ceiling")}},
+	}
+
+	want := "Assistant: Done\nAssistant: request a review: Fixed the ceiling\n\n"
+	if got := FormatConversationTurns(messages); got != want {
+		t.Errorf("turn text = %q, want %q", got, want)
+	}
+}
+
 func TestExtractCommitContext_RequestReviewWithOtherToolCalls(t *testing.T) {
 	t.Parallel()
 	// The request_review turn also carries other tool calls — the assistant message is
