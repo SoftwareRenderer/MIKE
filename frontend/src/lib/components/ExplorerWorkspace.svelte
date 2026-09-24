@@ -11,6 +11,7 @@
     import ResizeHandle from './ResizeHandle.svelte';
     import SandboxImageStatusBanner from './SandboxImageStatusBanner.svelte';
     import { t } from '$lib/i18n';
+    import { baseName } from '$lib/utils/path';
 
     /**
      * Everything an explorer screen shows below its header. The file browser is the one piece each
@@ -57,7 +58,7 @@
             title={t('explorer.shared.editor')}
         >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
-            {core.activeFilePath ? core.activeFilePath.split('/').pop() : t('explorer.shared.editor')}
+            {core.activeFilePath ? baseName(core.activeFilePath) : t('explorer.shared.editor')}
         </button>
         <button
             class="tab-btn {core.activeTab === 'symbols' ? 'active' : ''}"

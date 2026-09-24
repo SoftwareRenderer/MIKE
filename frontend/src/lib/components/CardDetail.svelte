@@ -10,6 +10,8 @@
     import { chatBlurState, chatCollapseState, chatFocusState, chatManualToggleState, chatSendState, type ChatAutoMaximizeRules, type ChatMaximizeState } from '$lib/utils/chat-auto-maximize';
     import { filterTopLevelTaskIds, willConsolidateIntoParent, taskIsInFlight } from '$lib/utils/task-utils';
     import { createStatusLabel } from '$lib/utils/subtask-status';
+    import { sandboxMountPath } from '$lib/utils/path';
+    import { isVimSwapFile } from '$lib/utils/file-suffix';
     import { clearHighlightCache } from '$lib/highlighter';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { createTabReturn } from '$lib/composables/use-tab-return';
@@ -209,7 +211,7 @@
         if (!task.id) return null;
         if (sandboxEnabled) {
             if (!projectName) return null;
-            return `/home/sandbox/${projectName}/${relativePath}`;
+            return `${sandboxMountPath(projectName)}/${relativePath}`;
         }
         if (!workspaceDir) return null;
 
@@ -318,13 +320,13 @@
             checkpointDiffBaseRef = result.base_ref || '';
             const truncatedSet = new Set(result.truncated_files || []);
             const origStats = result.original_file_stats || {};
-            checkpointDiffFiles = toDiffFiles(result.parsed_files ?? []).filter(f => !f.path.split('/').pop()?.match(/\..*\.swp$/)).map(f => ({
+            checkpointDiffFiles = toDiffFiles(result.parsed_files ?? []).filter(f => !isVimSwapFile(f.path)).map(f => ({
                 ...f,
                 truncated: truncatedSet.has(f.path),
                 origAdded: origStats[f.path]?.added,
                 origRemoved: origStats[f.path]?.removed,
             }));
-            checkpointDiffUntracked = (result.untracked || []).filter(u => !u.path.split('/').pop()?.match(/\..*\.swp$/)).map(u => ({
+            checkpointDiffUntracked = (result.untracked || []).filter(u => !isVimSwapFile(u.path)).map(u => ({
                 path: u.path,
                 fileSize: u.file_size,
                 truncated: u.truncated,

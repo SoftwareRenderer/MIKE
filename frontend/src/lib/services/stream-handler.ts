@@ -1,6 +1,6 @@
-import type { StreamEvent, DiffData } from '$lib/types';
-import type { ChatEntry } from '$lib/types';
-import type { ToolCallInfo } from './stream-state.svelte';
+import type { StreamEvent } from '$lib/types';
+import type { DiffManifest } from '$lib/types/diff';
+import type { ChatEntry, ToolCallInfo } from '$lib/types';
 import { StreamState } from './stream-state.svelte';
 import { resolveLiveToolCall, type LiveToolCall } from '$lib/utils/tool-call-lookup';
 import { errorFromEvent, isRepeatError, type ErrorEventData } from '$lib/utils/chat-entries';
@@ -30,7 +30,7 @@ export interface StreamHandlerCallbacks {
     scroll: (force?: boolean) => void;
     markStreaming: () => void;
     markNotStreaming: () => void;
-    onRefreshDiff: (data: DiffData) => void;
+    onRefreshDiff: (data: DiffManifest) => void;
     onThreadSwitch: () => void;
     loadHistory: (scrollAfter: boolean) => void;
     updateActiveThread: (threadId: string) => void;
@@ -437,7 +437,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 break;
             }
             case 'diff_changed': {
-                onRefreshDiff(event.data as DiffData);
+                onRefreshDiff(event.data as DiffManifest);
                 break;
             }
             case 'thread_switch': {

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { isUnderPath, toExplorerPath } from '$lib/utils/path';
+import {
+    baseName, isSandboxMountPath, isUnderPath, parentDir, sandboxMountFromPath,
+    sandboxMountPath, toExplorerPath,
+} from '$lib/utils/path';
 
 /**
  * A tool call names the file it wrote relative to the task root, while the explorer's
@@ -61,5 +64,60 @@ describe('isUnderPath', () => {
     it('refuses an empty side rather than treating it as a prefix of everything', () => {
         expect(isUnderPath('', root)).toBe(false);
         expect(isUnderPath(root, '')).toBe(false);
+    });
+});
+
+/**
+ * The two cuts every listing, picker and explorer makes on a path. `parentDir` is the folder a row
+ * lives in — the `..` row, the paste destination, the folder a deep link lists — and `baseName` is the
+ * row's label. Both are one cut at the last separator, so they are written once.
+ */
+describe('the two cuts on a path', () => {
+    it('a directory above the root of the filesystem is the root', () => {
+        expect(parentDir('/home')).toBe('/');
+        expect(parentDir('/home/mike/proj/main.go')).toBe('/home/mike/proj');
+    });
+
+    it('a path with no separator has no folder of its own', () => {
+        expect(parentDir('solo')).toBe('');
+    });
+
+    it('a row is called by its last segment, case kept', () => {
+        expect(baseName('/home/sandbox/bear/main.go')).toBe('main.go');
+        expect(baseName('main.go')).toBe('main.go');
+        expect(baseName('/p/App.TSX')).toBe('App.TSX');
+    });
+
+    it('the folder a deep link names is the same cut as the `..` row', () => {
+        // The explorers list this folder; the picker walks to it. One answer, from both.
+        expect(parentDir('/p/docs/readme.md')).toBe('/p/docs');
+        expect(baseName('/p/docs/readme.md')).toBe('readme.md');
+    });
+});
+
+/**
+ * The container-side path is a mirror of `sandbox.MountRoot` and of the mount the runtime names after
+ * the project, so a path an agent reported has to resolve here exactly as the server laid it out.
+ */
+describe('the container mount', () => {
+    it('names the mount after the tree it shows', () => {
+        expect(sandboxMountPath('bear')).toBe('/home/sandbox/bear');
+    });
+
+    it('answers no mount for no name, rather than mounting the string "undefined"', () => {
+        expect(sandboxMountPath('')).toBe('');
+    });
+
+    it('takes a project mount from the host checkout\'s own directory', () => {
+        expect(sandboxMountFromPath('/home/mike/proj')).toBe('/home/sandbox/proj');
+        expect(sandboxMountFromPath('/home/mike/proj/')).toBe('/home/sandbox/proj');
+        expect(sandboxMountFromPath('')).toBe('');
+    });
+
+    it('tells a mounted path from a host one', () => {
+        expect(isSandboxMountPath('/home/sandbox/proj/main.go')).toBe(true);
+        expect(isSandboxMountPath('/home/sandbox')).toBe(false); // the root itself is nobody's file
+        expect(isSandboxMountPath('/home/sandboxware/proj')).toBe(false);
+        expect(isSandboxMountPath('/home/mike/proj/main.go')).toBe(false);
     });
 });

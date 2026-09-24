@@ -16,6 +16,8 @@
         projectId?: string;
         taskId?: string;
         isSubmitting?: boolean;
+        /** The dialog hands the form its whole box: no 80% cap, and the field grows into the space. */
+        fill?: boolean;
         /** 'auto' labels the submit from the message's place in the thread (Send / New thread /
          *  Save). 'save' rewrites text that already exists: a Save button, and Enter writes a
          *  newline because what is being edited is prose, with Ctrl/Cmd+Enter as the submit — the
@@ -25,7 +27,7 @@
         onCancel?: () => void;
     }
 
-    let { content, attachments = [], isFirstUserMessage = false, isLastUserMessage = false, taskStatus = 'backlog', projectId = '', taskId = '', isSubmitting = false, submitMode = 'auto', onSubmit, onCancel }: Props = $props();
+    let { content, attachments = [], isFirstUserMessage = false, isLastUserMessage = false, taskStatus = 'backlog', projectId = '', taskId = '', isSubmitting = false, submitMode = 'auto', fill = false, onSubmit, onCancel }: Props = $props();
 
     let editContent = $state('');
     let textareaEl: HTMLTextAreaElement | null = $state(null);
@@ -98,6 +100,7 @@
 <div
     class="edit-form image-drop-target"
     class:is-drop-target={intake.isOver}
+    class:fill
     role="presentation"
     ondragenter={intake.handleDragEnter}
     ondragover={intake.handleDragOver}
@@ -171,6 +174,23 @@
         gap: 6px;
         max-width: 80%;
         width: 100%;
+    }
+    .edit-form.fill {
+        max-width: none;
+        flex: 1;
+        min-height: 0;
+        padding: 16px;
+    }
+    .edit-form.fill textarea {
+        flex: 1;
+        min-height: 0;
+        resize: none;
+        font-size: 1rem;
+        line-height: 1.6;
+    }
+    .edit-form.fill .edit-actions {
+        padding-top: 8px;
+        border-top: 1px solid var(--color-border);
     }
     .edit-form textarea {
         width: 100%;

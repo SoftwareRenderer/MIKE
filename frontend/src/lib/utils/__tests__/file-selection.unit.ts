@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-    allSelectablePaths, applyRowClick, baseName, confirmList, emptySelection, indexPaths,
-    parentDir, pasteTarget, pruneSelection, rowIsSelectable, CONFIRM_LIST_MAX,
+    allSelectablePaths, applyRowClick, confirmList, emptySelection, indexPaths,
+    pasteTarget, pruneSelection, rowIsSelectable, CONFIRM_LIST_MAX,
     type RowOrder,
 } from '$lib/utils/file-selection';
 
@@ -184,16 +184,6 @@ describe('pasteTarget', () => {
 });
 
 describe('paths as the listing spells them', () => {
-    it('a directory above the root of the filesystem is the root', () => {
-        expect(parentDir('/home')).toBe('/');
-        expect(parentDir('solo')).toBe('');
-    });
-
-    it('a row is called by its last segment', () => {
-        expect(baseName('/home/sandbox/bear/main.go')).toBe('main.go');
-        expect(baseName('main.go')).toBe('main.go');
-    });
-
     it('the parent row is the one a file operation cannot run on', () => {
         expect(rowIsSelectable({ name: '..' })).toBe(false);
         expect(rowIsSelectable({ name: '.env' })).toBe(true);

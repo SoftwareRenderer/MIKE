@@ -3,9 +3,8 @@
     import VirtualList from '$lib/components/VirtualList.svelte';
     import { getHistoryDensity, buildCommitTooltip } from '$lib/utils/git-history';
     import type { HistoryDensity } from '$lib/utils/git-history';
-    import { timeAgo } from '$lib/utils/format-time';
+    import { timeAgo, formatDateTime } from '$lib/utils/format-time';
     import { t } from '$lib/i18n';
-    import { activeLocale } from '$lib/i18n/runtime.svelte';
 
     let { currentBranch, commits, originTip, loading, hasMore, onCommitSelected, onLoadMore, selectedCommitHash }: {
         currentBranch: string;
@@ -76,8 +75,7 @@
             if (c.date) {
                 // 'compact' keeps counting in w/mo/y — a commit lane is read by age.
                 dateFormatted = timeAgo(c.date, { scale: 'compact' }) || c.date.slice(0, 10);
-                const when = new Date(c.date);
-                dateFull = isNaN(when.getTime()) ? c.date : when.toLocaleString(activeLocale());
+                dateFull = formatDateTime(c.date);
             }
 
             return {

@@ -24,7 +24,7 @@ import { test, expect, type Page } from '@playwright/test';
 const SETTINGS_BTN = '.icon-btn[aria-label="Settings"]';
 const ABOUT_TAB = 'button.tab-btn:has-text("About")';
 const SESSIONS_SECTION = '.sessions-section';
-const SESSION_ROW = '.sessions-section .session-row';
+const SESSION_ROW = '.sessions-section .settings-row';
 const CURRENT_BADGE = '.session-badge';
 const ROW_REVOKE = 'button[aria-label^="revoke-session-"]';
 const REVOKE_ALL = 'button[aria-label="revoke-all-other-sessions"]';

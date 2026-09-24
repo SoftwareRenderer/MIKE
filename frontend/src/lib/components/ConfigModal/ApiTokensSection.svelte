@@ -10,9 +10,8 @@
     import type { APITokenInfo } from '$lib/types';
     import { listAPITokens, createAPIToken, revokeAPIToken } from '$lib/api';
     import { dialogStore } from '$lib/stores';
-    import { formatRelativeTime } from '$lib/utils/format-time';
+    import { formatDateTime, formatRelativeTime } from '$lib/utils/format-time';
     import { t } from '$lib/i18n';
-    import { activeLocale } from '$lib/i18n/runtime.svelte';
 
     let tokens = $state<APITokenInfo[]>([]);
     // Starts true so the first paint is the loading state, not a flash of the empty state.
@@ -32,9 +31,7 @@
 
     /** Absolute timestamp for a row's `title` tooltip. */
     function absolute(iso: string): string {
-        if (!iso) return t('settings.tokens.neverUsed');
-        const date = new Date(iso);
-        return isNaN(date.getTime()) ? iso : date.toLocaleString(activeLocale());
+        return iso ? formatDateTime(iso) : t('settings.tokens.neverUsed');
     }
 
     /** Relative display text; a token that has never been used says so rather than showing a date. */
@@ -126,7 +123,7 @@
         <div class="settings-section-actions">
             <button
                 type="button"
-                class="btn-small"
+                class="settings-btn-small"
                 onclick={loadTokens}
                 disabled={loading || creating}
                 aria-label="refresh-tokens"
@@ -150,7 +147,7 @@
         />
         <button
             type="button"
-            class="btn-small btn-primary"
+            class="settings-btn-small btn-primary"
             onclick={handleCreate}
             disabled={creating || loading}
             aria-label="create-api-token"
@@ -162,7 +159,7 @@
             <div class="tokens-revealed-note">{t('settings.tokens.createdTitle')}</div>
             <div class="tokens-revealed-row">
                 <code class="tokens-secret" title={issued.token}>{issued.token}</code>
-                <button type="button" class="btn-small" onclick={handleCopy} aria-label="copy-api-token">
+                <button type="button" class="settings-btn-small" onclick={handleCopy} aria-label="copy-api-token">
                     {copied ? t('settings.tokens.copied') : t('settings.tokens.copy')}
                 </button>
             </div>
@@ -179,21 +176,21 @@
         <div class="tokens-status" role="status">{t('settings.tokens.none')}</div>
     {:else}
         {#each rows as token (token.id)}
-            <div class="token-row" data-token-id={token.id}>
-                <div class="token-info">
+            <div class="settings-row" data-token-id={token.id}>
+                <div class="settings-row-info">
                     <div class="token-label" title={token.label}>{token.label}</div>
-                    <div class="token-meta">
+                    <div class="settings-row-meta">
                         <span class="token-meta-item" title={absolute(token.created_at)}>
-                            <span class="token-meta-key">{t('settings.tokens.created')}</span> {relative(token.created_at)}
+                            <span class="settings-row-meta-key">{t('settings.tokens.created')}</span> {relative(token.created_at)}
                         </span>
                         <span class="token-meta-item" title={token.last_used_at ? absolute(token.last_used_at) : ''}>
-                            <span class="token-meta-key">{t('settings.tokens.lastUsed')}</span> {relative(token.last_used_at)}
+                            <span class="settings-row-meta-key">{t('settings.tokens.lastUsed')}</span> {relative(token.last_used_at)}
                         </span>
                     </div>
                 </div>
                 <button
                     type="button"
-                    class="btn-small btn-danger token-revoke"
+                    class="settings-btn-small settings-btn-danger token-revoke"
                     onclick={() => handleRevoke(token)}
                     disabled={revokingId === token.id}
                     aria-label={`revoke-token-${token.id}`}
@@ -274,22 +271,6 @@
         color: var(--color-text-primary);
     }
 
-    .token-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        background: var(--color-surface-2);
-        padding: 10px 12px;
-    }
-    .token-info {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        min-width: 0;
-    }
     .token-label {
         font-size: 0.8125rem;
         font-weight: 500;
@@ -299,46 +280,11 @@
         text-overflow: ellipsis;
         white-space: nowrap;
     }
-    .token-meta {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px 14px;
-        font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
-        font-size: 0.75rem;
-        color: var(--color-text-secondary);
-    }
-    .token-meta-key {
-        color: var(--color-text-tertiary);
-    }
 
-    .btn-small {
-        padding: 6px 12px;
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-sm);
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        font-size: 0.8125rem;
-        font-weight: 500;
-        font-family: inherit;
-        cursor: pointer;
-        white-space: nowrap;
-        flex-shrink: 0;
-    }
-    .btn-small:hover:not(:disabled) {
-        background: var(--color-surface-4);
-    }
-    .btn-small:disabled {
-        opacity: 0.55;
-        cursor: default;
-    }
     .btn-primary {
         border-color: var(--color-accent);
         background: var(--color-accent);
         color: white;
-    }
-    .btn-danger {
-        color: var(--color-status-red);
-        border-color: var(--color-status-red);
     }
 
     .tokens-status {

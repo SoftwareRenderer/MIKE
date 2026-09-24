@@ -21,3 +21,24 @@ Object.defineProperty(svelteModule, 'onDestroy', {
     enumerable: true,
     configurable: true,
 });
+
+// jsdom's HTMLDialogElement declares `open` and nothing else, so showModal()/close() throw and a
+// component that opens its own <dialog> never reaches the markup the test is reading. What the app
+// asks of them: showModal makes it open, close makes it closed and says so.
+const dialogPrototype = Object.getPrototypeOf(document.createElement('dialog')) as HTMLDialogElement;
+if (typeof dialogPrototype.showModal !== 'function') {
+    Object.defineProperty(dialogPrototype, 'showModal', {
+        value: function (this: HTMLDialogElement) { this.open = true; },
+        writable: true,
+        configurable: true,
+    });
+    Object.defineProperty(dialogPrototype, 'close', {
+        value: function (this: HTMLDialogElement) {
+            if (!this.open) return;
+            this.open = false;
+            this.dispatchEvent(new Event('close'));
+        },
+        writable: true,
+        configurable: true,
+    });
+}

@@ -6,6 +6,7 @@
     import fileIcon from '$lib/assets/icons/file.svg?raw';
     import { t } from '$lib/i18n';
     import { listFsDirectory, type FsEntry as Entry } from '$lib/api';
+    import { parentDir } from '$lib/utils/path';
 
     let { title, initialPath, emptyLabel, selectTitle, fileFilter, onClose, onSelect }: {
         title: string;
@@ -34,13 +35,7 @@
     let loading = $state(false);
     let error = $state('');
     let parentPath = $derived(
-        currentPath && currentPath !== '/'
-            ? (() => {
-                const parts = currentPath.split('/').filter(Boolean);
-                parts.pop();
-                return parts.length === 0 ? '/' : '/' + parts.join('/');
-            })()
-            : null
+        currentPath && currentPath !== '/' ? (parentDir(currentPath) || '/') : null
     );
 
     async function loadDir(path: string) {
@@ -100,7 +95,7 @@
     </div>
 {/snippet}
 
-<BaseModal {title} width="560px" zIndex={1100} footer={footer} onClose={onClose}>
+<BaseModal {title} width="560px" zIndex={1100} modalClass="path-browser" footer={footer} onClose={onClose}>
     <!-- Path bar -->
     <div class="path-bar">
         <div class="path-bar-row">
@@ -172,6 +167,7 @@
 
 <style>
     @import '$lib/styles/shared.css';
+    @import '$lib/styles/path-browser.css';
 
     :global(.modal) {
         max-height: 80vh;
@@ -193,14 +189,6 @@
         background: var(--color-surface-1);
         padding: 12px 0 8px;
     }
-    .path-bar-row {
-        display: flex;
-        gap: 8px;
-        align-items: stretch;
-        background: var(--color-surface-2);
-        border-radius: var(--radius-md);
-        padding: 4px;
-    }
     .home-btn {
         display: flex;
         align-items: center;
@@ -212,19 +200,6 @@
         cursor: pointer;
         color: var(--color-text-secondary);
     }
-    .home-btn:hover {
-        background: var(--color-surface-3);
-    }
-    .path-input {
-        flex: 1;
-        padding: 6px 10px;
-        background: transparent;
-        border: none;
-        color: var(--color-text-primary);
-        font-size: 0.875rem;
-        font-family: var(--font-mono);
-        outline: none;
-    }
     .error {
         color: var(--color-status-red);
         font-size: 0.875rem;
@@ -232,42 +207,11 @@
         background: color-mix(in srgb, var(--color-status-red) 10%, transparent);
         border-radius: var(--radius-sm);
     }
-    .loading {
-        text-align: center;
-        color: var(--color-text-secondary);
-        padding: 24px;
-    }
     .empty {
         text-align: center;
         color: var(--color-text-secondary);
         padding: 24px;
         font-size: 0.875rem;
-    }
-    .file-list {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-    }
-    .file-entry {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 12px;
-        border-radius: var(--radius-sm);
-        cursor: pointer;
-        font-size: 0.875rem;
-        text-align: left;
-        width: 100%;
-        font: inherit;
-        color: inherit;
-        background: none;
-        border: none;
-    }
-    .file-entry:hover {
-        background: var(--color-surface-2);
-    }
-    .file-entry.dir {
-        font-weight: 500;
     }
     .file-entry.selected {
         background: var(--color-accent-dark);
@@ -276,32 +220,5 @@
     .file-entry.parent-entry {
         color: var(--color-text-secondary);
         font-style: italic;
-    }
-    .icon {
-        display: flex;
-        align-items: center;
-        flex-shrink: 0;
-    }
-    .name {
-        flex: 1;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    /* Footer layout */
-    .current-path {
-        font-size: 0.75rem;
-        color: var(--color-text-tertiary);
-        font-family: var(--font-mono);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        flex: 1;
-    }
-    .footer-actions {
-        display: flex;
-        gap: 8px;
-        align-items: center;
     }
 </style>

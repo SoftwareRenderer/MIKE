@@ -57,6 +57,73 @@ export interface DiffImageRequest {
     newRef: string;
 }
 
+/**
+ * The manifest body `/tasks/{id}/diff` answers with, and the body the `diff_changed` frame carries —
+ * one shape over two transports (`api.diffManifest` and `Server.broadcastTaskDiff` in Go). Every field is
+ * optional because the route answers differently per query: the per-file manifest here, or the patch text
+ * in `TaskDiff`'s own fields, and a cached body may hold only one of the two.
+ */
+export interface DiffManifest {
+    /** Per-file metadata keyed by path. Never the patch text: rows come from `/diff/file`. */
+    files?: Record<string, DiffManifestEntry>;
+    short_stat?: string;
+    /** The ref the diff was taken against, so a later comparison can name it. */
+    base_ref?: string;
+}
+
+/**
+ * One entry of that manifest — `api.diffManifestFile` in Go. The names are its JSON tags, and the pair of
+ * them is the whole contract: the manifest says which files changed and how big the change is, never the
+ * patch text, which arrives per file from `/diff/file`.
+ *
+ * Declared once because three browser copies of it disagreed: `staged` and `is_binary` were visible to the
+ * diff cache and invisible to the API layer, so a field the server sent was a field the type said could not
+ * arrive.
+ */
+interface DiffManifestEntry {
+    hash: string;
+    /** `tracked` or `untracked` — which half of the worktree the entry describes. */
+    type: string;
+    added?: number;
+    removed?: number;
+    truncated?: boolean;
+    origAdded?: number;
+    origRemoved?: number;
+    /** Total line count, set for an untracked file whose lines were omitted. */
+    line_count?: number;
+    file_size?: number;
+    is_binary?: boolean;
+    /** True for a file the change created or removed. */
+    isNew?: boolean;
+    isDeleted?: boolean;
+    /** True while the path is staged in the index. */
+    staged?: boolean;
+}
+
+/**
+ * One file, read back from `/diff/file` — the rows the panel renders plus the stats that decide how to
+ * label them. `committedRows` is the committed half of the same file, present when the panel shows
+ * working and committed changes side by side.
+ *
+ * The names follow `git.TrackedDiffFile`, which spells them `fileSize`/`isBinary` — unlike the manifest
+ * entry above, which is a different Go struct and spells them `file_size`/`is_binary`. Both are pinned
+ * to their struct: renaming either one silently drops the value.
+ */
+export interface DiffFileResponse {
+    type?: string;
+    lines?: string[];
+    line_count?: number;
+    rows?: ApiDiffRow[];
+    committedRows?: ApiDiffRow[];
+    truncated?: boolean;
+    origAdded?: number;
+    origRemoved?: number;
+    isBinary?: boolean;
+    fileSize?: number;
+    isNew?: boolean;
+    isDeleted?: boolean;
+}
+
 /** A parsed file group from a unified diff. */
 export interface DiffFile {
     /** File path (e.g., "src/lib/utils.ts"). */

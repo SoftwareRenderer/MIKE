@@ -1,6 +1,7 @@
 <script lang="ts">
     import FileBrowserView from '$lib/components/FileBrowserView.svelte';
     import { t } from '$lib/i18n';
+    import { sandboxMountPath } from '$lib/utils/path';
     import { taskRelativeFsPath, type FsEvent } from '$lib/utils/fs-event';
 
     let { projectId, projectName, taskId, taskPath, initialPath = '', sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange, onToggleFind, onDeleted }: {
@@ -20,7 +21,7 @@
     } = $props();
 
     // Sandbox mount path: /home/sandbox/<projectName>
-    let mountPath = $derived(sandboxEnabled ? '/home/sandbox/' + projectName : '');
+    let mountPath = $derived(sandboxEnabled ? sandboxMountPath(projectName) : '');
     // Everything listed, written and dropped lands under this: the mount when sandboxed, the
     // task's own worktree otherwise.
     let rootPath = $derived(sandboxEnabled ? mountPath : taskPath);

@@ -1,4 +1,5 @@
 import type { Extension } from '$lib/types';
+import { slugifyAuthor } from '$lib/utils/extension-identity';
 import { computeGrants, CAP_THEME_UPDATE } from '$lib/extensions/capabilities';
 import { readThemeVars } from '$lib/extensions/handlers/theme';
 import { ExtensionHostChannel, mintChannelToken } from '$lib/extensions/channel';
@@ -17,44 +18,19 @@ const THEME_LINK_ID = 'kanban-theme-stylesheet';
 // The static prefix every extension asset is served under.
 const EXTENSIONS_PREFIX = '/extensions/';
 
-// authorDir turns a registry author into a safe, single-segment directory name
-// (mirrors backend authorDir). Installed extensions live at
-// ./extensions/<author>/<name>, served as /extensions/<author>/<name>/.
-function authorDir(author?: string): string {
-    let slug = (author ?? '').toLowerCase().trim();
-    if (!slug) return 'unknown';
-    let out = '';
-    let lastDash = false;
-    for (const ch of slug) {
-        const ok =
-            (ch >= 'a' && ch <= 'z') ||
-            (ch >= '0' && ch <= '9') ||
-            ch === '-' ||
-            ch === '_' ||
-            ch === '.';
-        if (!ok) {
-            if (lastDash) continue;
-            out += '-';
-            lastDash = true;
-            continue;
-        }
-        out += ch;
-        lastDash = false;
-    }
-    return (out.trim().replace(/[-._]+$/, '') || 'unknown');
-}
-
 // extBaseURL returns the served base URL for an installed extension directory.
 //
 // The server's `served_url` wins when present: it is derived from the installed record, the
 // same path the server reads, deletes and repairs the extension through. The author/name
 // derivation below is a fallback guess, right only when the install landed under
-// <slug(manifest.author)>/<name>. `ext.name` is percent-encoded so a name cannot reshape the
-// same-origin path; the Go static handler decodes it again.
+// <slug(manifest.author)>/<name> — the same slug `extension-identity` keys the installed and registry
+// lists by, so the guessed directory cannot disagree with the identity of the extension it holds.
+// `ext.name` is percent-encoded so a name cannot reshape the same-origin path; the Go static handler
+// decodes it again.
 export function extBaseURL(ext: Extension): string {
     return (
         servedBaseURL(ext.served_url) ??
-        `${EXTENSIONS_PREFIX}${authorDir(ext.manifest.author)}/${encodeURIComponent(ext.name)}`
+        `${EXTENSIONS_PREFIX}${slugifyAuthor(ext.manifest.author)}/${encodeURIComponent(ext.name)}`
     );
 }
 

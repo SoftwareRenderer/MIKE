@@ -24,3 +24,67 @@
     display: flex;
     gap: 8px;
 }
+
+/* One row of a Settings list — the bordered box, the column it holds, the mono meta line and the dim
+ * word that names each part of it. Sessions and API tokens render the same row; what only one list
+ * shows (the current-session badge, the secret, the revoke button's own width) stays in that list. */
+:global(.settings-row) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+    padding: 10px 12px;
+}
+
+:global(.settings-row-info) {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+:global(.settings-row-meta) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+}
+
+:global(.settings-row-meta-key) {
+    color: var(--color-text-tertiary);
+}
+
+/* The small action button of the Settings panels. A list's own single-class rule still outweighs
+ * these, because a scoped rule carries its compile-time class as well as its name. */
+:global(.settings-btn-small) {
+    padding: 6px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-3);
+    color: var(--color-text-primary);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+:global(.settings-btn-small:hover:not(:disabled)) {
+    background: var(--color-surface-4);
+}
+
+:global(.settings-btn-small:disabled) {
+    opacity: 0.55;
+    cursor: default;
+}
+
+:global(.settings-btn-danger) {
+    color: var(--color-status-red);
+    border-color: var(--color-status-red);
+}

@@ -15,7 +15,8 @@
     import fileIcon from '$lib/assets/icons/file.svg?raw';
     import { t, type MessageKey } from '$lib/i18n';
     import { explorerPathHref } from '$lib/utils/app-link';
-    import { baseName, confirmList, pasteTarget, rowIsSelectable } from '$lib/utils/file-selection';
+    import { confirmList, pasteTarget, rowIsSelectable } from '$lib/utils/file-selection';
+    import { baseName } from '$lib/utils/path';
     import type { FsEvent } from '$lib/utils/fs-event';
 
     /** A row's extra badge — the project explorer's git status letter and nothing else. */

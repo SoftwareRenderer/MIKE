@@ -5,6 +5,7 @@
     import EditForm from './EditForm.svelte';
     import ReasoningBlock from './ReasoningBlock.svelte';
     import MessageStats from './MessageStats.svelte';
+    import { tick } from 'svelte';
     import { formatTimestamp } from '$lib/utils/format-time';
     import { escapeHtml } from '$lib/utils/format';
     import { copyText } from '$lib/utils/clipboard';
@@ -12,33 +13,8 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { imageSrc } from '$lib/utils/attachments';
     import { systemNoteText } from '$lib/utils/chat-entries';
-    import { useImageAttachments } from '$lib/composables/use-image-attachments.svelte';
-    import { uploadTaskFile } from '$lib/api';
+    import type { ToolCallInfo } from '$lib/types';
     import { t } from '$lib/i18n';
-
-    interface ToolCallInfo {
-        toolId: string;
-        toolName: string;
-        displayName?: string;
-        args: Record<string, unknown>;
-        raw_args?: string;
-        sandbox?: boolean;
-        path?: string;
-        result?: string;
-        resultTruncated?: boolean;
-        originalLines?: number;
-        originalBytes?: number;
-        messageId?: string;
-        success?: boolean;
-        interrupted?: boolean; // stopped by a user message, not a failure
-        duration?: number;
-        isPending?: boolean;
-        bytesWritten?: number;
-        linesAdded?: number;
-        linesRemoved?: number;
-        contentIndex?: number;
-        reasoningIndex?: number;
-    }
 
     interface Props {
         role: string;
@@ -80,7 +56,6 @@
     // Edit state
     let isEditing = $state(false);
     let isSubmitting = $state(false);
-    let mobileEditTextarea: HTMLTextAreaElement | null = $state(null);
     let mobileEditDialog: HTMLDialogElement | null = $state(null);
     let copied = $state(false);
     let expandedArgs = $state<Set<string>>(new Set());
@@ -114,14 +89,13 @@
         setTimeout(() => copied = false, 2000);
     }
 
-    function startEdit() {
+    async function startEdit() {
         isEditing = true;
-        if (isMobileCtx.isMobile) {
-            setTimeout(() => {
-                mobileEditDialog?.showModal();
-                mobileEditTextarea?.focus();
-            }, 50);
-        }
+        if (!isMobileCtx.isMobile) return;
+        // The dialog and the form inside it exist after this tick; the form focuses its own field,
+        // which is only useful once the dialog is on screen.
+        await tick();
+        mobileEditDialog?.showModal();
     }
 
     function cancelEdit() {
@@ -150,41 +124,6 @@
         }
     }
 
-    let mobileEditContent = $state('');
-    let mobileEditAttachments = $state<Array<{ mimeType: string; data: string }>>([]);
-
-    function handleMobileKeydown(e: KeyboardEvent) {
-        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !isSubmitting) {
-            e.preventDefault();
-            submitEdit(mobileEditContent, mobileEditAttachments.length > 0 ? mobileEditAttachments : undefined);
-        } else if (e.key === 'Escape') {
-            e.preventDefault();
-            cancelEdit();
-        }
-    }
-
-    $effect(() => {
-        if (isEditing) {
-            mobileEditContent = content;
-            mobileEditAttachments = attachments ? [...attachments] : [];
-        }
-    });
-
-    let mobileFileInput: HTMLInputElement | null = $state(null);
-
-    const intake = useImageAttachments({
-        getTextarea: () => mobileEditTextarea,
-        getValue: () => mobileEditContent,
-        setValue: (v) => { mobileEditContent = v; },
-        held: () => mobileEditAttachments.length,
-        addImages: (accepted) => { mobileEditAttachments = [...mobileEditAttachments, ...accepted]; },
-        uploadFile: (file) => uploadTaskFile(projectId, msgTaskId, file),
-        hasTask: () => !!projectId && !!msgTaskId,
-    });
-
-    function removeMobileAttachment(index: number) {
-        mobileEditAttachments = mobileEditAttachments.filter((_, i) => i !== index);
-    }
 </script>
 
 <div
@@ -205,46 +144,8 @@
                 <h3>{t('chat.message.editTitle')}</h3>
                 <button class="close-btn" onclick={cancelEdit} aria-label={t('chat.common.close')}>✕</button>
             </div>
-            <textarea
-                bind:this={mobileEditTextarea}
-                class="image-drop-target"
-                class:is-drop-target={intake.isOver}
-                bind:value={mobileEditContent}
-                onkeydown={handleMobileKeydown}
-                onpaste={intake.handlePaste}
-                ondragenter={intake.handleDragEnter}
-                ondragover={intake.handleDragOver}
-                ondragleave={intake.handleDragLeave}
-                ondrop={intake.handleDrop}
-                rows="8"
-                aria-label={t('chat.edit.contentAria')}
-            ></textarea>
-            {#if mobileEditAttachments.length > 0}
-                <div class="edit-attachments-preview">
-                    {#each mobileEditAttachments as att, i}
-                        <div class="edit-attachment-chip">
-                            <img src={imageSrc(att)} alt={t('chat.common.attachment')} />
-                            <button type="button" class="remove-attachment" onclick={() => removeMobileAttachment(i)} title={t('chat.common.remove')}>&times;</button>
-                        </div>
-                    {/each}
-                </div>
-            {/if}
-            <div class="edit-modal-footer">
-                <input type="file" multiple bind:this={mobileFileInput} onchange={intake.handlePicked} style="display:none" />
-                <button type="button" class="edit-attach-btn" onclick={() => mobileFileInput?.click()} title={t('chat.common.attachFile')} aria-label={t('chat.common.attachFile')}>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
-                    </svg>
-                </button>
-                <button type="button" class="edit-cancel-btn" onclick={cancelEdit}>{t('chat.common.cancel')}</button>
-                <button type="button" class="edit-save-btn" onclick={() => submitEdit(mobileEditContent, mobileEditAttachments.length > 0 ? mobileEditAttachments : undefined)} disabled={isSubmitting}>
-                    {#if isSubmitting}
-                        <span class="spinner-inline"></span>
-                    {:else}
-                        {t('chat.common.save')}
-                    {/if}
-                </button>
-            </div>
+            <!-- The one edit form: Ctrl/⌘+Enter saves, Escape cancels, attachments ride along. -->
+            {@render editForm('save', true)}
         </div>
     </dialog>
 {/if}
@@ -259,7 +160,7 @@
     {/if}
 {/snippet}
 
-{#snippet editForm(submitMode?: 'auto' | 'save')}
+{#snippet editForm(submitMode?: 'auto' | 'save', fill = false)}
     <EditForm
         {content}
         {attachments}
@@ -270,6 +171,7 @@
         taskId={msgTaskId}
         {isSubmitting}
         {submitMode}
+        {fill}
         onSubmit={submitEdit}
         onCancel={cancelEdit}
     />
@@ -798,110 +700,5 @@
         font-size: 1.125rem;
         cursor: pointer;
         padding: 4px;
-    }
-    .edit-modal textarea {
-        flex: 1;
-        padding: 16px;
-        border: none;
-        background: transparent;
-        color: var(--color-text-primary);
-        font-family: inherit;
-        font-size: 0.875rem;
-        line-height: 1.5;
-        resize: none;
-        outline: none;
-    }
-    .edit-modal-footer {
-        display: flex;
-        gap: 8px;
-        justify-content: flex-end;
-        padding: 16px;
-        border-top: 1px solid var(--color-border);
-    }
-    .edit-cancel-btn {
-        padding: 7px 14px;
-        border-radius: var(--radius-md);
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        font-size: 0.8125rem;
-        font-weight: 500;
-        cursor: pointer;
-        border: none;
-        font-family: inherit;
-        min-height: 44px;
-    }
-    .edit-cancel-btn:hover {
-        background: var(--color-surface-4);
-    }
-    .edit-save-btn {
-        padding: 7px 18px;
-        border-radius: var(--radius-md);
-        background: var(--color-accent-dark);
-        color: var(--color-btn-text);
-        font-size: 0.8125rem;
-        font-weight: 500;
-        cursor: pointer;
-        border: none;
-        font-family: inherit;
-        min-height: 44px;
-    }
-    .edit-save-btn:hover {
-        opacity: 0.85;
-    }
-    .edit-save-btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-    }
-    .edit-attach-btn {
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: 4px;
-        color: var(--color-text-secondary);
-        opacity: 0.6;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-    .edit-attach-btn:hover {
-        opacity: 1;
-        color: var(--color-text-primary);
-    }
-    .edit-attachments-preview {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        padding: 8px 16px;
-    }
-    .edit-attachment-chip {
-        position: relative;
-        width: 48px;
-        height: 48px;
-        border-radius: var(--radius-sm);
-        overflow: hidden;
-        border: 1px solid var(--color-border);
-    }
-    .edit-attachment-chip img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-    }
-    .edit-attachment-chip .remove-attachment {
-        position: absolute;
-        top: 0;
-        right: 0;
-        width: 18px;
-        height: 18px;
-        border-radius: 50%;
-        background: rgba(0,0,0,0.7);
-        color: white;
-        border: none;
-        font-size: 14px;
-        line-height: 1;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0;
     }
 </style>

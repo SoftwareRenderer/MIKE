@@ -4,6 +4,7 @@
     import { get } from 'svelte/store';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
     import { t } from '$lib/i18n';
+    import { isSandboxMountPath } from '$lib/utils/path';
     import { wsConnection } from '$lib/stores/connection';
     import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
     import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
@@ -1330,7 +1331,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     /** Collapse sidebar on tablet when a file is opened in the Explorer; restore when closed. */
     function handleExplorerFileChange(path: string | null) {
-        const isFileOpen = path != null && (path.startsWith(currentProject?.path || '') || path.startsWith('/home/sandbox/'));
+        const isFileOpen = path != null && (path.startsWith(currentProject?.path || '') || isSandboxMountPath(path));
         if (isFileOpen) {
             updateUrl({ project: currentProject?.id, view: urlChangesOpen ? 'review' : 'explorer', file: path });
             // Auto-collapse sidebar on tablet to give editor more space

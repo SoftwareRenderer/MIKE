@@ -13,6 +13,7 @@
     import editIcon from '$lib/assets/icons/edit.svg?raw';
     import checkCircleIcon from '$lib/assets/icons/check-circle.svg?raw';
     import questionIcon from '$lib/assets/icons/question.svg?raw';
+    import type { ToolCallInfo } from '$lib/types';
     import { formatToolArgs, rawArgsComplete, streamedPath, normalizeEdits, HIDE_ARGS_FOR_TOOLS, SANDBOXABLE_TOOLS, ARGS_MAX_LEN, EDIT_DIFF_MAX_LINES } from '$lib/utils/toolArgs';
     import type { EditDiffEntry } from '$lib/utils/toolArgs';
     import { formatElapsed, formatDuration } from '$lib/utils/format-time';
@@ -21,28 +22,7 @@
     import { t } from '$lib/i18n';
 
     interface Props {
-        toolCall: {
-            toolId: string;
-            toolName: string;
-            displayName?: string;
-            args: Record<string, unknown>;
-            raw_args?: string;
-            path?: string;
-            result?: string;
-            success?: boolean;
-            interrupted?: boolean; // the user's message stopped it; yellow, not red
-            isPending?: boolean;
-            sandbox?: boolean;
-            duration?: number;
-            bytesWritten?: number;
-            linesAdded?: number;
-            linesRemoved?: number;
-            resultTruncated?: boolean; // true if backend truncated the result
-            originalLines?: number; // original line count before truncation
-            originalBytes?: number; // original byte count before truncation
-            messageId?: string; // tool_call message ID for fetching full result
-            startedAt?: number; // timestamp when tool call started (ms)
-        };
+        toolCall: ToolCallInfo;
         expandedArgs: Set<string>;
         editDiffOverrides: Record<string, boolean>;
         projectId?: string;

@@ -23,6 +23,7 @@ import {
     stopTaskRaw,
     resumeTaskRaw,
     sendTaskMessageRaw,
+    type SendTaskMessagePayload,
     createTaskMessageRaw,
     deleteTaskMessagesAfterRaw,
     deleteTaskMessageRaw,
@@ -153,16 +154,19 @@ export async function sendTaskMessage(
     reasoningEffort?: string,
     regenerate = false
 ): Promise<{ id: string; role: string; content: string; thread_id?: string; queued?: boolean; actionId?: string }> {
+    // The one place a send is assembled; the queue and the wire share it, so a field cannot be queued
+    // without being sent or sent without being queued.
+    const payload: SendTaskMessagePayload = { projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort, regenerate };
     // Queue the message when offline or on network failure so it isn't lost.
     const queueMessage = () => {
         const id = generateId();
-        return queueWrite('sendTaskMessage', { projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort, regenerate }, { id, role: 'user', content });
+        return queueWrite('sendTaskMessage', payload, { id, role: 'user', content });
     };
     if (getOfflineStatus()) {
         return await queueMessage();
     }
     try {
-        return await sendTaskMessageRaw(projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort, regenerate);
+        return await sendTaskMessageRaw(payload);
     } catch (e) {
         // Network failure — the request never reached the server — so queue the message instead of
         // losing it. A cancellation is not transient (isTransientError says so): the user stopped this

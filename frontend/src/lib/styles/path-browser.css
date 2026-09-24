@@ -1,0 +1,102 @@
+/* The two modals that browse a directory tree — PathPicker.svelte (a host path for the sandbox
+ * configuration) and FileBrowser.svelte (the same job while adding a project). They grew from one
+ * another and still render the same path bar, the same rows and the same footer line.
+ *
+ * :global() for the reason file-browser.css states: these names (.file-entry, .icon, .name,
+ * .path-input) are used by other listings in the app, so a global file may only restyle markup
+ * inside one of these two modals. That is what `modalClass="path-browser"` on their BaseModal is
+ * for — it puts the scoping ancestor on the box, so the class names the markup carries do not
+ * change and each component's own rules keep outweighing these (a scoped rule counts its
+ * compile-time class as well as its name).
+ *
+ * Rules whose bodies differ between the two — the sticky `.path-bar`, the `.home-btn` base,
+ * `.error`, the modal padding — stay in the component that owns them. */
+
+:global(.path-browser .path-bar-row) {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+    background: var(--color-surface-2);
+    border-radius: var(--radius-md);
+    padding: 4px;
+}
+
+:global(.path-browser .home-btn:hover) {
+    background: var(--color-surface-3);
+}
+
+:global(.path-browser .path-input) {
+    flex: 1;
+    padding: 6px 10px;
+    background: transparent;
+    border: none;
+    color: var(--color-text-primary);
+    font-size: 0.875rem;
+    font-family: var(--font-mono);
+    outline: none;
+}
+
+:global(.path-browser .loading) {
+    text-align: center;
+    color: var(--color-text-secondary);
+    padding: 24px;
+}
+
+:global(.path-browser .file-list) {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+:global(.path-browser .file-entry) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.875rem;
+    text-align: left;
+    width: 100%;
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: none;
+}
+
+:global(.path-browser .file-entry:hover) {
+    background: var(--color-surface-2);
+}
+
+:global(.path-browser .file-entry.dir) {
+    font-weight: 500;
+}
+
+:global(.path-browser .icon) {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+:global(.path-browser .name) {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+:global(.path-browser .current-path) {
+    font-size: 0.75rem;
+    color: var(--color-text-tertiary);
+    font-family: var(--font-mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+:global(.path-browser .footer-actions) {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}

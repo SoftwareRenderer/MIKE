@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { t } from '$lib/i18n';
+    import { baseName, sandboxMountFromPath } from '$lib/utils/path';
     import { ensureCsrfToken } from '$lib/api';
     import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { EditorView } from 'codemirror';
@@ -217,7 +218,7 @@
             if (result.kind === 'no-op') return;
             if (result.kind === 'conflict') {
                 dialogStore.showToast(
-                    t('editor.externalConflict', { name: filePath.split('/').pop() || filePath }),
+                    t('editor.externalConflict', { name: baseName(filePath) || filePath }),
                     'error',
                 );
                 return;
@@ -703,7 +704,7 @@
 
             if (mode === 'diff') {
                 // Diff mode: header display path + baseline vs baseRef for the gutter.
-                displayPath = displayPathProp || filePath.split('/').pop() || filePath;
+                displayPath = displayPathProp || baseName(filePath) || filePath;
                 content = fileContent;
                 baselineContent = '';
                 savedContent = fileContent;
@@ -1258,8 +1259,7 @@
             return filePath;
         }
         if (!filePath || !projectPath) return filePath;
-        const projectName = projectPath.split('/').filter(Boolean).pop();
-        const sandboxPrefix = `/home/sandbox/${projectName}/`;
+        const sandboxPrefix = `${sandboxMountFromPath(projectPath)}/`;
         if (filePath.startsWith(sandboxPrefix)) {
             return projectPath + '/' + filePath.slice(sandboxPrefix.length);
         }

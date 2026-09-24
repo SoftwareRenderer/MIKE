@@ -1,3 +1,5 @@
+import { parentDir } from './path';
+
 interface SelectableRow {
     path: string;
     /** false for `..`, which is never a target for a file operation but is still a paste target. */
@@ -94,18 +96,6 @@ export function pasteTarget(entry: { path: string; isDir: boolean } | null, list
     if (!entry) return listedPath;
     if (entry.isDir) return entry.path;
     return parentDir(entry.path) || listedPath;
-}
-
-/** The folder containing `path`, or '' when there is none. */
-export function parentDir(path: string): string {
-    const cut = path.lastIndexOf('/');
-    if (cut < 0) return '';
-    return cut === 0 ? '/' : path.slice(0, cut);
-}
-
-export function baseName(path: string): string {
-    const cut = path.lastIndexOf('/');
-    return cut < 0 ? path : path.slice(cut + 1);
 }
 
 export function rowIsSelectable(entry: { name: string }): boolean {

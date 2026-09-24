@@ -2,6 +2,7 @@
     import FileEditor from './FileEditor.svelte';
     import type { OpenFileTab } from '$lib/utils/editor-tabs';
     import { t } from '$lib/i18n';
+    import { baseName } from '$lib/utils/path';
     import type { LSPSymbol } from '$lib/utils/lsp-symbols';
     import { appStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
@@ -59,7 +60,7 @@
     });
 
     function getFileName(path: string): string {
-        return path.split('/').pop() || path;
+        return baseName(path) || path;
     }
 
     function handleEditorFocused(filePath: string, focused: boolean) {

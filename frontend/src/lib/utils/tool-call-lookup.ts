@@ -1,5 +1,4 @@
-import type { ChatEntry } from '$lib/types';
-import type { ToolCallInfo } from '$lib/services/stream-state.svelte';
+import type { ChatEntry, ToolCallInfo } from '$lib/types';
 
 /** A live tool call and the entry that currently holds it. */
 export interface LiveToolCall {

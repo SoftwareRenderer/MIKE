@@ -157,6 +157,41 @@ export interface Thread {
     created_at: string;
 }
 
+/**
+ * One tool call as the client holds it — the only declaration of the shape.
+ *
+ * The fields are the `tool_call` / `tool_result` frames' payload (`backend/types/ws.go`), kept under
+ * the names the client uses; `contentIndex` and `reasoningIndex` are not on the wire — stream-handler
+ * stamps them with the offsets the call arrived at, which is what lets `chat-layout` interleave the
+ * card inside the reasoning text. Every renderer (`ChatMessage`, `ToolCall`) and every lookup
+ * (`tool-call-lookup`, `stream-state`) binds to this type, because a card whose field list drifts from
+ * the frame's silently drops the value instead of failing.
+ */
+export interface ToolCallInfo {
+    toolId: string;
+    toolName: string;
+    displayName?: string;
+    args: Record<string, unknown>;
+    raw_args?: string;
+    sandbox?: boolean;
+    path?: string;
+    result?: string;
+    resultTruncated?: boolean;
+    originalLines?: number;
+    originalBytes?: number;
+    messageId?: string;
+    success?: boolean;
+    interrupted?: boolean; // stopped by a user message, not a failure
+    duration?: number;
+    isPending?: boolean;
+    bytesWritten?: number;
+    linesAdded?: number;
+    linesRemoved?: number;
+    startedAt?: number;
+    contentIndex?: number;
+    reasoningIndex?: number;
+}
+
 export interface ChatEntry {
     id: string;
     role: string;
@@ -176,28 +211,7 @@ export interface ChatEntry {
         done?: boolean;
     };
     attachments?: Array<{ mimeType: string; data: string }>;
-    toolCalls?: Array<{
-        toolId: string;
-        toolName: string;
-        displayName?: string;
-        args: Record<string, unknown>;
-        raw_args?: string;
-        sandbox?: boolean;
-        path?: string;
-        result?: string;
-        resultTruncated?: boolean;
-        originalLines?: number;
-        originalBytes?: number;
-        messageId?: string;
-        success?: boolean;
-        interrupted?: boolean; // stopped by a user message, not a failure
-        duration?: number;
-        isPending?: boolean;
-        bytesWritten?: number;
-        linesAdded?: number;
-        linesRemoved?: number;
-        startedAt?: number;
-    }>;
+    toolCalls?: ToolCallInfo[];
     toolCall?: {
         toolName: string;
         displayName?: string;
@@ -226,23 +240,6 @@ export interface ChatEntry {
     /** The queue action this outgoing entry came from, so a re-derive does not draw it twice. */
     actionId?: string;
 }
-
-export type DiffData = {
-    files?: Record<string, {
-        hash: string;
-        type: string;
-        added?: number;
-        removed?: number;
-        truncated?: boolean;
-        origAdded?: number;
-        origRemoved?: number;
-        line_count?: number;
-        file_size?: number;
-        is_binary?: boolean;
-        staged?: boolean;
-    }>;
-    short_stat?: string;
-};
 
 export interface Board {
     tasks: Task[];

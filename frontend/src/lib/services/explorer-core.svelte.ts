@@ -8,7 +8,7 @@ import {
     type EditorTabState,
 } from '$lib/storage';
 import { revealFileTab, toPersistedTabs, type OpenFileTab } from '$lib/utils/editor-tabs';
-import { isUnderPath } from '$lib/utils/path';
+import { baseName, isUnderPath } from '$lib/utils/path';
 import { EDITOR_SAVE_SETTLED, SAVE_SETTLE_BACKSTOP_MS, SaveRequestGuard } from '$lib/utils/save-state';
 import type { LSPSymbol } from '$lib/utils/lsp-symbols';
 import type { GitCommit, GitLogResponse } from '$lib/types';
@@ -258,7 +258,7 @@ export class ExplorerCore {
         if (idx < 0) return;
 
         if (this.unsavedFiles.has(path)) {
-            const fileName = path.split('/').pop() || path;
+            const fileName = baseName(path) || path;
             const confirmed = await dialogStore.showConfirm({
                 title: t('explorer.shared.unsavedChanges'),
                 message: t('explorer.shared.unsavedDiscardMessage', { file: fileName }),

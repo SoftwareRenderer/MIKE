@@ -1,5 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { formatRelativeTime, formatTimestamp, formatElapsed, formatDuration, timeAgo, dataAgeText } from '$lib/utils/format-time';
+import {
+    formatDate, formatDateTime, formatDuration, formatElapsed, formatRelativeTime,
+    formatTimestamp, timeAgo, dataAgeText,
+} from '$lib/utils/format-time';
 import { registerCatalog, setLocale } from '$lib/i18n/runtime.svelte';
 
 const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
@@ -275,5 +278,29 @@ describe('active locale', () => {
         setLocale('ja');
         expect(formatElapsed(65_000)).toBe('1m 5s');
         expect(formatDuration(1200)).toBe('1.2s');
+    });
+});
+
+/**
+ * The absolute moment a row shows in its tooltip while the label counts age. Four screens wrote this
+ * line themselves; the fold is only safe because an unreadable stamp answers itself everywhere.
+ */
+describe('formatDateTime / formatDate', () => {
+    const moment = '2026-03-04T15:30:00';
+
+    it('answers the text back when the stamp is not a moment', () => {
+        expect(formatDateTime('not a date')).toBe('not a date');
+        expect(formatDate('not a date')).toBe('not a date');
+        expect(formatDateTime('')).toBe('');
+    });
+
+    it('prints the date and the time in the active locale, and the date alone on request', () => {
+        setLocale('en');
+        expect(formatDateTime(moment)).toBe('3/4/2026, 3:30:00 PM');
+        expect(formatDate(moment)).toBe('3/4/2026');
+        setLocale('ja');
+        // Order, separators and the clock are ICU's, not the caller's: a literal would survive the switch.
+        expect(formatDate(moment)).toBe('2026/3/4');
+        expect(formatDateTime(moment)).toBe('2026/3/4 15:30:00');
     });
 });

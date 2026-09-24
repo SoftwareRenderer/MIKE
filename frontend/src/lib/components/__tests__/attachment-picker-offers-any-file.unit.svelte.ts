@@ -122,7 +122,7 @@ describe('the mobile message editor', () => {
             if (d) return d;
             throw new Error('the mobile editor did not open');
         });
-        expect(dialog.querySelector('button.edit-attach-btn')?.getAttribute('aria-label')).toBe('Attach file');
+        expect(dialog.querySelector('button.btn-edit-attach')?.getAttribute('aria-label')).toBe('Attach file');
 
         const input = fileInputIn(dialog);
         expect(input.hasAttribute('accept')).toBe(false);

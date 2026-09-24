@@ -11,7 +11,7 @@
     // carrying a copy of its own — the copy it did carry was already missing a token.
     import '$lib/styles/token-colors.css';
     import { escapeHtml } from '$lib/utils/format';
-    import { activeLocale } from '$lib/i18n/runtime.svelte';
+    import { formatDateTime, formatDate } from '$lib/utils/format-time';
     import { t } from '$lib/i18n';
     import { slide } from 'svelte/transition';
     import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
@@ -183,24 +183,6 @@
 
     function handleFileClick(path: string) {
         onFileSelected(formatPath(path));
-    }
-
-    function formatDate(dateStr: string): string {
-        if (!dateStr) return '';
-        try {
-            return new Date(dateStr).toLocaleDateString(activeLocale());
-        } catch {
-            return dateStr;
-        }
-    }
-
-    function formatDateTime(dateStr: string): string {
-        if (!dateStr) return '';
-        try {
-            return new Date(dateStr).toLocaleString(activeLocale());
-        } catch {
-            return dateStr;
-        }
     }
 
     // Handle keyboard navigation

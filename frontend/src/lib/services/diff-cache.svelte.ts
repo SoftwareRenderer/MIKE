@@ -1,5 +1,7 @@
 import type { ApiDiffRow, DiffFile, DiffRow } from '$lib/types/diff';
-import { toDiffFiles, type ParsedDiffFile } from '$lib/api';
+import { toDiffFiles, type TaskDiff, type TaskDiffOptions } from '$lib/api';
+import { isVimSwapFile } from '$lib/utils/file-suffix';
+import type { DiffFileResponse } from '$lib/types/diff';
 import { isAborted } from '$lib/api/helpers';
 
 /** Metadata for untracked files. */
@@ -23,50 +25,15 @@ export interface DiffStats {
     staged_paths?: string[];
 }
 
-/** API callbacks the component must provide. */
+/**
+ * API callbacks the component must provide. The response types are the endpoint's own — this cache binds
+ * to `api/git.ts`, so a field the server adds cannot arrive here under a name the API layer has never heard.
+ */
 export interface DiffCacheApis {
-    getTaskDiff: (projectId: string, taskId: string, options?: { headRef?: string; baseRef?: string; full?: boolean; checkpointIndex?: number; parsed?: boolean }) => Promise<DiffApiResponse>;
-    getDiffFile: (projectId: string, taskId: string, path: string, options?: { signal?: AbortSignal; full?: boolean }) => Promise<DiffFileApiResponse>;
+    getTaskDiff: (projectId: string, taskId: string, options?: TaskDiffOptions) => Promise<TaskDiff>;
+    getDiffFile: (projectId: string, taskId: string, path: string, options?: { signal?: AbortSignal; full?: boolean }) => Promise<DiffFileResponse>;
     stageFile: (projectId: string, taskId: string, path: string, stage: boolean) => Promise<unknown>;
     enrichRows: (rows: ApiDiffRow[]) => DiffRow[];
-}
-
-/** Response from getTaskDiff API. */
-export interface DiffApiResponse {
-    files?: Record<string, {
-        hash: string;
-        type: string;
-        added?: number;
-        removed?: number;
-        truncated?: boolean;
-        origAdded?: number;
-        origRemoved?: number;
-        line_count?: number;
-        file_size?: number;
-        is_binary?: boolean;
-        isNew?: boolean;
-        isDeleted?: boolean;
-        staged?: boolean;
-    }>;
-    short_stat?: string;
-    base_ref?: string;
-    diff?: string; // raw unified diff (returned when headRef is set)
-    /** Present for ?parsed=1 — this same diff, parsed by the server (backend/git). */
-    parsed_files?: ParsedDiffFile[];
-}
-
-/** Response from getDiffFile API. */
-interface DiffFileApiResponse {
-    rows?: ApiDiffRow[];
-    committedRows?: ApiDiffRow[];
-    lines?: string[];
-    truncated?: boolean;
-    origAdded?: number;
-    origRemoved?: number;
-    fileSize?: number;
-    isBinary?: boolean;
-    isNew?: boolean;
-    isDeleted?: boolean;
 }
 
 /**
@@ -248,7 +215,7 @@ export class DiffCache {
      * the diff rows are already parsed by the caller and passed via data.files.
      * When data.files is a manifest (normal working-tree diff), individual files
      * are fetched on-demand. */
-    updateDiff(data: DiffApiResponse) {
+    updateDiff(data: TaskDiff) {
         if (data.base_ref !== undefined) {
             this.state.baseRef = data.base_ref;
         }
@@ -258,12 +225,11 @@ export class DiffCache {
             this.fileHashes = {};
             return;
         }
-        const ignoreSwp = (p: string) => !p.split('/').pop()?.match(/\..*\.swp$/);
         const newCache: Record<string, DiffFile> = {};
         const newUntracked: Record<string, UntrackedMeta> = {};
 
         for (const [path, entry] of Object.entries(data.files)) {
-            if (!ignoreSwp(path) && entry.type === 'untracked') continue;
+            if (isVimSwapFile(path) && entry.type === 'untracked') continue;
             if (entry.type === 'tracked') {
                 const existing = this.state.files[path];
                 newCache[path] = {
@@ -311,10 +277,9 @@ export class DiffCache {
     /** Update cache from a parsed diff (used for done-task branch-tip diffs).
      * Files already have their rows populated. */
     updateDiffFromFiles(files: DiffFile[]) {
-        const ignoreSwp = (p: string) => !p.split('/').pop()?.match(/\..*\.swp$/);
         const newCache: Record<string, DiffFile> = {};
         for (const file of files) {
-            if (!ignoreSwp(file.path)) continue;
+            if (isVimSwapFile(file.path)) continue;
             newCache[file.path] = { ...file, staged: false };
         }
         this.state.files = newCache;

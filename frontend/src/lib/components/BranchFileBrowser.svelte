@@ -2,6 +2,7 @@
     import { onMount } from 'svelte';
     import { getGitStatus } from '$lib/api';
     import { gitStatusLabel, gitStatusClass, gitStatusPriority } from '$lib/utils/git-status';
+    import { sandboxMountFromPath } from '$lib/utils/path';
     import FileBrowserView from '$lib/components/FileBrowserView.svelte';
     import { t } from '$lib/i18n';
 
@@ -19,7 +20,7 @@
     } = $props();
 
     // Sandbox mount path for this project
-    let mountPath = $derived(sandboxEnabled ? '/home/sandbox/' + projectPath.split('/').filter(Boolean).pop() : '');
+    let mountPath = $derived(sandboxEnabled ? sandboxMountFromPath(projectPath) : '');
     // Everything listed, written and dropped lands under this: the mount when sandboxed, the checkout otherwise.
     let rootPath = $derived(sandboxEnabled ? mountPath : projectPath);
     // The explorer remembers the folder it was on; a sandboxed project opens at its mount.

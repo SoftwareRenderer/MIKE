@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { Snippet } from 'svelte';
+    import { isEditableTarget } from '$lib/utils/keyboard';
 
     /**
      * Fixed-height virtual scroll list: renders visible rows plus a buffer, absolutely
@@ -45,8 +46,7 @@
     // Keyboard navigation: Page Up/Down, Arrow Up/Down, Home, End
     function handleKeydown(e: KeyboardEvent) {
         // Skip if focus is inside an input/textarea/contenteditable — those keys move the cursor
-        const target = e.target as HTMLElement;
-        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+        if (isEditableTarget(e.target)) return;
         const el = scrollEl;
         if (!el) return;
         const scrollAmount = e.key === 'ArrowUp' || e.key === 'ArrowDown' ? 80 : el.clientHeight * 0.8;

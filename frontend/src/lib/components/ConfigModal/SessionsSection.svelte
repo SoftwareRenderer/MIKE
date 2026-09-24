@@ -9,9 +9,8 @@
     import type { SessionInfo } from '$lib/types';
     import { listSessions, revokeSession, revokeOtherSessions } from '$lib/api';
     import { dialogStore } from '$lib/stores';
-    import { formatRelativeTime } from '$lib/utils/format-time';
+    import { formatDateTime, formatRelativeTime } from '$lib/utils/format-time';
     import { t } from '$lib/i18n';
-    import { activeLocale } from '$lib/i18n/runtime.svelte';
 
     /** Sign-out path owned by the modal (App's logout handler). */
     let { onSignOut }: { onSignOut?: () => void | Promise<void> } = $props();
@@ -34,9 +33,7 @@
 
     /** Absolute timestamp for a row's `title` tooltip. */
     function absolute(iso: string): string {
-        if (!iso) return t('settings.sessions.unknownTime');
-        const date = new Date(iso);
-        return isNaN(date.getTime()) ? iso : date.toLocaleString(activeLocale());
+        return iso ? formatDateTime(iso) : t('settings.sessions.unknownTime');
     }
 
     /** Relative display text; empty timestamps render as an em dash. */
@@ -127,7 +124,7 @@
         <div class="settings-section-actions">
             <button
                 type="button"
-                class="btn-small"
+                class="settings-btn-small"
                 onclick={loadSessions}
                 disabled={loading || revokingOthers}
                 aria-label="refresh-sessions"
@@ -135,7 +132,7 @@
             >{loading ? t('settings.sessions.loading') : t('settings.sessions.refresh')}</button>
             <button
                 type="button"
-                class="btn-small btn-danger"
+                class="settings-btn-small settings-btn-danger"
                 onclick={handleRevokeOthers}
                 disabled={loading || revokingOthers || otherCount === 0}
                 aria-label="revoke-all-other-sessions"
@@ -154,8 +151,8 @@
         <div class="sessions-status" role="status">{t('settings.sessions.none')}</div>
     {:else}
         {#each rows as session (session.id)}
-            <div class="session-row" class:session-row-current={session.current} data-session-id={session.id}>
-                <div class="session-info">
+            <div class="settings-row" class:session-current={session.current} data-session-id={session.id}>
+                <div class="settings-row-info">
                     <div class="session-headline">
                         <span class="session-agent" title={session.user_agent || t('settings.sessions.unknownDevice')}>
                             {session.user_agent || t('settings.sessions.unknownDevice')}
@@ -164,21 +161,21 @@
                             <span class="session-badge">{t('settings.sessions.thisDevice')}</span>
                         {/if}
                     </div>
-                    <div class="session-meta">
+                    <div class="settings-row-meta">
                         <span class="session-meta-item" title={t('settings.sessions.signedInAt', { time: absolute(session.created_at) })}>
-                            <span class="session-meta-key">{t('settings.sessions.created')}</span> {relative(session.created_at)}
+                            <span class="settings-row-meta-key">{t('settings.sessions.created')}</span> {relative(session.created_at)}
                         </span>
                         <span class="session-meta-item" title={t('settings.sessions.lastSeenAt', { time: absolute(session.last_seen) })}>
-                            <span class="session-meta-key">{t('settings.sessions.lastSeen')}</span> {relative(session.last_seen)}
+                            <span class="settings-row-meta-key">{t('settings.sessions.lastSeen')}</span> {relative(session.last_seen)}
                         </span>
                         <span class="session-meta-item">
-                            <span class="session-meta-key">{t('settings.sessions.ip')}</span> {session.ip || '\u2014'}
+                            <span class="settings-row-meta-key">{t('settings.sessions.ip')}</span> {session.ip || '\u2014'}
                         </span>
                     </div>
                 </div>
                 <button
                     type="button"
-                    class="btn-small btn-danger session-revoke"
+                    class="settings-btn-small settings-btn-danger session-revoke"
                     onclick={() => handleRevoke(session)}
                     disabled={revokingId === session.id || revokingOthers}
                     aria-label={`revoke-session-${session.id}`}
@@ -207,24 +204,8 @@
         gap: 10px;
     }
 
-    .session-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        background: var(--color-surface-2);
-        padding: 10px 12px;
-    }
-    .session-row-current {
+    .session-current {
         border-color: var(--color-accent);
-    }
-    .session-info {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        min-width: 0;
     }
     .session-headline {
         display: flex;
@@ -253,43 +234,6 @@
         background: var(--color-accent);
         color: white;
     }
-    .session-meta {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px 14px;
-        font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
-        font-size: 0.75rem;
-        color: var(--color-text-secondary);
-    }
-    .session-meta-key {
-        color: var(--color-text-tertiary);
-    }
-
-    .btn-small {
-        padding: 6px 12px;
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-sm);
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        font-size: 0.8125rem;
-        font-weight: 500;
-        font-family: inherit;
-        cursor: pointer;
-        white-space: nowrap;
-        flex-shrink: 0;
-    }
-    .btn-small:hover:not(:disabled) {
-        background: var(--color-surface-4);
-    }
-    .btn-small:disabled {
-        opacity: 0.55;
-        cursor: default;
-    }
-    .btn-danger {
-        color: var(--color-status-red);
-        border-color: var(--color-status-red);
-    }
-
     .sessions-status {
         font-size: 0.8125rem;
         color: var(--color-text-tertiary);

@@ -1,5 +1,5 @@
 import type { GitLogResponse, TaskCommit } from '../types';
-import type { ApiDiffRow, DiffFile } from '../types/diff';
+import type { ApiDiffRow, DiffFile, DiffFileResponse, DiffManifest } from '../types/diff';
 import { enrichRowsWithInlineSegments } from '../utils/diff-parser';
 import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
 import { setBoardCache, getBoardCache, diffCacheKey, doneDiffCacheKey } from '../storage';
@@ -194,23 +194,37 @@ export async function pushProject(projectId: string): Promise<{ status: string }
 
 // -- Task Git endpoints --
 
-/** Fetch the unified diff for a task's worktree. Supports optional head/base refs and full file
- * content. The current worktree diff (no head/base/checkpoint) is cached so it stays viewable when
- * the server cannot be reached; non-current diffs are not cached. */
-export interface TaskDiff {
-    diff: string;
-    untracked: Array<{ path: string; diff: string; file_size?: number; truncated?: boolean; orig_added?: number; lines?: string[]; line_count?: number }>;
-    short_stat: string;
+/**
+ * What `/tasks/{id}/diff` answers: the manifest plus, for the calls that asked for it, the patch text and
+ * the server's own parse of it.
+ */
+export interface TaskDiff extends DiffManifest {
+    /** The patch text, present when the caller asked for the diff itself rather than the manifest. */
+    diff?: string;
+    untracked?: Array<{ path: string; diff: string; file_size?: number; truncated?: boolean; orig_added?: number; lines?: string[]; line_count?: number }>;
     truncated_files?: string[];
     original_file_stats?: Record<string, { added: number; removed: number }>;
-    files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number }>;
     /** Present only for ?parsed=1 — the same diff the server already parsed, per file. Named apart from
      * `files` above because that key is the manifest's keyed hash map. */
     parsed_files?: ParsedDiffFile[];
-    base_ref?: string;
 }
 
-export async function getTaskDiff(projectId: string, taskId: string, options?: { headRef?: string; baseRef?: string; full?: boolean; checkpointIndex?: number; parsed?: boolean }): Promise<TaskDiff> {
+/** How a caller narrows `/diff`: which two refs to compare, whether to send full file content, and
+ * whether the server should hand back the diff it already parsed. */
+export interface TaskDiffOptions {
+    headRef?: string;
+    baseRef?: string;
+    full?: boolean;
+    checkpointIndex?: number;
+    parsed?: boolean;
+}
+
+/**
+ * Fetch the unified diff for a task's worktree. Supports optional head/base refs and full file content.
+ * The current worktree diff (no head/base/checkpoint) is cached so it stays viewable when the server
+ * cannot be reached; non-current diffs are not cached.
+ */
+export async function getTaskDiff(projectId: string, taskId: string, options?: TaskDiffOptions): Promise<TaskDiff> {
     const params = new URLSearchParams();
     if (options?.headRef) params.set('head', options.headRef);
     if (options?.baseRef) params.set('base', options.baseRef);
@@ -267,7 +281,7 @@ export async function getTaskCommits(projectId: string, taskId: string): Promise
 }
 
 /** Fetch the content of a single file (tracked or untracked) from the cached diff. */
-export async function getDiffFile(projectId: string, taskId: string, path: string, options?: { full?: boolean; signal?: AbortSignal }): Promise<{ type?: string; lines?: string[]; line_count?: number; rows?: Array<{ key?: string; lineNumber: number | null; variant: string; text?: string; segments?: Array<{ key: string; text: string; tone: string }> }>; truncated?: boolean; origAdded?: number; origRemoved?: number; isBinary?: boolean; fileSize?: number; isNew?: boolean; isDeleted?: boolean }> {
+export async function getDiffFile(projectId: string, taskId: string, path: string, options?: { full?: boolean; signal?: AbortSignal }): Promise<DiffFileResponse> {
     const params = new URLSearchParams({ path });
     if (options?.full) params.set('full', '1');
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/diff/file?${params}`, { signal: options?.signal });
@@ -311,9 +325,6 @@ export async function getTaskGitLog(projectId: string, taskId: string, options?:
  * point: the server already parsed this diff, so the client should not try to.
  */
 export async function getTaskCommitDiffFiles(projectId: string, taskId: string, baseHash: string, headHash: string): Promise<DiffFile[]> {
-    const params = new URLSearchParams({ base: baseHash, head: headHash, parsed: '1' });
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/diff?${params}`);
-    if (!res.ok) throw await apiError(res, t('api.fetchTaskCommitDiff'));
-    const body = await res.json();
-    return toDiffFiles(body?.parsed_files ?? []);
+    const body = await getTaskDiff(projectId, taskId, { baseRef: baseHash, headRef: headHash, parsed: true });
+    return toDiffFiles(body.parsed_files ?? []);
 }

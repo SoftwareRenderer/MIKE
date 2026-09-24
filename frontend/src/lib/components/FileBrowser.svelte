@@ -203,7 +203,7 @@
     }
 </script>
 
-<BaseModal title={t('explorer.fileBrowser.title')} width="560px" zIndex={300} onClose={handleClose}>
+<BaseModal title={t('explorer.fileBrowser.title')} width="560px" zIndex={300} modalClass="path-browser" onClose={handleClose}>
         {#snippet toolbar()}
             <div class="tabs">
                 <button
@@ -372,6 +372,8 @@
 </BaseModal>
 
 <style>
+    @import '$lib/styles/path-browser.css';
+
     :global(.modal) {
         display: flex;
         flex-direction: column;
@@ -430,14 +432,6 @@
         flex-direction: column;
         gap: 8px;
     }
-    .path-bar-row {
-        display: flex;
-        gap: 8px;
-        align-items: stretch;
-        background: var(--color-surface-2);
-        border-radius: var(--radius-md);
-        padding: 4px;
-    }
     .home-btn {
         display: flex;
         align-items: center;
@@ -445,19 +439,6 @@
         padding: 6px;
         background: transparent;
         border-radius: var(--radius-sm);
-    }
-    .home-btn:hover {
-        background: var(--color-surface-3);
-    }
-    .path-input {
-        flex: 1;
-        padding: 6px 10px;
-        background: transparent;
-        border: none;
-        color: var(--color-text-primary);
-        font-size: 0.875rem;
-        font-family: var(--font-mono);
-        outline: none;
     }
     .path-input:focus-visible {
         border-color: var(--color-accent);
@@ -469,11 +450,6 @@
         padding: 8px;
         background: var(--color-status-red)11;
         border-radius: var(--radius-sm);
-    }
-    .loading {
-        text-align: center;
-        color: var(--color-text-secondary);
-        padding: 24px;
     }
     .git-indicator {
         color: var(--color-status-green);
@@ -597,45 +573,8 @@
         opacity: 0.4;
         cursor: not-allowed;
     }
-    .file-list {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-    }
-    .file-entry {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 12px;
-        border-radius: var(--radius-sm);
-        cursor: pointer;
-        font-size: 0.875rem;
-        text-align: left;
-        width: 100%;
-        font: inherit;
-        color: inherit;
-        background: none;
-        border: none;
-    }
-    .file-entry:hover {
-        background: var(--color-surface-2);
-    }
-    .file-entry.dir {
-        font-weight: 500;
-    }
     .file-entry.git-repo:hover {
         background: var(--color-status-green)11;
-    }
-    .icon {
-        display: flex;
-        align-items: center;
-        flex-shrink: 0;
-    }
-    .name {
-        flex: 1;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
     }
     .git-badge {
         font-size: 0.75rem;
@@ -644,20 +583,6 @@
         color: var(--color-status-green);
         border-radius: 10px;
         font-weight: 600;
-    }
-    .current-path {
-        font-size: 0.75rem;
-        color: var(--color-text-tertiary);
-        font-family: var(--font-mono);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        flex: 1;
-    }
-    .footer-actions {
-        display: flex;
-        gap: 8px;
-        align-items: center;
     }
     .sandbox-toggle {
         display: flex;

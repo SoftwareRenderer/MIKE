@@ -10,6 +10,13 @@
 import { activeLocale, packText, t } from '$lib/i18n/runtime.svelte';
 import type { MessageKey } from '$lib/i18n/en';
 
+/** The `1m 30s` rung both duration answers end on: whole minutes, seconds only when there are some. */
+function minutesSeconds(totalSec: number): string {
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    return sec === 0 ? `${min}m` : `${min}m ${sec}s`;
+}
+
 /**
  * Format elapsed milliseconds into a human-readable string (e.g. "6s", "1m 30s").
  * Used by ToolCall for pending tool duration display.
@@ -19,26 +26,20 @@ import type { MessageKey } from '$lib/i18n/en';
  */
 export function formatElapsed(ms: number): string {
     const totalSec = Math.floor(ms / 1000);
-    if (totalSec < 60) return `${totalSec}s`;
-    const min = Math.floor(totalSec / 60);
-    const sec = totalSec % 60;
-    return sec === 0 ? `${min}m` : `${min}m ${sec}s`;
+    return totalSec < 60 ? `${totalSec}s` : minutesSeconds(totalSec);
 }
 
 /**
  * Format a tool call duration in ms, using seconds when >= 1000ms.
  * Returns e.g. "342ms", "1.2s", "15s".
  *
- * Same reasoning as `formatElapsed`: abbreviations, not phrases.
+ * Same reasoning as `formatElapsed`: abbreviations, not phrases. It reads the sub-second
+ * rung the elapsed counter has none of, because a tool call that took 342ms is worth knowing.
  */
 export function formatDuration(ms: number): string {
     if (ms >= 1000) {
         const totalSec = Math.floor(ms / 1000);
-        if (totalSec >= 60) {
-            const min = Math.floor(totalSec / 60);
-            const sec = totalSec % 60;
-            return sec === 0 ? `${min}m` : `${min}m ${sec}s`;
-        }
+        if (totalSec >= 60) return minutesSeconds(totalSec);
         const sec = ms / 1000;
         if (sec >= 10) return `${Math.round(sec)}s`;
         return `${sec.toFixed(1)}s`;
@@ -163,6 +164,21 @@ export function formatTimestamp(isoStr: string): { display: string; tooltip: str
         const shortDate = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', year: 'numeric' }).format(date);
         return { display: t('time.onDateAt', { date: shortDate, time: timeStr }), tooltip: fullDate };
     }
+}
+
+/**
+ * An absolute date and time, or date alone, in the active locale — the tooltip of a row whose visible
+ * label counts age instead. An input that is not a moment answers itself. `formatTimestamp` is the other
+ * question: a chat message's own label, with the day folded in.
+ */
+export function formatDateTime(when: string): string {
+    const date = new Date(when);
+    return isNaN(date.getTime()) ? when : date.toLocaleString(activeLocale());
+}
+
+export function formatDate(when: string): string {
+    const date = new Date(when);
+    return isNaN(date.getTime()) ? when : date.toLocaleDateString(activeLocale());
 }
 
 /**

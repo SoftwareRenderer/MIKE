@@ -7,6 +7,8 @@
  * `__tests__/line-selection.unit.ts`.
  */
 
+import { sandboxMountFromPath } from './path';
+
 /** Inclusive 1-based document line range. */
 export interface LineRange {
     start: number;
@@ -48,11 +50,8 @@ export function toProjectRelative(filePath: string, projectPath: string): string
     if (!filePath) return '';
     const root = (projectPath || '').replace(/\/+$/, '');
     if (root && filePath.startsWith(root + '/')) return filePath.slice(root.length + 1);
-    const projectName = root.split('/').filter(Boolean).pop() || '';
-    if (projectName) {
-        const mount = `/home/sandbox/${projectName}`;
-        if (filePath.startsWith(mount + '/')) return filePath.slice(mount.length + 1);
-    }
+    const mount = sandboxMountFromPath(root);
+    if (mount && filePath.startsWith(mount + '/')) return filePath.slice(mount.length + 1);
     return filePath;
 }
 

@@ -3,6 +3,8 @@
  * writes in `App.svelte` (project, task, view, file) and what `applyUrlView` reads back.
  */
 
+import { sandboxMountFromPath, sandboxMountPath } from './path';
+
 /** The screen that shows the terminal alone, with no board, top bar or sidebar behind it. */
 export const TERMINAL_VIEW = 'terminal';
 
@@ -85,13 +87,12 @@ export interface ExplorerPathRoots {
  * `ExplorerCore.isPathSafe`, which clamps again where the path is opened.
  */
 export function explorerPathRoots(roots: ExplorerPathRoots): string[] {
-    const base = roots.projectPath.split('/').filter(Boolean).pop() ?? '';
     const worktree = roots.workspaceDir && roots.projectId && roots.taskId
         ? roots.workspaceDir + '/' + roots.projectId + '/' + roots.taskId
         : '';
     const mounts = !roots.sandboxEnabled ? [] : [
-        base && '/home/sandbox/' + base,
-        roots.projectName && '/home/sandbox/' + roots.projectName,
+        sandboxMountFromPath(roots.projectPath),
+        sandboxMountPath(roots.projectName ?? ''),
     ];
     return [...new Set([roots.projectPath, worktree, ...mounts].filter(Boolean))];
 }

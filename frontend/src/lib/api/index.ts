@@ -117,7 +117,7 @@ export {
     getTaskGitLog,
     getTaskCommitDiffFiles,
 } from './git';
-export type { ParsedDiffFile } from './git';
+export type { ParsedDiffFile, TaskDiff, TaskDiffOptions } from './git';
 
 // -- Stream --
 export { createAppStream } from './stream';

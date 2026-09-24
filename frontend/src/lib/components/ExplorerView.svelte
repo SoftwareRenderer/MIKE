@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { getGitLogFull, getGitBranches, checkoutBranch, getCommitDiffFiles } from '$lib/api';
-    import { toHomeRelative } from '$lib/utils/path';
+    import { toHomeRelative, sandboxMountFromPath, parentDir } from '$lib/utils/path';
     import { projectTerminalHref, parseExplorerFile } from '$lib/utils/app-link';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { fromPersistedTabs, mergeRestoredTabs } from '$lib/utils/editor-tabs';
@@ -21,7 +21,7 @@
     const isMobileCtx = useIsMobile();
 
     // Sandbox mount path for this project
-    let mountPath = $derived(sandboxEnabled ? '/home/sandbox/' + projectPath.split('/').filter(Boolean).pop() : '');
+    let mountPath = $derived(sandboxEnabled ? sandboxMountFromPath(projectPath) : '');
 
     let selectedBranch = $state('');
     let branches = $state<string[]>([]);
@@ -57,7 +57,7 @@
         const target = parseExplorerFile(initialFile);
         return core.isPathSafe(target.path) ? target : { path: '', isDir: false };
     });
-    let urlFolder = $derived(urlTarget.path.substring(0, urlTarget.isDir ? urlTarget.path.length : urlTarget.path.lastIndexOf('/')));
+    let urlFolder = $derived(urlTarget.isDir ? urlTarget.path : parentDir(urlTarget.path));
     /** The folder the listing shows: the URL's until the user navigates, then theirs. */
     let currentFolderPath = $derived(navigatedFolder || urlFolder || (sandboxEnabled ? mountPath : projectPath));
 

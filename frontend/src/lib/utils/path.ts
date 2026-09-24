@@ -6,7 +6,49 @@ export function toHomeRelative(path: string): string {
     if (!path) return '';
     const match = path.match(/^\/home\/[^/]+\/(.+)$/);
     if (match) return '~/' + match[1];
-    return path.split('/').pop() || path;
+    return baseName(path) || path;
+}
+
+/**
+ * The folder containing `path`, or '' when there is none.
+ *
+ * The one place a path is cut at its last separator; the explorers' URL target, the picker's
+ * "folder above" row and the paste destination all mean the same cut.
+ */
+export function parentDir(path: string): string {
+    const cut = path.lastIndexOf('/');
+    if (cut < 0) return '';
+    return cut === 0 ? '/' : path.slice(0, cut);
+}
+
+/** The last segment of `path`, case kept. `''` for `''`; a bare name answers itself. */
+export function baseName(path: string): string {
+    const cut = path.lastIndexOf('/');
+    return cut < 0 ? path : path.slice(cut + 1);
+}
+
+/**
+ * The container-side root a sandboxed project's tree appears under — the mirror of
+ * `sandbox.MountRoot` (`backend/sandbox/sandbox.go`), which is what the runtime mounts and what an
+ * agent therefore reports in every path it prints. Anything here that guesses the mount from a name
+ * must agree with that constant and with `MountRoot + "/" + project.Name`, or a path the agent
+ * reported stops resolving in the explorer.
+ */
+const SANDBOX_MOUNT_ROOT = '/home/sandbox';
+
+/** The mount a container shows for the tree named `name`; `''` when there is no name to mount. */
+export function sandboxMountPath(name: string): string {
+    return name ? `${SANDBOX_MOUNT_ROOT}/${name}` : '';
+}
+
+/** The mount of the project whose host checkout lives at `hostPath` — the container names it after that directory. */
+export function sandboxMountFromPath(hostPath: string): string {
+    return sandboxMountPath(hostPath.split('/').filter(Boolean).pop() ?? '');
+}
+
+/** Whether `path` is inside the mount root, so it names the container's view of a tree. */
+export function isSandboxMountPath(path: string): boolean {
+    return path.startsWith(SANDBOX_MOUNT_ROOT + '/');
 }
 
 /**

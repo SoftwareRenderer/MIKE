@@ -14,7 +14,7 @@ import { test, expect, type Page } from '@playwright/test';
 const SETTINGS_BTN = '.icon-btn[aria-label="Settings"]';
 const ABOUT_TAB = 'button.tab-btn:has-text("About")';
 const TOKENS_SECTION = '.tokens-section';
-const TOKEN_ROW = '.tokens-section .token-row';
+const TOKEN_ROW = '.tokens-section .settings-row';
 const TOKEN_LABEL_INPUT = '.tokens-section input[type="text"]';
 const CREATE_BTN = 'button[aria-label="create-api-token"]';
 const REFRESH_BTN = 'button[aria-label="refresh-tokens"]';

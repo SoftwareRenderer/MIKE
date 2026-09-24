@@ -478,7 +478,7 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
     const taskId = resolveId(p.taskId);
     switch (action.type) {
         case 'sendTaskMessage':
-            await sendTaskMessageRaw(p.projectId, taskId, p.content, p.modelName, p.serverUrl, p.attachments, p.reasoningEffort, p.regenerate);
+            await sendTaskMessageRaw({ ...p, taskId } as SendTaskMessagePayload);
             break;
         case 'createTaskMessage':
             await createTaskMessageRaw(p.projectId, taskId, p.role, p.content);
@@ -762,17 +762,28 @@ async function resumeTaskRaw(projectId: string, taskId: string): Promise<Task> {
     return res.json();
 }
 
+/**
+ * What one queued or live `sendTaskMessage` carries.
+ *
+ * The key names are the persisted IndexedDB queue payload, not a call signature: an action written by an
+ * older build is replayed against this code, so a rename or a nesting change strands that send in the
+ * queue. One type owns it because the send was spelled out three times — here, in the wrapper in
+ * `tasks.ts`, and in the replay below — and a positional list is only ever right by agreement.
+ */
+export interface SendTaskMessagePayload {
+    projectId: string;
+    taskId: string;
+    content: string;
+    modelName?: string;
+    serverUrl?: string;
+    attachments?: Array<{ mimeType: string; data: string }>;
+    reasoningEffort?: string;
+    regenerate?: boolean;
+}
+
 /** Send a user message via HTTP POST. Triggers executor and returns the created message. */
-async function sendTaskMessageRaw(
-    projectId: string,
-    taskId: string,
-    content: string,
-    modelName?: string,
-    serverUrl?: string,
-    attachments?: Array<{ mimeType: string; data: string }>,
-    reasoningEffort?: string,
-    regenerate = false
-): Promise<{ id: string; role: string; content: string; thread_id?: string }> {
+async function sendTaskMessageRaw(payload: SendTaskMessagePayload): Promise<{ id: string; role: string; content: string; thread_id?: string }> {
+    const { projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort, regenerate } = payload;
     const body: Record<string, any> = { content };
     if (modelName) body.model_name = modelName;
     if (serverUrl) body.llama_server_url = serverUrl;

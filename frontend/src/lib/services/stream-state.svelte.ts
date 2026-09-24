@@ -1,8 +1,5 @@
-import type { ChatEntry, LockWait } from '$lib/types';
+import type { ChatEntry, LockWait, ToolCallInfo } from '$lib/types';
 import { findToolCall } from '$lib/utils/tool-call-lookup';
-
-/** Tool call info — matches ChatEntry['toolCalls'][number]. */
-export type ToolCallInfo = NonNullable<ChatEntry['toolCalls']>[number];
 
 /**
  * Reactive class holding all stream-processing state.
