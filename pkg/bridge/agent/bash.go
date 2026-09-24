@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"net"
+	"io"
 	"os"
 	"os/exec"
 	"syscall"
@@ -27,7 +27,7 @@ const (
 //
 // Ordering contract: all Chunk frames precede the Result frame. The client stops
 // reading chunks at Result, so a later chunk is lost output.
-func handleBash(h *handler, conn net.Conn, req *protocol.Request) error {
+func handleBash(h *handler, out io.Writer, req *protocol.Request) error {
 	var p protocol.BashParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		return fmt.Errorf("parse bash params: %w", err)
@@ -104,7 +104,7 @@ func handleBash(h *handler, conn net.Conn, req *protocol.Request) error {
 		for {
 			n, readErr := reader.Read(buf)
 			if n > 0 {
-				h.writeBashChunk(conn, bp, req.MsgID, stream, buf[:n])
+				h.writeBashChunk(out, bp, req.MsgID, stream, buf[:n])
 			}
 			if readErr != nil {
 				return
@@ -167,24 +167,24 @@ func handleBash(h *handler, conn net.Conn, req *protocol.Request) error {
 		"cancelled":   cancelled,
 	})
 	payload := protocol.NewBashResult(exitCode, meta)
-	return h.writeBashResult(conn, bp, req.MsgID, payload)
+	return h.writeBashResult(out, bp, req.MsgID, payload)
 }
 
 // writeBashChunk sends one output chunk, unless the Result frame already went out
 // (a chunk after it would be dropped by the client).
-func (h *handler) writeBashChunk(conn net.Conn, bp *bashProc, msgID uint32, stream uint8, data []byte) {
+func (h *handler) writeBashChunk(out io.Writer, bp *bashProc, msgID uint32, stream uint8, data []byte) {
 	bp.mu.Lock()
 	defer bp.mu.Unlock()
 	if bp.finished {
 		return
 	}
-	_ = h.writeFrame(conn, protocol.NewChunk(msgID, protocol.NewBashChunk(stream, data)))
+	_ = h.writeFrame(out, protocol.NewChunk(msgID, protocol.NewBashChunk(stream, data)))
 }
 
 // writeBashResult sends the Result frame and refuses any further chunk.
-func (h *handler) writeBashResult(conn net.Conn, bp *bashProc, msgID uint32, payload []byte) error {
+func (h *handler) writeBashResult(out io.Writer, bp *bashProc, msgID uint32, payload []byte) error {
 	bp.mu.Lock()
 	defer bp.mu.Unlock()
 	bp.finished = true
-	return h.writeFrame(conn, protocol.NewResult(msgID, payload))
+	return h.writeFrame(out, protocol.NewResult(msgID, payload))
 }

@@ -140,13 +140,3 @@ func (f *Frame) ErrorMsg() string {
 	}
 	return string(f.Payload)
 }
-
-// String returns a debug string for the frame.
-func (f *Frame) String() string {
-	size := len(f.Payload)
-	if size > 80 {
-		size = 80
-	}
-	return fmt.Sprintf("Frame{MsgID:%d Type:%s Payload:%dB %q}",
-		f.MsgID, messageTypeString(f.Type), len(f.Payload), string(f.Payload[:size]))
-}

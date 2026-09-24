@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"os/exec"
 	"strings"
 	"sync"
@@ -275,11 +274,11 @@ func argsEqual(a, b []string) bool {
 
 // handleLSP starts this connection's language server (a request carrying a non-empty Command)
 // and otherwise forwards raw JSON-RPC to it.
-func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
-	defer h.recoverPanic(conn, req.MsgID)
+func (h *handler) handleLSP(out io.Writer, req *protocol.Request) {
+	defer h.recoverPanic(out, req.MsgID)
 	var p protocol.LSPParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
-		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, fmt.Sprintf("parse lsp params: %v", err)))
+		_ = h.writeFrame(out, protocol.NewError(req.MsgID, fmt.Sprintf("parse lsp params: %v", err)))
 		return
 	}
 
@@ -293,17 +292,17 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 		// with it leaves that holder talking to a process that never saw `initialize`.
 		if lsp != nil && lsp.session != nil && !lsp.session.isClosed() {
 			if lsp.command == p.Command && argsEqual(lsp.args, p.Args) {
-				_ = h.writeFrame(conn, protocol.NewResult(req.MsgID, json.RawMessage(`{"status":"started"}`)))
+				_ = h.writeFrame(out, protocol.NewResult(req.MsgID, json.RawMessage(`{"status":"started"}`)))
 				return
 			}
-			_ = h.writeFrame(conn, protocol.NewError(req.MsgID,
+			_ = h.writeFrame(out, protocol.NewError(req.MsgID,
 				fmt.Sprintf("lsp session on this connection is running %q; %q needs its own connection", lsp.command, p.Command)))
 			return
 		}
 
 		sess, err := newLSPSession(p.Command, p.Args)
 		if err != nil {
-			_ = h.writeFrame(conn, protocol.NewError(req.MsgID, err.Error()))
+			_ = h.writeFrame(out, protocol.NewError(req.MsgID, err.Error()))
 			return
 		}
 
@@ -315,7 +314,7 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 		// every other writer: a raw WriteFrame here can land in the middle of a bash output frame.
 		go func() {
 			for notif := range sess.outputCh {
-				_ = h.writeFrame(conn, &protocol.Frame{
+				_ = h.writeFrame(out, &protocol.Frame{
 					MsgID:   0, // Notifications use MsgID 0
 					Type:    protocol.TypeNotification,
 					Payload: []byte(notif),
@@ -325,21 +324,21 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 
 		// Send init response
 		result := protocol.NewResult(req.MsgID, json.RawMessage(`{"status":"started"}`))
-		_ = h.writeFrame(conn, result)
+		_ = h.writeFrame(out, result)
 		return
 	}
 
 	if lsp == nil || lsp.session == nil || lsp.session.isClosed() {
 		// Refuse, do not restart: a server restarted here never saw `initialize`, so it answers a
 		// document with a warning about itself. Starting one is the host's decision.
-		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, "lsp server not started"))
+		_ = h.writeFrame(out, protocol.NewError(req.MsgID, "lsp server not started"))
 		return
 	}
 
 	// Forward raw JSON-RPC to LSP server
 	if len(p.Raw) == 0 {
 		logging.For(logging.Bridge).Infof("lsp: raw JSON-RPC message required for MsgID=%d", req.MsgID)
-		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, "raw JSON-RPC message required"))
+		_ = h.writeFrame(out, protocol.NewError(req.MsgID, "raw JSON-RPC message required"))
 		return
 	}
 
@@ -348,17 +347,17 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 	resp, err := lsp.session.send(ctx, p.Raw)
 	if err != nil {
 		logging.For(logging.Bridge).Warnf("lsp: send error: %v", err)
-		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, err.Error()))
+		_ = h.writeFrame(out, protocol.NewError(req.MsgID, err.Error()))
 		return
 	}
 
 	result := protocol.NewResult(req.MsgID, resp)
-	_ = h.writeFrame(conn, result)
+	_ = h.writeFrame(out, result)
 }
 
 // handleLSPNotify handles LSP notification frames (no response expected).
 // Forwards raw JSON-RPC notifications to the LSP server.
-func (h *handler) handleLSPNotify(_ net.Conn, frame *protocol.Frame) {
+func (h *handler) handleLSPNotify(frame *protocol.Frame) {
 	defer h.recoverPanic(nil, 0)
 	// Extract JSON params from frame payload: [method:1][reserved:1][jsonLen:4][json:params]
 	if len(frame.Payload) < 6 {

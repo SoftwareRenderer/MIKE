@@ -142,7 +142,7 @@ func (pw *ProjectWatcher) StartEventLoop() {
 func (pw *ProjectWatcher) handleEvent(event fsnotify.Event) {
 	pw.mu.Lock()
 
-	projectID, _ := lookupWatchedOwner(pw.pathCache, event.Name)
+	projectID := lookupWatchedOwner(pw.pathCache, event.Name)
 
 	if projectID == "" {
 		pw.mu.Unlock()

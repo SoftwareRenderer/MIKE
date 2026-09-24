@@ -84,9 +84,10 @@ func (w *streamLineWriter) captureLocked(p []byte) {
 }
 
 // WriteFrom streams a pipe into the writer until EOF, or until procterm.Drain closes the fd
-// (the normal end for a command that detached a child still holding it).
-func (w *streamLineWriter) WriteFrom(r io.Reader) (int64, error) {
-	return io.Copy(w, r)
+// (the normal end for a command that detached a child still holding it). What was written is
+// already in the accumulator and on the line stream, so neither count is reported back.
+func (w *streamLineWriter) WriteFrom(r io.Reader) {
+	_, _ = io.Copy(w, r)
 }
 
 // String returns what was captured — up to the cap, plus the marker naming what was dropped.
@@ -175,7 +176,7 @@ func execCommandStream(ctx context.Context, dir, command string, timeout int64, 
 	copiers := make(chan struct{}, 2)
 	copyStream := func(r *os.File) {
 		defer func() { copiers <- struct{}{} }()
-		_, _ = w.WriteFrom(r)
+		w.WriteFrom(r)
 	}
 	go copyStream(stdoutR)
 	go copyStream(stderrR)

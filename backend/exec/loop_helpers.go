@@ -675,16 +675,17 @@ func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, re
 	}
 }
 
-// setupSandbox creates or reuses a sandbox container and connects to the agent.
-// Returns the image used, the agent client, and any assigned ports.
-// The caller is responsible for creating callbacks from the agent client.
-func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Client, []types.AssignedPort, error) {
+// setupSandbox creates or reuses a sandbox container and connects to the agent. Returns the image
+// used and the agent client; the caller builds its callbacks from the latter. Assigned ports are not
+// returned: they are carried on setup.task and broadcast here, which is the only path that may write
+// task.AssignedPorts.
+func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Client, error) {
 	task := setup.task
 	projectID := setup.projectID
 	worktreePath := setup.worktreePath
 
 	if te.sandboxMgr == nil || !te.sandboxMgr.IsAvailable() {
-		return "", nil, nil, fmt.Errorf("gVisor not available")
+		return "", nil, fmt.Errorf("gVisor not available")
 	}
 
 	// Make the project's sandbox image exist, building it from its Dockerfile or pulling it. This
@@ -706,7 +707,7 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Clie
 		}
 	})
 	if imgErr != nil {
-		return "", nil, nil, fmt.Errorf("failed to prepare sandbox image: %w", imgErr)
+		return "", nil, fmt.Errorf("failed to prepare sandbox image: %w", imgErr)
 	}
 
 	// Reuse existing container (lazy-start). Create only if none exists or if stopped/crashed.
@@ -715,7 +716,7 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Clie
 		var createErr error
 		assignedPorts, createErr = te.sandboxMgr.Create(task.ID, worktreePath, setup.project, te.sandboxCreateOpts(setup, imageToUse, task.IsPlanMode()))
 		if createErr != nil {
-			return "", nil, nil, fmt.Errorf("failed to create sandbox: %w", createErr)
+			return "", nil, fmt.Errorf("failed to create sandbox: %w", createErr)
 		}
 		logging.For(logging.Sandbox).With(logging.TaskID, task.ID).Infof("sandbox created with image %s", imageToUse)
 		// Store and broadcast assigned ports (carried on the task object)
@@ -732,8 +733,8 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Clie
 	// Get agent client for tool calls (required — sandbox creation ensures agent is running)
 	agentClient, err := te.sandboxMgr.GetClient(task.ID)
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("failed to connect to sandbox bridge: %w", err)
+		return "", nil, fmt.Errorf("failed to connect to sandbox bridge: %w", err)
 	}
 
-	return imageToUse, agentClient, assignedPorts, nil
+	return imageToUse, agentClient, nil
 }
