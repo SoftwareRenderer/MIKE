@@ -54,7 +54,8 @@ ever reach.
 The first-byte sniff must not run inside `hybridListener.Accept()`: `net/http` accepts **serially**, so one
 peer that connects and sends nothing stalls every later handshake, and returning that peer's EOF reads as a
 dead listener, ends `Serve` and kills the process. `Accept()` waits on a queue a per-connection goroutine
-fills. Silent peers are closed and logged per host, never handed to `net/http`.
+fills — not a worker pool, since N workers still block everyone at N silent peers. Silent peers are closed
+and logged per host, never handed to `net/http`, and only the listener's own accept error may end `Serve`.
 Test: `backend/server/listener_test.go`.
 ## Checking this
 

@@ -22,10 +22,6 @@ RELEASE_TAGS := release
 build: frontend ## Build binary with version injected + frontend
 	go build -trimpath -ldflags "$(LDFLAGS)" -o mike .
 
-.PHONY: build-backend
-build-backend: ## Build Go binary only (no frontend rebuild)
-	go build -trimpath -ldflags "$(LDFLAGS)" -o mike .
-
 .PHONY: frontend
 frontend: ## Build frontend (Vite)
 	cd frontend && npm run build
@@ -82,13 +78,8 @@ test: test-go test-frontend ## Run all tests (Go unit + frontend unit)
 test-go: ## Run Go unit tests (~60s, parallel)
 	go test $(GO_SCOPE) -count=1 -parallel 8
 
-# The executor, stream manager and sandbox/terminal layers run ~120 detached goroutines between them.
-# -parallel is lower than test-go because the race detector multiplies the work per test, and the
-# sandbox packages need a working podman + runsc on top of it.
-.PHONY: test-go-race
-test-go-race: ## Run Go unit tests under the race detector (~4min)
-	go test -race $(GO_SCOPE) -count=1 -parallel 4
-
+# What each frontend gate enforces is in the doc that owns it: docs/markup-sanitizing.md (the HTML
+# sinks), docs/i18n.md (the surface count, the catalogue).
 .PHONY: test-frontend
 test-frontend: ## Run frontend unit tests + the gates (vitest, ~10s)
 	cd frontend && npm test && npm run check:i18n && npm run check:i18n-surface-test && npm run check:i18n-surface && npm run check:sinks-test && npm run check:sinks
@@ -96,18 +87,6 @@ test-frontend: ## Run frontend unit tests + the gates (vitest, ~10s)
 	cd frontend && npm run check:dead
 	@echo "==> unused declarations (noUnusedLocals + noUnusedParameters)"
 	cd frontend && npm run check:unused
-
-.PHONY: test-sinks
-test-sinks: ## Fail if an HTML sink in core is unlisted, renders a translation, or lost the mechanism it declares (~1s)
-	cd frontend && npm run check:sinks-test && npm run check:sinks
-
-.PHONY: test-i18n-surface
-test-i18n-surface: ## Fail if any user-facing string is still a core literal (~5s)
-	cd frontend && npm run check:i18n-surface
-
-.PHONY: test-e2e
-test-e2e: ## Run e2e tests (Playwright, manages its own server)
-	cd frontend && npx playwright test
 
 # A locale pack fails silently in both directions, so neither failure shows up in the UI: a
 # missing message key falls back to English per key (a pack missing 300 keys still looks
@@ -212,10 +191,12 @@ check: ## THE GATE: lint + archgate + docs-check + bridge-check + build + Go tes
 	@echo ""
 	@echo "make check: all gates green"
 
-# The packages that own the detached goroutines and the executor's lock discipline. A full -race
-# sweep is ~4min and would not get run; these are where races have actually hidden. AGENTS.md: "A
-# green ./backend/exec/ is not proof" - the executor's locking bugs surface only under -race in
-# ./backend/server/, so both are here.
+# The packages that own the detached goroutines and the executor's lock discipline - the executor,
+# the stream manager and the sandbox/terminal layers run ~120 of them between them. A -race sweep of
+# every package is ~4min and would not get run, so this is where races have actually hidden. AGENTS.md:
+# "A green ./backend/exec/ is not proof" - the executor's locking bugs surface only under -race in
+# ./backend/server/, so both are here. `-parallel` is lower than test-go's because the race detector
+# multiplies the work per test, and the sandbox packages need a working podman + runsc on top of it.
 RACE_PKGS := ./backend/git/ ./backend/exec/ ./backend/server/ ./backend/stream/ ./backend/api/ ./pkg/logging/
 
 .PHONY: check-race
@@ -248,7 +229,7 @@ stop: ## Stop dev server (exact process name; -f would match any path containing
 
 .PHONY: clean
 clean: ## Remove build artifacts
-	rm -f mike mike-server
+	rm -f mike
 	rm -rf frontend/dist
 	rm -rf dist
 	@# Recreated: `go:embed` of the SPA needs one file inside frontend/dist.
@@ -280,10 +261,6 @@ package: frontend ## Build dist/mike-server-<version>-<os>-<arch>.tar.gz for eve
 .PHONY: package-amd64
 package-amd64: frontend ## Package linux/amd64 only
 	@VERSION=$(PKG_VERSION) RELEASE_TAGS=$(RELEASE_TAGS) scripts/package-release.sh linux/amd64
-
-.PHONY: package-arm64
-package-arm64: frontend ## Package linux/arm64 only
-	@VERSION=$(PKG_VERSION) RELEASE_TAGS=$(RELEASE_TAGS) scripts/package-release.sh linux/arm64
 
 # ---------------------------------------------------------------------------
 # Help

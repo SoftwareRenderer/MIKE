@@ -34,10 +34,7 @@ node_modules
 # The Go stage gets this from the web stage, not the context: a context copy would be whatever the
 # last local `npm run build` left behind.
 frontend/dist
-frontend/stats.html
-frontend/stats.json
 mike
-backend/kanban_binary
 # The committed bridge artifact is deliberately excluded: the image builds it from
 # ./pkg/bridge/agent so a sandbox can never run an older bridge than this tree's source.
 # `make bridge-check` remains the gate for the committed copy.
