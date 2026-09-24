@@ -354,6 +354,75 @@ func TestUserMessageInterruptsRunningToolCall(t *testing.T) {
 	}
 }
 
+// The row exists before the call runs, so the frame naming it cannot wait for the answer.
+func TestRunningToolCallNamesItsRowWhileItRuns(t *testing.T) {
+	const marker = "started.txt"
+	running := toolCallsScript(scriptToolCall{id: "call_1", name: "bash", args: `{"command":"` + bashSleepThen + `","timeout":90}`})
+	run := newInterruptRun(t, &types.Task{Title: "Row id", Prompt: "Work"},
+		running,
+		toolCallsScript(scriptToolCall{id: "call_2", name: "bash", args: `{"command":"` + bashSleepThen + `","timeout":90}`}),
+	)
+
+	run.awaitStreamCalls(t, 1)
+	run.awaitFile(t, marker)
+
+	// Everything the second turn emits lands inside the capture, which ends while its command runs.
+	frames := taskStreamFramesDuring(t, run.te.appStreamMgr, run.projectID, run.taskID, func() {
+		if err := os.Remove(filepath.Join(run.worktreePath, marker)); err != nil {
+			t.Errorf("clear the first turn's marker: %v", err)
+			return
+		}
+		run.send(t, "Stop")
+		run.awaitStreamCalls(t, 2)
+		run.awaitFile(t, marker)
+	})
+
+	rows := run.toolRows(t)
+	if len(rows) < 2 {
+		t.Fatalf("tool_call rows = %d, want one per turn", len(rows))
+	}
+	secondRow := rows[len(rows)-1]
+	var called struct {
+		ID string `json:"tool_id"`
+	}
+	if err := json.Unmarshal([]byte(secondRow.ToolCalls), &called); err != nil {
+		t.Fatalf("decode the second turn's tool_call row: %v", err)
+	}
+	if called.ID != "call_2" {
+		t.Fatalf("the newest tool_call row names %q, want call_2 — the capture would weigh the wrong call", called.ID)
+	}
+
+	var namedRow, answered bool
+	for _, f := range frames {
+		switch f.Event {
+		case string(types.WSTypeToolProgress):
+			if f.Data["tool_id"] == called.ID && f.Data["message_id"] == secondRow.ID {
+				namedRow = true
+			}
+		case string(types.WSTypeToolResult):
+			if f.Data["tool_id"] == called.ID {
+				answered = true
+			}
+		}
+	}
+	if !namedRow {
+		t.Errorf("no tool_progress frame named row %s of the running %s; captured %d frames: %s",
+			secondRow.ID, called.ID, len(frames), frameEvents(frames))
+	}
+	if answered {
+		t.Error("the captured window holds the call's answer, so it says nothing about a running call")
+	}
+}
+
+// frameEvents lists the events a capture held.
+func frameEvents(frames []taskStreamFrame) string {
+	events := make([]string, 0, len(frames))
+	for _, f := range frames {
+		events = append(events, f.Event)
+	}
+	return strings.Join(events, ",")
+}
+
 // An interrupted turn settles nothing: a request_review in it does not commit, merge or mark Done,
 // because the work it was reporting on was stopped on the way.
 func TestInterruptedTurnDoesNotCommitOrFinish(t *testing.T) {

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import type { StreamEvent } from '$lib/types';
 import { StreamState } from '$lib/services/stream-state.svelte';
 import { createStreamHandler, type StreamHandlerCallbacks } from '$lib/services/stream-handler';
 import { buildEntriesFromMessages, mergeLoadedHistory } from '$lib/utils/chat-entries';
@@ -102,6 +103,101 @@ describe('tool_result interrupted flag', () => {
         handleEvent({ type: 'tool_result', data: { tool_id: 'tc-3', success: true, interrupted: false, output: 'built', duration: 12 } }, false);
 
         expect(stream.state.entries[0].toolCalls![0].interrupted).toBe(false);
+    });
+});
+
+// A user message interrupts the turn in flight. The rows written before the call ran decide what the
+// screen may delete at the keystroke: what it drops, the answer has nowhere to land.
+describe('a message that interrupts a running tool call', () => {
+    function setup() {
+        const stream = new StreamState();
+        const handleEvent = createStreamHandler(stream, makeCallbacks());
+        return { stream, handleEvent };
+    }
+
+    /** The frames of a turn whose call is now running. */
+    function runningCall(handleEvent: ReturnType<typeof createStreamHandler>) {
+        handleEvent({ type: 'token', data: { text: 'Building it now. ' } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-1', tool_name: 'bash', args: { command: 'make build' } } }, false);
+        handleEvent({ type: 'tool_progress', data: { tool_id: 'tc-1', message_id: 'row-1' } }, false);
+    }
+
+    const cancelled: StreamEvent = { type: 'status', data: { state: 'cancelled', activity: 'Response cancelled, processing new message' } };
+    const interruptedResult: StreamEvent = { type: 'tool_result', data: { tool_id: 'tc-1', success: false, interrupted: true, output: 'Interrupted', duration: 900, message_id: 'row-1' } };
+
+    it('names the row on the card, because an announcement alone proves no row exists', () => {
+        const { stream, handleEvent } = setup();
+        runningCall(handleEvent);
+
+        expect(stream.state.entries[0].toolCalls![0].messageId).toBe('row-1');
+    });
+
+    it('keeps the turn\'s text and card, so the interrupted answer lands instead of vanishing', () => {
+        const { stream, handleEvent } = setup();
+        runningCall(handleEvent);
+
+        stream.abandonInterruptedTurn(); // what sending the message does
+
+        handleEvent(interruptedResult, false);
+        handleEvent(cancelled, false);
+        handleEvent({ type: 'status', data: { state: 'running', activity: 'Processing new message' } }, false);
+
+        const entry = stream.state.entries.find(e => (e.toolCalls?.length ?? 0) > 0);
+        expect(entry?.content).toBe('Building it now. ');
+        expect(entry?.toolCalls).toHaveLength(1);
+        expect(entry!.toolCalls![0].interrupted).toBe(true);
+        expect(entry!.toolCalls![0].isPending).toBe(false);
+    });
+
+    it('drops the text and the card the model was only announcing, which no row answers', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: 'Let me run the build. ' } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-2', tool_name: 'bash', args: { command: 'make build' } } }, false);
+
+        stream.abandonInterruptedTurn();
+
+        expect(stream.state.entries).toEqual([]);
+        // An id kept after its card goes swallows the announcement that would redraw it.
+        expect(stream.state.processedToolIds.has('tc-2')).toBe(false);
+        expect(stream.state.unresolvedToolIds.has('tc-2')).toBe(true);
+    });
+
+    it('leaves the yellow card of a stopped turn on a screen that never sent the message', () => {
+        const { stream, handleEvent } = setup();
+        runningCall(handleEvent);
+        handleEvent(interruptedResult, false);
+
+        // Nothing acted locally: the cancelled frame is all this screen is told.
+        handleEvent(cancelled, false);
+
+        expect(stream.state.entries[0].toolCalls![0].interrupted).toBe(true);
+    });
+
+    it('is what deletes the abandoned text and its card a cancelled frame arrives over', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: 'Half a sentence' } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-5', tool_name: 'bash', args: { command: 'make build' } } }, false);
+
+        handleEvent(cancelled, false);
+
+        expect(stream.state.entries).toEqual([]);
+    });
+
+    it('names the row on the card a history reload moved to another entry', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: 'Building it now. ' } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-1', tool_name: 'bash', args: { command: 'make build' } } }, false);
+        // What loadHistory leaves behind: the row's entry id, the same tool_id, a stale ref.
+        stream.state.entries = [{
+            id: 'row-1', role: 'assistant', content: 'Building it now. ', isStreaming: false,
+            createdAt: new Date().toISOString(),
+            toolCalls: [{ toolId: 'tc-1', toolName: 'bash', args: { command: 'make build' }, isPending: true, startedAt: Date.now() }],
+        }];
+        stream.state.currentAssistantId = null;
+
+        handleEvent({ type: 'tool_progress', data: { tool_id: 'tc-1', message_id: 'row-1' } }, false);
+
+        expect(stream.state.entries[0].toolCalls![0].messageId).toBe('row-1');
     });
 });
 

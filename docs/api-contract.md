@@ -103,6 +103,26 @@ the run ends instead of looping. Tests: `TestUserMessageInterruptsRunningToolCal
 `TestStoppingATaskIsNotAnInterrupt` (`backend/exec/interrupt_tool_call_test.go`),
 `TestBuildToolResultEvent_Interrupted`, `stream-handler.unit.ts`, `chat-entries.unit.ts`.
 
+### What an interrupting message may delete
+
+The rows decide, and the screen is told which they are. `finalizeTurn` (`backend/exec/loop.go`) persists
+the assistant row and one `tool_call` row per call before running any of them, and as each row lands a
+`tool_progress` frame names it: `{"tool_id": …, "message_id": …}`. So a card carrying `messageId` is a
+row while its command is still running — no answer need have arrived.
+
+`StreamState.abandonInterruptedTurn` (`frontend/src/lib/services/stream-state.svelte.ts`) is the one place
+that rule is applied, and both paths into it go through it: the chat's own send, and the
+`status: cancelled` frame that tells every other screen. A streaming entry goes only when nothing in it
+carries `messageId`. Drop a row's card and the `tool_result` frames that answer the stopped call resolve
+nothing: the turn and its text vanish until the transcript is read from the database again.
+
+Filter before closing the entry. Closing clears `isStreaming`, the flag that identifies the entry, so a
+handler that closes first deletes neither the half-streamed text nor the card no row answers.
+
+Tests: `stream-handler.unit.ts` (the kept card, the dropped one, the cancelled frame arriving alone) and
+`TestRunningToolCallNamesItsRowWhileItRuns` (`backend/exec/interrupt_tool_call_test.go`), which reads the
+wire while a command runs.
+
 ## Provider routing
 
 `PUT /api/config` is a partial update with two required pairs:

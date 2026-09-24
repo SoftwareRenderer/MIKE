@@ -228,19 +228,21 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 break;
             }
             case 'tool_progress': {
-                const data = event.data as { tool_id?: string; bytes_written?: number; lines_added?: number; lines_removed?: number; path?: string };
+                const data = event.data as { tool_id?: string; bytes_written?: number; lines_added?: number; lines_removed?: number; path?: string; message_id?: string };
                 // Progress lands on the live tool call — a ref captured before a history
                 // reload points at a detached copy and would swallow it.
-                const applyProgress = (toolId: string, fallback: ToolCallInfo | undefined) => {
+                const applyProgress = (toolId: string, fallback: ToolCallInfo | undefined): ToolCallInfo | undefined => {
                     const tc = resolveLiveToolCall(s.entries, s.activeToolCalls, toolId)?.tc ?? fallback;
-                    if (!tc) return;
+                    if (!tc) return undefined;
                     if (data.bytes_written !== undefined) tc.bytesWritten = data.bytes_written;
                     if (data.lines_added !== undefined) tc.linesAdded = data.lines_added;
                     if (data.lines_removed !== undefined) tc.linesRemoved = data.lines_removed;
                     if (data.path) tc.path = data.path;
+                    return tc;
                 };
                 if (data.tool_id) {
-                    applyProgress(data.tool_id, s.activeToolCalls.get(data.tool_id)?.toolCall);
+                    const tc = applyProgress(data.tool_id, s.activeToolCalls.get(data.tool_id)?.toolCall);
+                    if (tc && data.message_id) tc.messageId = data.message_id;
                 } else {
                     // Broadcast: update all active tool calls
                     for (const [toolId, ref] of s.activeToolCalls) applyProgress(toolId, ref.toolCall);
@@ -363,10 +365,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                         s.awaitingResponse = true;
                     }
                 } else if (data.state === 'cancelled') {
-                    stream.closeCurrentAssistant();
-                    s.activeToolCalls = new Map();
-                    s.processedToolIds = new Set();
-                    s.entries = s.entries.filter(e => !e.isStreaming);
+                    stream.abandonInterruptedTurn();
                     markNotStreaming();
                     s.awaitingResponse = false;
                     stream.clearRetry();

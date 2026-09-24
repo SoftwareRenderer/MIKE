@@ -773,14 +773,9 @@
 
     async function handleSend(msg: string, attachments?: Array<{ mimeType: string; data: string }>) {
         if (!msg && (!attachments || attachments.length === 0)) return;
-        // If LLM is streaming, cancel the current response by clearing partial assistant entry.
+
         if (isLoading) {
-            stream.state.entries = stream.state.entries.filter(e => !e.isStreaming);
-            if (currentAssistantId) {
-                stream.state.currentAssistantId = null;
-            }
-            stream.state.activeToolCalls = new Map();
-                    stream.state.processedToolIds = new Set();
+            stream.abandonInterruptedTurn();
             markNotStreaming();
         }
         // If task is in Done, move it back to In Progress before sending

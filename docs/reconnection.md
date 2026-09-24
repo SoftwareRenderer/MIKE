@@ -113,7 +113,9 @@ only thing that can draw the card.
 The `status: running` frame announces a run, and it discards any entry that is nothing but an unanswered
 tool call — that call belongs to the run the frame ends, not the one it opens. What the frame supersedes is
 what this screen saw announced, never what it read. A pending call carrying `messageId` is a row the server
-wrote; a frame about the run says nothing about that row. The `tool_call` event is broadcast once (*The
+wrote; a frame about the run says nothing about that row. `tool_progress` names the row while the call is
+still running, so the evidence is on screen before any answer — `docs/api-contract.md` → *What an
+interrupting message may delete*. The `tool_call` event is broadcast once (*The
 reload meets the replay buffer*), so the replay carrying this frame may have lost the announcement that
 would redraw the card. Delete the row's copy then, and the call has no card for the rest of the run: its
 `tool_result` resolves nothing, and nothing asks again. That is why the machine that watched the run shows

@@ -112,6 +112,34 @@ export class StreamState {
         this.state.processedToolIds = new Set();
     }
 
+    /**
+     * A user message interrupted the turn in flight: the entries no row answers go, the rest stay so
+     * the frames answering an interrupted call still have a card to land on. A `messageId` means a row
+     * exists — `finalizeTurn` (backend/exec/loop.go) writes the assistant row and one `tool_call` row
+     * per call before running any of them, and names each row in a `tool_progress` frame.
+     *
+     * Filter before closing: closing clears the `isStreaming` flag this filter reads.
+     */
+    abandonInterruptedTurn() {
+        const discarded: string[] = [];
+        this.state.entries = this.state.entries.filter(e => {
+            if (!e.isStreaming) return true;
+            if (!e.toolCalls?.some(tc => !!tc.messageId)) {
+                discarded.push(...(e.toolCalls ?? []).map(tc => tc.toolId));
+                return false;
+            }
+            e.isStreaming = false; // its row exists, so the text is finished
+            return true;
+        });
+        this.state.currentAssistantId = null;
+        this.reconcileActiveToolCalls();
+        if (discarded.length > 0) {
+            // An id still held after its card goes swallows the announcement that would redraw it.
+            const gone = new Set(discarded);
+            this.state.processedToolIds = new Set([...this.state.processedToolIds].filter(id => !gone.has(id)));
+        }
+    }
+
     /** Reset streaming state (thread switch). */
     resetStreaming() {
         this.closeCurrentAssistant();

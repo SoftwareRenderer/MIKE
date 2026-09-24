@@ -1105,6 +1105,8 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 				CreatedAt:      time.Now().UTC(),
 			}); err != nil {
 				logging.For(logging.Tools).Warnf("FAILED to persist tool_call message for setup.task=%s tool=%s: %v", setup.task.ID, tc.Function.Name, err)
+			} else {
+				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]any{"tool_id": tc.ID, "message_id": toolCallMsgID}})
 			}
 
 			// A call the model could not state its arguments for is refused rather than run with an
