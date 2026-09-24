@@ -652,27 +652,19 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 	return false // continue
 }
 
-// sandboxCreateOpts is the sandbox configuration for creating (or recreating) setup's
-// container on the given image, with the worktree mounted read-only when readOnly says so.
-// Four paths create this
-// container (start, plan/build-mode switch, agent config change, bridge recovery) and share
-// it, so a new field cannot be set in three of them. Only the image comes from the caller -
-// only EnsureImageForProject knows what it settled on.
+// sandboxCreateOpts is the sandbox configuration for creating (or recreating) setup's container on
+// the given image, with the worktree mounted read-only when readOnly says so. Four paths create this
+// container (start, plan/build-mode switch, agent config change, bridge recovery) and share it. Only
+// the image and the mode come from the caller — only EnsureImageForProject knows what the image
+// settled on; the project's own configuration is sandbox.ProjectOpts's.
 func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, readOnly bool) sandbox.SandboxOpts {
-	// The host folders this container may see are the ones the project configured, plus the ones the user
-	// approved for the agent this task runs. No other installed extension contributes a folder.
-	return sandbox.SandboxOpts{
-		BaseImage:        image,
-		NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
-		MemoryLimit:      setup.sandboxOpts.MemoryLimit,
-		ForwardPorts:     setup.sandboxOpts.ForwardPorts,
-		AgentSandbox:     te.agentRegistry.AgentSandboxForURL(setup.providerURL()),
-		SkillsDir:        prompts.SkillsDir(),
-		SandboxMounts:    setup.sandboxOpts.SandboxMounts,
-		SandboxEnvs:      setup.sandboxOpts.SandboxEnvs,
-		Capabilities:     setup.sandboxOpts.Capabilities,
-		WorktreeReadOnly: readOnly,
-	}
+	// The host folders this container may see are the ones the project configured, plus the ones the
+	// user approved for the agent this task runs. No other installed extension contributes a folder.
+	opts := setup.sandboxOpts
+	opts.BaseImage = image
+	opts.AgentSandbox = te.agentRegistry.AgentSandboxForURL(setup.providerURL())
+	opts.WorktreeReadOnly = readOnly
+	return opts
 }
 
 // setupSandbox creates or reuses a sandbox container and connects to the agent. Returns the image

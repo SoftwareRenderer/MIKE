@@ -158,8 +158,7 @@ func IsGitIgnored(repoRoot, relPath string) bool {
 			return false
 		}
 	}
-	cmd := Command("", "check-ignore", "--quiet", "--", relPath)
-	cmd.Dir = repoRoot
+	cmd := Command(repoRoot, "check-ignore", "--quiet", "--", relPath)
 	// Exit code 0 means ignored, 1 means not ignored, 128 means fatal error.
 	// Any error (not ignored or git unavailable) → not ignored.
 	return cmd.Run() == nil
@@ -324,8 +323,7 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 	staleRegPath := filepath.Join(project.Path, ".git", "worktrees", taskID)
 	_ = os.RemoveAll(staleRegPath)
 
-	cmd := Command("", "worktree", "add", "--detach", worktreePath, sourceRef)
-	cmd.Dir = project.Path
+	cmd := Command(project.Path, "worktree", "add", "--detach", worktreePath, sourceRef)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("create worktree: %s: %w", string(out), err)
 	}
@@ -336,9 +334,9 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 	branchExists := wm.branchExistsInRepo(project.Path, branchName)
 	var branchErr error
 	if branchExists {
-		_, branchErr = wm.gitRunOutput(worktreePath, "checkout", branchName)
+		_, branchErr = Run(worktreePath, "checkout", branchName)
 	} else {
-		_, branchErr = wm.gitRunOutput(worktreePath, "checkout", "-B", branchName)
+		_, branchErr = Run(worktreePath, "checkout", "-B", branchName)
 	}
 	if branchErr != nil {
 		wm.gitRun(project.Path, "worktree", "remove", "--force", worktreePath)
@@ -392,16 +390,12 @@ func (wm *WorktreeManager) RemoveWorktree(projectID, taskID, branchName string) 
 
 // GitStatus returns the git status --porcelain output for a task's worktree.
 func (wm *WorktreeManager) GitStatus(taskID string) (string, error) {
-	worktreePath, err := wm.WorktreePath(taskID)
+	worktreePath, err := wm.taskWorktree(taskID)
 	if err != nil {
 		return "", err
 	}
 
-	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		return "", ErrWorktreeNotFound
-	}
-
-	out, err := wm.gitRunOutput(worktreePath, "status", "--porcelain")
+	out, err := Run(worktreePath, "status", "--porcelain")
 	if err != nil {
 		return "", fmt.Errorf("git status: %w", err)
 	}
@@ -596,15 +590,8 @@ var kanbanLabelPrefixes = []string{
 	stashLabelAutoMerge,
 }
 
-// hasKanbanLabel returns true if the subject contains any kanban label prefix.
-func hasKanbanLabel(subject string) bool {
-	for _, p := range kanbanLabelPrefixes {
-		if strings.Contains(subject, p) {
-			return true
-		}
-	}
-	return false
-}
+// hasKanbanLabel returns true if the subject carries any kanban label prefix, whatever task it names.
+func hasKanbanLabel(subject string) bool { return matchKanbanTaskID(subject, "") }
 
 // matchKanbanTaskID returns true if the subject is a kanban-labeled stash for the given task.
 func matchKanbanTaskID(subject, taskID string) bool {
@@ -653,7 +640,7 @@ func getFileSize(worktreePath, filePath, blobHash string, wm *WorktreeManager) (
 
 // gitCatFileSize returns the size of a git blob object.
 func (wm *WorktreeManager) gitCatFileSize(hash string) (int64, error) {
-	out, err := wm.gitRunOutput("", "cat-file", "-s", hash)
+	out, err := Run("", "cat-file", "-s", hash)
 	if err != nil {
 		return 0, err
 	}
@@ -772,12 +759,6 @@ func (wm *WorktreeManager) gitRunInGitDir(dir string, args ...string) (string, e
 	return string(out), err
 }
 
-func (wm *WorktreeManager) gitRunOutput(dir string, args ...string) (string, error) {
-	cmd := Command(dir, args...)
-	out, err := cmd.CombinedOutput()
-	return string(out), err
-}
-
 // baselineUsable reports whether a recorded baseline ref is a meaningful
 // diff baseline for the task's branch
 func (wm *WorktreeManager) baselineUsable(projectPath, baseline, taskBranch string) bool {
@@ -790,7 +771,7 @@ func (wm *WorktreeManager) baselineUsable(projectPath, baseline, taskBranch stri
 	if projectPath == "" {
 		return true
 	}
-	out, err := wm.gitRunOutput(projectPath, "rev-parse", "--verify", "--quiet", baseline+"^{commit}")
+	out, err := Run(projectPath, "rev-parse", "--verify", "--quiet", baseline+"^{commit}")
 	return err == nil && strings.TrimSpace(out) != ""
 }
 
@@ -806,20 +787,9 @@ func (wm *WorktreeManager) ResolveTaskBaseline(projectPath, originBranch string,
 	return baseline
 }
 
-// GitRunInWorktree runs a git command in the task's worktree directory.
-func (wm *WorktreeManager) GitRunInWorktree(taskID string, args ...string) error {
-	worktreePath, err := wm.WorktreePath(taskID)
-	if err != nil {
-		return err
-	}
-	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		return ErrWorktreeNotFound
-	}
-	return wm.gitRun(worktreePath, args...)
-}
-
-// GitRunInWorktreeOutput runs a git command in the task's worktree directory and returns its output.
-func (wm *WorktreeManager) GitRunInWorktreeOutput(taskID string, args ...string) (string, error) {
+// taskWorktree resolves the task's worktree directory and refuses one that is gone, so a task whose
+// worktree was deleted never runs git somewhere else.
+func (wm *WorktreeManager) taskWorktree(taskID string) (string, error) {
 	worktreePath, err := wm.WorktreePath(taskID)
 	if err != nil {
 		return "", err
@@ -827,7 +797,25 @@ func (wm *WorktreeManager) GitRunInWorktreeOutput(taskID string, args ...string)
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
 		return "", ErrWorktreeNotFound
 	}
-	return wm.gitRunOutput(worktreePath, args...)
+	return worktreePath, nil
+}
+
+// GitRunInWorktree runs a git command in the task's worktree directory.
+func (wm *WorktreeManager) GitRunInWorktree(taskID string, args ...string) error {
+	worktreePath, err := wm.taskWorktree(taskID)
+	if err != nil {
+		return err
+	}
+	return wm.gitRun(worktreePath, args...)
+}
+
+// GitRunInWorktreeOutput runs a git command in the task's worktree directory and returns its output.
+func (wm *WorktreeManager) GitRunInWorktreeOutput(taskID string, args ...string) (string, error) {
+	worktreePath, err := wm.taskWorktree(taskID)
+	if err != nil {
+		return "", err
+	}
+	return Run(worktreePath, args...)
 }
 
 // StageIndexedFiles refreshes the index of currently staged files from the
@@ -892,7 +880,7 @@ func (wm *WorktreeManager) GitRunInProjectOutput(projectID string, args ...strin
 	if err != nil {
 		return "", fmt.Errorf("get project: %w", err)
 	}
-	return wm.gitRunOutput(project.Path, args...)
+	return Run(project.Path, args...)
 }
 
 // GitRunInDir runs a git command in the given directory.
@@ -902,20 +890,16 @@ func (wm *WorktreeManager) GitRunInDir(dir string, args ...string) error {
 
 // GitRunInDirOutput runs a git command in the given directory and returns its output.
 func (wm *WorktreeManager) GitRunInDirOutput(dir string, args ...string) (string, error) {
-	return wm.gitRunOutput(dir, args...)
+	return Run(dir, args...)
 }
 
 // GetTaskCommits returns the commit log for a task's worktree branch.
 // If baseRef is provided, only commits after the divergence from baseRef are returned (baseRef..HEAD).
 // Also returns the commit at baseRef as BaseCommit for display purposes.
 func (wm *WorktreeManager) GetTaskCommits(taskID, baseRef string) (*TaskCommitsResult, error) {
-	worktreePath, err := wm.WorktreePath(taskID)
+	worktreePath, err := wm.taskWorktree(taskID)
 	if err != nil {
 		return nil, err
-	}
-
-	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		return nil, ErrWorktreeNotFound
 	}
 
 	return TaskCommitsIn(worktreePath, baseRef, "")
@@ -944,7 +928,7 @@ func (wm *WorktreeManager) ResetWorktreeTo(taskID, hash string) error {
 		return fmt.Errorf("restore: no snapshot given for task %s", taskID)
 	}
 	// Check the snapshot exists before throwing the current work away.
-	if _, err := wm.gitRunOutput(worktreePath, "rev-parse", "--verify", hash+"^{tree}"); err != nil {
+	if _, err := Run(worktreePath, "rev-parse", "--verify", hash+"^{tree}"); err != nil {
 		return fmt.Errorf("%w: snapshot %.12s is not in this repository: %w", ErrSnapshotMissing, hash, err)
 	}
 
@@ -1048,8 +1032,7 @@ var fileRe = regexp.MustCompile(`^diff --git a/(.+?) b/`)
 
 // IsGitRepo checks if a path is a git repository.
 func IsGitRepo(path string) bool {
-	cmd := Command("", "-C", path, "rev-parse", "--git-dir")
-	cmd.Dir = path
+	cmd := Command(path, "-C", path, "rev-parse", "--git-dir")
 	return cmd.Run() == nil
 }
 

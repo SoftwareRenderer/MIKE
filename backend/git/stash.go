@@ -100,13 +100,13 @@ func (wm *WorktreeManager) PopStashByHash(dir, hash string) (bool, error) {
 
 // porcelainStatus fingerprints dir's working tree, to tell a refused apply from a partial one.
 func (wm *WorktreeManager) porcelainStatus(dir string) (string, bool) {
-	out, err := wm.gitRunOutput(dir, "status", "--porcelain")
+	out, err := Run(dir, "status", "--porcelain")
 	return out, err == nil
 }
 
 // unmergedPaths lists the paths dir's index holds unmerged. Empty means nothing conflicted.
 func (wm *WorktreeManager) unmergedPaths(dir string) []string {
-	out, err := wm.gitRunOutput(dir, "diff", "--name-only", "--diff-filter=U", "-z")
+	out, err := Run(dir, "diff", "--name-only", "--diff-filter=U", "-z")
 	if err != nil {
 		return nil
 	}
@@ -121,7 +121,7 @@ func (wm *WorktreeManager) unmergedPaths(dir string) []string {
 
 // listStashEntries parses "git stash list --format=%gd%x00%H%x00%gs" output.
 func (wm *WorktreeManager) listStashEntries(repoPath string) ([]StashEntry, error) {
-	out, err := wm.gitRunOutput(repoPath, "stash", "list", "--format=%gd%x00%H%x00%gs")
+	out, err := Run(repoPath, "stash", "list", "--format=%gd%x00%H%x00%gs")
 	if err != nil {
 		return nil, err
 	}

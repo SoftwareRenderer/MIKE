@@ -90,13 +90,13 @@ func TestMergeConflictResolution_StagesOnlyConflictedFiles(t *testing.T) {
 	conflictedFiles = GetResolvedConflictedFiles(wtPath)
 	if len(conflictedFiles) > 0 {
 		addArgs := append([]string{"add"}, conflictedFiles...)
-		if err := gitRun(wtPath, addArgs...); err != nil {
+		if _, err := git.Run(wtPath, addArgs...); err != nil {
 			t.Fatalf("git add conflicted files failed: %v", err)
 		}
 	}
 
 	// 2. Commit the resolution (in modern git, this completes the merge)
-	if err := gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
+	if _, err := git.Run(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
 		t.Fatalf("git commit failed: %v", err)
 	}
 
@@ -218,11 +218,11 @@ func TestMergeConflictResolution_MultipleConflictedFiles(t *testing.T) {
 	conflictedFiles = GetResolvedConflictedFiles(wtPath)
 	if len(conflictedFiles) > 0 {
 		addArgs := append([]string{"add"}, conflictedFiles...)
-		if err := gitRun(wtPath, addArgs...); err != nil {
+		if _, err := git.Run(wtPath, addArgs...); err != nil {
 			t.Fatalf("git add failed: %v", err)
 		}
 	}
-	if err := gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
+	if _, err := git.Run(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
 		t.Fatalf("git commit failed: %v", err)
 	}
 	unlockStash4 := te.worktreeMgr.LockProjectStash(projectID)
@@ -296,9 +296,9 @@ func TestMergeConflictResolution_CommitMessage(t *testing.T) {
 	conflictedFiles := GetResolvedConflictedFiles(wtPath)
 	if len(conflictedFiles) > 0 {
 		addArgs := append([]string{"add"}, conflictedFiles...)
-		gitRun(wtPath, addArgs...)
+		_, _ = git.Run(wtPath, addArgs...)
 	}
-	gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
+	_, _ = git.Run(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
 
 	// Verify commit message
 	cmd := runGitCmd(wtPath, "log", "-1", "--format=%s")
@@ -368,9 +368,9 @@ func TestMergeConflictResolution_WithFinalMerge(t *testing.T) {
 	conflictedFiles := GetResolvedConflictedFiles(wtPath)
 	if len(conflictedFiles) > 0 {
 		addArgs := append([]string{"add"}, conflictedFiles...)
-		gitRun(wtPath, addArgs...)
+		_, _ = git.Run(wtPath, addArgs...)
 	}
-	gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
+	_, _ = git.Run(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
 	unlockStash7 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "pop")
 	unlockStash7()
@@ -465,9 +465,9 @@ func TestMergeConflictResolution_StashRestored(t *testing.T) {
 	conflictedFiles := GetResolvedConflictedFiles(wtPath)
 	if len(conflictedFiles) > 0 {
 		addArgs := append([]string{"add"}, conflictedFiles...)
-		gitRun(wtPath, addArgs...)
+		_, _ = git.Run(wtPath, addArgs...)
 	}
-	gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
+	_, _ = git.Run(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
 
 	// Pop stash — should restore notes.txt
 	unlockStash9 := te.worktreeMgr.LockProjectStash(projectID)
@@ -705,9 +705,9 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 	conflictedFiles := GetResolvedConflictedFiles(subtaskWtPath)
 	if len(conflictedFiles) > 0 {
 		addArgs := append([]string{"add"}, conflictedFiles...)
-		gitRun(subtaskWtPath, addArgs...)
+		_, _ = git.Run(subtaskWtPath, addArgs...)
 	}
-	gitRun(subtaskWtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
+	_, _ = git.Run(subtaskWtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
 	unlockStash12 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(subtaskWtPath, "stash", "pop")
 	unlockStash12()
@@ -864,9 +864,9 @@ func TestMergeConflictResolution_CommitIsMergeCommit(t *testing.T) {
 	conflictedFiles := GetResolvedConflictedFiles(wtPath)
 	if len(conflictedFiles) > 0 {
 		addArgs := append([]string{"add"}, conflictedFiles...)
-		gitRun(wtPath, addArgs...)
+		_, _ = git.Run(wtPath, addArgs...)
 	}
-	gitRun(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
+	_, _ = git.Run(wtPath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...)
 
 	// Verify the resolution commit is a merge commit (has 2 parents)
 	cmd := runGitCmd(wtPath, "cat-file", "-p", "HEAD")

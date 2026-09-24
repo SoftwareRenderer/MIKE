@@ -161,7 +161,7 @@ func (wm *WorktreeManager) PinSnapshot(repoPath, ref, hash string) error {
 	if hash == "" {
 		return fmt.Errorf("%w: %s has no object to pin", ErrInvalidSnapshotRef, ref)
 	}
-	if _, err := wm.gitRunOutput(repoPath, "rev-parse", "--verify", hash+"^{commit}"); err != nil {
+	if _, err := Run(repoPath, "rev-parse", "--verify", hash+"^{commit}"); err != nil {
 		return fmt.Errorf("pin snapshot %s: object %s is not reachable in this repository: %w", ref, hash, err)
 	}
 	if err := wm.gitRun(repoPath, "update-ref", ref, hash); err != nil {
@@ -185,7 +185,7 @@ func (wm *WorktreeManager) DeleteSnapshotRefsUnder(repoPath, prefix string) (int
 	if prefix != SnapshotRefPrefix && !strings.HasPrefix(prefix, SnapshotRefPrefix+"/") {
 		return 0, fmt.Errorf("%w: refusing to delete refs under %q", ErrInvalidSnapshotRef, prefix)
 	}
-	out, err := wm.gitRunOutput(repoPath, "for-each-ref", "--format=%(refname)", prefix)
+	out, err := Run(repoPath, "for-each-ref", "--format=%(refname)", prefix)
 	if err != nil {
 		return 0, fmt.Errorf("list snapshot refs under %s: %w", prefix, err)
 	}

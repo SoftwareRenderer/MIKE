@@ -22,8 +22,7 @@ var ErrNotAMergeConflict = errors.New("not a merge conflict")
 // Uses `git rev-parse --git-dir` to correctly resolve the git directory in both
 // regular repos and worktrees (where .git is a file, not a directory).
 func isMergeInProgress(dir string) bool {
-	cmd := git.Command("", "rev-parse", "--git-dir")
-	cmd.Dir = dir
+	cmd := git.Command(dir, "rev-parse", "--git-dir")
 	out, err := cmd.Output()
 	if err != nil {
 		return false
@@ -48,8 +47,7 @@ func GetConflictedFiles(dir string) []string {
 	var files []string
 
 	// Primary: git status --porcelain -z
-	cmd := git.Command("", "status", "--porcelain", "-z")
-	cmd.Dir = dir
+	cmd := git.Command(dir, "status", "--porcelain", "-z")
 	if out, err := cmd.Output(); err == nil {
 		entries := strings.Split(string(out), "\x00")
 		for i := 0; i < len(entries); i++ {
@@ -70,8 +68,7 @@ func GetConflictedFiles(dir string) []string {
 
 	// Fallback: git diff --name-only -z --diff-filter=U (binary conflicts, renames)
 	if len(files) == 0 {
-		cmd = git.Command("", "diff", "--name-only", "-z", "--diff-filter=U")
-		cmd.Dir = dir
+		cmd = git.Command(dir, "diff", "--name-only", "-z", "--diff-filter=U")
 		if out, err := cmd.Output(); err == nil {
 			for _, name := range strings.Split(string(out), "\x00") {
 				if name != "" {
@@ -106,15 +103,13 @@ func GetAllConflictsResolved(dir string) bool {
 
 	// Check MERGE_HEAD exists (we should be in a merge state).
 	// If not, fall back to file-content scan.
-	mergeHeadCmd := git.Command("", "rev-parse", "--verify", "--quiet", "MERGE_HEAD")
-	mergeHeadCmd.Dir = dir
+	mergeHeadCmd := git.Command(dir, "rev-parse", "--verify", "--quiet", "MERGE_HEAD")
 	if mergeHeadCmd.Run() == nil {
 		// Use git diff --check to detect conflict markers.
 		// Compares working tree against MERGE_HEAD; any markers in the
 		// diff are reported as warnings and cause a non-zero exit code.
 		args := append([]string{"diff", "--check", "MERGE_HEAD", "--"}, conflictedFiles...)
-		cmd := git.Command("", args...)
-		cmd.Dir = dir
+		cmd := git.Command(dir, args...)
 		return cmd.Run() == nil
 	}
 
@@ -155,8 +150,7 @@ func GetResolvedConflictedFiles(dir string) []string {
 
 // getMergeStatusOutput returns the raw git status --porcelain output for diagnostics.
 func getMergeStatusOutput(dir string) string {
-	cmd := git.Command("", "status", "--porcelain")
-	cmd.Dir = dir
+	cmd := git.Command(dir, "status", "--porcelain")
 	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Sprintf("(git status failed: %v)", err)

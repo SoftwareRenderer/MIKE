@@ -38,26 +38,25 @@ func normalizeBashTimeout(timeout int64) int64 {
 	}
 }
 
-// streamLineWriter accumulates a command's output and hands each completed line to onLine as
-// it arrives. mu lets one writer serve both the stdout and stderr copiers. The accumulator is
-// bounded because the bytes come from an LLM-written command; the line stream to the browser is
-// not, since the UI follows a running command.
+// streamLineWriter accumulates a command's output and hands each completed line to onLine as it
+// arrives. mu lets one writer serve both the stdout and stderr copiers. The accumulator is a
+// toolresult.Capture because the bytes come from an LLM-written command; the line stream to the
+// browser is not bounded, since the UI follows a running command.
 type streamLineWriter struct {
-	mu      sync.Mutex
-	total   bytes.Buffer
-	onLine  func(text string)
-	pend    []byte
-	dropped int
+	mu       sync.Mutex
+	captured toolresult.Capture
+	onLine   func(text string)
+	pend     []byte
 }
 
 // partialFlushBytes bounds the buffer held back waiting for a newline.
 const partialFlushBytes = 64 << 10
 
+// Write always reports the full length: a short count makes io.Copy stop and drop output.
 func (w *streamLineWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	// Always report the full length: a short count makes io.Copy stop and drop output.
-	w.captureLocked(p)
+	w.captured.Write(p)
 	w.pend = append(w.pend, p...)
 	if i := bytes.LastIndexByte(w.pend, '\n'); i >= 0 {
 		w.emitLocked(string(w.pend[:i+1]))
@@ -69,20 +68,6 @@ func (w *streamLineWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// captureLocked keeps the result string bounded; bytes past the cap are counted, not stored.
-func (w *streamLineWriter) captureLocked(p []byte) {
-	room := toolresult.MaxCaptureBytes - w.total.Len()
-	switch {
-	case room <= 0:
-		w.dropped += len(p)
-	case len(p) <= room:
-		w.total.Write(p)
-	default:
-		w.total.Write(p[:room])
-		w.dropped += len(p) - room
-	}
-}
-
 // WriteFrom streams a pipe into the writer until EOF, or until procterm.Drain closes the fd
 // (the normal end for a command that detached a child still holding it). What was written is
 // already in the accumulator and on the line stream, so neither count is reported back.
@@ -91,14 +76,7 @@ func (w *streamLineWriter) WriteFrom(r io.Reader) {
 }
 
 // String returns what was captured — up to the cap, plus the marker naming what was dropped.
-func (w *streamLineWriter) String() string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.dropped == 0 {
-		return w.total.String()
-	}
-	return w.total.String() + toolresult.CaptureMarker(w.dropped)
-}
+func (w *streamLineWriter) String() string { return w.captured.String() }
 
 // flush emits a trailing partial line, so a command that ends without a newline still gets
 // its last line reported.

@@ -6,6 +6,8 @@ package types
 
 import (
 	"time"
+
+	"mike/pkg/sandboxruntime"
 )
 
 // Task represents a card on the Kanban board.
@@ -234,6 +236,18 @@ type SandboxMemoryStats struct {
 	LimitMB   int64  `json:"memory_limit_mb"`
 	PeakMB    int64  `json:"memory_peak_mb"`
 	OOMKills  uint64 `json:"oom_kills"`
+}
+
+// NewSandboxMemoryStats is one container's measured usage in the form a client reads. A container
+// whose cgroup could not be read is reported as not running.
+func NewSandboxMemoryStats(usage sandboxruntime.MemoryUsageMB) *SandboxMemoryStats {
+	return &SandboxMemoryStats{
+		Running:   usage.Known,
+		CurrentMB: usage.Current,
+		LimitMB:   usage.Limit,
+		PeakMB:    usage.Peak,
+		OOMKills:  usage.OOMKills,
+	}
 }
 
 // MemoryAlertAck is a dismissed alert and the numbers it showed. Counters only rise,

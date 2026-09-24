@@ -69,12 +69,7 @@ func (pw *ProjectWatcher) Watch(projectID, path string) error {
 
 	if existingPath, exists := pw.projects[projectID]; exists {
 		_ = pw.watcher.Remove(existingPath)
-		prefix := existingPath + string(filepath.Separator)
-		for p := range pw.pathCache {
-			if p == existingPath || strings.HasPrefix(p, prefix) {
-				delete(pw.pathCache, p)
-			}
-		}
+		dropWatchedTree(pw.pathCache, existingPath)
 	}
 
 	pw.projects[projectID] = path
@@ -102,14 +97,7 @@ func (pw *ProjectWatcher) Unwatch(projectID string) {
 
 	_ = pw.watcher.Remove(path)
 	delete(pw.projects, projectID)
-	delete(pw.pathCache, path)
-	delete(pw.pathCache, path+string(filepath.Separator))
-	prefix := path + string(filepath.Separator)
-	for p := range pw.pathCache {
-		if strings.HasPrefix(p, prefix) {
-			delete(pw.pathCache, p)
-		}
-	}
+	dropWatchedTree(pw.pathCache, path)
 
 	if timer, ok := pw.debounces[projectID]; ok {
 		timer.Stop()

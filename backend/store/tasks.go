@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"mike/backend/types"
@@ -284,14 +285,33 @@ func (s *Store) SetTaskAssignedPorts(taskID, projectID string, ports []types.Ass
 	return s.updateTaskColumn(taskID, projectID, "assigned_ports", marshalAssignedPorts(ports))
 }
 
+// taskColumn is one column to write and its value.
+type taskColumn struct {
+	name  string
+	value any
+}
+
 // updateTaskColumn updates a single tasks column, scoped to the task's project.
 // The column name comes from internal call sites only (never user input).
 func (s *Store) updateTaskColumn(taskID, projectID, column string, value any) error {
+	return s.updateTaskColumns(taskID, projectID, taskColumn{column, value})
+}
+
+// updateTaskColumns writes several columns of one task in a single statement, scoped to the task's
+// project, and refreshes updated_at. A caller that changes more than one column at once must not do
+// it in two statements: the reader that saw the first without the second would act on half a change.
+// Column names come from internal call sites only (never user input).
+func (s *Store) updateTaskColumns(taskID, projectID string, sets ...taskColumn) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	_, err := s.db.Exec("UPDATE tasks SET "+column+" = ?, updated_at = ? WHERE id = ? AND project_id = ?",
-		value, now.Format(time.RFC3339), taskID, projectID)
+	clauses := make([]string, 0, len(sets))
+	args := make([]any, 0, len(sets)+3)
+	for _, c := range sets {
+		clauses = append(clauses, c.name+" = ?")
+		args = append(args, c.value)
+	}
+	args = append(args, time.Now().UTC().Format(time.RFC3339), taskID, projectID)
+	_, err := s.db.Exec("UPDATE tasks SET "+strings.Join(clauses, ", ")+", updated_at = ? WHERE id = ? AND project_id = ?", args...)
 	return err
 }
 
@@ -327,23 +347,15 @@ func (s *Store) TransitionInFlightTask(taskID, projectID string, executionState 
 // not write the full row (it read the row at task creation, so a full-row
 // update would clobber concurrent changes such as status on task start).
 func (s *Store) SetTaskTitle(projectID, taskID, title string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE tasks SET title = ?, title_generating = ?, updated_at = ? WHERE id = ? AND project_id = ?`,
-		title, 0, now.Format(time.RFC3339), taskID, projectID)
-	return err
+	return s.updateTaskColumns(taskID, projectID,
+		taskColumn{"title", title},
+		taskColumn{"title_generating", 0})
 }
 
 // ClearTitleGenerating marks title generation as finished without touching
 // any other field of the task row.
 func (s *Store) ClearTitleGenerating(projectID, taskID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE tasks SET title_generating = ?, updated_at = ? WHERE id = ? AND project_id = ?`,
-		0, now.Format(time.RFC3339), taskID, projectID)
-	return err
+	return s.updateTaskColumn(taskID, projectID, "title_generating", 0)
 }
 
 // SetTaskBranchIfEmpty sets branch only if empty. Returns true on success.
@@ -363,12 +375,7 @@ func (s *Store) SetTaskBranchIfEmpty(taskID, projectID, branch string) (bool, er
 // ClearTaskBranch clears the branch field of a task. Used to roll back an
 // orphaned branch name when worktree creation fails after SetTaskBranchIfEmpty.
 func (s *Store) ClearTaskBranch(taskID, projectID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE tasks SET branch = '', updated_at = ? WHERE id = ? AND project_id = ?`,
-		now.Format(time.RFC3339), taskID, projectID)
-	return err
+	return s.updateTaskColumn(taskID, projectID, "branch", "")
 }
 
 // SetTaskBranch unconditionally sets the branch of a task. Used by
@@ -379,12 +386,7 @@ func (s *Store) SetTaskBranch(taskID, projectID, branch string) error {
 
 // SetTaskMergeConflict sets or clears the merge conflict flag on a task.
 func (s *Store) SetTaskMergeConflict(taskID, projectID string, hasConflict bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE tasks SET has_merge_conflict = ?, updated_at = ? WHERE id = ? AND project_id = ?`,
-		B2I(hasConflict), now.Format(time.RFC3339), taskID, projectID)
-	return err
+	return s.updateTaskColumn(taskID, projectID, "has_merge_conflict", B2I(hasConflict))
 }
 
 // DeleteTask removes a task.

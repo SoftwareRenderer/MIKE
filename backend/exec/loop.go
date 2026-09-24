@@ -1902,14 +1902,6 @@ func userMessagesEqual(a, b types.ChatMessage) bool {
 	return a.Content == b.Content
 }
 
-// gitRun runs one git command in dir and discards its output.
-func gitRun(dir string, args ...string) error {
-	c := git.Command("", args...)
-	c.Dir = dir
-	_, err := c.CombinedOutput()
-	return err
-}
-
 // failTask sets the task to failed/review state, persists it, broadcasts the
 // update, and sends a WebSocket error event.
 func (te *TaskExecutor) failTask(task *types.Task, projectID, output, code string) {

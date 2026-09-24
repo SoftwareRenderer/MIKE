@@ -1335,16 +1335,9 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		msgWake:        msgWake,
 		summarizeCh:    summarizeCh,
 		sandboxEnabled: project.SandboxEnabled,
-		sandboxOpts: sandbox.SandboxOpts{
-			NetworkIsolation: project.SandboxNetworkIsolation,
-			MemoryLimit:      project.SandboxMemoryLimit,
-			ForwardPorts:     project.ForwardPorts,
-			SandboxMounts:    project.SandboxMounts,
-			SandboxEnvs:      project.SandboxEnvs,
-			Capabilities:     project.SandboxCapabilities,
-		},
-		done:     doneCh,
-		finished: finishedCh,
+		sandboxOpts:    sandbox.ProjectOpts(project),
+		done:           doneCh,
+		finished:       finishedCh,
 	}, nil
 }
 

@@ -20,7 +20,6 @@ import (
 	"mike/backend/errs"
 	"mike/backend/fsutil"
 	"mike/backend/git"
-	"mike/backend/prompts"
 	"mike/backend/sandbox"
 	"mike/backend/types"
 	"mike/pkg/logging"
@@ -1244,17 +1243,9 @@ func (s *Server) fsSandboxOpts(project *types.Project, taskID string) (sandbox.S
 	if err != nil {
 		return sandbox.SandboxOpts{}, err
 	}
-	opts := sandbox.SandboxOpts{
-		BaseImage:        image,
-		NetworkIsolation: project.SandboxNetworkIsolation,
-		MemoryLimit:      project.SandboxMemoryLimit,
-		ForwardPorts:     project.ForwardPorts,
-		AgentSandbox:     s.agentGrantForTask(project.ID, taskID),
-		SkillsDir:        prompts.SkillsDir(),
-		SandboxMounts:    project.SandboxMounts,
-		SandboxEnvs:      project.SandboxEnvs,
-		Capabilities:     project.SandboxCapabilities,
-	}
+	opts := sandbox.ProjectOpts(project)
+	opts.BaseImage = image
+	opts.AgentSandbox = s.agentGrantForTask(project.ID, taskID)
 	return opts, nil
 }
 

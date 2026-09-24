@@ -441,11 +441,12 @@ func isKnownWeak(password string) bool {
 	return known
 }
 
-// splitCSV parses a comma-separated list, dropping blanks and padding. The splitting lives here so a
-// consumer receives entries, not a string each of them re-splits its own way.
-func splitCSV(raw string) []string {
+// splitList drops blanks and padding from a separated list. Which separator a variable uses differs
+// per variable; the dropping does not, and the splitting lives here so a consumer receives entries,
+// not a string each of them re-splits its own way.
+func splitList(raw string, split func(string) []string) []string {
 	var out []string
-	for _, part := range strings.Split(raw, ",") {
+	for _, part := range split(raw) {
 		if p := strings.TrimSpace(part); p != "" {
 			out = append(out, p)
 		}
@@ -453,15 +454,14 @@ func splitCSV(raw string) []string {
 	return out
 }
 
-// splitPathList splits an os.PathList-separated value, dropping blanks and padding.
+// splitCSV parses a comma-separated list.
+func splitCSV(raw string) []string {
+	return splitList(raw, func(s string) []string { return strings.Split(s, ",") })
+}
+
+// splitPathList splits an os.PathList-separated value.
 func splitPathList(raw string) []string {
-	var out []string
-	for _, part := range filepath.SplitList(raw) {
-		if p := strings.TrimSpace(part); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
+	return splitList(raw, filepath.SplitList)
 }
 
 // sortNames is an insertion sort over the two-name list WeakSecrets can return. Sorting keeps the boot

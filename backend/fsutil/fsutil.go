@@ -14,10 +14,52 @@ import (
 	"strings"
 )
 
-// inside reports whether p is one of roots or below it. Empty roots are skipped. It is
-// unexported because it is lexical only: the answer this package gives to "is this path
-// inside that root" is Contained, which requires that too *and* the symlink-resolved
-// path, so there is no way to reach the weak half from outside.
+// InsideRoots reports whether an already-resolved path is one of roots or below it. The comparison
+// is lexical, so it is only sound once the candidate has been through ResolveSymlinks and the roots
+// through NormalizeRoots — both in the same form. Contained is what does both halves for a path that
+// has not been resolved.
+func InsideRoots(resolved string, roots []string) bool { return inside(resolved, roots) }
+
+// RootForms returns a directory in the two forms a candidate path is compared against: absolute and
+// cleaned, and symlink-resolved — the same string when it does not resolve yet. ok is false for a
+// blank entry, which jails nothing.
+func RootForms(raw string) (absolute, resolved string, ok bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", false
+	}
+	absolute = raw
+	if !filepath.IsAbs(absolute) {
+		if a, err := filepath.Abs(absolute); err == nil {
+			absolute = a
+		}
+	}
+	absolute = filepath.Clean(absolute)
+	resolved = absolute
+	if r, err := filepath.EvalSymlinks(absolute); err == nil {
+		resolved = filepath.Clean(r)
+	}
+	return absolute, resolved, true
+}
+
+// NormalizeRoots puts each root in the form a candidate path is compared in — the resolved one when
+// it resolves — dropping blanks and duplicates.
+func NormalizeRoots(roots []string) []string {
+	out := make([]string, 0, len(roots))
+	seen := map[string]bool{}
+	for _, raw := range roots {
+		_, resolved, ok := RootForms(raw)
+		if !ok || seen[resolved] {
+			continue
+		}
+		seen[resolved] = true
+		out = append(out, resolved)
+	}
+	return out
+}
+
+// inside reports whether p is one of roots or below it. Empty roots are skipped, so an entry that
+// carried no path cannot open the jail.
 func inside(p string, roots []string) bool {
 	for _, root := range roots {
 		if root == "" {

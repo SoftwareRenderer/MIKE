@@ -73,20 +73,9 @@ func normalizeHostRoots(dirs ...string) []hostRoot {
 	out := make([]hostRoot, 0, len(dirs))
 	seen := map[string]bool{}
 	for _, raw := range dirs {
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
+		abs, resolved, ok := RootForms(raw)
+		if !ok {
 			continue
-		}
-		abs := raw
-		if !filepath.IsAbs(abs) {
-			if a, err := filepath.Abs(abs); err == nil {
-				abs = a
-			}
-		}
-		abs = filepath.Clean(abs)
-		resolved := abs
-		if r, err := filepath.EvalSymlinks(abs); err == nil {
-			resolved = filepath.Clean(r)
 		}
 		for _, form := range []string{abs, resolved} {
 			if seen[form] {
