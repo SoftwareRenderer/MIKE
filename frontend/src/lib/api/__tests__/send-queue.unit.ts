@@ -26,7 +26,7 @@ describe('sendTaskMessage queueing on network failure', () => {
         const { loadQueue } = await import('$lib/api/queue');
         mockRejectedFetch('TypeError');
 
-        const result = await sendTaskMessage('p1', 't1', 'hello world', 'model-a', 'http://llm:8010/v1');
+        const result = await sendTaskMessage({ projectId: 'p1', taskId: 't1', content: 'hello world', modelName: 'model-a', serverUrl: 'http://llm:8010/v1' });
 
         expect(result.queued).toBe(true);
         expect(result.actionId).toBeTruthy();
@@ -51,7 +51,7 @@ describe('sendTaskMessage queueing on network failure', () => {
         const { loadQueue } = await import('$lib/api/queue');
         mockRejectedFetch('AbortError');
 
-        await expect(sendTaskMessage('p1', 't1', 'cancelled message')).rejects.toThrow();
+        await expect(sendTaskMessage({ projectId: 'p1', taskId: 't1', content: 'cancelled message' })).rejects.toThrow();
 
         const queue = await loadQueue();
         expect(queue).toHaveLength(0);
@@ -64,7 +64,7 @@ describe('sendTaskMessage queueing on network failure', () => {
         const { loadQueue, flushQueueNow } = await import('$lib/api/queue');
         mockRejectedFetch('TypeError');
 
-        await sendTaskMessage('p1', 't1', 'think harder', 'model-a', undefined, undefined, 'high');
+        await sendTaskMessage({ projectId: 'p1', taskId: 't1', content: 'think harder', modelName: 'model-a', reasoningEffort: 'high' });
         expect((await loadQueue())[0].params).toMatchObject({ reasoningEffort: 'high' });
 
         const sends: { url: string; body: string }[] = [];
@@ -87,12 +87,38 @@ describe('sendTaskMessage queueing on network failure', () => {
         });
     });
 
+    // An edited message is one send carrying the row it replaces: the server truncates as the message
+    // lands, so the queue has to carry that intent or a replay would stack the edit onto the thread it was
+    // meant to replace.
+    it('queues an edit-and-send with its replace intent and replays it', async () => {
+        const { sendTaskMessage } = await import('$lib/api/tasks');
+        const { loadQueue, flushQueueNow } = await import('$lib/api/queue');
+        mockRejectedFetch('TypeError');
+
+        await sendTaskMessage({ projectId: 'p1', taskId: 't1', content: 'worded differently', replaceMessageId: 'm-7' });
+        expect((await loadQueue())[0].params).toMatchObject({ replaceMessageId: 'm-7' });
+
+        const bodies: any[] = [];
+        vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: RequestInit) => {
+            const href = String(url);
+            if (href.includes('/api/auth/session')) {
+                return { ok: true, status: 200, json: async () => ({ authenticated: true, csrf_token: 'tok' }) };
+            }
+            bodies.push(JSON.parse(String(init?.body)));
+            return { ok: true, status: 200, json: async () => ({ id: 'm8', role: 'user', content: 'worded differently' }) };
+        }) as unknown as typeof fetch);
+
+        await flushQueueNow();
+
+        expect(bodies).toEqual([expect.objectContaining({ content: 'worded differently', replace_message_id: 'm-7' })]);
+    });
+
     it('does NOT queue and rejects on non-transient server errors (HTTP 500)', async () => {
         const { sendTaskMessage } = await import('$lib/api/tasks');
         const { loadQueue } = await import('$lib/api/queue');
         mockServerErrorFetch();
 
-        await expect(sendTaskMessage('p1', 't1', 'server error message')).rejects.toBeTruthy();
+        await expect(sendTaskMessage({ projectId: 'p1', taskId: 't1', content: 'server error message' })).rejects.toBeTruthy();
 
         const queue = await loadQueue();
         expect(queue).toHaveLength(0);

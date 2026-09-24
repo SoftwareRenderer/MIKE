@@ -12,6 +12,8 @@ holds the transport: the listener, TLS, session/CSRF middleware, the shutdown st
 base context, and therefore the endpoints that are *about the listener* — the `(*Server)` methods in
 `handler_*.go` (`handleFS…`, `handleThread…`, `handleSessions…`), which are methods on `Server` precisely
 because they call `s.broadcastTaskDiff`, `s.lockWorktree`, `s.fsWriteTarget` and take the `s.gitTask` lock.
+`handleTaskSend` is one of them for the same reason: the truncation it may perform releases the checkpoints
+the discarded turns pinned and the forks keyed on their rows, which is `handler_message.go`'s work.
 
 The direction is `server → api` and never back; `backend/api` imports no `backend/server`, which is why a
 handler that needs the hub or a lock is *injected* with a function value instead. That one-way edge is what
@@ -200,6 +202,24 @@ sends it — `` `${API_BASE}/x` ``, a bare `'/api/x'`, and the relative path han
 WebSocket upgrades, whose URL is built from `window.location.origin`, and
 `GET /api/preview/{token}/{path...}`, whose sub-resource URLs the server writes into the document it
 serves (`rewriteRootRelative`). Gate: `scripts/archgate` `apiroutes`.
+
+## A send may take the thread back before it lands
+
+`POST /api/projects/{projectID}/tasks/{taskID}/send` carries one field the executor never reads:
+`replace_message_id`. Set, the thread is taken back to that row first and the message lands where the deleted
+row stood, so an edited message and the turns that answered the old text are one request. Unset, the route is
+the executor's own send unchanged.
+
+The named row has to be the active thread's **last user row** at the moment of the request. A newer user row
+means the conversation moved somewhere this click cannot speak for, and a send flushed from the offline queue
+lands long after the click that wrote it: the route answers 409 and truncates nothing. `handleTaskSend`
+(`backend/server/handler_send.go`) peeks that one field and hands the body on, so every other field stays the
+executor's to parse and its duplicate-send guard sees a thread ending where the message belongs.
+
+**Tests:** `backend/server/handler_send_replace_test.go` — an edit-and-send leaves one user row and moves the
+task out of Review, with and without an attachment, and a replace naming a row that is not the thread's last
+user row leaves
+the thread whole.
 
 ## Child rows under a task path
 

@@ -37,6 +37,37 @@ func (s *Server) messageInTask(w http.ResponseWriter, projectID, taskID, message
 	return msg, true
 }
 
+// truncateMessagesFrom deletes the named message and everything after it in its thread, then undoes what that
+// implies: the file snapshots those turns pinned, the fork threads whose checkpoint row is gone, and the replay
+// buffer that would hand a reconnecting client the deleted turns back. No caller may state a subset of those
+// steps.
+//
+// `regenerate` says the thread is about to be answered again, so the executor re-syncs on its own and the fork
+// cleanup is skipped.
+func (s *Server) truncateMessagesFrom(projectID, taskID string, msg *types.TaskMessage, regenerate bool) error {
+	msgCreatedAt, msgTimeErr := s.store.GetMessageCreatedAt(msg.ID)
+	// The message's own thread_id, in case the task's active thread has moved on since the row was written.
+	deletedCheckpoints, err := s.store.DeleteTaskMessagesAfter(taskID, msg.ID, msg.ThreadID)
+	if err != nil {
+		return err
+	}
+	// The delete returns the ids, because only it knows which rows actually went.
+	s.releaseMessageSnapshots(taskID, deletedCheckpoints)
+	task, _ := s.store.GetTask(projectID, taskID)
+	// Waking an idle executor would start an unwanted LLM call; a running one picks the change up before its
+	// next call anyway, so this only resets the loop detector.
+	if !regenerate && s.executor != nil && task != nil && task.ExecutionState == types.ExecStateRunning {
+		s.executor.NotifyContextChanged(taskID)
+	}
+	s.appStreamMgr.ClearTaskBuffer(projectID, taskID)
+	if !regenerate && msg.Role != "summarization" {
+		s.cleanupDeletedMessageForks(projectID, taskID, task, msg.ThreadID, msg.ID, msgCreatedAt, msgTimeErr, msg.Role)
+	} else {
+		s.broadcastTaskDiff(taskID)
+	}
+	return nil
+}
+
 func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -82,37 +113,9 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		msgRole := msg.Role
-		msgThreadID := msg.ThreadID
-		msgCreatedAt, msgTimeErr := s.store.GetMessageCreatedAt(req.MessageID)
-		// Use the message's own thread_id so deletion targets the correct thread
-		// even if the task's active thread has switched since the message was created.
-		deletedCheckpoints, err := s.store.DeleteTaskMessagesAfter(taskID, req.MessageID, msgThreadID)
-		if err != nil {
+		if err := s.truncateMessagesFrom(projectID, taskID, msg, req.Regenerate); err != nil {
 			Fail(w, err, "delete messages", "message not found")
 			return
-		}
-		// Release the file states those turns pinned. The delete returns the ids, because only it knows
-		// which rows actually went.
-		s.releaseMessageSnapshots(taskID, deletedCheckpoints)
-		// Fetch task early to check execution state for executor notification.
-		task, _ := s.store.GetTask(projectID, taskID)
-		// Notify running executor to reset loop detector and re-sync messages.
-		// Skip during regeneration — the regenerate message itself triggers a re-sync.
-		// Skip when executor is idle — waking it would trigger an unwanted LLM call.
-		// (The non-blocking select before each LLM call in the active loop already
-		// picks up context changes via NotifyContextChanged when the agent is running.)
-		if !req.Regenerate && s.executor != nil && task != nil && task.ExecutionState == types.ExecStateRunning {
-			s.executor.NotifyContextChanged(taskID)
-		}
-		// Clear buffered task events so reconnecting clients don't replay
-		// stale events (e.g., summarization for a deleted message, or old
-		// turn deltas/tool_calls on regenerate).
-		s.appStreamMgr.ClearTaskBuffer(projectID, taskID)
-		if !req.Regenerate && msgRole != "summarization" {
-			s.cleanupDeletedMessageForks(projectID, taskID, task, msgThreadID, req.MessageID, msgCreatedAt, msgTimeErr, msgRole)
-		} else {
-			s.broadcastTaskDiff(taskID)
 		}
 		JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 		return

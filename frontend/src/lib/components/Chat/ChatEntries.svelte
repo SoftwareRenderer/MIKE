@@ -28,6 +28,7 @@
         isAgentSelected,
         taskStatus,
         taskExecutionState,
+        turnInFlight = false,
         projectId,
         taskId,
         onDismissError,
@@ -67,6 +68,8 @@
         isAgentSelected: () => boolean;
         taskStatus: string;
         taskExecutionState: string;
+        /** A turn of this task is running, so no row may be edited into it. */
+        turnInFlight?: boolean;
         projectId: string;
         taskId: string;
         onDismissError: (messageId: string) => Promise<void>;
@@ -195,8 +198,8 @@
     let tapped: { entryId: string; intent: number } | null = null;
 
     /**
-     * The prompts the header can name: the rendered ones where they sit, and the ones older than every
-     * rendered row from the prompt read, which names what a window of answers leaves out.
+     * The prompts the header can name: the rendered ones, plus the older ones from the prompt read that no
+     * rendered row holds.
      */
     function stickyTurns(el: HTMLElement, containerTop: number, scrollTop: number): StickyTurn[] {
         const rendered: StickyTurn[] = [];
@@ -306,9 +309,9 @@
     });
 
     /**
-     * What is above the line moves with layout and no scroll event: the keyboard or auto-maximize
-     * resizing the column, the tab switch that hides it, entries realizing their height, scroll
-     * anchoring. The follow tracker watches these nodes too, but for who owns `scrollTop`.
+     * Layout moves what is above the line without a scroll event: the keyboard or auto-maximize resizing the
+     * column, a tab switch, entries reaching their real height. The follow tracker watches these nodes too, but
+     * for who owns `scrollTop`.
      */
     $effect(() => {
         const nodes = [chatScrollEl, chatContentEl, stickyHeaderEl];
@@ -479,7 +482,7 @@
                     </div>
                 {:else if entry.role === 'user'}
                     <div class="sticky-user-message" data-entry-idx={entryIdx} data-entry-id={entry.id} data-user-msg-first-line={turnLabel(entry.content)}>
-                        <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} isOptimistic={isOptimisticId(entry.id)} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} onDelete={() => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => onRegenerate(entry.id) : undefined} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} reasoningExpandedOverride={reasoningExpandedOverrides[entry.id]} onReasoningToggle={(exp) => handleReasoningToggle(entry.id, exp)} resolvedReasoningOverride={resolvedReasoningOverrides[entry.id]} onReasoningResolved={(content) => handleReasoningResolved(entry.id, content)} />
+                        <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} isOptimistic={isOptimisticId(entry.id)} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} onDelete={() => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={meta.isFirstUserMessage} turnInFlight={turnInFlight} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => onRegenerate(entry.id) : undefined} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} reasoningExpandedOverride={reasoningExpandedOverrides[entry.id]} onReasoningToggle={(exp) => handleReasoningToggle(entry.id, exp)} resolvedReasoningOverride={resolvedReasoningOverrides[entry.id]} onReasoningResolved={(content) => handleReasoningResolved(entry.id, content)} />
                     </div>
                 {:else if entry.buildLog}
                     <div class="build-box">
@@ -516,7 +519,7 @@
                     </div>
                 {:else}
                     <div>
-                        <ChatMessage role={entry.role} severity={entry.severity} kind={entry.kind} content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} isOptimistic={isOptimisticId(entry.id)} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} onDelete={entry.role === 'system' ? () => onDismissError(entry.id) : () => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => onRegenerate(entry.id) : undefined} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} reasoningExpandedOverride={reasoningExpandedOverrides[entry.id]} onReasoningToggle={(exp) => handleReasoningToggle(entry.id, exp)} resolvedReasoningOverride={resolvedReasoningOverrides[entry.id]} onReasoningResolved={(content) => handleReasoningResolved(entry.id, content)} />
+                        <ChatMessage role={entry.role} severity={entry.severity} kind={entry.kind} content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} isOptimistic={isOptimisticId(entry.id)} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} onDelete={entry.role === 'system' ? () => onDismissError(entry.id) : () => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={meta.isFirstUserMessage} turnInFlight={turnInFlight} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => onRegenerate(entry.id) : undefined} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} reasoningExpandedOverride={reasoningExpandedOverrides[entry.id]} onReasoningToggle={(exp) => handleReasoningToggle(entry.id, exp)} resolvedReasoningOverride={resolvedReasoningOverrides[entry.id]} onReasoningResolved={(content) => handleReasoningResolved(entry.id, content)} />
                     </div>
                 {/if}
                 </div>
@@ -577,10 +580,8 @@
     .chat-messages:focus-visible {
         outline-offset: -2px;
     }
-    /* Render every entry in the DOM (no JS virtualizer) but let the browser skip
-       paint/layout for entries far off-screen. `auto` remembers each entry's last
-       rendered size so scroll height stays stable; 64px is the fallback estimate.
-       This keeps long conversations smooth without a height cache. */
+    /* Every entry stays in the DOM; the browser skips painting ones far off-screen. `auto` keeps each
+       entry's last size so scroll height stays stable, and 64px is the estimate before that. */
     .chat-entry {
         content-visibility: auto;
         contain-intrinsic-size: auto 64px;

@@ -93,7 +93,7 @@ describe('clearAll (sign-out sweep)', () => {
         const networkDown = Object.assign(new Error('Failed to fetch'), { name: 'TypeError' });
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(networkDown));
 
-        const queued = await sendTaskMessage('proj-a', 'task-1', 'a send made while offline');
+        const queued = await sendTaskMessage({ projectId: 'proj-a', taskId: 'task-1', content: 'a send made while offline' });
         await storage.setBoardCache(storage.messagesCacheKey('proj-a', 'task-1'), [{ content: 'a cached body' }]);
         expect(queued.queued).toBe(true);
 

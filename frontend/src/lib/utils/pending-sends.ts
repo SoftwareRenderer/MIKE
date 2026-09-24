@@ -33,11 +33,15 @@ export function pendingSendEntries(args: {
     refused: PendingSend[];
     /** Action ids already on screen as an optimistic entry from this session. */
     rendered?: Iterable<string>;
+    /** Row and notice ids the user dismissed here. Nothing can delete them server-side, so without this the
+     * next re-derive paints the card that was just dismissed. */
+    dismissed?: Iterable<string>;
     copy: PendingSendCopy;
     threadId?: string;
 }): ChatEntry[] {
     const rendered = new Set(args.rendered ?? []);
-    // A refusal has been answered, so it carries no clock.
+    const dismissed = new Set(args.dismissed ?? []);
+    // A refusal has been answered, so it carries no clock. Neither kind of row is a server row.
     const row = (send: PendingSend, waiting: boolean): ChatEntry => ({
         id: pendingSendEntryId(send.actionId),
         role: 'user',
@@ -47,6 +51,7 @@ export function pendingSendEntries(args: {
         isStreaming: false,
         createdAt: new Date(send.timestamp).toISOString(),
         queued: waiting,
+        local: true,
     });
 
     const rows = [
@@ -62,6 +67,7 @@ export function pendingSendEntries(args: {
         isStreaming: false,
         error: { code, message },
         createdAt: new Date(newest).toISOString(),
+        local: true,
     });
     if (args.pending.some(s => !rendered.has(s.actionId))) {
         notices.push(notice('send_queued', args.copy.queued, newestOf(args.pending, rendered)));
@@ -69,7 +75,7 @@ export function pendingSendEntries(args: {
     if (args.refused.some(s => !rendered.has(s.actionId))) {
         notices.push(notice('send_refused', args.copy.refused, newestOf(args.refused, rendered)));
     }
-    return [...rows, ...notices];
+    return [...rows, ...notices].filter(e => !dismissed.has(e.id));
 }
 
 function newestOf(sends: PendingSend[], rendered: Set<string>): number {

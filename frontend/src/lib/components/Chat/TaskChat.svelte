@@ -3,7 +3,7 @@
     import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, TaskMessage, Task, ChatTurn } from '$lib/types';
     import type { DiffManifest } from '$lib/types/diff';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, getTaskTurns, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, onQueueFlushed, getQueuedTaskIds, getQueuedSends, getRefusedSends, getDroppedTaskIds, getTask, isFromCache, type AppStream } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, getTaskTurns, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, onQueueFlushed, getQueuedTaskIds, getQueuedSends, getRefusedSends, getDroppedTaskIds, getTask, isFromCache, type AppStream, type SendResult } from '$lib/api';
     import { PENDING_SEND_ID_PREFIX, pendingSendEntries } from '$lib/utils/pending-sends';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
@@ -18,9 +18,9 @@
     import { DRAFT_SAVE_DEBOUNCE_MS } from '$lib/constants';
     import { mergeQueuedUpdate, taskIsInFlight } from '$lib/utils/task-utils';
     import { effectiveStartTaskKey, matchShortcut } from '$lib/utils/keyboard';
-    import { trustedExecutionState } from '$lib/utils/execution-state';
+    import { trustedExecutionState, isTaskPaused } from '$lib/utils/execution-state';
     import { reselectProvider, getProviderDisplayName } from '$lib/utils/providers';
-    import { getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, mergeLoadedHistory, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, type EntryMeta } from '$lib/utils/chat-entries';
+    import { buildEntriesFromMessages, mergeLoadedHistory, buildEntryMetas, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, takeEchoMatch, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { wsConnection } from '$lib/stores/connection';
     import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments, type DraftAttachment } from '$lib/storage';
@@ -123,11 +123,8 @@
     });
 
     /**
-     * The selected provider's own name — for an agent that is its manifest's
-     * `display_name`, which is the only place an agent's name comes from. This replaced a
-     * literal `'Pi'` that printed one agent's name whatever the user had installed; core
-     * names no agent. Empty when nothing is selected, which lets `MessageStats` answer
-     * with its own `chat.stats.modelFallback`.
+     * The selected provider's own name — for an agent that is the `display_name` in its manifest, because core
+     * names no agent. Empty when nothing is selected, so `MessageStats` answers with its own fallback.
      */
     let selectedProviderName = $derived.by(() => {
         const p = providers.find(p => p.url === selectedUrl);
@@ -157,10 +154,8 @@
     let isCommitting = $state(false);
 
     let threadSwitching = $state(false); // true while a thread switch is in-flight
-    // Suppress buffer replay for non-running tasks to avoid flicker from stale entries.
-    // For in_progress tasks, buffer events are legitimate and must be replayed.
-    // `isLoading` joins in because the board's status lags the turn: the ungated `status: running`
-    // frame opens the gate for the turn it announces.
+    // Replay the buffer only while the task is in flight, so a stale buffer cannot flicker entries that are
+    // not coming. `isLoading` counts because the board's status lags the turn that frame announces.
     let suppressEvents = $state(true);
     $effect(() => { suppressEvents = taskStatus !== 'in_progress' && !isLoading; });
 
@@ -210,15 +205,12 @@
     // Resume/Restart conditions must look past them.
     let lastNonErrorEntry = $derived([...entries].reverse().find(e => e.role !== 'error'));
 
-    // Paused: the task was stopped while in progress (stays in the In
-    // Progress column). The ReviewBar shows a Resume button over the input.
-    let isPaused = $derived(taskExecutionState === 'paused');
+    // Stopped mid-run: it stays in the In Progress column, and the ReviewBar offers Resume over the input.
+    // Asked of the task's own row, not the board's copy.
+    let isPaused = $derived(isTaskPaused(knownExecutionState));
 
-    // Show "Restart Task" button when task is in_progress, stalled (no active LLM, not queued),
-    // has at least one assistant response (was actually started before),
-    // and the last message is from the user (agent hasn't responded yet).
-    // Hidden while paused (the Resume bar replaces it) and during summarization
-    // so the ChatForm (with spinner) stays visible.
+    // "Restart Task" is hidden while paused (the Resume bar replaces it) and while summarizing, so the
+    // ChatForm's spinner stays visible.
     let showRestartButton = $derived(
         taskStatus === 'in_progress' &&
         !isLoading &&
@@ -231,12 +223,8 @@
         entries.some(e => e.role === 'assistant')
     );
 
-    // Show "Resume" button in review bar when the last message is from the user
-    // (agent hasn't responded yet — user sent a follow-up before moving to review).
-    // Also shows when a follow-up message was queued due to a network failure:
-    // the outgoing message stays the last entry, so "Resume" is the recovery
-    // action once the connection is restored.
-    // Hidden during summarization so the ChatForm (with spinner) stays visible.
+    // "Resume" in the review bar when the last message is the user's — including one a network failure queued,
+    // since Resume is the recovery once the connection is back.
     let showResumeButton = $derived(
         taskStatus === 'review' &&
         !isLoading &&
@@ -249,34 +237,20 @@
     // ends on the newest row.
     let lastUserMessageIds = $derived(computeLastUserMessageIds(entries));
 
-    // Precomputed per-entry metadata — O(n) single-pass via buildCheckpointStateMap.
-    let entryMetas = $derived(((() => {
-        const metas: EntryMeta[] = new Array(entries.length);
-        const streaming = isLoading;
-        const cpStateMap = buildCheckpointStateMap(entries, pendingCheckpoints, checkpointLabels, checkpointCommitHashes);
-        const activeThread = threads.find(t => t.is_active);
-        // Count all checkpoints (oldest first) for stash index mapping.
-        // Even checkpoints without commitHash get an index — the backend resolves
-        // to the matching stash by index when headRef equals baseRef.
-        let cpIdx = 0;
-        // Entry 0 is the thread's first row only while nothing older is left unloaded.
-        for (let i = 0; i < entries.length; i++) {
-            const entry = entries[i];
-            const cpState = entry.role === 'user' ? (cpStateMap.get(i) ?? null) : null;
-            const idx = cpState ? cpIdx++ : -1;
-            metas[i] = entry.role === 'user'
-                ? {
-                    cpState,
-                    cpThread: threads.length > 0 ? getCheckpointThreadsUtil(entry, threads, activeThread, i === 0 && !hasEarlier) : null,
-                    checkpointIndex: idx,
-                    isLastUserMessage: lastUserMessageIds.has(entry.id) && !streaming,
-                }
-                : { cpState: null, cpThread: null, checkpointIndex: -1, isLastUserMessage: false };
-        }
-        // Force tracking of checkpointHashesVersion so meta rebuilds on checkpoint changes
+    let entryMetas = $derived.by(() => {
+        // A checkpoint hash lands in a Map, so reading the version is what re-runs this when one arrives.
         void checkpointHashesVersion;
-        return metas;
-    })()));
+        return buildEntryMetas({
+            entries,
+            pendingCheckpoints,
+            checkpointLabels,
+            checkpointCommitHashes,
+            threads,
+            hasEarlier,
+            lastUserMessageIds,
+            streaming: isLoading,
+        });
+    });
 
     function genId(): string {
         return Math.random().toString(36).slice(2, 10);
@@ -304,10 +278,8 @@
         }
     }
 
-    // Watch for task config changes from the app store (e.g., inline edit)
-    // Updates model selection when the task's model/provider is changed externally.
-    // Skips model fields when a local updateTask is in-flight to avoid overwriting
-    // the user's selection with stale DB values.
+    // Follow model and provider changes made elsewhere (inline edit, settings), but skip them while a local
+    // updateTask is in flight, so a stale row cannot overwrite what the user just picked.
     $effect(() => {
         const boardTask = appStore.board?.tasks.find(t => t.id === taskId);
         if (boardTask) {
@@ -340,13 +312,7 @@
 
     /** Reset stream state before loading a new thread's messages. */
     function resetStreamState() {
-        stream.closeCurrentAssistant();
-        stream.state.activeToolCalls = new Map();
-        stream.state.processedToolIds = new Set();
-        stream.state.entries = [];
-        stream.state.currentAssistantId = null;
-        stream.state.streamTokenCount = 0;
-        stream.state.awaitingResponse = false;
+        stream.resetForThreadSwitch();
     }
 
     /** Merge an updated task into the app store. */
@@ -356,16 +322,34 @@
         updateTaskInBoard(appStore, taskId, merged);
     }
 
-    /** Result of a send: the created/optimistic message, or null on failure. */
-    type SendResult = { id: string; role: string; content: string; thread_id?: string; queued?: boolean; actionId?: string };
+    type SendRequest = {
+        attachments?: Array<{ mimeType: string; data: string }>;
+        /** The thread already holds this text, so the send means "answer what the thread holds". */
+        regenerate?: boolean;
+        /** The optimistic entry on screen for this send, which the echo renames to the row's real id. */
+        entryId?: string;
+        /** Take the thread back to this row as the message lands. Server-side, so truncating and running
+         * are one step: see `handleTaskSend`. */
+        replaceMessageId?: string;
+    };
 
     /** Send a message via the API with tracking state. Returns the message result, or null on failure. */
-    async function sendWithTracking(msg: string, attachments?: Array<{ mimeType: string; data: string }>, regenerate = false, entryId?: string): Promise<SendResult | null> {
+    async function sendWithTracking(msg: string, request: SendRequest = {}): Promise<SendResult | null> {
         lastSentMessage = msg;
-        lastSentEntryId = entryId ?? null;
+        lastSentEntryId = request.entryId ?? null;
         stream.state.awaitingResponse = true;
         try {
-            return await sendTaskMessage(projectId, taskId, msg, selectedModel, selectedUrl, attachments, selectedReasoningEffort || undefined, regenerate);
+            return await sendTaskMessage({
+                projectId,
+                taskId,
+                content: msg,
+                modelName: selectedModel,
+                serverUrl: selectedUrl,
+                attachments: request.attachments,
+                reasoningEffort: selectedReasoningEffort || undefined,
+                regenerate: request.regenerate,
+                replaceMessageId: request.replaceMessageId,
+            });
         } catch {
             stream.state.awaitingResponse = false;
             return null;
@@ -375,8 +359,9 @@
     /** Frames the anchor is re-read while lazily rendered rows find their height; see `settleOnRow`. */
     const ANCHOR_SETTLE_FRAMES = 20;
 
-/** Error codes that are client-side only — never persisted to the DB. */
-    const LOCAL_ERROR_CODES = new Set(['send_queued', 'send_refused']);
+    /** Cards this view stopped drawing. Nothing can delete them server-side, so the dismissal is remembered
+     * here or a re-derive of the queue paints them again. */
+    const dismissedNotices = new Set<string>();
 
     /** Append a client-side error entry (visible but never persisted to the DB). */
     function appendErrorEntry(code: string, message: string) {
@@ -387,15 +372,14 @@
             isStreaming: false,
             error: { code, message },
             createdAt: new Date().toISOString(),
+            local: true,
         }];
     }
 
     /**
-     * A send was queued due to a network failure. Mark the optimistic entry as
-     * queued and append a visible error notice. The notice lives only in the UI
-     * (never persisted to the DB) and is cleared when the queue flushes.
-     *
-     * The action id keeps a re-derive of the queue from drawing the message twice.
+     * A send was queued by a network failure: mark the optimistic row queued and add a notice that lives only
+     * in this UI until the queue flushes. The action id keeps a re-derive of the queue from drawing the
+     * message twice.
      */
     function handleQueuedSend(content: string, entryId?: string, actionId?: string) {
         const entry = entryId
@@ -440,30 +424,18 @@
         if (event.type === 'user_message') {
             const data = event.data as { id?: string; role: string; content: string; thread_id?: string; attachments?: Array<{ mimeType: string; data: string }> };
             if (lastSentMessage === data.content) {
+                const entryId = lastSentEntryId;
+                // Read the id before clearing it, so a second echo of one send renames nothing twice.
                 lastSentMessage = null;
                 lastSentEntryId = null;
-                if (data.id) {
-                    // Match by optimistic entry ID when available (reliable),
-                    // fall back to content match for backward compat (e.g. regenerate).
-                    if (lastSentEntryId) {
-                        const entry = stream.state.entries.find(e => e.id === lastSentEntryId);
-                        if (entry) {
-                            entry.id = data.id;
-                            if (data.thread_id) entry.threadId = data.thread_id;
-                            if (data.attachments) entry.attachments = data.attachments;
-                        }
-                    } else {
-                        for (let i = stream.state.entries.length - 1; i >= 0; i--) {
-                            if (stream.state.entries[i].role === 'user' && stream.state.entries[i].content === data.content) {
-                                stream.state.entries[i].id = data.id;
-                                if (data.thread_id) stream.state.entries[i].threadId = data.thread_id;
-                                if (data.attachments) stream.state.entries[i].attachments = data.attachments;
-                                break;
-                            }
-                        }
-                    }
+                const entry = takeEchoMatch(stream.state.entries, { entryId, content: data.content });
+                if (entry && data.id) {
+                    entry.id = data.id;
+                    if (data.thread_id) entry.threadId = data.thread_id;
+                    if (data.attachments) entry.attachments = data.attachments;
                 }
-                return;
+                // An id that no longer resolves is not this echo's row; let the frame through and it appends.
+                if (entry || !data.id) return;
             }
         }
         _handleStreamEvent(event, suppressEvents);
@@ -484,13 +456,9 @@
         }
     }
 
-    // The provider list is not fixed while this chat stays open: installing or enabling an
-    // agent extension makes the server report a new provider (agent://<name>) in
-    // GET /api/config, and the app re-reads the config on that broadcast. So the selector
-    // gains (or loses) the agent without a page reload.
-    //
-    // untrack(): the sync reads and writes provider/selection/context-limit state of its
-    // own, and as dependencies those would make this effect re-run itself.
+    // The provider list can change while this chat stays open: enabling an agent extension makes the server
+    // report a new one. untrack() keeps the state this sync reads and writes from making the effect re-run
+    // itself.
     $effect(() => {
         const cfg = appStore.config;
         if (cfg) untrack(updateProvidersFromStore);
@@ -573,6 +541,7 @@
                 pending,
                 refused,
                 rendered,
+                dismissed: dismissedNotices,
                 copy: { queued: t('chat.task.sendQueued'), refused: t('chat.task.sendRefused') },
                 threadId: activeThreadId,
             });
@@ -646,9 +615,8 @@
     }
 
     /**
-     * Reads the prompts beside the rows. A window counted in answers leaves out the prompt that opened a
-     * long turn, and the chat's sticky header names it; this is where it comes from. A failed read costs the
-     * header those labels and never the conversation, so nothing here re-throws.
+     * Reads the prompts beside the rows: the sticky header names the prompt a window counted in answers leaves
+     * out. A failed read costs the header those labels, not the conversation, so nothing here re-throws.
      */
     async function readTurns(fromTheStart: boolean): Promise<void> {
         try {
@@ -763,9 +731,8 @@
     }
 
     /**
-     * Follow the latest content. Forced only for user-initiated actions (send,
-     * edit, regenerate); never for stream events, so a reader who scrolled up
-     * keeps their position.
+     * Follow the latest content. Forced only for user-initiated actions, never for stream events, so a reader
+     * who scrolled up keeps their position.
      */
     function scroll(force = false) {
         follow.pin(force);
@@ -803,11 +770,17 @@
                 stream.state.awaitingResponse = false;
             }
             // Send with model info for lazy-start
-            const result = await sendWithTracking(msg, attachments, false, entryId);
+            const result = await sendWithTracking(msg, { attachments, entryId });
             if (result === null) {
-                // Permanent failure (e.g. server error) — remove the optimistic message and show an error.
-                stream.state.entries = stream.state.entries.filter(e => !(e.role === 'user' && e.content === msg));
-                appendErrorEntry('send_failed', t('chat.task.sendFailed'));
+                // Permanent failure (e.g. server error) — the row goes by its id and the draft comes back.
+                stream.state.entries = removeFailedSend(stream.state.entries, {
+                    entryId,
+                    copy: { failed: t('chat.task.sendFailed') },
+                });
+                chatFormComp?.restoreDraft(msg, attachments);
+                // No answer is coming for this send; a later echo must not be read as its.
+                lastSentMessage = null;
+                lastSentEntryId = null;
                 return;
             }
             if (result.queued) {
@@ -828,8 +801,7 @@
         selectedUrl = providerUrl;
         selectedReasoningEffort = reasoningEffort || '';
         updateContextLimit();
-        // Recalculate context usage from conversation history when switching providers.
-        // This ensures the context bar reflects the correct usage for the new provider.
+        // Recount context against the new provider's window.
         const lastAssistant = [...entries].reverse().find(e => e.role === 'assistant' && e.stats);
         if (lastAssistant?.stats) {
             stream.state.lastPromptTokens = (lastAssistant.stats.prompt_tokens || 0) + (lastAssistant.stats.predicted_tokens || 0);
@@ -880,8 +852,7 @@
     let summarizeController: AbortController | null = null;
 
     async function handleSummarize() {
-        // Pass live getters so the dialog's donut + stats update in real time
-        // (e.g. while a task keeps streaming in the background).
+        // Live getters, so the dialog's donut and stats keep updating while the task streams.
         const confirmed = await dialogStore.showCompressContextDialog({
             used: () => stream.state.contextState.used,
             limit: () => stream.state.contextState.limit,
@@ -892,9 +863,8 @@
         if (!confirmed) return;
         try {
             if (isAgentSelected()) {
-                // Pi mode: trigger compaction via RPC (only works while task is running)
+                // An agent compacts through its own RPC, which only works while the task runs.
                 const result = await compactTask(projectId, taskId);
-                // Add the compaction summary as a chat entry
                 stream.state.entries = [...stream.state.entries, {
                     id: genId(),
                     role: 'summarization',
@@ -904,7 +874,7 @@
                     stats: { model_name: selectedModel || selectedProviderName, prompt_tokens: 0, predicted_tokens: 0, prompt_ms: 0, predicted_ms: 0, duration: 0 },
                 }];
             } else {
-                // LLM mode: summarize via backend (runs in background, result arrives via WebSocket).
+                // A plain model summarizes in the background; the result arrives over the WebSocket.
                 summarizeController = new AbortController();
                 await summarizeTask(projectId, taskId, summarizeController.signal);
             }
@@ -935,19 +905,18 @@
         if (isLoading) return;
         const idx = entries.findIndex(e => e.id === entryId);
         if (idx === -1) return;
-        // Find the last user message before this assistant message
         const lastUserIdx = findLastUserMessageBefore(entries, idx);
         if (lastUserIdx === -1) return;
         const lastUser = entries[lastUserIdx];
-        // Regenerate from backend starting after the last user message
+        // A failed truncate leaves the rows the retry would answer still there, so the turn is not started.
         try {
             await deleteTaskMessagesAfter(projectId, taskId, lastUser.id, true);
         } catch (e) {
-            console.error('Failed to regenerate messages:', e);
+            dialogStore.showToast(String(e));
+            return;
         }
-        // Trim local entries: keep everything up to and including the last user message
         stream.state.entries = trimEntriesForRegenerate(stream.state.entries, idx);
-        const result = await sendWithTracking(lastUser.content, undefined, true);
+        const result = await sendWithTracking(lastUser.content, { regenerate: true });
         if (result === null) {
             dialogStore.showToast(t('chat.task.regenerateFailed'));
             return;
@@ -957,7 +926,6 @@
             // visible as outgoing and surface a non-persisted notice.
             handleQueuedSend(lastUser.content, undefined, result.actionId);
         }
-        // Regenerate is a user-initiated action — jump to the latest message.
         scroll(true);
     }
 
@@ -974,8 +942,8 @@
                 console.error('Failed to update task model before start:', e);
             }
         }
-        // If the last message is already from the LLM, just update status without re-triggering
-        // (use the last non-error entry — client-side error notices don't count).
+        // If the last real message is the assistant's, moving the column is enough. Client-side notices
+        // don't count as a real message.
         const lastEntry = lastNonErrorEntry;
         if (lastEntry && lastEntry.role === 'assistant') {
             try {
@@ -987,8 +955,7 @@
             return;
         }
         isStarting = true;
-        // Prompt is already in entries (loaded from DB at task creation)
-        // Don't pre-create assistant entry — let the first token/tool_call event create it
+        // The prompt is already on screen, and the first token or tool_call event creates the assistant entry.
         lastSentMessage = taskPrompt;
         stream.state.awaitingResponse = true;
         scroll();
@@ -1043,24 +1010,20 @@
             console.error('Failed to stop task:', e);
         }
         noteTaskRow(stoppedState);
-        // Reload history from DB to discard any unpersisted (streaming) entries
-        // so they don't appear as duplicates when the task is restarted
+        // Re-read the transcript so unpersisted streaming rows don't come back as duplicates.
         await loadHistory(false, stoppedState);
     }
 
     $effect(() => {
-        if (!($streamingIds.has(taskId) || taskExecutionState === 'running')) {
+        if (!($streamingIds.has(taskId) || knownExecutionState === 'running')) {
             stopping = false;
         }
     });
 
     let taskDiffStatsStore = getTaskDiffStatsContext();
     let diffStats = $derived($taskDiffStatsStore[taskId] || null);
-    // Prefer the prop from CardDetail (computed from DiffCache, the source of truth).
-    // Falls back to WebSocket store for backward compat (e.g., Card.svelte usage).
-    // Includes both staged index changes and committed-but-unmerged changes.
-    // When commits are already merged into the target branch, committed changes
-    // don't count — only staged (index) changes matter.
+    // Prefer the prop from CardDetail, which reads DiffCache; the WebSocket store is the fallback for other
+    // callers. Merged commits don't count - only staged changes do.
     let hasStagedChanges = $derived(
         hasStagedChangesProp ?? ((diffStats?.staged_paths || []).length > 0 || (!!diffStats?.has_committed_changes && !diffStats?.already_merged))
     );
@@ -1122,8 +1085,7 @@
     }
 
 
-    /** Called when the user clicks the delete button on a message.
-     * Checks if deleting this message would also delete a fork branch, then shows the dialog. */
+    /** Ask whether deleting this message would delete a fork branch too, then show the dialog. */
     async function handleDeleteRequest(entryId: string, count: number) {
         let willDeleteBranch = false;
         let branchName = '';
@@ -1135,8 +1097,8 @@
             // If check fails, proceed without branch warning
         }
 
-        // Two whole messages joined by a blank line — the branch warning is optional, so it
-        // stays its own message rather than a placeholder inside the first one.
+        // Two messages joined by a blank line: the branch warning is optional, so it stays separate rather
+        // than a placeholder inside the first.
         const base = t('chat.task.deleteConfirm', { count });
         let message = base;
         if (willDeleteBranch && branchName) {
@@ -1205,13 +1167,15 @@
             onThreadSwitch?.();
             // regenerate: the fork already wrote the edited question into the new thread, so this send is
             // "answer what the thread holds", not a second copy of the same message.
-            const result = await sendWithTracking(newContent, attachments, true);
+            const result = await sendWithTracking(newContent, { attachments, regenerate: true });
             if (result?.queued) handleQueuedSend(newContent, undefined, result.actionId);
         } catch (e) {
             dialogStore.showToast(String(e));
         }
     }
 
+    /** Re-run the turn from an edited message. One send carries the edit and the row it replaces: a
+     * delete-then-send leaves a gap whose thread the executor reads as a duplicate submit — no answer. */
     async function handleEditSend(entryId: string, _originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) {
         const idx = entries.findIndex(e => e.id === entryId);
         if (idx === -1) return;
@@ -1226,26 +1190,41 @@
         }
 
         if (isLoading) return;
-        stream.state.entries = stream.state.entries.slice(0, idx);
+        // The same shape the request produces: the edited row stands for everything after it.
+        const optimisticId = genId();
+        stream.state.entries = [...stream.state.entries.slice(0, idx), {
+            id: optimisticId, role: 'user', content: newContent, attachments, threadId: activeThreadId,
+            isStreaming: false, createdAt: new Date().toISOString(),
+        }];
         stream.closeCurrentAssistant();
+        scroll(true);
+        const result = await sendWithTracking(newContent, { attachments, entryId: optimisticId, replaceMessageId: entryId });
+        if (result === null) {
+            // Nothing was truncated, so re-read rather than hold a transcript missing rows the server kept.
+            await loadHistory(true);
+            return;
+        }
+        if (result.queued) {
+            handleQueuedSend(newContent, optimisticId, result.actionId);
+        }
+        // The replace can retire the fork this row opened and moves the diff baseline. A failed re-read here
+        // is the panel catching up on a send that already landed.
         try {
-            await deleteTaskMessagesAfter(projectId, taskId, entryId);
             threads = await getTaskThreads(projectId, taskId);
             const active = threads.find(t => t.is_active);
             if (active) {
                 activeThreadId = active.id;
                 updateThreadUrl(active.id);
             }
-            // Invalidate diff cache (same reason as handleDeleteRequest)
-            onInvalidateDiff?.();
-        } catch (e) {
-            dialogStore.showToast(String(e));
-            return;
+        } catch { /* the transcript on screen is still the one the send produced */ }
+        onInvalidateDiff?.();
+        if (!result.queued && result.id) {
+            const entry = stream.state.entries.find(e => e.id === optimisticId);
+            if (entry) {
+                entry.id = result.id;
+                if (result.thread_id) entry.threadId = result.thread_id;
+            }
         }
-        const newMsg = await createTaskMessage(projectId, taskId, 'user', newContent);
-        stream.state.entries = [...stream.state.entries, { id: newMsg.id, role: 'user', content: newContent, attachments, threadId: activeThreadId, isStreaming: false, createdAt: newMsg.created_at || new Date().toISOString() }];
-        const result = await sendWithTracking(newContent, attachments);
-        if (result?.queued) handleQueuedSend(newContent, undefined, result.actionId);
         // Edit-and-send is a user-initiated send — jump to the latest message.
         scroll(true);
     }
@@ -1267,16 +1246,14 @@
 
     /** Dismiss a single error message without affecting other messages. */
     async function handleDismissError(messageId: string) {
-        const entry = entries.find(e => e.id === messageId);
-        // Client-side only errors (queued / connection-lost) are not in the DB —
-        // remove them locally instead of attempting a delete that would 404.
-        if (entry?.error?.code && LOCAL_ERROR_CODES.has(entry.error.code)) {
-            stream.state.entries = entries.filter(e => e.id !== messageId);
-            return;
-        }
+        const outcome = removeDismissedError(entries, messageId);
+        // Whatever the outcome, this view stops drawing it.
+        dismissedNotices.add(messageId);
+        stream.state.entries = outcome.entries;
+        if (outcome.deleteId === null) return;
         try {
-            await deleteTaskMessage(projectId, taskId, messageId);
-            stream.state.entries = entries.filter(e => e.id !== messageId);
+            await deleteTaskMessage(projectId, taskId, outcome.deleteId);
+            stream.state.entries = stream.state.entries.filter(e => e.id !== messageId);
         } catch (e) {
             console.error('Failed to dismiss error:', e);
         }
@@ -1290,7 +1267,7 @@
     // Mobile keyboard: track visualViewport shrink and add padding to keep input visible
     let keyboardOffset = $state(0);
     // svelte-ignore non_reactive_update — DOM ref via bind:this
-    let chatFormComp: { focus: () => void } | null = null;
+    let chatFormComp: { focus: () => void; restoreDraft: (text: string, images?: Array<{ mimeType: string; data: string }>) => void } | null = null;
 
     // svelte-ignore non_reactive_update — DOM ref via bind:this
     function setupViewportListener() {
@@ -1593,7 +1570,8 @@
         {retryError}
         {isAgentSelected}
         {taskStatus}
-        {taskExecutionState}
+        taskExecutionState={knownExecutionState}
+        turnInFlight={isLoading}
         {projectId}
         {taskId}
         {follow}
@@ -1636,7 +1614,7 @@
         <div class="chat-form-wrapper" style="padding-bottom: {keyboardOffset}px;">
         <ReviewBar
             {taskStatus}
-            {taskExecutionState}
+            taskExecutionState={knownExecutionState}
             {showResumeButton}
             {showRestartButton}
             {isStarting}

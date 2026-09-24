@@ -1,11 +1,8 @@
 // Barrel exports — the domain functions are reachable via `$lib/api`; domain modules live
 // in ./projects, ./tasks, ./git, etc.
 //
-// The fetch primitives underneath the barrel (`apiFetch`, `apiError`, `API_BASE`, `isAborted`)
-// are deliberately not re-exported: adding them would invite a component to hand-roll a fetch,
-// which is the opposite of what this barrel is for. No component imports them; the deep
-// importers are inside `$lib/api` itself, the extension handlers, and the two services that
-// own a request lifecycle (`services/app-update.ts`, `services/diff-cache.svelte.ts`).
+// The fetch primitives under this barrel (`apiFetch`, `apiError`, `API_BASE`, `isAborted`) are not
+// re-exported, so a component cannot hand-roll a fetch.
 
 // -- Helpers --
 export { generateId, setCsrfToken, clearCsrfToken, ensureCsrfToken } from './helpers';
@@ -32,6 +29,8 @@ export {
     flushQueueNow,
     waitForFlush,
     applyQueuedActionsToBoard,
+    type SendResult,
+    type SendTaskMessagePayload,
 } from './queue';
 
 // -- Projects --
@@ -74,7 +73,6 @@ export {
     getTaskMessages,
     getTaskTurns,
     getTaskMessageFull,
-    createTaskMessage,
     deleteTaskMessagesAfter,
     deleteTaskMessage,
     checkMessageDelete,

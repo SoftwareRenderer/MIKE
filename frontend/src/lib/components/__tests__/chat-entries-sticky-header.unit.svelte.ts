@@ -60,6 +60,7 @@ function makeMeta(withCheckpoint = false) {
         cpThread: null,
         checkpointIndex: withCheckpoint ? 1 : -1,
         isLastUserMessage: false,
+        isFirstUserMessage: false,
     };
 }
 

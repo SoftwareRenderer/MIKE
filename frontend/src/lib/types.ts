@@ -158,14 +158,12 @@ export interface Thread {
 }
 
 /**
- * One tool call as the client holds it — the only declaration of the shape.
+ * One tool call as the client holds it.
  *
- * The fields are the `tool_call` / `tool_result` frames' payload (`backend/types/ws.go`), kept under
- * the names the client uses; `contentIndex` and `reasoningIndex` are not on the wire — stream-handler
- * stamps them with the offsets the call arrived at, which is what lets `chat-layout` interleave the
- * card inside the reasoning text. Every renderer (`ChatMessage`, `ToolCall`) and every lookup
- * (`tool-call-lookup`, `stream-state`) binds to this type, because a card whose field list drifts from
- * the frame's silently drops the value instead of failing.
+ * The fields are the `tool_call` / `tool_result` frames' payload (`backend/types/ws.go`) under the names the
+ * client uses; `contentIndex` and `reasoningIndex` are not on the wire - the stream handler stamps them with
+ * the offsets the call arrived at, which is what lets `chat-layout` interleave the card inside the reasoning
+ * text.
  */
 export interface ToolCallInfo {
     toolId: string;
@@ -239,6 +237,8 @@ export interface ChatEntry {
     queued?: boolean;
     /** The queue action this outgoing entry came from, so a re-derive does not draw it twice. */
     actionId?: string;
+    /** This browser wrote the entry, so dismissing it needs no request: the server has no such row. */
+    local?: boolean;
 }
 
 export interface Board {
@@ -261,8 +261,8 @@ export interface Config {
     default_max_failed_turns?: number;
     default_auto_summarize_threshold?: number; // percent of context window, 1-100
     hide_model_badge?: boolean; // hide the model badge on task cards
-    // May MIKE ask the release manifest whether a newer version exists? Absent means never asked —
-    // off, and still owed the first-run question. MIKE_DISABLE_UPDATES outranks both answers.
+    // May MIKE ask the release manifest whether a newer version exists? Absent means never asked - off, and
+    // still owed the first-run question, which MIKE_DISABLE_UPDATES outranks.
     update_check_enabled?: boolean;
     run_siblings_parallel?: boolean; // start all of a parent's subtasks at once (default off)
     sort_oldest_first?: boolean; // put the least recently moved card on top of a column (default off)
@@ -317,11 +317,10 @@ export interface ProviderModel {
 }
 
 /**
- * Known reasoning effort levels offered as suggestions; any other value is a custom effort
- * passed through verbatim to the server.
+ * The reasoning effort levels offered as suggestions; any other value is passed to the server as given.
  *
- * A function, not a const array: its labels are locale-derived, and a module-scope `t()`
- * answer is computed once and then outlives every language switch (the `usdSymbol` bug).
+ * A function, not a const array: its labels come from the locale, so a module-scope `t()` answer would
+ * outlive every language switch.
  */
 export function reasoningEffortOptions(): Array<{ value: string; label: string }> {
     return [
@@ -709,12 +708,9 @@ export interface ExtensionSandboxConfig {
     environment?: { check: { command: string; args?: string[]; timeout_seconds?: number }; suppress_codes?: string[]; note?: string };
     /** Workspace files whose change makes the language server re-read the project. */
     reload_files?: string[];
-    /**
-     * Where this server reads resolved dependencies from, inside its own container, and the
-     * variable it reads that location from. The host directory that fills it is chosen under
-     * Settings → Extensions — a manifest names where it looks, never what it may read here. It is
-     * read from there, always: the containers that fill it are a task's or a terminal's own work.
-     */
+    /** Where this server reads resolved dependencies from inside its own container, and the variable it reads
+     *  that location from. A manifest names where it looks; the host directory that fills it is a person's
+     *  choice under Settings → Extensions, and the reads always happen in the container. */
     dependency_cache?: { container_path: string; env: string };
     /**
      * The host directory the user granted to fill that cache, or empty when none is granted.

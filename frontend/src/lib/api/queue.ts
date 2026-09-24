@@ -235,9 +235,8 @@ export function isTransientError(e: unknown): boolean {
 }
 
 /**
- * Track task ID resolution and latest state during a flush.
- * Maps optimistic IDs → real IDs (from createTask) and tracks
- * latest state from subsequent actions (start, move, etc.).
+ * Record what one flushed action settled: a created task's real id, and the newest state of a task the
+ * action returned.
  */
 function trackResult(action: QueuedAction, result: any, idMap: Map<string, string>, resolvedTasks: Map<string, any>) {
     if (action.type === 'createTask' && result && action.params.taskData?.id) {
@@ -252,10 +251,8 @@ function trackResult(action: QueuedAction, result: any, idMap: Map<string, strin
     }
 }
 
-/**
- * Core flush loop: process all queued actions in order.
- * @param onTransientError  Callback when a transient (retryable) error occurs.
- *                          Return true to stop flushing, false to continue.
+/** Flush every queued action, in order.
+ * @param onTransientError  Called on a retryable error; return true to stop flushing.
  */
 async function doFlush(onTransientError?: (e: unknown) => boolean): Promise<Map<string, any>> {
     const idMap = new Map<string, string>();
@@ -340,14 +337,11 @@ async function flushQueue() {
 // =============================================================================
 
 /**
- * Apply pending queue actions to a copy of the cached board data.
- * Returns a new tasks array with optimistic updates applied.
+ * Replay queued actions onto a copy of the cached board data.
  *
- * @param tasks    Cached tasks from the board (server state)
- * @param forProject  The project the list belongs to. Every board-shaped action names its own
- *                    project, and one from another project belongs to that project's board —
- *                    replaying it here would add a card that is not this project's.
- * @returns         New tasks array with queued actions applied
+ * @param forProject  The project the list belongs to. Every board-shaped action names its own project, and
+ *                    one from another project belongs to that project's board — replaying it here would add a
+ *                    card that is not this project's.
  */
 export function applyQueuedActionsToBoard(
     tasks: Task[],
@@ -480,6 +474,8 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
         case 'sendTaskMessage':
             await sendTaskMessageRaw({ ...p, taskId } as SendTaskMessagePayload);
             break;
+        // No longer written — an edited message is one send carrying `replaceMessageId` — but kept so a queue
+        // an older build left on disk still lands its row.
         case 'createTaskMessage':
             await createTaskMessageRaw(p.projectId, taskId, p.role, p.content);
             break;
@@ -555,8 +551,7 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
 }
 
 /**
- * Helper: enqueue an action and return an optimistic result.
- * Returns the queued action's ID for tracking.
+ * Enqueue an action and return the optimistic result, tagged with the queued action's id.
  */
 export async function queueWrite<T>(type: ActionType, params: Record<string, any>, optimistic: T): Promise<T> {
     const queued = await enqueueAction({ type, params });
@@ -765,10 +760,8 @@ async function resumeTaskRaw(projectId: string, taskId: string): Promise<Task> {
 /**
  * What one queued or live `sendTaskMessage` carries.
  *
- * The key names are the persisted IndexedDB queue payload, not a call signature: an action written by an
- * older build is replayed against this code, so a rename or a nesting change strands that send in the
- * queue. One type owns it because the send was spelled out three times — here, in the wrapper in
- * `tasks.ts`, and in the replay below — and a positional list is only ever right by agreement.
+ * The key names are the persisted IndexedDB payload, not a call signature: an action written by an older
+ * build is replayed against this code, so a rename or a nesting change strands that send in the queue.
  */
 export interface SendTaskMessagePayload {
     projectId: string;
@@ -779,16 +772,31 @@ export interface SendTaskMessagePayload {
     attachments?: Array<{ mimeType: string; data: string }>;
     reasoningEffort?: string;
     regenerate?: boolean;
+    /** Take the thread back to this row before the message lands, so an edit replaces the turns that answered
+     * the old text. The server refuses (409) unless it is its thread's last user row, which is what makes a
+     * queued edit safe to replay late. */
+    replaceMessageId?: string;
+}
+
+/** What a live or replayed send answers with. A queued send names the queue action holding it. */
+export interface SendResult {
+    id: string;
+    role: string;
+    content: string;
+    thread_id?: string;
+    queued?: boolean;
+    actionId?: string;
 }
 
 /** Send a user message via HTTP POST. Triggers executor and returns the created message. */
-async function sendTaskMessageRaw(payload: SendTaskMessagePayload): Promise<{ id: string; role: string; content: string; thread_id?: string }> {
-    const { projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort, regenerate } = payload;
+async function sendTaskMessageRaw(payload: SendTaskMessagePayload): Promise<SendResult> {
+    const { projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort, regenerate, replaceMessageId } = payload;
     const body: Record<string, any> = { content };
     if (modelName) body.model_name = modelName;
     if (serverUrl) body.llama_server_url = serverUrl;
     if (reasoningEffort) body.reasoning_effort = reasoningEffort;
     if (regenerate) body.regenerate = regenerate;
+    if (replaceMessageId) body.replace_message_id = replaceMessageId;
     if (attachments && attachments.length > 0) {
         body.attachments = JSON.stringify(attachments);
     }

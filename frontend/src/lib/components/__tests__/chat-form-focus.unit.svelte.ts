@@ -65,9 +65,15 @@ afterEach(() => {
 function renderForm(props = {}) {
     const onInputFocus = vi.fn();
     const onInputBlur = vi.fn();
-    const { container } = render(ChatForm, { props: { ...baseProps, ...props, onInputFocus, onInputBlur } });
+    const { container, component } = render(ChatForm, { props: { ...baseProps, ...props, onInputFocus, onInputBlur } });
     const textarea = container.querySelector<HTMLTextAreaElement>('#chat-message-input')!;
-    return { container, textarea, onInputFocus, onInputBlur };
+    return { container, textarea, component: component as unknown as ChatFormExposed, onInputFocus, onInputBlur };
+}
+
+/** The two methods the panel reaches for through `bind:this`. */
+interface ChatFormExposed {
+    focus(): void;
+    restoreDraft(text: string, images?: Array<{ mimeType: string; data: string }>): void;
 }
 
 describe('ChatForm focus notification', () => {
@@ -165,6 +171,30 @@ describe('ChatForm focus notification', () => {
         fireEvent.blur(textarea, { relatedTarget: null });
 
         expect(onInputBlur).not.toHaveBeenCalled();
+    });
+});
+
+describe('ChatForm handing a draft back', () => {
+    // A send that failed for good is nobody's fault but the network's, so the text and the images the user
+    // attached return to the box they were typed into. Submitting cleared the draft, which is why putting it
+    // back is a step of its own rather than the absence of a removal.
+    it('puts the text and the images back where they were typed', async () => {
+        const { container, component } = renderForm();
+
+        component.restoreDraft('a message that never sent', [{ mimeType: 'image/png', data: 'AAA' }]);
+
+        await waitFor(() => expect(container.querySelector('.attachment-thumb')).toBeTruthy());
+        expect(container.querySelector<HTMLTextAreaElement>('#chat-message-input')!.value)
+            .toBe('a message that never sent');
+    });
+
+    it('leaves the attachments alone when the send carried none', async () => {
+        const { container, component } = renderForm();
+
+        component.restoreDraft('text only');
+
+        await waitFor(() => expect(container.querySelector<HTMLTextAreaElement>('#chat-message-input')!.value).toBe('text only'));
+        expect(container.querySelector('.attachment-thumb')).toBeNull();
     });
 });
 

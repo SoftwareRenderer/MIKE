@@ -66,4 +66,15 @@ describe('ReviewBar paused bar', () => {
         const { bars } = renderBar({ taskExecutionState: 'running' });
         expect(bars()).toHaveLength(0);
     });
+
+    // The panel asks a state question, so it reads the value handed in — which is the task's own
+    // `execution_state` by the time it arrives (docs/reconnection.md → The row decides, not the board's
+    // copy). A column is not this question: a stopped task stays In Progress and moves only its state.
+    it('follows the state it is handed, whatever column the task is filed under', () => {
+        expect(renderBar({ taskStatus: 'in_progress', taskExecutionState: 'paused' }).resumeButton()).toBeTruthy();
+        expect(renderBar({ taskStatus: 'in_progress', taskExecutionState: 'running' }).resumeButton()).toBeNull();
+        // The column answers nothing here: a stopped task stays In Progress and moves only its state, and a
+        // bar built from `taskStatus` shows Resume to a running task or hides it from a paused one.
+        expect(renderBar({ taskStatus: 'backlog', taskExecutionState: 'paused' }).resumeButton()).toBeTruthy();
+    });
 });

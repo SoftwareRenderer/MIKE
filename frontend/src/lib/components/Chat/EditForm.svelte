@@ -5,6 +5,7 @@
     import { uploadTaskFile } from '$lib/api';
     import { imageSrc } from '$lib/utils/attachments';
     import type { DraftAttachment } from '$lib/storage';
+    import { editSubmitAction } from '$lib/utils/chat-entries';
     import { t } from '$lib/i18n';
 
     interface Props {
@@ -18,10 +19,8 @@
         isSubmitting?: boolean;
         /** The dialog hands the form its whole box: no 80% cap, and the field grows into the space. */
         fill?: boolean;
-        /** 'auto' labels the submit from the message's place in the thread (Send / New thread /
-         *  Save). 'save' rewrites text that already exists: a Save button, and Enter writes a
-         *  newline because what is being edited is prose, with Ctrl/Cmd+Enter as the submit — the
-         *  combination the mobile edit dialog already uses for a long message. */
+        /** 'auto' labels the submit from the message's place in the thread (Send / New thread / Save).
+         *  'save' rewrites text that already exists: Enter writes a newline, Ctrl/Cmd+Enter submits. */
         submitMode?: 'auto' | 'save';
         onSubmit?: (content: string, attachments: Array<{ mimeType: string; data: string }>) => void;
         onCancel?: () => void;
@@ -72,22 +71,16 @@
         }
     }
 
-    /** Determine the submit button label based on context. */
-    let submitLabel = $derived(() => {
-        if (submitMode === 'save') return t('chat.common.save');
-        if (isFirstUserMessage && taskStatus === 'backlog') return t('chat.common.save');
-        if (isFirstUserMessage) return t('chat.common.send');
-        if (isLastUserMessage) return t('chat.common.send');
-        return t('chat.common.newThread');
-    });
-
-    let submitIcon = $derived(() => {
-        if (submitMode === 'save') return 'check';
-        if (isFirstUserMessage && taskStatus === 'backlog') return 'check';
-        if (isFirstUserMessage) return 'send';
-        if (isLastUserMessage) return 'send';
-        return 'fork';
-    });
+    /** The label, the icon and the routing are the one rule, read once. */
+    const submitAction = $derived(
+        editSubmitAction({ isFirstUserMessage, isLastUserMessage, taskStatus, forcedSave: submitMode === 'save' }),
+    );
+    const submitLabel = $derived(
+        submitAction === 'save' ? t('chat.common.save')
+            : submitAction === 'send' ? t('chat.common.send')
+                : t('chat.common.newThread'),
+    );
+    const submitIcon = $derived(submitAction === 'save' ? 'check' : submitAction === 'send' ? 'send' : 'fork');
 
     $effect(() => {
         setTimeout(() => {
@@ -136,15 +129,15 @@
             </svg>
         </button>
         <button class="btn-edit-cancel" onclick={onCancel} title={t('chat.edit.cancelEditing')}>{t('chat.common.cancel')}</button>
-        <button class="btn-edit-submit" onclick={() => { if (canSubmit) onSubmit?.(editContent.trim(), editAttachments); }} disabled={isSubmitting || !canSubmit} title={submitLabel()}>
+        <button class="btn-edit-submit" onclick={() => { if (canSubmit) onSubmit?.(editContent.trim(), editAttachments); }} disabled={isSubmitting || !canSubmit} title={submitLabel}>
             {#if isSubmitting}
                 <span class="spinner-inline"></span>
-            {:else if submitIcon() === 'check'}
+            {:else if submitIcon === 'check'}
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <polyline points="20 6 9 17 4 12"/>
                 </svg>
                 {t('chat.common.save')}
-            {:else if submitIcon() === 'send'}
+            {:else if submitIcon === 'send'}
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <line x1="22" y1="2" x2="11" y2="13"/>
                     <polygon points="22 2 15 22 11 13 2 9 22 2"/>

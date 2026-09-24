@@ -143,6 +143,36 @@ describe('StreamState', () => {
         expect(s.state.entries.length).toBe(1);
     });
 
+    // A thread switch is the one moment the panel throws away a whole transcript. What it leaves behind is
+    // what `mayBeBehind()` reads on the next tab return, so a half-reset leaves the return gate open forever.
+    it('resetForThreadSwitch leaves no evidence that this screen owes an answer', () => {
+        const s = new StreamState();
+        s.ensureAssistantEntry(() => 'test-id');
+        s.state.entries.push({ id: 'u1', role: 'user', content: 'deploy it', isStreaming: false, createdAt: '' });
+        s.state.activeToolCalls.set('tc1', { entryId: 'test-id', toolCall: { toolId: 'tc1', toolName: 'read', args: {} } });
+        s.state.processedToolIds.add('tc1');
+        s.state.unresolvedToolIds = new Set(['tc1']);
+        s.state.awaitingResponse = true;
+        s.state.streamTokenCount = 42;
+
+        s.resetForThreadSwitch();
+
+        expect(s.state.entries).toHaveLength(0);
+        expect(s.state.currentAssistantId).toBeNull();
+        expect(s.state.activeToolCalls.size).toBe(0);
+        expect(s.state.processedToolIds.size).toBe(0);
+        expect(s.state.unresolvedToolIds.size).toBe(0);
+        expect(s.state.awaitingResponse).toBe(false);
+        expect(s.state.streamTokenCount).toBe(0);
+    });
+
+    it('resetForThreadSwitch keeps what belongs to the session, not the thread', () => {
+        const s = new StreamState();
+        s.state.sessionCost = 1.25;
+        s.resetForThreadSwitch();
+        expect(s.state.sessionCost).toBe(1.25);
+    });
+
     it('reset clears all entries and state', () => {
         const s = new StreamState();
         s.ensureAssistantEntry(() => 'test-id');

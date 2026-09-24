@@ -24,7 +24,7 @@
  },
  "docs/api-contract.md": {
   "history": 1,
-  "longsent": 30
+  "longsent": 25
  },
  "docs/api.md": {
   "history": 0,
@@ -115,8 +115,8 @@
   "longsent": 6
  },
  "docs/reconnection.md": {
-  "history": 6,
-  "longsent": 31
+  "history": 5,
+  "longsent": 24
  },
  "docs/sandbox-bridge.md": {
   "history": 3,
