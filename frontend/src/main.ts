@@ -16,7 +16,7 @@ window.addEventListener('unhandledrejection', (event) => {
         return;
     }
     if (err && err.stack) {
-        console.warn('[Unhandled Promise Rejection] Suppressed. Stack:', err.stack);
+        console.warn('[Unhandled Promise Rejection] Suppressed:', err.message || err, '\n', err.stack);
     } else {
         console.warn('[Unhandled Promise Rejection] Suppressed:', err);
     }
