@@ -53,3 +53,14 @@ export interface AppStreamFrame {
     type: AppStreamEventType;
     [key: string]: any;
 }
+
+/**
+ * The keepalive frame's name, mirroring `httputil.KeepaliveFrame`. It stays out of the list above, which
+ * is the `backend/types/ws.go` vocabulary the `wsevents` rule checks, so the frame is matched by text.
+ */
+const keepaliveFrameType = 'ping';
+
+/** Whether this frame is the keepalive rather than content a screen could paint. */
+export function isKeepaliveFrame(frame: unknown): boolean {
+    return (frame as { type?: unknown } | null)?.type === keepaliveFrameType;
+}

@@ -3,7 +3,7 @@
  * reachable from a test; `use-tab-return` owns the listeners.
  */
 
-/** Silence is the only evidence a window that was merely unfocused has slept. */
+/** How long a stream must have said nothing for silence to stand in for "this window went unread". */
 export const WAKE_FRAME_GAP_MS = 30_000;
 
 /** The browser fires several signals for one gesture. */
@@ -18,6 +18,8 @@ export interface ReturnSignal {
     /** Null when there is no stream to ask. */
     msSinceFrame: number | null;
     msSinceReconcile: number;
+    /** Null when no content has arrived while this window was unfocused. */
+    msSinceUnpainted: number | null;
     /** True when the screen may be showing something the server has moved past. */
     mayBeBehind: boolean;
     /** True when a missed frame leaves nothing on this screen that could report it, so the only evidence is
@@ -29,5 +31,11 @@ export function needsReturnReconcile(s: ReturnSignal): boolean {
     if (s.hidden) return false;
     if (s.msSinceReconcile < RETURN_DEDUPE_MS) return false;
     if (s.source === 'visible') return s.hiddenIsEvidence || s.mayBeBehind;
-    return s.mayBeBehind && s.msSinceFrame !== null && s.msSinceFrame >= WAKE_FRAME_GAP_MS;
+    return s.mayBeBehind && (contentWentUnread(s) || (s.msSinceFrame !== null && s.msSinceFrame >= WAKE_FRAME_GAP_MS));
+}
+
+/** Content arrived while this window was unfocused, after this view last reconciled — see
+ * `docs/reconnection.md → The tab that comes back`. */
+function contentWentUnread(s: ReturnSignal): boolean {
+    return s.msSinceUnpainted !== null && s.msSinceUnpainted < s.msSinceReconcile;
 }

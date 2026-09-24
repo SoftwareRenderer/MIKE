@@ -854,6 +854,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     const returnWatcher = createTabReturn({
         mayBeBehind: () => true,
         msSinceFrame: () => appStream?.msSinceFrame() ?? null,
+        msSinceUnpainted: () => appStream?.msSinceUnpainted() ?? null,
         onReturn: reconcileAfterAbsence,
     });
 

@@ -1444,6 +1444,7 @@
             // True because this transcript arrives on `task_event` frames and nowhere else.
             hiddenIsEvidence: true,
             msSinceFrame: () => getAppStreamRef()?.msSinceFrame() ?? null,
+            msSinceUnpainted: () => getAppStreamRef()?.msSinceUnpainted() ?? null,
             onReturn: () => { void reconcileAfterAbsence(); },
         });
 

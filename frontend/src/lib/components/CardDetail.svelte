@@ -752,6 +752,7 @@
         const returnWatcher = createTabReturn({
             mayBeBehind: () => taskIsInFlight(task.execution_state) || streamingIds.has(task.id),
             msSinceFrame: () => getAppStreamRef()?.msSinceFrame() ?? null,
+            msSinceUnpainted: () => getAppStreamRef()?.msSinceUnpainted() ?? null,
             onReturn: () => { void loadDiff(); },
         });
 

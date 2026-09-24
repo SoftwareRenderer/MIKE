@@ -1,5 +1,6 @@
 import type { ProjectCounts, Task, StreamEvent } from '$lib/types';
 import type { AppStreamFrame } from './events';
+import { isKeepaliveFrame } from './events';
 import { API_BASE, parseStreamFrame } from './helpers';
 import { STALE_THRESHOLD_MS, HEARTBEAT_INTERVAL_MS, RECONNECT_BASE_DELAY_MS, RECONNECT_MAX_DELAY_MS, SUSPENDED_GAP_MS } from '$lib/constants';
 import { WAKE_FRAME_GAP_MS } from '$lib/utils/tab-return';
@@ -31,6 +32,8 @@ export interface AppStream {
     close: () => void;
     /** ms since this stream last had anything to say: a frame, a close, or the attempt under way. */
     msSinceFrame: () => number;
+    /** ms since a frame a screen could have painted arrived while this window was not focused; null when none has. */
+    msSinceUnpainted: () => number | null;
     reconnectNow: () => void;
     subscribeProject: (projectId: string) => void;
     unsubscribeProject: (projectId: string) => void;
@@ -73,6 +76,8 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
     // (e.g. phone sleep: WebSocket appears OPEN but server closed its end)
     let lastActivityAt = Date.now();
     let lastHeartbeatAt = Date.now();
+    /** The newest frame an unfocused window had to miss, or 0 for none. */
+    let lastUnpaintedAt = 0;
     // Track active subscriptions for re-subscription on reconnect
     const subscribedProjects = new Set<string>();
     /**
@@ -267,6 +272,7 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
             // branch that can never run, and svelte-check is the only thing that would ever notice.
             const msg = parseStreamFrame(e.data, 'stream') as AppStreamFrame | null;
             if (!msg) return; // an unreadable frame is dropped; the connection stays up
+            if (!isKeepaliveFrame(msg) && !document.hasFocus()) lastUnpaintedAt = Date.now();
             // Handle task_event (server-side multiplexed task events)
             if (msg.type === 'task_event' && callbacks.onTaskEvent) {
                 callbacks.onTaskEvent(msg.task_id, {
@@ -353,6 +359,7 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
             if (!currentWs || dropIfSilent(WAKE_FRAME_GAP_MS)) connect();
         },
         msSinceFrame: () => Date.now() - lastActivityAt,
+        msSinceUnpainted: () => (lastUnpaintedAt === 0 ? null : Date.now() - lastUnpaintedAt),
         subscribeProject: (projectId: string) => {
             if (subscribedProjects.has(projectId)) return;
             subscribedProjects.add(projectId);

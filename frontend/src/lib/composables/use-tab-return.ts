@@ -10,6 +10,7 @@ export interface TabReturnOptions {
     /** Passed through to `ReturnSignal.hiddenIsEvidence`. */
     hiddenIsEvidence?: boolean;
     msSinceFrame?: () => number | null;
+    msSinceUnpainted?: () => number | null;
     /** Called at most once per return gesture. */
     onReturn: (source: ReturnSource) => void;
 }
@@ -28,6 +29,7 @@ export function createTabReturn(opts: TabReturnOptions): TabReturn {
             hidden: document.hidden,
             source,
             msSinceFrame: opts.msSinceFrame?.() ?? null,
+            msSinceUnpainted: opts.msSinceUnpainted?.() ?? null,
             msSinceReconcile: Date.now() - lastReconcileAt,
             mayBeBehind: opts.mayBeBehind(),
             hiddenIsEvidence: opts.hiddenIsEvidence ?? false,

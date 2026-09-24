@@ -18,9 +18,9 @@ When the WebSocket drops and reconnects, the current view (board, task view) upd
   listener is on `window`, which is where the browser's own event bubbles to from `document` — a synthetic
   `new Event(...)` fired at `document` does not bubble and reaches nothing.
 
-**Tests:** e2e `reconnect-refresh.spec.ts`; the merge above is held by
-`src/lib/utils/__tests__/chat-history-merge.unit.ts`, which drives the real stream handler and the real
-message builder. Since `page.route` doesn't intercept WebSockets in
+**Tests:** e2e `reconnect-refresh.spec.ts`; the wake reading is held by `stream-unpainted.unit.ts`; the
+merge above is held by `src/lib/utils/__tests__/chat-history-merge.unit.ts`, which drives the real stream
+handler and the real message builder. Since `page.route` doesn't intercept WebSockets in
 Playwright, the spec wraps the `WebSocket` constructor via `addInitScript` and uses `serverApi()` to
 advance state. `ws-stale-reconnect.spec.ts` drops a live socket the same way for the banner and the
 wake-up fetch.
@@ -309,7 +309,7 @@ and the rule collapses them to a single call, never twice inside `RETURN_DEDUPE_
 
 | view | what says it could be behind | what it refetches |
 |---|---|---|
-| board (`App.svelte`) | always — a stale list looks current whatever the socket did | `refreshBoard()`, plus `checkStale()` / `reconnectNow()` for the socket |
+| board (`App.svelte`) | always — a stale list looks current whatever the socket did | `reconnectNow()`, then `refreshBoard()`, retried once after a second |
 | chat (`TaskChat.svelte`) | after a window that was hidden: nothing, because `hiddenIsEvidence` is set. Otherwise: in flight, a card still pending, a turn still open on screen, or a call it owes a card for | the task row, then the messages |
 | diff (`CardDetail.svelte`) | in flight or streaming | `loadDiff()` |
 
@@ -323,11 +323,30 @@ diff does not set it: its content is mirrored by `task_diff_stats` on the projec
 that move the board's copy it gates on. And `loadDiff()` resets the open file, the checkpoint overlay and the
 from/to comparison — reloading it on every tab switch is a loss the chat does not pay.
 
-A `focus` or `pageshow` return never hid the page, so it still needs the view's own answer *and* the stream
-silent for `WAKE_FRAME_GAP_MS`, read from `AppStream.msSinceFrame()` (which restarts its clock at the last
-close, so a dead socket counts as silence). A window that merely lost focus keeps receiving frames, so
-silence is the only evidence the machine slept or the socket went zombie without the tab ever going hidden —
-and with two windows open on one app, `document.hidden` never becomes true at all.
+**A frame that arrived to an unfocused window is the evidence for a window that never hid.** A `focus` or
+`pageshow` return needs the view's own answer *and* one of two readings of the stream. The first is
+`AppStream.msSinceUnpainted()`: the newest frame that arrived while `document.hasFocus()` was false, from
+which `createTabReturn` keeps only what is newer than that view's own last reconcile. The second is the
+stream silent for `WAKE_FRAME_GAP_MS` on `AppStream.msSinceFrame()` — the *liveness* clock, which restarts
+at every close, so a dead socket counts as silence.
+
+Silence alone cannot carry the unfocused case, because it is a measurement a healthy stream never fails to
+pass: `httputil.KeepaliveFrame` arrives every 27 s and `msSinceFrame()` is stamped by every inbound frame,
+so on a live connection that clock never reaches the 30 s gap and the branch could only ever fire for a
+zombie socket — the state the reconnect path already serves. And a window that never hid has no third
+signal: Android's background window, a split-screen pane, and a second browser window on the same app are
+all `visible` throughout, so `visibilitychange` never fires and `document.hidden` never becomes true. What
+content arriving to an unfocused window proves is unread content, which is what the rule needed.
+
+Two rules keep that reading honest. The keepalive is not content (`isKeepaliveFrame`, `$lib/api/events.ts`)
+and never marks anything unread — counting it would make an idle app look like a page that missed a turn,
+and a returning tab missed nothing. And the comparison is against each view's own last reconcile, not a
+cleared counter: three watchers share one stream, and a reading one of them consumed would leave the other
+two with nothing to ask about. Silence stays in the rule because it answers the case content cannot — a
+socket that received nothing because it was gone.
+
+`msSinceFrame()` deliberately stays a liveness clock. Had the gate been switched to a content clock, the
+board — whose `mayBeBehind()` is constant `true` — would refetch on every window switch of an idle app.
 
 **The chat's gate is `StreamState.unresolvedToolIds`, not the task's status — for the signals that never hid
 the page.** `isLoading` and
@@ -364,9 +383,11 @@ paused there; the follow tracker re-pins on return).
 in the wrapped constructor runs before the app's `onmessage`, so `stopImmediatePropagation` is where the
 frame can be removed) and asserts they really were swallowed; the turn ends with the card gone, and one
 `visibilitychange` must bring it back holding the stored output. `tab-return.unit.ts` holds the gate rule
-itself, including that a screen which cannot see its own gap reconciles on the hidden signal alone and one
-that was never hidden does not. `chat-window.unit.ts` holds the half the reconcile reads — that only a row
-read that reached the server redraws a transcript.
+itself, including that a screen which cannot see its own gap reconciles on the hidden signal alone, that one
+which was never hidden reconciles on unread content, and that content older than its own reconcile is not
+evidence. `stream-unpainted.unit.ts` holds the reading: the keepalive never marks content unread, neither
+does a focused window's traffic, and the newest unread frame is the one counted. `chat-window.unit.ts` holds
+the half the reconcile reads — that only a row read that reached the server redraws a transcript.
 
 ## The board on screen belongs to one project
 
