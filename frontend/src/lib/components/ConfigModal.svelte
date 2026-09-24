@@ -827,8 +827,8 @@
                         <h3 class="settings-section-title">{t('settings.aboutTitle')} <span class="about-version">{config?.version || 'dev'}</span></h3>
                         <p class="about-description">{t('app.copyright', { year: 2026, name: 'Mike Wren' })}</p>
                         <p class="about-description">
-                            <a href="https://github.com/SoftwareRenderer" target="_blank" rel="noopener noreferrer">
-                                <span>github.com/SoftwareRenderer</span>
+                            <a href="https://getmike.dev" target="_blank" rel="noopener noreferrer">
+                                <span>getmike.dev</span>
                             </a>
                         </p>
                         <p class="about-update">
