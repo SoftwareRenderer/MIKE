@@ -22,7 +22,7 @@ import (
 // steps in place. A database stamped N has been through 1..N; an older one reads 0 and runs the
 // whole chain. So the steps must stay idempotent, and one that must run exactly once needs its own
 // marker (see the config-row guard on the backfill) rather than trusting this number.
-const schemaVersion = doneMessageOrderIndexesStamp
+const schemaVersion = doneUserTurnIndexesStamp
 
 // doneDiffParsedStamp is the stamp from which a stored done-task diff body carries parsed_files.
 // Older bodies are served byte for byte and cannot grow the key, so initSchema drops those rows.
@@ -49,6 +49,10 @@ const doneMessageTimeKeysStamp = doneLegacyPeakClearedStamp + 1
 // doneMessageOrderIndexesStamp is the version from which a thread's or a task's messages come out of a
 // composite (scope, created_at) index rather than a temp B-tree over the whole thread.
 const doneMessageOrderIndexesStamp = doneMessageTimeKeysStamp + 1
+
+// doneUserTurnIndexesStamp is the version from which a conversation's user rows carry an index of their
+// own, so naming the prompt above a position costs the prompts rather than every row between them.
+const doneUserTurnIndexesStamp = doneMessageOrderIndexesStamp + 1
 
 // userVersion reads PRAGMA user_version. A read failure answers 0, which reruns the probe chain:
 // slow, but it cannot leave a column missing. The caller holds s.mu.
@@ -248,6 +252,10 @@ CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_task_messages_thread_time ON task_messages(thread_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_task_messages_task_time ON task_messages(task_id, created_at);
+-- The prompts of a conversation, indexed apart from the answers under them: rowid is still the last key
+-- column of a partial index, so the order a window read uses survives the role filter.
+CREATE INDEX IF NOT EXISTS idx_task_messages_user_thread ON task_messages(thread_id, created_at) WHERE role = 'user';
+CREATE INDEX IF NOT EXISTS idx_task_messages_user_task ON task_messages(task_id, created_at) WHERE role = 'user';
 CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 `
 
@@ -345,6 +353,10 @@ func (s *Store) addMissingColumns() {
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_messages_task_time ON task_messages(task_id, created_at)`)
 	_, _ = s.db.Exec(`DROP INDEX IF EXISTS idx_task_messages_thread`)
 	_, _ = s.db.Exec(`DROP INDEX IF EXISTS idx_task_messages_task`)
+	// One index per conversation scope, partial on user rows: the read that names the prompt above a
+	// position walks prompts only, and its cost stops depending on how long the turn below it is.
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_messages_user_thread ON task_messages(thread_id, created_at) WHERE role = 'user'`)
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_messages_user_task ON task_messages(task_id, created_at) WHERE role = 'user'`)
 	// moved_at orders the board: it changes only when a task moves column (see UpdateTask).
 	// The backfill belongs to the moment the column first appears, so this one probes.
 	if !s.hasColumn("tasks", "moved_at") {

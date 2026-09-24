@@ -282,12 +282,12 @@ the turn continues and one that stays empty. `mayBeBehind()` is false for an idl
 transcript, so a return from a hidden window (*The tab that comes back*) is the other thing that refetches
 by itself. A live read clears the notice and the claim, so neither outlives its answer.
 
-**A mirror copy is not a reading of the server, so it does not redraw a transcript that has rows.**
-`windowIsReading` (`$lib/utils/chat-window.ts`) is that gate: the stored window paints a screen holding no
-rows — the open that never reached the server, which is what the mirror exists for — and nothing else. The
-window is this browser's own last answered read, so every turn and card that arrived since is missing from
-it, and redrawing from one at a return is how a transcript goes backwards. The notice and the `no_rows`
-claim still move on what the read was, so the reader is told and Retry still asks again.
+**A mirror copy is not a reading of the server** — it does not redraw a transcript that has rows.
+`windowIsReading` (`$lib/utils/chat-window.ts`) is that gate. The stored window paints a screen holding no
+rows — the open that never reached the server — and nothing else. It is this browser's own last answered
+read, so every turn and card that arrived since is missing from it: redrawing from one at a return is how a
+transcript goes backwards. The notice and the `no_rows` claim still move on what the read was, so the reader
+is told and Retry still asks again.
 
 It is not a chat entry: a read that lands rebuilds the transcript, so a synthetic entry would be appended
 again by each rebuild. What the queue holds is rebuilt too — see *A pending outgoing message is

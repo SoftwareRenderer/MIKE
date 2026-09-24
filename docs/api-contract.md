@@ -216,6 +216,17 @@ window, so a page may open mid-turn. `X-Messages-More` is what says older conten
 over exactly once across the pages.** The cursor names the oldest row this page holds, so the next page
 starts older. Nothing between two reads is skipped or repeated.
 
+**The prompts are a read of their own.** `GET /api/projects/{projectID}/tasks/{taskID}/turns` answers where
+the user rows are: the newest prompts of the task's active thread, oldest first, with `X-Turns-More` and
+`X-Turns-Before` naming the older page. Each carries its row id, its instant, and `text` — the head of the
+prompt up to `store.TurnLabelChars` characters, bounded in the read rather than in the response. The chat's
+sticky header needs the prompt above the rows it holds, and the window counted in answers cannot name it:
+one turn is routinely more answers than a window, so the prompt that opened that turn is older than every
+row the task opens on. Default 10, ceiling 50 — outside that a 400 naming `limit` — and a `before` this
+route never issued is a 400 naming `before`. Its cursor names a prompt and the window's names a row: the
+two reads share the cursor's encoding, not its meaning. Tests: `backend/store/messages_turns_test.go`,
+`backend/server/handler_turns_test.go`.
+
 **The client owns the merge.** `TaskChat` keeps every row it has fetched and rebuilds the transcript from
 all of them. `prependRows` in `$lib/utils/chat-window.ts` dedups by row id, so a turn longer than a page is
 still one entry once both pages are held. **Scrolling is the only
@@ -238,10 +249,13 @@ The offline cache holds **the newest window plus the rows this browser already s
 offline reload opens on the bigger of the two. A page fetched by cursor is still not cached on its own —
 that is what the merge is for.
 
-The read walks the covering index for the window's positions, then fetches those rows by `rowid`. Positions
-come first, so the cut and the sort run over index entries, and the answer to "is there an older page" is
-one bounded `EXISTS` on the same index. The sort, the cut and the redaction pass are therefore
-proportional to the window, not to the thread.
+The read walks the `(scope, created_at)` index for the window's positions, then fetches those rows by
+`rowid`. Positions come first, so the cut and the sort run over index entries, and the answer to "is there
+an older page" is one bounded `EXISTS` on the same index. The sort, the cut and the redaction pass are
+therefore proportional to the window, not to the thread. The walk is not covering: `id` and `role` are not
+index columns, so every position is looked up in the table — measured at 3x the cost of the same walk over
+`created_at` and `rowid`. `role` is what the answer boundary is cut on; dropping `id` from the walk is the
+lever if that number ever matters.
 
 **The window bounds rows, not bytes.** The read takes at most `MessageRowCeiling` positions, which is the
 response guard when the newest few answers are enormous; a conversation of a few rows holding tool output

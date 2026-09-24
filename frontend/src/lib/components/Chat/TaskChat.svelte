@@ -1,8 +1,8 @@
 <script lang="ts">
     import { onMount, onDestroy, untrack, tick } from 'svelte';
-    import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData, TaskMessage, Task } from '$lib/types';
+    import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData, TaskMessage, Task, ChatTurn } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, onQueueFlushed, getQueuedTaskIds, getQueuedSends, getRefusedSends, getDroppedTaskIds, getTask, isFromCache, type AppStream } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, getTaskTurns, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, onQueueFlushed, getQueuedTaskIds, getQueuedSends, getRefusedSends, getDroppedTaskIds, getTask, isFromCache, type AppStream } from '$lib/api';
     import { PENDING_SEND_ID_PREFIX, pendingSendEntries } from '$lib/utils/pending-sends';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
@@ -50,6 +50,13 @@
     let earlierCursor = $state('');
     let hasEarlier = $state(false);
     let loadingEarlier = $state(false);
+    /** The window read in flight, so a scroll to the top edge and a jump to a prompt share one page. */
+    let earlierInFlight: Promise<boolean> | null = null;
+    /** The prompts the header can name, oldest first, and where the next-older page of them starts. A
+     * window counted in answers does not hold the prompt that opened a long turn; this read does. */
+    let chatTurns = $state<ChatTurn[]>([]);
+    let turnsCursor = '';
+    let turnsHasMore = $state(false);
     let inputValue = $state('');
     let draftAttachments = $state<DraftAttachment[]>([]);
 
@@ -511,7 +518,6 @@
         try {
             const window = await getTaskMessages(projectId, taskId);
             read = isFromCache(window) ? 'cached' : 'answered';
-
             historyNotice = noticeForWindowRead(read, readContext(executionState));
             declareRows(historyNotice);
             if (windowIsReading(read, historyRows.length > 0)) {
@@ -520,6 +526,8 @@
                 hasEarlier = window.hasMore;
                 renderHistory(scrollAfter, executionState);
             }
+            // The transcript draws first: the prompts the header names arrive a moment later and relabel it.
+            await readTurns(true);
         } catch (e) {
             // Task may have been deleted — clear stale draft
             if (e instanceof Error && (e.message.includes('Not found') || e.message.includes('404'))) {
@@ -600,30 +608,81 @@
     }
 
     /** Adds the next-older window above the rows held, leaving the reader on their row: the entry under
-     * the top edge is found again by id afterwards. */
-    async function loadEarlierMessages() {
+     * the top edge is found again by id afterwards. True when rows arrived. */
+    async function loadEarlierMessages(): Promise<boolean> {
         // The cursor is named for exactly as long as older rows exist, so the flag is the guard.
-        if (!hasEarlier || loadingEarlier) return;
-        loadingEarlier = true;
-        // Reading older rows is a takeover: growth at the bottom must not pull the reader back there.
-        follow.stopFollowing();
+        if (!hasEarlier) return false;
+        // A reader who reaches the top edge while a jump is paging asks for the same page: waiting on the
+        // read in flight is the answer, not a second one.
+        if (earlierInFlight) return earlierInFlight;
+        earlierInFlight = (async () => {
+            loadingEarlier = true;
+            // Reading older rows is a takeover: growth at the bottom must not pull the reader back there.
+            follow.stopFollowing();
+            const held = historyRows.length;
+            try {
+                const older = await getTaskMessages(projectId, taskId, earlierCursor);
+                const el = follow.el;
+                // Read where the reader is now, not where the request went out: they may have kept scrolling
+                // while it was in flight, and pinning them back to that is a jump.
+                const anchor = el ? resolveAnchor(measuredEntries(el), el.getBoundingClientRect().top) : null;
+                historyRows = prependRows(historyRows, older.messages);
+                earlierCursor = older.before;
+                hasEarlier = older.hasMore;
+                renderHistory(false, knownExecutionState);
+                await tick();
+                if (el && anchor) await settleOnRow(el, anchor);
+                return historyRows.length > held;
+            } catch {
+                // Nothing to undo: the rows held and the cursor are untouched.
+                return false;
+            } finally {
+                loadingEarlier = false;
+                earlierInFlight = null;
+            }
+        })();
+        return earlierInFlight;
+    }
+
+    /**
+     * Reads the prompts beside the rows. A window counted in answers leaves out the prompt that opened a
+     * long turn, and the chat's sticky header names it; this is where it comes from. A failed read costs the
+     * header those labels and never the conversation, so nothing here re-throws.
+     */
+    async function readTurns(fromTheStart: boolean): Promise<void> {
         try {
-            const older = await getTaskMessages(projectId, taskId, earlierCursor);
-            const el = follow.el;
-            // Read where the reader is now, not where the request went out: they may have kept scrolling
-            // while it was in flight, and pinning them back to that is a jump.
-            const anchor = el ? resolveAnchor(measuredEntries(el), el.getBoundingClientRect().top) : null;
-            historyRows = prependRows(historyRows, older.messages);
-            earlierCursor = older.before;
-            hasEarlier = older.hasMore;
-            renderHistory(false, knownExecutionState);
-            await tick();
-            if (el && anchor) await settleOnRow(el, anchor);
+            const page = await getTaskTurns(projectId, taskId, fromTheStart ? '' : turnsCursor);
+            chatTurns = fromTheStart ? page.turns : prependRows(chatTurns, page.turns);
+            turnsCursor = page.before;
+            turnsHasMore = page.hasMore;
         } catch {
-            // Nothing to undo: the rows held and the cursor are untouched.
-        } finally {
-            loadingEarlier = false;
+            // What the rows on screen name is what the header has.
         }
+    }
+
+    /** Lands the prompt the header named: fetches older windows until its row is on screen, and answers
+     * whether it got there — the caller owns the scroll. */
+    async function jumpToTurn(entryId: string): Promise<boolean> {
+        for (;;) {
+            if (turnRowOnScreen(entryId)) {
+                await keepTurnsAbove(entryId);
+                return true;
+            }
+            // Every row above is fetched, or the read failed: either way the jump has nowhere left to go.
+            if (!(await loadEarlierMessages())) return false;
+        }
+    }
+
+    function turnRowOnScreen(entryId: string): boolean {
+        const el = follow.el;
+        return !!el && !!el.querySelector(`[data-entry-id="${CSS.escape(entryId)}"]`);
+    }
+
+    /** A jump that landed on the oldest prompt this browser knows asks for the ones above it, so the next
+     * click up has somewhere to go. */
+    async function keepTurnsAbove(entryId: string): Promise<void> {
+        if (!turnsHasMore || chatTurns[0]?.id !== entryId) return;
+        await readTurns(false);
     }
 
     /** Keeps the reader's row under the top edge while the prepended rows find their real heights — entries
@@ -1500,7 +1559,6 @@
         }
         if (!taskIsInFlight(executionState)) dropStaleStreamingState();
         const read = await loadHistory(false, executionState);
-
         if (read === 'answered') {
             stream.state.unresolvedToolIds = pendingToolIds(stream.state.entries);
         }
@@ -1560,6 +1618,9 @@
         hasEarlier={hasEarlier}
         loadingEarlier={loadingEarlier}
         onLoadEarlier={loadEarlierMessages}
+        turns={chatTurns}
+        turnsHasMore={turnsHasMore}
+        onJumpToTurn={jumpToTurn}
     />
     {#if showStartButton}
         <StartPanel
