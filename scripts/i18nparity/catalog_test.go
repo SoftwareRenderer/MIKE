@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sort"
 	"strings"
 	"testing"
 )
@@ -11,6 +12,16 @@ func cat(pairs ...string) *Catalog {
 		c.Values[pairs[i]] = pairs[i+1]
 	}
 	return c
+}
+
+// Every key of a catalog, sorted, so a failure prints the same list in the same order.
+func catalogKeys(c *Catalog) []string {
+	out := make([]string, 0, len(c.Values))
+	for k := range c.Values {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // counted adds a plural table to a catalog the way the loader does: the flattened `key.form`
@@ -86,7 +97,7 @@ func TestPlaceholdersAreByteIdenticalNotNormalised(t *testing.T) {
 	// literally. That is only caught if the token is compared as written.
 	// keyDiff works on key sets — a plural table is one key, not one key per form — so both sides
 	// come from a catalog, the way CompareCatalogs builds them.
-	_, extra := keyDiff(keySet(cat("a", "{count}").Keys()), keySet(cat("a", "{count}").Keys()))
+	_, extra := keyDiff(keySet(catalogKeys(cat("a", "{count}"))), keySet(catalogKeys(cat("a", "{count}"))))
 	if len(extra) != 0 {
 		t.Fatalf("unexpected key diff %v", extra)
 	}

@@ -31,7 +31,7 @@ record there rather than arguing inside the rule. When you learn something, *rep
 - **Never commit.** The user commits manually.
 - **Never leave the server running** after a crash or panic — stop it first.
 - **`make check` is the gate** and there is no CI file, so it is the only thing that catches a
-  regression: `lint` (gofmt → vet → staticcheck → deadcode, both roots) → `archgate` + `test-archgate`
+  regression: `lint` (gofmt → vet → staticcheck → deadcode, every root) → `archgate` + `test-archgate`
   (structural debt against its frozen baselines) → `docs-check` + `test-docs-check` (the same, for docs) →
   `bridge-check` → build → `check-release` → the Go suite → `svelte-check` → the frontend gates. Run it
   before claiming done, and `make check-race` on whatever you touched — a package's own green tests prove
@@ -83,7 +83,10 @@ code, the change is arguing with itself.
   your regression until you've seen it survive the scoping.
 - **A green package is not proof.** `backend/exec`'s tests never start a task, so `executionState` locking
   bugs only surface under `-race` in `./backend/server/`.
-- **`deadcode` needs both roots** (`. ` and `./pkg/bridge/agent`) or it calls live bridge code dead.
+- **`deadcode` needs every main as a root** — `. `, `./pkg/bridge/agent`, and the two `scripts/` mains. A
+  missing root calls live bridge code dead. A method whose type satisfies some used interface counts
+  as live even when nothing selects it, so an exported method no caller calls is the ALLOWLIST's
+  question, not this tool's.
 - **Some tests fail only under load.** Read `docs/testing.md → Tests that fail only under load` before
   believing a red that names them.
 - **A `WaitDelay` bounds a subprocess's output pipes, not the child; only a cancelled context bounds the

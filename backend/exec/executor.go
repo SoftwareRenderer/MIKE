@@ -468,7 +468,6 @@ func (te *TaskExecutor) automatedAnswers(ctx context.Context, subtask *types.Tas
 	systemPrompt, userPrompt, err := prompts.RenderAnswerQuestionPrompt(prompts.AnswerQuestionData{
 		ParentTitle:  parent.Title,
 		ParentPrompt: parent.Prompt,
-		SubtaskTitle: subtask.Title,
 		Questions:    questions,
 	})
 	if err != nil {

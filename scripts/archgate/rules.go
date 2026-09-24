@@ -155,7 +155,6 @@ func read(root, rel string) []string {
 }
 
 var (
-	reNetHTTP    = regexp.MustCompile(`^\s*"net/http(/httptest)?"\s*$|^\s*(\w+)\s+"net/http(/httptest)?"\s*$`)
 	reHTTPImport = regexp.MustCompile(`"net/http"`)
 	reEnvRead    = regexp.MustCompile(`\bos\.(Getenv|LookupEnv|Environ|Getenvs)\(`)
 	// The type may end the line (no trailing comment), so nothing may be required after it.

@@ -64,6 +64,13 @@ GO_SCOPE := ./backend/... ./pkg/... .
 # in a script because make ends `$(shell` at the first parenthesis and reads `$|` as a variable.
 GO_TOUCHED := $(shell bash scripts/touched-packages.sh)
 
+# The static half's scope: GO_SCOPE plus the two script mains. `scripts/` is Go this repo owns and
+# nobody else checks — it is outside GO_SCOPE, so a dead declaration there survived every gate until
+# one run over ./scripts/... reported three of them. Tests are not run over it, because archgate and
+# the parity checker have their own targets (test-archgate, test-i18n-parity), and deadcode has its
+# own roots in scripts/deadcode-check.sh.
+LINT_SCOPE := $(GO_SCOPE) ./scripts/...
+
 # Every Go file this repo owns, and only those. Not `.`: that also walks extensions/ (a pulled
 # artifact from another module) and node_modules/, and would recurse into backend/ and pkg/ and
 # report each violation twice.
@@ -158,7 +165,7 @@ test-docs-check: ## Test the documentation gate itself, both directions (~0.2s)
 # into an error carrying its install command, because a gate that passes an unrun check is the same
 # false "done" with better formatting.
 .PHONY: lint
-lint: ## gofmt + scoped vet + staticcheck (all checks) + deadcode (both roots)
+lint: ## gofmt + scoped vet + staticcheck (all checks) + deadcode (every root)
 	@echo "==> gofmt"
 	@# stderr is folded in on purpose: gofmt reports an unreadable path on stderr and exits non-zero,
 	@# while the list on stdout stays empty — so a deleted or renamed entry used to leave this step
@@ -170,9 +177,9 @@ lint: ## gofmt + scoped vet + staticcheck (all checks) + deadcode (both roots)
 		exit 1; \
 	fi
 	@echo "==> go vet"
-	@go vet $(GO_SCOPE)
+	@go vet $(LINT_SCOPE)
 	@echo "==> staticcheck -checks=all"
-	@$$(scripts/lint-tools.sh path staticcheck) -checks=all $(GO_SCOPE)
+	@$$(scripts/lint-tools.sh path staticcheck) -checks=all $(LINT_SCOPE)
 	@echo "==> deadcode"
 	@scripts/deadcode-check.sh
 

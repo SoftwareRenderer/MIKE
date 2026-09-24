@@ -324,9 +324,6 @@ func CompareCatalogs(en, pack *Catalog, locale string, f *Findings, maxList int)
 				if known && !reachable[form] {
 					deadForm = append(deadForm, fmt.Sprintf("%s.%s", key, form))
 				}
-				if _, ok := enForms[form]; !ok {
-					continue // a form English does not need and this language does: correct, not extra
-				}
 			}
 			for form, text := range enForms {
 				if _, shipped := packForms[form]; shipped {

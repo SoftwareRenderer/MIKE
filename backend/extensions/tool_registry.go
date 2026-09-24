@@ -38,12 +38,6 @@ func (r *ToolRegistry) Contributed() []ContributedTool {
 	return offered
 }
 
-// Unmet lists what is not offered and why, the same answer survey logs at debug.
-func (r *ToolRegistry) Unmet() []ToolProblem {
-	_, problems := r.survey()
-	return problems
-}
-
 // Lookup answers only for the tools Contributed returns, so a withheld tool cannot be run through here.
 func (r *ToolRegistry) Lookup(name string) (*ContributedTool, bool) {
 	offered, _ := r.survey()

@@ -141,7 +141,6 @@ func TestRenderHelpers_ShippedTemplates(t *testing.T) {
 		system, user, err := RenderAnswerQuestionPrompt(AnswerQuestionData{
 			ParentTitle:  "Ship sessions",
 			ParentPrompt: "Add the revoke endpoint",
-			SubtaskTitle: "Write the handler",
 			Questions:    []string{"Which column?", "Auth by cookie?"},
 		})
 		if err != nil {
