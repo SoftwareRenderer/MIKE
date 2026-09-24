@@ -72,6 +72,7 @@ export {
 export {
     sendTaskMessage,
     getTaskMessages,
+    getTaskTurns,
     getTaskMessageFull,
     createTaskMessage,
     deleteTaskMessagesAfter,

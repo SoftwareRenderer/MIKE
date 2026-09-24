@@ -168,7 +168,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	// A window, not the whole thread: the read, the redaction pass below and the response are all bounded
 	// by it. The body stays the array of rows; the window rides the X-Messages-* headers.
-	limit, err := messageWindowLimit(r)
+	limit, err := pageLimit(r, store.MessageWindowDefault, store.MessageWindowMax)
 	if err != nil {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
@@ -219,16 +219,49 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, messages)
 }
 
-// messageWindowLimit reads the caller's window size. Absent or unparsable is the default; above the
-// ceiling is a 400, because the ceiling is what bounds the request.
-func messageWindowLimit(r *http.Request) (int, error) {
+// handleTaskTurns answers where the prompts of a conversation are, which a window counted in answers does
+// not hold: the chat's sticky header names the prompt above the rows it has. GET …/turns only.
+func (s *Server) handleTaskTurns(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
+	task, err := s.store.GetTask(projectID, taskID)
+	if err != nil {
+		Fail(w, err, "get task", "task not found")
+		return
+	}
+	limit, err := pageLimit(r, store.TurnWindowDefault, store.TurnWindowMax)
+	if err != nil {
+		JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	page, err := s.store.GetUserTurnPage(taskID, task.CurrentThreadID, limit, r.URL.Query().Get("before"))
+	if err != nil {
+		if errors.Is(err, store.ErrMessageCursor) {
+			JSONError(w, http.StatusBadRequest, "before is not a cursor this endpoint issued")
+			return
+		}
+		Fail(w, err, "get turns", "task not found")
+		return
+	}
+	// The cursors of the two reads share one encoding but not one meaning: this one names a prompt.
+	w.Header().Set("X-Turns-More", strconv.FormatBool(page.HasMore))
+	if page.Before != "" {
+		w.Header().Set("X-Turns-Before", page.Before)
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	JSONResponse(w, http.StatusOK, page.Turns)
+}
+
+// pageLimit reads a caller's page size. Absent or unparsable is the default; outside 1..ceiling is a 400,
+// because the ceiling is what bounds the response.
+func pageLimit(r *http.Request, def, ceiling int) (int, error) {
 	raw := r.URL.Query().Get("limit")
 	if raw == "" {
-		return store.MessageWindowDefault, nil
+		return def, nil
 	}
 	limit, err := strconv.Atoi(raw)
-	if err != nil || limit < 1 || limit > store.MessageWindowMax {
-		return 0, fmt.Errorf("limit must be between 1 and %d", store.MessageWindowMax)
+	if err != nil || limit < 1 || limit > ceiling {
+		return 0, fmt.Errorf("limit must be between 1 and %d", ceiling)
 	}
 	return limit, nil
 }

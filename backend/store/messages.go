@@ -43,12 +43,56 @@ const (
 	MessageRowCeiling    = 500
 )
 
+// A turn read answers where the prompts are, which is how far back the chat's sticky header can name a
+// step up. TurnLabelChars bounds the quoted line: a prompt that is a pasted file must not ride the
+// response just to name itself.
+const (
+	TurnWindowDefault = 10
+	TurnWindowMax     = 50
+	TurnLabelChars    = 200
+)
+
 // MessagePage is one window of a conversation: its newest rows, oldest first.
 type MessagePage struct {
 	Messages []types.TaskMessage
 	// Before is the cursor for the next-older window, empty when this window reaches the first row.
 	Before  string
 	HasMore bool
+}
+
+// UserTurn is one prompt's position in the conversation and the line that names it. A loop hint is a
+// user-role row the transcript draws among the prompts, so it is a turn here too.
+type UserTurn struct {
+	ID        string `json:"id"`
+	CreatedAt string `json:"created_at"`
+	// Text is the head of the prompt, bounded by TurnLabelChars — enough to name the turn, and a client
+	// shows its first line.
+	Text string `json:"text"`
+}
+
+// UserTurnPage is the newest few prompts of a conversation, oldest first, with the cursor for the prompts
+// above them.
+type UserTurnPage struct {
+	Turns []UserTurn
+	// Before is the cursor for the next-older prompts, empty when this page reaches the first prompt.
+	Before  string
+	HasMore bool
+}
+
+// userTurnRow pairs a turn with the position its cursor names.
+type userTurnRow struct {
+	UserTurn
+	key messageKey
+}
+
+func scanUserTurn(r *sql.Rows) (userTurnRow, error) {
+	var t userTurnRow
+	if err := r.Scan(&t.ID, &t.CreatedAt, &t.key.rowid, &t.Text); err != nil {
+		return t, err
+	}
+	// A cursor is the pair the ORDER BY compares, so the row's id and role are not part of it.
+	t.key.at = t.CreatedAt
+	return t, nil
 }
 
 // messageKey is a row's position in the conversation order: the values the ORDER BY compares.
@@ -101,8 +145,10 @@ func conversationWhere(taskID, threadID string, cursor *messageKey) (string, []a
 	return sb.String(), args
 }
 
-// messageKeyCols names only the columns the (scope, created_at) index carries, so a window read never
-// touches a content page.
+// messageKeyCols names the columns the key walk reads. The (scope, created_at) index carries the order but
+// neither id nor role, so the walk looks every position up in the table — measured 3x the cost of the same
+// walk over created_at and rowid alone. role is what newestUnits cuts an answer on, and id is what the row
+// fetch below is keyed by.
 const messageKeyCols = `SELECT id, created_at, rowid, role FROM task_messages WHERE `
 
 func (s *Store) messageKeys(taskID, threadID string, cursor *messageKey, n int) ([]messageKey, error) {
@@ -147,13 +193,9 @@ func (s *Store) GetTaskMessagePage(taskID, threadID string, limit int, before st
 	if limit <= 0 || limit > MessageWindowMax {
 		limit = MessageWindowDefault
 	}
-	var cursor *messageKey
-	if before != "" {
-		c, err := decodeMessageCursor(before)
-		if err != nil {
-			return nil, err
-		}
-		cursor = &c
+	cursor, err := messageCursor(before)
+	if err != nil {
+		return nil, err
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -202,6 +244,74 @@ func (s *Store) GetTaskMessagePage(taskID, threadID string, limit int, before st
 		if m, ok := byID[keys[i].id]; ok {
 			page.Messages = append(page.Messages, m)
 		}
+	}
+	return page, nil
+}
+
+// messageCursor decodes a page cursor. An empty one means "from this end of the conversation".
+func messageCursor(before string) (*messageKey, error) {
+	if before == "" {
+		return nil, nil
+	}
+	c, err := decodeMessageCursor(before)
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// userTurnCols names the columns of a prompt read: the position a cursor names, beside the head of the
+// prompt. The substr bound is the first placeholder, so a prompt is bounded before its bytes are read.
+const userTurnCols = `SELECT id, created_at, rowid, substr(content, 1, ?) FROM task_messages WHERE `
+
+// userTurnOnly is the partial user-row indexes' predicate: a read carrying it walks prompts, and the
+// answers between them stay unread.
+const userTurnOnly = ` AND role = 'user'`
+
+// GetUserTurnPage answers where the prompts are without reading the answers under them. The chat's sticky
+// header names the prompt above the rows it holds, and a turn counted in answers keeps that prompt out of
+// the window. `role = 'user'` is the partial user-row index's predicate, so the read costs the prompts it
+// returns rather than the rows between them.
+func (s *Store) GetUserTurnPage(taskID, threadID string, limit int, before string) (*UserTurnPage, error) {
+	// The route refuses a page outside 1..TurnWindowMax; this covers a caller that is not a request.
+	if limit <= 0 || limit > TurnWindowMax {
+		limit = TurnWindowDefault
+	}
+	cursor, err := messageCursor(before)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	page := &UserTurnPage{}
+	where, args := conversationWhere(taskID, threadID, cursor)
+	// substr's bound is the first placeholder; the where's args follow it, the limit last.
+	args = append(append([]any{TurnLabelChars}, args...), limit)
+	rows, err := s.db.Query(userTurnCols+where+userTurnOnly+` `+newestFirstOrder+` LIMIT ?`, args...)
+	if err != nil {
+		return nil, err
+	}
+	found, err := scanRows(rows, scanUserTurn)
+	if err != nil {
+		return nil, err
+	}
+	if len(found) > 0 {
+		oldest := found[len(found)-1]
+		olderWhere, olderArgs := conversationWhere(taskID, threadID, &oldest.key)
+		var more int
+		if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM task_messages WHERE `+olderWhere+userTurnOnly+`)`, olderArgs...).Scan(&more); err != nil {
+			return nil, err
+		}
+		page.HasMore = more == 1
+		if page.HasMore {
+			page.Before = encodeMessageCursor(oldest.key)
+		}
+	}
+	// A page is an array even when the conversation holds no prompt: the route answers with this slice.
+	page.Turns = make([]UserTurn, 0, len(found))
+	for i := len(found) - 1; i >= 0; i-- {
+		page.Turns = append(page.Turns, found[i].UserTurn)
 	}
 	return page, nil
 }

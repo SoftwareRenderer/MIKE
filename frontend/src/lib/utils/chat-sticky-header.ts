@@ -2,27 +2,30 @@
  * The sticky header names the user message to jump to next: the latest one above the sticky line,
  * excluding whichever message already rests on it. Positions are in content space — offsets from the
  * top of the scroll content, whatever the container's place on screen.
+ *
+ * A turn the window does not hold is still a turn the header can name. One agent turn is routinely more
+ * answers than a window of answers, so the prompt that opened it is older than every row a task opens on,
+ * and the prompt read (`GET …/turns`) is what names it. Such a marker has no geometry: it is older than
+ * everything rendered, and jumping to it means fetching before landing.
  */
 
-/** A rendered user message and its measured position in content space. */
-export interface StickyUserMessage {
-    entryIdx: number;
+/** A prompt the header can name. `entryIdx` is -1 when the row is not on screen, and then so is its box. */
+export interface StickyTurn {
+    /** The message's row id — how a jump finds it once it is rendered. */
+    entryId: string;
     firstLine: string;
+    entryIdx: number;
     top: number;
     bottom: number;
 }
 
 export interface StickyHeaderState {
     firstLine: string;
-    /** The entry the header refers to, -1 when none. */
-    entryIdx: number;
+    /** The named prompt's row id, '' when the header names nothing. */
+    entryId: string;
     show: boolean;
-    /**
-     * The next step back is a row this window does not hold, so older rows should be fetched. One
-     * agent turn is routinely a hundred rows of a 120-row window, so the previous user message is
-     * often not in the document at all.
-     */
-    needsEarlier: boolean;
+    /** The named prompt is older than the rows on screen: a jump fetches before it can land. */
+    needsRows: boolean;
 }
 
 /**
@@ -32,39 +35,53 @@ export interface StickyHeaderState {
  */
 const TOP_MESSAGE_TOLERANCE = 12;
 
+/** The line a prompt's header shows: its first line, whatever came from the server or from the DOM. */
+export function turnLabel(text: string): string {
+    return text.split('\n')[0];
+}
+
 /**
- * Pick the header's message at a scroll position. `topInset` is the measured distance from the
- * container's top edge to the sticky line — never an estimate, because the choice below turns on it.
+ * Pick the header's message at a scroll position. `turns` is oldest first — the prompts older than the
+ * rendered rows, then the rendered ones in document order, which is the order they were written.
  *
- * `tappedIdx`: the message the header last jumped to. `olderRowsBeyond`: rows older than the rendered
- * ones exist and have not been fetched.
+ * `topInset` is the measured distance from the container's top edge to the sticky line — never an
+ * estimate, because the choice below turns on it. `tappedId` is the prompt the header last jumped to, and
+ * `olderTurnsBeyond` says the prompt read has an older page this list does not hold.
  */
 export function computeStickyHeader(
-    userMessages: StickyUserMessage[],
+    turns: StickyTurn[],
     scrollTop: number,
     topInset = 0,
-    tappedIdx = -1,
-    olderRowsBeyond = false,
+    tappedId = '',
+    olderTurnsBeyond = false,
 ): StickyHeaderState {
-    if (userMessages.length === 0) {
-        return { firstLine: '', entryIdx: -1, show: false, needsEarlier: false };
-    }
+    const hidden = { firstLine: '', entryId: '', show: false, needsRows: false };
+    if (turns.length === 0) return hidden;
+
     const line = scrollTop + topInset;
-    let above: StickyUserMessage | null = null;
-    for (const m of userMessages) {
-        if (m.top < line - TOP_MESSAGE_TOLERANCE) above = m;
+    // From the newest prompt down, stopping at the first answer: a rendered prompt above the line wins,
+    // and the unrendered ones — the older end of the list — are met only when nothing rendered has crossed
+    // the line, so the first of them met is the newest of them.
+    let above: StickyTurn | null = null;
+    for (let i = turns.length - 1; i >= 0 && above === null; i--) {
+        const turn = turns[i];
+        if (turn.entryIdx < 0 || turn.top < line - TOP_MESSAGE_TOLERANCE) above = turn;
     }
+
     let latest = above;
-    if (above && above.entryIdx === tappedIdx) {
-        const at = userMessages.indexOf(above);
-        latest = at > 0 ? userMessages[at - 1] : null;
+    if (above && above.entryId === tappedId) {
+        const at = turns.indexOf(above);
+        latest = at > 0 ? turns[at - 1] : null;
     }
-    // The gate is about the conversation's first message, and a page edge is not that.
-    const show = latest !== null && (olderRowsBeyond || scrollTop >= userMessages[0].bottom);
+    if (!latest) return hidden;
+    // The gate is about the conversation's first message, and a page edge is not that. A prompt that is
+    // not on screen is by definition out of it.
+    const first = turns[0];
+    const firstIsOut = first.entryIdx < 0 || scrollTop >= first.bottom;
     return {
-        firstLine: latest ? latest.firstLine : '',
-        entryIdx: latest ? latest.entryIdx : -1,
-        show,
-        needsEarlier: olderRowsBeyond && above === userMessages[0],
+        firstLine: latest.firstLine,
+        entryId: latest.entryId,
+        show: olderTurnsBeyond || firstIsOut,
+        needsRows: latest.entryIdx < 0,
     };
 }

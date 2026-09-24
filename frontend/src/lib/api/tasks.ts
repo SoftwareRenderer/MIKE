@@ -1,4 +1,4 @@
-import type { MemoryAlertAckPayload, Task, TaskMessage } from '../types';
+import type { ChatTurn, MemoryAlertAckPayload, Task, TaskMessage } from '../types';
 import { API_BASE, apiFetch, apiError, generateId } from './helpers';
 import { setBoardCache, getBoardCache, messagesCacheKey, messageFullCacheKey } from '../storage';
 import { mergeCachedRows } from '../utils/chat-window';
@@ -225,6 +225,32 @@ async function widenCache(projectId: string, taskId: string, window: MessageWind
         // A cache this browser cannot read is no reason to lose the window it just read.
     }
     await setBoardCache(key, merged);
+}
+
+/** One page of a task's prompts, oldest first, plus how to ask for the older ones. */
+export interface TurnPage {
+    turns: ChatTurn[];
+    hasMore: boolean;
+    /** Cursor for the next-older prompts; empty when this page reaches the first prompt. */
+    before: string;
+}
+
+/**
+ * Fetch the newest prompts of a task's conversation, or older ones by cursor. A window counted in answers
+ * does not hold the prompt that opened a long turn, and this read does.
+ *
+ * Never cached: a prompt list is not a transcript, and an old copy would name a message this browser has
+ * since deleted. A caller that cannot read it loses those labels, not the conversation.
+ */
+export async function getTaskTurns(projectId: string, taskId: string, before = ''): Promise<TurnPage> {
+    const query = before ? `?before=${encodeURIComponent(before)}` : '';
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/turns${query}`);
+    if (!res.ok) throw await apiError(res, t('api.fetchMessages'));
+    return {
+        turns: await res.json(),
+        hasMore: res.headers.get('X-Turns-More') === 'true',
+        before: res.headers.get('X-Turns-Before') ?? '',
+    };
 }
 
 /** Fetch a single message with full content (uncompressed reasoning_content, tool_calls).

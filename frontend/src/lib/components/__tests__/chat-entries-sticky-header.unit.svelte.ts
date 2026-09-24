@@ -147,7 +147,7 @@ function stubRect(el: Element, value: () => { top: number; bottom: number }) {
  * Live geometry derived from `scrollTop`, so every rect read sees the effect of the
  * previous scroll write and the settle loop converges here as it does on screen.
  */
-function mountGeometry(container: HTMLElement, follow: ChatFollow, geometry?: Map<number, number[]>) {
+function mountGeometry(container: HTMLElement, follow: ChatFollow, geometry?: Map<number, number[]>, scrollHeight = SCROLL_HEIGHT) {
     const el = container.querySelector<HTMLElement>('.chat-messages')!;
     let top = 0;
     // The mobile tab switch leaves this component mounted with the column `display: none`,
@@ -159,10 +159,10 @@ function mountGeometry(container: HTMLElement, follow: ChatFollow, geometry?: Ma
         configurable: true,
         get: () => top,
         set: (value: number) => {
-            top = Math.max(0, Math.min(value, SCROLL_HEIGHT - CONTAINER_HEIGHT));
+            top = Math.max(0, Math.min(value, scrollHeight - CONTAINER_HEIGHT));
         },
     });
-    Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => SCROLL_HEIGHT });
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => scrollHeight });
     Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => (laidOut ? CONTAINER_HEIGHT : 0) });
     stubRect(el, () => (laidOut ? { top: CONTAINER_TOP, bottom: CONTAINER_TOP + CONTAINER_HEIGHT } : { top: 0, bottom: 0 }));
 
@@ -206,7 +206,7 @@ function mountGeometry(container: HTMLElement, follow: ChatFollow, geometry?: Ma
         },
         /** The view moved on its own: scroll anchoring, or content above changing height. */
         async nudge(delta: number) {
-            top = Math.max(0, Math.min(top + delta, SCROLL_HEIGHT - CONTAINER_HEIGHT));
+            top = Math.max(0, Math.min(top + delta, scrollHeight - CONTAINER_HEIGHT));
             el.dispatchEvent(new Event('scroll'));
             await flush();
         },
@@ -429,24 +429,24 @@ describe('ChatEntries — sticky user-message header', () => {
         expect(view.scrollEvents()).toBe(scrolls);
     });
 
-    // One user message in the loaded window — see `StickyHeaderState.needsEarlier` for why that is
-    // the normal case.
+    // One user message in the loaded window, and the prompt read naming what lies above it.
     const oneTurn = [
         makeEntry('u-a', 'user', 'Alpha request\nmore'),
         makeEntry('a-1', 'assistant', 'On it'),
     ];
     const TALL_A = new Map<number, number[]>([[0, [300, 900]]]);
 
-    it('shows at the top of a loaded page and asks for what is older', async () => {
+    it('shows the oldest message it knows without fetching it into view', async () => {
         const onLoadEarlier = vi.fn(() => Promise.resolve());
         const { container, follow } = await renderChat(undefined, oneTurn, { hasEarlier: true, onLoadEarlier });
-        const view = mountGeometry(container, follow, TALL_A);
-        // 500 is past the 240px top-edge trigger, so a request here comes from the header having
-        // nothing older to name.
-        await view.to(500);
+        // 900 is past the top-edge trigger (1.5 viewports = 750), so a request here would be the
+        // header's own.
+        const view = mountGeometry(container, follow, TALL_A, 4000);
+        await view.to(900);
         expect(headerText(container)).toBe('Alpha request');
         expect(headerHidden(container)).toBe(false);
-        expect(onLoadEarlier).toHaveBeenCalled();
+        // The list edge is the fetch affordance; naming a prompt is not a request for its rows.
+        expect(onLoadEarlier).not.toHaveBeenCalled();
     });
 
     it('still hides at the top when nothing older exists', async () => {
@@ -456,6 +456,56 @@ describe('ChatEntries — sticky user-message header', () => {
         await view.to(500);
         expect(headerHidden(container)).toBe(true);
         expect(onLoadEarlier).not.toHaveBeenCalled();
+    });
+
+    // A window counted in answers holds no prompt at all: the read that answers prompts is what the
+    // header shows then, and its row is fetched only when the reader asks for it.
+    const midTurn = [makeEntry('a-1', 'assistant', 'Reading the tree')];
+    const openedTurn = { id: 'u-open', created_at: '2026-01-01T00:00:00Z', text: 'work through the tree\nfile by file' };
+
+    it('names the prompt the window left out', async () => {
+        const { container, follow } = await renderChat(undefined, midTurn, { turns: [openedTurn] });
+        const view = mountGeometry(container, follow, new Map());
+        await view.to(500);
+        expect(headerText(container)).toBe('work through the tree');
+        expect(headerHidden(container)).toBe(false);
+    });
+
+    it('fetches the prompt it names, then lands it on the line', async () => {
+        let landed: (value: boolean) => void = () => {};
+        const onJumpToTurn = vi.fn(() => new Promise<boolean>(resolve => { landed = resolve; }));
+        const { container, follow, rerender } = await renderChat(undefined, midTurn, { turns: [openedTurn], onJumpToTurn });
+        const view = mountGeometry(container, follow, new Map());
+        await view.to(500);
+
+        container.querySelector<HTMLElement>('.chat-sticky-bubble')!.click();
+        await flush();
+        expect(onJumpToTurn).toHaveBeenCalledWith('u-open');
+        expect(view.at()).toBe(500);
+
+        // The rows arrived: the prompt's row is on screen now, at a measured offset.
+        const withPrompt = [makeEntry('u-open', 'user', 'work through the tree\nfile by file'), ...midTurn];
+        rerender({ entries: withPrompt, entryMetas: withPrompt.map(() => makeMeta()) });
+        landed(true);
+        await view.relaidOut(new Map([[0, [600, 700]]]));
+        await flush();
+
+        expect(view.at()).toBe(600 - HEADER_HEIGHT);
+        // It rests on the line, so it is the message at the top and there is nothing older to offer.
+        expect(headerHidden(container)).toBe(true);
+    });
+
+    it('leaves the view alone when the prompt cannot be reached', async () => {
+        const onJumpToTurn = vi.fn(() => Promise.resolve(false));
+        const { container, follow } = await renderChat(undefined, midTurn, { turns: [openedTurn], onJumpToTurn });
+        const view = mountGeometry(container, follow, new Map());
+        await view.to(500);
+
+        container.querySelector<HTMLElement>('.chat-sticky-bubble')!.click();
+        await flush();
+
+        expect(onJumpToTurn).toHaveBeenCalledWith('u-open');
+        expect(view.at()).toBe(500);
     });
 
     it('names the older message once the page lands', async () => {
