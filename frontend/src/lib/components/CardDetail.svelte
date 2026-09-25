@@ -3,7 +3,8 @@
     import type { Task, TaskCommit } from '$lib/types';
     import type { DiffFile, DiffImageSource } from '$lib/types/diff';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
-    import { getStreamingContext, getTaskDiffStatsContext, getExpandedTasksContext } from '$lib/context';
+    import { streamingTaskStore } from '$lib/stores/streaming-tasks.svelte';
+    import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile, toDiffFiles } from '$lib/api';
     import { enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
     import { shouldAutoFullscreenDiffEditor } from '$lib/utils/diff-editor-layout';
@@ -135,9 +136,8 @@
     // Includes both staged index changes and committed-but-unmerged changes.
     // When commits are already merged into the target branch, committed files
     // don't count — only staged (index) changes matter.
-    // Note: diffStatsMap is declared later (line ~297) but $derived.by evaluates lazily.
     let hasStagedChanges = $derived.by(() => {
-        const alreadyMerged = diffStatsMap[task.id]?.already_merged ?? false;
+        const alreadyMerged = diffStatsStore.get(task.id)?.already_merged ?? false;
         return stagedFiles.length > 0 || (!alreadyMerged && committedFiles.length > 0);
     });
     let stagedUntracked = $derived([] as { path: string; fileSize?: number; isBinary?: boolean; truncated?: boolean; origAdded?: number; loading?: boolean; file: DiffFile }[]);
@@ -351,20 +351,6 @@
         }
     }
 
-    // Context stores
-    let streamingIdsContext = getStreamingContext();
-    let expandedTasksContext = getExpandedTasksContext();
-    let taskDiffStats = getTaskDiffStatsContext();
-    // Sync streamingIds store to $state for reactive tracking in $derived.by
-    // (get() on a Svelte store inside $derived.by does NOT establish a dependency)
-    let streamingIds = $state<Set<string>>(new Set());
-    $effect(() => {
-        const unsub = streamingIdsContext.subscribe(v => { streamingIds = v; });
-        return unsub;
-    });
-    // Sync store to reactive state for $effect tracking
-    let diffStatsMap = $state<Record<string, { hash: string; files: number; additions: number; deletions: number; file_hashes?: Record<string, string>; removed_files?: string[]; staged_paths?: string[]; already_merged?: boolean }>>({});
-
     // Reload diff when task changes (switching tasks via task view keeps CardDetail mounted)
     let previousTaskId = $state<string | null>(null);
     $effect(() => {
@@ -393,7 +379,7 @@
 
     // Status badge
     let badge = $derived.by(() => {
-        const streaming = streamingIds.has(task.id);
+        const streaming = streamingTaskStore.has(task.id);
         const state = appStore.board?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state;
         if (streaming || state === 'running') return { text: t('board.badge.running'), color: 'var(--color-status-blue)' };
         if (state === 'pulling_image') return { text: t('board.badge.pullingImage'), color: 'var(--color-status-blue)' };
@@ -434,7 +420,7 @@
     }
 
     // Subtask hierarchy (extracted composable)
-    let hierarchy = useSubtaskHierarchy(() => allTasks, expandedTasksContext, () => task.parent_task_id);
+    let hierarchy = useSubtaskHierarchy(() => allTasks, () => task.parent_task_id);
 
     // True when this task actually has child subtasks (only then is the
     // committed-files section legitimately "Merged from Subtasks").
@@ -597,7 +583,6 @@
         previousFocus = document.activeElement as HTMLElement;
         // Focus the detail panel for keyboard/screen reader users
         queueMicrotask(() => detailEl?.focus());
-        const unsubDiff = taskDiffStats.subscribe(v => { diffStatsMap = v; });
         const unsubsMultiSelect = multiSelectActions.setup();
 
         loadDiff();
@@ -741,14 +726,13 @@
         // The diff is mirrored by `task_diff_stats` on the project channel, so this screen can answer for
         // itself. A reload is not free either: it closes the open file and the checkpoint overlay.
         const returnWatcher = createTabReturn({
-            mayBeBehind: () => taskIsInFlight(task.execution_state) || streamingIds.has(task.id),
+            mayBeBehind: () => taskIsInFlight(task.execution_state) || streamingTaskStore.has(task.id),
             msSinceFrame: () => getAppStreamRef()?.msSinceFrame() ?? null,
             msSinceUnpainted: () => getAppStreamRef()?.msSinceUnpainted() ?? null,
             onReturn: () => { void loadDiff(); },
         });
 
         return () => {
-            unsubDiff();
             unsubsMultiSelect();
             returnWatcher.destroy();
             window.removeEventListener('keydown', handleKey);
@@ -762,8 +746,7 @@
 
     // Real-time diff update: delegate to DiffCache service.
     $effect(() => {
-        const stat = diffStatsMap[task.id];
-        diffCache.processStats(stat, diffLoading);
+        diffCache.processStats(diffStatsStore.get(task.id) ?? undefined, diffLoading);
     });
 
     async function handleMove(status: string) {
@@ -842,7 +825,7 @@
             diffLoading = false;
             // Apply any pending staged_paths from a WebSocket broadcast that
             // arrived during the load (the effect was blocked by diffLoading).
-            const stat = diffStatsMap[task.id];
+            const stat = diffStatsStore.get(task.id);
             if (stat) {
                 diffCache.applyStagedPaths(stat.staged_paths);
             }

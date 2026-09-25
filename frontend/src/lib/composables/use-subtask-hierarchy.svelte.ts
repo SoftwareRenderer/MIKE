@@ -1,16 +1,13 @@
 import type { Task } from '$lib/types';
-import { persistCollapsedTasks, initExpandedTasks, appStore } from '$lib/stores';
-import { pruneCollapsedTasks } from '$lib/storage';
+import { appStore } from '$lib/stores';
+import { expandedTasksStore } from '$lib/stores/expanded-tasks.svelte';
 import { sortByLastMoved } from '$lib/utils/sort-tasks';
 
 /** Composable for subtask hierarchy management.
  * Tracks expanded/collapsed state, consolidation of subtasks under same-column ancestors,
  * and auto-expansion of parent tasks.
  * Accepts getter functions for reactive props so $derived/$effect see live values. */
-export function useSubtaskHierarchy(getAllTasks: () => Task[], expandedTasksContext: {
-    set: (v: Set<string>) => void;
-    subscribe: (fn: (v: Set<string>) => void) => () => void;
-}, getCurrentParentId: () => string | undefined) {
+export function useSubtaskHierarchy(getAllTasks: () => Task[], getCurrentParentId: () => string | undefined) {
     // Build children map for subtask hierarchy
     const childrenMap = $derived.by(() => {
         const tasks = getAllTasks();
@@ -58,23 +55,14 @@ export function useSubtaskHierarchy(getAllTasks: () => Task[], expandedTasksCont
     // IDs of tasks that have children (potential parents)
     const parentTaskIds = $derived.by(() => new Set(getAllTasks().filter(t => childrenMap.has(t.id)).map(t => t.id)));
 
-    // Track expanded tasks (shared store for Board + CardDetail sync)
-    let expandedTasks = $state<Set<string>>(new Set());
-    $effect(() => {
-        expandedTasksContext.subscribe(v => expandedTasks = v);
-    });
-
     // Initialize expanded tasks from IndexedDB (default: all expanded) — run once
     let expandedInitialized = $state(false);
     $effect(() => {
         if (expandedInitialized) return;
         if (parentTaskIds.size > 0) {
             expandedInitialized = true;
-            (async () => {
-                const allIds = new Set(getAllTasks().map(t => t.id));
-                await pruneCollapsedTasks(allIds);
-                expandedTasksContext.set(await initExpandedTasks(parentTaskIds));
-            })().catch(() => {});
+            const allIds = new Set(getAllTasks().map(t => t.id));
+            expandedTasksStore.load(parentTaskIds, allIds).catch(() => {});
         }
     });
 
@@ -83,12 +71,7 @@ export function useSubtaskHierarchy(getAllTasks: () => Task[], expandedTasksCont
     function autoExpandParent(parentId: string | undefined) {
         if (parentId && parentId !== lastAutoExpandedParent) {
             lastAutoExpandedParent = parentId;
-            const current = expandedTasks;
-            if (!current.has(parentId)) {
-                const next = new Set(current);
-                next.add(parentId);
-                expandedTasksContext.set(next);
-            }
+            expandedTasksStore.add(parentId);
         }
     }
 
@@ -103,28 +86,16 @@ export function useSubtaskHierarchy(getAllTasks: () => Task[], expandedTasksCont
         const currentParents = new Set(childrenMap.keys());
         for (const parentId of currentParents) {
             if (!lastExpandedParents.has(parentId)) {
-                const current = expandedTasks;
-                if (!current.has(parentId)) {
-                    const next = new Set(current);
-                    next.add(parentId);
-                    expandedTasksContext.set(next);
-                }
+                expandedTasksStore.add(parentId);
                 lastExpandedParents = new Set([...lastExpandedParents, parentId]);
             }
         }
     });
 
     function toggleTaskExpanded(taskId: string) {
-        const next = new Set(expandedTasks);
-        if (next.has(taskId)) {
-            next.delete(taskId);
-        } else {
-            next.add(taskId);
-        }
-        expandedTasksContext.set(next);
+        expandedTasksStore.toggle(taskId);
         const allIds = new Set(getAllTasks().map(t => t.id));
-        persistCollapsedTasks(next, parentTaskIds).catch(() => {});
-        pruneCollapsedTasks(allIds).catch(() => {});
+        expandedTasksStore.persist(parentTaskIds, allIds).catch(() => {});
     }
 
     return {
@@ -132,7 +103,7 @@ export function useSubtaskHierarchy(getAllTasks: () => Task[], expandedTasksCont
         get subtaskIds() { return subtaskIds; },
         get consolidatedSubtaskIds() { return consolidatedSubtaskIds; },
         get parentTaskIds() { return parentTaskIds; },
-        get expandedTasks() { return expandedTasks; },
+        get expandedTasks() { return expandedTasksStore.all; },
         toggleTaskExpanded,
     };
 }

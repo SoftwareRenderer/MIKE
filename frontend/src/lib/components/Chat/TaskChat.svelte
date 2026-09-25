@@ -6,7 +6,9 @@
     import { sendTaskMessage, getTaskMessages, getTaskTurns, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, onQueueFlushed, getQueuedTaskIds, getQueuedSends, getRefusedSends, getDroppedTaskIds, getTask, isFromCache, type AppStream, type SendResult } from '$lib/api';
     import { PENDING_SEND_ID_PREFIX, pendingSendEntries } from '$lib/utils/pending-sends';
     import { appStore, dialogStore, updateTaskInBoard } from '$lib/stores';
-    import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
+    import { streamingTaskStore } from '$lib/stores/streaming-tasks.svelte';
+    import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
+    import { commitQueueStore } from '$lib/stores/commit-queue.svelte';
     import { StreamState } from '$lib/services/stream-state.svelte';
     import { createStreamHandler } from '$lib/services/stream-handler';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
@@ -23,7 +25,8 @@
     import { reselectProvider, getProviderDisplayName } from '$lib/utils/providers';
     import { buildEntriesFromMessages, mergeLoadedHistory, buildEntryMetas, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, takeEchoMatch, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
-    import { wsConnection } from '$lib/stores/connection';
+    import { useConnectionRestored } from '$lib/composables/use-connection-restored.svelte';
+    import { useTaskEvents } from '$lib/composables/use-task-events.svelte';
     import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments, type DraftAttachment } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { t } from '$lib/i18n';
@@ -180,9 +183,7 @@
         if (was === undefined || taskIsInFlight(taskExecutionState) || !taskIsInFlight(was)) return;
         stream.dropUnresolvedToolCalls();
     });
-    let commitQueueStatus = getCommitQueueContext();
-    let taskEventContext = getTaskEventContext();
-    let queueStatus = $derived($commitQueueStatus[projectId]?.taskID === taskId ? $commitQueueStatus[projectId].status : null);
+    let queueStatus = $derived(commitQueueStore.statusOf(projectId, taskId));
 
     let threads: Thread[] = $state([]);
     let activeThreadId = $state('');
@@ -190,10 +191,8 @@
     let stopping = $state(false);
     let isSummarizing = $derived(taskSummarizing);
     // isLoading: true when LLM is actively streaming tokens OR task is in running state.
-    // After page refresh, streamingIds is empty but execution_state preserves running state.
-    let streamingIds = getStreamingContext();
-    // streamingIds is from context (not appStore), accessed via $derived with context auto-subscription
-    let isLoading = $derived(!stopping && ($streamingIds.has(taskId) || knownExecutionState === 'running'));
+    // After page refresh, streamingTaskStore is empty but execution_state preserves running state.
+    let isLoading = $derived(!stopping && (streamingTaskStore.has(taskId) || knownExecutionState === 'running'));
 
     // Last entry index for regenerate button gating
     let lastEntryIdx = $derived(entries.length - 1);
@@ -394,11 +393,11 @@
     }
 
     function markStreaming() {
-        streamingIds.update(s => { const n = new Set(s); n.add(taskId); return n; });
+        streamingTaskStore.add(taskId);
     }
 
     function markNotStreaming() {
-        streamingIds.update(s => { const n = new Set(s); n.delete(taskId); return n; });
+        streamingTaskStore.delete(taskId);
         stream.state.queuePosition = 0;
         stream.state.queueEstimatedWait = 0;
         stream.state.streamTokenCount = 0;
@@ -1023,13 +1022,12 @@
     }
 
     $effect(() => {
-        if (!($streamingIds.has(taskId) || knownExecutionState === 'running')) {
+        if (!(streamingTaskStore.has(taskId) || knownExecutionState === 'running')) {
             stopping = false;
         }
     });
 
-    let taskDiffStatsStore = getTaskDiffStatsContext();
-    let diffStats = $derived($taskDiffStatsStore[taskId] || null);
+    let diffStats = $derived(diffStatsStore.get(taskId));
     // Prefer the prop from CardDetail, which reads DiffCache; the WebSocket store is the fallback for other
     // callers. Merged commits don't count - only staged changes do.
     let hasStagedChanges = $derived(
@@ -1069,11 +1067,7 @@
         } finally {
             isCommitting = false;
             // Clear queue status for this project
-            commitQueueStatus.update(map => {
-                const copy = { ...map };
-                delete copy[thisProjectId];
-                return copy;
-            });
+            commitQueueStore.remove(thisProjectId);
         }
     }
 
@@ -1305,9 +1299,14 @@
         }
     }
 
+    // The frames App.svelte dispatches for the selected or floating task; armed once the history
+    // this screen paints has been read.
+    const taskEvents = useTaskEvents(() => taskId, (event) => {
+        handleEvent({ type: event.type as StreamEventType, data: event.data });
+    });
+
     onMount(() => {
         // Run async init in a promise chain; cleanup is returned synchronously.
-        let unsubTaskEvent: (() => void) | null = null;
         let unsubViewport: (() => void) | null | undefined = null;
         let unmounted = false;
         const handleUrlChange = () => syncThreadFromUrl();
@@ -1351,16 +1350,14 @@
             }
             if (unmounted) return;
 
-            // 1. Set up task event handler FIRST (before subscribing to task).
-            unsubTaskEvent = taskEventContext.subscribe((event) => {
-                if (event && event.task_id === taskId) {
-                    handleEvent({ type: event.type as StreamEventType, data: event.data });
-                }
-            });
+            // 1. Open the task-event reader. Before this the last published frame is not this
+            // screen's to act on: its history is not loaded yet, and a frame handled now would
+            // land ahead of the rows it belongs between.
+            taskEvents.arm();
 
             // 2. Clear stale streaming state for non-running tasks.
-            // The global streamingTaskIds store may have a leftover entry from a previous
-            // visit if the user navigated away while the task was streaming.
+            // A leftover id in the streaming store from a visit that ended mid-turn would otherwise
+            // keep this chat showing a turn that is not running.
             if (taskStatus === 'review' || taskStatus === 'done' || taskStatus === 'backlog') {
                 markNotStreaming();
             }
@@ -1431,7 +1428,6 @@
         return () => {
             window.removeEventListener('urlchanged', handleUrlChange);
             unsubViewport?.();
-            unsubTaskEvent?.();
             returnWatcher.destroy();
             // Release on the stream that was asked to hold it, not on whatever is current now.
             heldStream?.unsubscribeTask(projectId, taskId);
@@ -1449,7 +1445,6 @@
         markNotStreaming();
         unsubQueue?.();
         unsubFlushed?.();
-        unsubWsConn?.();
         window.removeEventListener('beforeunload', handleBeforeUnload);
         // Flush pending draft save on navigation/component destroy
         if (draftSaveTimer) {
@@ -1502,19 +1497,10 @@
         });
     });
 
-    // Reconcile chat state on WebSocket reconnect. Turns completed while
-    // offline aren't replayed, so we reload history. Running tasks replay
-    // their in-flight turn; loadHistory merges them without clobbering.
-    let unsubWsConn: (() => void) | null = null;
-    onMount(() => {
-        let wasDisconnected = false;
-        unsubWsConn = wsConnection.subscribe((connected) => {
-            if (connected && wasDisconnected) {
-                void reconcileAfterAbsence();
-            }
-            wasDisconnected = !connected;
-        });
-    });
+    // Turns completed while offline aren't replayed, so the transcript comes back from the
+    // database when the connection does. Running tasks replay their in-flight turn; loadHistory
+    // merges them without clobbering.
+    useConnectionRestored(() => void reconcileAfterAbsence());
 
     /** True while this screen could be showing work the server has moved past. Read at the moment of
      * the event — a value kept from earlier is the stale view itself. */

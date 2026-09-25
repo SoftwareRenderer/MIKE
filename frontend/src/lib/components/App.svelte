@@ -1,14 +1,15 @@
 
 <script lang="ts">
     import { onMount, onDestroy, tick } from 'svelte';
-    import { get } from 'svelte/store';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard, applyResolvedTasksToBoard } from '$lib/stores';
     import { t } from '$lib/i18n';
     import { isSandboxMountPath } from '$lib/utils/path';
     import { isAnyModalOpen } from '$lib/utils/modal-state';
-    import { wsConnection } from '$lib/stores/connection';
+    import { connectionStore } from '$lib/stores/connection.svelte';
     import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
-    import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
+    import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
+    import { commitQueueStore } from '$lib/stores/commit-queue.svelte';
+    import { taskEventStore } from '$lib/stores/task-events.svelte';
     import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, checkSession, logout, setOfflineStatus, loadQueue, clearQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask, getDroppedActions } from '$lib/api';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
     import { dragCarriesFiles } from '$lib/utils/file-drop';
@@ -157,7 +158,6 @@
 
     let collapsed = $state(false);
     let appStream: ReturnType<typeof createAppStream> | null = $state(null);
-    let wsConnected = $state(false);
     let initialLoadComplete = $state(false); // tracks whether onMount data load is done
     let lastSyncedAt = $state<number | null>(null); // epoch ms of the last data that actually landed
     let nextReconnectAt = $state(0); // epoch ms of next reconnect attempt
@@ -265,14 +265,13 @@
     let everDropped = $state(false);
     /** The countdown and the age line change every second, so they stay out of this announced text. */
     const connectionNotice = $derived(
-        !wsConnected
+        !connectionStore.connected
             ? (everDropped ? t('app.reconnect.status') : '')
             : (everDropped && hadConnection ? t('app.reconnect.back') : '')
     );
 
     function handleWsConnection(connected: boolean): void {
-        wsConnected = connected;
-        wsConnection.set(connected);
+        connectionStore.set(connected);
         setOfflineStatus(!connected);
         if (connected) {
             hadConnection = true;
@@ -550,7 +549,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 const additions = tracked_add + (untracked_lines || 0);
                 const deletions = tracked_del;
                 const stats: DiffStatsEntry = { hash: hash || '', files: files_n, additions, deletions, untracked_n: untracked_n || 0, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged };
-                taskDiffStatsContext.update(map => ({ ...map, [task_id]: stats }));
+                diffStatsStore.set(task_id, stats);
                 // persist dont-task stats
                 const t = appStore.tasks.find(x => x.id === task_id);
                 const project = appStore.selectedProject;
@@ -618,12 +617,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 if (appStore.selectedTask && appStore.selectedTask.id === task_id) {
                     clearTaskDetail();
                 }
-                taskDiffStatsContext.update(map => {
-                    if (!(task_id in map)) return map;
-                    const next = { ...map };
-                    delete next[task_id];
-                    return next;
-                });
+                diffStatsStore.remove(task_id);
                 const project = appStore.selectedProject;
                 if (project) {
                     const key = `${project.id}:${task_id}`;
@@ -640,13 +634,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 // The frame names no project, so the board on screen decides whether the task is
                 // ours — the slot is one per project, and another project's task would occupy it.
                 if (project && appStore.tasks.some(t => t.id === task_id)) {
-                    commitQueueStatusContext.update(map => ({ ...map, [project.id]: { taskID: task_id, status } }));
+                    commitQueueStore.set(project.id, { taskID: task_id, status });
                 }
             },
             onTaskEvent: (task_id: string, event: StreamEvent) => {
                 if (event.type === 'sandbox_stats') {
                     // Sandbox memory stats live in their own store (keyed by
-                    // task) — not in the single-slot task event context.
+                    // task) — not in the single-slot task event store.
                     sandboxStatsStore.set(task_id, event.data as SandboxMemoryStats);
                     return;
                 }
@@ -654,7 +648,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 const floatingId = uiStore.floatingTask?.taskId;
                 if ((appStore.selectedTask && appStore.selectedTask.id === task_id) ||
                     (floatingId && floatingId === task_id)) {
-                    taskEventContext.set({ task_id, ...event });
+                    taskEventStore.publish({ task_id, ...event });
                 }
             },
             ...reconnectCountdown(),
@@ -752,13 +746,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         // Nothing leaves the process until that question is answered yes.
         void updateCheck.start();
     }
-
-    // Initialize context providers
-    const { taskDiffStats: taskDiffStatsContext } = createTaskDiffContext();
-    const commitQueueStatusContext = createCommitQueueContext();
-    createExpandedTasksContext();
-    const taskEventContext = createTaskEventContext();
-    createStreamingContext();
 
     async function hasCachedProjects(): Promise<boolean> {
         try {
@@ -982,8 +969,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
     }
 
-    /** Hydrate cached done-task stats (IndexedDB) into the in-memory cache and
-     * the diff-stats context so cards render immediately and the next
+    /** Hydrate cached done-task stats (IndexedDB) into the in-memory cache and the
+     * diff-stats store so cards render immediately and the next
      * subscribe can declare them via known_stats. A cache miss just means the
      * server sends the stats as usual. */
     async function hydrateDoneTaskStats(projectId: string, projectTasks: Task[]) {
@@ -1005,15 +992,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             next[`${projectId}:${id}`] = entry;
         }
         doneStatsCache = next;
-        // Mirror into the context only for tasks without live stats already.
-        const current = get(taskDiffStatsContext);
         const toAdd: Record<string, DiffStatsEntry> = {};
         for (const { id, entry } of hits) {
-            if (!(id in current)) toAdd[id] = entry.stats;
+            toAdd[id] = entry.stats;
         }
-        if (Object.keys(toAdd).length > 0) {
-            taskDiffStatsContext.update(map => ({ ...map, ...toAdd }));
-        }
+        diffStatsStore.fillAbsent(toAdd);
     }
 
     /** The board of the project just opened, as IndexedDB last saw it, applied while its live board
@@ -1032,7 +1015,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         lastSyncedAt = entry!.cachedAt;
         // The banner says "this is the newest copy there is", which is only true with no socket to
         // bring the live board in; a slow-but-connected switch must not flash it.
-        servingFromCache = !wsConnected;
+        servingFromCache = !connectionStore.connected;
     }
 
     async function refreshBoard() {
@@ -1418,7 +1401,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 {:else}
 <!-- Not a live region: the countdown and the age change every second. The region under it
      announces the transitions. -->
-{#if !wsConnected}
+{#if !connectionStore.connected}
     <div class="reconnecting-banner">
         <span class="reconnecting-spinner"></span>
         {reconnectStatus}
@@ -1434,12 +1417,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     <div class="cache-banner" role="status" aria-live="polite">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         {t('app.cache.banner')}
-        {#if wsConnected}
+        {#if connectionStore.connected}
             <button class="reconnecting-btn" onclick={retryLiveNow} type="button" aria-label="Try connecting now">{t('app.reconnect.connect')}</button>
         {/if}
     </div>
 {/if}
-<div class="app" class:collapsed class:task-detail={uiStore.showCardDetail && !!appStore.selectedTask} class:ws-disconnected={!wsConnected} class:cache-visible={servingFromCache}>
+<div class="app" class:collapsed class:task-detail={uiStore.showCardDetail && !!appStore.selectedTask} class:ws-disconnected={!connectionStore.connected} class:cache-visible={servingFromCache}>
     <!-- Skip navigation link -->
     <a href="#main-content" class="skip-link">{t('app.skipToMain')}</a>
 

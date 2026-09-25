@@ -7,8 +7,12 @@ When the WebSocket drops and reconnects, the current view (board, task view) upd
 
 - `onConnected(true)` in `App.svelte` runs `silentRefresh()` if `initialLoadComplete` is true.
 - Project re-subscription forces the server to re-send `task_diff_stats`, refreshing the diff panel.
-- `TaskChat` subscribes to the `wsConnection` store and reloads history on reconnect. Turns completed
-  while offline aren't replayed (buffer cleared at turn end), so DB reload is required.
+- `TaskChat` registers `useConnectionRestored` — the false→true edge of the connection store — and reloads
+  history on reconnect; the value read at mount is not that edge. Turns completed while offline aren't
+  replayed (buffer cleared at turn end), so DB reload is required.
+- The task-event reader (`useTaskEvents`) arms itself only after that history read, and takes each frame
+  exactly once: a handler whose writes the reader can read back re-delivers its own frame and restarts the
+  turn.
 - Browser `online`/`offline` events complement the WS backoff: `offline` queues writes immediately
   (the exceptions are a config carrying a real provider API key and a clone URL carrying credentials —
   both refused, never persisted);
@@ -19,9 +23,12 @@ When the WebSocket drops and reconnects, the current view (board, task view) upd
   listener is on `window`, which is where the browser's own event bubbles to from `document` — a synthetic
   `new Event(...)` fired at `document` does not bubble and reaches nothing.
 
-**Tests:** e2e `reconnect-refresh.spec.ts`; the wake reading is held by `stream-unpainted.unit.ts`; the
-merge above is held by `src/lib/utils/__tests__/chat-history-merge.unit.ts`, which drives the real stream
-handler and the real message builder. Since `page.route` doesn't intercept WebSockets in
+**Tests:** e2e `reconnect-refresh.spec.ts`; the edge rule and the arming rule are held by
+`src/lib/composables/__tests__/connection-restored.unit.svelte.ts` and
+`src/lib/composables/__tests__/task-events-delivery.unit.svelte.ts`. The wake reading is held by
+`stream-unpainted.unit.ts`; the merge above is held by `src/lib/utils/__tests__/chat-history-merge.unit.ts`,
+which drives the real stream handler and the real message builder. Since `page.route` doesn't intercept
+WebSockets in
 Playwright, the spec wraps the `WebSocket` constructor via `addInitScript` and uses `serverApi()` to
 advance state. `ws-stale-reconnect.spec.ts` drops a live socket the same way for the banner and the
 wake-up fetch.
@@ -127,12 +134,13 @@ the running card, and the one that opens the task does not.
 The claim goes with the
 entry. `processedToolIds` is what stops a second announcement of one id opening a second card. An id still
 held when its card is discarded **swallows the announcement that follows** — the replayed one, or the
-event `taskEventContext` delivers the instant a chat subscribes. Every frame of that call is then refused
+event `taskEventStore` delivers the instant a chat arms its reader. Every frame of that call is then refused
 as a duplicate and the card is never drawn: the `tool_result` resolves nothing, because the id was never
 rendered and `unresolvedToolIds` never learns either. So `processedToolIds` lets go of exactly the ids it
 discarded, and `unresolvedToolIds` keeps them — an unanswered call is still evidence that a card is owed.
 
-**Tests:** `src/lib/services/__tests__/stream-handler.unit.ts`. E2E `away-and-back.spec.ts` holds the whole
+**Tests:** `src/lib/services/__tests__/stream-handler.unit.ts`. E2E
+`away-and-back.spec.ts` holds the whole
 stream back until the rows are read, then loses the call's announcement; the rows are the only evidence
 the screen holds.
 

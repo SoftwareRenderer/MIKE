@@ -1,5 +1,5 @@
 import type { Project, Board, Config, Task, Provider } from '$lib/types';
-import { saveCollapsedTasks, pruneCollapsedTasks, loadAppSetting, saveAppSetting } from '$lib/storage';
+import { loadAppSetting, saveAppSetting } from '$lib/storage';
 import { getConfig } from '$lib/api/config';
 import { isFromCache } from '$lib/api/cache';
 
@@ -134,30 +134,4 @@ export class AppStore {
         })();
         return this.configRefresh;
     }
-}
-
-// ─── Expanded Tasks Helpers ───
-
-/** Save collapsed state to IndexedDB. */
-export async function persistCollapsedTasks(expanded: Set<string>, parentTaskIds: Set<string>): Promise<void> {
-    const collapsed = new Set<string>();
-    for (const id of parentTaskIds) {
-        if (!expanded.has(id)) {
-            collapsed.add(id);
-        }
-    }
-    await saveCollapsedTasks(collapsed);
-}
-
-/** Init expanded task IDs from IndexedDB. */
-export async function initExpandedTasks(parentTaskIds: Set<string>): Promise<Set<string>> {
-    const collapsed = await pruneCollapsedTasks(parentTaskIds);
-    // Expanded = all parent IDs minus collapsed
-    const expanded = new Set<string>();
-    for (const id of parentTaskIds) {
-        if (!collapsed.has(id)) {
-            expanded.add(id);
-        }
-    }
-    return expanded;
 }
