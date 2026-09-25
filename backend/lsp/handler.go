@@ -22,22 +22,19 @@ import (
 	"mike/pkg/logging"
 )
 
-// JSONRPCMessage is a JSON-RPC 2.0 message: a request (id and method), a response (id only),
-// or a notification (method only).
+// JSONRPCMessage is the routing view of a JSON-RPC 2.0 message: a request (id and method), a
+// response (id only), or a notification (method only). Only these members are read — the bytes are
+// forwarded unchanged, so `jsonrpc` and `params` are not modelled here.
 type JSONRPCMessage struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      *json.Number    `json:"id,omitempty"`
-	Method  string          `json:"method,omitempty"`
-	Params  json.RawMessage `json:"params,omitempty"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *RPCError       `json:"error,omitempty"`
+	ID     *json.Number    `json:"id,omitempty"`
+	Method string          `json:"method,omitempty"`
+	Result json.RawMessage `json:"result,omitempty"`
+	Error  *RPCError       `json:"error,omitempty"`
 }
 
-// RPCError represents a JSON-RPC 2.0 error object.
+// RPCError is the error object's message; its code and data are not read.
 type RPCError struct {
-	Code    int    `json:"code"`
 	Message string `json:"message"`
-	Data    any    `json:"data,omitempty"`
 }
 
 // SubscribeParams carries the workspace and file path for subscription.

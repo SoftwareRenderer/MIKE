@@ -6,23 +6,6 @@ vi.mock('svelte/transition', () => ({ slide: vi.fn(), fade: vi.fn() }));
 vi.mock('$lib/assets/icons/commit-push.svg?raw', () => ({ default: '' }));
 vi.mock('$lib/components/Icon.svelte', () => ({ default: () => '' }));
 
-vi.mock('$lib/context', () => {
-    function writable(initial: unknown) {
-        return {
-            subscribe: (fn: (v: unknown) => void) => { fn(initial); return () => {}; },
-            set: () => {},
-            update: () => {},
-        };
-    }
-    return {
-        getStreamingContext: () => writable(new Set<string>()),
-        getTaskDiffStatsContext: () => writable({}),
-        getCommitQueueContext: () => writable({}),
-        getExpandedTasksContext: () => writable(new Set<string>()),
-        getTaskEventContext: () => writable(null),
-    };
-});
-
 const { mockAppStore, mockUiStore } = vi.hoisted(() => ({
     mockAppStore: {
         selectedTask: null as unknown,

@@ -104,7 +104,7 @@ test-diff: ## Go tests for the packages this working tree touched (cached)
 	else echo "==> go test $$pkgs"; go test -parallel 4 $$pkgs; fi
 
 # What each frontend gate enforces is in the doc that owns it: docs/markup-sanitizing.md (the HTML
-# sinks), docs/i18n.md (the surface count, the catalogue).
+# sinks), docs/i18n.md (the surface count, the catalogue), docs/testing.md (the component fetch count).
 .PHONY: test-frontend
 test-frontend: ## Run frontend unit tests + the gates (vitest, ~10s)
 	cd frontend && npm test && npm run check:i18n && npm run check:i18n-surface-test && npm run check:i18n-surface && npm run check:sinks-test && npm run check:sinks
@@ -112,6 +112,8 @@ test-frontend: ## Run frontend unit tests + the gates (vitest, ~10s)
 	cd frontend && npm run check:dead
 	@echo "==> unused declarations (noUnusedLocals + noUnusedParameters)"
 	cd frontend && npm run check:unused
+	@echo "==> component fetches (the API layer owns the network)"
+	cd frontend && npm run check:fetch
 
 # A locale pack fails silently in both directions, so neither failure shows up in the UI: a
 # missing message key falls back to English per key (a pack missing 300 keys still looks

@@ -8,6 +8,7 @@
  * each carry a private copy of.
  */
 import { detectMentionAtCursor, insertMention, getInputRect } from '$lib/utils/file-mention';
+import { searchFsPaths } from '$lib/api';
 
 const MENTION_DEBOUNCE_MS = 150;
 
@@ -144,14 +145,9 @@ export class FileMention {
     private async search(query: string) {
         const projectId = this.opts.getProjectId();
         if (!projectId) return;
-        const params = new URLSearchParams({ q: query, project: projectId });
-        const taskId = this.opts.getTaskId?.();
-        if (taskId) params.set('task', taskId);
         try {
-            const res = await fetch(`/api/fs/search?${params.toString()}`);
-            if (!res.ok) return;
-            const data = await res.json();
-            this.results = data.results || [];
+            const answer = await searchFsPaths({ query, project: projectId, task: this.opts.getTaskId?.() });
+            this.results = answer.results || [];
         } catch {
             this.results = [];
         }

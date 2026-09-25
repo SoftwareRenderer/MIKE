@@ -210,6 +210,30 @@ describe('extensions API', () => {
         await expect(collect()).rejects.toThrow('Operation ended before reporting completion');
     });
 
+    it('installExtension skips a malformed frame and keeps streaming', async () => {
+        const encoder = new TextEncoder();
+        const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(encoder.encode('data: {"extension":"gopls","progress":10,"message":"Fetching","done":false}\n\n'));
+                controller.enqueue(encoder.encode('data: this frame is not json\n\n'));
+                controller.enqueue(encoder.encode('data: {"extension":"gopls","progress":100,"message":"Installed","done":true}\n\n'));
+                controller.close();
+            },
+        });
+        mockFetch.mockImplementation(async (url: any) => {
+            if (typeof url === 'string' && url.includes('/api/auth/session')) {
+                return { ok: true, status: 200, json: async () => ({ authenticated: true, csrf_token: 'test-token' }) };
+            }
+            return { ok: true, status: 200, headers: new Headers({ 'Content-Type': 'text/event-stream' }), body };
+        });
+
+        const { installExtension } = await import('$lib/api/extensions');
+        const events: any[] = [];
+        for await (const ev of installExtension('gopls')) events.push(ev);
+
+        expect(events.map((e) => e.progress)).toEqual([10, 100]);
+    });
+
     it('checkUpdates returns available updates', async () => {
         const updates = [
             { id: 'gopls-1', name: 'gopls', current_version: '1.0.0', available_version: '2.0.0' },

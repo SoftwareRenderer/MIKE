@@ -55,6 +55,17 @@ fetch can run on a detached context while the swap stays behind a click; the rou
   `api/helpers.ts`, the one reader of both sockets' `onmessage`). A `JSON.parse` throw inside `onmessage`
   is swallowed by the event loop: the frame is lost, the socket stays open, and the app believes it is
   current. Test: `api/__tests__/ws-frame.unit.ts`.
+- A server **progress stream** has one client reader: `readEventStream` in `api/helpers.ts`. It splits the body
+  on the blank line that terminates a frame and yields `{ event, data }`. The writers are `data: %s\n\n`
+  (`backend/api/project.go`, `backend/extensions/handler.go`) and `event: %s\ndata: %s\n\n`
+  (`backend/exec/merge.go`). A response with no body is the reader's error. A frame the stream stopped inside
+  is dropped, because half a frame is not one. Whether an early end is a failure is the caller's decision,
+  since only the caller knows which frame it needed: a `done` event, a build result, a cloned project. The
+  reader applies no deadline — a stream ends when the caller's `AbortSignal` does, and that cancellation never
+  reads as an outage. A component iterates typed frames from the API layer instead of reading bytes
+  (`streamCommitPreview` in `api/tasks.ts`). Four streams read through it: clone progress, a sandbox image
+  build, an extension install, a commit-message preview. `grep -rn getReader frontend/src` re-counts them.
+  Test: `api/__tests__/event-stream.unit.ts`.
 - Use optimistic UI for user messages (add immediately, skip the echo).
 - Model/provider changes ride a `user_message` with optional `model_name`/`llama_server_url`.
 
@@ -278,8 +289,8 @@ the newest content, and the jump-to-latest button lands on an old row. A window 
 rows held cannot be joined: another thread's read, or a truncation that cut the overlap away, answers alone.
 **Scrolling is the only
 affordance** — no control asks the reader to fetch anything. The list edge is the request, and it fires a
-viewport and a half before the reader gets there (`earlierEdgePx`) so the page lands while they are still
-reading toward it.
+viewport and a half before the reader gets there (`atTopOfList` and its `EARLIER_EDGE_VIEWPORTS`, in
+`frontend/src/lib/utils/chat-window.ts`) so the page lands while they are still reading toward it.
 
 The scroll
 position is preserved by re-finding the entry under the top edge of the viewport (`data-entry-id`), never

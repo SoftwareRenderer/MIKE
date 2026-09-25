@@ -12,6 +12,11 @@ import {
     agentMountDeclaration,
     agentMountGrant,
     needsAgentMountGrant,
+    agentMountDraft,
+    agentMountUpdate,
+    grantFingerprint,
+    suggestedDependencyPath,
+    dependencyDraft,
 } from '../extension-permissions';
 
 describe('isDangerousPermission (sandbox-escaping permissions only)', () => {
@@ -378,5 +383,64 @@ describe('the agent mount as an install gate', () => {
     it('an agent that asks for no folder installs without one', () => {
         expect(requiresInstallReview({ capabilities: { agent: { wasm_module: 'a.wasm' } } })).toBe(false);
         expect(requiresSetupAfterInstall({ agent: { wasm_module: 'a.wasm' } })).toBe(false);
+    });
+});
+
+describe('the Edit dialog\u2019s grant drafts', () => {
+    const DECLARED = { agent: { sandbox: { mount: [{ host_path: '~/.pi/agent', container_path: '/root/.pi/agent', mode: 'rw' }] } } };
+
+    it('opens with one row per declared folder, filled from what is approved', () => {
+        const rows = agentMountDraft({
+            manifest: { capabilities: DECLARED },
+            config: { sandbox_mount: [{ host_path: '/home/a/.pi/agent', container_path: '/root/.pi/agent', mode: 'ro' }] },
+        });
+        expect(rows).toEqual([{ host_path: '/home/a/.pi/agent', container_path: '/root/.pi/agent', mode: 'ro', suggestion: '~/.pi/agent' }]);
+    });
+
+    it('keeps an approved folder the manifest no longer declares, because the save sends the whole list', () => {
+        const rows = agentMountDraft({
+            manifest: { capabilities: {} },
+            config: { sandbox_mount: [{ host_path: '/srv/old', container_path: '/old', mode: '' }] },
+        });
+        expect(rows).toEqual([{ host_path: '/srv/old', container_path: '/old', mode: 'ro', suggestion: '' }]);
+    });
+
+    it('sends only the rows with a host folder, and sends it trimmed', () => {
+        expect(agentMountUpdate([
+            { host_path: '  /home/a/.pi  ', container_path: '/root/.pi', mode: 'ro' },
+            { host_path: '   ', container_path: '/none', mode: 'rw' },
+        ])).toEqual([{ host_path: '/home/a/.pi', container_path: '/root/.pi', mode: 'ro' }]);
+    });
+
+    it('compares two lists whatever order the server wrote the fields in', () => {
+        const saved = agentMountGrant({
+            config: { sandbox_mount: [{ mode: 'ro', container_path: '/b', host_path: '/host-b' }, { container_path: '/a', host_path: '/host-a', mode: 'rw' }] },
+        });
+        const typed = [
+            { host_path: '/host-a', container_path: '/a', mode: 'rw', suggestion: '' },
+            { host_path: '/host-b', container_path: '/b', mode: 'ro', suggestion: '' },
+        ];
+        expect(grantFingerprint(agentMountUpdate(typed))).toBe(grantFingerprint(saved));
+        typed[0].mode = 'ro';
+        expect(grantFingerprint(agentMountUpdate(typed))).not.toBe(grantFingerprint(saved));
+    });
+});
+
+describe('the dependency directory draft', () => {
+    const DECLARED = { dependency_cache: { container_path: '/go/pkg/mod', env: 'GOMODCACHE' } };
+
+    it('suggests the declared container path under the server home', () => {
+        expect(suggestedDependencyPath({ sandbox_config: DECLARED }, '/home/tester')).toBe('/home/tester/go/pkg/mod');
+    });
+
+    it('suggests nothing before the home directory is known', () => {
+        expect(suggestedDependencyPath({ sandbox_config: DECLARED }, '')).toBe('');
+        expect(suggestedDependencyPath({ sandbox_config: {} }, '/home/tester')).toBe('');
+    });
+
+    it('opens with the granted directory wherever the suggestion would have pointed', () => {
+        const ext = { sandbox_config: { ...DECLARED, dependency_host_path: '/data/shared/gomodcache' } };
+        expect(dependencyDraft(ext, '/home/tester')).toBe('/data/shared/gomodcache');
+        expect(dependencyDraft({ sandbox_config: DECLARED }, '/home/tester')).toBe('/home/tester/go/pkg/mod');
     });
 });

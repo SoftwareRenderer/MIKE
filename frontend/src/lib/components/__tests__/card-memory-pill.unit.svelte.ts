@@ -5,19 +5,10 @@
  */
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/svelte';
-import { writable } from 'svelte/store';
 
 vi.mock('svelte/transition', () => ({ slide: vi.fn(), fade: vi.fn() }));
 vi.mock('$lib/assets/icons/commit-push.svg?raw', () => ({ default: '' }));
 vi.mock('$lib/components/Icon.svelte', () => ({ default: () => '' }));
-
-vi.mock('$lib/context', () => ({
-    getStreamingContext: () => writable(new Set<string>()),
-    getTaskDiffStatsContext: () => writable({}),
-    getCommitQueueContext: () => writable({}),
-    getExpandedTasksContext: () => writable(new Set<string>()),
-    getTaskEventContext: () => writable(null),
-}));
 
 const appStore = vi.hoisted(() => ({
     current: {

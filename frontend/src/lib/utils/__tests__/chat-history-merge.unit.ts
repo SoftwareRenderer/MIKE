@@ -50,6 +50,7 @@ const assistantRow = (id: string, over: Record<string, unknown> = {}) => ({
 });
 
 const userRow = (id: string, content: string) => ({ id, role: 'user', content, thread_id: 'th1', created_at: '2026-09-10T09:59:00Z' });
+const errorRow = (id: string, content: string) => ({ id, role: 'error', content, thread_id: 'th1', created_at: '2026-09-10T10:06:00Z' });
 
 function toolIdsOf(entries: ChatEntry[]): string[] {
     return entries.flatMap(e => (e.toolCalls ?? []).map(tc => tc.toolId));
@@ -156,6 +157,93 @@ describe('mergeLoadedHistory — a turn the DB has only partly persisted', () =>
 
         // The live turn is the one still thinking, so the match proves nothing and it stays.
         expect(merged.some(e => e.reasoningContent === ' — and let me now explain why.')).toBe(true);
+    });
+});
+
+describe('mergeLoadedHistory — a live copy of a row the read brought', () => {
+    it('retires the copies a thawed tab leaves below the rows whose text they repeat', () => {
+        // The tab was frozen mid-turn, so these tokens landed after the read's rows. The newest row is an
+        // error, so a rule that reads only the newest row has nothing to compare against here.
+        const messages = [
+            userRow('u1', 'do it'),
+            assistantRow('a1', { content: 'The command completed.' }),
+            userRow('u2', 'Is the task complete?'),
+            assistantRow('a2', { content: 'The command completed.' }),
+            errorRow('e1', '[loop_detected] Model stuck in loop'),
+        ];
+        const live = liveEntries([
+            { type: 'token', data: { text: 'The command ' } },
+            { type: 'token', data: { text: 'completed.' } },
+            { type: 'hint', data: { id: 'u2', role: 'user', content: 'Is the task complete?' } },
+            { type: 'token', data: { text: 'The command completed.' } },
+            { type: 'user_message', data: { id: 'e1', role: 'error', content: 'Model stuck in loop' } },
+        ]);
+
+        const merged = mergeLoadedHistory(buildEntriesFromMessages(messages).entries, messages.map(m => m.id), live, false);
+
+        expect(merged.map(e => e.id)).toEqual(['u1', 'a1', 'u2', 'a2', 'e1']);
+    });
+
+    it('keeps the streaming answer that repeats an older row, while it is the newest thing on screen', () => {
+        // Two calls in one conversation do answer with the same words.
+        const messages = [
+            userRow('u1', 'go'),
+            assistantRow('a1', { content: 'The command completed.' }),
+            userRow('u2', 'Is the task complete?'),
+        ];
+        const live = liveEntries([
+            { type: 'hint', data: { id: 'u2', role: 'user', content: 'Is the task complete?' } },
+            { type: 'token', data: { text: 'The command completed.' } },
+        ]);
+
+        const merged = mergeLoadedHistory(buildEntriesFromMessages(messages).entries, messages.map(m => m.id), live, true);
+
+        expect(merged.filter(e => e.content === 'The command completed.')).toHaveLength(2);
+        expect(merged[merged.length - 1].isStreaming).toBe(true);
+    });
+
+    it('keeps a live answer none of the rows holds, closed or not', () => {
+        const messages = [userRow('u1', 'go'), assistantRow('a1', { content: 'The command completed.' })];
+        const live = liveEntries([
+            { type: 'token', data: { text: 'Now the tests are green; the fix is in place.' } },
+            { type: 'user_message', data: { id: 'u2', role: 'user', content: 'thanks' } }, // closes it
+        ]);
+
+        const merged = mergeLoadedHistory(buildEntriesFromMessages(messages).entries, messages.map(m => m.id), live, true);
+
+        expect(merged.some(e => e.content === 'Now the tests are green; the fix is in place.')).toBe(true);
+        expect(merged.map(e => e.id)).toEqual(['u1', 'a1', 'live-0', 'u2']);
+    });
+
+    it('retires a streaming copy once something newer is on screen below it', () => {
+        const messages = [userRow('u1', 'go'), assistantRow('a1', { content: 'The command completed.' })];
+        const live: ChatEntry[] = [
+            { id: 'live-0', role: 'assistant', content: 'The command compl', isStreaming: true },
+            { id: 'live-1', role: 'advisory', content: '2 diagnostics', kind: 'diagnostics', isStreaming: false },
+        ];
+
+        const merged = mergeLoadedHistory(buildEntriesFromMessages(messages).entries, messages.map(m => m.id), live, true);
+
+        expect(merged.map(e => e.id)).toEqual(['u1', 'a1', 'live-1']);
+    });
+
+    it('keeps a live entry that holds a call the rows do not have, whatever its text repeats', () => {
+        const messages = [
+            userRow('u1', 'go'),
+            assistantRow('a1', { content: 'Reading now.' }),
+            toolRow('m1', 't1', 'read_file', 'file body'),
+            errorRow('e1', '[loop_detected] Model stuck in loop'),
+        ];
+        const live = liveEntries([
+            { type: 'token', data: { text: 'Reading now.' } },
+            { type: 'tool_result', data: { tool_id: 't1', success: true, output: 'file body', duration: 3 } },
+            { type: 'tool_call', data: { tool_id: 't2', tool_name: 'bash', args: {} } },
+        ]);
+
+        const merged = mergeLoadedHistory(buildEntriesFromMessages(messages).entries, messages.map(m => m.id), live, true);
+
+        expect(toolIdsOf(merged).sort()).toEqual(['t1', 't2']);
+        expect(merged.filter(e => e.content === 'Reading now.')).toHaveLength(1);
     });
 });
 

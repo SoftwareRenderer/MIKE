@@ -1,5 +1,5 @@
 import type { Extension, RegistryEntry, ExtensionUpdate } from '../types';
-import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
+import { API_BASE, apiFetch, apiError, csrfHeaders, readEventStream } from './helpers';
 import { t } from '$lib/i18n';
 
 /** Fetch all installed extensions with runtime status. */
@@ -103,14 +103,6 @@ export async function setAgentMount(
     return res.json();
 }
 
-/** The server's own home directory, for suggesting where a dependency directory should live. */
-export async function getHomeDirectory(): Promise<string> {
-    const res = await apiFetch(`${API_BASE}/home`);
-    if (!res.ok) throw await apiError(res, t('api.readHomeDirectory'));
-    const data = await res.json();
-    return typeof data?.home === 'string' ? data.home : '';
-}
-
 /** Fetch extensions present in the local extensions directory (filesystem). */
 export async function listLocalExtensions(): Promise<RegistryEntry[]> {
     const res = await apiFetch(`${API_BASE}/extensions/local`);
@@ -160,14 +152,13 @@ export interface BuildProgressEvent {
     result?: Extension;
 }
 
-/** POST to a streaming endpoint and parse its SSE response; HTTP errors are thrown. */
+/** POST to a streaming endpoint and parse its SSE response; HTTP errors are thrown. A plain fetch
+ * rather than `apiFetch` for the reason `streamCommitPreview` (`api/tasks.ts`) states. */
 function streamOperation(path: string, body: Record<string, any>): AsyncIterable<BuildProgressEvent> {
     const url = `${API_BASE}${path}`;
 
     const iterator = async function* () {
-        const token = await ensureCsrfToken();
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (token) headers['X-CSRF-Token'] = token;
+        const headers = await csrfHeaders({ 'Content-Type': 'application/json' });
 
         const res = await fetch(url, {
             method: 'POST',
@@ -187,45 +178,21 @@ function streamOperation(path: string, body: Record<string, any>): AsyncIterable
             );
         }
 
-        const reader = res.body?.getReader();
-        if (!reader) {
-            throw new Error(t('api.noReader'));
+        let sawDone = false;
+        for await (const frame of readEventStream(res)) {
+            let event: BuildProgressEvent;
+            try {
+                event = JSON.parse(frame.data) as BuildProgressEvent;
+            } catch {
+                continue; // Skip malformed data
+            }
+            if (event.done) sawDone = true;
+            yield event;
         }
 
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let sawDone = false;
-
-        try {
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-
-                // Parse SSE events
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const event = JSON.parse(line.slice(6)) as BuildProgressEvent;
-                            if (event.done) sawDone = true;
-                            yield event;
-                        } catch {
-                            // Skip malformed data
-                        }
-                    }
-                }
-            }
-
-            // A healthy SSE stream always ends with a `done` event.
-            if (!sawDone) {
-                throw new Error(t('api.operationEndedEarly'));
-            }
-        } finally {
-            reader.releaseLock();
+        // A healthy SSE stream always ends with a `done` event.
+        if (!sawDone) {
+            throw new Error(t('api.operationEndedEarly'));
         }
     };
 

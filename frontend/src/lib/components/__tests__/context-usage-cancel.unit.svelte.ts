@@ -38,7 +38,7 @@ function actions(opts: { summarizing?: boolean; cancellable?: boolean } = {}) {
 
 afterEach(() => {
     cleanup();
-    dialogStore.confirmation = null;
+    dialogStore.confirmationSlot.clear();
     i18n.setCatalog(DEFAULT_LOCALE, null);
 });
 
@@ -58,7 +58,7 @@ describe('ContextUsage cancelling a running summarization', () => {
         await flush();
 
         expect(calls.onSummarizeCancel).toHaveBeenCalledTimes(1);
-        expect(dialogStore.confirmation).toBeNull();
+        expect(dialogStore.confirmationSlot.pending).toBeNull();
     });
 
     it('leaves the summarization alone when the ask is dismissed', async () => {
@@ -72,7 +72,7 @@ describe('ContextUsage cancelling a running summarization', () => {
         await flush();
 
         expect(calls.onSummarizeCancel).not.toHaveBeenCalled();
-        expect(dialogStore.confirmation).toBeNull();
+        expect(dialogStore.confirmationSlot.pending).toBeNull();
     });
 
     it('asks on the keyboard path too', async () => {
@@ -98,7 +98,7 @@ describe('ContextUsage cancelling a running summarization', () => {
         await fireEvent.click(spinner);
         await flush();
 
-        expect(dialogStore.confirmation).toBeNull();
+        expect(dialogStore.confirmationSlot.pending).toBeNull();
         expect(ask.textContent).not.toContain('Cancel Summarization');
     });
 
@@ -111,6 +111,6 @@ describe('ContextUsage cancelling a running summarization', () => {
         await flush();
 
         expect(calls.onSummarize).toHaveBeenCalledTimes(1);
-        expect(dialogStore.confirmation).toBeNull();
+        expect(dialogStore.confirmationSlot.pending).toBeNull();
     });
 });

@@ -75,7 +75,7 @@ ASSET_IMPORT_RE = re.compile(
 # The guards rule 5 accepts, each with the module that declares it and a marker present
 # only while the guard still checks the scheme.
 URL_GUARDS: dict[str, tuple[str, str]] = {
-    "safeUrl": ("lib/components/ConfigModal/ExtensionsTab.svelte", "u.protocol"),
+    "safeUrl": ("lib/utils/safe-url.ts", "u.protocol"),
     "imageSrc": ("lib/utils/attachments.ts", "DATA_URL_SCHEME"),
 }
 # What `encoded-by` accepts as proof that a builder escapes what it interpolates.

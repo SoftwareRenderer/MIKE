@@ -38,6 +38,12 @@ single connection, so an unthrottled write would turn every authenticated reques
   the next request 401s and the SPA falls back to the login modal.
 - `POST /api/sessions/revoke-others` → `{"revoked": n}`; deletes every session except the caller's.
 
+**The three `/api/auth/*` routes have one client:** `frontend/src/lib/api/auth.ts` holds `checkSession`,
+`login` and `logout`, and it is the only place the CSRF token is stored. Its two unusual readings are what
+the boot path and the login form depend on. A session answer is read from the body whatever the status, so
+a signed-out browser is never read as an outage. A logout that 401s settles: revoking the current session
+signs out behind it, and the caller's teardown must still run.
+
 ## UI
 
 The **Sessions** section of Settings → **About** (`ConfigModal/SessionsSection.svelte`, API in
@@ -55,7 +61,8 @@ authenticates the routes listed in `docs/api.md`.
 
 `backend/store/sessions_test.go`, `backend/auth/session_test.go`,
 `backend/server/handler_sessions_test.go`, `backend/types/idgen_test.go`,
-`frontend/src/lib/api/__tests__/sessions.unit.ts`, e2e `settings-sessions.spec.ts` (isolated).
+`frontend/src/lib/api/__tests__/sessions.unit.ts`, `frontend/src/lib/api/__tests__/auth.unit.ts`, e2e
+`settings-sessions.spec.ts` (isolated).
 ## Checking this
 
 `go test ./backend/auth/` covers the digest comparison, the hashed session and the token store.

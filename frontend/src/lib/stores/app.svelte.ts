@@ -1,5 +1,5 @@
 import type { Project, Board, Config, Task, Provider } from '$lib/types';
-import { saveCollapsedTasks, pruneCollapsedTasks, loadAppSetting, saveAppSetting } from '$lib/storage';
+import { loadAppSetting, saveAppSetting } from '$lib/storage';
 import { getConfig } from '$lib/api/config';
 import { isFromCache } from '$lib/api/cache';
 
@@ -21,6 +21,30 @@ export function removeTaskFromBoard(appStore: AppStore, taskId: string): void {
     const board = appStore.board;
     if (!board) return;
     appStore.board = { ...board, tasks: board.tasks.filter(t => t.id !== taskId) };
+}
+
+/** Add a task to the board. No-op when no board is on screen: an optimistic card belongs to the
+ * board this browser is looking at, and a card with no board under it would be a list nothing owns. */
+export function appendTaskToBoard(appStore: AppStore, task: Task): void {
+    const board = appStore.board;
+    if (!board) return;
+    appStore.board = { ...board, tasks: [...(board.tasks || []), task] };
+}
+
+/**
+ * Land the answers of one queue flush on the board: an optimistic id becomes the task the server
+ * created, and a real id takes the newer state a later queued action produced. Tasks the flush did
+ * not answer keep what this browser holds.
+ */
+export function applyResolvedTasksToBoard(appStore: AppStore, resolved: Map<string, Task>): void {
+    const board = appStore.board;
+    if (!board) return;
+    const tasks = (board.tasks || []).map(t => {
+        const created = resolved.get(t.id);
+        if (!created) return t;
+        return resolved.get(created.id) || created;
+    });
+    appStore.board = { ...board, tasks };
 }
 
 // ─── Domain State ───
@@ -50,6 +74,12 @@ export class AppStore {
 
     // Active port mappings for project-level terminal
     public projectTerminalPorts = $state<Array<{ host_port: number; container_port: number }>>([]);
+
+    /** The task list on screen. Derived from the board, so the board a panel reads and the list the
+     * board draws are the same value; there is no second stored task list. */
+    get tasks(): Task[] {
+        return this.board?.tasks || [];
+    }
 
     // Sidebar
     public sidebarCollapsed = $state(false);
@@ -104,30 +134,4 @@ export class AppStore {
         })();
         return this.configRefresh;
     }
-}
-
-// ─── Expanded Tasks Helpers ───
-
-/** Save collapsed state to IndexedDB. */
-export async function persistCollapsedTasks(expanded: Set<string>, parentTaskIds: Set<string>): Promise<void> {
-    const collapsed = new Set<string>();
-    for (const id of parentTaskIds) {
-        if (!expanded.has(id)) {
-            collapsed.add(id);
-        }
-    }
-    await saveCollapsedTasks(collapsed);
-}
-
-/** Init expanded task IDs from IndexedDB. */
-export async function initExpandedTasks(parentTaskIds: Set<string>): Promise<Set<string>> {
-    const collapsed = await pruneCollapsedTasks(parentTaskIds);
-    // Expanded = all parent IDs minus collapsed
-    const expanded = new Set<string>();
-    for (const id of parentTaskIds) {
-        if (!collapsed.has(id)) {
-            expanded.add(id);
-        }
-    }
-    return expanded;
 }

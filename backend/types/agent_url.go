@@ -4,8 +4,8 @@ import "strings"
 
 // AgentURLPrefix is the scheme an agent provider's URL carries: agent://<extension-name>. An
 // enabled agent extension *is* a provider, so this string is the only link between a task's
-// provider setting and the extension that runs it. The browser mirrors it as AGENT_URL_PREFIX
-// (frontend/src/lib/types.ts); the server is the side that decides the shape.
+// provider setting and the extension that runs it. The browser mirrors it as
+// AGENT_URL_PREFIX (frontend/src/lib/types/index.ts); the server is the side that decides the shape.
 const AgentURLPrefix = "agent://"
 
 // AgentProviderURL is the URL an enabled agent extension is reachable as, and the inverse of

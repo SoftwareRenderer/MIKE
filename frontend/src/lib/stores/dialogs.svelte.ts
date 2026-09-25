@@ -10,44 +10,92 @@ import { t } from '$lib/i18n';
  */
 export type DialogVariant = 'default' | 'destructive';
 
+/** The handle a promise-backed dialog settles its caller's promise with. */
+interface SlotRequest<Answer> {
+    _resolve?: (value: Answer) => void;
+}
+
+/**
+ * One dialog that answers a promise: the pending request its dialog arms itself from, and the promise
+ * its caller waits on. `open` is the only write that puts a request in and `clear` the only one that
+ * takes it out, which is what keeps the slot the single source of "is this dialog open" — the rule the
+ * dialog half of the pattern, `use-promise-dialog.svelte.ts`, is written against.
+ *
+ * A request still pending when a newer one opens is answered `declined` rather than dropped, so the
+ * older caller resumes as cancelled instead of hanging on a dialog now showing someone else's request.
+ */
+export class PromiseSlot<Request, Answer> {
+    /** The pending request, or null. Only `open` and `clear` write it. */
+    public pending = $state<(Request & SlotRequest<Answer>) | null>(null);
+
+    /** This dialog's own no — what a caller gets when its request never reached a button. */
+    private readonly declined: Answer;
+
+    constructor(declined: Answer) {
+        this.declined = declined;
+    }
+
+    /** Put `request` up as the pending request, and be the promise the dialog settles. */
+    public open(request: Request): Promise<Answer> {
+        this.pending?._resolve?.(this.declined);
+        return new Promise<Answer>((resolve) => {
+            this.pending = { ...request, _resolve: resolve };
+        });
+    }
+
+    /** Empty the slot. This is the write a dialog is given, and the only one. */
+    public clear(): void {
+        this.pending = null;
+    }
+}
+
+/** What a caller asks `showConfirm` to put up. */
+interface ConfirmationRequest {
+    title: string;
+    message: string;
+    items?: string[];
+    confirmText?: string;
+    cancelText?: string;
+    variant?: DialogVariant;
+}
+
+/** The request on screen: a confirmation, or a notice once `showNotice` has given it one button. */
+interface PendingConfirmation extends ConfirmationRequest {
+    /** Set by showNotice: the dialog gets a single button. */
+    okText?: string;
+}
+
+interface CommitDialogRequest {
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    authorName?: string;
+    authorEmail?: string;
+    mergeTarget?: string;
+    streaming?: boolean;
+    promptProgress?: number;
+    projectId?: string;
+    taskId?: string;
+}
+
+/**
+ * A stat value may be a snapshot number or a live getter; getters let the
+ * dialog's visualization track reactive sources (e.g. stream state) in real time.
+ */
+interface CompressContextRequest {
+    used?: number | (() => number);
+    limit?: number | (() => number);
+    sessionCost?: number | (() => number);
+    confirmText?: string;
+    cancelText?: string;
+}
+
 export class DialogStore {
     public toast = $state<{ message: string; type: 'error' | 'success' } | null>(null);
-    public confirmation = $state<{
-        title: string;
-        message: string;
-        items?: string[];
-        confirmText?: string;
-        cancelText?: string;
-        variant?: DialogVariant;
-        /** Set by showNotice: the dialog gets a single button. */
-        okText?: string;
-        _resolve?: (value: boolean) => void;
-    } | null>(null);
-    public commitDialog = $state<{
-        message: string;
-        confirmText?: string;
-        cancelText?: string;
-        authorName?: string;
-        authorEmail?: string;
-        mergeTarget?: string;
-        streaming?: boolean;
-        promptProgress?: number;
-        projectId?: string;
-        taskId?: string;
-        _resolve?: (value: string | null) => void;
-    } | null>(null);
-    /**
-     * A stat value may be a snapshot number or a live getter; getters let the
-     * dialog's visualization track reactive sources (e.g. stream state) in real time.
-     */
-    public compressContextDialog = $state<{
-        used?: number | (() => number);
-        limit?: number | (() => number);
-        sessionCost?: number | (() => number);
-        confirmText?: string;
-        cancelText?: string;
-        _resolve?: (value: boolean) => void;
-    } | null>(null);
+
+    public readonly confirmationSlot = new PromiseSlot<PendingConfirmation, boolean>(false);
+    public readonly commitDialogSlot = new PromiseSlot<CommitDialogRequest, string | null>(null);
+    public readonly compressContextDialogSlot = new PromiseSlot<CompressContextRequest, boolean>(false);
 
     /** Pending dismissal — one toast at a time, so one timer at a time. */
     private toastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -67,24 +115,12 @@ export class DialogStore {
     /**
      * Show a confirmation dialog and return a Promise that resolves to true (confirmed) or false (cancelled).
      */
-    public showConfirm(options: {
-        title: string;
-        message: string;
-        items?: string[];
-        confirmText?: string;
-        cancelText?: string;
-        variant?: DialogVariant;
-    }): Promise<boolean> {
-        return new Promise((resolve) => {
-            this.confirmation = {
-                title: options.title,
-                message: options.message,
-                items: options.items,
-                confirmText: options.confirmText ?? t('app.confirm.confirm'),
-                cancelText: options.cancelText ?? t('app.cancel'),
-                variant: options.variant ?? 'destructive',
-                _resolve: resolve,
-            };
+    public showConfirm(options: ConfirmationRequest): Promise<boolean> {
+        return this.confirmationSlot.open({
+            ...options,
+            confirmText: options.confirmText ?? t('app.confirm.confirm'),
+            cancelText: options.cancelText ?? t('app.cancel'),
+            variant: options.variant ?? 'destructive',
         });
     }
 
@@ -95,72 +131,36 @@ export class DialogStore {
         items?: string[];
         okText?: string;
     }): Promise<void> {
-        return new Promise((resolve) => {
-            this.confirmation = {
-                title: options.title,
-                message: options.message,
-                items: options.items,
-                okText: options.okText ?? t('app.ok'),
-                variant: 'default',
-                _resolve: () => resolve(),
-            };
-        });
+        // The answer is the notice's own business: the caller waits for the dismissal, not for a yes.
+        return this.confirmationSlot.open({
+            ...options,
+            okText: options.okText ?? t('app.ok'),
+            variant: 'default',
+        }).then(() => undefined);
     }
 
     /**
      * Show a commit confirmation dialog and return a Promise that resolves with the edited message or null (cancelled).
      */
+    public showCommitDialog(options: CommitDialogRequest): Promise<string | null> {
+        return this.commitDialogSlot.open({
+            ...options,
+            confirmText: options.confirmText ?? t('app.dialog.commitAndDone'),
+            cancelText: options.cancelText ?? t('app.cancel'),
+        });
+    }
+
     /**
      * Show the Compress Context dialog (includes a context donut + stats) and
      * return a Promise that resolves to true (confirmed) or false (cancelled).
      * Pass getters for `used`/`limit`/`sessionCost` to keep the visualization
      * and stats updating in real time while the dialog is open.
      */
-    public showCompressContextDialog(options: {
-        used?: number | (() => number);
-        limit?: number | (() => number);
-        sessionCost?: number | (() => number);
-        confirmText?: string;
-        cancelText?: string;
-    }): Promise<boolean> {
-        return new Promise((resolve) => {
-            this.compressContextDialog = {
-                used: options.used,
-                limit: options.limit,
-                sessionCost: options.sessionCost,
-                confirmText: options.confirmText ?? t('app.dialog.compress'),
-                cancelText: options.cancelText ?? t('app.cancel'),
-                _resolve: resolve,
-            };
-        });
-    }
-
-    public showCommitDialog(options: {
-        message: string;
-        confirmText?: string;
-        cancelText?: string;
-        authorName?: string;
-        authorEmail?: string;
-        mergeTarget?: string;
-        streaming?: boolean;
-        promptProgress?: number;
-        projectId?: string;
-        taskId?: string;
-    }): Promise<string | null> {
-        return new Promise((resolve) => {
-            this.commitDialog = {
-                message: options.message,
-                confirmText: options.confirmText ?? t('app.dialog.commitAndDone'),
-                cancelText: options.cancelText ?? t('app.cancel'),
-                authorName: options.authorName,
-                authorEmail: options.authorEmail,
-                mergeTarget: options.mergeTarget,
-                streaming: options.streaming,
-                promptProgress: options.promptProgress,
-                projectId: options.projectId,
-                taskId: options.taskId,
-                _resolve: resolve,
-            };
+    public showCompressContextDialog(options: CompressContextRequest): Promise<boolean> {
+        return this.compressContextDialogSlot.open({
+            ...options,
+            confirmText: options.confirmText ?? t('app.dialog.compress'),
+            cancelText: options.cancelText ?? t('app.cancel'),
         });
     }
 }
