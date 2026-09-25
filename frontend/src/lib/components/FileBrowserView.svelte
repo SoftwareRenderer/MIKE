@@ -17,7 +17,7 @@
     import { t, type MessageKey } from '$lib/i18n';
     import { explorerPathHref } from '$lib/utils/app-link';
     import { confirmList, pasteTarget, rowIsSelectable } from '$lib/utils/file-selection';
-    import { baseName } from '$lib/utils/path';
+    import { baseName, folderName } from '$lib/utils/path';
     import type { FsEvent } from '$lib/utils/fs-event';
 
     /** A row's extra badge — the project explorer's git status letter and nothing else. */
@@ -285,12 +285,6 @@
     function handlePathInput() {
         const p = currentPath.trim();
         if (p) loadDir(resolveWithinRoot(p));
-    }
-
-    /** The task worktree's own folder name, as the first crumb. */
-    function getFolderName(path: string): string {
-        const parts = path.split('/');
-        return parts[parts.length - 1] || '/';
     }
 
     function getBreadcrumbParts(): string[] {
@@ -699,7 +693,7 @@
         </div>
     {:else if getBreadcrumbParts().length > 0}
         <div class="breadcrumb">
-            <button class="breadcrumb-item" onclick={() => loadDir(rootPath)}>{getFolderName(rootPath)}</button>
+            <button class="breadcrumb-item" onclick={() => loadDir(rootPath)}>{folderName(rootPath)}</button>
             {#each getBreadcrumbParts() as part, index}
                 <span class="breadcrumb-sep">/</span>
                 <button class="breadcrumb-item" class:active={index === getBreadcrumbParts().length - 1} onclick={() => handleBreadcrumbClick(index)}>

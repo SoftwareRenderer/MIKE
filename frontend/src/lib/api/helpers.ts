@@ -183,6 +183,16 @@ export async function apiFetch(url: string, init?: RequestInit & { signal?: Abor
     }
 }
 
+/** Headers for a caller that opens its own response instead of going through `apiFetch` — the progress
+ * streams that cost the caller a line rather than the offline flag (`docs/reconnection.md → How a request
+ * ends`). Nothing else about the request changes. */
+export async function csrfHeaders(init?: HeadersInit): Promise<Headers> {
+    const headers = new Headers(init);
+    const token = await ensureCsrfToken();
+    if (token) headers.set('X-CSRF-Token', token);
+    return headers;
+}
+
 /** Extract error message from a failed API response, falling back to a default. */
 export async function apiError(res: Response, defaultMsg: string): Promise<Error> {
     try {

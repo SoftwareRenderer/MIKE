@@ -1,5 +1,5 @@
 import type { Extension, RegistryEntry, ExtensionUpdate } from '../types';
-import { API_BASE, apiFetch, apiError, ensureCsrfToken, readEventStream } from './helpers';
+import { API_BASE, apiFetch, apiError, csrfHeaders, readEventStream } from './helpers';
 import { t } from '$lib/i18n';
 
 /** Fetch all installed extensions with runtime status. */
@@ -152,14 +152,13 @@ export interface BuildProgressEvent {
     result?: Extension;
 }
 
-/** POST to a streaming endpoint and parse its SSE response; HTTP errors are thrown. */
+/** POST to a streaming endpoint and parse its SSE response; HTTP errors are thrown. A plain fetch
+ * rather than `apiFetch` for the reason `streamCommitPreview` (`api/tasks.ts`) states. */
 function streamOperation(path: string, body: Record<string, any>): AsyncIterable<BuildProgressEvent> {
     const url = `${API_BASE}${path}`;
 
     const iterator = async function* () {
-        const token = await ensureCsrfToken();
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (token) headers['X-CSRF-Token'] = token;
+        const headers = await csrfHeaders({ 'Content-Type': 'application/json' });
 
         const res = await fetch(url, {
             method: 'POST',

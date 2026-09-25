@@ -289,8 +289,8 @@ the newest content, and the jump-to-latest button lands on an old row. A window 
 rows held cannot be joined: another thread's read, or a truncation that cut the overlap away, answers alone.
 **Scrolling is the only
 affordance** — no control asks the reader to fetch anything. The list edge is the request, and it fires a
-viewport and a half before the reader gets there (`earlierEdgePx`) so the page lands while they are still
-reading toward it.
+viewport and a half before the reader gets there (`atTopOfList` and its `EARLIER_EDGE_VIEWPORTS`, in
+`frontend/src/lib/utils/chat-window.ts`) so the page lands while they are still reading toward it.
 
 The scroll
 position is preserved by re-finding the entry under the top edge of the viewport (`data-entry-id`), never

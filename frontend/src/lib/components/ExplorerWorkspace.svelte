@@ -11,7 +11,7 @@
     import ResizeHandle from './ResizeHandle.svelte';
     import SandboxImageStatusBanner from './SandboxImageStatusBanner.svelte';
     import { t } from '$lib/i18n';
-    import { baseName } from '$lib/utils/path';
+    import { baseName, folderName } from '$lib/utils/path';
 
     /**
      * Everything an explorer screen shows below its header. The file browser is the one piece each
@@ -36,10 +36,6 @@
         browser: Snippet;
     } = $props();
 
-    function getFolderName(path: string): string {
-        const parts = path.split('/');
-        return parts[parts.length - 1] || '/';
-    }
 </script>
 
 {#if isMobile && !changesOpen && !core.editorFullscreen}
@@ -50,7 +46,7 @@
             title={t('explorer.shared.fileBrowser')}
         >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 3h4l1.5 2H13l1.5 2.5V13a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
-            <span class="tab-label">{getFolderName(folderPath)}</span>
+            <span class="tab-label">{folderName(folderPath)}</span>
         </button>
         <button
             class="tab-btn {core.activeTab === 'editor' ? 'active' : ''}"

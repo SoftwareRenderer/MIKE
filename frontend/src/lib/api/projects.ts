@@ -1,5 +1,5 @@
 import type { Board, Project, ProjectCounts, ProjectStats, ProjectUpdates } from '../types';
-import { API_BASE, apiFetch, apiError, ensureCsrfToken, readEventStream } from './helpers';
+import { API_BASE, apiFetch, apiError, csrfHeaders, readEventStream } from './helpers';
 import {
     getOfflineStatus,
     enqueueAction,
@@ -151,9 +151,7 @@ async function cloneProjectRaw(
     sandboxEnabled: boolean,
     onProgress?: (percent: number) => void,
 ): Promise<Project> {
-    const token = await ensureCsrfToken();
-    const headers = new Headers({ 'Content-Type': 'application/json' });
-    if (token) headers.set('X-CSRF-Token', token);
+    const headers = await csrfHeaders({ 'Content-Type': 'application/json' });
 
     const body: Record<string, unknown> = {
         path: targetDir,

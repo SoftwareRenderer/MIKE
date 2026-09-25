@@ -1,13 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { Project } from '$lib/types';
 
-// The CSRF lookup hits the session endpoint — stub it, keep everything else.
-const { ensureCsrfToken } = vi.hoisted(() => ({ ensureCsrfToken: vi.fn(async () => 'csrf-token') }));
-vi.mock('../helpers', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('../helpers')>();
-    return { ...actual, ensureCsrfToken };
-});
-
 import { cloneProject } from '../projects';
 
 /**
@@ -48,6 +41,7 @@ function responseChunks(...text: string[]): Response {
 function stubFetch(response: Response) {
     const calls: any[][] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: any, init: any) => {
+        // A cold session costs the CSRF bootstrap its own request; only what follows it is under test.
         if (String(url).includes('/api/auth/session')) {
             return { ok: true, json: async () => ({ authenticated: true, csrf_token: 'csrf-token' }) };
         }

@@ -1,12 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// The CSRF lookup hits the session endpoint — stub it, keep everything else.
-const { ensureCsrfToken } = vi.hoisted(() => ({ ensureCsrfToken: vi.fn(async () => 'csrf-token') }));
-vi.mock('../helpers', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('../helpers')>();
-    return { ...actual, ensureCsrfToken };
-});
-
 import { buildSandboxImageStream } from '../raw/projects';
 
 /** Minimal SSE Response whose single chunk carries the given data frames. */
@@ -34,7 +27,12 @@ describe('buildSandboxImageStream no-cache modifier', () => {
     let fetchMock: ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
-        fetchMock = vi.fn(async () => sseResponse(['Building sandbox image from Dockerfile...', RESULT]));
+        // A cold session costs the CSRF bootstrap its own request, so the session endpoint is answered
+        // here too and only the build request counts as the call under test.
+        fetchMock = vi.fn(async (url: any) =>
+            String(url).includes('/api/auth/session')
+                ? ({ ok: true, json: async () => ({ authenticated: true, csrf_token: 'csrf-token' }) } as Response)
+                : sseResponse(['Building sandbox image from Dockerfile...', RESULT]));
         vi.stubGlobal('fetch', fetchMock);
     });
 
@@ -42,9 +40,14 @@ describe('buildSandboxImageStream no-cache modifier', () => {
         vi.unstubAllGlobals();
     });
 
+    function buildCall(): [string, RequestInit] {
+        const calls = fetchMock.mock.calls.filter(([url]) => !String(url).includes('/api/auth/session'));
+        expect(calls).toHaveLength(1);
+        return calls[0] as [string, RequestInit];
+    }
+
     function requestedUrl(): string {
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-        return fetchMock.mock.calls[0][0] as string;
+        return buildCall()[0];
     }
 
     it('omits the no_cache param by default', async () => {
@@ -71,7 +74,7 @@ describe('buildSandboxImageStream no-cache modifier', () => {
 
     it('posts with credentials and the CSRF header', async () => {
         await buildSandboxImageStream('p1', () => { }, { noCache: true });
-        const init = fetchMock.mock.calls[0][1] as RequestInit;
+        const init = buildCall()[1];
         expect(init.method).toBe('POST');
         expect(init.credentials).toBe('include');
         expect((init.headers as Headers).get('X-CSRF-Token')).toBe('csrf-token');

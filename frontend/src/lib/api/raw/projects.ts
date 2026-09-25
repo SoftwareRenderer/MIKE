@@ -1,6 +1,6 @@
 // One domain's plain HTTP calls: the offline queue replays these, and nothing here knows the queue exists.
 import type { Project, ProjectUpdates } from '../../types';
-import { API_BASE, apiFetch, apiError, ensureCsrfToken, readEventStream } from '../helpers';
+import { API_BASE, apiFetch, apiError, csrfHeaders, readEventStream } from '../helpers';
 import { t } from '$lib/i18n';
 
 export async function createProjectRaw(path: string, sandboxEnabled = false, gitUrl?: string): Promise<Project> {
@@ -31,15 +31,14 @@ export async function updateProjectRaw(id: string, updates: ProjectUpdates): Pro
 }
 
 /** Stream build progress via SSE. onLine is called for each progress line.
- *  opts.noCache skips the container build layer cache for this build only. */
+ *  opts.noCache skips the container build layer cache for this build only. A plain fetch rather than
+ *  `apiFetch` for the reason `streamCommitPreview` (`api/tasks.ts`) states. */
 export async function buildSandboxImageStream(
     id: string,
     onLine: (line: string) => void,
     opts?: { noCache?: boolean },
 ): Promise<{ status: string; image: string; project: string }> {
-    const token = await ensureCsrfToken();
-    const headers = new Headers();
-    if (token) headers.set('X-CSRF-Token', token);
+    const headers = await csrfHeaders();
 
     const url = `${API_BASE}/projects/${id}/sandbox/build${opts?.noCache ? '?no_cache=1' : ''}`;
     const res = await fetch(url, {
