@@ -360,7 +360,7 @@ const catalog = {
     // ── ConfigModal/ProjectDefaults.svelte ──
     'settings.project.description': 'Defaults for {project}',
     'settings.project.assistedBy': 'Assisted-by line',
-    'settings.project.assistedByDesc': 'Add "Assisted-by: MIKE:<model>" to generated commit messages',
+    'settings.project.assistedByDesc': 'Prefill "Assisted-by: MIKE:<model>" in draft commit messages',
     'settings.project.assistedByAria': 'Assisted-by line in commit messages',
 
     // ── ConfigModal/AgentSection.svelte ──
