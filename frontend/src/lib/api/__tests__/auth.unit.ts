@@ -11,15 +11,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  */
 
 let mockFetch: ReturnType<typeof vi.fn>;
-let offlineCalls: boolean[];
+let reachabilityCalls: boolean[];
 
 beforeEach(async () => {
     vi.resetModules();
     mockFetch = vi.fn();
     (globalThis as any).fetch = mockFetch;
-    offlineCalls = [];
+    reachabilityCalls = [];
     const helpers = await import('$lib/api/helpers');
-    helpers.registerSetOffline((v: boolean) => offlineCalls.push(v));
+    helpers.registerSetHttpReachable((v: boolean) => reachabilityCalls.push(v));
 });
 
 /** One answer, shaped like the `Response` `apiFetch` hands back. */
@@ -63,7 +63,7 @@ describe('checkSession', () => {
         expect(sessionAnswers).toBe(2);
     });
 
-    it('answers false for a signed-out browser without raising the offline flag', async () => {
+    it('answers false for a signed-out browser without calling the server unreachable', async () => {
         mockFetch.mockResolvedValue(res(200, { authenticated: false }));
 
         const { checkSession } = await import('$lib/api/auth');
@@ -71,7 +71,8 @@ describe('checkSession', () => {
 
         await expect(checkSession()).resolves.toBe(false);
         await expect(ensureCsrfToken()).resolves.toBe('');
-        expect(offlineCalls).toEqual([]);
+        // The answer is the evidence: a signed-out browser is a server that replied.
+        expect(reachabilityCalls).toEqual([true]);
     });
 
     it('reads the flag off a status it did not expect, so first paint is not an outage', async () => {
@@ -82,7 +83,7 @@ describe('checkSession', () => {
         const { checkSession } = await import('$lib/api/auth');
 
         await expect(checkSession()).resolves.toBe(false);
-        expect(offlineCalls).toEqual([]);
+        expect(reachabilityCalls).toEqual([true]);
     });
 
     it('throws on a body that is not the answer, the boot path\'s outage branch', async () => {
@@ -130,12 +131,12 @@ describe('login', () => {
         await expect(login('hunter2')).rejects.toThrow('Login failed');
     });
 
-    it('answers a request that got no reply with the form\'s network copy, and calls it an outage', async () => {
+    it('answers a request that got no reply with the form\'s network copy, and reports the server unreachable', async () => {
         rejectConnection();
 
         const { login } = await import('$lib/api/auth');
         await expect(login('hunter2')).rejects.toThrow('Network error');
-        expect(offlineCalls).toEqual([true]);
+        expect(reachabilityCalls).toEqual([false]);
     });
 });
 

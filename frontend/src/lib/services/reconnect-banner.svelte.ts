@@ -8,8 +8,8 @@
  * this banner (`TaskChat`) reacts to its false→true edge and must not have to know about this one.
  *
  * Nothing here decides whether a request failed: `apiFetch` owns that (docs/reconnection.md → *How a
- * request ends*), and `setOfflineStatus` here is only what a dropped socket says — a client-side deadline
- * would be a second, worse answer to the same outage. The banner's copy is one message per state change;
+ * request ends*). `setOfflineStatus` here is the socket's reason for holding writes, and only the socket
+ * edge releases it. The banner's copy is one message per state change;
  * the countdown and the age line change every second and stay out of the announced text.
  */
 import type { AppStream } from '$lib/api';

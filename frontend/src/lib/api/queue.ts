@@ -1,4 +1,5 @@
-import { generateId, isAborted, registerSetOffline } from './helpers';
+import { generateId, isAborted, registerSetHttpReachable } from './helpers';
+import { QUEUE_RETRY_BASE_DELAY_MS, RECONNECT_MAX_DELAY_MS } from '$lib/constants';
 import { loadQueue as loadQueueFromStorage, saveQueue as saveQueueToStorage, type QueuedAction as StoredQueuedAction } from '../storage';
 import { getBoardCache, refusedSendsCacheKey, removeBoardCache, setBoardCache } from '../storage';
 import type { PendingSend } from '../utils/pending-sends';
@@ -31,15 +32,13 @@ import { forkTaskThreadRaw, switchTaskThreadRaw } from './raw/threads';
 // Re-export QueuedAction from storage (canonical definition)
 export type { StoredQueuedAction as QueuedAction };
 
-// Register setOfflineStatus so helpers can mark app offline on fetch failures
-registerSetOffline((offline: boolean) => setOfflineStatus(offline));
+registerSetHttpReachable((reachable: boolean) => setHttpReachable(reachable));
 
 // =============================================================================
 // Offline Action Queue
 // =============================================================================
-// Queues write operations when the WebSocket is disconnected.
-// Persists to IndexedDB so actions survive page refresh.
-// On reconnect, actions are replayed in order.
+// Queues write operations while the app cannot reach the server, as `getOfflineStatus` decides. Persists
+// to IndexedDB so actions survive a page refresh, and replays them in order once nothing holds them.
 // =============================================================================
 
 type QueuedAction = StoredQueuedAction;
@@ -62,7 +61,17 @@ export type ActionType =
     | 'updateConfig' | 'resetProjectStats'
 
 
-let isOffline = false;
+// Two independent reasons to hold a write: what the socket says, and what this app's own requests say.
+// Each is released only by its own evidence, because an answered request says nothing about a socket
+// that is gone, and a socket that is up says nothing about a server that stopped answering HTTP.
+let declaredOffline = false;
+let httpUnreachable = false;
+/** A replay in flight: writes go out with it instead of queueing behind it, and a reason raised now wins. */
+let replaying = false;
+// How soon a queue replays after one of its own sends failed. An answered request says the server is
+// reachable, not that this action will land, and every replay end provokes a read that answers.
+let replayRetryDelayMs = 0;
+let replayHeldUntil = 0;
 let actionQueue: QueuedAction[] = [];
 let flushPromise: Promise<void> | null = null;
 // Actions the server refused outright (404, 403, …) during the most recent flush. They are out of
@@ -81,17 +90,31 @@ function queueLength(): number {
 let queueChangeCallbacks: Array<() => void> = [];
 let queueFlushedCallbacks: Array<(optimisticTaskIds: string[], resolvedTasks: Map<string, any>) => void> = [];
 
-/** Check if the app is currently offline (WebSocket disconnected). */
+/** Whether a write should be queued instead of sent. */
 export function getOfflineStatus(): boolean {
-    return isOffline;
+    return !replaying && (declaredOffline || httpUnreachable);
 }
 
-/** Set offline state. Triggers automatic flush when transitioning to online. */
+/** Set when the socket drops, the browser reports offline, or the boot probe gets no answer. */
 export function setOfflineStatus(offline: boolean) {
-    isOffline = offline;
-    if (!offline && queueLength() > 0) {
-        flushQueue();
-    }
+    declaredOffline = offline;
+    if (offline) replaying = false;
+    sendQueueIfReachable();
+}
+
+/** The HTTP reason: no answer is unreachable, and any answer of any status is not. `apiFetch` is its
+ * only writer, through the seam above. */
+function setHttpReachable(reachable: boolean) {
+    httpUnreachable = !reachable;
+    if (!reachable) replaying = false;
+    sendQueueIfReachable();
+}
+
+/** The queue goes out when no reason is left holding it. */
+function sendQueueIfReachable() {
+    if (queueLength() === 0 || getOfflineStatus()) return;
+    if (Date.now() < replayHeldUntil) return;
+    flushQueue();
 }
 
 /** Register a callback fired when the queue changes (enqueue/dequeue/flush). */
@@ -319,34 +342,46 @@ export async function flushQueueNow(): Promise<void> {
     if (queueLength() === 0) return;
 
     flushPromise = (async () => {
-        const resolvedTasks = await doFlush();
+        const resolvedTasks = await doFlush(stopAtFirstTransientError);
+        noteReplayDrained();
         notifyQueueFlushed([], resolvedTasks);
         flushPromise = null;
     })();
     return flushPromise;
 }
 
-/** Replay all queued actions in order. Triggered on WebSocket reconnect. */
+/** Stop the replay at the first retryable error, and hold the queue before trying again; a refused action
+ * is dropped by `doFlush` itself. */
+function stopAtFirstTransientError() {
+    replayRetryDelayMs = replayRetryDelayMs === 0
+        ? QUEUE_RETRY_BASE_DELAY_MS
+        : Math.min(replayRetryDelayMs * 2, RECONNECT_MAX_DELAY_MS);
+    replayHeldUntil = Date.now() + replayRetryDelayMs;
+    return true;
+}
+
+/** A replay that applied everything waits at the base pace again. */
+function noteReplayDrained() {
+    if (queueLength() > 0) return;
+    replayRetryDelayMs = 0;
+    replayHeldUntil = 0;
+}
+
+/** Replay all queued actions in order. Triggered when the last reason for holding them is released. */
 async function flushQueue() {
     if (flushPromise) return flushPromise;
     if (queueLength() === 0) return;
 
     flushPromise = (async () => {
-        const wasOffline = isOffline;
-        // Temporarily set online so raw functions execute directly
-        isOffline = false;
+        replaying = true;
         try {
-            // doFlush only invokes the callback for transient errors — mark
-            // offline and stop flushing; the rest stays queued.
-            const resolvedTasks = await doFlush(() => {
-                isOffline = true;
-                return true; // stop flushing
-            });
+            const resolvedTasks = await doFlush(stopAtFirstTransientError);
             notifyQueueFlushed([], resolvedTasks);
         } finally {
-            isOffline = wasOffline;
+            noteReplayDrained();
+            replaying = false;
+            flushPromise = null;
         }
-        flushPromise = null;
     })();
     return flushPromise;
 }

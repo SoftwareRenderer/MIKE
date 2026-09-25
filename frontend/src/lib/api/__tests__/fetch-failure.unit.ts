@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-import { apiFetch, setCsrfToken, registerSetOffline, isAborted, RequestAborted, ConnectionFailure } from '../helpers';
+import { apiFetch, setCsrfToken, registerSetHttpReachable, isAborted, RequestAborted, ConnectionFailure } from '../helpers';
 import { isTransientError } from '../queue';
 
 /**
@@ -19,12 +19,13 @@ function stubFetchReject(name: string, message = 'boom') {
 }
 
 describe('apiFetch failure classification', () => {
-    let offlineCalls: boolean[];
+    /** What `apiFetch` reports: false on no answer, true on any answer. */
+    let reachabilityReports: boolean[];
 
     beforeEach(() => {
         vi.resetModules();
-        offlineCalls = [];
-        registerSetOffline((v: boolean) => offlineCalls.push(v));
+        reachabilityReports = [];
+        registerSetHttpReachable((v: boolean) => reachabilityReports.push(v));
         // A token in hand keeps ensureCsrfToken from spending its own best-effort request.
         setCsrfToken('csrf-under-test');
     });
@@ -71,11 +72,11 @@ describe('apiFetch failure classification', () => {
         expect(isAborted(err)).toBe(true);
         // The name every existing cancellation check in this codebase already reads.
         expect((err as any).name).toBe('AbortError');
-        expect(offlineCalls).toEqual([]);
+        expect(reachabilityReports).toEqual([]);
         expect(isTransientError(err)).toBe(false);
     });
 
-    it('reports no-connection as a connection failure, takes the app offline, and says what to check', async () => {
+    it('reports no-connection as a connection failure, reports the server unreachable, and says what to check', async () => {
         stubFetchReject('TypeError', 'Failed to fetch');
 
         const err = await apiFetch('/api/config').then(() => null).catch((e) => e);
@@ -83,9 +84,21 @@ describe('apiFetch failure classification', () => {
         expect(err).toBeInstanceOf(ConnectionFailure);
         expect(isAborted(err)).toBe(false);
         expect((err as Error).message).toContain('Connection issue');
-        expect(offlineCalls).toEqual([true]);
+        expect(reachabilityReports).toEqual([false]);
         // The cause survives, so the raw TypeError is still reachable in a debugger and in console output.
         expect((err as any).cause?.name).toBe('TypeError');
+    });
+
+    it('reports the server reachable on an answer, whatever the status is', async () => {
+        // A 404 is a server that answered, and an answer is what releases the queue.
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+            ok: false, status: 404, headers: new Headers(), json: async () => ({ error: 'no such task' }),
+        }));
+
+        const res = await apiFetch('/api/projects/p1/tasks/gone');
+
+        expect(res.status).toBe(404);
+        expect(reachabilityReports).toEqual([true]);
     });
 
     it('keeps a queued retry available for the failure that is actually retryable', () => {

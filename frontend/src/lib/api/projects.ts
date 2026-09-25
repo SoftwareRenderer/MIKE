@@ -18,9 +18,7 @@ import { gitUrlCarriesCredentials } from '../utils/git-url';
 import { t } from '$lib/i18n';
 
 /** Fetch all projects from the server. Falls back to cached copy on failure.
- * Always tries the network first — the isOffline flag tracks WebSocket state,
- * not HTTP availability. On mobile wake (tab resume), the WebSocket may be
- * disconnected but HTTP still works, so we must not short-circuit to cache. */
+ * Always tries the network first: a read is what releases the queue (`api/queue.ts`). */
 export async function getProjects(): Promise<Project[]> {
     try {
         const res = await apiFetch(`${API_BASE}/projects`);
@@ -213,9 +211,7 @@ export async function deleteProject(id: string): Promise<void> {
 // -- Board endpoints --
 
 /** Fetch the full board state (tasks + columns) for a project. Falls back to cached copy on failure.
- * Always tries the network first — the isOffline flag tracks WebSocket state,
- * not HTTP availability. On mobile wake (tab resume), the WebSocket may be
- * disconnected but HTTP still works, so we must not short-circuit to cache. */
+ * Always tries the network first: a read is what releases the queue (`api/queue.ts`). */
 export async function getBoard(projectId: string): Promise<Board> {
     try {
         const res = await apiFetch(`${API_BASE}/projects/${projectId}/board`);
