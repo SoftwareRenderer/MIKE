@@ -86,8 +86,8 @@ only under load.
   only `.btn-commit-and-done` opens the commit dialog, and it is gated on STAGED changes
   while a trailing *user* chat entry makes it render "Resume" instead (`waitForTurnAnswered`).
 - **Offline = abort `**/api/**`, not `context.setOffline(true)`.** The offline screen
-  (`App.svelte`'s `hasLocalCache` branch) exists for "app booted, API unreachable, cache
-  available"; going fully offline takes the document down with it and you are asserting on
+  (`App.svelte`'s `hasLocalCache` branch, from `session-boot.svelte.ts`) exists for "app booted, API
+  unreachable, cache available"; going fully offline takes the document down too, so you assert on
   Chrome's error page.
 - **`locator.isVisible({ timeout })` does not wait** — Playwright's own types say so ("does
   not wait for the element to become visible and returns immediately"). So

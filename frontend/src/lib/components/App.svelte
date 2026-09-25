@@ -10,16 +10,17 @@
     import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
     import { commitQueueStore } from '$lib/stores/commit-queue.svelte';
     import { taskEventStore } from '$lib/stores/task-events.svelte';
-    import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, checkSession, logout, setOfflineStatus, loadQueue, clearQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask, getDroppedActions } from '$lib/api';
+    import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask, getDroppedActions } from '$lib/api';
+    import { reconnectBanner } from '$lib/services/reconnect-banner.svelte';
+    import { sessionBoot } from '$lib/services/session-boot.svelte';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
     import { dragCarriesFiles } from '$lib/utils/file-drop';
-    import { dataAgeText } from '$lib/utils/format-time';
     import { resolveBoardLandingColumn, resolveClosedTaskColumn, mergeTaskUpdateIntoBoard } from '$lib/utils/task-utils';
     import { resolveLandingProject } from '$lib/utils/project-landing';
     import { explorerPathRoots } from '$lib/utils/app-link';
     import { urlRouter } from '$lib/services/url-router.svelte';
     import { reviewNotifier } from '$lib/services/review-notifications.svelte';
-    import { getBoardCache, getBoardCacheEntry, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, clearAll, loadAppSetting, saveAppSetting } from '$lib/storage';
+    import { getBoardCache, getBoardCacheEntry, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { flushBoardMirror, mirrorBoard } from '$lib/services/board-mirror';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
@@ -30,7 +31,6 @@
     import CardDetail from './CardDetail.svelte';
     import { setAppStreamRef } from '$lib/stream-ref';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
-    import { localeOffer } from '$lib/services/locale-offer.svelte';
     import { sandboxImageStatus } from '$lib/services/sandbox-image-status.svelte';
     import { updateCheck } from '$lib/services/update-check.svelte';
     import { useLazyComponent } from '$lib/composables/use-lazy-component.svelte';
@@ -56,19 +56,6 @@
     import LocaleOffer from './LocaleOffer.svelte';
 
     const terminalPanel = useLazyComponent(() => import('./TerminalPanel.svelte'));
-
-    /** The reconnect banner both stream connections drive. */
-    const reconnectCountdown = () => ({
-        onConnected: handleWsConnection,
-        onReconnectScheduled: (nextAttemptAt: number) => {
-            nextReconnectAt = nextAttemptAt;
-            startCountdown();
-        },
-        onConnectAttempt: () => {
-            stopCountdown();
-            countdownSeconds = 0;
-        },
-    });
 
     /**
      * Open the project terminal (terminal button and open-terminal shortcut).
@@ -116,13 +103,6 @@
 
     let collapsed = $state(false);
     let appStream: ReturnType<typeof createAppStream> | null = $state(null);
-    let initialLoadComplete = $state(false); // tracks whether onMount data load is done
-    let lastSyncedAt = $state<number | null>(null); // epoch ms of the last data that actually landed
-    let nextReconnectAt = $state(0); // epoch ms of next reconnect attempt
-    let countdownSeconds = $state(0);
-    let countdownTimer: ReturnType<typeof setInterval> | null = null;
-    let staleTimeText = $state(''); // "Data from X ago" text, updated every second while disconnected
-    let staleTimer: ReturnType<typeof setInterval> | null = null;
     let visibilityRetryTimer: ReturnType<typeof setTimeout> | null = null; // retry refresh after network stabilizes
 
     /**
@@ -137,7 +117,7 @@
         if (!board || appStore.selectedProject?.id !== projectId) return false;
         if (source === 'live') {
             mirrorBoard(projectId, board);
-            lastSyncedAt = Date.now();
+            reconnectBanner.lastSyncedAt = Date.now();
             appStore.board = board;
             return true;
         }
@@ -182,83 +162,6 @@
         uiStore.openSettings(updateCheck.dot === 'none' ? null : 'about');
     }
 
-    function startCountdown() {
-        stopCountdown();
-        updateCountdown();
-        countdownTimer = setInterval(updateCountdown, 250);
-    }
-    function stopCountdown() {
-        if (countdownTimer) {
-            clearInterval(countdownTimer);
-            countdownTimer = null;
-        }
-    }
-    function updateCountdown() {
-        countdownSeconds = Math.max(0, Math.ceil((nextReconnectAt - Date.now()) / 1000));
-    }
-    function startStaleTick() {
-        stopStaleTick();
-        updateStaleTime();
-        staleTimer = setInterval(updateStaleTime, 1000);
-    }
-    function updateStaleTime() {
-        staleTimeText = dataAgeText(lastSyncedAt);
-    }
-
-    // The reconnect countdown belongs to the sentence, not to the markup: word
-    // order and the unit are the translator's, so the whole line is one message.
-    const reconnectStatus = $derived(
-        countdownSeconds > 0
-            ? t('app.reconnect.statusCountdown', { seconds: countdownSeconds })
-            : t('app.reconnect.status'),
-    );
-    function stopStaleTick() {
-        if (staleTimer) {
-            clearInterval(staleTimer);
-            staleTimer = null;
-        }
-    }
-
-    let hadConnection = $state(false);
-    let everDropped = $state(false);
-    /** The countdown and the age line change every second, so they stay out of this announced text. */
-    const connectionNotice = $derived(
-        !connectionStore.connected
-            ? (everDropped ? t('app.reconnect.status') : '')
-            : (everDropped && hadConnection ? t('app.reconnect.back') : '')
-    );
-
-    function handleWsConnection(connected: boolean): void {
-        connectionStore.set(connected);
-        setOfflineStatus(!connected);
-        if (connected) {
-            hadConnection = true;
-            stopCountdown();
-            stopStaleTick();
-            nextReconnectAt = 0;
-            countdownSeconds = 0;
-            // The first connect has nothing to catch up on.
-            if (initialLoadComplete) {
-                silentRefresh().catch(() => {});
-            }
-        } else {
-            everDropped = true;
-            // The age counts from the last data that landed, not from this socket dropping.
-            startStaleTick();
-        }
-    }
-
-    function tryReconnectNow() {
-        if (appStream) {
-            appStream.reconnectNow();
-            nextReconnectAt = 0;
-        }
-    }
-
-    function retryLiveNow() {
-        tryReconnectNow();
-        silentRefresh().catch(() => {});
-    }
     let projectCounts: Record<string, { backlog: number; in_progress: number; review: number }> = $state({});
     // Cached done-task diff stats, keyed "<projectId>:<taskId>". Done-task diffs
     // are immutable (pinned BaseCommit..BranchTip), so entries persist in
@@ -338,11 +241,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     // Arrow-key navigation between board cards (same gate as the shortcuts above).
     useBoardArrowNav({ isEnabled: boardShortcutsEnabled });
 
-    let isAuthenticated = $state(false);
-    let isLoadingAuth = $state(true);
-    let servingFromCache = $state(false);
-    let hasLocalCache = $state(false); // the server did not answer and the mirror can be offered
-    let bootSlow = $state(false);      // the session check has not answered; nothing is known yet
     let hasProviders = $derived(!!appStore.config?.providers?.length);
     let pageTitle = $derived(computePageTitle());
     let hasReview = $derived.by(() => {
@@ -464,8 +362,26 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         appStream = null;
     }
 
-    async function initializeAuthSession() {
-        closeAppStream();
+    /** Open the one app stream this page holds. `mirror` is the offline screen's own: its task handlers
+     *  stay silent, because a mirrored board has no live task to follow. */
+    function openAppStream(mode: 'live' | 'mirror'): void {
+        if (mode === 'mirror') {
+            appStream = createAppStream({
+                onProjectCounts: (counts) => { applyProjectCounts(counts); },
+                onRefresh: () => refreshBoard(),
+                onDiffStats: () => {},
+                onBranch: (branch) => { currentBranch = branch; },
+                onFsEvent: () => {},
+                onTaskUpdated: () => {},
+                onTaskDeleted: () => {},
+                onCommitStatus: () => {},
+                onTaskEvent: () => {},
+                ...reconnectBanner.handlers,
+                onExtensionChange: handleExtensionChange,
+            });
+            setAppStreamRef(appStream);
+            return;
+        }
         appStream = createAppStream({
             onProjectCounts: (counts) => {
                 applyProjectCounts(counts);
@@ -517,7 +433,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 const project = appStore.selectedProject;
                 if (project) {
                     mirrorBoard(project.id, { tasks: merged });
-                    lastSyncedAt = Date.now();
+                    reconnectBanner.lastSyncedAt = Date.now();
                 }
                 if (appStore.selectedTask?.id === updatedTask.id) {
                     appStore.selectedTask = updatedTask;
@@ -531,7 +447,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     const project = appStore.selectedProject;
                     if (project) {
                         mirrorBoard(project.id, { tasks: appStore.tasks });
-                        lastSyncedAt = Date.now();
+                        reconnectBanner.lastSyncedAt = Date.now();
                     }
                 }
                 sandboxStatsStore.remove(task_id);
@@ -572,7 +488,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     taskEventStore.publish({ task_id, ...event });
                 }
             },
-            ...reconnectCountdown(),
+            ...reconnectBanner.handlers,
             onProjectPorts: (ports) => {
                 appStore.projectTerminalPorts = ports;
             },
@@ -595,15 +511,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             },
         });
         setAppStreamRef(appStream);
-        urlRouter.read();
-        urlRouter.applyView();
-        await loadAppData();
-        // The language offer runs **after** the extension list resolves: its first
-        // rule is "no i18n pack is enabled", and before this resolves that answer
-        // is the previous session's, which offers a pack that is already on.
-        extensionManager.loadExtensions()
-            .then(() => localeOffer.detect())
-            .catch(() => {});
     }
 
     function reportRefusedWrites(): void {
@@ -624,7 +531,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 // resolvedTasks has: optimisticId → createTask result, AND realId → latest update (start/move/etc.)
                 applyResolvedTasksToBoard(appStore, resolvedTasks);
                 // Clear cache indicator after flush succeeds
-                servingFromCache = false;
+                sessionBoot.servingFromCache = false;
                 reportRefusedWrites();
             });
             const projs = await getProjects();
@@ -638,7 +545,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 // The landing replayed this project's queued writes already; a second pass opens a
                 // second card.
                 // Check if data was served from cache
-                servingFromCache = isFromCache(projs);
+                sessionBoot.servingFromCache = isFromCache(projs);
             }
             // Load config (best-effort — cache fallback inside getConfig)
             try {
@@ -659,7 +566,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
         // Mark initial load as done. Reconnects now trigger silentRefresh()
         // to pick up changes that occurred while offline.
-        initialLoadComplete = true;
+        reconnectBanner.initialLoadComplete = true;
         // One release pass per boot, from the one place both boot paths land on; `start()` guards
         // itself, so a path that runs twice costs nothing. Its opt-in question cannot interrupt the
         // loading screen, because it is asked only after the status read and the stamp read behind it.
@@ -667,50 +574,16 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         void updateCheck.start();
     }
 
-    async function hasCachedProjects(): Promise<boolean> {
-        try {
-            const cached = await getBoardCache<Project[]>('projects');
-            return !!cached && cached.length > 0;
-        } catch (e) {
-            console.error('Failed to check cached data:', e);
-            return false;
-        }
-    }
+    /** What the boot may ask of this page. It runs before `onMount` opens any stream, so the first
+     *  session check already finds its hooks in place. */
+    sessionBoot.configure({
+        closeStream: closeAppStream,
+        openStream: openAppStream,
+        loadAppData,
+    });
 
-    onMount(async () => {
-        // A slow session answer is not an unreachable server: the 2 s timer only offers the offline
-        // mirror, and the answer that arrives later takes the offer back.
-        let authResolved = false;
-        const offlineTimer = setTimeout(async () => {
-            if (authResolved) return;
-            bootSlow = true;
-            setOfflineStatus(true);
-            // With no mirror to offer there is nothing to show but the wait.
-            if (await hasCachedProjects()) {
-                hasLocalCache = true;
-                isLoadingAuth = false;
-            }
-        }, 2000);
-        try {
-            isAuthenticated = await checkSession();
-            authResolved = true;
-            clearTimeout(offlineTimer);
-            bootSlow = false;
-            // The mirror screen outranks the app, so only this takes it down.
-            hasLocalCache = false;
-            if (isAuthenticated) {
-                await initializeAuthSession();
-            }
-            isLoadingAuth = false;
-        } catch (e) {
-            authResolved = true;
-            clearTimeout(offlineTimer);
-            console.error('Failed to check auth:', e);
-            // Mark as offline so API calls skip network and use cache immediately
-            setOfflineStatus(true);
-            hasLocalCache = await hasCachedProjects();
-            isLoadingAuth = false;
-        }
+    onMount(() => {
+        void sessionBoot.boot();
     });
 
     // What this window missed comes back over HTTP: the per-connection event buffer is gone once the
@@ -759,7 +632,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     window.addEventListener('drop', rejectStrayFileDrop);
 
     onDestroy(() => {
-        stopCountdown();
+        reconnectBanner.destroy();
         if (visibilityRetryTimer) {
             clearTimeout(visibilityRetryTimer);
             visibilityRetryTimer = null;
@@ -776,39 +649,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         if (urlRafId !== null) cancelAnimationFrame(urlRafId);
     });
 
-    /** Load the board from local cache after the user clicks "Load Local Cache". */
-    async function loadFromCache() {
-        hasLocalCache = false; // hide the offline screen
-        closeAppStream(); // the mirror's stream must not outlive the mirror
-        // Keep isLoadingAuth = true so the loading screen bridges the gap
-        // while cached data is read from IndexedDB (avoids flash of empty state)
-        isAuthenticated = true;
-        appStream = createAppStream({
-            onProjectCounts: (counts) => { applyProjectCounts(counts); },
-            onRefresh: () => refreshBoard(),
-            onDiffStats: () => {},
-            onBranch: (branch) => { currentBranch = branch; },
-            onFsEvent: () => {},
-            onTaskUpdated: () => {},
-            onTaskDeleted: () => {},
-            onCommitStatus: () => {},
-            onTaskEvent: () => {},
-            ...reconnectCountdown(),
-            onExtensionChange: handleExtensionChange,
-        });
-        setAppStreamRef(appStream);
-        const mirror = await getBoardCacheEntry('projects').catch(() => null);
-        if (mirror) lastSyncedAt = mirror.cachedAt;
-        await loadAppData(); // sets initialLoadComplete on completion
-        isLoadingAuth = false; // hide loading screen after data is loaded
-
-        // Load installed extensions for LSP discovery, then ask (once, silently if
-        // the answer is no) whether this browser wants a translation pack.
-        extensionManager.loadExtensions()
-            .then(() => localeOffer.detect())
-            .catch(() => {});
-    }
-
     // Detect external URL changes (e.g., page.goto() in Playwright, direct URL navigation).
     // Uses requestAnimationFrame with throttling — only checks when frame fires,
     // skips if URL hasn't changed. ~10-60ms latency vs 500ms setInterval.
@@ -822,7 +662,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     }
 
     $effect(() => {
-        if (!isAuthenticated || !appStore.selectedProject) return;
+        if (!sessionBoot.isAuthenticated || !appStore.selectedProject) return;
         urlRouter.markSeen();
         urlRafId = requestAnimationFrame(checkUrlChange);
         return () => { if (urlRafId !== null) cancelAnimationFrame(urlRafId); };
@@ -909,10 +749,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         const cached = entry?.data as BoardData | undefined;
         if (!cached || appStore.board || appStore.selectedProject?.id !== projectId) return;
         if (!applyBoard(cached, projectId, 'mirror')) return;
-        lastSyncedAt = entry!.cachedAt;
+        reconnectBanner.lastSyncedAt = entry!.cachedAt;
         // The banner says "this is the newest copy there is", which is only true with no socket to
         // bring the live board in; a slow-but-connected switch must not flash it.
-        servingFromCache = !connectionStore.connected;
+        sessionBoot.servingFromCache = !connectionStore.connected;
     }
 
     async function refreshBoard() {
@@ -934,7 +774,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 }
             }
             // Live data received — clear cache indicator
-            servingFromCache = isFromCache(b);
+            sessionBoot.servingFromCache = isFromCache(b);
         } catch {
             // A board that did not answer leaves the one on screen untouched; the age line counts
             // from whenever data last landed.
@@ -971,12 +811,22 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             }
             const c = await getConfig();
             appStore.config = c;
-            servingFromCache = false;
-            lastSyncedAt = Date.now();
+            sessionBoot.servingFromCache = false;
+            reconnectBanner.lastSyncedAt = Date.now();
         } catch {
             // Still offline — keep cached data
         }
     }
+
+    /** What the banner may ask of this page: the stream it reconnects, and the re-read a reconnect owes.
+     *  It runs before any stream exists — `onMount` opens the first one — and it names this instance's
+     *  `appStream` rather than the module ref, which outlives a `closeAppStream()`. */
+    reconnectBanner.configure({
+        stream: () => appStream,
+        refresh: () => {
+            void silentRefresh().catch(() => {});
+        },
+    });
 
     function clearTaskDetail() {
         // Push URL first so the subscription sees updated URL
@@ -1055,7 +905,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             if (wasDifferentProject && isMobileCtx.isMobile) {
                 boardFocus = { projectId: p.id, column: resolveBoardLandingColumn(boardTasks) };
             }
-            servingFromCache = isFromCache(b);
+            sessionBoot.servingFromCache = isFromCache(b);
             // Restore task from URL after board loads (await so task detail renders before return)
             await restoreTaskFromUrl();
             // Hydrate cached done-task stats BEFORE subscribing so the
@@ -1073,7 +923,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             try {
                 const cachedBoard = await getBoardCache<BoardData>(boardCacheKey(p.id));
                 if (cachedBoard && applyBoard(cachedBoard, p.id, 'mirror')) {
-                    servingFromCache = true;
+                    sessionBoot.servingFromCache = true;
                     await restoreTaskFromUrl();
                 }
             } catch {
@@ -1085,16 +935,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     function openAddProject() {
         showFileBrowserVal = true;
         addProjectError = '';
-    }
-
-    async function handleLogout() {
-        await logout();
-        // Signing out means this browser keeps nothing: the stores hold this user's
-        // messages, diffs, drafts and queued writes, and gc() only prunes tasks
-        // that no longer exist. The in-memory queue goes with them.
-        clearQueue();
-        await clearAll();
-        isAuthenticated = false;
     }
 
     async function handleSelectProjectPath(path: string, sandboxEnabled: boolean) {
@@ -1259,50 +1099,47 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 </script>
 
 <!-- Login gate -->
-{#if isLoadingAuth}
+{#if sessionBoot.isLoadingAuth}
     <div class="loading-screen">
         <img class="loading-icon" src={mikeIcon} width="96" height="96" alt="Loading" />
-        {#if bootSlow}<p class="loading-slow">{t('app.bootSlow.title')}</p>{/if}
+        {#if sessionBoot.bootSlow}<p class="loading-slow">{t('app.bootSlow.title')}</p>{/if}
     </div>
-{:else if hasLocalCache}
+{:else if sessionBoot.hasLocalCache}
     <div class="offline-screen">
         <img class="offline-icon" src={mikeIcon} width="96" height="96" alt="Offline" />
-        <p class="offline-text">{bootSlow ? t('app.bootSlow.title') : t('app.offline.title')}</p>
-        <button class="offline-btn" onclick={loadFromCache}>
+        <p class="offline-text">{sessionBoot.bootSlow ? t('app.bootSlow.title') : t('app.offline.title')}</p>
+        <button class="offline-btn" onclick={() => void sessionBoot.useLocalCache()}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="6,3 20,12 6,21"/></svg>
             {t('app.offline.button')}
         </button>
     </div>
-{:else if !isAuthenticated}
-    <LoginModal onClose={async () => {
-        isAuthenticated = true;
-        await initializeAuthSession();
-    }} />
+{:else if !sessionBoot.isAuthenticated}
+    <LoginModal onClose={() => sessionBoot.startAfterLogin()} />
 {:else}
 <!-- Not a live region: the countdown and the age change every second. The region under it
      announces the transitions. -->
 {#if !connectionStore.connected}
     <div class="reconnecting-banner">
         <span class="reconnecting-spinner"></span>
-        {reconnectStatus}
-        {#if staleTimeText}<span class="reconnecting-stale">{t('app.reconnect.dataFrom', { time: staleTimeText })}</span>{/if}
-        <button class="reconnecting-btn" onclick={tryReconnectNow} type="button" aria-label="Try connecting now">{t('app.reconnect.connect')}</button>
+        {reconnectBanner.status}
+        {#if reconnectBanner.staleTimeText}<span class="reconnecting-stale">{t('app.reconnect.dataFrom', { time: reconnectBanner.staleTimeText })}</span>{/if}
+        <button class="reconnecting-btn" onclick={() => reconnectBanner.reconnectNow()} type="button" aria-label="Try connecting now">{t('app.reconnect.connect')}</button>
     </div>
 {/if}
 <div class="sr-only" role="status" aria-live="polite">
-    {#if connectionNotice}{connectionNotice}{/if}
+    {#if reconnectBanner.notice}{reconnectBanner.notice}{/if}
 </div>
 <!-- Offline cache banner -->
-{#if servingFromCache}
+{#if sessionBoot.servingFromCache}
     <div class="cache-banner" role="status" aria-live="polite">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         {t('app.cache.banner')}
         {#if connectionStore.connected}
-            <button class="reconnecting-btn" onclick={retryLiveNow} type="button" aria-label="Try connecting now">{t('app.reconnect.connect')}</button>
+            <button class="reconnecting-btn" onclick={() => reconnectBanner.retryLive()} type="button" aria-label="Try connecting now">{t('app.reconnect.connect')}</button>
         {/if}
     </div>
 {/if}
-<div class="app" class:collapsed class:task-detail={uiStore.showCardDetail && !!appStore.selectedTask} class:ws-disconnected={!connectionStore.connected} class:cache-visible={servingFromCache}>
+<div class="app" class:collapsed class:task-detail={uiStore.showCardDetail && !!appStore.selectedTask} class:ws-disconnected={!connectionStore.connected} class:cache-visible={sessionBoot.servingFromCache}>
     <!-- Skip navigation link -->
     <a href="#main-content" class="skip-link">{t('app.skipToMain')}</a>
 
@@ -1524,7 +1361,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             config={appStore.config}
             onClose={() => uiStore.showConfig = false}
             onSaved={() => uiStore.showConfig = false}
-            onSignOut={handleLogout}
+            onSignOut={() => sessionBoot.signOut()}
         />
     {/if}
     {#if uiStore.showTerminal && terminalPanel.component}

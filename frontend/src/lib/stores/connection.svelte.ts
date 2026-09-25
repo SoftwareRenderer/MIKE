@@ -1,7 +1,7 @@
 /**
  * Whether the app-level stream (`/api/stream`) is up right now.
  *
- * Written only by `handleWsConnection` in `App.svelte` — a reader must never set it.
+ * Written only by `onConnected` in `services/reconnect-banner.svelte.ts` — a reader must never set it.
  * Consumers (e.g. `TaskChat`) react to the false→true edge to refresh data that
  * changed while the connection was down; the value at mount is not that edge.
  */

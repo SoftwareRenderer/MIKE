@@ -1,11 +1,13 @@
 # Reconnection Refresh — Mechanism
 
-Read this before touching WS connect/reconnect handling in `App.svelte`, `TaskChat`, or the offline
-write queue. The hard rules live in `AGENTS.md → Reconnection & Offline`.
+Read this before touching WS connect/reconnect handling in `App.svelte`,
+`frontend/src/lib/services/reconnect-banner.svelte.ts`, `TaskChat`, or the offline write queue. The hard
+rules live in `AGENTS.md → Reconnection & Offline`.
 
 When the WebSocket drops and reconnects, the current view (board, task view) updates automatically:
 
-- `onConnected(true)` in `App.svelte` runs `silentRefresh()` if `initialLoadComplete` is true.
+- `onConnected(true)` in `reconnect-banner.svelte.ts` runs the app's `silentRefresh()` if
+  `initialLoadComplete` is true.
 - Project re-subscription forces the server to re-send `task_diff_stats`, refreshing the diff panel.
 - `TaskChat` registers `useConnectionRestored` — the false→true edge of the connection store — and reloads
   history on reconnect; the value read at mount is not that edge. Turns completed while offline aren't
@@ -201,15 +203,19 @@ ordering) with `stream-reconnect.unit.ts` for the ladder around it; the server h
 
 ## The boot offer and one stream per page
 
-`/api/auth/session` decides whether the app or the offline mirror is on screen. A 2 s timer *offers*
-the mirror (`hasLocalCache`) when a request has not answered and the mirror holds projects; the answer
-that arrives afterwards retracts the offer (`hasLocalCache = false`) and the copy says the wait is slow,
-not that the server is unreachable. Only one `/api/stream` is open at a time (`closeAppStream()` in
-`App.svelte`): the field holding it is a single reference, so a second `createAppStream` leaves the
-first connected, still firing handlers, and unreachable to close — the exact shape the boot race took
-when the user clicked Offline Mode and the session then answered.
+`/api/auth/session` decides whether the app or the offline mirror is on screen, and
+`frontend/src/lib/services/session-boot.svelte.ts` holds that decision together with its offer. A 2 s timer
+*offers* the mirror (`hasLocalCache`) when a request has not answered and the mirror holds projects; the
+answer that arrives afterwards retracts the offer (`hasLocalCache = false`) and the copy says the wait is
+slow, not that the server is unreachable. Both boot paths close the stream they found before opening the
+next, because only one `/api/stream` is open at a time (`closeAppStream()` in `App.svelte`): the field
+holding it is a single reference, so a second `createAppStream` leaves the first connected, still firing
+handlers, and unreachable to close — the exact shape the boot race took when the user clicked Offline Mode
+and the session then answered.
 
-**Tests:** e2e `boot-slow-session.spec.ts` (the offer comes down by itself; one live stream afterwards).
+**Tests:** e2e `boot-slow-session.spec.ts` (the offer comes down by itself; one live stream afterwards) and
+`src/lib/services/__tests__/session-boot.unit.svelte.ts` (the offer waits 2 s and needs a mirror; the login
+click and the offline click each open one stream).
 
 ## An unanswered attempt is replaced, not awaited
 
@@ -485,12 +491,14 @@ from the cache stamped itself as arriving now. `dataAgeText` (`$lib/utils/format
 rule and `timeAgo` holds the rungs.
 
 The countdown and the age are not in an announced region: they change every second. The banner is
-plain markup and `App.svelte`'s `sr-only` region carries the transitions only (down, back) — one
-sentence per change instead of ~29 a minute.
+plain markup in `App.svelte`, whose `sr-only` region carries the transitions only (down, back) — one
+sentence per change instead of ~29 a minute. Both clocks are `reconnect-banner.svelte.ts`'s, and both stop
+when the page is destroyed.
 
 **Tests:** `src/lib/utils/__tests__/format-time.unit.ts` (unknown ≠ just now); e2e
 `ws-stale-reconnect.spec.ts` (a drop announces one sentence with no digits in it, and the way back is
-announced).
+announced); `src/lib/services/__tests__/reconnect-banner.unit.svelte.ts` (the age keeps counting while
+disconnected and stops with the socket; the countdown follows the scheduled attempt).
 
 **Tests:** `src/lib/utils/__tests__/task-utils.unit.ts` (a frame of another project never appends) and
 `src/lib/api/__tests__/queue-board-scope.unit.ts` (a queued action of another project never replays).
@@ -500,9 +508,10 @@ announced).
 `servingFromCache` and `wsConnected` are both true whenever a read answered from the mirror while the
 socket stayed up — `selectProject`'s fallback after a failed board fetch, and any board carrying
 `isFromCache`. The "Reconnecting…" banner is off in that state, so the cache banner's own Connect button
-is the only route back: `retryLiveNow` skips the socket's backoff and runs `silentRefresh()`, which puts
-live data on screen or leaves the banner exactly where it was. The button is hidden while the socket is
-down, because the reconnecting banner already offers it. No spec covers the button itself.
+is the only route back: `reconnectBanner.retryLive()` skips the socket's backoff and runs `silentRefresh()`,
+which puts live data on screen or leaves the banner exactly where it was. The button is hidden while the
+socket is down, because the reconnecting banner already offers it. The button itself is held by
+`src/lib/services/__tests__/reconnect-banner.unit.svelte.ts`; no spec covers it.
 
 ## A pending outgoing message is the queue's projection
 
@@ -532,7 +541,8 @@ message after a reload while still offline, and the applied row reaching the scr
 
 ## The behaviour, in full
 
-`onConnected(true)` in `App.svelte` runs `silentRefresh()` once `initialLoadComplete`; `TaskChat` reloads history from the DB on reconnect because **turns completed while offline are never replayed** (buffer cleared at turn end). `offline` queues writes immediately, except a value that carries a secret — an unmasked provider key, or a clone URL with credentials in it — which is refused because the queue is persisted; `online` flushes the queue and calls `reconnectNow()` to skip backoff; `visibilitychange` refreshes the board (phone-sleep), and the open task's chat and diff answer the same signal together with the window's own `focus` and a bfcache `pageshow` — the chat whatever it believes, because a missed turn leaves no local trace, the diff only while the task looks able to move under it, never on the task's status. Project re-subscription forces a re-send of `task_diff_stats`.
+`onConnected(true)` in `reconnect-banner.svelte.ts` runs the app's `silentRefresh()` once
+`initialLoadComplete`; `TaskChat` reloads history from the DB on reconnect because **turns completed while offline are never replayed** (buffer cleared at turn end). `offline` queues writes immediately, except a value that carries a secret — an unmasked provider key, or a clone URL with credentials in it — which is refused because the queue is persisted; `online` flushes the queue and calls `reconnectNow()` to skip backoff; `visibilitychange` refreshes the board (phone-sleep), and the open task's chat and diff answer the same signal together with the window's own `focus` and a bfcache `pageshow` — the chat whatever it believes, because a missed turn leaves no local trace, the diff only while the task looks able to move under it, never on the task's status. Project re-subscription forces a re-send of `task_diff_stats`.
 
 ### How a request ends: cancelled, or unanswered
 
@@ -553,9 +563,10 @@ dialog had the same effect on purpose-free terms.
 
 **No client-side deadline replaced it.** The plan's rule is that the queue gets bounded and the work does
 not, and the case the timeout existed for — a server that accepts a connection and never answers — is
-already surfaced honestly: the WebSocket drops, and `setOfflineStatus(!connected)` in `App.svelte` sets the
-same flag the HTTP layer would have. Stalls on the server are reported where they are known
-(`subproc.Watch` for podman, the lock slow-wait reports), not guessed at from the client.
+already surfaced honestly: the WebSocket drops, and `setOfflineStatus(!connected)` in
+`reconnect-banner.svelte.ts` sets the same flag the HTTP layer would have. Stalls on the server are
+reported where they are known (`subproc.Watch` for podman, the lock slow-wait reports), not guessed at
+from the client.
 
 Both classes keep the DOM `name` (`AbortError`, `TypeError`) rather than inventing one, because a check that
 misses a cancellation fails silently in one of two directions: a cancellation starts toasting, or a queueable
