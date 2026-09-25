@@ -188,6 +188,44 @@ func TestPrepareMergeConflictTurn_DeliversBeforeTheNextCall(t *testing.T) {
 	}
 }
 
+// The resolver reads what the agent said at review, not the task's opening prompt.
+func TestPrepareMergeConflictTurn_CarriesWhatReviewWasTold(t *testing.T) {
+	s := testStore(t)
+	te := newTestExecutorWith(t, Deps{Store: s})
+	setup := diagTestSetup(t, s, "mc-proj3", "mc-task3")
+	if err := s.CreateTaskMessage(&types.TaskMessage{
+		ID: "as-1", TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID,
+		Role: "assistant", Content: "I did the work", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("assistant row: %v", err)
+	}
+	if err := s.CreateTaskMessage(&types.TaskMessage{
+		ID: "tc-1", TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID,
+		Role:           "tool_call",
+		AssistantMsgID: "as-1",
+		ToolCalls:      `{"tool_id":"c1","tool_name":"request_review","raw_args":"{\"summary\":\"Added the revoke button\"}"}`,
+		ToolResult:     `{"output":"Task complete","success":true}`,
+		CreatedAt:      time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("tool_call row: %v", err)
+	}
+
+	chdirToRepoRoot(t)
+	lc := &loopContext{
+		messages: []types.ChatMessage{{Role: "user", Content: "diag prompt"}},
+		detector: newLoopDetector(),
+	}
+	te.prepareMergeConflictTurn(setup, lc, []string{"src/b.go"})
+
+	last := lc.messages[len(lc.messages)-1]
+	if !strings.Contains(last.Content, "Added the revoke button") {
+		t.Errorf("instructions do not carry what the review reported:\n%s", last.Content)
+	}
+	if strings.Contains(last.Content, setup.task.Prompt) {
+		t.Errorf("the task description is still sent alongside the review context:\n%s", last.Content)
+	}
+}
+
 func TestComposeDiagnosticsAdvisory_SilentWhenNothingSurvives(t *testing.T) {
 	t.Parallel()
 	// The whole point of suppressing: no findings left means no note at all, not

@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -653,6 +654,71 @@ func TestExtractCommitContext_RequestReviewWithOtherToolCalls(t *testing.T) {
 	}
 	if toolRoles != 2 {
 		t.Errorf("expected 2 tool results, got %d", toolRoles)
+	}
+}
+
+// --- reviewSummaries Tests ---
+
+// reviewRows builds the rows of a turn that asked for review: an assistant row and the tool_call
+// row it owns.
+func reviewRows(assistantID, callID, summary string) []types.TaskMessage {
+	args := "{}"
+	if summary != "" {
+		args = fmt.Sprintf(`{"summary":%q}`, summary)
+	}
+	return []types.TaskMessage{
+		{ID: assistantID, Role: "assistant", Content: "the turn's own prose"},
+		{
+			Role:           "tool_call",
+			AssistantMsgID: assistantID,
+			ToolCalls:      fmt.Sprintf(`{"tool_id":%q,"tool_name":"request_review","raw_args":%q}`, callID, args),
+			ToolResult:     `{"output":"Task complete","success":true}`,
+		},
+	}
+}
+
+func TestReviewSummaries_EveryReviewInOrder(t *testing.T) {
+	t.Parallel()
+	// Two reviews changed two things: both summaries arrive, oldest first, and nothing else does.
+	rows := []types.TaskMessage{{ID: "u1", Role: "user", Content: "the task prompt"}}
+	rows = append(rows, reviewRows("a1", "c1", "Added the retry loop")...)
+	rows = append(rows, types.TaskMessage{
+		Role: "tool_call", AssistantMsgID: "a1",
+		ToolCalls:  `{"tool_id":"c0","tool_name":"edit_file","raw_args":"{\"path\":\"client.go\"}"}`,
+		ToolResult: `{"output":"edited client.go","success":true}`,
+	})
+	rows = append(rows, reviewRows("a2", "c2", "Made the ceiling per-provider")...)
+
+	got := reviewSummaries(rows)
+	want := "Added the retry loop\n\nMade the ceiling per-provider"
+	if got != want {
+		t.Errorf("reviewSummaries =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestReviewSummaries_NothingReviewed(t *testing.T) {
+	t.Parallel()
+	// Empty is what selects the caller's fallback.
+	rows := []types.TaskMessage{
+		{ID: "u1", Role: "user", Content: "the task prompt"},
+		{ID: "a1", Role: "assistant", Content: "worked on it"},
+	}
+	if got := reviewSummaries(rows); got != "" {
+		t.Errorf("reviewSummaries with no review = %q, want empty", got)
+	}
+	if got := reviewSummaries(reviewRows("a2", "c2", "")); got != "" {
+		t.Errorf("reviewSummaries with a summary-less review = %q, want empty", got)
+	}
+}
+
+func TestReviewSummaries_RepeatAppearsOnce(t *testing.T) {
+	t.Parallel()
+	rows := reviewRows("a1", "c1", "Fixed the parser")
+	rows = append(rows, reviewRows("a2", "c2", "Fixed the parser")...)
+	rows = append(rows, reviewRows("a3", "c3", "And the tests")...)
+
+	if got, want := reviewSummaries(rows), "Fixed the parser\n\nAnd the tests"; got != want {
+		t.Errorf("reviewSummaries = %q, want %q", got, want)
 	}
 }
 

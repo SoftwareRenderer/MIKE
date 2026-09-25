@@ -1837,6 +1837,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		conflictContext, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 			TaskBranch:      task.Branch,
 			TargetBranch:    te.merge.ResolveMergeTarget(projectID, task),
+			ReviewContext:   te.ReviewContextFor(task),
 			TaskTitle:       task.Title,
 			TaskDescription: task.Prompt,
 			ConflictedFiles: conflictedFiles,

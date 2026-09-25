@@ -223,6 +223,7 @@ func RenderSystemPrompt(data PromptData) (string, error) {
 type MergeConflictData struct {
 	TaskBranch      string
 	TargetBranch    string
+	ReviewContext   string // what each request_review reported; when empty the two fields below are used instead
 	TaskTitle       string
 	TaskDescription string
 	ConflictedFiles []string // list of conflicted file paths

@@ -104,7 +104,7 @@ func TestNoOverlayRendersCoreBytesForEveryEntryPoint(t *testing.T) {
 	})
 
 	t.Run("merge conflict", func(t *testing.T) {
-		data := MergeConflictData{TaskBranch: "task/a", TargetBranch: "main", TaskTitle: "T", ConflictedFiles: []string{"x.go"}}
+		data := MergeConflictData{TaskBranch: "task/a", TargetBranch: "main", ReviewContext: "Did the thing", ConflictedFiles: []string{"x.go"}}
 		got, err := RenderMergeConflictPrompt(data)
 		if err != nil {
 			t.Fatalf("render: %v", err)

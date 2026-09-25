@@ -619,6 +619,32 @@ func ExtractCommitContext(messages []types.ChatMessage) []types.ChatMessage {
 	return result
 }
 
+// reviewSummaries returns what each request_review said the work was, oldest first, as one block.
+// A request_review's result is the constant "Task complete", so only the call's summary argument
+// says anything.
+func reviewSummaries(taskMsgs []types.TaskMessage) string {
+	messages := groupTaskMessages(taskMsgs)
+	seen := make(map[string]bool)
+	var summaries []string
+	for i := range messages {
+		if messages[i].Role != "assistant" {
+			continue
+		}
+		for _, tc := range messages[i].ToolCalls {
+			if tc.Function.Name != llama.ToolRequestReview {
+				continue
+			}
+			summary := reviewSummary(tc.Function.Arguments)
+			if summary == "" || seen[summary] {
+				continue
+			}
+			seen[summary] = true
+			summaries = append(summaries, summary)
+		}
+	}
+	return strings.Join(summaries, "\n\n")
+}
+
 // ExtractLastTurns extracts the last N turns (user + assistant pairs, including tool results) from a conversation.
 func ExtractLastTurns(messages []types.ChatMessage, n int) []types.ChatMessage {
 	// Group messages into turns: each turn starts with a user message and includes

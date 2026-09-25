@@ -104,6 +104,27 @@ func TestRenderHelpers_ShippedTemplates(t *testing.T) {
 		out, err := RenderMergeConflictPrompt(MergeConflictData{
 			TaskBranch:      "task/alpha",
 			TargetBranch:    "main",
+			ReviewContext:   "Listed the signed-in sessions with revoke buttons",
+			ConflictedFiles: []string{"backend/server/handler_sessions.go"},
+		})
+		if err != nil {
+			t.Fatalf("RenderMergeConflictPrompt: %v", err)
+		}
+		for _, want := range []string{"task/alpha", "main", "Listed the signed-in sessions with revoke buttons", "handler_sessions.go"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("merge conflict prompt is missing %q", want)
+			}
+		}
+		if strings.Contains(out, "Task title:") || strings.Contains(out, "Task description:") {
+			t.Errorf("review context did not replace the task title and description:\n%s", out)
+		}
+	})
+
+	t.Run("merge conflict without a review", func(t *testing.T) {
+		// Nothing reviewed yet: the title and description are what the resolver gets.
+		out, err := RenderMergeConflictPrompt(MergeConflictData{
+			TaskBranch:      "task/alpha",
+			TargetBranch:    "main",
 			TaskTitle:       "Add sessions",
 			TaskDescription: "List the signed-in sessions",
 			ConflictedFiles: []string{"backend/server/handler_sessions.go"},
@@ -111,9 +132,9 @@ func TestRenderHelpers_ShippedTemplates(t *testing.T) {
 		if err != nil {
 			t.Fatalf("RenderMergeConflictPrompt: %v", err)
 		}
-		for _, want := range []string{"task/alpha", "main", "Add sessions", "handler_sessions.go"} {
+		for _, want := range []string{"Add sessions", "List the signed-in sessions"} {
 			if !strings.Contains(out, want) {
-				t.Errorf("merge conflict prompt is missing %q", want)
+				t.Errorf("fallback prompt is missing %q", want)
 			}
 		}
 	})

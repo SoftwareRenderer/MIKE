@@ -546,6 +546,17 @@ func (te *TaskExecutor) autoAnswerTextStop(setup *taskExecSetup, lc *loopContext
 	return turnNextLLMCall
 }
 
+// ReviewContextFor reads the task's own thread for the merge-conflict prompt. Called mid-turn it
+// sees this turn's own review: the assistant row is persisted before its tool calls run.
+func (te *TaskExecutor) ReviewContextFor(task *types.Task) string {
+	rows, err := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
+	if err != nil {
+		logging.For(logging.Merge).With(logging.TaskID, task.ID).Warnf("could not read the thread for the conflict prompt: %v", err)
+		return ""
+	}
+	return reviewSummaries(rows)
+}
+
 // prepareMergeConflictTurn hands the model the instructions for resolving a conflict and
 // resets the turn state around it: the loop detector forgets the history (conflict work
 // repeating is expected, not a loop) and the half-built assistant/tool buffers are dropped.
@@ -558,6 +569,7 @@ func (te *TaskExecutor) prepareMergeConflictTurn(setup *taskExecSetup, lc *loopC
 	prompt, err := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 		TaskBranch:      setup.task.Branch,
 		TargetBranch:    te.merge.ResolveMergeTarget(setup.projectID, setup.task),
+		ReviewContext:   te.ReviewContextFor(setup.task),
 		TaskTitle:       setup.task.Title,
 		TaskDescription: setup.task.Prompt,
 		ConflictedFiles: conflictedFiles,

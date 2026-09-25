@@ -497,6 +497,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, wor
 			prompt, _ := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 				TaskBranch:      task.Branch,
 				TargetBranch:    te.merge.ResolveMergeTarget(projectID, task),
+				ReviewContext:   te.ReviewContextFor(task),
 				TaskTitle:       task.Title,
 				TaskDescription: task.Prompt,
 				ConflictedFiles: conflictedFiles,

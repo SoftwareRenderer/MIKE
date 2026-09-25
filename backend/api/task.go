@@ -820,6 +820,7 @@ func (h *TaskHandler) handConflictToAgent(w http.ResponseWriter, projectID, task
 	userContent, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 		TaskBranch:      task.Branch,
 		TargetBranch:    h.executor.ResolveMergeTarget(projectID, task),
+		ReviewContext:   h.executor.ReviewContextFor(task),
 		TaskTitle:       task.Title,
 		TaskDescription: task.Prompt,
 		ConflictedFiles: conflictedFiles,
