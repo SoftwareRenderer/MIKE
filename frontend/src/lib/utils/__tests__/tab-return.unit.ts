@@ -13,7 +13,7 @@ const signal = (over: Partial<ReturnSignal> = {}): ReturnSignal => ({
     msSinceReconcile: 60_000,
     msSinceUnpainted: null,
     mayBeBehind: true,
-    unreadIsEvidence: false,
+    revalidateOnReturn: false,
     ...over,
 });
 
@@ -21,8 +21,8 @@ describe('needsReturnReconcile', () => {
     it('never reconciles while the document is hidden', () => {
         expect(needsReturnReconcile(signal({ hidden: true }))).toBe(false);
         expect(needsReturnReconcile(signal({ hidden: true, msSinceFrame: WAKE_FRAME_GAP_MS }))).toBe(false);
-        expect(needsReturnReconcile(signal({ hidden: true, mayBeBehind: false, unreadIsEvidence: true }))).toBe(false);
-        expect(needsReturnReconcile(signal({ source: 'resume', hidden: true, unreadIsEvidence: true }))).toBe(false);
+        expect(needsReturnReconcile(signal({ hidden: true, mayBeBehind: false, revalidateOnReturn: true }))).toBe(false);
+        expect(needsReturnReconcile(signal({ source: 'resume', hidden: true, revalidateOnReturn: true }))).toBe(false);
     });
 
     it('never reconciles a screen that cannot be behind', () => {
@@ -32,28 +32,33 @@ describe('needsReturnReconcile', () => {
         ).toBe(false);
     });
 
-    it('a missed turn leaves no evidence, so a hidden screen cannot vouch for itself', () => {
-        expect(needsReturnReconcile(signal({ mayBeBehind: false, unreadIsEvidence: true }))).toBe(true);
-    });
-
-    it('a page that was stopped is the same fact for the screen that cannot see its own gap', () => {
-        // A thawed page has no stream reading left: its queued frames arrive once the focus is back.
+    it('revalidates every visible return signal when the screen asks, because a missed turn leaves nothing here to prove it', () => {
+        // None of the four signals arrives with evidence: the missed turn's frames would have carried it.
+        for (const source of ['visible', 'focus', 'pageshow', 'resume'] as const) {
+            expect(needsReturnReconcile(signal({
+                source, mayBeBehind: false, msSinceFrame: 0, msSinceUnpainted: null, revalidateOnReturn: true,
+            }))).toBe(true);
+        }
         expect(needsReturnReconcile(signal({
-            source: 'resume', mayBeBehind: false, unreadIsEvidence: true, msSinceFrame: 0, msSinceUnpainted: null,
-        }))).toBe(true);
+            source: 'visible', mayBeBehind: false, hidden: true, revalidateOnReturn: true,
+        }))).toBe(false);
+        expect(needsReturnReconcile(signal({
+            source: 'focus', mayBeBehind: false, revalidateOnReturn: true, msSinceReconcile: RETURN_DEDUPE_MS - 1,
+        }))).toBe(false);
     });
 
-    it('a stopped page does not pull along a screen that can answer for itself', () => {
+    it('a stopped page does not pull along a screen that answers for itself', () => {
         expect(needsReturnReconcile(signal({ source: 'resume' }))).toBe(false);
         expect(needsReturnReconcile(signal({ source: 'resume', msSinceFrame: WAKE_FRAME_GAP_MS * 4 }))).toBe(false);
+        expect(needsReturnReconcile(signal({ source: 'resume', msSinceUnpainted: 1_000 }))).toBe(false);
     });
 
     it('leaves a window that was never hidden to answer for itself', () => {
         expect(needsReturnReconcile(signal({
-            source: 'focus', msSinceFrame: WAKE_FRAME_GAP_MS, mayBeBehind: false, unreadIsEvidence: true,
+            source: 'focus', msSinceFrame: WAKE_FRAME_GAP_MS, mayBeBehind: false,
         }))).toBe(false);
         expect(needsReturnReconcile(signal({
-            source: 'pageshow', msSinceFrame: WAKE_FRAME_GAP_MS, mayBeBehind: false, unreadIsEvidence: true,
+            source: 'pageshow', msSinceFrame: WAKE_FRAME_GAP_MS, mayBeBehind: false,
         }))).toBe(false);
     });
 
@@ -114,7 +119,7 @@ describe('needsReturnReconcile', () => {
         }))).toBe(false);
         // One suspension can arrive twice: the browser's event, and the clock that noticed it.
         expect(needsReturnReconcile(signal({
-            source: 'resume', unreadIsEvidence: true, msSinceReconcile: RETURN_DEDUPE_MS - 1,
+            source: 'resume', revalidateOnReturn: true, msSinceReconcile: RETURN_DEDUPE_MS - 1,
         }))).toBe(false);
     });
 });

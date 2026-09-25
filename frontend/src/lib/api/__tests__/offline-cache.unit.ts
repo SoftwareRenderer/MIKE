@@ -118,6 +118,84 @@ describe('offline message cache', () => {
         const { getTaskMessages } = await import('$lib/api/tasks');
         await expect(getTaskMessages('p1', 't1')).rejects.toBeTruthy();
     });
+
+    it('returns and caches the newest window revision', async () => {
+        const storage = await import('$lib/storage');
+        mockResolvedFetch(messages, { ...windowHeaders, etag: '"window-1"' });
+
+        const { getTaskMessages } = await import('$lib/api/tasks');
+        const result = await getTaskMessages('p1', 't1');
+
+        expect(result.revision).toBe('"window-1"');
+        await vi.waitFor(async () => {
+            expect(await storage.getBoardCache(storage.messagesCacheKey('p1', 't1'))).toEqual(result);
+        });
+    });
+
+    it('revalidates a known newest-window revision', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => messages,
+            headers: { get: (name: string) => name.toLowerCase() === 'etag' ? '"window-1"' : null },
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        const { getTaskMessages } = await import('$lib/api/tasks');
+        const result = await getTaskMessages('p1', 't1', '', '"window-1"');
+
+        const messagesCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/messages'));
+        expect(messagesCall).toBeTruthy();
+        expect(new Headers((messagesCall![1] as RequestInit).headers).get('If-None-Match')).toBe('"window-1"');
+        expect(result.unchanged).toBeUndefined();
+        expect(result.revision).toBe('"window-1"');
+    });
+
+    it('asks about no revision for an older page', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => messages,
+            headers: { get: (name: string) => name.toLowerCase() === 'etag' ? '"page-2"' : null },
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        const { getTaskMessages } = await import('$lib/api/tasks');
+        const result = await getTaskMessages('p1', 't1', 'cursor-1', '"window-1"');
+
+        const messagesCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/messages'));
+        expect(new Headers((messagesCall![1] as RequestInit).headers).get('If-None-Match')).toBeNull();
+        expect(result.revision).toBeUndefined();
+    });
+
+    it('treats a direct 304 as the current window without parsing a body', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+            ok: false,
+            status: 304,
+            json: async () => { throw new Error('a 304 has no body'); },
+            headers: { get: (name: string) => name.toLowerCase() === 'etag' ? '"window-1"' : null },
+        }));
+
+        const { getTaskMessages } = await import('$lib/api/tasks');
+        const result = await getTaskMessages('p1', 't1', '', '"window-1"');
+
+        expect(result).toMatchObject({ unchanged: true, revision: '"window-1"', messages: [] });
+    });
+
+    it('never offers a cached fallback as a live revision', async () => {
+        const storage = await import('$lib/storage');
+        await storage.setBoardCache(storage.messagesCacheKey('p1', 't1'), {
+            messages, hasMore: false, before: '', revision: '"stale"',
+        });
+        mockRejectedFetch();
+
+        const { getTaskMessages } = await import('$lib/api/tasks');
+        const result = await getTaskMessages('p1', 't1');
+
+        expect(result.messages).toEqual(messages);
+        expect(result.revision).toBeUndefined();
+        expect(result.unchanged).toBeUndefined();
+    });
 });
 
 describe('offline diff cache', () => {

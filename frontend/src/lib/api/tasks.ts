@@ -239,27 +239,48 @@ export interface MessageWindow {
     hasMore: boolean;
     /** Cursor for the next-older window; empty when this window reaches the first row. */
     before: string;
+    /** Strong ETag of the newest window; absent on older pages and cached fallbacks. */
+    revision?: string;
+    /** A direct `304`: the caller keeps the window it already has. */
+    unchanged?: boolean;
 }
 
 /** Fetch the newest window of a task's conversation, or an older one by cursor.
  * Always tries the network first: the isOffline flag tracks the WebSocket, not whether HTTP works, so a
  * resumed tab must not fall back to cache. */
-export async function getTaskMessages(projectId: string, taskId: string, before = ''): Promise<MessageWindow> {
+export async function getTaskMessages(
+    projectId: string,
+    taskId: string,
+    before = '',
+    knownRevision = '',
+): Promise<MessageWindow> {
     const query = before ? `?before=${encodeURIComponent(before)}` : '';
+    // An older page is a slice of the thread: its bytes say nothing about the rows above it.
+    const ifNoneMatch = before ? '' : knownRevision;
     try {
-        const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages${query}`);
+        const res = await apiFetch(
+            `${API_BASE}/projects/${projectId}/tasks/${taskId}/messages${query}`,
+            ifNoneMatch ? { headers: { 'If-None-Match': ifNoneMatch } } : undefined,
+        );
+        const revision = res.headers.get('ETag') ?? undefined;
+        if (res.status === 304) {
+            return { messages: [], hasMore: false, before: '', revision: revision ?? ifNoneMatch, unchanged: true };
+        }
         if (!res.ok) throw await apiError(res, t('api.fetchMessages'));
         const window: MessageWindow = {
             messages: await res.json(),
             hasMore: res.headers.get('X-Messages-More') === 'true',
             before: res.headers.get('X-Messages-Before') ?? '',
+            ...(revision && !before ? { revision } : {}),
         };
         // Only the newest window is cached; an older page cached on its own is what a reload would open on.
         if (!before) widenCache(projectId, taskId, window).catch(() => {});
         return window;
     } catch (e) {
         const cached = await getBoardCache<MessageWindow>(messagesCacheKey(projectId, taskId));
-        if (cached) return markCached(cached);
+        if (cached) {
+            return markCached({ messages: cached.messages, hasMore: cached.hasMore, before: cached.before });
+        }
         throw e;
     }
 }

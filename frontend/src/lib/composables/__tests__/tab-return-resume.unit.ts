@@ -21,9 +21,9 @@ describe('createTabReturn', () => {
         while (watchers.length) watchers.pop()!.destroy();
     });
 
-    it('treats a thawed page as a return for the view that cannot see its own gap', () => {
+    it('treats a thawed page as a return for the view that asks the server', () => {
         const onReturn = vi.fn();
-        watch({ mayBeBehind: () => false, unreadIsEvidence: true, onReturn });
+        watch({ revalidateOnReturn: true, onReturn });
 
         document.dispatchEvent(new Event('resume'));
 
@@ -39,9 +39,18 @@ describe('createTabReturn', () => {
         expect(onReturn).not.toHaveBeenCalled();
     });
 
-    it('answers one thaw once, whatever else arrives with it', () => {
+    it('revalidates a visible return even when the screen cannot prove it fell behind', () => {
         const onReturn = vi.fn();
-        watch({ mayBeBehind: () => false, unreadIsEvidence: true, onReturn });
+        watch({ mayBeBehind: () => false, revalidateOnReturn: true, msSinceFrame: () => 0, onReturn });
+
+        window.dispatchEvent(new Event('visibilitychange'));
+
+        expect(onReturn).toHaveBeenCalledWith('visible');
+    });
+
+    it('answers one signal per return gesture', () => {
+        const onReturn = vi.fn();
+        watch({ revalidateOnReturn: true, onReturn });
 
         document.dispatchEvent(new Event('resume'));
         document.dispatchEvent(new Event('resume'));
@@ -51,7 +60,7 @@ describe('createTabReturn', () => {
 
     it('hears nothing once the view has gone', () => {
         const onReturn = vi.fn();
-        const watcher = watch({ mayBeBehind: () => false, unreadIsEvidence: true, onReturn });
+        const watcher = watch({ revalidateOnReturn: true, onReturn });
 
         watcher.destroy();
         document.dispatchEvent(new Event('resume'));
