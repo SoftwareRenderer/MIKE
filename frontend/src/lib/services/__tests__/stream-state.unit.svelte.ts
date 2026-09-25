@@ -366,3 +366,35 @@ describe('dropUnresolvedToolCalls', () => {
         expect([...s.state.activeToolCalls.keys()]).toEqual(['call-1']);
     });
 });
+
+describe('settleStreamingRef', () => {
+    it('drops the ref when the entry it named is off the screen, so the next token opens a fresh entry', () => {
+        const s = new StreamState();
+        s.ensureAssistantEntry(() => 'gen-1');
+        s.state.entries = []; // a rebuild from the rows retired it
+
+        s.settleStreamingRef();
+
+        expect(s.state.currentAssistantId).toBeNull();
+        expect(s.ensureAssistantEntry(() => 'gen-2').id).toBe('gen-2');
+    });
+
+    it('drops the ref when the entry on screen under that id is closed', () => {
+        const s = new StreamState();
+        s.ensureAssistantEntry(() => 'gen-1');
+        s.state.entries = [{ id: 'gen-1', role: 'assistant', content: 'stored answer', isStreaming: false, createdAt: 'now' }];
+
+        s.settleStreamingRef();
+
+        expect(s.state.currentAssistantId).toBeNull();
+    });
+
+    it('keeps the ref of a turn that is still streaming on screen', () => {
+        const s = new StreamState();
+        s.ensureAssistantEntry(() => 'gen-1');
+
+        s.settleStreamingRef();
+
+        expect(s.state.currentAssistantId).toBe('gen-1');
+    });
+});

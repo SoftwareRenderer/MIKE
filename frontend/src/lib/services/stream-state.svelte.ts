@@ -137,6 +137,14 @@ export class StreamState {
         this.state.currentAssistantId = null;
     }
 
+    /** Forgets the streaming ref unless an entry on screen is still streaming under it, so the next `token`
+     * cannot write into an entry a rebuild dropped. */
+    settleStreamingRef() {
+        if (!this.state.currentAssistantId) return;
+        if (this.state.entries.some(e => e.id === this.state.currentAssistantId && e.isStreaming)) return;
+        this.state.currentAssistantId = null;
+    }
+
     /** Reset streaming state (thread switch). */
     resetStreaming() {
         this.closeCurrentAssistant();

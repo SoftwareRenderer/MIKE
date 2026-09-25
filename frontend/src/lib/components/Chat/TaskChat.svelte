@@ -566,6 +566,7 @@
         // These are new entry objects, so refs captured while streaming are now
         // detached; re-point them before more events for this turn arrive.
         stream.reconcileActiveToolCalls();
+        stream.settleStreamingRef();
         // Restore context usage from the last assistant message.
         // Use total context (prompt + predicted) to reflect full window consumed.
         const lastAssistant = [...stream.state.entries].reverse().find(e => e.role === 'assistant' && e.stats);

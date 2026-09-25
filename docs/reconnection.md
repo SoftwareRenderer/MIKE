@@ -262,6 +262,19 @@ id: `mergeLoadedHistory` (`src/lib/utils/chat-entries.ts`) owns the rule and sta
 The fact it is built on is that a `tool_call` event is broadcast once, so an entry discarded before its row
 exists loses that card until the page is reloaded.
 
+**Text is the second key, because a finished answer has no id the client knows.** A text answer's row id is
+`assistant_message_id`, and it reaches the client on `complete` — which the executor sends at turn end and
+not per call. So a live entry for a call whose row the read just brought has nothing to match, and `isRowCopy`
+compares its content against every assistant row the read brought — equal to one, or a prefix of one. A match
+means the row's own entry stands. Only the newest entry on screen escapes that test, and only while it
+streams: that one is the turn in flight, and two calls in one conversation do open with the same words.
+
+The merge replaces the entry list, so anything holding a reference to an entry it dropped is left pointing at
+an object off screen. `currentAssistantId` is the one that writes: it names where the next `token` goes.
+`settleStreamingRef` (`src/lib/services/stream-state.svelte.ts`) clears the ref unless an entry on screen still
+streams under that id, and `TaskChat` calls it after every merge beside `reconcileActiveToolCalls`. A ref kept
+on a dropped entry takes the next turn's text into a copy nobody sees.
+
 Being in progress is what separates a pending `tool_call` row that is work from one that is a leftover:
 a stopped task will never write the missing result, so that card is hidden while the message around it —
 its text, its thinking, the cards that did finish — stays. Where the running flag comes from is its own rule
@@ -271,7 +284,11 @@ its text, its thinking, the cards that did finish — stays. Where the running f
 `backend/exec/durable_replay_test.go` for the seam — a real turn, a subscriber arriving after the result
 row, and no finished iteration in what it is sent. `DurableThrough` keeps a running call and the newest
 state; a client with `no_rows` is owed what a trim would drop. Removing either executor call site turns one
-of them red.
+of them red. `src/lib/utils/__tests__/chat-history-merge.unit.ts` holds the copy rule (a copy below something
+newer on screen goes; the newest streaming entry stays; an announced call outranks the text), and
+`src/lib/services/__tests__/stream-state.unit.svelte.ts` holds the ref. E2e `return-after-review.spec.ts`
+drives the whole path: a frozen tab, a run that ends in Review, and a transcript holding nothing the server
+holds no row for.
 
 ## A read that did not answer says so
 
@@ -669,4 +686,5 @@ write).
 
 `cd frontend && npm test` covers `taskIsInFlight`, the offline queue, the mirror's coalescing and the pending
 rows derived from the queue. `cd frontend && npx playwright test reconnect-refresh ws-stale-reconnect` drives a
-lost connection; `mirror-follows-frames offline-send-queue` drive the mirror and the queue across a reload.
+lost connection; `mirror-follows-frames offline-send-queue` drive the mirror and the queue across a reload;
+`return-after-review` drives the return onto a run that finished while the tab held nothing.
