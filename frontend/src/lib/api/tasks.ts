@@ -10,6 +10,8 @@ import {
     enqueueAction,
     queueWrite,
     isTransientError,
+} from './queue';
+import {
     createTaskRaw,
     updateTaskRaw,
     deleteTaskRaw,
@@ -28,7 +30,7 @@ import {
     deleteTaskMessagesAfterRaw,
     deleteTaskMessageRaw,
     updateTaskMessageRaw,
-} from './queue';
+} from './raw/tasks';
 import { t } from '$lib/i18n';
 
 // -- Task CRUD endpoints --

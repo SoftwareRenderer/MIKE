@@ -7,7 +7,7 @@ vi.mock('../helpers', async (importOriginal) => {
     return { ...actual, ensureCsrfToken };
 });
 
-import { buildSandboxImageStream } from '../queue';
+import { buildSandboxImageStream } from '../raw/projects';
 
 /** Minimal SSE Response whose single chunk carries the given data frames. */
 function sseResponse(frames: string[]): Response {

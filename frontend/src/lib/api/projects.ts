@@ -4,11 +4,13 @@ import {
     getOfflineStatus,
     enqueueAction,
     queueWrite,
+} from './queue';
+import {
     createProjectRaw,
     updateProjectRaw,
     deleteProjectRaw,
     resetProjectStatsRaw,
-} from './queue';
+} from './raw/projects';
 import { setBoardCache, getBoardCache, boardCacheKey } from '../storage';
 import { markCached } from './cache';
 import { repoNameFromGitUrl } from '../utils/repo-name';
@@ -200,9 +202,6 @@ export async function updateProject(id: string, updates: ProjectUpdates): Promis
     }
     return updateProjectRaw(id, updates);
 }
-
-/** Trigger a sandbox image build with live progress streaming. */
-export { buildSandboxImageStream } from './queue';
 
 /** Delete a project and all its tasks. Queued when offline. */
 export async function deleteProject(id: string): Promise<void> {

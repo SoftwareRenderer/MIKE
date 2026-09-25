@@ -29,9 +29,10 @@ export {
     flushQueueNow,
     waitForFlush,
     applyQueuedActionsToBoard,
-    type SendResult,
-    type SendTaskMessagePayload,
 } from './queue';
+
+// The send types are declared with the send call itself, which the queue replays.
+export type { SendResult, SendTaskMessagePayload } from './raw/tasks';
 
 // -- Projects --
 export {
@@ -43,10 +44,12 @@ export {
     createProject,
     cloneProject,
     updateProject,
-    buildSandboxImageStream,
     deleteProject,
     getBoard,
 } from './projects';
+
+// A sandbox build is a progress stream, never a queued write, so it lives under ./raw/.
+export { buildSandboxImageStream } from './raw/projects';
 
 // -- Tasks --
 export {
