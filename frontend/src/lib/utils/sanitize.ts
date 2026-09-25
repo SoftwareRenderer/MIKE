@@ -83,8 +83,8 @@ export function sanitizeHTML(html: string, forbidTags?: readonly string[]): stri
 }
 
 /**
- * The only fence tag rendered rather than shown. Every other tag stays a code block, which is how
- * generated text displays markup the reader is meant to read.
+ * The only fence tag rendered rather than shown; `DIAGRAM_FENCE_TAG` below is drawn, but as an image
+ * rather than as markup in this document.
  */
 const RENDERED_FENCE_TAG = 'markdown';
 
@@ -96,6 +96,17 @@ export function fenceTag(lang: string | undefined): string {
 /** Whether a fence names the rendered document rather than a language to show. */
 export function isRenderedFence(lang: string | undefined): boolean {
     return fenceTag(lang).toLowerCase() === RENDERED_FENCE_TAG;
+}
+
+/** The one fence tag drawn as a diagram instead of shown as text. */
+const DIAGRAM_FENCE_TAG = 'mermaid';
+
+/**
+ * Whether a fence holds a diagram source. Beside `isRenderedFence`, not underneath it: a rendered fence
+ * becomes markup in this document, a diagram becomes an image owned by a component.
+ */
+export function isDiagramFence(lang: string | undefined): boolean {
+    return fenceTag(lang).toLowerCase() === DIAGRAM_FENCE_TAG;
 }
 
 /** Markdown parsed the default way, for inside a rendered fence. With no renderer of its own, a
@@ -125,6 +136,40 @@ const embeddingMarkdown = new Marked({ async: false }).use({
  */
 export function markdownToSafeHTML(markdown: string): string {
     return sanitizeHTML(embeddingMarkdown.parse(markdown, { async: false }));
+}
+
+/** An SVG parsed as a standalone document must declare this. */
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+
+/** Attributes the browser may follow somewhere else: another document, another host. */
+const REFERRING_ATTRS = ['href', 'xlink:href', 'src'];
+
+/**
+ * A generated SVG *document* headed for an `<img>`, or `''` if it is not one — the only markup this app
+ * keeps `style` on, because these bytes reach an image of their own and never this document. Refuses the
+ * root's own `style` and any `href`/`src` that is not an internal fragment.
+ * `docs/markup-sanitizing.md → A diagram fence is drawn as an image` owns the why.
+ */
+export function svgImageMarkup(markup: string): string {
+    if (!markup) return '';
+    // DOMPurify's own defaults, not FORBID_TAGS/FORBID_ATTR above: styles are the point here.
+    const body = DOMPurify.sanitize(markup, { RETURN_DOM: true, FORBID_TAGS: ['form'] }) as unknown as HTMLElement;
+    const kids = Array.from(body.children);
+    if (kids.length !== 1 || kids[0].tagName.toLowerCase() !== 'svg') return '';
+    const beside = Array.from(body.childNodes).filter((n) => n.nodeType === Node.TEXT_NODE);
+    if (beside.some((n) => (n.textContent ?? '').trim() !== '')) return '';
+
+    const root = kids[0];
+    root.removeAttribute('style');
+    for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
+        for (const name of REFERRING_ATTRS) {
+            const value = el.getAttribute(name);
+            // A `#fragment` is how a diagram references its own marker or gradient.
+            if (value !== null && !value.startsWith('#')) el.removeAttribute(name);
+        }
+    }
+    root.setAttribute('xmlns', SVG_NAMESPACE);
+    return new XMLSerializer().serializeToString(root);
 }
 
 /**
