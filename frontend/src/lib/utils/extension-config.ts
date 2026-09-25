@@ -1,4 +1,5 @@
 import type { Extension, SchemaProperty } from '$lib/types';
+import { memoryLimitToInput, parseMemoryLimitMB } from './memory-stats';
 
 export interface ConfigField {
     key: string;
@@ -69,4 +70,18 @@ export function initialEditConfig(ext: Extension): Record<string, any> {
         delete config[HOST_OWNED_AGENT_CONFIG_KEY];
     }
     return config;
+}
+
+/**
+ * The number a form field opens with. A memory limit renders blank for "no limit", where every other
+ * field shows its stored value or the schema default.
+ */
+export function configNumberValue(config: Record<string, any>, field: ConfigField): number | null {
+    const raw = config[field.key] ?? field.default;
+    return field.key === HOST_OWNED_LSP_CONFIG_KEY ? memoryLimitToInput(raw) : raw;
+}
+
+/** What typing in that field means: blank, 0 or a negative limit is the numeric 0 (unlimited). */
+export function configNumberInput(key: string, raw: string): number {
+    return key === HOST_OWNED_LSP_CONFIG_KEY ? parseMemoryLimitMB(raw) : Number(raw);
 }
