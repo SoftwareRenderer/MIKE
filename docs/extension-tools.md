@@ -110,7 +110,7 @@ same tool, and **a project's Network Isolation says nothing about it**: isolatio
 container and this request never enters it. `configResponse.server_network_extensions`
 (`ToolRegistry.NetworkedExtensions`, derived and never stored) is what lets the Sandbox Configuration say
 that out loud when isolation is on; `frontend/src/lib/utils/server-tool-network.ts` is the rule and
-`SandboxConfigModal.svelte` / `SandboxPanel.svelte` are the two places it is said.
+`SandboxConfigModal/NetworkRow.svelte` / `SandboxPanel.svelte` are the two places it is said.
 
 ## Test connection
 

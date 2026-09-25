@@ -20,7 +20,7 @@ Four rules, each one a sentence in the docs:
                               typography block in `src/app.css`, where a tag may appear ONLY
                               inside a `:lang(…)` selector — AGENTS.md requires that block,
                               and a selector targets a language without naming one to a
-                              reader. (`src/lib/types.ts`'s `i18n.locale` field and the
+                              reader. (`src/lib/types/index.ts`'s `i18n.locale` field and the
                               runtime's `LocaleTag` are the *shape* of a tag, never a tag.)
                               A PACK'S TAG IS CHECKED TEXTUALLY ONLY WHILE THE TAG CANNOT BE
                               AN ORDINARY WORD. The Latin-script pack tags (`es`, `de`, `pt`,
