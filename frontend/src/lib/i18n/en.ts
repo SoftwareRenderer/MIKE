@@ -227,6 +227,7 @@ const catalog = {
     'settings.toggleFullscreen': 'Toggle fullscreen',
     'settings.tab.providers': 'Providers',
     'settings.tab.taskDefaults': 'Task Defaults',
+    'settings.tab.projectDefaults': 'Project Defaults',
     'settings.tab.preferences': 'Preferences',
     'settings.tab.extensions': 'Extensions',
     'settings.tab.about': 'About',
@@ -355,6 +356,12 @@ const catalog = {
     'settings.defaults.reclaimSandboxAria': 'Release a waiting task sandbox container',
     'settings.defaults.maxFailed': 'Max failed turns',
     'settings.defaults.maxFailedDesc': 'Stop task after this many consecutive LLM failures',
+
+    // ── ConfigModal/ProjectDefaults.svelte ──
+    'settings.project.description': 'Defaults for {project}',
+    'settings.project.assistedBy': 'Assisted-by line',
+    'settings.project.assistedByDesc': 'Add "Assisted-by: MIKE:<model>" to generated commit messages',
+    'settings.project.assistedByAria': 'Assisted-by line in commit messages',
 
     // ── ConfigModal/AgentSection.svelte ──
     // The manifest's own description and setup_info are extension text: never keyed.

@@ -891,3 +891,68 @@ func TestProjectSandboxCapabilities(t *testing.T) {
 		t.Fatal("expected to find proj-caps in list")
 	}
 }
+
+// TestProjectCommitAssistedByDefaultsOn: a row that never answered keeps the trailer.
+func TestProjectCommitAssistedByDefaultsOn(t *testing.T) {
+	s := testStore(t)
+
+	if err := s.CreateProject(newProject("proj-new", "New", "/tmp/new")); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if _, err := s.Exec(`INSERT INTO projects (id, name, path, created_at, updated_at) VALUES ('proj-old', 'Old', '/tmp/old', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("insert row without the column: %v", err)
+	}
+
+	for _, id := range []string{"proj-new", "proj-old"} {
+		got, err := s.GetProject(id)
+		if err != nil {
+			t.Fatalf("get %s: %v", id, err)
+		}
+		if !got.AssistedByEnabled() {
+			t.Errorf("%s: trailer reads off, want on", id)
+		}
+	}
+}
+
+// TestUpdateProjectCommitAssistedBy: an explicit "off" is stored as an answer, not collapsed into the default.
+func TestUpdateProjectCommitAssistedBy(t *testing.T) {
+	s := testStore(t)
+	off := false
+	proj := newProject("proj-1", "One", "/tmp/one")
+	proj.CommitAssistedBy = &off
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	got, err := s.GetProject("proj-1")
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if got.CommitAssistedBy == nil || *got.CommitAssistedBy {
+		t.Fatalf("an explicit off did not survive the insert: %v", got.CommitAssistedBy)
+	}
+
+	if err := s.UpdateProjectCommitAssistedBy("proj-1", true); err != nil {
+		t.Fatalf("turn trailer on: %v", err)
+	}
+	if got, err = s.GetProject("proj-1"); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if got.CommitAssistedBy == nil || !*got.CommitAssistedBy {
+		t.Fatalf("trailer did not turn on: %v", got.CommitAssistedBy)
+	}
+
+	if err := s.UpdateProjectCommitAssistedBy("proj-1", false); err != nil {
+		t.Fatalf("turn trailer off: %v", err)
+	}
+	projects, err := s.ListProjects()
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	if len(projects) != 1 {
+		t.Fatalf("expected 1 project, got %d", len(projects))
+	}
+	if projects[0].AssistedByEnabled() {
+		t.Fatalf("the list read lost the stored off: %v", projects[0].CommitAssistedBy)
+	}
+}

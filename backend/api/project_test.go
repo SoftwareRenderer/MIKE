@@ -1097,3 +1097,51 @@ func TestHandleCreateCloneRejectsHelperTransport(t *testing.T) {
 		t.Fatal("ext:: payload executed — the clone source was not validated")
 	}
 }
+
+// TestUpdateProjectCommitTrailer: commit_assisted_by is written both ways, and a request that does not
+// mention it leaves the stored answer alone.
+func TestUpdateProjectCommitTrailer(t *testing.T) {
+	h, projID := testProjectHandler(t)
+	mux := http.NewServeMux()
+	mux.HandleFunc("PUT /api/projects/{projectID}", h.HandleByID)
+
+	put := func(body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPut, "/api/projects/"+projID, strings.NewReader(body))
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+		return rr
+	}
+	stored := func() *bool {
+		t.Helper()
+		p, err := h.store.GetProject(projID)
+		if err != nil {
+			t.Fatalf("get project: %v", err)
+		}
+		return p.CommitAssistedBy
+	}
+
+	for _, want := range []bool{false, true} {
+		rr := put(fmt.Sprintf(`{"commit_assisted_by":%t}`, want))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("PUT %t: status = %d, want 200 (%s)", want, rr.Code, rr.Body.String())
+		}
+		var answered types.Project
+		if err := json.Unmarshal(rr.Body.Bytes(), &answered); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if answered.CommitAssistedBy == nil || *answered.CommitAssistedBy != want {
+			t.Errorf("PUT %t: response carries %v", want, answered.CommitAssistedBy)
+		}
+		if got := stored(); got == nil || *got != want {
+			t.Errorf("PUT %t: stored %v", want, got)
+		}
+	}
+
+	if rr := put(`{"name":"Renamed"}`); rr.Code != http.StatusOK {
+		t.Fatalf("PUT name: status = %d (%s)", rr.Code, rr.Body.String())
+	}
+	if got := stored(); got == nil || !*got {
+		t.Errorf("an update that never mentioned the trailer changed it to %v", got)
+	}
+}

@@ -76,6 +76,8 @@ export interface Project {
     sandbox_mounts?: SandboxMount[];
     sandbox_envs?: SandboxEnv[];
     sandbox_capabilities?: string[];
+    /** The project's answer to the "Assisted-by" commit trailer; default on. */
+    commit_assisted_by?: boolean;
     active_terminal_ports?: AssignedPort[];
     created_at: string;
     updated_at: string;
@@ -94,6 +96,7 @@ export interface ProjectUpdates {
     sandbox_mounts?: SandboxMount[];
     sandbox_envs?: SandboxEnv[];
     sandbox_capabilities?: string[];
+    commit_assisted_by?: boolean;
 }
 
 /** A dismissed memory alert and the numbers it showed, as the task row carries them. */

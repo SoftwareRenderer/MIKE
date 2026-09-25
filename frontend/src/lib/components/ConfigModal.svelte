@@ -6,11 +6,12 @@
     import { getModelName, getProviderDisplayName } from '$lib/utils/providers';
     import { t } from '$lib/i18n';
     import { formatMB, usdSymbol } from '$lib/utils/format';
-    import { updateConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
+    import { updateConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi, updateProject } from '$lib/api';
     import { appStore, dialogStore, uiStore } from '$lib/stores';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import BaseModal from './BaseModal.svelte';
     import TaskDefaults from './ConfigModal/TaskDefaults.svelte';
+    import ProjectDefaults from './ConfigModal/ProjectDefaults.svelte';
     import type { ProviderDraft } from './ConfigModal/drafts';
     import PreferencesTab from './ConfigModal/PreferencesTab.svelte';
     import ProviderCard from './ConfigModal/ProviderCard.svelte';
@@ -57,11 +58,16 @@
     let sortOldestFirst = $state(false);
     let autoMaximizeChat = $state(true);
     let notifyOnReview = $state(false);
+    // The open project's answer to the "Assisted-by" commit trailer; absent means on.
+    let commitAssistedBy = $state(true);
     let loading = $state(false);
     let error = $state('');
 
-    // The modal is mounted per open, so the tab the opener asked for is read once here.
-    let activeTab = $state<string>(uiStore.settingsTab ?? 'providers');
+    // The modal is mounted per open, so the tab the opener asked for is read once here. The Project
+    // Defaults tab is hidden without a project, so it cannot be the tab asked for.
+    let requestedTab = uiStore.settingsTab ?? 'providers';
+    if (requestedTab === 'project-defaults' && !appStore.selectedProject) requestedTab = 'providers';
+    let activeTab = $state<string>(requestedTab);
 
     // Track unsaved changes
     let hasChanges = $state(false);
@@ -200,6 +206,7 @@
             sortOldestFirst = config.sort_oldest_first === true;
             autoMaximizeChat = config.auto_maximize_chat_mobile !== false;
             notifyOnReview = uiStore.notifyOnReview;
+            commitAssistedBy = appStore.selectedProject?.commit_assisted_by !== false;
             providers = buildProviders(config);
             hasChanges = false;
             agentRows = agentRowSignature(config);
@@ -486,6 +493,18 @@
         return updateCheckEnabled === null ? payload : { ...payload, update_check_enabled: updateCheckEnabled };
     }
 
+    // Project Defaults writes to the open project's row, not to the config payload. A Save that did not
+    // touch the row sends nothing.
+    async function saveProjectCommitDefaults() {
+        const row = appStore.selectedProject;
+        if (!row || commitAssistedBy === (row.commit_assisted_by !== false)) return;
+        await updateProject(row.id, { commit_assisted_by: commitAssistedBy });
+        // The offline queue answers with a partial row, so the stored row is patched rather than replaced.
+        const patched = { ...row, commit_assisted_by: commitAssistedBy };
+        appStore.projects = appStore.projects.map(p => (p.id === row.id ? patched : p));
+        if (appStore.selectedProject?.id === row.id) appStore.selectedProject = patched;
+    }
+
     async function handleSave() {
         const validationError = validatePrimaryProviders();
         if (validationError) {
@@ -560,6 +579,7 @@
                 keyboard_shortcuts: { create_task: keyboardCreateTask, create_task_submit: keyboardCreateTaskSubmit, open_terminal: keyboardOpenTerminal, start_task: keyboardStartTask, toggle_fullscreen: keyboardToggleFullscreen, multi_select_click: keyboardMultiSelectClick, hide_hints: keyboardHideHints },
             } as Config));
             appStore.config = cfg;
+            await saveProjectCommitDefaults();
             uiStore.notifyOnReview = notifyOnReview;
             uiStore.persistNotifyOnReview();
             // The switch may have just answered the question the dot is waiting on.
@@ -647,6 +667,9 @@
         <div class="header-tabs">
             <button type="button" class="tab-btn" class:active={activeTab === 'providers'} onclick={() => activeTab = 'providers'}>{t('settings.tab.providers')}</button>
             <button type="button" class="tab-btn" class:active={activeTab === 'task-defaults'} onclick={() => activeTab = 'task-defaults'}>{t('settings.tab.taskDefaults')}</button>
+            {#if appStore.selectedProject}
+                <button type="button" class="tab-btn" class:active={activeTab === 'project-defaults'} onclick={() => activeTab = 'project-defaults'}>{t('settings.tab.projectDefaults')}</button>
+            {/if}
             <button type="button" class="tab-btn" class:active={activeTab === 'preferences'} onclick={() => activeTab = 'preferences'}>{t('settings.tab.preferences')}</button>
             <button type="button" class="tab-btn" class:active={activeTab === 'extensions'} onclick={() => activeTab = 'extensions'}>{t('settings.tab.extensions')}</button>
             <button type="button" class="tab-btn" class:active={activeTab === 'about'} onclick={() => activeTab = 'about'}>{t('settings.tab.about')}</button>
@@ -806,6 +829,11 @@
                 originBranch={appStore.selectedProject?.origin_branch || 'main'}
                 onDirty={markDirty}
             />
+        {/if}
+
+        <!-- Project Defaults Tab -->
+        {#if activeTab === 'project-defaults' && appStore.selectedProject}
+            <ProjectDefaults bind:commitAssistedBy projectName={appStore.selectedProject.name} onDirty={markDirty} />
         {/if}
 
         <!-- Preferences Tab -->

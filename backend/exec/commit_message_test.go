@@ -1,8 +1,11 @@
 package exec
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"mike/backend/types"
 )
@@ -394,5 +397,69 @@ func TestBuildCommitMessageWithAssistedBy_PreservesMessageBody(t *testing.T) {
 	}
 	if !strings.Contains(result, "Assisted-by: MIKE:gpt-4o") {
 		t.Error("should contain co-author")
+	}
+}
+
+// --- The project's answer to the Assisted-by line ---
+
+// commitTrailerExecutor builds an executor whose utility model answers with the given label (or fails),
+// over a project with the given answer to the Assisted-by line.
+func commitTrailerExecutor(t *testing.T, commitAssistedBy *bool, label string, callErr error) (*TaskExecutor, *types.Task) {
+	t.Helper()
+	te, s := newTestExecutorWithStore(t)
+	now := time.Now().UTC()
+	project := &types.Project{ID: "proj-trailer", Name: "trailer", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now, CommitAssistedBy: commitAssistedBy}
+	if err := s.CreateProject(project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &types.Task{ID: "task-trailer", ProjectID: project.ID, Title: "Fix the parser", ModelName: "worker-model", Status: types.StatusInProgress}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	te.merge.utilityTarget = func(*types.Task) (string, string, bool) { return "http://utility.test/v1", "utility-model", true }
+	te.merge.chatCompletion = func(context.Context, string, string, []types.ChatMessage, *ChatCompletionOpts) (*types.ChatUsage, string, error) {
+		return nil, label, callErr
+	}
+	return te, task
+}
+
+// TestGenerateCommitMessage_AssistedByFollowsTheProject: a row that never answered keeps the line, an explicit off drops it.
+func TestGenerateCommitMessage_AssistedByFollowsTheProject(t *testing.T) {
+	on, off := true, false
+	for _, tc := range []struct {
+		name        string
+		assistedBy  *bool
+		wantTrailer bool
+	}{
+		{"unset keeps the line", nil, true},
+		{"on keeps the line", &on, true},
+		{"off drops the line", &off, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			te, task := commitTrailerExecutor(t, tc.assistedBy, "Fix the parser flush", nil)
+			got := te.merge.GenerateCommitMessage(context.Background(), task)
+			if strings.Contains(got, "Assisted-by") != tc.wantTrailer {
+				t.Fatalf("commit message %q, want trailer: %t", got, tc.wantTrailer)
+			}
+			if !strings.HasPrefix(got, "Fix the parser flush") {
+				t.Fatalf("the generated label was replaced: %q", got)
+			}
+		})
+	}
+}
+
+// TestGenerateCommitMessage_FallbackFollowsTheProject: the title-only fallback carries the trailer only
+// where the project wants it.
+func TestGenerateCommitMessage_FallbackFollowsTheProject(t *testing.T) {
+	off := false
+	te, task := commitTrailerExecutor(t, &off, "", errors.New("provider down"))
+	if got := te.merge.GenerateCommitMessage(context.Background(), task); got != "Fix the parser" {
+		t.Fatalf("a project that declined the trailer got %q", got)
+	}
+
+	te, task = commitTrailerExecutor(t, nil, "", errors.New("provider down"))
+	got := te.merge.GenerateCommitMessage(context.Background(), task)
+	if !strings.Contains(got, "Assisted-by: MIKE:utility-model") {
+		t.Fatalf("unset project fallback = %q, want the utility model named", got)
 	}
 }

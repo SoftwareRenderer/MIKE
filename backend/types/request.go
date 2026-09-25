@@ -33,6 +33,7 @@ type UpdateProjectRequest struct {
 	SandboxMounts           []SandboxMount `json:"sandbox_mounts,omitempty"`
 	SandboxEnvs             []SandboxEnv   `json:"sandbox_envs,omitempty"`
 	SandboxCapabilities     []string       `json:"sandbox_capabilities,omitempty"`
+	CommitAssistedBy        *bool          `json:"commit_assisted_by,omitempty"`
 }
 
 // GitCheckoutRequest is the request body for git checkout.
