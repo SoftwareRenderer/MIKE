@@ -137,6 +137,9 @@ export type { FsEntry } from './fs';
 export { deleteFsPaths, copyFsPaths, moveFsPaths, renameFsPath } from './fs-ops';
 export type { FsOpsResult } from './fs-ops';
 
+// -- Auth (the session check, the login and the logout that gate the whole app) --
+export { checkSession, login, logout } from './auth';
+
 // -- Sessions (login sessions, Settings → About) --
 export {
     listSessions,

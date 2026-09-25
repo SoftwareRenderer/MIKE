@@ -186,7 +186,7 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
 
 ## Frontend cleanliness gates (run by `make check`)
 
-`make test-frontend` ends with two gates over `frontend/src`:
+`make test-frontend` ends with three gates over `frontend/src`:
 
 - **`npm run check:dead`** — knip over the **production view**: unused files, exports, exported types,
   duplicate exports, unlisted imports, unused dependencies. `ignore` in the config excludes every test
@@ -196,6 +196,11 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
   `tsconfig.unused.json`, which turns on `noUnusedLocals` and `noUnusedParameters`; `npm run check` does
   not. The script keeps the two `is declared but …` messages, prints `file:line name`, and fails on any.
   It covers test files too, because `tsconfig.json` includes `src/**/*.ts`.
+- **`npm run check:fetch`** — `frontend/scripts/check-fetch.sh` counts `fetch(` in every `*.svelte` file
+  and compares the per-file counts against the list frozen inside it. The API layer owns credentials, the
+  CSRF token and the reading of a failed request, so a component that calls the network itself is a
+  second answer to the same outage. A fetch the list does not name fails, and a listed file holding fewer
+  fails too — the list moves only when the code does.
 
 **Names starting with `_` are exempt, deliberately.** `$effect(() => { const _v = uiInjector.getPointVersion(); … })`
 subscribes by *reading*; the value is never used and the read is the whole point. TypeScript exempts

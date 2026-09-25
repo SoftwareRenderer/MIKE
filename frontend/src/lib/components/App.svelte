@@ -8,7 +8,7 @@
     import { wsConnection } from '$lib/stores/connection';
     import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
     import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
-    import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, clearQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask, getDroppedActions } from '$lib/api';
+    import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, checkSession, logout, setOfflineStatus, loadQueue, clearQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask, getDroppedActions } from '$lib/api';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
     import { dragCarriesFiles } from '$lib/utils/file-drop';
     import { dataAgeText } from '$lib/utils/format-time';
@@ -813,17 +813,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             }
         }, 2000);
         try {
-            const authRes = await fetch('/api/auth/session', { credentials: 'include' });
+            isAuthenticated = await checkSession();
             authResolved = true;
             clearTimeout(offlineTimer);
-            const authData = await authRes.json();
             bootSlow = false;
             // The mirror screen outranks the app, so only this takes it down.
             hasLocalCache = false;
-            isAuthenticated = authData.authenticated;
             if (isAuthenticated) {
-                // Extract CSRF token from session response
-                if (authData.csrf_token) setCsrfToken(authData.csrf_token);
                 await initializeAuthSession();
             }
             isLoadingAuth = false;
@@ -1233,13 +1229,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     }
 
     async function handleLogout() {
-        const csrfToken = await ensureCsrfToken();
-        await fetch('/api/auth/logout', {
-            method: 'POST',
-            credentials: 'include',
-            headers: csrfToken ? { 'X-CSRF-Token': csrfToken } : {},
-        });
-        clearCsrfToken();
+        await logout();
         // Signing out means this browser keeps nothing: the stores hold this user's
         // messages, diffs, drafts and queued writes, and gc() only prunes tasks
         // that no longer exist. The in-memory queue goes with them.
