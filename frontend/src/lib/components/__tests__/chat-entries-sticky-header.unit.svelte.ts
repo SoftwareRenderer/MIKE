@@ -231,6 +231,11 @@ function mountGeometry(container: HTMLElement, follow: ChatFollow, geometry?: Ma
     };
 }
 
+/** The ring the header wears while the prompt it named is being fetched. */
+function stickySpinner(container: HTMLElement) {
+    return container.querySelector('.chat-sticky-header .spinner-inline');
+}
+
 /** Click the header, then let the component react to the scroll it caused. */
 async function tapHeader(container: HTMLElement, view: ReturnType<typeof mountGeometry>) {
     container.querySelector<HTMLElement>('.chat-sticky-bubble')!.click();
@@ -507,6 +512,58 @@ describe('ChatEntries — sticky user-message header', () => {
 
         expect(onJumpToTurn).toHaveBeenCalledWith('u-open');
         expect(view.at()).toBe(500);
+    });
+
+    // Reaching a prompt older than every row held can take several pages, so the header says the wait
+    // is happening instead of looking like a click that did nothing.
+    it('wears a ring while the named prompt is being fetched', async () => {
+        let landed: (value: boolean) => void = () => {};
+        const onJumpToTurn = vi.fn(() => new Promise<boolean>(resolve => { landed = resolve; }));
+        const { container, follow, rerender } = await renderChat(undefined, midTurn, { turns: [openedTurn], onJumpToTurn });
+        const view = mountGeometry(container, follow, new Map());
+        await view.to(500);
+        expect(stickySpinner(container)).toBeNull();
+
+        container.querySelector<HTMLElement>('.chat-sticky-bubble')!.click();
+        await flush();
+        expect(stickySpinner(container)).toBeTruthy();
+        expect(headerText(container)).toBe('work through the tree');
+        expect(container.querySelector('.chat-sticky-header')?.getAttribute('aria-busy')).toBe('true');
+
+        const withPrompt = [makeEntry('u-open', 'user', 'work through the tree\nfile by file'), ...midTurn];
+        rerender({ entries: withPrompt, entryMetas: withPrompt.map(() => makeMeta()) });
+        landed(true);
+        await view.relaidOut(new Map([[0, [600, 700]]]));
+        await flush();
+
+        expect(stickySpinner(container)).toBeNull();
+    });
+
+    it('ignores a second tap while the fetch is in flight', async () => {
+        const onJumpToTurn = vi.fn(() => new Promise<boolean>(() => {}));
+        const { container, follow } = await renderChat(undefined, midTurn, { turns: [openedTurn], onJumpToTurn });
+        const view = mountGeometry(container, follow, new Map());
+        await view.to(500);
+
+        const bubble = container.querySelector<HTMLElement>('.chat-sticky-bubble')!;
+        bubble.click();
+        await flush();
+        bubble.click();
+        bubble.click();
+        await flush();
+
+        expect(onJumpToTurn).toHaveBeenCalledTimes(1);
+    });
+
+    it('wears no ring for a jump to a row already rendered', async () => {
+        const { container, follow } = await renderChat();
+        const view = mountGeometry(container, follow);
+        await view.to(550);
+
+        await tapHeader(container, view);
+
+        expect(view.at()).toBe(B_TOP - HEADER_HEIGHT);
+        expect(stickySpinner(container)).toBeNull();
     });
 
     it('names the older message once the page lands', async () => {
