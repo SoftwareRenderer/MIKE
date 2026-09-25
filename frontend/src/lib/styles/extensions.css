@@ -1,0 +1,394 @@
+/* One extension row and one capability tag, shared by the siblings of Settings -> Extensions: the tab,
+ * the installed card, the Browse card and the capability dialog each render part of the same row, and a
+ * rule one of them held alone would leave the others' markup unstyled. Named for this screen and written
+ * `:global` — an unscoped `.btn`, `.field-label` or `.card-actions` rule of another component stays the
+ * only one that reaches it.
+ */
+
+/* The dependency-directory warning on a card: the Installed card shows a dot on the Edit icon and
+a badge that opens that dialog; a Browse card shows the badge as a plain label, because nothing
+is installed there yet. Same attention color as .unpublished-badge. */
+:global(.needs-setup-badge) {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.12rem 0.5rem;
+    border-radius: 4px;
+    background: var(--color-status-yellow);
+    color: #111;
+    border: 1px solid #111;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* In the Edit dialog: the location the manifest declared, the field that names the host directory,
+and the grant as it stands. Quieter than a warning — this is a setting, not a fault. */
+:global(.ext-dep-env, .ext-dep-path, .ext-dep-input) {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.75rem;
+}
+
+:global(.ext-dep-state) {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+    min-width: 0;
+    margin-top: 0.35rem;
+}
+
+:global(.ext-dep-state-label) {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-tertiary);
+    flex: none;
+}
+
+:global(.ext-dep-path) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-text);
+}
+
+:global(.ext-dep-none) {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+    font-style: italic;
+}
+
+:global(.extension-card) {
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 8px;
+    padding: 1rem;
+    transition: border-color 0.15s;
+}
+
+:global(.extension-card:hover) {
+    border-color: var(--color-border-hover);
+}
+
+:global(.extension-card.disabled) {
+    opacity: 0.6;
+}
+
+:global(.registry-card) {
+    border-style: dashed;
+}
+
+:global(.unpublished-card) {
+    position: relative;
+    border-color: transparent;
+    background: color-mix(in srgb, var(--color-status-yellow) 6%, var(--color-bg-card));
+}
+
+:global(.unpublished-card::before) {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 2px; /* stripe border thickness */
+    background: repeating-linear-gradient(
+        45deg,
+        var(--color-status-yellow) 0 8px,
+        #111 8px 16px
+    );
+    -webkit-mask:
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+}
+
+:global(.unpublished-card:hover) {
+    filter: brightness(1.02);
+}
+
+:global(.unpublished-badge) {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.12rem 0.5rem;
+    border-radius: 4px;
+    background: var(--color-status-yellow);
+    color: #111;
+    border: 1px solid #111;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+:global(.featured-badge) {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.12rem 0.5rem;
+    border-radius: 4px;
+    background: var(--color-accent);
+    color: #fff;
+    border: 1px solid var(--color-accent);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* In the Installed view the badge is a button that reveals the path. */
+:global(.extension-card .unpublished-badge[type='button']) {
+    cursor: pointer;
+    text-decoration: none;
+}
+
+:global(.extension-card .unpublished-badge[type='button']:hover) {
+    filter: brightness(1.08);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-status-yellow) 40%, transparent);
+}
+
+:global(.extension-card .unpublished-badge[type='button'][aria-expanded='true']) {
+    box-shadow: 0 0 0 2px var(--color-status-yellow);
+}
+
+:global(.ext-icon) {
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+:global(.ext-lsp) {
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--color-status-green);
+}
+
+:global(.ext-ui) {
+    background: rgba(76, 154, 255, 0.15);
+    color: var(--color-status-blue);
+}
+
+:global(.ext-css) {
+    background: rgba(227, 179, 65, 0.15);
+    color: var(--color-status-yellow);
+}
+
+:global(.ext-agent) {
+    background: rgba(163, 113, 247, 0.15);
+    color: var(--color-status-purple);
+}
+
+:global(.ext-llm) {
+    background: var(--color-text-inverse);
+    color: var(--color-text-secondary);
+}
+
+/* A translation pack: its own accent, so an installed pack is not mistaken
+for a UI plugin. */
+:global(.ext-i18n) {
+        background: rgba(210, 153, 34, 0.15);
+        color: var(--color-status-orange);    
+}
+
+:global(.ext-info) {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+:global(.ext-name-row) {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+:global(.ext-name) {
+    font-weight: 600;
+    color: var(--color-text-primary);
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+:global(.ext-meta) {
+    font-size: 0.8rem;
+    color: var(--color-text-tertiary);
+}
+
+:global(.ext-link) {
+    color: var(--color-accent);
+    text-decoration: none;
+}
+
+:global(.ext-link:hover) {
+    text-decoration: underline;
+}
+
+:global(.ext-description) {
+    margin: 0 0 0.75rem;
+    font-size: 0.85rem;
+    color: var(--color-text-tertiary);
+    line-height: 1.4;
+}
+
+:global(.ext-note) {
+    margin: 0 0 0.5rem;
+    font-size: 0.8rem;
+    color: var(--color-text-tertiary);
+    line-height: 1.4;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.35rem;
+}
+
+:global(.ext-proxy-domains) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem 0.5rem;
+    margin: 0 0 0.75rem;
+    font-size: 0.8rem;
+    color: var(--color-text-tertiary);
+}
+
+:global(.ext-proxy-label) {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+:global(.ext-note svg) {
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+:global(.ext-note code) {
+    background: var(--color-bg-input);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+    font-size: 0.78rem;
+}
+
+/* Capability badges */
+:global(.capability-badges) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    flex-shrink: 0;
+}
+
+:global(.cap-badge) {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+:global(.cap-badge:hover) {
+    filter: brightness(1.3);
+    border-color: currentColor;
+}
+
+:global(.cap-lsp) {
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--color-status-green);
+    border-color: rgba(63, 185, 80, 0.3);
+}
+
+:global(.cap-ui) {
+    background: rgba(76, 154, 255, 0.15);
+    color: var(--color-status-blue);
+    border-color: rgba(76, 154, 255, 0.3);
+}
+
+:global(.cap-css) {
+    background: rgba(227, 179, 65, 0.15);
+    color: var(--color-status-yellow);
+    border-color: rgba(227, 179, 65, 0.3);
+}
+
+:global(.cap-agent) {
+    background: rgba(163, 113, 247, 0.15);
+    color: var(--color-status-purple);
+    border-color: rgba(163, 113, 247, 0.3);
+}
+
+:global(.cap-network) {
+    background: rgba(236, 72, 153, 0.15);
+    color: #ec4899;
+    border-color: rgba(236, 72, 153, 0.3);
+}
+
+:global(.cap-llm) {
+    background: var(--color-text-inverse);
+    color: var(--color-text-secondary);
+    border-color: rgba(222, 222, 222, 0.3);
+}
+
+:global(.cap-i18n) {
+        background: rgba(210, 153, 34, 0.15);
+        color: var(--color-status-orange);
+        border-color: rgba(210, 153, 34, 0.3);    
+}
+
+:global(.cap-detail-tags) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+}
+
+:global(.cap-detail-tag) {
+    font-size: 0.75rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    background: var(--color-bg-input);
+    border: 1px solid var(--color-border-subtle);
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+}
+
+:global(button.cap-detail-tag) {
+    cursor: pointer;
+    transition: all 0.15s;
+    font: inherit;
+    text-align: inherit;
+}
+
+:global(button.cap-detail-tag:hover) {
+    background: var(--color-surface-2);
+    border-color: var(--color-border-hover);
+    color: var(--color-text-primary);
+}
+
+:global(.ext-proxy-domains .cap-detail-tag) {
+    color: var(--color-status-red);
+    border-color: var(--color-status-red);
+    background: color-mix(in srgb, var(--color-status-red) 10%, var(--color-bg-input));
+}
+
+:global(.cap-permission-list) {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    width: 100%;
+}

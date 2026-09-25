@@ -22,7 +22,7 @@ function footerButton(container: HTMLElement, label: string): HTMLElement {
 
 afterEach(() => {
     cleanup();
-    dialogStore.confirmation = null;
+    dialogStore.confirmationSlot.clear();
     i18n.setCatalog(DEFAULT_LOCALE, null);
 });
 
@@ -38,7 +38,7 @@ describe('ConfirmationDialog', () => {
         await fireEvent.click(footerButton(container, 'Cancel'));
         await flush();
 
-        expect(dialogStore.confirmation).toBeNull();
+        expect(dialogStore.confirmationSlot.pending).toBeNull();
         await expect(answered).resolves.toBe(false);
     });
 
@@ -58,19 +58,15 @@ describe('ConfirmationDialog', () => {
         await fireEvent.click(footerButton(container, 'Ship it'));
         await flush();
 
-        expect(dialogStore.confirmation).toBeNull();
+        expect(dialogStore.confirmationSlot.pending).toBeNull();
         await expect(answered).resolves.toBe(true);
     });
 
     it('re-labels the default confirm button when the locale changes while it is open', async () => {
         const { container } = render(ConfirmationDialog);
-        // The store fills both labels in, so the no-label caller is written straight into the slot.
-        let answer = false;
-        dialogStore.confirmation = {
-            title: 'Drop it',
-            message: 'Three cards go',
-            _resolve: (value) => { answer = value; },
-        };
+        // Opened on the slot rather than through showConfirm, so no label is filled in and the
+        // dialog's own defaults are what the pack translates.
+        const answered = dialogStore.confirmationSlot.open({ title: 'Drop it', message: 'Three cards go' });
         await flush();
 
         expect(footerButton(container, 'Confirm')).toBeTruthy();
@@ -80,10 +76,10 @@ describe('ConfirmationDialog', () => {
 
         expect(footerButton(container, 'Confirmer')).toBeTruthy();
         expect(footerButton(container, 'Annuler')).toBeTruthy();
-        expect(dialogStore.confirmation).not.toBeNull();
+        expect(dialogStore.confirmationSlot.pending).not.toBeNull();
 
         await fireEvent.click(footerButton(container, 'Confirmer'));
-        expect(answer).toBe(true);
+        await expect(answered).resolves.toBe(true);
     });
 
     it('dresses the ordinary answer apart from the destructive one', async () => {

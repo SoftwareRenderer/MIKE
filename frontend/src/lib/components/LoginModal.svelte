@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { setCsrfToken } from '$lib/api';
+    import { login } from '$lib/api';
     import { t } from '$lib/i18n';
     import BaseModal from './BaseModal.svelte';
 
@@ -16,23 +16,11 @@
         loading = true;
         error = '';
         try {
-            const res = await fetch('/api/auth/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ password }),
-            });
-            if (!res.ok) {
-                const body = await res.json().catch(() => ({}));
-                error = body.error || t('app.login.failed');
-                return;
-            }
-            // Extract CSRF token from response header
-            const token = res.headers.get('X-CSRF-Token');
-            if (token) setCsrfToken(token);
+            await login(password);
             await onClose();
-        } catch (e) {
-            error = t('app.login.networkError');
+        } catch (e: any) {
+            // `login` answers every failure with the words to show here, so the copy has one home.
+            error = e?.message || t('app.login.failed');
         } finally {
             loading = false;
         }

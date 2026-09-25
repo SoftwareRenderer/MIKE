@@ -6,7 +6,6 @@
     import { moveTask, clearDoneTasks, deleteTask, startTask } from '$lib/api';
     import { sortByLastMoved } from '$lib/utils/sort-tasks';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
-    import { getExpandedTasksContext } from '$lib/context';
     import { gc } from '$lib/storage';
     import { mergeQueuedUpdate, filterTopLevelTaskIds, ancestorInProgress, willConsolidateIntoParent } from '$lib/utils/task-utils';
     import { createStatusLabel } from '$lib/utils/subtask-status';
@@ -22,7 +21,6 @@
     });
 
     let { tasks, projectId, projectPath, onAddTask, onCreateChildTask, onRefreshBoard, onSelectTask, scrollToColumn, boardFocus }: { tasks: Task[]; projectId: string; projectPath?: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void; onSelectTask?: (task: Task) => void; scrollToColumn?: string | null; boardFocus?: { projectId: string; column: string } | null } = $props();
-    let expandedTasksContext = getExpandedTasksContext();
 
     // Multi-select actions (wires up floating bar events)
     let multiSelectActions = useMultiSelectActions({
@@ -113,7 +111,7 @@
     });
 
     // Subtask hierarchy management (expanded state, consolidation, auto-expand)
-    let hierarchy = useSubtaskHierarchy(() => tasks, expandedTasksContext, () => undefined);
+    let hierarchy = useSubtaskHierarchy(() => tasks, () => undefined);
 
     // Garbage-collect stale IndexedDB entries for deleted tasks (Board-specific)
     let gcInitialized = $state(false);
@@ -189,13 +187,7 @@
             const willConsolidate = willConsolidateIntoParent(task, tasks, targetStatus);
             if (!willConsolidate) {
                 // When offline, updated is a partial optimistic result — merge with existing task
-                const merged = mergeQueuedUpdate(task, updated);
-                // Update tasks array directly (Board renders from this prop, not boardStore)
-                const idx = tasks.findIndex(t => t.id === task.id);
-                if (idx !== -1) {
-                    tasks[idx] = merged;
-                }
-                appStore.board = { ...appStore.board!, tasks: [...tasks] };
+                updateTaskInBoard(appStore, task.id, mergeQueuedUpdate(task, updated));
             }
             return true;
         } catch (e) {

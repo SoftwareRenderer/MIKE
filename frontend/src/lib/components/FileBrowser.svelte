@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import BaseModal from './BaseModal.svelte';
-    import { ensureCsrfToken, listFsDirectory, type FsEntry } from '$lib/api';
+    import { listFsDirectory, createFsDirectory, initGitRepository, getHomeDirectory, type FsEntry } from '$lib/api';
     import Icon from '$lib/components/Icon.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     // UI extension injection point — re-render when extensions change
@@ -95,17 +95,7 @@
         initGitLoading = true;
         error = '';
         try {
-            const csrfToken = await ensureCsrfToken();
-            const res = await fetch('/api/fs/init-git', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
-                body: JSON.stringify({ path: currentPath }),
-                credentials: 'include',
-            });
-            if (!res.ok) {
-                const err = await res.json();
-                throw new Error(err.error || t('explorer.shared.errInitGit'));
-            }
+            await initGitRepository({ path: currentPath });
             // Refresh directory to confirm git init succeeded, then auto-select
             await loadDir(currentPath);
             onSelect(currentPath, sandboxEnabled);
@@ -134,17 +124,7 @@
         error = '';
         try {
             const newPath = currentPath.endsWith('/') ? currentPath + name : currentPath + '/' + name;
-            const csrfToken = await ensureCsrfToken();
-            const res = await fetch('/api/fs/mkdir', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
-                body: JSON.stringify({ path: newPath }),
-                credentials: 'include',
-            });
-            if (!res.ok) {
-                const err = await res.json();
-                throw new Error(err.error || t('explorer.shared.errCreateFolder'));
-            }
+            await createFsDirectory({ path: newPath });
             showNewFolder = false;
             newFolderName = '';
             await loadDir(newPath);
@@ -186,9 +166,7 @@
     /** The home button and the mount share this, so both land on the same directory. */
     async function goHome() {
         try {
-            const res = await fetch('/api/home');
-            const data = await res.json();
-            await loadDir(data.home || '/home');
+            await loadDir(await getHomeDirectory() || '/home');
         } catch {
             await loadDir('/home');
         }

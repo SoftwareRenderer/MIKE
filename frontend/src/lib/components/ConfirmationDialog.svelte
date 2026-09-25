@@ -19,8 +19,8 @@
 
     const dialog = usePromiseDialog({
         slot: {
-            get: () => dialogStore.confirmation,
-            clear: () => { dialogStore.confirmation = null; },
+            get: () => dialogStore.confirmationSlot.pending,
+            clear: () => { dialogStore.confirmationSlot.clear(); },
         },
         arm: (value) => {
             title = value.title;

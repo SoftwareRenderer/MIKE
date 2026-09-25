@@ -1,7 +1,7 @@
 import type { GitLogResponse, TaskCommit } from '../types';
 import type { ApiDiffRow, DiffFile, DiffFileResponse, DiffManifest } from '../types/diff';
 import { enrichRowsWithInlineSegments } from '../utils/diff-parser';
-import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
+import { API_BASE, apiFetch, apiError } from './helpers';
 import { setBoardCache, getBoardCache, diffCacheKey, doneDiffCacheKey } from '../storage';
 import { markCached, isDisconnectedError } from './cache';
 import { t } from '$lib/i18n';
@@ -91,19 +91,28 @@ export async function getCommitDiffFiles(projectId: string, baseHash: string, he
     return getProjectDiffFiles(projectId, { base: baseHash, head: headHash });
 }
 
-/** List all branches for a project. */
+/** List every ref the server calls a branch, in the order it returned them — remote-tracking refs and
+ * the detached `HEAD` line included. A list offered to a person wants getLocalBranches. */
 export async function getGitBranches(projectId: string): Promise<string[]> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/branches`);
     if (!res.ok) throw await apiError(res, t('api.fetchBranches'));
     return res.json();
 }
 
-/** Checkout a branch in a project's worktree. Requires CSRF token. */
+/**
+ * The branches a person may be offered: local branches only, so a remote-tracking ref and the detached
+ * `HEAD` line are never a choice. Order is the server's — a branch list never follows the UI locale.
+ */
+export async function getLocalBranches(projectId: string): Promise<string[]> {
+    const all = await getGitBranches(projectId);
+    return all.filter(b => !b.startsWith('origin/') && b !== 'HEAD');
+}
+
+/** Checkout a branch in a project's worktree. */
 export async function checkoutBranch(projectId: string, branch: string): Promise<{ branch: string }> {
-    const csrfToken = await ensureCsrfToken();
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/checkout`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ branch }),
     });
     if (!res.ok) throw await apiError(res, t('api.checkoutBranch'));
@@ -136,10 +145,9 @@ export async function getProjectDiffFile(projectId: string, path: string, option
 
 /** Stage or unstage a single file in the project repo. */
 export async function stageProjectFile(projectId: string, path: string, stage: boolean): Promise<{ status: string; action: string }> {
-    const csrfToken = await ensureCsrfToken();
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/stage`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path, stage }),
     });
     if (!res.ok) throw await apiError(res, stage ? t('api.stageFile') : t('api.unstageFile'));
@@ -148,10 +156,9 @@ export async function stageProjectFile(projectId: string, path: string, stage: b
 
 /** Discard one file's changes in the project repo: back to HEAD, or removed when HEAD never held it. */
 export async function discardProjectFile(projectId: string, path: string): Promise<{ status: string }> {
-    const csrfToken = await ensureCsrfToken();
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/discard`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path }),
     });
     if (!res.ok) throw await apiError(res, t('api.discardFile'));
@@ -160,10 +167,9 @@ export async function discardProjectFile(projectId: string, path: string): Promi
 
 /** Commit staged changes in the project repo. */
 export async function commitProject(projectId: string, message: string): Promise<{ status: string }> {
-    const csrfToken = await ensureCsrfToken();
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/commit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message }),
     });
     if (!res.ok) throw await apiError(res, t('api.commit'));
@@ -172,22 +178,14 @@ export async function commitProject(projectId: string, message: string): Promise
 
 /** Pull from the remote in the project repo. */
 export async function pullProject(projectId: string): Promise<{ status: string }> {
-    const csrfToken = await ensureCsrfToken();
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/pull`, {
-        method: 'POST',
-        headers: { ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
-    });
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/pull`, { method: 'POST' });
     if (!res.ok) throw await apiError(res, t('api.pull'));
     return res.json();
 }
 
 /** Push to the remote in the project repo. */
 export async function pushProject(projectId: string): Promise<{ status: string }> {
-    const csrfToken = await ensureCsrfToken();
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/push`, {
-        method: 'POST',
-        headers: { ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
-    });
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/push`, { method: 'POST' });
     if (!res.ok) throw await apiError(res, t('api.push'));
     return res.json();
 }
@@ -291,10 +289,9 @@ export async function getDiffFile(projectId: string, taskId: string, path: strin
 
 /** Stage or unstage a single file in the task's worktree. */
 export async function stageFile(projectId: string, taskId: string, path: string, stage: boolean): Promise<{ status: string; action: string }> {
-    const csrfToken = await ensureCsrfToken();
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/diff/stage`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path, stage }),
     });
     if (!res.ok) throw await apiError(res, stage ? t('api.stageFile') : t('api.unstageFile'));

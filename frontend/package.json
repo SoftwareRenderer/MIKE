@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "check:dead": "knip --no-progress --no-config-hints",
+    "check:fetch": "bash scripts/check-fetch.sh",
     "check:unused": "bash scripts/check-unused.sh",
     "check:i18n": "python3 i18n-gate.py",
     "check:i18n-surface": "python3 i18n-count.py",

@@ -3,6 +3,7 @@
     import type { DiffFile } from '$lib/types/diff';
     import { gitStatusLabel, gitStatusAbsentFromHead } from '$lib/utils/git-status';
     import { confirmList } from '$lib/utils/file-selection';
+    import { sortPathsRootLast } from '$lib/utils/sort-paths';
     import { t } from '$lib/i18n';
     import { getGitStatus, getProjectDiffFiles, getCommitDiffFiles, getProjectDiffFile, stageProjectFile, commitProject, discardProjectFile, pullProject, pushProject, getGitLogFull } from '$lib/api';
     import type { GitCommit } from '$lib/types';
@@ -419,31 +420,10 @@
         compareLoading
     );
 
-    // Sort helpers
-    function sortEntries(entries: StatusEntry[]): StatusEntry[] {
-        return [...entries].sort((a, b) => {
-            const aHasDir = a.path.includes('/');
-            const bHasDir = b.path.includes('/');
-            if (aHasDir && !bHasDir) return -1;
-            if (!aHasDir && bHasDir) return 1;
-            return a.path.localeCompare(b.path);
-        });
-    }
-
-    function sortFiles(files: DiffFile[]): DiffFile[] {
-        return [...files].sort((a, b) => {
-            const aHasDir = a.path.includes('/');
-            const bHasDir = b.path.includes('/');
-            if (aHasDir && !bHasDir) return -1;
-            if (!aHasDir && bHasDir) return 1;
-            return a.path.localeCompare(b.path);
-        });
-    }
-
-    let sortedStagedEntries = $derived(sortEntries(stagedEntries));
-    let sortedUnstagedEntries = $derived(sortEntries(unstagedEntries));
-    let sortedStagedFiles = $derived(sortFiles(stagedDiffFiles));
-    let sortedUnstagedFiles = $derived(sortFiles(unstagedDiffFiles));
+    let sortedStagedEntries = $derived(sortPathsRootLast(stagedEntries));
+    let sortedUnstagedEntries = $derived(sortPathsRootLast(unstagedEntries));
+    let sortedStagedFiles = $derived(sortPathsRootLast(stagedDiffFiles));
+    let sortedUnstagedFiles = $derived(sortPathsRootLast(unstagedDiffFiles));
 
     // ── The sidebar's rows, their selection, and the menu that acts on them ──
 

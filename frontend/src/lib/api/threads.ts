@@ -3,9 +3,8 @@ import { API_BASE, apiFetch, apiError, generateId } from './helpers';
 import {
     getOfflineStatus,
     queueWrite,
-    switchTaskThreadRaw,
-    forkTaskThreadRaw,
 } from './queue';
+import { switchTaskThreadRaw, forkTaskThreadRaw } from './raw/threads';
 import { t } from '$lib/i18n';
 
 // -- Thread endpoints --

@@ -1,11 +1,13 @@
 // Barrel exports — the domain functions are reachable via `$lib/api`; domain modules live
 // in ./projects, ./tasks, ./git, etc.
 //
-// The fetch primitives under this barrel (`apiFetch`, `apiError`, `API_BASE`, `isAborted`) are not
-// re-exported, so a component cannot hand-roll a fetch.
+// The fetch primitives under this barrel (`apiFetch`, `apiError`, `API_BASE`, `isAborted`) and the CSRF
+// token behind them are not re-exported, so a component cannot hand-roll a fetch or its header block.
+// `npm run check:fetch` is what keeps that promise: scripts/check-fetch.sh fails on a `fetch(` anywhere
+// else, with one named exemption.
 
 // -- Helpers --
-export { generateId, setCsrfToken, clearCsrfToken, ensureCsrfToken } from './helpers';
+export { generateId, setCsrfToken, clearCsrfToken } from './helpers';
 
 // -- Cache --
 export { isFromCache } from './cache';
@@ -29,9 +31,10 @@ export {
     flushQueueNow,
     waitForFlush,
     applyQueuedActionsToBoard,
-    type SendResult,
-    type SendTaskMessagePayload,
 } from './queue';
+
+// The send types are declared with the send call itself, which the queue replays.
+export type { SendResult, SendTaskMessagePayload } from './raw/tasks';
 
 // -- Projects --
 export {
@@ -43,10 +46,12 @@ export {
     createProject,
     cloneProject,
     updateProject,
-    buildSandboxImageStream,
     deleteProject,
     getBoard,
 } from './projects';
+
+// A sandbox build is a progress stream, never a queued write, so it lives under ./raw/.
+export { buildSandboxImageStream } from './raw/projects';
 
 // -- Tasks --
 export {
@@ -106,6 +111,7 @@ export {
     getProjectDiffFile,
     toDiffFiles,
     getGitBranches,
+    getLocalBranches,
     checkoutBranch,
     getGitStatus,
     stageProjectFile,
@@ -128,11 +134,24 @@ export { createTerminal, createProjectTerminal, isTerminalStale } from './termin
 // -- Pasted/dropped files written into the task's own environment --
 export { uploadTaskFile } from './task-upload';
 
-// -- A file's own bytes, for an `<img>` src --
-export { rawFileURL, listFsDirectory } from './fs';
-export type { FsEntry } from './fs';
+// -- Files: the tree inside a project, or the host directories a picker was declared over --
+export {
+    listFsDirectory,
+    rawFileURL,
+    readFsFile,
+    FsReadRefused,
+    writeFsFile,
+    createFsDirectory,
+    initGitRepository,
+    searchFsPaths,
+    getHomeDirectory,
+} from './fs';
+export type { FsEntry, FsFileRead, FsSearchResult, FsSearchAnswer } from './fs';
 export { deleteFsPaths, copyFsPaths, moveFsPaths, renameFsPath } from './fs-ops';
 export type { FsOpsResult } from './fs-ops';
+
+// -- Auth (the session check, the login and the logout that gate the whole app) --
+export { checkSession, login, logout } from './auth';
 
 // -- Sessions (login sessions, Settings → About) --
 export {
@@ -158,7 +177,6 @@ export {
     setExtensionEnabled,
     setDependencyCache,
     setAgentMount,
-    getHomeDirectory,
     getRegistryIndex,
     installExtension,
     installLocalExtension,

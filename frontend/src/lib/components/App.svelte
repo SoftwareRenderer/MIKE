@@ -1,33 +1,36 @@
 
 <script lang="ts">
     import { onMount, onDestroy, tick } from 'svelte';
-    import { get } from 'svelte/store';
-    import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
+    import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard, applyResolvedTasksToBoard } from '$lib/stores';
     import { t } from '$lib/i18n';
     import { isSandboxMountPath } from '$lib/utils/path';
-    import { wsConnection } from '$lib/stores/connection';
+    import { isAnyModalOpen } from '$lib/utils/modal-state';
+    import { connectionStore } from '$lib/stores/connection.svelte';
     import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
-    import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
-    import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, clearQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask, getDroppedActions } from '$lib/api';
+    import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
+    import { commitQueueStore } from '$lib/stores/commit-queue.svelte';
+    import { taskEventStore } from '$lib/stores/task-events.svelte';
+    import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask, getDroppedActions } from '$lib/api';
+    import { reconnectBanner } from '$lib/services/reconnect-banner.svelte';
+    import { sessionBoot } from '$lib/services/session-boot.svelte';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
     import { dragCarriesFiles } from '$lib/utils/file-drop';
-    import { dataAgeText } from '$lib/utils/format-time';
     import { resolveBoardLandingColumn, resolveClosedTaskColumn, mergeTaskUpdateIntoBoard } from '$lib/utils/task-utils';
     import { resolveLandingProject } from '$lib/utils/project-landing';
-    import { TERMINAL_VIEW, asksForTerminal, explorerPathRoots, fileWithinRoots } from '$lib/utils/app-link';
+    import { explorerPathRoots } from '$lib/utils/app-link';
+    import { urlRouter } from '$lib/services/url-router.svelte';
     import { reviewNotifier } from '$lib/services/review-notifications.svelte';
-    import { getBoardCache, getBoardCacheEntry, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, clearAll, loadAppSetting, saveAppSetting } from '$lib/storage';
+    import { getBoardCache, getBoardCacheEntry, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { flushBoardMirror, mirrorBoard } from '$lib/services/board-mirror';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
     import { useBoardArrowNav } from '$lib/composables/use-board-arrow-nav';
     import { createTabReturn } from '$lib/composables/use-tab-return';
     import mikeIcon from '$lib/assets/icons/mike.svg';
-    import type { Project, Task, Config, StreamEvent, SandboxMemoryStats, DiffStatsEntry, Board as BoardData } from '$lib/types';
+    import type { Project, Task, StreamEvent, SandboxMemoryStats, DiffStatsEntry, Board as BoardData } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
     import { setAppStreamRef } from '$lib/stream-ref';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
-    import { localeOffer } from '$lib/services/locale-offer.svelte';
     import { sandboxImageStatus } from '$lib/services/sandbox-image-status.svelte';
     import { updateCheck } from '$lib/services/update-check.svelte';
     import { useLazyComponent } from '$lib/composables/use-lazy-component.svelte';
@@ -53,19 +56,6 @@
     import LocaleOffer from './LocaleOffer.svelte';
 
     const terminalPanel = useLazyComponent(() => import('./TerminalPanel.svelte'));
-
-    /** The reconnect banner both stream connections drive. */
-    const reconnectCountdown = () => ({
-        onConnected: handleWsConnection,
-        onReconnectScheduled: (nextAttemptAt: number) => {
-            nextReconnectAt = nextAttemptAt;
-            startCountdown();
-        },
-        onConnectAttempt: () => {
-            stopCountdown();
-            countdownSeconds = 0;
-        },
-    });
 
     /**
      * Open the project terminal (terminal button and open-terminal shortcut).
@@ -95,81 +85,24 @@
     }
 
     function computePageTitle(): string {
-        const name = currentProject?.name;
-        if (!name || !currentProject) return t('app.title.default');
-        if (terminalOnlyVal) return t('app.title.terminal', { name });
-        const reviewCount = projectCounts[currentProject.id]?.review ?? 0;
-        // If current project has reviews, show it with count
+        const project = appStore.selectedProject;
+        if (!project?.name) return t('app.title.default');
+        const name = project.name;
+        if (urlRouter.terminalOnly) return t('app.title.terminal', { name });
+        const reviewCount = projectCounts[project.id]?.review ?? 0;
         if (reviewCount > 0) {
             return t('app.title.review', { name, count: reviewCount });
         }
-        // Check if any other project has reviews
         for (const [pid, counts] of Object.entries(projectCounts)) {
-            if (pid === currentProject.id || !counts.review) continue;
-            const project = projects.find(p => p.id === pid);
-            const pName = project?.name || pid;
-            return `${name} | 🟡 ${pName}`;
+            if (pid === project.id || !counts.review) continue;
+            const other = appStore.projects.find(p => p.id === pid);
+            return `${name} | 🟡 ${other?.name || pid}`;
         }
         return name;
     }
 
-    /**
-     * Update the URL to reflect the current navigation state.
-     * Params are always ordered: project, task, view, thread.
-     * - project/task: must be explicitly provided; omitted = cleared
-     * - view: preserved if omitted; null = cleared
-     * - thread: preserved unless clearThread=true
-     * @param clearThread Also remove the `thread` param (use when leaving task detail).
-     * @param push If true, uses pushState (creates history entry for back button). Default: replaceState.
-     */
-    function updateUrl(params: { project?: string | null; task?: string | null; view?: string | null; file?: string | null }, clearThread = false, push = false) {
-        const current = new URLSearchParams(location.search);
-        // project/task: explicitly provided or cleared; view: preserve if omitted
-        const project = params.project;
-        const task = params.task;
-        const view = params.view !== undefined ? params.view : current.get('view');
-        const file = params.file !== undefined ? params.file : current.get('file');
-        const thread = clearThread ? null : current.get('thread');
-        // Keep the Review Changes panel state in sync
-        if (params.view !== undefined) {
-            urlChangesOpen = params.view === 'review' || params.view === 'task-review';
-        }
-        // Build query in canonical order: project, task, view, file, thread
-        // Use manual encoding to keep / unencoded in file paths
-        const parts: string[] = [];
-        if (project) parts.push('project=' + encodeURIComponent(project));
-        if (task) parts.push('task=' + encodeURIComponent(task));
-        if (view) parts.push('view=' + encodeURIComponent(view));
-        if (file) parts.push('file=' + file); // keep / unencoded
-        if (thread) parts.push('thread=' + encodeURIComponent(thread));
-        const newUrl = location.pathname + (parts.length ? '?' + parts.join('&') : '');
-        if (location.pathname + location.search !== newUrl) {
-            if (push) {
-                history.pushState(null, '', newUrl);
-            } else {
-                history.replaceState(null, '', newUrl);
-            }
-            // Keep urlFileId in sync — replaceState doesn't fire popstate
-            if (params.file !== undefined) {
-                urlFileId = params.file || '';
-            }
-        }
-    }
-
-    let projects: Project[] = $state([]);
-    let currentProject: Project | null = $state(null);
-    let tasks: Task[] = $state([]);
-    let cfg: Config | null = $state(null);
     let collapsed = $state(false);
     let appStream: ReturnType<typeof createAppStream> | null = $state(null);
-    let wsConnected = $state(false);
-    let initialLoadComplete = $state(false); // tracks whether onMount data load is done
-    let lastSyncedAt = $state<number | null>(null); // epoch ms of the last data that actually landed
-    let nextReconnectAt = $state(0); // epoch ms of next reconnect attempt
-    let countdownSeconds = $state(0);
-    let countdownTimer: ReturnType<typeof setInterval> | null = null;
-    let staleTimeText = $state(''); // "Data from X ago" text, updated every second while disconnected
-    let staleTimer: ReturnType<typeof setInterval> | null = null;
     let visibilityRetryTimer: ReturnType<typeof setTimeout> | null = null; // retry refresh after network stabilizes
 
     /**
@@ -181,16 +114,14 @@
      * keeps the age it carries and gets this browser's queued writes replayed onto it.
      */
     function applyBoard(board: BoardData, projectId: string, source: 'live' | 'mirror'): boolean {
-        if (!board || currentProject?.id !== projectId) return false;
+        if (!board || appStore.selectedProject?.id !== projectId) return false;
         if (source === 'live') {
             mirrorBoard(projectId, board);
-            lastSyncedAt = Date.now();
-            tasks = board.tasks || [];
+            reconnectBanner.lastSyncedAt = Date.now();
             appStore.board = board;
             return true;
         }
         const withQueue = applyQueuedActionsToBoard(board.tasks || [], projectId);
-        tasks = withQueue;
         appStore.board = { ...board, tasks: withQueue };
         return true;
     }
@@ -209,7 +140,7 @@
     $effect(() => {
         // The board on screen tells the notifier which Review cards the user can already see.
         const board = appStore.board;
-        const projectId = currentProject?.id;
+        const projectId = appStore.selectedProject?.id;
         if (!board || !projectId) {
             reviewNotifier.clearBoard();
             return;
@@ -231,84 +162,6 @@
         uiStore.openSettings(updateCheck.dot === 'none' ? null : 'about');
     }
 
-    function startCountdown() {
-        stopCountdown();
-        updateCountdown();
-        countdownTimer = setInterval(updateCountdown, 250);
-    }
-    function stopCountdown() {
-        if (countdownTimer) {
-            clearInterval(countdownTimer);
-            countdownTimer = null;
-        }
-    }
-    function updateCountdown() {
-        countdownSeconds = Math.max(0, Math.ceil((nextReconnectAt - Date.now()) / 1000));
-    }
-    function startStaleTick() {
-        stopStaleTick();
-        updateStaleTime();
-        staleTimer = setInterval(updateStaleTime, 1000);
-    }
-    function updateStaleTime() {
-        staleTimeText = dataAgeText(lastSyncedAt);
-    }
-
-    // The reconnect countdown belongs to the sentence, not to the markup: word
-    // order and the unit are the translator's, so the whole line is one message.
-    const reconnectStatus = $derived(
-        countdownSeconds > 0
-            ? t('app.reconnect.statusCountdown', { seconds: countdownSeconds })
-            : t('app.reconnect.status'),
-    );
-    function stopStaleTick() {
-        if (staleTimer) {
-            clearInterval(staleTimer);
-            staleTimer = null;
-        }
-    }
-
-    let hadConnection = $state(false);
-    let everDropped = $state(false);
-    /** The countdown and the age line change every second, so they stay out of this announced text. */
-    const connectionNotice = $derived(
-        !wsConnected
-            ? (everDropped ? t('app.reconnect.status') : '')
-            : (everDropped && hadConnection ? t('app.reconnect.back') : '')
-    );
-
-    function handleWsConnection(connected: boolean): void {
-        wsConnected = connected;
-        wsConnection.set(connected);
-        setOfflineStatus(!connected);
-        if (connected) {
-            hadConnection = true;
-            stopCountdown();
-            stopStaleTick();
-            nextReconnectAt = 0;
-            countdownSeconds = 0;
-            // The first connect has nothing to catch up on.
-            if (initialLoadComplete) {
-                silentRefresh().catch(() => {});
-            }
-        } else {
-            everDropped = true;
-            // The age counts from the last data that landed, not from this socket dropping.
-            startStaleTick();
-        }
-    }
-
-    function tryReconnectNow() {
-        if (appStream) {
-            appStream.reconnectNow();
-            nextReconnectAt = 0;
-        }
-    }
-
-    function retryLiveNow() {
-        tryReconnectNow();
-        silentRefresh().catch(() => {});
-    }
     let projectCounts: Record<string, { backlog: number; in_progress: number; review: number }> = $state({});
     // Cached done-task diff stats, keyed "<projectId>:<taskId>". Done-task diffs
     // are immutable (pinned BaseCommit..BranchTip), so entries persist in
@@ -317,52 +170,21 @@
     let doneStatsCache: Record<string, { updated_at: string; stats: DiffStatsEntry }> = $state({});
     let boardRefreshPending = false; // deduplicate rapid refreshBoard calls
     let showFileBrowserVal = $state(false);
-    let showExplorerViewVal = $state(false);
-    let showTaskExplorerVal = $state(false);
-    // Terminal-only screen (URL: view=terminal): the shell fills the page.
-    let terminalOnlyVal = $state(asksForTerminal(location.search));
-    /** Its target: the prepared "<projectId>:<taskId>", and whether creating that task's worktree failed. */
+    /** The terminal screen's target: the prepared "<projectId>:<taskId>", and whether creating that task's worktree failed. */
     let terminalScreen = $state<{ key: string; failed: boolean }>({ key: '', failed: false });
-    // Review Changes panel state (URL: view=review / view=task-review)
-    let urlChangesOpen = $state(initialChangesOpen());
-
-    /** True when the initial URL opened the Review Changes panel. */
-    function initialChangesOpen(): boolean {
-        const v = new URLSearchParams(location.search).get('view');
-        return v === 'review' || v === 'task-review';
-    }
-
-    /** Restore the screen the URL's view param names: an explorer, the terminal alone, or the board. */
-    function applyUrlView(viewParam: string | null) {
-        terminalOnlyVal = viewParam === TERMINAL_VIEW;
-        if (terminalOnlyVal) return;
-        if (viewParam === 'explorer' || viewParam === 'review') {
-            showExplorerViewVal = true;
-            showTaskExplorerVal = false;
-            urlChangesOpen = viewParam === 'review';
-        } else if (viewParam === 'task-explorer' || viewParam === 'task-review') {
-            showExplorerViewVal = false;
-            showTaskExplorerVal = true;
-            urlChangesOpen = viewParam === 'task-review';
-        } else {
-            showExplorerViewVal = false;
-            showTaskExplorerVal = false;
-            urlChangesOpen = false;
-        }
-    }
 
     /**
      * The terminal-only screen prepares its own target: the project must be on screen, and a task
      * terminal needs the worktree, which the board's terminal button also creates before it opens.
      */
     $effect(() => {
-        if (!terminalOnlyVal) {
+        if (!urlRouter.terminalOnly) {
             terminalScreen = { key: '', failed: false };
             return;
         }
-        const project = currentProject;
+        const project = appStore.selectedProject;
         if (!project) return;
-        const wantsTask = !!new URLSearchParams(location.search).get('task');
+        const wantsTask = urlRouter.task !== '';
         const task = wantsTask ? appStore.selectedTask : null;
         if (wantsTask && !task) return;
         const key = project.id + ':' + (task?.id ?? '');
@@ -389,38 +211,23 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     let fsEventQueue = $state<Array<{ op: 'create' | 'delete'; path: string }>>([]);
     let addProjectError = $state('');
     let currentBranch = $state('');
-    let urlFileId = $state(new URLSearchParams(location.search).get('file') || '');
     let mobileMenuOpen = $state(false);
 
-    // No modal/overlay is open (shared gate for the keyboard shortcuts below).
-    function noModalOpen(): boolean {
-        return (
-            !uiStore.showCreateTask &&
-            !uiStore.showConfig &&
-            !uiStore.showTerminal &&
-            !uiStore.showStats &&
-            !uiStore.showSandboxConfig &&
-            !appStore.showEditTask &&
-            !dialogStore.confirmation &&
-            !dialogStore.commitDialog &&
-            !dialogStore.compressContextDialog
-        );
-    }
     // Keyboard shortcuts (Settings → Preferences): the create-task shortcut is
     // active only on the visible board; the open-terminal shortcut is active
     // on every page with a terminal button (board, task detail, explorers).
     function boardShortcutsEnabled(): boolean {
         return (
-            !!currentProject &&
-            !terminalOnlyVal &&
+            !!appStore.selectedProject &&
+            !urlRouter.terminalOnly &&
             !(uiStore.showCardDetail && appStore.selectedTask) &&
-            !showExplorerViewVal &&
-            !showTaskExplorerVal &&
-            noModalOpen()
+            !urlRouter.explorerOpen &&
+            !urlRouter.taskExplorerOpen &&
+            !isAnyModalOpen()
         );
     }
     function terminalShortcutEnabled(): boolean {
-        return !!currentProject && !terminalOnlyVal && noModalOpen();
+        return !!appStore.selectedProject && !urlRouter.terminalOnly && !isAnyModalOpen();
     }
     useKeyboardShortcuts({
         isEnabled: boardShortcutsEnabled,
@@ -434,14 +241,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     // Arrow-key navigation between board cards (same gate as the shortcuts above).
     useBoardArrowNav({ isEnabled: boardShortcutsEnabled });
 
-    let isAuthenticated = $state(false);
-    let isLoadingAuth = $state(true);
-    let servingFromCache = $state(false);
-    let hasLocalCache = $state(false); // the server did not answer and the mirror can be offered
-    let bootSlow = $state(false);      // the session check has not answered; nothing is known yet
-    let hasProviders = $derived(!!(cfg as Config | null)?.providers?.length);
+    let hasProviders = $derived(!!appStore.config?.providers?.length);
     let pageTitle = $derived(computePageTitle());
-    let hasReview = $derived(!!(currentProject && projectCounts[(currentProject as unknown as Project).id]?.review > 0));
+    let hasReview = $derived.by(() => {
+        const project = appStore.selectedProject;
+        return !!project && (projectCounts[project.id]?.review ?? 0) > 0;
+    });
 
     const isMobileCtx = useIsMobile();
 
@@ -450,36 +255,32 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         collapsed = appStore.sidebarCollapsed;
         appStore.persistSidebarCollapsed();
     });
-    $effect(() => { const v = appStore.config; if (v) cfg = v; });
 
     // A task's frames belong to the chat that reads it: `TaskChat` takes and releases the key. `docs/reconnection.md`
 
     // Handle browser back/forward
     async function handlePopState() {
-        const params = new URLSearchParams(location.search);
-        const projectId = params.get('project');
-        const taskId = params.get('task');
-        const fileParam = params.get('file') || '';
-        const fileProject = (projectId ? projects.find(p => p.id === projectId) : null) ?? currentProject;
+        const url = urlRouter.read();
+        const projectId = url.project;
+        const taskId = url.task;
+        const fileProject = (projectId ? appStore.projects.find(p => p.id === projectId) : null) ?? appStore.selectedProject;
         const fileRoots = fileProject
             ? explorerPathRoots({
                 projectPath: fileProject.path, projectName: fileProject.name,
-                sandboxEnabled: !!fileProject.sandbox_enabled, workspaceDir: cfg?.workspace_dir,
+                sandboxEnabled: !!fileProject.sandbox_enabled, workspaceDir: appStore.config?.workspace_dir,
                 projectId: fileProject.id, taskId: taskId || undefined,
             })
             : [];
-        urlFileId = fileWithinRoots(fileParam, fileRoots) ? fileParam : '';
+        urlRouter.acceptFile(url.file, fileRoots);
 
-        if (!projectId && currentProject) {
+        if (!projectId && appStore.selectedProject) {
             const landing = await landingProject();
             if (landing) {
                 await selectProject(landing, false);
                 window.dispatchEvent(new CustomEvent('urlchanged'));
                 return;
             }
-            currentProject = null;
             appStore.selectedProject = null;
-            tasks = [];
             appStore.board = null;
             disconnectBoardStream();
             appStore.selectedTask = null;
@@ -489,8 +290,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
 
         // If URL specifies a different project, switch to it
-        if (projectId && currentProject && projectId !== currentProject.id) {
-            const targetProject = projects.find(p => p.id === projectId);
+        if (projectId && appStore.selectedProject && projectId !== appStore.selectedProject.id) {
+            const targetProject = appStore.projects.find(p => p.id === projectId);
             if (targetProject) {
                 await selectProject(targetProject, false);
                 // After board loads, restoreTaskFromUrl will handle the task
@@ -500,7 +301,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
 
         if (taskId) {
-            const task = tasks.find(t => t.id === taskId);
+            const task = appStore.tasks.find(t => t.id === taskId);
             if (task) {
                 appStore.selectedTask = task;
                 uiStore.showCardDetail = true;
@@ -513,7 +314,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             uiStore.showCardDetail = false;
         }
         // Restore explorer view (and Review Changes panel) from URL
-        applyUrlView(params.get('view'));
+        urlRouter.applyView();
         // Notify child components (e.g., TaskChat) that the URL changed
         window.dispatchEvent(new CustomEvent('urlchanged'));
     }
@@ -528,9 +329,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
      * explorers occupy one place) and mirror it in the URL.
      */
     function openTaskExplorer(): void {
-        showExplorerViewVal = false;
-        showTaskExplorerVal = true;
-        updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: 'task-explorer' }, false, true);
+        const project = appStore.selectedProject;
+        const task = appStore.selectedTask;
+        if (!project || !task) return;
+        urlRouter.openTaskExplorer(project.id, task.id);
     }
 
     async function routeDefinitionJump(event: Event): Promise<void> {
@@ -541,7 +343,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         // Not the selected task — nothing here knows how to open that file.
         if (detail.taskId !== appStore.selectedTask?.id) return;
         // The task explorer is showing: its own listener already has this event.
-        if (showTaskExplorerVal) return;
+        if (urlRouter.taskExplorerOpen) return;
         openTaskExplorer();
         await tick();
         window.dispatchEvent(new CustomEvent('open-file', { detail }));
@@ -560,8 +362,26 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         appStream = null;
     }
 
-    async function initializeAuthSession() {
-        closeAppStream();
+    /** Open the one app stream this page holds. `mirror` is the offline screen's own: its task handlers
+     *  stay silent, because a mirrored board has no live task to follow. */
+    function openAppStream(mode: 'live' | 'mirror'): void {
+        if (mode === 'mirror') {
+            appStream = createAppStream({
+                onProjectCounts: (counts) => { applyProjectCounts(counts); },
+                onRefresh: () => refreshBoard(),
+                onDiffStats: () => {},
+                onBranch: (branch) => { currentBranch = branch; },
+                onFsEvent: () => {},
+                onTaskUpdated: () => {},
+                onTaskDeleted: () => {},
+                onCommitStatus: () => {},
+                onTaskEvent: () => {},
+                ...reconnectBanner.handlers,
+                onExtensionChange: handleExtensionChange,
+            });
+            setAppStreamRef(appStream);
+            return;
+        }
         appStream = createAppStream({
             onProjectCounts: (counts) => {
                 applyProjectCounts(counts);
@@ -571,26 +391,22 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 const additions = tracked_add + (untracked_lines || 0);
                 const deletions = tracked_del;
                 const stats: DiffStatsEntry = { hash: hash || '', files: files_n, additions, deletions, untracked_n: untracked_n || 0, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged };
-                taskDiffStatsContext.update(map => ({ ...map, [task_id]: stats }));
+                diffStatsStore.set(task_id, stats);
                 // persist dont-task stats
-                const t = tasks.find(x => x.id === task_id);
-                if (t && t.status === 'done' && currentProject && t.updated_at) {
-                    const key = `${currentProject.id}:${task_id}`;
+                const t = appStore.tasks.find(x => x.id === task_id);
+                const project = appStore.selectedProject;
+                if (t && t.status === 'done' && project && t.updated_at) {
+                    const key = `${project.id}:${task_id}`;
                     doneStatsCache[key] = { updated_at: t.updated_at, stats };
-                    setBoardCache(doneStatsCacheKey(currentProject.id, task_id), doneStatsCache[key]).catch(() => {});
+                    setBoardCache(doneStatsCacheKey(project.id, task_id), doneStatsCache[key]).catch(() => {});
                 }
             },
             onBranch: (branch) => {
                 currentBranch = branch;
-                if (branch && !showExplorerViewVal) {
-                    const view = new URLSearchParams(location.search).get('view');
-                    if (view === 'explorer' || view === 'review') {
-                        applyUrlView(view);
-                    }
-                }
+                if (branch && !urlRouter.explorerOpen) urlRouter.restoreProjectExplorer();
             },
             onFsEvent: (op, path) => {
-                if (showExplorerViewVal || showTaskExplorerVal || (uiStore.showCardDetail && appStore.selectedTask)) {
+                if (urlRouter.explorerOpen || urlRouter.taskExplorerOpen || (uiStore.showCardDetail && appStore.selectedTask)) {
                     fsEventQueue = [...fsEventQueue, { op, path }];
                 }
             },
@@ -607,64 +423,61 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         removeBoardCache(doneStatsCacheKey(updatedTask.project_id, updatedTask.id)).catch(() => {});
                     }
                 }
-                const merged = mergeTaskUpdateIntoBoard(tasks, updatedTask, currentProject?.id ?? '');
+                const board = appStore.board;
+                if (!board) return;
+                const merged = mergeTaskUpdateIntoBoard(board.tasks || [], updatedTask, appStore.selectedProject?.id ?? '');
                 if (!merged) return;
-                tasks = merged;
-                appStore.board = { ...appStore.board!, tasks };
+                appStore.board = { ...board, tasks: merged };
                 // A frame this connection was sent is server-answered state, so the mirror and the
                 // age line follow it.
-                if (currentProject) {
-                    mirrorBoard(currentProject.id, { tasks });
-                    lastSyncedAt = Date.now();
+                const project = appStore.selectedProject;
+                if (project) {
+                    mirrorBoard(project.id, { tasks: merged });
+                    reconnectBanner.lastSyncedAt = Date.now();
                 }
                 if (appStore.selectedTask?.id === updatedTask.id) {
                     appStore.selectedTask = updatedTask;
                 }
             },
             onTaskDeleted: (task_id: string) => {
-                const remaining = tasks.filter(t => t.id !== task_id);
                 // A frame naming a task this board never held belongs to another project; there is
                 // nothing here to take away.
-                if (remaining.length !== tasks.length) {
-                    tasks = remaining;
-                    appStore.board = { ...appStore.board!, tasks };
-                    if (currentProject) {
-                        mirrorBoard(currentProject.id, { tasks });
-                        lastSyncedAt = Date.now();
+                if (appStore.tasks.some(t => t.id === task_id)) {
+                    removeTaskFromBoard(appStore, task_id);
+                    const project = appStore.selectedProject;
+                    if (project) {
+                        mirrorBoard(project.id, { tasks: appStore.tasks });
+                        reconnectBanner.lastSyncedAt = Date.now();
                     }
                 }
                 sandboxStatsStore.remove(task_id);
                 if (appStore.selectedTask && appStore.selectedTask.id === task_id) {
                     clearTaskDetail();
                 }
-                taskDiffStatsContext.update(map => {
-                    if (!(task_id in map)) return map;
-                    const next = { ...map };
-                    delete next[task_id];
-                    return next;
-                });
-                if (currentProject) {
-                    const key = `${currentProject.id}:${task_id}`;
+                diffStatsStore.remove(task_id);
+                const project = appStore.selectedProject;
+                if (project) {
+                    const key = `${project.id}:${task_id}`;
                     if (doneStatsCache[key]) {
                         const next = { ...doneStatsCache };
                         delete next[key];
                         doneStatsCache = next;
-                        removeBoardCache(doneStatsCacheKey(currentProject.id, task_id)).catch(() => {});
+                        removeBoardCache(doneStatsCacheKey(project.id, task_id)).catch(() => {});
                     }
                 }
             },
             onCommitStatus: (task_id: string, status: 'queued' | 'processing') => {
-                const proj = currentProject;
+                const project = appStore.selectedProject;
                 // The frame names no project, so the board on screen decides whether the task is
                 // ours — the slot is one per project, and another project's task would occupy it.
-                if (proj && tasks.some(t => t.id === task_id)) {
-                    commitQueueStatusContext.update(map => ({ ...map, [proj.id]: { taskID: task_id, status } }));
+                if (project && appStore.tasks.some(t => t.id === task_id)) {
+                    commitQueueStore.set(project.id, { taskID: task_id, status });
                 }
             },
             onTaskEvent: (task_id: string, event: StreamEvent) => {
                 if (event.type === 'sandbox_stats') {
                     // Sandbox memory stats live in their own store (keyed by
-                    // task) — not in the single-slot task event context.
+                    // task) — not in the single-slot task event store.
                     sandboxStatsStore.set(task_id, event.data as SandboxMemoryStats);
                     return;
                 }
@@ -672,10 +485,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 const floatingId = uiStore.floatingTask?.taskId;
                 if ((appStore.selectedTask && appStore.selectedTask.id === task_id) ||
                     (floatingId && floatingId === task_id)) {
-                    taskEventContext.set({ task_id, ...event });
+                    taskEventStore.publish({ task_id, ...event });
                 }
             },
-            ...reconnectCountdown(),
+            ...reconnectBanner.handlers,
             onProjectPorts: (ports) => {
                 appStore.projectTerminalPorts = ports;
             },
@@ -698,14 +511,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             },
         });
         setAppStreamRef(appStream);
-        applyUrlView(new URLSearchParams(location.search).get('view'));
-        await loadAppData();
-        // The language offer runs **after** the extension list resolves: its first
-        // rule is "no i18n pack is enabled", and before this resolves that answer
-        // is the previous session's, which offers a pack that is already on.
-        extensionManager.loadExtensions()
-            .then(() => localeOffer.detect())
-            .catch(() => {});
     }
 
     function reportRefusedWrites(): void {
@@ -724,26 +529,15 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onQueueFlushed((_optimisticIds, resolvedTasks) => {
                 // Replace optimistic tasks with their latest real state
                 // resolvedTasks has: optimisticId → createTask result, AND realId → latest update (start/move/etc.)
-                tasks = tasks.map(t => {
-                    // First: optimisticId → real task from createTask
-                    const created = resolvedTasks.get(t.id);
-                    if (!created) return t;
-                    // Then: realId → latest state from subsequent actions (start, move, etc.)
-                    const latest = resolvedTasks.get(created.id);
-                    return latest || created;
-                });
-                appStore.board = { ...appStore.board!, tasks };
+                applyResolvedTasksToBoard(appStore, resolvedTasks);
                 // Clear cache indicator after flush succeeds
-                servingFromCache = false;
+                sessionBoot.servingFromCache = false;
                 reportRefusedWrites();
             });
             const projs = await getProjects();
-            projects = projs || [];
-            appStore.projects = projects;
-            if (projects.length > 0) {
-                const urlParams = new URLSearchParams(location.search);
-                const urlProjectId = urlParams.get('project');
-                const targetProject = (urlProjectId ? projects.find(p => p.id === urlProjectId) : null)
+            appStore.projects = projs || [];
+            if (appStore.projects.length > 0) {
+                const targetProject = (urlRouter.project ? appStore.projects.find(p => p.id === urlRouter.project) : null)
                     ?? await landingProject();
                 if (targetProject) {
                     await selectProject(targetProject, false);
@@ -751,12 +545,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 // The landing replayed this project's queued writes already; a second pass opens a
                 // second card.
                 // Check if data was served from cache
-                servingFromCache = isFromCache(projs);
+                sessionBoot.servingFromCache = isFromCache(projs);
             }
             // Load config (best-effort — cache fallback inside getConfig)
             try {
                 const c = await getConfig();
-                cfg = c;
                 appStore.config = c;
             } catch {
                 // No cached config — proceed without it
@@ -773,7 +566,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
         // Mark initial load as done. Reconnects now trigger silentRefresh()
         // to pick up changes that occurred while offline.
-        initialLoadComplete = true;
+        reconnectBanner.initialLoadComplete = true;
         // One release pass per boot, from the one place both boot paths land on; `start()` guards
         // itself, so a path that runs twice costs nothing. Its opt-in question cannot interrupt the
         // loading screen, because it is asked only after the status read and the stamp read behind it.
@@ -781,61 +574,16 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         void updateCheck.start();
     }
 
-    // Initialize context providers
-    const { taskDiffStats: taskDiffStatsContext } = createTaskDiffContext();
-    const commitQueueStatusContext = createCommitQueueContext();
-    createExpandedTasksContext();
-    const taskEventContext = createTaskEventContext();
-    createStreamingContext();
+    /** What the boot may ask of this page. It runs before `onMount` opens any stream, so the first
+     *  session check already finds its hooks in place. */
+    sessionBoot.configure({
+        closeStream: closeAppStream,
+        openStream: openAppStream,
+        loadAppData,
+    });
 
-    async function hasCachedProjects(): Promise<boolean> {
-        try {
-            const cached = await getBoardCache<Project[]>('projects');
-            return !!cached && cached.length > 0;
-        } catch (e) {
-            console.error('Failed to check cached data:', e);
-            return false;
-        }
-    }
-
-    onMount(async () => {
-        // A slow session answer is not an unreachable server: the 2 s timer only offers the offline
-        // mirror, and the answer that arrives later takes the offer back.
-        let authResolved = false;
-        const offlineTimer = setTimeout(async () => {
-            if (authResolved) return;
-            bootSlow = true;
-            setOfflineStatus(true);
-            // With no mirror to offer there is nothing to show but the wait.
-            if (await hasCachedProjects()) {
-                hasLocalCache = true;
-                isLoadingAuth = false;
-            }
-        }, 2000);
-        try {
-            const authRes = await fetch('/api/auth/session', { credentials: 'include' });
-            authResolved = true;
-            clearTimeout(offlineTimer);
-            const authData = await authRes.json();
-            bootSlow = false;
-            // The mirror screen outranks the app, so only this takes it down.
-            hasLocalCache = false;
-            isAuthenticated = authData.authenticated;
-            if (isAuthenticated) {
-                // Extract CSRF token from session response
-                if (authData.csrf_token) setCsrfToken(authData.csrf_token);
-                await initializeAuthSession();
-            }
-            isLoadingAuth = false;
-        } catch (e) {
-            authResolved = true;
-            clearTimeout(offlineTimer);
-            console.error('Failed to check auth:', e);
-            // Mark as offline so API calls skip network and use cache immediately
-            setOfflineStatus(true);
-            hasLocalCache = await hasCachedProjects();
-            isLoadingAuth = false;
-        }
+    onMount(() => {
+        void sessionBoot.boot();
     });
 
     // What this window missed comes back over HTTP: the per-connection event buffer is gone once the
@@ -884,7 +632,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     window.addEventListener('drop', rejectStrayFileDrop);
 
     onDestroy(() => {
-        stopCountdown();
+        reconnectBanner.destroy();
         if (visibilityRetryTimer) {
             clearTimeout(visibilityRetryTimer);
             visibilityRetryTimer = null;
@@ -901,92 +649,43 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         if (urlRafId !== null) cancelAnimationFrame(urlRafId);
     });
 
-    /** Load the board from local cache after the user clicks "Load Local Cache". */
-    async function loadFromCache() {
-        hasLocalCache = false; // hide the offline screen
-        closeAppStream(); // the mirror's stream must not outlive the mirror
-        // Keep isLoadingAuth = true so the loading screen bridges the gap
-        // while cached data is read from IndexedDB (avoids flash of empty state)
-        isAuthenticated = true;
-        appStream = createAppStream({
-            onProjectCounts: (counts) => { applyProjectCounts(counts); },
-            onRefresh: () => refreshBoard(),
-            onDiffStats: () => {},
-            onBranch: (branch) => { currentBranch = branch; },
-            onFsEvent: () => {},
-            onTaskUpdated: () => {},
-            onTaskDeleted: () => {},
-            onCommitStatus: () => {},
-            onTaskEvent: () => {},
-            ...reconnectCountdown(),
-            onExtensionChange: handleExtensionChange,
-        });
-        setAppStreamRef(appStream);
-        const mirror = await getBoardCacheEntry('projects').catch(() => null);
-        if (mirror) lastSyncedAt = mirror.cachedAt;
-        await loadAppData(); // sets initialLoadComplete on completion
-        isLoadingAuth = false; // hide loading screen after data is loaded
-
-        // Load installed extensions for LSP discovery, then ask (once, silently if
-        // the answer is no) whether this browser wants a translation pack.
-        extensionManager.loadExtensions()
-            .then(() => localeOffer.detect())
-            .catch(() => {});
-    }
-
     // Detect external URL changes (e.g., page.goto() in Playwright, direct URL navigation).
     // Uses requestAnimationFrame with throttling — only checks when frame fires,
     // skips if URL hasn't changed. ~10-60ms latency vs 500ms setInterval.
     let urlRafId: number | null = null;
-    let lastUrlCheck = '';
-    let lastUrlCheckTime = 0;
-    const URL_CHECK_THROTTLE = 250; // ms between checks
 
     function checkUrlChange() {
-        const now = Date.now();
-        if (now - lastUrlCheckTime < URL_CHECK_THROTTLE) {
-            urlRafId = requestAnimationFrame(checkUrlChange);
-            return;
-        }
-        if (location.search !== lastUrlCheck) {
-            lastUrlCheck = location.search;
-            lastUrlCheckTime = now;
-            if (tasks.length > 0) {
-                restoreTaskFromUrl();
-            }
+        if (urlRouter.refresh() && appStore.tasks.length > 0) {
+            void restoreTaskFromUrl();
         }
         urlRafId = requestAnimationFrame(checkUrlChange);
     }
 
     $effect(() => {
-        if (!isAuthenticated || !currentProject) return;
-        lastUrlCheck = location.search;
-        lastUrlCheckTime = Date.now();
+        if (!sessionBoot.isAuthenticated || !appStore.selectedProject) return;
+        urlRouter.markSeen();
         urlRafId = requestAnimationFrame(checkUrlChange);
         return () => { if (urlRafId !== null) cancelAnimationFrame(urlRafId); };
     });
 
     // Function to restore task from URL after board loads.
-    // When task is not in local tasks array (e.g., created via API, board stream
+    // When task is not on the board (e.g., created via API, board stream
     // hasn't pushed yet), refresh board from server to pick up new tasks.
     async function restoreTaskFromUrl() {
-        const params = new URLSearchParams(location.search);
-        const taskId = params.get('task');
-        if (!taskId || !currentProject) return;
-        const projectId = currentProject.id;
-        let task = tasks.find(t => t.id === taskId);
+        const taskId = urlRouter.task;
+        if (!taskId || !appStore.selectedProject) return;
+        const projectId = appStore.selectedProject.id;
+        let task = appStore.tasks.find(t => t.id === taskId);
         if (!task) {
             try {
                 // Refresh board to pick up tasks created via API
                 const b = await getBoard(projectId);
                 if (!applyBoard(b, projectId, boardSource(b))) return;
-                task = tasks.find(t => t.id === taskId);
+                task = appStore.tasks.find(t => t.id === taskId);
                 if (!task) {
                     // The task belongs to another project, so the detail on screen is not the URL's:
                     // clearing the param alone leaves it rendered under the project the URL names.
-                    const url = new URL(location.href);
-                    url.searchParams.delete('task');
-                    history.replaceState(null, '', location.pathname + url.search);
+                    urlRouter.write({ project: projectId });
                     appStore.selectedTask = null;
                     uiStore.showCardDetail = false;
                     return;
@@ -996,25 +695,19 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             }
         }
         appStore.selectedTask = task;
-        // Restore view state from URL
-        const viewParam = params.get('view');
-        if (viewParam === 'explorer' || viewParam === 'review' || viewParam === 'task-explorer' || viewParam === 'task-review' || viewParam === TERMINAL_VIEW) {
-            applyUrlView(viewParam);
-            uiStore.showCardDetail = false;
-        } else {
-            applyUrlView(null);
-            uiStore.showCardDetail = true;
-        }
+        // Restore view state from URL: a `view` that names a screen of its own keeps the detail closed.
+        uiStore.showCardDetail = !urlRouter.applyView();
     }
 
     function disconnectBoardStream() {
-        if (currentProject && appStream) {
-            appStream.unsubscribeProject(currentProject.id);
+        const project = appStore.selectedProject;
+        if (project && appStream) {
+            appStream.unsubscribeProject(project.id);
         }
     }
 
-    /** Hydrate cached done-task stats (IndexedDB) into the in-memory cache and
-     * the diff-stats context so cards render immediately and the next
+    /** Hydrate cached done-task stats (IndexedDB) into the in-memory cache and the
+     * diff-stats store so cards render immediately and the next
      * subscribe can declare them via known_stats. A cache miss just means the
      * server sends the stats as usual. */
     async function hydrateDoneTaskStats(projectId: string, projectTasks: Task[]) {
@@ -1036,15 +729,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             next[`${projectId}:${id}`] = entry;
         }
         doneStatsCache = next;
-        // Mirror into the context only for tasks without live stats already.
-        const current = get(taskDiffStatsContext);
         const toAdd: Record<string, DiffStatsEntry> = {};
         for (const { id, entry } of hits) {
-            if (!(id in current)) toAdd[id] = entry.stats;
+            toAdd[id] = entry.stats;
         }
-        if (Object.keys(toAdd).length > 0) {
-            taskDiffStatsContext.update(map => ({ ...map, ...toAdd }));
-        }
+        diffStatsStore.fillAbsent(toAdd);
     }
 
     /** The board of the project just opened, as IndexedDB last saw it, applied while its live board
@@ -1058,41 +747,37 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             return; // no cache to show — the live board is the first paint
         }
         const cached = entry?.data as BoardData | undefined;
-        if (!cached || appStore.board || currentProject?.id !== projectId) return;
+        if (!cached || appStore.board || appStore.selectedProject?.id !== projectId) return;
         if (!applyBoard(cached, projectId, 'mirror')) return;
-        lastSyncedAt = entry!.cachedAt;
+        reconnectBanner.lastSyncedAt = entry!.cachedAt;
         // The banner says "this is the newest copy there is", which is only true with no socket to
         // bring the live board in; a slow-but-connected switch must not flash it.
-        servingFromCache = !wsConnected;
+        sessionBoot.servingFromCache = !connectionStore.connected;
     }
 
     async function refreshBoard() {
-        if (!currentProject || boardRefreshPending) return;
-        const projectId = currentProject.id;
+        if (!appStore.selectedProject || boardRefreshPending) return;
+        const projectId = appStore.selectedProject.id;
         boardRefreshPending = true;
         try {
             // Wait for pending queue flush
             await waitForFlush();
             const b = await getBoard(projectId);
             if (!applyBoard(b, projectId, boardSource(b))) return;
-            void hydrateDoneTaskStats(projectId, tasks);
+            void hydrateDoneTaskStats(projectId, appStore.tasks);
             // Update selected task reference to point to fresh object from API
             const task = appStore.selectedTask;
             if (task) {
-                const fresh = tasks.find(t => t.id === task.id);
+                const fresh = appStore.tasks.find(t => t.id === task.id);
                 if (fresh) {
                     appStore.selectedTask = fresh;
                 }
             }
             // Live data received — clear cache indicator
-            servingFromCache = isFromCache(b);
-        } catch (e) {
-            if (currentProject?.id !== projectId) return;
-            // When offline, sync tasks from appStore (has optimistic updates)
-            const b = appStore.board;
-            if (b?.tasks) {
-                tasks = b.tasks;
-            }
+            sessionBoot.servingFromCache = isFromCache(b);
+        } catch {
+            // A board that did not answer leaves the one on screen untouched; the age line counts
+            // from whenever data last landed.
         } finally {
             boardRefreshPending = false;
         }
@@ -1109,15 +794,15 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             // Wait for pending queue flush
             await waitForFlush();
             const projs = await getProjects();
-            projects = projs || [];
-            appStore.projects = projects;
-            if (currentProject) {
-                const projectId = currentProject.id;
+            appStore.projects = projs || [];
+            const project = appStore.selectedProject;
+            if (project) {
+                const projectId = project.id;
                 const b = await getBoard(projectId);
                 if (applyBoard(b, projectId, boardSource(b))) {
                     // Update selected task reference
                     { const sel = appStore.selectedTask; if (sel) {
-                        const fresh = tasks.find(t => t.id === sel.id);
+                        const fresh = appStore.tasks.find(t => t.id === sel.id);
                         if (fresh) {
                             appStore.selectedTask = fresh;
                         }
@@ -1125,25 +810,63 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 }
             }
             const c = await getConfig();
-            cfg = c;
             appStore.config = c;
-            servingFromCache = false;
-            lastSyncedAt = Date.now();
+            sessionBoot.servingFromCache = false;
+            reconnectBanner.lastSyncedAt = Date.now();
         } catch {
             // Still offline — keep cached data
         }
     }
 
+    /** What the banner may ask of this page: the stream it reconnects, and the re-read a reconnect owes.
+     *  It runs before any stream exists — `onMount` opens the first one — and it names this instance's
+     *  `appStream` rather than the module ref, which outlives a `closeAppStream()`. */
+    reconnectBanner.configure({
+        stream: () => appStream,
+        refresh: () => {
+            void silentRefresh().catch(() => {});
+        },
+    });
+
     function clearTaskDetail() {
         // Push URL first so the subscription sees updated URL
-        updateUrl({ project: currentProject?.id }, true, true);
+        urlRouter.write({ project: appStore.selectedProject?.id }, true, true);
         appStore.selectedTask = null;
         uiStore.showCardDetail = false;
     }
 
+    /** Land the edit dialog's answer on the board, then tell the server. The dialog's own record names
+     * the task it was opened for; a task the board does not hold is not edited anywhere. */
+    function saveTaskEdit(
+        title: string, model: string, url: string, reasoningEffort: string,
+        operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean, baseRef: string,
+    ): void {
+        const edit = appStore.editTaskData;
+        appStore.showEditTask = false;
+        appStore.editTaskData = null;
+        if (!edit) return;
+        const patch: Partial<Task> = {
+            title: title.trim(),
+            operating_mode: operatingMode,
+            auto_commit: autoMerge,
+            auto_merge: autoMerge,
+            subtasks_auto_merge: subtasksAutoMerge,
+        };
+        if (baseRef) patch.base_ref = baseRef;
+        if (model) patch.model_name = model;
+        if (url) patch.llama_server_url = url;
+        if (reasoningEffort) patch.reasoning_effort = reasoningEffort;
+        const task = appStore.tasks.find(t => t.id === edit.taskId);
+        if (!task) return;
+        updateTaskInBoard(appStore, edit.taskId, { ...task, ...patch });
+        import('$lib/api').then(({ updateTask }) => updateTask(edit.projectId, edit.taskId, patch)).catch(err => {
+            console.error('Failed to update task:', err);
+        });
+    }
+
     async function landingProject(): Promise<Project | null> {
         const last = await loadAppSetting(LAST_PROJECT_KEY, '').catch(() => '');
-        return resolveLandingProject(projects, last);
+        return resolveLandingProject(appStore.projects, last);
     }
 
     /**
@@ -1153,11 +876,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
      */
     async function selectProject(p: Project, push = true) {
         disconnectBoardStream();
-        const wasExplorerViewOpen = showExplorerViewVal;
-        const wasTaskExplorerOpen = showTaskExplorerVal;
-        const wasProjectSwitch = !!currentProject;
-        const wasDifferentProject = !!currentProject && currentProject.id !== p.id;
-        currentProject = p;
+        const previous = appStore.selectedProject;
+        // The screen on screen is the `view` the new project's address bar has to keep naming.
+        const viewParam = urlRouter.currentView();
+        const wasProjectSwitch = !!previous;
+        const wasDifferentProject = !!previous && previous.id !== p.id;
         // Image progress belongs to the project it was sent for.
         if (wasDifferentProject) sandboxImageStatus.clear();
         currentBranch = '';
@@ -1165,42 +888,24 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         // The list on screen belongs to the project the user left; the new project's own cached copy
         // replaces it, never the old project's cards.
         if (wasDifferentProject) {
-            tasks = [];
             appStore.board = null;
             void showCachedBoard(p.id);
         }
         saveAppSetting(LAST_PROJECT_KEY, p.id).catch(() => {});
         // Re-mount explorer view for the new project (only on project switch, not initial load)
-        if (wasProjectSwitch && wasExplorerViewOpen) {
-            showExplorerViewVal = false;
-            fsEventQueue = [];
-        }
-        if (wasProjectSwitch && wasTaskExplorerOpen) {
-            showTaskExplorerVal = false;
-            fsEventQueue = [];
-        }
+        if (wasProjectSwitch && urlRouter.remountExplorers()) fsEventQueue = [];
         // Update URL with project param
         // Preserve task param from URL — restoreTaskFromUrl needs it after board loads
-        const urlTaskId = new URLSearchParams(location.search).get('task');
-        const viewParam = terminalOnlyVal ? TERMINAL_VIEW
-            : wasExplorerViewOpen ? (urlChangesOpen ? 'review' : 'explorer')
-            : (wasTaskExplorerOpen ? (urlChangesOpen ? 'task-review' : 'task-explorer') : null);
-        updateUrl({ project: p.id, task: appStore.selectedTask?.id || urlTaskId, view: viewParam, file: urlFileId || null }, false, push);
-        if (wasProjectSwitch && wasExplorerViewOpen) {
-            queueMicrotask(() => { showExplorerViewVal = true; });
-        }
-        if (wasProjectSwitch && wasTaskExplorerOpen) {
-            queueMicrotask(() => { showTaskExplorerVal = true; });
-        }
+        urlRouter.write({ project: p.id, task: appStore.selectedTask?.id || urlRouter.task, view: viewParam, file: urlRouter.file || null }, false, push);
         try {
             const b = await getBoard(p.id);
             if (!applyBoard(b, p.id, boardSource(b))) return;
-            const boardTasks = tasks;
+            const boardTasks = appStore.tasks;
             // Mobile: land the board on the column that has work
             if (wasDifferentProject && isMobileCtx.isMobile) {
                 boardFocus = { projectId: p.id, column: resolveBoardLandingColumn(boardTasks) };
             }
-            servingFromCache = isFromCache(b);
+            sessionBoot.servingFromCache = isFromCache(b);
             // Restore task from URL after board loads (await so task detail renders before return)
             await restoreTaskFromUrl();
             // Hydrate cached done-task stats BEFORE subscribing so the
@@ -1213,12 +918,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             }
         } catch (e) {
             console.error('Failed to load board:', e);
-            if (currentProject?.id !== p.id) return;
+            if (appStore.selectedProject?.id !== p.id) return;
             // Fallback: load board from cache if available
             try {
                 const cachedBoard = await getBoardCache<BoardData>(boardCacheKey(p.id));
                 if (cachedBoard && applyBoard(cachedBoard, p.id, 'mirror')) {
-                    servingFromCache = true;
+                    sessionBoot.servingFromCache = true;
                     await restoreTaskFromUrl();
                 }
             } catch {
@@ -1232,29 +937,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         addProjectError = '';
     }
 
-    async function handleLogout() {
-        const csrfToken = await ensureCsrfToken();
-        await fetch('/api/auth/logout', {
-            method: 'POST',
-            credentials: 'include',
-            headers: csrfToken ? { 'X-CSRF-Token': csrfToken } : {},
-        });
-        clearCsrfToken();
-        // Signing out means this browser keeps nothing: the stores hold this user's
-        // messages, diffs, drafts and queued writes, and gc() only prunes tasks
-        // that no longer exist. The in-memory queue goes with them.
-        clearQueue();
-        await clearAll();
-        isAuthenticated = false;
-    }
-
     async function handleSelectProjectPath(path: string, sandboxEnabled: boolean) {
         showFileBrowserVal = false;
         addProjectError = '';
         try {
             const proj = await createProject(path, sandboxEnabled);
-            projects.push(proj);
-            appStore.projects = projects;
+            appStore.projects = [...appStore.projects, proj];
             clearTaskDetail();
             selectProject(proj);
         } catch (e) {
@@ -1279,31 +967,23 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
         };
-        projects.push(placeholder);
-        appStore.projects = projects;
+        appStore.projects = [...appStore.projects, placeholder];
         try {
             const proj = await cloneProject(targetDir, gitUrl, sandboxEnabled, (percent) => {
-                const p = projects.find(x => x.id === placeholderId);
-                if (p && p.cloneProgress !== percent) {
-                    p.cloneProgress = percent;
-                }
+                appStore.projects = appStore.projects.map(x =>
+                    x.id === placeholderId && x.cloneProgress !== percent ? { ...x, cloneProgress: percent } : x);
             });
-            const idx = projects.findIndex(p => p.id === placeholderId);
-            if (idx >= 0) {
-                projects.splice(idx, 1, proj);
+            const list = appStore.projects;
+            if (list.some(p => p.id === placeholderId)) {
+                appStore.projects = list.map(p => (p.id === placeholderId ? proj : p));
             } else {
                 // A project-list refresh replaced the array mid-clone — append.
-                projects.push(proj);
+                appStore.projects = [...list, proj];
             }
-            appStore.projects = projects;
             clearTaskDetail();
             selectProject(proj);
         } catch (e) {
-            const idx = projects.findIndex(p => p.id === placeholderId);
-            if (idx >= 0) {
-                projects.splice(idx, 1);
-            }
-            appStore.projects = projects;
+            appStore.projects = appStore.projects.filter(p => p.id !== placeholderId);
             addProjectError = String(e);
             showFileBrowserVal = true;
         }
@@ -1332,9 +1012,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     /** Collapse sidebar on tablet when a file is opened in the Explorer; restore when closed. */
     function handleExplorerFileChange(path: string | null) {
-        const isFileOpen = path != null && (path.startsWith(currentProject?.path || '') || isSandboxMountPath(path));
+        const isFileOpen = path != null && (path.startsWith(appStore.selectedProject?.path || '') || isSandboxMountPath(path));
         if (isFileOpen) {
-            updateUrl({ project: currentProject?.id, view: urlChangesOpen ? 'review' : 'explorer', file: path });
+            urlRouter.write({ project: appStore.selectedProject?.id, view: urlRouter.changesOpen ? 'review' : 'explorer', file: path });
             // Auto-collapse sidebar on tablet to give editor more space
             if (isTablet() && !collapsed) {
                 collapsed = true;
@@ -1342,7 +1022,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 sidebarAutoCollapsed = true;
             }
         } else {
-            updateUrl({ project: currentProject?.id, view: urlChangesOpen ? 'review' : 'explorer', file: null });
+            urlRouter.write({ project: appStore.selectedProject?.id, view: urlRouter.changesOpen ? 'review' : 'explorer', file: null });
             // Restore sidebar when file is closed
             if (sidebarAutoCollapsed) {
                 collapsed = false;
@@ -1371,19 +1051,16 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         if (!confirmed) return;
         try {
             await deleteProject(p.id);
-            const index = projects.indexOf(p);
-            projects.splice(index, 1);
-            appStore.projects = projects;
+            const index = appStore.projects.findIndex(x => x.id === p.id);
+            appStore.projects = appStore.projects.filter(x => x.id !== p.id);
+            const rest = appStore.projects;
             // Auto-select next project (or previous if it was the last)
-            if (projects.length > 0) {
-                const nextIndex = Math.min(index, projects.length - 1);
+            if (rest.length > 0) {
                 clearTaskDetail();
-                selectProject(projects[nextIndex]);
+                selectProject(rest[Math.min(Math.max(index, 0), rest.length - 1)]);
             } else {
                 clearTaskDetail();
-                currentProject = null;
                 appStore.selectedProject = null;
-                tasks = [];
                 appStore.board = null;
             }
         } catch (e) {
@@ -1400,13 +1077,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         // Refresh projects list to pick up changes
         try {
             const projs = await getProjects();
-            projects = projs || [];
-            appStore.projects = projects;
-            const proj = currentProject;
+            appStore.projects = projs || [];
+            const proj = appStore.selectedProject;
             if (proj) {
-                const updated = projects.find(p => p.id === proj.id);
+                const updated = appStore.projects.find(p => p.id === proj.id);
                 if (updated) {
-                    currentProject = updated;
                     appStore.selectedProject = updated;
                     // Close terminal so it restarts with updated sandbox mode
                     uiStore.showTerminal = false;
@@ -1424,50 +1099,47 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 </script>
 
 <!-- Login gate -->
-{#if isLoadingAuth}
+{#if sessionBoot.isLoadingAuth}
     <div class="loading-screen">
         <img class="loading-icon" src={mikeIcon} width="96" height="96" alt="Loading" />
-        {#if bootSlow}<p class="loading-slow">{t('app.bootSlow.title')}</p>{/if}
+        {#if sessionBoot.bootSlow}<p class="loading-slow">{t('app.bootSlow.title')}</p>{/if}
     </div>
-{:else if hasLocalCache}
+{:else if sessionBoot.hasLocalCache}
     <div class="offline-screen">
         <img class="offline-icon" src={mikeIcon} width="96" height="96" alt="Offline" />
-        <p class="offline-text">{bootSlow ? t('app.bootSlow.title') : t('app.offline.title')}</p>
-        <button class="offline-btn" onclick={loadFromCache}>
+        <p class="offline-text">{sessionBoot.bootSlow ? t('app.bootSlow.title') : t('app.offline.title')}</p>
+        <button class="offline-btn" onclick={() => void sessionBoot.useLocalCache()}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="6,3 20,12 6,21"/></svg>
             {t('app.offline.button')}
         </button>
     </div>
-{:else if !isAuthenticated}
-    <LoginModal onClose={async () => {
-        isAuthenticated = true;
-        await initializeAuthSession();
-    }} />
+{:else if !sessionBoot.isAuthenticated}
+    <LoginModal onClose={() => sessionBoot.startAfterLogin()} />
 {:else}
 <!-- Not a live region: the countdown and the age change every second. The region under it
      announces the transitions. -->
-{#if !wsConnected}
+{#if !connectionStore.connected}
     <div class="reconnecting-banner">
         <span class="reconnecting-spinner"></span>
-        {reconnectStatus}
-        {#if staleTimeText}<span class="reconnecting-stale">{t('app.reconnect.dataFrom', { time: staleTimeText })}</span>{/if}
-        <button class="reconnecting-btn" onclick={tryReconnectNow} type="button" aria-label="Try connecting now">{t('app.reconnect.connect')}</button>
+        {reconnectBanner.status}
+        {#if reconnectBanner.staleTimeText}<span class="reconnecting-stale">{t('app.reconnect.dataFrom', { time: reconnectBanner.staleTimeText })}</span>{/if}
+        <button class="reconnecting-btn" onclick={() => reconnectBanner.reconnectNow()} type="button" aria-label="Try connecting now">{t('app.reconnect.connect')}</button>
     </div>
 {/if}
 <div class="sr-only" role="status" aria-live="polite">
-    {#if connectionNotice}{connectionNotice}{/if}
+    {#if reconnectBanner.notice}{reconnectBanner.notice}{/if}
 </div>
 <!-- Offline cache banner -->
-{#if servingFromCache}
+{#if sessionBoot.servingFromCache}
     <div class="cache-banner" role="status" aria-live="polite">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         {t('app.cache.banner')}
-        {#if wsConnected}
-            <button class="reconnecting-btn" onclick={retryLiveNow} type="button" aria-label="Try connecting now">{t('app.reconnect.connect')}</button>
+        {#if connectionStore.connected}
+            <button class="reconnecting-btn" onclick={() => reconnectBanner.retryLive()} type="button" aria-label="Try connecting now">{t('app.reconnect.connect')}</button>
         {/if}
     </div>
 {/if}
-<div class="app" class:collapsed class:task-detail={uiStore.showCardDetail && !!appStore.selectedTask} class:ws-disconnected={!wsConnected} class:cache-visible={servingFromCache}>
+<div class="app" class:collapsed class:task-detail={uiStore.showCardDetail && !!appStore.selectedTask} class:ws-disconnected={!connectionStore.connected} class:cache-visible={sessionBoot.servingFromCache}>
     <!-- Skip navigation link -->
     <a href="#main-content" class="skip-link">{t('app.skipToMain')}</a>
 
@@ -1477,10 +1149,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     {/if}
 
     <!-- Sidebar -->
-    {#if !terminalOnlyVal}
+    {#if !urlRouter.terminalOnly}
         <Sidebar
-            {projects}
-            {currentProject}
+            projects={appStore.projects}
+            currentProject={appStore.selectedProject}
             {projectCounts}
             {collapsed}
             isMobile={isMobileCtx.isMobile}
@@ -1505,7 +1177,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     <!-- Main Content -->
     <main id="main-content" class="main" tabindex="-1">
-        {#if terminalOnlyVal}
+        {#if urlRouter.terminalOnly}
             {#if terminalScreen.key !== '' && !terminalScreen.failed && terminalPanel.component}
                 {@const Terminal = terminalPanel.component}
                 {#if Terminal}
@@ -1520,70 +1192,70 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     <img class="loading-icon" src={mikeIcon} width="96" height="96" alt="Loading" />
                 </div>
             {/if}
-        {:else if currentProject}
-            {#if !(uiStore.showCardDetail && appStore.selectedTask) && !showExplorerViewVal && !showTaskExplorerVal}
+        {:else if appStore.selectedProject}
+            {#if !(uiStore.showCardDetail && appStore.selectedTask) && !urlRouter.explorerOpen && !urlRouter.taskExplorerOpen}
             <TopBar
-                currentProject={currentProject}
+                currentProject={appStore.selectedProject}
                 {currentBranch}
                 {hasReview}
                 onOpenMenu={() => mobileMenuOpen = true}
-                onOpenSandboxConfig={() => currentProject && openSandboxConfig(currentProject)}
-                onOpenExplorerView={() => { showExplorerViewVal = true; updateUrl({ project: currentProject?.id, view: 'explorer' }, false, true); }}
+                onOpenSandboxConfig={() => appStore.selectedProject && openSandboxConfig(appStore.selectedProject)}
+                onOpenExplorerView={() => urlRouter.openProjectExplorer(appStore.selectedProject?.id ?? '')}
                 onOpenTerminal={openTerminal}
                 onShowStats={() => uiStore.showStats = true}
                 onShowConfig={openSettings}
             />
             {/if}
             <section class="board-container" aria-label="Kanban board">
-                {#if showExplorerViewVal && currentProject}
+                {#if urlRouter.explorerOpen && appStore.selectedProject}
                     <ExplorerView
-                        projectId={currentProject.id}
-                        projectPath={currentProject.path}
+                        projectId={appStore.selectedProject.id}
+                        projectPath={appStore.selectedProject.path}
                         currentBranch={currentBranch}
-                        initialFile={urlFileId || ''}
-                        sandboxEnabled={currentProject.sandbox_enabled ?? false}
+                        initialFile={urlRouter.file}
+                        sandboxEnabled={appStore.selectedProject.sandbox_enabled ?? false}
                         fsEventQueue={fsEventQueue}
                         onOpenTerminal={openTerminal}
                         onUpdateFile={handleExplorerFileChange}
-                        changesOpen={urlChangesOpen}
-                        onChangesOpen={(open: boolean) => updateUrl({ project: currentProject?.id, view: open ? 'review' : 'explorer' }, false, open)}
-                        onClose={() => { restoreExplorerSidebar(); showExplorerViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
+                        changesOpen={urlRouter.changesOpen}
+                        onChangesOpen={(open: boolean) => urlRouter.write({ project: appStore.selectedProject?.id, view: open ? 'review' : 'explorer' }, false, open)}
+                        onClose={() => { restoreExplorerSidebar(); urlRouter.write({ project: appStore.selectedProject?.id, view: null, file: null }, false, true); urlRouter.applyView(); fsEventQueue = []; }}
                     />
-                {:else if showTaskExplorerVal && currentProject && appStore.selectedTask}
+                {:else if urlRouter.taskExplorerOpen && appStore.selectedProject && appStore.selectedTask}
                     <TaskExplorerView
-                        projectId={currentProject.id}
-                        projectName={currentProject.name}
+                        projectId={appStore.selectedProject.id}
+                        projectName={appStore.selectedProject.name}
                         taskId={appStore.selectedTask.id}
-                        taskPath={cfg?.workspace_dir ? `${cfg.workspace_dir}/${currentProject.id}/${appStore.selectedTask.id}` : ''}
+                        taskPath={appStore.config?.workspace_dir ? `${appStore.config.workspace_dir}/${appStore.selectedProject.id}/${appStore.selectedTask.id}` : ''}
                         taskBranch={appStore.selectedTask.branch || ''}
                         taskStatus={appStore.selectedTask.status || ''}
-                        initialFile={urlFileId || ''}
-                        sandboxEnabled={currentProject.sandbox_enabled ?? false}
+                        initialFile={urlRouter.file}
+                        sandboxEnabled={appStore.selectedProject.sandbox_enabled ?? false}
                         fsEventQueue={fsEventQueue}
                         onOpenTerminal={openTerminal}
-                        onUpdateFile={(path: string | null) => updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: urlChangesOpen ? 'task-review' : 'task-explorer', file: path }, false, !!path)}
-                        changesOpen={urlChangesOpen}
-                        onChangesOpen={(open: boolean) => updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: open ? 'task-review' : 'task-explorer' }, false, open)}
-                        onClose={() => { showTaskExplorerVal = false; updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
+                        onUpdateFile={(path: string | null) => urlRouter.write({ project: appStore.selectedProject?.id, task: appStore.selectedTask?.id, view: urlRouter.changesOpen ? 'task-review' : 'task-explorer', file: path }, false, !!path)}
+                        changesOpen={urlRouter.changesOpen}
+                        onChangesOpen={(open: boolean) => urlRouter.write({ project: appStore.selectedProject?.id, task: appStore.selectedTask?.id, view: open ? 'task-review' : 'task-explorer' }, false, open)}
+                        onClose={() => { urlRouter.write({ project: appStore.selectedProject?.id, task: appStore.selectedTask?.id, view: null, file: null }, false, true); urlRouter.applyView(); fsEventQueue = []; }}
                     />
                 {:else if uiStore.showCardDetail && appStore.selectedTask}
-                    <CardDetail task={appStore.selectedTask} tasks={tasks} projectPath={currentProject?.path} projectName={currentProject?.name} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} fsEventQueue={fsEventQueue} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff' | 'checkpoint') => cardDetailActiveTab = tab} onClose={(status?: string) => {
-                        if (status) scrollToColumn = resolveClosedTaskColumn(status, tasks, appStore.selectedTask?.id ?? '');
+                    <CardDetail task={appStore.selectedTask} tasks={appStore.tasks} projectPath={appStore.selectedProject?.path} projectName={appStore.selectedProject?.name} workspaceDir={appStore.config?.workspace_dir} sandboxEnabled={appStore.selectedProject?.sandbox_enabled} fsEventQueue={fsEventQueue} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff' | 'checkpoint') => cardDetailActiveTab = tab} onClose={(status?: string) => {
+                        if (status) scrollToColumn = resolveClosedTaskColumn(status, appStore.tasks, appStore.selectedTask?.id ?? '');
                         uiStore.showCardDetail = false;
                         appStore.selectedTask = null;
                         fsEventQueue = [];
-                        updateUrl({ project: currentProject?.id }, true, true);
+                        urlRouter.write({ project: appStore.selectedProject?.id }, true, true);
                     }} onSelectTask={(t: Task) => {
                         // Push URL first so the subscription sees updated URL and skips replaceState
-                        updateUrl({ project: currentProject?.id, task: t.id }, true, true);
+                        urlRouter.write({ project: appStore.selectedProject?.id, task: t.id }, true, true);
                         if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
                         appStore.selectedTask = t;
                     }} onRefreshBoard={() => refreshBoard()} onOpenTerminal={openTerminal} onOpenExplorer={openTaskExplorer} />
                 {:else}
                     <Board
-                        {tasks}
-                        projectId={currentProject.id}
-                        projectPath={currentProject.path}
+                        tasks={appStore.tasks}
+                        projectId={appStore.selectedProject.id}
+                        projectPath={appStore.selectedProject.path}
                         scrollToColumn={scrollToColumn}
                         {boardFocus}
                         onAddTask={() => { uiStore.creatingChildOf = null; uiStore.showCreateTask = true; }}
@@ -1617,30 +1289,30 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     <!-- Editor: Floating task view (Chat only) -->
     {#if uiStore.floatingTask}
-        {@const floatingTaskData = tasks.find((t) => t.id === uiStore.floatingTask!.taskId) ?? uiStore.floatingTask!.task}
+        {@const floatingTaskData = appStore.tasks.find((t) => t.id === uiStore.floatingTask!.taskId) ?? uiStore.floatingTask!.task}
         {#if floatingTaskData}
             <CardDetail
                 task={floatingTaskData}
-                tasks={tasks}
-                projectPath={currentProject?.path}
-                projectName={currentProject?.name}
-                workspaceDir={cfg?.workspace_dir}
-                sandboxEnabled={currentProject?.sandbox_enabled}
+                tasks={appStore.tasks}
+                projectPath={appStore.selectedProject?.path}
+                projectName={appStore.selectedProject?.name}
+                workspaceDir={appStore.config?.workspace_dir}
+                sandboxEnabled={appStore.selectedProject?.sandbox_enabled}
                 fsEventQueue={fsEventQueue}
                 activeTab="chat"
                 floating
                 onClose={() => { uiStore.floatingTask = null; }}
-                onSelectTask={(t: Task) => { uiStore.floatingTask = { projectId: currentProject?.id as string, taskId: t.id, task: t }; }}
+                onSelectTask={(t: Task) => { uiStore.floatingTask = { projectId: appStore.selectedProject?.id as string, taskId: t.id, task: t }; }}
                 onRefreshBoard={() => refreshBoard()}
                 onOpenTask={() => {
                     // Navigate to the full task view and a new history entry
                     const ft = uiStore.floatingTask;
                     if (!ft) return;
                     uiStore.floatingTask = null;
-                    const task = tasks.find((t) => t.id === ft.taskId) ?? ft.task;
+                    const task = appStore.tasks.find((t) => t.id === ft.taskId) ?? ft.task;
                     appStore.selectedTask = task;
                     uiStore.showCardDetail = true;
-                    updateUrl({ project: ft.projectId, task: ft.taskId, view: null, file: null }, false, true);
+                    urlRouter.write({ project: ft.projectId, task: ft.taskId, view: null, file: null }, false, true);
                 }}
             />
         {/if}
@@ -1649,20 +1321,17 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     <!-- Modals -->
     {#if uiStore.showCreateTask}
         <CreateTaskModal
-            projectId={currentProject?.id}
+            projectId={appStore.selectedProject?.id}
             parentId={uiStore.creatingChildOf ?? undefined}
             currentBranch={currentBranch}
             initialPrompt={uiStore.createTaskLineSelection?.prompt}
             lineTask={!!uiStore.createTaskLineSelection}
             onOpenTask={(task: Task) => {
                 // Floating task view over the current view
-                uiStore.floatingTask = { projectId: currentProject?.id as string, taskId: task.id, task };
+                uiStore.floatingTask = { projectId: appStore.selectedProject?.id as string, taskId: task.id, task };
             }}
             onClose={() => { uiStore.showCreateTask = false; uiStore.creatingChildOf = null; uiStore.createTaskLineSelection = null; }}
             onTaskCreated={() => { uiStore.creatingChildOf = null; }} // board stream pushes update
-            onOptimisticTaskCreated={(task: Task) => { tasks = [...tasks, task]; }}
-            onReplaceOptimisticTask={(optimisticId: string, realTask: Task) => { tasks = tasks.map(t => t.id === optimisticId ? realTask : t); }}
-            onRemoveOptimisticTask={(optimisticId: string) => { tasks = tasks.filter(t => t.id !== optimisticId); }}
         />
     {/if}
     {#if appStore.showEditTask && appStore.editTaskData}
@@ -1680,39 +1349,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             taskHasParent={appStore.editTaskData.taskHasParent}
             targetBranch={appStore.editTaskData.targetBranch}
             baseRef={appStore.editTaskData.baseRef}
-            onSave={(title: string, model: string, url: string, reasoningEffort: string, operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean, baseRef: string) => {
-                const taskId = appStore.editTaskData!.taskId;
-                const projectId = appStore.editTaskData!.projectId;
-                // Find the task in the board and update it
-                const task = tasks.find(t => t.id === taskId);
-                if (task) {
-                    const trimmed = title.trim();
-                    const updates: Record<string, unknown> = { title: trimmed };
-                    updates.operating_mode = operatingMode;
-                    updates.auto_commit = autoMerge;
-                    updates.auto_merge = autoMerge;
-                    updates.subtasks_auto_merge = subtasksAutoMerge;
-                    if (baseRef) updates.base_ref = baseRef;
-                    if (model) updates.model_name = model;
-                    if (url) updates.llama_server_url = url;
-                    if (reasoningEffort) updates.reasoning_effort = reasoningEffort;
-                    task.title = trimmed;
-                    task.operating_mode = operatingMode;
-                    task.auto_commit = autoMerge;
-                    task.auto_merge = autoMerge;
-                    task.subtasks_auto_merge = subtasksAutoMerge;
-                    if (baseRef) task.base_ref = baseRef;
-                    if (model) task.model_name = model;
-                    if (url) task.llama_server_url = url;
-                    if (reasoningEffort) task.reasoning_effort = reasoningEffort;
-                    updateTaskInBoard(appStore, task.id, task);
-                    import('$lib/api').then(({ updateTask }) => updateTask(projectId, taskId, updates)).catch(err => {
-                        console.error('Failed to update task:', err);
-                    });
-                }
-                appStore.showEditTask = false;
-                appStore.editTaskData = null;
-            }}
+            onSave={saveTaskEdit}
             onCancel={() => {
                 appStore.showEditTask = false;
                 appStore.editTaskData = null;
@@ -1721,23 +1358,23 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     {/if}
     {#if uiStore.showConfig}
         <ConfigModal
-            config={cfg}
+            config={appStore.config}
             onClose={() => uiStore.showConfig = false}
             onSaved={() => uiStore.showConfig = false}
-            onSignOut={handleLogout}
+            onSignOut={() => sessionBoot.signOut()}
         />
     {/if}
     {#if uiStore.showTerminal && terminalPanel.component}
-        {#key currentProject?.id + '-' + (currentProject?.sandbox_enabled ?? '')}
+        {#key appStore.selectedProject?.id + '-' + (appStore.selectedProject?.sandbox_enabled ?? '')}
             {@const Terminal = terminalPanel.component}
             {#if Terminal}
                 <Terminal />
             {/if}
         {/key}
     {/if}
-    {#if uiStore.showStats && currentProject}
+    {#if uiStore.showStats && appStore.selectedProject}
         <StatsModal
-            projectId={currentProject.id}
+            projectId={appStore.selectedProject.id}
             onClose={() => uiStore.showStats = false}
         />
     {/if}
@@ -1748,10 +1385,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onClone={handleCloneProject}
         />
     {/if}
-    {#if uiStore.showSandboxConfig && currentProject}
+    {#if uiStore.showSandboxConfig && appStore.selectedProject}
         <SandboxConfigModal
-            project={currentProject}
-            inProgressCount={projectCounts[currentProject.id]?.in_progress ?? 0}
+            project={appStore.selectedProject}
+            inProgressCount={projectCounts[appStore.selectedProject.id]?.in_progress ?? 0}
             onClose={() => uiStore.showSandboxConfig = false}
             onSaved={handleSandboxSaved}
         />

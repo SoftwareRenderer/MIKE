@@ -183,6 +183,16 @@ export async function apiFetch(url: string, init?: RequestInit & { signal?: Abor
     }
 }
 
+/** Headers for a caller that opens its own response instead of going through `apiFetch` — the progress
+ * streams that cost the caller a line rather than the offline flag (`docs/reconnection.md → How a request
+ * ends`). Nothing else about the request changes. */
+export async function csrfHeaders(init?: HeadersInit): Promise<Headers> {
+    const headers = new Headers(init);
+    const token = await ensureCsrfToken();
+    if (token) headers.set('X-CSRF-Token', token);
+    return headers;
+}
+
 /** Extract error message from a failed API response, falling back to a default. */
 export async function apiError(res: Response, defaultMsg: string): Promise<Error> {
     try {
@@ -191,6 +201,75 @@ export async function apiError(res: Response, defaultMsg: string): Promise<Error
     } catch {
         return new Error(defaultMsg);
     }
+}
+
+/** One frame of a server progress stream: the frame's `event:` name, and its `data:` text. */
+export interface EventFrame {
+    /** The frame's `event:` field, or `'message'` when it carries none. */
+    event: string;
+    /** The frame's `data:` lines joined with `\n`; never a frame with no `data:` field at all. */
+    data: string;
+}
+
+/**
+ * The one reader of a server progress stream: a `Response` whose body the server is writing as
+ * blank-line-terminated frames. Every core consumer of one iterates this rather than splitting the
+ * bytes itself — `grep -rn getReader frontend/src` is the count.
+ *
+ * The frame grammar is a cross-boundary contract: the Go side writes `data: %s\n\n`
+ * (`backend/api/project.go`, `backend/extensions/handler.go`) or `event: %s\ndata: %s\n\n`
+ * (`backend/exec/merge.go`), so the split is on the blank line and never on a single newline — a line
+ * split across two chunks is not a boundary. The tail of an unfinished frame is kept for the next
+ * chunk, and a tail the stream never completes is dropped: half a frame is not a frame, and whether a
+ * stream that stopped early counts as failure is the caller's question, because only it knows which
+ * frame it needed to see (`done`, a build result, a cloned project).
+ *
+ * No deadline is applied here, and a long wait is not read as a stalled server. The caller's
+ * `AbortSignal` ends a stream, and a rejected read propagates unchanged, so an abort stays a
+ * cancellation and never becomes a connection failure.
+ */
+export async function* readEventStream(res: Response): AsyncGenerator<EventFrame> {
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error(t('api.streamingNotSupported'));
+
+    const decoder = new TextDecoder();
+    let tail = '';
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            tail += decoder.decode(value, { stream: true });
+
+            let boundary = tail.indexOf('\n\n');
+            while (boundary !== -1) {
+                const frame = parseEventFrame(tail.slice(0, boundary));
+                tail = tail.slice(boundary + 2);
+                if (frame) yield frame;
+                boundary = tail.indexOf('\n\n');
+            }
+        }
+    } finally {
+        reader.releaseLock();
+    }
+}
+
+/**
+ * One frame's fields. A line that is neither `event:` nor `data:` is ignored, which is also how a
+ * keep-alive comment reaches nothing. `data:` loses exactly one leading space, the separator the
+ * writers add — the payload of a build-log line keeps every other byte.
+ */
+function parseEventFrame(raw: string): EventFrame | null {
+    let event = 'message';
+    const data: string[] = [];
+    for (const line of raw.split('\n')) {
+        if (line.startsWith('event:')) {
+            event = line.slice(6).trim();
+        } else if (line.startsWith('data:')) {
+            const value = line.slice(5);
+            data.push(value.startsWith(' ') ? value.slice(1) : value);
+        }
+    }
+    return data.length ? { event, data: data.join('\n') } : null;
 }
 
 export { API_BASE };

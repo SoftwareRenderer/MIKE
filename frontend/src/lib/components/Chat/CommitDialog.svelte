@@ -3,6 +3,8 @@
     import { dialogStore } from '$lib/stores';
     import BaseModal from '../BaseModal.svelte';
     import { t } from '$lib/i18n';
+    import { streamCommitPreview } from '$lib/api/tasks';
+    import { isAborted } from '$lib/api/helpers';
 
     let open = $state(false);
     let streaming = $state(false);
@@ -38,7 +40,7 @@
             resolveFn(value);
             resolveFn = null;
         }
-        dialogStore.commitDialog = null;
+        dialogStore.commitDialogSlot.clear();
     }
 
     function handleConfirm() {
@@ -67,8 +69,9 @@
         }
     }
 
-    // Parse SSE stream from the commit preview endpoint
-    async function streamCommitPreview(projectId: string, taskId: string) {
+    // Paint the preview stream. Framing, the request and the frame payloads are the API layer's;
+    // this only decides what each event does to the dialog.
+    async function startPreview(projectId: string, taskId: string) {
         abortController = new AbortController();
         streaming = true;
         message = '';
@@ -76,98 +79,44 @@
         promptProgress = 0;
 
         try {
-            const res = await fetch(
-                `/api/projects/${projectId}/tasks/${taskId}/commit-preview/stream`,
-                {
-                    method: 'GET',
-                    credentials: 'include',
-                    signal: abortController.signal,
-                }
-            );
-
-            if (!res.ok) {
-                throw new Error(`HTTP ${res.status}`);
-            }
-
-            const reader = res.body?.getReader();
-            if (!reader) {
-                throw new Error(t('git.noResponseBody'));
-            }
-
-            const decoder = new TextDecoder();
-            let buffer = '';
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-
-                // Process complete SSE frames
-                const frames = buffer.split('\n\n');
-                buffer = frames.pop() || ''; // keep incomplete frame in buffer
-
-                for (const frame of frames) {
-                    if (!frame.trim()) continue;
-
-                    const lines = frame.split('\n');
-                    let eventType = 'message';
-                    let data = '';
-
-                    for (const line of lines) {
-                        if (line.startsWith('event: ')) {
-                            eventType = line.slice(7).trim();
-                        } else if (line.startsWith('data: ')) {
-                            data = line.slice(6).trim();
-                        }
+            for await (const frame of streamCommitPreview(projectId, taskId, abortController.signal)) {
+                switch (frame.event) {
+                    case 'metadata': {
+                        authorName = frame.authorName;
+                        authorEmail = frame.authorEmail;
+                        mergeTarget = frame.mergeTarget;
+                        break;
                     }
-
-                    if (!data) continue;
-
-                    try {
-                        const parsed = JSON.parse(data);
-
-                        switch (eventType) {
-                            case 'metadata': {
-                                authorName = parsed.author_name || '';
-                                authorEmail = parsed.author_email || '';
-                                mergeTarget = parsed.merge_target || '';
-                                break;
+                    case 'token': {
+                        message += frame.content;
+                        editedMessage = message;
+                        // Auto-scroll textarea
+                        setTimeout(() => {
+                            if (textareaRef) {
+                                textareaRef.scrollTop = textareaRef.scrollHeight;
                             }
-                            case 'token': {
-                                message += parsed.content || '';
-                                editedMessage = message;
-                                // Auto-scroll textarea
-                                setTimeout(() => {
-                                    if (textareaRef) {
-                                        textareaRef.scrollTop = textareaRef.scrollHeight;
-                                    }
-                                }, 0);
-                                break;
-                            }
-                            case 'prompt_progress': {
-                                promptProgress = parsed.percent || 0;
-                                break;
-                            }
-                            case 'done': {
-                                message = parsed.content || message;
-                                editedMessage = message;
-                                streaming = false;
-                                break;
-                            }
-                            case 'error': {
-                                console.error('Commit preview error:', parsed.error);
-                                streaming = false;
-                                break;
-                            }
-                        }
-                    } catch {
-                        // Skip malformed JSON
+                        }, 0);
+                        break;
+                    }
+                    case 'prompt_progress': {
+                        promptProgress = frame.percent;
+                        break;
+                    }
+                    case 'done': {
+                        message = frame.content || message;
+                        editedMessage = message;
+                        streaming = false;
+                        break;
+                    }
+                    case 'error': {
+                        console.error('Commit preview error:', frame.error);
+                        streaming = false;
+                        break;
                     }
                 }
             }
-        } catch (e: any) {
-            if (e.name === 'AbortError') {
+        } catch (e) {
+            if (isAborted(e)) {
                 // User cancelled, don't show error
                 return;
             }
@@ -179,7 +128,7 @@
     }
 
     $effect(() => {
-        const value = dialogStore.commitDialog;
+        const value = dialogStore.commitDialogSlot.pending;
         if (value) {
             // Only initialize on first run; re-runs would wipe streamed tokens.
             if (streamState.count === 0) {
@@ -197,7 +146,7 @@
 
                 if (value.projectId && value.taskId && !value.message) {
                     streamState.count++;
-                    streamCommitPreview(value.projectId, value.taskId);
+                    startPreview(value.projectId, value.taskId);
                 }
 
                 if (!streaming) {
@@ -209,7 +158,7 @@
 
             // Abort only on dialog close, not on effect re-runs.
             return () => {
-                if (dialogStore.commitDialog === null && abortController) {
+                if (dialogStore.commitDialogSlot.pending === null && abortController) {
                     abortController.abort();
                     abortController = null;
                 }

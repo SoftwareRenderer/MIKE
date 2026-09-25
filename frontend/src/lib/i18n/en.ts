@@ -930,7 +930,6 @@ const catalog = {
     'api.operationFailed': 'Operation failed',
     'api.unexpectedResponse': 'Unexpected response from {path} ({contentType}): {body}',
     'api.emptyBody': 'empty body',
-    'api.noReader': 'No reader available',
     'api.operationEndedEarly': 'Operation ended before reporting completion',
     'api.fetchGitLog': 'Failed to fetch git log',
     'api.fetchBranches': 'Failed to fetch branches',
@@ -1731,7 +1730,6 @@ const catalog = {
     'git.diffError': 'Diff error:',
     'git.showingDiffWith': 'Showing diff with',
     'git.loadingDiffViewer': 'Loading diff viewer...',
-    'git.noResponseBody': 'No response body',
     // "origin" is what a reader types into git, so a pack keeps the word; the key is
     // what makes keeping it a choice.
     'git.remoteOrigin': 'origin',

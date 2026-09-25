@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { t } from '$lib/i18n';
     import { baseName, sandboxMountFromPath } from '$lib/utils/path';
-    import { ensureCsrfToken } from '$lib/api';
+    import { readFsFile, writeFsFile, FsReadRefused } from '$lib/api';
     import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { EditorView } from 'codemirror';
     import { EditorState, Transaction, Compartment, StateField, StateEffect, RangeSet, Range, type Extension } from '@codemirror/state';
@@ -207,13 +207,8 @@
      */
     async function checkExternalChange() {
         try {
-            const taskParam = taskId ? `&task=${encodeURIComponent(taskId)}` : '';
-            const res = await fetch(
-                `/api/fs/read?path=${encodeURIComponent(filePath)}&project=${encodeURIComponent(projectId)}${taskParam}`,
-            );
-            if (!res.ok) return;
-            const data = await res.json();
-            const theirs: string = data.content ?? '';
+            const disk = await readFsFile({ path: filePath, project: projectId, task: taskId });
+            const theirs: string = disk.content ?? '';
             const result = reconcileExternalChange(savedContent, content, theirs);
             if (result.kind === 'no-op') return;
             if (result.kind === 'conflict') {
@@ -224,7 +219,7 @@
                 return;
             }
             // reload (no unsaved edits) or merged (user edits preserved)
-            applyDiskContent(result.content, theirs, parseGutterMarkers(data.gutter_markers));
+            applyDiskContent(result.content, theirs, parseGutterMarkers(disk.gutter_markers));
         } catch {
             // Transient read failure — keep the buffer untouched.
         }
@@ -685,21 +680,7 @@
         if (view) dispatchLineSel(view, null);
 
         try {
-            const taskParam = taskId ? `&task=${encodeURIComponent(taskId)}` : '';
-            const res = await fetch(`/api/fs/read?path=${encodeURIComponent(filePath)}&project=${encodeURIComponent(projectId)}${taskParam}`);
-            if (!res.ok) {
-                if (res.status === 413) {
-                    fileTooLarge = true;
-                    return;
-                }
-                if (res.status === 404) {
-                    fileNotFound = true;
-                    return;
-                }
-                const err = await res.json().catch(() => ({ error: t('editor.readFailed') }));
-                throw new Error(err.error || t('editor.readFailed'));
-            }
-            const data = await res.json();
+            const data = await readFsFile({ path: filePath, project: projectId, task: taskId });
             const fileContent = data.content || '';
 
             if (mode === 'diff') {
@@ -716,17 +697,9 @@
                 // Uses the diff panel's baseRef; on failure (new file) baseline
                 // stays empty — all lines shown as added.
                 const refToUse = baseRef || 'HEAD';
-                const headParams = new URLSearchParams({ path: filePath, ref: refToUse });
-                if (projectId) headParams.set('project', projectId);
-                if (taskId) headParams.set('task', taskId);
                 try {
-                    const headRes = await fetch(`/api/fs/read?${headParams}`);
-                    if (headRes.ok) {
-                        const headData = await headRes.json();
-                        baselineContent = headData.content || '';
-                    } else {
-                        baselineContent = '';
-                    }
+                    const head = await readFsFile({ path: filePath, project: projectId, task: taskId, ref: refToUse });
+                    baselineContent = head.content || '';
                 } catch {
                     baselineContent = '';
                 }
@@ -754,7 +727,11 @@
                 }
             }
         } catch (e) {
-            error = String(e);
+            // The two refusals that are answers rather than faults: the file is bigger than an editor
+            // shows, or it is gone. Anything else is said with the server's own sentence.
+            if (e instanceof FsReadRefused && e.status === 413) fileTooLarge = true;
+            else if (e instanceof FsReadRefused && e.status === 404) fileNotFound = true;
+            else error = String(e);
         } finally {
             loadedPath = requestPath;
         }
@@ -853,21 +830,13 @@
         saving = true;
         let ok = false;
         try {
-            const csrfToken = await ensureCsrfToken();
-            const taskParam = taskId ? `&task=${encodeURIComponent(taskId)}` : '';
-            const res = await fetch(`/api/fs/write?project=${encodeURIComponent(projectId)}${taskParam}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
-                },
-                body: JSON.stringify({ path: filePath, content }),
-                credentials: 'include',
+            await writeFsFile({
+                project: projectId,
+                task: taskId,
+                path: filePath,
+                content,
+                fallback: t('editor.saveFailed'),
             });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ error: t('editor.saveFailed') }));
-                throw new Error(err.error || t('editor.saveFailed'));
-            }
             savedContent = content;
             hasChanges = false;
             ok = true;

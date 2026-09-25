@@ -27,6 +27,11 @@ export function baseName(path: string): string {
     return cut < 0 ? path : path.slice(cut + 1);
 }
 
+/** `baseName` as a folder label: a path with no last segment is the root, and the root is `/`. */
+export function folderName(path: string): string {
+    return baseName(path) || '/';
+}
+
 /**
  * The container-side root a sandboxed project's tree appears under — the mirror of
  * `sandbox.MountRoot` (`backend/sandbox/sandbox.go`), which is what the runtime mounts and what an

@@ -1,34 +1,20 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { render } from '@testing-library/svelte';
 import { tick } from 'svelte';
-import { writable } from 'svelte/store';
 import { t } from '$lib/i18n';
 
 // ============================================================
 // CARD STATUS BADGE — reactive sources
 // ============================================================
-// Two async inputs must both re-render the badge: the streamingIds context and the task's
-// execution_state. get() on a store inside $derived.by does not create a dependency, so Card
-// mirrors the store into $state with an $effect; a regression there leaves the card stuck on
-// "Running" — invisible to a test that renders only once.
+// Two async inputs must both re-render the badge: the streaming-task store and the task's
+// execution_state. A badge that read the store without tracking it keeps showing "Running"
+// after the turn ended — invisible to a test that renders only once.
 
 vi.mock('svelte/transition', () => ({ slide: vi.fn(), fade: vi.fn() }));
 vi.mock('$lib/assets/icons/commit-push.svg?raw', () => ({ default: '' }));
 vi.mock('$lib/components/Icon.svelte', () => ({ default: () => '' }));
 
-const streamingStore = writable(new Set<string>());
-const diffStatsStore = writable({});
-const commitQueueStore = writable({});
-const expandedTasksStore = writable(new Set<string>());
-const taskEventStore = writable(null);
-
-vi.mock('$lib/context', () => ({
-    getStreamingContext: () => streamingStore,
-    getTaskDiffStatsContext: () => diffStatsStore,
-    getCommitQueueContext: () => commitQueueStore,
-    getExpandedTasksContext: () => expandedTasksStore,
-    getTaskEventContext: () => taskEventStore,
-}));
+import { streamingTaskStore } from '$lib/stores/streaming-tasks.svelte';
 
 const appStore = vi.hoisted(() => ({
     current: {
@@ -115,34 +101,34 @@ function renderCard(task: Task) {
 
 describe('Card status badge tracks its reactive sources', () => {
     it('shows Running while this client has an in-flight turn for the task', () => {
-        streamingStore.set(new Set(['card-1']));
+        streamingTaskStore.add('card-1');
         try {
             const container = renderCard(makeTask());
             expect(badgeText(container)).toBe(t('board.badge.running'));
         } finally {
-            streamingStore.set(new Set());
+            streamingTaskStore.delete('card-1');
         }
     });
 
-    it('drops the Running badge when the streaming store is cleared (the $state mirror is live)', async () => {
-        streamingStore.set(new Set(['card-1']));
+    it('drops the Running badge when the task stops streaming', async () => {
+        streamingTaskStore.add('card-1');
         const container = renderCard(makeTask());
         expect(badgeText(container)).toBe(t('board.badge.running'));
 
-        // This is the whole point: a badge that read the store with get() would
+        // This is the whole point: a badge that read the store without tracking it would
         // keep showing Running after the turn ended.
-        streamingStore.set(new Set());
+        streamingTaskStore.delete('card-1');
         await tick();
         expect(badgeText(container)).not.toBe(t('board.badge.running'));
     });
 
     it("does not mark a card Running for another task's stream", () => {
-        streamingStore.set(new Set(['some-other-task']));
+        streamingTaskStore.add('some-other-task');
         try {
             const container = renderCard(makeTask({ execution_state: 'paused' }));
             expect(badgeText(container)).toBe(t('board.badge.paused'));
         } finally {
-            streamingStore.set(new Set());
+            streamingTaskStore.delete('some-other-task');
         }
     });
 });

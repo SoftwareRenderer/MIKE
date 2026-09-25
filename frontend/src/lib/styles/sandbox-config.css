@@ -1,0 +1,462 @@
+/* The Sandbox Configuration form's shared primitives — the ruled row, the collapsible section, the
+ * field, the 28px add button, the 20px discard control, the list row, the radio pair. The screen is
+ * one component per section now, and a parent's scoped rule does not reach an element a child
+ * renders (svelte-check calls such a selector unused), so the rules several sections share live once
+ * here as :global(), the same way sandbox-settings.css and settings-section.css do it.
+ *
+ * Every rule is anchored on `.sandbox-config`, the class the modal puts on the form it renders. That
+ * is what keeps a `.config-row` or a `.radio-label` belonging to this screen alone: the anchor costs
+ * one class of specificity, which is exactly what a scoped rule would have carried. */
+
+/* ── The row: icon, label, description, one control on the right ───────────── */
+:global(.sandbox-config .config-row) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+}
+
+:global(.sandbox-config .config-row:not(:last-child)) {
+    border-bottom: 1px solid var(--color-border);
+}
+
+:global(.sandbox-config .config-row-input) {
+    gap: 12px;
+}
+
+:global(.sandbox-config .config-info) {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+}
+
+:global(.sandbox-config .config-icon) {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-primary);
+}
+
+:global(.sandbox-config .config-text) {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+:global(.sandbox-config .config-label) {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+:global(.sandbox-config .config-desc) {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+    margin-top: 1px;
+}
+
+/* ── A row that opens a section under itself ───────────────────────────────── */
+
+/* Nested one level under a switch, so its rows line up under the switch's label. */
+:global(.sandbox-config .config-row-subsection) {
+    padding-left: 36px;
+}
+
+:global(.sandbox-config .config-row-subsection .config-icon) {
+    color: var(--color-text-secondary);
+}
+
+:global(.sandbox-config .config-row-subsection .config-label) {
+    font-weight: 400;
+}
+
+:global(.sandbox-config .config-row-subsection .config-label.collapsed) {
+    font-size: 0.75rem;
+}
+
+/* Expandable rows (subsection + non-subsection like Custom Mounts) */
+:global(.sandbox-config .config-row-subsection),
+:global(.sandbox-config .config-row-expandable) {
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    user-select: none;
+}
+
+:global(.sandbox-config .config-row-subsection:hover),
+:global(.sandbox-config .config-row-expandable:hover) {
+    background: var(--color-surface-3);
+    border-radius: var(--radius-sm);
+}
+
+/* Wrapper for expandable row + content — extends highlight into parent padding */
+:global(.sandbox-config .config-row-group > .config-row) {
+    border-bottom: 1px solid var(--color-border);
+}
+
+:global(.sandbox-config .config-row-group.expanded) {
+    margin: 0 -12px;
+    background: var(--color-surface-3);
+    border-radius: var(--radius-sm);
+}
+
+:global(.sandbox-config .config-row-group.expanded > .config-row) {
+    padding-right: 12px;
+    padding-left: 12px;
+    border-bottom: none;
+}
+
+:global(.sandbox-config .config-row-group.expanded > .ports-content),
+:global(.sandbox-config .config-row-group.expanded > .mounts-content) {
+    padding-left: 12px;
+    padding-right: 12px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+:global(.sandbox-config .chevron) {
+    margin-left: auto;
+    flex-shrink: 0;
+    color: var(--color-text-secondary);
+    transition: transform 0.15s ease;
+}
+
+:global(.sandbox-config .chevron-open) {
+    transform: rotate(180deg);
+}
+
+/* Expandable content block */
+:global(.sandbox-config .ports-content),
+:global(.sandbox-config .mounts-content),
+:global(.sandbox-config .envs-content) {
+    padding: 0 0 4px;
+}
+
+/* The capability picker is a field rather than a row of inputs, so it keeps its own box. */
+:global(.sandbox-config .caps-content) {
+    padding: 12px 12px 4px;
+    border-top: 1px solid var(--color-border);
+}
+
+/* ── The field ─────────────────────────────────────────────────────────────── */
+
+/* Every field in this form: one box, one focus ring, one disabled look. The width each one
+   takes is the only thing that differs, so it is the only thing they declare for themselves. */
+:global(.sandbox-config .image-input),
+:global(.sandbox-config .memory-input),
+:global(.sandbox-config .port-input),
+:global(.sandbox-config .mount-input),
+:global(.sandbox-config .env-input) {
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface-1);
+    color: var(--color-text-primary);
+    font-size: 0.75rem;
+    font-family: var(--font-mono, monospace);
+    transition: border-color 0.15s;
+}
+
+:global(.sandbox-config .image-input:focus),
+:global(.sandbox-config .memory-input:focus),
+:global(.sandbox-config .port-input:focus),
+:global(.sandbox-config .mount-input:focus),
+:global(.sandbox-config .env-input:focus) {
+    outline: none;
+    border-color: var(--color-accent);
+}
+
+:global(.sandbox-config .image-input:disabled),
+:global(.sandbox-config .memory-input:disabled),
+:global(.sandbox-config .port-input:disabled),
+:global(.sandbox-config .mount-input:disabled),
+:global(.sandbox-config .env-input:disabled) {
+    opacity: 0.5;
+}
+
+/* The two number fields keep no spinners. */
+:global(.sandbox-config .memory-input),
+:global(.sandbox-config .port-input) {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+:global(.sandbox-config .memory-input::-webkit-outer-spin-button),
+:global(.sandbox-config .memory-input::-webkit-inner-spin-button),
+:global(.sandbox-config .port-input::-webkit-outer-spin-button),
+:global(.sandbox-config .port-input::-webkit-inner-spin-button) {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+@media (max-width: 768px) {
+    :global(.sandbox-config .mount-input::placeholder),
+    :global(.sandbox-config .port-input::placeholder) {
+        font-size: 12px;
+    }
+}
+
+/* ── A saved row of a list, and the row that adds one ──────────────────────── */
+
+:global(.sandbox-config .port-list),
+:global(.sandbox-config .mount-list),
+:global(.sandbox-config .env-list) {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-left: 36px;
+    margin-top: 4px;
+}
+
+:global(.sandbox-config .port-item),
+:global(.sandbox-config .mount-item),
+:global(.sandbox-config .env-item) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 8px;
+    background: var(--color-surface-1);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+:global(.sandbox-config .port-item:hover:not(:disabled)),
+:global(.sandbox-config .mount-item:hover:not(:disabled)),
+:global(.sandbox-config .env-item:hover:not(:disabled)) {
+    background: var(--color-surface-3);
+}
+
+:global(.sandbox-config .port-item.editing),
+:global(.sandbox-config .mount-item.editing),
+:global(.sandbox-config .env-item.editing) {
+    border-color: var(--color-accent);
+    background: rgba(136, 192, 208, 0.05);
+}
+
+/* The saved value inside such a row, and the halves it is written in. */
+:global(.sandbox-config .port-mapping),
+:global(.sandbox-config .mount-info),
+:global(.sandbox-config .env-info) {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    font-family: var(--font-mono, monospace);
+    color: var(--color-text-primary);
+}
+
+:global(.sandbox-config .mount-info),
+:global(.sandbox-config .env-info) {
+    min-width: 0;
+}
+
+/* A key = value row spends one step of the gap on the sign. */
+:global(.sandbox-config .env-info) {
+    gap: 4px;
+}
+
+:global(.sandbox-config .port-host),
+:global(.sandbox-config .port-container),
+:global(.sandbox-config .mount-path),
+:global(.sandbox-config .mount-container),
+:global(.sandbox-config .env-key) {
+    font-weight: 600;
+}
+
+:global(.sandbox-config .port-host),
+:global(.sandbox-config .mount-path),
+:global(.sandbox-config .env-key) {
+    color: var(--color-accent-light);
+}
+
+:global(.sandbox-config .mount-container),
+:global(.sandbox-config .env-value) {
+    color: var(--color-text-primary);
+}
+
+:global(.sandbox-config .port-container) {
+    color: white;
+}
+
+:global(.sandbox-config .mount-path),
+:global(.sandbox-config .mount-container),
+:global(.sandbox-config .env-key),
+:global(.sandbox-config .env-value) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+:global(.sandbox-config .mount-path),
+:global(.sandbox-config .mount-container) {
+    min-width: 0;
+}
+
+:global(.sandbox-config .port-add-row),
+:global(.sandbox-config .mount-add-row),
+:global(.sandbox-config .env-add-row) {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-left: 36px;
+}
+
+/* The 28px square button of every add row: confirm, add, browse, cancel. */
+:global(.sandbox-config .btn-add-port),
+:global(.sandbox-config .btn-add-mount),
+:global(.sandbox-config .btn-add-env),
+:global(.sandbox-config .btn-browse-mount),
+:global(.sandbox-config .btn-cancel-edit) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface-1);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+}
+
+:global(.sandbox-config .btn-add-port),
+:global(.sandbox-config .btn-add-mount),
+:global(.sandbox-config .btn-add-env),
+:global(.sandbox-config .btn-browse-mount) {
+    color: var(--color-text-primary);
+    transition: background 0.15s, border-color 0.15s;
+}
+
+:global(.sandbox-config .btn-add-port:hover:not(:disabled)),
+:global(.sandbox-config .btn-add-mount:hover:not(:disabled)),
+:global(.sandbox-config .btn-add-env:hover:not(:disabled)),
+:global(.sandbox-config .btn-browse-mount:hover:not(:disabled)) {
+    background: var(--color-surface-3);
+    border-color: var(--color-accent);
+}
+
+/* Something is typed but not added yet. */
+:global(.sandbox-config .btn-add-port.pending),
+:global(.sandbox-config .btn-add-mount.pending),
+:global(.sandbox-config .btn-add-env.pending) {
+    background: rgba(34, 197, 94, 0.15);
+    border-color: rgba(34, 197, 94, 0.6);
+    color: var(--color-status-green);
+}
+
+:global(.sandbox-config .btn-add-port:disabled),
+:global(.sandbox-config .btn-add-mount:disabled),
+:global(.sandbox-config .btn-browse-mount:disabled),
+:global(.sandbox-config .btn-cancel-edit:disabled) {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+:global(.sandbox-config .btn-cancel-edit) {
+    color: var(--color-text-secondary);
+    transition: background 0.15s, color 0.15s;
+}
+
+:global(.sandbox-config .btn-cancel-edit:hover) {
+    background: var(--color-surface-3);
+    color: var(--color-text-primary);
+}
+
+/* The 20px discard control of every list row. */
+:global(.sandbox-config .btn-remove-port),
+:global(.sandbox-config .btn-remove-mount),
+:global(.sandbox-config .btn-remove-env) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border: none;
+    background: transparent;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: background 0.15s, color 0.15s;
+    flex-shrink: 0;
+}
+
+:global(.sandbox-config .btn-remove-port:hover:not(:disabled)),
+:global(.sandbox-config .btn-remove-mount:hover:not(:disabled)),
+:global(.sandbox-config .btn-remove-env:hover:not(:disabled)) {
+    background: var(--color-status-red-dark);
+    color: white;
+}
+
+:global(.sandbox-config .btn-remove-port:disabled),
+:global(.sandbox-config .btn-remove-mount:disabled),
+:global(.sandbox-config .btn-remove-env:disabled) {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+:global(.sandbox-config .port-error),
+:global(.sandbox-config .mount-error),
+:global(.sandbox-config .env-error) {
+    padding: 4px 8px;
+    padding-left: 36px;
+    background: rgba(248, 81, 73, 0.1);
+    border: 1px solid rgba(248, 81, 73, 0.3);
+    border-radius: var(--radius-sm);
+    color: var(--color-status-red);
+    font-size: 0.75rem;
+}
+
+/* ── Two choices, one box ──────────────────────────────────────────────────── */
+
+:global(.sandbox-config .radio-group) {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+:global(.sandbox-config .radio-label) {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    user-select: none;
+}
+
+:global(.sandbox-config .radio-label:first-child) {
+    border-right: 1px solid var(--color-border);
+}
+
+:global(.sandbox-config .radio-label.active) {
+    background: var(--color-accent-dark);
+    color: white;
+}
+
+:global(.sandbox-config .radio-label:hover:not(.active)) {
+    background: var(--color-surface-3);
+}
+
+:global(.sandbox-config .radio-label input[type="radio"]) {
+    display: none;
+}
+
+:global(.sandbox-config .radio-label:disabled) {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+:global(.sandbox-config .radio-text) {
+    white-space: nowrap;
+}

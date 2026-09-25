@@ -2,9 +2,10 @@
  * The dialog that answers a promise.
  *
  * A store slot holds the pending request, the dialog arms itself from that slot, and dismissing
- * resolves the caller's promise and empties the slot again. `open`, the resolve handle, the arming
- * effect, the Enter-to-confirm listener and the unmount safety net live here so a dialog written
- * against a slot says only what its own body needs.
+ * resolves the caller's promise and empties the slot again. The slot is `PromiseSlot` in
+ * `stores/dialogs.svelte.ts`: its `$state`, its promise, and the resolve handle this file reads.
+ * `open`, the arming effect, the Enter-to-confirm listener and the unmount safety net live here so a
+ * dialog written against a slot says only what its own body needs.
  *
  * Two rules survive here because nothing else in the file enforces them:
  *

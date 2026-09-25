@@ -1,17 +1,25 @@
 # Link-like Rows — Design Detail
 
 Read this before touching `App/Sidebar.svelte`, `Card.svelte`, `App/TopBar.svelte`,
-`CardDetail/TaskHeader.svelte`, `ExplorerHeader.svelte`, `$lib/utils/app-link.ts`, or the click routing
+`CardDetail/TaskHeader.svelte`, `ExplorerHeader.svelte`, `$lib/utils/app-link.ts`,
+`$lib/services/url-router.svelte.ts`, or the click routing
 in `use-board-arrow-nav.ts` / `keyboard.ts`. The
 hard rules live in `AGENTS.md → Frontend`.
 
 Sidebar project rows, task cards, both Explorer buttons and all four Terminal buttons are reachable by
 real URLs, so the browser's own link actions work on them: right-click → *Open Link in New Tab/Window*,
 middle click, *Copy Link Address*, status-bar URL. They use the same deep links the app itself writes
-(`?project=`, `?project=&task=`, `&view=explorer`, canonical order from `updateUrl` in `App.svelte`), which
-`loadAppData` + `restoreTaskFromUrl` + `applyUrlView` already restore — no backend route is involved
-(`/` is the only SPA document). The Terminal links are the one exception to "the tab shows what a click
+(`?project=`, `?project=&task=`, `&view=explorer`), in the canonical order `write` in
+`$lib/services/url-router.svelte.ts` owns. That module's `read()` plus `loadAppData` and
+`restoreTaskFromUrl` restore them; no backend route is involved (`/` is the only SPA document). The
+Terminal links are the one exception to "the tab shows what a click
 shows"; see *Terminal buttons*.
+
+**One module owns the address bar.** `write()` is the shell's only `history.pushState`/`replaceState`
+call and `read()` its only reader of `location.search`; the screen a `view` names is its
+`applyView()`. Two components push entries of their own: `Board.svelte` pushes a card's `task` before
+selecting it, and `Chat/TaskChat.svelte` owns `thread`. `write()` therefore takes the params it
+preserves from the live address bar, not from the state it last wrote.
 
 ## Project row
 
@@ -64,15 +72,16 @@ used by two specs).
 button) and `ExplorerHeader.svelte` — the header both explorer screens share — carry the link
 `$lib/utils/app-link.ts` builds: `/?project=<id>&view=terminal`, with `&task=<id>` where the button
 belongs to a task. That file owns the param names, the href shape and `asksForTerminal`, because
-`updateUrl`'s order and `applyUrlView`'s reader have to keep agreeing with it. Same anchor shape and
-click routing as the Explorer buttons.
+`url-router.svelte.ts`'s `write` order and its `applyView` reader have to keep agreeing with it. The
+anchor shape and click routing are the Explorer buttons' too.
 
 **The link is a screen, the click is a panel.** A plain click still opens the panel over the current
 screen (`uiStore.showTerminal`, which the URL never carries, so nothing goes stale when the panel
 closes); opening the link renders `view=terminal` — the terminal alone, with no sidebar, top bar, board
-or task detail. `applyUrlView` owns `terminalOnlyVal`, so `restoreTaskFromUrl` and `handlePopState`
-restore it, and `selectProject` must name `terminal` in the `view` it writes back: that call *is* the
-launch rewrite, and a `view` it does not name is stripped from the URL before the board arrives.
+or task detail. `urlRouter.terminalOnly` is the router's; `restoreTaskFromUrl` and `handlePopState`
+restore it through `applyView()`. `selectProject` must name `terminal` in the `view` it writes back,
+which is what `currentView()` answers: that call *is* the launch rewrite, and a `view` it does not name
+is stripped from the URL before the board arrives.
 
 That screen renders `TerminalPanel` with `standalone`: permanent fullscreen, minus the chrome that only
 makes sense for a panel over the board — the dimming overlay, the height handle, the close button, the
@@ -116,7 +125,8 @@ overlay attributes), `components/__tests__/explorer-buttons-are-links.unit.svelt
 buttons), `components/__tests__/terminal-buttons-are-links.unit.svelte.ts` (the three terminal links and
 the link each explorer hands its header),
 `components/__tests__/file-browser-context-menu.unit.svelte.ts` (the file rows' window item, the URL it
-carries, and the middle-button gesture), `utils/__tests__/app-link.unit.ts` (the hrefs, the reader, the
+carries, and the middle-button gesture), `services/__tests__/url-router.unit.svelte.ts` (the address bar
+↔ router state mapping: the param order, what an omitted param means, which navigation is a Back entry), `utils/__tests__/app-link.unit.ts` (the hrefs, the reader, the
 file param's roots),
 `utils/__tests__/keyboard.unit.ts` (click bindings), e2e
 `link-like-rows.spec.ts` (middle-click opens a real tab, no document navigation on left click, drag

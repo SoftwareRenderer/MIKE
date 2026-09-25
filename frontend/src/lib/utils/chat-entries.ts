@@ -412,7 +412,7 @@ export function mergeLoadedHistory(
     for (const e of dbEntries) {
         for (const tc of e.toolCalls ?? []) dbToolIds.add(tc.toolId);
     }
-    const lastDb = dbEntries[dbEntries.length - 1];
+    const lastLive = liveEntries[liveEntries.length - 1];
 
     const merged: ChatEntry[] = [...settled];
     for (const e of liveEntries) {
@@ -440,9 +440,7 @@ export function mergeLoadedHistory(
             continue;
         }
 
-        // Text is the one field the response never truncates, so matching the newest row means it is
-        // stored. A streaming entry cannot prove that: its row is not written yet.
-        if (!e.isStreaming && e.role === 'assistant' && e.content && lastDb?.role === 'assistant' && lastDb.content === e.content) continue;
+        if (isRowCopy(e, dbEntries, e === lastLive)) continue;
 
         merged.push(e);
     }
@@ -453,6 +451,18 @@ export function mergeLoadedHistory(
         seenIds.add(e.id);
         return true;
     });
+}
+
+/**
+ * True when a live entry repeats the answer one of the read's rows holds, so that row's entry stands for it.
+ * Only the newest streaming entry is exempt: no row holds the turn in flight yet.
+ * `docs/reconnection.md → The reload meets the replay buffer`.
+ */
+function isRowCopy(entry: ChatEntry, rows: ChatEntry[], isNewestOnScreen: boolean): boolean {
+    if (entry.role !== 'assistant' || !entry.content) return false;
+    if (entry.isStreaming && isNewestOnScreen) return false;
+    return rows.some(r => r.role === 'assistant' && !!r.content
+        && (r.content === entry.content || r.content.startsWith(entry.content)));
 }
 
 /** The entry without the pending tool calls a stopped task will never resolve; null if nothing renders. */

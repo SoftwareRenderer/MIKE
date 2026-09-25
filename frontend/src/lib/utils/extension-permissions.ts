@@ -140,6 +140,66 @@ export function needsDependencyGrant(ext: DependencyGrantView): boolean {
 }
 
 /**
+ * Where to suggest putting a dependency directory: the container path the extension declared,
+ * mirrored under the server's own home. Language-blind by construction — it reads nothing but the
+ * declaration and one path the server already reports at /api/home, never a probe — and for the
+ * common case it lands on the directory the toolchain already uses.
+ */
+export function suggestedDependencyPath(ext: DependencyGrantView, homeDir: string): string {
+    const declared = ext.sandbox_config?.dependency_cache;
+    return declared && homeDir ? homeDir + declared.container_path : '';
+}
+
+/** What the dialog's field opens with: the granted directory, or the suggestion where none is. */
+export function dependencyDraft(ext: DependencyGrantView, homeDir: string): string {
+    return ext.sandbox_config?.dependency_host_path || suggestedDependencyPath(ext, homeDir);
+}
+
+/**
+ * One row of the Edit dialog's agent-folder editor. The container path comes from the extension; the
+ * host folder and the mode are what the user chooses. `suggestion` is only placeholder text.
+ */
+export type AgentMountRow = AgentMountProposal & { suggestion: string };
+
+/** The editor's opening rows: one per folder the manifest suggested, plus every approved folder. */
+export function agentMountDraft(ext: AgentMountView): AgentMountRow[] {
+    const granted = agentMountGrant(ext);
+    const rows = agentMountDeclaration(ext.manifest?.capabilities).map((proposal) => {
+        const saved = granted.find((g) => g.container_path === proposal.container_path);
+        return {
+            host_path: saved?.host_path ?? '',
+            container_path: proposal.container_path,
+            mode: saved?.mode ?? proposal.mode ?? 'rw',
+            suggestion: proposal.host_path,
+        };
+    });
+    // The whole list is sent when the user saves, so an approved folder that gets no row here would be
+    // removed by that save.
+    for (const extra of granted) {
+        if (!rows.some((row) => row.container_path === extra.container_path)) {
+            rows.push({ host_path: extra.host_path, container_path: extra.container_path, mode: extra.mode || 'ro', suggestion: '' });
+        }
+    }
+    return rows;
+}
+
+/** The list to send: a row whose host folder is empty approves nothing. */
+export function agentMountUpdate(rows: readonly AgentMountProposal[]): AgentMountProposal[] {
+    return rows
+        .filter((row) => row.host_path.trim() !== '')
+        .map((row) => ({ host_path: row.host_path.trim(), container_path: row.container_path, mode: row.mode }));
+}
+
+/**
+ * Turns a list of folders into one sorted string, so two lists can be compared in any order.
+ * Comparing JSON text is not enough: the server writes a folder's fields in its own order, so text
+ * comparison would report a change the user never made.
+ */
+export function grantFingerprint(mounts: readonly AgentMountProposal[]): string {
+    return mounts.map((m) => `${m.container_path}\u0000${m.host_path}\u0000${m.mode}`).sort().join('\n');
+}
+
+/**
  * True when an install warrants a pre-install review dialog: the entry declares the `network`
  * capability or at least one sandbox-escaping permission, or it declares a dependency cache and
  * will therefore ask which directory on this machine it may read.
