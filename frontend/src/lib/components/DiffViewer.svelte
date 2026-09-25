@@ -2,6 +2,7 @@
     import type { DiffFile, DiffRow, DiffImageRequest, DiffImageSection, DiffImageSource } from '$lib/types/diff';
     import type { DiffDisplayItem } from '$lib/utils/diff-parser';
     import { buildDisplayItems, truncatePath, getStatusBadge } from '$lib/utils/diff-parser';
+    import { comparePathsRootLast, sortPathsRootLast } from '$lib/utils/sort-paths';
     import { isDisplayableImage, imageSides } from '$lib/utils/diff-image';
     import { highlightLinesAsync } from '$lib/highlighter';
     import { formatBytes } from '$lib/utils/format';
@@ -18,12 +19,13 @@ import { slide } from 'svelte/transition';
     let { committedFiles = [], stagedFiles = [], unstagedFiles = [], stagedUntracked = [], unstagedUntracked = [], loading = false, onExpandFile, onExpandUntracked, onLineClick, onStageFile, onStageAll, onUnstageAll, selectedPath, mergedLabel = t('task.diff.mergedFromSubtasks'), imageSource }: { committedFiles?: DiffFile[]; stagedFiles: DiffFile[]; unstagedFiles: DiffFile[]; stagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; unstagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; loading?: boolean; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void; onStageFile?: (path: string, stage: boolean) => void; onStageAll?: () => void; onUnstageAll?: () => void; selectedPath?: string; mergedLabel?: string; imageSource?: DiffImageSource } = $props();
     let hasContent = $derived(committedFiles.length > 0 || stagedFiles.length > 0 || unstagedFiles.length > 0 || stagedUntracked.length > 0 || unstagedUntracked.length > 0);
 
-    // Sort files: directories first (by path), then root files
+    // Tracked files rank by change status first, untracked ones by path alone; both end at the
+    // same path rule ($lib/utils/sort-paths).
     let sortedStagedFiles = $derived(sortFilesByPath(stagedFiles));
     let sortedUnstagedFiles = $derived(sortFilesByPath(unstagedFiles));
-    let sortedStagedUntracked = $derived(sortUntrackedByPath(stagedUntracked));
+    let sortedStagedUntracked = $derived(sortPathsRootLast(stagedUntracked));
     let sortedCommittedFiles = $derived(sortFilesByPath(committedFiles));
-    let sortedUnstagedUntracked = $derived(sortUntrackedByPath(unstagedUntracked));
+    let sortedUnstagedUntracked = $derived(sortPathsRootLast(unstagedUntracked));
 
     // Map of file path -> DOM element for scroll-to-file from sidebar
     let fileSections = new Map<string, HTMLElement>();
@@ -264,7 +266,7 @@ import { slide } from 'svelte/transition';
         }
     }
 
-    /** Sort files by path: files with directory prefix first (alphabetical), then root files. */
+    /** Modified, then Added, then Deleted, then Renamed; the path rule decides within a status. */
     function sortFilesByPath(files: DiffFile[]): DiffFile[] {
         // Status sort priority: Modified (M) = 0, Added (A) = 1, Deleted (D) = 2, Renamed (R) = 3
         const statusOrder = (f: DiffFile): number => {
@@ -274,30 +276,10 @@ import { slide } from 'svelte/transition';
             if (letter === 'D') return 2;
             return 3; // R (renamed)
         };
-        return [...files].sort((a, b) => {
-            const aOrder = statusOrder(a);
-            const bOrder = statusOrder(b);
-            if (aOrder !== bOrder) return aOrder - bOrder;
-            const aHasDir = a.path.includes('/');
-            const bHasDir = b.path.includes('/');
-            if (aHasDir && !bHasDir) return -1;
-            if (!aHasDir && bHasDir) return 1;
-            return a.path.localeCompare(b.path);
-        });
+        return [...files].sort((a, b) => (statusOrder(a) - statusOrder(b)) || comparePathsRootLast(a, b));
     }
 
     type UntrackedEntry = { path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean };
-
-    /** Sort untracked entries by path: files with directory prefix first, then root files. */
-    function sortUntrackedByPath(entries: UntrackedEntry[]): UntrackedEntry[] {
-        return [...entries].sort((a, b) => {
-            const aHasDir = a.path.includes('/');
-            const bHasDir = b.path.includes('/');
-            if (aHasDir && !bHasDir) return -1;
-            if (!aHasDir && bHasDir) return 1;
-            return a.path.localeCompare(b.path);
-        });
-    }
 
     function getDisplayItems(rows: DiffRow[]): DiffDisplayItem[] {
         return buildDisplayItems(rows);

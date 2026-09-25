@@ -227,6 +227,7 @@ const catalog = {
     'settings.toggleFullscreen': 'Toggle fullscreen',
     'settings.tab.providers': 'Providers',
     'settings.tab.taskDefaults': 'Task Defaults',
+    'settings.tab.projectDefaults': 'Project Defaults',
     'settings.tab.preferences': 'Preferences',
     'settings.tab.extensions': 'Extensions',
     'settings.tab.about': 'About',
@@ -355,6 +356,12 @@ const catalog = {
     'settings.defaults.reclaimSandboxAria': 'Release a waiting task sandbox container',
     'settings.defaults.maxFailed': 'Max failed turns',
     'settings.defaults.maxFailedDesc': 'Stop task after this many consecutive LLM failures',
+
+    // ── ConfigModal/ProjectDefaults.svelte ──
+    'settings.project.description': 'Defaults for {project}',
+    'settings.project.assistedBy': 'Assisted-by line',
+    'settings.project.assistedByDesc': 'Prefill "Assisted-by: MIKE:<model>" in draft commit messages',
+    'settings.project.assistedByAria': 'Assisted-by line in commit messages',
 
     // ── ConfigModal/AgentSection.svelte ──
     // The manifest's own description and setup_info are extension text: never keyed.
@@ -930,7 +937,6 @@ const catalog = {
     'api.operationFailed': 'Operation failed',
     'api.unexpectedResponse': 'Unexpected response from {path} ({contentType}): {body}',
     'api.emptyBody': 'empty body',
-    'api.noReader': 'No reader available',
     'api.operationEndedEarly': 'Operation ended before reporting completion',
     'api.fetchGitLog': 'Failed to fetch git log',
     'api.fetchBranches': 'Failed to fetch branches',
@@ -1731,7 +1737,6 @@ const catalog = {
     'git.diffError': 'Diff error:',
     'git.showingDiffWith': 'Showing diff with',
     'git.loadingDiffViewer': 'Loading diff viewer...',
-    'git.noResponseBody': 'No response body',
     // "origin" is what a reader types into git, so a pack keeps the word; the key is
     // what makes keeping it a choice.
     'git.remoteOrigin': 'origin',

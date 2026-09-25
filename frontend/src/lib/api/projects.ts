@@ -1,14 +1,16 @@
 import type { Board, Project, ProjectCounts, ProjectStats, ProjectUpdates } from '../types';
-import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
+import { API_BASE, apiFetch, apiError, csrfHeaders, readEventStream } from './helpers';
 import {
     getOfflineStatus,
     enqueueAction,
     queueWrite,
+} from './queue';
+import {
     createProjectRaw,
     updateProjectRaw,
     deleteProjectRaw,
     resetProjectStatsRaw,
-} from './queue';
+} from './raw/projects';
 import { setBoardCache, getBoardCache, boardCacheKey } from '../storage';
 import { markCached } from './cache';
 import { repoNameFromGitUrl } from '../utils/repo-name';
@@ -149,9 +151,7 @@ async function cloneProjectRaw(
     sandboxEnabled: boolean,
     onProgress?: (percent: number) => void,
 ): Promise<Project> {
-    const token = await ensureCsrfToken();
-    const headers = new Headers({ 'Content-Type': 'application/json' });
-    if (token) headers.set('X-CSRF-Token', token);
+    const headers = await csrfHeaders({ 'Content-Type': 'application/json' });
 
     const body: Record<string, unknown> = {
         path: targetDir,
@@ -173,31 +173,18 @@ async function cloneProjectRaw(
         throw await apiError(res, t('api.cloneProject'));
     }
 
-    const reader = res.body?.getReader();
-    if (!reader) throw new Error(t('api.streamingNotSupported'));
-
-    const decoder = new TextDecoder();
-    let buffer = '';
     let project: Project | null = null;
     let errorMessage: string | null = null;
 
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const event = parseCloneEvent(line.slice(6));
-            if (!event) continue;
-            if (event.type === 'progress') {
-                onProgress?.(event.percent);
-            } else if (event.type === 'done') {
-                project = event.project;
-            } else if (event.type === 'error') {
-                errorMessage = event.message;
-            }
+    for await (const frame of readEventStream(res)) {
+        const event = parseCloneEvent(frame.data);
+        if (!event) continue;
+        if (event.type === 'progress') {
+            onProgress?.(event.percent);
+        } else if (event.type === 'done') {
+            project = event.project;
+        } else if (event.type === 'error') {
+            errorMessage = event.message;
         }
     }
 
@@ -213,9 +200,6 @@ export async function updateProject(id: string, updates: ProjectUpdates): Promis
     }
     return updateProjectRaw(id, updates);
 }
-
-/** Trigger a sandbox image build with live progress streaming. */
-export { buildSandboxImageStream } from './queue';
 
 /** Delete a project and all its tasks. Queued when offline. */
 export async function deleteProject(id: string): Promise<void> {

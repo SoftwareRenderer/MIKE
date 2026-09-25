@@ -8,7 +8,11 @@
 #
 # A reported function whose name also appears in a _test.go in its own package is a test-only accessor.
 # Those are listed as an explicit allowlist below rather than matched by a name pattern, so a NEW
-# unreachable function always fails the gate and must be deleted or justified here.
+# function reported here always fails the gate and must be deleted or justified here.
+#
+# What is reported is not everything unreachable. RTA counts a method live once its type satisfies
+# any used interface, so a method no call site selects can still look reachable: the allowlist is
+# not the complete list of production-unreachable functions.
 #
 # Usage: scripts/deadcode-check.sh
 set -euo pipefail

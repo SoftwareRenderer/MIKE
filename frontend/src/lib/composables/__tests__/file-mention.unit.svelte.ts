@@ -112,17 +112,23 @@ describe('FileMention.handleInput', () => {
     it('debounces the search and stores the results', async () => {
         vi.useFakeTimers();
         try {
-            const fetchMock = vi.fn().mockResolvedValue({
-                ok: true,
-                json: async () => ({ results: [{ path: 'src/readme.md' }] }),
-            });
-            vi.stubGlobal('fetch', fetchMock);
+            // The API layer reads the CSRF token before it puts a request on the wire, so the search is
+            // picked out by its own path rather than by being the first call of the run.
+            const searches: string[] = [];
+            vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+                const url = new URL(String(input), 'http://localhost');
+                const json = (body: unknown) => new Response(JSON.stringify(body), {
+                    status: 200, headers: { 'Content-Type': 'application/json' },
+                });
+                if (url.pathname === '/api/auth/session') return json({ authenticated: true, csrf_token: 'tok' });
+                searches.push(url.pathname + url.search);
+                return json({ results: [{ path: 'src/readme.md' }] });
+            }));
             const h = makeHarness('see @read');
             h.mention.handleInput();
-            expect(fetchMock).not.toHaveBeenCalled(); // debounced
+            expect(searches).toEqual([]); // debounced
             await vi.advanceTimersByTimeAsync(200);
-            expect(fetchMock).toHaveBeenCalledTimes(1);
-            expect(String(fetchMock.mock.calls[0][0])).toContain('/api/fs/search?q=read&project=proj-1');
+            expect(searches).toEqual(['/api/fs/search?q=read&project=proj-1']);
             expect(h.mention.results).toEqual([{ path: 'src/readme.md' }]);
         } finally {
             vi.unstubAllGlobals();

@@ -22,7 +22,7 @@ import (
 // steps in place. A database stamped N has been through 1..N; an older one reads 0 and runs the
 // whole chain. So the steps must stay idempotent, and one that must run exactly once needs its own
 // marker (see the config-row guard on the backfill) rather than trusting this number.
-const schemaVersion = doneUserTurnIndexesStamp
+const schemaVersion = doneProjectCommitTrailerStamp
 
 // doneDiffParsedStamp is the stamp from which a stored done-task diff body carries parsed_files.
 // Older bodies are served byte for byte and cannot grow the key, so initSchema drops those rows.
@@ -53,6 +53,10 @@ const doneMessageOrderIndexesStamp = doneMessageTimeKeysStamp + 1
 // doneUserTurnIndexesStamp is the version from which a conversation's user rows carry an index of their
 // own, so naming the prompt above a position costs the prompts rather than every row between them.
 const doneUserTurnIndexesStamp = doneMessageOrderIndexesStamp + 1
+
+// doneProjectCommitTrailerStamp is the version from which a project carries its answer to the
+// "Assisted-by" commit trailer.
+const doneProjectCommitTrailerStamp = doneUserTurnIndexesStamp + 1
 
 // userVersion reads PRAGMA user_version. A read failure answers 0, which reruns the probe chain:
 // slow, but it cannot leave a column missing. The caller holds s.mu.
@@ -134,6 +138,7 @@ CREATE TABLE IF NOT EXISTS projects (
     sandbox_image            TEXT DEFAULT NULL,
     sandbox_dockerfile_path  TEXT DEFAULT NULL,
     sandbox_memory_limit     INTEGER NOT NULL DEFAULT 1024,
+    commit_assisted_by       INTEGER NOT NULL DEFAULT 1,
     created_at               TEXT NOT NULL,
     updated_at               TEXT NOT NULL
 );
@@ -309,6 +314,7 @@ func (s *Store) addMissingColumns() {
 	s.addColumn("projects", "sandbox_mounts", "TEXT DEFAULT NULL")
 	s.addColumn("projects", "sandbox_envs", "TEXT DEFAULT NULL")
 	s.addColumn("projects", "sandbox_capabilities", "TEXT DEFAULT NULL")
+	s.addColumn("projects", "commit_assisted_by", "INTEGER NOT NULL DEFAULT 1")
 	s.addColumn("tasks", "base_ref", "TEXT DEFAULT NULL")
 	s.addColumn("tasks", "base_commit", "TEXT DEFAULT NULL")
 	s.addColumn("tasks", "branch_tip", "TEXT DEFAULT NULL")

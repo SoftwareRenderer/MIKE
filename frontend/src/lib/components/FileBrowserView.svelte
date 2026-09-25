@@ -1,7 +1,8 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import {
-        copyFsPaths, deleteFsPaths, ensureCsrfToken, listFsDirectory, moveFsPaths, renameFsPath,
+        copyFsPaths, deleteFsPaths, listFsDirectory, moveFsPaths, renameFsPath,
+        createFsDirectory, writeFsFile,
         type FsOpsResult, type FsEntry,
     } from '$lib/api';
     import { dialogStore } from '$lib/stores';
@@ -16,7 +17,7 @@
     import { t, type MessageKey } from '$lib/i18n';
     import { explorerPathHref } from '$lib/utils/app-link';
     import { confirmList, pasteTarget, rowIsSelectable } from '$lib/utils/file-selection';
-    import { baseName } from '$lib/utils/path';
+    import { baseName, folderName } from '$lib/utils/path';
     import type { FsEvent } from '$lib/utils/fs-event';
 
     /** A row's extra badge — the project explorer's git status letter and nothing else. */
@@ -136,13 +137,6 @@
         }
     });
 
-    /** The query every `/api/fs` call carries: the project, and the task when there is one. */
-    function fsQuery() {
-        const params = new URLSearchParams({ project: projectId });
-        if (taskId) params.set('task', taskId);
-        return params.toString();
-    }
-
     async function loadDir(path: string) {
         // Clamp to root: nothing above it is listed, whatever a row, a crumb or a keystroke asked for.
         const target = path.startsWith(rootPath) ? path : rootPath;
@@ -191,24 +185,6 @@
         }
     }
 
-    /** One POST to `/api/fs/<route>`, and the server's own reason when it refuses. */
-    async function postFs(route: 'write' | 'mkdir', body: Record<string, unknown>, fallback: string) {
-        const csrfToken = await ensureCsrfToken();
-        const res = await fetch(`/api/fs/${route}?${fsQuery()}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
-            },
-            body: JSON.stringify(body),
-            credentials: 'include',
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || fallback);
-        }
-    }
-
     async function toggleNewFile() {
         showNewFile = true;
         newFileName = '';
@@ -231,7 +207,13 @@
         creating = true;
         createError = '';
         try {
-            await postFs('write', { path: currentPath + '/' + name, content: '' }, t('explorer.shared.errCreateFile'));
+            await writeFsFile({
+                project: projectId,
+                task: taskId,
+                path: currentPath + '/' + name,
+                content: '',
+                fallback: t('explorer.shared.errCreateFile'),
+            });
             showNewFile = false;
             newFileName = '';
             loadDir(currentPath);
@@ -250,7 +232,7 @@
         createFolderError = '';
         try {
             const newPath = currentPath + '/' + name;
-            await postFs('mkdir', { path: newPath }, t('explorer.shared.errCreateFolder'));
+            await createFsDirectory({ path: newPath, project: projectId, task: taskId });
             showNewFolder = false;
             newFolderName = '';
             await loadDir(newPath); // a new folder is opened into
@@ -303,12 +285,6 @@
     function handlePathInput() {
         const p = currentPath.trim();
         if (p) loadDir(resolveWithinRoot(p));
-    }
-
-    /** The task worktree's own folder name, as the first crumb. */
-    function getFolderName(path: string): string {
-        const parts = path.split('/');
-        return parts[parts.length - 1] || '/';
     }
 
     function getBreadcrumbParts(): string[] {
@@ -717,7 +693,7 @@
         </div>
     {:else if getBreadcrumbParts().length > 0}
         <div class="breadcrumb">
-            <button class="breadcrumb-item" onclick={() => loadDir(rootPath)}>{getFolderName(rootPath)}</button>
+            <button class="breadcrumb-item" onclick={() => loadDir(rootPath)}>{folderName(rootPath)}</button>
             {#each getBreadcrumbParts() as part, index}
                 <span class="breadcrumb-sep">/</span>
                 <button class="breadcrumb-item" class:active={index === getBreadcrumbParts().length - 1} onclick={() => handleBreadcrumbClick(index)}>

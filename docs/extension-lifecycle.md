@@ -166,8 +166,8 @@ An extension may ship `CHANGELOG.jsonl` next to its manifest (one JSON object pe
 `{"hash", "version", "description"}`), published to `<registry-base>/<author-slug>/<name>`.
 `GET /api/extensions/check-updates` returns entries newer than the installed commit (anchored on the
 first hash match); no match / no file / fetch error → empty `changelog` (best-effort, never blocks update
-detection). UI: `.update-changelog` in the "Updates Available" section of `ExtensionsTab.svelte`. Key
-files: `backend/extensions/changelog.go`, `FetchChangelog` (`registry.go`), `HandleCheckUpdates`, e2e
+detection). UI: `.update-changelog` in the "Updates Available" section of `ExtensionUpdatesPanel.svelte`.
+Key files: `backend/extensions/changelog.go`, `FetchChangelog` (`registry.go`), `HandleCheckUpdates`, e2e
 `extension-changelog.spec.ts`.
 
 ## UI injection scopes
@@ -184,7 +184,9 @@ and the `exthello` handshake: `docs/ui-extensions.md`.
 `changelog.go`, `manifest_validate.go`. `backend/lsp/extension_manager.go` — extension-driven LSP
 discovery (LSP availability = installed extensions). Frontend:
 `services/extension-manager.svelte.ts`, `ui-injector.svelte.ts`, `$lib/api/extensions.ts`,
-`ConfigModal/ExtensionsTab.svelte`.
+`ConfigModal/ExtensionsTab.svelte` and the `Extension*` components beside it, whose Edit-dialog draft is
+`ConfigModal/extensions-draft.svelte.ts`.
+
 ## Checking this
 
 `go test ./backend/extensions/` covers install, repair and deletion.

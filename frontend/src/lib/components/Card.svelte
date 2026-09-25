@@ -5,7 +5,8 @@
     import { MultiSelect } from '$lib/composables/use-multi-select.svelte';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { resolveWorker, getModelName, getProviderDisplayName, displayModelName } from '$lib/utils/providers';
-    import { getStreamingContext, getTaskDiffStatsContext } from '$lib/context';
+    import { streamingTaskStore } from '$lib/stores/streaming-tasks.svelte';
+    import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
     import Card from './Card.svelte';
     import { moveTask, stopTask, resumeTask, deleteTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
     import { mergeQueuedUpdate } from '$lib/utils/task-utils';
@@ -466,7 +467,7 @@
     });
 
     let statusBadge = $derived.by(() => {
-        const streaming = streamingIds.has(task.id);
+        const streaming = streamingTaskStore.has(task.id);
         const state = appStore.board?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state;
         const hasConflict = (appStore.board?.tasks.find(t => t.id === task.id)?.has_merge_conflict ?? task.has_merge_conflict) ?? false;
         if (streaming || state === 'running') return { text: t('board.badge.running'), color: 'var(--color-status-blue)' };
@@ -525,17 +526,7 @@
         return { text, provider: provName, model: displayModel, color: getModelColor(activeModel), isAgent: false };
     });
 
-    // Context stores (must be retrieved at top level, not inside derived/effects)
-    let streamingIdsContext = getStreamingContext();
-    let taskDiffStatsStore = getTaskDiffStatsContext();
-    // Sync streamingIds store to $state for reactive tracking in $derived.by
-    // (get() on a Svelte store inside $derived.by does NOT establish a dependency)
-    let streamingIds = $state<Set<string>>(new Set());
-    $effect(() => {
-        const unsub = streamingIdsContext.subscribe(v => { streamingIds = v; });
-        return unsub;
-    });
-    let diffStats = $derived($taskDiffStatsStore[task.id] || null);
+    let diffStats = $derived(diffStatsStore.get(task.id));
     let hasChanges = $derived(!!diffStats?.hash && ((diffStats.staged_paths?.length || 0) > 0 || !!diffStats.has_committed_changes));
 
     let isSelected = $state(false);
@@ -686,23 +677,20 @@
             let updated: Task;
             if (nextStatus === 'done' && hasChanges) {
                 // Open dialog — it will stream the commit message from the backend
-                const confirmedMessage = await new Promise<string | null>((resolve) => {
-                    dialogStore.commitDialog = {
-                        streaming: true,
-                        message: '',
-                        confirmText: t('board.card.commitAndDone'),
-                        cancelText: t('board.confirm.cancel'),
-                        projectId: thisProjectId,
-                        taskId: thisTask.id,
-                        _resolve: resolve,
-                    };
+                const confirmedMessage = await dialogStore.showCommitDialog({
+                    streaming: true,
+                    message: '',
+                    confirmText: t('board.card.commitAndDone'),
+                    cancelText: t('board.confirm.cancel'),
+                    projectId: thisProjectId,
+                    taskId: thisTask.id,
                 });
                 if (!confirmedMessage) {
                     return; // User cancelled
                 }
                 updated = await commitAndDone(thisProjectId, thisTask.id, confirmedMessage);
                 // Clear stale diff stats
-                taskDiffStatsStore.update(map => { delete map[thisTask.id]; return { ...map }; });
+                diffStatsStore.remove(thisTask.id);
             } else {
                 updated = await moveTask(thisProjectId, thisTask.id, nextStatus);
             }

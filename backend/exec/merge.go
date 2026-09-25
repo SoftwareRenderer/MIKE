@@ -327,36 +327,54 @@ func (m *mergeOrchestrator) ResolveMergeTarget(projectID string, task *types.Tas
 }
 
 // GenerateCommitMessage writes the task's commit message from the conversation.
-// Every commit path goes through it. Each model that contributed gets its own Assisted-by line.
+// Every commit path goes through it, and each model that contributed gets its own Assisted-by line
+// unless the project turned that line off.
 func (m *mergeOrchestrator) GenerateCommitMessage(ctx context.Context, task *types.Task) string {
+	assistedBy := m.assistedByEnabled(task.ProjectID)
 	taskMsgs, _ := m.store.GetTaskMessages(task.ID, task.CurrentThreadID)
 	conversation := BuildConversationFromTaskMessages(taskMsgs)
-	commitMsg := m.generateCommitMessageLLM(ctx, task, commitContextText(conversation))
+	commitMsg := m.generateCommitMessageLLM(ctx, task, commitContextText(conversation), assistedBy)
 	// The LLM's generic answer when it could not run; the title says more.
 	if commitMsg == "file changes" && task.Title != "" {
 		commitMsg = task.Title
 	}
 
-	models := collectUniqueModels(taskMsgs)
-	if len(models) == 0 {
-		if task.ModelName != "" {
-			models = []string{task.ModelName}
-		} else {
-			models = []string{"unknown model"}
+	var models []string
+	if assistedBy {
+		models = collectUniqueModels(taskMsgs)
+		if len(models) == 0 {
+			if task.ModelName != "" {
+				models = []string{task.ModelName}
+			} else {
+				models = []string{"unknown model"}
+			}
 		}
 	}
 
 	return buildCommitMessageWithAssistedBy(commitMsg, models)
 }
 
-// generateCommitMessageLLM asks the model for the message, falling back to
-// "{title}\n\nAssisted-by: {model}" on any error.
-func (m *mergeOrchestrator) generateCommitMessageLLM(ctx context.Context, task *types.Task, turnText string) string {
+// assistedByEnabled reads the project's answer to the Assisted-by trailer; a project that cannot be
+// read keeps it.
+func (m *mergeOrchestrator) assistedByEnabled(projectID string) bool {
+	project, err := m.store.GetProject(projectID)
+	if err != nil {
+		return true
+	}
+	return project.AssistedByEnabled()
+}
+
+// generateCommitMessageLLM asks the model for the message, falling back to the task's title (plus the
+// Assisted-by line when the project wants it) on any error.
+func (m *mergeOrchestrator) generateCommitMessageLLM(ctx context.Context, task *types.Task, turnText string, assistedBy bool) string {
 	serverURL, modelName, _ := m.utilityTarget(task)
 	if serverURL == "" || modelName == "" {
 		return "file changes"
 	}
-	fallback := fmt.Sprintf("%s\n\nAssisted-by: %s", task.Title, assistedByModel(modelName))
+	fallback := task.Title
+	if assistedBy {
+		fallback = buildCommitMessageWithAssistedBy(task.Title, []string{modelName})
+	}
 
 	labelMessages := buildCommitMessages(turnText)
 
@@ -391,9 +409,12 @@ func (m *mergeOrchestrator) StreamCommitMessage(s *httputil.SSE, taskID string, 
 	turnText := commitContextText(conversation)
 	labelMessages := buildCommitMessages(turnText)
 
-	models := collectUniqueModels(taskMsgs)
-	if len(models) == 0 {
-		models = []string{task.ModelName}
+	var models []string
+	if m.assistedByEnabled(task.ProjectID) {
+		models = collectUniqueModels(taskMsgs)
+		if len(models) == 0 {
+			models = []string{task.ModelName}
+		}
 	}
 
 	var sb strings.Builder

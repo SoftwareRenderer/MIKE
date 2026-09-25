@@ -119,9 +119,3 @@ func RepoAtMessage(t *testing.T, dir, subject string) {
 	Git(t, dir, "add", "README.md")
 	Git(t, dir, "commit", "-m", subject)
 }
-
-// RevParse resolves a ref (HEAD, a branch, a tag) to its commit hash.
-func RevParse(t *testing.T, dir, ref string) string {
-	t.Helper()
-	return GitOutput(t, dir, "rev-parse", ref)
-}

@@ -287,8 +287,17 @@ type Project struct {
 	SandboxEnvs             []SandboxEnv   `json:"sandbox_envs,omitempty"`
 	SandboxCapabilities     []string       `json:"sandbox_capabilities,omitempty"`
 	ActiveTerminalPorts     []AssignedPort `json:"active_terminal_ports,omitempty"` // transient: assigned ports from project-level terminal
-	CreatedAt               time.Time      `json:"created_at"`
-	UpdatedAt               time.Time      `json:"updated_at"`
+	// CommitAssistedBy is this project's answer to the "Assisted-by" commit trailer, read through
+	// AssistedByEnabled.
+	CommitAssistedBy *bool     `json:"commit_assisted_by,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// AssistedByEnabled says whether this project's commit messages credit the models that contributed.
+// An unset value means on, so a row predating the flag keeps the trailer.
+func (p *Project) AssistedByEnabled() bool {
+	return p.CommitAssistedBy == nil || *p.CommitAssistedBy
 }
 
 // ProjectCounts holds task counts per status for a project.

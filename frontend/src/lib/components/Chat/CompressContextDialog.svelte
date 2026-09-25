@@ -21,16 +21,16 @@
 
     // Derived from the dialog store so the donut + stats track live sources
     // (e.g. stream state) in real time while the dialog is open.
-    let used = $derived(resolveStat(dialogStore.compressContextDialog?.used));
-    let limit = $derived(resolveStat(dialogStore.compressContextDialog?.limit));
-    let sessionCost = $derived(resolveStat(dialogStore.compressContextDialog?.sessionCost));
+    let used = $derived(resolveStat(dialogStore.compressContextDialogSlot.pending?.used));
+    let limit = $derived(resolveStat(dialogStore.compressContextDialogSlot.pending?.limit));
+    let sessionCost = $derived(resolveStat(dialogStore.compressContextDialogSlot.pending?.sessionCost));
 
     let percentage = $derived(limit > 0 ? Math.round((used / limit) * 100) : 0);
 
     const dialog = usePromiseDialog({
         slot: {
-            get: () => dialogStore.compressContextDialog,
-            clear: () => { dialogStore.compressContextDialog = null; },
+            get: () => dialogStore.compressContextDialogSlot.pending,
+            clear: () => { dialogStore.compressContextDialogSlot.clear(); },
         },
         arm: (value) => {
             confirmOverride = value.confirmText ?? null;

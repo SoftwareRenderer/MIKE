@@ -51,9 +51,9 @@ function seededBoard() {
     appStore.board = { project_id: 'p1', tasks: [] } as never;
 }
 
-async function submitSubtask(props: Record<string, unknown>) {
+async function submitSubtask() {
     const { container } = render(CreateTaskModal, {
-        props: { projectId: 'p1', parentId: PARENT_ID, onClose: () => {}, ...props },
+        props: { projectId: 'p1', parentId: PARENT_ID, onClose: () => {} },
     });
     // Waiting on the parent's title proves the fetch that also brings its status landed.
     await waitFor(() => expect(container.querySelector('.parent-label strong')?.textContent).toBe('Started parent'));
@@ -87,23 +87,20 @@ describe('CreateTaskModal — a subtask of a started task', () => {
 
     it('is placed Pending beneath its parent, not in the backlog', async () => {
         api.createTask.mockReturnValue(new Promise(() => {})); // still in flight when we look
-        const created = vi.fn();
-        await submitSubtask({ onOptimisticTaskCreated: created });
+        await submitSubtask();
 
-        await waitFor(() => expect(created).toHaveBeenCalled());
-        const card = created.mock.calls[0][0] as Task;
+        await waitFor(() => expect(appStore.board?.tasks).toHaveLength(1));
+        const card = appStore.board!.tasks[0] as Task;
         expect(card.status).toBe('in_progress');
         expect(card.execution_state).toBe('idle'); // the "Pending" badge
     });
 
     it('shows a server refusal and drops the card instead of queueing it', async () => {
         api.createTask.mockRejectedValue(new Error('parent task is archived'));
-        const removed = vi.fn();
-        await submitSubtask({ onRemoveOptimisticTask: removed });
+        await submitSubtask();
 
         await waitFor(() => expect(toast).toHaveBeenCalled());
         expect(toast.mock.calls[0][0]).toContain('parent task is archived');
-        expect(removed).toHaveBeenCalled();
         expect(appStore.board?.tasks).toHaveLength(0);
         // A refusal is not a lost connection: nothing queued, nothing marked offline.
         expect(api.setOfflineStatus).not.toHaveBeenCalled();
@@ -112,12 +109,10 @@ describe('CreateTaskModal — a subtask of a started task', () => {
 
     it('still queues the create when the network is what failed', async () => {
         api.createTask.mockRejectedValue(new TypeError('Failed to fetch'));
-        const removed = vi.fn();
-        await submitSubtask({ onRemoveOptimisticTask: removed });
+        await submitSubtask();
 
         await waitFor(() => expect(api.enqueueAction).toHaveBeenCalled());
         expect(api.setOfflineStatus).toHaveBeenCalledWith(true);
-        expect(removed).not.toHaveBeenCalled();
         expect(appStore.board?.tasks).toHaveLength(1); // the card stays, promising a retry
         // The queued body carries the column, so the replay lands it under its parent.
         const queued = api.enqueueAction.mock.calls[0][0] as { type: string; params: { taskData: Task } };

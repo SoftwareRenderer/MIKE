@@ -42,9 +42,13 @@ func (s *Store) CreateProject(p *types.Project) error {
 			capsJSON = string(b)
 		}
 	}
+	assistedBy := 0
+	if p.AssistedByEnabled() {
+		assistedBy = 1 // unset means on, the column's default
+	}
 	_, err := s.db.Exec(
-		`INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, p.Path, ptrStr(p.OriginBranch), B2I(p.SandboxEnabled), B2I(p.SandboxNetworkIsolation), ptrStr(p.SandboxImage), ptrStr(p.SandboxDockerfilePath), memoryLimit, forwardPortsJSON, mountsJSON, envsJSON, capsJSON, p.CreatedAt.Format(time.RFC3339), p.UpdatedAt.Format(time.RFC3339),
+		`INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, p.Path, ptrStr(p.OriginBranch), B2I(p.SandboxEnabled), B2I(p.SandboxNetworkIsolation), ptrStr(p.SandboxImage), ptrStr(p.SandboxDockerfilePath), memoryLimit, forwardPortsJSON, mountsJSON, envsJSON, capsJSON, assistedBy, p.CreatedAt.Format(time.RFC3339), p.UpdatedAt.Format(time.RFC3339),
 	)
 	return err
 }
@@ -52,21 +56,23 @@ func (s *Store) CreateProject(p *types.Project) error {
 // projectColumns lists the projects table columns in the exact order scanProject
 // reads them. Keep the two in step — a SELECT built from anything else will scan
 // silently wrong values, not fail.
-const projectColumns = `id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_memory_limit, sandbox_forward_ports, sandbox_mounts, sandbox_envs, sandbox_capabilities, created_at, updated_at`
+const projectColumns = `id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_memory_limit, sandbox_forward_ports, sandbox_mounts, sandbox_envs, sandbox_capabilities, commit_assisted_by, created_at, updated_at`
 
 // scanProject reads one project row from either a *sql.Row or an *sql.Rows cursor
 // and applies the column conventions (NULL-able text columns collapse to "",
 // 0/1 integers to bools, JSON columns unmarshal best-effort).
 func scanProject(s scanner, p *types.Project) error {
 	var originBranch, sandboxImage, sandboxDockerfilePath, forwardPortsJSON, mountsJSON, envsJSON, capsJSON sql.NullString
-	var sandboxEnabled, sandboxNetworkIsolation int
+	var sandboxEnabled, sandboxNetworkIsolation, commitAssistedBy int
 	var createdAt, updatedAt string
-	if err := s.Scan(&p.ID, &p.Name, &p.Path, &originBranch, &sandboxEnabled, &sandboxNetworkIsolation, &sandboxImage, &sandboxDockerfilePath, &p.SandboxMemoryLimit, &forwardPortsJSON, &mountsJSON, &envsJSON, &capsJSON, &createdAt, &updatedAt); err != nil {
+	if err := s.Scan(&p.ID, &p.Name, &p.Path, &originBranch, &sandboxEnabled, &sandboxNetworkIsolation, &sandboxImage, &sandboxDockerfilePath, &p.SandboxMemoryLimit, &forwardPortsJSON, &mountsJSON, &envsJSON, &capsJSON, &commitAssistedBy, &createdAt, &updatedAt); err != nil {
 		return err
 	}
 	p.OriginBranch = originBranch.String
 	p.SandboxEnabled = I2B(sandboxEnabled)
 	p.SandboxNetworkIsolation = I2B(sandboxNetworkIsolation)
+	assistedBy := I2B(commitAssistedBy)
+	p.CommitAssistedBy = &assistedBy
 	p.SandboxImage = sandboxImage.String
 	p.SandboxDockerfilePath = sandboxDockerfilePath.String
 	if forwardPortsJSON.Valid && forwardPortsJSON.String != "" {
@@ -206,6 +212,11 @@ func (s *Store) UpdateProjectSandboxEnvs(id string, envs []types.SandboxEnv) err
 // UpdateProjectSandboxCapabilities updates the sandbox_capabilities for a project.
 func (s *Store) UpdateProjectSandboxCapabilities(id string, capabilities []string) error {
 	return s.updateProjectColumn(id, "sandbox_capabilities", marshalColumnJSON(capabilities))
+}
+
+// UpdateProjectCommitAssistedBy sets whether a project's commit messages carry the "Assisted-by" trailer.
+func (s *Store) UpdateProjectCommitAssistedBy(id string, enabled bool) error {
+	return s.updateProjectColumn(id, "commit_assisted_by", B2I(enabled))
 }
 
 func (s *Store) DeleteProject(id string) error {

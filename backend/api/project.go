@@ -656,6 +656,13 @@ func (h *ProjectHandler) handleUpdateProject(w http.ResponseWriter, r *http.Requ
 		httputil.Fail(w, err, "update project", "project not found")
 		return
 	}
+	// Changing the trailer answer recreates no container and stops no task, so it is not a sandbox field.
+	if req.CommitAssistedBy != nil {
+		if err := h.store.UpdateProjectCommitAssistedBy(id, *req.CommitAssistedBy); err != nil {
+			httputil.Fail(w, errs.Operation("update commit trailer setting", err), "update project", "project not found")
+			return
+		}
+	}
 
 	// Containers and sessions are recreated with the new settings on next use.
 	if hasSandboxChange {

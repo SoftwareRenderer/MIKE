@@ -28,7 +28,7 @@ afterEach(() => {
     stats.used = 12000;
     stats.limit = 32000;
     stats.sessionCost = 0;
-    dialogStore.compressContextDialog = null;
+    dialogStore.compressContextDialogSlot.clear();
     i18n.setCatalog(DEFAULT_LOCALE, null);
 });
 
@@ -102,7 +102,7 @@ describe('CompressContextDialog dismissal', () => {
         await fireEvent.click(footerButton(container, 'Cancel'));
         await flush();
 
-        expect(dialogStore.compressContextDialog).toBeNull();
+        expect(dialogStore.compressContextDialogSlot.pending).toBeNull();
         await expect(answered).resolves.toBe(false);
     });
 
@@ -111,13 +111,9 @@ describe('CompressContextDialog dismissal', () => {
         // that path is covered in i18n/__tests__/runtime.unit.svelte.ts.
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const { container } = render(CompressContextDialog);
-        // The store fills both labels in, so the no-label caller is written straight into the slot.
-        let answer = false;
-        dialogStore.compressContextDialog = {
-            used: 8000,
-            limit: 32000,
-            _resolve: (value) => { answer = value; },
-        };
+        // Opened on the slot rather than through showCompressContextDialog, so no label is filled in
+        // and the dialog's own defaults are what the pack translates.
+        const answered = dialogStore.compressContextDialogSlot.open({ used: 8000, limit: 32000 });
         await flush();
 
         expect(footerButton(container, 'Compress')).toBeTruthy();
@@ -127,10 +123,10 @@ describe('CompressContextDialog dismissal', () => {
 
         expect(footerButton(container, 'Compresser')).toBeTruthy();
         expect(footerButton(container, 'Annuler')).toBeTruthy();
-        expect(dialogStore.compressContextDialog).not.toBeNull();
+        expect(dialogStore.compressContextDialogSlot.pending).not.toBeNull();
 
         await fireEvent.click(footerButton(container, 'Compresser'));
-        expect(answer).toBe(true);
+        await expect(answered).resolves.toBe(true);
         warn.mockRestore();
     });
 });

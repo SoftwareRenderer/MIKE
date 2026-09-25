@@ -51,7 +51,7 @@ copy the built module to that path (gitignored) and re-run `-run TestWasmPiAdapt
 `types.AgentURLPrefix` with `AgentProviderURL` (emit) and `ParseAgentURL` / `IsAgentURL` (read) in
 `backend/types/agent_url.go` — because `backend/agent` already sits *above* `backend/config` in the
 import graph, and the config store is one of the readers. Every Go site calls it; the browser mirrors
-the prefix as `AGENT_URL_PREFIX` (`frontend/src/lib/types.ts`). Both directions are held:
+the prefix as `AGENT_URL_PREFIX` (`frontend/src/lib/types/index.ts`). Both directions are held:
 `TestRegistry_EmittedProviderURLsParseBack` re-reads every URL `ToProviders()` emits.
 
 ## Which binary the agent runs

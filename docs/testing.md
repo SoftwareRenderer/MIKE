@@ -86,8 +86,8 @@ only under load.
   only `.btn-commit-and-done` opens the commit dialog, and it is gated on STAGED changes
   while a trailing *user* chat entry makes it render "Resume" instead (`waitForTurnAnswered`).
 - **Offline = abort `**/api/**`, not `context.setOffline(true)`.** The offline screen
-  (`App.svelte`'s `hasLocalCache` branch) exists for "app booted, API unreachable, cache
-  available"; going fully offline takes the document down with it and you are asserting on
+  (`App.svelte`'s `hasLocalCache` branch, from `session-boot.svelte.ts`) exists for "app booted, API
+  unreachable, cache available"; going fully offline takes the document down too, so you assert on
   Chrome's error page.
 - **`locator.isVisible({ timeout })` does not wait** — Playwright's own types say so ("does
   not wait for the element to become visible and returns immediately"). So
@@ -186,7 +186,7 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
 
 ## Frontend cleanliness gates (run by `make check`)
 
-`make test-frontend` ends with two gates over `frontend/src`:
+`make test-frontend` ends with three gates over `frontend/src`:
 
 - **`npm run check:dead`** — knip over the **production view**: unused files, exports, exported types,
   duplicate exports, unlisted imports, unused dependencies. `ignore` in the config excludes every test
@@ -196,6 +196,15 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
   `tsconfig.unused.json`, which turns on `noUnusedLocals` and `noUnusedParameters`; `npm run check` does
   not. The script keeps the two `is declared but …` messages, prints `file:line name`, and fails on any.
   It covers test files too, because `tsconfig.json` includes `src/**/*.ts`.
+- **`npm run check:fetch`** — `frontend/scripts/check-fetch.sh` fails on a `fetch(` in any `*.svelte` or
+  `*.ts` file under `src/` outside `src/lib/api/`. The API layer owns credentials, the CSRF token and the
+  reading of a failed request, so a second caller answers one outage in its own words: a bare `TypeError`,
+  no offline flag raised, and no queued write. Two skips are named and reasoned inside the script — a test
+  file, whose `fetch(` is a stub or an adversarial payload string, and `src/lib/i18n/load-pack.ts`, which
+  must read a missing pack as English-plus-a-report instead of as going offline (`docs/i18n.md`). An exempt
+  path that has stopped fetching fails too, so the exemption list cannot rot. The pattern wants a call
+  position, so prose naming `fetch()` — one capability description does — is not a request. A scan that
+  finds no file to scan is a failure, not a clean run.
 
 **Names starting with `_` are exempt, deliberately.** `$effect(() => { const _v = uiInjector.getPointVersion(); … })`
 subscribes by *reading*; the value is never used and the read is the whole point. TypeScript exempts

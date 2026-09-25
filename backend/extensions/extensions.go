@@ -682,8 +682,6 @@ func (sc *SandboxConfig) DependencyGrant() string {
 type CommandRef struct {
 	Command string   `json:"command"`
 	Args    []string `json:"args,omitempty"`
-	// TimeoutSeconds is the declared bound for one run, in seconds.
-	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
 }
 
 // Argv is the command line to run, command first. Returns false when no command
