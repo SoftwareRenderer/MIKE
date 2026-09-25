@@ -1,7 +1,8 @@
 <script lang="ts">
-    import { markdownToSafeHTML } from '$lib/utils/sanitize';
+    import { markdownToSafeHTML, isDiagramFence } from '$lib/utils/sanitize';
     import { splitMarkdownSegments } from '$lib/utils/markdown-segments';
     import CodeFence from './CodeFence.svelte';
+    import DiagramFence from './DiagramFence.svelte';
 
     interface Props {
         content: string;
@@ -14,7 +15,12 @@
 
 {#each segments as seg}
     {#if seg.kind === 'code'}
-        <CodeFence lang={seg.lang} text={seg.text} />
+        {#if !seg.open && isDiagramFence(seg.lang)}
+            <!-- An open fence is a diagram half-written: the source is the honest rendering of it. -->
+            <DiagramFence text={seg.text} />
+        {:else}
+            <CodeFence lang={seg.lang} text={seg.text} />
+        {/if}
     {:else}
         {@html markdownToSafeHTML(seg.source)}
     {/if}

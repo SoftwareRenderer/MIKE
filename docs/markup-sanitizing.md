@@ -55,7 +55,63 @@ order, and the prose renders as the whole message did.
 A code segment is `Chat/CodeFence.svelte`, so its copy control is a real element with a handler, scoped
 styles and a catalog key for its tooltip — button text never crosses the sanitizer, which is rule 2's
 reason read from the other side. A fence nested in a list item or a blockquote stays in the prose run and
-carries no control, and so does a fence whose body is empty.
+carries no control, and so does a fence whose body is empty. A code segment also carries `open`: whether
+the fence's closing delimiter has arrived. A streaming message ends in one, and only a fence that draws
+something needs the difference.
+
+### A diagram fence is drawn as an image
+
+A closed ` ```mermaid ` fence with a body is drawn. `isDiagramFence` owns the tag, beside `isRenderedFence`;
+`Chat/DiagramFence.svelte` owns the bubble's half and `src/lib/utils/diagram.ts` owns everything below it.
+An open fence stays `CodeFence`, because half a diagram is not a diagram and its source is the honest
+rendering of it. A nested fence, an empty one and a message the user wrote are text as well.
+
+**What reaches the screen is an image.** The renderer returns an SVG document, and that document becomes
+`<img src="data:image/svg+xml;base64,…">`. A browser loads an SVG image as a document of its own: its
+stylesheet styles that document and nothing here, its scripts and event handlers never run, its external
+references are never fetched, and its links do not navigate. The markup therefore reaches no sink — no
+`{@html}`, no `innerHTML` — and rule 5 accounts for the one URL binding. `src/lib/utils/diagram.ts` builds
+the only `data:` URL this app builds at runtime, from a literal prefix; the other `data:` in the tree is a
+literal icon in `FileEditor.svelte`'s CSS, which no message can reach.
+
+**`svgImageMarkup` is the one helper in `sanitize.ts` that keeps `style`,** and the consumer is the reason.
+It sanitizes with DOMPurify's defaults plus `form` refused, requires exactly one `<svg>` element with
+nothing beside it, sets `xmlns`, and writes the bytes with `XMLSerializer` so they parse as
+`image/svg+xml`. A `<!DOCTYPE>` carrying an internal subset is refused rather than filtered: it does not
+survive the parse that produced the DOM being re-serialized. Two things DOMPurify keeps are refused here —
+the **root's own** `style` attribute, which is the one declaration in the tree that could move this page's
+layout, and any `href`, `xlink:href` or `src` that is not an internal `#fragment`. The contract is the
+consumer: these bytes are for an image document and never for `innerHTML`.
+
+**What the renderer is not told.** `diagram.ts` sets `securityLevel: 'strict'`, `htmlLabels: false`,
+`suppressErrorRendering: true` and `startOnLoad: false`, and names those keys — plus `themeCSS`,
+`themeVariables`, `fontFamily` and `maxTextSize` — in the library's `secure` list, which is how a diagram's
+own `%%{init}%%` directive is refused. It caps the source before the parser sees it, and the markup before
+it becomes a URL. It renders into a `div` it creates and removes whatever the render does, and runs one
+render at a time, because the library keeps its configuration in one process-global object. A refused
+diagram is the source plus one catalog line. There is no second attempt with weaker settings.
+
+**Where CSP is the control.** Text measurement needs layout, so the library builds the diagram inside a
+live element before serializing it. For the length of a draw, markup that no sanitizer of ours has seen is
+in this document, off-screen and `aria-hidden`; `script-src 'self' 'nonce-…'` is what stops anything in it
+running. The font the diagram draws with is the page's computed `font-family` through `safeCSSValue`,
+because an image document resolves no custom property of ours.
+
+**What it costs.** A `journey` diagram draws its labels in a `<foreignObject>`, so its boxes arrive
+without their words: keeping them would widen DOMPurify's SVG allowlist to HTML in the one path that keeps
+styles, and `__tests__/chat-diagram-fence.unit.svelte.ts` holds the no-HTML boundary instead. A `mermaid`
+fence in a tool body stays a `<pre>`, because `Chat/ToolCall.svelte` renders one HTML string and has no
+fence split to hang a component on.
+
+The renderer is 116 chunks and 4.9 MB on disk. The first flowchart of a session fetches 45 of the built
+chunks — 34 of them the renderer's — 1.2 MB gzipped; a chat with no diagram fetches none. The service worker
+precache carries 28 entries and 2.7 MB, against 144 entries and 7.6 MB for the same build with the deny list
+removed: every diagram type into every install, whatever that install's chats contain.
+`scripts/mermaid-chunks.ts` names every chunk the app cannot reach except through the library, and the
+precache refuses that name. `npm run build` prints the chunk names and the precache line, and fails when the
+library is in the graph and no chunk got the name: a deny list matching nothing would otherwise re-add the
+megabytes quietly.
+
 
 The tests are written as the payload list plus a control case for each refusal, proving it is this config
 and not DOMPurify's, each control written against the shape the defaults **keep** — a refusal tested only
@@ -131,3 +187,10 @@ not the control there, because inside a `style` attribute a `;` simply starts an
 
 `cd frontend && npm run check:sinks` audits every sink, URL and style binding, and audits its own claim.
 `npm run check:sinks-test` proves that audit is capable of failing.
+`npm test` holds the rest. `__tests__/sanitize.unit.ts` runs the payload list through both markup paths and
+the SVG-document path. `__tests__/diagram.unit.ts` pins what a directive may not change, and that the bytes
+handed to the `<img>` are the sanitized ones. `__tests__/chat-diagram-fence.unit.svelte.ts` pins which
+fences get drawn at all.
+`npm run build` prints the precache line and the chunk names, and fails when mermaid is in the graph and no
+chunk is named for it; `scripts/mermaid-chunks.ts` decides that name from the module graph rather than from
+a package list someone stops maintaining.

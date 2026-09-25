@@ -3,6 +3,7 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { VitePWA } from 'vite-plugin-pwa';
 // The extension is load-bearing: `configLoader: 'native'` resolves specifiers verbatim.
 import { buildIdPlugin } from './scripts/build-id.ts';
+import { isMermaidChunk, mermaidChunksPlugin, MERMAID_CHUNK_PREFIX, MERMAID_PRECACHE_DENY } from './scripts/mermaid-chunks.ts';
 import { alias } from './scripts/aliases.js';
 import { isAppShellAsset, isExtensionAsset } from './scripts/sw-routes.ts';
 
@@ -10,6 +11,7 @@ export default defineConfig({
     plugins: [
         svelte(),
         buildIdPlugin(),
+        mermaidChunksPlugin(),
         VitePWA({
             // No `autoUpdate`: that would set skipWaiting/clientsClaim and let the browser pick when a
             // new build takes over. services/app-update.ts releases a waiting worker itself.
@@ -43,6 +45,9 @@ export default defineConfig({
             },
             workbox: {
                 globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+                // The diagram renderer is fetched the first time a diagram appears; precaching it would
+                // put several megabytes into every install, whatever that install's chats contain.
+                globIgnores: [MERMAID_PRECACHE_DENY],
                 // The generated worker has no click handler of its own; this adds the one that opens what
                 // a notification was about.
                 importScripts: ['/sw-notifications.js'],
@@ -100,6 +105,14 @@ export default defineConfig({
         chunkSizeWarningLimit: 500,
         rollupOptions: {
             output: {
+                // Renderer chunks get one name so the precache deny list has one pattern to refuse; the
+                // rule that decides is in scripts/mermaid-chunks.ts.
+                chunkFileNames(info: unknown) {
+                    const chunk = (info as { chunk?: { moduleIds?: string[] } }).chunk ?? (info as { moduleIds?: string[] });
+                    return isMermaidChunk(chunk.moduleIds ?? [])
+                        ? `assets/${MERMAID_CHUNK_PREFIX}[hash].js`
+                        : 'assets/[name]-[hash].js';
+                },
                 manualChunks(id) {
                     // Split CodeMirror language packages into separate chunks
                     // so they're only loaded when a diff of that language is viewed.
