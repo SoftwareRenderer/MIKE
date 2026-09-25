@@ -148,6 +148,12 @@ test.describe.serial('Commit Dialog', () => {
     const textarea = page.locator('.commit-textarea');
     await expect(textarea).toBeVisible({ timeout: 15000 });
 
+    // The message has to arrive over the preview stream — each frame the server writes is painted
+    // into this textarea, so a non-empty value here is the client decoding the frame stream, and an
+    // empty one is that decode silently producing nothing.
+    await expect(textarea).not.toHaveValue('', { timeout: 20000 });
+    expect((await textarea.inputValue()).trim()).not.toBe('');
+
     // Edit the commit message (this also cancels streaming generation)
     await textarea.fill('Edited commit message for testing');
 
@@ -216,5 +222,9 @@ test.describe.serial('Commit Dialog', () => {
     // The confirm button should be enabled (user has typed a message)
     const confirmBtn = page.locator('.modal-footer .btn-primary');
     await expect(confirmBtn).toBeEnabled();
+
+    // A cancelled stream is a cancellation, not an outage: the app must not read the abort as a lost
+    // connection, because going offline is what starts queueing every later write into IndexedDB.
+    await expect(page.locator('.offline-screen')).toHaveCount(0);
   });
 });

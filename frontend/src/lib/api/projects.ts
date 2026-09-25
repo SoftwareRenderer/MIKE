@@ -1,5 +1,5 @@
 import type { Board, Project, ProjectCounts, ProjectStats, ProjectUpdates } from '../types';
-import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
+import { API_BASE, apiFetch, apiError, ensureCsrfToken, readEventStream } from './helpers';
 import {
     getOfflineStatus,
     enqueueAction,
@@ -173,31 +173,18 @@ async function cloneProjectRaw(
         throw await apiError(res, t('api.cloneProject'));
     }
 
-    const reader = res.body?.getReader();
-    if (!reader) throw new Error(t('api.streamingNotSupported'));
-
-    const decoder = new TextDecoder();
-    let buffer = '';
     let project: Project | null = null;
     let errorMessage: string | null = null;
 
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const event = parseCloneEvent(line.slice(6));
-            if (!event) continue;
-            if (event.type === 'progress') {
-                onProgress?.(event.percent);
-            } else if (event.type === 'done') {
-                project = event.project;
-            } else if (event.type === 'error') {
-                errorMessage = event.message;
-            }
+    for await (const frame of readEventStream(res)) {
+        const event = parseCloneEvent(frame.data);
+        if (!event) continue;
+        if (event.type === 'progress') {
+            onProgress?.(event.percent);
+        } else if (event.type === 'done') {
+            project = event.project;
+        } else if (event.type === 'error') {
+            errorMessage = event.message;
         }
     }
 

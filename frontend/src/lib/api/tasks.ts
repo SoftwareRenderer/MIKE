@@ -1,5 +1,5 @@
 import type { ChatTurn, MemoryAlertAckPayload, Task, TaskMessage } from '../types';
-import { API_BASE, apiFetch, apiError, generateId } from './helpers';
+import { API_BASE, apiFetch, apiError, generateId, readEventStream } from './helpers';
 import { setBoardCache, getBoardCache, messagesCacheKey, messageFullCacheKey } from '../storage';
 import { mergeCachedRows } from '../utils/chat-window';
 import { markCached } from './cache';
@@ -83,6 +83,71 @@ export async function commitAndDone(projectId: string, taskId: string, commitMes
         return await queueWrite('commitAndDone', { projectId, taskId }, { id: taskId, status: 'done', moved_at: new Date().toISOString() } as Task);
     }
     return commitAndDoneRaw(projectId, taskId, commitMessage);
+}
+
+/** One frame of the commit-message preview stream, with the fields that event carries. */
+export type CommitPreviewFrame =
+    | { event: 'metadata'; authorName: string; authorEmail: string; mergeTarget: string }
+    | { event: 'token'; content: string }
+    | { event: 'prompt_progress'; percent: number }
+    | { event: 'done'; content: string }
+    | { event: 'error'; error: string };
+
+/**
+ * Stream the commit message this task's changes deserve, frame by frame, until the server sends its
+ * `done` or `error` frame. `signal` is the only bound on the wait: generating the message is a model
+ * call, and a slow one is still the answer the dialog waits for.
+ *
+ * The wire events and their payloads are `writeSSE`'s in `backend/exec/merge.go`, plus the `metadata`
+ * frame `HandleCommitPreviewStream` sends first. An event this function does not know is skipped rather
+ * than fatal, and so is a frame whose data is not a JSON object. This stays a plain `fetch` rather than
+ * `apiFetch`: a preview that never arrived costs the dialog a log line, not the app's offline flag.
+ */
+export async function* streamCommitPreview(
+    projectId: string,
+    taskId: string,
+    signal?: AbortSignal,
+): AsyncGenerator<CommitPreviewFrame> {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/commit-preview/stream`, {
+        method: 'GET',
+        credentials: 'include',
+        signal,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    for await (const frame of readEventStream(res)) {
+        let payload: unknown;
+        try {
+            payload = JSON.parse(frame.data);
+        } catch {
+            continue;
+        }
+        if (payload === null || typeof payload !== 'object') continue;
+        const fields = payload as Record<string, unknown>;
+
+        switch (frame.event) {
+            case 'metadata':
+                yield {
+                    event: 'metadata',
+                    authorName: String(fields.author_name ?? ''),
+                    authorEmail: String(fields.author_email ?? ''),
+                    mergeTarget: String(fields.merge_target ?? ''),
+                };
+                break;
+            case 'token':
+                yield { event: 'token', content: String(fields.content ?? '') };
+                break;
+            case 'prompt_progress':
+                yield { event: 'prompt_progress', percent: Number(fields.percent ?? 0) };
+                break;
+            case 'done':
+                yield { event: 'done', content: String(fields.content ?? '') };
+                break;
+            case 'error':
+                yield { event: 'error', error: String(fields.error ?? '') };
+                break;
+        }
+    }
 }
 
 /** Dismiss this task's memory alert. Queued when offline, like any other write. */

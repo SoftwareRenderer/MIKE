@@ -1,4 +1,4 @@
-import { API_BASE, apiFetch, apiError, ensureCsrfToken, generateId, isAborted, registerSetOffline } from './helpers';
+import { API_BASE, apiFetch, apiError, ensureCsrfToken, generateId, isAborted, readEventStream, registerSetOffline } from './helpers';
 import { loadQueue as loadQueueFromStorage, saveQueue as saveQueueToStorage, type QueuedAction as StoredQueuedAction } from '../storage';
 import { getBoardCache, refusedSendsCacheKey, removeBoardCache, setBoardCache } from '../storage';
 import type { PendingSend } from '../utils/pending-sends';
@@ -612,37 +612,22 @@ export async function buildSandboxImageStream(
         throw new Error(err.error || t('api.buildSandboxImage'));
     }
 
-    const reader = res.body?.getReader();
-    if (!reader) throw new Error(t('api.streamingNotSupported'));
-
-    const decoder = new TextDecoder();
-    let buffer = '';
     let result: { status: string; image: string; project: string } | null = null;
 
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-            if (line.startsWith('data: ')) {
-                const data = line.slice(6);
-                // Only parse JSON objects (final result), treat everything else as text
-                if (data.startsWith('{')) {
-                    try {
-                        const parsed = JSON.parse(data);
-                        if (parsed && typeof parsed === 'object' && 'status' in parsed) {
-                            result = parsed;
-                            continue;
-                        }
-                    } catch {}
+    for await (const frame of readEventStream(res)) {
+        const data = frame.data;
+        // The final result is the JSON object carrying `status`; everything else is a line for the
+        // log, including a `{`-shaped line that is not valid JSON.
+        if (data.startsWith('{')) {
+            try {
+                const parsed = JSON.parse(data);
+                if (parsed && typeof parsed === 'object' && 'status' in parsed) {
+                    result = parsed;
+                    continue;
                 }
-                onLine(data);
-            }
+            } catch {}
         }
+        onLine(data);
     }
 
     if (!result) throw new Error(t('api.buildCompletedWithoutResult'));

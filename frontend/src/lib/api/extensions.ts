@@ -1,5 +1,5 @@
 import type { Extension, RegistryEntry, ExtensionUpdate } from '../types';
-import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
+import { API_BASE, apiFetch, apiError, ensureCsrfToken, readEventStream } from './helpers';
 import { t } from '$lib/i18n';
 
 /** Fetch all installed extensions with runtime status. */
@@ -187,45 +187,21 @@ function streamOperation(path: string, body: Record<string, any>): AsyncIterable
             );
         }
 
-        const reader = res.body?.getReader();
-        if (!reader) {
-            throw new Error(t('api.noReader'));
+        let sawDone = false;
+        for await (const frame of readEventStream(res)) {
+            let event: BuildProgressEvent;
+            try {
+                event = JSON.parse(frame.data) as BuildProgressEvent;
+            } catch {
+                continue; // Skip malformed data
+            }
+            if (event.done) sawDone = true;
+            yield event;
         }
 
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let sawDone = false;
-
-        try {
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-
-                // Parse SSE events
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const event = JSON.parse(line.slice(6)) as BuildProgressEvent;
-                            if (event.done) sawDone = true;
-                            yield event;
-                        } catch {
-                            // Skip malformed data
-                        }
-                    }
-                }
-            }
-
-            // A healthy SSE stream always ends with a `done` event.
-            if (!sawDone) {
-                throw new Error(t('api.operationEndedEarly'));
-            }
-        } finally {
-            reader.releaseLock();
+        // A healthy SSE stream always ends with a `done` event.
+        if (!sawDone) {
+            throw new Error(t('api.operationEndedEarly'));
         }
     };
 
