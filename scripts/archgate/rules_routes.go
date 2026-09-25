@@ -630,10 +630,10 @@ const appStreamUnion = "frontend/src/lib/api/events.ts"
 
 // streamEventUnion is the browser's second vocabulary declaration, for the per-task events that ride
 // inside a task_event frame. Same trap as appStreamUnion: written down is not read.
-const streamEventUnion = "frontend/src/lib/types.ts"
+const streamEventUnion = "frontend/src/lib/types/index.ts"
 
 // unionNameByFile is the file-to-union map of those declarations. The block is stripped rather than the
-// file, because lib/types.ts also holds real code and its readers still count.
+// file, because lib/types/index.ts also holds real code and its readers still count.
 var unionNameByFile = map[string]string{
 	appStreamUnion:   "AppStreamEventType",
 	streamEventUnion: "StreamEventType",

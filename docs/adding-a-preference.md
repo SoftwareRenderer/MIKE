@@ -15,7 +15,7 @@ default.
 
 1. `*string` field in `types.KeyboardShortcuts` (`backend/types/domain.go`).
 2. All-nil check in `normalizeKeyboardShortcuts` (`backend/config/config.go`).
-3. Field in `KeyboardShortcuts` (`$lib/types.ts`).
+3. Field in `KeyboardShortcuts` (`$lib/types`).
 4. Default in `DEFAULT_SHORTCUTS` — or a platform-aware `defaultXxx()` helper
    (`$lib/utils/keyboard.ts`) if the default differs per platform; platform-aware defaults are
    **not** `DEFAULT_SHORTCUTS` entries.
@@ -52,7 +52,7 @@ Example in-repo: `hide_model_badge` gates `.model-badge` in `Card.svelte`
    list is never read from the `config` table, so the flag answers nil whatever was saved. Add a
    `ConfigStore` accessor returning a plain `bool` when a Go consumer needs one, and say in it what an
    unset value means — `GetReclaimIdleSandbox` reads unset as off.
-2. Field in `Config` (`$lib/types.ts`).
+2. Field in `Config` (`$lib/types`).
 3. State / hydrate / save payload in `ConfigModal.svelte`.
 4. Toggle row in `ConfigModal/PreferencesTab.svelte` (UI section) — or in
    `ConfigModal/TaskDefaults.svelte` when the preference is a *behaviour* default rather than something this

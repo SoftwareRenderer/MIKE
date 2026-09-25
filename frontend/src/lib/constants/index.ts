@@ -1,5 +1,9 @@
 // =============================================================================
 // Shared constants — magic numbers and strings extracted from components/utils
+//
+// Nothing here imports `$lib/i18n`, and `./modes` is not re-exported: readers of these numbers (the
+// stream, the terminal, the highlighter) must not have to evaluate the catalog to get a timeout.
+// Mode copy is `$lib/constants/modes`.
 // =============================================================================
 
 // ─── Scroll Thresholds ───

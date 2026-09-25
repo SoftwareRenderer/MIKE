@@ -662,7 +662,7 @@ func TestRuleWSEvents_ASecondUnionDeclarationIsNotAReader(t *testing.T) {
 		"frontend/src/lib/api/events.ts": unionFixture(append(eventNames(24), "only_go")),
 		// The exec stream's second union declares only_go too, and nothing dispatches it. Were a
 		// declaration counted as a reader, this fixture would look like a frontend that reads everything.
-		"frontend/src/lib/types.ts": "export type StreamEventType =\n    | 'event_a'\n    | 'only_go'\n    ;\n\nexport function getToolDisplayName(n: string): string { return n }\n",
+		"frontend/src/lib/types/index.ts": "export type StreamEventType =\n    | 'event_a'\n    | 'only_go'\n    ;\n\nexport function getToolDisplayName(n: string): string { return n }\n",
 	})
 	findings, _, err := scanWSEvents(root)
 	if err != nil {
