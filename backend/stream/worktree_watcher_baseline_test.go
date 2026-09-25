@@ -175,3 +175,45 @@ func TestWatcherKeepsADoneTaskDiffOutOfTheFileCache(t *testing.T) {
 		t.Error("a done task's commit-to-commit diff was handed to the cache the panel's per-file fetch reads")
 	}
 }
+
+// The client's "+N" is TrackedAdd + UntrackedLines, so the watcher must report an untracked file's lines
+// only in UntrackedLines. Its own counters used to fold them into TrackedAdd as well, which counted every
+// untracked line twice on a frame the executor would have counted once.
+func TestWatcherReportsUntrackedLinesApartFromTrackedAdditions(t *testing.T) {
+	e := newWatcherBaselineEnv(t)
+
+	wtPath, err := e.wm.WorktreePath(e.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, wtPath, "README.md", "# Test\nline one\nline two\n")
+	writeTestFile(t, wtPath, "scratch.txt", "a\nb\nc\n")
+
+	var events []DiffStatsEvent
+	ww, err := NewWorktreeWatcher(e.wm, func(ev DiffStatsEvent) { events = append(events, ev) }, nil, nil)
+	if err != nil {
+		t.Skipf("skip watcher stats test (inotify limit): %v", err)
+	}
+	defer ww.Close()
+	if err := ww.Watch(e.taskID, e.projectID); err != nil {
+		t.Fatal(err)
+	}
+
+	ww.computeAndBroadcast(e.taskID, e.projectID)
+
+	if len(events) != 1 {
+		t.Fatalf("broadcast %d frames, want 1", len(events))
+	}
+	ev := events[0]
+	// 2 README additions + the 1 line the environment committed; the folding this test guards against
+	// reported 6 here.
+	if ev.TrackedAdd != 3 {
+		t.Errorf("TrackedAdd = %d, want 3 — tracked additions only, with the untracked file's lines left out", ev.TrackedAdd)
+	}
+	if ev.UntrackedLines != 3 {
+		t.Errorf("UntrackedLines = %d, want 3", ev.UntrackedLines)
+	}
+	if ev.UntrackedN != 1 || ev.FilesN != 3 {
+		t.Errorf("UntrackedN/FilesN = %d/%d, want 1/3", ev.UntrackedN, ev.FilesN)
+	}
+}

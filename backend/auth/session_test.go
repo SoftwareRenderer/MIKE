@@ -30,7 +30,7 @@ func testManagerWithStore(t *testing.T) (*SessionManager, *store.Store) {
 	}
 	t.Cleanup(func() { s.Close() })
 
-	m, err := NewSessionManager(s, testPassword)
+	m, err := NewSessionManager(t.Context(), s, testPassword)
 	if err != nil {
 		t.Fatalf("create manager: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestNewSessionManagerNoPassword(t *testing.T) {
 	}
 	t.Cleanup(func() { s.Close() })
 
-	_, err = NewSessionManager(s, "")
+	_, err = NewSessionManager(t.Context(), s, "")
 	if err == nil {
 		t.Fatal("NewSessionManager accepted an empty master password")
 	}
@@ -74,7 +74,7 @@ func TestNewSessionManagerNoPassword(t *testing.T) {
 func TestLoginValidPassword(t *testing.T) {
 	m := testManager(t)
 
-	id, token, csrfToken, err := m.Login("test-password", testIP, testUA)
+	id, token, csrfToken, err := m.Login(t.Context(), "test-password", testIP, testUA)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestLoginCredentialsShareNoBytes(t *testing.T) {
 
 	seen := map[string]bool{}
 	for i := 0; i < 20; i++ {
-		id, token, csrfToken, err := m.Login(testPassword, testIP, testUA)
+		id, token, csrfToken, err := m.Login(t.Context(), testPassword, testIP, testUA)
 		if err != nil {
 			t.Fatalf("login: %v", err)
 		}
@@ -124,7 +124,7 @@ func TestLoginCredentialsShareNoBytes(t *testing.T) {
 func TestLoginInvalidPassword(t *testing.T) {
 	m := testManager(t)
 
-	_, _, _, err := m.Login("wrong-password", testIP, testUA)
+	_, _, _, err := m.Login(t.Context(), "wrong-password", testIP, testUA)
 	if err != ErrInvalidPassword {
 		t.Fatalf("expected ErrInvalidPassword, got: %v", err)
 	}
@@ -133,12 +133,12 @@ func TestLoginInvalidPassword(t *testing.T) {
 func TestValidateValidToken(t *testing.T) {
 	m := testManager(t)
 
-	_, token, _, err := m.Login("test-password", testIP, testUA)
+	_, token, _, err := m.Login(t.Context(), "test-password", testIP, testUA)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
 
-	id, csrfToken, err := m.Validate(token)
+	id, csrfToken, err := m.Validate(t.Context(), token)
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestValidateValidToken(t *testing.T) {
 func TestValidateInvalidToken(t *testing.T) {
 	m := testManager(t)
 
-	_, _, err := m.Validate("nonexistent-token")
+	_, _, err := m.Validate(t.Context(), "nonexistent-token")
 	if err != ErrInvalidToken {
 		t.Fatalf("expected ErrInvalidToken, got: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestValidateInvalidToken(t *testing.T) {
 func TestValidateEmptyToken(t *testing.T) {
 	m := testManager(t)
 
-	_, _, err := m.Validate("")
+	_, _, err := m.Validate(t.Context(), "")
 	if err != ErrInvalidToken {
 		t.Fatalf("expected ErrInvalidToken for empty token, got: %v", err)
 	}
@@ -171,17 +171,17 @@ func TestValidateEmptyToken(t *testing.T) {
 func TestLogout(t *testing.T) {
 	m := testManager(t)
 
-	_, token, _, err := m.Login("test-password", testIP, testUA)
+	_, token, _, err := m.Login(t.Context(), "test-password", testIP, testUA)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
 
-	if err := m.Logout(token); err != nil {
+	if err := m.Logout(t.Context(), token); err != nil {
 		t.Fatalf("logout: %v", err)
 	}
 
 	// Token should be invalid after logout
-	_, _, err = m.Validate(token)
+	_, _, err = m.Validate(t.Context(), token)
 	if err != ErrInvalidToken {
 		t.Fatalf("expected ErrInvalidToken after logout, got: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestLogout(t *testing.T) {
 func TestLogoutEmptyToken(t *testing.T) {
 	m := testManager(t)
 
-	err := m.Logout("")
+	err := m.Logout(t.Context(), "")
 	if err != ErrInvalidToken {
 		t.Fatalf("expected ErrInvalidToken for empty token, got: %v", err)
 	}
@@ -199,33 +199,33 @@ func TestLogoutEmptyToken(t *testing.T) {
 func TestMultipleSessions(t *testing.T) {
 	m := testManager(t)
 
-	_, token1, _, err := m.Login("test-password", testIP, testUA)
+	_, token1, _, err := m.Login(t.Context(), "test-password", testIP, testUA)
 	if err != nil {
 		t.Fatalf("login 1: %v", err)
 	}
-	_, token2, _, err := m.Login("test-password", testIP, testUA)
+	_, token2, _, err := m.Login(t.Context(), "test-password", testIP, testUA)
 	if err != nil {
 		t.Fatalf("login 2: %v", err)
 	}
 
-	if _, _, err := m.Validate(token1); err != nil {
+	if _, _, err := m.Validate(t.Context(), token1); err != nil {
 		t.Errorf("token1 should be valid: %v", err)
 	}
-	if _, _, err := m.Validate(token2); err != nil {
+	if _, _, err := m.Validate(t.Context(), token2); err != nil {
 		t.Errorf("token2 should be valid: %v", err)
 	}
 
 	// Logout token1 only
-	if err := m.Logout(token1); err != nil {
+	if err := m.Logout(t.Context(), token1); err != nil {
 		t.Fatalf("logout token1: %v", err)
 	}
 
 	// token1 invalid, token2 still valid
-	_, _, err = m.Validate(token1)
+	_, _, err = m.Validate(t.Context(), token1)
 	if err != ErrInvalidToken {
 		t.Errorf("token1 should be invalid after logout, got: %v", err)
 	}
-	if _, _, err := m.Validate(token2); err != nil {
+	if _, _, err := m.Validate(t.Context(), token2); err != nil {
 		t.Errorf("token2 should still be valid: %v", err)
 	}
 }
@@ -234,10 +234,10 @@ func TestLoginNearMissPassword(t *testing.T) {
 	// A same-length password differing in a single byte must be rejected
 	// (exercises the constant-time comparison path where lengths match).
 	m := testManager(t)
-	if _, _, _, err := m.Login("test-password", testIP, testUA); err != nil {
+	if _, _, _, err := m.Login(t.Context(), "test-password", testIP, testUA); err != nil {
 		t.Fatalf("valid password login: %v", err)
 	}
-	if _, _, _, err := m.Login("test-passwordX", testIP, testUA); err == nil {
+	if _, _, _, err := m.Login(t.Context(), "test-passwordX", testIP, testUA); err == nil {
 		t.Fatal("near-miss password accepted; expected ErrInvalidPassword")
 	} else if err != ErrInvalidPassword {
 		t.Fatalf("expected ErrInvalidPassword, got %v", err)
@@ -267,13 +267,13 @@ func TestLoginComparesPasswordDigests(t *testing.T) {
 		"TEST-PASSWORD",  // same length, different bytes
 		strings.Repeat("p", 4096),
 	} {
-		if _, _, _, err := m.Login(bad, testIP, testUA); err != ErrInvalidPassword {
+		if _, _, _, err := m.Login(t.Context(), bad, testIP, testUA); err != ErrInvalidPassword {
 			t.Errorf("Login(%q) error = %v; want ErrInvalidPassword", bad, err)
 		}
 	}
 
 	// The real password still authenticates.
-	if _, _, _, err := m.Login("test-password", testIP, testUA); err != nil {
+	if _, _, _, err := m.Login(t.Context(), "test-password", testIP, testUA); err != nil {
 		t.Errorf("correct password rejected: %v", err)
 	}
 }
@@ -282,7 +282,7 @@ func TestLoginComparesPasswordDigests(t *testing.T) {
 func TestLoginRecordsIPAndUserAgent(t *testing.T) {
 	m, db := testManagerWithStore(t)
 
-	id, _, _, err := m.Login("test-password", "198.51.100.7", "Mozilla/5.0 (Test Browser)")
+	id, _, _, err := m.Login(t.Context(), "test-password", "198.51.100.7", "Mozilla/5.0 (Test Browser)")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestLoginRecordsIPAndUserAgent(t *testing.T) {
 // would be a write per page render.
 func TestValidateThrottlesLastSeen(t *testing.T) {
 	m, db := testManagerWithStore(t)
-	id, token, _, err := m.Login("test-password", testIP, testUA)
+	id, token, _, err := m.Login(t.Context(), "test-password", testIP, testUA)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestValidateThrottlesLastSeen(t *testing.T) {
 
 	// Older than the interval → this validation refreshes the stamp.
 	backdate(120)
-	if _, _, err := m.Validate(token); err != nil {
+	if _, _, err := m.Validate(t.Context(), token); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
 	refreshed := lastSeenOf(t, db, id)
@@ -335,7 +335,7 @@ func TestValidateThrottlesLastSeen(t *testing.T) {
 	// Inside the same minute → no further writes.
 	backdate(0)
 	for i := 0; i < 3; i++ {
-		if _, _, err := m.Validate(token); err != nil {
+		if _, _, err := m.Validate(t.Context(), token); err != nil {
 			t.Fatalf("validate %d: %v", i, err)
 		}
 	}
@@ -348,7 +348,7 @@ func TestValidateThrottlesLastSeen(t *testing.T) {
 	if stale := lastSeenOf(t, db, id); time.Now().Unix()-stale < 60 {
 		t.Fatalf("backdate did not take effect: last_seen = %d", stale)
 	}
-	if _, _, err := m.Validate(token); err != nil {
+	if _, _, err := m.Validate(t.Context(), token); err != nil {
 		t.Fatalf("validate after interval: %v", err)
 	}
 	if got := lastSeenOf(t, db, id); time.Now().Unix()-got > 5 {
@@ -375,7 +375,7 @@ func TestStartupBackfillsLegacySessions(t *testing.T) {
 		t.Fatalf("seed legacy row: %v", err)
 	}
 
-	if _, err := NewSessionManager(s, testPassword); err != nil {
+	if _, err := NewSessionManager(t.Context(), s, testPassword); err != nil {
 		t.Fatalf("NewSessionManager: %v", err)
 	}
 
@@ -393,7 +393,7 @@ func TestStartupBackfillsLegacySessions(t *testing.T) {
 	}
 
 	m := &SessionManager{store: s, passwordHash: sha256.Sum256([]byte("test-password"))}
-	if gotID, _, err := m.Validate(legacyToken); err != nil || gotID != "legacy-1" {
+	if gotID, _, err := m.Validate(t.Context(), legacyToken); err != nil || gotID != "legacy-1" {
 		t.Fatalf("the upgraded session must still validate: id=%q err=%v", gotID, err)
 	}
 }

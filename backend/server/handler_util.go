@@ -5,7 +5,21 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"mike/backend/types"
 )
+
+// taskInPath reads the task the request's path names and answers it when there is none.
+//
+// ok is false after writing the response.
+func (s *Server) taskInPath(w http.ResponseWriter, projectID, taskID string) (*types.Task, bool) {
+	task, err := s.store.GetTask(projectID, taskID)
+	if err != nil {
+		Fail(w, err, "get task", "task not found")
+		return nil, false
+	}
+	return task, true
+}
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})

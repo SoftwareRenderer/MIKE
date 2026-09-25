@@ -54,3 +54,16 @@ func resolveWorktree(w http.ResponseWriter, r *http.Request, mgr *git.WorktreeMa
 	}
 	return path, true
 }
+
+// resolveTaskWithWorktree resolves the task the path names and checks a worktree manager exists before
+// any worktree question is asked of it. A handler that only needs the directory uses resolveWorktree.
+func resolveTaskWithWorktree(w http.ResponseWriter, r *http.Request, store taskGetter, mgr *git.WorktreeManager) (*types.Task, bool) {
+	task, ok := resolveTask(w, r, store)
+	if !ok {
+		return nil, false
+	}
+	if !requireWorktreeMgr(w, mgr) {
+		return nil, false
+	}
+	return task, true
+}

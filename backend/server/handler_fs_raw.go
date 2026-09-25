@@ -56,13 +56,8 @@ func (s *Server) handleFSRaw(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusUnsupportedMediaType, "not a viewable image type")
 		return
 	}
-	project, err := s.optionalProject(r)
-	if err != nil {
-		JSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if project == nil {
-		JSONError(w, http.StatusBadRequest, "project parameter is required")
+	project, ok := s.requiredProject(w, r)
+	if !ok {
 		return
 	}
 	if !s.requireSandboxAvailable(w, project) {

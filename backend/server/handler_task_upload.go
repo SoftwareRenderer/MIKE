@@ -18,21 +18,11 @@ func (s *Server) handleTaskUpload(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 
-	r.Body = http.MaxBytesReader(w, r.Body, MaxUploadSize+uploadBoundaryOverhead)
-	if err := r.ParseMultipartForm(uploadFormMemory); err != nil {
-		httputil.JSONError(w, http.StatusRequestEntityTooLarge, uploadTooLargeMessage)
+	file, header, release, ok := uploadedFile(w, r)
+	if !ok {
 		return
 	}
-	if r.MultipartForm != nil {
-		defer r.MultipartForm.RemoveAll()
-	}
-
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "file part is required")
-		return
-	}
-	defer file.Close()
+	defer release()
 
 	// Answered for before any byte is written, so a request that cannot name its file is refused as
 	// a bad request rather than as a failed write.

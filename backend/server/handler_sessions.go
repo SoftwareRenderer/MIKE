@@ -50,7 +50,7 @@ func (s *Server) handleSessionsList(w http.ResponseWriter, r *http.Request) {
 
 	sessions, err := s.store.ListSessions(r.Context())
 	if err != nil {
-		JSONError(w, http.StatusInternalServerError, "internal error")
+		Fault(w, "list sessions", err)
 		return
 	}
 
@@ -86,7 +86,7 @@ func (s *Server) handleSessionRevoke(w http.ResponseWriter, r *http.Request) {
 
 	found, err := s.store.DeleteSessionByID(r.Context(), id)
 	if err != nil {
-		JSONError(w, http.StatusInternalServerError, "internal error")
+		Fault(w, "revoke session", err)
 		return
 	}
 	if !found {
@@ -107,7 +107,7 @@ func (s *Server) handleSessionsRevokeOthers(w http.ResponseWriter, r *http.Reque
 
 	n, err := s.store.DeleteOtherSessions(r.Context(), current)
 	if err != nil {
-		JSONError(w, http.StatusInternalServerError, "internal error")
+		Fault(w, "revoke other sessions", err)
 		return
 	}
 	JSONResponse(w, http.StatusOK, map[string]int{"revoked": n})

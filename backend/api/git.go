@@ -77,9 +77,6 @@ func (h *GitHandler) UpdateDiffCache(taskID string, taskDiff *git.TaskDiff) {
 // currentTaskDiff is this package's only way to compute the diff behind the Changes panel. It resolves the
 // baseline itself, so a caller cannot answer a different question than the one the panel asked.
 func (h *GitHandler) currentTaskDiff(task *types.Task, skipTruncate bool) (*git.TaskDiff, string, error) {
-	if h.worktreeMgr == nil {
-		return nil, "", fmt.Errorf("worktree manager not available")
-	}
 	baseRef := h.worktreeMgr.TaskDiffBaseline(task)
 	taskDiff, err := h.worktreeMgr.GetTaskDiff(task.ID, baseRef, "", skipTruncate)
 	if err != nil {
@@ -634,11 +631,8 @@ func (h *GitHandler) HandlePush(w http.ResponseWriter, r *http.Request) {
 func (h *GitHandler) HandleTaskCommits(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	task, ok := resolveTask(w, r, h.store)
+	task, ok := resolveTaskWithWorktree(w, r, h.store, h.worktreeMgr)
 	if !ok {
-		return
-	}
-	if !requireWorktreeMgr(w, h.worktreeMgr) {
 		return
 	}
 	if task.Status == types.StatusBacklog {
@@ -696,11 +690,8 @@ func (h *GitHandler) getTaskCommitsFromProject(projectID string, task *types.Tas
 func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	task, ok := resolveTask(w, r, h.store)
+	task, ok := resolveTaskWithWorktree(w, r, h.store, h.worktreeMgr)
 	if !ok {
-		return
-	}
-	if !requireWorktreeMgr(w, h.worktreeMgr) {
 		return
 	}
 
@@ -1109,11 +1100,8 @@ func (h *GitHandler) HandleStageFile(w http.ResponseWriter, r *http.Request) {
 		httputil.JSONError(w, http.StatusBadRequest, "path required")
 		return
 	}
-	task, ok := resolveTask(w, r, h.store)
+	task, ok := resolveTaskWithWorktree(w, r, h.store, h.worktreeMgr)
 	if !ok {
-		return
-	}
-	if !requireWorktreeMgr(w, h.worktreeMgr) {
 		return
 	}
 	if task.Status == types.StatusBacklog || task.Status == types.StatusDone {

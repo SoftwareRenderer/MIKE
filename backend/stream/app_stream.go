@@ -661,6 +661,10 @@ func (asm *AppStreamManager) SetDiffCacheUpdate(fn func(taskID string, taskDiff 
 }
 
 // BroadcastDiffStats sends compact diff stats to all clients of a project.
+//
+// Three producers write these keys: here, the per-connection initial load below, and the stored snapshot
+// in done_snapshot.go. has_committed_changes means committed-but-unmerged work in a worktree, and "this
+// diff is committed work" in a stored snapshot.
 func (asm *AppStreamManager) BroadcastDiffStats(event DiffStatsEvent) {
 	asm.sendBoardPayload(event.ProjectID, appFrame(types.WSTypeTaskDiffStats, map[string]any{
 		"task_id":               event.TaskID,
@@ -1231,7 +1235,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			filesN := stats.VisibleTracked + stats.VisibleUntracked
 			// Check if task branch commits are already merged into the target branch.
 			stats.AlreadyMerged = asm.computeAlreadyMerged(projectID, task)
-			statsFrame := appFrame(types.WSTypeTaskDiffStats, map[string]any{
+			statsFrame := appFrame(types.WSTypeTaskDiffStats, map[string]any{ // the shape BroadcastDiffStats documents
 				"task_id":               task.ID,
 				"hash":                  hash,
 				"short_stat":            diffResult.ShortStat,

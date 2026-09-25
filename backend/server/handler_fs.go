@@ -31,13 +31,8 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "path is required")
 		return
 	}
-	project, err := s.optionalProject(r)
-	if err != nil {
-		JSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if project == nil {
-		JSONError(w, http.StatusBadRequest, "project parameter is required")
+	project, ok := s.requiredProject(w, r)
+	if !ok {
 		return
 	}
 	taskID := r.URL.Query().Get("task")
@@ -201,109 +196,72 @@ func gitBlobSize(runGit func(args ...string) (string, error), spec string) (int6
 	return size, true
 }
 
-// computeGutterMarkers runs `git diff HEAD -- <path>` and parses the unified diff
-// into per-line markers indexed by the current (working tree) line number (1-based).
-// Returns nil if the file is untracked, the repo has no commits, or git is unavailable.
+// computeGutterMarkers runs `git diff HEAD -- <path>` and marks the lines of the current working-tree
+// file that diff touched, indexed 1-based. nil when the file is untracked, the repo has no commits, or
+// git cannot answer.
 func computeGutterMarkers(s *Server, worktreePath, path, taskID string) map[int][]string {
 	relPath, err := filepath.Rel(worktreePath, path)
 	if err != nil {
 		return nil
 	}
-	var diffOutput string
-	if taskID != "" {
-		diffOutput, err = s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "diff", "HEAD", "--", relPath)
-	} else {
-		diffOutput, err = s.executor.WorktreeMgr().GitRunInDirOutput(worktreePath, "diff", "HEAD", "--", relPath)
-	}
-	if err != nil || diffOutput == "" {
+	patch, err := s.gitInContext(taskID, worktreePath)("diff", "HEAD", "--", relPath)
+	if err != nil || patch == "" {
 		return nil
 	}
-	return parseUnifiedDiff(diffOutput)
+	return gutterMarkers(patch)
 }
 
-// parseUnifiedDiff parses a unified diff and returns per-line markers for the
-// current (working tree) file. Line numbers are 1-based. Marker types:
-// "added", "removed", "modified".
-func parseUnifiedDiff(diff string) map[int][]string {
-	markers := make(map[int][]string)
-	lines := strings.Split(diff, "\n")
-	// Remove trailing empty element from final newline
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-
-	newLine := 0 // current line number in working tree (0-based internally)
-	hunkOldStart := 0
-	hunkOldCount := 0
-	hunkNewStart := 0
-	hunkNewCount := 0
-	inHunk := false
-	hunkOldPos := 0 // lines consumed from old range
-	hunkNewPos := 0 // lines consumed from new range
-	var pendingRemovals int
-
-	for _, line := range lines {
-		// Detect hunk header: @@ -oldStart,oldCount +newStart,newCount @@
-		if strings.HasPrefix(line, "@@ ") {
-			_, _ = fmt.Sscanf(line, "@@ -%d,%d +%d,%d @@", &hunkOldStart, &hunkOldCount, &hunkNewStart, &hunkNewCount)
-			newLine = hunkNewStart - 1 // 0-based
-			inHunk = true
-			hunkOldPos = 0
-			hunkNewPos = 0
-			pendingRemovals = 0
-			continue
-		}
-		if !inHunk {
-			continue
-		}
-
-		if strings.HasPrefix(line, "+") {
-			if pendingRemovals > 0 {
-				// Paired with a removal → modified
-				markers[newLine+1] = append(markers[newLine+1], "modified")
-				pendingRemovals--
-			} else {
-				markers[newLine+1] = append(markers[newLine+1], "added")
+// gutterMarkers turns a patch into the editor's per-line marks: "added", "removed", "modified".
+//
+// It reads git.ParseUnifiedDiff rather than a grammar of its own, because that is the grammar the diff
+// panel's `?parsed=1` contract is written against — a second parser here would drift from it in exactly
+// the cases nobody re-tests (renames, binary notices, "\ No newline at end of file").
+//
+// A run of removed rows owns no working-tree line, so it is marked on the line it follows; a removal
+// immediately followed by an addition is a modification of the added line. A new-side row whose number
+// is not the next one is the start of a new hunk, and the line before it is the last one the previous
+// hunk could have marked.
+func gutterMarkers(patch string) map[int][]string {
+	marks := make(map[int][]string)
+	for _, file := range git.ParseUnifiedDiff(patch) {
+		prev := 0    // working-tree line of the last new-side row; 0 before the first
+		removed := 0 // removals awaiting the row that decides added-or-modified
+		for _, row := range file.Rows {
+			if row.LineNumber == nil {
+				continue // a binary or large-file notice: text the editor must not number
 			}
-			newLine++
-			hunkNewPos++
-		} else if strings.HasPrefix(line, "-") {
-			pendingRemovals++
-			hunkOldPos++
-		} else {
-			// context line
-			if pendingRemovals > 0 {
-				// Removals followed by context — mark removed on the line before
-				if newLine > 0 {
-					markers[newLine] = append(markers[newLine], "removed")
+			line := *row.LineNumber
+			if row.Variant == "removed" {
+				removed++
+				continue
+			}
+			if line != prev+1 {
+				prev = line - 1
+			}
+			switch row.Variant {
+			case "added":
+				if removed > 0 {
+					marks[line] = append(marks[line], "modified")
+					removed = 0
+				} else {
+					marks[line] = append(marks[line], "added")
 				}
-				pendingRemovals = 0
+			default: // context
+				if removed > 0 && prev > 0 {
+					marks[prev] = append(marks[prev], "removed")
+					removed = 0
+				}
 			}
-			newLine++
-			hunkOldPos++
-			hunkNewPos++
+			prev = line
 		}
-
-		// Check if hunk is exhausted
-		if hunkOldPos >= hunkOldCount && hunkNewPos >= hunkNewCount {
-			inHunk = false
-			// Flush remaining removals at end of hunk
-			if pendingRemovals > 0 && newLine > 0 {
-				markers[newLine] = append(markers[newLine], "removed")
-				pendingRemovals = 0
-			}
+		if removed > 0 && prev > 0 {
+			marks[prev] = append(marks[prev], "removed")
 		}
 	}
-
-	// Flush remaining removals at end of diff
-	if pendingRemovals > 0 && newLine > 0 {
-		markers[newLine] = append(markers[newLine], "removed")
-	}
-
-	if len(markers) == 0 {
+	if len(marks) == 0 {
 		return nil
 	}
-	return markers
+	return marks
 }
 
 func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
@@ -319,13 +277,8 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusRequestEntityTooLarge, fsTooLargeMessage)
 		return
 	}
-	project, err := s.optionalProject(r)
-	if err != nil {
-		JSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if project == nil {
-		JSONError(w, http.StatusBadRequest, "project parameter is required")
+	project, ok := s.requiredProject(w, r)
+	if !ok {
 		return
 	}
 	target, ok := s.fsWriteTarget(w, r, project, req.Path)
@@ -572,11 +525,8 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		searchRoot = resolved
 	}
-	if project != nil && project.SandboxEnabled {
-		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
-			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
-			return
-		}
+	if !s.requireSandboxAvailable(w, project) {
+		return
 	}
 
 	resultLimit := 10
@@ -723,6 +673,22 @@ func (s *Server) optionalProject(r *http.Request) (*types.Project, error) {
 	return project, nil
 }
 
+// requiredProject is optionalProject for the file endpoints that cannot work without one: the
+// project is what the path is jailed to, so a request naming none has nothing to jail against.
+// ok is false after writing the response.
+func (s *Server) requiredProject(w http.ResponseWriter, r *http.Request) (*types.Project, bool) {
+	project, err := s.optionalProject(r)
+	if err != nil {
+		JSONError(w, http.StatusBadRequest, err.Error())
+		return nil, false
+	}
+	if project == nil {
+		JSONError(w, http.StatusBadRequest, "project parameter is required")
+		return nil, false
+	}
+	return project, true
+}
+
 // fsWorktreeRoot answers which host directory a file request operates on: the task's
 // worktree when ?task names one, otherwise the project checkout. An empty root means
 // neither was supplied, which /api/fs allows for a bare browse. ok is false after
@@ -776,7 +742,7 @@ func (s *Server) requireSandboxAvailable(w http.ResponseWriter, project *types.P
 	if project == nil || !project.SandboxEnabled {
 		return true
 	}
-	if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
+	if !s.sandboxMgr.IsAvailable() {
 		JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
 		return false
 	}
@@ -985,12 +951,11 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Enforce sandbox if enabled — no fallback to host
+	if !s.requireSandboxAvailable(w, project) {
+		return
+	}
+	// A sandboxed project has no host checkout to write into — no fallback to host.
 	if project != nil && project.SandboxEnabled {
-		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
-			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
-			return
-		}
 		sandboxPath := fsSandboxPath(project.Path, project, req.Path)
 
 		// This is the project's own container rather than a task's, so no agent's approved folders apply.
@@ -1252,7 +1217,7 @@ func (s *Server) fsSandboxOpts(project *types.Project, taskID string) (sandbox.S
 // agentGrantForTask returns nothing for an empty taskID: a project container or a plain file browse has no
 // agent of its own.
 func (s *Server) agentGrantForTask(projectID, taskID string) *types.AgentSandbox {
-	if taskID == "" || s.executor == nil {
+	if taskID == "" {
 		return nil
 	}
 	task, err := s.store.GetTask(projectID, taskID)

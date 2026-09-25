@@ -192,6 +192,8 @@
     let computedShowHeader = $state(false);
     let stickyNeedsRows = $state(false);
     let stickyEntryId = $state('');
+    // The named prompt's row is being fetched: the header says so rather than look idle.
+    let stickyJumping = $state(false);
     // The overlay hangs over the top of the scroller, so it decides where a message
     // has to land to be readable rather than behind it.
     let stickyHeaderEl: HTMLElement | null = $state(null);
@@ -265,16 +267,21 @@
     /** Land the message the header names on the sticky line, under the overlay. */
     async function handleStickyClickInternal() {
         const scroller = chatScrollEl;
-        if (!scroller || stickyEntryId === '') return;
+        if (!scroller || stickyEntryId === '' || stickyJumping) return;
         // Declare the takeover before anything moves, or the follow tracker's pin loop and the settle
         // loop of a page that lands write scrollTop against us.
         follow.noteUserIntent();
         tapped = { entryId: stickyEntryId, intent: follow.intent };
         if (stickyNeedsRows) {
             // The prompt is older than every row held: fetch until its row is on screen.
-            const landed = await (onJumpToTurn?.(stickyEntryId) ?? Promise.resolve(false));
-            if (!landed) return;
-            await tick();
+            stickyJumping = true;
+            try {
+                const landed = await (onJumpToTurn?.(stickyEntryId) ?? Promise.resolve(false));
+                if (!landed) return;
+                await tick();
+            } finally {
+                stickyJumping = false;
+            }
         }
         // The message, not its `.chat-entry`: a checkpoint divider above the message
         // lives in the entry, so the entry starts a divider-height too early.
@@ -340,8 +347,11 @@
         <!-- Mounted whenever there are entries and hidden by class: the sticky line is this element's
              measured bottom edge. -->
         <div class="chat-sticky-header" class:hidden-header={!computedShowHeader} bind:this={stickyHeaderEl}
-             role="status" aria-live="polite">
-            <button class="chat-sticky-bubble" onclick={handleStickyClickInternal} title={t('chat.entries.scrollToMessage')} aria-label={t('chat.entries.scrollToMessage')}>{computedStickyMessage}</button>
+             role="status" aria-live="polite" aria-busy={stickyJumping || undefined}>
+            <button class="chat-sticky-bubble" onclick={handleStickyClickInternal} title={t('chat.entries.scrollToMessage')} aria-label={t('chat.entries.scrollToMessage')}>
+                {#if stickyJumping}<span class="spinner-inline"></span>{/if}
+                <span class="chat-sticky-text">{computedStickyMessage}</span>
+            </button>
             {#if onToggleFullscreen}
                 <button type="button" class="chat-sticky-fullscreen" onclick={onToggleFullscreen} title={fullscreenTitle} aria-label={t('chat.entries.toggleFullscreen')}>
                     {#if isChatFullscreen}
@@ -558,6 +568,8 @@
 </div>
 
 <style>
+    @import '$lib/styles/shared.css';
+
     .chat-messages-wrapper {
         flex: 1;
         position: relative;
@@ -607,6 +619,9 @@
         visibility: hidden;
     }
     .chat-sticky-bubble {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         font-size: 0.8125rem;
         pointer-events: auto;
         color: var(--color-text-primary);
@@ -614,14 +629,21 @@
         border-radius: 1.125rem;
         padding: 6px 12px;
         max-width: 80%;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
         border: none;
         cursor: pointer;
         font: inherit;
         text-align: left;
         transition: background 0.15s ease;
+    }
+    /* A flex item ellipsizes only with a 0 floor of its own. */
+    .chat-sticky-text {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .chat-sticky-bubble :global(.spinner-inline) {
+        flex-shrink: 0;
     }
     .chat-sticky-bubble:hover {
         background: color-mix(in srgb, var(--color-accent) 28%, transparent);

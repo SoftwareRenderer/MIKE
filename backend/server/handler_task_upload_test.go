@@ -135,6 +135,35 @@ func TestTaskUploadRefusesRequestsWithoutAFileOrWithoutATask(t *testing.T) {
 	}
 }
 
+// Both upload routes read their body through one helper, and its two refusals are two different answers:
+// a body over the cap is a size problem, a body that is not a multipart form at all is the caller's
+// request. They were one answer (413) on the task route.
+func TestUploadRefusesNotAFormAs400AndKeeps413ForSize(t *testing.T) {
+	s, _ := taskUploadProject(t, "up-shape")
+
+	notAForm := func(path string) *http.Request {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("not a multipart body"))
+		req.Header.Set("Content-Type", "text/plain")
+		return req
+	}
+	if rr := testResponseAuth(t, s, notAForm("/api/projects/up-shape/tasks/t1/uploads")); rr.Code != http.StatusBadRequest {
+		t.Errorf("task upload, body not a form: status = %d, want 400: %s", rr.Code, rr.Body.String())
+	}
+	if rr := testResponseAuth(t, s, notAForm("/api/fs/upload?project=up-shape")); rr.Code != http.StatusBadRequest {
+		t.Errorf("fs upload, body not a form: status = %d, want 400: %s", rr.Code, rr.Body.String())
+	}
+	// The sentence is the proof the request reached the body reader rather than being refused by a
+	// middleware on the way to it.
+	if rr := testResponseAuth(t, s, notAForm("/api/projects/up-shape/tasks/t1/uploads")); !strings.Contains(rr.Body.String(), "multipart form") {
+		t.Errorf("refusal %q did not come from the body reader", rr.Body.String())
+	}
+
+	oversize := bytes.Repeat([]byte("x"), exec.MaxUploadBytes+1)
+	if rr := postTaskUpload(t, s, "up-shape", "t1", "big.bin", oversize); rr.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("task upload over the cap: status = %d, want 413: %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestTaskUploadRefusesAFileOverTheLimit(t *testing.T) {
 	s, _ := taskUploadProject(t, "up-size")
 

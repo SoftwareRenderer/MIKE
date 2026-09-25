@@ -131,7 +131,7 @@ func TestNewAgentRunner_Host(t *testing.T) {
 		Config: map[string]any{},
 	}
 
-	runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "test-session", false)
+	runner, err := NewAgentRunner(context.Background(), RunnerDeps{Ext: ext, TaskID: "test-task", WorktreePath: t.TempDir(), SessionName: "test-session"})
 	if err != nil {
 		t.Fatalf("NewAgentRunner: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestAgentRunner_Prompt(t *testing.T) {
 		},
 	}
 
-	runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
+	runner, err := NewAgentRunner(context.Background(), RunnerDeps{Ext: ext, TaskID: "test-task", WorktreePath: t.TempDir(), SessionName: "session"})
 	if err != nil {
 		t.Fatalf("NewAgentRunner: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestAgentRunner_Close(t *testing.T) {
 		},
 	}
 
-	runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
+	runner, err := NewAgentRunner(context.Background(), RunnerDeps{Ext: ext, TaskID: "test-task", WorktreePath: t.TempDir(), SessionName: "session"})
 	if err != nil {
 		t.Fatalf("NewAgentRunner: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestAgentRunner_ModelName(t *testing.T) {
 		},
 	}
 
-	runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
+	runner, err := NewAgentRunner(context.Background(), RunnerDeps{Ext: ext, TaskID: "test-task", WorktreePath: t.TempDir(), SessionName: "session"})
 	if err != nil {
 		t.Fatalf("NewAgentRunner: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestAgentRunner_QueryStats(t *testing.T) {
 		},
 	}
 
-	runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
+	runner, err := NewAgentRunner(context.Background(), RunnerDeps{Ext: ext, TaskID: "test-task", WorktreePath: t.TempDir(), SessionName: "session"})
 	if err != nil {
 		t.Fatalf("NewAgentRunner: %v", err)
 	}
@@ -437,7 +437,7 @@ func TestAgentRunner_Compact(t *testing.T) {
 				Manifest: extensions.ExtensionManifest{Version: "1.0.0", Capabilities: &extensions.Capabilities{Agent: &extensions.AgentConfig{}}},
 			}
 
-			runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
+			runner, err := NewAgentRunner(context.Background(), RunnerDeps{Ext: ext, TaskID: "test-task", WorktreePath: t.TempDir(), SessionName: "session"})
 			if err != nil {
 				t.Fatalf("NewAgentRunner: %v", err)
 			}
@@ -553,7 +553,7 @@ func TestNewAgentRunner_BrokenAdapter(t *testing.T) {
 		},
 	}
 
-	_, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
+	_, err := NewAgentRunner(context.Background(), RunnerDeps{Ext: ext, TaskID: "test-task", WorktreePath: t.TempDir(), SessionName: "session"})
 	if err == nil {
 		t.Fatal("expected error from NewAgentRunner with broken adapter, got nil")
 	}
@@ -576,7 +576,7 @@ func TestAgentRunner_PromptNilEncode(t *testing.T) {
 		},
 	}
 
-	runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
+	runner, err := NewAgentRunner(context.Background(), RunnerDeps{Ext: ext, TaskID: "test-task", WorktreePath: t.TempDir(), SessionName: "session"})
 	if err != nil {
 		t.Fatalf("NewAgentRunner: %v", err)
 	}
@@ -604,7 +604,7 @@ func TestAgentRunner_CloseNilEncode(t *testing.T) {
 		},
 	}
 
-	runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
+	runner, err := NewAgentRunner(context.Background(), RunnerDeps{Ext: ext, TaskID: "test-task", WorktreePath: t.TempDir(), SessionName: "session"})
 	if err != nil {
 		t.Fatalf("NewAgentRunner: %v", err)
 	}
@@ -713,7 +713,7 @@ func TestAgentRunner_CloseWhileReaderActive(t *testing.T) {
 			Manifest: extensions.ExtensionManifest{Capabilities: &extensions.Capabilities{Agent: &extensions.AgentConfig{}}},
 		}
 
-		runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
+		runner, err := NewAgentRunner(context.Background(), RunnerDeps{Ext: ext, TaskID: "test-task", WorktreePath: t.TempDir(), SessionName: "session"})
 		if err != nil {
 			t.Fatalf("NewAgentRunner: %v", err)
 		}

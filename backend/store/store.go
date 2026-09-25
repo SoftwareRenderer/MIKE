@@ -5,6 +5,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -344,6 +345,19 @@ func (s *Store) tx(fn func(tx *sql.Tx) error) error {
 		return fmt.Errorf("commit transaction: %w", err)
 	}
 	return nil
+}
+
+// deleteRows runs one DELETE under s.mu and reports how many rows went. A single statement needs no tx,
+// so only the mutex is taken.
+func (s *Store) deleteRows(ctx context.Context, query, op string, arg string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res, err := s.db.ExecContext(ctx, query, arg)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", op, err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
 // execer is satisfied by both *sql.DB and *sql.Tx for the three entry points this package uses. A

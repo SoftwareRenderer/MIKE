@@ -101,11 +101,11 @@ func TestAPITokenAndSessionTokensAreNotInterchangeable(t *testing.T) {
 	sessions, s := testManagerWithStore(t)
 	ctx := context.Background()
 
-	_, sessionToken, _, err := sessions.Login(testPassword, testIP, testUA)
+	_, sessionToken, _, err := sessions.Login(ctx, testPassword, testIP, testUA)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
-	if _, _, err := sessions.Validate(sessionToken); err != nil {
+	if _, _, err := sessions.Validate(ctx, sessionToken); err != nil {
 		t.Fatalf("the session token should authenticate a session: %v", err)
 	}
 
@@ -118,7 +118,7 @@ func TestAPITokenAndSessionTokensAreNotInterchangeable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
-	if _, _, err := sessions.Validate(apiSecret); !errors.Is(err, ErrInvalidToken) {
+	if _, _, err := sessions.Validate(ctx, apiSecret); !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("an API token authenticated a session: %v", err)
 	}
 }

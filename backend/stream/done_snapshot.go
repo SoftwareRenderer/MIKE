@@ -84,7 +84,7 @@ func MaterializeDoneTaskDiff(st *store.Store, wm *git.WorktreeManager, projectID
 	stats := ComputeDiffStats(diffResult)
 	filesN := stats.VisibleTracked + stats.VisibleUntracked
 
-	statsObj := map[string]any{
+	statsObj := map[string]any{ // the stored form of the shape BroadcastDiffStats documents
 		"hash":                  hash,
 		"short_stat":            diffResult.ShortStat,
 		"files_n":               filesN,

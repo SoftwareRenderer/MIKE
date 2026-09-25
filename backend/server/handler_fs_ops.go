@@ -110,13 +110,8 @@ func (s *Server) decodeFSOpsBatch(w http.ResponseWriter, r *http.Request, needDe
 		JSONError(w, http.StatusBadRequest, "dest is required")
 		return fsOpsBatch{}, false
 	}
-	project, err := s.optionalProject(r)
-	if err != nil {
-		JSONError(w, http.StatusBadRequest, err.Error())
-		return fsOpsBatch{}, false
-	}
-	if project == nil {
-		JSONError(w, http.StatusBadRequest, "project parameter is required")
+	project, ok := s.requiredProject(w, r)
+	if !ok {
 		return fsOpsBatch{}, false
 	}
 	scope, ok := s.fsWriteScope(w, r, project)
@@ -251,13 +246,8 @@ func (s *Server) handleFSRenamePath(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "invalid name")
 		return
 	}
-	project, err := s.optionalProject(r)
-	if err != nil {
-		JSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if project == nil {
-		JSONError(w, http.StatusBadRequest, "project parameter is required")
+	project, ok := s.requiredProject(w, r)
+	if !ok {
 		return
 	}
 	scope, ok := s.fsWriteScope(w, r, project)

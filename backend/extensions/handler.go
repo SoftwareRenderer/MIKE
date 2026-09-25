@@ -1238,12 +1238,7 @@ func (h *ExtensionHandler) rollbackFailedInstall(entry *RegistryEntry, gitPinned
 // streamOperation streams SSE events until Done or client disconnect. The
 // operation runs detached, so returning on disconnect does not cancel it.
 func (h *ExtensionHandler) streamOperation(w http.ResponseWriter, r *http.Request, events <-chan sseEvent) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-
-	flusher, ok := w.(http.Flusher)
+	sse, ok := httputil.NewSSE(w)
 	if !ok {
 		// Streaming unsupported; drain the channel in the background so the
 		// detached operation can still finish without blocking on sends.
@@ -1269,12 +1264,7 @@ func (h *ExtensionHandler) streamOperation(w http.ResponseWriter, r *http.Reques
 			if !ok {
 				return
 			}
-			data, err := json.Marshal(ev)
-			if err != nil {
-				continue
-			}
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
+			sse.JSON(ev)
 			if ev.Done {
 				return
 			}

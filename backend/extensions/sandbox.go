@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -858,19 +859,6 @@ func envSnapshot(envs []types.SandboxEnv) []string {
 	return snap
 }
 
-// equalStrings reports whether two sorted snapshots are identical.
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 // MountsCompatible reports whether a live sandbox still matches what the caller would
 // create, with a reason when it must be recreated: a different project set, mounts, or
 // extension envs (a container's env is fixed at `podman create`).
@@ -885,21 +873,21 @@ func (sm *ExtensionSandboxManager) MountsCompatible(extID string, desired map[st
 	if state == nil {
 		return false, "no sandbox"
 	}
-	// Compare sorted lists of project host paths
+	// Every comparison is between sorted snapshots, so a reordering never recreates a matching container.
 	desiredSorted := make([]string, 0, len(desired))
 	for p := range desired {
 		desiredSorted = append(desiredSorted, p)
 	}
 	sort.Strings(desiredSorted)
-	if !equalStrings(desiredSorted, state.mountedProjects) {
+	if !slices.Equal(desiredSorted, state.mountedProjects) {
 		return false, "project mounts changed"
 	}
 	// Compare custom extension mounts (e.g. node_modules)
-	if !equalStrings(customMountSnapshot(desiredCustom), state.customMounts) {
+	if !slices.Equal(customMountSnapshot(desiredCustom), state.customMounts) {
 		return false, "mounts changed"
 	}
 	// Compare the extension's own container env
-	if !equalStrings(envSnapshot(desiredEnvs), state.envs) {
+	if !slices.Equal(envSnapshot(desiredEnvs), state.envs) {
 		return false, "envs changed"
 	}
 	return true, ""

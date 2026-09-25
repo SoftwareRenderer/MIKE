@@ -298,7 +298,7 @@ func (s *Server) SessionMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		sessionID, _, err := s.sessionMgr.Validate(cookie.Value)
+		sessionID, _, err := s.sessionMgr.Validate(r.Context(), cookie.Value)
 		if err != nil {
 			JSONError(w, http.StatusUnauthorized, "invalid session")
 			return
@@ -387,7 +387,7 @@ func (s *Server) CSRFMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		_, storedCSRF, err := s.sessionMgr.Validate(cookie.Value)
+		_, storedCSRF, err := s.sessionMgr.Validate(r.Context(), cookie.Value)
 		if err != nil {
 			JSONError(w, http.StatusForbidden, "invalid session")
 			return

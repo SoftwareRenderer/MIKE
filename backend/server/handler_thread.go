@@ -22,8 +22,7 @@ func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("taskID")
 	switch r.Method {
 	case http.MethodGet:
-		if _, err := s.store.GetTask(projectID, taskID); err != nil {
-			Fail(w, err, "get task", "task not found")
+		if _, ok := s.taskInPath(w, projectID, taskID); !ok {
 			return
 		}
 		threads, err := s.store.GetThreadsByTask(taskID)
@@ -73,7 +72,7 @@ func (s *Server) releaseThreadSnapshots(taskID, threadID string) {
 // releaseMessageSnapshots unpins the snapshots the given messages captured. Call it with ids that were
 // just deleted: an unnamed snapshot is a copy of the worktree git can never reclaim.
 func (s *Server) releaseMessageSnapshots(taskID string, messageIDs []string) {
-	if len(messageIDs) == 0 || s.executor == nil {
+	if len(messageIDs) == 0 {
 		return
 	}
 	if err := s.executor.WorktreeMgr().UnpinMessageSnapshots(taskID, messageIDs); err != nil && !errors.Is(err, git.ErrWorktreeNotFound) {
@@ -89,10 +88,8 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 		JSONError(w, http.StatusBadRequest, "thread_id required")
 		return
 	}
-	// Validate task exists
-	task, err := s.store.GetTask(projectID, taskID)
-	if err != nil {
-		Fail(w, err, "get task", "task not found")
+	task, ok := s.taskInPath(w, projectID, taskID)
+	if !ok {
 		return
 	}
 	// Can't delete the only thread (Main)
@@ -109,9 +106,8 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 	defer s.lockWorktree(taskID)()
 
 	// Re-fetch task after acquiring lock — state may have changed.
-	task, err = s.store.GetTask(projectID, taskID)
-	if err != nil {
-		Fail(w, err, "get task", "task not found")
+	task, ok = s.taskInPath(w, projectID, taskID)
+	if !ok {
 		return
 	}
 
@@ -171,9 +167,7 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "thread_id required")
 		return
 	}
-	// Validate task exists (pre-lock check, re-fetched after lock below)
-	if _, err := s.store.GetTask(projectID, taskID); err != nil {
-		Fail(w, err, "get task", "task not found")
+	if _, ok := s.taskInPath(w, projectID, taskID); !ok {
 		return
 	}
 	// Validate thread exists and belongs to this task
@@ -189,9 +183,8 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 	defer s.lockWorktree(taskID)()
 
 	// Re-fetch task after acquiring lock — state may have changed.
-	task, err := s.store.GetTask(projectID, taskID)
-	if err != nil {
-		Fail(w, err, "get task", "task not found")
+	task, ok := s.taskInPath(w, projectID, taskID)
+	if !ok {
 		return
 	}
 
@@ -289,9 +282,7 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	if req.NewContent != "" {
 		_ = s.executor.StopTask(taskID)
 	}
-	// Validate task exists (pre-lock check, re-fetched after lock below)
-	if _, err := s.store.GetTask(projectID, taskID); err != nil {
-		Fail(w, err, "get task", "task not found")
+	if _, ok := s.taskInPath(w, projectID, taskID); !ok {
 		return
 	}
 	// Validate source thread exists
@@ -307,9 +298,8 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	defer s.lockWorktree(taskID)()
 
 	// Re-fetch task after acquiring lock — state may have changed.
-	task, err := s.store.GetTask(projectID, taskID)
-	if err != nil {
-		Fail(w, err, "get task", "task not found")
+	task, ok := s.taskInPath(w, projectID, taskID)
+	if !ok {
 		return
 	}
 

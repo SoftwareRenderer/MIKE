@@ -53,9 +53,8 @@ func (s *Server) truncateForReplace(w http.ResponseWriter, projectID, taskID, me
 	if !ok {
 		return false
 	}
-	task, err := s.store.GetTask(projectID, taskID)
-	if err != nil {
-		Fail(w, err, "get task", "task not found")
+	task, ok := s.taskInPath(w, projectID, taskID)
+	if !ok {
 		return false
 	}
 	lastUserID, err := s.store.GetLastUserMessageInThread(task.CurrentThreadID)

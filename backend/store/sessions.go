@@ -263,32 +263,20 @@ func scanSessionRow(r *sql.Rows) (SessionInfo, error) {
 // DeleteSessionByID revokes a single session. Returns false when no session
 // has that id.
 func (s *Store) DeleteSessionByID(ctx context.Context, id string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if id == "" {
 		return false, nil
 	}
-	res, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, id)
-	if err != nil {
-		return false, fmt.Errorf("delete session by id: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	return n > 0, nil
+	n, err := s.deleteRows(ctx, `DELETE FROM sessions WHERE id = ?`, "delete session by id", id)
+	return n > 0, err
 }
 
 // DeleteOtherSessions revokes every session except currentID and returns the
 // number deleted. An empty currentID deletes nothing — the caller's identity is
 // unknown and deleting every session would be the wrong guess.
 func (s *Store) DeleteOtherSessions(ctx context.Context, currentID string) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if currentID == "" {
 		return 0, nil
 	}
-	res, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE id <> ?`, currentID)
-	if err != nil {
-		return 0, fmt.Errorf("delete other sessions: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	return int(n), nil
+	n, err := s.deleteRows(ctx, `DELETE FROM sessions WHERE id <> ?`, "delete other sessions", currentID)
+	return int(n), err
 }

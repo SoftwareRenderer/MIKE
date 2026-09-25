@@ -126,11 +126,22 @@ var detachedOperations = []sideEffectEntry{
 		"revocation is the row's absence: a cancel that left it standing leaves a credential live that the user " +
 			"believes is gone",
 	},
+	{
+		"POST /api/auth/login",
+		"creates the session row. A tab closing halfway through a login must not decide whether the user is " +
+			"signed in, and the answer the response gives has to match the row that exists",
+	},
+	{
+		"POST /api/auth/logout",
+		"deletes the session row: a delete that does not land leaves the session live, which is the opposite " +
+			"of what was asked for",
+	},
 }
 
 // requestScopedReads serve a response and leave nothing behind. Their cancellation is expected — a
 // navigated-away panel, a closed editor — and must never be reported as a fault.
 var requestScopedReads = []sideEffectEntry{
+	{"GET /api/auth/session", "reads one session row; a cancel leaves nothing"},
 	{"GET /api/fs", "a directory listing; the panel refetches"},
 	{"GET /api/fs/read", "one file's content, capped before it is read"},
 	{"GET /api/fs/search", "a search result set"},

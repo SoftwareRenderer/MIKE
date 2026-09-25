@@ -1462,9 +1462,10 @@ func TestCtxRootRealRegister_IsCompleteAndNamesRealFunctions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
-	if len(findings) < 30 {
-		t.Fatalf("the register holds %d entries; Phase 0 measured 46 base contexts across the tree, so a "+
-			"count this small means the matcher stopped seeing them", len(findings))
+	if len(findings) < 20 {
+		t.Fatalf("the register holds %d entries; Phase 0 measured 46 base contexts across the tree and the "+
+			"register holds 26 today (a thread of a context through a boundary retires its entry), so a count "+
+			"this small means the matcher stopped seeing them", len(findings))
 	}
 	for _, f := range findings {
 		if strings.Contains(f.Detail, "unclassified") {
