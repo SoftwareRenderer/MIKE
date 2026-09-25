@@ -23,18 +23,18 @@ export interface ReturnSignal {
     msSinceUnpainted: number | null;
     /** True when the screen may be showing something the server has moved past. */
     mayBeBehind: boolean;
-    /** True when a missed turn leaves nothing on this screen that could report it, so "this window went
-     * unread" is evidence enough by itself — `docs/reconnection.md → The tab that comes back`. */
-    unreadIsEvidence: boolean;
+    /** True when a return is reason enough to ask the server, whatever this screen can prove. */
+    revalidateOnReturn?: boolean;
 }
 
 export function needsReturnReconcile(s: ReturnSignal): boolean {
     if (s.hidden) return false;
     if (s.msSinceReconcile < RETURN_DEDUPE_MS) return false;
-    // A page that was stopped ran nothing while it was stopped, so it counts as unread for the view that
-    // cannot see its own gap. The other two keep their own evidence, because a reload costs them state.
-    if (s.source === 'resume') return s.unreadIsEvidence;
-    if (s.source === 'visible') return s.unreadIsEvidence || s.mayBeBehind;
+    if (s.revalidateOnReturn) return true;
+    // A stopped page delivers the frames queued during the freeze once focus returns, so the stream closes
+    // that gap; a refetch would cost these screens state.
+    if (s.source === 'resume') return false;
+    if (s.source === 'visible') return s.mayBeBehind;
     return s.mayBeBehind && (contentWentUnread(s) || (s.msSinceFrame !== null && s.msSinceFrame >= WAKE_FRAME_GAP_MS));
 }
 

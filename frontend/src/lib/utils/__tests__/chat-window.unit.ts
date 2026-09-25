@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
     applyWindowRead,
+    isStaleHistoryRead,
+    newestWindowUnchanged,
     prependRows,
     resolveAnchor,
     anchorScrollDelta,
@@ -249,5 +251,29 @@ describe('windowIsReading', () => {
     it('gives a read that did not answer nothing to redraw', () => {
         expect(windowIsReading('failed', false)).toBe(false);
         expect(windowIsReading('failed', true)).toBe(false);
+    });
+});
+
+describe('newestWindowUnchanged', () => {
+    it('recognizes both a direct 304 and a matching ETag', () => {
+        expect(newestWindowUnchanged('"a"', undefined, true)).toBe(true);
+        expect(newestWindowUnchanged('"a"', '"a"')).toBe(true);
+    });
+
+    it('treats a different or missing revision as changed', () => {
+        expect(newestWindowUnchanged('"a"', '"b"')).toBe(false);
+        expect(newestWindowUnchanged('"a"')).toBe(false);
+        expect(newestWindowUnchanged('', '"a"')).toBe(false);
+    });
+});
+
+describe('isStaleHistoryRead', () => {
+    it('accepts only the newest read while the screen is alive', () => {
+        expect(isStaleHistoryRead(false, 2, 2)).toBe(false);
+    });
+
+    it('discards superseded reads and reads returning to a destroyed screen', () => {
+        expect(isStaleHistoryRead(false, 2, 3)).toBe(true);
+        expect(isStaleHistoryRead(true, 3, 3)).toBe(true);
     });
 });

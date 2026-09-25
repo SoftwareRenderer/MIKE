@@ -31,7 +31,7 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { t } from '$lib/i18n';
     import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
-    import { applyWindowRead, prependRows, resolveAnchor, anchorScrollDelta, readerScrolledUp, noticeForWindowRead, windowIsReading, type MeasuredEntry, type ScrollAnchor, type WindowRead, type WindowReadNotice } from '$lib/utils/chat-window';
+    import { applyWindowRead, isStaleHistoryRead, newestWindowUnchanged, prependRows, resolveAnchor, anchorScrollDelta, readerScrolledUp, noticeForWindowRead, windowIsReading, type MeasuredEntry, type ScrollAnchor, type WindowRead, type WindowReadNotice } from '$lib/utils/chat-window';
     import { createTabReturn } from '$lib/composables/use-tab-return';
     import ChatForm from './ChatForm.svelte';
     import ChatEntries from './ChatEntries.svelte';
@@ -54,6 +54,10 @@
     /** Where the next-older window starts, and whether there is one. */
     let earlierCursor = $state('');
     let hasEarlier = $state(false);
+    /** Strong ETag of the newest window on screen; empty when no live baseline is known. */
+    let historyRevision = '';
+    /** Identifies the newest history read; older reads are discarded. */
+    let historyReadSeq = 0;
     let loadingEarlier = $state(false);
     /** The window read in flight, so a scroll to the top edge and a jump to a prompt share one page. */
     let earlierInFlight: Promise<boolean> | null = null;
@@ -313,6 +317,7 @@
     /** Reset stream state before loading a new thread's messages. */
     function resetStreamState() {
         stream.resetForThreadSwitch();
+        historyRevision = '';
     }
 
     /** Merge an updated task into the app store. */
@@ -482,14 +487,19 @@
     /** `executionState` decides whether an unanswered tool call is work or a leftover: pass the task row,
      * not the board's copy. The answer says how the read ended, so a caller can tell a mirror copy from
      * the server's own rows. */
-    async function loadHistory(scrollAfter = false, executionState = knownExecutionState): Promise<WindowRead> {
+    async function loadHistory(scrollAfter = false, executionState = knownExecutionState, knownRevision = ''): Promise<WindowRead> {
         let read: WindowRead = 'failed';
+        const seq = ++historyReadSeq;
         try {
-            const window = await getTaskMessages(projectId, taskId);
+            const window = await getTaskMessages(projectId, taskId, '', knownRevision);
+            if (isStaleHistoryRead(destroyed, seq, historyReadSeq)) return 'failed';
+            const unchanged = newestWindowUnchanged(knownRevision, window.revision, window.unchanged);
             read = isFromCache(window) ? 'cached' : 'answered';
             historyNotice = noticeForWindowRead(read, readContext(executionState));
             declareRows(historyNotice);
-            if (windowIsReading(read, historyRows.length > 0)) {
+            // Only a live read sets the baseline: a window with no ETag says nothing about what is on screen.
+            if (read === 'answered') historyRevision = window.revision ?? '';
+            if (!unchanged && windowIsReading(read, historyRows.length > 0)) {
                 const joined = applyWindowRead(historyRows, window.messages);
                 historyRows = joined.rows;
 
@@ -502,6 +512,7 @@
             // The transcript draws first: the prompts the header names arrive a moment later and relabel it.
             await readTurns(true);
         } catch (e) {
+            if (isStaleHistoryRead(destroyed, seq, historyReadSeq)) return 'failed';
             // Task may have been deleted — clear stale draft
             if (e instanceof Error && (e.message.includes('Not found') || e.message.includes('404'))) {
                 clearDraftText(taskId).catch(() => {});
@@ -513,6 +524,7 @@
             historyNotice = noticeForWindowRead('failed', readContext(executionState));
             declareRows(historyNotice);
         }
+        if (isStaleHistoryRead(destroyed, seq, historyReadSeq)) return read;
         // A queued send has no row, so no read can bring it; the queue is read either way.
         await renderPendingSends();
         return read;
@@ -710,6 +722,7 @@
 
     /** Update local thread state to reflect a new active thread (avoids refetching all threads). */
     function updateActiveThread(threadId: string) {
+        if (activeThreadId && threadId !== activeThreadId) resetStreamState();
         activeThreadId = threadId;
         threads = threads.map(t => ({ ...t, is_active: t.id === threadId }));
     }
@@ -1417,12 +1430,11 @@
             }
         })();
 
+        // This transcript arrives on `task_event` frames and nowhere else, and a missed turn leaves nothing
+        // on screen that could report it, so every return revalidates the newest window against the
+        // revision held here.
         const returnWatcher = createTabReturn({
-            mayBeBehind,
-            // True because this transcript arrives on `task_event` frames and nowhere else.
-            unreadIsEvidence: true,
-            msSinceFrame: () => getAppStreamRef()?.msSinceFrame() ?? null,
-            msSinceUnpainted: () => getAppStreamRef()?.msSinceUnpainted() ?? null,
+            revalidateOnReturn: true,
             onReturn: () => { void reconcileAfterAbsence(); },
         });
 
@@ -1501,18 +1513,10 @@
     // Turns completed while offline aren't replayed, so the transcript comes back from the
     // database when the connection does. Running tasks replay their in-flight turn; loadHistory
     // merges them without clobbering.
-    useConnectionRestored(() => void reconcileAfterAbsence());
-
-    /** True while this screen could be showing work the server has moved past. Read at the moment of
-     * the event — a value kept from earlier is the stale view itself. */
-    function mayBeBehind(): boolean {
-        return isLoading
-            || taskIsInFlight(knownExecutionState)
-            // A turn open on screen is mid-flight, so a frame lost while away has no other way back.
-            || stream.state.currentAssistantId !== null
-            || entries.some(e => e.toolCalls?.some(tc => tc.isPending))
-            || stream.state.unresolvedToolIds.size > 0;
-    }
+    useConnectionRestored(() => {
+        historyRevision = '';
+        void reconcileAfterAbsence();
+    });
 
     /**
      * Rebuild the transcript from the database after a stretch this screen was not being read. Turns
@@ -1527,7 +1531,7 @@
             // Deleted or unreachable: keep the reading from the last row read.
         }
         if (!taskIsInFlight(executionState)) dropStaleStreamingState();
-        const read = await loadHistory(false, executionState);
+        const read = await loadHistory(follow.following, executionState, historyRevision);
         if (read === 'answered') {
             stream.state.unresolvedToolIds = pendingToolIds(stream.state.entries);
         }
