@@ -16,7 +16,8 @@
     import { dataAgeText } from '$lib/utils/format-time';
     import { resolveBoardLandingColumn, resolveClosedTaskColumn, mergeTaskUpdateIntoBoard } from '$lib/utils/task-utils';
     import { resolveLandingProject } from '$lib/utils/project-landing';
-    import { TERMINAL_VIEW, asksForTerminal, explorerPathRoots, fileWithinRoots } from '$lib/utils/app-link';
+    import { explorerPathRoots } from '$lib/utils/app-link';
+    import { urlRouter } from '$lib/services/url-router.svelte';
     import { reviewNotifier } from '$lib/services/review-notifications.svelte';
     import { getBoardCache, getBoardCacheEntry, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, clearAll, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { flushBoardMirror, mirrorBoard } from '$lib/services/board-mirror';
@@ -100,7 +101,7 @@
         const project = appStore.selectedProject;
         if (!project?.name) return t('app.title.default');
         const name = project.name;
-        if (terminalOnlyVal) return t('app.title.terminal', { name });
+        if (urlRouter.terminalOnly) return t('app.title.terminal', { name });
         const reviewCount = projectCounts[project.id]?.review ?? 0;
         if (reviewCount > 0) {
             return t('app.title.review', { name, count: reviewCount });
@@ -111,49 +112,6 @@
             return `${name} | 🟡 ${other?.name || pid}`;
         }
         return name;
-    }
-
-    /**
-     * Update the URL to reflect the current navigation state.
-     * Params are always ordered: project, task, view, thread.
-     * - project/task: must be explicitly provided; omitted = cleared
-     * - view: preserved if omitted; null = cleared
-     * - thread: preserved unless clearThread=true
-     * @param clearThread Also remove the `thread` param (use when leaving task detail).
-     * @param push If true, uses pushState (creates history entry for back button). Default: replaceState.
-     */
-    function updateUrl(params: { project?: string | null; task?: string | null; view?: string | null; file?: string | null }, clearThread = false, push = false) {
-        const current = new URLSearchParams(location.search);
-        // project/task: explicitly provided or cleared; view: preserve if omitted
-        const project = params.project;
-        const task = params.task;
-        const view = params.view !== undefined ? params.view : current.get('view');
-        const file = params.file !== undefined ? params.file : current.get('file');
-        const thread = clearThread ? null : current.get('thread');
-        // Keep the Review Changes panel state in sync
-        if (params.view !== undefined) {
-            urlChangesOpen = params.view === 'review' || params.view === 'task-review';
-        }
-        // Build query in canonical order: project, task, view, file, thread
-        // Use manual encoding to keep / unencoded in file paths
-        const parts: string[] = [];
-        if (project) parts.push('project=' + encodeURIComponent(project));
-        if (task) parts.push('task=' + encodeURIComponent(task));
-        if (view) parts.push('view=' + encodeURIComponent(view));
-        if (file) parts.push('file=' + file); // keep / unencoded
-        if (thread) parts.push('thread=' + encodeURIComponent(thread));
-        const newUrl = location.pathname + (parts.length ? '?' + parts.join('&') : '');
-        if (location.pathname + location.search !== newUrl) {
-            if (push) {
-                history.pushState(null, '', newUrl);
-            } else {
-                history.replaceState(null, '', newUrl);
-            }
-            // Keep urlFileId in sync — replaceState doesn't fire popstate
-            if (params.file !== undefined) {
-                urlFileId = params.file || '';
-            }
-        }
     }
 
     let collapsed = $state(false);
@@ -309,52 +267,21 @@
     let doneStatsCache: Record<string, { updated_at: string; stats: DiffStatsEntry }> = $state({});
     let boardRefreshPending = false; // deduplicate rapid refreshBoard calls
     let showFileBrowserVal = $state(false);
-    let showExplorerViewVal = $state(false);
-    let showTaskExplorerVal = $state(false);
-    // Terminal-only screen (URL: view=terminal): the shell fills the page.
-    let terminalOnlyVal = $state(asksForTerminal(location.search));
-    /** Its target: the prepared "<projectId>:<taskId>", and whether creating that task's worktree failed. */
+    /** The terminal screen's target: the prepared "<projectId>:<taskId>", and whether creating that task's worktree failed. */
     let terminalScreen = $state<{ key: string; failed: boolean }>({ key: '', failed: false });
-    // Review Changes panel state (URL: view=review / view=task-review)
-    let urlChangesOpen = $state(initialChangesOpen());
-
-    /** True when the initial URL opened the Review Changes panel. */
-    function initialChangesOpen(): boolean {
-        const v = new URLSearchParams(location.search).get('view');
-        return v === 'review' || v === 'task-review';
-    }
-
-    /** Restore the screen the URL's view param names: an explorer, the terminal alone, or the board. */
-    function applyUrlView(viewParam: string | null) {
-        terminalOnlyVal = viewParam === TERMINAL_VIEW;
-        if (terminalOnlyVal) return;
-        if (viewParam === 'explorer' || viewParam === 'review') {
-            showExplorerViewVal = true;
-            showTaskExplorerVal = false;
-            urlChangesOpen = viewParam === 'review';
-        } else if (viewParam === 'task-explorer' || viewParam === 'task-review') {
-            showExplorerViewVal = false;
-            showTaskExplorerVal = true;
-            urlChangesOpen = viewParam === 'task-review';
-        } else {
-            showExplorerViewVal = false;
-            showTaskExplorerVal = false;
-            urlChangesOpen = false;
-        }
-    }
 
     /**
      * The terminal-only screen prepares its own target: the project must be on screen, and a task
      * terminal needs the worktree, which the board's terminal button also creates before it opens.
      */
     $effect(() => {
-        if (!terminalOnlyVal) {
+        if (!urlRouter.terminalOnly) {
             terminalScreen = { key: '', failed: false };
             return;
         }
         const project = appStore.selectedProject;
         if (!project) return;
-        const wantsTask = !!new URLSearchParams(location.search).get('task');
+        const wantsTask = urlRouter.task !== '';
         const task = wantsTask ? appStore.selectedTask : null;
         if (wantsTask && !task) return;
         const key = project.id + ':' + (task?.id ?? '');
@@ -381,7 +308,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     let fsEventQueue = $state<Array<{ op: 'create' | 'delete'; path: string }>>([]);
     let addProjectError = $state('');
     let currentBranch = $state('');
-    let urlFileId = $state(new URLSearchParams(location.search).get('file') || '');
     let mobileMenuOpen = $state(false);
 
     // Keyboard shortcuts (Settings → Preferences): the create-task shortcut is
@@ -390,15 +316,15 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     function boardShortcutsEnabled(): boolean {
         return (
             !!appStore.selectedProject &&
-            !terminalOnlyVal &&
+            !urlRouter.terminalOnly &&
             !(uiStore.showCardDetail && appStore.selectedTask) &&
-            !showExplorerViewVal &&
-            !showTaskExplorerVal &&
+            !urlRouter.explorerOpen &&
+            !urlRouter.taskExplorerOpen &&
             !isAnyModalOpen()
         );
     }
     function terminalShortcutEnabled(): boolean {
-        return !!appStore.selectedProject && !terminalOnlyVal && !isAnyModalOpen();
+        return !!appStore.selectedProject && !urlRouter.terminalOnly && !isAnyModalOpen();
     }
     useKeyboardShortcuts({
         isEnabled: boardShortcutsEnabled,
@@ -436,10 +362,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     // Handle browser back/forward
     async function handlePopState() {
-        const params = new URLSearchParams(location.search);
-        const projectId = params.get('project');
-        const taskId = params.get('task');
-        const fileParam = params.get('file') || '';
+        const url = urlRouter.read();
+        const projectId = url.project;
+        const taskId = url.task;
         const fileProject = (projectId ? appStore.projects.find(p => p.id === projectId) : null) ?? appStore.selectedProject;
         const fileRoots = fileProject
             ? explorerPathRoots({
@@ -448,7 +373,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 projectId: fileProject.id, taskId: taskId || undefined,
             })
             : [];
-        urlFileId = fileWithinRoots(fileParam, fileRoots) ? fileParam : '';
+        urlRouter.acceptFile(url.file, fileRoots);
 
         if (!projectId && appStore.selectedProject) {
             const landing = await landingProject();
@@ -491,7 +416,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             uiStore.showCardDetail = false;
         }
         // Restore explorer view (and Review Changes panel) from URL
-        applyUrlView(params.get('view'));
+        urlRouter.applyView();
         // Notify child components (e.g., TaskChat) that the URL changed
         window.dispatchEvent(new CustomEvent('urlchanged'));
     }
@@ -506,9 +431,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
      * explorers occupy one place) and mirror it in the URL.
      */
     function openTaskExplorer(): void {
-        showExplorerViewVal = false;
-        showTaskExplorerVal = true;
-        updateUrl({ project: appStore.selectedProject?.id, task: appStore.selectedTask?.id, view: 'task-explorer' }, false, true);
+        const project = appStore.selectedProject;
+        const task = appStore.selectedTask;
+        if (!project || !task) return;
+        urlRouter.openTaskExplorer(project.id, task.id);
     }
 
     async function routeDefinitionJump(event: Event): Promise<void> {
@@ -519,7 +445,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         // Not the selected task — nothing here knows how to open that file.
         if (detail.taskId !== appStore.selectedTask?.id) return;
         // The task explorer is showing: its own listener already has this event.
-        if (showTaskExplorerVal) return;
+        if (urlRouter.taskExplorerOpen) return;
         openTaskExplorer();
         await tick();
         window.dispatchEvent(new CustomEvent('open-file', { detail }));
@@ -561,15 +487,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             },
             onBranch: (branch) => {
                 currentBranch = branch;
-                if (branch && !showExplorerViewVal) {
-                    const view = new URLSearchParams(location.search).get('view');
-                    if (view === 'explorer' || view === 'review') {
-                        applyUrlView(view);
-                    }
-                }
+                if (branch && !urlRouter.explorerOpen) urlRouter.restoreProjectExplorer();
             },
             onFsEvent: (op, path) => {
-                if (showExplorerViewVal || showTaskExplorerVal || (uiStore.showCardDetail && appStore.selectedTask)) {
+                if (urlRouter.explorerOpen || urlRouter.taskExplorerOpen || (uiStore.showCardDetail && appStore.selectedTask)) {
                     fsEventQueue = [...fsEventQueue, { op, path }];
                 }
             },
@@ -674,7 +595,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             },
         });
         setAppStreamRef(appStream);
-        applyUrlView(new URLSearchParams(location.search).get('view'));
+        urlRouter.read();
+        urlRouter.applyView();
         await loadAppData();
         // The language offer runs **after** the extension list resolves: its first
         // rule is "no i18n pack is enabled", and before this resolves that answer
@@ -708,9 +630,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             const projs = await getProjects();
             appStore.projects = projs || [];
             if (appStore.projects.length > 0) {
-                const urlParams = new URLSearchParams(location.search);
-                const urlProjectId = urlParams.get('project');
-                const targetProject = (urlProjectId ? appStore.projects.find(p => p.id === urlProjectId) : null)
+                const targetProject = (urlRouter.project ? appStore.projects.find(p => p.id === urlRouter.project) : null)
                     ?? await landingProject();
                 if (targetProject) {
                     await selectProject(targetProject, false);
@@ -893,30 +813,17 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     // Uses requestAnimationFrame with throttling — only checks when frame fires,
     // skips if URL hasn't changed. ~10-60ms latency vs 500ms setInterval.
     let urlRafId: number | null = null;
-    let lastUrlCheck = '';
-    let lastUrlCheckTime = 0;
-    const URL_CHECK_THROTTLE = 250; // ms between checks
 
     function checkUrlChange() {
-        const now = Date.now();
-        if (now - lastUrlCheckTime < URL_CHECK_THROTTLE) {
-            urlRafId = requestAnimationFrame(checkUrlChange);
-            return;
-        }
-        if (location.search !== lastUrlCheck) {
-            lastUrlCheck = location.search;
-            lastUrlCheckTime = now;
-            if (appStore.tasks.length > 0) {
-                restoreTaskFromUrl();
-            }
+        if (urlRouter.refresh() && appStore.tasks.length > 0) {
+            void restoreTaskFromUrl();
         }
         urlRafId = requestAnimationFrame(checkUrlChange);
     }
 
     $effect(() => {
         if (!isAuthenticated || !appStore.selectedProject) return;
-        lastUrlCheck = location.search;
-        lastUrlCheckTime = Date.now();
+        urlRouter.markSeen();
         urlRafId = requestAnimationFrame(checkUrlChange);
         return () => { if (urlRafId !== null) cancelAnimationFrame(urlRafId); };
     });
@@ -925,8 +832,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     // When task is not on the board (e.g., created via API, board stream
     // hasn't pushed yet), refresh board from server to pick up new tasks.
     async function restoreTaskFromUrl() {
-        const params = new URLSearchParams(location.search);
-        const taskId = params.get('task');
+        const taskId = urlRouter.task;
         if (!taskId || !appStore.selectedProject) return;
         const projectId = appStore.selectedProject.id;
         let task = appStore.tasks.find(t => t.id === taskId);
@@ -939,9 +845,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 if (!task) {
                     // The task belongs to another project, so the detail on screen is not the URL's:
                     // clearing the param alone leaves it rendered under the project the URL names.
-                    const url = new URL(location.href);
-                    url.searchParams.delete('task');
-                    history.replaceState(null, '', location.pathname + url.search);
+                    urlRouter.write({ project: projectId });
                     appStore.selectedTask = null;
                     uiStore.showCardDetail = false;
                     return;
@@ -951,15 +855,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             }
         }
         appStore.selectedTask = task;
-        // Restore view state from URL
-        const viewParam = params.get('view');
-        if (viewParam === 'explorer' || viewParam === 'review' || viewParam === 'task-explorer' || viewParam === 'task-review' || viewParam === TERMINAL_VIEW) {
-            applyUrlView(viewParam);
-            uiStore.showCardDetail = false;
-        } else {
-            applyUrlView(null);
-            uiStore.showCardDetail = true;
-        }
+        // Restore view state from URL: a `view` that names a screen of its own keeps the detail closed.
+        uiStore.showCardDetail = !urlRouter.applyView();
     }
 
     function disconnectBoardStream() {
@@ -1083,7 +980,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     function clearTaskDetail() {
         // Push URL first so the subscription sees updated URL
-        updateUrl({ project: appStore.selectedProject?.id }, true, true);
+        urlRouter.write({ project: appStore.selectedProject?.id }, true, true);
         appStore.selectedTask = null;
         uiStore.showCardDetail = false;
     }
@@ -1130,8 +1027,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     async function selectProject(p: Project, push = true) {
         disconnectBoardStream();
         const previous = appStore.selectedProject;
-        const wasExplorerViewOpen = showExplorerViewVal;
-        const wasTaskExplorerOpen = showTaskExplorerVal;
+        // The screen on screen is the `view` the new project's address bar has to keep naming.
+        const viewParam = urlRouter.currentView();
         const wasProjectSwitch = !!previous;
         const wasDifferentProject = !!previous && previous.id !== p.id;
         // Image progress belongs to the project it was sent for.
@@ -1146,27 +1043,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
         saveAppSetting(LAST_PROJECT_KEY, p.id).catch(() => {});
         // Re-mount explorer view for the new project (only on project switch, not initial load)
-        if (wasProjectSwitch && wasExplorerViewOpen) {
-            showExplorerViewVal = false;
-            fsEventQueue = [];
-        }
-        if (wasProjectSwitch && wasTaskExplorerOpen) {
-            showTaskExplorerVal = false;
-            fsEventQueue = [];
-        }
+        if (wasProjectSwitch && urlRouter.remountExplorers()) fsEventQueue = [];
         // Update URL with project param
         // Preserve task param from URL — restoreTaskFromUrl needs it after board loads
-        const urlTaskId = new URLSearchParams(location.search).get('task');
-        const viewParam = terminalOnlyVal ? TERMINAL_VIEW
-            : wasExplorerViewOpen ? (urlChangesOpen ? 'review' : 'explorer')
-            : (wasTaskExplorerOpen ? (urlChangesOpen ? 'task-review' : 'task-explorer') : null);
-        updateUrl({ project: p.id, task: appStore.selectedTask?.id || urlTaskId, view: viewParam, file: urlFileId || null }, false, push);
-        if (wasProjectSwitch && wasExplorerViewOpen) {
-            queueMicrotask(() => { showExplorerViewVal = true; });
-        }
-        if (wasProjectSwitch && wasTaskExplorerOpen) {
-            queueMicrotask(() => { showTaskExplorerVal = true; });
-        }
+        urlRouter.write({ project: p.id, task: appStore.selectedTask?.id || urlRouter.task, view: viewParam, file: urlRouter.file || null }, false, push);
         try {
             const b = await getBoard(p.id);
             if (!applyBoard(b, p.id, boardSource(b))) return;
@@ -1294,7 +1174,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     function handleExplorerFileChange(path: string | null) {
         const isFileOpen = path != null && (path.startsWith(appStore.selectedProject?.path || '') || isSandboxMountPath(path));
         if (isFileOpen) {
-            updateUrl({ project: appStore.selectedProject?.id, view: urlChangesOpen ? 'review' : 'explorer', file: path });
+            urlRouter.write({ project: appStore.selectedProject?.id, view: urlRouter.changesOpen ? 'review' : 'explorer', file: path });
             // Auto-collapse sidebar on tablet to give editor more space
             if (isTablet() && !collapsed) {
                 collapsed = true;
@@ -1302,7 +1182,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 sidebarAutoCollapsed = true;
             }
         } else {
-            updateUrl({ project: appStore.selectedProject?.id, view: urlChangesOpen ? 'review' : 'explorer', file: null });
+            urlRouter.write({ project: appStore.selectedProject?.id, view: urlRouter.changesOpen ? 'review' : 'explorer', file: null });
             // Restore sidebar when file is closed
             if (sidebarAutoCollapsed) {
                 collapsed = false;
@@ -1432,7 +1312,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     {/if}
 
     <!-- Sidebar -->
-    {#if !terminalOnlyVal}
+    {#if !urlRouter.terminalOnly}
         <Sidebar
             projects={appStore.projects}
             currentProject={appStore.selectedProject}
@@ -1460,7 +1340,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     <!-- Main Content -->
     <main id="main-content" class="main" tabindex="-1">
-        {#if terminalOnlyVal}
+        {#if urlRouter.terminalOnly}
             {#if terminalScreen.key !== '' && !terminalScreen.failed && terminalPanel.component}
                 {@const Terminal = terminalPanel.component}
                 {#if Terminal}
@@ -1476,35 +1356,35 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 </div>
             {/if}
         {:else if appStore.selectedProject}
-            {#if !(uiStore.showCardDetail && appStore.selectedTask) && !showExplorerViewVal && !showTaskExplorerVal}
+            {#if !(uiStore.showCardDetail && appStore.selectedTask) && !urlRouter.explorerOpen && !urlRouter.taskExplorerOpen}
             <TopBar
                 currentProject={appStore.selectedProject}
                 {currentBranch}
                 {hasReview}
                 onOpenMenu={() => mobileMenuOpen = true}
                 onOpenSandboxConfig={() => appStore.selectedProject && openSandboxConfig(appStore.selectedProject)}
-                onOpenExplorerView={() => { showExplorerViewVal = true; updateUrl({ project: appStore.selectedProject?.id, view: 'explorer' }, false, true); }}
+                onOpenExplorerView={() => urlRouter.openProjectExplorer(appStore.selectedProject?.id ?? '')}
                 onOpenTerminal={openTerminal}
                 onShowStats={() => uiStore.showStats = true}
                 onShowConfig={openSettings}
             />
             {/if}
             <section class="board-container" aria-label="Kanban board">
-                {#if showExplorerViewVal && appStore.selectedProject}
+                {#if urlRouter.explorerOpen && appStore.selectedProject}
                     <ExplorerView
                         projectId={appStore.selectedProject.id}
                         projectPath={appStore.selectedProject.path}
                         currentBranch={currentBranch}
-                        initialFile={urlFileId || ''}
+                        initialFile={urlRouter.file}
                         sandboxEnabled={appStore.selectedProject.sandbox_enabled ?? false}
                         fsEventQueue={fsEventQueue}
                         onOpenTerminal={openTerminal}
                         onUpdateFile={handleExplorerFileChange}
-                        changesOpen={urlChangesOpen}
-                        onChangesOpen={(open: boolean) => updateUrl({ project: appStore.selectedProject?.id, view: open ? 'review' : 'explorer' }, false, open)}
-                        onClose={() => { restoreExplorerSidebar(); showExplorerViewVal = false; updateUrl({ project: appStore.selectedProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
+                        changesOpen={urlRouter.changesOpen}
+                        onChangesOpen={(open: boolean) => urlRouter.write({ project: appStore.selectedProject?.id, view: open ? 'review' : 'explorer' }, false, open)}
+                        onClose={() => { restoreExplorerSidebar(); urlRouter.write({ project: appStore.selectedProject?.id, view: null, file: null }, false, true); urlRouter.applyView(); fsEventQueue = []; }}
                     />
-                {:else if showTaskExplorerVal && appStore.selectedProject && appStore.selectedTask}
+                {:else if urlRouter.taskExplorerOpen && appStore.selectedProject && appStore.selectedTask}
                     <TaskExplorerView
                         projectId={appStore.selectedProject.id}
                         projectName={appStore.selectedProject.name}
@@ -1512,14 +1392,14 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         taskPath={appStore.config?.workspace_dir ? `${appStore.config.workspace_dir}/${appStore.selectedProject.id}/${appStore.selectedTask.id}` : ''}
                         taskBranch={appStore.selectedTask.branch || ''}
                         taskStatus={appStore.selectedTask.status || ''}
-                        initialFile={urlFileId || ''}
+                        initialFile={urlRouter.file}
                         sandboxEnabled={appStore.selectedProject.sandbox_enabled ?? false}
                         fsEventQueue={fsEventQueue}
                         onOpenTerminal={openTerminal}
-                        onUpdateFile={(path: string | null) => updateUrl({ project: appStore.selectedProject?.id, task: appStore.selectedTask?.id, view: urlChangesOpen ? 'task-review' : 'task-explorer', file: path }, false, !!path)}
-                        changesOpen={urlChangesOpen}
-                        onChangesOpen={(open: boolean) => updateUrl({ project: appStore.selectedProject?.id, task: appStore.selectedTask?.id, view: open ? 'task-review' : 'task-explorer' }, false, open)}
-                        onClose={() => { showTaskExplorerVal = false; updateUrl({ project: appStore.selectedProject?.id, task: appStore.selectedTask?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
+                        onUpdateFile={(path: string | null) => urlRouter.write({ project: appStore.selectedProject?.id, task: appStore.selectedTask?.id, view: urlRouter.changesOpen ? 'task-review' : 'task-explorer', file: path }, false, !!path)}
+                        changesOpen={urlRouter.changesOpen}
+                        onChangesOpen={(open: boolean) => urlRouter.write({ project: appStore.selectedProject?.id, task: appStore.selectedTask?.id, view: open ? 'task-review' : 'task-explorer' }, false, open)}
+                        onClose={() => { urlRouter.write({ project: appStore.selectedProject?.id, task: appStore.selectedTask?.id, view: null, file: null }, false, true); urlRouter.applyView(); fsEventQueue = []; }}
                     />
                 {:else if uiStore.showCardDetail && appStore.selectedTask}
                     <CardDetail task={appStore.selectedTask} tasks={appStore.tasks} projectPath={appStore.selectedProject?.path} projectName={appStore.selectedProject?.name} workspaceDir={appStore.config?.workspace_dir} sandboxEnabled={appStore.selectedProject?.sandbox_enabled} fsEventQueue={fsEventQueue} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff' | 'checkpoint') => cardDetailActiveTab = tab} onClose={(status?: string) => {
@@ -1527,10 +1407,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         uiStore.showCardDetail = false;
                         appStore.selectedTask = null;
                         fsEventQueue = [];
-                        updateUrl({ project: appStore.selectedProject?.id }, true, true);
+                        urlRouter.write({ project: appStore.selectedProject?.id }, true, true);
                     }} onSelectTask={(t: Task) => {
                         // Push URL first so the subscription sees updated URL and skips replaceState
-                        updateUrl({ project: appStore.selectedProject?.id, task: t.id }, true, true);
+                        urlRouter.write({ project: appStore.selectedProject?.id, task: t.id }, true, true);
                         if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
                         appStore.selectedTask = t;
                     }} onRefreshBoard={() => refreshBoard()} onOpenTerminal={openTerminal} onOpenExplorer={openTaskExplorer} />
@@ -1595,7 +1475,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     const task = appStore.tasks.find((t) => t.id === ft.taskId) ?? ft.task;
                     appStore.selectedTask = task;
                     uiStore.showCardDetail = true;
-                    updateUrl({ project: ft.projectId, task: ft.taskId, view: null, file: null }, false, true);
+                    urlRouter.write({ project: ft.projectId, task: ft.taskId, view: null, file: null }, false, true);
                 }}
             />
         {/if}
