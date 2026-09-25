@@ -12,6 +12,7 @@
     import { createStatusLabel } from '$lib/utils/subtask-status';
     import { sandboxMountPath } from '$lib/utils/path';
     import { isVimSwapFile } from '$lib/utils/file-suffix';
+    import { isAnyModalOpen } from '$lib/utils/modal-state';
     import { clearHighlightCache } from '$lib/highlighter';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { createTabReturn } from '$lib/composables/use-tab-return';
@@ -601,16 +602,6 @@
 
         loadDiff();
 
-        /** True while any modal/overlay would swallow task-view shortcuts. */
-        function isBlocked(): boolean {
-            return !!(
-                uiStore.showCreateTask || uiStore.showConfig || uiStore.showTerminal ||
-                uiStore.showStats || uiStore.showSandboxConfig ||
-                appStore.showEditTask ||
-                dialogStore.confirmation || dialogStore.commitDialog || dialogStore.compressContextDialog
-            );
-        }
-
         function handleKey(e: KeyboardEvent) {
             if (e.key === 'Escape') {
                 // A floating task view owns Escape while it's open — a background
@@ -668,7 +659,7 @@
                 if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
                 const active = document.activeElement;
                 if (active instanceof HTMLElement && isEditableTarget(active)) return;
-                if (isBlocked()) return;
+                if (isAnyModalOpen()) return;
                 if (mobile && activeTab !== 'context') return;
                 if (!detailEl) return;
                 const chatCol = detailEl.querySelector<HTMLElement>('.column-chat');
@@ -712,7 +703,7 @@
                     shiftKey: e.shiftKey,
                     defaultPrevented: e.defaultPrevented,
                     isMobile: mobile,
-                    blocked: isBlocked(),
+                    blocked: isAnyModalOpen(),
                     editingFile: !!editingFile,
                     diffFullscreen,
                     chatFullscreen: chatMaximize.fullscreen,

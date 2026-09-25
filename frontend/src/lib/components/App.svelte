@@ -5,6 +5,7 @@
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
     import { t } from '$lib/i18n';
     import { isSandboxMountPath } from '$lib/utils/path';
+    import { isAnyModalOpen } from '$lib/utils/modal-state';
     import { wsConnection } from '$lib/stores/connection';
     import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
     import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
@@ -392,20 +393,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     let urlFileId = $state(new URLSearchParams(location.search).get('file') || '');
     let mobileMenuOpen = $state(false);
 
-    // No modal/overlay is open (shared gate for the keyboard shortcuts below).
-    function noModalOpen(): boolean {
-        return (
-            !uiStore.showCreateTask &&
-            !uiStore.showConfig &&
-            !uiStore.showTerminal &&
-            !uiStore.showStats &&
-            !uiStore.showSandboxConfig &&
-            !appStore.showEditTask &&
-            !dialogStore.confirmation &&
-            !dialogStore.commitDialog &&
-            !dialogStore.compressContextDialog
-        );
-    }
     // Keyboard shortcuts (Settings → Preferences): the create-task shortcut is
     // active only on the visible board; the open-terminal shortcut is active
     // on every page with a terminal button (board, task detail, explorers).
@@ -416,11 +403,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             !(uiStore.showCardDetail && appStore.selectedTask) &&
             !showExplorerViewVal &&
             !showTaskExplorerVal &&
-            noModalOpen()
+            !isAnyModalOpen()
         );
     }
     function terminalShortcutEnabled(): boolean {
-        return !!currentProject && !terminalOnlyVal && noModalOpen();
+        return !!currentProject && !terminalOnlyVal && !isAnyModalOpen();
     }
     useKeyboardShortcuts({
         isEnabled: boardShortcutsEnabled,

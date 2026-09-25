@@ -51,14 +51,14 @@ beforeEach(() => {
     }));
     posts = [];
     responders = {};
-    dialogStore.confirmation = null;
+    dialogStore.confirmationSlot.clear();
     dialogStore.toast = null;
 });
 
 afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
-    dialogStore.confirmation = null;
+    dialogStore.confirmationSlot.clear();
     dialogStore.toast = null;
 });
 
@@ -109,9 +109,9 @@ async function openRowMenu(container: HTMLElement, path: string) {
 
 // Answer the confirmation the listing is waiting on.
 async function answerDialog(answer: boolean) {
-    await waitFor(() => expect(dialogStore.confirmation).toBeTruthy());
-    dialogStore.confirmation?._resolve?.(answer);
-    dialogStore.confirmation = null;
+    await waitFor(() => expect(dialogStore.confirmationSlot.pending).toBeTruthy());
+    dialogStore.confirmationSlot.pending?._resolve?.(answer);
+    dialogStore.confirmationSlot.clear();
 }
 
 describe('the file list context menu', () => {
@@ -219,11 +219,11 @@ describe('the file list context menu', () => {
         await openRowMenu(container, `${ROOT}/b.txt`);
         menuItem('Delete')!.click();
 
-        await waitFor(() => expect(dialogStore.confirmation).toBeTruthy());
-        expect(dialogStore.confirmation?.title).toBe('Delete files');
-        expect(dialogStore.confirmation?.message).toBe('Delete these 2 items from disk? Nothing here can undo them.');
-        expect(dialogStore.confirmation?.items).toEqual(['a.txt', 'b.txt']);
-        expect(dialogStore.confirmation?.variant).toBe('destructive');
+        await waitFor(() => expect(dialogStore.confirmationSlot.pending).toBeTruthy());
+        expect(dialogStore.confirmationSlot.pending?.title).toBe('Delete files');
+        expect(dialogStore.confirmationSlot.pending?.message).toBe('Delete these 2 items from disk? Nothing here can undo them.');
+        expect(dialogStore.confirmationSlot.pending?.items).toEqual(['a.txt', 'b.txt']);
+        expect(dialogStore.confirmationSlot.pending?.variant).toBe('destructive');
         expect(posts, 'nothing is removed before the answer').toEqual([]);
 
         await answerDialog(true);

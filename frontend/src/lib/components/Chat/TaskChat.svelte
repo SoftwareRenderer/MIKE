@@ -18,6 +18,7 @@
     import { DRAFT_SAVE_DEBOUNCE_MS } from '$lib/constants';
     import { mergeQueuedUpdate, taskIsInFlight } from '$lib/utils/task-utils';
     import { effectiveStartTaskKey, matchShortcut } from '$lib/utils/keyboard';
+    import { isAnyModalOpen } from '$lib/utils/modal-state';
     import { trustedExecutionState, isTaskPaused } from '$lib/utils/execution-state';
     import { reselectProvider, getProviderDisplayName } from '$lib/utils/providers';
     import { buildEntriesFromMessages, mergeLoadedHistory, buildEntryMetas, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, takeEchoMatch, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
@@ -986,10 +987,7 @@
         function handleKeydown(e: KeyboardEvent) {
             if (e.defaultPrevented || e.repeat) return;
             if (!showStartButton) return;
-            if (uiStore.showCreateTask || uiStore.showConfig || uiStore.showTerminal ||
-                uiStore.showStats || uiStore.showSandboxConfig ||
-                appStore.showEditTask || dialogStore.confirmation ||
-                dialogStore.commitDialog || dialogStore.compressContextDialog) return;
+            if (isAnyModalOpen()) return;
             const key = effectiveStartTaskKey(appStore.config);
             if (key && matchShortcut(key, e)) {
                 e.preventDefault();
@@ -1046,16 +1044,13 @@
         isCommitting = true;
         try {
             // Open dialog — it will stream the commit message from the backend
-            const confirmedMessage = await new Promise<string | null>((resolve) => {
-                dialogStore.commitDialog = {
-                    streaming: true,
-                    message: '',
-                    confirmText: t('chat.review.commitAndDone'),
-                    cancelText: t('chat.common.cancel'),
-                    projectId: thisProjectId,
-                    taskId: thisTaskId,
-                    _resolve: resolve,
-                };
+            const confirmedMessage = await dialogStore.showCommitDialog({
+                streaming: true,
+                message: '',
+                confirmText: t('chat.review.commitAndDone'),
+                cancelText: t('chat.common.cancel'),
+                projectId: thisProjectId,
+                taskId: thisTaskId,
             });
             if (!confirmedMessage) {
                 return; // User cancelled

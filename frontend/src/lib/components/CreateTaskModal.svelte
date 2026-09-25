@@ -126,7 +126,7 @@
     // The submit shortcut fires from anywhere in the dialog (description included).
     $effect(() => {
         const handleKeydown = (e: KeyboardEvent) => {
-            if (e.repeat || !canSubmit || dialogStore.confirmation) return;
+            if (e.repeat || !canSubmit || dialogStore.confirmationSlot.pending) return;
             if (matchesCreateTaskSubmitKey(appStore.config, e)) {
                 e.preventDefault();
                 handleSubmit();
@@ -331,7 +331,7 @@
      */
     async function requestClose(): Promise<boolean> {
         if (prompt.trim()) {
-            if (dialogStore.confirmation) return false;
+            if (dialogStore.confirmationSlot.pending) return false;
             const confirmed = await dialogStore.showConfirm({
                 title: t('app.task.discardTitle'),
                 message: t('app.task.discardMessage'),

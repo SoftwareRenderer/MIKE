@@ -40,7 +40,7 @@
             resolveFn(value);
             resolveFn = null;
         }
-        dialogStore.commitDialog = null;
+        dialogStore.commitDialogSlot.clear();
     }
 
     function handleConfirm() {
@@ -128,7 +128,7 @@
     }
 
     $effect(() => {
-        const value = dialogStore.commitDialog;
+        const value = dialogStore.commitDialogSlot.pending;
         if (value) {
             // Only initialize on first run; re-runs would wipe streamed tokens.
             if (streamState.count === 0) {
@@ -158,7 +158,7 @@
 
             // Abort only on dialog close, not on effect re-runs.
             return () => {
-                if (dialogStore.commitDialog === null && abortController) {
+                if (dialogStore.commitDialogSlot.pending === null && abortController) {
                     abortController.abort();
                     abortController = null;
                 }

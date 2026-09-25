@@ -686,16 +686,13 @@
             let updated: Task;
             if (nextStatus === 'done' && hasChanges) {
                 // Open dialog — it will stream the commit message from the backend
-                const confirmedMessage = await new Promise<string | null>((resolve) => {
-                    dialogStore.commitDialog = {
-                        streaming: true,
-                        message: '',
-                        confirmText: t('board.card.commitAndDone'),
-                        cancelText: t('board.confirm.cancel'),
-                        projectId: thisProjectId,
-                        taskId: thisTask.id,
-                        _resolve: resolve,
-                    };
+                const confirmedMessage = await dialogStore.showCommitDialog({
+                    streaming: true,
+                    message: '',
+                    confirmText: t('board.card.commitAndDone'),
+                    cancelText: t('board.confirm.cancel'),
+                    projectId: thisProjectId,
+                    taskId: thisTask.id,
                 });
                 if (!confirmedMessage) {
                     return; // User cancelled

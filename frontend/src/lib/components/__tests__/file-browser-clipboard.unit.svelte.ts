@@ -46,14 +46,14 @@ beforeEach(() => {
     posts = [];
     responders = {};
     deleted = [];
-    dialogStore.confirmation = null;
+    dialogStore.confirmationSlot.clear();
     dialogStore.toast = null;
 });
 
 afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
-    dialogStore.confirmation = null;
+    dialogStore.confirmationSlot.clear();
     dialogStore.toast = null;
 });
 
@@ -110,11 +110,11 @@ describe('the file list clipboard and rename', () => {
         await fireEvent.keyDown(listEl(container), { key: 'c', ctrlKey: true });
         await fireEvent.keyDown(listEl(container), { key: 'v', ctrlKey: true });
 
-        await waitFor(() => expect(dialogStore.confirmation?.title).toBe('Pasted under other names'));
-        expect(dialogStore.confirmation?.message).toBe('That folder already held these names:');
-        expect(dialogStore.confirmation?.items).toEqual(['a.txt → a copy.txt']);
+        await waitFor(() => expect(dialogStore.confirmationSlot.pending?.title).toBe('Pasted under other names'));
+        expect(dialogStore.confirmationSlot.pending?.message).toBe('That folder already held these names:');
+        expect(dialogStore.confirmationSlot.pending?.items).toEqual(['a.txt → a copy.txt']);
         // Nothing was destroyed, so the dialog offers one button.
-        expect(dialogStore.confirmation?.okText).toBe('OK');
+        expect(dialogStore.confirmationSlot.pending?.okText).toBe('OK');
     });
 
     it('marks the cut rows, moves them on paste, and forgets them', async () => {
@@ -212,6 +212,6 @@ describe('the file list clipboard and rename', () => {
         await waitFor(() => expect(dialogStore.toast?.type).toBe('error'));
         expect(dialogStore.toast?.message).toBe('1 item was not changed: the server could not do it');
         // The renamed notice still shows behind the failure.
-        await waitFor(() => expect(dialogStore.confirmation?.items).toEqual(['a.txt → a copy.txt']));
+        await waitFor(() => expect(dialogStore.confirmationSlot.pending?.items).toEqual(['a.txt → a copy.txt']));
     });
 });

@@ -43,20 +43,20 @@ describe('app shell copy', () => {
         it('confirms in English when the caller names no buttons', async () => {
             const store = new DialogStore();
             void store.showConfirm({ title: 'T', message: 'M' });
-            expect(store.confirmation?.confirmText).toBe('Confirm');
-            expect(store.confirmation?.cancelText).toBe('Cancel');
-            store.confirmation?._resolve?.(true);
+            expect(store.confirmationSlot.pending?.confirmText).toBe('Confirm');
+            expect(store.confirmationSlot.pending?.cancelText).toBe('Cancel');
+            store.confirmationSlot.pending?._resolve?.(true);
         });
 
         it('labels the two specialised dialogs with their own verb', () => {
             const store = new DialogStore();
             void store.showCompressContextDialog({});
-            expect(store.compressContextDialog?.confirmText).toBe('Compress');
-            expect(store.compressContextDialog?.cancelText).toBe('Cancel');
+            expect(store.compressContextDialogSlot.pending?.confirmText).toBe('Compress');
+            expect(store.compressContextDialogSlot.pending?.cancelText).toBe('Cancel');
 
             void store.showCommitDialog({ message: 'm' });
-            expect(store.commitDialog?.confirmText).toBe('Commit and move to Done');
-            expect(store.commitDialog?.cancelText).toBe('Cancel');
+            expect(store.commitDialogSlot.pending?.confirmText).toBe('Commit and move to Done');
+            expect(store.commitDialogSlot.pending?.cancelText).toBe('Cancel');
         });
     });
 
