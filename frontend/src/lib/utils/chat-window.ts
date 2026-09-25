@@ -122,6 +122,16 @@ export function readerScrolledUp(writtenTop: number, topNow: number, slack = 2):
     return writtenTop - topNow > slack;
 }
 
+/** True when a newest-window response matches the revision already on screen. */
+export function newestWindowUnchanged(revision: string, windowRevision?: string, unchanged?: boolean): boolean {
+    return unchanged === true || (!!revision && !!windowRevision && windowRevision === revision);
+}
+
+/** True when a read belongs to an older request or to a screen that no longer exists. */
+export function isStaleHistoryRead(destroyed: boolean, seq: number, currentSeq: number): boolean {
+    return destroyed || seq !== currentSeq;
+}
+
 /** How far above the top edge older rows are fetched, as a multiple of the viewport, so a page lands while
  * the reader is still heading toward the top. */
 const EARLIER_EDGE_VIEWPORTS = 1.5;

@@ -7,9 +7,9 @@ import { watchSuspension } from '$lib/utils/page-suspension';
  */
 export interface TabReturnOptions {
     /** True while this screen could be showing something the server has moved past. */
-    mayBeBehind: () => boolean;
-    /** Passed through to `ReturnSignal.unreadIsEvidence`. */
-    unreadIsEvidence?: boolean;
+    mayBeBehind?: () => boolean;
+    /** Ask the server whether content changed on every return signal; the caller makes that check cheap. */
+    revalidateOnReturn?: boolean;
     msSinceFrame?: () => number | null;
     msSinceUnpainted?: () => number | null;
     /** Called at most once per return gesture. */
@@ -32,8 +32,8 @@ export function createTabReturn(opts: TabReturnOptions): TabReturn {
             msSinceFrame: opts.msSinceFrame?.() ?? null,
             msSinceUnpainted: opts.msSinceUnpainted?.() ?? null,
             msSinceReconcile: Date.now() - lastReconcileAt,
-            mayBeBehind: opts.mayBeBehind(),
-            unreadIsEvidence: opts.unreadIsEvidence ?? false,
+            mayBeBehind: opts.mayBeBehind?.() ?? false,
+            revalidateOnReturn: opts.revalidateOnReturn ?? false,
         })) {
             return;
         }
