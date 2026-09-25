@@ -19,8 +19,8 @@ func TestRepoIsCommitted(t *testing.T) {
 	if count := GitOutput(t, dir, "rev-list", "--count", "HEAD"); count != "1" {
 		t.Errorf("repo has %s commits, want 1", count)
 	}
-	if hash := RevParse(t, dir, "HEAD"); len(hash) != 40 {
-		t.Errorf("RevParse(HEAD) = %q, want a commit hash", hash)
+	if hash := GitOutput(t, dir, "rev-parse", "HEAD"); len(hash) != 40 {
+		t.Errorf("HEAD does not resolve to a commit hash: %q", hash)
 	}
 	if got := GitOutput(t, dir, "config", "user.email"); got != AuthorEmail {
 		t.Errorf("user.email = %q, want %q", got, AuthorEmail)
