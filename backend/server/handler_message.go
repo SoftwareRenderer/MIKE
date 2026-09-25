@@ -21,8 +21,7 @@ import (
 // Message rows are keyed by their own id, so this ties a message to the task in the request's
 // path. ok is false after writing the response.
 func (s *Server) messageInTask(w http.ResponseWriter, projectID, taskID, messageID string) (*types.TaskMessage, bool) {
-	if _, err := s.store.GetTask(projectID, taskID); err != nil {
-		Fail(w, err, "get task", "task not found")
+	if _, ok := s.taskInPath(w, projectID, taskID); !ok {
 		return nil, false
 	}
 	msg, err := s.store.GetTaskMessageByID(messageID)
@@ -227,9 +226,8 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTaskTurns(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	task, err := s.store.GetTask(projectID, taskID)
-	if err != nil {
-		Fail(w, err, "get task", "task not found")
+	task, ok := s.taskInPath(w, projectID, taskID)
+	if !ok {
 		return
 	}
 	limit, err := pageLimit(r, store.TurnWindowDefault, store.TurnWindowMax)
@@ -365,9 +363,6 @@ func (s *Server) publishSummaryEdit(projectID, taskID string, msg *types.TaskMes
 		"id":      msg.ID,
 		"summary": content,
 	}})
-	if s.executor == nil {
-		return
-	}
 	latest, err := s.store.LastSummarizationMessageID(msg.ThreadID)
 	if err != nil {
 		logging.For(logging.HTTP).With(logging.TaskID, taskID).Warnf("thread=%s could not find its current summary: %v", msg.ThreadID, err)

@@ -15,6 +15,27 @@ import (
 // task workspace root. Renames only ever modify files within the worktree.
 var errEditOutsideWorkspace = errors.New("edit target outside workspace")
 
+// lspEnvelope is the JSON-RPC reply every LSP tool call reads. An LSP error is a reply rather than a
+// transport failure, so it arrives here and not as a Go error.
+type lspEnvelope struct {
+	Error *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+	Result json.RawMessage `json:"result"`
+}
+
+// errText is the sentence a caller answers an error envelope with.
+func (e *lspEnvelope) errText() string {
+	return fmt.Sprintf("LSP error %d: %s", e.Error.Code, e.Error.Message)
+}
+
+// hasResult reports whether the reply carries a result. A JSON `null` means the server found nothing,
+// which is not an error.
+func (e *lspEnvelope) hasResult() bool {
+	return len(e.Result) > 0 && string(e.Result) != "null"
+}
+
 // lspPosition is a 0-indexed LSP text position.
 type lspPosition struct {
 	Line      int `json:"line"`
@@ -118,20 +139,14 @@ func applyTextEdits(content string, edits []lspTextEdit) (string, error) {
 // edits. A null result (nothing renamed) yields (nil, nil). An LSP error
 // envelope yields an error carrying the code and message.
 func parseWorkspaceEdit(response json.RawMessage) (map[string][]lspTextEdit, error) {
-	var envelope struct {
-		Error *struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-		Result json.RawMessage `json:"result"`
-	}
+	var envelope lspEnvelope
 	if err := json.Unmarshal(response, &envelope); err != nil {
 		return nil, fmt.Errorf("unmarshal rename response: %w", err)
 	}
 	if envelope.Error != nil {
-		return nil, fmt.Errorf("LSP error %d: %s", envelope.Error.Code, envelope.Error.Message)
+		return nil, errors.New(envelope.errText())
 	}
-	if len(envelope.Result) == 0 || string(envelope.Result) == "null" {
+	if !envelope.hasResult() {
 		return nil, nil
 	}
 

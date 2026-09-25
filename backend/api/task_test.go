@@ -48,7 +48,7 @@ func newTestTaskHandler(t *testing.T) (*TaskHandler, *store.Store, string) {
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	wm := git.NewWorktreeManager(s, cfgStore)
 	boardMgr := stream.NewAppStreamManager(s, wm)
-	h := NewTaskHandler(s, boardMgr, cfgStore, nil, nil, wm, nil, nil)
+	h := NewTaskHandler(TaskDeps{Store: s, BoardStream: boardMgr, ConfigStore: cfgStore, WorktreeMgr: wm})
 
 	return h, s, worktreesDir
 }
@@ -577,7 +577,8 @@ func newTaskHandlerWithExecutor(t *testing.T) (*TaskHandler, *store.Store, strin
 		AppStreamMgr: boardMgr,
 		WorktreeMgr:  worktreeMgr,
 	})
-	h := NewTaskHandler(s, boardMgr, cfgStore, nil, executor, worktreeMgr, nil, nil)
+	h := NewTaskHandler(TaskDeps{Store: s, BoardStream: boardMgr, ConfigStore: cfgStore,
+		Executor: executor, WorktreeMgr: worktreeMgr})
 	return h, s, projID
 }
 
@@ -1064,7 +1065,8 @@ func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
 		AppStreamMgr: boardMgr,
 		WorktreeMgr:  wm,
 	})
-	h := NewTaskHandler(s, boardMgr, cfgStore, nil, te, wm, nil, nil)
+	h := NewTaskHandler(TaskDeps{Store: s, BoardStream: boardMgr, ConfigStore: cfgStore,
+		Executor: te, WorktreeMgr: wm})
 	mux := newTaskMux(h)
 
 	projPath := t.TempDir()

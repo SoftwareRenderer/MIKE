@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"mike/backend/git"
+	"mike/backend/httputil"
 	"mike/backend/store"
 	"mike/backend/stream"
 	"mike/backend/types"
@@ -94,8 +94,8 @@ func (te *TaskExecutor) GenerateCommitMessage(ctx context.Context, task *types.T
 	return te.merge.GenerateCommitMessage(ctx, task)
 }
 
-func (te *TaskExecutor) StreamCommitMessage(w SSEFlusher, taskID string, task *types.Task) {
-	te.merge.StreamCommitMessage(w, taskID, task)
+func (te *TaskExecutor) StreamCommitMessage(s *httputil.SSE, taskID string, task *types.Task) {
+	te.merge.StreamCommitMessage(s, taskID, task)
 }
 
 // branchChildFrom settles the branch a task forks from. "" means the project baseline.
@@ -326,11 +326,6 @@ func (m *mergeOrchestrator) ResolveMergeTarget(projectID string, task *types.Tas
 	return project.OriginBranch
 }
 
-type SSEFlusher interface {
-	http.ResponseWriter
-	http.Flusher
-}
-
 // GenerateCommitMessage writes the task's commit message from the conversation.
 // Every commit path goes through it. Each model that contributed gets its own Assisted-by line.
 func (m *mergeOrchestrator) GenerateCommitMessage(ctx context.Context, task *types.Task) string {
@@ -379,16 +374,15 @@ func (m *mergeOrchestrator) generateCommitMessageLLM(ctx context.Context, task *
 	return label
 }
 
-// StreamCommitMessage streams the message as SSE events. No timeout is applied, and the caller
-// must set the SSE headers first.
-func (m *mergeOrchestrator) StreamCommitMessage(w SSEFlusher, taskID string, task *types.Task) {
+// StreamCommitMessage streams the message as SSE events. No timeout is applied.
+func (m *mergeOrchestrator) StreamCommitMessage(s *httputil.SSE, taskID string, task *types.Task) {
 	serverURL, modelName, _ := m.utilityTarget(task)
 	if serverURL == "" || modelName == "" {
 		fallback := task.Title
 		if fallback == "" {
 			fallback = "file changes"
 		}
-		fmt.Fprintf(w, "event: done\ndata: {\"content\":%q}\n\n", fallback)
+		_ = s.Event("done", fmt.Sprintf("{\"content\":%q}", fallback))
 		return
 	}
 
@@ -407,11 +401,9 @@ func (m *mergeOrchestrator) StreamCommitMessage(w SSEFlusher, taskID string, tas
 	defer cancel()
 
 	writeSSE := func(event, data string) {
-		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data); err != nil {
+		if err := s.Event(event, data); err != nil {
 			cancel()
-			return
 		}
-		w.Flush()
 	}
 
 	_, err := m.streamCompletion(ctx, serverURL, modelName, labelMessages,

@@ -30,7 +30,11 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, token, csrfToken, err := s.sessionMgr.Login(req.Password, clientIP(r, s.settings.TrustProxy), r.UserAgent())
+	// A session is state this leaves behind, so the write runs detached: closing the tab halfway
+	// through a login must not decide whether the user ends up signed in (sideeffects.go).
+	ctx, cancel := s.Detached()
+	defer cancel()
+	_, token, csrfToken, err := s.sessionMgr.Login(ctx, req.Password, clientIP(r, s.settings.TrustProxy), r.UserAgent())
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidPassword) {
 			JSONError(w, http.StatusUnauthorized, "invalid password")
@@ -55,12 +59,15 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, _, err := s.sessionMgr.Validate(cookie.Value); err != nil {
+	if _, _, err := s.sessionMgr.Validate(r.Context(), cookie.Value); err != nil {
 		JSONError(w, http.StatusUnauthorized, "invalid session")
 		return
 	}
 
-	_ = s.sessionMgr.Logout(cookie.Value)
+	// Detached like login: a logout whose delete is cancelled leaves the session live.
+	ctx, cancel := s.Detached()
+	defer cancel()
+	_ = s.sessionMgr.Logout(ctx, cookie.Value)
 	s.clearSessionCookie(w, r)
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -71,7 +78,7 @@ func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
 
 	cookie, err := r.Cookie(sessionCookieName)
 	if err == nil && s.sessionMgr != nil {
-		if _, csrfToken, err := s.sessionMgr.Validate(cookie.Value); err == nil {
+		if _, csrfToken, err := s.sessionMgr.Validate(r.Context(), cookie.Value); err == nil {
 			JSONResponse(w, http.StatusOK, map[string]any{"authenticated": true, "csrf_token": csrfToken})
 			return
 		}

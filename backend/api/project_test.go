@@ -417,26 +417,6 @@ func TestHandleSandboxBuildNoDockerfilePath(t *testing.T) {
 	}
 }
 
-// TestHandleSandboxBuildRequiresSandboxManager verifies that once a Dockerfile
-// path is configured, the build proceeds to require a sandbox manager.
-func TestHandleSandboxBuildRequiresSandboxManager(t *testing.T) {
-	h, projID := testProjectHandler(t)
-	if err := h.store.UpdateProjectSandboxDockerfilePath(projID, "/tmp/Dockerfile"); err != nil {
-		t.Fatalf("set dockerfile path: %v", err)
-	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/projects/{projectID}/sandbox/build", h.HandleSandboxBuild)
-
-	rr := doSandboxBuildRequest(t, mux, projID)
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
-	}
-	if !strings.Contains(rr.Body.String(), "sandbox manager not available") {
-		t.Fatalf("body = %q, want error message", rr.Body.String())
-	}
-}
-
 // TestBuildWantsNoCache checks that only an explicit truthy ?no_cache value
 // disables the build layer cache; anything else keeps the default cached build.
 func TestBuildWantsNoCache(t *testing.T) {

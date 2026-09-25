@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -53,8 +52,31 @@ type projectSandboxOps interface {
 	StopProjectContainers(projectID string, taskIDs []string)
 }
 
-func NewProjectHandler(store *store.Store, configStore *config.ConfigStore, worktreeMgr *git.WorktreeManager, terminalMgr *term.TerminalManager, sandboxMgr projectSandboxOps, taskExecutor *exec.TaskExecutor, hostRoot *fsutil.HostRoot, dangerZone sandbox.DangerZone, tasks taskTreeDeleter) *ProjectHandler {
-	return &ProjectHandler{store: store, configStore: configStore, worktreeMgr: worktreeMgr, terminalMgr: terminalMgr, sandboxMgr: sandboxMgr, executor: taskExecutor, hostRoot: hostRoot, dangerZone: dangerZone, tasks: tasks}
+// ProjectDeps is what a ProjectHandler is wired with.
+type ProjectDeps struct {
+	Store       *store.Store
+	ConfigStore *config.ConfigStore
+	WorktreeMgr *git.WorktreeManager
+	TerminalMgr *term.TerminalManager
+	SandboxMgr  projectSandboxOps
+	Executor    *exec.TaskExecutor
+	Tasks       taskTreeDeleter
+	HostRoot    *fsutil.HostRoot
+	DangerZone  sandbox.DangerZone
+}
+
+func NewProjectHandler(deps ProjectDeps) *ProjectHandler {
+	return &ProjectHandler{
+		store:       deps.Store,
+		configStore: deps.ConfigStore,
+		worktreeMgr: deps.WorktreeMgr,
+		terminalMgr: deps.TerminalMgr,
+		sandboxMgr:  deps.SandboxMgr,
+		executor:    deps.Executor,
+		hostRoot:    deps.HostRoot,
+		dangerZone:  deps.DangerZone,
+		tasks:       deps.Tasks,
+	}
 }
 
 // HandleList returns all projects.
@@ -305,20 +327,12 @@ func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
+	sse, ok := httputil.NewSSE(w)
 	if !ok {
 		httputil.JSONError(w, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	sendEvent := func(event map[string]any) {
-		data, _ := json.Marshal(event)
-		_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
-		flusher.Flush()
-	}
+	sendEvent := sse.JSON
 
 	// Same rules as HandleCreate, so common failures are known before any work starts; the host
 	// jail's refusal arrives here as an error frame rather than a 403.
@@ -490,25 +504,14 @@ func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Reque
 		httputil.JSONError(w, http.StatusBadRequest, "no Dockerfile path configured for this project")
 		return
 	}
-	if h.sandboxMgr == nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "sandbox manager not available")
-		return
-	}
-
-	flusher, ok := w.(http.Flusher)
+	sse, ok := httputil.NewSSE(w)
 	if !ok {
 		httputil.JSONError(w, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	sendLine := func(line string) {
-		_, _ = fmt.Fprintf(w, "data: %s\n\n", line)
-		flusher.Flush()
-	}
+	// Each frame is one raw progress line, not JSON: this stream's reader shows the lines.
+	sendLine := sse.Data
 
 	if noCache {
 		sendLine("Building sandbox image from Dockerfile (no cache)...")
@@ -529,13 +532,11 @@ func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Reque
 	h.stopProjectSandbox(id)
 
 	// Final result as JSON
-	result, _ := json.Marshal(map[string]string{
+	sse.JSON(map[string]string{
 		"status":  "built",
 		"image":   sandbox.ProjectImageName(project.Name),
 		"project": id,
 	})
-	_, _ = fmt.Fprintf(w, "data: %s\n\n", result)
-	flusher.Flush()
 }
 
 // HandleByID handles GET, PUT, DELETE for a single project.

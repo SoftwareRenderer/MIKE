@@ -71,15 +71,26 @@ type RunnerConfig struct {
 	AgentManifest *extensions.AgentConfig `json:"agent_manifest,omitempty"`
 }
 
+// RunnerDeps is one agent run. Its three string fields are interchangeable to the compiler, so a call
+// site names each one.
+type RunnerDeps struct {
+	Ext            *extensions.Extension
+	SandboxMgr     *sandbox.SandboxManager
+	TaskID         string
+	WorktreePath   string
+	SessionName    string
+	SandboxEnabled bool
+}
+
 // NewAgentRunner prepares the adapter, then starts its process. A caller that must know the
 // binary before anything is spawned takes PrepareAgent and Start instead: the name lives only in
 // the adapter.
-func NewAgentRunner(ctx context.Context, ext *extensions.Extension, sandboxMgr *sandbox.SandboxManager, taskID, worktreePath, sessionName string, sandboxEnabled bool) (*AgentRunner, error) {
-	prepared, err := PrepareAgent(ctx, ext, worktreePath, sessionName, sandboxEnabled)
+func NewAgentRunner(ctx context.Context, deps RunnerDeps) (*AgentRunner, error) {
+	prepared, err := PrepareAgent(ctx, deps)
 	if err != nil {
 		return nil, err
 	}
-	return prepared.Start(sandboxMgr, taskID)
+	return prepared.Start(deps.SandboxMgr, deps.TaskID)
 }
 
 // Prepared is a loaded, initialized adapter that has said which process it runs, with that
@@ -95,7 +106,8 @@ type Prepared struct {
 
 // PrepareAgent loads, initializes and resolves the adapter's subprocess config. An adapter that
 // cannot name a binary is refused here, before any process exists.
-func PrepareAgent(ctx context.Context, ext *extensions.Extension, worktreePath, sessionName string, sandboxEnabled bool) (*Prepared, error) {
+func PrepareAgent(ctx context.Context, deps RunnerDeps) (*Prepared, error) {
+	ext, worktreePath, sessionName, sandboxEnabled := deps.Ext, deps.WorktreePath, deps.SessionName, deps.SandboxEnabled
 	cfg := RunnerConfig{
 		ExtensionName: ext.Name,
 		SessionName:   sessionName,

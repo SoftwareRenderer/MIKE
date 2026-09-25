@@ -419,7 +419,12 @@ func (te *TaskExecutor) binaryProber() agentBinaries {
 // prepareAgent loads the adapter and, for a sandboxed task, checks the container holds the binary
 // that adapter named. The order is the rule: the adapter is the only place the name exists.
 func (te *TaskExecutor) prepareAgent(ctx context.Context, ext *extensions.Extension, taskID, worktreePath, sessionName string, sandboxEnabled bool) (*agent.Prepared, error) {
-	prepared, err := agent.PrepareAgent(ctx, ext, worktreePath, sessionName, sandboxEnabled)
+	prepared, err := agent.PrepareAgent(ctx, agent.RunnerDeps{
+		Ext:            ext,
+		WorktreePath:   worktreePath,
+		SessionName:    sessionName,
+		SandboxEnabled: sandboxEnabled,
+	})
 	if err != nil {
 		return nil, err
 	}

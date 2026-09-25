@@ -138,15 +138,9 @@ func scanAPITokenRow(r *sql.Rows) (APITokenInfo, error) {
 
 // DeleteAPITokenByID revokes a single token. Returns false when no token has that id.
 func (s *Store) DeleteAPITokenByID(ctx context.Context, id string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if id == "" {
 		return false, nil
 	}
-	res, err := s.db.ExecContext(ctx, `DELETE FROM api_tokens WHERE id = ?`, id)
-	if err != nil {
-		return false, fmt.Errorf("delete api token by id: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	return n > 0, nil
+	n, err := s.deleteRows(ctx, `DELETE FROM api_tokens WHERE id = ?`, "delete api token by id", id)
+	return n > 0, err
 }

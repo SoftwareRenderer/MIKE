@@ -46,9 +46,31 @@ type taskSandboxOps interface {
 	GetContainerPorts(taskID string) ([]types.AssignedPort, error)
 }
 
+// TaskDeps is what a TaskHandler is wired with. Four of these are legitimately nil on an unsandboxed
+// server.
+type TaskDeps struct {
+	Store       *store.Store
+	BoardStream *stream.AppStreamManager
+	ConfigStore *config.ConfigStore
+	TerminalMgr *term.TerminalManager
+	Executor    *exec.TaskExecutor
+	WorktreeMgr *git.WorktreeManager
+	CommitQueue *exec.CommitQueue
+	SandboxMgr  taskSandboxOps
+}
+
 // NewTaskHandler creates a new TaskHandler.
-func NewTaskHandler(store *store.Store, boardStreamMgr *stream.AppStreamManager, configStore *config.ConfigStore, terminalMgr *term.TerminalManager, executor *exec.TaskExecutor, worktreeMgr *git.WorktreeManager, commitQueue *exec.CommitQueue, sandboxMgr taskSandboxOps) *TaskHandler {
-	return &TaskHandler{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore, terminalMgr: terminalMgr, executor: executor, worktreeMgr: worktreeMgr, commitQueue: commitQueue, sandboxMgr: sandboxMgr}
+func NewTaskHandler(deps TaskDeps) *TaskHandler {
+	return &TaskHandler{
+		store:          deps.Store,
+		boardStreamMgr: deps.BoardStream,
+		configStore:    deps.ConfigStore,
+		terminalMgr:    deps.TerminalMgr,
+		executor:       deps.Executor,
+		worktreeMgr:    deps.WorktreeMgr,
+		commitQueue:    deps.CommitQueue,
+		sandboxMgr:     deps.SandboxMgr,
+	}
 }
 
 // refreshTaskPorts updates AssignedPorts from the live sandbox container.
@@ -749,34 +771,27 @@ func resolveGitAuthor(projectID string, s interface {
 func (h *TaskHandler) HandleCommitPreviewStream(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
+	sse, ok := httputil.NewSSE(w)
+	if !ok {
+		httputil.JSONError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
 	task, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprintf(w, "event: error\ndata: {\"error\":\"task not found\"}\n\n")
+		sse.EventJSON("error", map[string]string{"error": "task not found"})
 		return
 	}
 
 	// Send metadata immediately (author + merge target)
 	authorName, authorEmail := resolveGitAuthor(projectID, h.store)
 	mergeTarget := h.executor.ResolveMergeTarget(projectID, task)
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	metadata, _ := json.Marshal(map[string]string{
+	sse.EventJSON("metadata", map[string]string{
 		"author_name":  authorName,
 		"author_email": authorEmail,
 		"merge_target": mergeTarget,
 	})
-	fmt.Fprintf(w, "event: metadata\ndata: %s\n\n", string(metadata))
-	w.(http.Flusher).Flush()
 
-	// Stream the commit message generation
-	flusher, ok := w.(exec.SSEFlusher)
-	if !ok {
-		fmt.Fprintf(w, "event: error\ndata: {\"error\":\"streaming not supported\"}\n\n")
-		return
-	}
-	h.executor.StreamCommitMessage(flusher, taskID, task)
+	h.executor.StreamCommitMessage(sse, taskID, task)
 }
 
 // HandleCommitAndDone commits the worktree changes, merges into the origin branch, and moves the task to Done.
@@ -858,11 +873,8 @@ func (h *TaskHandler) handConflictToAgent(w http.ResponseWriter, projectID, task
 func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
-	task, ok := resolveTask(w, r, h.store)
+	task, ok := resolveTaskWithWorktree(w, r, h.store, h.worktreeMgr)
 	if !ok {
-		return
-	}
-	if !requireWorktreeMgr(w, h.worktreeMgr) {
 		return
 	}
 
@@ -1021,9 +1033,6 @@ func (h *TaskHandler) deleteTaskTrees(projectID string, taskIDs ...string) {
 
 // broadcastTaskDeleted sends a task_deleted event for the given task and all its descendants.
 func (h *TaskHandler) broadcastTaskDeleted(projectID, taskID string, descendants []types.Task) {
-	if h.boardStreamMgr == nil {
-		return
-	}
 	for _, d := range descendants {
 		h.boardStreamMgr.BroadcastTaskDeleted(projectID, d.ID)
 	}

@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -31,6 +32,37 @@ const (
 	uploadFormMemory = 1 << 20
 )
 
+// uploadedFile reads the one `file` part of a multipart body, bounding it before any of it is read so a
+// size cap is not an allocation. The func it returns closes the file and discards the form's temporary
+// files, and the caller defers it: Go defers in the caller's frame. ok is false after writing the response.
+func uploadedFile(w http.ResponseWriter, r *http.Request) (multipart.File, *multipart.FileHeader, func(), bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, MaxUploadSize+uploadBoundaryOverhead)
+	if err := r.ParseMultipartForm(uploadFormMemory); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			JSONError(w, http.StatusRequestEntityTooLarge, uploadTooLargeMessage)
+			return nil, nil, nil, false
+		}
+		JSONError(w, http.StatusBadRequest, "multipart form with a file part is required")
+		return nil, nil, nil, false
+	}
+	discard := func() {
+		if r.MultipartForm != nil {
+			r.MultipartForm.RemoveAll()
+		}
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		discard()
+		JSONError(w, http.StatusBadRequest, "file part is required")
+		return nil, nil, nil, false
+	}
+	return file, header, func() {
+		_ = file.Close()
+		discard()
+	}, true
+}
+
 // handleFSUpload writes one uploaded file into a project's directory tree.
 //
 // multipart/form-data with `path` (target directory, in container form when the project is
@@ -38,37 +70,16 @@ const (
 // and the `file` part. The relative path needs its own field because Go strips directories from
 // a part's filename. An existing name is answered 409 unless overwrite=1.
 func (s *Server) handleFSUpload(w http.ResponseWriter, r *http.Request) {
-	project, err := s.optionalProject(r)
-	if err != nil {
-		JSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if project == nil {
-		JSONError(w, http.StatusBadRequest, "project parameter is required")
+	project, ok := s.requiredProject(w, r)
+	if !ok {
 		return
 	}
 
-	// Bound the body before reading any of it.
-	r.Body = http.MaxBytesReader(w, r.Body, MaxUploadSize+uploadBoundaryOverhead)
-	if err := r.ParseMultipartForm(uploadFormMemory); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			JSONError(w, http.StatusRequestEntityTooLarge, uploadTooLargeMessage)
-			return
-		}
-		JSONError(w, http.StatusBadRequest, "multipart form with a file part is required")
+	file, header, release, ok := uploadedFile(w, r)
+	if !ok {
 		return
 	}
-	if r.MultipartForm != nil {
-		defer r.MultipartForm.RemoveAll()
-	}
-
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		JSONError(w, http.StatusBadRequest, "file part is required")
-		return
-	}
-	defer file.Close()
+	defer release()
 
 	dir := strings.TrimSpace(r.FormValue("path"))
 	if dir == "" {

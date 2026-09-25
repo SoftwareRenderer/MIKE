@@ -249,20 +249,14 @@ func isIdentChar(c byte) bool {
 
 // formatLSPResponse formats a raw LSP JSON response into a human-readable string.
 func formatLSPResponse(response json.RawMessage, method string, worktreePath string) string {
-	var envelope struct {
-		Error *struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-		Result json.RawMessage `json:"result"`
-	}
+	var envelope lspEnvelope
 	if err := json.Unmarshal(response, &envelope); err != nil {
 		return string(response)
 	}
 	if envelope.Error != nil {
-		return fmt.Sprintf("LSP error %d: %s", envelope.Error.Code, envelope.Error.Message)
+		return envelope.errText()
 	}
-	if envelope.Result == nil || string(envelope.Result) == "null" {
+	if !envelope.hasResult() {
 		return "(no result)"
 	}
 	var result any

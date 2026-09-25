@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -258,20 +259,6 @@ type lspState struct {
 	args    []string // LSP server args this session was started with
 }
 
-// argsEqual reports whether two argument lists are identical, so a repeated start is recognised
-// as the same server.
-func argsEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 // handleLSP starts this connection's language server (a request carrying a non-empty Command)
 // and otherwise forwards raw JSON-RPC to it.
 func (h *handler) handleLSP(out io.Writer, req *protocol.Request) {
@@ -291,7 +278,7 @@ func (h *handler) handleLSP(out io.Writer, req *protocol.Request) {
 		// different one is refused. Replacing a server out from under the holder that handshaked
 		// with it leaves that holder talking to a process that never saw `initialize`.
 		if lsp != nil && lsp.session != nil && !lsp.session.isClosed() {
-			if lsp.command == p.Command && argsEqual(lsp.args, p.Args) {
+			if lsp.command == p.Command && slices.Equal(lsp.args, p.Args) {
 				_ = h.writeFrame(out, protocol.NewResult(req.MsgID, json.RawMessage(`{"status":"started"}`)))
 				return
 			}

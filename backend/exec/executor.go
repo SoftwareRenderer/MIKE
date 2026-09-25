@@ -1385,13 +1385,15 @@ func (te *TaskExecutor) getAgentRunner(projectID, taskID string) (*agent.AgentRu
 		}
 	}
 
-	var runner *agent.AgentRunner
-	var runnerErr error
-	if setup.sandboxEnabled {
-		runner, runnerErr = agent.NewAgentRunner(setup.ctx, ext, te.sandboxMgr, task.ID, setup.worktreePath, fmt.Sprintf("kanban-%s", task.ID), true)
-	} else {
-		runner, runnerErr = agent.NewAgentRunner(setup.ctx, ext, nil, task.ID, setup.worktreePath, fmt.Sprintf("kanban-%s", task.ID), false)
-	}
+	// Start consults the sandbox manager only when the run is sandboxed, so both postures share one call.
+	runner, runnerErr := agent.NewAgentRunner(setup.ctx, agent.RunnerDeps{
+		Ext:            ext,
+		SandboxMgr:     te.sandboxMgr,
+		TaskID:         task.ID,
+		WorktreePath:   setup.worktreePath,
+		SessionName:    fmt.Sprintf("kanban-%s", task.ID),
+		SandboxEnabled: setup.sandboxEnabled,
+	})
 	if runnerErr != nil {
 		return nil, fmt.Errorf("new agent runner: %w", runnerErr)
 	}

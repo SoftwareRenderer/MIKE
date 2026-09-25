@@ -383,7 +383,7 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	s.previewStore.startSweeper()
 	defer s.reg(stagePreviewSweeper, "preview sweeper", s.previewStore.stopSweeper)()
 
-	sessionMgr, err := auth.NewSessionManager(store, settings.MasterPassword)
+	sessionMgr, err := auth.NewSessionManager(s.base, store, settings.MasterPassword)
 	if err != nil {
 		return nil, fmt.Errorf("create session manager: %w\nSet MIKE_LOGIN_PASSWORD environment variable to enable authentication", err)
 	}
@@ -559,8 +559,27 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	}
 	s.terminalMgr.SetAgentRegistry(agentRegistry)
 
-	s.taskHandler = api.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, commitQueue, s.sandboxMgr)
-	s.projectHandler = api.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor, s.hostRoot, sandbox.DangerZone(settings.DangerZone), s.taskHandler)
+	s.taskHandler = api.NewTaskHandler(api.TaskDeps{
+		Store:       store,
+		BoardStream: s.appStreamMgr,
+		ConfigStore: cfgStore,
+		TerminalMgr: s.terminalMgr,
+		Executor:    s.executor,
+		WorktreeMgr: worktreeMgr,
+		CommitQueue: commitQueue,
+		SandboxMgr:  s.sandboxMgr,
+	})
+	s.projectHandler = api.NewProjectHandler(api.ProjectDeps{
+		Store:       store,
+		ConfigStore: cfgStore,
+		WorktreeMgr: worktreeMgr,
+		TerminalMgr: s.terminalMgr,
+		SandboxMgr:  s.sandboxMgr,
+		Executor:    s.executor,
+		Tasks:       s.taskHandler,
+		HostRoot:    s.hostRoot,
+		DangerZone:  sandbox.DangerZone(settings.DangerZone),
+	})
 	s.gitHandler = api.NewGitHandler(store, s.executor.WorktreeMgr())
 	s.gitHandler.SetWorktreeMutex(s.lockWorktree)
 

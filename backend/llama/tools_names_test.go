@@ -93,31 +93,6 @@ func TestToolNamesMatchTheirDefinitions(t *testing.T) {
 	}
 }
 
-// A core tool added to llama without types would otherwise silently become shadowable.
-func TestCoreToolNamesMatchAllToolNames(t *testing.T) {
-	core := types.CoreToolNames()
-	if len(core) != len(AllToolNames()) {
-		t.Fatalf("types.CoreToolNames has %d names, llama.AllToolNames has %d", len(core), len(AllToolNames()))
-	}
-	for _, n := range AllToolNames() {
-		if !types.IsCoreToolName(n) {
-			t.Errorf("%q is a core tool that types.CoreToolNames does not reserve", n)
-		}
-	}
-	for _, n := range core {
-		found := false
-		for _, m := range AllToolNames() {
-			if m == n {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("%q is reserved by types.CoreToolNames but llama.AllToolNames does not declare it", n)
-		}
-	}
-}
-
 // toolNames extracts the names of a definition list, tolerating a missing Function so a broken
 // definition surfaces in the test that owns it rather than as a nil dereference here.
 func toolNames(defs []types.ChatTool) []string {

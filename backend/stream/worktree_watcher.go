@@ -26,9 +26,9 @@ type DiffStatsEvent struct {
 	ShortStat           string // full diff shortstat (for logging); do NOT use for card display
 	FilesN              int
 	UntrackedN          int
-	UntrackedLines      int
-	TrackedAdd          int // additions from truncated manifest (for card display)
-	TrackedDel          int // deletions from truncated manifest (for card display)
+	UntrackedLines      int // additions living in untracked files, never folded into TrackedAdd
+	TrackedAdd          int // additions in tracked files only (for card display)
+	TrackedDel          int // deletions in tracked files only (for card display)
 	ChangedHashes       map[string]string
 	RemovedFiles        []string
 	StagedPaths         []string
@@ -423,10 +423,15 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID string) {
 		ww.mu.Unlock()
 	}()
 
+	// A job can outlive its task: deletion unwatches the worktree, but a job queued before that is
+	// already in the channel. A nil task then reads as "no baseline, no merge check".
 	task, err := ww.worktreeMgr.GetTaskByID(taskID)
+	if err != nil {
+		task = nil
+	}
 	baseRef := ww.worktreeMgr.TaskDiffBaseline(task)
 	headRef := ""
-	if err == nil && task.Status == types.StatusDone {
+	if task != nil && task.Status == types.StatusDone {
 		headRef = task.BranchTip
 		if headRef == "" {
 			headRef = task.Branch
@@ -437,8 +442,9 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID string) {
 		return
 	}
 
-	trackedN, untrackedN := countManifestFiles(diffResult)
-	filesN := trackedN + untrackedN
+	stats := ComputeDiffStats(diffResult)
+	untrackedN := stats.VisibleUntracked
+	filesN := stats.VisibleTracked + untrackedN
 
 	hash := ComputeDiffHash(diffResult.Diff, diffResult.CommittedDiff, diffResult.Untracked, diffResult.StagedHash)
 	if hash != "" {
@@ -459,22 +465,18 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID string) {
 		ww.updateCache(taskID, diffResult)
 	}
 
-	// Check if task branch commits are already merged into the target branch.
-	// Uses the target branch name (BaseRef), not the fixed BaseCommit SHA,
-	// so the check reflects the current state of the target branch.
-	ww.mu.Lock()
-	worktreePath := ww.worktrees[taskID].path
-	ww.mu.Unlock()
-	targetBranch := task.BaseRef
-	if strings.HasPrefix(targetBranch, "fatal:") {
-		targetBranch = ""
+	// The merge check runs against the target branch name (BaseRef), not the fixed BaseCommit SHA, so
+	// it reflects the current state of the target branch.
+	if task != nil {
+		ww.mu.Lock()
+		worktreePath := ww.worktrees[taskID].path
+		ww.mu.Unlock()
+		if targetBranch, ok := CheckAlreadyMerged(*task); ok {
+			stats.AlreadyMerged = ww.worktreeMgr.IsMergedInto(worktreePath, task.Branch, targetBranch)
+		}
 	}
-	alreadyMerged := targetBranch != "" && task.Branch != "" &&
-		ww.worktreeMgr.IsMergedInto(worktreePath, task.Branch, targetBranch)
 
 	if diffResult.Diff != "" || untrackedN > 0 || diffResult.CommittedDiff != "" {
-		untrackedLines := countVisibleUntrackedLines(diffResult.Untracked)
-		trackedAdd, trackedDel := countManifestChanges(diffResult)
 		ww.broadcast(DiffStatsEvent{
 			ProjectID:           projectID,
 			TaskID:              taskID,
@@ -482,14 +484,14 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID string) {
 			ShortStat:           diffResult.ShortStat,
 			FilesN:              filesN,
 			UntrackedN:          untrackedN,
-			UntrackedLines:      untrackedLines,
-			TrackedAdd:          trackedAdd,
-			TrackedDel:          trackedDel,
+			UntrackedLines:      stats.UntrackedLines,
+			TrackedAdd:          stats.TrackedAdd,
+			TrackedDel:          stats.TrackedDel,
 			ChangedHashes:       changedHashes,
 			RemovedFiles:        removedFiles,
 			StagedPaths:         diffResult.StagedPaths,
 			HasCommittedChanges: diffResult.CommittedDiff != "",
-			AlreadyMerged:       alreadyMerged,
+			AlreadyMerged:       stats.AlreadyMerged,
 		})
 		logging.For(logging.Watcher).With(logging.TaskID, taskID).Infof("diff changed: %s (untracked: %d files)", diffResult.ShortStat, untrackedN)
 	} else if len(changedHashes) > 0 || len(removedFiles) > 0 {
@@ -500,7 +502,7 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID string) {
 			RemovedFiles:        removedFiles,
 			StagedPaths:         diffResult.StagedPaths,
 			HasCommittedChanges: diffResult.CommittedDiff != "",
-			AlreadyMerged:       alreadyMerged,
+			AlreadyMerged:       stats.AlreadyMerged,
 		})
 	}
 }
@@ -542,61 +544,6 @@ func computeDiffDelta(taskID string, newHashes map[string]string, newDiff *git.T
 
 	cache.Store(taskID, newDiff)
 	return
-}
-
-// countManifestChanges computes total additions/deletions from the truncated manifest,
-// excluding internal files. This matches what the diff panel displays.
-func countManifestChanges(d *git.TaskDiff) (add, del int) {
-	for path, f := range d.Tracked {
-		if git.IsInternalFile(path) {
-			continue
-		}
-		add += f.Added
-		del += f.Removed
-	}
-	for _, u := range d.Untracked {
-		if git.IsInternalFile(u.Path) {
-			continue
-		}
-		if u.OrigAdded > 0 {
-			add += u.OrigAdded
-		} else {
-			add += len(u.Lines)
-		}
-	}
-	return
-}
-
-// countManifestFiles counts visible files in the manifest (excluding internal files).
-// This matches the file count shown in the diff panel.
-func countManifestFiles(d *git.TaskDiff) (tracked, untracked int) {
-	for path := range d.Tracked {
-		if !git.IsInternalFile(path) {
-			tracked++
-		}
-	}
-	for _, u := range d.Untracked {
-		if !git.IsInternalFile(u.Path) {
-			untracked++
-		}
-	}
-	return
-}
-
-// countVisibleUntrackedLines counts lines in untracked files, excluding internal files.
-func countVisibleUntrackedLines(untracked []git.UntrackedFile) int {
-	total := 0
-	for _, u := range untracked {
-		if git.IsInternalFile(u.Path) {
-			continue
-		}
-		if u.OrigAdded > 0 {
-			total += u.OrigAdded
-		} else {
-			total += len(u.Lines)
-		}
-	}
-	return total
 }
 
 // loadIgnoredDirs merges hardcoded dirs with .gitignore-discovered dirs.

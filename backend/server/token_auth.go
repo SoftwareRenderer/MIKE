@@ -107,9 +107,6 @@ func (s *Server) APITokenMiddleware(next http.Handler) http.Handler {
 // routeScope reports the registered pattern a request will reach and whether a bearer token may
 // reach it. The empty pattern belongs to no route, and so to no scope.
 func (s *Server) routeScope(r *http.Request) (pattern string, scoped bool) {
-	if s.mux == nil {
-		return "", false
-	}
 	_, pattern = s.mux.Handler(r)
 	_, scoped = tokenScope[pattern]
 	return pattern, scoped
