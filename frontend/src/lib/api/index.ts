@@ -109,6 +109,7 @@ export {
     getProjectDiffFile,
     toDiffFiles,
     getGitBranches,
+    getLocalBranches,
     checkoutBranch,
     getGitStatus,
     stageProjectFile,

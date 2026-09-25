@@ -91,11 +91,21 @@ export async function getCommitDiffFiles(projectId: string, baseHash: string, he
     return getProjectDiffFiles(projectId, { base: baseHash, head: headHash });
 }
 
-/** List all branches for a project. */
+/** List every ref the server calls a branch, in the order it returned them — remote-tracking refs and
+ * the detached `HEAD` line included. A list offered to a person wants getLocalBranches. */
 export async function getGitBranches(projectId: string): Promise<string[]> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/branches`);
     if (!res.ok) throw await apiError(res, t('api.fetchBranches'));
     return res.json();
+}
+
+/**
+ * The branches a person may be offered: local branches only, so a remote-tracking ref and the detached
+ * `HEAD` line are never a choice. Order is the server's — a branch list never follows the UI locale.
+ */
+export async function getLocalBranches(projectId: string): Promise<string[]> {
+    const all = await getGitBranches(projectId);
+    return all.filter(b => !b.startsWith('origin/') && b !== 'HEAD');
 }
 
 /** Checkout a branch in a project's worktree. Requires CSRF token. */

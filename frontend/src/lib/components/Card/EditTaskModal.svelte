@@ -3,6 +3,7 @@
     import type { Provider } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import { appStore } from '$lib/stores';
+    import { getLocalBranches } from '$lib/api';
     import { MODE_DESCRIPTIONS } from '$lib/constants/modes';
     import ModelSelector from '../Chat/ModelSelector.svelte';
     import ToggleSwitch from '../ToggleSwitch.svelte';
@@ -107,12 +108,7 @@
         initialOperatingMode = editOperatingMode;
         if (taskHasParent || !projectId) return;
         try {
-            const res = await fetch(`/api/projects/${projectId}/git/branches`);
-            if (res.ok) {
-                const data: string[] = await res.json();
-                // Filter to local branches only (no origin/ prefix)
-                branches = data.filter(b => !b.startsWith('origin/') && b !== 'HEAD');
-            }
+            branches = await getLocalBranches(projectId);
         } catch {
             // Ignore errors
         }

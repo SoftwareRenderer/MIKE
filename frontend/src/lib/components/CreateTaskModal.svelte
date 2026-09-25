@@ -11,7 +11,7 @@
     });
     import type { Config, Provider, Task } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
-    import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId, startTask, isTransientError } from '$lib/api';
+    import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId, startTask, isTransientError, getLocalBranches } from '$lib/api';
     import { appStore, uiStore, dialogStore, removeTaskFromBoard } from '$lib/stores';
     import { t } from '$lib/i18n';
     import { ATTACHABLE_IMAGE_ACCEPT, imageSrc } from '$lib/utils/attachments';
@@ -190,11 +190,7 @@
         if (!parentId && projectId) {
             branchDraft = targetBranch;
             try {
-                const res = await fetch(`/api/projects/${projectId}/git/branches`);
-                if (res.ok) {
-                    const data: string[] = await res.json();
-                    branches = data.filter(b => !b.startsWith('origin/') && b !== 'HEAD');
-                }
+                branches = await getLocalBranches(projectId);
             } catch {
                 // Ignore errors
             }

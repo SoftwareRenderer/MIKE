@@ -14,8 +14,6 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 pattern='(^|[^A-Za-z0-9_$])fetch[[:space:]]*\('
 
 frozen=(
-    "1 src/lib/components/Card/EditTaskModal.svelte"
-    "1 src/lib/components/CreateTaskModal.svelte"
     "3 src/lib/components/FileBrowser.svelte"
     "1 src/lib/components/FileBrowserView.svelte"
     "4 src/lib/components/FileEditor.svelte"
