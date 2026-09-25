@@ -12,7 +12,7 @@
     import type { Config, Provider, Task } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId, startTask, isTransientError, getLocalBranches } from '$lib/api';
-    import { appStore, uiStore, dialogStore, removeTaskFromBoard } from '$lib/stores';
+    import { appStore, uiStore, dialogStore, removeTaskFromBoard, updateTaskInBoard, appendTaskToBoard } from '$lib/stores';
     import { t } from '$lib/i18n';
     import { ATTACHABLE_IMAGE_ACCEPT, imageSrc } from '$lib/utils/attachments';
     import { useImageAttachments } from '$lib/composables/use-image-attachments.svelte';
@@ -30,7 +30,7 @@
     import { MODE_DESCRIPTIONS } from '$lib/constants/modes';
     import BranchPicker from './BranchPicker.svelte';
 
-    let { projectId, onClose, onTaskCreated, parentId, currentBranch, onOptimisticTaskCreated, onReplaceOptimisticTask, onRemoveOptimisticTask, initialPrompt = '', lineTask = false, onOpenTask = null }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void; parentId?: string; currentBranch?: string; onOptimisticTaskCreated?: (task: Task) => void; onReplaceOptimisticTask?: (optimisticId: string, realTask: Task) => void; onRemoveOptimisticTask?: (optimisticId: string) => void; initialPrompt?: string; lineTask?: boolean; onOpenTask?: ((task: Task) => void) | null } = $props();
+    let { projectId, onClose, onTaskCreated, parentId, currentBranch, initialPrompt = '', lineTask = false, onOpenTask = null }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void; parentId?: string; currentBranch?: string; initialPrompt?: string; lineTask?: boolean; onOpenTask?: ((task: Task) => void) | null } = $props();
 
     // One-time initialization from the prop (e.g. gutter line-selection prefill)
     const initialPromptValue = () => initialPrompt;
@@ -209,14 +209,7 @@
 
     /** Replace the optimistic board card with the real server task. */
     function replaceOptimisticTask(id: string, realTask: Task) {
-        const idx = appStore.board?.tasks.findIndex(t => t.id === id) ?? -1;
-        if (idx !== -1 && appStore.board) {
-            const updated = [...appStore.board.tasks];
-            updated[idx] = realTask;
-            appStore.board = { ...appStore.board, tasks: updated };
-        }
-        // Also replace in App's tasks array
-        onReplaceOptimisticTask?.(id, realTask);
+        updateTaskInBoard(appStore, id, realTask);
     }
 
     /** Auto-start (line-task variant) — fire-and-forget with a failure toast. */
@@ -270,8 +263,7 @@
             (optimisticTask as any).actionId = queued.id;
             await queueStartIfEnabled();
         }
-        appStore.board = { ...appStore.board!, tasks: [...(appStore.board!.tasks || []), optimisticTask] };
-        onOptimisticTaskCreated?.(optimisticTask);
+        appendTaskToBoard(appStore, optimisticTask);
         uiStore.showCreateTask = false;
         onTaskCreated?.();
         onClose();
@@ -291,7 +283,6 @@
             if (!isTransientError(err)) {
                 const reason = err instanceof Error ? err.message : String(err);
                 removeTaskFromBoard(appStore, id);
-                onRemoveOptimisticTask?.(id);
                 dialogStore.showToast(t('app.task.createFailed', { error: reason }), 'error');
                 return;
             }

@@ -23,6 +23,30 @@ export function removeTaskFromBoard(appStore: AppStore, taskId: string): void {
     appStore.board = { ...board, tasks: board.tasks.filter(t => t.id !== taskId) };
 }
 
+/** Add a task to the board. No-op when no board is on screen: an optimistic card belongs to the
+ * board this browser is looking at, and a card with no board under it would be a list nothing owns. */
+export function appendTaskToBoard(appStore: AppStore, task: Task): void {
+    const board = appStore.board;
+    if (!board) return;
+    appStore.board = { ...board, tasks: [...(board.tasks || []), task] };
+}
+
+/**
+ * Land the answers of one queue flush on the board: an optimistic id becomes the task the server
+ * created, and a real id takes the newer state a later queued action produced. Tasks the flush did
+ * not answer keep what this browser holds.
+ */
+export function applyResolvedTasksToBoard(appStore: AppStore, resolved: Map<string, Task>): void {
+    const board = appStore.board;
+    if (!board) return;
+    const tasks = (board.tasks || []).map(t => {
+        const created = resolved.get(t.id);
+        if (!created) return t;
+        return resolved.get(created.id) || created;
+    });
+    appStore.board = { ...board, tasks };
+}
+
 // ─── Domain State ───
 
 export interface EditTaskData {
@@ -50,6 +74,12 @@ export class AppStore {
 
     // Active port mappings for project-level terminal
     public projectTerminalPorts = $state<Array<{ host_port: number; container_port: number }>>([]);
+
+    /** The task list on screen. Derived from the board, so the board a panel reads and the list the
+     * board draws are the same value; there is no second stored task list. */
+    get tasks(): Task[] {
+        return this.board?.tasks || [];
+    }
 
     // Sidebar
     public sidebarCollapsed = $state(false);

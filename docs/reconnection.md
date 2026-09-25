@@ -424,8 +424,9 @@ back keeps the newest message at the bottom of the list and their own row under 
 
 ## The board on screen belongs to one project
 
-`App.svelte` holds one task list, and it is the board of the project named in the URL. Three things can
-hand it a task that belongs to another project, and each is answered where it arrives:
+`appStore.board` is the app's one task list, and it is the board of the project named in the URL: the
+board, the task view and every panel read that one value (`appStore.tasks` is its own list, not a copy of
+it). Three things can hand it a task that belongs to another project, and each is answered where it arrives:
 
 - **A board response that lost the race.** `refreshBoard`, `silentRefresh`, `restoreTaskFromUrl` and
   `selectProject` capture the project id before their awaits and write through `applyBoard(board,
@@ -669,5 +670,8 @@ write).
 ## Checking this
 
 `cd frontend && npm test` covers `taskIsInFlight`, the offline queue, the mirror's coalescing and the pending
-rows derived from the queue. `cd frontend && npx playwright test reconnect-refresh ws-stale-reconnect` drives a
-lost connection; `mirror-follows-frames offline-send-queue` drive the mirror and the queue across a reload.
+rows derived from the queue, and `stores/__tests__/app-store.unit.ts` the board helpers that are the only way
+the task list moves. `cd frontend && npx playwright test reconnect-refresh ws-stale-reconnect` drives a lost
+connection; `mirror-follows-frames offline-send-queue` drive the mirror and the queue across a reload;
+`one-task-list` drives a board move and a queued card edit, which is where a second task list would show up
+as a card that disagrees with its row.

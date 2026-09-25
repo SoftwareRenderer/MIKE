@@ -5,7 +5,7 @@
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import { sendTaskMessage, getTaskMessages, getTaskTurns, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, onQueueFlushed, getQueuedTaskIds, getQueuedSends, getRefusedSends, getDroppedTaskIds, getTask, isFromCache, type AppStream, type SendResult } from '$lib/api';
     import { PENDING_SEND_ID_PREFIX, pendingSendEntries } from '$lib/utils/pending-sends';
-    import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
+    import { appStore, dialogStore, updateTaskInBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
     import { StreamState } from '$lib/services/stream-state.svelte';
     import { createStreamHandler } from '$lib/services/stream-handler';

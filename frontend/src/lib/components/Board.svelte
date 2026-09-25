@@ -189,13 +189,7 @@
             const willConsolidate = willConsolidateIntoParent(task, tasks, targetStatus);
             if (!willConsolidate) {
                 // When offline, updated is a partial optimistic result — merge with existing task
-                const merged = mergeQueuedUpdate(task, updated);
-                // Update tasks array directly (Board renders from this prop, not boardStore)
-                const idx = tasks.findIndex(t => t.id === task.id);
-                if (idx !== -1) {
-                    tasks[idx] = merged;
-                }
-                appStore.board = { ...appStore.board!, tasks: [...tasks] };
+                updateTaskInBoard(appStore, task.id, mergeQueuedUpdate(task, updated));
             }
             return true;
         } catch (e) {
