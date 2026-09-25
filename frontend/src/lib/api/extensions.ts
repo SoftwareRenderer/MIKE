@@ -103,14 +103,6 @@ export async function setAgentMount(
     return res.json();
 }
 
-/** The server's own home directory, for suggesting where a dependency directory should live. */
-export async function getHomeDirectory(): Promise<string> {
-    const res = await apiFetch(`${API_BASE}/home`);
-    if (!res.ok) throw await apiError(res, t('api.readHomeDirectory'));
-    const data = await res.json();
-    return typeof data?.home === 'string' ? data.home : '';
-}
-
 /** Fetch extensions present in the local extensions directory (filesystem). */
 export async function listLocalExtensions(): Promise<RegistryEntry[]> {
     const res = await apiFetch(`${API_BASE}/extensions/local`);

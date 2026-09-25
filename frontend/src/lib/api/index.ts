@@ -1,11 +1,13 @@
 // Barrel exports — the domain functions are reachable via `$lib/api`; domain modules live
 // in ./projects, ./tasks, ./git, etc.
 //
-// The fetch primitives under this barrel (`apiFetch`, `apiError`, `API_BASE`, `isAborted`) are not
-// re-exported, so a component cannot hand-roll a fetch.
+// The fetch primitives under this barrel (`apiFetch`, `apiError`, `API_BASE`, `isAborted`) and the CSRF
+// token behind them are not re-exported, so a component cannot hand-roll a fetch or its header block.
+// `npm run check:fetch` is what keeps that promise: scripts/check-fetch.sh fails on a `fetch(` anywhere
+// else, with one named exemption.
 
 // -- Helpers --
-export { generateId, setCsrfToken, clearCsrfToken, ensureCsrfToken } from './helpers';
+export { generateId, setCsrfToken, clearCsrfToken } from './helpers';
 
 // -- Cache --
 export { isFromCache } from './cache';
@@ -132,9 +134,19 @@ export { createTerminal, createProjectTerminal, isTerminalStale } from './termin
 // -- Pasted/dropped files written into the task's own environment --
 export { uploadTaskFile } from './task-upload';
 
-// -- A file's own bytes, for an `<img>` src --
-export { rawFileURL, listFsDirectory } from './fs';
-export type { FsEntry } from './fs';
+// -- Files: the tree inside a project, or the host directories a picker was declared over --
+export {
+    listFsDirectory,
+    rawFileURL,
+    readFsFile,
+    FsReadRefused,
+    writeFsFile,
+    createFsDirectory,
+    initGitRepository,
+    searchFsPaths,
+    getHomeDirectory,
+} from './fs';
+export type { FsEntry, FsFileRead, FsSearchResult, FsSearchAnswer } from './fs';
 export { deleteFsPaths, copyFsPaths, moveFsPaths, renameFsPath } from './fs-ops';
 export type { FsOpsResult } from './fs-ops';
 
@@ -165,7 +177,6 @@ export {
     setExtensionEnabled,
     setDependencyCache,
     setAgentMount,
-    getHomeDirectory,
     getRegistryIndex,
     installExtension,
     installLocalExtension,

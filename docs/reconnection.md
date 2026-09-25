@@ -527,8 +527,9 @@ message after a reload while still offline, and the applied row reaching the scr
 
 ### How a request ends: cancelled, or unanswered
 
-`apiFetch` (`src/lib/api/helpers.ts`) is the one place that decides what a failed fetch means, because all
-69 call sites read it.
+`apiFetch` (`src/lib/api/helpers.ts`) is the one place that decides what a failed fetch means. Its 88 call
+sites are the only way this app reaches its server: `npm run check:fetch` fails on a `fetch(` outside
+`src/lib/api/`, and the one file it exempts is reasoned in that script's own list.
 
 | outcome | thrown | offline flag | what the user sees |
 |---|---|---|---|

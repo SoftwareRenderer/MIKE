@@ -196,11 +196,15 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
   `tsconfig.unused.json`, which turns on `noUnusedLocals` and `noUnusedParameters`; `npm run check` does
   not. The script keeps the two `is declared but …` messages, prints `file:line name`, and fails on any.
   It covers test files too, because `tsconfig.json` includes `src/**/*.ts`.
-- **`npm run check:fetch`** — `frontend/scripts/check-fetch.sh` counts `fetch(` in every `*.svelte` file
-  and compares the per-file counts against the list frozen inside it. The API layer owns credentials, the
-  CSRF token and the reading of a failed request, so a component that calls the network itself is a
-  second answer to the same outage. A fetch the list does not name fails, and a listed file holding fewer
-  fails too — the list moves only when the code does.
+- **`npm run check:fetch`** — `frontend/scripts/check-fetch.sh` fails on a `fetch(` in any `*.svelte` or
+  `*.ts` file under `src/` outside `src/lib/api/`. The API layer owns credentials, the CSRF token and the
+  reading of a failed request, so a second caller answers one outage in its own words: a bare `TypeError`,
+  no offline flag raised, and no queued write. Two skips are named and reasoned inside the script — a test
+  file, whose `fetch(` is a stub or an adversarial payload string, and `src/lib/i18n/load-pack.ts`, which
+  must read a missing pack as English-plus-a-report instead of as going offline (`docs/i18n.md`). An exempt
+  path that has stopped fetching fails too, so the exemption list cannot rot. The pattern wants a call
+  position, so prose naming `fetch()` — one capability description does — is not a request. A scan that
+  finds no file to scan is a failure, not a clean run.
 
 **Names starting with `_` are exempt, deliberately.** `$effect(() => { const _v = uiInjector.getPointVersion(); … })`
 subscribes by *reading*; the value is never used and the read is the whole point. TypeScript exempts

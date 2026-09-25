@@ -2,12 +2,7 @@
     import { onDestroy } from 'svelte';
     import { t } from '$lib/i18n';
     import { escapeHtml } from '$lib/utils/format';
-
-    interface SearchResult {
-        path: string;
-        line?: number;
-        text?: string;
-    }
+    import { searchFsPaths, type FsSearchResult } from '$lib/api';
 
     let { projectId, taskId, onFileSelected, onClose }: {
         projectId: string;
@@ -24,7 +19,7 @@
     let useRegex = $state(false);
     let searchContent = $state(true);
 
-    let results = $state<SearchResult[]>([]);
+    let results = $state<FsSearchResult[]>([]);
     let rootPath = $state('');
     let loading = $state(false);
     let error = $state('');
@@ -33,11 +28,11 @@
     interface GroupedFile {
         path: string;
         line: number;
-        results: SearchResult[];
+        results: FsSearchResult[];
     }
 
     let groupedResults = $derived.by(() => {
-        const map = new Map<string, SearchResult[]>();
+        const map = new Map<string, FsSearchResult[]>();
         for (const r of results) {
             const key = r.path;
             const group = map.get(key);
@@ -79,24 +74,17 @@
         searched = true;
 
         try {
-            const params = new URLSearchParams({
-                q,
+            const answer = await searchFsPaths({
+                query: q,
                 project: projectId,
+                task: taskId,
+                content: searchContent,
+                matchCase,
+                wholeWord,
+                regex: useRegex,
             });
-            if (taskId) params.set('task', taskId);
-            if (searchContent) params.set('content', '1');
-            if (matchCase) params.set('case', '1');
-            if (wholeWord) params.set('word', '1');
-            if (useRegex) params.set('regex', '1');
-
-            const res = await fetch(`/api/fs/search?${params}`);
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || t('editor.searchFailed', { status: res.status }));
-            }
-            const data = await res.json();
-            rootPath = data.root || '';
-            results = (data.results || []) as SearchResult[];
+            rootPath = answer.root || '';
+            results = answer.results || [];
         } catch (e) {
             error = String(e);
             results = [];
@@ -125,7 +113,7 @@
         }
     }
 
-    function handleResultClick(result: SearchResult) {
+    function handleResultClick(result: FsSearchResult) {
         const fullPath = rootPath ? rootPath + '/' + result.path : result.path;
         onFileSelected(fullPath, result.line || undefined);
     }
