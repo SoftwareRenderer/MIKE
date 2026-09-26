@@ -2,6 +2,7 @@
     import { onMount, tick } from 'svelte';
     import BaseModal from './BaseModal.svelte';
     import { listFsDirectory, createFsDirectory, initGitRepository, getHomeDirectory, type FsEntry } from '$lib/api';
+    import { errorText } from '$lib/utils/error-text';
     import Icon from '$lib/components/Icon.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     // UI extension injection point — re-render when extensions change
@@ -63,7 +64,7 @@
             isGitRepo = listing.isGitRepo;
         } catch (e) {
             if (seq !== loadSeq) return;
-            error = String(e);
+            error = errorText(e, t('explorer.shared.errReadDir'));
             entries = [];
         } finally {
             if (seq === loadSeq) loading = false;
@@ -100,7 +101,7 @@
             await loadDir(currentPath);
             onSelect(currentPath, sandboxEnabled);
         } catch (e) {
-            error = String(e);
+            error = errorText(e, t('explorer.shared.errInitGit'));
         } finally {
             initGitLoading = false;
         }
@@ -129,7 +130,7 @@
             newFolderName = '';
             await loadDir(newPath);
         } catch (e) {
-            error = String(e);
+            error = errorText(e, t('explorer.shared.errCreateFolder'));
         } finally {
             mkdirLoading = false;
         }
@@ -146,7 +147,7 @@
         try {
             await onClone(url, currentPath, sandboxEnabled);
         } catch (e) {
-            cloneError = String(e);
+            cloneError = errorText(e, t('api.cloneFailed'));
         } finally {
             cloneLoading = false;
         }

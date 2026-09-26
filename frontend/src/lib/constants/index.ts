@@ -41,6 +41,13 @@ export const SUSPENDED_GAP_MS = 10_000;
  * failure doubles it, up to `RECONNECT_MAX_DELAY_MS`. */
 export const QUEUE_RETRY_BASE_DELAY_MS = 1_000;
 
+/** First wait (ms) before a file save that got no answer is written again; each failure doubles it, up to
+ * `SAVE_RETRY_MAX_DELAY_MS`. */
+export const SAVE_RETRY_BASE_DELAY_MS = 2_000;
+
+/** The longest that wait gets. It is a pace, not a deadline. */
+export const SAVE_RETRY_MAX_DELAY_MS = 15_000;
+
 // ─── Cache Sizes ───
 
 /** Max entries in the syntax highlighter cache before eviction. */

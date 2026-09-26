@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { t } from '$lib/i18n';
     import { baseName, sandboxMountFromPath } from '$lib/utils/path';
-    import { readFsFile, writeFsFile, FsReadRefused } from '$lib/api';
+    import { readFsFile, writeFsFile, FsReadRefused, isTransientError } from '$lib/api';
     import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { EditorView } from 'codemirror';
     import { EditorState, Transaction, Compartment, StateField, StateEffect, RangeSet, Range, type Extension } from '@codemirror/state';
@@ -16,7 +16,9 @@
     import { requestLSPChannel, type LSPTransportOptions, type VirtualTransport } from '$lib/utils/lsp-connection-manager';
     import { lspClientConfig } from '$lib/utils/lsp-client-config';
     import { isLSPAvailable } from '$lib/utils/lsp-connection-manager';
-    import { SaveController, EDITOR_SAVE_SETTLED } from '$lib/utils/save-state';
+    import { SaveController, EDITOR_SAVE_SETTLED, saveRetryDelayMs } from '$lib/utils/save-state';
+    import { errorText } from '$lib/utils/error-text';
+    import { connectionStore } from '$lib/stores/connection.svelte';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     import { isExtensionContentSet } from '$lib/extensions/handlers/editor';
@@ -266,6 +268,8 @@
         savedContent = diskContent;
         baselineContent = diskContent;
         hasChanges = content !== savedContent;
+        // Disk already says what the buffer says, so a waiting write has nothing left to carry.
+        if (!hasChanges) cancelSaveRetry();
         lineCount = content ? content.split('\n').length : 0;
         charCount = content.length;
         setEditorDraft(filePath, content).catch(() => {});
@@ -653,6 +657,7 @@
         error = '';
         fileTooLarge = false;
         fileNotFound = false;
+        cancelSaveRetry();
 
         // Destroy old editor and LSP client
         lspClient?.disconnect();
@@ -730,7 +735,7 @@
             // shows, or it is gone. Anything else is said with the server's own sentence.
             if (e instanceof FsReadRefused && e.status === 413) fileTooLarge = true;
             else if (e instanceof FsReadRefused && e.status === 404) fileNotFound = true;
-            else error = String(e);
+            else error = errorText(e, t('editor.readFailed'));
         } finally {
             loadedPath = requestPath;
         }
@@ -819,6 +824,48 @@
         window.dispatchEvent(new CustomEvent(EDITOR_SAVE_SETTLED, { detail: { path: filePath, ok } }));
     }
 
+    /**
+     * The wait between attempts at a save that got no answer. A save is not an `offline-queue` action: a body
+     * replayed from IndexedDB would overwrite newer content, so the editor holding the buffer holds the wait.
+     * `docs/reconnection.md`.
+     */
+    let saveRetryAttempt = 0;
+    let saveRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function clearSaveRetryTimer() {
+        if (!saveRetryTimer) return;
+        clearTimeout(saveRetryTimer);
+        saveRetryTimer = null;
+    }
+
+    /** Nothing left to write: it landed, the buffer matches disk again, or this editor is going away. */
+    function cancelSaveRetry() {
+        clearSaveRetryTimer();
+        saveRetryAttempt = 0;
+    }
+
+    /** Arm the next attempt. A refusal does not qualify — the server answered that one, and would answer again. */
+    function armSaveRetry(e: unknown) {
+        clearSaveRetryTimer();
+        if (!isTransientError(e)) {
+            saveRetryAttempt = 0;
+            return;
+        }
+        const delay = saveRetryDelayMs(saveRetryAttempt++);
+        saveRetryTimer = setTimeout(() => {
+            saveRetryTimer = null;
+            void handleSave();
+        }, delay);
+    }
+
+    // An armed wait does not sit out its delay once the socket is back. The timer covers a blip that
+    // never dropped the socket.
+    $effect(() => {
+        if (!connectionStore.connected || !saveRetryTimer) return;
+        clearSaveRetryTimer();
+        void handleSave();
+    });
+
     async function handleSave() {
         if (!filePath) return;
         if (!saveController.begin(saveIsNeeded())) {
@@ -826,6 +873,8 @@
             if (!saveController.busy) announceSaveSettled(false);
             return;
         }
+        // This attempt sends the current buffer, so the armed wait is no longer needed.
+        clearSaveRetryTimer();
         saving = true;
         let ok = false;
         try {
@@ -839,6 +888,7 @@
             savedContent = content;
             hasChanges = false;
             ok = true;
+            cancelSaveRetry();
             // File changed on disk — re-extract outline symbols and
             // sticky-scroll headers (line numbers may have shifted).
             extractSymbols();
@@ -861,13 +911,19 @@
                 clearEditorDraft(filePath).catch(() => {});
             }
         } catch (e) {
-            error = String(e);
+            // A failed save never writes `error`: that pane replaces the editor. A blip is retried and said
+            // nowhere; a refusal is toasted once, because waiting will not fix it.
+            armSaveRetry(e);
+            if (!isTransientError(e)) {
+                dialogStore.showToast(errorText(e, t('editor.saveFailed')), 'error');
+            }
         } finally {
             saving = false;
             announceSaveSettled(ok);
         }
-        // A save asked for during that write runs now if anything is still unsaved.
-        if (saveController.settle(saveIsNeeded())) await handleSave();
+        // A save asked for during that write runs now if anything is still unsaved, unless a retry is
+        // already armed to carry it.
+        if (saveController.settle(saveIsNeeded()) && !saveRetryTimer) await handleSave();
     }
 
     /** Position cursor on a specific line and scroll it into view. */
@@ -1458,6 +1514,7 @@
 
     onDestroy(() => {
         clearUnrelatedEventTimer();
+        cancelSaveRetry();
         if (searchApp) {
             unmount(searchApp);
             searchApp = null;

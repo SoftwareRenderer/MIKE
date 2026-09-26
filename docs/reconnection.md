@@ -799,6 +799,47 @@ silently turns a cancellation into an error toast, or a queueable write into a f
 the test, never `instanceof DOMException`**: these are `Error`s that carry the name, so the call is
 `isAborted(e)`. Tests: `api/__tests__/fetch-failure.unit.ts`, `api/__tests__/send-queue.unit.ts`.
 
+**Displaying one strips the class name off.** The same `name` that lets the queue recognise a lost
+connection is what `String(e)` prints in front of the sentence, so a person reads
+`TypeError: Connection issue...` where the fact was the rest of the line. `errorText` in
+`$lib/utils/error-text.ts` is the one way these failures reach the screen: the `message`, or the caller's
+own sentence when the failure carried none. Its result is never handed to `t()` — a message is a wire value
+or another pack's sentence, which is the rule `en.ts` states beside the catalog's fallback texts. Test:
+`utils/__tests__/error-text.unit.ts`.
+
+## A file save the connection lost waits with the editor, not in the queue
+
+A file write never joins `offline-queue`, and that is a decision rather than a gap. The queue is replayed
+from IndexedDB, possibly after a reload, and a file body is a snapshot of a buffer someone may have edited
+since. A replay would write older bytes over newer ones and report success while doing it.
+
+So the editor holds the wait, and `FileEditor.handleSave` sorts its own failure with `isTransientError`:
+
+- **no answer** — nothing is said and nothing on screen changes: the buffer, its draft and the tab's
+  unsaved marker stay, and the Save button stays enabled because it is gated on `hasChanges`. The editor
+  runs the save again after `saveRetryDelayMs(attempt)` — 2 s, doubling to 15 s — and runs it at once on
+  the socket's false→true edge, the earliest honest signal that a write can land. The timer is the fallback
+  for a blip that never dropped the socket.
+- **answered and refused** — never retried: a later attempt asks the same question and gets the same
+  answer. This is the one save failure said out loud, once, as a toast carrying the server's sentence, a
+  permanent fault being the one thing silence cannot describe.
+
+**The retry runs the save; it never replays a captured body.** Reading `content` when the attempt fires is
+what makes the newest edit win. Two existing guards keep the wait to one write per rung: one timer per
+editor, and `SaveController` turning any request made during a write into one coalesced follow-up. The wait
+ends when a write lands, when the buffer stops differing from the file — an external change reconciled it —
+and when the editor is switched or unmounted.
+
+**A save failure never writes `error`.** That state renders the *read*-failure pane, and the template's
+`{:else if error}` replaces `.editor-wrapper` with its text, so a save that reports itself that way deletes
+the document the user was editing along with the reason. Say it in the toast, or say nothing.
+
+**Tests:** `src/lib/components/__tests__/editor-save-failure.unit.svelte.ts` holds the surviving document,
+the silence during a blip, the attempt gaps of 2/4/8/15 s, and one write per rung.
+`src/lib/utils/__tests__/save-state.unit.ts` holds the gap sequence itself. E2E
+`editor-save-retry.spec.ts` aborts the write in flight, checks the buffer stays on screen unannounced, and
+lets the retry land it against the real server — once.
+
 ## A refused queued write is not a delivered one
 
 A queued action leaves the queue for two reasons: the server applied it, or it refused it outright
