@@ -57,6 +57,7 @@ export { buildSandboxImageStream } from './raw/projects';
 export {
     createTask,
     getTask,
+    getTaskSync,
     updateTask,
     deleteTask,
     moveTask,
@@ -76,6 +77,7 @@ export {
 export {
     sendTaskMessage,
     getTaskMessages,
+    readCachedWindow,
     MESSAGE_JUMP_LIMIT,
     getTaskTurns,
     getTaskMessageFull,
@@ -84,6 +86,9 @@ export {
     checkMessageDelete,
     updateTaskMessage,
 } from './tasks';
+
+// A window is what a screen holds of a conversation, so the view that reads one names what it got.
+export type { MessageWindow } from './tasks';
 
 // -- Threads --
 export {

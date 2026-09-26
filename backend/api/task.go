@@ -396,6 +396,26 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// HandleSync answers the digest a window asks when it comes back; `syncDigest` builds the body. The answer must
+// not be kept, and the handler sets no ETag so CompressMiddleware can supply one.
+func (h *TaskHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
+	if err := types.ValidateTaskID(r.PathValue("taskID")); err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	task, ok := resolveTask(w, r, h.store)
+	if !ok {
+		return
+	}
+	digest, err := h.syncDigest(task)
+	if err != nil {
+		httputil.Fault(w, "count task messages", err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	httputil.JSONResponse(w, http.StatusOK, digest)
+}
+
 // HandleClearDone deletes all tasks with status 'done' for a project.
 func (h *TaskHandler) HandleClearDone(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")

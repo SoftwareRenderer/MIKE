@@ -21,7 +21,8 @@ When the WebSocket drops and reconnects, the current view (board, task view) upd
   `online` flushes the queue and calls `reconnectNow()` to skip backoff.
 - A window coming back refreshes the board, the open task's chat and its diff — phone-sleep included — on
   the same signal as the window's own `focus`, a bfcache `pageshow`, and a page that finds its own clock has
-  jumped. See *The tab that comes back*. The
+  jumped. The chat and the diff ask one cheap digest of the server first, because neither can prove its own
+  currency; see *The tab that comes back*. The
   listener is on `window`, which is where the browser's own event bubbles to from `document` — a synthetic
   `new Event(...)` fired at `document` does not bubble and reaches nothing.
 
@@ -107,8 +108,10 @@ the rebuild hides a tool call that is running.
 
 So the task's own row answers until the board's copy moves under it; `trustedExecutionState`
 (`$lib/utils/execution-state.ts`) states the rule and says why a superseded row is not a second opinion.
-`TaskChat` reads that row as the first thing its mount does, which costs nothing because the mount already
-read it for the model and session cost. Every caller that *makes* a transition passes the row it got back:
+`TaskChat` asks that row at the top of its mount, beside the thread list and the newest window. It applies
+the row before taking the task key: the key is what earns the replay, and the gate must be open before it
+arrives. Reading the row costs nothing extra because the mount already read it for the model and session
+cost. Every caller that *makes* a transition passes the row it got back:
 the stop's `paused`, `commitAndDone`'s and `moveTask`'s updated task. The same value answers the frame
 gate (`isLoading` → `suppressEvents`), which is why a replayed `tool_call` now reaches the screen for a
 task the board still lists under Review. The two panels that *decide* from the state — the awaiting/queue
@@ -319,23 +322,46 @@ return from a window that was not being read revalidates whatever the transcript
 back*). A live read clears the notice and the claim, so neither outlives its answer, and a mirror copy
 carries no `revision`, so a fallback cannot answer for the server on the next return.
 
-**A mirror copy is not a reading of the server** — it does not redraw a transcript that has rows.
-`windowIsReading` (`$lib/utils/chat-window.ts`) is that gate. The stored window paints a screen holding no
-rows — the open that never reached the server — and nothing else. It is this browser's own last answered
-read, so every turn and card that arrived since is missing from it: redrawing from one at a return is how a
-transcript goes backwards. The notice and the `no_rows` claim still move on what the read was, so the reader
-is told and Retry still asks again.
+**A copy this browser holds of its own is not a reading of the server, and it paints a screen that holds
+nothing.** `windowIsReading` (`$lib/utils/chat-window.ts`) is that gate, and it has three doors.
+
+- **a read that did not answer** paints the stored window onto a screen holding no rows, and nothing else —
+  the open that never reached the server. The stored window is this browser's last answered read, so it is
+  missing every turn and card that arrived since. Redrawing from one at a return is how a transcript goes
+  backwards.
+- **a read still out** paints that stored window onto that same empty screen, and only a window ending on a
+  Review result may be drawn. `endsOnReviewResult` (`$lib/utils/chat-entries.ts`) says which ones that is.
+  Nothing in such a conversation can still move, so showing it a round trip early loses nothing. Any other
+  newest row is a send nothing answered, or a call with no result: those stay in the cache until the read
+  lands. `readCachedWindow` (`$lib/api/tasks.ts`) is the read with no network attempt behind it. Whether the
+  task is running is the row's `execution_state` or the digest's, never the shape of a drawn window.
+- **neither** paints over rows the screen already holds. Only an answered read moves that boundary, because
+  only an answered read tells the server this screen can be handed rows.
+
+Both paints came from the cache, so both keep the `no_rows` claim (*The reload meets the replay buffer*). An
+answered read drops it. A mirror copy carries no `revision`, so a fallback cannot answer for the server on
+the next return.
+
+What the reader is **told** is the other half, and the two paints do not say the same thing. A fault gets the
+band with Retry. A read still out gets no band at all, because the ordinary good case must not wear the
+vocabulary of a fault. `noticeForWindowRead` answers `'pending'`, and `ChatEntries` draws it as a spinner
+floating over the transcript. It is absolute and out of the scroll region's flow, and only its opacity
+animates, so no row moves when it appears or goes. It floats at the opposite corner from the jump-to-latest
+button. A pending indicator may become a fault notice; it must never silently become nothing.
 
 It is not a chat entry: a read that lands rebuilds the transcript, so a synthetic entry would be appended
 again by each rebuild. What the queue holds is rebuilt too — see *A pending outgoing message is
 the queue's projection* — so a read that failed does not hide a message this browser wrote.
 
 **Tests:** e2e `away-and-back.spec.ts` — a read aborted from the first open with no cached copy,
-retried once the server answers again, and a reload onto the stored copy. `chat-window.unit.ts` holds the
-notice decision itself, including that a mirror read never reports `'owing'`, and `windowIsReading`,
-including that a mirror copy never replaces rows the screen holds.
-`chat-entries-history-notice.unit.svelte.ts` renders which sentence lands for which notice, and the Retry
-beside it.
+retried once the server answers again, and a reload onto the stored copy. E2e
+`provisional-review-paint.spec.ts` — the review card on screen while the newest-window read is held, the
+`no_rows` claim on the wire beside it, and the answered window replacing the cached rows without drawing one
+twice. `chat-window.unit.ts` holds the notice decision itself: a mirror read never reports `'owing'`, a
+pending paint reports no fault, and `replayBufferOwed` keeps its claim. `chat-entries.unit.ts` holds
+`endsOnReviewResult`, including the row that arrives after the card. `windowIsReading` holds that neither
+cached paint replaces rows the screen holds. `chat-entries-history-notice.unit.svelte.ts` renders which
+sentence lands for which notice, the Retry beside it, and the spinner in place of a band.
 
 ## The tab that comes back
 
@@ -348,20 +374,50 @@ gesture — `visibilitychange`→visible, the window's own `focus`, `pageshow` f
 | view | what says it could be behind | what it refetches |
 |---|---|---|
 | board (`App.svelte`) | always — a stale list looks current whatever the socket did | `reconnectNow()`, then `refreshBoard()`, retried once after a second |
-| chat (`TaskChat.svelte`) | nothing — `revalidateOnReturn` is set, so the return asks the server instead of the screen judging itself | the task row, then the newest message window, conditionally on the revision it holds |
-| diff (`CardDetail.svelte`) | in flight or streaming | `loadDiff()` |
+| chat (`TaskChat.svelte`) | nothing on the screen: the sync digest answers | the task row when the row moved, then the newest message window |
+| diff (`CardDetail.svelte`) | nothing on the screen: the sync digest answers | `refreshManifest()`, or `loadDiff()` when the base moved |
+| terminal (`TerminalPanel.svelte`) | its own socket: `isTerminalStale` | a new terminal connection, when the old one stopped answering |
 
-**A chat does not judge whether it fell behind; it asks.** A turn missed whole takes with it every trace
-this screen could read back: no card drawn, no id opened, nothing left unresolved. Ask such a screen whether
-it is behind and it answers no, which is the shape of a chat left on a stale transcript while its task
-answered twice. So `ReturnSignal.revalidateOnReturn` is set, and every visible return re-sends the held
-revision as `If-None-Match`. The question is cheap: the window carries `Cache-Control: no-cache`, so the
-server always sees it, and answers `304` with no body when the conversation is where this screen left it
-(`docs/api-contract.md → Response headers`). A hidden tab and a thawed page are two more returns, not a
-different question, so neither signal needs the screen's own opinion. The board and the diff keep theirs: the
-board's list is mirrored by the frames that move it, and the diff's by `task_diff_stats` on the project
-channel. And `loadDiff()` resets the open file, the checkpoint overlay and the from/to comparison — reloading
-it on every tab switch is a loss.
+**A view that has stopped being read cannot report that it is behind, so it asks the server.** One request
+answers for the task view: `GET /api/projects/{id}/tasks/{id}/sync` (`TaskHandler.HandleSync`) returns the
+task-row fields, the conversation as `{epoch, revision, messages, thread}`, and the diff as
+`{known, hash, staged}`. `$lib/utils/task-sync.ts` compares that against what each view *applied* and says
+which part to bring back; `resyncPlan` is pure, so the rule is reachable from a test. Two facts make this the
+shape rather than a poll:
+
+- **A response-body ETag is a claim about the server, and a stale screen matches it perfectly.** The messages
+  window's `If-None-Match` answers "the server is where this browser last downloaded it". Three screens fit
+  that answer while sitting behind: one where a read threw after the baseline moved, one whose frames
+  `suppressEvents` refused, and one that discarded a call card (*A discarded card releases its id*). Such a
+  screen is answered `304` forever — a transcript left behind with nothing to ask about it. So
+  `appliedRevision` (`$lib/utils/chat-window.ts`) moves the baseline only with a read that was applied,
+  `createStreamHandler` reports a discarded card through `onDiverged`, and a transcript that knows it
+  diverged reads without a baseline. Retry asks unconditionally for the same reason.
+- **The revision is a count, not a version.** `AppStreamManager.ConversationRevision` moves at
+  `DurableThrough` — the seam the executor already calls where a row lands — and where rows are removed. It
+  restarts with the process, which is why the digest carries `epoch` too. Every reading the client cannot
+  match (a restarted server, a re-created task, a digest it could not fetch) counts as behind: that direction
+  costs a re-read, where the other one leaves a screen that lies.
+
+The digest carries `Cache-Control: no-cache` and the middleware's ETag, so an unchanged view costs no body, and
+`fetchTaskSync` (`$lib/services/task-sync.ts`) shares one in-flight call between the views answering the same
+gesture. An unknown diff in the digest (`known: false`) is an unknown and not a clean answer: the panel is
+left alone, because nothing was computed to compare against.
+
+**A returning view keeps what the reader was doing.** `DiffCache.refreshManifest` reconciles the manifest —
+new files, changed files, staged flags — and keeps the open file, the checkpoint overlay and the from/to
+comparison. A full reload closes all three, which is why the return path asks for the cheaper one. The chat pins only
+while the reader follows: a window that joins the rows held leaves them where they were, and one that cannot
+be joined (a thread switch, a truncation) is a different conversation and opens at its end. A changed base is
+the exception that resets — `diffHeadRef`/`diffBaseMoved` (`$lib/utils/diff-base.ts`) is the panel's own rule
+for what its diff is computed against, and two bases cannot share one view. Not kept: an untracked file's
+preview, which is fetched on demand and comes back fetched rather than pinned.
+
+**Tests:** `sync-return-freshness.spec.ts` — a change made while the window was elsewhere arrives on return,
+and the open file survives. `focus-return-review.spec.ts` — the transcript matches the stored rows after a run
+missed whole, and the *next* return is answered by the ETag. `task-sync.unit.ts`, `diff-base.unit.ts` and the
+`appliedRevision` cases in `chat-window.unit.ts`. Go: `handler_task_sync_test.go`, and the
+`ConversationRevision` tests in `app_stream_test.go`.
 
 **A page that stopped running reports itself off its own clock.** `watchSuspension`
 (`$lib/utils/page-suspension.ts`) keeps one 5 s interval for the whole page. A tick later than its pace by
@@ -370,10 +426,11 @@ asked for. Chrome's `resume` event feeds the same source as a courtesy, not as t
 behind another app and a page thawed by iOS report nothing. Neither stream reading carries this case, and the
 burst is why. Frames queued behind the freeze reach JavaScript after the window has focus, so
 `msSinceUnpainted` stays unstamped, and the same burst stamps the liveness clock — which is also why no
-reconnect banner appears. So `resume` reconciles only the view that asks the server: the board reads the
-frames that move it, and the diff would close the file someone was reading. What this does not claim: a page
-that kept running, lost frames and got no event at either edge has no evidence of its own. The chat asks
-again at the next signal it does get; the other two views have nothing to act on.
+reconnect banner appears. `resume` is a return like any other for the two views that ask the server, and
+nothing for the board: the board's list is mirrored by the frames that move it, and a thawed page receives
+the burst it missed. What no clock claims either: a page that kept running, lost frames and raised no event
+at either edge has no evidence of its own. That is the case the digest exists for — those views ask the server
+instead of reading themselves.
 
 **A frame that arrived to an unfocused window is the evidence for a window that never hid.** For a view that
 answers for itself, a `focus` or
@@ -397,6 +454,9 @@ and a returning tab missed nothing. And the comparison is against each view's ow
 cleared counter: the watchers share one stream, and a reading one of them consumed would leave the others
 with nothing to ask about. Silence stays in the rule because it answers the case content cannot — a
 socket that received nothing because it was gone.
+
+Only the board still decides on this evidence, and it decides to refresh. The chat and the diff ask the
+digest, which speaks about the server and the rows rather than about what this window happened to stamp.
 
 `msSinceFrame()` deliberately stays a liveness clock. Had the gate been switched to a content clock, the
 board — whose `mayBeBehind()` is constant `true` — would refetch on every window switch of an idle app.

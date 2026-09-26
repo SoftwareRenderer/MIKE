@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -166,6 +167,8 @@ type AppStreamManager struct {
 	// taskBuffers, oldest opened first, which is the order they are evicted in.
 	taskBufLoad  map[string]int
 	taskBufOrder []string
+	// convRev counts durable conversation writes per task key, guarded by taskBufMu. See ConversationRevision.
+	convRev      map[string]uint64
 	taskBufBound int // byte bound on one task's buffer
 	taskBufKeys  int // how many tasks may hold one
 	// queueFrames and queueBytes bound one connection's outbound queue; see sendQueue.
@@ -716,6 +719,7 @@ func (asm *AppStreamManager) BroadcastTaskDeleted(projectID, taskID string) {
 	// cleared by terminal status/complete events, but deletion bypasses the
 	// executor lifecycle.
 	asm.clearTaskBuffer(projectID + ":" + taskID)
+	asm.forgetConversationRevision(projectID, taskID)
 	asm.sendBoardPayload(projectID, appFrame(types.WSTypeTaskDeleted, map[string]any{
 		"task_id": taskID,
 	}))
@@ -815,11 +819,45 @@ func (asm *AppStreamManager) holdsTaskWithoutRowsLocked(taskKey string) bool {
 	return false
 }
 
+// conversationEpoch names this process. A revision restarts at zero with it, so the epoch is what turns "a
+// process that forgot" into one re-read rather than a stale screen.
+var conversationEpoch = strconv.FormatInt(time.Now().UnixNano(), 36)
+
+// ConversationRevision counts the durable conversation writes this task has had in this process, which a client
+// compares against the read it applied. It is a count, not a version: it restarts with the process and is
+// dropped when the task is deleted, and a client that cannot match its cursor re-reads.
+func (asm *AppStreamManager) ConversationRevision(projectID, taskID string) uint64 {
+	key := projectID + ":" + taskID
+	asm.taskBufMu.Lock()
+	defer asm.taskBufMu.Unlock()
+	return asm.convRev[key]
+}
+
+// ConversationEpoch is the value that tells a client whether the revisions it holds came from this process.
+func (asm *AppStreamManager) ConversationEpoch() string { return conversationEpoch }
+
+// TaskDiffDigest is what this process last learned about a task's diff. ok=false means it never computed one,
+// which is an unknown and not "nothing changed".
+func (asm *AppStreamManager) TaskDiffDigest(taskID string) (hash string, staged int, ok bool) {
+	if asm.watcher == nil {
+		return "", 0, false
+	}
+	return asm.watcher.DiffDigest(taskID)
+}
+
 // DurableThrough tells the hub that everything the task has said up to now is a conversation row, so its
 // buffer keeps only what no row answers. The executor calls it where a row lands, never at the frame that
-// precedes the row: a `tool_result` frame arrives before its row is written.
+// precedes the row: a `tool_result` frame arrives before its row is written. A path that removes rows calls it
+// too.
 func (asm *AppStreamManager) DurableThrough(projectID, taskID string) {
 	key := projectID + ":" + taskID
+	// The conversation moved whether or not the buffer is trimmed next.
+	asm.taskBufMu.Lock()
+	if asm.convRev == nil {
+		asm.convRev = make(map[string]uint64)
+	}
+	asm.convRev[key]++
+	asm.taskBufMu.Unlock()
 	asm.mu.RLock()
 	owed := asm.holdsTaskWithoutRowsLocked(key)
 	asm.mu.RUnlock()
@@ -984,6 +1022,15 @@ func (asm *AppStreamManager) clearTaskBuffer(taskKey string) {
 	asm.taskBufMu.Lock()
 	defer asm.taskBufMu.Unlock()
 	asm.dropTaskBufferLocked(taskKey)
+}
+
+// forgetConversationRevision retires a deleted task's count. A key reused by a new task starts at zero, which
+// costs a client one re-read.
+func (asm *AppStreamManager) forgetConversationRevision(projectID, taskID string) {
+	key := projectID + ":" + taskID
+	asm.taskBufMu.Lock()
+	defer asm.taskBufMu.Unlock()
+	delete(asm.convRev, key)
 }
 
 // ClearTaskBuffer removes the per-task ring buffer.

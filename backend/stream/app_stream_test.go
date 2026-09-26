@@ -720,6 +720,56 @@ func TestDurabilityTrimLeavesTheUndurableTail(t *testing.T) {
 	}
 }
 
+// TestConversationRevisionCountsDurableWrites: the revision moves once per durable write and for nothing that
+// is not a row.
+func TestConversationRevisionCountsDurableWrites(t *testing.T) {
+	asm := NewAppStreamManager(nil, nil)
+	if got := asm.ConversationRevision("proj-1", "task-1"); got != 0 {
+		t.Fatalf("a task with no writes is at revision %d, want 0", got)
+	}
+	// A token is stream content, not a row.
+	asm.SendTaskEvent("proj-1", "task-1", tokenEvent("streaming is not a row"))
+	if got := asm.ConversationRevision("proj-1", "task-1"); got != 0 {
+		t.Fatalf("a token frame moved the revision to %d, want it to wait for the row", got)
+	}
+	asm.DurableThrough("proj-1", "task-1")
+	asm.DurableThrough("proj-1", "task-1")
+	if got := asm.ConversationRevision("proj-1", "task-1"); got != 2 {
+		t.Fatalf("revision is %d after two durable writes, want 2", got)
+	}
+	if other := asm.ConversationRevision("proj-1", "task-2"); other != 0 {
+		t.Fatalf("another task of the same project reads %d, want its own count", other)
+	}
+	if asm.ConversationEpoch() == "" {
+		t.Fatal("no epoch: a client cannot tell a fresh process from an idle one")
+	}
+}
+
+// TestConversationRevisionMovesWhenTheTrimIsDeclined: the count is not a statistic about the buffer.
+func TestConversationRevisionMovesWhenTheTrimIsDeclined(t *testing.T) {
+	asm := NewAppStreamManager(nil, nil)
+	fs := dialStream(t, asm)
+	fs.subscribeTaskWithoutRows(t, "proj-1", "task-1")
+	awaitNoRowsClaim(t, asm, "proj-1:task-1", true)
+
+	asm.DurableThrough("proj-1", "task-1")
+
+	if got := asm.ConversationRevision("proj-1", "task-1"); got != 1 {
+		t.Fatalf("revision is %d with the trim declined, want 1", got)
+	}
+}
+
+// TestConversationRevisionIsRetiredWithTheTask: a deleted task leaves no count behind, and a reused key starts
+// at zero, which a client reads as a cursor it cannot match.
+func TestConversationRevisionIsRetiredWithTheTask(t *testing.T) {
+	asm := NewAppStreamManager(nil, nil)
+	asm.DurableThrough("proj-1", "task-1")
+	asm.BroadcastTaskDeleted("proj-1", "task-1")
+	if got := asm.ConversationRevision("proj-1", "task-1"); got != 0 {
+		t.Fatalf("a deleted task still counts %d, want its entry retired", got)
+	}
+}
+
 type replayFootprint struct{ frames, bytes int }
 
 func measureReplay(asm *AppStreamManager, taskKey string) replayFootprint {

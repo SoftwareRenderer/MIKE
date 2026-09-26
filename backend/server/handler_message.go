@@ -59,6 +59,8 @@ func (s *Server) truncateMessagesFrom(projectID, taskID string, msg *types.TaskM
 		s.executor.NotifyContextChanged(taskID)
 	}
 	s.appStreamMgr.ClearTaskBuffer(projectID, taskID)
+	// Removing rows moved the conversation too.
+	s.appStreamMgr.DurableThrough(projectID, taskID)
 	if !regenerate && msg.Role != "summarization" {
 		s.cleanupDeletedMessageForks(projectID, taskID, task, msg.ThreadID, msg.ID, msgCreatedAt, msgTimeErr, msg.Role)
 	} else {

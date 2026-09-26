@@ -174,6 +174,12 @@ answers 405 with an `Allow` header before any handler runs, and handlers do not 
 refuse. A new methodless `/api` route is an archgate `routes` violation, so it fails `make check` rather
 than being noticed in review. A methodless route also escapes `CSRFMiddleware`, which guards non-GET only.
 
+That skip is a client-side rule as well: `apiFetch` asks for the token only for a method the
+middleware guards (`needsCsrf`), so a GET sends no `X-CSRF-Token` and issues no probe for one. It matters
+because `/api/auth/session` is the request that *supplies* the token. A safe method that asked for one
+would spend a round trip fetching a header the server ignores — the probe for the answer first fetching
+the credential for the question. Tests: `frontend/src/lib/api/__tests__/auth.unit.ts`.
+
 Exemptions, each with a reason: the extensions file-server subtree (`/extensions/`) and the two WebSocket
 upgrades (`/api/stream`, `/api/lsp`), which upgrade on GET and never inspect the verb.
 `handler_preview.go`'s two `r.Method != http.MethodHead` checks suppress a HEAD *body*, not a
@@ -467,8 +473,16 @@ extension lists decide `Cache-Control: no-cache` — "keep a copy, ask before sh
 Browse can paint from a stored index only after this server agreed it has not moved
 (`HandleList`, `HandleRegistryIndex`, `HandleLocalExtensions`). `handleTaskMessages` decides the same
 lifetime: reopening a task asks the same question, and a thread that has not moved answers `304` with no
-body. An answer holding arbitrary extension
-data is not worth storing anywhere, so `GET /api/extensions/{id}/storage` declares no lifetime at all.
+body. `TaskHandler.HandleSync` (`GET …/tasks/{taskID}/sync`) decides it for the same reason in the other
+direction — a returning window asks whether anything moved, and a kept digest *is* the stale answer it called
+to replace — so the route is `no-cache` and its 304 carries the header back. It is a task route, so it lives
+in `backend/api`. The handler sits in `task.go`: the `http` archgate rule counts a domain package's files that
+import `net/http` and refuses a new one. `syncDigest` (`task_sync.go`) builds the answer and imports nothing of
+the transport. It reads the hub for the conversation revision, which the one-way
+`server → api` edge permits because `api` already holds the manager. Tests:
+`backend/server/handler_task_sync_test.go` (the 304 round trip and the `no-cache` on both answers),
+`backend/api/task_sync_test.go` (the body). An answer holding arbitrary extension data is not worth storing
+anywhere, so `GET /api/extensions/{id}/storage` declares no lifetime at all.
 SSE and `GET /api/fs/raw` image bytes are passed through unbuffered and carry no ETag.
 Tests: `backend/server/handler_headers_test.go`, `backend/server/compress_test.go`,
 `backend/server/handler_message_window_test.go`.

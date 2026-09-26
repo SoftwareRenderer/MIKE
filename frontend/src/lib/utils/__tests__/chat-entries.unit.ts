@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { findLastUserMessageBefore, trimEntriesForRegenerate, buildCheckpointStateMap, mergeToolCallsIntoAssistant, computeLastUserMessageIds, getCheckpointThreads, buildEntriesFromMessages, advisoryLabel, systemNoteText, pendingToolIds, editSubmitAction, takeEchoMatch, buildEntryMetas, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
+import { findLastUserMessageBefore, trimEntriesForRegenerate, buildCheckpointStateMap, mergeToolCallsIntoAssistant, computeLastUserMessageIds, getCheckpointThreads, buildEntriesFromMessages, advisoryLabel, systemNoteText, pendingToolIds, endsOnReviewResult, editSubmitAction, takeEchoMatch, buildEntryMetas, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
+import type { WindowRow } from '$lib/utils/chat-entries';
 import type { ChatEntry, Thread } from '$lib/types';
 import { PENDING_SEND_ID_PREFIX } from '$lib/utils/pending-sends';
 
@@ -732,6 +733,63 @@ describe('pendingToolIds', () => {
             { toolId: 'call-2', isPending: true },
         ])];
         expect([...pendingToolIds(entries)]).toEqual(['call-2']);
+    });
+});
+
+describe('endsOnReviewResult', () => {
+    // The rows are read as the cache holds them: JSON in the two payload columns, one row per stored message.
+    function reviewRow(): WindowRow {
+        return {
+            role: 'tool_call',
+            tool_calls: JSON.stringify({ tool_name: 'request_review', args: { summary: 'Done.' } }),
+            tool_result: '{"output":"Task complete"}',
+        };
+    }
+
+    it('reads a window whose newest row is an answered request_review as a finished turn', () => {
+        const rows: WindowRow[] = [{ role: 'user' }, reviewRow()];
+        expect(endsOnReviewResult(rows)).toBe(true);
+    });
+
+    it('paints nothing when the card has no result yet — the call is the turn still running', () => {
+        const running = reviewRow();
+        delete running.tool_result;
+        expect(endsOnReviewResult([running])).toBe(false);
+    });
+
+    it('walks past the advisory rows that follow the card', () => {
+        // A diagnostics or auto-answer row is written after the run ended; the turn still finished.
+        const rows: WindowRow[] = [reviewRow(), { role: 'advisory', kind: 'diagnostics' }];
+        expect(endsOnReviewResult(rows)).toBe(true);
+    });
+
+    it('paints nothing when the newest row is a user message nothing has answered', () => {
+        const rows: WindowRow[] = [reviewRow(), { role: 'user' }];
+        expect(endsOnReviewResult(rows)).toBe(false);
+    });
+
+    it('paints nothing when a call is still waiting for its result', () => {
+        // The card may be below it, but a call with no `tool_result` is work that can still move.
+        const rows: WindowRow[] = [reviewRow(), { role: 'tool_call', tool_calls: '{"tool_name":"bash"}' }];
+        expect(endsOnReviewResult(rows)).toBe(false);
+    });
+
+    it('paints nothing for a window whose newest card is a different tool', () => {
+        const asked = reviewRow();
+        asked.tool_calls = JSON.stringify({ tool_name: 'ask_question' });
+        expect(endsOnReviewResult([asked])).toBe(false);
+    });
+
+    it('paints nothing when the card payload will not read', () => {
+        // Unparseable evidence is not evidence: the safe answer is to wait for the read.
+        const broken = reviewRow();
+        broken.tool_calls = '{"tool_name"';
+        expect(endsOnReviewResult([broken])).toBe(false);
+    });
+
+    it('paints nothing for a window with no content row at all', () => {
+        expect(endsOnReviewResult([])).toBe(false);
+        expect(endsOnReviewResult([{ role: 'title' }])).toBe(false);
     });
 });
 

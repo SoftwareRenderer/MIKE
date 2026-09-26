@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
+    appliedRevision,
     applyWindowRead,
     isStaleHistoryRead,
     newestWindowUnchanged,
@@ -10,6 +11,7 @@ import {
     atTopOfList,
     mergeCachedRows,
     noticeForWindowRead,
+    replayBufferOwed,
     windowIsReading,
     jumpFloor,
     pageUntilRowLands,
@@ -234,6 +236,37 @@ describe('noticeForWindowRead', () => {
         expect(noticeForWindowRead('failed', { holdsTaskKey: false, taskInFlight: true })).toBe('failed');
         expect(noticeForWindowRead('failed', { holdsTaskKey: true, taskInFlight: false })).toBe('failed');
     });
+
+    it('calls a provisional paint a wait, not a fault', () => {
+        // Whatever else this screen holds or waits on, the read is still out: nothing has gone wrong.
+        expect(noticeForWindowRead('provisional', holding)).toBe('pending');
+        expect(noticeForWindowRead('provisional', { holdsTaskKey: false, taskInFlight: false })).toBe('pending');
+    });
+
+    it('gives the band back when the read a provisional paint waited on does not answer', () => {
+        const seen = { holdsTaskKey: true, taskInFlight: false };
+        expect(noticeForWindowRead('provisional', seen)).toBe('pending');
+        expect(noticeForWindowRead('failed', seen)).toBe('failed');
+    });
+});
+
+describe('replayBufferOwed', () => {
+    it('keeps the claim while the screen holds only what its own cache gave it', () => {
+        expect(replayBufferOwed('pending')).toBe(true);
+    });
+
+    it('keeps the claim when a read failed on a task this browser holds a key for', () => {
+        expect(replayBufferOwed('owing')).toBe(true);
+    });
+
+    it('drops the claim once a read has answered', () => {
+        expect(replayBufferOwed(null)).toBe(false);
+    });
+
+    it('drops the claim for a mirror copy, which the server answered to somebody earlier', () => {
+        expect(replayBufferOwed('cached')).toBe(false);
+        expect(replayBufferOwed('failed')).toBe(false);
+    });
 });
 
 describe('windowIsReading', () => {
@@ -254,6 +287,15 @@ describe('windowIsReading', () => {
         expect(windowIsReading('failed', false)).toBe(false);
         expect(windowIsReading('failed', true)).toBe(false);
     });
+
+    it('paints a provisional copy onto a transcript that holds no rows', () => {
+        expect(windowIsReading('provisional', false)).toBe(true);
+    });
+
+    it('never lets a provisional copy replace rows the screen holds', () => {
+        // Those rows came from a read; this one came from the cache behind it.
+        expect(windowIsReading('provisional', true)).toBe(false);
+    });
 });
 
 describe('newestWindowUnchanged', () => {
@@ -266,6 +308,33 @@ describe('newestWindowUnchanged', () => {
         expect(newestWindowUnchanged('"a"', '"b"')).toBe(false);
         expect(newestWindowUnchanged('"a"')).toBe(false);
         expect(newestWindowUnchanged('', '"a"')).toBe(false);
+    });
+});
+
+describe('appliedRevision', () => {
+    it('moves the baseline only with a read this screen applied', () => {
+        expect(appliedRevision('answered', true, { windowRevision: '"b"', held: '"a"' })).toBe('"b"');
+    });
+
+    it('keeps the baseline a read that did not apply cannot answer for', () => {
+        // The read threw, or its window was refused: the screen holds the older transcript, so it keeps the
+        // older baseline.
+        expect(appliedRevision('answered', false, { windowRevision: '"b"', held: '"a"' })).toBe('"a"');
+        expect(appliedRevision('failed', false, { windowRevision: undefined, held: '"a"' })).toBe('"a"');
+    });
+
+    it('keeps the baseline a 304 confirmed', () => {
+        // A 304 is an answered read that applies nothing; the held baseline is what earned it.
+        expect(appliedRevision('answered', false, { windowRevision: '"a"', held: '"a"' })).toBe('"a"');
+    });
+
+    it('claims nothing for a window that carries no ETag', () => {
+        expect(appliedRevision('answered', true, { windowRevision: undefined, held: '"a"' })).toBe('');
+    });
+
+    it('claims nothing for a mirror copy, which never read the server', () => {
+        expect(appliedRevision('cached', true, { windowRevision: '"b"', held: '"a"' })).toBe('"a"');
+        expect(appliedRevision('cached', true, { windowRevision: undefined, held: '' })).toBe('');
     });
 });
 

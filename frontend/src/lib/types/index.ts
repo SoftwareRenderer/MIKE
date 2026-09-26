@@ -424,6 +424,24 @@ export interface TaskCommit {
     date: string;
 }
 
+/**
+ * The digest `GET …/tasks/{id}/sync` answers: whether each part of the task view has moved, so a screen that
+ * stopped being read asks instead of guessing. `docs/reconnection.md → The tab that comes back`.
+ */
+export interface TaskSyncDigest {
+    status: string;
+    execution_state: string;
+    summarizing: boolean;
+    has_merge_conflict: boolean;
+    branch_tip?: string;
+    updated_at: string;
+    /** The conversation this task is on; a switch replaces a screen's whole window. */
+    thread?: string;
+    conversation: { epoch: string; revision: number; messages: number };
+    /** `known: false` means the server never computed a diff. */
+    diff: { known: boolean; hash?: string; staged: number };
+}
+
 export interface ProjectCounts {
     backlog: number;
     in_progress: number;

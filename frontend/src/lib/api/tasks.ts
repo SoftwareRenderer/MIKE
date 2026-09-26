@@ -1,4 +1,4 @@
-import type { ChatTurn, MemoryAlertAckPayload, Task, TaskMessage } from '../types';
+import type { ChatTurn, MemoryAlertAckPayload, Task, TaskMessage, TaskSyncDigest } from '../types';
 import { API_BASE, apiFetch, apiError, generateId, readEventStream } from './helpers';
 import { setBoardCache, getBoardCache, messagesCacheKey, messageFullCacheKey } from '../storage';
 import { mergeCachedRows } from '../utils/chat-window';
@@ -48,6 +48,16 @@ export async function createTask(projectId: string, task: Partial<Task>): Promis
 export async function getTask(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`);
     if (!res.ok) throw await apiError(res, t('api.taskNotFound'));
+    return res.json();
+}
+
+/**
+ * The digest a window asks for when it comes back. Never read from the offline mirror: a stored digest would
+ * turn "could not ask" into "nothing moved".
+ */
+export async function getTaskSync(projectId: string, taskId: string): Promise<TaskSyncDigest> {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/sync`);
+    if (!res.ok) throw await apiError(res, t('api.fetchTaskSync'));
     return res.json();
 }
 
@@ -317,6 +327,15 @@ async function widenCache(projectId: string, taskId: string, window: MessageWind
         // A cache this browser cannot read is no reason to lose the window it just read.
     }
     await setBoardCache(key, merged);
+}
+
+/** What this browser holds of a conversation, read out of its own cache with no network attempt and no
+ * failure to catch: the open path asks for it beside its read, to draw while that read is still out. It
+ * carries no revision — the baseline names what a read answered, and this answered nothing. */
+export async function readCachedWindow(projectId: string, taskId: string): Promise<MessageWindow | null> {
+    const held = await getBoardCache<MessageWindow>(messagesCacheKey(projectId, taskId)).catch(() => null);
+    if (!held || !Array.isArray(held.messages)) return null;
+    return markCached({ messages: held.messages, hasMore: held.hasMore, before: held.before });
 }
 
 /** One page of a task's prompts, oldest first, plus how to ask for the older ones. */

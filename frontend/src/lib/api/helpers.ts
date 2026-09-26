@@ -147,7 +147,19 @@ export class ConnectionFailure extends Error {
 }
 
 /**
- * Wrapper around fetch that includes credentials (cookies) and CSRF token on every request.
+ * Whether a request needs the CSRF token. `CSRFMiddleware` skips GET, HEAD and OPTIONS, so a safe request
+ * that asked for one would spend a round trip to `/api/auth/session` for a header the server ignores — and
+ * the session check is the request that supplies that token, so asking on a safe method makes the boot probe
+ * pay for itself twice.
+ */
+function needsCsrf(method: string | undefined): boolean {
+    const m = (method ?? 'GET').toUpperCase();
+    return m !== 'GET' && m !== 'HEAD' && m !== 'OPTIONS';
+}
+
+/**
+ * Wrapper around fetch that includes credentials (cookies) and, for a method the CSRF middleware guards, its
+ * token.
  *
  * **No implicit deadline.** Every call used to be aborted at 15 s unless the caller passed a signal, which
  * is a decision on the work rather than on the queue: a big task's diff, a merge on commit-and-done, or a
@@ -169,8 +181,8 @@ export class ConnectionFailure extends Error {
  */
 export async function apiFetch(url: string, init?: RequestInit & { signal?: AbortSignal }): Promise<Response> {
     const headers = new Headers(init?.headers);
-    // Skip CSRF for login endpoint (public)
-    if (!url.includes('/api/auth/login')) {
+    // The login endpoint is public and has no token to send yet.
+    if (needsCsrf(init?.method) && !url.includes('/api/auth/login')) {
         const token = await ensureCsrfToken();
         if (token) headers.set('X-CSRF-Token', token);
     }
@@ -191,11 +203,14 @@ export async function apiFetch(url: string, init?: RequestInit & { signal?: Abor
 
 /** Headers for a caller that opens its own response instead of going through `apiFetch` — the progress
  * streams that cost the caller a line rather than the HTTP reason (`docs/reconnection.md → How a request
- * ends`). Nothing else about the request changes. */
-export async function csrfHeaders(init?: HeadersInit): Promise<Headers> {
+ * ends`). Nothing else about the request changes. Every such caller posts, so the token is asked for unless
+ * a safe method says otherwise. */
+export async function csrfHeaders(init?: HeadersInit, method = 'POST'): Promise<Headers> {
     const headers = new Headers(init);
-    const token = await ensureCsrfToken();
-    if (token) headers.set('X-CSRF-Token', token);
+    if (needsCsrf(method)) {
+        const token = await ensureCsrfToken();
+        if (token) headers.set('X-CSRF-Token', token);
+    }
     return headers;
 }
 

@@ -152,6 +152,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}", s.taskHandler.HandleByID)
 	s.mux.HandleFunc("PUT /api/projects/{projectID}/tasks/{taskID}", s.taskHandler.HandleByID)
 	s.mux.HandleFunc("DELETE /api/projects/{projectID}/tasks/{taskID}", s.taskHandler.HandleByID)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/sync", s.taskHandler.HandleSync)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/move", s.taskHandler.HandleMove)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/init", s.taskHandler.HandleInit)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", s.taskHandler.HandleStart)

@@ -3,7 +3,7 @@
     import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, TaskMessage, Task, ChatTurn } from '$lib/types';
     import type { DiffManifest } from '$lib/types/diff';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, MESSAGE_JUMP_LIMIT, getTaskTurns, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, onQueueFlushed, getQueuedTaskIds, getQueuedSends, getRefusedSends, getDroppedTaskIds, getTask, isFromCache, type AppStream, type SendResult } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, readCachedWindow, type MessageWindow, MESSAGE_JUMP_LIMIT, getTaskTurns, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, onQueueFlushed, getQueuedTaskIds, getQueuedSends, getRefusedSends, getDroppedTaskIds, getTask, isFromCache, type AppStream, type SendResult } from '$lib/api';
     import { PENDING_SEND_ID_PREFIX, pendingSendEntries } from '$lib/utils/pending-sends';
     import { appStore, dialogStore, updateTaskInBoard } from '$lib/stores';
     import { streamingTaskStore } from '$lib/stores/streaming-tasks.svelte';
@@ -23,7 +23,7 @@
     import { isAnyModalOpen } from '$lib/utils/modal-state';
     import { trustedExecutionState, isTaskPaused } from '$lib/utils/execution-state';
     import { reselectProvider, getProviderDisplayName } from '$lib/utils/providers';
-    import { buildEntriesFromMessages, mergeLoadedHistory, buildEntryMetas, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, takeEchoMatch, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
+    import { buildEntriesFromMessages, mergeLoadedHistory, buildEntryMetas, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, endsOnReviewResult, takeEchoMatch, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { useConnectionRestored } from '$lib/composables/use-connection-restored.svelte';
     import { useTaskEvents } from '$lib/composables/use-task-events.svelte';
@@ -31,8 +31,10 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { t } from '$lib/i18n';
     import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
-    import { applyWindowRead, isStaleHistoryRead, newestWindowUnchanged, prependRows, resolveAnchor, anchorScrollDelta, readerScrolledUp, noticeForWindowRead, windowIsReading, jumpFloor, pageUntilRowLands, type MeasuredEntry, type ScrollAnchor, type WindowRead, type WindowReadNotice } from '$lib/utils/chat-window';
+    import { appliedRevision, applyWindowRead, isStaleHistoryRead, newestWindowUnchanged, prependRows, replayBufferOwed, resolveAnchor, anchorScrollDelta, readerScrolledUp, noticeForWindowRead, windowIsReading, jumpFloor, pageUntilRowLands, type MeasuredEntry, type ScrollAnchor, type WindowRead, type WindowReadNotice } from '$lib/utils/chat-window';
     import { createTabReturn } from '$lib/composables/use-tab-return';
+    import { fetchTaskSync } from '$lib/services/task-sync';
+    import { heldFromDigest, resyncPlan, type HeldConversation } from '$lib/utils/task-sync';
     import ChatForm from './ChatForm.svelte';
     import ChatEntries from './ChatEntries.svelte';
     import ReviewBar from './ReviewBar.svelte';
@@ -46,7 +48,7 @@
     // True while the initial conversation history is being fetched
     let historyLoading = $state(false);
     /** Set when the transcript may not be current: read from this device's mirror, or not read at all. */
-    let historyNotice = $state<'cached' | 'failed' | 'owing' | null>(null);
+    let historyNotice = $state<WindowReadNotice>(null);
     /** The stream this chat holds its task key on, set while the chat is mounted. */
     let heldStream: AppStream | null = null;
     /** Rows every window has delivered, oldest first; the transcript is rebuilt from these. */
@@ -56,6 +58,11 @@
     let hasEarlier = $state(false);
     /** Strong ETag of the newest window on screen; empty when no live baseline is known. */
     let historyRevision = '';
+    /** The conversation this transcript was built from, as the sync digest named it. Only an applied read
+     * writes here. */
+    let appliedConversation: HeldConversation = { epoch: '', revision: 0, messages: 0, thread: '' };
+    /** True when this transcript threw away content no later read can redraw, so the next return must re-read. */
+    let transcriptDiverged = false;
     /** Identifies the newest history read; older reads are discarded. */
     let historyReadSeq = 0;
     let loadingEarlier = $state(false);
@@ -421,6 +428,7 @@
         loadHistory,
         updateActiveThread,
         updateThreadUrl,
+        onDiverged: () => { transcriptDiverged = true; },
     });
 
     /** Wrapper around stream handler with component-specific echo logic. */
@@ -484,22 +492,71 @@
         stream.state.contextState = { ...stream.state.contextState, limit: (model as { context_window?: number })?.context_window || 0 };
     }
 
+    /** A newest-window read that has gone out and not yet been drawn. Its place in the read order is
+     * claimed when it goes out, not when it lands: the newest read issued is the one that may paint, which
+     * is what lets the open ask early and apply after a read it started in between. */
+    interface WindowReadInFlight {
+        seq: number;
+        read: Promise<MessageWindow>;
+    }
+
+    /** Send for the newest window without waiting for it. The window route answers for whichever thread is
+     * current and names none, so this needs nothing but the task. */
+    function issueWindowRead(knownRevision = ''): WindowReadInFlight {
+        const seq = ++historyReadSeq;
+        const read = getTaskMessages(projectId, taskId, { knownRevision });
+        // A read its caller never applies — a thread switch superseded it, or the chat unmounted first —
+        // still has to have its failure consumed, or it surfaces as an unhandled rejection.
+        read.catch(() => {});
+        return { seq, read };
+    }
+
+    /** The task's own row, recorded the moment it lands. `execution_state` is what decides whether an
+     * unanswered tool call is work or a leftover, and the model fields decide what the form offers. A row
+     * that did not answer costs the reading, never the paint: the board's copy stands in. */
+    async function readTaskRow(): Promise<Task | null> {
+        try {
+            const row = await getTask(projectId, taskId);
+            noteTaskRow(row.execution_state);
+            return row;
+        } catch {
+            return null;
+        }
+    }
+
+    /** Draw what this browser holds of the conversation while its read of the newest window is still out —
+     * the last Review result it saw, and nothing else: a window ending there holds no work that can still
+     * move, so showing it a round trip early loses nothing. The answered read replaces these rows. */
+    async function paintHeldWindow(): Promise<void> {
+        const held = await readCachedWindow(projectId, taskId);
+        if (!held || destroyed || historyRows.length > 0) return;
+        if (!endsOnReviewResult(held.messages) || taskIsInFlight(knownExecutionState)) return;
+        historyRows = held.messages;
+        earlierCursor = held.before;
+        hasEarlier = held.hasMore;
+        historyNotice = noticeForWindowRead('provisional', readContext(knownExecutionState));
+        renderHistory(true, knownExecutionState);
+        // What is on screen came from this browser, not from a read, so the replay buffer is still owed.
+        declareRows(historyNotice);
+    }
+
     /** `executionState` decides whether an unanswered tool call is work or a leftover: pass the task row,
      * not the board's copy. The answer says how the read ended, so a caller can tell a mirror copy from
-     * the server's own rows. */
-    async function loadHistory(scrollAfter = false, executionState = knownExecutionState, knownRevision = ''): Promise<WindowRead> {
+     * the server's own rows. `preRead` is a window read already in flight, applied here once what the render
+     * needs has landed. */
+    async function loadHistory(scrollAfter = false, executionState = knownExecutionState, knownRevision = '',
+        preRead?: WindowReadInFlight): Promise<WindowRead> {
         let read: WindowRead = 'failed';
-        const seq = ++historyReadSeq;
+        const seq = preRead ? preRead.seq : ++historyReadSeq;
         try {
-            const window = await getTaskMessages(projectId, taskId, { knownRevision });
+            const window = await (preRead ? preRead.read : getTaskMessages(projectId, taskId, { knownRevision }));
             if (isStaleHistoryRead(destroyed, seq, historyReadSeq)) return 'failed';
             const unchanged = newestWindowUnchanged(knownRevision, window.revision, window.unchanged);
             read = isFromCache(window) ? 'cached' : 'answered';
             historyNotice = noticeForWindowRead(read, readContext(executionState));
             declareRows(historyNotice);
-            // Only a live read sets the baseline: a window with no ETag says nothing about what is on screen.
-            if (read === 'answered') historyRevision = window.revision ?? '';
-            if (!unchanged && windowIsReading(read, historyRows.length > 0)) {
+            const applies = !unchanged && windowIsReading(read, historyRows.length > 0);
+            if (applies) {
                 const joined = applyWindowRead(historyRows, window.messages);
                 historyRows = joined.rows;
 
@@ -507,8 +564,12 @@
                     earlierCursor = window.before;
                     hasEarlier = window.hasMore;
                 }
-                renderHistory(scrollAfter, executionState);
+                // A window that cannot be joined replaced the conversation rather than extending it, and the
+                // reader's row is gone with it. Only then does a rebuild move the viewport.
+                renderHistory(scrollAfter || !joined.keepsEarlier, executionState);
             }
+            // The baseline names what this screen painted, never what it merely downloaded.
+            historyRevision = appliedRevision(read, applies, { windowRevision: window.revision, held: historyRevision });
             // The transcript draws first: the prompts the header names arrive a moment later and relabel it.
             await readTurns(true);
         } catch (e) {
@@ -519,8 +580,8 @@
                 draftAttachments = [];
                 return 'failed';
             }
-            // Anything else: what is on screen may be the last thing read, so say that rather than stay
-            // silent about a transcript that looks empty.
+            // Anything else: what is on screen may be the last thing read, so say so.
+            transcriptDiverged = true;
             historyNotice = noticeForWindowRead('failed', readContext(executionState));
             declareRows(historyNotice);
         }
@@ -534,10 +595,11 @@
         return { holdsTaskKey: heldStream !== null, taskInFlight: taskIsInFlight(executionState) };
     }
 
-    /** Tell the hub whether this screen has a copy of the conversation: with none, the replay buffer is all
-     * it has and must not be trimmed. Re-declaring what the hub already knows sends nothing. */
+    /** Tell the hub whether this screen has a copy of the conversation the server answered: with none, or
+     * with only its own cached copy drawn (`'pending'`), the replay buffer is all it has and must not be
+     * trimmed. Re-declaring what the hub already knows sends nothing. */
     function declareRows(notice: WindowReadNotice) {
-        heldStream?.subscribeTask(projectId, taskId, notice === 'owing');
+        heldStream?.subscribeTask(projectId, taskId, replayBufferOwed(notice));
     }
 
     /**
@@ -1340,73 +1402,84 @@
         unsubViewport = setupViewportListener();
 
         (async () => {
-            await loadThreads();
+            // The open's three reads, asked in the same breath: the thread list, the task's own row, and the
+            // newest window — which names no thread, so it waits on neither of the other two. What still
+            // orders the *apply* is written where it is applied.
+            const threadsRead = loadThreads();
+            const rowRead = readTaskRow();
+            let windowRead = issueWindowRead();
+            // What this browser holds of the conversation goes on screen as soon as its cache gives it up,
+            // which is while those reads are still out. It paints nothing unless it ends on a Review result.
+            void paintHeldWindow();
+
+            await threadsRead;
             // If URL has a thread param, switch to that thread before loading history
             const urlThread = readThreadFromUrl();
             if (urlThread && threads.some(t => t.id === urlThread)) {
                 try {
                     const switched = await switchTaskThread(projectId, taskId, urlThread);
                     updateActiveThread(switched.id);
+                    // The read that went out answers for the thread this screen has just left.
+                    windowRead = issueWindowRead();
                 } catch (e) {
                     dialogStore.showToast(String(e));
                 }
-            } else if (!urlThread) {
+            } else if (!urlThread && !activeThreadId) {
                 // No thread param — use the last active thread (is_active flag).
                 // Only default to "Main" if no thread is marked active (first open).
-                if (!activeThreadId) {
-                    const mainThread = threads.find(t => t.name === 'Main');
-                    if (mainThread) {
-                        try {
-                            const switched = await switchTaskThread(projectId, taskId, mainThread.id);
-                            updateActiveThread(switched.id);
-                        } catch (e) {
-                            dialogStore.showToast(String(e));
-                        }
+                const mainThread = threads.find(t => t.name === 'Main');
+                if (mainThread) {
+                    try {
+                        const switched = await switchTaskThread(projectId, taskId, mainThread.id);
+                        updateActiveThread(switched.id);
+                        windowRead = issueWindowRead();
+                    } catch (e) {
+                        dialogStore.showToast(String(e));
                     }
                 }
             }
-            // 0. The task's own row: the `execution_state` reading known to be current. `docs/reconnection.md`
-            let taskRow: Task | null = null;
-            try {
-                taskRow = await getTask(projectId, taskId);
-                noteTaskRow(taskRow.execution_state);
-            } catch {
-                // Deleted or unreachable: fall back to the board's copy.
-            }
+            // The row is applied before the task key is taken: it opens the gate that drops frames for a
+            // task this screen does not believe is running, and the replay that key earns arrives while the
+            // rows are still loading (`docs/reconnection.md → The row decides, not the board's copy`).
+            const taskRow = await rowRead;
             if (unmounted) return;
 
-            // 1. Open the task-event reader. Before this the last published frame is not this
+            // Open the task-event reader. Before this the last published frame is not this
             // screen's to act on: its history is not loaded yet, and a frame handled now would
             // land ahead of the rows it belongs between.
             taskEvents.arm();
 
-            // 2. Clear stale streaming state for non-running tasks.
+            // Clear stale streaming state for non-running tasks.
             // A leftover id in the streaming store from a visit that ended mid-turn would otherwise
             // keep this chat showing a turn that is not running.
             if (taskStatus === 'review' || taskStatus === 'done' || taskStatus === 'backlog') {
                 markNotStreaming();
             }
 
-            // 3. Take this task's key: that frame is what earns the server's replay buffer, which is the
-            // only source for a call already in flight. Released when this chat goes.
-            if (unmounted) return;
+            // Take this task's key: that frame is what earns the server's replay buffer, which is the only
+            // source for a call already in flight. Released when this chat goes.
             heldStream = getAppStreamRef();
             if (heldStream) {
                 heldStream.subscribeTask(projectId, taskId);
+                // The key is new, so whatever the screen is already under has to be claimed on it: a
+                // provisional paint before this line happened while no key was held.
+                declareRows(historyNotice);
             }
 
-            // 4. Load history from DB (merges with buffer entries via ID-based dedup).
+            // Draw the window the open asked for (merges with buffer entries via ID-based dedup). It waits
+            // for the row above because whether an unanswered tool call is work or a leftover is that
+            // reading's to say.
             historyLoading = true;
             try {
-                await loadHistory();
+                await loadHistory(false, knownExecutionState, '', windowRead);
             } finally {
                 historyLoading = false;
             }
 
-            // 5. Allow live events — buffer replay is done, DB state is loaded.
+            // Allow live events — buffer replay is done, DB state is loaded.
             suppressEvents = false;
 
-            // 6. Initial focus (skipped on mobile — auto-focus pops the virtual keyboard)
+            // Initial focus (skipped on mobile — auto-focus pops the virtual keyboard)
             if (!destroyed && !isMobile) chatFormComp?.focus();
 
             // Task-specific model selection, from the row already read.
@@ -1441,9 +1514,7 @@
             }
         })();
 
-        // This transcript arrives on `task_event` frames and nowhere else, and a missed turn leaves nothing
-        // on screen that could report it, so every return revalidates the newest window against the
-        // revision held here.
+        // A turn missed whole leaves nothing on screen that could report it, so every return asks the server.
         const returnWatcher = createTabReturn({
             revalidateOnReturn: true,
             onReturn: () => { void reconcileAfterAbsence(); },
@@ -1530,21 +1601,37 @@
     });
 
     /**
-     * Rebuild the transcript from the database after a stretch this screen was not being read. Turns
-     * completed while away are never replayed, and a frame lost to a suspended tab has no other way back.
+     * What a window that has not been being read does about it: it asks the server, because a missed turn
+     * leaves nothing here that could report it. No digest, or `force` (the reader clicking Retry), is read as
+     * "everything moved".
      */
-    async function reconcileAfterAbsence(): Promise<void> {
+    async function reconcileAfterAbsence(force = false): Promise<void> {
+        const digest = force ? null : await fetchTaskSync(projectId, taskId);
+        const verdict = digest
+            ? resyncPlan({
+                conversation: appliedConversation,
+                row: { status: taskStatus, executionState: knownExecutionState, summarizing: taskSummarizing },
+            }, digest)
+            : { conversation: true, diff: false, row: true };
+        if (transcriptDiverged) verdict.conversation = true;
         let executionState = knownExecutionState;
-        try {
-            executionState = (await getTask(projectId, taskId)).execution_state;
-            noteTaskRow(executionState);
-        } catch {
-            // Deleted or unreachable: keep the reading from the last row read.
+        if (verdict.row) {
+            try {
+                executionState = (await getTask(projectId, taskId)).execution_state;
+                noteTaskRow(executionState);
+            } catch {
+                // Deleted or unreachable: keep the reading from the last row read.
+            }
         }
         if (!taskIsInFlight(executionState)) dropStaleStreamingState();
-        const read = await loadHistory(follow.following, executionState, historyRevision);
+        // A held ETag can only confirm what this screen already claimed it holds, so doubt reads the rows.
+        const read = await loadHistory(follow.following, executionState, verdict.conversation ? '' : historyRevision);
         if (read === 'answered') {
             stream.state.unresolvedToolIds = pendingToolIds(stream.state.entries);
+            if (digest) {
+                appliedConversation = heldFromDigest(digest);
+                transcriptDiverged = false;
+            }
         }
     }
 
@@ -1599,7 +1686,7 @@
         {isChatFullscreen}
         {historyLoading}
         historyNotice={historyNotice}
-        onRetryHistory={() => { void reconcileAfterAbsence(); }}
+        onRetryHistory={() => { void reconcileAfterAbsence(true); }}
         hasEarlier={hasEarlier}
         loadingEarlier={loadingEarlier}
         onLoadEarlier={loadEarlierMessages}

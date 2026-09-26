@@ -5,6 +5,7 @@
     import { WebglAddon } from '@xterm/addon-webgl';
     import { appStore, uiStore } from '$lib/stores';
     import { createTerminal, createProjectTerminal, isTerminalStale, getTask, getProject } from '$lib/api';
+    import { createTabReturn } from '$lib/composables/use-tab-return';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
     import { createFocusTrap } from '$lib/a11y';
@@ -306,17 +307,17 @@
         const task = appStore.selectedTask;
         createTerminalWS(proj, task);
 
-        // Detect stale terminal WebSocket on visibility change (e.g. phone wakes from sleep).
-        function handleTerminalVisibility() {
-            if (!document.hidden && ws && isTerminalStale(ws)) {
+        // A socket that stopped answering is not revived by the page coming back, so this check rides the
+        // shared return signal: `visibilitychange` alone never fires for a window that was only unfocused.
+        const returnWatcher = createTabReturn({
+            revalidateOnReturn: true,
+            onReturn: () => {
+                if (!ws || !isTerminalStale(ws)) return;
                 terminal.write('\r\n\x1b[2mReconnecting...\x1b[0m\r\n');
                 ws.close();
-                const p = appStore.selectedProject;
-                const t = appStore.selectedTask;
-                createTerminalWS(p, t);
-            }
-        }
-        window.addEventListener('visibilitychange', handleTerminalVisibility);
+                createTerminalWS(appStore.selectedProject, appStore.selectedTask);
+            },
+        });
 
         let fitPending = false;
         const observer = new ResizeObserver(() => {
@@ -810,7 +811,7 @@
             observer.disconnect();
             element.removeEventListener('paste', handlePaste, { capture: true });
             window.removeEventListener('keydown', handleKeyDown);
-            window.removeEventListener('visibilitychange', handleTerminalVisibility);
+            returnWatcher.destroy();
             webglRef = null;
 
             try { terminal.dispose(); } catch {}

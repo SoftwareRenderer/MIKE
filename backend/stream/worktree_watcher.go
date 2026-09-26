@@ -507,6 +507,20 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID string) {
 	}
 }
 
+// DiffDigest reports the diff the last broadcast described: the hash `task_diff_stats` carries and how many
+// paths are staged. ok=false means this process computed none, which is an unknown and never a clean answer.
+func (ww *WorktreeWatcher) DiffDigest(taskID string) (hash string, staged int, ok bool) {
+	raw, found := ww.diffCache.Load(taskID)
+	if !found {
+		return "", 0, false
+	}
+	d, isDiff := raw.(*git.TaskDiff)
+	if !isDiff {
+		return "", 0, false
+	}
+	return ComputeDiffHash(d.Diff, d.CommittedDiff, d.Untracked, d.StagedHash), len(d.StagedPaths), true
+}
+
 // computeDiffDelta compares new file hashes with cached previous state.
 // Internal files are excluded.
 func computeDiffDelta(taskID string, newHashes map[string]string, newDiff *git.TaskDiff, cache *sync.Map) (changedHashes map[string]string, removedFiles []string) {
