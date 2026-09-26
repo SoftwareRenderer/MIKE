@@ -85,8 +85,7 @@ async function create(container: HTMLElement, buttonLabel: string, name: string)
     await fireEvent.keyDown(input, { key: 'Enter' });
 }
 
-/** What the one error surface says. A thrown Error reaches the row through `String(e)`, so the
- *  reason arrives behind an `Error: ` prefix — the sentence the user reads today. */
+/** What the one error surface says: the error's `message`, or the catalog sentence when the refusal had none. */
 const errorText = (container: HTMLElement) =>
     [...container.querySelectorAll('.file-browser-error')].map(e => e.textContent).join('\n');
 

@@ -4,6 +4,8 @@
  * fetch here, so it can be tested without mounting an editor.
  */
 
+import { SAVE_RETRY_BASE_DELAY_MS, SAVE_RETRY_MAX_DELAY_MS } from '$lib/constants';
+
 /** Fired by an editor when it is no longer saving `detail.path`. */
 export const EDITOR_SAVE_SETTLED = 'editor-save-settled';
 
@@ -53,6 +55,15 @@ export class SaveController {
         this.inFlight = false;
         this.queued = false;
     }
+}
+
+/**
+ * How long a save that got no answer waits before it is written again. The wait grows to a ceiling and never
+ * ends: a buffer that still differs from the file is not given up on.
+ */
+export function saveRetryDelayMs(attempt: number): number {
+    const rung = Number.isFinite(attempt) ? Math.max(0, Math.floor(attempt)) : 0;
+    return Math.min(SAVE_RETRY_BASE_DELAY_MS * 2 ** rung, SAVE_RETRY_MAX_DELAY_MS);
 }
 
 /**
