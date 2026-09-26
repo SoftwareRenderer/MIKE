@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -286,5 +288,32 @@ func TestMessagesWindowIsStoredThenRevalidated(t *testing.T) {
 	// A response holding provider keys is not worth storing anywhere.
 	if got := get("/api/config", "").Header().Get("Cache-Control"); got != "" {
 		t.Errorf("GET /api/config declares Cache-Control %q", got)
+	}
+}
+
+// A floor bounds an older page, so the route refuses it without `before`.
+func TestMessagesRouteRefusesAFloorAloneOrUnissued(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Floored")
+	path := "/api/projects/" + projID + "/tasks/" + taskID + "/messages"
+	seedWindow(t, s, projID, taskID, 7)
+
+	_, headers := readWindow(t, s, path)
+	floor := url.QueryEscape(headers.Get("X-Messages-Before"))
+	if floor == "" {
+		t.Fatal("the newest window answered no cursor to walk from")
+	}
+	for _, query := range []string{
+		"from=" + floor,
+		"before=" + floor + "&from=not-a-cursor",
+	} {
+		rr := testResponseAuth(t, s, testRequest("GET", path+"?"+query, nil))
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("%s answered %d, want 400: %s", query, rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), "from") {
+			t.Errorf("%s was refused without naming the parameter: %s", query, rr.Body.String())
+		}
 	}
 }

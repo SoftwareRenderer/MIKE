@@ -245,21 +245,39 @@ export interface MessageWindow {
     unchanged?: boolean;
 }
 
+/** How far back one read of the conversation travels, and where it stops. */
+export interface MessageWindowQuery {
+    before?: string;
+    /** The strong ETag of the newest window, sent only while reading the newest window. */
+    knownRevision?: string;
+    /** The oldest row this page may answer; the rows below it are later, never skipped. */
+    from?: string;
+    limit?: number;
+}
+
+/** The widest window the messages route answers, mirroring `store.MessageWindowMax` in
+ * `backend/store/messages.go`: wider is a 400. */
+export const MESSAGE_JUMP_LIMIT = 25;
+
 /** Fetch the newest window of a task's conversation, or an older one by cursor.
  * Always tries the network first: the isOffline flag tracks the WebSocket, not whether HTTP works, so a
  * resumed tab must not fall back to cache. */
 export async function getTaskMessages(
     projectId: string,
     taskId: string,
-    before = '',
-    knownRevision = '',
+    query: MessageWindowQuery = {},
 ): Promise<MessageWindow> {
-    const query = before ? `?before=${encodeURIComponent(before)}` : '';
+    const { before = '', knownRevision = '', from = '', limit = 0 } = query;
+    const params = new URLSearchParams();
+    if (before) params.set('before', before);
+    if (from) params.set('from', from);
+    if (limit) params.set('limit', String(limit));
+    const suffix = params.size > 0 ? `?${params.toString()}` : '';
     // An older page is a slice of the thread: its bytes say nothing about the rows above it.
     const ifNoneMatch = before ? '' : knownRevision;
     try {
         const res = await apiFetch(
-            `${API_BASE}/projects/${projectId}/tasks/${taskId}/messages${query}`,
+            `${API_BASE}/projects/${projectId}/tasks/${taskId}/messages${suffix}`,
             ifNoneMatch ? { headers: { 'If-None-Match': ifNoneMatch } } : undefined,
         );
         const revision = res.headers.get('ETag') ?? undefined;

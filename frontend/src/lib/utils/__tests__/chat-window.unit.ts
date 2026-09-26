@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
     applyWindowRead,
     isStaleHistoryRead,
@@ -11,6 +11,8 @@ import {
     mergeCachedRows,
     noticeForWindowRead,
     windowIsReading,
+    jumpFloor,
+    pageUntilRowLands,
     CACHED_ROWS_FLOOR,
     type MeasuredEntry,
 } from '../chat-window';
@@ -275,5 +277,49 @@ describe('isStaleHistoryRead', () => {
     it('discards superseded reads and reads returning to a destroyed screen', () => {
         expect(isStaleHistoryRead(false, 2, 3)).toBe(true);
         expect(isStaleHistoryRead(true, 3, 3)).toBe(true);
+    });
+});
+
+describe('jumpFloor', () => {
+    it('names the floor the prompt read gave that prompt', () => {
+        expect(jumpFloor([{ id: 'u-1', cursor: 'cur-1' }, { id: 'u-2', cursor: 'cur-2' }], 'u-2')).toBe('cur-2');
+    });
+
+    it('names nothing for a row no prompt read carried, which leaves the walk', () => {
+        expect(jumpFloor([{ id: 'u-1', cursor: 'cur-1' }], 'u-9')).toBe('');
+        expect(jumpFloor([{ id: 'u-1' }], 'u-1')).toBe('');
+        expect(jumpFloor([], 'u-1')).toBe('');
+    });
+});
+
+describe('pageUntilRowLands', () => {
+    it('lands without reading when the row is already on screen', async () => {
+        const loadPage = vi.fn(async () => true);
+        const landed = await pageUntilRowLands('u-1', () => true, loadPage, 'cur-1');
+        expect(landed).toBe(true);
+        expect(loadPage).not.toHaveBeenCalled();
+    });
+
+    it('stops at the page that landed the row, floor and all', async () => {
+        let pages = 0;
+        const floors: string[] = [];
+        const loadPage = vi.fn(async (floor: string) => { pages++; floors.push(floor); return true; });
+        const landed = await pageUntilRowLands('u-1', () => pages >= 1, loadPage, 'cur-1');
+        expect(landed).toBe(true);
+        expect(floors).toEqual(['cur-1']);
+    });
+
+    it('keeps the same floor across a span one page cannot cover', async () => {
+        let pages = 0;
+        const floors: string[] = [];
+        const loadPage = vi.fn(async (floor: string) => { pages++; floors.push(floor); return true; });
+        const landed = await pageUntilRowLands('u-1', () => pages >= 3, loadPage, 'cur-1');
+        expect(landed).toBe(true);
+        expect(floors).toEqual(['cur-1', 'cur-1', 'cur-1']);
+    });
+
+    it('says the row did not land once a page brings nothing, rather than landing near it', async () => {
+        const landed = await pageUntilRowLands('u-1', () => false, async () => false, '');
+        expect(landed).toBe(false);
     });
 });

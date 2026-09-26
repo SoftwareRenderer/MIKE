@@ -371,6 +371,8 @@ export interface ChatTurn {
     id: string;
     created_at: string;
     text: string;
+    /** This prompt's position, in the encoding the message window takes as `from`. */
+    cursor: string;
 }
 
 export interface TaskMessage {

@@ -21,3 +21,6 @@ var (
 // ErrMessageCursor is a paging cursor this store never issued. Refusing it beats an empty page, which a
 // client would read as "no history".
 var ErrMessageCursor = errors.New("malformed message cursor")
+
+// ErrMessageFloor is a floor this store never issued — the same refusal, naming the other parameter.
+var ErrMessageFloor = errors.New("malformed message floor")
