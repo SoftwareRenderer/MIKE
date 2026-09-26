@@ -75,8 +75,12 @@ type ExtensionLSPManager struct {
 	projects   projectPaths
 	mu         sync.Mutex
 	clients    map[string]*sandboxClient // workspaceKey → client state
-	// serverCh receives messages from all LSP servers (responses + notifications)
+	// serverCh receives messages from all LSP servers. An answer dropped here is a browser waiting
+	// on a request its server already answered, so the send waits for room — see deliverToRouter.
 	serverCh chan json.RawMessage
+	// done closes once, at Close, so a blocked deliverToRouter cannot outlive the handler.
+	done      chan struct{}
+	closeOnce sync.Once
 	// subscribers receive a copy of all LSP server messages (for filtered listening)
 	subscribers []chan json.RawMessage
 	subMu       sync.Mutex
@@ -94,32 +98,26 @@ type sandboxClient struct {
 	// initMu serializes the handshake on this connection: `initialized` is one flag shared
 	// by every caller of EnsureInitialized (tools, the editor channel, the diagnostics pass),
 	// so neither the check nor the handshake may race another caller into asking twice.
-	initMu sync.Mutex
-	// initialized tracks whether the LSP server has been initialized.
+	initMu      sync.Mutex
 	initialized bool
-	// openedFiles tracks file URIs that have been sent via didOpen.
 	openedFiles map[string]bool
-	// openedFileContents tracks the last content sent to the server per URI,
-	// so on-disk changes (agent edits between LSP calls) can be re-synced via
-	// didChange. Servers like tsserver do not watch the filesystem.
+	// The last content sent per URI, so an on-disk change (an agent edit between LSP calls)
+	// can be re-synced via didChange: tsserver and gopls do not watch the filesystem.
 	openedFileContents map[string]string
-	// openedFileVersions tracks the last LSP document version sent per URI.
 	openedFileVersions map[string]int
 	// refs counts the holders that can hand the connection back — the editor WebSocket and a
 	// diagnostics pass. Agent tool calls are not counted: they have no lifetime in which to
 	// release, so counting them would keep every server alive forever.
 	refs int
-	// dead is set when the agent's language server for this connection is gone. The bridge
-	// connection outlives the server, so without this flag the map keeps handing out a
-	// connection whose every request answers `lsp server died`.
+	// Set when the language server is gone. The bridge connection outlives it, so without this
+	// flag the map keeps handing out a connection that only answers `lsp server died`.
 	dead atomic.Bool
 	// extension is the installed record this connection was created from: its manifest
 	// declares the workspace files whose change makes this server re-read the project, and
 	// core never interprets a file name.
 	extension *extensions.Extension
-	// There is no dependency-root field: that assignment is a container-level `-e` (see
-	// extensions.DependencyMount), not per connection, so the language server sees the same
-	// dependency location the container was created with.
+	// The dependency directory is a container-level `-e` (see extensions.DependencyMount),
+	// never a per-connection setting.
 }
 
 // usable reports whether requests may still go through this connection: both the bridge
@@ -144,8 +142,7 @@ func newSandboxClient(bridgeClient *bridge.Client, workspace, language, extensio
 	}
 }
 
-// swapPrefix replaces a path's leading root and reports whether it had one — one scan where
-// the caller used to test the prefix and then replace it.
+// swapPrefix replaces a path's leading root and reports whether it had one.
 func swapPrefix(path, from, to string) (string, bool) {
 	if rest, ok := strings.CutPrefix(path, from); ok {
 		return to + rest, true
@@ -237,7 +234,18 @@ func NewExtensionLSPManager(extStore *extensions.ExtensionStore, extSandbox *ext
 		projects:    projects,
 		clients:     make(map[string]*sandboxClient),
 		serverCh:    make(chan json.RawMessage, 256),
+		done:        make(chan struct{}),
 		subscribers: make([]chan json.RawMessage, 0),
+	}
+}
+
+// deliverToRouter hands one message to the handler's router, waiting for room rather than
+// dropping it. Waiting is safe because the router never blocks on a browser, and the send ends at
+// Close.
+func (m *ExtensionLSPManager) deliverToRouter(msg json.RawMessage) {
+	select {
+	case m.serverCh <- msg:
+	case <-m.done:
 	}
 }
 
@@ -270,6 +278,7 @@ func (m *ExtensionLSPManager) SandboxMemory(workspacePath, filePath string) *typ
 // Close retires every connection rather than emptying the map, so no `podman exec`, language
 // server, or sandbox reference is left stranded.
 func (m *ExtensionLSPManager) Close() {
+	m.closeOnce.Do(func() { close(m.done) })
 	m.mu.Lock()
 	pending := make(map[string]*sandboxClient, len(m.clients))
 	for key, sc := range m.clients {
@@ -361,11 +370,7 @@ func (m *ExtensionLSPManager) startSession(ctx context.Context, ext *extensions.
 	go func() {
 		for notif := range bridgeClient.LSPNotificationCh() {
 			translated := translateURIsToHost(notif, workspacePath, projectMounts)
-			select {
-			case m.serverCh <- translated:
-			default:
-				logging.For(logging.LSP).Infof("server channel full, dropping notification")
-			}
+			m.deliverToRouter(translated)
 			m.broadcastToSubscribers(translated)
 		}
 		// The channel closes only when this connection's language server is gone, so the
@@ -537,16 +542,12 @@ func (m *ExtensionLSPManager) Release(workspacePath, language string) {
 // needs, recreating it when the mount set changed. It hands out no connection — consumers get
 // their own from ExtensionSandboxManager.StartSession.
 func (m *ExtensionLSPManager) ensureSandbox(ext *extensions.Extension, workspacePath string, projectMounts map[string]string) error {
-	// Build the desired custom mounts (user's Sandbox Configuration + project
-	// custom mounts adapted for the LSP sandbox) so we can check compatibility
-	// with an existing sandbox.
+	// Build the mounts a create would use, so an existing sandbox can be compared against them.
 	wsContainer := containerWorkspacePath(workspacePath, projectMounts)
 	createMounts, compareMounts, compareEnvs := m.sandboxMountPlan(ext, workspacePath, projectMounts, wsContainer)
-	// Check if sandbox already exists and is alive
 	if m.extSandbox.IsRunning(ext.ID) {
-		// Existing sandbox — does it still match what we would create? The reason comes back
-		// because three different causes share this one decision (project set, mounts, the
-		// extension's own envs) and a log line that does not say which is a wasted morning.
+		// The reason comes back because three causes share this one decision:
+		// project set, mounts, and the extension's envs.
 		if ok, why := m.extSandbox.MountsCompatible(ext.ID, projectMounts, compareMounts, compareEnvs); ok {
 			logging.For(logging.LSP).Infof("reusing existing sandbox for extension %s", ext.ID)
 			return nil
@@ -557,9 +558,7 @@ func (m *ExtensionLSPManager) ensureSandbox(ext *extensions.Extension, workspace
 		_ = m.extSandbox.Stop(ext.ID)
 	}
 
-	// Resolve {workspace} in the user's Sandbox Configuration mounts, and adapt a node_modules
-	// mount for the LSP sandbox if the project configures one, so the server can resolve
-	// dependencies. Applied to a copy so the shared extension record isn't mutated.
+	// The record is shared, so the computed mounts go onto a copy.
 	logging.For(logging.LSP).Infof("creating sandbox for extension %s", ext.ID)
 	extCopy := *ext
 	extCopy.SandboxConfig.Mounts = createMounts
@@ -570,8 +569,9 @@ func (m *ExtensionLSPManager) ensureSandbox(ext *extensions.Extension, workspace
 }
 
 // sandboxMountPlan returns the two mount lists this workspace implies. They are two because Create
-// appends the granted dependency directory itself: passing it in the create list would record it twice,
-// a snapshot no comparison can ever match, and the sandbox would restart on every file the user opens.
+// appends the granted dependency directory itself: passing it in the create list would record it
+// twice, a snapshot no comparison can ever match, and the sandbox would restart on every file the
+// user opens.
 //
 //   - createMounts: what the container is created with, without the dependency directory.
 //   - compareMounts/compareEnvs: the snapshot to compare against, with what Create will have recorded.
@@ -616,7 +616,6 @@ func (m *ExtensionLSPManager) SendToServer(ctx context.Context, process *LSPProc
 		return fmt.Errorf("sandbox client %w for workspace=%s lang=%s", errStaleClient, process.Workspace, process.Language)
 	}
 
-	// Translate file URIs from host path to container path
 	translated := translateURIsToContainer(msg, sc.workspace, sc.projectMounts)
 
 	sendCtx, cancel := context.WithTimeout(ctx, lspSendTimeout)
@@ -629,23 +628,13 @@ func (m *ExtensionLSPManager) SendToServer(ctx context.Context, process *LSPProc
 		return fmt.Errorf("send to LSP server: %w", err)
 	}
 
-	// Notifications return empty response — nothing to route
 	if len(response) == 0 {
 		return nil
 	}
 
-	// Translate file URIs back from container path to host path
 	response = translateURIsToHost(response, sc.workspace, sc.projectMounts)
 
-	// Route the response back through the server channel
-	// This allows the handler's serverMessageRouter to process it
-	select {
-	case m.serverCh <- response:
-	default:
-		logging.For(logging.LSP).Infof("server channel full, dropping message")
-	}
-
-	// Broadcast to subscribers (e.g., triggerLSPDiagnostics)
+	m.deliverToRouter(response)
 	m.broadcastToSubscribers(response)
 
 	return nil
@@ -687,7 +676,7 @@ func (m *ExtensionLSPManager) broadcastToSubscribers(msg json.RawMessage) {
 		select {
 		case sub <- msg:
 		default:
-			// Drop if subscriber is too slow
+			// A slow subscriber loses frames; it never blocks the publisher.
 		}
 	}
 }
@@ -711,7 +700,6 @@ func (m *ExtensionLSPManager) collectProjectMounts(workspacePath string) map[str
 		}
 		mounts[absPath] = "/mnt/" + filepath.Base(absPath)
 	}
-	// Ensure the current workspace is included even if not a registered project
 	absWorkspace, err := filepath.Abs(workspacePath)
 	if err == nil {
 		if _, ok := mounts[absWorkspace]; !ok {
@@ -774,8 +762,7 @@ func (m *ExtensionLSPManager) adaptProjectMounts(workspacePath, wsContainerPath 
 	var adapted []types.SandboxMount
 	for _, mo := range project.SandboxMounts {
 		cp := mo.ContainerPath
-		// If the mount lives under the task sandbox project root, remap it
-		// relative to the LSP workspace container path.
+		// A path under the task's root means the same place under the LSP workspace.
 		if strings.HasPrefix(cp, taskRoot+"/") {
 			rel := strings.TrimPrefix(cp, taskRoot+"/")
 			cp = filepath.Join(wsContainerPath, rel)
@@ -813,9 +800,8 @@ func (m *ExtensionLSPManager) LSPRequest(ctx context.Context, workspacePath, fil
 	}
 	language := lspCfg.Language
 
-	// One ServerConfig for the whole call: it is the same shape the diagnostics pass gets from
-	// the registry, so the handshake and the process key cannot disagree about which server a
-	// file belongs to — including for a manifest that leaves `language` empty.
+	// One ServerConfig for the whole call: it is the shape the diagnostics pass gets too, so
+	// the handshake and the process key cannot disagree about which server a file belongs to.
 	cfg := m.GetRegistry().toServerConfig(ext)
 	if cfg == nil {
 		return nil, fmt.Errorf("no server config for language %q", language)
@@ -834,28 +820,23 @@ func (m *ExtensionLSPManager) LSPRequest(ctx context.Context, workspacePath, fil
 		}
 	}
 
-	// The handshake belongs to the connection, not to the request: one per connection,
-	// because it costs a second of server time (measured: gopls answers initialize 1.06s
-	// after a cold start) and a second one teaches the server nothing it did not already know.
+	// One handshake per connection, not per request: initialize costs about a second of
+	// server time (gopls, cold start).
 	if err := m.EnsureInitialized(ctx, workspacePath, cfg); err != nil {
 		return nil, err
 	}
 
-	// Extract the file URI from params and ensure the server's copy is in sync
-	// with the on-disk content (didOpen once, then didChange when the file
-	// changes on disk — servers like tsserver do not watch the filesystem).
 	if paramsMap, ok := params.(map[string]any); ok {
 		if td, ok := paramsMap["textDocument"].(map[string]any); ok {
 			if uri, ok := td["uri"].(string); ok {
 				if _, err := m.ensureDocSync(ctx, sc, uri, workspacePath, filePath, cfg); err != nil {
 					logging.For(logging.LSP).Warnf("doc sync failed for %s: %v", filePath, err)
-					// Continue anyway — the server may still have the file
+					// A desynced document is not a reason to refuse the request.
 				}
 			}
 		}
 	}
 
-	// Build the JSON-RPC request
 	reqID := int64(time.Now().UnixNano())
 	req := map[string]any{
 		"jsonrpc": "2.0",
@@ -868,17 +849,13 @@ func (m *ExtensionLSPManager) LSPRequest(ctx context.Context, workspacePath, fil
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	// Translate URIs and send
 	translated := translateURIsToContainer(reqBytes, sc.workspace, sc.projectMounts)
 	reqCtx, cancel := context.WithTimeout(ctx, lspRequestTimeout)
 	defer cancel()
 
 	response, err := sc.bridgeClient.LSPSend(reqCtx, translated)
 	if err != nil {
-		// The connection is unusable, and it is retired rather than forgotten: dropping the map
-		// entry alone would leave the sandbox reference it took with no holder left to hand it
-		// back, pinning the container open past every task that ever used it, and would tear the
-		// server down for any other holder without closing the bridge underneath them.
+		// Retired, not just dropped: see retire for the sandbox reference this holds.
 		m.retire(workspaceKey, sc)
 		return nil, fmt.Errorf("LSP request failed: %w", err)
 	}
@@ -886,7 +863,6 @@ func (m *ExtensionLSPManager) LSPRequest(ctx context.Context, workspacePath, fil
 		return nil, fmt.Errorf("empty LSP response")
 	}
 
-	// Translate URIs back to host paths
 	return translateURIsToHost(response, sc.workspace, sc.projectMounts), nil
 }
 
@@ -961,7 +937,6 @@ func (m *ExtensionLSPManager) lspInitialize(ctx context.Context, sc *sandboxClie
 			{"uri": "file://" + absWorkspace, "name": filepath.Base(absWorkspace)},
 		},
 	}
-	// Merge init params from extension config
 	for k, v := range cfg.InitParamsOverride {
 		initParams[k] = v
 	}
@@ -994,7 +969,6 @@ func (m *ExtensionLSPManager) lspInitialize(ctx context.Context, sc *sandboxClie
 		return fmt.Errorf("initialize rejected by %s (code %d): %s", cfg.Command, reply.Error.Code, reply.Error.Message)
 	}
 
-	// Send "initialized" notification
 	notify := map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "initialized",
@@ -1149,14 +1123,13 @@ func (m *ExtensionLSPManager) IsToolCallsEnabledForFile(filePath string) bool {
 	return lspCfg.IsToolCallsEnabled()
 }
 
-// lookupExtension finds the matching LSP extension for a given language.
+// lookupExtension finds the LSP extension that answers for a language name.
 func (m *ExtensionLSPManager) lookupExtension(language string) (*extensions.Extension, error) {
 	extensions, err := m.extStore.GetByType(extensions.ExtensionTypeLSP)
 	if err != nil {
 		return nil, err
 	}
 
-	// Find the extension that matches this language
 	for _, ext := range extensions {
 		if !ext.Enabled {
 			continue
@@ -1165,7 +1138,6 @@ func (m *ExtensionLSPManager) lookupExtension(language string) (*extensions.Exte
 		if lspCfg == nil {
 			continue
 		}
-		// Check if the extension handles this language
 		if lspCfg.Language == language {
 			return &ext, nil
 		}
@@ -1187,13 +1159,12 @@ type ExtensionRegistry struct {
 	extStore *extensions.ExtensionStore
 }
 
-// NewExtensionRegistry creates a new ExtensionRegistry.
 func NewExtensionRegistry(extStore *extensions.ExtensionStore) *ExtensionRegistry {
 	return &ExtensionRegistry{extStore: extStore}
 }
 
-// Lookup finds a ServerConfig for the given file path or workspace.
-// It searches installed LSP extensions for a matching file pattern.
+// Lookup finds the ServerConfig for a file path or workspace, by the extension's own
+// declared file pattern.
 func (r *ExtensionRegistry) Lookup(fileOrPath string) *ServerConfig {
 	extensions, err := r.extStore.GetByType(extensions.ExtensionTypeLSP)
 	if err != nil {
@@ -1236,7 +1207,6 @@ func (r *ExtensionRegistry) HasAnyLSPToolCallsExtension() bool {
 	return false
 }
 
-// toServerConfig converts an Extension to a ServerConfig.
 func (r *ExtensionRegistry) toServerConfig(ext *extensions.Extension) *ServerConfig {
 	lspCfg := ext.Manifest.Capabilities.GetLSP()
 	if lspCfg == nil {

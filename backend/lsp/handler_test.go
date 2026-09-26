@@ -3,7 +3,6 @@ package lsp
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -48,8 +47,7 @@ type mockProcessManager struct {
 	// sentMessages captures messages sent to the server (in order)
 	sentMessages []json.RawMessage
 	// sendErr, when set, is what every send to the server answers with.
-	sendErr error
-	// messageCh for delivering server responses
+	sendErr   error
 	messageCh chan json.RawMessage
 }
 
@@ -246,7 +244,6 @@ func subscribeClient(t *testing.T, url string, channelID int64, workspace, file,
 	}
 	client.conn = conn
 
-	// Send subscribe message with _ch hint
 	client.send(t, map[string]any{
 		"_ch":    channelID,
 		"method": "workspace/subscribe",
@@ -273,7 +270,8 @@ func subscribeClientDefault(t *testing.T, url, workspace, file string) *testClie
 // dropping the request also left the id mappings that route answers behind.
 func TestRequestIsAnsweredWhenItsServerIsGone(t *testing.T) {
 	mgr := newMockProcessManager()
-	mgr.sendErr = errors.New("sandbox client stale for workspace=/tmp/test-project lang=go")
+	// The real manager wraps the sentinel; the double has to, or it tests a shape nothing sends.
+	mgr.sendErr = fmt.Errorf("sandbox client %w for workspace=/tmp/test-project lang=go", errStaleClient)
 	reg := newTestRegistry()
 	handler := NewLSPHandler(reg, mgr)
 	defer handler.Close()
@@ -295,8 +293,8 @@ func TestRequestIsAnsweredWhenItsServerIsGone(t *testing.T) {
 	if msg.Error == nil {
 		t.Fatalf("a request whose server was gone was answered without an error: %+v", msg)
 	}
-	if !strings.Contains(msg.Error.Message, "stale") {
-		t.Errorf("error message = %q, want the reason the send failed", msg.Error.Message)
+	if !strings.Contains(msg.Error.Message, "stopped") {
+		t.Errorf("error message = %q, want the sentence that says the server stopped", msg.Error.Message)
 	}
 }
 
@@ -308,10 +306,8 @@ func TestIDRemapping(t *testing.T) {
 
 	url := startTestServer(t, handler)
 
-	// Connect client and subscribe
 	client := subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
 
-	// Send a request with id=5 (includes _ch, _workspace, _lang hints)
 	client.sendLSP(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      5,
@@ -319,10 +315,8 @@ func TestIDRemapping(t *testing.T) {
 		"params":  map[string]any{"textDocument": map[string]any{"uri": "file:///main.go"}},
 	})
 
-	// Give the handler time to process
 	time.Sleep(50 * time.Millisecond)
 
-	// Check that the server received the remapped request
 	sent := mgr.SentMessages()
 	if len(sent) != 1 {
 		t.Fatalf("expected 1 sent message, got %d", len(sent))
@@ -333,13 +327,11 @@ func TestIDRemapping(t *testing.T) {
 		t.Fatalf("unmarshal sent message: %v", err)
 	}
 
-	// The id should have been remapped to a backend ID (not 5)
 	serverID := serverMsg["id"]
 	if serverID == 5 || serverID == "5" {
 		t.Errorf("expected remapped backend ID, got original id %v", serverID)
 	}
 
-	// Simulate server response with the backend ID
 	serverResponse := map[string]any{
 		"jsonrpc": "2.0",
 		"id":      serverID,
@@ -348,7 +340,6 @@ func TestIDRemapping(t *testing.T) {
 	respData, _ := json.Marshal(serverResponse)
 	mgr.Deliver(respData)
 
-	// Client should receive the response with the original id=5
 	resp := client.receiveJSON(t)
 	if resp.ID == nil {
 		t.Fatal("expected response with id")
@@ -369,10 +360,8 @@ func TestInitializeCaching(t *testing.T) {
 
 	url := startTestServer(t, handler)
 
-	// Connect first client (channel 1)
 	client1 := subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
 
-	// First client sends initialize with id=1
 	client1.sendLSP(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
@@ -381,7 +370,6 @@ func TestInitializeCaching(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Check that initialize was forwarded to server
 	sent := mgr.SentMessages()
 	if len(sent) != 1 {
 		t.Fatalf("expected 1 sent message (initialize), got %d", len(sent))
@@ -397,7 +385,6 @@ func TestInitializeCaching(t *testing.T) {
 
 	backendID := initReq["id"]
 
-	// Simulate server initialize response
 	initResponse := map[string]any{
 		"jsonrpc": "2.0",
 		"id":      backendID,
@@ -417,7 +404,6 @@ func TestInitializeCaching(t *testing.T) {
 	respData, _ := json.Marshal(initResponse)
 	mgr.Deliver(respData)
 
-	// Client 1 should receive the initialize response with id=1
 	resp1 := client1.receiveJSON(t)
 	if resp1.ID == nil || resp1.ID.String() != "1" {
 		t.Errorf("client1: expected id 1, got %v", resp1.ID)
@@ -426,10 +412,8 @@ func TestInitializeCaching(t *testing.T) {
 		t.Error("client1: expected result in initialize response")
 	}
 
-	// Connect second client to the same workspace (channel 2)
 	client2 := subscribeClient(t, url, 2, "/tmp/test-project", "main.go", "go")
 
-	// Second client sends initialize with id=2
 	client2.sendLSP(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      2,
@@ -438,13 +422,11 @@ func TestInitializeCaching(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	// No new messages should have been sent to the server (initialize was cached)
 	sentAfter := mgr.SentMessages()
 	if len(sentAfter) != 1 {
 		t.Errorf("expected 1 sent message total (initialize cached), got %d", len(sentAfter))
 	}
 
-	// Client 2 should receive the cached response with id=2
 	resp2 := client2.receiveJSON(t)
 	if resp2.ID == nil || resp2.ID.String() != "2" {
 		t.Errorf("client2: expected id 2, got %v", resp2.ID)
@@ -453,7 +435,6 @@ func TestInitializeCaching(t *testing.T) {
 		t.Error("client2: expected result in cached initialize response")
 	}
 
-	// Verify the cached response has the same capabilities
 	var result map[string]any
 	if err := json.Unmarshal(resp2.Result, &result); err != nil {
 		t.Fatalf("unmarshal result: %v", err)
@@ -664,21 +645,17 @@ func TestDisconnectCleanup(t *testing.T) {
 
 	url := startTestServer(t, handler)
 
-	// Connect client
 	client := subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
 
-	// Verify the process exists
 	if mgr.ProcessCount() != 1 {
 		t.Errorf("expected 1 process, got %d", mgr.ProcessCount())
 	}
 
-	// Disconnect client
 	client.conn.Close(websocket.StatusNormalClosure, "done")
 
-	// Give time for cleanup
+	// Cleanup is asynchronous.
 	time.Sleep(100 * time.Millisecond)
 
-	// Verify the process was removed (0 clients)
 	if mgr.ProcessCount() != 0 {
 		t.Errorf("expected 0 processes after disconnect, got %d", mgr.ProcessCount())
 	}
@@ -694,7 +671,6 @@ func TestMultipleRequestRemapping(t *testing.T) {
 
 	client := subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
 
-	// Send multiple requests with different IDs
 	requests := []int64{10, 20, 30}
 	for _, id := range requests {
 		client.sendLSP(t, map[string]any{
@@ -707,7 +683,6 @@ func TestMultipleRequestRemapping(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Check that 3 messages were sent with unique backend IDs
 	sent := mgr.SentMessages()
 	if len(sent) != 3 {
 		t.Fatalf("expected 3 sent messages, got %d", len(sent))
@@ -724,7 +699,6 @@ func TestMultipleRequestRemapping(t *testing.T) {
 		backendIDs[id] = true
 	}
 
-	// Simulate responses in different order
 	for _, msg := range sent {
 		var m map[string]any
 		json.Unmarshal(msg, &m)
@@ -739,7 +713,6 @@ func TestMultipleRequestRemapping(t *testing.T) {
 		mgr.Deliver(respData)
 	}
 
-	// All 3 responses should be received
 	for i := 0; i < 3; i++ {
 		resp := client.receiveJSON(t)
 		if resp.ID == nil {
@@ -762,7 +735,6 @@ func TestInitializedNotificationForwarded(t *testing.T) {
 	client := subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
 	mgr.ResetSent()
 
-	// Send "initialized" notification (no id, method="initialized")
 	client.sendLSP(t, map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "initialized",
@@ -771,7 +743,6 @@ func TestInitializedNotificationForwarded(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	// The initialized notification should be forwarded to the server
 	sent := mgr.SentMessages()
 	if len(sent) != 1 {
 		t.Fatalf("expected 1 sent message (initialized notification), got %d", len(sent))
@@ -792,13 +763,10 @@ func TestTwoClientsDifferentWorkspaces(t *testing.T) {
 
 	url := startTestServer(t, handler)
 
-	// Client 1 subscribes to workspace A (channel 1)
 	client1 := subscribeClient(t, url, 1, "/tmp/project-a", "main.go", "go")
 
-	// Client 2 subscribes to workspace B (channel 2)
 	client2 := subscribeClient(t, url, 2, "/tmp/project-b", "main.go", "go")
 
-	// Client 1 sends a request
 	client1.sendLSP(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      100,
@@ -813,7 +781,6 @@ func TestTwoClientsDifferentWorkspaces(t *testing.T) {
 		t.Fatalf("expected 1 sent message, got %d", len(sent))
 	}
 
-	// Simulate response
 	var m map[string]any
 	json.Unmarshal(sent[0], &m)
 	response := map[string]any{
@@ -824,13 +791,12 @@ func TestTwoClientsDifferentWorkspaces(t *testing.T) {
 	respData, _ := json.Marshal(response)
 	mgr.Deliver(respData)
 
-	// Client 1 should receive the response
 	resp := client1.receiveJSON(t)
 	if resp.ID == nil || resp.ID.String() != "100" {
 		t.Errorf("client1: expected id 100, got %v", resp.ID)
 	}
 
-	// Client 2 should NOT receive anything (different workspace)
+	// Nothing arrives, so this read times out.
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	_, _, err := client2.conn.Read(ctx)
@@ -847,11 +813,9 @@ func TestTwoClientsSameWorkspace(t *testing.T) {
 
 	url := startTestServer(t, handler)
 
-	// Both clients subscribe to the same workspace (different channels)
 	client1 := subscribeClient(t, url, 1, "/tmp/test-project", "main.go", "go")
 	client2 := subscribeClient(t, url, 2, "/tmp/test-project", "main.go", "go")
 
-	// Client 1 sends a request
 	client1.sendLSP(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      100,
@@ -866,7 +830,6 @@ func TestTwoClientsSameWorkspace(t *testing.T) {
 		t.Fatalf("expected 1 sent message, got %d", len(sent))
 	}
 
-	// Simulate response
 	var m map[string]any
 	json.Unmarshal(sent[0], &m)
 	response := map[string]any{
@@ -877,13 +840,11 @@ func TestTwoClientsSameWorkspace(t *testing.T) {
 	respData, _ := json.Marshal(response)
 	mgr.Deliver(respData)
 
-	// Client 1 should receive the response
 	resp := client1.receiveJSON(t)
 	if resp.ID == nil || resp.ID.String() != "100" {
 		t.Errorf("client1: expected id 100, got %v", resp.ID)
 	}
 
-	// Client 2 should NOT receive the response (it didn't make the request)
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	_, _, err := client2.conn.Read(ctx)
@@ -893,8 +854,8 @@ func TestTwoClientsSameWorkspace(t *testing.T) {
 }
 
 func TestMultiWorkspaceSingleConnection(t *testing.T) {
-	// Two channels on the same WebSocket connection, each subscribed to a different workspace.
-	// Verifies that requests are routed to the correct workspace and responses go to the correct channel.
+	// Two channels on one connection: a request reaches its own workspace and the answer
+	// its own channel.
 	mgr := newMockProcessManager()
 	reg := newTestRegistry()
 	handler := NewLSPHandler(reg, mgr)
@@ -902,10 +863,8 @@ func TestMultiWorkspaceSingleConnection(t *testing.T) {
 
 	url := startTestServer(t, handler)
 
-	// Single connection, two channels
 	client := connectClient(t, url)
 
-	// Subscribe channel 1 to workspace A
 	client.channelID = 1
 	client.workspace = "/tmp/project-a"
 	client.language = "go"
@@ -918,7 +877,6 @@ func TestMultiWorkspaceSingleConnection(t *testing.T) {
 		},
 	})
 
-	// Subscribe channel 2 to workspace B
 	client.channelID = 2
 	client.workspace = "/tmp/project-b"
 	client.language = "go"
@@ -933,16 +891,13 @@ func TestMultiWorkspaceSingleConnection(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Drain $server/lspReady notifications from both subscriptions
 	client.receiveJSON(t) // ch=1 ready
 	client.receiveJSON(t) // ch=2 ready
 
-	// Two processes should exist (one per workspace)
 	if mgr.ProcessCount() != 2 {
 		t.Errorf("expected 2 processes, got %d", mgr.ProcessCount())
 	}
 
-	// Channel 1 sends a request to workspace A
 	client.channelID = 1
 	client.workspace = "/tmp/project-a"
 	client.language = "go"
@@ -960,7 +915,6 @@ func TestMultiWorkspaceSingleConnection(t *testing.T) {
 		t.Fatalf("expected 1 sent message, got %d", len(sent))
 	}
 
-	// Simulate response
 	var m map[string]any
 	json.Unmarshal(sent[0], &m)
 	response := map[string]any{
@@ -971,13 +925,11 @@ func TestMultiWorkspaceSingleConnection(t *testing.T) {
 	respData, _ := json.Marshal(response)
 	mgr.Deliver(respData)
 
-	// Client should receive the response with _ch=1 hint
 	resp := client.receiveJSON(t)
 	if resp.ID == nil || resp.ID.String() != "100" {
 		t.Errorf("expected id 100, got %v", resp.ID)
 	}
 
-	// Channel 2 sends a request to workspace B
 	client.channelID = 2
 	client.workspace = "/tmp/project-b"
 	client.language = "go"
@@ -995,7 +947,6 @@ func TestMultiWorkspaceSingleConnection(t *testing.T) {
 		t.Fatalf("expected 2 sent messages, got %d", len(sent2))
 	}
 
-	// Simulate response for second request
 	var m2 map[string]any
 	json.Unmarshal(sent2[1], &m2)
 	response2 := map[string]any{
@@ -1006,7 +957,6 @@ func TestMultiWorkspaceSingleConnection(t *testing.T) {
 	respData2, _ := json.Marshal(response2)
 	mgr.Deliver(respData2)
 
-	// Client should receive the second response
 	resp2 := client.receiveJSON(t)
 	if resp2.ID == nil || resp2.ID.String() != "200" {
 		t.Errorf("expected id 200, got %v", resp2.ID)
@@ -1014,10 +964,9 @@ func TestMultiWorkspaceSingleConnection(t *testing.T) {
 }
 
 // TestRouteDropsFramesItCannotDispatch: a server request (id and method), a frame with neither, and
-// an empty object have no destination. They must reach no client and must not stop the router — the
-// notification delivered last is what makes both halves observable, because a subscribed session
-// receives every notification, so it is the one frame this client may get and the first frame it gets
-// is the answer.
+// an empty object have no destination: they reach no client and do not stop the router. The
+// notification sent last is the observable half — a subscribed session receives every notification,
+// so it is the only frame this client may get.
 func TestRouteDropsFramesItCannotDispatch(t *testing.T) {
 	mgr := newMockProcessManager()
 	handler := NewLSPHandler(newTestRegistry(), mgr)
@@ -1059,7 +1008,6 @@ func TestUnknownExtensionRejected(t *testing.T) {
 		},
 	})
 
-	// The connection should be closed with an error
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_, _, err := client.conn.Read(ctx)
@@ -1076,10 +1024,8 @@ func TestLSPReadyNotification(t *testing.T) {
 
 	url := startTestServer(t, handler)
 
-	// Connect client and subscribe (subscribeClient drains $server/lspReady)
 	client := subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
 
-	// Send initialize request
 	client.sendLSP(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
@@ -1090,10 +1036,8 @@ func TestLSPReadyNotification(t *testing.T) {
 		},
 	})
 
-	// Give handler time to process
 	time.Sleep(50 * time.Millisecond)
 
-	// Simulate initialize response from server
 	sent := mgr.SentMessages()
 	if len(sent) != 1 {
 		t.Fatalf("expected 1 sent message (initialize), got %d", len(sent))
@@ -1116,7 +1060,6 @@ func TestLSPReadyNotification(t *testing.T) {
 	respData, _ := json.Marshal(initResponse)
 	mgr.Deliver(respData)
 
-	// Client should receive initialize response
 	resp := client.receiveJSON(t)
 	if resp.ID == nil || resp.ID.String() != "1" {
 		t.Fatalf("expected initialize response with id=1, got id=%v", resp.ID)
@@ -1125,14 +1068,12 @@ func TestLSPReadyNotification(t *testing.T) {
 		t.Fatal("expected result in initialize response")
 	}
 
-	// Send initialized notification
 	client.sendLSP(t, map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "initialized",
 		"params":  map[string]any{},
 	})
 
-	// Client should receive $server/lspReady notification
 	readyMsg := client.receiveJSON(t)
 	if readyMsg.Method != "$/lspReady" {
 		t.Fatalf("expected $server/lspReady notification, got method=%s", readyMsg.Method)
@@ -1147,7 +1088,6 @@ func TestLSPReadyNotificationCachedResponse(t *testing.T) {
 
 	url := startTestServer(t, handler)
 
-	// First client: complete full initialize handshake (channel 1)
 	client1 := subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
 
 	client1.sendLSP(t, map[string]any{
@@ -1176,25 +1116,21 @@ func TestLSPReadyNotificationCachedResponse(t *testing.T) {
 	}
 	mgr.Deliver(json.RawMessage(mustMarshal(t, initResponse)))
 
-	// Client1 receives initialize response
 	resp1 := client1.receiveJSON(t)
 	if resp1.ID == nil || resp1.ID.String() != "1" {
 		t.Fatalf("client1: expected id=1, got %v", resp1.ID)
 	}
 
-	// Client1 sends initialized
 	client1.sendLSP(t, map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "initialized",
 		"params":  map[string]any{},
 	})
-	// Client1 receives $server/lspReady
 	ready1 := client1.receiveJSON(t)
 	if ready1.Method != "$/lspReady" {
 		t.Fatalf("client1: expected $server/lspReady, got %s", ready1.Method)
 	}
 
-	// Second client: connects to same workspace (channel 2), gets cached response
 	client2 := subscribeClient(t, url, 2, "/tmp/test-project", "main.go", "go")
 
 	client2.sendLSP(t, map[string]any{
@@ -1207,7 +1143,6 @@ func TestLSPReadyNotificationCachedResponse(t *testing.T) {
 		},
 	})
 
-	// Client2 should receive cached initialize response
 	resp2 := client2.receiveJSON(t)
 	if resp2.ID == nil || resp2.ID.String() != "2" {
 		t.Fatalf("client2: expected id=2, got %v", resp2.ID)
@@ -1216,7 +1151,6 @@ func TestLSPReadyNotificationCachedResponse(t *testing.T) {
 		t.Fatal("client2: expected cached result")
 	}
 
-	// Client2 should also receive $server/lspReady
 	ready2 := client2.receiveJSON(t)
 	if ready2.Method != "$/lspReady" {
 		t.Fatalf("client2: expected $server/lspReady, got %s", ready2.Method)
@@ -1241,7 +1175,6 @@ func TestSubscriptionRejectsDisallowedWorkspace(t *testing.T) {
 
 	url := startTestServer(t, handler)
 
-	// Connect and subscribe to a disallowed workspace.
 	client := connectClient(t, url)
 	client.channelID = 1
 	client.workspace = "/etc"
@@ -1252,7 +1185,6 @@ func TestSubscriptionRejectsDisallowedWorkspace(t *testing.T) {
 		"params": map[string]any{"workspace": "/etc", "file": "main.go"},
 	})
 
-	// The handler should close the connection without spawning a language server.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if _, _, err := client.conn.Read(ctx); err == nil {
@@ -1308,9 +1240,8 @@ func sendInit(t *testing.T, c *testClient, id int, workspace, file string) {
 	})
 }
 
-// TestLazyInitializeWithoutSubscribe: initialize alone creates the workspace. This path
-// used to unlock h.mu twice, and a double unlock is a runtime throw — the process died
-// instead of the test failing.
+// TestLazyInitializeWithoutSubscribe: initialize alone creates the workspace. A mistake here is a
+// double unlock of h.mu, which is a runtime throw: the process dies instead of the test failing.
 func TestLazyInitializeWithoutSubscribe(t *testing.T) {
 	mgr := newMockProcessManager()
 	handler := NewLSPHandler(newTestRegistry(), mgr)
@@ -1457,9 +1388,8 @@ func TestWebSocketOrigin_AcceptsSameOrigin(t *testing.T) {
 
 // ─── HandleSandboxMemory (GET /api/lsp/memory) ──────────────────────────────
 
-// The POST-is-refused case moved with the method pattern: "GET /api/lsp/memory" in the route table
-// means the mux refuses POST, so a handler-level call cannot reach that decision. Asserted at
-// backend/server/routes_method_test.go.
+// The POST-is-refused case is asserted at backend/server/routes_method_test.go: the route pattern
+// "GET /api/lsp/memory" carries the verb, so a handler-level call cannot reach that decision.
 
 func TestHandleSandboxMemory_MissingParams(t *testing.T) {
 	handler := NewLSPHandler(newTestRegistry(), newMockProcessManager())

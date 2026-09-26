@@ -1,13 +1,9 @@
 /**
- * LSP hover card with a clickable "Go to Definition" action.
- *
- * Not a `hoverTooltip()` source: CodeMirror dismisses a hover as soon as the pointer
- * leaves the hovered position, so a tooltip carrying a button closes during the motion
- * needed to press it. Open and close are therefore ours: it opens after `hoverTime` of
- * stillness on an identifier, stays while the pointer is on the identifier or inside the
- * card plus `graceMs` after it leaves both, re-arms the dwell if the pointer comes back
- * inside that window, and ignores single-pixel moves (which would make the dwell
- * unreachable). It closes on a scroll from outside and on any doc change.
+ * LSP hover card with a clickable "Go to Definition" action. Not a `hoverTooltip()` source:
+ * CodeMirror dismisses a hover the moment the pointer leaves the position, which is the motion
+ * needed to press the button, so open and close are ours. `hoverTime` of stillness opens the card;
+ * the pointer on the identifier or inside the card keeps it; `graceMs` after the pointer leaves
+ * both, a scroll from outside, or any doc change closes it.
  */
 
 import { EditorView, ViewPlugin, showTooltip, type PluginValue, type Tooltip, type TooltipView, type ViewUpdate } from '@codemirror/view';
@@ -21,8 +17,8 @@ import { identifierRange, pickDefinitionTarget, toLspPosition, type CharRange, t
 // ─── Pure state machine ──────────────────────────────────────────────────────
 
 /**
- * Where the pointer is relative to the card. `'other-token'` is an identifier other than the card's, and
- * it closes the card immediately — which a geometry check cannot tell from a pointer heading for the card.
+ * Where the pointer is relative to the card. `'other-token'` is an identifier other than the
+ * card's, which a geometry check cannot tell from a pointer heading for the card.
  */
 export type HoverZone = 'token' | 'tooltip' | 'other-token' | 'outside';
 
@@ -76,8 +72,8 @@ function settle(state: HoverMachineState): HoverDecision {
 }
 
 /**
- * Start the dwell for `token`. A card already on screen is about a symbol the pointer left, so it closes
- * rather than being re-targeted: every card pays `hoverTime`, not just the first of a session.
+ * Start the dwell for `token`. A card already on screen is about a symbol the pointer left, so it
+ * closes rather than being re-targeted.
  */
 function rearm(state: HoverMachineState, token: CharRange | null): HoverDecision {
     if (sameToken(state.token, token) && state.phase === 'arming') return settle(state);
@@ -92,18 +88,15 @@ function shutdown(state: HoverMachineState): HoverDecision {
 }
 
 /**
- * Next state + the timer/UI side effects the caller must carry out.
- *
- * `token` on a `pointermove` is the identifier *under the pointer* (null when
- * there is none), so the machine never has to guess.
+ * Next state plus the timer/UI side effects the caller must carry out. `token` on a `pointermove`
+ * is the identifier under the pointer, null when there is none.
  */
 export function reduceHover(state: HoverMachineState, input: HoverInput): HoverDecision {
     switch (input.type) {
         case 'pointermove': {
             const { zone, token } = input;
             if (zone === 'tooltip') {
-                // Only meaningful while open; a stray move there otherwise means
-                // the pointer left the identifier, so stop arming.
+                // Only meaningful while open; elsewhere it means the pointer left the identifier.
                 if (state.phase === 'open') return settle(state);
                 return state.phase === 'idle' ? keep(state) : shutdown(state);
             }
@@ -118,8 +111,8 @@ export function reduceHover(state: HoverMachineState, input: HoverInput): HoverD
             // 'token' | 'other-token' — over an identifier.
             if (state.phase === 'idle') return rearm(HOVER_IDLE, token);
             if (state.phase === 'arming') return rearm(state, token);
-            // Open, and the pointer is not on the card's identifier: another identifier is a different
-            // question, and this one was already left once. Either way, dwell again.
+            // Another identifier is a different question, and this one was already left once.
+            // Dwell again.
             if (!sameToken(state.token, token)) return rearm(state, token);
             return state.gracePending ? rearm(state, token) : settle(state);
         }
@@ -139,8 +132,8 @@ export function reduceHover(state: HoverMachineState, input: HoverInput): HoverD
     }
 }
 
-// The pointer-vs-card hit test lives in `hit-box.ts`, shared with
-// `closeHoverOnScroll` so both agree on when a tooltip is still being pointed at.
+// The pointer-vs-card hit test lives in `hit-box.ts`, shared with `closeHoverOnScroll` so both
+// agree on when the tooltip is being pointed at.
 
 // ─── Card ────────────────────────────────────────────────────────────────────
 
@@ -159,8 +152,8 @@ function fenced(language: string, value: string): string {
 function renderMarked(plugin: LSPPlugin, item: MarkedString): string {
     if (typeof item === 'string') return plugin.docToHTML(item, 'markdown');
     if (!item || typeof item !== 'object') return '';
-    // MarkupContent carries its own kind: plaintext must stay escaped, not be
-    // run through the markdown renderer.
+    // MarkupContent carries its own kind: plaintext must stay escaped, not be run through
+    // markdown.
     if ('kind' in item && item.kind) return plugin.docToHTML(item as { kind: 'markdown' | 'plaintext'; value: string });
     if ('language' in item && item.language) {
         return plugin.docToHTML({ kind: 'markdown', value: fenced(item.language, item.value ?? '') }, 'markdown');
@@ -169,8 +162,10 @@ function renderMarked(plugin: LSPPlugin, item: MarkedString): string {
     return '';
 }
 
-/** A language server separates doc sections with a rule the hover card's own
- * layout already provides; everything else the sanitizer refuses by default. */
+/**
+ * A language server separates doc sections with a rule the card's own layout provides; the
+ * sanitizer refuses everything else by default.
+ */
 const HOVER_FORBID_TAGS = ['hr'] as const;
 
 /** `Hover.contents` (string | MarkupContent | MarkedString[]) to sanitized HTML. */
@@ -190,14 +185,12 @@ export function hoverDocsHTML(plugin: LSPPlugin, hover: RawMarkup | null | undef
 }
 
 /**
- * The card's DOM. Content is filled in as the two requests land, and the
- * action row is the *bottom* section: with `above: true` the card keeps its
- * bottom edge anchored to the code line, so late-arriving documentation grows
- * upward and the button never moves out from under the pointer.
+ * The card's DOM. The action row is the bottom section: with `above: true` the card keeps its
+ * bottom edge on the code line, so late documentation grows upward and the button does not move.
  */
 export class HoverCard {
     readonly dom = document.createElement('div');
-    private readonly loading: HTMLElement;
+    private readonly status: HTMLElement;
     private readonly docs: HTMLElement;
     private readonly row: HTMLElement;
     private readonly button: HTMLButtonElement;
@@ -207,13 +200,13 @@ export class HoverCard {
         this.dom.className = 'cm-lsp-action-card';
         const body = document.createElement('div');
         body.className = 'cm-lsp-action-card-body';
-        this.loading = document.createElement('div');
-        this.loading.className = 'cm-lsp-action-loading';
-        this.loading.textContent = '…';
+        this.status = document.createElement('div');
+        this.status.className = 'cm-lsp-action-status';
+        this.status.textContent = '…';
         this.docs = document.createElement('div');
         this.docs.className = 'cm-lsp-action-docs cm-lsp-documentation';
         this.docs.hidden = true;
-        body.append(this.loading, this.docs);
+        body.append(this.status, this.docs);
 
         this.row = document.createElement('div');
         this.row.className = 'cm-lsp-action-row';
@@ -228,9 +221,8 @@ export class HoverCard {
             const target = this.target;
             if (target) onJump(target);
         });
-        // A press on the card is not a press on the text underneath it: the card
-        // overlaps the code, and without this CodeMirror would move the caret to
-        // whatever sits below the button.
+        // The card overlaps the code; without this CodeMirror would move the caret under the
+        // button.
         this.dom.addEventListener('mousedown', e => {
             e.preventDefault();
             e.stopPropagation();
@@ -247,7 +239,7 @@ export class HoverCard {
 
     showDocs(html: string): void {
         if (this.destroyed) return;
-        this.loading.hidden = true;
+        this.status.hidden = true;
         if (!html) return;
         this.docs.innerHTML = html;
         this.docs.hidden = false;
@@ -259,10 +251,22 @@ export class HoverCard {
         this.row.hidden = false;
     }
 
-    /** Resolved with nothing to show — collapse the placeholder. */
-    hideLoading(): void {
+    /** The wait has a name. */
+    showWaiting(text: string): void {
         if (this.destroyed) return;
-        this.loading.hidden = true;
+        this.status.textContent = text;
+        this.status.hidden = false;
+    }
+
+    /** The wait ended without an answer, in a sentence that outlives the placeholder. */
+    showConclusion(text: string): void {
+        this.showWaiting(text);
+    }
+
+    /** Nothing to say — collapse the status line. */
+    clearStatus(): void {
+        if (this.destroyed) return;
+        this.status.hidden = true;
     }
 
     destroy(): void {
@@ -299,6 +303,12 @@ export interface LspHoverActionOptions {
     hoverTime?: number;
     /** How long the card survives after the pointer leaves it. Default {@link DEFAULT_HOVER_GRACE}. */
     graceMs?: number;
+    /** How long the bare placeholder is allowed to stand before it names the server. Default {@link DEFAULT_HOVER_WAITING}. */
+    waitingMs?: number;
+    /** How long one request may take before the card says it will not be answered. Default {@link DEFAULT_HOVER_CEILING}. */
+    ceilingMs?: number;
+    /** What to call the server this card is waiting for. */
+    serverLabel?: () => string;
     /** Whether a definition target can be jumped to from this editor. */
     canJump?: (target: DefinitionTarget) => boolean;
     /** Perform the jump. */
@@ -311,18 +321,51 @@ export const DEFAULT_HOVER_TIME = 500;
 // How long the card survives after the pointer leaves it and the identifier
 export const DEFAULT_HOVER_GRACE = 500;
 
+// How long the placeholder waits alone before it says which server it is waiting for
+export const DEFAULT_HOVER_WAITING = 700;
+
+// How long one hover/definition round trip may take before the card stops waiting on it. Under the
+// library's request timer and the bridge's, over the seconds a cold index needs.
+export const DEFAULT_HOVER_CEILING = 8000;
+
 export function resolveHoverTimings(
-    options: Pick<LspHoverActionOptions, 'hoverTime' | 'graceMs'>,
-): { hoverTime: number; graceMs: number } {
+    options: Pick<LspHoverActionOptions, 'hoverTime' | 'graceMs' | 'waitingMs' | 'ceilingMs'>,
+): { hoverTime: number; graceMs: number; waitingMs: number; ceilingMs: number } {
     return {
         hoverTime: options.hoverTime ?? DEFAULT_HOVER_TIME,
         graceMs: options.graceMs ?? DEFAULT_HOVER_GRACE,
+        waitingMs: options.waitingMs ?? DEFAULT_HOVER_WAITING,
+        ceilingMs: options.ceilingMs ?? DEFAULT_HOVER_CEILING,
     };
 }
 
-interface ResolvedHover {
-    docs: string;
-    definition: DefinitionTarget | null;
+/** The half of a card one of the wait clocks writes. */
+export interface WaitStatus {
+    showWaiting(text: string): void;
+    showConclusion(text: string): void;
+}
+
+/**
+ * Starts the two clocks a waiting card runs and returns the function that stops both. `live`
+ * rejects a clock that fires for a card the pointer has left; the sentences are read when the
+ * clock fires, so a server that introduces itself mid-hover is named by the name it gave.
+ */
+export function armWaitClocks(
+    card: WaitStatus,
+    timings: { waitingMs: number; ceilingMs: number },
+    sentences: { waiting: () => string; noAnswer: () => string },
+    live: () => boolean,
+): () => void {
+    const waiting = setTimeout(() => {
+        if (live()) card.showWaiting(sentences.waiting());
+    }, timings.waitingMs);
+    const ceiling = setTimeout(() => {
+        if (live()) card.showConclusion(sentences.noAnswer());
+    }, timings.ceilingMs);
+    return () => {
+        clearTimeout(waiting);
+        clearTimeout(ceiling);
+    };
 }
 
 /** `TextDocumentPositionParams`, shaped locally to avoid a protocol dependency. */
@@ -334,9 +377,8 @@ interface HoverRequestParams {
 const CACHE_LIMIT = 200;
 
 /**
- * Per-view request memos, shared by the hover card and the click path so a
- * click straight after a hover (or the other way round) costs no round trip.
- * Keys are document offsets, so any edit clears them.
+ * Per-view request memos, shared by the hover card and the click path. Keys are document offsets,
+ * so any edit clears them.
  */
 interface ViewCaches {
     docs: Map<string, Promise<string>>;
@@ -361,7 +403,11 @@ function clearCaches(view: EditorView): void {
     caches.definition.clear();
 }
 
-function remember<T>(cache: Map<string, Promise<T>>, key: string, make: () => Promise<T>): Promise<T> {
+/**
+ * The per-token memo. A request that failed is not remembered as "no answer": one poisoned entry
+ * otherwise strands that identifier for the life of the editor.
+ */
+export function remember<T>(cache: Map<string, Promise<T>>, key: string, make: () => Promise<T>): Promise<T> {
     const existing = cache.get(key);
     if (existing) return existing;
     const promise = make();
@@ -370,7 +416,7 @@ function remember<T>(cache: Map<string, Promise<T>>, key: string, make: () => Pr
         const oldest = cache.keys().next();
         if (!oldest.done) cache.delete(oldest.value);
     }
-    // A timeout must stay retryable: drop it instead of remembering "nothing".
+    // A failed request stays retryable: drop it instead of remembering "nothing".
     promise.catch(() => {
         if (cache.get(key) === promise) cache.delete(key);
     });
@@ -382,9 +428,9 @@ function tokenKey(plugin: LSPPlugin, token: CharRange): string {
 }
 
 /**
- * Capability probe. `hasCapability` is missing from @codemirror/lsp-client
- * 6.2.5's declarations, so read the public record: capabilities that have not
- * arrived yet must not block a request, a known absence must.
+ * Capability probe. `hasCapability` is missing from @codemirror/lsp-client 6.2.5's declarations,
+ * so read the public record: a capability that has not arrived must not block a request, a known
+ * absence must.
  */
 function supported(plugin: LSPPlugin, cap: 'hoverProvider' | 'definitionProvider'): boolean {
     const caps = plugin.client.serverCapabilities;
@@ -392,23 +438,29 @@ function supported(plugin: LSPPlugin, cap: 'hoverProvider' | 'definitionProvider
 }
 
 /** Hover documentation, HTML-escaped/sanitized. */
-function fetchDocs(plugin: LSPPlugin, token: CharRange, doc: Text): Promise<string> {
+function fetchDocs(plugin: LSPPlugin, params: HoverRequestParams): Promise<string> {
     if (!supported(plugin, 'hoverProvider')) return Promise.resolve('');
     // Flush unsaved edits first: the server must answer about this buffer.
     plugin.client.sync();
-    const params: HoverRequestParams = { textDocument: { uri: plugin.uri }, position: toLspPosition(doc, token.from) };
     return plugin.client
         .request<HoverRequestParams, RawMarkup | null>('textDocument/hover', params)
         .then(hover => hoverDocsHTML(plugin, hover));
 }
 
-function fetchDefinition(plugin: LSPPlugin, token: CharRange, doc: Text): Promise<DefinitionTarget | null> {
+function fetchDefinition(plugin: LSPPlugin, params: HoverRequestParams): Promise<DefinitionTarget | null> {
     if (!supported(plugin, 'definitionProvider')) return Promise.resolve(null);
     plugin.client.sync();
-    const params: HoverRequestParams = { textDocument: { uri: plugin.uri }, position: toLspPosition(doc, token.from) };
     return plugin.client
         .request<HoverRequestParams, unknown>('textDocument/definition', params)
         .then(result => pickDefinitionTarget(result));
+}
+
+/**
+ * One request's params. Hover and definition need separate objects: `cancelRequest` picks the
+ * request to cancel by the identity of the params it was sent with.
+ */
+function requestParams(plugin: LSPPlugin, doc: Text, token: CharRange): HoverRequestParams {
+    return { textDocument: { uri: plugin.uri }, position: toLspPosition(doc, token.from) };
 }
 
 // ─── View plugin ─────────────────────────────────────────────────────────────
@@ -423,12 +475,16 @@ class LspHoverValue implements PluginValue {
     private card: HoverCard | null = null;
     /** Guards responses against the card/token they were asked for. */
     private seq = 0;
+    /** Requests the current card is still waiting on, so abandoning it can tell the server. */
+    private waits: { client: LSPPlugin['client']; params: HoverRequestParams }[] = [];
+    /** Stops the two clocks the card on screen runs, if it is still waiting. */
+    private stopWaits: (() => void) | null = null;
     private lastPlugin: LSPPlugin | null = null;
     /** Last pointer position, used to classify a scroll. */
     private pointer: { x: number; y: number } | null = null;
     /**
-     * `EditorView.update` throws if a plugin dispatches while it runs, so a
-     * close requested from inside `update` is handed to the next task instead.
+     * `EditorView.update` throws if a plugin dispatches while it runs, so a close asked for inside
+     * `update` is handed to the next task.
      */
     private inUpdate = false;
     private destroyed = false;
@@ -446,13 +502,12 @@ class LspHoverValue implements PluginValue {
         this.inUpdate = true;
         try {
             if (update.docChanged) {
-                // Cache keys are document offsets — an edit makes every one of them stale.
+                // Cache keys are document offsets, so an edit makes every one stale.
                 clearCaches(update.view);
                 this.feed({ type: 'doc-change' });
             }
             const plugin = LSPPlugin.get(update.view);
             if (plugin !== this.lastPlugin) {
-                // Different file/connection: everything cached belongs to the old one.
                 this.lastPlugin = plugin ?? null;
                 clearCaches(update.view);
                 this.feed({ type: 'dismiss' });
@@ -465,6 +520,7 @@ class LspHoverValue implements PluginValue {
     destroy(): void {
         this.destroyed = true;
         this.clearTimers();
+        this.cancelWaits();
         this.view.dom.removeEventListener('mousemove', this.onMouseMove);
         this.view.dom.removeEventListener('mouseleave', this.onMouseLeave);
         this.view.scrollDOM.removeEventListener('scroll', this.onScroll);
@@ -481,9 +537,7 @@ class LspHoverValue implements PluginValue {
     };
 
     private readonly onMouseLeave = (event: MouseEvent): void => {
-        // Leaving for the card is a move, not a leave: the card lives inside
-        // view.dom, so only a truly departed pointer (or one over other text)
-        // reaches this branch via zoneAt.
+        // The card lives inside view.dom, so only a truly departed pointer reaches this branch.
         if (this.card && !this.card.isDestroyed && this.card.dom.contains(event.relatedTarget as Node | null)) return;
         this.pointer = null;
         this.feed({ type: 'pointermove', zone: 'outside', token: null });
@@ -551,6 +605,46 @@ class LspHoverValue implements PluginValue {
     private clearTimers(): void {
         this.clearTimer('arm');
         this.clearTimer('grace');
+        this.stopWaitClocks();
+    }
+
+    /** The clocks for the card being opened now; the card before it had its own stopped already. */
+    private startWaitClocks(card: HoverCard, seq: number): void {
+        this.stopWaitClocks();
+        this.stopWaits = armWaitClocks(
+            card,
+            this.opts,
+            { waiting: () => t('lsp.hoverWaiting', { server: this.serverLabel() }), noAnswer: this.noAnswerText },
+            () => this.live(card, seq),
+        );
+    }
+
+    private stopWaitClocks(): void {
+        this.stopWaits?.();
+        this.stopWaits = null;
+    }
+
+    /** The name the server introduced itself by. */
+    private serverLabel(): string {
+        const label = this.opts.serverLabel?.() ?? '';
+        return label.trim() === '' ? t('lsp.hoverServerUnknown') : label;
+    }
+
+    private noAnswerText = (): string => t('lsp.hoverNoAnswer', { server: this.serverLabel() });
+
+    /**
+     * Tell the server to stop computing answers this card will never show. A server that ignores the
+     * notification loses nothing.
+     */
+    private cancelWaits(): void {
+        const waiting = this.waits;
+        this.waits = [];
+        for (const { client, params } of waiting) {
+            try {
+                client.cancelRequest(params);
+            } catch {
+            }
+        }
     }
 
     // ---- card ----
@@ -561,9 +655,10 @@ class LspHoverValue implements PluginValue {
             this.feed({ type: 'dismiss' });
             return;
         }
-        // Nothing should be on screen when a dwell elapses; anything that is gets destroyed here
-        // rather than left behind as a second tooltip.
+        // Anything on screen when a dwell elapses is destroyed here, not left as a second tooltip.
         this.card?.destroy();
+        this.cancelWaits();
+        this.stopWaitClocks();
         const card = new HoverCard(target => this.opts.onJump(target));
         this.card = card;
         this.seq++;
@@ -575,13 +670,21 @@ class LspHoverValue implements PluginValue {
             create: () => card.asTooltipView(),
         };
         this.view.dispatch({ effects: setHoverCard.of(tooltip) });
-        void this.fill(plugin, token, card, seq);
+        this.startWaitClocks(card, seq);
+        this.fill(plugin, token, card, seq);
+    }
+
+    /** Whether this card is still the one on screen for the current dwell. */
+    private live(card: HoverCard, seq: number): boolean {
+        return !this.destroyed && !card.isDestroyed && seq === this.seq && this.machine.phase === 'open';
     }
 
     private closeCard(): void {
         this.card?.destroy();
         this.card = null;
-        // A doc change already dropped the card in the field — nothing to remove.
+        this.stopWaitClocks();
+        this.cancelWaits();
+        // A doc change may already have dropped the card.
         if (!this.view.state.field(hoverCardField)) return;
         if (this.inUpdate) {
             setTimeout(() => this.removeCard(), 0);
@@ -591,43 +694,91 @@ class LspHoverValue implements PluginValue {
     }
 
     private removeCard(): void {
-        // A doc change already dropped the card in the field; the view may also
-        // be gone by the time a deferred close runs.
+        // A doc change may have dropped the card, and a deferred close may find the view gone.
         if (this.destroyed || !this.view.state.field(hoverCardField)) return;
         this.view.dispatch({ effects: setHoverCard.of(null) });
     }
 
-    private async fill(plugin: LSPPlugin, token: CharRange, card: HoverCard, seq: number): Promise<void> {
-        const live = () => !card.isDestroyed && seq === this.seq && this.machine.phase === 'open';
-        let resolved: ResolvedHover;
-        try {
-            resolved = await this.resolve(plugin, token);
-        } catch {
-            if (live()) this.feed({ type: 'dismiss' });
-            return;
-        }
-        if (!live()) return;
-        card.showDocs(resolved.docs);
-        const target = resolved.definition;
-        const jumpable = !!target && (this.opts.canJump ? this.opts.canJump(target) : true);
-        if (target && jumpable) card.showAction(target);
-        if (!resolved.docs && !jumpable) {
-            // Nothing to say about this identifier — do not park an empty box on it.
-            this.feed({ type: 'dismiss' });
-        } else {
-            card.hideLoading();
-        }
+    /**
+     * Asks about one identifier and fills the card as the answers come. Each half paints on its own
+     * clock: documentation must not wait on a definition still being computed.
+     */
+    private fill(plugin: LSPPlugin, token: CharRange, card: HoverCard, seq: number): void {
+        const state = { docs: false, definition: false, failed: false, shown: false };
+        const finish = (): void => {
+            if (!this.live(card, seq)) return;
+            this.stopWaitClocks();
+            if (state.shown) {
+                card.clearStatus();
+                return;
+            }
+            // One half is still out there and may still have something to say.
+            if (!state.docs || !state.definition) return;
+            if (state.failed) card.showConclusion(this.noAnswerText());
+            // Nothing to say — do not park an empty box on it.
+            else this.feed({ type: 'dismiss' });
+        };
+        this.requestDocs(plugin, token).then(
+            html => {
+                state.docs = true;
+                if (html && this.live(card, seq)) {
+                    state.shown = true;
+                    card.showDocs(html);
+                }
+                finish();
+            },
+            () => {
+                state.docs = true;
+                state.failed = true;
+                finish();
+            },
+        );
+        this.requestDefinition(plugin, token).then(
+            target => {
+                state.definition = true;
+                const jumpable = !!target && (this.opts.canJump ? this.opts.canJump(target) : true);
+                if (jumpable && target && this.live(card, seq)) {
+                    state.shown = true;
+                    card.showAction(target);
+                }
+                finish();
+            },
+            () => {
+                state.definition = true;
+                state.failed = true;
+                finish();
+            },
+        );
     }
 
-    /** Per-token memo: repeat hovers are free, and the machine never refires. */
-    private resolve(plugin: LSPPlugin, token: CharRange): Promise<ResolvedHover> {
+    /** Per-token memo, so a repeat hover over the same symbol is free and the machine never refires. */
+    private requestDocs(plugin: LSPPlugin, token: CharRange): Promise<string> {
         const caches = cachesFor(this.view);
-        const key = tokenKey(plugin, token);
-        const doc = this.view.state.doc;
-        return Promise.all([
-            remember(caches.docs, key, () => fetchDocs(plugin, token, doc)),
-            remember(caches.definition, key, () => fetchDefinition(plugin, token, doc)),
-        ]).then(([docs, definition]) => ({ docs, definition }));
+        const params = requestParams(plugin, this.view.state.doc, token);
+        return remember(caches.docs, tokenKey(plugin, token), () =>
+            this.track(plugin.client, params, () => fetchDocs(plugin, params)),
+        );
+    }
+
+    private requestDefinition(plugin: LSPPlugin, token: CharRange): Promise<DefinitionTarget | null> {
+        const caches = cachesFor(this.view);
+        const params = requestParams(plugin, this.view.state.doc, token);
+        return remember(caches.definition, tokenKey(plugin, token), () =>
+            this.track(plugin.client, params, () => fetchDefinition(plugin, params)),
+        );
+    }
+
+    /**
+     * Runs one request while the card waits on it, so abandoning the card can name it. A request
+     * leaves the list as soon as it settles.
+     */
+    private track<T>(client: LSPPlugin['client'], params: HoverRequestParams, make: () => Promise<T>): Promise<T> {
+        const wait = { client, params };
+        this.waits.push(wait);
+        return make().finally(() => {
+            const at = this.waits.indexOf(wait);
+            if (at >= 0) this.waits.splice(at, 1);
+        });
     }
 }
 
@@ -653,13 +804,9 @@ const hoverCardTheme = EditorView.baseTheme({
         overflowY: 'auto',
         overscrollBehavior: 'contain',
     },
-    '& .cm-lsp-action-loading': { color: 'var(--color-text-muted, #888)', padding: '1px 2px' },
-    // NOT `white-space: pre-wrap`: the renderer's output is block HTML, and it
-    // writes a newline *between* every tag (`</pre>\n<p>`), which pre-wrap turns
-    // into a blank line between the signature and its prose — and between every
-    // paragraph after it. Line structure that matters survives without it:
-    // plaintext documentation arrives as `<br>`s and code blocks keep their own
-    // pre-wrap (next rule).
+    '& .cm-lsp-action-status': { color: 'var(--color-text-muted, #888)', padding: '1px 2px' },
+    // Not `white-space: pre-wrap`: the renderer writes a newline between every tag, which pre-wrap
+    // turns into a blank line between the signature and its prose.
     '& .cm-lsp-action-docs': { overflowWrap: 'anywhere' },
     '& .cm-lsp-action-docs pre': { margin: '2px 0', whiteSpace: 'pre-wrap' },
     '& .cm-lsp-action-row': { marginTop: '4px', flexShrink: 0 },
@@ -679,9 +826,8 @@ const hoverCardTheme = EditorView.baseTheme({
 // ─── Extension ───────────────────────────────────────────────────────────────
 
 /**
- * Hover card for the file's language server. Finds the connection through
- * `LSPPlugin`, so it survives an LSP reconnect. One half of
- * `lspDefinitionActions`, which is this module's entry point.
+ * Hover card for the file's language server. It finds the connection through `LSPPlugin`, so it
+ * survives a reconnect.
  */
 function lspHoverActions(options: LspHoverActionOptions): Extension {
     const resolved: ResolvedHoverOptions = {
@@ -694,9 +840,8 @@ function lspHoverActions(options: LspHoverActionOptions): Extension {
 // ─── Click path ──────────────────────────────────────────────────────────────
 
 /**
- * Definition of the identifier at `pos`, sharing the hover card's cache.
- * Resolves to null when there is no identifier, no connection, or the server
- * has nothing to say — a jump is never attempted on a guess.
+ * Definition of the identifier at `pos`, sharing the hover card's cache. Null when there is no
+ * identifier, no connection, or nothing to say — a jump is never attempted on a guess.
  */
 function definitionAt(view: EditorView, pos: number): Promise<DefinitionTarget | null> {
     const plugin = LSPPlugin.get(view);
@@ -705,8 +850,9 @@ function definitionAt(view: EditorView, pos: number): Promise<DefinitionTarget |
     if (!token) return Promise.resolve(null);
     if (!supported(plugin, 'definitionProvider')) return Promise.resolve(null);
     const doc = view.state.doc;
+    const params = requestParams(plugin, doc, token);
     return remember(cachesFor(view).definition, tokenKey(plugin, token), () =>
-        fetchDefinition(plugin, token, doc),
+        fetchDefinition(plugin, params),
     ).catch(() => null);
 }
 
@@ -717,12 +863,8 @@ export function isJumpModifier(event: { ctrlKey: boolean; metaKey: boolean; shif
 }
 
 /**
- * Ctrl/Cmd+Click jumps to the definition of the identifier under the pointer.
- * This is the primary gesture precisely because it has no target to hit: if a
- * hover card is being stubborn, the same jump is still one click away.
- *
- * The click is left uncanceled, so the caret still lands where it was clicked
- * (as in VS Code) and the explorer's line-selection keeps working.
+ * Ctrl/Cmd+Click jumps to the definition of the identifier under the pointer. The click is left
+ * uncancelled, so the caret still lands where it was clicked.
  */
 function lspDefinitionClick(options: LspHoverActionOptions): Extension {
     return [
@@ -733,9 +875,8 @@ function lspDefinitionClick(options: LspHoverActionOptions): Extension {
                 if ((event.target as HTMLElement | null)?.closest?.('.cm-lsp-action-card')) return false;
                 const pos = view.posAtCoords({ x: event.clientX, y: event.clientY }, false);
                 if (pos == null) return false;
-                // No `canJump` gate here on purpose: the jump itself explains why
-                // a target outside this workspace cannot be opened, and a silent
-                // no-op is what this bug report was about.
+                // No `canJump` gate here: the jump explains why a target outside this workspace
+                // cannot be opened, where a silent no-op explains nothing.
                 void definitionAt(view, pos).then(target => {
                     if (target) options.onJump(target);
                 });
@@ -747,10 +888,8 @@ function lspDefinitionClick(options: LspHoverActionOptions): Extension {
 }
 
 /**
- * Toggles `.cm-lsp-jump-ready` on the editor while Ctrl/Cmd is held so the
- * pointer hints that clicking jumps. Modifier state is tracked on the window:
- * the browser reports a release that happens outside the editor only there,
- * and a hint stuck on forever is worse than no hint.
+ * Toggles `.cm-lsp-jump-ready` while Ctrl/Cmd is held. Modifier state is tracked on the window,
+ * which is the only place that reports a release outside the editor.
  */
 class JumpModifierValue implements PluginValue {
     private held = false;
@@ -789,9 +928,8 @@ const jumpModifierHint = [
 ];
 
 /**
- * Everything go-to-definition needs: the hover card and Ctrl/Cmd+Click. Both
- * talk to the language server through the editor's `LSPPlugin`, so they follow
- * the connection wherever the caller puts it.
+ * Everything go-to-definition needs: the hover card and Ctrl/Cmd+Click, both reaching the server
+ * through the editor's `LSPPlugin`.
  */
 export function lspDefinitionActions(options: LspHoverActionOptions): Extension {
     return [lspHoverActions(options), lspDefinitionClick(options)];

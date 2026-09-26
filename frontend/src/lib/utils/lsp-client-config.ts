@@ -1,15 +1,17 @@
 /**
- * The one `LSPClient` configuration, used by both the initial connect and the reconnect: an option the
- * reconnect drops is a feature that disappears the first time the socket does. It lives outside
- * `FileEditor.svelte` so a test can exercise the wiring the app actually uses.
+ * The one `LSPClient` configuration, used by both the initial connect and the reconnect: an
+ * option the reconnect drops is a feature that disappears the first time the socket does.
  */
 import type { LSPClientConfig } from '@codemirror/lsp-client';
 import { sanitizeHTML } from '$lib/utils/sanitize';
 import { getGrammarForFence } from './editor-language';
 import { createLSPNotificationHandlers } from './lsp-connection-manager';
 
-/** Gopls can take 10-20s to initialize on large workspaces. */
-const LSP_INIT_TIMEOUT_MS = 30000;
+/**
+ * The library's per-request timer, which every request it sends runs under. Gopls can take 10-20s
+ * on a cold index; the hover card gives up long before this does (DEFAULT_HOVER_CEILING).
+ */
+const LSP_REQUEST_TIMEOUT_MS = 30000;
 
 interface LspClientConfigOptions {
     /** The LSP features this editor uses, chosen per editor rather than taken from the bundle. */
@@ -28,7 +30,7 @@ export function lspClientConfig({ extensions, rootUri, getFile, onMessage }: Lsp
         extensions,
         rootUri,
         notificationHandlers: createLSPNotificationHandlers(onMessage),
-        timeout: LSP_INIT_TIMEOUT_MS,
+        timeout: LSP_REQUEST_TIMEOUT_MS,
         // A code fence in a language server's markdown (the signature a hover card opens with) needs this
         // hook: our grammars are all named `mike-declared`, so the renderer's "fence tag equals the
         // editor's language name" rule matches nothing and every signature would be monochrome.

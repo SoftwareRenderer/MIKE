@@ -18,10 +18,9 @@ import (
 	"github.com/coder/websocket"
 )
 
-// deafManager stands in for a language server that accepts every request and answers none — the
-// shape that grew a session's routing maps for as long as the editor kept sending. A send that
-// never returns is a different shape and cannot grow anything: a session's own read loop is what
-// forwards, so a wedged send stops that session at one outstanding request.
+// deafManager stands in for a language server that accepts every request and answers none. A send
+// that never returns is a different shape: the writer gives each request its own goroutine, and
+// the session's bound is what keeps that count finite.
 type deafManager struct {
 	mu        sync.Mutex
 	sent      []json.RawMessage
@@ -166,9 +165,9 @@ func sendInitialize(t *testing.T, c *testClient, id int) {
 	})
 }
 
-// TestRequestMapsStopAtTheirBound: a server that answers nothing used to grow the maps that route
-// answers back for as long as the browser kept asking. Past the bound the oldest request loses its
-// slot, and it is answered rather than dropped.
+// TestRequestMapsStopAtTheirBound: the maps that route answers back stay finite when the server
+// answers nothing. Past the bound the oldest request loses its slot, and it is answered rather than
+// dropped.
 func TestRequestMapsStopAtTheirBound(t *testing.T) {
 	mgr := newDeafManager()
 	handler := NewLSPHandler(newTestRegistry(), mgr)
@@ -239,8 +238,17 @@ func TestAnAnswerFreesASlotUnderTheBound(t *testing.T) {
 	waitUntil(t, func() bool { return len(mgr.forwarded("textDocument/hover")) == 2 },
 		"both requests forwarded")
 
+	// Requests reach the server concurrently, so the order it recorded them in says nothing about
+	// who sent first. Backend ids ascend in the order the handler took them, so the smallest is the
+	// one the browser sent first — id 1.
 	serverIDs := mgr.forwarded("textDocument/hover")
-	mgr.answer(serverIDs[0])
+	first := serverIDs[0]
+	for _, id := range serverIDs[1:] {
+		if id < first {
+			first = id
+		}
+	}
+	mgr.answer(first)
 	if got := client.receiveJSON(t); got.ID == nil || got.ID.String() != "1" || got.Error != nil {
 		t.Fatalf("the answer for request 1 arrived as %+v", got)
 	}

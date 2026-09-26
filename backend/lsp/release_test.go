@@ -84,7 +84,7 @@ func TestSessionsUsingLockedCountsSessionsNotChannels(t *testing.T) {
 }
 
 func newSessionUsing(workspaceKeys ...string) *ClientSession {
-	s := newClientSession(&websocket.Conn{}, 0)
+	s := newClientSession(&websocket.Conn{}, 0, DefaultMaxQueuedFrames)
 	for _, key := range workspaceKeys {
 		s.uses(key)
 	}

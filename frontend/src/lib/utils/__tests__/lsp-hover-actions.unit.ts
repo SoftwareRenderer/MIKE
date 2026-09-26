@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
     reduceHover,
     HOVER_IDLE,
@@ -6,8 +6,12 @@ import {
     hoverDocsHTML,
     isJumpModifier,
     resolveHoverTimings,
+    armWaitClocks,
+    remember,
     DEFAULT_HOVER_TIME,
     DEFAULT_HOVER_GRACE,
+    DEFAULT_HOVER_WAITING,
+    DEFAULT_HOVER_CEILING,
     HoverCard,
     type HoverEffect,
     type HoverInput,
@@ -423,11 +427,170 @@ describe('resolveHoverTimings', () => {
         // The complaint this pins down: a card that fires the moment the mouse
         // crosses a symbol interrupts a read of the code.
         expect(DEFAULT_HOVER_TIME).toBe(500);
-        expect(resolveHoverTimings({})).toEqual({ hoverTime: 500, graceMs: DEFAULT_HOVER_GRACE });
+        expect(resolveHoverTimings({})).toEqual({
+            hoverTime: DEFAULT_HOVER_TIME,
+            graceMs: DEFAULT_HOVER_GRACE,
+            waitingMs: DEFAULT_HOVER_WAITING,
+            ceilingMs: DEFAULT_HOVER_CEILING,
+        });
     });
 
     it('honours an explicit timing, including a zero delay', () => {
-        expect(resolveHoverTimings({ hoverTime: 0, graceMs: 120 })).toEqual({ hoverTime: 0, graceMs: 120 });
+        expect(resolveHoverTimings({ hoverTime: 0, graceMs: 120 })).toEqual({
+            hoverTime: 0,
+            graceMs: 120,
+            waitingMs: DEFAULT_HOVER_WAITING,
+            ceilingMs: DEFAULT_HOVER_CEILING,
+        });
+    });
+
+    it('puts the ceiling under the library\'s own request timer', () => {
+        // The card's ceiling is the shorter timer, so it speaks before the library's request timer
+        // does.
+        expect(DEFAULT_HOVER_WAITING).toBeLessThan(DEFAULT_HOVER_CEILING);
+        expect(DEFAULT_HOVER_CEILING).toBeLessThan(30000);
+    });
+});
+
+describe('armWaitClocks — the card never stands on a bare placeholder', () => {
+    /** The card as the clocks see it: two sentences, no DOM. */
+    function fakeCard() {
+        const said: string[] = [];
+        return {
+            said,
+            showWaiting: (text: string) => said.push(`waiting:${text}`),
+            showConclusion: (text: string) => said.push(`conclusion:${text}`),
+        };
+    }
+    const sentences = { waiting: () => 'waiting', noAnswer: () => 'no-answer' };
+
+    it('names the server once the placeholder has been up long enough to look like a stall', () => {
+        vi.useFakeTimers();
+        try {
+            const card = fakeCard();
+            armWaitClocks(card, { waitingMs: 700, ceilingMs: 8000 }, sentences, () => true);
+            vi.advanceTimersByTime(699);
+            expect(card.said).toEqual([]);
+            vi.advanceTimersByTime(1);
+            expect(card.said).toEqual(['waiting:waiting']);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('says the answer is not coming at the ceiling', () => {
+        vi.useFakeTimers();
+        try {
+            const card = fakeCard();
+            armWaitClocks(card, { waitingMs: 700, ceilingMs: 8000 }, sentences, () => true);
+            vi.advanceTimersByTime(8000);
+            expect(card.said).toEqual(['waiting:waiting', 'conclusion:no-answer']);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('says nothing about a card the pointer has left', () => {
+        vi.useFakeTimers();
+        try {
+            const card = fakeCard();
+            let live = true;
+            armWaitClocks(card, { waitingMs: 700, ceilingMs: 8000 }, sentences, () => live);
+            live = false;
+            vi.advanceTimersByTime(8000);
+            expect(card.said).toEqual([]);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('stops both clocks when the returned function is called', () => {
+        vi.useFakeTimers();
+        try {
+            const card = fakeCard();
+            const stop = armWaitClocks(card, { waitingMs: 700, ceilingMs: 8000 }, sentences, () => true);
+            vi.advanceTimersByTime(699);
+            stop();
+            vi.advanceTimersByTime(8000);
+            expect(card.said).toEqual([]);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('reads the sentences when a clock fires, not when it is armed', () => {
+        // A server that introduces itself after the pointer arrives is named by the name it gave.
+        vi.useFakeTimers();
+        try {
+            let name = 'the language server';
+            const card = fakeCard();
+            armWaitClocks(card, { waitingMs: 700, ceilingMs: 8000 }, { waiting: () => name, noAnswer: () => name }, () => true);
+            name = 'gopls';
+            vi.advanceTimersByTime(8000);
+            expect(card.said).toEqual(['waiting:gopls', 'conclusion:gopls']);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});
+
+describe('remember — one token\'s request is retryable after it fails', () => {
+    it('keeps an answer, so the second hover over the same symbol costs nothing', async () => {
+        const cache = new Map<string, Promise<string>>();
+        const made: number[] = [];
+        const make = () => {
+            made.push(1);
+            return Promise.resolve('docs');
+        };
+        expect(await remember(cache, 'k', make)).toBe('docs');
+        expect(await remember(cache, 'k', make)).toBe('docs');
+        expect(made).toHaveLength(1);
+    });
+
+    it('forgets a request that failed, so the next hover asks again', async () => {
+        // A cache holding a rejected promise answers every later hover with that failure.
+        const cache = new Map<string, Promise<string>>();
+        const failure = remember(cache, 'k', () => Promise.reject(new Error('no answer')));
+        await expect(failure).rejects.toThrow('no answer');
+        // The drop is a `.catch` of its own, so let it run before reading the cache back.
+        await Promise.resolve();
+        expect(cache.has('k')).toBe(false);
+        expect(await remember(cache, 'k', () => Promise.resolve('docs'))).toBe('docs');
+    });
+});
+
+describe('HoverCard — the status line', () => {
+    const status = (card: HoverCard) => card.dom.querySelector('.cm-lsp-action-status') as HTMLElement;
+
+    it('begins on the placeholder and ends on a sentence naming the wait', () => {
+        const card = new HoverCard(() => {});
+        expect(status(card).textContent).toBe('…');
+        expect(status(card).hidden).toBe(false);
+
+        card.showWaiting('Waiting for gopls…');
+        expect(status(card).textContent).toBe('Waiting for gopls…');
+        expect(status(card).hidden).toBe(false);
+
+        card.showConclusion('gopls did not answer');
+        expect(status(card).textContent).toBe('gopls did not answer');
+        expect(status(card).hidden).toBe(false);
+    });
+
+    it('collapses the status line once documentation arrives', () => {
+        const card = new HoverCard(() => {});
+        card.showWaiting('Waiting for gopls…');
+        card.showDocs('<p>docs</p>');
+        expect(status(card).hidden).toBe(true);
+        expect((card.dom.querySelector('.cm-lsp-action-docs') as HTMLElement).hidden).toBe(false);
+    });
+
+    it('ignores a late write to a card that has been closed', () => {
+        const card = new HoverCard(() => {});
+        card.destroy();
+        card.showWaiting('Waiting for gopls…');
+        card.showDocs('<p>docs</p>');
+        expect(status(card).textContent).toBe('…');
+        expect((card.dom.querySelector('.cm-lsp-action-docs') as HTMLElement).hidden).toBe(true);
     });
 });
 
@@ -466,7 +629,7 @@ describe('HoverCard — where the button lives', () => {
         const docs = card.dom.querySelector('.cm-lsp-action-docs') as HTMLElement;
         expect(docs.hidden).toBe(false);
         expect(docs.innerHTML).toContain('docs');
-        expect(card.dom.querySelector('.cm-lsp-action-loading')!.hasAttribute('hidden')).toBe(true);
+        expect(card.dom.querySelector('.cm-lsp-action-status')!.hasAttribute('hidden')).toBe(true);
         // Documentation grows inside the body, above the row — never next to it.
         expect(card.dom.lastElementChild!.className).toContain('cm-lsp-action-row');
     });

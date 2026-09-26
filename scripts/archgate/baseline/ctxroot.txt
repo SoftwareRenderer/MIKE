@@ -14,10 +14,7 @@ backend/exec/loop_agent.go|TaskExecutor.handleAgentTurnComplete|detached|x2
 backend/exec/merge.go|mergeOrchestrator.StreamCommitMessage|detached|x1
 backend/exec/summarize.go|summarizeOrchestrator.HandleSummarize|root|x2
 backend/extensions/registry.go|RegistryClient.CheckoutExtension|root|x1
-backend/lsp/handler.go|LSPHandler.BroadcastLSPReset|detached|x1
-backend/lsp/handler.go|LSPHandler.failInitialize|detached|x1
-backend/lsp/handler.go|LSPHandler.routeNotification|root|x1
-backend/lsp/handler.go|LSPHandler.routeResponse|root|x3
+backend/lsp/handler.go|ClientSession.serve|root|x1
 backend/server/server.go|NewServer|root|x1
 backend/server/shutdown.go|runShutdownWithDeadline|root|x1
 backend/stream/app_stream.go|AppStreamManager.HandleStream|root|x1

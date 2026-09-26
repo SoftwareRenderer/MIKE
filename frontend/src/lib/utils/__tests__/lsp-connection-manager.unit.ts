@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { isLSPAvailable, SharedLSPConnection } from '$lib/utils/lsp-connection-manager';
 import { extensionManager } from '$lib/services/extension-manager.svelte';
 import type { Extension } from '$lib/types';
@@ -261,109 +261,26 @@ describe('LSP connection manager — message routing', () => {
       expect(received[2]).toHaveLength(1);
     });
 
-    it('drops response for unknown channel', () => {
-      dispatchMessage(channels, JSON.stringify({
-        jsonrpc: '2.0',
-        id: 9999,
-        _ch: 99,
-        result: {},
-      }));
-
+    it('drops a response for an unknown channel, and says so once', () => {
+      // A dropped response looks like a server that never answered, so it is reported — once,
+      // because a console full of the line hides the next one.
+      const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      for (const id of [9999, 10000]) {
+        dispatchMessage(channels, JSON.stringify({ jsonrpc: '2.0', id, _ch: 99, result: {} }));
+      }
       expect(received[0]).toHaveLength(0);
       expect(received[1]).toHaveLength(0);
       expect(received[2]).toHaveLength(0);
-    });
-  });
-
-  describe('response routing by ID range (fallback)', () => {
-    beforeEach(() => setup(3));
-
-    it('routes ID 1500 to channel 1 (range 1001–1999)', () => {
-      dispatchMessage(channels, JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1500,
-        result: {},
-      }));
-
-      expect(received[0]).toHaveLength(1);
-      expect(received[1]).toHaveLength(0);
-      expect(received[2]).toHaveLength(0);
+      expect(warned).toHaveBeenCalledTimes(1);
+      warned.mockRestore();
     });
 
-    it('routes ID 2500 to channel 2 (range 2001–2999)', () => {
-      dispatchMessage(channels, JSON.stringify({
-        jsonrpc: '2.0',
-        id: 2500,
-        result: {},
-      }));
-
-      expect(received[0]).toHaveLength(0);
-      expect(received[1]).toHaveLength(1);
-      expect(received[2]).toHaveLength(0);
-    });
-
-    it('routes ID 3001 to channel 3 (range 3001–3999)', () => {
-      dispatchMessage(channels, JSON.stringify({
-        jsonrpc: '2.0',
-        id: 3001,
-        result: {},
-      }));
-
+    it('never guesses a channel from the request id', () => {
+      // The backend stamps `_ch` on every response it forwards, and ids a client numbers from 1
+      // belong to no channel.
+      dispatchMessage(channels, JSON.stringify({ jsonrpc: '2.0', id: 1500, result: {} }));
       expect(received[0]).toHaveLength(0);
       expect(received[1]).toHaveLength(0);
-      expect(received[2]).toHaveLength(1);
-    });
-
-    it('does not route ID 500 (below all ranges)', () => {
-      dispatchMessage(channels, JSON.stringify({
-        jsonrpc: '2.0',
-        id: 500,
-        result: {},
-      }));
-
-      expect(received[0]).toHaveLength(0);
-      expect(received[1]).toHaveLength(0);
-      expect(received[2]).toHaveLength(0);
-    });
-
-    it('does not route ID 1000 (boundary — not in any range)', () => {
-      dispatchMessage(channels, JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1000,
-        result: {},
-      }));
-
-      expect(received[0]).toHaveLength(0);
-      expect(received[1]).toHaveLength(0);
-      expect(received[2]).toHaveLength(0);
-    });
-
-    it('does not route ID 2000 (boundary)', () => {
-      dispatchMessage(channels, JSON.stringify({
-        jsonrpc: '2.0',
-        id: 2000,
-        result: {},
-      }));
-
-      expect(received[0]).toHaveLength(0);
-      expect(received[1]).toHaveLength(0);
-      expect(received[2]).toHaveLength(0);
-    });
-  });
-
-  describe('_ch hint takes precedence over ID range', () => {
-    beforeEach(() => setup(3));
-
-    it('routes ID 1500 with _ch:2 to channel 2 (not channel 1)', () => {
-      dispatchMessage(channels, JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1500,
-        _ch: 2,
-        result: {},
-      }));
-
-      expect(received[0]).toHaveLength(0);
-      expect(received[1]).toHaveLength(1);
       expect(received[2]).toHaveLength(0);
     });
   });
@@ -534,25 +451,6 @@ describe('LSP connection manager — message routing', () => {
       }));
 
       expect(called).toBe(false);
-    });
-
-    it('calls onServerInfo via ID range fallback', () => {
-      setup(2);
-      let serverInfo: { name: string; version: string | null } | null = null;
-      channels[0].onServerInfo = (name, version) => {
-        serverInfo = { name, version };
-      };
-
-      dispatchMessage(channels, JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1001, // in channel 1's range (1001-1999)
-        result: {
-          capabilities: {},
-          serverInfo: { name: 'rust-analyzer', version: '1.75.0' },
-        },
-      }));
-
-      expect(serverInfo).toEqual({ name: 'rust-analyzer', version: '1.75.0' });
     });
   });
 });

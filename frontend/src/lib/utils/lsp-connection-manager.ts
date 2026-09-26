@@ -3,11 +3,8 @@ import { t } from '$lib/i18n';
 import { resolveFile } from './editor-language';
 
 /**
- * Create notification handlers that forward LSP messages to a callback
- * instead of the default CodeMirror dialog (cm-lsp-message).
- *
- * Returns a handler map for the LSPClient `notificationHandlers` option.
- * Returning true stops propagation to the default handler.
+ * Notification handlers that forward LSP messages to a callback instead of the default CodeMirror
+ * dialog (cm-lsp-message). Returning true from one stops propagation to that default.
  */
 export function createLSPNotificationHandlers(
     onMessage: (message: string) => void,
@@ -21,12 +18,6 @@ export function createLSPNotificationHandlers(
         'window/logMessage': handle,
     };
 }
-
-/**
- * Channel ID step for non-overlapping ID ranges per virtual transport.
- * Channel 1: IDs 1001–1999, Channel 2: IDs 2001–2999, etc.
- */
-const CHANNEL_ID_STEP = 1000;
 
 /** The language the backend routes this file to — the manifest's routing key, not the per-file `didOpen` id. */
 function routingLanguage(filePath: string): string {
@@ -48,7 +39,7 @@ export interface LSPTransportOptions {
   filePath: string;
   onDisconnected?: () => void;
   onServerInfo?: (name: string, version: string | null) => void;
-  onReady?: () => void; // Called when backend confirms LSP is fully ready
+  onReady?: () => void;
 }
 
 export interface VirtualTransport extends Transport {
@@ -64,28 +55,37 @@ interface Channel {
   handler: ((value: string) => void) | null;
   onServerInfo?: (name: string, version: string | null) => void;
   onReady?: () => void;
-  subscribed: boolean; // whether workspace/subscribe has been sent for this channel
+  subscribed: boolean; // workspace/subscribe has been sent for this channel
 }
 
 /**
- * Manages a single shared WebSocket connection for ALL workspaces,
- * multiplexing multiple editor tabs across multiple projects through
- * virtual transports.
- *
- * Message routing:
- * - Notifications (no `id`) → delivered to channels sharing the same workspace
- *   (determined by matching textDocument.uri against channel workspace paths)
- * - Responses (has `id`) → routed by `_ch` hint or ID range check
- * - $server/lspReady → routed by `_ch` hint
+ * Whether the "dropped a response" line has been said yet: the one report of a bookkeeping bug,
+ * because a console full of it hides the next one.
  */
-/** Exported so the routing tests can drive dispatchMessage without a socket. */
+let lostResponseReported = false;
+
+/** The one drop on this path that is never silent. */
+function reportLostResponse(id: unknown, channel: unknown): void {
+  if (lostResponseReported) return;
+  lostResponseReported = true;
+  console.warn(
+    `[lsp] dropped the response to request ${String(id)}: ` +
+      (channel == null ? 'no channel was named' : `channel ${String(channel)} has no listener`),
+  );
+}
+
+/**
+ * A single shared WebSocket for every editor tab, multiplexing workspaces and languages over
+ * numbered channels. The backend answers each message with its `_ch`, so the answer reaches the
+ * channel that asked. Exported so the routing tests can drive dispatchMessage without a socket.
+ */
 export class SharedLSPConnection {
   private ws: WebSocket | null = null;
   private channels = new Map<number, Channel>();
   private nextChannelId = 0;
   private connectPromise: Promise<WebSocket> | null = null;
 
-  /** Get the current WebSocket, connecting if needed. */
+  /** The socket to write to, opening one if needed; concurrent callers share one connect. */
   private getCurrentWS(): Promise<WebSocket> {
     if (this.ws?.readyState === WebSocket.OPEN) {
       return Promise.resolve(this.ws);
@@ -125,10 +125,8 @@ export class SharedLSPConnection {
       ws.addEventListener('open', () => {
         if (settled) return;
         settle();
-        // Install unified dispatcher
         ws.onmessage = (e) => this.dispatchMessage(e.data);
         resolve(ws);
-        // Send pending subscriptions for all channels
         this.flushPendingSubscriptions();
       });
 
@@ -144,7 +142,7 @@ export class SharedLSPConnection {
       ws.addEventListener('close', () => {
         if (this.ws === ws) {
           this.ws = null;
-          // Reset subscription state so pending subs are retried on reconnect
+          // The backend forgot every subscription with the socket.
           for (const ch of this.channels.values()) {
             ch.subscribed = false;
           }
@@ -163,7 +161,7 @@ export class SharedLSPConnection {
     return p;
   }
 
-  /** Send pending workspace/subscribe messages for all unsubscribed channels. */
+  /** Re-subscribe every channel: the backend's knowledge of a subscription dies with the socket. */
   private flushPendingSubscriptions(): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     for (const ch of this.channels.values()) {
@@ -173,7 +171,6 @@ export class SharedLSPConnection {
     }
   }
 
-  /** Send workspace/subscribe for a single channel. */
   private sendSubscribe(ch: Channel): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     this.ws.send(JSON.stringify({
@@ -207,11 +204,9 @@ export class SharedLSPConnection {
       }).catch(() => {});
     };
 
-    // If already connected, subscribe immediately
     if (this.ws?.readyState === WebSocket.OPEN) {
       sendSubscribe();
     } else if (this.connectPromise) {
-      // Wait for connection, then subscribe
       this.connectPromise.then(() => sendSubscribe()).catch(() => {});
     }
 
@@ -224,8 +219,7 @@ export class SharedLSPConnection {
       send: (msg: string) => {
         this.getCurrentWS().then((ws) => {
           if (ws.readyState === WebSocket.OPEN) {
-            // Wrap message with channel ID, workspace, language, and file path
-            // so the backend can route to the correct language server.
+            // The hints are how one socket reaches one language server.
             try {
               const parsed = JSON.parse(msg);
               parsed._ch = channel.id;
@@ -234,7 +228,6 @@ export class SharedLSPConnection {
               parsed._file = channel.file;
               ws.send(JSON.stringify(parsed));
             } catch {
-              // Not JSON — send as-is
               ws.send(msg);
             }
           }
@@ -263,12 +256,10 @@ export class SharedLSPConnection {
     try {
       parsed = JSON.parse(text);
     } catch {
-      // Non-JSON — deliver to all channels
       for (const ch of this.channels.values()) ch.handler?.(text);
       return;
     }
 
-    // $server/lspReady — route to specific channel (or broadcast if no _ch)
     if (parsed.method === '$/lspReady') {
       if (parsed._ch != null) {
         const target = this.channels.get(parsed._ch);
@@ -279,7 +270,7 @@ export class SharedLSPConnection {
       return;
     }
 
-    // $server/lspReset — clear all channels (extension was rebuilt)
+    // The extension was rebuilt: every channel must re-subscribe.
     if (parsed.method === '$/lspReset') {
       for (const ch of this.channels.values()) {
         ch.subscribed = false;
@@ -289,61 +280,39 @@ export class SharedLSPConnection {
       return;
     }
 
-    // Notification (no id, has method) → deliver to channels in the same workspace
     if (parsed.id == null && parsed.method) {
       this.dispatchNotification(parsed, text);
       return;
     }
 
-    // Response (has id) → route to owning channel
+    // A response carries the `_ch` of the channel that asked.
     if (parsed.id != null) {
-      // Backend _ch hint (multiplex mode)
-      if (parsed._ch != null) {
-        const target = this.channels.get(parsed._ch);
-        if (target?.handler) {
-          // Extract serverInfo from initialize response
-          const si = parsed.result?.serverInfo;
-          if (si && target.onServerInfo) {
-            target.onServerInfo(si.name || '', si.version || null);
-          }
-          const clean = { ...parsed };
-          delete clean._ch;
-          target.handler(JSON.stringify(clean));
+      const target = parsed._ch != null ? this.channels.get(parsed._ch) : undefined;
+      if (target?.handler) {
+        const si = parsed.result?.serverInfo;
+        if (si && target.onServerInfo) {
+          target.onServerInfo(si.name || '', si.version || null);
         }
+        const clean = { ...parsed };
+        delete clean._ch;
+        target.handler(JSON.stringify(clean));
         return;
       }
-
-      // Fallback: ID range check (backward compat with non-multiplex backend)
-      const idNum = Number(parsed.id);
-      if (!isNaN(idNum)) {
-        for (const ch of this.channels.values()) {
-          const base = ch.id * CHANNEL_ID_STEP;
-          if (idNum >= base + 1 && idNum < base + CHANNEL_ID_STEP) {
-            // Extract serverInfo from initialize response
-            const si = parsed.result?.serverInfo;
-            if (si && ch.onServerInfo) {
-              ch.onServerInfo(si.name || '', si.version || null);
-            }
-            ch.handler?.(text);
-            return;
-          }
-        }
-      }
+      // Nothing is listening for it. Thrown away quietly, this looks to the editor exactly like a
+      // language server that never answered, which is the failure this whole path exists to avoid.
+      reportLostResponse(parsed.id, parsed._ch);
       return;
     }
 
-    // Unknown message type — deliver to all
     for (const ch of this.channels.values()) ch.handler?.(text);
   }
 
   /** Route a notification to channels in the same workspace. */
   private dispatchNotification(parsed: any, text: string): void {
-    // Try to extract workspace from textDocument.uri
     const uri = parsed?.params?.textDocument?.uri;
     if (uri && typeof uri === 'string') {
-      // Strip file:// prefix
+      // A notification names a document, not a channel, so the workspace path is the only match.
       const uriPath = uri.replace(/^file:\/\//, '');
-      // Deliver to channels whose workspace is a prefix of the URI path
       for (const ch of this.channels.values()) {
         if (uriPath.startsWith(ch.workspace)) {
           ch.handler?.(text);
@@ -352,8 +321,7 @@ export class SharedLSPConnection {
       return;
     }
 
-    // No workspace context — broadcast to all channels
-    // (e.g., $/progress, window/logMessage)
+    // Nothing names a workspace ($/progress, window/logMessage), so every channel may care.
     for (const ch of this.channels.values()) ch.handler?.(text);
   }
 
@@ -377,8 +345,6 @@ class LSPConnectionManager {
     return LSPConnectionManager.instance;
   }
 
-  // Single shared WebSocket connection for all workspaces.
-  // Each channel carries its own workspace path via the _workspace hint.
   private connection = new SharedLSPConnection();
 
   requestChannel(options: LSPTransportOptions): Promise<VirtualTransport> {
@@ -387,13 +353,10 @@ class LSPConnectionManager {
 }
 
 /**
- * Request a virtual LSP transport from the shared connection manager.
- * All editors across all projects share a single WebSocket connection.
- * The backend routes messages to the correct language server via the
- * _workspace and _lang hints on each message.
- *
- * Returns a standard CodeMirror Transport plus a `release()` method
- * to free the channel when the editor tab is closed.
+ * Request a virtual LSP transport from the shared connection manager. All editors share one
+ * socket, and a language server is scoped to a workspace and a language, so each tab's messages
+ * must be distinguishable — the LSPClient's own `virtual` option is not the answer because the
+ * shared socket outlives any one extension.
  */
 export function requestLSPChannel(options: LSPTransportOptions): Promise<VirtualTransport> {
   return LSPConnectionManager.getInstance().requestChannel(options);

@@ -70,6 +70,10 @@ only under load.
   `file-list` / `file-entry` as well, because that is the name its specs locate them by (the props are
   `listingClass` / `rowClass`, and `file-drop.css` matches either). Drop the second name and no gate fails — only
   `editor-line-task`.
+- **`toHaveCount(0)` is not a visibility check.** It counts attached nodes. An element the component
+  builds with the card and reveals by unhiding its row is attached the whole time — the hover card's
+  "Go to Definition" button is one. Say `toBeHidden()` for "not on screen yet", and keep
+  `toHaveCount(0)` for a node the code never creates.
 - **`[role="dialog"]` is not a selector here.** BaseModal, `CommitDiffOverlay`,
   `TerminalPanel` and BOTH explorer views carry `role="dialog"`, and every ChatMessage's
   edit `<dialog>` has it implicitly — so the bare locator is a strict-mode violation
@@ -85,8 +89,7 @@ only under load.
   NOT `nth(1)`, which is New file). The review bar has three `.btn-commit-done` buttons —
   only `.btn-commit-and-done` opens the commit dialog, and it is gated on STAGED changes
   while a trailing *user* chat entry makes it render "Resume" instead (`waitForTurnAnswered`).
-- **Offline = abort `**/api/**`, not `context.setOffline(true)`.** The offline screen
-  (`App.svelte`'s `hasLocalCache` branch, from `session-boot.svelte.ts`) exists for "app booted, API
+- **Offline = abort `**/api/**`, not `context.setOffline(true)`.** The offline screen  (`App.svelte`'s `hasLocalCache` branch, from `session-boot.svelte.ts`) exists for "app booted, API
   unreachable, cache available"; going fully offline takes the document down too, so you assert on
   Chrome's error page.
 - **`locator.isVisible({ timeout })` does not wait** — Playwright's own types say so ("does
@@ -160,6 +163,11 @@ reachable from a normal task prompt: the plan-first skill is in **every** system
 `isPlanMode` branch answers first and a spec that asks for "edit" gets `create_task`. That is why
 several chat specs asserted against the wrong tool card for their whole life — and why the fix is
 a pin, not a reordering — `fill` a prompt like `edit 1749… llm-fixture:tool_call_edit_file`.
+That reachability is a machine condition: `prompts/skills/` is gitignored, so a checkout without it
+has no plan route at all — `isPlanMode` answers false and the keyword table decides. Such a checkout
+sees `editor-line-task`'s real-time-streaming test wait 30 s for a `.tool-call-entry` that never
+arrives, because the mock answered that turn with plain text. Measured both ways on that one spec: red
+without the directory, green with one `plan-first/SKILL.md` inside it.
 **A pinned tool-call fixture also needs its operand**: the tool runs in the task's worktree, and the
 e2e repos hold only a README, so a fixture that edits `src/lib/utils/format.ts` fails on a missing
 file unless the spec writes it first (`writeFileInWorktree`, task-scoped). And the task's **creation**

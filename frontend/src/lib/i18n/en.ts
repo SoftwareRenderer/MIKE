@@ -1797,6 +1797,9 @@ const catalog = {
     'lsp.websocketError': 'LSP WebSocket error',
     'lsp.symbolTimeout': 'LSP symbol request timeout',
     'lsp.goToDefinition': 'Go to Definition',
+    'lsp.hoverWaiting': 'Waiting for {server}…',
+    'lsp.hoverNoAnswer': '{server} did not answer',
+    'lsp.hoverServerUnknown': 'the language server',
     'lsp.definitionOutsideTask': 'Definition is outside this task workspace',
     'lsp.definitionOutsideProject': 'Definition is outside this project workspace',
 

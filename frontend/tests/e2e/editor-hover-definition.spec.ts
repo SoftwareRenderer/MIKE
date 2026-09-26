@@ -5,18 +5,14 @@ import { join } from 'path';
 import { csrfFetch, apiGetConfig, createTaskViaApi } from './helpers';
 
 /**
- * Regression coverage for the editor's go-to-definition UX.
+ * The editor's go-to-definition UX.
  *
- * The reported bug: "Go to Definition sometimes disappears when trying to click
- * it." The old affordance was a `hoverTooltip` whose range was a single
- * character, and CodeMirror's hover plugin dismisses a hover the moment the
- * pointer leaves that character (±4px around the tooltip box) — so the motion
- * needed to reach the button was the motion that closed it. A fast pointer
- * survived, a careful one did not.
+ * Keeping the card open is the hard half: the pointer has to travel from the identifier to the
+ * card's button, and every gesture that dismisses a hover on leaving the text closes it before the
+ * click lands. So open and close are the card's own, and these tests move the pointer in small
+ * steps — the deliberate slow move.
  *
- * The tests below drive a REAL browser with real layout (jsdom has neither),
- * and move the pointer in small steps — the deliberate slow move that used to
- * lose the card.
+ * The tests drive a REAL browser with real layout (jsdom has neither).
  *
  * No language server is involved: `/api/extensions` is stubbed with a fake Go
  * LSP extension so the editor believes one is installed, and `/api/lsp` is
@@ -35,6 +31,7 @@ const TARGET = 'target.go';
 
 // caller.go — `Helper` is defined in this file, `Alpha` in target.go, and
 // `Documented` is the symbol the fake gives long, rule-filled documentation.
+// `Stalled` is the one the fake never answers and `LateDoc` the one it answers late.
 //   1 package hover
 //   2
 //   3 func Helper() int { return 2 }
@@ -44,6 +41,10 @@ const TARGET = 'target.go';
 //   7 }
 //   8
 //   9 func Documented() int { return 3 }
+//  10
+//  11 func Stalled() int { return 4 }
+//  12
+//  13 func LateDoc() int { return 5 }
 const CALLER_SRC = `package hover
 
 func Helper() int { return 2 }
@@ -53,6 +54,10 @@ func Use() int {
 }
 
 func Documented() int { return 3 }
+
+func Stalled() int { return 4 }
+
+func LateDoc() int { return 5 }
 `;
 
 const TARGET_SRC = `package hover
@@ -83,9 +88,8 @@ const FAKE_LSP_INIT = (targetPath: string) => {
     /**
      * Documentation with the shape a real server sends for a documented symbol:
      * a signature block, then prose in sections split by `---` (markdown rules),
-     * taller than any reasonable tooltip. This is the input that used to push the
-     * card's "Go to Definition" button below the fold — and the `---` are kept in
-     * the fixture because the card is expected to render none of them.
+     * taller than the card itself. The `---` stay in the fixture because the card
+     * renders none of them.
      */
     const PARAGRAPH =
         'Documents the symbol at enough length that the documentation itself has to scroll inside the card, ' +
@@ -94,6 +98,14 @@ const FAKE_LSP_INIT = (targetPath: string) => {
         Array.from({ length: n }, (_, i) => `Section ${i + 1}. ${PARAGRAPH}${PARAGRAPH}`).join('\n\n');
     const LONG_DOC =
         '```go\nfunc Documented() int\n```\n\n---\n\n' + section(4) + '\n\n---\n\n' + section(4) + '\n\n---\n';
+
+    /**
+     * `LateDoc` answers documentation after LATE_DOC_MS and its definition after LATE_DEF_MS; that
+     * order is the fixture. They live here because an init script is serialized into the page and a
+     * module constant is not.
+     */
+    const LATE_DOC_MS = 2500;
+    const LATE_DEF_MS = 6000;
 
     class FakeSocket extends EventTarget {
         /** Only `readyState`, `send`, `close`, `onmessage` and the event target
@@ -192,6 +204,14 @@ const FAKE_LSP_INIT = (targetPath: string) => {
                 case 'textDocument/hover': {
                     const { line, character } = params.position;
                     const word = this.wordAt(params.textDocument.uri, line, character);
+                    if (word === 'Stalled') {
+                        // Nothing answers it; only the card's own ceiling ends the wait.
+                        return;
+                    }
+                    if (word === 'LateDoc') {
+                        setTimeout(() => this.reply(msg, { contents: { kind: 'markdown', value: '```go\nfunc LateDoc() int\n```\n\nThe documentation arrived while the definition was still being computed.' } }), LATE_DOC_MS);
+                        return;
+                    }
                     if (word === 'Documented') {
                         this.reply(msg, { contents: { kind: 'markdown', value: LONG_DOC } });
                     } else if (word === 'Helper' || word === 'Alpha') {
@@ -203,18 +223,31 @@ const FAKE_LSP_INIT = (targetPath: string) => {
                     }
                     return;
                 }
+                case '$/cancelRequest':
+                    // The log is how a test sees that an abandoned hover was cancelled.
+                    return;
                 case 'textDocument/definition': {
                     const { line, character } = params.position;
                     const uri = params.textDocument.uri;
                     const word = this.wordAt(uri, line, character);
+                    if (word === 'Stalled') {
+                        // Neither half is answered, so an abandoned hover has two requests to
+                        // cancel.
+                        return;
+                    }
+                    if (word === 'LateDoc') {
+                        // The definition is the slow half of the two, so the documentation has to be
+                        // on screen before this lands.
+                        setTimeout(() => this.reply(msg, [{ targetUri: uri, targetRange: { start: { line: 12, character: 5 }, end: { line: 12, character: 12 } }, targetSelectionRange: { start: { line: 12, character: 5 }, end: { line: 12, character: 12 } } }]), LATE_DEF_MS);
+                        return;
+                    }
                     if (word === 'Alpha') {
                         this.reply(msg, [{ targetUri: TARGET_URI, targetRange: { start: { line: 2, character: 5 }, end: { line: 2, character: 10 } }, targetSelectionRange: { start: { line: 2, character: 5 }, end: { line: 2, character: 10 } } }]);
                     } else if (word === 'Helper') {
                         // Same-file definition (line 3, 1-based).
                         this.reply(msg, [{ targetUri: uri, targetRange: { start: { line: 2, character: 5 }, end: { line: 2, character: 11 } }, targetSelectionRange: { start: { line: 2, character: 5 }, end: { line: 2, character: 11 } } }]);
                     } else if (word === 'Documented') {
-                        // Same-file, and far enough down that a card which grew past
-                        // its own height used to park its button off-screen.
+                        // Same-file, and far enough down that a tall card must keep its button on screen.
                         this.reply(msg, [{ targetUri: uri, targetRange: { start: { line: 8, character: 5 }, end: { line: 8, character: 15 } }, targetSelectionRange: { start: { line: 8, character: 5 }, end: { line: 8, character: 15 } } }]);
                     } else {
                         this.reply(msg, []);
@@ -318,10 +351,8 @@ async function blankSpot(page: Page) {
         const view = el?.__view;
         if (!view) return null;
         const rect = view.dom.getBoundingClientRect();
-        // Past the END of the last line's text, not below it. The area under the
-        // code is only blank while the fixture ends higher up: a "blank" spot that
-        // lands on an identifier turns the pointer move into a re-target, which is
-        // a different test than leaving the card alone.
+        // Past the end of the last line's text, not below it: a "blank" spot that lands on an
+        // identifier turns the move into a re-target, which is a different test.
         const at = view.coordsAtPos(view.state.doc.line(view.state.doc.lines).to);
         if (!at) return null;
         return { x: Math.min(rect.right - 8, at.right + 80), y: Math.max(rect.top + 8, at.bottom - 6) };
@@ -361,9 +392,8 @@ const CARD_BUTTON = '.cm-lsp-action-button';
 test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
     let projectId = '';
 
-    // No "is a language server installed?" gate here, unlike lsp-integration.spec.ts: this suite answers
-    // `/api/extensions` itself and fakes the LSP socket, so asking the real server measures a list the
-    // suite replaces — the gate could only ever answer "skip". `waitForLSPReady` is the precondition.
+    // The suite answers `/api/extensions` itself, so an installed-server gate could only ever
+    // answer "skip"; `waitForLSPReady` is the precondition.
 
     test.beforeAll(async ({ browser }) => {
         rmSync(HOVER_REPO, { recursive: true, force: true });
@@ -418,8 +448,7 @@ test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
 
         const button = page.locator(CARD_BUTTON);
         const box = (await button.boundingBox())!;
-        // The regression: 12 small steps from the symbol to the button. The old
-        // hover closed on the first of them.
+        // 12 small steps: the pointer has to travel from the symbol to the button.
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 12 });
         await expect(button).toBeVisible();
         await expect(page.locator(CARD)).toBeVisible();
@@ -435,22 +464,18 @@ test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
         await page.mouse.move(symbol.x, symbol.y);
         await expect(page.locator(CARD_BUTTON)).toBeVisible({ timeout: 10000 });
 
-        // Leaving the identifier ends the card: the pointer is no longer asking about `Alpha`. That a
-        // pointer reaching for the button is not punished is the other guarantee — measured by the
-        // 12-step trip in the test above.
+        // Leaving the identifier ends the card: the pointer no longer asks about `Alpha`.
         const away = (await blankSpot(page))!;
         await page.mouse.move(away.x, away.y, { steps: 3 });
         await expect(page.locator(CARD)).toHaveCount(0);
 
-        // steps: 1 on purpose: a multi-step move classifies every point on the way, and crossing a
-        // neighbour would re-arm the dwell, measuring the route instead of the rule.
+        // steps: 1 — a multi-step move classifies every point on the way, and crossing a
+        // neighbour would re-arm the dwell.
         const arrived = Date.now();
         await page.mouse.move(symbol.x, symbol.y, { steps: 1 });
         await expect(page.locator(CARD)).toBeVisible({ timeout: 5000 });
         const waited = Date.now() - arrived;
-        // A card that came back the moment the pointer touched the identifier is the bug. The floor is
-        // 300ms rather than 500 because a slow round trip can only lengthen the wait: this fails on
-        // behaviour, never on the machine.
+        // 300ms rather than 500 as the floor: a slow round trip can only lengthen the wait.
         expect(waited, `card returned after ${waited}ms — the hover dwell was not paid`).toBeGreaterThan(300);
     });
 
@@ -513,6 +538,61 @@ test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
         await expect(page.locator(CARD)).toHaveCount(0);
     });
 
+    // ── What the card does while it waits ────────────────────────────────────
+
+    test('a request the server never answers ends on a sentence, never on a placeholder', async ({ page }) => {
+        await openCaller(page);
+
+        const spot = await coordsOf(page, 'Stalled()');
+        await page.mouse.move(spot.x, spot.y);
+        await expect(page.locator(CARD)).toBeVisible({ timeout: 10000 });
+        const status = page.locator('.cm-lsp-action-status');
+
+        // The placeholder is a moment: the wait gets a name, and the non-answer gets a sentence.
+        await expect(status).toContainText('Waiting for fakegopls', { timeout: 5000 });
+        // This is the ceiling speaking — after the 8s a request is allowed, inside the 12s wait.
+        await expect(status).toHaveText('fakegopls did not answer', { timeout: 12000 });
+        await expect(page.locator(CARD)).toBeVisible();
+
+        // Moving away is what tells the server to stop.
+        const away = (await blankSpot(page))!;
+        await page.mouse.move(away.x, away.y, { steps: 3 });
+        await expect
+            .poll(
+                async () =>
+                    page.evaluate(
+                        () =>
+                            (
+                                (window as any).__fakeLSP.log as { method?: string }[]
+                            ).filter(m => m.method === '$/cancelRequest').length,
+                    ),
+                { timeout: 5000 },
+            )
+            .toBeGreaterThan(0);
+    });
+
+    test('each half of the answer lands on the card as it arrives', async ({ page }) => {
+        await openCaller(page);
+
+        const spot = await coordsOf(page, 'LateDoc()');
+        await page.mouse.move(spot.x, spot.y);
+        await expect(page.locator(CARD)).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('.cm-lsp-action-status')).toContainText('Waiting for fakegopls', {
+            timeout: 5000,
+        });
+
+        // Documentation lands at 2.5s and the definition at 6s, and the pointer never left.
+        await expect(page.locator('.cm-lsp-action-docs')).toContainText('documentation arrived', {
+            timeout: 5000,
+        });
+        await expect(page.locator('.cm-lsp-action-status')).toBeHidden();
+        // The definition is answered at 6s, so it is still outstanding. The button's element is
+        // built with the card and its row is hidden until a target lands, so this is a check on
+        // visibility.
+        await expect(page.locator(CARD_BUTTON)).toBeHidden();
+        await expect(page.locator(CARD_BUTTON)).toBeVisible({ timeout: 10000 });
+    });
+
     test('long documentation scrolls beneath the pinned button, without its rules', async ({ page }) => {
         await openCaller(page);
 
@@ -546,23 +626,20 @@ test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
             };
         });
 
-        // The fixture's documentation carries three `---` dividers; the card
-        // renders none of them …
+        // The fixture's documentation carries three `---` dividers; none may be rendered …
         expect(geometry.rules).toBe(0);
-        // … without eating the prose they separated.
+        // … and the prose they separated must survive.
         expect(geometry.sections).toBeGreaterThan(4);
 
-        // Signature → prose and prose → prose are one collapsed margin apart. A
-        // container with `white-space: pre-wrap` renders the newline the
-        // markdown renderer writes *between* block tags, which cost a full empty
-        // line at every one of those breaks.
+        // `white-space: pre-wrap` would render the newline the markdown writer puts between
+        // block tags as a blank line at every break.
         expect(geometry.signatureToBody).toBeLessThanOrEqual(4);
         expect(geometry.paragraphGap).toBeLessThanOrEqual(4);
 
-        // There IS something to scroll, and it is the documentation …
+        // The documentation scrolls …
         expect(geometry.bodyOverflows).toBeGreaterThan(0);
         expect(geometry.bodyOverflowY).toBe('auto');
-        // … never the card, which is what used to take the button with it.
+        // … the card never does, or the button leaves with it.
         expect(geometry.cardOverflowY).toBe('hidden');
         expect(geometry.cardScrolled).toBe(0);
         // 240px cap plus its own padding and border.
@@ -602,10 +679,8 @@ test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
         const config = await apiGetConfig(page);
         const worktreeFile = `${config.workspace_dir}/${projectId}/${taskId}/${CALLER}`;
 
-        // Make the worktree's copy differ from the committed one. Both trees
-        // otherwise hold byte-identical files, and the assertions below would
-        // pass for the project's HEAD copy — the exact file a task jump must
-        // never open.
+        // The worktree's copy must differ from the committed one, or the assertions below
+        // would pass for the project's HEAD copy.
         const init = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/init`, { method: 'POST' });
         expect(init.ok, `init task worktree: ${JSON.stringify(init.data)}`).toBe(true);
         await expect.poll(() => existsSync(worktreeFile), { timeout: 20000 }).toBe(true);

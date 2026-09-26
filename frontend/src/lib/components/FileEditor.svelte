@@ -522,10 +522,9 @@
             // signature help) — the browser's page-sized block margins are far
             // too much whitespace in a 12px card.
             lspDocsTheme,
-            // Hover documentation + "Go to Definition", and Ctrl/Cmd+Click. Both
-            // resolve the connection through LSPPlugin at use time, so they keep
-            // working across an LSP reconnect.
-            lspDefinitionActions({ canJump: canJumpTo, onJump: openDefinition }),
+            // working across an LSP reconnect. The footer already names the server a waiting card
+            // should name.
+            lspDefinitionActions({ canJump: canJumpTo, onJump: openDefinition, serverLabel: () => lspServerName }),
             EditorView.updateListener.of((update) => {
                 if (update.docChanged) {
                     // Sync content first, then compute hasChanges vs disk

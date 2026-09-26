@@ -4,7 +4,7 @@
   "longsent": 8
  },
  "_global": {
-  "longsent": 217
+  "longsent": 205
  },
  "docs/adding-a-preference.md": {
   "history": 0,
@@ -98,6 +98,10 @@
   "history": 0,
   "longsent": 4
  },
+ "docs/lsp-transport.md": {
+  "history": 0,
+  "longsent": 0
+ },
  "docs/markup-sanitizing.md": {
   "history": 0,
   "longsent": 5
@@ -116,7 +120,7 @@
  },
  "docs/reconnection.md": {
   "history": 5,
-  "longsent": 24
+  "longsent": 23
  },
  "docs/sandbox-bridge.md": {
   "history": 3,

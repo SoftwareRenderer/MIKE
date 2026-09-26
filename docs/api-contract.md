@@ -6,10 +6,10 @@ table's exemptions, and the error vocabulary.
 ## Which package owns an endpoint
 
 **A domain package serves its own endpoints.** `backend/api` holds the handlers for domain resources —
-`TaskHandler`, `ProjectHandler`, `BoardHandler`, `GitHandler` — so a new handler for a task, project, board
+`TaskHandler`, `ProjectHandler`, `BoardHandler`, `GitHandler`. A new handler for a task, project, board
 or git route goes there, constructed in `NewServer` and registered on the `*Server`'s mux. `backend/server`
 holds the transport: the listener, TLS, session/CSRF middleware, the shutdown stage table, the detached
-base context, and therefore the endpoints that are *about the listener* — the `(*Server)` methods in
+base context. It therefore holds the endpoints that are *about the listener* — the `(*Server)` methods in
 `handler_*.go` (`handleFS…`, `handleThread…`, `handleSessions…`), which are methods on `Server` precisely
 because they call `s.broadcastTaskDiff`, `s.lockWorktree`, `s.fsWriteTarget` and take the `s.gitTask` lock.
 `handleTaskSend` is one of them for the same reason: the truncation it may perform releases the checkpoints
@@ -17,19 +17,19 @@ the discarded turns pinned and the forks keyed on their rows, which is `handler_
 
 The direction is `server → api` and never back; `backend/api` imports no `backend/server`, which is why a
 handler that needs the hub or a lock is *injected* with a function value instead. That one-way edge is what
-makes two plausible refactors unavailable rather than merely deferred: folding every handler into one
-package means moving `Server` with them or taking a `server ↔ api` import cycle, and splitting
+makes two plausible refactors unavailable rather than merely deferred. Folding every handler into one
+package means moving `Server` with them or taking a `server ↔ api` import cycle. Splitting
 `backend/api` by domain means inventing a shared-helper package to solve a naming problem, because
 `resolveTask`, `requireWorktreeMgr` and `resolveWorktree` (`http.go`) are shared between `task.go` and
 `git.go`. The mixed `Handle*`/`handle*` naming inside `backend/api` is the same boundary showing through,
-not drift: a handler is exported because `backend/server`'s route table names it and unexported because only
+not drift: a handler is exported because `backend/server`'s route table names it. It is unexported because only
 the package calls it, so renaming one set into the other changes who may reach it.
 
 ## Who may call a route at all
 
 Two credentials reach this server. A login cookie reaches everything the middleware guards. A bearer
-token reaches the patterns in `tokenScope` (`backend/server/token_auth.go`) and nothing else, which is
-checked against the pattern the mux reports for the request — so a route renamed without editing that
+token reaches the patterns in `tokenScope` (`backend/server/token_auth.go`) and nothing else. The grant is
+checked against the pattern the mux reports for the request, so a route renamed without editing that
 map loses its grant rather than keeping one under the old name. `docs/api.md` is the client-facing
 version of that list and of what each route does; `TestTokenScopeIsTheApprovedSet` holds the code and
 that list together. Nothing else in this file changes for a token caller except CSRF, which has no
@@ -93,8 +93,8 @@ in `backend/exec/llm_crash_test.go` (one stored row for three attempts), `stream
 
 The stored row is the permanent record that the provider was interrupted; the awaiting line is live
 state and clears when the retried call streams (`clearAwaiting`) or when the turn ends (`complete`,
-`error`). A turn that ran tools and then lost the provider leaves no partial assistant row — the dead
-call never reached `finalizeTurn`, which is what persists it — so the client drops the half-streamed
+`error`). A turn that ran tools and then lost the provider leaves no partial assistant row: the dead
+call never reached `finalizeTurn`, which is what persists it. So the client drops the half-streamed
 text with `dropAbandonedTurn()` and the retry streams the answer in its place.
 
 ### A tool call the user stopped says so in a field
@@ -158,7 +158,8 @@ Tests: `backend/api/task_update_test.go`, `backend/config/updates_test.go`.
 ## The acknowledged memory alert
 
 `tasks.memory_alert_ack` is on every task payload: `null` when nobody dismissed the alert, an object
-`{peak_mb, oom_kills, limit_mb}` when someone did — the numbers it showed at the time, which is what
+`{peak_mb, oom_kills, limit_mb}` when someone did. The object is the numbers the alert showed at the
+time, which is what
 decides whether it comes back (`memoryAlertAckCovers` in `$lib/utils/memory-stats.ts`; the client owns
 that rule and the server stores only what it is told). It is a column on the row, so one dismissal
 serves every device, and the route that writes it broadcasts the task the way any other task change
@@ -173,14 +174,14 @@ answers 405 with an `Allow` header before any handler runs, and handlers do not 
 refuse. A new methodless `/api` route is an archgate `routes` violation, so it fails `make check` rather
 than being noticed in review. A methodless route also escapes `CSRFMiddleware`, which guards non-GET only.
 
-Exemptions, each with a reason: the extensions file-server subtree (`/extensions/`), the two WebSocket
-upgrades (`/api/stream`, `/api/lsp` — they upgrade on GET and never inspect the verb),
-`handler_preview.go`'s two `r.Method != http.MethodHead` checks (they suppress a HEAD *body*, not a
-request), and `handleTaskMessages` (three verbs through one function).
+Exemptions, each with a reason: the extensions file-server subtree (`/extensions/`) and the two WebSocket
+upgrades (`/api/stream`, `/api/lsp`), which upgrade on GET and never inspect the verb.
+`handler_preview.go`'s two `r.Method != http.MethodHead` checks suppress a HEAD *body*, not a
+request, and `handleTaskMessages` takes three verbs through one function.
 
 The frontend is served **behind** the mux (`spaBehind`, `backend/server/routes.go`), never as a route in
-it, and that is a route-verb rule rather than a styling preference: a catch-all pattern inside a
-`ServeMux` outranks that mux's own verb-mismatch answer, so `GET` on a POST-only `/api` route gets served
+it. That is a route-verb rule rather than a styling preference: a catch-all pattern inside a
+`ServeMux` outranks that mux's own verb-mismatch answer. `GET` on a POST-only `/api` route would be served
 the application document — a 200 that reads to a caller as a route which accepted the request. Behind the
 mux, an unmatched path outside `/api/` is the SPA's and everything under `/api/` keeps the mux's answer,
 405 and `Allow` included. `TestSPAServesNothingToAWrongVerbOnAnAPIPath` and
@@ -189,7 +190,7 @@ mux, an unmatched path outside `/api/` is the SPA's and everything under `/api/`
 A handler that switches on `r.Method` is not a methodless route and is not stale either. Nine branches
 across six files (`api/task.go`, `api/project.go`, `config/config.go`, `extensions/handler.go`,
 `server/handler_message.go`, `server/handler_thread.go`) end a verb switch in
-`httputil.MethodNotAllowed`, and because a `GET` pattern also matches `HEAD` it is that arm which answers
+`httputil.MethodNotAllowed`. Because a `GET` pattern also matches `HEAD`, it is that arm which answers
 HEAD — deliberately, so `HEAD /api/config` refuses while `HEAD /api/health` answers.
 `TestGETPatternAlsoAnswersHEAD` pins which side each route is on; deleting those arms would turn nine
 deliberate 405s into bodiless 200s.
@@ -236,8 +237,8 @@ the thread whole.
 
 A route under `/api/projects/{projectID}/tasks/{taskID}/` names a task, but threads, messages and the
 diff cache are keyed by task or message id alone, so the lookup that fetches one never learns which task
-asked. Each of these resolves the task in the path first (`store.GetTask(projectID, taskID)`) and, where
-the row carries a task of its own, compares its `TaskID` with the path before anything is read or
+asked. Each of these resolves the task in the path first (`store.GetTask(projectID, taskID)`). Where
+the row carries a task of its own it compares its `TaskID` with the path before anything is read or
 deleted; `server.messageInTask` is the helper for the message routes, and `HandleTaskDiffFile` settles
 the pair before the cache. A handler that hands `{messageID}` straight to `GetTaskMessageByID` answers
 for another project's row.
@@ -271,8 +272,8 @@ starts older. Nothing between two reads is skipped or repeated.
 the user rows are: the newest prompts of the task's active thread, oldest first, with `X-Turns-More` and
 `X-Turns-Before` naming the older page. Each carries its row id, its instant, and `text` — the head of the
 prompt up to `store.TurnLabelChars` characters, bounded in the read rather than in the response. The chat's
-sticky header needs the prompt above the rows it holds, and the window counted in answers cannot name it:
-one turn is routinely more answers than a window, so the prompt that opened that turn is older than every
+sticky header needs the prompt above the rows it holds, and the window counted in answers cannot name it.
+One turn is routinely more answers than a window, so the prompt that opened that turn is older than every
 row the task opens on. Default 10, ceiling 50 — outside that a 400 naming `limit` — and a `before` this
 route never issued is a 400 naming `before`. Its cursor names a prompt and the window's names a row: the
 two reads share the cursor's encoding, not its meaning. Tests: `backend/store/messages_turns_test.go`,
@@ -370,7 +371,7 @@ subresource, what it can carry is the whole permission:
 - **No `Content-Disposition`.** The name comes from the repository, and putting it in a header makes a
   crafted filename a header writer; `inline` is the default the route wants anyway.
 - **`CompressMiddleware` passes this response through without buffering it.** The middleware keeps a
-  whole GET body to hash an ETag and then compresses it, which for an image costs several times the file
+  whole GET body to hash an ETag and then compresses it. For an image that costs several times the file
   in memory plus a brotli pass over bytes a codec already finished with, and the buffer sits outside the
   route's cap so the cap stops being the bound. The escape is by `image/` content type, beside the SSE
   one, and it keeps the handler's `Content-Length`. `TestGetImageResponseIsPassedThrough` and
@@ -482,7 +483,8 @@ anyway. Test: `backend/httputil/ws_origin_test.go`.
 than an upgrade it has to work out is dead. Each bound is a package constant mirrored by a field on the
 manager (`maxConns` on `AppStreamManager` and `TerminalManager`, `maxSessions` on `LSPHandler`) so a test
 shrinks the number instead of opening hundreds of sockets. Nothing here reads an environment variable, and
-nothing here is a timeout: inside a bound, a request waits exactly as long as its language server takes.
+nothing here is a deadline: the counts decide, and the one wait a request suffers is its own, off any
+other request's path (`docs/lsp-transport.md`).
 The same rule holds the bookkeeping *behind* the upgrade — a bound that is reached answers what it
 overturns, it never drops it silently.
 
@@ -493,6 +495,8 @@ overturns, it never drops it silently.
 | `term.DefaultMaxConnections` | 64 | live terminal sockets, across every session | 503 before the upgrade |
 | `lsp.DefaultMaxPendingRequests` | 256 | requests one session has waiting for an answer | the oldest is answered with a JSON-RPC error and loses its slot; an answer that does arrive frees its slot first |
 | `lsp.DefaultMaxQueuedInitializes` | 64 | `initialize` requests waiting behind the one in flight | the whole queue is failed as a failed send fails it, the overflowing request in the same sentence, so a later `initialize` is forwarded |
+| `lsp.DefaultMaxQueuedMessages` | 128 | messages waiting for one workspace's language server | a request is answered with a JSON-RPC error; a notification is logged, because the server's copy of that document is then unknown |
+| `lsp.DefaultMaxQueuedFrames` | 128 | frames one browser has not read off its `/api/lsp` socket | that socket is ended with `StatusTryAgainLater`, so the browser reconnects and resyncs |
 
 Terminal counts connections rather than PTYs because a session is per task or project and every client of
 it shares one shell, so connections are what a client can multiply.
@@ -520,9 +524,10 @@ a frame it never receives.
 
 Two rules keep a **busy** connection from being read as a dead one, and both are about `writeMu`, which the
 pinger holds so a ping cannot interleave with the frames of the one endpoint that passes it — `/api/stream`.
-`/api/lsp` and the terminals pass nil: there a frame is written by whichever goroutine produced it, the
-router or the connection's own read loop, each under its own `WriteTimeout`, so the pinger has no lock of
-ours to refuse to wait behind. The ping's deadline is built *after* the lock is taken, so `KeepaliveTimeout`
+`/api/lsp` and the terminals pass nil: there a frame is written by whichever goroutine produced it —
+the session's own writer for `/api/lsp`, the connection's read loop for a terminal — each under its own
+`WriteTimeout`. The pinger therefore has no lock of ours to refuse to wait behind. The ping's deadline
+is built *after* the lock is taken, so `KeepaliveTimeout`
 bounds the ping and never the queue in front of it, and the lock is taken with `TryLock`, because a lock
 another writer holds is a frame on its way out — liveness evidence — so that tick is skipped. Queuing
 instead was measurable: holding `writeMu` longer than the ping timeout lets a queued tick's deadline expire
