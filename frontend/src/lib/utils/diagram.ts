@@ -26,6 +26,8 @@ const LOCKED_KEYS = [
 
 let mermaidLoader: Promise<typeof import('mermaid').default> | null = null;
 
+let rendererLoaded = false;
+
 /** The library scopes its generated stylesheet to this id and deletes any element already carrying it,
  * so no two renders may share one. */
 let renderCount = 0;
@@ -64,6 +66,7 @@ async function loadMermaid(): Promise<typeof import('mermaid').default> {
         mermaidLoader = import('mermaid')
             .then((module) => {
                 module.default.initialize(configuration());
+                rendererLoaded = true;
                 return module.default;
             })
             .catch((error: unknown) => {
@@ -118,9 +121,61 @@ async function renderOnce(source: string): Promise<DiagramAnswer> {
     }
 }
 
+/** What this session has drawn, oldest first. The transcript hands a fence the same text again whenever a
+ * row is redrawn, and starting from nothing would show the source where the picture stood. */
+const drawn = new Map<string, DiagramAnswer>();
+
+/** The render a second caller with the same text waits on. */
+const pending = new Map<string, Promise<DiagramAnswer>>();
+
+/** One drawing can cost megabytes, so the count alone is not the budget. */
+const MAX_DRAWN_SOURCES = 100;
+const MAX_DRAWN_BYTES = 8 * 1024 * 1024;
+let drawnBytes = 0;
+
+function weight(answer: DiagramAnswer): number {
+    return answer.ok ? answer.imageSrc.length + answer.markup.length : 0;
+}
+
+function remember(source: string, answer: DiagramAnswer): void {
+    const previous = drawn.get(source);
+    if (previous) drawn.delete(source);
+    drawn.set(source, answer);
+    drawnBytes += weight(answer) - (previous ? weight(previous) : 0);
+    while (drawn.size > MAX_DRAWN_SOURCES || drawnBytes > MAX_DRAWN_BYTES) {
+        const oldest = drawn.keys().next();
+        if (oldest.done) break;
+        drawnBytes -= weight(drawn.get(oldest.value)!);
+        drawn.delete(oldest.value);
+    }
+}
+
+/** The picture this `source` already produced, or `null` when nothing has drawn it. Asking again keeps that
+ * picture the newest in the memory. */
+export function drawnDiagram(source: string): DiagramAnswer | null {
+    const answer = drawn.get(source);
+    if (!answer) return null;
+    drawn.delete(source);
+    drawn.set(source, answer);
+    return answer;
+}
+
+async function drawOnce(source: string): Promise<DiagramAnswer> {
+    const answer = await renderOnce(source);
+    // A renderer that never arrived is the transport's failure, so the next call gets to retry it.
+    if (answer.ok || rendererLoaded) remember(source, answer);
+    return answer;
+}
+
 /** A diagram for `source`, or the reason there is none. Never throws. */
 export function renderDiagram(source: string): Promise<DiagramAnswer> {
-    const turn = turns.then(() => renderOnce(source));
+    const already = drawnDiagram(source);
+    if (already) return Promise.resolve(already);
+    const waiting = pending.get(source);
+    if (waiting) return waiting;
+    const turn = turns.then(() => drawOnce(source));
     turns = turn.catch(() => undefined);
-    return turn;
+    const settled = turn.finally(() => { pending.delete(source); });
+    pending.set(source, settled);
+    return settled;
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { stubSvgMeasurement } from './svg-measurement';
-import { renderDiagram } from '../diagram';
+import { renderDiagram, drawnDiagram } from '../diagram';
 
 // The real renderer runs here, so these tests are about what the app is willing to put on screen: the
 // shape of the answer, what a directive may not change, and what a failed render leaves behind.
@@ -116,5 +116,28 @@ describe('renderDiagram', () => {
         const scope = (markup: string) => /#([\w-]+)\s*\{/.exec(markup)?.[1];
         expect(scope(one.markup)).toBeTruthy();
         expect(scope(one.markup)).not.toBe(scope(two.markup));
+    });
+
+    it('answers a source it has already drawn from that drawing', async () => {
+        const source = 'flowchart LR\n  A[Once] --> B[Again]';
+        expect(drawnDiagram(source)).toBeNull();
+        const first = await renderDiagram(source);
+        expect(first.ok).toBe(true);
+        // The same object: a second render would scope its stylesheet to a new id and repaint the picture.
+        expect(drawnDiagram(source)).toBe(first);
+        expect(await renderDiagram(source)).toBe(first);
+    });
+
+    it('runs one render for a source several callers ask for at once', async () => {
+        const source = 'flowchart LR\n  A[Twin] --> B[One]';
+        const [one, two] = await Promise.all([renderDiagram(source), renderDiagram(source)]);
+        expect(one).toBe(two);
+    });
+
+    it('remembers the reason a source was not drawn', async () => {
+        const source = 'flowchart TD\n  A -->>--> B not a diagram twice';
+        const answer = await renderDiagram(source);
+        expect(answer).toEqual({ ok: false, reason: 'failed' });
+        expect(drawnDiagram(source)).toEqual({ ok: false, reason: 'failed' });
     });
 });

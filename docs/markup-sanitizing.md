@@ -91,6 +91,13 @@ it becomes a URL. It renders into a `div` it creates and removes whatever the re
 render at a time, because the library keeps its configuration in one process-global object. A refused
 diagram is the source plus one catalog line. There is no second attempt with weaker settings.
 
+**A drawn source answers again.** `drawnDiagram` is how a fence asks whether its text already has a picture,
+and the answer is the object the first render returned. The transcript hands the same fence text through
+whenever a row is redrawn, and a fence that starts from nothing shows the source where the picture stood, so
+the reader above it moves. The memory holds the newest 100 sources and 8 MB of markup, oldest out first; one
+render answers every fence quoting the same text. `src/lib/utils/__tests__/diagram.unit.ts` and
+`src/lib/components/__tests__/chat-diagram-redraw.unit.svelte.ts` hold this.
+
 **Where CSP is the control.** Text measurement needs layout, so the library builds the diagram inside a
 live element before serializing it. For the length of a draw, markup that no sanitizer of ours has seen is
 in this document, off-screen and `aria-hidden`; `script-src 'self' 'nonce-…'` is what stops anything in it

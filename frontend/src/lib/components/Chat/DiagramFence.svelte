@@ -1,6 +1,6 @@
 <script lang="ts">
     import { t } from '$lib/i18n';
-    import { renderDiagram, type DiagramAnswer } from '$lib/utils/diagram';
+    import { renderDiagram, drawnDiagram, type DiagramAnswer } from '$lib/utils/diagram';
     import FenceCopyButton from './FenceCopyButton.svelte';
 
     interface Props {
@@ -16,6 +16,11 @@
 
     $effect(() => {
         const source = text;
+        const already = drawnDiagram(source);
+        if (already) {
+            answer = already;
+            return;
+        }
         answer = null;
         let live = true;
         void renderDiagram(source).then((result) => {
