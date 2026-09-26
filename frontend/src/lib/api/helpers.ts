@@ -98,9 +98,11 @@ export function resetBadFrameReports(): void {
 }
 
 /** Import queue helpers lazily to avoid circular deps */
-let _setOfflineStatus: ((offline: boolean) => void) | null = null;
-export function registerSetOffline(fn: (offline: boolean) => void): void {
-    _setOfflineStatus = fn;
+let _setHttpReachable: ((reachable: boolean) => void) | null = null;
+
+/** Where `apiFetch` reports what its own requests saw. */
+export function registerSetHttpReachable(fn: (reachable: boolean) => void): void {
+    _setHttpReachable = fn;
 }
 
 /**
@@ -154,10 +156,12 @@ export class ConnectionFailure extends Error {
  * and swallows its failure.
  *
  * Callers that have something to cancel pass `init.signal` (the component's lifetime, or a Stop button).
- * Two outcomes are reported, and they are not the same:
+ * Three outcomes are reported, and they are not the same:
  *
- *   - aborted → `RequestAborted`, and the offline flag is **not** touched;
- *   - no connection → `ConnectionFailure` and the offline flag goes up, which is what the queue wants.
+ *   - aborted → `RequestAborted`, and neither offline reason is touched;
+ *   - no connection → `ConnectionFailure` and the HTTP reason goes up, which is what the queue wants;
+ *   - answered, whatever the status → the HTTP reason goes down, because a `404` is still a server.
+
  *
  * A server that accepts a request and never answers is the case the old timeout existed for. It now shows
  * up as a request that keeps waiting — which is what the user asked for by starting the operation — and the
@@ -171,20 +175,22 @@ export async function apiFetch(url: string, init?: RequestInit & { signal?: Abor
         if (token) headers.set('X-CSRF-Token', token);
     }
     try {
-        return await fetch(url, { ...init, credentials: 'include', headers, signal: init?.signal });
+        const res = await fetch(url, { ...init, credentials: 'include', headers, signal: init?.signal });
+        _setHttpReachable?.(true);
+        return res;
     } catch (e: any) {
         if (e?.name === 'AbortError') {
             // Somebody cancelled this request. That is not an outage, and marking one is how a cancelled
             // dialog used to start queueing every later write to IndexedDB, where it outlives the tab.
             throw new RequestAborted(url, { cause: e });
         }
-        _setOfflineStatus?.(true);
+        _setHttpReachable?.(false);
         throw new ConnectionFailure({ cause: e });
     }
 }
 
 /** Headers for a caller that opens its own response instead of going through `apiFetch` — the progress
- * streams that cost the caller a line rather than the offline flag (`docs/reconnection.md → How a request
+ * streams that cost the caller a line rather than the HTTP reason (`docs/reconnection.md → How a request
  * ends`). Nothing else about the request changes. */
 export async function csrfHeaders(init?: HeadersInit): Promise<Headers> {
     const headers = new Headers(init);

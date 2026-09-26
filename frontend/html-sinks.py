@@ -27,7 +27,7 @@ OUTSIDE_SRC = ("index.html", "public/host-client.js")
 # Every file in core that turns a string into elements, with the reason it is safe.
 ALLOW: dict[str, str] = {
     "src/lib/components/Chat/ChatMessage.svelte": "escapeHtml on the user's own text (assistant markdown renders in Chat/MarkdownBody)",
-    "src/lib/components/Chat/MarkdownBody.svelte": "utils/sanitize over marked (assistant markdown; a top-level fence renders as Chat/CodeFence instead)",
+    "src/lib/components/Chat/MarkdownBody.svelte": "utils/sanitize over marked (assistant markdown; a top-level fence renders as Chat/CodeFence or Chat/DiagramFence instead)",
     "src/lib/components/Chat/ToolCall.svelte": "utils/sanitize over marked (question, summary, tool result)",
     "src/lib/components/ConfigModal/AgentSection.svelte": "utils/sanitize over marked (manifest description/setup)",
     "src/lib/utils/lsp-hover-actions.ts": "utils/sanitize with the hr tag forbidden, over the LSP plugin's docToHTML",
@@ -103,6 +103,9 @@ URL_SINKS: dict[tuple[str, str], str] = {
         "refuses anything that is not a lone sanitized <svg> root",
     ("src/lib/components/ImageDiffModal.svelte", "url"):
         "encoded-by:lib/api/fs — rawFileURL builds the query with URLSearchParams",
+    ("src/lib/components/Chat/DiagramFence.svelte", "diagram.imageSrc"):
+        "literal — lib/utils/diagram.ts prefixes the markup that svgImageMarkup accepted, so it is never "
+        "text a message wrote. __tests__/diagram.unit.ts pins that the bytes it decodes to are that markup",
     ("src/lib/services/ui-injector.svelte.ts", "setAttribute(src)"):
         "encoded-by:lib/services/ui-injector.svelte — extBaseURL re-encodes every segment of "
         "the served path and refuses one that leaves /extensions/",

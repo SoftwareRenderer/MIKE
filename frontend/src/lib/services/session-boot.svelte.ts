@@ -95,7 +95,7 @@ class SessionBoot {
             authResolved = true;
             clearTimeout(offlineTimer);
             console.error('Failed to check auth:', e);
-            // Mark as offline so API calls skip network and use cache immediately
+            // The boot probe got no answer, so writes wait; reads still try the network.
             setOfflineStatus(true);
             this.hasLocalCache = await this.hasCachedProjects();
             this.isLoadingAuth = false;

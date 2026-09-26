@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import DOMPurify from 'dompurify';
-import { sanitizeHTML, markdownToSafeHTML } from '../sanitize';
+import { sanitizeHTML, markdownToSafeHTML, svgImageMarkup } from '../sanitize';
 import { htmlHazards as hazards } from './html-hazards';
 
 /** The payload classes this app must survive, collected from untrusted sources:
@@ -349,3 +349,92 @@ describe('the hazard scanner itself', () => {
         expect(hazards('<slot><img src=x></slot>')).toEqual([]);
     });
 });
+
+describe('svgImageMarkup — an SVG document headed for an <img>', () => {
+    /** Styles are what this path exists for — they apply to the image's own document — so only the
+     * executable half of the hazard list is asserted here. */
+    const executable = (markup: string) =>
+        hazards(markup).filter((h) => !h.startsWith('style=') && !h.startsWith('stylesheet '));
+
+    const DIAGRAM = [
+        '<svg id="mmd1" width="100%" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40">',
+        '<style>#mmd1{font-size:16px;fill:#ccc}#mmd1 .node rect{fill:#ecd;stroke:#9c9}</style>',
+        '<defs><marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>',
+        '<g class="node"><rect style="fill:#ecd" width="40" height="20"/><text y="10">Start</text></g>',
+        '<path class="edge" d="M40,10 L80,10" marker-end="url(#arrow)"/>',
+        '</svg>',
+    ].join('');
+
+    it('keeps the styling a diagram is unreadable without', () => {
+        const out = svgImageMarkup(DIAGRAM);
+        expect(out).toContain('#mmd1 .node rect{fill:#ecd');
+        expect(out).toContain('style="fill:#ecd"');
+        expect(out).toContain('>Start</text>');
+        // Control: the chat path loses both, which is why a diagram is an image and not markup.
+        const chat = sanitizeHTML(DIAGRAM);
+        expect(chat).not.toContain('#mmd1 .node rect');
+        expect(chat).not.toContain('fill:#ecd');
+    });
+
+    it('drops the one declaration that could move this page', () => {
+        // DOMPurify's defaults keep both halves of this payload.
+        const out = svgImageMarkup(
+            '<svg xmlns="http://www.w3.org/2000/svg" style="position:fixed;inset:0"><style>body{display:none}</style><rect/></svg>',
+        );
+        expect(out).not.toContain('position:fixed');
+        // The nested stylesheet stays: inside the image's own document, `body` is that document's body.
+        expect(out).toContain('body{display:none}');
+    });
+
+    it.each([
+        ['an image from elsewhere', '<svg xmlns="http://www.w3.org/2000/svg"><image href="http://evil.example/x.png"/></svg>'],
+        ['a <use> of another document', '<svg xmlns="http://www.w3.org/2000/svg"><use href="http://evil.example/x.svg#y"/></svg>'],
+        ['a link to another document', '<svg xmlns="http://www.w3.org/2000/svg"><a href="https://evil.example"><text>x</text></a></svg>'],
+        ['an old-namespace href', '<svg xmlns="http://www.w3.org/2000/svg"><use xlink:href="http://evil.example/x.svg#y"/></svg>'],
+    ])('refuses %s but keeps what an internal fragment cannot do', (_name, markup) => {
+        const out = svgImageMarkup(markup);
+        expect(out).not.toContain('evil.example');
+        expect(out).not.toContain('http://evil');
+    });
+
+    it('keeps the internal reference a diagram draws its arrows with', () => {
+        expect(svgImageMarkup('<svg xmlns="http://www.w3.org/2000/svg"><a href="#arrow"><text>x</text></a></svg>')).toContain('href="#arrow"');
+        expect(svgImageMarkup(DIAGRAM)).toContain('marker-end="url(#arrow)"');
+    });
+
+    it.each([
+        ['a script element', '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><rect/></svg>'],
+        ['a handler on an image', '<svg xmlns="http://www.w3.org/2000/svg"><image href="#x" onerror="alert(1)"/></svg>'],
+        ['an animated href', '<svg xmlns="http://www.w3.org/2000/svg"><a><animate attributeName="href" values="javascript:alert(1)"/><text>x</text></a></svg>'],
+        ['an encoded scheme in a link', '<svg xmlns="http://www.w3.org/2000/svg"><a href="&#106;avascript:alert(1)"><text>x</text></a></svg>'],
+        ['HTML in a foreign object', '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject><div onclick=alert(1)>x</div></foreignObject></svg>'],
+    ])('leaves nothing executable behind: %s', (_name, markup) => {
+        const out = svgImageMarkup(markup);
+        expect(executable(out)).toEqual([]);
+    });
+
+    it.each([
+        ['nothing', ''],
+        ['HTML rather than a document', '<p>text</p>'],
+        ['two roots', '<svg xmlns="http://www.w3.org/2000/svg"></svg><svg xmlns="http://www.w3.org/2000/svg"></svg>'],
+        ['text beside the root', 'x<svg xmlns="http://www.w3.org/2000/svg"></svg>'],
+        ['a doctype with an internal subset', '<!DOCTYPE x [<!ENTITY a "&a;&a;">]><svg xmlns="http://www.w3.org/2000/svg"><text>&a;</text></svg>'],
+    ])('refuses %s', (_name, markup) => {
+        expect(svgImageMarkup(markup)).toBe('');
+    });
+
+    it('loses a stylesheet written beside the root rather than inside it', () => {
+        const out = svgImageMarkup('<style>body{display:none}</style><svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>');
+        expect(out).toBe('<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>');
+    });
+
+    it('emits bytes that parse as an SVG document', () => {
+        const out = svgImageMarkup(DIAGRAM);
+        const doc = new DOMParser().parseFromString(out, 'image/svg+xml');
+        expect(doc.querySelector('parsererror')).toBeNull();
+        expect(doc.documentElement.tagName).toBe('svg');
+        // Without the declaration the image would not load at all.
+        expect(doc.documentElement.getAttribute('xmlns')).toBe('http://www.w3.org/2000/svg');
+    });
+});
+

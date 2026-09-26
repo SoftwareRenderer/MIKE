@@ -37,6 +37,10 @@ export const RECONNECT_MAX_DELAY_MS = 30_000;
  * is running fires within milliseconds of the delay it asked for. */
 export const SUSPENDED_GAP_MS = 10_000;
 
+/** First delay (ms) before the offline queue replays again after one of its own sends failed. Each
+ * failure doubles it, up to `RECONNECT_MAX_DELAY_MS`. */
+export const QUEUE_RETRY_BASE_DELAY_MS = 1_000;
+
 // ─── Cache Sizes ───
 
 /** Max entries in the syntax highlighter cache before eviction. */

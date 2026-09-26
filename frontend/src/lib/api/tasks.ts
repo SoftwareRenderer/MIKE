@@ -260,8 +260,7 @@ export interface MessageWindowQuery {
 export const MESSAGE_JUMP_LIMIT = 25;
 
 /** Fetch the newest window of a task's conversation, or an older one by cursor.
- * Always tries the network first: the isOffline flag tracks the WebSocket, not whether HTTP works, so a
- * resumed tab must not fall back to cache. */
+ * Always tries the network first: a read is what releases the queue (`api/queue.ts`). */
 export async function getTaskMessages(
     projectId: string,
     taskId: string,

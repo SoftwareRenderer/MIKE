@@ -606,8 +606,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         onReturn: reconcileAfterAbsence,
     });
 
-    // Browser network signals. 'offline' queues writes immediately;
-    // 'online' flushes the queue and skips the reconnect backoff.
+    // Browser network signals. 'offline' queues writes at once; 'online' lifts that and skips the
+    // reconnect backoff.
     function handleBrowserOffline() {
         setOfflineStatus(true);
     }

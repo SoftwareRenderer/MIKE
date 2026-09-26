@@ -232,6 +232,115 @@ describe('createChatFollow — never fights the user', () => {
     });
 });
 
+describe('createChatFollow — a takeover during an in-flight pin', () => {
+    it('stops a forced settle loop when the reader scrolls away mid-sequence', () => {
+        const follow = createChatFollow();
+        const { el, state } = makeScroller(2000, 500);
+        follow.attach(el, null);
+        pinFrames();
+
+        // Growth re-pins, forced, and the sequence has frames left when the reader moves.
+        state.scrollHeight += 400;
+        fireResize();
+        flushFrames(1);
+
+        el.scrollTop = 0;
+        follow.handleScroll();
+
+        const writes = state.writes;
+        flushFrames(8);
+        expect(follow.following).toBe(false);
+        expect(el.scrollTop).toBe(0);
+        expect(state.writes).toBe(writes);
+        follow.destroy();
+    });
+
+    it('stops the settle loop the moment the wheel goes up, without waiting for the scroll event', () => {
+        const follow = createChatFollow();
+        const { el, state, fire } = makeScroller(2000, 500);
+        follow.attach(el, null);
+        pinFrames();
+
+        // Tokens are arriving, so a pin sequence is in flight.
+        state.scrollHeight += 400;
+        fireResize();
+        flushFrames(1);
+
+        // The scroll event for that gesture arrives after the next frame, too late to be trusted:
+        // a pin frame has already written over the reader's position by then.
+        fire('wheel', { deltaY: -120 } as never);
+        const writes = state.writes;
+        state.scrollHeight += 400;
+        flushFrames(8);
+
+        expect(follow.following).toBe(false);
+        expect(state.writes).toBe(writes);
+        expect(distanceFromBottom(el)).toBeGreaterThan(0);
+        follow.destroy();
+    });
+
+    it('stops following on a key that asks for what is above', () => {
+        for (const key of ['ArrowUp', 'PageUp', 'Home']) {
+            const follow = createChatFollow();
+            const { el, state, fire } = makeScroller(2000, 500);
+            follow.attach(el, null);
+            pinFrames();
+            state.scrollHeight += 400;
+            fireResize();
+            flushFrames(1);
+
+            fire('keydown', { key } as never);
+            const writes = state.writes;
+            flushFrames(6);
+
+            expect(follow.following, `${key} is a request for what is above`).toBe(false);
+            expect(state.writes, `${key} left a settle loop writing`).toBe(writes);
+            follow.destroy();
+        }
+    });
+
+    it('leaves a gesture that asks for the latest to the scroll event', () => {
+        for (const gesture of [
+            { event: 'wheel', args: { deltaY: 120 } },
+            { event: 'keydown', args: { key: 'PageDown' } },
+        ]) {
+            const follow = createChatFollow();
+            const { el, state, fire } = makeScroller(2000, 500);
+            follow.attach(el, null);
+            pinFrames();
+
+            fire(gesture.event, gesture.args as never);
+            state.scrollHeight += 400;
+            fireResize();
+            flushFrames(6);
+
+            expect(follow.following, `${gesture.event} ${JSON.stringify(gesture.args)} stopped following`).toBe(true);
+            expect(distanceFromBottom(el)).toBe(0);
+            follow.destroy();
+        }
+    });
+
+    it('re-engages following when a person forces a pin', () => {
+        const follow = createChatFollow();
+        const { el, state } = makeScroller(2000, 500);
+        follow.attach(el, null);
+        pinFrames();
+        el.scrollTop = 0;
+        follow.handleScroll();
+        expect(follow.following).toBe(false);
+
+        // A send jumps to what was just sent, and the answer that streams after it is followed too.
+        expect(follow.pin(true)).toBe(true);
+        expect(distanceFromBottom(el)).toBe(0);
+        expect(follow.following).toBe(true);
+        state.scrollHeight += 400;
+        fireResize();
+        flushFrames(6);
+        expect(distanceFromBottom(el)).toBe(0);
+        follow.destroy();
+    });
+});
+
 describe('createChatFollow — layout changes with no scroll event', () => {
     it('re-pins when the container shrinks (panel/viewport/keyboard resize)', () => {
         const follow = createChatFollow();
