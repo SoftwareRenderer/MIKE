@@ -245,7 +245,7 @@ var toolCreateTask = types.ChatTool{
 	Function: &types.ToolDef{
 		Name:        ToolCreateTask,
 		DisplayName: "Create Task",
-		Description: "Create a new task on the Kanban board. Use this to decompose work into subtasks. Returns the created task_id, which can be used as parent_task_id for nested subtasks. Do not create duplicate tasks.",
+		Description: "Create a new task on the Kanban board. Returns the created task_id, which can be used as parent_task_id for nested subtasks. Tasks are executed independently and the deepest descendent will be executed first.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": createTaskProps{
