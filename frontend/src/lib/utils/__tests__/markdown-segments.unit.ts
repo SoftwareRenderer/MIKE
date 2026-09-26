@@ -79,7 +79,7 @@ describe('splitMarkdownSegments', () => {
     it('splits a fence out of the prose around it', () => {
         expect(splitMarkdownSegments('before\n\n```go\npackage main\n```\n\nafter')).toEqual([
             { kind: 'markdown', source: 'before\n\n' },
-            { kind: 'code', lang: 'go', text: 'package main' },
+            { kind: 'code', lang: 'go', text: 'package main', open: false },
             { kind: 'markdown', source: '\n\nafter' },
         ]);
     });
@@ -90,7 +90,7 @@ describe('splitMarkdownSegments', () => {
         ['no tag at all', '```\ncode\n```', ''],
     ])('names the fence carrying %s as %j', (_name, source, lang) => {
         const segments = splitMarkdownSegments(source);
-        expect(segments).toEqual([{ kind: 'code', lang, text: 'code' }]);
+        expect(segments).toEqual([{ kind: 'code', lang, text: 'code', open: false }]);
     });
 
     it.each([
@@ -105,14 +105,26 @@ describe('splitMarkdownSegments', () => {
     it('yields a code segment for a fence that is still open', () => {
         expect(splitMarkdownSegments('here:\n\n```python\nx =')).toEqual([
             { kind: 'markdown', source: 'here:\n\n' },
-            { kind: 'code', lang: 'python', text: 'x =' },
+            { kind: 'code', lang: 'python', text: 'x =', open: true },
         ]);
+    });
+
+    it.each([
+        ['a closed fence', '```go\ncode\n```', false],
+        ['a closed fence with a trailing space', '```go\ncode\n```  \n', false],
+        ['a tilde fence', '~~~go\ncode\n~~~', false],
+        ['a fence closed by fewer markers', '````go\ncode\n```', true],
+        ['a fence closed by the other marker', '```go\ncode\n~~~', true],
+        ['an indented code block, which has no fence', '    code\n', false],
+    ])('reads %s as %j', (_name, source, open) => {
+        const [segment] = splitMarkdownSegments(source);
+        expect(segment.kind === 'code' && segment.open).toBe(open);
     });
 
     it('splits an indented code block too', () => {
         expect(splitMarkdownSegments('text\n\n    flagged = True\n')).toEqual([
             { kind: 'markdown', source: 'text\n\n' },
-            { kind: 'code', lang: '', text: 'flagged = True\n' },
+            { kind: 'code', lang: '', text: 'flagged = True\n', open: false },
         ]);
     });
 

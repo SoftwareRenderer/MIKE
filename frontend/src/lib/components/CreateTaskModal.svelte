@@ -11,7 +11,7 @@
     });
     import type { Config, Provider, Task } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
-    import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId, startTask, isTransientError, getLocalBranches } from '$lib/api';
+    import { createTask, getTask, enqueueAction, getOfflineStatus, generateId, startTask, isTransientError, getLocalBranches } from '$lib/api';
     import { appStore, uiStore, dialogStore, removeTaskFromBoard, updateTaskInBoard, appendTaskToBoard } from '$lib/stores';
     import { t } from '$lib/i18n';
     import { ATTACHABLE_IMAGE_ACCEPT, imageSrc } from '$lib/utils/attachments';
@@ -286,7 +286,7 @@
                 dialogStore.showToast(t('app.task.createFailed', { error: reason }), 'error');
                 return;
             }
-            setOfflineStatus(true);
+            // Nothing marks the app offline here: the failed request already reported its own reason.
             const queued = await enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
             (optimisticTask as any).actionId = queued.id;
             await queueStartIfEnabled();

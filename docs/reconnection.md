@@ -584,12 +584,13 @@ message after a reload while still offline, and the applied row reaching the scr
 that can be queued, or must report an outage, goes through it, and `npm run check:fetch` fails on a `fetch(`
 outside `src/lib/api/`; the one file it exempts is reasoned in that script's own list. What still opens its
 own response inside that directory is reasoned at its definition: the CSRF bootstrap, and the four progress
-streams that cost the caller a line rather than the offline flag (`streamCommitPreview` in `api/tasks.ts`).
+streams that cost the caller a line rather than the HTTP reason (`streamCommitPreview` in `api/tasks.ts`).
 
-| outcome | thrown | offline flag | what the user sees |
+| outcome | thrown | the HTTP reason | what the user sees |
 |---|---|---|---|
 | caller aborted (unmount, navigate away, Stop/Cancel) | `RequestAborted` | untouched | nothing — they asked for this |
-| connection failed | `ConnectionFailure` | **set** | "MIKE did not answer — check the server is still running", and the queue takes over |
+| connection failed | `ConnectionFailure` | **up** | "MIKE did not answer — check the server is still running", and the queue takes over |
+| answered, whatever the status | the `Response` | **down** | the queue goes out |
 
 Before this, both rows were one row: any `AbortError` counted as offline. Since `apiFetch` attached its own
 15 s `AbortController` to every call that had no caller signal, that meant a big task diff, a merge on
@@ -597,12 +598,29 @@ commit-and-done, or a clone replayed from the queue **failed in the browser at 1
 still doing the work**, and then every later write went to IndexedDB because of it. Cancelling a commit
 dialog had the same effect on purpose-free terms.
 
-**No client-side deadline replaced it.** The plan's rule is that the queue gets bounded and the work does
-not, and the case the timeout existed for — a server that accepts a connection and never answers — is
-already surfaced honestly: the WebSocket drops, and `setOfflineStatus(!connected)` in
-`reconnect-banner.svelte.ts` sets the same flag the HTTP layer would have. Stalls on the server are
-reported where they are known (`subproc.Watch` for podman, the lock slow-wait reports), not guessed at
-from the client.
+**Two reasons, one flag, and each reason answers to its own evidence.** `getOfflineStatus()` is the union of
+two reasons. One is the socket's: the edge in `reconnect-banner.svelte.ts`, the browser's own
+`online`/`offline` report, and the boot probe. The other is the HTTP layer's, in the table above, and
+`apiFetch` is its only writer. An answered request says nothing about a socket that is gone, and a socket
+that is up says nothing about a server that stopped answering HTTP, so neither writes the other's reason;
+the queue goes out when neither is left. A single unanswered request therefore cannot hold the queue once
+something answers again — which matters because the banner reads the socket, and a queued message beside a
+healthy banner is a report nobody can act on. A write that believes itself offline spends no request, so
+**the reads are the probe**: `getBoard`, `getTaskMessages` and `getConfig` go to the network whatever the
+queue believes, and the first one that answers releases it. No timer polls for that evidence.
+
+**A replay paces itself, not the app.** A queued action whose own send failed has said something narrower
+than "the server is down": this request did not land. Retrying it on the next answered read is a loop,
+because every replay end provokes a read and every read answers — measured, one held action drew a send
+attempt per read until it was bounded. So the queue waits `QUEUE_RETRY_BASE_DELAY_MS` after its own failure,
+doubles that to `RECONNECT_MAX_DELAY_MS`, and resets it when a replay drains the queue. The next answered
+read after the pause tries again; nothing waits on a timer the queue owns.
+
+**No client-side deadline replaced it.** The plan's rule is that the queue gets bounded, not the work. The
+case the timeout existed for — a server that accepts a connection and never answers — is already surfaced
+honestly: the WebSocket drops, and `setOfflineStatus(!connected)` in `reconnect-banner.svelte.ts` puts up
+the socket's reason, which holds the queue whether or not HTTP still works. Stalls on the server are reported where they are known (`subproc.Watch` for podman, the lock
+slow-wait reports), not guessed at from the client.
 
 Both classes keep the DOM `name` (`AbortError`, `TypeError`) rather than inventing one, because a check that
 misses a cancellation fails silently in one of two directions: a cancellation starts toasting, or a queueable
@@ -612,7 +630,9 @@ carry the name, which is why `isAborted(e)` is a function rather than a class ch
 a cancelled read stopped being silent: a check written against the throwing type, not the contract.
 
 `isTransientError` explicitly excludes a cancellation, so a send the user stopped is not replayed from
-storage after they left.
+storage after they left. The same split holds at the one other call site that saw a failed write:
+`CreateTaskModal` queues the card and announces it, and writes no reason at all, because the request that
+failed already reported its own.
 
 The server answers the same pair, in `httputil.Fail`, which is the only place a status is chosen:
 `context.Canceled` → **499** logged at debug (no fault to report); an `errs.Operation` fault → **500** whose body
@@ -628,7 +648,11 @@ may wait for this server — a subprocess or a protocol round-trip may carry its
 does not.
 
 Tests: `src/lib/api/__tests__/fetch-failure.unit.ts` (including "no implicit abort after 60 s of fake timers"
-and "a cancellation does not call itself an outage"), `src/lib/api/__tests__/send-queue.unit.ts`. The server side is held by `backend/errs/errs_test.go` (an operation must not inherit its cause's
+and "a cancellation does not call itself an outage"), `src/lib/api/__tests__/send-queue.unit.ts`, and
+`src/lib/api/__tests__/offline-reasons.unit.ts` for the two reasons — a queued write stays queued until an
+answer releases it, an answered read does not release the socket's reason, and a replay that failed on the
+network is retried at the pace and not per read. The server side is held by
+`backend/errs/errs_test.go` (an operation must not inherit its cause's
 classification) and `backend/httputil/httputil_test.go` (the sentence answers, the cause is logged, a host path
 never reaches the body).
 

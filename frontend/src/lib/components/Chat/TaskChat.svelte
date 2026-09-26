@@ -3,7 +3,7 @@
     import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, TaskMessage, Task, ChatTurn } from '$lib/types';
     import type { DiffManifest } from '$lib/types/diff';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, getTaskTurns, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, onQueueFlushed, getQueuedTaskIds, getQueuedSends, getRefusedSends, getDroppedTaskIds, getTask, isFromCache, type AppStream, type SendResult } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, MESSAGE_JUMP_LIMIT, getTaskTurns, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, onQueueFlushed, getQueuedTaskIds, getQueuedSends, getRefusedSends, getDroppedTaskIds, getTask, isFromCache, type AppStream, type SendResult } from '$lib/api';
     import { PENDING_SEND_ID_PREFIX, pendingSendEntries } from '$lib/utils/pending-sends';
     import { appStore, dialogStore, updateTaskInBoard } from '$lib/stores';
     import { streamingTaskStore } from '$lib/stores/streaming-tasks.svelte';
@@ -31,7 +31,7 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { t } from '$lib/i18n';
     import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
-    import { applyWindowRead, isStaleHistoryRead, newestWindowUnchanged, prependRows, resolveAnchor, anchorScrollDelta, readerScrolledUp, noticeForWindowRead, windowIsReading, type MeasuredEntry, type ScrollAnchor, type WindowRead, type WindowReadNotice } from '$lib/utils/chat-window';
+    import { applyWindowRead, isStaleHistoryRead, newestWindowUnchanged, prependRows, resolveAnchor, anchorScrollDelta, readerScrolledUp, noticeForWindowRead, windowIsReading, jumpFloor, pageUntilRowLands, type MeasuredEntry, type ScrollAnchor, type WindowRead, type WindowReadNotice } from '$lib/utils/chat-window';
     import { createTabReturn } from '$lib/composables/use-tab-return';
     import ChatForm from './ChatForm.svelte';
     import ChatEntries from './ChatEntries.svelte';
@@ -491,7 +491,7 @@
         let read: WindowRead = 'failed';
         const seq = ++historyReadSeq;
         try {
-            const window = await getTaskMessages(projectId, taskId, '', knownRevision);
+            const window = await getTaskMessages(projectId, taskId, { knownRevision });
             if (isStaleHistoryRead(destroyed, seq, historyReadSeq)) return 'failed';
             const unchanged = newestWindowUnchanged(knownRevision, window.revision, window.unchanged);
             read = isFromCache(window) ? 'cached' : 'answered';
@@ -594,9 +594,19 @@
         })();
     }
 
+    /** How one read of the older rows travels. Scroll-to-top paging leaves every field alone. */
+    interface OlderPage {
+        from?: string;
+        limit?: number;
+        /** Re-pin the reader while the prepended rows find their heights. A jump owns the scroll and lands
+         * once, so it declines the wait. */
+        settle?: boolean;
+    }
+
     /** Adds the next-older window above the rows held, leaving the reader on their row: the entry under
      * the top edge is found again by id afterwards. True when rows arrived. */
-    async function loadEarlierMessages(): Promise<boolean> {
+    async function loadEarlierMessages(page: OlderPage = {}): Promise<boolean> {
+        const { from = '', limit = 0, settle = true } = page;
         // The cursor is named for exactly as long as older rows exist, so the flag is the guard.
         if (!hasEarlier) return false;
         // A reader who reaches the top edge while a jump is paging asks for the same page: waiting on the
@@ -608,11 +618,11 @@
             follow.stopFollowing();
             const held = historyRows.length;
             try {
-                const older = await getTaskMessages(projectId, taskId, earlierCursor);
+                const older = await getTaskMessages(projectId, taskId, { before: earlierCursor, from, limit });
                 const el = follow.el;
                 // Read where the reader is now, not where the request went out: they may have kept scrolling
                 // while it was in flight, and pinning them back to that is a jump.
-                const anchor = el ? resolveAnchor(measuredEntries(el), el.getBoundingClientRect().top) : null;
+                const anchor = settle && el ? resolveAnchor(measuredEntries(el), el.getBoundingClientRect().top) : null;
                 historyRows = prependRows(historyRows, older.messages);
                 earlierCursor = older.before;
                 hasEarlier = older.hasMore;
@@ -652,17 +662,18 @@
         }
     }
 
-    /** Lands the prompt the header named: fetches older windows until its row is on screen, and answers
-     * whether it got there — the caller owns the scroll. */
+    /** Lands the prompt the header named by asking for the rows between the oldest row held and that
+     * prompt, walking when no prompt read carried a cursor for it. The caller owns the scroll. */
     async function jumpToTurn(entryId: string): Promise<boolean> {
-        for (;;) {
-            if (turnRowOnScreen(entryId)) {
-                await keepTurnsAbove(entryId);
-                return true;
-            }
-            // Every row above is fetched, or the read failed: either way the jump has nowhere left to go.
-            if (!(await loadEarlierMessages())) return false;
-        }
+        const landed = await pageUntilRowLands(
+            entryId,
+            turnRowOnScreen,
+            from => loadEarlierMessages({ from, limit: MESSAGE_JUMP_LIMIT, settle: false }),
+            jumpFloor(chatTurns, entryId),
+        );
+        if (!landed) return false;
+        await keepTurnsAbove(entryId);
+        return true;
     }
 
     function turnRowOnScreen(entryId: string): boolean {

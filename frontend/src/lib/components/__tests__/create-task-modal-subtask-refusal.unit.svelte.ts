@@ -102,7 +102,7 @@ describe('CreateTaskModal — a subtask of a started task', () => {
         await waitFor(() => expect(toast).toHaveBeenCalled());
         expect(toast.mock.calls[0][0]).toContain('parent task is archived');
         expect(appStore.board?.tasks).toHaveLength(0);
-        // A refusal is not a lost connection: nothing queued, nothing marked offline.
+        // A refusal is not a lost connection: nothing queued, and nothing declares an outage.
         expect(api.setOfflineStatus).not.toHaveBeenCalled();
         expect(api.enqueueAction).not.toHaveBeenCalled();
     });
@@ -112,7 +112,8 @@ describe('CreateTaskModal — a subtask of a started task', () => {
         await submitSubtask();
 
         await waitFor(() => expect(api.enqueueAction).toHaveBeenCalled());
-        expect(api.setOfflineStatus).toHaveBeenCalledWith(true);
+        // The retry is queued without declaring the whole app offline.
+        expect(api.setOfflineStatus).not.toHaveBeenCalled();
         expect(appStore.board?.tasks).toHaveLength(1); // the card stays, promising a retry
         // The queued body carries the column, so the replay lands it under its parent.
         const queued = api.enqueueAction.mock.calls[0][0] as { type: string; params: { taskData: Task } };

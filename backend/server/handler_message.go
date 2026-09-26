@@ -175,10 +175,19 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	page, err := s.store.GetTaskMessagePage(taskID, threadID, limit, r.URL.Query().Get("before"))
+	floor, err := messageFloor(r)
+	if err != nil {
+		JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	page, err := s.store.GetTaskMessagePage(taskID, threadID, limit, r.URL.Query().Get("before"), floor)
 	if err != nil {
 		if errors.Is(err, store.ErrMessageCursor) {
 			JSONError(w, http.StatusBadRequest, "before is not a cursor this endpoint issued")
+			return
+		}
+		if errors.Is(err, store.ErrMessageFloor) {
+			JSONError(w, http.StatusBadRequest, "from is not a cursor this endpoint issued")
 			return
 		}
 		Fail(w, err, "get messages", "task not found")
@@ -251,6 +260,16 @@ func (s *Server) handleTaskTurns(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-cache")
 	JSONResponse(w, http.StatusOK, page.Turns)
+}
+
+// messageFloor reads the oldest position a window may include. A floor bounds how far one read travels, so
+// it needs `before` to travel from.
+func messageFloor(r *http.Request) (string, error) {
+	floor := r.URL.Query().Get("from")
+	if floor != "" && r.URL.Query().Get("before") == "" {
+		return "", errors.New("from travels with before")
+	}
+	return floor, nil
 }
 
 // pageLimit reads a caller's page size. Absent or unparsable is the default; outside 1..ceiling is a 400,

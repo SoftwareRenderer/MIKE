@@ -255,7 +255,10 @@ for one. `?limit=` sizes the window **in units of conversation, not rows**. An a
 `tool_call` rows whose `assistant_msg_id` names it are one answer; a user row is one on its own. Opening a
 task wants the newest handful of answers, and the row count of five answers depends on how much tool work
 each one did. Default 5, ceiling 25 — outside that a 400 naming the parameter — and `?before=<cursor>` walks
-back. A cursor the route never issued is a 400, not an empty page: a client
+back. `?from=<cursor>` **floors** one page of that walk: the named row is the oldest the page may answer,
+and the rows below it stay for the next page rather than being skipped. A floor travels with `before` — alone
+it would name an older end for a read starting at the newest one — and is a 400 naming `from` if it is not a
+cursor this route issued. A cursor the route never issued is a 400, not an empty page: a client
 must not read its own bad token as "no history". `full=1` changes only the redaction, never the window,
 and `GET …/messages/{messageID}` is unchanged.
 
@@ -266,15 +269,19 @@ holding more rows than the read's own row ceiling, which the read cannot see pas
 the row that opened the answer arrives on the next page. One turn can hold more answers than a
 window, so a page may open mid-turn. `X-Messages-More` is what says older content exists. **Every row is handed
 over exactly once across the pages.** The cursor names the oldest row this page holds, so the next page
-starts older. Nothing between two reads is skipped or repeated.
+starts older. Nothing between two reads is skipped or repeated. **A floor does not break that rule.** It
+bounds where one page stops. `X-Messages-Before` of a floored page names that page's oldest row like any
+other, so the rows below it stay one read away — answered later, never jumped.
 
 **The prompts are a read of their own.** `GET /api/projects/{projectID}/tasks/{taskID}/turns` answers where
 the user rows are: the newest prompts of the task's active thread, oldest first, with `X-Turns-More` and
 `X-Turns-Before` naming the older page. Each carries its row id, its instant, and `text` — the head of the
-prompt up to `store.TurnLabelChars` characters, bounded in the read rather than in the response. The chat's
-sticky header needs the prompt above the rows it holds, and the window counted in answers cannot name it.
-One turn is routinely more answers than a window, so the prompt that opened that turn is older than every
-row the task opens on. Default 10, ceiling 50 — outside that a 400 naming `limit` — and a `before` this
+prompt up to `store.TurnLabelChars` characters, bounded in the read rather than in the response. Each also
+carries `cursor`: that prompt's own position, in the encoding the window's `before` and `from` take. A client
+that wants one prompt's rows asks for them by name instead of walking to them. The chat's sticky header
+needs the prompt above the rows it holds, and the window counted in answers cannot name it: one turn is
+routinely more answers than a window, so the prompt that opened that turn is older than every row the task
+opens on. Default 10, ceiling 50 — outside that a 400 naming `limit` — and a `before` this
 route never issued is a 400 naming `before`. Its cursor names a prompt and the window's names a row: the
 two reads share the cursor's encoding, not its meaning. Tests: `backend/store/messages_turns_test.go`,
 `backend/server/handler_turns_test.go`.

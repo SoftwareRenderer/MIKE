@@ -59,7 +59,7 @@ describe('offline message cache', () => {
         }));
 
         const { getTaskMessages } = await import('$lib/api/tasks');
-        await getTaskMessages('p1', 't1', 'cursor-1');
+        await getTaskMessages('p1', 't1', { before: 'cursor-1' });
 
         // An offline reload opens on this entry, so it must stay the newest window.
         expect(await storage.getBoardCache(storage.messagesCacheKey('p1', 't1'))).toEqual(newest);
@@ -106,11 +106,40 @@ describe('offline message cache', () => {
         vi.stubGlobal('fetch', fetchMock);
 
         const { getTaskMessages } = await import('$lib/api/tasks');
-        await getTaskMessages('p1', 't1', 'a/b+c');
+        await getTaskMessages('p1', 't1', { before: 'a/b+c' });
 
         // apiFetch resolves the CSRF session first, so the messages request is the call after it.
         const url = fetchMock.mock.calls.map(c => String(c[0])).find(u => u.includes('/messages'));
         expect(url).toContain('/projects/p1/tasks/t1/messages?before=a%2Fb%2Bc');
+    });
+
+    it('sends the floor and the page size a jump asks for', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true, json: async () => [], headers: { get: () => null },
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        const { getTaskMessages, MESSAGE_JUMP_LIMIT } = await import('$lib/api/tasks');
+        await getTaskMessages('p1', 't1', { before: 'frontier', from: 'floor-1', limit: MESSAGE_JUMP_LIMIT });
+
+        const url = fetchMock.mock.calls.map(c => String(c[0])).find(u => u.includes('/messages'));
+        expect(url).toContain('before=frontier');
+        expect(url).toContain('from=floor-1');
+        expect(url).toContain(`limit=${MESSAGE_JUMP_LIMIT}`);
+    });
+
+    it('sends no floor and no page size for a read that named neither', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true, json: async () => [], headers: { get: () => null },
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        const { getTaskMessages } = await import('$lib/api/tasks');
+        await getTaskMessages('p1', 't1', { before: 'cursor-1' });
+
+        const url = fetchMock.mock.calls.map(c => String(c[0])).find(u => u.includes('/messages'));
+        expect(url).not.toContain('from=');
+        expect(url).not.toContain('limit=');
     });
 
     it('rejects when network fails and no cache exists', async () => {
@@ -142,7 +171,7 @@ describe('offline message cache', () => {
         vi.stubGlobal('fetch', fetchMock);
 
         const { getTaskMessages } = await import('$lib/api/tasks');
-        const result = await getTaskMessages('p1', 't1', '', '"window-1"');
+        const result = await getTaskMessages('p1', 't1', { knownRevision: '"window-1"' });
 
         const messagesCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/messages'));
         expect(messagesCall).toBeTruthy();
@@ -161,7 +190,7 @@ describe('offline message cache', () => {
         vi.stubGlobal('fetch', fetchMock);
 
         const { getTaskMessages } = await import('$lib/api/tasks');
-        const result = await getTaskMessages('p1', 't1', 'cursor-1', '"window-1"');
+        const result = await getTaskMessages('p1', 't1', { before: 'cursor-1', knownRevision: '"window-1"' });
 
         const messagesCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/messages'));
         expect(new Headers((messagesCall![1] as RequestInit).headers).get('If-None-Match')).toBeNull();
@@ -177,7 +206,7 @@ describe('offline message cache', () => {
         }));
 
         const { getTaskMessages } = await import('$lib/api/tasks');
-        const result = await getTaskMessages('p1', 't1', '', '"window-1"');
+        const result = await getTaskMessages('p1', 't1', { knownRevision: '"window-1"' });
 
         expect(result).toMatchObject({ unchanged: true, revision: '"window-1"', messages: [] });
     });

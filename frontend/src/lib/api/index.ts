@@ -76,6 +76,7 @@ export {
 export {
     sendTaskMessage,
     getTaskMessages,
+    MESSAGE_JUMP_LIMIT,
     getTaskTurns,
     getTaskMessageFull,
     deleteTaskMessagesAfter,

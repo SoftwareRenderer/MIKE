@@ -140,3 +140,31 @@ const EARLIER_EDGE_VIEWPORTS = 1.5;
 export function atTopOfList(scrollTop: number, viewportHeight: number): boolean {
     return scrollTop <= Math.round(EARLIER_EDGE_VIEWPORTS * viewportHeight);
 }
+
+/** A prompt's position, as the prompt read answered it. */
+export interface TurnCursor {
+    id: string;
+    cursor?: string;
+}
+
+/** The floor a jump to one prompt names, or '' when no prompt read carried it. Then the caller walks, the
+ * only way to fetch the rows in between. */
+export function jumpFloor(turns: TurnCursor[], entryId: string): string {
+    return turns.find(turn => turn.id === entryId)?.cursor ?? '';
+}
+
+/**
+ * Pages older until the row a jump named is on screen. The floor rides every page, and a page that answers
+ * nothing ends the walk — a nearby row is not the row the caller named.
+ */
+export async function pageUntilRowLands(
+    entryId: string,
+    rowOnScreen: (id: string) => boolean,
+    loadPage: (floor: string) => Promise<boolean>,
+    floor: string,
+): Promise<boolean> {
+    for (;;) {
+        if (rowOnScreen(entryId)) return true;
+        if (!(await loadPage(floor))) return false;
+    }
+}

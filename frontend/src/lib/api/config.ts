@@ -12,9 +12,7 @@ import { t } from '$lib/i18n';
 // -- Configuration endpoints --
 
 /** Fetch the current server configuration (LLM endpoint, model, workspace, providers). Falls back to cached copy on failure.
- * Always tries the network first — the isOffline flag tracks WebSocket state,
- * not HTTP availability. On mobile wake (tab resume), the WebSocket may be
- * disconnected but HTTP still works, so we must not short-circuit to cache. */
+ * Always tries the network first: a read is what releases the queue (`api/queue.ts`). */
 export async function getConfig(): Promise<Config> {
     try {
         const res = await apiFetch(`${API_BASE}/config`);

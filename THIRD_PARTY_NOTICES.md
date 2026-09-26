@@ -10,7 +10,7 @@ Full license texts are available inside each dependency's package.
 binaries and `frontend/dist`. An extension's own dependencies (its language server, WASM adapter or
 bundled JS) are covered by that extension's `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES.md`.
 
-**Last updated:** 2026-09-11
+**Last updated:** 2026-09-25
 
 ---
 
@@ -45,10 +45,16 @@ go list -deps -f '{{if .Module}}{{.Module.Path}}{{end}}' ./backend/... ./pkg/...
 ## Frontend production dependencies
 
 Source of truth: `frontend/package-lock.json` (production `dependencies`) as bundled into
-`frontend/dist`.
+`frontend/dist`. A package a dependency imports for its **types only** is absent — nothing of it reaches
+`dist` — and the diagram renderer's chunks are present but fetched on demand, so they are listed beside
+the code that is loaded at startup.
 
 | Package | License |
 |---------|---------|
+| @braintree/sanitize-url | MIT |
+| @chevrotain/gast | Apache-2.0 |
+| @chevrotain/regexp-to-ast | Apache-2.0 |
+| @chevrotain/utils | Apache-2.0 |
 | @codemirror/autocomplete | MIT |
 | @codemirror/commands | MIT |
 | @codemirror/lang-css | MIT |
@@ -64,6 +70,7 @@ Source of truth: `frontend/package-lock.json` (production `dependencies`) as bun
 | @codemirror/search | MIT |
 | @codemirror/state | MIT |
 | @codemirror/view | MIT |
+| @iconify/utils | MIT |
 | @lezer/common | MIT |
 | @lezer/css | MIT |
 | @lezer/highlight | MIT |
@@ -74,13 +81,58 @@ Source of truth: `frontend/package-lock.json` (production `dependencies`) as bun
 | @lezer/markdown | MIT |
 | @lezer/yaml | MIT |
 | @marijn/find-cluster-break | MIT |
+| @mermaid-js/parser | MIT |
+| @upsetjs/venn.js | MIT |
 | @xterm/addon-fit | MIT |
 | @xterm/addon-webgl | MIT |
 | @xterm/xterm | MIT |
+| chevrotain | Apache-2.0 |
+| clsx | MIT |
 | codemirror | MIT |
+| cose-base | MIT |
 | crelt | MIT |
+| cytoscape | MIT |
+| cytoscape-cose-bilkent | MIT |
+| cytoscape-fcose | MIT |
+| d3 | ISC |
+| d3-array | ISC |
+| d3-axis | ISC |
+| d3-brush | ISC |
+| d3-color | ISC |
+| d3-dispatch | ISC |
+| d3-ease | BSD-3-Clause |
+| d3-format | ISC |
+| d3-hierarchy | ISC |
+| d3-interpolate | ISC |
+| d3-path | ISC |
+| d3-sankey | BSD-3-Clause |
+| d3-scale | ISC |
+| d3-scale-chromatic | ISC |
+| d3-selection | ISC |
+| d3-shape | ISC |
+| d3-time | ISC |
+| d3-time-format | ISC |
+| d3-timer | ISC |
+| d3-transition | ISC |
+| d3-zoom | ISC |
+| dagre-d3-es | MIT |
+| dayjs | MIT |
 | diff | BSD-3-Clause |
 | dompurify | (MPL-2.0 OR Apache-2.0) — treated as Apache-2.0 |
+| elkjs | EPL-2.0 |
+| es-toolkit | MIT |
+| internmap | ISC |
+| katex | MIT |
+| khroma | MIT |
+| layout-base | MIT |
+| lodash-es | MIT |
 | marked | MIT |
+| mermaid | MIT |
+| roughjs | MIT |
 | style-mod | MIT |
+| stylis | MIT |
+| svelte | MIT |
+| ts-dedent | MIT |
+| uuid | MIT |
 | w3c-keyname | MIT |
+| workbox-window | MIT |

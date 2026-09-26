@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -15,8 +16,9 @@ import (
 // so the prompt that opened a long turn is not among the rows a task opens on.
 
 type turnRow struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
+	ID     string `json:"id"`
+	Text   string `json:"text"`
+	Cursor string `json:"cursor"`
 }
 
 func readTurns(t *testing.T, s *Server, path string) ([]turnRow, http.Header) {
@@ -172,5 +174,31 @@ func TestTurnsRouteAnswersForATaskThatIsGone(t *testing.T) {
 	rr := testResponseAuth(t, s, testRequest("GET", "/api/projects/"+projID+"/tasks/no-such-task/turns", nil))
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("an unknown task answered %d, want 404 — %s", rr.Code, rr.Body.String())
+	}
+}
+
+// A prompt's cursor is the floor that stops a window at that prompt.
+func TestTurnsRouteHandsOutTheCursorThatFloorsAWindow(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Long turn")
+	seedLongTurn(t, s, projID, taskID, 20)
+
+	turns, _ := readTurns(t, s, "/api/projects/"+projID+"/tasks/"+taskID+"/turns")
+	for _, turn := range turns {
+		if turn.Cursor == "" {
+			t.Fatalf("prompt %s carries no cursor: %+v", turn.ID, turn)
+		}
+	}
+
+	_, headers := readWindow(t, s, "/api/projects/"+projID+"/tasks/"+taskID+"/messages")
+	page, _ := readWindow(t, s, "/api/projects/"+projID+"/tasks/"+taskID+"/messages?limit=25"+
+		"&before="+url.QueryEscape(headers.Get("X-Messages-Before"))+
+		"&from="+url.QueryEscape(turns[0].Cursor))
+	if len(page) == 0 {
+		t.Fatal("the floored page answered with nothing")
+	}
+	if oldest := page[0]; oldest.ID != turns[0].ID {
+		t.Errorf("the floored page stopped at %s, want the prompt %s it named", oldest.ID, turns[0].ID)
 	}
 }

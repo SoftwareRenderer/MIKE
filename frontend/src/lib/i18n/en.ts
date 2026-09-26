@@ -1289,6 +1289,15 @@ const catalog = {
     'chat.code.copy': 'Copy code',
     'chat.code.copied': 'Copied',
 
+    // ── Chat/DiagramFence.svelte ──
+    'chat.diagram.viewDiagram': 'Diagram',
+    'chat.diagram.viewSource': 'Source',
+    'chat.diagram.copySvg': 'Copy SVG',
+    'chat.diagram.rendering': 'Rendering diagram…',
+    'chat.diagram.failed': 'This diagram could not be rendered',
+    'chat.diagram.tooLarge': 'This diagram is too large to render',
+    'chat.diagram.alt': 'Diagram',
+
     // ── Chat/QueueIndicator.svelte ──
     'chat.queue.targetAgent': 'agent',
     'chat.queue.targetLlm': 'LLM provider',

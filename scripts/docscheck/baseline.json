@@ -157,5 +157,9 @@
  "docs/ui-extensions.md": {
   "history": 0,
   "longsent": 8
+ },
+ "docs/adr/0002-chat-jump-floors-its-page.md": {
+  "history": 0,
+  "longsent": 0
  }
 }

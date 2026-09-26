@@ -68,6 +68,8 @@ type UserTurn struct {
 	// Text is the head of the prompt, bounded by TurnLabelChars — enough to name the turn, and a client
 	// shows its first line.
 	Text string `json:"text"`
+	// Cursor is this prompt's own position, in the encoding the message window's `from` takes.
+	Cursor string `json:"cursor"`
 }
 
 // UserTurnPage is the newest few prompts of a conversation, oldest first, with the cursor for the prompts
@@ -126,9 +128,9 @@ func decodeMessageCursor(s string) (messageKey, error) {
 }
 
 // conversationWhere is the WHERE of a conversation read: one thread when one is named, otherwise the
-// whole task, cut at the caller's cursor. A created_at alone cannot cut a turn — its rows share one
-// instant — so the comparison is the pair the ORDER BY uses.
-func conversationWhere(taskID, threadID string, cursor *messageKey) (string, []any) {
+// whole task, cut at the caller's cursor and stopped at its floor. A created_at alone cannot cut a turn —
+// its rows share one instant — so both comparisons are the pair the ORDER BY uses.
+func conversationWhere(taskID, threadID string, cursor, floor *messageKey) (string, []any) {
 	var sb strings.Builder
 	var args []any
 	if threadID != "" {
@@ -142,6 +144,10 @@ func conversationWhere(taskID, threadID string, cursor *messageKey) (string, []a
 		sb.WriteString(" AND (created_at, rowid) < (?, ?)")
 		args = append(args, cursor.at, cursor.rowid)
 	}
+	if floor != nil {
+		sb.WriteString(" AND (created_at, rowid) >= (?, ?)")
+		args = append(args, floor.at, floor.rowid)
+	}
 	return sb.String(), args
 }
 
@@ -151,8 +157,8 @@ func conversationWhere(taskID, threadID string, cursor *messageKey) (string, []a
 // fetch below is keyed by.
 const messageKeyCols = `SELECT id, created_at, rowid, role FROM task_messages WHERE `
 
-func (s *Store) messageKeys(taskID, threadID string, cursor *messageKey, n int) ([]messageKey, error) {
-	where, args := conversationWhere(taskID, threadID, cursor)
+func (s *Store) messageKeys(taskID, threadID string, cursor, floor *messageKey, n int) ([]messageKey, error) {
+	where, args := conversationWhere(taskID, threadID, cursor, floor)
 	rows, err := s.db.Query(messageKeyCols+where+` `+newestFirstOrder+` LIMIT ?`,
 		append(append([]any{}, args...), n)...)
 	if err != nil {
@@ -183,17 +189,22 @@ func newestUnits(keys []messageKey, units int) []messageKey {
 }
 
 // GetTaskMessagePage answers one window: the newest `limit` answers, oldest first, with before naming a
-// cursor an earlier call returned. Positions are read before rows, so the cut and the sort run over index
-// entries rather than the conversation's bytes.
+// cursor an earlier call returned and `from` an optional floor — the oldest row this page may answer.
+// Positions are read before rows, so the cut and the sort run over index entries rather than the
+// conversation's bytes.
 //
 // Together the pages hand over every row of the thread exactly once, which is why the cursor names the
-// oldest row this page holds.
-func (s *Store) GetTaskMessagePage(taskID, threadID string, limit int, before string) (*MessagePage, error) {
+// oldest row this page holds. A floor stops a page there; the rows below it come on a later page.
+func (s *Store) GetTaskMessagePage(taskID, threadID string, limit int, before, from string) (*MessagePage, error) {
 	// The route refuses a window outside 1..MessageWindowMax; this covers a caller that is not a request.
 	if limit <= 0 || limit > MessageWindowMax {
 		limit = MessageWindowDefault
 	}
-	cursor, err := messageCursor(before)
+	cursor, err := messageCursor(before, ErrMessageCursor)
+	if err != nil {
+		return nil, err
+	}
+	floor, err := messageCursor(from, ErrMessageFloor)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +212,7 @@ func (s *Store) GetTaskMessagePage(taskID, threadID string, limit int, before st
 	defer s.mu.RUnlock()
 
 	page := &MessagePage{}
-	keys, err := s.messageKeys(taskID, threadID, cursor, MessageRowCeiling)
+	keys, err := s.messageKeys(taskID, threadID, cursor, floor, MessageRowCeiling)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +222,7 @@ func (s *Store) GetTaskMessagePage(taskID, threadID string, limit int, before st
 	}
 	// The oldest row here starts the next window: it answers both the cursor and whether one exists.
 	oldest := keys[len(keys)-1]
-	olderWhere, olderArgs := conversationWhere(taskID, threadID, &oldest)
+	olderWhere, olderArgs := conversationWhere(taskID, threadID, &oldest, nil)
 	var more int
 	if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM task_messages WHERE `+olderWhere+`)`, olderArgs...).Scan(&more); err != nil {
 		return nil, err
@@ -248,14 +259,15 @@ func (s *Store) GetTaskMessagePage(taskID, threadID string, limit int, before st
 	return page, nil
 }
 
-// messageCursor decodes a page cursor. An empty one means "from this end of the conversation".
-func messageCursor(before string) (*messageKey, error) {
+// messageCursor decodes a page cursor; an empty one means "from this end of the conversation". `bad` is
+// the error to answer with, so a token sent in the wrong parameter names that parameter.
+func messageCursor(before string, bad error) (*messageKey, error) {
 	if before == "" {
 		return nil, nil
 	}
 	c, err := decodeMessageCursor(before)
 	if err != nil {
-		return nil, err
+		return nil, bad
 	}
 	return &c, nil
 }
@@ -277,7 +289,7 @@ func (s *Store) GetUserTurnPage(taskID, threadID string, limit int, before strin
 	if limit <= 0 || limit > TurnWindowMax {
 		limit = TurnWindowDefault
 	}
-	cursor, err := messageCursor(before)
+	cursor, err := messageCursor(before, ErrMessageCursor)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +297,7 @@ func (s *Store) GetUserTurnPage(taskID, threadID string, limit int, before strin
 	defer s.mu.RUnlock()
 
 	page := &UserTurnPage{}
-	where, args := conversationWhere(taskID, threadID, cursor)
+	where, args := conversationWhere(taskID, threadID, cursor, nil)
 	// substr's bound is the first placeholder; the where's args follow it, the limit last.
 	args = append(append([]any{TurnLabelChars}, args...), limit)
 	rows, err := s.db.Query(userTurnCols+where+userTurnOnly+` `+newestFirstOrder+` LIMIT ?`, args...)
@@ -298,7 +310,7 @@ func (s *Store) GetUserTurnPage(taskID, threadID string, limit int, before strin
 	}
 	if len(found) > 0 {
 		oldest := found[len(found)-1]
-		olderWhere, olderArgs := conversationWhere(taskID, threadID, &oldest.key)
+		olderWhere, olderArgs := conversationWhere(taskID, threadID, &oldest.key, nil)
 		var more int
 		if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM task_messages WHERE `+olderWhere+userTurnOnly+`)`, olderArgs...).Scan(&more); err != nil {
 			return nil, err
@@ -311,7 +323,9 @@ func (s *Store) GetUserTurnPage(taskID, threadID string, limit int, before strin
 	// A page is an array even when the conversation holds no prompt: the route answers with this slice.
 	page.Turns = make([]UserTurn, 0, len(found))
 	for i := len(found) - 1; i >= 0; i-- {
-		page.Turns = append(page.Turns, found[i].UserTurn)
+		turn := found[i].UserTurn
+		turn.Cursor = encodeMessageCursor(found[i].key)
+		page.Turns = append(page.Turns, turn)
 	}
 	return page, nil
 }

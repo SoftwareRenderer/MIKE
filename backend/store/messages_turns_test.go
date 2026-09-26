@@ -55,7 +55,7 @@ func TestGetUserTurnPageNamesThePromptTheWindowLeftOut(t *testing.T) {
 	s := testStore(t)
 	seedTurns(t, s, "task-1", "thread-1", 3, 40)
 
-	window, err := s.GetTaskMessagePage("task-1", "thread-1", MessageWindowDefault, "")
+	window, err := s.GetTaskMessagePage("task-1", "thread-1", MessageWindowDefault, "", "")
 	if err != nil {
 		t.Fatalf("window: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestGetUserTurnPagesReadThroughTheUserRowIndexes(t *testing.T) {
 		{"a thread", "thread-1", "idx_task_messages_user_thread"},
 		{"a task", "", "idx_task_messages_user_task"},
 	} {
-		where, args := conversationWhere("task-1", read.scope, nil)
+		where, args := conversationWhere("task-1", read.scope, nil, nil)
 		query := userTurnCols + where + userTurnOnly + ` ` + newestFirstOrder + ` LIMIT ?`
 		plan := explainPlan(t, s, query, append(append([]any{TurnLabelChars}, args...), TurnWindowMax)...)
 		if !strings.Contains(plan, read.index) {

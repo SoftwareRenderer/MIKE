@@ -51,7 +51,7 @@ func TestGetTaskMessagePageWalksTheThreadOnce(t *testing.T) {
 		if page > len(ids) {
 			t.Fatalf("pages did not terminate after %d reads", page)
 		}
-		got, err := s.GetTaskMessagePage("task-1", "thread-1", 6, cursor)
+		got, err := s.GetTaskMessagePage("task-1", "thread-1", 6, cursor, "")
 		if err != nil {
 			t.Fatalf("page %d: %v", page, err)
 		}
@@ -90,7 +90,7 @@ func TestGetTaskMessagePageNeverOpensOnAToolCall(t *testing.T) {
 	seedThread(t, s, "task-1", "thread-1", 21)
 
 	for limit := 1; limit <= 12; limit++ {
-		got, err := s.GetTaskMessagePage("task-1", "thread-1", limit, "")
+		got, err := s.GetTaskMessagePage("task-1", "thread-1", limit, "", "")
 		if err != nil {
 			t.Fatalf("limit %d: %v", limit, err)
 		}
@@ -105,7 +105,7 @@ func TestGetTaskMessagePageNeverOpensOnAToolCall(t *testing.T) {
 	// Paging to the end keeps the rule.
 	cursor := ""
 	for page := 0; page < 12; page++ {
-		got, err := s.GetTaskMessagePage("task-1", "thread-1", 4, cursor)
+		got, err := s.GetTaskMessagePage("task-1", "thread-1", 4, cursor, "")
 		if err != nil {
 			t.Fatalf("page %d: %v", page, err)
 		}
@@ -146,7 +146,7 @@ func TestGetTaskMessagePageCutsInsideAnAnswerLongerThanTheCeiling(t *testing.T) 
 		total++
 	}
 
-	first, err := s.GetTaskMessagePage("task-1", "thread-1", 1, "")
+	first, err := s.GetTaskMessagePage("task-1", "thread-1", 1, "", "")
 	if err != nil {
 		t.Fatalf("first page: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestGetTaskMessagePageCutsInsideAnAnswerLongerThanTheCeiling(t *testing.T) 
 		t.Fatalf("the rows left behind must be one cursor away: more=%v cursor=%q", first.HasMore, first.Before)
 	}
 
-	second, err := s.GetTaskMessagePage("task-1", "thread-1", 1, first.Before)
+	second, err := s.GetTaskMessagePage("task-1", "thread-1", 1, first.Before, "")
 	if err != nil {
 		t.Fatalf("second page: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestGetTaskMessagePageCountsAnswersNotRows(t *testing.T) {
 		}
 	}
 
-	got, err := s.GetTaskMessagePage("task-1", "thread-1", 5, "")
+	got, err := s.GetTaskMessagePage("task-1", "thread-1", 5, "", "")
 	if err != nil {
 		t.Fatalf("window: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestGetTaskMessagePageCountsAnswersNotRows(t *testing.T) {
 		if page > 40 {
 			t.Fatal("paging did not terminate")
 		}
-		older, err := s.GetTaskMessagePage("task-1", "thread-1", 5, cursor)
+		older, err := s.GetTaskMessagePage("task-1", "thread-1", 5, cursor, "")
 		if err != nil {
 			t.Fatalf("page %d: %v", page, err)
 		}
@@ -270,7 +270,7 @@ func TestGetTaskMessagePageRefusesACursorItDidNotIssue(t *testing.T) {
 	seedThread(t, s, "task-1", "thread-1", 3)
 
 	for _, bad := range []string{"not-a-cursor", "AAAA", "e30", "aaaaaaaaAAAAAAAAAAAAAAAAAAAAAAAAAAA-"} {
-		if _, err := s.GetTaskMessagePage("task-1", "thread-1", 2, bad); !errors.Is(err, ErrMessageCursor) {
+		if _, err := s.GetTaskMessagePage("task-1", "thread-1", 2, bad, ""); !errors.Is(err, ErrMessageCursor) {
 			t.Errorf("cursor %q: got %v, want ErrMessageCursor", bad, err)
 		}
 	}
@@ -300,7 +300,7 @@ func TestGetTaskMessagePageCutsATurnSharedAcrossOneInstant(t *testing.T) {
 	cursor := ""
 	var first []types.TaskMessage
 	for page := 0; page < 8; page++ {
-		got, err := s.GetTaskMessagePage("task-1", "thread-1", 2, cursor)
+		got, err := s.GetTaskMessagePage("task-1", "thread-1", 2, cursor, "")
 		if err != nil {
 			t.Fatalf("page %d: %v", page, err)
 		}
@@ -331,8 +331,8 @@ func TestConversationReadsDoNotSortInATempBTree(t *testing.T) {
 	s := testStore(t)
 	seedThread(t, s, "task-1", "thread-1", 30)
 
-	threadWhere, threadArgs := conversationWhere("task-1", "thread-1", nil)
-	taskWhere, taskArgs := conversationWhere("task-1", "", nil)
+	threadWhere, threadArgs := conversationWhere("task-1", "thread-1", nil, nil)
+	taskWhere, taskArgs := conversationWhere("task-1", "", nil, nil)
 	window := func(where string) string {
 		return messageKeyCols + where + ` ` + newestFirstOrder + ` LIMIT 10`
 	}
@@ -401,4 +401,170 @@ func hasIndex(t *testing.T, s *Store, name string) bool {
 		t.Fatalf("look up index %s: %v", name, err)
 	}
 	return count > 0
+}
+
+// cursorOfRow encodes one row's position, the way the prompt read hands one out.
+func cursorOfRow(t *testing.T, s *Store, taskID, threadID, id string) string {
+	t.Helper()
+	keys, err := s.messageKeys(taskID, threadID, nil, nil, 100000)
+	if err != nil {
+		t.Fatalf("read positions: %v", err)
+	}
+	for _, k := range keys {
+		if k.id == id {
+			return encodeMessageCursor(k)
+		}
+	}
+	t.Fatalf("no position read named row %s", id)
+	return ""
+}
+
+func TestGetTaskMessagePageStopsAtTheFloorItWasGiven(t *testing.T) {
+	s := testStore(t)
+	ids := seedThread(t, s, "task-1", "thread-1", 20)
+
+	first, err := s.GetTaskMessagePage("task-1", "thread-1", 4, "", "")
+	if err != nil {
+		t.Fatalf("newest window: %v", err)
+	}
+	// A floor inside what this page answers.
+	floor := cursorOfRow(t, s, "task-1", "thread-1", ids[len(ids)-8])
+	page, err := s.GetTaskMessagePage("task-1", "thread-1", 25, first.Before, floor)
+	if err != nil {
+		t.Fatalf("floored page: %v", err)
+	}
+	if len(page.Messages) == 0 {
+		t.Fatal("a floor inside the span answered with nothing")
+	}
+	oldest := page.Messages[0]
+	if oldest.ID != ids[len(ids)-8] {
+		t.Fatalf("a reachable floor was not answered: oldest row = %s, want %s", oldest.ID, ids[len(ids)-8])
+	}
+	// The floor bounds this page, not the conversation: rows below it stay one cursor away.
+	if !page.HasMore || page.Before == "" {
+		t.Errorf("rows below the floor must stay readable: more=%v cursor=%q", page.HasMore, page.Before)
+	}
+}
+
+func TestGetTaskMessagePageIgnoresAFloorItNeverReaches(t *testing.T) {
+	s := testStore(t)
+	seedThread(t, s, "task-1", "thread-1", 20)
+
+	unfloored, err := s.GetTaskMessagePage("task-1", "thread-1", 2, "", "")
+	if err != nil {
+		t.Fatalf("unfloored page: %v", err)
+	}
+	floor := cursorOfRow(t, s, "task-1", "thread-1", "msg-000")
+	floored, err := s.GetTaskMessagePage("task-1", "thread-1", 2, "", floor)
+	if err != nil {
+		t.Fatalf("floored page: %v", err)
+	}
+	if len(floored.Messages) != len(unfloored.Messages) {
+		t.Fatalf("a floor above the span changed the page: %d rows, want %d", len(floored.Messages), len(unfloored.Messages))
+	}
+	for i := range floored.Messages {
+		if floored.Messages[i].ID != unfloored.Messages[i].ID {
+			t.Fatalf("row %d differs: %s, want %s", i, floored.Messages[i].ID, unfloored.Messages[i].ID)
+		}
+	}
+}
+
+func TestGetTaskMessagePagesToAFloorHandOverEveryRowOnce(t *testing.T) {
+	s := testStore(t)
+	ids := seedThread(t, s, "task-1", "thread-1", 20)
+	floor := cursorOfRow(t, s, "task-1", "thread-1", "msg-005")
+
+	seen := map[string]bool{}
+	cursor := ""
+	for page := 0; ; page++ {
+		if page > len(ids) {
+			t.Fatalf("floored pages did not terminate after %d reads", page)
+		}
+		got, err := s.GetTaskMessagePage("task-1", "thread-1", 2, cursor, floor)
+		if err != nil {
+			t.Fatalf("page %d: %v", page, err)
+		}
+		for _, m := range got.Messages {
+			if seen[m.ID] {
+				t.Fatalf("row %s arrived on two pages", m.ID)
+			}
+			seen[m.ID] = true
+		}
+		if !got.HasMore || len(got.Messages) == 0 {
+			break
+		}
+		if got.Messages[0].ID == "msg-005" {
+			break
+		}
+		cursor = got.Before
+	}
+	if !seen["msg-005"] {
+		t.Error("the walk stopped above the floor's row")
+	}
+	if seen["msg-004"] {
+		t.Error("the walk answered below the floor")
+	}
+	for _, id := range ids[5:] {
+		if !seen[id] {
+			t.Fatalf("the walk skipped %s", id)
+		}
+	}
+}
+
+// A span past the row ceiling is cut, and the next page picks up with the floor still set.
+func TestGetTaskMessagePagesToAFloorAcrossTheRowCeiling(t *testing.T) {
+	s := testStore(t)
+	if err := s.CreateProject(newProject("proj-1", "test", "/tmp/test")); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	at := time.Now().UTC().Add(-time.Hour)
+	head := newMessage("head-1", "task-1", "assistant", "one answer, too many calls")
+	head.ThreadID, head.CreatedAt = "thread-1", at
+	if err := s.CreateTaskMessage(head); err != nil {
+		t.Fatalf("create head: %v", err)
+	}
+	for i := 0; i <= MessageRowCeiling; i++ {
+		call := newMessage(fmt.Sprintf("call-%04d", i), "task-1", "tool_call", "x")
+		call.ThreadID, call.CreatedAt, call.AssistantMsgID = "thread-1", at, head.ID
+		if err := s.CreateTaskMessage(call); err != nil {
+			t.Fatalf("create call: %v", err)
+		}
+	}
+	floor := cursorOfRow(t, s, "task-1", "thread-1", head.ID)
+
+	first, err := s.GetTaskMessagePage("task-1", "thread-1", 1, "", floor)
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if len(first.Messages) != MessageRowCeiling {
+		t.Fatalf("first page holds %d rows, want the ceiling of %d", len(first.Messages), MessageRowCeiling)
+	}
+	second, err := s.GetTaskMessagePage("task-1", "thread-1", 1, first.Before, floor)
+	if err != nil {
+		t.Fatalf("second page: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, m := range append(append([]types.TaskMessage{}, first.Messages...), second.Messages...) {
+		if seen[m.ID] {
+			t.Fatalf("row %s arrived on two pages", m.ID)
+		}
+		seen[m.ID] = true
+	}
+	if !seen[head.ID] {
+		t.Error("the floor's row never arrived across the ceiling")
+	}
+}
+
+func TestGetTaskMessagePageRefusesAFloorItDidNotIssue(t *testing.T) {
+	s := testStore(t)
+	seedThread(t, s, "task-1", "thread-1", 3)
+
+	for _, bad := range []string{"not-a-cursor", "e30"} {
+		if _, err := s.GetTaskMessagePage("task-1", "thread-1", 2, "", bad); !errors.Is(err, ErrMessageFloor) {
+			t.Errorf("floor %q: got %v, want ErrMessageFloor", bad, err)
+		}
+	}
 }
