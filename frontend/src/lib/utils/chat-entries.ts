@@ -493,6 +493,24 @@ export function mergeLoadedHistory(
     });
 }
 
+/** True when no stored row could hold this entry yet: the turn streaming now, an unanswered call, a send the
+ * server has not accepted, a build still running. */
+function awaitsRow(entry: ChatEntry): boolean {
+    return !!entry.isStreaming || !!entry.queued
+        || !!entry.buildLog && entry.buildLog.done !== true
+        || (entry.toolCalls?.some(tc => tc.isPending) ?? false);
+}
+
+/**
+ * The tail of the transcript from the first entry that has no stored row yet, oldest first. A merge can only
+ * append, so an older entry kept through a replaced window lands below the newest answers.
+ * `docs/reconnection.md → The tab that comes back`.
+ */
+export function entriesAwaitingRows(entries: ChatEntry[]): ChatEntry[] {
+    const from = entries.findIndex(awaitsRow);
+    return from === -1 ? [] : entries.slice(from);
+}
+
 /**
  * True when a live entry repeats the answer one of the read's rows holds, so that row's entry stands for it.
  * Only the newest streaming entry is exempt: no row holds the turn in flight yet.

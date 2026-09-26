@@ -406,16 +406,23 @@ left alone, because nothing was computed to compare against.
 
 **A returning view keeps what the reader was doing.** `DiffCache.refreshManifest` reconciles the manifest —
 new files, changed files, staged flags — and keeps the open file, the checkpoint overlay and the from/to
-comparison. A full reload closes all three, which is why the return path asks for the cheaper one. The chat pins only
-while the reader follows: a window that joins the rows held leaves them where they were, and one that cannot
-be joined (a thread switch, a truncation) is a different conversation and opens at its end. A changed base is
-the exception that resets — `diffHeadRef`/`diffBaseMoved` (`$lib/utils/diff-base.ts`) is the panel's own rule
-for what its diff is computed against, and two bases cannot share one view. Not kept: an untracked file's
-preview, which is fetched on demand and comes back fetched rather than pinned.
+comparison. A full reload closes all three, which is why the return path asks for the cheaper one. The chat pins
+only while the reader follows: a window that joins the rows held leaves them where they were, and one that
+cannot be joined (a thread switch, a truncation) is a different conversation and opens at its end. The rows it
+replaces take their entries with them, because a merge can only append what a read does not name, and an answer
+appended below the newest rows is read as the newest content. `entriesAwaitingRows`
+(`$lib/utils/chat-entries.ts`) is what survives such a read: the turn streaming now, a call with no result yet,
+a send the server has not accepted. The answers above the new window come back by paging, as they do whenever
+the window is too short for the conversation. A changed base is the exception that resets —
+`diffHeadRef`/`diffBaseMoved` (`$lib/utils/diff-base.ts`) is the panel's own rule for what its diff is computed
+against, and two bases cannot share one view. Not kept: an untracked file's preview, which is fetched on demand
+and comes back fetched rather than pinned.
 
 **Tests:** `sync-return-freshness.spec.ts` — a change made while the window was elsewhere arrives on return,
 and the open file survives. `focus-return-review.spec.ts` — the transcript matches the stored rows after a run
-missed whole, and the *next* return is answered by the ETag. `task-sync.unit.ts`, `diff-base.unit.ts` and the
+missed whole, and the *next* return is answered by the ETag. `return-transcript-order.spec.ts` — a conversation
+too long for one window comes back as the stored rows, in order, with nothing older beneath them.
+`task-sync.unit.ts`, `entriesAwaitingRows` in `chat-history-merge.unit.ts`, `diff-base.unit.ts` and the
 `appliedRevision` cases in `chat-window.unit.ts`. Go: `handler_task_sync_test.go`, and the
 `ConversationRevision` tests in `app_stream_test.go`.
 

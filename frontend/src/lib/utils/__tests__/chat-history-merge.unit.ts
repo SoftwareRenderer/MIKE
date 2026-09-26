@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { StreamState } from '$lib/services/stream-state.svelte';
 import { createStreamHandler, type StreamHandlerCallbacks } from '$lib/services/stream-handler';
-import { buildEntriesFromMessages, mergeLoadedHistory } from '$lib/utils/chat-entries';
+import { buildEntriesFromMessages, entriesAwaitingRows, mergeLoadedHistory } from '$lib/utils/chat-entries';
 import type { ChatEntry } from '$lib/types';
 
 /** Both sides of the merge come from the real builders, so a change to either is felt here. */
@@ -306,5 +306,72 @@ describe('mergeLoadedHistory — identity', () => {
         const merged = mergeLoadedHistory(buildEntriesFromMessages(messages).entries, messages.map(m => m.id), live, false);
 
         expect(merged.map(e => e.id)).toEqual(['u1', 'a1', 'live-0']);
+    });
+});
+
+describe('entriesAwaitingRows — what a replaced conversation leaves on screen', () => {
+    const settled = (id: string, content: string): ChatEntry => ({
+        id, role: 'assistant', content, isStreaming: false,
+    });
+
+    it('keeps nothing when every answer on screen has had its turn at the database', () => {
+        const onScreen = [settled('u1', 'go'), settled('a1', 'an answer'), settled('a2', 'another')];
+
+        expect(entriesAwaitingRows(onScreen).map(e => e.id)).toEqual([]);
+    });
+
+    it('keeps the answer streaming now, and everything written after it', () => {
+        const onScreen = [
+            settled('a1', 'an answer'),
+            { id: 'live-0', role: 'assistant', content: 'Working on', isStreaming: true } as ChatEntry,
+        ];
+
+        expect(entriesAwaitingRows(onScreen).map(e => e.id)).toEqual(['live-0']);
+    });
+
+    it('keeps the turn whose tool call is still unanswered, text and card together', () => {
+        const onScreen = [
+            settled('a1', 'an answer'),
+            { ...settled('live-1', 'Let me check'), toolCalls: [{ toolId: 'call-1', toolName: 'bash', args: {}, isPending: true } as never] },
+        ];
+
+        // The card shares the entry of the text that announced it.
+        expect(entriesAwaitingRows(onScreen).map(e => e.id)).toEqual(['live-1']);
+    });
+
+    it('keeps a send the server has not accepted', () => {
+        const onScreen = [settled('a1', 'an answer'), { id: 'pend-1', role: 'user', content: 'next', isStreaming: false, queued: true } as ChatEntry];
+
+        expect(entriesAwaitingRows(onScreen).map(e => e.id)).toEqual(['pend-1']);
+    });
+
+    it('keeps a sandbox build box that is still writing', () => {
+        const onScreen = [
+            settled('a1', 'an answer'),
+            { id: 'live-2', role: 'system', content: 'Building', isStreaming: false, buildLog: { title: 'Building', lines: ['step 1'] } } as ChatEntry,
+        ];
+
+        expect(entriesAwaitingRows(onScreen).map(e => e.id)).toEqual(['live-2']);
+    });
+
+    it('drops a finished build box, which is a row like any other', () => {
+        const onScreen = [
+            { id: 'live-2', role: 'system', content: 'Building', isStreaming: false, buildLog: { title: 'Building', lines: ['step 1'], done: true } } as ChatEntry,
+        ];
+
+        expect(entriesAwaitingRows(onScreen)).toEqual([]);
+    });
+
+    it('reads the entries the stream left, not a hand-written list', () => {
+        const live = liveEntries([
+            { type: 'token', data: { text: 'Working on it.' } },
+            { type: 'tool_call', data: { tool_id: 'call-1', tool_name: 'bash', args: { command: 'sleep 5' } } },
+            { type: 'tool_result', data: { tool_id: 'call-1', output: 'done', success: true } },
+            { type: 'token', data: { text: 'The command' } },
+        ]);
+        expect(live.length).toBeGreaterThan(1);
+
+        // The call answered, so only the text streaming after it is still awaiting a row.
+        expect(entriesAwaitingRows(live).every(e => e.isStreaming)).toBe(true);
     });
 });
