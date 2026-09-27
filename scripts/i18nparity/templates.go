@@ -28,10 +28,11 @@ const receiverName = "prompts"
 
 // promptTemplates is the English set the overlay must mirror, named as the loaders name them
 // (backend/prompts renders base/merge_conflict/summarize/summarize_user/answer_question/
-// answer_question_user directly, and base invokes plan-mode).
+// answer_question_user directly, and base invokes plan-mode and explore-mode).
 var promptTemplates = []string{
 	"base.tmpl",
 	"plan-mode.tmpl",
+	"explore-mode.tmpl",
 	"merge_conflict.tmpl",
 	"summarize.tmpl",
 	"summarize_user.tmpl",

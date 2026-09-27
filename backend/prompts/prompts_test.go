@@ -47,15 +47,18 @@ func TestRenderSystemPrompt_ShippedTemplates(t *testing.T) {
 	withRealTemplates(t)
 
 	for _, tc := range []struct {
-		name     string
-		planMode bool
+		name        string
+		planMode    bool
+		exploreMode bool
 	}{
-		{name: "act mode", planMode: false},
+		{name: "act mode"},
 		{name: "plan mode", planMode: true},
+		{name: "explore mode", exploreMode: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			data := baseSample()
 			data.PlanMode = tc.planMode
+			data.ExploreMode = tc.exploreMode
 
 			out, err := RenderSystemPrompt(data)
 			if err != nil {
@@ -89,6 +92,19 @@ func TestRenderSystemPrompt_ShippedTemplates(t *testing.T) {
 			// new template could hijack the system prompt.
 			if got := strings.Contains(out, "Plan-First Workflow"); got != tc.planMode {
 				t.Errorf("plan-mode section present = %v, want %v", got, tc.planMode)
+			}
+			if got := strings.Contains(out, "# Explore Mode"); got != tc.exploreMode {
+				t.Errorf("explore-mode section present = %v, want %v", got, tc.exploreMode)
+			}
+			if tc.exploreMode {
+				for _, want := range []string{
+					"Create a task only on an explicit request.",
+					"Run order: children run BEFORE parents.",
+				} {
+					if !strings.Contains(out, want) {
+						t.Errorf("explore-mode section is missing %q", want)
+					}
+				}
 			}
 		})
 	}

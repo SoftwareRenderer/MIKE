@@ -164,10 +164,9 @@ func render(coreFiles []string, name string, data any) (string, error) {
 	return buf.String(), nil
 }
 
-// coreGlob returns core's whole template set. The system prompt needs all of it
-// because base.tmpl calls {{template "plan-mode" .}}, and a sub-template
-// resolves by the name its file *defines* ({{define "plan-mode"}}), not by its
-// file name — which is also what a pack has to know when it translates one.
+// coreGlob returns core's whole template set. The system prompt needs all of it because base.tmpl
+// calls the plan-mode and explore-mode sub-templates, which resolve by the name their file
+// *defines* rather than by its file name — a name a translating pack has to keep.
 func coreGlob() ([]string, error) {
 	files, err := filepath.Glob(filepath.Join(promptDir(), "*.tmpl"))
 	if err != nil {

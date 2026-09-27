@@ -198,6 +198,15 @@ func TestNoCoreTemplateReadsTheLocale(t *testing.T) {
 	if !strings.Contains(planOut, "Plan-First Workflow") {
 		t.Error("core's plan-mode section must still be there for a locale-only pack")
 	}
+	explore := baseSample()
+	explore.ExploreMode = true
+	exploreOut, err := RenderSystemPrompt(explore)
+	if err != nil {
+		t.Fatalf("explore render: %v", err)
+	}
+	if !strings.Contains(exploreOut, "# Explore Mode") {
+		t.Error("core's explore-mode section must still be there for a locale-only pack")
+	}
 }
 
 // TestPackTemplateWinsPerTemplate is the overlay rule itself: a same-named pack
@@ -231,32 +240,43 @@ func TestPackTemplateWinsPerTemplate(t *testing.T) {
 	}
 }
 
-// TestPackBaseTemplateResolvesCoreSubTemplates is the reason the whole core glob
-// is parsed for the system prompt: base.tmpl calls {{template "plan-mode" .}}, and
-// a translated base.tmpl has to keep working against core's English plan-mode when
-// the pack is silent about it. It also pins the trap — the sub-template resolves by
-// the name plan-mode.tmpl *defines*, so a pack that translates plan-mode itself has
-// to keep {{define "plan-mode"}}.
+// TestPackBaseTemplateResolvesCoreSubTemplates is why the whole core glob is parsed: a pack's
+// base.tmpl must resolve core's sub-templates by the name each file *defines*, so a pack that
+// translates one keeps that {{define}} name.
 func TestPackBaseTemplateResolvesCoreSubTemplates(t *testing.T) {
 	withRealTemplates(t)
 	resetOverlay(t)
 
 	pack := writePack(t, map[string]string{
-		"base.tmpl": `PACK BASE mode={{if .PlanMode}}plan{{else}}act{{end}} sub={{template "plan-mode" .}}`,
+		"base.tmpl": `PACK BASE mode={{if .PlanMode}}plan{{else if .ExploreMode}}explore{{else}}act{{end}} sub={{if .PlanMode}}{{template "plan-mode" .}}{{end}}{{if .ExploreMode}}{{template "explore-mode" .}}{{end}}`,
 	})
 	SetOverlay(pack, "ja")
 
-	data := baseSample()
-	data.PlanMode = true
-	out, err := RenderSystemPrompt(data)
-	if err != nil {
-		t.Fatalf("render: %v", err)
-	}
-	if !strings.HasPrefix(out, "PACK BASE mode=plan sub=") {
-		t.Fatalf("pack base.tmpl did not win: %.80s", out)
-	}
-	if !strings.Contains(out, "Plan-First Workflow") {
-		t.Error("core's plan-mode sub-template did not resolve inside the pack's base.tmpl")
+	for _, tc := range []struct {
+		name        string
+		planMode    bool
+		exploreMode bool
+		prefix      string
+		section     string
+	}{
+		{name: "plan", planMode: true, prefix: "PACK BASE mode=plan", section: "Plan-First Workflow"},
+		{name: "explore", exploreMode: true, prefix: "PACK BASE mode=explore", section: "# Explore Mode"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := baseSample()
+			data.PlanMode = tc.planMode
+			data.ExploreMode = tc.exploreMode
+			out, err := RenderSystemPrompt(data)
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			if !strings.HasPrefix(out, tc.prefix) {
+				t.Fatalf("pack base.tmpl did not win: %.80s", out)
+			}
+			if !strings.Contains(out, tc.section) {
+				t.Errorf("core's %s sub-template did not resolve inside the pack's base.tmpl", tc.name)
+			}
+		})
 	}
 }
 

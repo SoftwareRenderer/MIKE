@@ -14,6 +14,7 @@ type PromptData struct {
 	WorktreePath string
 	CurrentDate  string // e.g. "2025-07-08"
 	PlanMode     bool
+	ExploreMode  bool
 	Tools        []ToolInfo
 	AgentsMd     string  // contents of AGENTS.md from worktree root, empty if not found
 	Skills       []Skill // discovered skills with name, description, and location
@@ -203,9 +204,9 @@ func stripQuotes(s string) string {
 
 // RenderSystemPrompt renders the system prompt from templates loaded from disk.
 //
-// Every core template is parsed, because base.tmpl calls {{template "plan-mode" .}}; the
-// active translation pack's templates are then laid over them by name (see overlay.go), so
-// a pack can redefine any of them and core still answers for the ones it left alone.
+// Every core template is parsed, because base.tmpl calls the plan-mode and explore-mode
+// sub-templates; a pack's templates are then laid over them by name (see overlay.go), and core
+// answers for the ones a pack left alone.
 func RenderSystemPrompt(data PromptData) (string, error) {
 	if data.Locale == "" {
 		data.Locale = ActiveLocale()

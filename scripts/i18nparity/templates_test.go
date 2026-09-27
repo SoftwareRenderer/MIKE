@@ -7,14 +7,15 @@ import (
 	"testing"
 )
 
-// enTmpl is a miniature of the real prompt set: the same seven files, the same cross-file define,
-// the same control flow. Prose is short because the checker must never look at it.
+// enTmpl is a miniature of the real prompt set: the same files, the same cross-file defines, the
+// same control flow. Prose is short because the checker must never look at it.
 var enTmpl = map[string]string{
 	"base.tmpl": `You are MIKE, an agent working in a git worktree.
 
 Worktree: {{ .WorktreePath }}
 Today: {{ .CurrentDate }}
 {{if .PlanMode}}{{template "plan-mode" .}}{{end}}
+{{if .ExploreMode}}{{template "explore-mode" .}}{{end}}
 Available tools:
 {{range .Tools}}{{inc .Name}}. {{ .Name }}: {{ .Description }}
 {{end}}
@@ -22,6 +23,7 @@ Available tools:
 {{ .AgentsMd }}{{end}}
 `,
 	"plan-mode.tmpl":            "{{define \"plan-mode\"}}You are in plan mode for {{ .WorktreePath }}. Do not edit files.{{end}}\n",
+	"explore-mode.tmpl":         "{{define \"explore-mode\"}}You are exploring {{ .WorktreePath }}. Create tasks only when asked.{{end}}\n",
 	"merge_conflict.tmpl":       "Resolve {{ .TaskBranch }} into {{ .TargetBranch }}.\n{{range .ConflictedFiles}}- {{ . }}\n{{end}}",
 	"summarize.tmpl":            "Summarise the conversation concisely.",
 	"summarize_user.tmpl":       "Conversation:\n{{ .Text }}",
@@ -29,13 +31,14 @@ Available tools:
 	"answer_question_user.tmpl": "Question: {{ .Question }}\n",
 }
 
-// zhTmpl is the same seven templates with the prose in Chinese and every directive untouched.
+// zhTmpl is the same templates with the prose in Chinese and every directive untouched.
 var zhTmpl = map[string]string{
 	"base.tmpl": `你是 MIKE，一个在 git worktree 中工作的 agent。
 
 工作目录：{{ .WorktreePath }}
 今天：{{ .CurrentDate }}
 {{if .PlanMode}}{{template "plan-mode" .}}{{end}}
+{{if .ExploreMode}}{{template "explore-mode" .}}{{end}}
 可用工具：
 {{range .Tools}}{{inc .Name}}. {{ .Name }}：{{ .Description }}
 {{end}}
@@ -43,6 +46,7 @@ var zhTmpl = map[string]string{
 {{ .AgentsMd }}{{end}}
 `,
 	"plan-mode.tmpl":            "{{define \"plan-mode\"}}你处于 plan mode，工作目录 {{ .WorktreePath }}。不要修改文件。{{end}}\n",
+	"explore-mode.tmpl":         "{{define \"explore-mode\"}}你正在探索 {{ .WorktreePath }}。只有被要求时才创建任务。{{end}}\n",
 	"merge_conflict.tmpl":       "将 {{ .TaskBranch }} 合并到 {{ .TargetBranch }}。\n{{range .ConflictedFiles}}- {{ . }}\n{{end}}",
 	"summarize.tmpl":            "简要总结当前对话。",
 	"summarize_user.tmpl":       "对话内容：\n{{ .Text }}",
@@ -73,17 +77,20 @@ func compareTmpl(t *testing.T, enBodies, zhBodies map[string]string) *Findings {
 }
 
 func TestLoadTmplSetSeesCrossFileDefine(t *testing.T) {
-	// base.tmpl invokes a define declared in plan-mode.tmpl; the set must resolve that, and
-	// `inc` must parse because prompts.funcs provides it.
+	// base.tmpl invokes a define declared in plan-mode.tmpl and one declared in
+	// explore-mode.tmpl; the set must resolve both, and `inc` must parse because
+	// prompts.funcs provides it.
 	set := tmplSetFrom(t, enTmpl)
-	if !set.Declared["plan-mode"] {
-		t.Fatalf("define plan-mode not found; declared = %v", set.Declared)
+	for _, mode := range []string{"plan-mode", "explore-mode"} {
+		if !set.Declared[mode] {
+			t.Fatalf("define %s not found; declared = %v", mode, set.Declared)
+		}
+		if !contains(set.Invoked["base.tmpl"], mode) {
+			t.Fatalf("base.tmpl invoke of %s not recorded; invoked = %v", mode, set.Invoked["base.tmpl"])
+		}
 	}
-	if !contains(set.Invoked["base.tmpl"], "plan-mode") {
-		t.Fatalf("base.tmpl invoke not recorded; invoked = %v", set.Invoked["base.tmpl"])
-	}
-	if got := set.DefineNames(); len(got) != 1 || got[0] != "plan-mode" {
-		t.Fatalf("DefineNames = %v, want [plan-mode]", got)
+	if got := set.DefineNames(); len(got) != 2 || got[0] != "explore-mode" || got[1] != "plan-mode" {
+		t.Fatalf("DefineNames = %v, want [explore-mode plan-mode]", got)
 	}
 }
 
@@ -141,6 +148,19 @@ func TestComparePromptSetsDroppedTemplateCall(t *testing.T) {
 
 	f := compareTmpl(t, enTmpl, mutated)
 	requireErrorContaining(t, f, `plan-mode`)
+}
+
+// A pack base.tmpl that stops invoking the explore sub-template leaves that mode without its
+// instructions.
+func TestComparePromptSetsDroppedExploreCall(t *testing.T) {
+	mutated := map[string]string{}
+	for k, v := range zhTmpl {
+		mutated[k] = v
+	}
+	mutated["base.tmpl"] = strings.Replace(mutated["base.tmpl"], "{{if .ExploreMode}}{{template \"explore-mode\" .}}{{end}}", "", 1)
+
+	f := compareTmpl(t, enTmpl, mutated)
+	requireErrorContaining(t, f, `base.tmpl no longer invokes {{template "explore-mode" .}}`)
 }
 
 func TestComparePromptSetsRenamedField(t *testing.T) {
