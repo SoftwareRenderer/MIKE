@@ -241,11 +241,6 @@ export async function setDraftText(taskId: string, text: string): Promise<void> 
     return dbPut(STORE_DRAFTS, taskId, text);
 }
 
-/** Remove draft text for a task. */
-export async function clearDraftText(taskId: string): Promise<void> {
-    return dbDelete(STORE_DRAFTS, taskId);
-}
-
 // ─── Branch editor drafts (IndexedDB: editor-drafts store) ──────────────────
 
 /** Get saved draft content for a file. Returns `null` if no draft exists. */
