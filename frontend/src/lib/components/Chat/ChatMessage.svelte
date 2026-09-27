@@ -408,7 +408,7 @@
     }
     .queued-indicator {
         flex-shrink: 0;
-        color: var(--color-warning, #f59e0b);
+        color: var(--color-warning);
         display: inline-flex;
         align-items: center;
         gap: 4px;

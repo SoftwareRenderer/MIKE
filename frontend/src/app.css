@@ -44,6 +44,9 @@ input[type="number"] {
     --color-bg-page: #0d1117;
     --color-bg-card: #161b22;
     --color-bg-input: #0d1117;
+    /* A panel that floats inside a panel — a build log, a chat build box. Aliased so the colour keeps one
+       home; a theme that wants the lift stronger overrides this name instead of `--color-surface-1`. */
+    --color-bg-elevated: var(--color-surface-1);
 
     /* Borders */
     --color-border: rgba(255, 255, 255, 0.1);

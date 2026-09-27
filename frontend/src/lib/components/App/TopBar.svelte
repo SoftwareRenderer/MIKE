@@ -255,12 +255,12 @@
             border-color: var(--color-branch-solid);
             font-size: var(--text-2xs);
             padding: 1px 6px;
-            color: #fff;
+            color: var(--color-btn-text);
         }
         .explorer-btn .branch-badge.main {
             background: var(--color-branch-main-solid);
             border-color: var(--color-branch-main-solid);
-            color: #fff;
+            color: var(--color-btn-text);
         }
     }
 

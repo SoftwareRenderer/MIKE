@@ -1,5 +1,6 @@
 <script lang="ts">
     import { Z } from '$lib/constants/z-layers';
+    import { MODEL_BADGE_COLORS, AGENT_BADGE_COLOR } from '$lib/constants/badge-colors';
     import type { Task } from '$lib/types';
     import { AGENT_URL_PREFIX } from '$lib/types';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
@@ -387,7 +388,7 @@
         menu.className = 'card-overflow-menu';
         menu.setAttribute('role', 'menu');
         // Inline styles to escape Svelte scoping (element is on document.body)
-        menu.style.cssText = `position:fixed;z-index:${Z.overlay};background:var(--color-surface-3,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,6px);padding:4px;width:140px;box-shadow:0 8px 24px rgba(0,0,0,0.3);display:flex;flex-direction:column;gap:2px;`;
+        menu.style.cssText = `position:fixed;z-index:${Z.overlay};background:var(--color-surface-3);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:4px;width:140px;box-shadow:0 8px 24px rgba(0,0,0,0.3);display:flex;flex-direction:column;gap:2px;`;
 
         const items: Array<{ icon: readonly IconShape[]; label: string; action: (e: MouseEvent) => void; danger?: boolean }> = [];
 
@@ -411,7 +412,7 @@
             btn.type = 'button';
             btn.className = 'overflow-item' + (item.danger ? ' overflow-delete' : '');
             btn.setAttribute('role', 'menuitem');
-            btn.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:none;border-radius:var(--radius-sm,4px);background:transparent;color:var(--color-text-primary,#ccc);font-size:var(--text-base);font-family:inherit;font-weight:500;cursor:pointer;text-align:left;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
+            btn.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:none;border-radius:var(--radius-sm);background:transparent;color:var(--color-text-primary);font-size:var(--text-base);font-family:inherit;font-weight:500;cursor:pointer;text-align:left;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
             btn.appendChild(iconSvg(item.icon));
             btn.appendChild(document.createTextNode(item.label));
             btn.addEventListener('click', (e: MouseEvent) => { closeOverflow(); item.action(e); });
@@ -491,17 +492,12 @@
 
     // Model badge: always "auto" behavior
     // Model only (1 provider) or provider+model (2+)
-    const MODEL_COLORS = [
-        '#888888', '#4C9AFF', '#3FB950', '#D29922', '#F85149',
-        '#A371F7', '#E3B341', '#79C0FF', '#7EE787', '#FF7B72',
-        '#D2A8FF', '#F0883E', '#56B6C2', '#F778BA', '#DB6D28',
-    ];
     function getModelColor(modelName: string): string {
         let hash = 0;
         for (let i = 0; i < modelName.length; i++) {
             hash = ((hash << 5) - hash + modelName.charCodeAt(i)) | 0;
         }
-        return MODEL_COLORS[Math.abs(hash) % MODEL_COLORS.length];
+        return MODEL_BADGE_COLORS[Math.abs(hash) % MODEL_BADGE_COLORS.length];
     }
     let modelBadge = $derived.by(() => {
         const cfg = appStore.config;
@@ -512,7 +508,7 @@
             // Look up the agent provider's display name from the config
             const agentProvider = providers.find(p => p.url === task.llama_server_url);
             const agentText = agentProvider ? getProviderDisplayName(agentProvider, providers) : t('board.card.codingAgent');
-            return { text: agentText, provider: null, model: null, color: '#A371F7', isAgent: true };
+            return { text: agentText, provider: null, model: null, color: AGENT_BADGE_COLOR, isAgent: true };
         }
         // Use task model if set, otherwise fall back to the configured Worker model
         const worker = resolveWorker(cfg);
@@ -857,7 +853,7 @@
                             onclick={cycleStatus}
                             aria-label={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusWord(nextStatus)}`) : `Move to ${statusWord(nextStatus)}`}
                             title={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusWord(nextStatus)}`) : `Move to ${statusWord(nextStatus)}`}
-                            style="color: {nextStatus === 'done' && hasChanges ? '#EAB308' : statusColors[nextStatus]}"
+                            style="color: {nextStatus === 'done' && hasChanges ? 'var(--color-status-amber)' : statusColors[nextStatus]}"
                         >
                             {#if nextStatus === 'backlog'}
                                 <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
@@ -866,7 +862,7 @@
                             {:else if nextStatus === 'review'}
                                 <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
                             {:else if nextStatus === 'done' && hasChanges}
-                                <Icon src={commitPushIcon} color="#eab308" width={14} height={14} />
+                                <Icon src={commitPushIcon} color="var(--color-status-amber)" width={14} height={14} />
                             {:else if nextStatus === 'done'}
                                 <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
                             {/if}
@@ -892,7 +888,7 @@
     {#if statusBadge || memAlert || modelBadge.text || subtaskProgress}
         <div class="badges-row">
             {#if statusBadge}
-                <div class="badge" style="background: {statusBadge.color}11; color: {statusBadge.color}">
+                <div class="badge" style="background: rgb(from {statusBadge.color} r g b / 0.07); color: {statusBadge.color}">
                     {statusBadge.text}
                 </div>
             {/if}
@@ -904,7 +900,7 @@
             {/if}
             {#if modelBadge.text && !hideModelBadge}
                 {#if modelBadge.isAgent}
-                    <div class="badge model-badge agent-badge" style="background: {modelBadge.color}11; color: {modelBadge.color}">
+                    <div class="badge model-badge agent-badge" style="background: rgb(from {modelBadge.color} r g b / 0.07); color: {modelBadge.color}">
                         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style="margin-right: 3px">
                             <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
                             <circle cx="6" cy="9" r="1" fill="currentColor"/>
@@ -913,7 +909,7 @@
                         {modelBadge.text}
                     </div>
                 {:else}
-                    <div class="badge model-badge" style="background: {modelBadge.color}11; color: {modelBadge.color}">
+                    <div class="badge model-badge" style="background: rgb(from {modelBadge.color} r g b / 0.07); color: {modelBadge.color}">
                         {#if modelBadge.provider}<span class="badge-provider">{modelBadge.provider}</span><span class="badge-sep"> · </span>{/if}<span class="badge-model">{modelBadge.model}</span>
                     </div>
                 {/if}
@@ -1141,15 +1137,15 @@
     }
     .action-icon:hover {
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     .action-icon.action-move:hover {
         background: var(--color-accent-dark);
-        color: white !important;
+        color: var(--color-btn-text) !important;
     }
     .action-icon.action-delete:hover {
         background: var(--color-status-red-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     .action-idle {
         /* width, never min-width: a longer label from a translation pack must not outgrow the
@@ -1191,8 +1187,8 @@
     }
     .oom-badge {
         color: var(--color-status-red);
-        background: rgba(248, 81, 73, 0.12);
-        border: 1px solid rgba(248, 81, 73, 0.3);
+        background: var(--color-status-red-bg);
+        border: 1px solid rgb(from var(--color-status-red) r g b / 0.3);
     }
     .model-badge {
         max-width: 100%;
@@ -1228,11 +1224,11 @@
         color: var(--color-text-secondary);
     }
     .diff-add {
-        color: var(--color-status-green, #3FB950);
+        color: var(--color-status-green);
         margin-left: -1px;
     }
     .diff-del {
-        color: var(--color-status-red, #F85149);
+        color: var(--color-status-red);
         margin-left: -1px;
     }
     .diff-sep {

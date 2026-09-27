@@ -387,7 +387,7 @@
         color: var(--color-primary);
     }
     .sandbox-badge-off {
-        color: var(--color-status-red, #f85149);
+        color: var(--color-status-red);
     }
     .project-name {
         flex: 1;
@@ -415,7 +415,7 @@
         display: none;
     }
     .project-abbr-no-sandbox {
-        color: var(--color-status-red, #f85149);
+        color: var(--color-status-red);
     }
     .project-stats {
         display: flex;
@@ -448,7 +448,7 @@
     }
     .project-remove-btn:hover {
         background: var(--color-status-red-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     .sidebar-menu {
         padding: 8px;

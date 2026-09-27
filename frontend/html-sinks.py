@@ -142,18 +142,19 @@ STYLE_SINKS: dict[tuple[str, str], str] = {
     ("src/lib/components/Card.svelte", "subtaskProgress.pct * 100"):
         "literal — a ratio this file computes",
     ("src/lib/components/Card.svelte", "modelBadge.color"):
-        "contains:getModelColor — a hash into MODEL_COLORS, or a literal in this file",
+        "contains:MODEL_BADGE_COLORS — a hash into the fixed palette in $lib/constants/badge-colors, "
+        "or a literal in this file",
     ("src/lib/components/Card.svelte", "statusBadge.color"):
-        "contains:--color-status — statusBadge returns tokens or literals from this file",
+        "contains:--color-status — statusBadge returns status tokens written in this file",
     ("src/lib/components/Card.svelte",
-     "nextStatus === 'done' && hasChanges ? '#EAB308' : statusColors[nextStatus]"):
-        "contains:statusColors — a literal or a lookup in this file's fixed map",
+     "nextStatus === 'done' && hasChanges ? 'var(--color-status-amber)' : statusColors[nextStatus]"):
+        "contains:statusColors — a token or a lookup in this file's fixed map",
     ("src/lib/components/CardDetail/BoardOverview.svelte", "getColumnColor(section.id)"):
         "contains:var(-- — the column colors are tokens declared in this file",
     ("src/lib/components/CardDetail/TaskHeader.svelte", "badge.color"):
         "literal — a prop; the badge color is one of the status literals",
     ("src/lib/components/Chat/ContextDonut.svelte", "STROKE"):
-        "contains:# — STROKE is a literal in this file",
+        "literal — STROKE is size * 0.3, a number this file derives",
     ("src/lib/components/Chat/ToolCall.svelte",
      "tc.isPending ? 'var(--color-accent)' : tc.interrupted ? 'var(--color-status-yellow)' "
      ": (tc.success ? 'var(--color-status-green)' : 'var(--color-status-red)')"):

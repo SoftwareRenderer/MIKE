@@ -780,7 +780,7 @@
     }
     .summarization-label {
         font-size: var(--text-xs);
-        color: white;
+        color: var(--color-text-primary);
         opacity: 0.8;
         white-space: nowrap;
     }
@@ -937,7 +937,7 @@
         color: var(--color-status-yellow);
     }
     .build-box-icon.build-box-ok {
-        color: var(--color-status-green, #3fb950);
+        color: var(--color-status-green);
     }
     .build-box-title {
         font-weight: 500;
@@ -949,7 +949,7 @@
         margin-left: auto;
         flex-shrink: 0;
         font-size: var(--text-2xs);
-        color: var(--color-status-green, #3fb950);
+        color: var(--color-status-green);
         text-transform: uppercase;
         letter-spacing: 0.3px;
     }

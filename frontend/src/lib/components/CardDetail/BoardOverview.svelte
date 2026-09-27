@@ -187,11 +187,11 @@
     }
     .section-group.is-over {
         border-color: var(--color-accent);
-        box-shadow: 0 0 0 2px var(--color-accent)40;
+        box-shadow: 0 0 0 2px rgb(from var(--color-accent) r g b / 0.25);
     }
     .section-group.is-drop-rejected {
-        border-color: var(--color-status-red, #f85149);
-        box-shadow: 0 0 0 2px var(--color-status-red, #f85149)40;
+        border-color: var(--color-status-red);
+        box-shadow: 0 0 0 2px rgb(from var(--color-status-red) r g b / 0.25);
     }
     .section-header {
         display: flex;
@@ -257,7 +257,7 @@
     }
     .add-btn:hover {
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     .add-btn:focus-visible {
         outline: 2px solid var(--color-accent);
@@ -277,10 +277,10 @@
     }
     .clear-btn:hover {
         background: var(--color-status-red-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     .clear-btn:focus-visible {
-        outline: 2px solid var(--color-status-red, #f85149);
+        outline: 2px solid var(--color-status-red);
         outline-offset: 1px;
     }
     @media (max-width: 768px) {

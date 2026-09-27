@@ -1508,8 +1508,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         font-size: var(--text-xs);
     }
     .reconnecting-btn {
-        background: rgba(214, 211, 209, 0.15);
-        border: 1px solid rgba(214, 211, 209, 0.3);
+        background: rgb(from var(--color-alert-text) r g b / 0.15);
+        border: 1px solid rgb(from var(--color-alert-text) r g b / 0.3);
         color: var(--color-alert-text);
         padding: 2px 10px;
         line-height: 1;
@@ -1520,7 +1520,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         transition: background 0.15s;
     }
     .reconnecting-btn:hover {
-        background: rgba(214, 211, 209, 0.25);
+        background: rgb(from var(--color-alert-text) r g b / 0.25);
     }
     @keyframes slide-down {
         from {
@@ -1606,7 +1606,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         z-index: var(--z-modal);
         padding: 8px 16px;
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
         font-weight: 600;
         border-radius: var(--radius-md);
         text-decoration: none;
@@ -1661,7 +1661,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         left: 50%;
         transform: translateX(-50%);
         background: var(--color-status-red-dark);
-        color: white;
+        color: var(--color-btn-text);
         padding: 10px 20px;
         border-radius: var(--radius-md);
         font-size: var(--text-base);
