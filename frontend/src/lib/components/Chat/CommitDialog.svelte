@@ -2,6 +2,7 @@
     import { onDestroy } from 'svelte';
     import { dialogStore } from '$lib/stores';
     import BaseModal from '../BaseModal.svelte';
+    import Spinner from '$lib/components/Spinner.svelte';
     import { t } from '$lib/i18n';
     import { streamCommitPreview } from '$lib/api/tasks';
     import { isAborted } from '$lib/api/helpers';
@@ -219,18 +220,7 @@
 
         {#if streaming}
             <div class="commit-progress" role="status" aria-busy={streaming}>
-                <svg
-                    class="progress-spinner"
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.5"
-                    aria-hidden="true"
-                >
-                    <path d="M12 2a10 10 0 0 1 10 10"/>
-                </svg>
+                <Spinner size={14} decorative />
                 {#if promptProgress > 0 && promptProgress < 100}
                     <span class="progress-text">{t('chat.commit.promptProgress', { percent: promptProgress })}</span>
                 {:else}
@@ -298,12 +288,6 @@
 
     .progress-text {
         flex: 1;
-    }
-
-    .progress-spinner {
-        animation: spin 0.8s linear infinite;
-        flex-shrink: 0;
-        opacity: 0.6;
     }
 
     .commit-meta {

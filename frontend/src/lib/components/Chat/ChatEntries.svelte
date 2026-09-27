@@ -9,6 +9,7 @@
     import ChatMessage from './ChatMessage.svelte';
     import CheckpointDivider from './CheckpointDivider.svelte';
     import QueueIndicator from './QueueIndicator.svelte';
+    import Spinner from '$lib/components/Spinner.svelte';
     import { appStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
     import { t } from '$lib/i18n';
@@ -350,7 +351,7 @@
         <div class="chat-sticky-header" class:hidden-header={!computedShowHeader} bind:this={stickyHeaderEl}
              role="status" aria-live="polite" aria-busy={stickyJumping || undefined}>
             <button class="chat-sticky-bubble" onclick={handleStickyClickInternal} title={t('chat.entries.scrollToMessage')} aria-label={t('chat.entries.scrollToMessage')}>
-                {#if stickyJumping}<span class="spinner-inline"></span>{/if}
+                {#if stickyJumping}<Spinner decorative />{/if}
                 <span class="chat-sticky-text">{computedStickyMessage}</span>
             </button>
             {#if onToggleFullscreen}
@@ -384,7 +385,7 @@
         <div class="chat-messages" bind:this={chatScrollEl} role="region" aria-label={t('chat.entries.region')} tabindex="-1">
             {#if historyLoading}
                 <div class="chat-loading">
-                    <span class="spinner"></span>
+                    <Spinner size={20} decorative />
                     <p>{t('chat.entries.loading')}</p>
                 </div>
             {:else}
@@ -558,7 +559,7 @@
                  this appeared or went. It floats at the opposite corner from the jump button, so a reader who
                  scrolls away while the read is out gets both. -->
             <div class="chat-pending" role="status" aria-label={t('chat.entries.loading')}>
-                <span class="chat-pending-spinner" aria-hidden="true"></span>
+                <Spinner decorative />
             </div>
         {/if}
 
@@ -579,8 +580,6 @@
 </div>
 
 <style>
-    @import '$lib/styles/shared.css';
-
     .chat-messages-wrapper {
         flex: 1;
         position: relative;
@@ -653,9 +652,6 @@
         text-overflow: ellipsis;
         white-space: nowrap;
     }
-    .chat-sticky-bubble :global(.spinner-inline) {
-        flex-shrink: 0;
-    }
     .chat-sticky-bubble:hover {
         background: color-mix(in srgb, var(--color-accent) 28%, transparent);
     }
@@ -727,23 +723,7 @@
     .history-notice-retry:hover {
         background: color-mix(in srgb, var(--color-warning) 18%, transparent);
     }
-    .chat-loading .spinner {
-        width: 20px;
-        height: 20px;
-        border-width: 2px;
-        border-color: var(--color-accent);
-        border-top-color: transparent;
-    }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-    .spinner {
-        display: inline-block;
-        width: 10px;
-        height: 10px;
-        border: 1.5px solid var(--color-status-yellow);
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-    }
     /* Error entry styles */
     .error-entry {
         padding: 6px 0;
@@ -947,15 +927,6 @@
         /* Nothing to click here, and it floats over the transcript: a click must reach the entry under it. */
         pointer-events: none;
         animation: chat-pending-in 0.2s ease-out;
-    }
-    .chat-pending-spinner {
-        display: block;
-        width: 14px;
-        height: 14px;
-        border: 2px solid var(--color-text-secondary);
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
     }
     @keyframes chat-pending-in { from { opacity: 0; } to { opacity: 1; } }
 

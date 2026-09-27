@@ -1,5 +1,6 @@
 <script lang="ts">
     import FileMentionDropdown from '../FileMentionDropdown.svelte';
+    import Spinner from '$lib/components/Spinner.svelte';
     import { useFileMention } from '$lib/composables/use-file-mention.svelte';
     import { useImageAttachments } from '$lib/composables/use-image-attachments.svelte';
     import { uploadTaskFile } from '$lib/api';
@@ -131,7 +132,8 @@
         <button class="btn-edit-cancel" onclick={onCancel} title={t('chat.edit.cancelEditing')}>{t('chat.common.cancel')}</button>
         <button class="btn-edit-submit" onclick={() => { if (canSubmit) onSubmit?.(editContent.trim(), editAttachments); }} disabled={isSubmitting || !canSubmit} title={submitLabel}>
             {#if isSubmitting}
-                <span class="spinner-inline"></span>
+                <!-- The ring replaces the button's own words, so it carries them. -->
+                <Spinner label={submitLabel} />
             {:else if submitIcon === 'check'}
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <polyline points="20 6 9 17 4 12"/>
@@ -159,8 +161,6 @@
 <FileMentionDropdown {...mention.dropdownProps} />
 
 <style>
-    @import '$lib/styles/shared.css';
-
     .edit-form {
         display: flex;
         flex-direction: column;

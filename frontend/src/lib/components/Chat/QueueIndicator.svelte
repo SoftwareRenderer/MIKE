@@ -1,6 +1,7 @@
 <script lang="ts">
     import { t, type MessageKey } from '$lib/i18n';
     import type { LockWait } from '$lib/types';
+    import Spinner from '$lib/components/Spinner.svelte';
 
     interface Props {
         queuePosition: number;
@@ -50,7 +51,7 @@
 </script>
 
 <div class="awaiting-llm" class:retry={variant() === 'retry'}>
-    <span class="spinner"></span>
+    <Spinner size={12} decorative />
     <span>{label()}</span>
 </div>
 
@@ -66,15 +67,5 @@
     }
     .awaiting-llm.retry {
         color: var(--color-warning);
-    }
-    .spinner {
-        display: inline-block;
-        width: 12px;
-        height: 12px;
-        border: 2px solid currentColor;
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-        flex-shrink: 0;
     }
 </style>

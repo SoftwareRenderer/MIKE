@@ -4,6 +4,7 @@
     import { effectiveStartTaskKey, formatShortcut, shortcutHintsHidden } from '$lib/utils/keyboard';
     import ModelSelector from './ModelSelector.svelte';
     import ModeToggle from './ModeToggle.svelte';
+    import Spinner from '$lib/components/Spinner.svelte';
     import { t } from '$lib/i18n';
 
     // Start Task shortcut hint (empty = disabled).
@@ -55,7 +56,7 @@
     </div>
     <button class="btn-start-task" onclick={onStartTask} disabled={isStarting || (providers.length > 0 && !selectedModel)} title={startShortcutLabel ? t('chat.start.titleWithShortcut', { shortcut: startShortcutLabel }) : t('chat.start.title')}>
         {#if isStarting}
-            <span class="spinner-inline"></span> {t('chat.start.starting')}
+            <Spinner decorative /> {t('chat.start.starting')}
         {:else}
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                 <path d="M4 2l10 6-10 6V2z" fill="currentColor"/>
@@ -103,14 +104,5 @@
         color: rgba(255, 255, 255, 0.85);
         border-color: rgba(255, 255, 255, 0.3);
         background: rgba(255, 255, 255, 0.1);
-    }
-    .spinner-inline {
-        display: inline-block;
-        width: 14px;
-        height: 14px;
-        border: 2px solid color-mix(in srgb, var(--color-btn-text) 30%, transparent);
-        border-top-color: var(--color-btn-text);
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
     }
 </style>

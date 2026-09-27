@@ -5,6 +5,7 @@
     import { slide } from 'svelte/transition';
     import { isAtBottom } from '$lib/composables/use-chat-follow.svelte';
     import Icon from '$lib/components/Icon.svelte';
+    import Spinner from '$lib/components/Spinner.svelte';
     import shieldGreenIcon from '$lib/assets/icons/shield-green.svg?raw';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
     import zapIcon from '$lib/assets/icons/zap.svg?raw';
@@ -466,7 +467,7 @@
                 {/if}
             {/if}
             {#if tc.isPending}
-                <span class="tool-status pending"><span class="spinner"></span><span class="progress-text">{progressText}</span></span>
+                <span class="tool-status pending"><Spinner size={12} decorative /><span class="progress-text">{progressText}</span></span>
             {:else if tc.interrupted}
                 <span class="tool-status interrupted">{t('chat.tool.interrupted')}</span>
             {:else if !tc.success}
@@ -664,15 +665,6 @@
     .tool-status.error { color: var(--color-status-red); }
     .tool-status.interrupted { color: var(--color-status-yellow); }
     .tool-status.success { color: var(--color-status-green); }
-    .spinner {
-        display: inline-block;
-        width: 10px;
-        height: 10px;
-        border: 2px solid currentColor;
-        border-right-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-    }
     .tool-result {
         background: var(--color-surface-0);
         padding: 6px 8px;

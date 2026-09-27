@@ -1,5 +1,6 @@
 <script lang="ts">
     import ContextDonut from './ContextDonut.svelte';
+    import Spinner from '$lib/components/Spinner.svelte';
     import { formatTokens, formatCost } from '$lib/utils/format';
     import { dialogStore } from '$lib/stores';
     import { t } from '$lib/i18n';
@@ -70,7 +71,7 @@
             aria-label="{tooltip}"
         >
             {#if isSummarizing}
-                <span class="spinner"></span>
+                <Spinner size={20} decorative />
             {:else}
                 <ContextDonut {used} {limit} />
                 <span class="usage-text">{formatTokens(used)}</span>
@@ -133,15 +134,6 @@
         font-size: var(--text-xs);
         color: var(--color-text-secondary);
         white-space: nowrap;
-        flex-shrink: 0;
-    }
-    .spinner {
-        width: 22px;
-        height: 22px;
-        border: 2px solid var(--color-border);
-        border-top-color: var(--color-accent);
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
         flex-shrink: 0;
     }
 </style>

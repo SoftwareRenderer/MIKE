@@ -2,6 +2,7 @@
     import type { Thread } from '$lib/types';
     import { t } from '$lib/i18n';
     import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
+    import Spinner from '$lib/components/Spinner.svelte';
 
     interface Props {
         threads: Thread[];
@@ -56,7 +57,8 @@
                 >
                     <span class="thread-name">{thread.name}</span>
                     {#if isSwitching}
-                        <span class="switch-spinner"></span>
+                        <!-- Every item wears the ring while a switch is out, so the ring says nothing. -->
+                        <Spinner size={12} decorative />
                     {/if}
                 </button>
             {/each}
@@ -130,14 +132,5 @@
     }
     .thread-name {
         font-weight: 500;
-    }
-    .switch-spinner {
-        display: inline-block;
-        width: 12px;
-        height: 12px;
-        border: 2px solid currentColor;
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
     }
 </style>
