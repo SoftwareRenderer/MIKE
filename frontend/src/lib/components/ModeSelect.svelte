@@ -141,6 +141,7 @@
         text-align: left;
     }
     .mode-option:hover {
+        opacity: 1;
         background: var(--color-surface-3);
     }
     .mode-option.act.selected {

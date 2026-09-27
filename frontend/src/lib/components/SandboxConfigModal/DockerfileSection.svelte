@@ -5,6 +5,7 @@
      * from here and is never a saved setting.
      */
     import { t } from '$lib/i18n';
+    import Spinner from '../Spinner.svelte';
     import type { Project } from '$lib/types';
     import { imageTagFor } from './drafts';
     import type { SandboxDraftOwner } from './draft.svelte';
@@ -65,9 +66,7 @@
                 {#if dockerfileChanged}
                     <button type="button" class="btn-build" onclick={() => draft.rebuild(project)} disabled={busy} title={t('sandbox.buildImage')}>
                         {#if draft.building}
-                            <svg class="spin" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                                <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="20 10" stroke-linecap="round"/>
-                            </svg>
+                            <Spinner decorative />
                         {:else}
                             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                                 <path d="M7 2L2 12h10L7 2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/>
@@ -78,9 +77,7 @@
                 {:else}
                     <button type="button" class="btn-rebuild" onclick={() => draft.rebuild(project)} disabled={busy} title={draft.buildNoCache ? t('sandbox.rebuildImageNoCache') : t('sandbox.rebuildImage')}>
                         {#if draft.building}
-                            <svg class="spin" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                                <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="20 10" stroke-linecap="round"/>
-                            </svg>
+                            <Spinner decorative />
                         {:else}
                             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                                 <path d="M1.5 7a5.5 5.5 0 0110.2-2.8M12.5 7a5.5 5.5 0 01-10.2 2.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/>
@@ -204,7 +201,6 @@
         gap: 4px;
         border-radius: var(--radius-sm);
         font-size: var(--text-xs);
-        cursor: pointer;
         transition: background 0.15s, border-color 0.15s;
         white-space: nowrap;
     }
@@ -230,11 +226,13 @@
     .btn-build:hover:not(:disabled),
     .btn-browse:hover:not(:disabled),
     .btn-rebuild:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         border-color: var(--color-accent);
     }
 
     .btn-build:hover:not(:disabled) {
+        opacity: 1;
         background: var(--color-accent);
     }
 
@@ -346,7 +344,4 @@
         font-size: var(--text-xs);
     }
 
-    .spin {
-        animation: spin 1s linear infinite;
-    }
 </style>

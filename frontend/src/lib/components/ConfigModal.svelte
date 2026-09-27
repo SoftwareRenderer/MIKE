@@ -771,7 +771,7 @@
                 <div class="section-header">
                     <h3 class="settings-section-title">{t('settings.providers')}</h3>
                     <div class="settings-section-actions">
-                        <button type="button" class="btn-small" onclick={addProvider} title={t('settings.addProviderHint')}>{t('settings.addProvider')}</button>
+                        <button type="button" class="settings-btn-small" onclick={addProvider} title={t('settings.addProviderHint')}>{t('settings.addProvider')}</button>
                     </div>
                 </div>
                 <div class="providers-list">
@@ -1089,21 +1089,6 @@
 
     /* Toggle row layout */
 
-    /* Buttons */
-    .btn-small {
-        padding: 6px 12px;
-        border-radius: var(--radius-sm);
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        font-size: var(--text-base);
-        font-weight: 500;
-        cursor: pointer;
-        white-space: nowrap;
-    }
-    .btn-small:hover {
-        background: var(--color-surface-4);
-    }
-
     /* Primary Providers list container */
     .primary-providers-list {
         display: flex;
@@ -1197,6 +1182,7 @@
         transition: background 0.15s, color 0.15s;
     }
     .btn-pwa-install:hover {
+        opacity: 1;
         background: var(--color-accent-dark);
         color: var(--color-btn-text);
     }
@@ -1232,11 +1218,11 @@
         font-size: var(--text-sm);
         font-weight: 500;
         font-family: inherit;
-        cursor: pointer;
         border: 1px solid var(--color-accent);
         transition: background 0.15s, color 0.15s;
     }
     .btn-check-updates:hover {
+        opacity: 1;
         background: var(--color-accent-dark);
         color: var(--color-btn-text);
     }
@@ -1314,6 +1300,7 @@
         flex-shrink: 0;
     }
     .icon-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }

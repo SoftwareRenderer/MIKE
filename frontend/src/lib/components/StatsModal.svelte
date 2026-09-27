@@ -316,6 +316,7 @@
         transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
     }
     .btn-reset:hover {
+        opacity: 1;
         color: var(--color-status-red);
         background: rgba(248, 81, 73, 0.1);
         border-color: rgba(248, 81, 73, 0.3);

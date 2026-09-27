@@ -228,6 +228,7 @@
     }
     .footer-btn:hover,
     :global(.ext-footer-btn:hover) {
+        opacity: 1;
         background: var(--color-surface-4);
         color: var(--color-text-primary);
     }
@@ -238,6 +239,7 @@
     }
     .footer-btn.active:hover,
     :global(.ext-footer-btn.active:hover) {
+        opacity: 1;
         background: var(--color-surface-5);
         color: var(--color-text-primary);
     }

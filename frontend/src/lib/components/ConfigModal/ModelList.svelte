@@ -445,6 +445,7 @@
         padding: 0;
     }
     .btn-expand-model:hover {
+        opacity: 1;
         background: var(--color-surface-1);
     }
     .btn-expand-model svg.expanded {
@@ -461,6 +462,7 @@
         flex-shrink: 0;
     }
     .btn-remove-model:hover {
+        opacity: 1;
         background: var(--color-status-red-dark);
         color: var(--color-btn-text);
     }

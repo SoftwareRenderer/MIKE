@@ -369,6 +369,7 @@
         padding: 0;
     }
     .btn-attach:hover:not(:disabled) {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -398,7 +399,6 @@
         height: 32px;
         border-radius: 50%;
         border: none;
-        cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -406,14 +406,12 @@
         padding: 0;
     }
     .btn-send { background: var(--color-accent-dark); color: white; }
-    .btn-send:hover:not(:disabled) { opacity: 0.85; transform: scale(1.05); }
     .btn-send:disabled { background: var(--color-surface-3); color: var(--color-text-tertiary); }
     .btn-stop {
         background: var(--color-status-red-dark);
         color: white;
         animation: pulse-stop 1.5s ease-in-out infinite;
     }
-    .btn-stop:hover { opacity: 0.85; transform: scale(1.05); }
     @keyframes pulse-stop {
         0%, 100% { opacity: 1; }
         50% { opacity: 0.7; }

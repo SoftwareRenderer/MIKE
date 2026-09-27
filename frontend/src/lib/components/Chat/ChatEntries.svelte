@@ -500,9 +500,7 @@
                                     <polyline points="22 4 12 14.01 9 11.01"/>
                                 </svg>
                             {:else}
-                                <svg class="spin build-box-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                                    <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="20 10" stroke-linecap="round"/>
-                                </svg>
+                                <span class="build-box-icon"><Spinner decorative /></span>
                             {/if}
                             <span class="build-box-title">{entry.buildLog.title}</span>
                             {#if entry.buildLog.done}
@@ -615,7 +613,7 @@
         background: var(--color-surface-1);
         border-bottom: 1px solid var(--color-border);
         width: calc(100% - 14px);
-        border-bottom-right-radius: 1.125rem;
+        border-bottom-right-radius: var(--radius-bubble);
         /* Only its own controls take a click, so what lies under it stays reachable. */
         pointer-events: none;
     }
@@ -631,7 +629,7 @@
         pointer-events: auto;
         color: var(--color-text-primary);
         background: color-mix(in srgb, var(--color-accent) 18%, transparent);
-        border-radius: 1.125rem;
+        border-radius: var(--radius-bubble);
         padding: 6px 12px;
         max-width: 80%;
         border: none;
@@ -648,6 +646,7 @@
         white-space: nowrap;
     }
     .chat-sticky-bubble:hover {
+        opacity: 1;
         background: color-mix(in srgb, var(--color-accent) 28%, transparent);
     }
     .chat-sticky-fullscreen {
@@ -667,6 +666,7 @@
         flex-shrink: 0;
     }
     .chat-sticky-fullscreen:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -703,6 +703,7 @@
         cursor: pointer;
     }
     .history-notice-retry:hover {
+        opacity: 1;
         background: color-mix(in srgb, var(--color-warning) 18%, transparent);
     }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
@@ -741,6 +742,7 @@
         transition: all 0.15s ease;
     }
     .btn-dismiss:hover {
+        opacity: 1;
         background: color-mix(in srgb, var(--color-status-red) 15%, transparent);
         color: var(--color-status-red);
     }
@@ -880,6 +882,7 @@
         animation: chat-jump-latest-in 0.2s ease-out;
     }
     .chat-jump-latest:hover {
+        opacity: 1;
         background: color-mix(in srgb, var(--color-accent) 100%);
         color: var(--color-text-primary);
     }
@@ -916,9 +919,6 @@
     .build-box {
         padding: 8px 0;
         max-width: 100%;
-    }
-    .spin {
-        animation: spin 1s linear infinite;
     }
     .build-box-header {
         display: flex;

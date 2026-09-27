@@ -79,11 +79,11 @@
         min-height: 1.6rem;
     }
     .diff-select-btn:hover {
+        opacity: 1;
         background: var(--color-surface-4);
         color: var(--color-text-primary);
     }
-    .diff-select-btn:focus {
-        outline: none;
+    .diff-select-btn:focus-visible {
         border-color: var(--color-accent);
     }
     .sel-label {
@@ -145,6 +145,7 @@
         font-family: var(--font-mono);
     }
     .sel-option:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }

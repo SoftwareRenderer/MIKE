@@ -282,6 +282,8 @@
 {/if}
 
 <style>
+    @import '$lib/styles/shared.css';
+
     .ext-dep-pending {
         font-size: var(--text-xs);
         color: var(--color-status-yellow);
@@ -342,8 +344,4 @@
         margin: 0;
     }
 
-    .btn-small {
-        padding: 0.25rem 0.5rem;
-        font-size: var(--text-xs);
-    }
 </style>

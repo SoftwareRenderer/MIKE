@@ -110,6 +110,7 @@
 :global(.explorer-view .terminal-btn:hover),
 :global(.explorer-view .git-status-btn:hover),
 :global(.explorer-view .git-status-btn.active) {
+    opacity: 1;
     background: var(--color-accent-dark);
     color: white;
 }

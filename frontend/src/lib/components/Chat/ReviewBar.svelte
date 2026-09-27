@@ -181,6 +181,9 @@
         transition: all 0.15s ease;
     }
     .btn-move:hover {
+        /* `opacity: 1` cancels app.css's hover dim the way `shared.css` explains: the background and
+           border shift is this control's answer, and it must not also fade. */
+        opacity: 1;
         background: var(--color-surface-1);
         border-color: var(--color-accent);
     }
@@ -195,15 +198,14 @@
         background: var(--color-surface-2);
         color: var(--color-text-primary);
         border: 1.5px solid var(--color-status-green);
-        cursor: pointer;
         transition: all 0.15s ease;
     }
     .btn-commit-and-done {
         border-color: var(--color-status-yellow);
     }
     .btn-commit-done:hover:not(:disabled) {
+        opacity: 1;
         background: var(--color-surface-3);
-        opacity: 0.9;
     }
     .restart-model-row {
         display: flex;
@@ -221,7 +223,6 @@
         background: var(--color-accent-dark);
         color: white;
         border: none;
-        cursor: pointer;
         transition: all 0.15s ease;
     }
     .btn-restart-task:hover:not(:disabled) {

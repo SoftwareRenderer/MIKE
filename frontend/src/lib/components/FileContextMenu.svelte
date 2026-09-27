@@ -207,11 +207,11 @@
         color: var(--color-text-primary);
         font-size: var(--text-sm);
         text-align: left;
-        cursor: pointer;
         white-space: nowrap;
     }
     .menu-item:hover:not(:disabled),
     .menu-item:focus-visible {
+        opacity: 1;
         background: var(--color-surface-3);
         outline: none;
     }

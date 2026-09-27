@@ -575,6 +575,7 @@
         min-width: 0;
     }
     .diff-commit-subject-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
     }
     .diff-commit-subject-btn.expanded {
@@ -665,7 +666,6 @@
         color: var(--color-text-primary);
     }
     .diff-hash-copy-btn .icon {
-        opacity: 1;
         transition: opacity 0.2s ease;
     }
     .diff-hash-copy-btn.copied .icon {
@@ -779,6 +779,7 @@
         border-radius: 0 0 var(--radius-md) var(--radius-md);
     }
     .diff-file-header:hover {
+        opacity: 1;
         background: var(--color-surface-3);
     }
     .diff-file-header:focus-visible {
@@ -947,6 +948,7 @@
         text-align: center;
     }
     .diff-expand-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
     }
     .diff-expand-btn:focus-visible {
@@ -982,6 +984,7 @@
         transition: background 0.1s ease, color 0.1s ease;
     }
     .diff-mode-toggle:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }

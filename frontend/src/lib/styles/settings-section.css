@@ -76,6 +76,7 @@
 }
 
 :global(.settings-btn-small:hover:not(:disabled)) {
+    opacity: 1;
     background: var(--color-surface-4);
 }
 

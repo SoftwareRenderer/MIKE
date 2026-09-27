@@ -348,6 +348,7 @@
         flex-shrink: 0;
     }
     .editor-icon-btn:hover:not(:disabled) {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -360,7 +361,6 @@
         border-radius: var(--radius-md);
         background: var(--color-accent-dark);
         color: white;
-        cursor: pointer;
         font-size: var(--text-xs);
         font-family: inherit;
         font-weight: 500;

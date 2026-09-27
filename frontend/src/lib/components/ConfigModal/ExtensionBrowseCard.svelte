@@ -155,6 +155,8 @@
 </div>
 
 <style>
+    @import '$lib/styles/shared.css';
+
     .card-header {
         display: flex;
         align-items: flex-start;
@@ -166,33 +168,6 @@
         flex-shrink: 0;
         display: flex;
         align-items: flex-start;
-    }
-
-    .btn {
-        padding: 0.4rem 0.75rem;
-        border-radius: var(--radius-md);
-        font-size: var(--text-sm);
-        cursor: pointer;
-        border: 1px solid transparent;
-        transition: all 0.15s;
-    }
-
-    .btn-primary {
-        background: var(--color-btn-primary-bg);
-        color: var(--color-btn-text);
-    }
-
-    .btn-primary:hover:not(:disabled) {
-        background: var(--color-btn-primary-hover);
-    }
-
-    .btn-small {
-        padding: 0.25rem 0.5rem;
-        font-size: var(--text-xs);
-        /* The install button carries a working ring beside its label, so the two share a line. */
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
     }
 
     .installed-badge {

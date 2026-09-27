@@ -176,7 +176,7 @@
                 </div>
                 <button
                     type="button"
-                    class="btn-secondary btn-small"
+                    class="btn btn-secondary btn-small"
                     title={t('settings.extensions.agentCardUnmountHint')}
                     onclick={() => onrevoke(ext)}
                 >{t('settings.extensions.agentCardUnmount')}</button>
@@ -213,6 +213,8 @@
 </div>
 
 <style>
+    @import '$lib/styles/shared.css';
+
     .card-actions .btn-icon {
         position: relative;
     }
@@ -275,25 +277,6 @@
         margin-left: auto;
     }
 
-    .btn {
-        padding: 0.4rem 0.75rem;
-        border-radius: var(--radius-md);
-        font-size: var(--text-sm);
-        cursor: pointer;
-        border: 1px solid transparent;
-        transition: all 0.15s;
-    }
-
-    .btn-secondary {
-        background: var(--color-btn-secondary-bg);
-        border-color: var(--color-border-subtle);
-        color: var(--color-text-primary);
-    }
-
-    .btn-secondary:hover:not(:disabled) {
-        background: var(--color-border-subtle);
-    }
-
     .btn-icon {
         background: none;
         border: none;
@@ -312,10 +295,5 @@
 
     .btn-delete:hover {
         color: var(--color-status-red);
-    }
-
-    .btn-small {
-        padding: 0.25rem 0.5rem;
-        font-size: var(--text-xs);
     }
 </style>

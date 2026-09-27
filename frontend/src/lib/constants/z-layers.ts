@@ -12,8 +12,6 @@
 // =============================================================================
 
 export const Z = {
-    /** Under the surface it belongs to. */
-    below: -1,
     /** One layer above the unpositioned content around it. */
     raised: 1,
     /** Above `raised` siblings — a tint, link overlay or sticky strip inside one component. */

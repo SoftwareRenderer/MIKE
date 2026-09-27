@@ -90,6 +90,7 @@
 
 :global(.sandbox-config .config-row-subsection:hover),
 :global(.sandbox-config .config-row-expandable:hover) {
+    opacity: 1;
     background: var(--color-surface-3);
     border-radius: var(--radius-sm);
 }
@@ -337,6 +338,7 @@
 :global(.sandbox-config .btn-add-mount:hover:not(:disabled)),
 :global(.sandbox-config .btn-add-env:hover:not(:disabled)),
 :global(.sandbox-config .btn-browse-mount:hover:not(:disabled)) {
+    opacity: 1;
     background: var(--color-surface-3);
     border-color: var(--color-accent);
 }
@@ -356,6 +358,7 @@
 }
 
 :global(.sandbox-config .btn-cancel-edit:hover:not(:disabled)) {
+    opacity: 1;
     background: var(--color-surface-3);
     color: var(--color-text-primary);
 }
@@ -381,6 +384,7 @@
 :global(.sandbox-config .btn-remove-port:hover:not(:disabled)),
 :global(.sandbox-config .btn-remove-mount:hover:not(:disabled)),
 :global(.sandbox-config .btn-remove-env:hover:not(:disabled)) {
+    opacity: 1;
     background: var(--color-status-red-dark);
     color: var(--color-btn-text);
 }

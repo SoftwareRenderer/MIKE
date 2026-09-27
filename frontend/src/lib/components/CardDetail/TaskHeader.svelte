@@ -338,7 +338,11 @@
         justify-content: center;
         flex-shrink: 0;
     }
-    .btn-back:hover { background: var(--color-surface-3); color: var(--color-text-primary); }
+    .btn-back:hover {
+        opacity: 1;
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
     .header-main {
         display: flex;
         align-items: center;
@@ -411,6 +415,7 @@
         text-decoration: none;
     }
     .icon-btn:hover:not(:disabled) {
+        opacity: 1;
         background: var(--color-accent-dark);
     }
     /* Mobile full-path tooltip — fixed so it escapes the label's overflow:

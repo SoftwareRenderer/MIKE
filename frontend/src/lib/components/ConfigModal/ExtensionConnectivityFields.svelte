@@ -28,7 +28,7 @@
                     <span class="field-label">{field.title || field.key}</span>
                     <button
                         type="button"
-                        class="btn-secondary btn-test"
+                        class="btn btn-secondary btn-test"
                         onclick={() => ontest(field)}
                         disabled={probingKey !== ''}
                     >{probingKey === field.key ? t('settings.extensions.testingAddress') : t('settings.extensions.testAddress')}</button>
@@ -45,6 +45,8 @@
 {/if}
 
 <style>
+    @import '$lib/styles/shared.css';
+
     .field-label {
         display: block;
         font-size: var(--text-sm);
@@ -88,13 +90,5 @@
         color: var(--color-text-secondary);
     }
 
-    .btn-secondary {
-        background: var(--color-btn-secondary-bg);
-        border-color: var(--color-border-subtle);
-        color: var(--color-text-primary);
-    }
 
-    .btn-secondary:hover:not(:disabled) {
-        background: var(--color-border-subtle);
-    }
 </style>

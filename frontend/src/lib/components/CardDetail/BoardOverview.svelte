@@ -326,6 +326,7 @@
         transition: all 0.15s ease;
     }
     .task-item-add:hover {
+        opacity: 1;
         border-color: var(--color-accent);
         color: var(--color-accent);
         background: var(--color-accent)10;

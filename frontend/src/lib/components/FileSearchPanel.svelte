@@ -403,6 +403,7 @@
         line-height: 1;
     }
     .toggle-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -501,6 +502,7 @@
         border-radius: 0;
     }
     .search-result-item:hover {
+        opacity: 1;
         background: var(--color-surface-2);
     }
 

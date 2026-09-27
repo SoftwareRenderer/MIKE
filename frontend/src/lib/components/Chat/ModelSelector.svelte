@@ -473,6 +473,7 @@
         white-space: nowrap;
     }
     .selector-trigger:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
         border-color: var(--color-accent);
@@ -527,12 +528,14 @@
         transition: background 0.1s ease;
     }
     .provider-option:hover {
+        opacity: 1;
         background: var(--color-surface-3);
     }
     .provider-option-agent {
         color: var(--color-status-purple);
     }
     .provider-option-agent:hover {
+        opacity: 1;
         background: rgb(from var(--color-status-purple) r g b / 0.08);
     }
     .provider-option-agent.active {
@@ -573,6 +576,7 @@
         transition: background 0.1s ease;
     }
     .model-option:hover {
+        opacity: 1;
         background: var(--color-surface-3);
     }
     .model-option.active {

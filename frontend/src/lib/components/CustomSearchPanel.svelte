@@ -416,6 +416,7 @@
         line-height: 1;
     }
     .toggle-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -450,6 +451,7 @@
         transition: background 0.1s, color 0.1s;
     }
     .nav-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -488,6 +490,7 @@
         white-space: nowrap;
     }
     .action-btn:hover {
+        opacity: 1;
         background: var(--color-surface-4);
         color: var(--color-text-primary);
     }
@@ -509,6 +512,7 @@
         justify-content: center;
     }
     .toggle-replace-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
     }

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import {
   getProjectId,
   navigateToTask,
@@ -6,6 +6,11 @@ import {
   sendMessage,
   findProviderByRef,
 } from './helpers';
+
+/** Dismiss the Create Task modal. Named by its label: the shared button family carries no class a
+ *  restyle has to keep, so a styling class here is a locator that breaks on a rename. */
+const dismissTaskModal = (page: Page) =>
+  page.locator('.modal').getByRole('button', { name: 'Cancel', exact: true });
 
 test.describe.serial('ModeSelect component', () => {
   test.beforeEach(async ({ page }) => {
@@ -35,7 +40,7 @@ test.describe.serial('ModeSelect component', () => {
     await expect(options.nth(2)).toContainText('Explore');
 
     // Close modal
-    await page.locator('.modal .btn-secondary').click();
+    await dismissTaskModal(page).click();
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
   });
 
@@ -61,7 +66,7 @@ test.describe.serial('ModeSelect component', () => {
     await expect(page.locator('.mode-dropdown')).not.toBeVisible({ timeout: 5000 });
 
     // Close modal
-    await page.locator('.modal .btn-secondary').click();
+    await dismissTaskModal(page).click();
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
   });
 
@@ -87,7 +92,7 @@ test.describe.serial('ModeSelect component', () => {
     await expect(page.locator('.mode-dropdown')).not.toBeVisible({ timeout: 5000 });
 
     // Close modal
-    await page.locator('.modal .btn-secondary').click();
+    await dismissTaskModal(page).click();
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
   });
 
@@ -116,7 +121,7 @@ test.describe.serial('ModeSelect component', () => {
     await expect(page.locator('.mode-dropdown')).not.toBeVisible({ timeout: 5000 });
 
     // Close modal
-    await page.locator('.modal .btn-secondary').click();
+    await dismissTaskModal(page).click();
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
   });
 
@@ -277,7 +282,7 @@ test.describe.serial('ModeSelect component', () => {
     await expect(page.locator('.mode-btn')).toBeVisible();
 
     // Close modal
-    await page.locator('.modal .btn-secondary').click();
+    await dismissTaskModal(page).click();
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
   });
 });
@@ -306,7 +311,7 @@ test.describe.serial('Question mark auto-switches operating mode to Explore', ()
     await expect(page.locator('.mode-btn .mode-icon.explore')).toBeVisible();
 
     // Close modal (prompt is non-empty → confirm discard)
-    await page.locator('.modal .btn-secondary').click();
+    await dismissTaskModal(page).click();
     await expect(page.getByRole('button', { name: 'Discard' })).toBeVisible({ timeout: 5000 });
     await page.getByRole('button', { name: 'Discard' }).click();
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
@@ -334,7 +339,7 @@ test.describe.serial('Question mark auto-switches operating mode to Explore', ()
     await expect(page.locator('.mode-btn .mode-label')).toHaveText('Act');
 
     // Close modal (prompt is non-empty → confirm discard)
-    await page.locator('.modal .btn-secondary').click();
+    await dismissTaskModal(page).click();
     await expect(page.getByRole('button', { name: 'Discard' })).toBeVisible({ timeout: 5000 });
     await page.getByRole('button', { name: 'Discard' }).click();
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
@@ -360,7 +365,7 @@ test.describe.serial('Question mark auto-switches operating mode to Explore', ()
     await expect(page.locator('.mode-btn .mode-label')).toHaveText('Plan');
 
     // Close modal (prompt is non-empty → confirm discard)
-    await page.locator('.modal .btn-secondary').click();
+    await dismissTaskModal(page).click();
     await expect(page.getByRole('button', { name: 'Discard' })).toBeVisible({ timeout: 5000 });
     await page.getByRole('button', { name: 'Discard' }).click();
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });

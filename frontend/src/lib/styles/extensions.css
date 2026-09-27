@@ -377,6 +377,7 @@ for a UI plugin. */
 }
 
 :global(button.cap-detail-tag:hover) {
+    opacity: 1;
     background: var(--color-surface-2);
     border-color: var(--color-border-hover);
     color: var(--color-text-primary);

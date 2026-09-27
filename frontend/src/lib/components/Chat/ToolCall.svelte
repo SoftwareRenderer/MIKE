@@ -717,7 +717,7 @@
         max-height: none;
         overflow-y: visible;
         background: var(--color-surface-3);
-        border-radius: 1.125rem;
+        border-radius: var(--radius-bubble);
         padding: 10px 14px;
     }
     .tool-result-question {
@@ -959,6 +959,7 @@
         word-break: break-word;
     }
     .btn-open-task:hover {
+        opacity: 1;
         border-color: var(--color-border-bright);
         border-left-color: var(--color-column-backlog);
         background: var(--color-surface-3);
@@ -1051,6 +1052,7 @@
         transition: all 0.15s ease;
     }
     .edit-diff-toggle:hover {
+        opacity: 1;
         background: var(--color-surface-2);
         border-color: var(--color-border-bright);
         color: var(--color-text-primary);

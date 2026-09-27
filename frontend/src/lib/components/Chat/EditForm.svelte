@@ -271,6 +271,7 @@
         cursor: pointer;
     }
     .btn-edit-cancel:hover {
+        opacity: 1;
         background: var(--color-surface-4);
     }
     .btn-edit-submit {

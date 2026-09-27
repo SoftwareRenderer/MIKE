@@ -137,7 +137,7 @@ STYLE_SINKS: dict[tuple[str, str], str] = {
         "being the modal tier and every caller in core passing one",
     ("src/lib/components/Chat/ModelSelector.svelte", "Z.overlay"):
         "contains:constants/z-layers — a tier constant this file imports, not text a caller supplies",
-    ("src/lib/components/FileMentionDropdown.svelte", "Z.overlay"):
+    ("src/lib/components/FileMentionDropdown.svelte", "Z.modalStacked"):
         "contains:constants/z-layers — a tier constant this file imports, not text a caller supplies",
     ("src/lib/components/Card.svelte", "subtaskProgress.pct * 100"):
         "literal — a ratio this file computes",

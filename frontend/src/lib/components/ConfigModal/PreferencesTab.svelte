@@ -348,6 +348,7 @@
         transition: background 0.15s, color 0.15s;
     }
     .shortcut-action:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }

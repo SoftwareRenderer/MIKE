@@ -1235,7 +1235,6 @@ const catalog = {
     'terminal.connecting': 'Connecting...',
     'terminal.title': 'Terminal',
     'terminal.close': 'Close terminal',
-    'terminal.resizeAria': 'Resize terminal',
     // The on-screen arrows are key names, like the `esc`/`pgup` keycaps beside them.
     'terminal.arrowUpAria': 'Arrow up',
     'terminal.arrowDownAria': 'Arrow down',

@@ -93,6 +93,8 @@
 {/if}
 
 <style>
+    @import '$lib/styles/shared.css';
+
     /* Updates section */
     .updates-section {
         background: rgb(from var(--color-accent-light) r g b / 0.08);
@@ -262,26 +264,7 @@
         white-space: nowrap;
     }
 
-    .btn {
-        padding: 0.4rem 0.75rem;
-        border-radius: var(--radius-md);
-        font-size: var(--text-sm);
-        cursor: pointer;
-        border: 1px solid transparent;
-        transition: all 0.15s;
-    }
 
-    .btn-primary {
-        background: var(--color-btn-primary-bg);
-        color: var(--color-btn-text);
-    }
 
-    .btn-primary:hover:not(:disabled) {
-        background: var(--color-btn-primary-hover);
-    }
 
-    .btn-small {
-        padding: 0.25rem 0.5rem;
-        font-size: var(--text-xs);
-    }
 </style>

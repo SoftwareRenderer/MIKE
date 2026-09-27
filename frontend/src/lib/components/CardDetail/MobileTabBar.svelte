@@ -71,6 +71,7 @@
         border-bottom-color: var(--color-accent);
     }
     .tab-btn:hover:not(.active) {
+        opacity: 1;
         color: var(--color-text-secondary);
         background: var(--color-surface-1);
     }

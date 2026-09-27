@@ -88,6 +88,7 @@
         white-space: nowrap;
     }
     .thread-btn:hover {
+        opacity: 1;
         background: var(--color-surface-4);
         color: var(--color-text-primary);
     }
@@ -118,11 +119,11 @@
         background: none;
         border: none;
         color: var(--color-text-secondary);
-        cursor: pointer;
         transition: all 0.1s ease;
         text-align: left;
     }
     .thread-menu-item:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }

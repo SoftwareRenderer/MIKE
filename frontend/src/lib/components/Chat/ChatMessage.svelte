@@ -392,7 +392,7 @@
     .message-bubble {
         max-width: 80%;
         background: color-mix(in srgb, var(--color-accent) 18%, transparent);
-        border-radius: 1.125rem;
+        border-radius: var(--radius-bubble);
         padding: 8px 14px;
         display: flex;
         align-items: flex-end;
@@ -420,7 +420,7 @@
     .assistant .message-bubble {
         max-width: 100%;
         background: var(--color-surface-3);
-        border-radius: 1.125rem;
+        border-radius: var(--radius-bubble);
         padding: 10px 14px;
         border: 1px solid var(--color-border);
     }
@@ -496,6 +496,7 @@
         transition: all 0.15s ease;
     }
     .system-header .btn-dismiss:hover {
+        opacity: 1;
         background: color-mix(in srgb, var(--color-status-red) 15%, transparent);
         color: var(--color-status-red);
     }

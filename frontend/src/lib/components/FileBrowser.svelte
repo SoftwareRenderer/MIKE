@@ -395,6 +395,7 @@
         text-align: center;
     }
     .tab:hover {
+        opacity: 1;
         color: var(--color-text-primary);
         background: var(--color-surface-3);
     }
@@ -403,6 +404,7 @@
         color: white;
     }
     .tab.active:hover {
+        opacity: 1;
         background: var(--color-accent-hover);
         color: white;
     }
@@ -452,7 +454,6 @@
         color: var(--color-text-primary);
         font-size: var(--text-base);
         font-family: var(--font-mono);
-        outline: none;
     }
     .clone-form {
         display: flex;
@@ -521,6 +522,7 @@
         white-space: nowrap;
     }
     .btn-mini:hover:not(:disabled) {
+        opacity: 1;
         background: var(--color-accent-hover);
     }
     .btn-mini-cancel {
@@ -528,6 +530,7 @@
         color: var(--color-text-secondary);
     }
     .btn-mini-cancel:hover {
+        opacity: 1;
         background: var(--color-surface-4);
     }
     .icon-btn-sm {
@@ -541,6 +544,7 @@
         flex-shrink: 0;
     }
     .icon-btn-sm:hover:not(:disabled) {
+        opacity: 1;
         background: var(--color-surface-4);
         color: var(--color-text-primary);
     }

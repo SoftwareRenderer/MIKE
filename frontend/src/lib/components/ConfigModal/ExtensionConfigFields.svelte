@@ -205,6 +205,7 @@
     }
 
     .btn-remove:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-status-red);
     }

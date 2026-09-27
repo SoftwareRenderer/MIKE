@@ -179,12 +179,12 @@ test.describe.serial('Commit Dialog', () => {
     const { taskId, commitBtn } = await taskWithStagedChanges(page, projectId, `commit-cancel-${Date.now()}`, 'cancel-test.txt');
     await commitBtn.click();
 
-    // Wait for dialog to appear (modal with commit-textarea)    // Wait for dialog to appear (modal with commit-textarea)
-    const commitDialog = page.locator('[role="dialog"]');
+    // Wait for dialog to appear: `[role="dialog"]` is never unique, so filter by the dialog's own field.
+    const commitDialog = page.locator('[role="dialog"]').filter({ has: page.locator('.commit-textarea') });
     await expect(commitDialog).toBeVisible({ timeout: 10000 });
 
     // Cancel the dialog
-    await page.click('[role="dialog"] .btn-secondary');
+    await commitDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
 
     // Dialog should close
     await expect(commitDialog).not.toBeVisible({ timeout: 5000 });

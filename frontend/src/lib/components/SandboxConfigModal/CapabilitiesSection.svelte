@@ -213,6 +213,7 @@
 
     .caps-dropdown-item:hover,
     .caps-dropdown-item.selected {
+        opacity: 1;
         background: var(--color-surface-2);
     }
 

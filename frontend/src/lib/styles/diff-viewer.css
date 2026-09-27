@@ -116,6 +116,7 @@
     transition: background 0.1s ease, color 0.1s ease;
 }
 .diff-stage-btn:hover {
+    opacity: 1;
     background: var(--color-surface-3);
     color: var(--color-text-primary);
 }
@@ -335,6 +336,7 @@
     flex-shrink: 0;
 }
 .diff-collapse-btn:hover {
+    opacity: 1;
     background: var(--color-surface-3);
     color: var(--color-text-primary);
 }
@@ -443,6 +445,7 @@
     flex-shrink: 0;
 }
 .diff-expand-btn:hover {
+    opacity: 1;
     background: var(--color-surface-3);
     color: var(--color-accent-hover);
 }
@@ -513,6 +516,7 @@
     border-left-color: var(--color-status-yellow);
 }
 .diff-section-header:hover {
+    opacity: 1;
     background: var(--color-surface-3);
 }
 .diff-section-chevron {

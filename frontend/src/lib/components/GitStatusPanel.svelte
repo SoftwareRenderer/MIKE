@@ -1332,6 +1332,7 @@
         flex-shrink: 0;
     }
     .close-btn:hover {
+        opacity: 1;
         color: var(--color-text-primary);
         background: var(--color-surface-3);
     }
@@ -1390,8 +1391,11 @@
         color: var(--color-text-secondary);
         font-size: var(--text-xs);
         font-family: var(--font-mono);
-        outline: none;
         width: 100%;
+    }
+    .commit-combobox-input:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: -1px;
     }
     .commit-combobox-input::placeholder {
         color: var(--color-text-tertiary);
@@ -1410,6 +1414,7 @@
         flex-shrink: 0;
     }
     .commit-combobox-toggle:hover {
+        opacity: 1;
         color: var(--color-text-primary);
         background: var(--color-surface-3);
     }
@@ -1451,6 +1456,7 @@
         cursor: pointer;
     }
     .commit-dropdown-item:hover {
+        opacity: 1;
         background: var(--color-surface-3);
     }
     .commit-dropdown-item:focus-visible {
@@ -1504,11 +1510,11 @@
         border: none;
         background: transparent;
         color: var(--color-text-secondary);
-        cursor: pointer;
         border-radius: var(--radius-sm);
         flex-shrink: 0;
     }
     .panel-icon-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -1529,7 +1535,6 @@
         color: white;
         font-size: var(--text-xs);
         font-weight: 500;
-        cursor: pointer;
         border-radius: var(--radius-sm);
         white-space: nowrap;
     }
@@ -1669,6 +1674,7 @@
         border-radius: var(--radius-sm);
     }
     .changes-file-item:hover {
+        opacity: 1;
         background: var(--color-surface-3);
     }
     .changes-file-item.selected {
@@ -1729,10 +1735,12 @@
         opacity: 1;
     }
     .changes-stage-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
     .changes-discard-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-status-red);
     }

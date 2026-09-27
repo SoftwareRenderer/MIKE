@@ -1478,6 +1478,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     }
 
     .offline-btn:hover {
+        opacity: 1;
         background: var(--color-surface-2);
         border-color: var(--color-border-bright);
     }
@@ -1520,6 +1521,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         transition: background 0.15s;
     }
     .reconnecting-btn:hover {
+        opacity: 1;
         background: rgb(from var(--color-alert-text) r g b / 0.25);
     }
     @keyframes slide-down {

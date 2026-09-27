@@ -1143,14 +1143,17 @@
         transition: background 0.1s ease, color 0.1s ease;
     }
     .action-icon:hover {
+        opacity: 1;
         background: var(--color-accent-dark);
         color: var(--color-btn-text);
     }
     .action-icon.action-move:hover {
+        opacity: 1;
         background: var(--color-accent-dark);
         color: var(--color-btn-text) !important;
     }
     .action-icon.action-delete:hover {
+        opacity: 1;
         background: var(--color-status-red-dark);
         color: var(--color-btn-text);
     }
@@ -1250,8 +1253,7 @@
             --idle-slot: 44px;
         }
         .card-actions {
-            opacity: 1;
-            transition: none;
+        transition: none;
         }
         /* The container is pointer-events:none for the card's link, and it is re-enabled only by
            :hover/:focus-within/.selected rules, which a device that cannot hover never matches. */
@@ -1297,6 +1299,7 @@
         transition: background 0.15s ease;
     }
     .subtask-progress-bar:hover {
+        opacity: 1;
         background: var(--color-surface-4);
     }
     .subtask-progress-bar.is-expanded {

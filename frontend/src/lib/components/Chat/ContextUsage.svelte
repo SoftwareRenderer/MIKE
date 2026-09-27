@@ -109,6 +109,7 @@
         cursor: pointer;
     }
     .context-usage.clickable:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         border-color: var(--color-accent);
     }

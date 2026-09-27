@@ -118,6 +118,7 @@
         white-space: nowrap;
     }
     .view-changes-btn:hover {
+        opacity: 1;
         background: color-mix(in srgb, var(--color-accent) 12%, transparent);
         color: var(--color-accent);
         border-color: color-mix(in srgb, var(--color-accent) 30%, transparent);

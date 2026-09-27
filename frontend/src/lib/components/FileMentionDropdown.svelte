@@ -82,10 +82,12 @@
 </script>
 
 {#if visible}
+    <!-- One layer above the dialog: the caller mounts this outside `BaseModal` (a fixed element cannot
+         escape its dialog's stacking context from inside), so its siblings include the overlay itself. -->
     <ul
         class="mention-dropdown"
         bind:this={dropdownEl}
-        style="position:fixed; bottom:{dropdownBottom}px; left:{dropdownLeft}px; width:{dropdownWidth}px; z-index:{Z.overlay};"
+        style="position:fixed; bottom:{dropdownBottom}px; left:{dropdownLeft}px; width:{dropdownWidth}px; z-index:{Z.modalStacked};"
         role="listbox"
         aria-label={t('chat.mention.suggestionsAria')}
         onclick={(e) => e.stopPropagation()}

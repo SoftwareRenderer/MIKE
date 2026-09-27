@@ -210,6 +210,7 @@
         opacity: 1;
     }
     .add-btn:hover {
+        opacity: 1;
         background: var(--color-accent-dark);
         color: white;
     }
@@ -235,6 +236,7 @@
         flex-shrink: 0;
     }
     .clear-btn:hover {
+        opacity: 1;
         background: var(--color-status-red-dark);
         color: white;
     }
@@ -266,10 +268,12 @@
         justify-content: center;
     }
     .add-task-btn:hover {
+        opacity: 1;
         background: var(--color-accent-dark);
         color: white;
     }
     .add-task-btn:hover .key-hint {
+        opacity: 1;
         color: rgba(255, 255, 255, 0.85);
         border-color: rgba(255, 255, 255, 0.3);
         background: rgba(255, 255, 255, 0.1);

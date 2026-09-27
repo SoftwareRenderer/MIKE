@@ -101,6 +101,8 @@
 </div>
 
 <style>
+    @import '$lib/styles/shared.css';
+
     /* Sticky wrapper: view-tabs + search-row + category-row, flush with modal-header */
     .sticky-header {
         position: sticky;
@@ -142,6 +144,7 @@
     }
 
     .view-tab:hover {
+        opacity: 1;
         background: rgb(from var(--color-text-tertiary) r g b / 0.1);
         color: var(--color-text-primary);
     }
@@ -224,22 +227,6 @@
         color: var(--color-text-primary);
     }
 
-    .btn {
-        padding: 0.4rem 0.75rem;
-        border-radius: var(--radius-md);
-        font-size: var(--text-sm);
-        cursor: pointer;
-        border: 1px solid transparent;
-        transition: all 0.15s;
-    }
 
-    .btn-secondary {
-        background: var(--color-btn-secondary-bg);
-        border-color: var(--color-border-subtle);
-        color: var(--color-text-primary);
-    }
 
-    .btn-secondary:hover:not(:disabled) {
-        background: var(--color-border-subtle);
-    }
 </style>

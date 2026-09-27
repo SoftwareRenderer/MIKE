@@ -134,11 +134,11 @@
         flex-shrink: 0;
     }
     .action-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
     .action-btn .icon {
-        opacity: 1;
         transition: opacity 0.2s ease;
     }
     .action-btn.copied .icon {

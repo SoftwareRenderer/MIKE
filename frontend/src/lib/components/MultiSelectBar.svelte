@@ -342,6 +342,7 @@
     }
 
     .move-item:hover {
+        opacity: 1;
         background: var(--color-surface-4);
     }
 
@@ -357,6 +358,7 @@
     }
 
     .bar-btn-clear:hover {
+        opacity: 1;
         background: var(--color-surface-4);
         color: var(--color-text-primary);
     }

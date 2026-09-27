@@ -1008,6 +1008,7 @@
         border-radius: var(--radius-sm);
     }
     .icon-btn:hover {
+        opacity: 1;
         color: var(--color-text-primary);
         background: var(--color-surface-3);
     }

@@ -18,6 +18,7 @@
     flex-shrink: 0;
 }
 :global(.close-btn:hover) {
+    opacity: 1;
     color: var(--color-text-primary);
     background: var(--color-surface-3);
 }
@@ -29,10 +30,10 @@
    one control — a square icon button, a full-width submit, a denser padding — and never a second
    colour scheme.
 
-   `opacity: 1` in the hover rule is load-bearing, not decoration: `app.css` dims every button on hover,
-   so a button that also changes its background would do both at once. It is on the plain `:hover` so it
-   is settled before the variant rules are read, and it holds while the control is dead because
-   `app.css`'s `button:disabled:hover` outranks it.
+   `opacity: 1` in each hover rule is load-bearing, not decoration: `app.css` dims every button under the
+   pointer, so a button that also shifts its own background would answer the pointer twice. It rides the
+   colour rule because that is the rank which outranks `button:hover`, and a dead control keeps its dim
+   because `app.css`'s `button:disabled:hover` outranks this one.
 
    The colour changes carry `:not(:disabled)`: a control that reacts under the pointer is not claiming to
    be dead, which is the invariant `app.css` states for the disabled dim. */
@@ -53,10 +54,8 @@
     white-space: nowrap;
     transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
-:global(.btn:hover) {
-    opacity: 1;
-}
 :global(.btn:hover:not(:disabled)) {
+    opacity: 1;
     background: var(--color-surface-3);
     border-color: var(--color-border-bright);
 }
@@ -70,8 +69,22 @@
     color: var(--color-btn-text);
 }
 :global(.btn-primary:hover:not(:disabled)) {
+    opacity: 1;
     border-color: transparent;
     background: var(--color-btn-primary-hover);
+}
+
+/* The neutral answer — a card action that sits on a surface and has to stay apart from it. Same hover
+   as `.btn`: a variant answers which colour the answer is, never how the pointer is answered. */
+:global(.btn-secondary) {
+    background: var(--color-btn-secondary-bg);
+    border-color: var(--color-border-subtle);
+    color: var(--color-text-primary);
+}
+:global(.btn-secondary:hover:not(:disabled)) {
+    opacity: 1;
+    background: var(--color-surface-3);
+    border-color: var(--color-border-bright);
 }
 
 /* The answer that undoes something: the red fill the stop/remove controls already use, brightening
@@ -94,7 +107,15 @@
     color: var(--color-text-secondary);
 }
 :global(.btn-ghost:hover:not(:disabled)) {
+    opacity: 1;
     border-color: transparent;
     background: var(--color-surface-3);
     color: var(--color-text-primary);
+}
+
+/* The dense size of the family, for a control inside a row or a card footer. After `.btn`, so its
+   padding is the one that wins. */
+:global(.btn-small) {
+    padding: 0.25rem 0.5rem;
+    font-size: var(--text-xs);
 }

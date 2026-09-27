@@ -1787,6 +1787,7 @@
         position: relative;
     }
     .file-editor.diff .btn-back:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -1835,6 +1836,7 @@
         flex-shrink: 0;
     }
     .file-editor.diff .editor-icon-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -1849,7 +1851,6 @@
         border-radius: var(--radius-sm);
         font-size: var(--text-xs);
         font-weight: 500;
-        cursor: pointer;
         display: flex;
         align-items: center;
         gap: 5px;
@@ -1857,6 +1858,7 @@
         flex-shrink: 0;
     }
     .file-editor.diff .btn-save:hover:not(:disabled) {
+        opacity: 1;
         background: var(--color-accent-hover);
     }
     .file-editor.diff .btn-save:disabled {
@@ -1907,6 +1909,7 @@
         font-family: inherit;
     }
     .file-editor.diff .btn-confirm-cancel:hover {
+        opacity: 1;
         background: var(--color-surface-4);
     }
     .file-editor.diff .btn-confirm-discard {

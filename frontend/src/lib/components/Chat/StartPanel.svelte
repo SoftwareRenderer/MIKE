@@ -92,12 +92,12 @@
         color: var(--color-btn-text);
         font-size: var(--text-base);
         font-weight: 600;
-        cursor: pointer;
         border: none;
         font-family: inherit;
         width: 100%;
     }
     .btn-start-task:hover:not(:disabled) {
+        opacity: 1;
         background: var(--color-accent-hover);
     }
     .btn-start-task .key-hint {

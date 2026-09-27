@@ -97,6 +97,7 @@
         transition: all 0.15s ease;
     }
     .btn-close-checkpoint:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }

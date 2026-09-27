@@ -292,6 +292,7 @@
         transform: rotate(0deg);
     }
     .toggle-btn:hover {
+        opacity: 1;
         background: var(--color-surface-2);
         color: var(--color-text-primary);
     }
@@ -457,6 +458,7 @@
         transition: all 0.15s ease;
     }
     .project-remove-btn:hover {
+        opacity: 1;
         background: var(--color-status-red-dark);
         color: var(--color-btn-text);
     }
@@ -480,6 +482,7 @@
         position: relative;
     }
     .sidebar-menu-item:hover {
+        opacity: 1;
         background: var(--color-surface-2);
         color: var(--color-text-primary);
     }
@@ -499,6 +502,7 @@
         transition: all 0.15s ease;
     }
     .add-project-btn:hover {
+        opacity: 1;
         border-color: var(--color-accent);
         color: var(--color-accent);
         background: color-mix(in srgb, var(--color-accent) 10%, transparent);

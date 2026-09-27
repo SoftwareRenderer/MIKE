@@ -17,7 +17,7 @@ input[type="number"] {
     margin-left: 8px;
     border: 1px solid var(--color-border);
     border-bottom-width: 2px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     background: var(--color-surface-2);
     color: var(--color-text-tertiary);
     white-space: nowrap;
@@ -186,6 +186,9 @@ input[type="number"] {
     --radius-sm: 4px;
     --radius-md: 6px;
     --radius-lg: 8px;
+    /* A chat bubble and the chips that sit beside it: wider than the panel scale, and the one
+       measurement a theme has to retint a bubble's shape. */
+    --radius-bubble: 1.125rem;
     --radius-pill: 999px;
 
     --opacity-disabled: 0.5;
@@ -193,10 +196,9 @@ input[type="number"] {
     /* Stacking tiers. These are the only numeric z-index values in the frontend: a rank, not a
        distance, and it only means something inside its own stacking context. Owners: modal =
        BaseModal, toast = Toast.svelte, banner = the reconnect banner in App.svelte, overlay =
-       full-screen panels and the fixed menus/tooltips that escape a pane. A scrim takes the rank
-       under the surface it dims. `lib/constants/z-layers.ts` is the twin for props and imperative
-       styles; `constants/__tests__/z-layers.unit.ts` fails when the two disagree. */
-    --z-below: -1;
+       full-screen panels and the fixed menus/tooltips that escape a pane. A tier is added when a
+       component needs it, not before it does. `lib/constants/z-layers.ts` is the twin for props and
+       imperative styles; `constants/__tests__/z-layers.unit.ts` fails when the two disagree. */
     --z-raised: 1;
     --z-content: 2;
     --z-sticky: 10;
@@ -237,6 +239,9 @@ button {
     color: inherit;
 }
 
+/* The default hover answer for a control that does nothing else under the pointer: one dim. A control
+   that shifts its own background cancels this with `opacity: 1` — see the `.btn` family in
+   lib/styles/shared.css — because dimming and repainting together is two answers to one question. */
 button:hover {
     opacity: 0.85;
 }
@@ -250,7 +255,8 @@ button:hover {
 
    The `:hover` twin is load-bearing: a component's `.foo { cursor: pointer }` outranks the rule above, and a
    cursor is only seen with the pointer over it. Same reason a component's hover rule that changes opacity on
-   a disable-able control carries `:not(:disabled)` itself. */
+   a disable-able control carries `:not(:disabled)` itself, and the reason no component writes a
+   `cursor: pointer` of its own: the scoped rule would outrank this one and survive onto the dead control. */
 button:disabled,
 button[aria-disabled='true'] {
     cursor: not-allowed;

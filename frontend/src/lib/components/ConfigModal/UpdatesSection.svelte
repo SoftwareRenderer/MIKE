@@ -283,6 +283,7 @@
     .btn-update-prepare:hover:not(:disabled),
     .btn-update-apply:hover:not(:disabled),
     .btn-update-restart:hover:not(:disabled) {
+        opacity: 1;
         background: var(--color-surface-3);
     }
 
