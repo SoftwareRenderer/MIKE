@@ -11,7 +11,7 @@ input[type="number"] {
 /* Keycap hint shown on text buttons that have a keyboard shortcut */
 .key-hint {
     font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
-    font-size: 0.6875rem;
+    font-size: var(--text-2xs);
     line-height: 1.5;
     padding: 0 6px;
     margin-left: 8px;
@@ -138,10 +138,35 @@ input[type="number"] {
     --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     --line-height-clipped: 1.4;
 
+    /* Type scale */
+    --text-3xs: 0.625rem;
+    --text-2xs: 0.6875rem;
+    --text-xs: 0.75rem;
+    --text-sm: 0.8125rem;
+    --text-base: 0.875rem;
+    --text-md: 0.9375rem;
+    --text-lg: 1rem;
+
     /* Radii */
+    --radius-xs: 2px;
     --radius-sm: 4px;
     --radius-md: 6px;
     --radius-lg: 8px;
+    --radius-pill: 999px;
+
+    --opacity-disabled: 0.5;
+
+    /* Which subsystem owns which tier: modal = BaseModal, toast = Toast.svelte,
+       banner = the reconnect banner in App.svelte, overlay = full-screen panels. */
+    --z-below: -1;
+    --z-raised: 1;
+    --z-sticky: 10;
+    --z-dropdown: 100;
+    --z-overlay: 900;
+    --z-modal: 1000;
+    --z-toast: 10000;
+    --z-banner: 10001;
+    --z-max: 99999;
 }
 
 * {
