@@ -5,10 +5,9 @@ import (
 	"testing"
 )
 
-// The fixtures prove the rules; this proves the rules against the real contract. The seven English
-// templates in prompts/ are what a locale overlay must mirror, so the checker must at least parse
-// them and see the one cross-file reference they contain. If a template is edited into something
-// this checker cannot model, that shows up here rather than as a false pass on a locale pack.
+// The fixtures prove the rules; this proves them against the real templates in prompts/, which are
+// what a locale overlay must mirror. A template this checker cannot model shows up here rather than
+// as a false pass on a locale pack.
 func TestRealRepoPromptsParse(t *testing.T) {
 	root := mustRepoRoot()
 	dir := filepath.Join(root, "prompts")
@@ -23,11 +22,13 @@ func TestRealRepoPromptsParse(t *testing.T) {
 			t.Errorf("prompts/%s not found in %s", name, dir)
 		}
 	}
-	if !set.Declared["plan-mode"] {
-		t.Errorf(`prompts/plan-mode.tmpl must declare "plan-mode"; declared = %v`, set.Declared)
-	}
-	if !contains(set.Invoked["base.tmpl"], "plan-mode") {
-		t.Errorf(`base.tmpl must invoke {{template "plan-mode"}}; invoked = %v`, set.Invoked["base.tmpl"])
+	for _, mode := range []string{"plan-mode", "explore-mode"} {
+		if !set.Declared[mode] {
+			t.Errorf(`prompts/%s.tmpl must declare %q; declared = %v`, mode, mode, set.Declared)
+		}
+		if !contains(set.Invoked["base.tmpl"], mode) {
+			t.Errorf(`base.tmpl must invoke {{template %q}}; invoked = %v`, mode, set.Invoked["base.tmpl"])
+		}
 	}
 	for _, name := range promptTemplates {
 		for _, invoked := range set.Invoked[name] {
@@ -53,8 +54,8 @@ func TestRealRepoPromptsSelfCompareIsClean(t *testing.T) {
 	if len(f.Errors) != 0 {
 		t.Fatalf("self-comparison produced errors:\n%s", errText(f))
 	}
-	if stats.ENFiles != 7 {
-		t.Fatalf("expected the seven English templates, got %+v", stats)
+	if stats.ENFiles != 8 {
+		t.Fatalf("expected the eight English templates, got %+v", stats)
 	}
 }
 

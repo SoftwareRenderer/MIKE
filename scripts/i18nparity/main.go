@@ -528,10 +528,12 @@ func ComparePromptSets(en, pack *TmplSet, f *Findings, maxList int) PromptStats 
 		}
 	}
 
-	// base.tmpl's plan-mode call is the one cross-file reference in the set. If it goes missing,
-	// plan mode renders without its instructions and nothing else complains.
-	if contains(en.Invoked["base.tmpl"], "plan-mode") && !contains(pack.Invoked["base.tmpl"], "plan-mode") {
-		f.Errf(`base.tmpl no longer invokes {{template "plan-mode" .}}: plan mode's instructions are prompt text the executor's behaviour depends on`)
+	// base.tmpl's mode sub-templates are the cross-file references in the set. If one goes
+	// missing, that mode renders without its instructions and nothing else complains.
+	for _, name := range []string{"plan-mode", "explore-mode"} {
+		if contains(en.Invoked["base.tmpl"], name) && !contains(pack.Invoked["base.tmpl"], name) {
+			f.Errf(`base.tmpl no longer invokes {{template %q .}}: %s instructions are prompt text the executor's behaviour depends on`, name, strings.ReplaceAll(name, "-", " "))
+		}
 	}
 
 	for _, name := range sortedMapKeys(pack.Skeletons) {

@@ -154,7 +154,7 @@ func TestRunCleanPackPasses(t *testing.T) {
 	if cs.ENKeys != cs.PackKeys || cs.Compared != cs.ENKeys {
 		t.Fatalf("key counts must be equal: %+v", cs)
 	}
-	if ps.ENFiles != 7 || ps.PackFiles != 7 || ps.PackDefines != 1 {
+	if ps.ENFiles != 8 || ps.PackFiles != 8 || ps.PackDefines != 2 {
 		t.Fatalf("prompt stats = %+v", ps)
 	}
 }
@@ -307,7 +307,7 @@ func TestRunManifestAssetPathsLocateTheFiles(t *testing.T) {
 	}
 	f, cs, ps := fx.run(t)
 	requireNoErrors(t, f)
-	if cs.Compared != len(fixtureEN) || ps.PackFiles != 7 {
+	if cs.Compared != len(fixtureEN) || ps.PackFiles != 8 {
 		t.Fatalf("manifest asset paths not followed: %+v %+v", cs, ps)
 	}
 }

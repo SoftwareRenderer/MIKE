@@ -43,6 +43,7 @@ func BuildSystemPrompt(worktreePath, cwd, summary, skillsMount string, operating
 		WorktreePath: cwd,
 		CurrentDate:  time.Now().UTC().Format("2006-01-02"),
 		PlanMode:     operatingMode == types.ModePlan,
+		ExploreMode:  operatingMode == types.ModeExplore,
 		Tools:        toolInfos,
 		Skills:       prompts.DiscoverSkills(skillsMount),
 		AgentsMd:     agentsMd,

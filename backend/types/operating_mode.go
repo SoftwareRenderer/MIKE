@@ -16,7 +16,8 @@ const (
 	ModePlan OperatingMode = "plan"
 	// ModeExplore is a turn that reads code: the act tool set plus the task-board tools, and a
 	// writable mount, because exploring includes running the thing. It differs from act in never
-	// getting a loop hint, and in staying out of the autostart auto-answer path.
+	// getting a loop hint, in staying out of the autostart auto-answer path, and in the task-board
+	// instructions its prompt carries.
 	ModeExplore OperatingMode = "explore"
 )
 
