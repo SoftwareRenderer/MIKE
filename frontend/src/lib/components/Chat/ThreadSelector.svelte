@@ -102,7 +102,7 @@
         border-radius: var(--radius-md);
         padding: 4px;
         min-width: 160px;
-        z-index: 100;
+        z-index: var(--z-dropdown);
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     }
     .thread-menu-item {

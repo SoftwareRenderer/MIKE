@@ -112,6 +112,8 @@
         color: var(--color-text-tertiary);
         pointer-events: none;
     }
+    /* The sticky file header it lives in is already a stacking context, so the dropdown rank is
+       all this needs — it never competed with anything outside that header. */
     .sel-dropdown {
         position: absolute;
         top: calc(100% + 2px);
@@ -122,7 +124,7 @@
         border-radius: var(--radius-sm);
         max-height: 240px;
         overflow-y: auto;
-        z-index: 1000;
+        z-index: var(--z-dropdown);
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         padding: 2px;
     }

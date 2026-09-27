@@ -655,7 +655,8 @@
         50% { opacity: 0; }
     }
 
-    /* Mobile edit dialog */
+    /* Mobile edit dialog. A modal `<dialog>` paints in the top layer, so this rank only orders it
+       against other top-layer boxes — it is not why the dialog covers a toast. */
     .edit-dialog {
         position: fixed;
         inset: 0;
@@ -666,7 +667,7 @@
         padding: 0;
         border: none;
         background: transparent;
-        z-index: 10001;
+        z-index: var(--z-modal);
         display: flex;
         align-items: center;
         justify-content: center;

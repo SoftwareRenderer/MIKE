@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { Z } from '$lib/constants/z-layers';
     import { onMount } from 'svelte';
     import { Terminal } from '@xterm/xterm';
     import { FitAddon } from '@xterm/addon-fit';
@@ -530,11 +531,13 @@
                 selEndCol = col;
             }
 
+            // All four ride the top tier and are appended in the order they should paint in:
+            // scrim, handles, then the pill over them.
             overlayEl = document.createElement('div');
-            overlayEl.style.cssText = 'position:fixed;inset:0;z-index:9997;background:transparent;pointer-events:none;';
+            overlayEl.style.cssText = `position:fixed;inset:0;z-index:${Z.max};background:transparent;pointer-events:none;`;
 
             startHandleEl = document.createElement('div');
-            startHandleEl.style.cssText = 'position:fixed;z-index:10000;width:28px;height:28px;cursor:grab;touch-action:none;filter:drop-shadow(0 1px 3px rgba(0,0,0,0.3));';
+            startHandleEl.style.cssText = `position:fixed;z-index:${Z.max};width:28px;height:28px;cursor:grab;touch-action:none;filter:drop-shadow(0 1px 3px rgba(0,0,0,0.3));`;
             const sSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
             sSvg.setAttribute('width', '28');
             sSvg.setAttribute('height', '28');
@@ -553,7 +556,7 @@
 
             // Pill container.
             btnBarEl = document.createElement('div');
-            btnBarEl.style.cssText = 'position:fixed;z-index:10001;display:flex;align-items:center;background:#0084FF;border-radius:var(--radius-pill);box-shadow:0 2px 12px rgba(0,0,0,0.4);overflow:hidden;';
+            btnBarEl.style.cssText = `position:fixed;z-index:${Z.max};display:flex;align-items:center;background:#0084FF;border-radius:var(--radius-pill);box-shadow:0 2px 12px rgba(0,0,0,0.4);overflow:hidden;`;
 
             copyBtnEl = document.createElement('button');
             copyBtnEl.textContent = t('terminal.copy');
@@ -898,11 +901,13 @@
 <style>
     @import '$lib/styles/shared.css';
 
+    /* The scrim the panel below it dims: one tier apart, so the panel is never painted under its
+       own scrim by whatever else is on screen. */
     .terminal-overlay {
         position: fixed;
         inset: 0;
         background: rgba(0, 0, 0, 0.3);
-        z-index: 199;
+        z-index: var(--z-overlay);
         border: none;
         padding: 0;
         cursor: pointer;
@@ -916,7 +921,7 @@
         right: 0;
         background: var(--color-surface-0);
         border-top: 1px solid var(--color-border);
-        z-index: 200;
+        z-index: var(--z-modal);
         display: flex;
         flex-direction: column;
     }
@@ -1038,7 +1043,7 @@
             bottom: 0;
             left: 0;
             right: 0;
-            z-index: 10;
+            z-index: var(--z-sticky);
             display: flex;
             flex-direction: column;
             gap: 4px;

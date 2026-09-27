@@ -1,5 +1,6 @@
 <script lang="ts">
     import BaseModal from './BaseModal.svelte';
+    import { Z } from '$lib/constants/z-layers';
     import Icon from '$lib/components/Icon.svelte';
     import homeIcon from '$lib/assets/icons/home.svg?raw';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
@@ -95,7 +96,7 @@
     </div>
 {/snippet}
 
-<BaseModal {title} width="560px" zIndex={1100} modalClass="path-browser" footer={footer} onClose={onClose}>
+<BaseModal {title} width="560px" zIndex={Z.modalStacked} modalClass="path-browser" footer={footer} onClose={onClose}>
     <!-- Path bar -->
     <div class="path-bar">
         <div class="path-bar-row">
@@ -185,7 +186,7 @@
         gap: 8px;
         position: sticky;
         top: 0;
-        z-index: 5;
+        z-index: var(--z-sticky);
         background: var(--color-surface-1);
         padding: 12px 0 8px;
     }

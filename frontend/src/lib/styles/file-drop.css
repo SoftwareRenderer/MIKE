@@ -23,7 +23,7 @@
 :global(.drop-progress) {
     position: sticky;
     top: 0;
-    z-index: 2;
+    z-index: var(--z-content);
     margin: 2px 6px 4px;
     padding: 8px 10px;
     border: 1px dashed var(--color-accent);

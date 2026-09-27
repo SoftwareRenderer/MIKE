@@ -186,7 +186,7 @@
     }
     .file-context-menu {
         position: fixed;
-        z-index: 900;
+        z-index: var(--z-overlay);
         min-width: 190px;
         display: flex;
         flex-direction: column;

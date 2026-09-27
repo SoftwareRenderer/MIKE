@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { Z } from '$lib/constants/z-layers';
     import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
 
     interface Props {
@@ -83,7 +84,7 @@
     <ul
         class="mention-dropdown"
         bind:this={dropdownEl}
-        style="position:fixed; bottom:{dropdownBottom}px; left:{dropdownLeft}px; width:{dropdownWidth}px; z-index:1000;"
+        style="position:fixed; bottom:{dropdownBottom}px; left:{dropdownLeft}px; width:{dropdownWidth}px; z-index:{Z.overlay};"
         role="listbox"
         aria-label="File suggestions"
         onclick={(e) => e.stopPropagation()}

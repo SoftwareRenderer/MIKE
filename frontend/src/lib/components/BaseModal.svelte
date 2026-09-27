@@ -2,11 +2,12 @@
     import type { Snippet } from 'svelte';
     import { onMount, onDestroy } from 'svelte';
     import { createFocusTrap } from '$lib/a11y';
+    import { Z } from '$lib/constants/z-layers';
 
     let {
         title = '',
         width = '640px',
-        zIndex = 1000,
+        zIndex = Z.modal,
         closeOnOverlayClick = true,
         floating = false,
         onBeforeClose,
@@ -139,7 +140,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        z-index: 1000;
+        z-index: var(--z-modal);
     }
     /* Floating (non-modal) variant: no dim, clicks pass through to the app. */
     .overlay-floating {
@@ -195,7 +196,7 @@
         flex-shrink: 0;
         position: sticky;
         bottom: 0;
-        z-index: 10;
+        z-index: var(--z-sticky);
     }
     .modal-footer :global(.btn-secondary),
     .modal-footer :global(.btn-primary) {

@@ -3,7 +3,7 @@
 //
 // Nothing here imports `$lib/i18n`, and `./modes` is not re-exported: readers of these numbers (the
 // stream, the terminal, the highlighter) must not have to evaluate the catalog to get a timeout.
-// Mode copy is `$lib/constants/modes`.
+// Mode copy is `$lib/constants/modes`; the stacking tiers are `$lib/constants/z-layers`.
 // =============================================================================
 
 // ─── Scroll Thresholds ───

@@ -408,7 +408,7 @@
         top: calc(100% + 2px);
         left: 0;
         right: 0;
-        z-index: 30;
+        z-index: var(--z-dropdown);
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);

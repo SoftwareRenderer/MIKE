@@ -95,7 +95,7 @@
     }
 </script>
 
-<BaseModal title={t('settings.stats.title')} width="90vw" zIndex={300} onClose={handleClose}>
+<BaseModal title={t('settings.stats.title')} width="90vw" onClose={handleClose}>
             {#if loading}
                 <div class="loading">{t('settings.stats.loading')}</div>
             {:else if error}

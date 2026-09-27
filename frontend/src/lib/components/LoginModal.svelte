@@ -38,7 +38,7 @@
     </button>
 {/snippet}
 
-<BaseModal title="" width="360px" zIndex={1000} closeOnOverlayClick={false} footer={footer} onClose={() => {}} header={header}>
+<BaseModal title="" width="360px" closeOnOverlayClick={false} footer={footer} onClose={() => {}} header={header}>
     {#if error}
         <div class="login-error" role="alert">{error}</div>
     {/if}

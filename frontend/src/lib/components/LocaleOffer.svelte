@@ -73,7 +73,7 @@
         position: fixed;
         right: 16px;
         bottom: 16px;
-        z-index: 900;
+        z-index: var(--z-overlay);
         width: 340px;
         max-width: calc(100vw - 32px);
         display: flex;

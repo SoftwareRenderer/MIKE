@@ -97,7 +97,7 @@
     }
     .branch-dropdown {
         position: absolute;
-        z-index: 100;
+        z-index: var(--z-dropdown);
         max-height: 200px;
         overflow-y: auto;
         background: var(--color-surface-1);

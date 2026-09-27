@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { Z } from '$lib/constants/z-layers';
     import type { Provider } from '$lib/types';
     import { AGENT_URL_PREFIX } from '$lib/types';
     import { getModelName, getProviderDisplayName, providerRef, displayModelName } from '$lib/utils/providers';
@@ -384,7 +385,7 @@
 
 <!-- Provider dropdown (rendered in shadow DOM to escape overflow clipping) -->
 {#if providerDropdownOpen && providerRect}
-    <svelte:element this={"div"} class="portal-provider-dropdown" role="listbox" aria-label={t('chat.model.selectProvider')} style="position:fixed;top:{providerRect.top}px;left:{providerRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,6px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+    <svelte:element this={"div"} class="portal-provider-dropdown" role="listbox" aria-label={t('chat.model.selectProvider')} style="position:fixed;top:{providerRect.top}px;left:{providerRect.left}px;z-index:{Z.overlay};min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,6px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
         {#if hasAgentProvider}
             <button type="button" class="provider-option provider-option-agent" class:active={isAgentSelected} onclick={selectAgent} role="option" aria-selected={isAgentSelected}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -412,7 +413,7 @@
 
 <!-- Model dropdown -->
 {#if modelDropdownOpen && modelRect}
-    <svelte:element this={"div"} class="portal-model-dropdown" role="listbox" aria-label={t('chat.model.selectModel')} style="position:fixed;top:{modelRect.top}px;left:{modelRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,6px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+    <svelte:element this={"div"} class="portal-model-dropdown" role="listbox" aria-label={t('chat.model.selectModel')} style="position:fixed;top:{modelRect.top}px;left:{modelRect.left}px;z-index:{Z.overlay};min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,6px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
         {#if isAgentSelected}
             {#if agentModelsLoading}
                 <div class="empty">{t('chat.model.loadingModels')}</div>

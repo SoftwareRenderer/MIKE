@@ -601,7 +601,7 @@
         position: absolute;
         top: calc(100% + 6px);
         left: 0;
-        z-index: 100;
+        z-index: var(--z-dropdown);
         min-width: 280px;
         max-width: 480px;
         padding: 8px 12px;
@@ -768,7 +768,7 @@
         text-align: left;
         position: sticky;
         top: 0;
-        z-index: 5;
+        z-index: var(--z-sticky);
         opacity: 1;
     }
 

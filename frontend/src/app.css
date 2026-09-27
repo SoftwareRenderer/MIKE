@@ -156,14 +156,20 @@ input[type="number"] {
 
     --opacity-disabled: 0.5;
 
-    /* Which subsystem owns which tier: modal = BaseModal, toast = Toast.svelte,
-       banner = the reconnect banner in App.svelte, overlay = full-screen panels. */
+    /* Stacking tiers. These are the only numeric z-index values in the frontend: a rank, not a
+       distance, and it only means something inside its own stacking context. Owners: modal =
+       BaseModal, toast = Toast.svelte, banner = the reconnect banner in App.svelte, overlay =
+       full-screen panels and the fixed menus/tooltips that escape a pane. A scrim takes the rank
+       under the surface it dims. `lib/constants/z-layers.ts` is the twin for props and imperative
+       styles; `constants/__tests__/z-layers.unit.ts` fails when the two disagree. */
     --z-below: -1;
     --z-raised: 1;
+    --z-content: 2;
     --z-sticky: 10;
     --z-dropdown: 100;
     --z-overlay: 900;
     --z-modal: 1000;
+    --z-modal-stacked: 1100;
     --z-toast: 10000;
     --z-banner: 10001;
     --z-max: 99999;

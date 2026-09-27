@@ -1440,7 +1440,7 @@
         position: absolute;
         top: 100%;
         left: 0;
-        z-index: 100;
+        z-index: var(--z-dropdown);
         min-width: 260px;
         max-height: 240px;
         overflow-y: auto;

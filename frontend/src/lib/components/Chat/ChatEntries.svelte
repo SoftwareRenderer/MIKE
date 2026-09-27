@@ -613,7 +613,7 @@
         position: absolute;
         top: 0;
         left: 0;
-        z-index: 5;
+        z-index: var(--z-sticky);
         display: flex;
         justify-content: flex-end;
         align-items: center;
@@ -893,12 +893,13 @@
         white-space: pre-wrap;
     }
 
-    /* Jump to latest button */
+    /* Jump to latest button. It and `.chat-pending` share the content rank and own opposite bottom
+       corners, so which one wins a tie is never visible. */
     .chat-jump-latest {
         position: absolute;
         bottom: 12px;
         right: 12px;
-        z-index: 4;
+        z-index: var(--z-content);
         display: flex;
         align-items: center;
         gap: 4px;
@@ -936,7 +937,7 @@
         position: absolute;
         bottom: 12px;
         left: 12px;
-        z-index: 3;
+        z-index: var(--z-content);
         display: flex;
         padding: 7px 9px;
         border-radius: var(--radius-md);

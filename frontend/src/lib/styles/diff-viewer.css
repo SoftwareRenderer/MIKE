@@ -54,7 +54,7 @@
     position: sticky;
     top: 0;
     left: 0;
-    z-index: 10;
+    z-index: var(--z-sticky);
 }
 .diff-file-header:hover {
     filter: brightness(1.2);
@@ -185,7 +185,7 @@
     background: var(--color-surface-1);
     position: sticky;
     left: 0;
-    z-index: 5;
+    z-index: var(--z-content);
 }
 
 .diff-gutter-row {

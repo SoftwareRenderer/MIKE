@@ -223,6 +223,8 @@
 </aside>
 
 <style>
+    /* A flex item's z-index makes it a stacking context even while `position: static`, so this
+       rank is the ceiling for everything inside the rail. The mobile drawer below replaces it. */
     .sidebar {
         display: flex;
         flex-direction: column;
@@ -232,7 +234,7 @@
         border-right: 1px solid var(--color-border);
         transition: all 0.2s ease;
         overflow: hidden;
-        z-index: 100;
+        z-index: var(--z-dropdown);
     }
     .sidebar.collapsed {
         width: 56px;
@@ -503,7 +505,7 @@
             top: 0;
             left: 0;
             bottom: 0;
-            z-index: 1000;
+            z-index: var(--z-modal);
             width: 260px;
             min-width: 260px;
             transform: translateX(-100%);

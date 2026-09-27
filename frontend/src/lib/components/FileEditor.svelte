@@ -1711,7 +1711,7 @@
         bottom: 0;
         left: 0;
         right: 0;
-        z-index: 100;
+        z-index: var(--z-dropdown);
         pointer-events: none;
     }
 
@@ -1726,7 +1726,7 @@
         left: 0;
         right: 0;
         bottom: 0;
-        z-index: 5;
+        z-index: var(--z-content);
         pointer-events: none;
         overflow: hidden;
     }
@@ -1871,7 +1871,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        z-index: 10;
+        z-index: var(--z-sticky);
         border-radius: var(--radius-md);
     }
     .file-editor.diff .confirm-dialog {

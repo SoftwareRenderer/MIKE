@@ -130,7 +130,12 @@ STYLE_SINKS: dict[tuple[str, str], str] = {
     ("src/lib/components/Column.svelte", "color"):
         "literal — Board's four column colors, each a var(--color-column-…)",
     ("src/lib/components/BaseModal.svelte", "zIndex"):
-        "literal — a stack depth this app computes",
+        "contains:constants/z-layers — the overlay's depth is a tier constant, this file's default "
+        "being the modal tier and every caller in core passing one",
+    ("src/lib/components/Chat/ModelSelector.svelte", "Z.overlay"):
+        "contains:constants/z-layers — a tier constant this file imports, not text a caller supplies",
+    ("src/lib/components/FileMentionDropdown.svelte", "Z.overlay"):
+        "contains:constants/z-layers — a tier constant this file imports, not text a caller supplies",
     ("src/lib/components/Card.svelte", "subtaskProgress.pct * 100"):
         "literal — a ratio this file computes",
     ("src/lib/components/Card.svelte", "modelBadge.color"):

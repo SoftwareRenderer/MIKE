@@ -182,7 +182,7 @@
     }
 </script>
 
-<BaseModal title={t('explorer.fileBrowser.title')} width="560px" zIndex={300} modalClass="path-browser" onClose={handleClose}>
+<BaseModal title={t('explorer.fileBrowser.title')} width="560px" modalClass="path-browser" onClose={handleClose}>
         {#snippet toolbar()}
             <div class="tabs">
                 <button

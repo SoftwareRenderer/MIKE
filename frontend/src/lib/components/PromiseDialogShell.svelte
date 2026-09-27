@@ -59,7 +59,6 @@
     <BaseModal
         {title}
         {width}
-        zIndex={1000}
         modalClass="promise-dialog"
         {header}
         {footer}

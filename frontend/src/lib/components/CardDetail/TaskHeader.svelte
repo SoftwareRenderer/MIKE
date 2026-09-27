@@ -422,7 +422,7 @@
        tap dismisses it). */
     .path-tooltip {
         position: fixed;
-        z-index: 9000;
+        z-index: var(--z-overlay);
         max-width: min(80vw, 360px);
         padding: 6px 10px;
         border: 1px solid var(--color-border);

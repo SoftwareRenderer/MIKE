@@ -303,7 +303,7 @@
         border-radius: 50%;
         background: var(--color-status-purple);
         flex-shrink: 0;
-        z-index: 1;
+        z-index: var(--z-raised);
         transition: all 0.15s ease;
     }
     .git-dot.unpushed {

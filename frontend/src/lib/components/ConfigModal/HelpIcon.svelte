@@ -140,7 +140,7 @@
     }
     .help-tooltip {
         position: fixed;
-        z-index: 10000;
+        z-index: var(--z-overlay);
         width: max-content;
         max-width: min(320px, calc(100vw - 16px));
         visibility: hidden;

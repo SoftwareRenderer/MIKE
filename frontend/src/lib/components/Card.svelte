@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { Z } from '$lib/constants/z-layers';
     import type { Task } from '$lib/types';
     import { AGENT_URL_PREFIX } from '$lib/types';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
@@ -385,7 +386,7 @@
         menu.className = 'card-overflow-menu';
         menu.setAttribute('role', 'menu');
         // Inline styles to escape Svelte scoping (element is on document.body)
-        menu.style.cssText = 'position:fixed;z-index:10000;background:var(--color-surface-3,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,6px);padding:4px;width:140px;box-shadow:0 8px 24px rgba(0,0,0,0.3);display:flex;flex-direction:column;gap:2px;';
+        menu.style.cssText = `position:fixed;z-index:${Z.overlay};background:var(--color-surface-3,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,6px);padding:4px;width:140px;box-shadow:0 8px 24px rgba(0,0,0,0.3);display:flex;flex-direction:column;gap:2px;`;
 
         const items: Array<{ icon: readonly IconShape[]; label: string; action: (e: MouseEvent) => void; danger?: boolean }> = [];
 
@@ -988,13 +989,13 @@
             rgba(0, 0, 0, 0.5) 100%
         );
         pointer-events: none;
-        z-index: 1;
+        z-index: var(--z-raised);
     }
-    /* The overlay is excluded: at z-index 2 it would tie with .card-title and, being later
-       in the DOM, cover the action buttons. */
+    /* The link overlay is excluded: lifted to this rank too, it would tie with .card-title and,
+       being later in the DOM, cover the action buttons. */
     .card.queued > :not(.card-open-link) {
         position: relative;
-        z-index: 2;
+        z-index: var(--z-content);
     }
     /* Inverted diagonal fade for tasks being deleted offline */
     .card.queued-delete::after {
@@ -1010,7 +1011,7 @@
             transparent 100%
         );
         pointer-events: none;
-        z-index: 1;
+        z-index: var(--z-raised);
     }
     .card.has-children:not(.is-subtask) {
         border-left: 3px solid var(--column-color, var(--color-border));
@@ -1073,11 +1074,11 @@
         cursor: grabbing;
     }
     /* The card's link overlay: covers the card so a right-click anywhere on it opens the
-       link menu. Interactive descendants stay above it (z-index 2). */
+       link menu; interactive descendants take the rank above it. */
     .card-open-link {
         position: absolute;
         inset: 0;
-        z-index: 1;
+        z-index: var(--z-raised);
         border-radius: inherit;
         cursor: inherit;
     }
@@ -1116,7 +1117,7 @@
         right: 0;
         /* Above the link overlay. `.card-title` stays unlifted on purpose, so the
            overlay still covers the title text — only the buttons sit above it. */
-        z-index: 2;
+        z-index: var(--z-content);
         display: flex;
         align-items: center;
         gap: var(--action-gap);
@@ -1289,7 +1290,7 @@
         padding: 0 6px;
         border: none;
         position: relative;
-        z-index: 2;
+        z-index: var(--z-content);
         border-radius: var(--radius-sm);
         background: var(--color-surface-3);
         cursor: pointer;
@@ -1321,7 +1322,7 @@
         left: 50%;
         top: 50%;
         transform: translate(-50%, -50%);
-        z-index: 1;
+        z-index: var(--z-raised);
         font-size: var(--text-xs);
         font-weight: 600;
         font-family: inherit;
@@ -1335,7 +1336,7 @@
         right: 6px;
         top: 50%;
         transform: translateY(-50%);
-        z-index: 1;
+        z-index: var(--z-raised);
         opacity: 0.5;
         transition: transform 0.15s ease;
         pointer-events: none;
@@ -1351,7 +1352,7 @@
         flex-direction: column;
         gap: 6px;
         position: relative;
-        z-index: 2;
+        z-index: var(--z-content);
     }
     .subtask-list :global(.card) {
         background: var(--color-surface-1);

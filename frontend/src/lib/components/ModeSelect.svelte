@@ -122,7 +122,7 @@
         border-radius: var(--radius-sm);
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         padding: 4px;
-        z-index: 50;
+        z-index: var(--z-dropdown);
     }
     .mode-option {
         display: flex;

@@ -1411,7 +1411,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     .loading-screen {
         position: fixed;
         inset: 0;
-        z-index: 99999;
+        z-index: var(--z-max);
         background: var(--color-surface-0);
         display: flex;
         flex-direction: column;
@@ -1434,7 +1434,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     .offline-screen {
         position: fixed;
         inset: 0;
-        z-index: 99999;
+        z-index: var(--z-max);
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -1480,7 +1480,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         top: 0;
         left: 0;
         right: 0;
-        z-index: 10001;
+        z-index: var(--z-banner);
         background: var(--color-alert-bg);
         color: var(--color-alert-text);
         text-align: center;
@@ -1542,7 +1542,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         top: 0;
         left: 0;
         right: 0;
-        z-index: 10001;
+        z-index: var(--z-banner);
         background: var(--color-alert-bg);
         color: var(--color-alert-text);
         text-align: center;
@@ -1598,11 +1598,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
     }
 
+    /* Above the board it skips to; it never needs to beat a dialog, because the focus trap keeps
+       it out of the tab order while one is open. */
     .skip-link {
         position: absolute;
         top: -100%;
         left: 16px;
-        z-index: 10000;
+        z-index: var(--z-modal);
         padding: 8px 16px;
         background: var(--color-accent-dark);
         color: white;
@@ -1668,6 +1670,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     .btn-primary:hover {
         background: var(--color-accent-hover);
     }
+    /* Same tier as Toast.svelte: a failed add/clone has to stay readable above the picker dialog
+       it came from. */
     .error-toast {
         position: fixed;
         bottom: 24px;
@@ -1678,9 +1682,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         padding: 10px 20px;
         border-radius: var(--radius-md);
         font-size: var(--text-base);
-        z-index: 400;
+        z-index: var(--z-toast);
         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     }
+    /* The drawer's scrim: one tier under the drawer so the drawer stays hittable, and under a
+       dialog so a dialog is never dimmed by a drawer left open behind it. */
     .sidebar-backdrop {
         display: none;
     }
@@ -1691,7 +1697,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             position: fixed;
             inset: 0;
             background: var(--color-backdrop);
-            z-index: 199;
+            z-index: var(--z-overlay);
         }
     }
 </style>

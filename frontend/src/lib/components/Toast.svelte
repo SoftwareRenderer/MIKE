@@ -13,6 +13,8 @@
 {/if}
 
 <style>
+    /* Above every dialog: a fault the user has to see must not be hidden by the dialog that
+       raised it. Nothing the app itself opens belongs above this. */
     .toast {
         position: fixed;
         bottom: 24px;
@@ -22,7 +24,7 @@
         padding: 10px 20px;
         border-radius: var(--radius-md);
         font-size: var(--text-base);
-        z-index: 9999;
+        z-index: var(--z-toast);
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
         animation: slide-up 0.2s ease-out;
         max-width: 90vw;

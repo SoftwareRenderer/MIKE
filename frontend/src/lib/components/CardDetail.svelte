@@ -1225,7 +1225,7 @@
         width: 480px;
         height: 72vh;
         max-width: calc(100vw - 32px);
-        z-index: 900;
+        z-index: var(--z-overlay);
         flex: none;
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
@@ -1289,7 +1289,7 @@
     .diff-content :global(.checkpoint-diff-overlay) {
         position: absolute;
         inset: 0;
-        z-index: 5;
+        z-index: var(--z-content);
     }
     .diff-viewer-loading {
         display: flex;
@@ -1354,7 +1354,7 @@
         left: 0;
         right: 0;
         bottom: 0;
-        z-index: 1000;
+        z-index: var(--z-modal);
         margin: 0;
     }
     .task-detail-page.fullscreen :global(.header),
@@ -1384,7 +1384,7 @@
         left: 0;
         right: 0;
         bottom: 0;
-        z-index: 1000;
+        z-index: var(--z-modal);
         margin: 0;
     }
     .task-detail-page.chat-fullscreen :global(.header),

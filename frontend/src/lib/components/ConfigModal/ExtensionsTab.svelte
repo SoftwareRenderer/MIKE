@@ -620,10 +620,12 @@
         gap: 1rem;
     }
 
+    /* Clears ExtensionsHeader's sticky bar, which shares this top edge and sits earlier in the
+       DOM; the dropdown rank is the next one up. */
     .error-banner {
         position: sticky;
         top: 0;
-        z-index: 11;
+        z-index: var(--z-dropdown);
         background: var(--color-surface-1);
         border: 1px solid rgba(248, 81, 73, 0.4);
         border-left: 4px solid var(--color-status-red);

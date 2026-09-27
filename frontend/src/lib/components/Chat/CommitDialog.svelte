@@ -202,7 +202,7 @@
         </button>
     {/snippet}
 
-    <BaseModal title={t('chat.commit.title')} width="560px" zIndex={1000} footer={footer} onClose={handleCancel}>
+    <BaseModal title={t('chat.commit.title')} width="560px" footer={footer} onClose={handleCancel}>
         <p id="commit-dialog-desc" class="sr-only">
             {t('chat.commit.desc')}
         </p>

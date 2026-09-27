@@ -210,7 +210,7 @@
         text-align: left;
         position: sticky;
         top: 0;
-        z-index: 5;
+        z-index: var(--z-sticky);
         -webkit-appearance: none;
         appearance: none;
     }

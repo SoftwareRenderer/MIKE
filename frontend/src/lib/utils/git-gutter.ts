@@ -6,6 +6,7 @@ import {
     ViewUpdate,
 } from '@codemirror/view';
 import { mergeMarkers } from './diff-gutter';
+import { Z } from '$lib/constants/z-layers';
 
 /** Layout info for a document line, in content coordinates
  * (`block.top` is relative to the top of the document). */
@@ -377,7 +378,7 @@ export function gitGutter(options?: { title?: string }) {
             top: '0',
             right: '0',
             pointerEvents: 'none',
-            zIndex: '20',
+            zIndex: Z.sticky, // low rank: see codemirror-theme.ts
         },
         '.cm-scroller': {
             overflow: 'auto',

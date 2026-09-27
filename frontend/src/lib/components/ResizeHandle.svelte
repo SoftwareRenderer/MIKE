@@ -71,7 +71,7 @@
     .resize-handle {
         cursor: ew-resize;
         flex-shrink: 0;
-        z-index: 10;
+        z-index: var(--z-sticky);
         position: relative;
     }
     .resize-handle::before {

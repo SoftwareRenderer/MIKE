@@ -259,7 +259,7 @@
         border: 1px solid var(--color-border-bright);
         border-radius: var(--radius-lg);
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
-        z-index: 100;
+        z-index: var(--z-dropdown);
         user-select: none;
     }
 
