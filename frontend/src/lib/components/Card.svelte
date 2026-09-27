@@ -16,6 +16,7 @@
     import { effectiveMultiSelectClick, matchesClickBinding, isBrowserLinkClick } from '$lib/utils/keyboard';
     import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
     import Icon from './Icon.svelte';
+    import Spinner from './Spinner.svelte';
     import { fade, slide } from 'svelte/transition';
     import { onMount, onDestroy } from 'svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
@@ -771,9 +772,7 @@
 >
     <div class="card-title">
             {#if task.title_generating}
-                <span class="title-spinner" aria-label="Generating title">
-                    <svg viewBox="0 0 16 16" width="12" height="12"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="30 14" stroke-linecap="round"/></svg>
-                </span>
+                <Spinner size={12} label={t('board.card.titleGenerating')} />
             {/if}
             <span class="card-title-text">{truncate(task.title, 80)}</span>
             <div class="card-actions">
@@ -1085,6 +1084,7 @@
     .card-title {
         display: flex;
         align-items: center;
+        gap: 6px;
         font-size: var(--text-base);
         font-weight: 500;
         margin-bottom: 6px;
@@ -1097,14 +1097,6 @@
         overflow: hidden;
         text-overflow: ellipsis;
         padding-right: 0;
-    }
-    .title-spinner {
-        display: inline-flex;
-        align-items: center;
-        color: var(--color-text-tertiary);
-        margin-right: 6px;
-        flex-shrink: 0;
-        animation: spin 1s linear infinite;
     }
     .card:hover:not(:has(.card:hover)) > .card-title > .card-title-text,
     .card:focus-within:not(:has(.card:focus-within)) > .card-title > .card-title-text,

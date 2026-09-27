@@ -14,6 +14,7 @@
     import FileContextMenu, { type FileMenuItem } from './FileContextMenu.svelte';
     import SelectionActionBar from './SelectionActionBar.svelte';
     import Icon from './Icon.svelte';
+    import Spinner from './Spinner.svelte';
     import stageIcon from '$lib/assets/icons/stage.svg?raw';
     import unstageIcon from '$lib/assets/icons/unstage.svg?raw';
     import discardIcon from '$lib/assets/icons/discard.svg?raw';
@@ -1071,7 +1072,7 @@
             <span id="git-sync-busy" class="sr-only">{pulling ? t('git.pullBusy') : pushing ? t('git.pushBusy') : ''}</span>
             <button class="panel-icon-btn" onclick={handlePull} disabled={pulling || pushing} title={pulling ? t('git.pullBusy') : pullLabel} aria-label={pullLabel} aria-describedby={pulling || pushing ? 'git-sync-busy' : undefined}>
                 {#if pulling}
-                    <span class="mini-spinner" aria-hidden="true"></span>
+                    <Spinner size={12} decorative />
                 {:else}
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M8 3v7M5 7l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1082,7 +1083,7 @@
             </button>
             <button class="panel-icon-btn" onclick={handlePush} disabled={pulling || pushing} title={pushing ? t('git.pushBusy') : pushLabel} aria-label={pushLabel} aria-describedby={pulling || pushing ? 'git-sync-busy' : undefined}>
                 {#if pushing}
-                    <span class="mini-spinner" aria-hidden="true"></span>
+                    <Spinner size={12} decorative />
                 {:else}
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M8 10V3M5 6l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1109,7 +1110,7 @@
 
     {#if loading}
         <div class="panel-loading">
-            <span class="spinner"></span>
+            <Spinner size={20} decorative />
             <span>{t('diff.loadingChanges')}</span>
         </div>
     {:else if !hasContent}
@@ -1553,16 +1554,6 @@
         opacity: 0.9;
     }
 
-    /* Busy indicator for Pull/Push */
-    .mini-spinner {
-        width: 12px;
-        height: 12px;
-        border: 2px solid currentColor;
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-    }
-
     .panel-count {
         font-family: var(--font-mono);
         font-size: var(--text-2xs);
@@ -1583,15 +1574,6 @@
         flex: 1;
         min-height: 0;
     }
-    .panel-loading .spinner {
-        width: 20px;
-        height: 20px;
-        border: 2px solid var(--color-text-secondary);
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-    }
-
     /* Body: two-column layout */
     .panel-body {
         display: flex;

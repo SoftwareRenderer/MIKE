@@ -3,6 +3,7 @@
     import { onMount, onDestroy, tick } from 'svelte';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard, applyResolvedTasksToBoard } from '$lib/stores';
     import { t } from '$lib/i18n';
+    import Spinner from './Spinner.svelte';
     import { isSandboxMountPath } from '$lib/utils/path';
     import { isAnyModalOpen } from '$lib/utils/modal-state';
     import { connectionStore } from '$lib/stores/connection.svelte';
@@ -1118,7 +1119,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
      announces the transitions. -->
 {#if !connectionStore.connected}
     <div class="reconnecting-banner">
-        <span class="reconnecting-spinner"></span>
+        <Spinner size={12} decorative />
         {reconnectBanner.status}
         {#if reconnectBanner.staleTimeText}<span class="reconnecting-stale">{t('app.reconnect.dataFrom', { time: reconnectBanner.staleTimeText })}</span>{/if}
         <button class="reconnecting-btn" onclick={() => reconnectBanner.reconnectNow()} type="button" aria-label="Try connecting now">{t('app.reconnect.connect')}</button>
@@ -1513,15 +1514,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     }
     .reconnecting-btn:hover {
         background: rgba(214, 211, 209, 0.25);
-    }
-    .reconnecting-spinner {
-        display: inline-block;
-        width: 12px;
-        height: 12px;
-        border: 2px solid rgba(214, 211, 209, 0.3);
-        border-top-color: var(--color-alert-text);
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
     }
     @keyframes slide-down {
         from {

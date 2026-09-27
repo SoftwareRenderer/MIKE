@@ -1,6 +1,7 @@
 <script lang="ts">
     import { fetchLSPSandboxMemory } from '$lib/api/lsp';
     import { t } from '$lib/i18n';
+    import Spinner from './Spinner.svelte';
     import { formatSandboxMemory, isSandboxMemoryWarning } from '$lib/utils/memory-stats';
     import type { SandboxMemoryStats } from '$lib/types';
 
@@ -75,7 +76,7 @@
                 aria-label="LSP status"
             >
                 {#if lspConnecting}
-                    <span class="lsp-spinner"></span>
+                    <Spinner size={12} decorative />
                 {/if}
                 {lspStatusLabel}
             </button>
@@ -161,16 +162,6 @@
         display: flex;
         align-items: center;
         gap: 12px;
-    }
-    .lsp-spinner {
-        display: inline-block;
-        width: 10px;
-        height: 10px;
-        border: 2px solid currentColor;
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-        opacity: 0.6;
     }
     .lsp-tooltip {
         position: absolute;

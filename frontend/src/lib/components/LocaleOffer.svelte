@@ -2,6 +2,7 @@
     import { fade } from 'svelte/transition';
     import { localeOffer } from '$lib/services/locale-offer.svelte';
     import { t } from '$lib/i18n/runtime.svelte';
+    import Spinner from './Spinner.svelte';
 
     /**
      * The first-run offer: "your browser speaks another language, here is the
@@ -39,7 +40,7 @@
                  server says which step it is on, so a git clone that takes a
                  moment is visibly working rather than hung. -->
             <p class="locale-offer-progress locale-offer-step-state">
-                <span class="locale-offer-spin" aria-hidden="true"></span>
+                <Spinner size={12} decorative />
                 {t('i18n.offer.installing', { language })}
                 {#if state.progress > 0}<span class="locale-offer-pct">{Math.round(state.progress)}%</span>{/if}
             </p>
@@ -128,14 +129,5 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-    }
-
-    .locale-offer-spin {
-        width: 10px;
-        height: 10px;
-        border: 2px solid var(--color-border);
-        border-top-color: var(--color-text-primary);
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
     }
 </style>

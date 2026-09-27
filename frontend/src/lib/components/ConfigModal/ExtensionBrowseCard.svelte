@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { RegistryEntry } from '$lib/types';
     import { t } from '$lib/i18n';
+    import Spinner from '../Spinner.svelte';
     import ExtensionBuildProgress from './ExtensionBuildProgress.svelte';
     import type { OperationProgress } from './ExtensionBuildProgress.svelte';
     import ExtensionLocalPath from './ExtensionLocalPath.svelte';
@@ -106,7 +107,7 @@
             {:else}
                 <button class="btn btn-primary btn-small" onclick={() => oninstall(entry, unpublished)} disabled={installing}>
                     {#if installing}
-                        <span class="spinner"></span>
+                        <Spinner size={12} decorative />
                         {t('settings.extensions.installingNow')}
                     {:else}
                         {t('settings.extensions.install')}
@@ -188,19 +189,10 @@
     .btn-small {
         padding: 0.25rem 0.5rem;
         font-size: var(--text-xs);
-    }
-
-    /* Spinner */
-    .spinner {
-        display: inline-block;
-        width: 12px;
-        height: 12px;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        border-top-color: var(--color-btn-text);
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-        vertical-align: middle;
-        margin-right: 0.35rem;
+        /* The install button carries a working ring beside its label, so the two share a line. */
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
     }
 
     .installed-badge {

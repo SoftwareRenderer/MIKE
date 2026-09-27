@@ -7,6 +7,7 @@
     import { highlightLinesAsync } from '$lib/highlighter';
     import { formatBytes } from '$lib/utils/format';
     import { t } from '$lib/i18n';
+    import Spinner from './Spinner.svelte';
     import ImageDiffModal from './ImageDiffModal.svelte';
     import { loadCollapsedDiffFiles, saveCollapsedDiffFiles } from '$lib/storage';
 import { slide } from 'svelte/transition';
@@ -610,7 +611,7 @@ import { slide } from 'svelte/transition';
                     <div class="diff-line-scroll">
                         <div class="diff-line-content-wrapper">
                             <div class="diff-loading">
-                                <div class="diff-loading-spinner"></div>
+                                <Spinner decorative />
                                 <span>{t('diff.shared.loading')}</span>
                             </div>
                         </div>
@@ -641,7 +642,7 @@ import { slide } from 'svelte/transition';
     <div class="diff-empty">
         {#if loading}
             <div class="diff-loading diff-loading-center">
-                <div class="diff-loading-spinner"></div>
+                <Spinner decorative />
                 <span>{t('diff.loadingChanges')}</span>
             </div>
         {:else}
@@ -659,7 +660,7 @@ import { slide } from 'svelte/transition';
         <!-- Loading banner (shown when refreshing, e.g. thread switch) -->
         {#if loading}
         <div class="diff-loading-banner">
-            <div class="diff-loading-spinner"></div>
+            <Spinner decorative />
             <span>{t('diff.loadingChanges')}</span>
         </div>
         {/if}

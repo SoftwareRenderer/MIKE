@@ -42,6 +42,7 @@
     import { resolveGutterClickRange, toProjectRelative } from '$lib/utils/line-selection';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
     import EditorFooter from './EditorFooter.svelte';
+    import Spinner from './Spinner.svelte';
     import { mount, unmount } from 'svelte';
     import { appStore, dialogStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
@@ -1566,9 +1567,7 @@
                     aria-describedby={fileTooLarge ? 'file-editor-too-large' : undefined}
                 >
                 {#if saving}
-                    <svg class="save-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                        <path d="M12 2a10 10 0 0 1 10 10"/>
-                    </svg>
+                    <Spinner size={14} decorative />
                     {t('editor.saving')}
                 {:else}
                     {t('editor.save')}
@@ -1861,10 +1860,6 @@
     .file-editor.diff .btn-save:disabled {
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
-    }
-    .file-editor.diff .save-spinner {
-        animation: spin 0.8s linear infinite;
-        transform-origin: center;
     }
     .file-editor.diff .confirm-overlay {
         position: absolute;

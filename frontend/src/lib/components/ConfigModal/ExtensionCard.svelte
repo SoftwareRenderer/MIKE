@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { Extension } from '$lib/types';
     import { t } from '$lib/i18n';
+    import Spinner from '../Spinner.svelte';
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import ExtensionBuildProgress from './ExtensionBuildProgress.svelte';
     import ExtensionLocalPath from './ExtensionLocalPath.svelte';
@@ -128,7 +129,7 @@
             {#if ext.type === 'lsp'}
             <button class="btn btn-icon" title={t('settings.extensions.updateImageTitle')} onclick={() => onupdateimage(ext.id, ext.name)} disabled={updating}>
                 {#if updating}
-                    <span class="spinner"></span>
+                    <Spinner size={12} label={t('settings.extensions.updating')} />
                 {:else}
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M21 2v6h-6"/>
@@ -299,6 +300,10 @@
         color: var(--color-text-tertiary);
         padding: 0.25rem;
         font-size: var(--text-lg);
+        /* Each of these buttons holds one glyph — an icon, or a ring while its work runs. */
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
     }
 
     .btn-icon:hover {
@@ -312,18 +317,5 @@
     .btn-small {
         padding: 0.25rem 0.5rem;
         font-size: var(--text-xs);
-    }
-
-    /* Spinner */
-    .spinner {
-        display: inline-block;
-        width: 12px;
-        height: 12px;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        border-top-color: var(--color-btn-text);
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-        vertical-align: middle;
-        margin-right: 0.35rem;
     }
 </style>

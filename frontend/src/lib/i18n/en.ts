@@ -1582,6 +1582,7 @@ const catalog = {
     'board.card.idle': 'Idle',
     'board.card.codingAgent': 'Coding Agent',
     'board.card.modelWithProvider': '{provider} · {model}',
+    'board.card.titleGenerating': 'Generating title...',
     'board.card.commitAndDone': 'Commit and move to Done',
     'board.card.fileCount': { one: '{count} file', other: '{count} files' },
     'board.card.subtaskCount': { one: '{count} subtask', other: '{count} subtasks' },

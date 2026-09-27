@@ -1,5 +1,6 @@
 <script lang="ts">
     import BaseModal from './BaseModal.svelte';
+    import Spinner from './Spinner.svelte';
     import { rawFileURL } from '$lib/api';
     import { t } from '$lib/i18n';
 
@@ -43,7 +44,7 @@
         <div class="image-pane-body">
             {#if state[which] === 'loading'}
                 <div class="image-pane-status">
-                    <span class="image-spinner" aria-hidden="true"></span>
+                    <Spinner decorative />
                     <span>{t('diff.shared.loading')}</span>
                 </div>
             {:else if state[which] === 'error'}
@@ -116,13 +117,5 @@
         gap: 8px;
         color: rgba(255, 255, 255, 0.85);
         font-size: var(--text-xs);
-    }
-    .image-spinner {
-        width: 14px;
-        height: 14px;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        border-top-color: rgba(255, 255, 255, 0.9);
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
     }
 </style>
