@@ -135,9 +135,9 @@
         border: none;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         padding: 0.5rem 1rem;
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         transition: all 0.15s;
     }
 
@@ -162,10 +162,10 @@
         flex: 1;
         background: var(--color-bg-input);
         border: 1px solid var(--color-border-subtle);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         padding: 0.5rem 0.75rem;
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
     }
 
     .search-input:focus {
@@ -187,10 +187,10 @@
         align-items: center;
         background: var(--color-bg-input);
         border: 1px solid var(--color-border-subtle);
-        border-radius: 999px;
+        border-radius: var(--radius-pill);
         padding: 0.2rem 0.6rem;
         color: var(--color-text-secondary);
-        font-size: 0.68rem;
+        font-size: var(--text-2xs);
         font-weight: 700;
         letter-spacing: 0.04em;
         text-transform: uppercase;
@@ -215,7 +215,7 @@
         border: none;
         padding: 0.2rem 0.25rem;
         color: var(--color-text-tertiary);
-        font-size: 0.72rem;
+        font-size: var(--text-xs);
         text-decoration: underline;
         cursor: pointer;
     }
@@ -226,8 +226,8 @@
 
     .btn {
         padding: 0.4rem 0.75rem;
-        border-radius: 6px;
-        font-size: 0.8rem;
+        border-radius: var(--radius-md);
+        font-size: var(--text-sm);
         cursor: pointer;
         border: 1px solid transparent;
         transition: all 0.15s;

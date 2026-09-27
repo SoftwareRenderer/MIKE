@@ -82,7 +82,7 @@
     }
     .branch-input {
         width: 160px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-primary);
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
@@ -111,7 +111,7 @@
     }
     .branch-option {
         padding: 6px 10px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-family: var(--font-mono, monospace);
         color: var(--color-text-primary);
         cursor: pointer;

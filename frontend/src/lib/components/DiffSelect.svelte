@@ -67,7 +67,7 @@
         gap: 6px;
         padding: 3px 24px 3px 8px;
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
@@ -98,7 +98,7 @@
         flex-shrink: 1;
         min-width: 0;
         color: var(--color-text-tertiary);
-        font-size: 0.7rem;
+        font-size: var(--text-xs);
         text-align: right;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -132,8 +132,8 @@
         gap: 6px;
         width: 100%;
         padding: 4px 8px;
-        border-radius: 3px;
-        font-size: 0.75rem;
+        border-radius: var(--radius-sm);
+        font-size: var(--text-xs);
         background: none;
         border: none;
         color: var(--color-text-secondary);
@@ -161,7 +161,7 @@
     .opt-meta {
         flex-shrink: 0;
         color: var(--color-text-tertiary);
-        font-size: 0.7rem;
+        font-size: var(--text-xs);
         text-align: right;
     }
 </style>

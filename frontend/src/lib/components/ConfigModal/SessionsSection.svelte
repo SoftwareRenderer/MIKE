@@ -215,7 +215,7 @@
     }
     /* Ellipsize the User-Agent; the full string stays in the title tooltip. */
     .session-agent {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-text-primary);
         min-width: 0;
@@ -225,7 +225,7 @@
     }
     .session-badge {
         flex-shrink: 0;
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -235,11 +235,11 @@
         color: white;
     }
     .sessions-status {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-tertiary);
     }
     .sessions-error {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-status-red);
     }

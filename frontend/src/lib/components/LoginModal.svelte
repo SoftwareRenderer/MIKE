@@ -99,7 +99,7 @@
         color: var(--color-text-primary);
         padding: 8px 12px;
         border-radius: var(--radius-sm);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         text-align: center;
     }
 
@@ -110,7 +110,7 @@
         border-radius: var(--radius-md);
         background: var(--color-surface-2);
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         outline: none;
         transition: border-color 0.15s;
         box-sizing: border-box;
@@ -132,7 +132,7 @@
         border-radius: var(--radius-md);
         background: var(--color-accent-dark);
         color: white;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         cursor: pointer;
         transition: background 0.15s;

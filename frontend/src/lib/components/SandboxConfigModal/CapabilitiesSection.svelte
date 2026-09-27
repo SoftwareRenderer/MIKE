@@ -114,7 +114,7 @@
         background: rgba(136, 192, 208, 0.12);
         border: 1px solid rgba(136, 192, 208, 0.25);
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: var(--font-mono, monospace);
         color: var(--color-accent-light, #88c0d0);
     }
@@ -159,7 +159,7 @@
         border-radius: var(--radius-sm);
         background: var(--color-surface-1);
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-family: var(--font-mono, monospace);
         outline: none;
         transition: border-color 0.15s;
@@ -217,13 +217,13 @@
     }
 
     .caps-dropdown-name {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         font-family: var(--font-mono, monospace);
     }
 
     .caps-dropdown-desc {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-secondary);
     }
 </style>

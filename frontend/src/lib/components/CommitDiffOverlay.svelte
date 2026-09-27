@@ -566,7 +566,7 @@
         gap: 4px;
         padding: 2px 4px;
         border: none;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         background: transparent;
         cursor: pointer;
         text-align: left;
@@ -581,7 +581,7 @@
         background: var(--color-surface-3);
     }
     .diff-commit-subject {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-text-primary);
         white-space: nowrap;
@@ -607,7 +607,7 @@
         padding: 8px 12px;
         background: var(--color-surface-3);
         border: 1px solid var(--color-border);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         box-shadow: 0 8px 24px rgba(0,0,0,0.3);
     }
     .diff-commit-body-tooltip::before {
@@ -624,7 +624,7 @@
     }
     .diff-commit-body-tooltip pre {
         margin: 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: var(--font-mono, monospace);
         color: var(--color-text-secondary);
         line-height: 1.5;
@@ -640,7 +640,7 @@
         flex-shrink: 0;
     }
     .diff-commit-hash {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: var(--font-mono, monospace);
         color: var(--color-text-tertiary);
         flex-shrink: 0;
@@ -674,7 +674,7 @@
     .diff-hash-copy-btn .check {
         position: absolute;
         opacity: 0;
-        font-size: 10px;
+        font-size: var(--text-3xs);
         font-weight: 700;
         line-height: 1;
         transition: opacity 0.2s ease;
@@ -685,7 +685,7 @@
         opacity: 1;
     }
     .diff-commit-date {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         opacity: 0.7;
         flex-shrink: 0;
@@ -695,7 +695,7 @@
         align-items: center;
         gap: 6px;
         flex-shrink: 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
     }
     .diff-stat-added {
@@ -732,7 +732,7 @@
         justify-content: center;
         padding: 20px;
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
 
     /* Files scroll area */
@@ -761,9 +761,9 @@
         padding: 8px 12px;
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
-        border-radius: 6px 6px 0 0;
+        border-radius: var(--radius-md) var(--radius-md) 0 0;
         cursor: pointer;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
         text-align: left;
         position: sticky;
@@ -776,7 +776,7 @@
     .diff-sbs-body {
         border: 1px solid var(--color-border);
         border-top: none;
-        border-radius: 0 0 6px 6px;
+        border-radius: 0 0 var(--radius-md) var(--radius-md);
     }
     .diff-file-header:hover {
         background: var(--color-surface-3);
@@ -799,14 +799,14 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         font-family: var(--font-mono);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-primary);
     }
     .diff-file-stats {
         display: flex;
         gap: 6px;
         flex-shrink: 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
     }
     .diff-stat-added {
@@ -821,10 +821,10 @@
         margin-top: 2px;
         border: 1px solid var(--color-border);
         border-top: none;
-        border-radius: 0 0 6px 6px;
+        border-radius: 0 0 var(--radius-md) var(--radius-md);
         padding: 12px 12px 12px 42px;
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-style: italic;
     }
 
@@ -833,10 +833,10 @@
         margin-top: 2px;
         border: 1px solid var(--color-border);
         border-top: none;
-        border-radius: 0 0 6px 6px;
+        border-radius: 0 0 var(--radius-md) var(--radius-md);
         padding: 12px 16px;
         color: var(--color-status-red);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-style: italic;
         opacity: 0.8;
     }
@@ -846,10 +846,10 @@
         margin-top: 2px;
         border: 1px solid var(--color-border);
         border-top: none;
-        border-radius: 0 0 6px 6px;
+        border-radius: 0 0 var(--radius-md) var(--radius-md);
         padding: 12px 16px;
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-style: italic;
     }
 
@@ -862,7 +862,7 @@
     .diff-sbs-col-header {
         flex: 1;
         padding: 5px 12px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--color-text-tertiary);
         text-transform: uppercase;
@@ -893,7 +893,7 @@
     /* Individual line within a column */
     .diff-sbs-line {
         display: flex;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-family: var(--font-mono, monospace);
         line-height: 1.75rem;
     }
@@ -939,9 +939,9 @@
         padding: 8px 12px;
         background: var(--color-surface-2);
         border: none;
-        border-radius: 0 0 6px 6px;
+        border-radius: 0 0 var(--radius-md) var(--radius-md);
         color: var(--color-accent);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         cursor: pointer;
         text-align: center;
@@ -977,7 +977,7 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
         transition: background 0.1s ease, color 0.1s ease;
     }
@@ -994,7 +994,7 @@
     .diff-unified-body {
         border: 1px solid var(--color-border);
         border-top: none;
-        border-radius: 0 0 6px 6px;
+        border-radius: 0 0 var(--radius-md) var(--radius-md);
         overflow: hidden;
     }
     .diff-unified-scroll {
@@ -1003,7 +1003,7 @@
     }
     .diff-row {
         display: flex;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-family: var(--font-mono, monospace);
         line-height: 1.75rem;
         min-width: max-content;

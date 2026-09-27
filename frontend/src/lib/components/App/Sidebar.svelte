@@ -246,7 +246,7 @@
         flex-shrink: 0;
     }
     .sidebar-header h2 {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.5px;
@@ -266,7 +266,7 @@
         color: var(--color-text-tertiary);
         cursor: pointer;
         padding: 4px;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
         display: flex;
         align-items: center;
@@ -336,7 +336,7 @@
         border-radius: var(--radius-sm);
         color: var(--color-text-primary);
         cursor: pointer;
-        font-size: 0.9375rem;
+        font-size: var(--text-md);
         /* The row is an anchor now, so drop the UA link styling. */
         text-decoration: none;
         text-align: left;
@@ -354,7 +354,7 @@
         flex: 1;
         min-width: 48px;
         height: 4px;
-        border-radius: 2px;
+        border-radius: var(--radius-xs);
         background: var(--color-surface-3);
         overflow: hidden;
     }
@@ -396,7 +396,7 @@
     }
     .project-abbr {
         display: none;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 600;
         text-align: center;
         width: 100%;
@@ -424,7 +424,7 @@
         display: flex;
         align-items: center;
         gap: 2px;
-        font-size: 12px;
+        font-size: var(--text-xs);
         font-weight: 500;
         opacity: 1;
     }
@@ -438,7 +438,7 @@
         cursor: pointer;
         padding: 4px;
         border-radius: var(--radius-sm);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -463,7 +463,7 @@
         border-radius: var(--radius-sm);
         color: var(--color-text-secondary);
         cursor: pointer;
-        font-size: 0.9375rem;
+        font-size: var(--text-md);
         transition: all 0.15s ease;
         position: relative;
     }
@@ -483,7 +483,7 @@
         border-radius: var(--radius-sm);
         color: var(--color-text-tertiary);
         cursor: pointer;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         transition: all 0.15s ease;
     }
     .add-project-btn:hover {

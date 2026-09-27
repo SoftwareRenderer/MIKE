@@ -1422,7 +1422,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     .loading-slow {
         color: var(--color-text-muted);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         margin: 0;
     }
     .loading-icon,
@@ -1445,20 +1445,20 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     .offline-text {
         color: var(--color-column-backlog);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-family: inherit;
         margin: 0;
     }
 
     .offline-btn {
         font-family: inherit;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         display: flex;
         align-items: center;
         gap: 0.5rem;
         padding: 0.6rem 1.5rem;
         border: 1px solid var(--color-surface-3);
-        border-radius: 8px;
+        border-radius: var(--radius-lg);
         background: var(--color-surface-0);
         color: var(--color-text-primary);
         cursor: pointer;
@@ -1485,7 +1485,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         color: var(--color-alert-text);
         text-align: center;
         padding: 6px 16px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 600;
         display: flex;
         align-items: center;
@@ -1497,7 +1497,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     .reconnecting-stale {
         font-weight: 400;
         opacity: 0.75;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
     .reconnecting-btn {
         background: rgba(214, 211, 209, 0.15);
@@ -1505,8 +1505,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         color: var(--color-alert-text);
         padding: 2px 10px;
         line-height: 1;
-        border-radius: 4px;
-        font-size: 0.75rem;
+        border-radius: var(--radius-sm);
+        font-size: var(--text-xs);
         font-weight: 600;
         cursor: pointer;
         transition: background 0.15s;
@@ -1547,7 +1547,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         color: var(--color-alert-text);
         text-align: center;
         padding: 5px 16px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         display: flex;
         align-items: center;
@@ -1573,7 +1573,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         :global(input),
         :global(textarea),
         :global(select) {
-            font-size: 1rem !important;
+            font-size: var(--text-lg) !important;
         }
 
         :global(*) {
@@ -1655,7 +1655,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         right: 12px;
     }
     .empty-state h2 {
-        font-size: 1.25rem;
+        font-size: var(--text-lg);
         color: var(--color-text-primary);
     }
     .btn-primary {
@@ -1677,7 +1677,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         color: white;
         padding: 10px 20px;
         border-radius: var(--radius-md);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         z-index: 400;
         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     }

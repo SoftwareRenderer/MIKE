@@ -79,7 +79,7 @@
         gap: 6px;
     }
     .image-pane-label {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -115,7 +115,7 @@
         align-items: center;
         gap: 8px;
         color: rgba(255, 255, 255, 0.85);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
     .image-spinner {
         width: 14px;

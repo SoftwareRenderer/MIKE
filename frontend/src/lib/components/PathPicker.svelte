@@ -202,7 +202,7 @@
     }
     .error {
         color: var(--color-status-red);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         padding: 8px;
         background: color-mix(in srgb, var(--color-status-red) 10%, transparent);
         border-radius: var(--radius-sm);
@@ -211,7 +211,7 @@
         text-align: center;
         color: var(--color-text-secondary);
         padding: 24px;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
     }
     .file-entry.selected {
         background: var(--color-accent-dark);

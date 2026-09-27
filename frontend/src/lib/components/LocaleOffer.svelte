@@ -88,14 +88,14 @@
 
     .locale-offer-title {
         margin: 0;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 600;
         color: var(--color-text-primary);
     }
 
     .locale-offer-detail {
         margin: 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         line-height: 1.45;
         color: var(--color-text-secondary);
     }
@@ -112,7 +112,7 @@
         align-items: center;
         gap: 6px;
         margin: 2px 0 0 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-primary);
     }
 
@@ -123,7 +123,7 @@
 
     .locale-offer-step {
         margin: 0;
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-tertiary, var(--color-text-secondary));
         white-space: nowrap;
         overflow: hidden;

@@ -101,7 +101,7 @@
 
     .port-hint {
         padding: 2px 0 0 36px;
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-muted);
     }
 

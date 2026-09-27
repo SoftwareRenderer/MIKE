@@ -25,7 +25,7 @@
     border: none;
     background: var(--color-surface-3);
     color: var(--color-text-primary);
-    font-size: 0.875rem;
+    font-size: var(--text-base);
     font-weight: 500;
     font-family: inherit;
     cursor: pointer;
@@ -43,7 +43,7 @@
     border: none;
     background: var(--color-accent-dark);
     color: white;
-    font-size: 0.875rem;
+    font-size: var(--text-base);
     font-weight: 500;
     font-family: inherit;
     cursor: pointer;

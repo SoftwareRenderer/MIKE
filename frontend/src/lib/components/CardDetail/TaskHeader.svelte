@@ -347,7 +347,7 @@
         flex: 1;
     }
     .project-prefix {
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 400;
         color: var(--color-text-secondary);
         white-space: nowrap;
@@ -358,8 +358,8 @@
     }
     .badge {
         padding: 2px 8px;
-        border-radius: 10px;
-        font-size: 0.75rem;
+        border-radius: var(--radius-lg);
+        font-size: var(--text-xs);
         font-weight: 600;
         flex-shrink: 0;
         border: 1px solid;
@@ -401,7 +401,7 @@
         padding: 6px 12px;
         border-radius: var(--radius-md);
         background: var(--color-surface-3);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -430,7 +430,7 @@
         background: var(--color-surface-3);
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
         font-family: var(--font-mono);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         line-height: 1.4;
         color: var(--color-text-primary);
         display: flex;
@@ -455,7 +455,7 @@
         background: var(--color-surface-2);
         color: var(--color-text-secondary);
         font-family: inherit;
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         line-height: 1.5;
         cursor: pointer;
         white-space: nowrap;

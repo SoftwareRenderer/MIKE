@@ -60,7 +60,7 @@
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
 
     .sandbox-image-status.failed {
@@ -106,7 +106,7 @@
         background: var(--color-surface-1);
         border-radius: var(--radius-sm);
         font-family: var(--font-mono, monospace);
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         line-height: 1.4;
         color: var(--color-text-secondary);
         white-space: pre-wrap;
@@ -121,7 +121,7 @@
         background: transparent;
         color: var(--color-text-secondary);
         font-family: inherit;
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         cursor: pointer;
     }
 

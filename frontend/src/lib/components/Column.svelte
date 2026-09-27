@@ -173,7 +173,7 @@
         display: flex;
         align-items: center;
         gap: 5px;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.5px;
@@ -185,9 +185,9 @@
     }
     .count {
         background: var(--color-surface-3);
-        border-radius: 10px;
+        border-radius: var(--radius-lg);
         padding: 2px 8px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
     }
     .header-right {
@@ -259,7 +259,7 @@
         padding: 8px;
         border-radius: var(--radius-md);
         background: var(--color-surface-3);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         color: var(--color-text-secondary);
         cursor: pointer;
         transition: background 0.15s ease;

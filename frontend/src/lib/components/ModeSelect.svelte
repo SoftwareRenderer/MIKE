@@ -74,7 +74,7 @@
         border-radius: var(--radius-sm);
         background: var(--color-surface-2);
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         cursor: pointer;
         font-family: inherit;
@@ -131,10 +131,10 @@
         width: 100%;
         padding: 6px 10px;
         border: none;
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
         background: transparent;
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         cursor: pointer;
         font-family: inherit;

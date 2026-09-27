@@ -10,7 +10,7 @@
     background: none;
     border: none;
     color: var(--color-text-secondary);
-    font-size: 1.125rem;
+    font-size: var(--text-lg);
     cursor: pointer;
     padding: 4px;
     border-radius: var(--radius-sm);

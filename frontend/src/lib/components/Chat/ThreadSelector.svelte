@@ -76,7 +76,7 @@
         min-height: 1.375rem;
         padding: 2px 8px;
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
@@ -112,7 +112,7 @@
         width: 100%;
         padding: 6px 10px;
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         background: none;
         border: none;
         color: var(--color-text-secondary);

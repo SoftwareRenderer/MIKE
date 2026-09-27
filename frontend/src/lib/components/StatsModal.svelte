@@ -242,7 +242,7 @@
         color: var(--color-text-primary);
     }
     .summary-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -252,7 +252,7 @@
     .model-table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
     .model-table th {
         text-align: left;
@@ -260,7 +260,7 @@
         font-weight: 600;
         color: var(--color-text-secondary);
         border-bottom: 2px solid var(--color-border);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         text-transform: uppercase;
         letter-spacing: 0.04em;
     }
@@ -304,7 +304,7 @@
         display: inline-flex;
         align-items: center;
         gap: 4px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: var(--font-sans);
         transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
     }
@@ -315,7 +315,7 @@
     }
     .model-label {
         font-family: var(--font-mono, monospace);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
     @media (max-width: 768px) {
         .summary-row {
@@ -325,7 +325,7 @@
             min-width: 45%;
         }
         .model-table {
-            font-size: 0.75rem;
+            font-size: var(--text-xs);
         }
         .model-table th,
         .model-table td {

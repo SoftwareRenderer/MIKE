@@ -479,7 +479,7 @@
         align-items: center;
         gap: 8px;
         margin-left: auto;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-text-secondary);
         cursor: pointer;
@@ -489,7 +489,7 @@
         display: flex;
         flex-direction: column;
         gap: 6px;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         color: var(--color-text-secondary);
     }
@@ -499,7 +499,7 @@
         border-radius: var(--radius-md);
         padding: 8px 12px;
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         resize: vertical;
         min-height: 80px;
         font-family: inherit;
@@ -542,7 +542,7 @@
         background: rgba(0,0,0,0.7);
         color: white;
         border: none;
-        font-size: 14px;
+        font-size: var(--text-base);
         line-height: 1;
         cursor: pointer;
         display: flex;
@@ -568,7 +568,7 @@
         color: var(--color-text-primary);
     }
     .parent-label {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-tertiary);
         padding: 6px 10px;
         background: var(--color-surface-2);
@@ -592,7 +592,7 @@
         border-top: 1px solid var(--color-border);
     }
     .section-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -615,7 +615,7 @@
         gap: 2px;
     }
     .config-label {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-text-primary);
     }
@@ -626,7 +626,7 @@
         padding: 0 5px;
         border-radius: var(--radius-sm);
         background: var(--color-surface-3);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         color: var(--color-text-secondary);
         font-family: var(--font-mono);
@@ -634,7 +634,7 @@
         line-height: 1.2;
     }
     .config-desc {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
     }
     .model-select-row {
@@ -642,7 +642,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 12px;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         color: var(--color-text-secondary);
     }

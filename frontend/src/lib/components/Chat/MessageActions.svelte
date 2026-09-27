@@ -104,7 +104,7 @@
     .message-timestamp {
         display: flex;
         align-items: center;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         white-space: nowrap;
         margin: 0 4px;
@@ -149,7 +149,7 @@
     .action-btn .check {
         position: absolute;
         opacity: 0;
-        font-size: 14px;
+        font-size: var(--text-base);
         font-weight: 700;
         line-height: 1;
         transition: opacity 0.2s ease;

@@ -84,7 +84,7 @@
         background: none;
         border: none;
         color: var(--color-text-tertiary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         cursor: pointer;
         padding: 2px 6px;
         border-radius: var(--radius-sm);
@@ -103,7 +103,7 @@
         padding: 8px 12px;
         background: var(--color-surface-0);
         border-radius: var(--radius-sm);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         line-height: 1.5rem;
         color: var(--color-text-secondary);
         white-space: pre-wrap;

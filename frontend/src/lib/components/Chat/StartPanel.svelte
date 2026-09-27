@@ -89,7 +89,7 @@
         border-radius: var(--radius-md);
         background: var(--color-accent-dark);
         color: var(--color-btn-text);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 600;
         cursor: pointer;
         border: none;

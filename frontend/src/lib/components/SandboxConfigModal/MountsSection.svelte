@@ -137,6 +137,6 @@
 
     .radio-group-small .radio-label {
         padding: 2px 7px;
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
     }
 </style>

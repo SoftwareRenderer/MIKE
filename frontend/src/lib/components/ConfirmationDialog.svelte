@@ -56,7 +56,7 @@
 
 <style>
     .confirm-message {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
         margin: 0;
         line-height: 1.5;
@@ -65,7 +65,7 @@
     .confirm-list {
         margin: 8px 0 0 0;
         padding-left: 18px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
         line-height: 1.6;
     }

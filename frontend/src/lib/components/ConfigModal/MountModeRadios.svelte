@@ -39,7 +39,7 @@
         align-items: center;
         gap: 4px;
         padding: 3px 10px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary, var(--color-text-tertiary));
         cursor: pointer;
         transition: background 0.15s, color 0.15s;
@@ -73,6 +73,6 @@
 
     .radio-group-small .radio-label {
         padding: 2px 7px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
 </style>

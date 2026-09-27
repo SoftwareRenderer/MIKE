@@ -627,7 +627,7 @@
         background: var(--color-surface-1);
         border: 1px solid rgba(248, 81, 73, 0.4);
         border-left: 4px solid var(--color-status-red);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         padding: 0.75rem 1rem;
         color: var(--color-status-red);
         cursor: pointer;
@@ -642,7 +642,7 @@
         border: none;
         color: inherit;
         cursor: pointer;
-        font-size: 1rem;
+        font-size: var(--text-lg);
         padding: 0 0.25rem;
     }
 
@@ -656,8 +656,8 @@
 
     .btn {
         padding: 0.4rem 0.75rem;
-        border-radius: 6px;
-        font-size: 0.8rem;
+        border-radius: var(--radius-md);
+        font-size: var(--text-sm);
         cursor: pointer;
         border: 1px solid transparent;
         transition: all 0.15s;
@@ -689,7 +689,7 @@
     }
 
     .empty-state .help {
-        font-size: 0.85rem;
+        font-size: var(--text-base);
     }
 
     .empty-state .btn {

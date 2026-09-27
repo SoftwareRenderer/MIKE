@@ -148,7 +148,7 @@
     }
     .pricing-label,
     .currency-label {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -185,7 +185,7 @@
         gap: 4px;
     }
     .currency-field label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
     }
     .currency-input-wrap {
@@ -201,7 +201,7 @@
     }
     .currency-prefix {
         padding: 4px 6px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         background: var(--color-surface-2);
         border-right: 1px solid var(--color-border);
@@ -211,7 +211,7 @@
     .field-input {
         flex: 1;
         min-width: 0;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         padding: 4px 6px;
         background: transparent;
         border: none;

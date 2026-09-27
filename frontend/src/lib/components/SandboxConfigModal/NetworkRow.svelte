@@ -59,7 +59,7 @@
         border: 1px solid rgba(210, 153, 34, 0.3);
         border-radius: var(--radius-md);
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         line-height: 1.45;
     }
 </style>

@@ -276,8 +276,8 @@
 
     .btn {
         padding: 0.4rem 0.75rem;
-        border-radius: 6px;
-        font-size: 0.8rem;
+        border-radius: var(--radius-md);
+        font-size: var(--text-sm);
         cursor: pointer;
         border: 1px solid transparent;
         transition: all 0.15s;
@@ -303,7 +303,7 @@
         border: none;
         color: var(--color-text-tertiary);
         padding: 0.25rem;
-        font-size: 1rem;
+        font-size: var(--text-lg);
     }
 
     .btn-icon:hover {
@@ -316,7 +316,7 @@
 
     .btn-small {
         padding: 0.25rem 0.5rem;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
 
     /* Spinner */

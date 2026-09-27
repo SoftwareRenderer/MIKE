@@ -385,7 +385,7 @@
         menu.className = 'card-overflow-menu';
         menu.setAttribute('role', 'menu');
         // Inline styles to escape Svelte scoping (element is on document.body)
-        menu.style.cssText = 'position:fixed;z-index:10000;background:var(--color-surface-3,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);padding:4px;width:140px;box-shadow:0 8px 24px rgba(0,0,0,0.3);display:flex;flex-direction:column;gap:2px;';
+        menu.style.cssText = 'position:fixed;z-index:10000;background:var(--color-surface-3,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,6px);padding:4px;width:140px;box-shadow:0 8px 24px rgba(0,0,0,0.3);display:flex;flex-direction:column;gap:2px;';
 
         const items: Array<{ icon: readonly IconShape[]; label: string; action: (e: MouseEvent) => void; danger?: boolean }> = [];
 
@@ -409,7 +409,7 @@
             btn.type = 'button';
             btn.className = 'overflow-item' + (item.danger ? ' overflow-delete' : '');
             btn.setAttribute('role', 'menuitem');
-            btn.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:none;border-radius:var(--radius-sm,6px);background:transparent;color:var(--color-text-primary,#ccc);font-size:0.875rem;font-family:inherit;font-weight:500;cursor:pointer;text-align:left;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
+            btn.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:none;border-radius:var(--radius-sm,4px);background:transparent;color:var(--color-text-primary,#ccc);font-size:var(--text-base);font-family:inherit;font-weight:500;cursor:pointer;text-align:left;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
             btn.appendChild(iconSvg(item.icon));
             btn.appendChild(document.createTextNode(item.label));
             btn.addEventListener('click', (e: MouseEvent) => { closeOverflow(); item.action(e); });
@@ -1084,7 +1084,7 @@
     .card-title {
         display: flex;
         align-items: center;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         margin-bottom: 6px;
         position: relative;
@@ -1166,7 +1166,7 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         text-align: center;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         text-transform: uppercase;
         letter-spacing: 0.3px;
@@ -1187,7 +1187,7 @@
         display: inline-flex;
         align-items: center;
         gap: 3px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         padding: 2px 6px;
         border-radius: var(--radius-sm);
         font-weight: 500;
@@ -1224,7 +1224,7 @@
         display: inline-flex;
         align-items: center;
         gap: 3px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         font-variant-numeric: tabular-nums;
     }
@@ -1322,7 +1322,7 @@
         top: 50%;
         transform: translate(-50%, -50%);
         z-index: 1;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         font-family: inherit;
         font-variant-numeric: tabular-nums;

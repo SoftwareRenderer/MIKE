@@ -269,7 +269,7 @@
         border: 1px solid var(--color-border);
         background: var(--color-surface-0);
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-family: inherit;
         line-height: 1.5;
         resize: vertical;
@@ -293,7 +293,7 @@
         gap: 8px;
         margin-top: 10px;
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
 
     .progress-text {
@@ -308,15 +308,15 @@
 
     .commit-meta {
         margin-top: 10px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
     }
 
     .commit-meta code {
         background: var(--color-surface-2);
         padding: 1px 5px;
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
         font-family: var(--font-mono);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
 </style>

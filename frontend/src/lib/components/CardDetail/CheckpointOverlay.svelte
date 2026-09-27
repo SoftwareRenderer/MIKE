@@ -79,7 +79,7 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 600;
         color: white;
     }

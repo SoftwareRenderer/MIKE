@@ -46,7 +46,7 @@
     .selection-count {
         flex: 1;
         padding-left: 4px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         white-space: nowrap;
         overflow: hidden;
@@ -65,7 +65,7 @@
         border-radius: var(--radius-sm);
         background: transparent;
         color: var(--color-text-secondary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         cursor: pointer;
     }
     :global(.file-selection-bar .selection-btn:hover:not(:disabled)) {
@@ -86,7 +86,7 @@
             height: 36px;
         }
         .selection-count {
-            font-size: 0.8125rem;
+            font-size: var(--text-sm);
         }
     }
 </style>

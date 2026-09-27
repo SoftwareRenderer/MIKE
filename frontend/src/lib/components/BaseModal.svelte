@@ -170,7 +170,7 @@
     }
     .modal-header h2 {
         margin: 0;
-        font-size: 1rem;
+        font-size: var(--text-lg);
         font-weight: 600;
     }
     .modal-body {
@@ -201,7 +201,7 @@
     .modal-footer :global(.btn-primary) {
         padding: 8px 16px;
         border-radius: var(--radius-md);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         font-family: inherit;
         cursor: pointer;

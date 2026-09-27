@@ -47,14 +47,14 @@
 <style>
     .field-label {
         display: block;
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         color: var(--color-text-tertiary);
         margin-bottom: 0.25rem;
     }
 
     .field-desc {
         color: var(--color-text-tertiary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         margin: 0;
     }
 
@@ -72,7 +72,7 @@
     .probe-answer {
         padding: 6px 10px;
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         line-height: 1.45;
     }
 

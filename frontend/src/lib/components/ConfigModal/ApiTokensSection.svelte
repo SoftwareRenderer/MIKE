@@ -217,7 +217,7 @@
     }
     .tokens-help {
         margin: 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         line-height: 1.5;
         color: var(--color-text-tertiary);
     }
@@ -235,7 +235,7 @@
         border-radius: var(--radius-sm);
         background: var(--color-surface-2);
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-family: inherit;
     }
 
@@ -249,7 +249,7 @@
         padding: 10px 12px;
     }
     .tokens-revealed-note {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--color-text-secondary);
     }
@@ -267,12 +267,12 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-primary);
     }
 
     .token-label {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-text-primary);
         min-width: 0;
@@ -288,11 +288,11 @@
     }
 
     .tokens-status {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-tertiary);
     }
     .tokens-error {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-status-red);
     }

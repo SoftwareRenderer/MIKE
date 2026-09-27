@@ -60,7 +60,7 @@
         background: none;
         border: none;
         color: var(--color-text-tertiary);
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         cursor: pointer;
         transition: all 0.15s ease;
         border-bottom: 2px solid transparent;

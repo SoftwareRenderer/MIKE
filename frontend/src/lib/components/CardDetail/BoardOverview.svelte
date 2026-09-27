@@ -202,7 +202,7 @@
         border: none;
         cursor: pointer;
         color: var(--color-text-secondary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.5px;
@@ -235,11 +235,11 @@
         gap: 8px;
     }
     .section-count {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         background: var(--color-surface-3);
         padding: 1px 6px;
-        border-radius: 8px;
+        border-radius: var(--radius-lg);
         font-weight: 500;
     }
     .add-btn {
@@ -322,7 +322,7 @@
         border: 1px dashed var(--color-border);
         background: none;
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         cursor: pointer;
         transition: all 0.15s ease;
     }

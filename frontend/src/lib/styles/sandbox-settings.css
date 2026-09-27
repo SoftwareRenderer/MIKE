@@ -32,12 +32,12 @@
 }
 
 :global(.sandbox-label) {
-    font-size: 0.8125rem;
+    font-size: var(--text-sm);
     color: var(--color-text-secondary);
 }
 
 :global(.sandbox-value) {
-    font-size: 0.8125rem;
+    font-size: var(--text-sm);
     color: var(--color-text-primary);
     text-align: right;
 }
@@ -49,7 +49,7 @@
 /* A run of saved values under one heading. -bounded separates the run from the row above it,
    which is what the locked view does and the panel does not. */
 :global(.sandbox-section-label) {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     font-weight: 500;
     color: var(--color-text-secondary);
     text-transform: uppercase;
@@ -88,7 +88,7 @@
     padding: 4px 8px;
     background: var(--color-surface-2);
     border-radius: var(--radius-sm);
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     font-family: var(--font-mono, monospace);
 }
 
@@ -119,21 +119,21 @@
 :global(.sandbox-eq) {
     color: var(--color-text-secondary);
     flex-shrink: 0;
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
 }
 
 :global(.sandbox-note) {
     color: var(--color-text-tertiary);
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     font-style: italic;
 }
 
 /* rw / ro, and the capability chip. The modifiers follow the base they override — same
    specificity, so the file's own order is what decides. */
 :global(.sandbox-mode) {
-    font-size: 0.6875rem;
+    font-size: var(--text-2xs);
     padding: 1px 5px;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     background: var(--color-surface-3);
     color: var(--color-text-secondary);
     font-weight: 600;
@@ -160,7 +160,7 @@
     background: rgba(136, 192, 208, 0.12);
     border: 1px solid rgba(136, 192, 208, 0.25);
     border-radius: var(--radius-sm);
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     font-family: var(--font-mono, monospace);
     color: var(--color-accent-light, #88c0d0);
     max-width: 100%;

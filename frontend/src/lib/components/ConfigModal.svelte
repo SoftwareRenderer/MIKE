@@ -983,7 +983,7 @@
     }
     .header-wrap h2 {
         margin: 0;
-        font-size: 1.25rem;
+        font-size: var(--text-lg);
         font-weight: 600;
         white-space: nowrap;
     }
@@ -1023,7 +1023,7 @@
         border: none;
         background: none;
         color: var(--color-text-secondary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         font-family: inherit;
         cursor: pointer;
@@ -1069,18 +1069,18 @@
         display: flex;
         flex-direction: column;
         gap: 6px;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         color: var(--color-text-primary);
     }
     .field-help {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         font-weight: 400;
     }
     .readonly-value {
         font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
@@ -1090,7 +1090,7 @@
         overflow-wrap: break-word;
     }
     .field-label-inline {
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         color: var(--color-text-primary);
     }
@@ -1103,7 +1103,7 @@
         border-radius: var(--radius-sm);
         background: var(--color-surface-3);
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         cursor: pointer;
         white-space: nowrap;
@@ -1131,12 +1131,12 @@
         min-width: 0;
     }
     .primary-provider-title {
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 600;
         color: var(--color-text-primary);
     }
     .primary-provider-select {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         padding: 6px 8px;
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
@@ -1169,12 +1169,12 @@
         color: var(--color-text-secondary);
     }
     .providers-empty p {
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         color: var(--color-text-primary);
     }
     .providers-empty span {
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         max-width: 280px;
     }
     .empty-icon {
@@ -1190,7 +1190,7 @@
         background: rgba(210, 153, 34, 0.08);
         border: 1px solid rgba(210, 153, 34, 0.25);
         border-radius: var(--radius-sm);
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         color: var(--color-status-orange);
         line-height: 1.4;
     }
@@ -1204,7 +1204,7 @@
 
     .error {
         color: var(--color-status-red);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
     }
     .modal-footer-right {
@@ -1217,7 +1217,7 @@
         border-radius: var(--radius-md);
         background: var(--color-surface-3);
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         font-family: inherit;
         cursor: pointer;
@@ -1235,7 +1235,7 @@
         border-radius: var(--radius-md);
         background: var(--color-surface-3);
         color: var(--color-accent);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         cursor: pointer;
         border: 1px solid var(--color-accent);
@@ -1255,7 +1255,7 @@
         border-radius: var(--radius-md);
         background: var(--color-surface-3);
         color: var(--color-accent);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         text-decoration: none;
         cursor: pointer;
@@ -1274,7 +1274,7 @@
         border-radius: var(--radius-md);
         background: var(--color-surface-3);
         color: var(--color-accent);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         font-family: inherit;
         cursor: pointer;
@@ -1296,7 +1296,7 @@
         margin: 10px 0 0;
     }
     .about-update-outcome {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
     }
 
@@ -1318,20 +1318,20 @@
     }
     .about-description {
         margin: 4px 0 0;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         color: var(--color-text-secondary);
         line-height: 1.6;
     }
     .about-version {
         display: inline-block;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
         text-transform: none;
         color: var(--color-text-tertiary);
         background: var(--color-surface-3);
         padding: 2px 8px;
-        border-radius: 9999px;
+        border-radius: var(--radius-pill);
         vertical-align: middle;
         margin-left: 4px;
     }

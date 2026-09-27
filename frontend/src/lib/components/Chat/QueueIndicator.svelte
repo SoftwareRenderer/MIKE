@@ -62,7 +62,7 @@
         padding: 10px 16px;
         background: transparent;
         color: var(--color-text-secondary);
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
     }
     .awaiting-llm.retry {
         color: var(--color-warning);

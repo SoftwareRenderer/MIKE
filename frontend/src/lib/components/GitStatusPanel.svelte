@@ -1325,7 +1325,7 @@
         flex-wrap: wrap;
     }
     .panel-title {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--color-text-secondary);
         text-transform: uppercase;
@@ -1338,7 +1338,7 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -1383,7 +1383,7 @@
         padding: 1px 4px;
         border: 1px solid var(--color-border);
         background: var(--color-surface-1);
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         max-width: 220px;
     }
     .commit-selector.open .commit-combobox-input {
@@ -1401,7 +1401,7 @@
         border: none;
         background: transparent;
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: var(--font-mono);
         outline: none;
         width: 100%;
@@ -1419,7 +1419,7 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
     }
     .commit-combobox-toggle:hover {
@@ -1433,7 +1433,7 @@
     .commit-dropdown-empty {
         padding: 6px 10px;
         color: var(--color-text-tertiary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-style: italic;
     }
     .commit-dropdown-list {
@@ -1459,7 +1459,7 @@
         border: none;
         background: transparent;
         color: var(--color-text-primary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         text-align: left;
         cursor: pointer;
     }
@@ -1481,7 +1481,7 @@
     }
     .commit-dropdown-hash {
         font-family: var(--font-mono);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         flex-shrink: 0;
         width: 3.5rem;
@@ -1498,7 +1498,7 @@
     .compare-error {
         padding: 8px 12px;
         color: var(--color-status-red);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         background: rgba(248, 81, 73, 0.1);
         border-top: 1px solid var(--color-border);
         display: flex;
@@ -1518,7 +1518,7 @@
         background: transparent;
         color: var(--color-text-secondary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
     }
     .panel-icon-btn:hover {
@@ -1542,10 +1542,10 @@
         border: none;
         background: var(--color-accent-dark);
         color: white;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         white-space: nowrap;
     }
     .panel-commit-btn:hover {
@@ -1569,7 +1569,7 @@
 
     .panel-count {
         font-family: var(--font-mono);
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         line-height: 1;
     }
 
@@ -1583,7 +1583,7 @@
         gap: 12px;
         padding: 48px 24px;
         color: var(--color-text-secondary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         flex: 1;
         min-height: 0;
     }
@@ -1635,7 +1635,7 @@
         border: none;
         background: transparent;
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -1655,7 +1655,7 @@
     }
     .changes-section-count {
         margin-left: auto;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         color: var(--color-text-tertiary);
     }
@@ -1670,7 +1670,7 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
     }
     .changes-section-action:hover {
@@ -1703,10 +1703,10 @@
         border: none;
         background: transparent;
         color: var(--color-text-primary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         cursor: pointer;
         text-align: left;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
     }
     .changes-file-item:hover {
         background: var(--color-surface-3);
@@ -1735,7 +1735,7 @@
         padding: 0 6px;
     }
     .changes-file-badge {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 700;
         font-family: var(--font-mono);
         flex-shrink: 0;
@@ -1757,7 +1757,7 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
         opacity: 0;
         transition: opacity 0.1s ease;
@@ -1792,7 +1792,7 @@
         justify-content: center;
         padding: 48px 24px;
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         flex: 1;
     }
 

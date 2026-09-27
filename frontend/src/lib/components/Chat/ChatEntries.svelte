@@ -633,7 +633,7 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         pointer-events: auto;
         color: var(--color-text-primary);
         background: color-mix(in srgb, var(--color-accent) 18%, transparent);
@@ -672,7 +672,7 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
     }
     .chat-sticky-fullscreen:hover {
@@ -690,8 +690,8 @@
         text-align: center;
         height: 100%;
     }
-    .chat-empty p { font-size: 0.875rem; margin: 0; font-weight: 500; }
-    .chat-empty .hint { font-size: 0.75rem; }
+    .chat-empty p { font-size: var(--text-base); margin: 0; font-weight: 500; }
+    .chat-empty .hint { font-size: var(--text-xs); }
     .chat-loading {
         display: flex;
         flex-direction: column;
@@ -703,12 +703,12 @@
         text-align: center;
         height: 100%;
     }
-    .chat-loading p { font-size: 0.875rem; margin: 0; font-weight: 500; }
+    .chat-loading p { font-size: var(--text-base); margin: 0; font-weight: 500; }
     .history-notice {
         margin: 0;
         padding: 6px 12px;
         flex-shrink: 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-warning);
         background: color-mix(in srgb, var(--color-warning) 12%, transparent);
     }
@@ -716,7 +716,7 @@
         margin-left: 8px;
         padding: 0 4px;
         border: none;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         background: none;
         color: inherit;
         font: inherit;
@@ -775,7 +775,7 @@
         border: none;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         transition: all 0.15s ease;
     }
     .btn-dismiss:hover {
@@ -783,13 +783,13 @@
         color: var(--color-status-red);
     }
     .error-code {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.3px;
     }
     .error-message {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
         line-height: 1.5;
         white-space: pre-wrap;
@@ -817,7 +817,7 @@
         flex-shrink: 0;
     }
     .summarization-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: white;
         opacity: 0.8;
         white-space: nowrap;
@@ -844,12 +844,12 @@
     }
     .advisory-error .advisory-header { color: var(--color-status-red); }
     .advisory-label {
-        font-size: 0.7rem;
+        font-size: var(--text-xs);
         text-transform: uppercase;
         letter-spacing: 0.04em;
     }
     .advisory-text {
-        font-size: 0.78rem;
+        font-size: var(--text-xs);
         line-height: 1.45;
         white-space: pre-wrap;
         word-break: break-word;
@@ -881,13 +881,13 @@
         color: var(--color-status-green);
     }
     .merge-resolution-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--color-status-green);
     }
     .merge-resolution-content {
         padding: 4px 12px 10px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
         line-height: 1.5;
         white-space: pre-wrap;
@@ -910,7 +910,7 @@
         border: 1px solid var(--color-border);
         color: var(--color-text-secondary);
         cursor: pointer;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
         transition: opacity 0.2s ease, transform 0.2s ease, background 0.15s ease;
@@ -975,7 +975,7 @@
         border-bottom: none;
         border-radius: var(--radius-sm) var(--radius-sm) 0 0;
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
     .build-box-icon {
         flex-shrink: 0;
@@ -993,7 +993,7 @@
     .build-box-status {
         margin-left: auto;
         flex-shrink: 0;
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-status-green, #3fb950);
         text-transform: uppercase;
         letter-spacing: 0.3px;
@@ -1006,7 +1006,7 @@
         border: 1px solid var(--color-border);
         border-radius: 0 0 var(--radius-sm) var(--radius-sm);
         font-family: var(--font-mono);
-        font-size: 0.7rem;
+        font-size: var(--text-xs);
         line-height: 1.5;
         color: var(--color-text-secondary);
     }

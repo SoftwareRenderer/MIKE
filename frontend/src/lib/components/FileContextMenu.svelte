@@ -205,7 +205,7 @@
         border-radius: var(--radius-sm);
         background: transparent;
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         text-align: left;
         cursor: pointer;
         white-space: nowrap;

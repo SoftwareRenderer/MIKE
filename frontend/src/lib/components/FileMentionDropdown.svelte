@@ -128,7 +128,7 @@
         padding: 6px 10px;
         border-radius: var(--radius-sm);
         cursor: pointer;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-family: var(--font-mono, monospace);
         color: var(--color-text-secondary);
         transition: background 0.1s ease, color 0.1s ease;

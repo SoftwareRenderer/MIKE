@@ -101,7 +101,7 @@
 <style>
     .install-confirm-intro {
         margin: 0 0 0.6rem;
-        font-size: 0.85rem;
+        font-size: var(--text-base);
         color: var(--color-text-secondary);
     }
 
@@ -126,7 +126,7 @@
 
     .field-desc {
         color: var(--color-text-tertiary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         margin: 0;
     }
 </style>

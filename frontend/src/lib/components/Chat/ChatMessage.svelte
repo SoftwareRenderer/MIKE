@@ -379,7 +379,7 @@
     .message-image {
         max-width: 160px;
         max-height: 160px;
-        border-radius: 8px;
+        border-radius: var(--radius-lg);
         object-fit: cover;
         border: 1px solid var(--color-border);
     }
@@ -412,7 +412,7 @@
         display: inline-flex;
         align-items: center;
         gap: 4px;
-        font-size: 0.7rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -425,7 +425,7 @@
         border: 1px solid var(--color-border);
     }
     .message-text {
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         line-height: 1.875rem;
         word-break: break-word;
         white-space: pre-wrap;
@@ -475,7 +475,7 @@
         color: var(--color-text-tertiary);
     }
     .system-code {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.3px;
@@ -492,7 +492,7 @@
         border: none;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         transition: all 0.15s ease;
     }
     .system-header .btn-dismiss:hover {
@@ -500,7 +500,7 @@
         color: var(--color-status-red);
     }
     .system-message {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
         line-height: 1.5;
         white-space: pre-wrap;
@@ -515,14 +515,14 @@
         border-radius: var(--radius-md);
         overflow-x: auto;
         margin: 8px 0;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         line-height: 1.5rem;
     }
     .assistant .message-text :global(code) {
         background: var(--color-surface-0);
         padding: 2px 6px;
-        border-radius: 4px;
-        font-size: 0.8125rem;
+        border-radius: var(--radius-sm);
+        font-size: var(--text-sm);
         line-height: 1.25rem;
         font-family: var(--font-mono);
     }
@@ -555,8 +555,8 @@
     .assistant .message-text :global(h2) { font-size: 1.29rem; }
     .assistant .message-text :global(h3) { font-size: 1.14rem; }
     .assistant .message-text :global(h4) { font-size: 1.07rem; }
-    .assistant .message-text :global(h5) { font-size: 1rem; }
-    .assistant .message-text :global(h6) { font-size: 1rem; color: var(--color-text-secondary); }
+    .assistant .message-text :global(h5) { font-size: var(--text-lg); }
+    .assistant .message-text :global(h6) { font-size: var(--text-lg); color: var(--color-text-secondary); }
     .assistant .message-text :global(h1:first-child),
     .assistant .message-text :global(h2:first-child),
     .assistant .message-text :global(h3:first-child) {
@@ -609,7 +609,7 @@
         border-collapse: collapse;
         width: 100%;
         margin: 0.75rem 0;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         line-height: 1.5rem;
         display: block;
         overflow-x: auto;
@@ -692,14 +692,14 @@
     }
     .edit-modal-header h3 {
         margin: 0;
-        font-size: 1rem;
+        font-size: var(--text-lg);
         font-weight: 600;
     }
     .close-btn {
         background: none;
         border: none;
         color: var(--color-text-secondary);
-        font-size: 1.125rem;
+        font-size: var(--text-lg);
         cursor: pointer;
         padding: 4px;
     }

@@ -323,7 +323,7 @@
         position: relative;
         width: 48px;
         height: 48px;
-        border-radius: 8px;
+        border-radius: var(--radius-lg);
         overflow: hidden;
         border: 1px solid var(--color-border);
         flex-shrink: 0;
@@ -387,7 +387,7 @@
         border: none;
         background: transparent;
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         line-height: 1.5rem;
         padding: 4px 0;
         font-family: inherit;

@@ -94,7 +94,7 @@
         border: 1px solid rgba(210, 153, 34, 0.3);
         border-radius: var(--radius-md);
         color: var(--color-status-yellow, #d29922);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
 
     .locked-notice svg {

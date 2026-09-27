@@ -78,7 +78,7 @@
         border-radius: var(--radius-sm);
         background: var(--color-surface-2);
         color: var(--color-text-secondary);
-        font-size: 11px;
+        font-size: var(--text-2xs);
         cursor: pointer;
     }
     .tab:hover {
@@ -102,6 +102,6 @@
     .note {
         margin: 0.35rem 0 0;
         color: var(--color-text-secondary);
-        font-size: 11px;
+        font-size: var(--text-2xs);
     }
 </style>

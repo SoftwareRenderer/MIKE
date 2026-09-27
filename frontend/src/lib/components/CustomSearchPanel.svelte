@@ -385,7 +385,7 @@
         outline: none;
         color: var(--color-text-primary);
         font-family: var(--font-mono, monospace);
-        font-size: 13px;
+        font-size: var(--text-sm);
         padding: 6px 0;
         min-width: 0;
     }
@@ -421,7 +421,7 @@
     }
 
     .match-count {
-        font-size: 11px;
+        font-size: var(--text-2xs);
         color: var(--color-text-tertiary);
         white-space: nowrap;
         flex-shrink: 0;
@@ -479,7 +479,7 @@
         border-radius: var(--radius-sm);
         padding: 5px 12px;
         cursor: pointer;
-        font-size: 12px;
+        font-size: var(--text-xs);
         font-weight: 500;
         font-family: inherit;
         white-space: nowrap;
@@ -499,7 +499,7 @@
         display: flex;
         align-items: center;
         gap: 4px;
-        font-size: 12px;
+        font-size: var(--text-xs);
         font-family: inherit;
         margin-top: 4px;
         width: 100%;
@@ -524,7 +524,7 @@
             min-width: 0;
         }
         .search-input {
-            font-size: 16px;
+            font-size: var(--text-lg);
             padding: 8px 0;
         }
         .toggle-btn {

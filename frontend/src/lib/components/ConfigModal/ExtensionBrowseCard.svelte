@@ -169,8 +169,8 @@
 
     .btn {
         padding: 0.4rem 0.75rem;
-        border-radius: 6px;
-        font-size: 0.8rem;
+        border-radius: var(--radius-md);
+        font-size: var(--text-sm);
         cursor: pointer;
         border: 1px solid transparent;
         transition: all 0.15s;
@@ -192,7 +192,7 @@
 
     .btn-small {
         padding: 0.25rem 0.5rem;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
 
     /* Spinner */
@@ -209,10 +209,10 @@
     }
 
     .installed-badge {
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         color: var(--color-status-green);
         padding: 0.4rem 0.75rem;
         background: rgba(63, 185, 80, 0.1);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
     }
 </style>

@@ -220,7 +220,7 @@
     }
 
     .git-graph-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--color-text-secondary);
         text-transform: uppercase;
@@ -240,7 +240,7 @@
     .git-graph-empty {
         padding: 8px 10px;
         color: var(--color-text-tertiary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
 
 .git-commit-row {
@@ -335,7 +335,7 @@
     }
 
     .git-commit-subject {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-primary);
         white-space: nowrap;
         overflow: hidden;
@@ -352,8 +352,8 @@
         align-items: center;
         gap: 2px;
         padding: 1px 5px;
-        border-radius: 9999px;
-        font-size: 0.625rem;
+        border-radius: var(--radius-pill);
+        font-size: var(--text-3xs);
         font-family: var(--font-mono);
         flex-shrink: 0;
         line-height: var(--line-height-clipped);
@@ -393,7 +393,7 @@
     }
 
     .git-commit-hash {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: var(--font-mono);
         color: var(--color-text-tertiary);
         margin-left: auto;
@@ -401,7 +401,7 @@
     }
 
     .git-commit-author {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         overflow: hidden;
         text-overflow: ellipsis;
@@ -416,7 +416,7 @@
     }
 
     .git-commit-date {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         opacity: 0.7;
         /* Never wrap ("1h ago" → 2 lines breaks the fixed 36px row):

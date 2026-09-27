@@ -255,7 +255,7 @@
         align-items: center;
         gap: 6px;
         padding: 6px 10px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         cursor: pointer;
         border-right: 1px solid var(--color-border);
@@ -313,7 +313,7 @@
         background: transparent;
         color: currentColor;
         cursor: pointer;
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
         opacity: 0.5;
         transition: opacity 0.1s, background 0.1s;
     }
@@ -344,7 +344,7 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
     }
     .editor-icon-btn:hover:not(:disabled) {
@@ -361,7 +361,7 @@
         background: var(--color-accent-dark);
         color: white;
         cursor: pointer;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: inherit;
         font-weight: 500;
         flex-shrink: 0;
@@ -399,7 +399,7 @@
         justify-content: center;
         padding: 48px 24px;
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         flex: 1;
     }
 </style>

@@ -31,7 +31,7 @@
     background: transparent;
     border: none;
     color: var(--color-text-primary);
-    font-size: 0.875rem;
+    font-size: var(--text-base);
     font-family: var(--font-mono);
     outline: none;
 }
@@ -55,7 +55,7 @@
     padding: 8px 12px;
     border-radius: var(--radius-sm);
     cursor: pointer;
-    font-size: 0.875rem;
+    font-size: var(--text-base);
     text-align: left;
     width: 100%;
     font: inherit;
@@ -86,7 +86,7 @@
 }
 
 :global(.path-browser .current-path) {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     color: var(--color-text-tertiary);
     font-family: var(--font-mono);
     overflow: hidden;

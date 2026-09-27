@@ -77,7 +77,7 @@
 
 <style>
     .dialog-message {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
         margin: 0 0 16px 0;
         line-height: 1.5;
@@ -88,7 +88,7 @@
         align-items: center;
         gap: 16px;
         padding: 12px;
-        border-radius: 12px;
+        border-radius: var(--radius-lg);
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
     }
@@ -109,12 +109,12 @@
     }
 
     .stat-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
     }
 
     .stat-value {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 600;
         color: var(--color-text-primary);
         font-variant-numeric: tabular-nums;

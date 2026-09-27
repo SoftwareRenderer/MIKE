@@ -270,7 +270,7 @@
         padding: 6px 12px;
         border: none;
         border-radius: var(--radius-sm);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         font-family: inherit;
         cursor: pointer;
@@ -334,7 +334,7 @@
         background: transparent;
         color: var(--color-text-primary);
         font-family: inherit;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         text-align: left;
         white-space: nowrap;
         cursor: pointer;

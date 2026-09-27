@@ -178,7 +178,7 @@
         flex: 1;
         min-height: 0;
         resize: none;
-        font-size: 1rem;
+        font-size: var(--text-lg);
         line-height: 1.6;
     }
     .edit-form.fill .edit-actions {
@@ -193,7 +193,7 @@
         border: 1px solid var(--color-border);
         background: var(--color-surface-2);
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         line-height: 1.5rem;
         font-family: inherit;
         resize: vertical;
@@ -237,7 +237,7 @@
         background: rgba(0,0,0,0.7);
         color: white;
         border: none;
-        font-size: 14px;
+        font-size: var(--text-base);
         line-height: 1;
         cursor: pointer;
         display: flex;
@@ -265,7 +265,7 @@
         gap: 4px;
         padding: 4px 12px;
         border-radius: var(--radius-sm);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         background: var(--color-surface-3);
         color: var(--color-text-primary);
         cursor: pointer;
@@ -279,7 +279,7 @@
         gap: 4px;
         padding: 4px 12px;
         border-radius: var(--radius-sm);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         background: var(--color-accent-dark);
         color: white;
         cursor: pointer;

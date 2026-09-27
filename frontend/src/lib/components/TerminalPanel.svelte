@@ -553,18 +553,18 @@
 
             // Pill container.
             btnBarEl = document.createElement('div');
-            btnBarEl.style.cssText = 'position:fixed;z-index:10001;display:flex;align-items:center;background:#0084FF;border-radius:18px;box-shadow:0 2px 12px rgba(0,0,0,0.4);overflow:hidden;';
+            btnBarEl.style.cssText = 'position:fixed;z-index:10001;display:flex;align-items:center;background:#0084FF;border-radius:var(--radius-pill);box-shadow:0 2px 12px rgba(0,0,0,0.4);overflow:hidden;';
 
             copyBtnEl = document.createElement('button');
             copyBtnEl.textContent = t('terminal.copy');
-            copyBtnEl.style.cssText = 'padding:7px 16px;border:none;background:transparent;color:#fff;font-size:14px;font-weight:600;font-family:system-ui,sans-serif;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
+            copyBtnEl.style.cssText = 'padding:7px 16px;border:none;background:transparent;color:#fff;font-size:var(--text-base);font-weight:600;font-family:system-ui,sans-serif;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
 
             const divider = document.createElement('div');
             divider.style.cssText = 'width:1px;height:20px;background:rgba(255,255,255,0.3);';
 
             pasteBtnEl = document.createElement('button');
             pasteBtnEl.textContent = t('terminal.paste');
-            pasteBtnEl.style.cssText = 'padding:7px 16px;border:none;background:transparent;color:#fff;font-size:14px;font-weight:600;font-family:system-ui,sans-serif;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
+            pasteBtnEl.style.cssText = 'padding:7px 16px;border:none;background:transparent;color:#fff;font-size:var(--text-base);font-weight:600;font-family:system-ui,sans-serif;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
             pasteBtnEl.addEventListener('mousedown', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -964,7 +964,7 @@
         min-width: 0;
     }
     .title {
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 600;
         color: var(--color-text-secondary);
     }
@@ -973,11 +973,11 @@
         align-items: center;
         gap: 4px;
         padding: 2px 8px;
-        border-radius: 999px;
+        border-radius: var(--radius-pill);
         background: rgba(80, 140, 255, 0.12);
         border: 1px solid rgba(80, 140, 255, 0.25);
         color: var(--color-accent-light);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: var(--font-mono, monospace);
         font-weight: 500;
         flex-shrink: 0;
@@ -1012,7 +1012,7 @@
     }
 
     :global(.close-btn) {
-        font-size: 1rem;
+        font-size: var(--text-lg);
         padding: 2px 6px;
     }
     :global(.close-btn:hover) {
@@ -1064,7 +1064,7 @@
             border-radius: var(--radius-sm);
             color: var(--color-text-primary);
             font-family: var(--font-mono);
-            font-size: 0.7rem;
+            font-size: var(--text-xs);
             font-weight: 500;
             text-transform: uppercase;
             letter-spacing: 0.03em;

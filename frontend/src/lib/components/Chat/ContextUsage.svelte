@@ -96,7 +96,7 @@
         box-sizing: border-box;
         height: 26px;
         padding: 0 6px;
-        border-radius: 12px;
+        border-radius: var(--radius-lg);
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
         white-space: nowrap;
@@ -116,7 +116,7 @@
         cursor: pointer;
     }
     .usage-text {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
@@ -127,10 +127,10 @@
         display: inline-flex;
         align-items: center;
         padding: 3px 8px;
-        border-radius: 12px;
+        border-radius: var(--radius-lg);
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         white-space: nowrap;
         flex-shrink: 0;

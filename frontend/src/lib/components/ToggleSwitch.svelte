@@ -28,7 +28,7 @@
         position: relative;
         width: 40px;
         height: 22px;
-        border-radius: 11px;
+        border-radius: var(--radius-lg);
         background: var(--color-surface-4);
         border: none;
         flex-shrink: 0;

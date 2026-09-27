@@ -362,7 +362,7 @@
     }
 
     .symbol-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--color-text-secondary);
         text-transform: uppercase;
@@ -386,7 +386,7 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
     }
     .toggle-btn:hover {
         background: var(--color-surface-3);
@@ -397,11 +397,11 @@
     }
 
     .symbol-count {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         background: var(--color-surface-3);
         padding: 1px 5px;
-        border-radius: 8px;
+        border-radius: var(--radius-lg);
     }
 
     .symbol-list {
@@ -420,7 +420,7 @@
         border: none;
         background: transparent;
         color: var(--color-text-primary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         text-align: left;
         cursor: pointer;
     }
@@ -433,7 +433,7 @@
         flex-shrink: 0;
         width: 14px;
         text-align: center;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 700;
         font-family: var(--font-mono);
         line-height: 1;
@@ -450,7 +450,7 @@
 
     .symbol-line {
         flex-shrink: 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         opacity: 0.5;
         font-family: var(--font-mono);
@@ -459,7 +459,7 @@
     .symbol-empty {
         padding: 8px 10px;
         color: var(--color-text-tertiary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
 
     /* Collapse/expand icon */
@@ -472,7 +472,7 @@
         flex-shrink: 0;
         cursor: pointer;
         color: var(--color-text-tertiary);
-        border-radius: 2px;
+        border-radius: var(--radius-xs);
     }
     .collapse-icon:hover {
         color: var(--color-text-secondary);
@@ -486,7 +486,7 @@
 
     .outline-number {
         flex-shrink: 0;
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-tertiary);
         font-family: var(--font-mono);
         min-width: 14px;

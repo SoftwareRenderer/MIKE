@@ -147,11 +147,11 @@
     .caps-ext-icon {
         width: 2.5rem;
         height: 2.5rem;
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 700;
         flex-shrink: 0;
     }
@@ -166,12 +166,12 @@
         margin: 0;
         font-weight: 600;
         color: var(--color-text-primary);
-        font-size: 1rem;
+        font-size: var(--text-lg);
     }
 
     .caps-ext-desc {
         margin: 0;
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         color: var(--color-text-tertiary);
     }
 
@@ -188,7 +188,7 @@
         padding: 0.75rem;
         background: var(--color-bg-card);
         border: 1px solid var(--color-border-subtle);
-        border-radius: 8px;
+        border-radius: var(--radius-lg);
     }
 
     .cap-detail-header {
@@ -198,17 +198,17 @@
     }
 
     .cap-detail-badge {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         padding: 0.2rem 0.6rem;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         text-transform: uppercase;
         letter-spacing: 0.03em;
     }
 
     .cap-detail-desc {
         margin: 0;
-        font-size: 0.85rem;
+        font-size: var(--text-base);
         color: var(--color-text-secondary);
         line-height: 1.5;
     }
@@ -224,7 +224,7 @@
     }
 
     .cap-detail-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--color-text-tertiary);
         text-transform: uppercase;
@@ -232,7 +232,7 @@
     }
 
     .cap-detail-value {
-        font-size: 0.82rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
     }
 

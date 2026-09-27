@@ -388,7 +388,7 @@
         border: none;
         border-radius: var(--radius-sm);
         color: var(--color-text-secondary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         cursor: pointer;
         white-space: nowrap;
@@ -425,14 +425,14 @@
     }
     .error {
         color: var(--color-status-red);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         padding: 8px;
         background: var(--color-status-red)11;
         border-radius: var(--radius-sm);
     }
     .git-indicator {
         color: var(--color-status-green);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         padding: 8px;
         background: var(--color-status-green)11;
         border-radius: var(--radius-sm);
@@ -450,7 +450,7 @@
         border: 1px solid var(--color-accent);
         border-radius: var(--radius-md);
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-family: var(--font-mono);
         outline: none;
     }
@@ -461,7 +461,7 @@
         padding: 8px 0;
     }
     .clone-label {
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 600;
         color: var(--color-text-primary);
     }
@@ -472,7 +472,7 @@
         border: 1px solid var(--color-surface-4);
         border-radius: var(--radius-md);
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-family: var(--font-mono);
         outline: none;
     }
@@ -480,7 +480,7 @@
         border-color: var(--color-accent);
     }
     .clone-help {
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         color: var(--color-text-tertiary);
     }
     .clone-help code {
@@ -498,13 +498,13 @@
         border-radius: var(--radius-md);
     }
     .clone-target-label {
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
         white-space: nowrap;
     }
     .clone-target-path {
         flex: 1;
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         font-family: var(--font-mono);
         color: var(--color-text-primary);
         overflow: hidden;
@@ -516,7 +516,7 @@
         background: var(--color-accent-dark);
         color: white;
         border-radius: var(--radius-md);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         white-space: nowrap;
     }
@@ -556,18 +556,18 @@
         background: var(--color-status-green)11;
     }
     .git-badge {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         padding: 1px 6px;
         background: var(--color-status-green)33;
         color: var(--color-status-green);
-        border-radius: 10px;
+        border-radius: var(--radius-lg);
         font-weight: 600;
     }
     .sandbox-toggle {
         display: flex;
         align-items: center;
         gap: 6px;
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
         cursor: pointer;
         user-select: none;

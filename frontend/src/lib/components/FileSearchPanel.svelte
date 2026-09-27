@@ -371,7 +371,7 @@
         outline: none;
         color: var(--color-text-primary);
         font-family: var(--font-mono, monospace);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         padding: 4px 0;
         min-width: 0;
     }
@@ -414,7 +414,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        border-radius: 2px;
+        border-radius: var(--radius-xs);
         flex-shrink: 0;
     }
     .clear-btn:hover {
@@ -424,20 +424,20 @@
     .search-error {
         padding: 12px;
         color: var(--color-status-red);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
 
     .search-loading {
         padding: 12px;
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         text-align: center;
     }
 
     .search-empty {
         padding: 12px;
         color: var(--color-text-tertiary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         text-align: center;
     }
 
@@ -449,7 +449,7 @@
         gap: 8px;
         padding: 24px 12px;
         color: var(--color-text-tertiary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         flex: 1;
     }
     .placeholder-icon {
@@ -476,7 +476,7 @@
         flex: 1;
         min-width: 0;
         font-family: var(--font-mono, monospace);
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         font-weight: 500;
         color: var(--color-text-primary);
         white-space: nowrap;
@@ -485,7 +485,7 @@
     }
 
     .file-match-count {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-tertiary);
         flex-shrink: 0;
     }
@@ -497,7 +497,7 @@
         border: none;
         background: transparent;
         color: var(--color-text-primary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         text-align: left;
         cursor: pointer;
         border-radius: 0;
@@ -509,7 +509,7 @@
     .result-path {
         color: var(--color-text-secondary);
         font-family: var(--font-mono, monospace);
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -527,7 +527,7 @@
         display: flex;
         gap: 6px;
         font-family: var(--font-mono, monospace);
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         line-height: 1.5;
         margin-top: 1px;
         padding-left: 16px;
@@ -551,7 +551,7 @@
     .line-text :global(mark) {
         background: color-mix(in srgb, var(--color-accent) 35%, transparent);
         color: inherit;
-        border-radius: 2px;
+        border-radius: var(--radius-xs);
         padding: 0 1px;
     }
 
@@ -565,7 +565,7 @@
     }
 
     .search-footer .match-count {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-tertiary);
         white-space: nowrap;
     }
@@ -579,7 +579,7 @@
             padding: 0 8px;
         }
         .search-input {
-            font-size: 16px; /* Prevent zoom on iOS */
+            font-size: var(--text-lg); /* Prevent zoom on iOS */
             padding: 6px 0;
         }
         .toggle-btn {
@@ -590,10 +590,10 @@
             padding: 8px 12px;
         }
         .result-path {
-            font-size: 0.8125rem;
+            font-size: var(--text-sm);
         }
         .result-line {
-            font-size: 0.8125rem;
+            font-size: var(--text-sm);
             padding-left: 20px;
         }
     }

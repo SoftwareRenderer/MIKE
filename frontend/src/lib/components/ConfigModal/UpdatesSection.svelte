@@ -193,31 +193,31 @@
     }
 
     .update-row-name {
-        font-size: 13px;
+        font-size: var(--text-sm);
         color: var(--color-text-primary);
     }
 
     .update-row-desc {
-        font-size: 12px;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         max-width: 52ch;
     }
 
     .update-verdict {
         margin: 10px 0 0;
-        font-size: 13px;
+        font-size: var(--text-sm);
         color: var(--color-text-primary);
     }
 
     .update-meta {
         margin: 4px 0 0;
-        font-size: 12px;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
     }
 
     .update-fault {
         margin: 8px 0 0;
-        font-size: 12px;
+        font-size: var(--text-xs);
         color: var(--color-status-red);
         overflow-wrap: anywhere;
     }
@@ -226,20 +226,20 @@
         margin-top: 10px;
         padding: 10px 12px;
         border: 1px solid var(--color-border);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         background: var(--color-surface-1);
     }
 
     .update-card-line {
         margin: 0;
-        font-size: 13px;
+        font-size: var(--text-sm);
         color: var(--color-text-primary);
         overflow-wrap: anywhere;
     }
 
     .update-command {
         margin: 6px 0 0;
-        font-size: 12px;
+        font-size: var(--text-xs);
     }
 
     .update-command code {
@@ -259,8 +259,8 @@
     .btn-update-apply,
     .btn-update-restart {
         padding: 5px 12px;
-        font-size: 12px;
-        border-radius: 6px;
+        font-size: var(--text-xs);
+        border-radius: var(--radius-md);
         border: 1px solid var(--color-border);
         background: var(--color-surface-2);
         color: var(--color-text-primary);

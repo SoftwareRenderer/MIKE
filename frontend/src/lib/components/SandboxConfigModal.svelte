@@ -168,7 +168,7 @@
     :global(.close-btn) {
         width: 28px;
         height: 28px;
-        font-size: 1rem;
+        font-size: var(--text-lg);
     }
 
     .config-options {
@@ -187,7 +187,7 @@
         border: 1px solid rgba(34, 197, 94, 0.3);
         border-radius: var(--radius-md);
         color: var(--color-status-green);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         margin-bottom: 12px;
     }
 
@@ -197,7 +197,7 @@
         border: 1px solid rgba(248, 81, 73, 0.3);
         border-radius: var(--radius-md);
         color: var(--color-status-red);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         margin-bottom: 12px;
     }
 

@@ -46,7 +46,7 @@
         border: 1px solid var(--color-border);
         background: var(--color-surface-2);
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         transition: all 0.15s ease;
     }
     .btn-plan-toggle.bar:hover {
@@ -71,7 +71,7 @@
         border: none;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
     .btn-plan-toggle.panel:hover {
         background: var(--color-surface-4);

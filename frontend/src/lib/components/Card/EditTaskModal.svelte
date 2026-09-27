@@ -238,13 +238,13 @@
         gap: 5px;
     }
     .field-label {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-text-secondary);
     }
     input[type="text"] {
         width: 100%;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         color: var(--color-text-primary);
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
@@ -275,7 +275,7 @@
         border-top: 1px solid var(--color-border);
     }
     .section-label {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -294,12 +294,12 @@
         min-width: 0;
     }
     .config-label {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-text-primary);
     }
     .config-desc {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-tertiary);
     }
     @media (max-width: 768px) {

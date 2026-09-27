@@ -146,7 +146,7 @@
         visibility: hidden;
         pointer-events: none;
         padding: 6px 8px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         line-height: 1.4;
         color: var(--color-text-primary);
         background: var(--color-surface-1);

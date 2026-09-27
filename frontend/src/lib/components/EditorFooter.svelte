@@ -147,7 +147,7 @@
         padding: 4px 10px;
         border-top: 1px solid var(--color-border);
         flex-shrink: 0;
-        font-size: 12px;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         background: var(--color-surface-2);
         position: relative;
@@ -178,11 +178,11 @@
         left: 0;
         background: var(--color-surface-3);
         border: 1px solid var(--color-border);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         padding: 6px 12px;
         z-index: 100;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-        font-size: 12px;
+        font-size: var(--text-xs);
         min-width: 180px;
     }
     .lsp-tooltip-row {
@@ -214,7 +214,7 @@
         overflow-y: auto;
         text-align: left;
         font-family: var(--font-mono);
-        font-size: 11px;
+        font-size: var(--text-2xs);
         color: var(--color-text-secondary);
         white-space: pre-wrap;
         word-break: break-word;
@@ -227,11 +227,11 @@
         gap: 4px;
         padding: 2px 8px;
         border: none;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
         cursor: pointer;
-        font-size: 12px;
+        font-size: var(--text-xs);
         font-family: var(--font-mono);
         flex-shrink: 0;
     }

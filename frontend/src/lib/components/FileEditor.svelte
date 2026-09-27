@@ -1586,7 +1586,7 @@
             {:else if fileNotFound}
                 <div class="editor-placeholder">
                     <p style="margin:0 0 8px">{t('editor.fileNotFound')}</p>
-                    <p style="margin:0;font-size:0.75rem;color:var(--color-text-tertiary)">{filePath}</p>
+                    <p style="margin:0;font-size:var(--text-xs);color:var(--color-text-tertiary)">{filePath}</p>
                 </div>
             {:else if fileTooLarge}
                 <div class="editor-placeholder">{t('editor.fileTooLarge')}</div>
@@ -1693,12 +1693,12 @@
         justify-content: center;
         gap: 8px;
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
     .editor-error {
         padding: 16px;
         color: var(--color-status-red);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
 
     .editor-wrapper {
@@ -1762,7 +1762,7 @@
         opacity: 0.6;
     }
     .file-editor.diff .file-path {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         font-family: var(--font-mono);
         overflow: hidden;
@@ -1827,7 +1827,7 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
     }
     .file-editor.diff .editor-icon-btn:hover {
@@ -1843,7 +1843,7 @@
         color: white;
         border: none;
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         cursor: pointer;
         display: flex;
@@ -1872,7 +1872,7 @@
         align-items: center;
         justify-content: center;
         z-index: 10;
-        border-radius: 6px;
+        border-radius: var(--radius-md);
     }
     .file-editor.diff .confirm-dialog {
         background: var(--color-surface-1);
@@ -1885,11 +1885,11 @@
     }
     .file-editor.diff .confirm-dialog h3 {
         margin: 0 0 6px;
-        font-size: 0.9375rem;
+        font-size: var(--text-md);
     }
     .file-editor.diff .confirm-dialog p {
         margin: 0 0 16px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
     }
     .file-editor.diff .confirm-actions {
@@ -1903,7 +1903,7 @@
         color: var(--color-text-primary);
         border: none;
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         cursor: pointer;
         font-family: inherit;
     }
@@ -1916,7 +1916,7 @@
         color: white;
         border: none;
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         cursor: pointer;
         font-family: inherit;
     }

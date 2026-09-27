@@ -109,10 +109,10 @@
     .config-input {
         background: var(--color-bg-input);
         border: 1px solid var(--color-border-subtle);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         padding: 0.5rem 0.75rem;
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
     }
 
     .config-input:focus {
@@ -142,10 +142,10 @@
     .mount-input {
         background: var(--color-bg-input);
         border: 1px solid var(--color-border-subtle);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         padding: 0.4rem 0.5rem;
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         flex: 1;
         min-width: 0;
     }
@@ -163,10 +163,10 @@
     .env-input {
         background: var(--color-bg-input);
         border: 1px solid var(--color-border-subtle);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         padding: 0.4rem 0.5rem;
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         flex: 1;
         min-width: 0;
     }
@@ -183,7 +183,7 @@
 
     .env-equals {
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         flex-shrink: 0;
     }
 
@@ -198,7 +198,7 @@
         background: none;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
     }
 
@@ -218,7 +218,7 @@
         background: none;
         color: var(--color-text-secondary);
         cursor: pointer;
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         align-self: flex-start;
     }
 
@@ -229,7 +229,7 @@
 
     .no-schema {
         color: var(--color-text-tertiary);
-        font-size: 0.85rem;
+        font-size: var(--text-base);
         margin-bottom: 1.5rem;
     }
 </style>

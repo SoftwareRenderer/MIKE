@@ -35,20 +35,20 @@
         padding: 0.4rem 0.55rem;
         background: var(--color-bg-input);
         border: 1px solid var(--color-border-subtle);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
     }
 
     .cap-permission-name {
         display: inline-flex;
         align-items: center;
         gap: 4px;
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         font-weight: 600;
         color: var(--color-text-primary);
     }
 
     .cap-permission-desc {
-        font-size: 0.78rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         line-height: 1.4;
     }

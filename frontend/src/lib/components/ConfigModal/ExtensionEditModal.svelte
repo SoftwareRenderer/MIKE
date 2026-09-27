@@ -281,20 +281,20 @@
 
 <style>
     .ext-dep-pending {
-        font-size: 0.72rem;
+        font-size: var(--text-xs);
         color: var(--color-status-yellow);
     }
 
     .ext-dep-error {
         margin: 0.3rem 0 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         line-height: 1.45;
         color: var(--color-status-red, #f85149);
     }
 
     .field-label {
         display: block;
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         color: var(--color-text-tertiary);
         margin-bottom: 0.25rem;
     }
@@ -308,7 +308,7 @@
 
     .config-fields h4 {
         margin: 0;
-        font-size: 0.85rem;
+        font-size: var(--text-base);
         color: var(--color-text-tertiary);
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -323,10 +323,10 @@
     .config-input {
         background: var(--color-bg-input);
         border: 1px solid var(--color-border-subtle);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         padding: 0.5rem 0.75rem;
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
     }
 
     .config-input:focus {
@@ -336,7 +336,7 @@
 
     .field-desc {
         color: var(--color-text-tertiary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         margin: 0;
     }
 
@@ -361,6 +361,6 @@
 
     .btn-small {
         padding: 0.25rem 0.5rem;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
 </style>

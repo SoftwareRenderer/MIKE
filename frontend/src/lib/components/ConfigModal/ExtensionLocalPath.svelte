@@ -21,10 +21,10 @@
         gap: 0.5rem;
         margin: 0 0 0.5rem;
         padding: 0.35rem 0.6rem;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         background: color-mix(in srgb, var(--color-status-yellow) 10%, var(--color-bg-card));
         border: 1px solid color-mix(in srgb, var(--color-status-yellow) 35%, transparent);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         overflow: hidden;
     }
 
@@ -32,14 +32,14 @@
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        font-size: 0.65rem;
+        font-size: var(--text-2xs);
         color: color-mix(in srgb, var(--color-text) 70%, transparent);
         flex-shrink: 0;
     }
 
     .local-path-code {
         font-family: var(--font-mono, monospace);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;

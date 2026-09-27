@@ -21,7 +21,7 @@
         color: white;
         padding: 10px 20px;
         border-radius: var(--radius-md);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         z-index: 9999;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
         animation: slide-up 0.2s ease-out;

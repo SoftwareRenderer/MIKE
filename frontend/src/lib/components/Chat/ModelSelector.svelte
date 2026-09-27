@@ -384,7 +384,7 @@
 
 <!-- Provider dropdown (rendered in shadow DOM to escape overflow clipping) -->
 {#if providerDropdownOpen && providerRect}
-    <svelte:element this={"div"} class="portal-provider-dropdown" role="listbox" aria-label={t('chat.model.selectProvider')} style="position:fixed;top:{providerRect.top}px;left:{providerRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+    <svelte:element this={"div"} class="portal-provider-dropdown" role="listbox" aria-label={t('chat.model.selectProvider')} style="position:fixed;top:{providerRect.top}px;left:{providerRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,6px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
         {#if hasAgentProvider}
             <button type="button" class="provider-option provider-option-agent" class:active={isAgentSelected} onclick={selectAgent} role="option" aria-selected={isAgentSelected}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -412,7 +412,7 @@
 
 <!-- Model dropdown -->
 {#if modelDropdownOpen && modelRect}
-    <svelte:element this={"div"} class="portal-model-dropdown" role="listbox" aria-label={t('chat.model.selectModel')} style="position:fixed;top:{modelRect.top}px;left:{modelRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+    <svelte:element this={"div"} class="portal-model-dropdown" role="listbox" aria-label={t('chat.model.selectModel')} style="position:fixed;top:{modelRect.top}px;left:{modelRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,6px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
         {#if isAgentSelected}
             {#if agentModelsLoading}
                 <div class="empty">{t('chat.model.loadingModels')}</div>
@@ -461,11 +461,11 @@
         align-items: center;
         gap: 4px;
         padding: 3px 8px;
-        border-radius: 12px;
+        border-radius: var(--radius-lg);
         border: 1px solid var(--color-border);
         background: var(--color-surface-2);
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: inherit;
         cursor: pointer;
         transition: all 0.15s ease;
@@ -504,7 +504,7 @@
 
     .empty {
         padding: 12px 16px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         text-align: center;
     }
@@ -519,7 +519,7 @@
         border: none;
         background: none;
         color: var(--color-text-primary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: inherit;
         cursor: pointer;
         text-align: left;
@@ -550,7 +550,7 @@
         font-weight: 500;
     }
     .model-count {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         flex-shrink: 0;
     }
@@ -565,7 +565,7 @@
         border: none;
         background: none;
         color: var(--color-text-primary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: inherit;
         cursor: pointer;
         text-align: left;
@@ -584,14 +584,14 @@
         white-space: nowrap;
     }
     .effort-badge {
-        font-size: 0.65rem;
+        font-size: var(--text-2xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
         color: var(--color-text-tertiary);
         background: var(--color-surface-3);
         padding: 1px 5px;
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
         margin-left: 4px;
     }

@@ -64,7 +64,7 @@
     }
     .agent-managed-note {
         margin: 8px 0 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
     }
     .agent-managed-note :global(strong) {
@@ -75,14 +75,14 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-warning);
     }
     .agent-info-missing svg {
         flex-shrink: 0;
     }
     .agent-info-text {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
         line-height: 1.5;
         margin: 0 0 12px;
@@ -100,7 +100,7 @@
         border: 1px solid var(--color-border);
     }
     .agent-info-box-title {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -110,7 +110,7 @@
     .agent-info-box :global(ul) {
         margin: 0;
         padding-left: 16px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
         line-height: 1.6;
     }
@@ -120,8 +120,8 @@
     .agent-info-box :global(code) {
         background: var(--color-surface-2);
         padding: 1px 4px;
-        border-radius: 3px;
-        font-size: 0.75rem;
+        border-radius: var(--radius-sm);
+        font-size: var(--text-xs);
     }
     .agent-info-box :global(strong) {
         font-weight: 600;

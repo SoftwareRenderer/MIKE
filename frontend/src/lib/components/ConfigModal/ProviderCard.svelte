@@ -267,7 +267,7 @@
         flex-shrink: 0;
     }
     .provider-display-name {
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 600;
         white-space: nowrap;
         overflow: hidden;
@@ -337,16 +337,16 @@
     }
     .url-label,
     .api-key-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
     }
     .optional-text {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         opacity: 0.6;
     }
     .url-field input,
     .api-key-field input {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         padding: 6px 8px;
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
@@ -370,7 +370,7 @@
         display: flex;
         align-items: center;
         gap: 4px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         padding: 4px 10px;
         border-radius: var(--radius-sm);
         border: 1px solid var(--color-border);
@@ -396,7 +396,7 @@
         gap: 6px;
         margin-top: 8px;
         padding: 6px 8px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-danger);
         background: rgba(248, 81, 73, 0.1);
         border-radius: var(--radius-sm);
@@ -407,7 +407,7 @@
         gap: 6px;
         margin-top: 8px;
         padding: 6px 8px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         border-radius: var(--radius-sm);
     }
     .test-result.test-success {
@@ -440,12 +440,12 @@
         flex: 1;
     }
     .option-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
     }
     .option-input {
         width: 60px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         padding: 3px 6px;
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);

@@ -1195,17 +1195,17 @@
     }
     .memory-alert-title {
         color: var(--color-status-red);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 600;
     }
     .memory-alert-line {
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
     .memory-alert-dismiss {
         flex-shrink: 0;
         padding: 4px 10px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-primary);
         background: var(--color-surface-3);
         border: 1px solid var(--color-border);
@@ -1297,7 +1297,7 @@
         justify-content: center;
         padding: 48px 24px;
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         flex: 1;
     }
     .diff-viewer-empty {
@@ -1306,7 +1306,7 @@
         justify-content: center;
         padding: 48px 24px;
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         flex: 1;
     }
     .column.hidden {

@@ -606,14 +606,14 @@
     }
     .tool-call-header { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
     .tool-name {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 600;
         color: var(--color-text-primary);
         display: flex;
         align-items: center;
     }
     .tool-args {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         margin: 0;
         padding: 0;
@@ -646,16 +646,16 @@
         width: 100%;
     }
     .tool-status {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         margin-left: auto;
         display: flex;
         align-items: center;
         gap: 4px;
     }
     .tool-status.pending { color: var(--color-accent); }
-    .progress-text { font-size: 0.8125rem; font-weight: 600; }
+    .progress-text { font-size: var(--text-sm); font-weight: 600; }
     .tool-timeout-badge {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-tertiary);
         padding: 2px 0;
     }
@@ -677,7 +677,7 @@
         background: var(--color-surface-0);
         padding: 6px 8px;
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: var(--font-mono);
         overflow-x: auto;
         margin: 4px 0 0;
@@ -698,7 +698,7 @@
         background: none;
         border: none;
         color: var(--color-text-tertiary);
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         cursor: pointer;
         padding: 2px 4px;
         margin: 0 0 4px;
@@ -715,7 +715,7 @@
     .tool-result-summary,
     .tool-result-question {
         font-family: inherit;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         line-height: 1.875rem;
         color: var(--color-text-primary);
         word-break: break-word;
@@ -737,7 +737,7 @@
         border-left: 3px solid var(--color-accent);
         background: var(--color-surface-1);
         border-radius: var(--radius-sm);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         line-height: 1.7;
         color: var(--color-text-primary);
         word-break: break-word;
@@ -746,7 +746,7 @@
         overflow: hidden;
     }
     .auto-answer-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -764,7 +764,7 @@
     }
     .auto-answer-body :global(code) {
         font-family: var(--font-mono);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         overflow-wrap: break-word;
         word-break: break-word;
     }
@@ -833,7 +833,7 @@
     .tool-result-summary :global(code),
     .tool-result-question :global(code) {
         font-family: var(--font-mono);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         overflow-wrap: break-word;
         word-break: break-word;
     }
@@ -841,7 +841,7 @@
     .tool-result-question :global(:not(pre) > code) {
         background-color: var(--color-surface-1);
         padding: 1px 4px;
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
     }
     .tool-create-task {
         display: flex;
@@ -860,7 +860,7 @@
         padding: 6px 8px;
         border-radius: var(--radius-sm);
         margin: 4px 0 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
     .write-result-text {
         color: var(--color-text-secondary);
@@ -884,7 +884,7 @@
     }
     .create-task-text {
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
     .tool-edit-task {
         display: flex;
@@ -894,7 +894,7 @@
         padding: 6px 8px;
         border-radius: var(--radius-sm);
         margin: 4px 0 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
     .edit-task-text {
         color: var(--color-text-secondary);
@@ -909,7 +909,7 @@
         padding: 6px 8px;
         border-radius: var(--radius-sm);
         margin: 4px 0 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
     .view-tasks-header {
         color: var(--color-text-secondary);
@@ -925,7 +925,7 @@
     .view-task-id {
         color: var(--color-text-tertiary);
         font-family: var(--font-mono);
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         flex-shrink: 0;
     }
     .view-task-title {
@@ -940,7 +940,7 @@
     .view-task-parent {
         color: var(--color-text-tertiary);
         font-family: var(--font-mono);
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         flex-shrink: 0;
     }
     .btn-open-task {
@@ -949,7 +949,7 @@
         gap: 6px;
         padding: 6px 10px;
         border-radius: var(--radius-md);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         background: var(--color-surface-2);
         color: var(--color-text-primary);
@@ -975,7 +975,7 @@
         display: inline-flex;
         align-items: center;
         gap: 4px;
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-tertiary);
         margin-top: 4px;
     }
@@ -984,12 +984,12 @@
         opacity: 0.6;
     }
     .tool-timeout {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-tertiary);
     }
     .edit-diff {
         font-family: var(--font-mono);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         line-height: 1.4;
         overflow-x: auto;
     }
@@ -997,7 +997,7 @@
         display: flex;
         gap: 0;
         padding: 0 8px;
-        border-radius: 2px;
+        border-radius: var(--radius-xs);
         white-space: pre-wrap;
         word-break: break-word;
     }
@@ -1032,11 +1032,11 @@
     }
     .edit-segment-added {
         background: rgba(63,185,80,0.4);
-        border-radius: 2px;
+        border-radius: var(--radius-xs);
     }
     .edit-segment-removed {
         background: rgba(248,81,73,0.4);
-        border-radius: 2px;
+        border-radius: var(--radius-xs);
     }
     .edit-separator {
         border-top: 1px dashed var(--color-border);
@@ -1053,7 +1053,7 @@
         margin: 4px 0 0;
         cursor: pointer;
         font-family: var(--font-mono);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--color-text-secondary);
         transition: all 0.15s ease;
@@ -1064,7 +1064,7 @@
         color: var(--color-text-primary);
     }
     .edit-diff-arrow {
-        font-size: 0.625rem;
+        font-size: var(--text-3xs);
         color: var(--color-text-tertiary);
         margin-left: 2px;
     }

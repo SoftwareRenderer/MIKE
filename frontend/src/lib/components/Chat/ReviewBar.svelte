@@ -173,7 +173,7 @@
         align-items: center;
         padding: 6px 12px;
         border-radius: var(--radius-md);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         background: var(--color-surface-2);
         color: var(--color-text);
@@ -191,7 +191,7 @@
         gap: 6px;
         padding: 7px 16px;
         border-radius: var(--radius-md);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 600;
         background: var(--color-surface-2);
         color: var(--color-text-primary);
@@ -221,7 +221,7 @@
         gap: 6px;
         padding: 8px 16px;
         border-radius: var(--radius-md);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 600;
         background: var(--color-accent-dark);
         color: white;

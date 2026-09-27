@@ -44,7 +44,7 @@
 
 {#if open}
     {#snippet header({ title }: { title: string })}
-        <h2 style="font-size: 0.9375rem;">{title}</h2>
+        <h2 style="font-size: var(--text-md);">{title}</h2>
     {/snippet}
 
     {#snippet footer()}
