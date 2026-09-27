@@ -4,6 +4,7 @@
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard, applyResolvedTasksToBoard } from '$lib/stores';
     import { t } from '$lib/i18n';
     import Spinner from './Spinner.svelte';
+    import EmptyState from './EmptyState.svelte';
     import { isSandboxMountPath } from '$lib/utils/path';
     import { isAnyModalOpen } from '$lib/utils/modal-state';
     import { connectionStore } from '$lib/stores/connection.svelte';
@@ -1265,7 +1266,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 {/if}
             </section>
         {:else}
-            <div class="empty-state">
+            <div class="start-pane">
                 <button class="icon-btn" onclick={openSettings} aria-label="Settings" title="Settings">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <circle cx="12" cy="12" r="3"/>
@@ -1274,13 +1275,17 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     <UpdateDot />
                 </button>
                 {#if !hasProviders}
-                    <h2>{t('app.empty.welcomeTitle')}</h2>
-                    <p>{t('app.empty.welcomeBody')}</p>
-                    <button class="btn-primary" onclick={() => uiStore.openSettings()} title="Configure an LLM provider">{t('app.empty.configureProvider')}</button>
+                    <EmptyState title={t('app.empty.welcomeTitle')} hint={t('app.empty.welcomeBody')}>
+                        {#snippet action()}
+                            <button class="btn-primary" onclick={() => uiStore.openSettings()} title="Configure an LLM provider">{t('app.empty.configureProvider')}</button>
+                        {/snippet}
+                    </EmptyState>
                 {:else}
-                    <h2>{t('app.empty.noProjectsTitle')}</h2>
-                    <p>{t('app.empty.noProjectsBody')}</p>
-                    <button class="btn-primary" onclick={openAddProject} title="Add a project">{t('app.empty.addProject')}</button>
+                    <EmptyState title={t('app.empty.noProjectsTitle')} hint={t('app.empty.noProjectsBody')}>
+                        {#snippet action()}
+                            <button class="btn-primary" onclick={openAddProject} title="Add a project">{t('app.empty.addProject')}</button>
+                        {/snippet}
+                    </EmptyState>
                 {/if}
             </div>
         {/if}
@@ -1632,25 +1637,19 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         flex: 1;
         overflow: hidden;
     }
-    .empty-state {
+    /* The pane a person lands on with no project: it fills the column, and the settings button
+       keeps the corner outside the centred column EmptyState draws. */
+    .start-pane {
+        position: relative;
+        height: 100%;
         display: flex;
-        flex-direction: column;
         align-items: center;
         justify-content: center;
-        height: 100%;
-        gap: 12px;
-        color: var(--color-text-secondary);
-        text-align: center;
-        position: relative;
     }
-    .empty-state .icon-btn {
+    .start-pane .icon-btn {
         position: absolute;
         top: 12px;
         right: 12px;
-    }
-    .empty-state h2 {
-        font-size: var(--text-lg);
-        color: var(--color-text-primary);
     }
     .btn-primary {
         padding: 8px 20px;

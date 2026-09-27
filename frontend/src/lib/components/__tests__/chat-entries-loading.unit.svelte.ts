@@ -75,7 +75,7 @@ describe('ChatEntries — history loading indicator', () => {
         });
 
         // The empty state should be visible
-        const emptyState = container.querySelector('.chat-empty');
+        const emptyState = container.querySelector('.empty-state');
         expect(emptyState).toBeTruthy();
         expect(emptyState?.textContent).toContain('No messages yet');
 
@@ -107,7 +107,7 @@ describe('ChatEntries — history loading indicator', () => {
         expect(loadingIndicator).toBeFalsy();
 
         // Empty state should NOT be present either
-        const emptyState = container.querySelector('.chat-empty');
+        const emptyState = container.querySelector('.empty-state');
         expect(emptyState).toBeFalsy();
     });
 

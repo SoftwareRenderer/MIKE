@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { GitCommit } from '$lib/types';
     import VirtualList from '$lib/components/VirtualList.svelte';
+    import EmptyState from '$lib/components/EmptyState.svelte';
     import { getHistoryDensity, buildCommitTooltip } from '$lib/utils/git-history';
     import type { HistoryDensity } from '$lib/utils/git-history';
     import { timeAgo, formatDateTime } from '$lib/utils/format-time';
@@ -123,7 +124,7 @@
         {#if loading && commitDisplays.length === 0}
             <div class="git-graph-loading">{t('task.graph.loading')}</div>
         {:else if commitDisplays.length === 0}
-            <div class="git-graph-empty">{t('task.graph.empty')}</div>
+            <EmptyState compact title={t('task.graph.empty')} />
         {:else}
             <VirtualList items={commitDisplays} itemHeight={36} minThreshold={0} onscroll={handleListScroll} onScrollElChange={handleScrollElChange}>
                 {#snippet children({ item: d, index: idx })}
@@ -236,14 +237,13 @@
         padding: 4px 0;
     }
 
-    .git-graph-loading,
-    .git-graph-empty {
+    .git-graph-loading {
         padding: 8px 10px;
         color: var(--color-text-tertiary);
         font-size: var(--text-xs);
     }
 
-.git-commit-row {
+    .git-commit-row {
         display: flex;
         align-items: flex-start;
         gap: 6px;

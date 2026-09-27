@@ -99,12 +99,6 @@
     font-size: var(--text-xs);
 }
 
-:global(.file-browser .file-browser-empty) {
-    padding: 8px 10px;
-    color: var(--color-text-tertiary);
-    font-size: var(--text-xs);
-}
-
 /* ── Where the listing is: a path you type, or the breadcrumb above the list ── */
 
 :global(.file-browser .file-browser-path) {
@@ -311,8 +305,7 @@
         gap: 10px;
     }
     :global(.file-browser .file-browser-error),
-    :global(.file-browser .file-browser-loading),
-    :global(.file-browser .file-browser-empty) {
+    :global(.file-browser .file-browser-loading) {
         padding: 12px;
         font-size: var(--text-base);
     }

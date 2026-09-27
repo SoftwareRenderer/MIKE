@@ -1,5 +1,6 @@
 <script lang="ts">
     import VirtualList from '$lib/components/VirtualList.svelte';
+    import EmptyState from '$lib/components/EmptyState.svelte';
     import { t } from '$lib/i18n';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
 
@@ -248,7 +249,7 @@
 
     {#if symbols.length === 0}
         <div class="symbol-list">
-            <div class="symbol-empty">{isOutlineMode ? t('explorer.symbols.noneHeadings') : t('explorer.symbols.noneSymbols')}</div>
+            <EmptyState compact title={isOutlineMode ? t('explorer.symbols.noneHeadings') : t('explorer.symbols.noneSymbols')} />
         </div>
     {:else if isOutlineMode}
         <VirtualList items={flatHeadings} itemHeight={22} minThreshold={50} role="tree" aria-label={t('explorer.symbols.outlineAria')}>
@@ -454,12 +455,6 @@
         color: var(--color-text-tertiary);
         opacity: 0.5;
         font-family: var(--font-mono);
-    }
-
-    .symbol-empty {
-        padding: 8px 10px;
-        color: var(--color-text-tertiary);
-        font-size: var(--text-xs);
     }
 
     /* Collapse/expand icon */

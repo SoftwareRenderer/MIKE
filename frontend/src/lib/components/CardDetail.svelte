@@ -39,6 +39,7 @@
     import TaskHeader from './CardDetail/TaskHeader.svelte';
     import BoardOverview from './CardDetail/BoardOverview.svelte';
     import MultiSelectBar from './MultiSelectBar.svelte';
+    import EmptyState from './EmptyState.svelte';
     import { useMultiSelectActions } from '$lib/composables/use-multi-select-actions.svelte';
 
     const diffViewer = useLazyComponent(() => import('./DiffViewer.svelte'));
@@ -1142,7 +1143,7 @@
                                     <div class="diff-viewer-loading">{t('task.loadingDiffViewer')}</div>
                                 {/if}
                             {:else}
-                                <div class="diff-viewer-empty">{t('task.noChanges')}</div>
+                                <EmptyState class="pane-fill" title={t('task.noChanges')} />
                             {/if}
                         {/if}
 
@@ -1292,15 +1293,6 @@
         z-index: var(--z-content);
     }
     .diff-viewer-loading {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 48px 24px;
-        color: var(--color-text-tertiary);
-        font-size: var(--text-sm);
-        flex: 1;
-    }
-    .diff-viewer-empty {
         display: flex;
         align-items: center;
         justify-content: center;

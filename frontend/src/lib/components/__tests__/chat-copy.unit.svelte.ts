@@ -147,8 +147,8 @@ describe('ChatEntries — list chrome', () => {
         cleanup();
 
         const empty = render(ChatEntries, { props: { ...baseProps, follow: createChatFollow() } });
-        expect(empty.container.querySelector('.chat-empty p')?.textContent).toBe('No messages yet');
-        expect(empty.container.querySelector('.chat-empty .hint')?.textContent).toBe('Send a message to start the conversation');
+        expect(empty.container.querySelector('.empty-state .title')?.textContent).toBe('No messages yet');
+        expect(empty.container.querySelector('.empty-state .hint')?.textContent).toBe('Send a message to start the conversation');
     });
 
     it('labels the build box and falls back to the merge label', () => {

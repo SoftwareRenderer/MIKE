@@ -10,6 +10,7 @@
     import CheckpointDivider from './CheckpointDivider.svelte';
     import QueueIndicator from './QueueIndicator.svelte';
     import Spinner from '$lib/components/Spinner.svelte';
+    import EmptyState from '$lib/components/EmptyState.svelte';
     import { appStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
     import { t } from '$lib/i18n';
@@ -389,13 +390,7 @@
                     <p>{t('chat.entries.loading')}</p>
                 </div>
             {:else}
-                <div class="chat-empty">
-                    <svg width="32" height="32" viewBox="0 0 16 16" fill="none">
-                        <path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1" stroke-linejoin="round" opacity="0.3"/>
-                    </svg>
-                    <p>{t('chat.entries.empty')}</p>
-                    <span class="hint">{t('chat.entries.emptyHint')}</span>
-                </div>
+                <EmptyState class="parent-height" title={t('chat.entries.empty')} hint={t('chat.entries.emptyHint')} />
             {/if}
         </div>
     {:else}
@@ -675,19 +670,6 @@
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
-    .chat-empty {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        padding: 48px 16px;
-        color: var(--color-text-tertiary);
-        text-align: center;
-        height: 100%;
-    }
-    .chat-empty p { font-size: var(--text-base); margin: 0; font-weight: 500; }
-    .chat-empty .hint { font-size: var(--text-xs); }
     .chat-loading {
         display: flex;
         flex-direction: column;

@@ -3,6 +3,7 @@
     import { t } from '$lib/i18n';
     import { escapeHtml } from '$lib/utils/format';
     import { searchFsPaths, type FsSearchResult } from '$lib/api';
+    import EmptyState from '$lib/components/EmptyState.svelte';
 
     let { projectId, taskId, onFileSelected, onClose }: {
         projectId: string;
@@ -274,7 +275,7 @@
     {:else if loading}
         <div class="search-loading">{t('editor.searching')}</div>
     {:else if searched && results.length === 0}
-        <div class="search-empty">{t('editor.noResultsFound')}</div>
+        <EmptyState compact title={t('editor.noResultsFound')} />
     {:else if results.length > 0}
         <div class="search-results" role="list" aria-label="Search results">
             {#each groupedResults as group}
@@ -430,13 +431,6 @@
     .search-loading {
         padding: 12px;
         color: var(--color-text-secondary);
-        font-size: var(--text-xs);
-        text-align: center;
-    }
-
-    .search-empty {
-        padding: 12px;
-        color: var(--color-text-tertiary);
         font-size: var(--text-xs);
         text-align: center;
     }

@@ -101,6 +101,9 @@ URL_SINKS: dict[tuple[str, str], str] = {
     ("src/lib/components/Chat/ToolCall.svelte", "iconInfo.src"):
         "literal — the tool-icon table maps tool names to ?raw imports, and Icon.svelte "
         "refuses anything that is not a lone sanitized <svg> root",
+    ("src/lib/components/EmptyState.svelte", "icon"):
+        "literal — a prop; every caller passes an *.svg?raw import, and the value reaches the "
+        "browser through Icon.svelte, which refuses anything that is not a lone sanitized <svg> root",
     ("src/lib/components/ImageDiffModal.svelte", "url"):
         "encoded-by:lib/api/fs — rawFileURL builds the query with URLSearchParams",
     ("src/lib/components/Chat/DiagramFence.svelte", "diagram.imageSrc"):

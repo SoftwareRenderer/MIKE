@@ -47,7 +47,7 @@ test.describe('Find in Files', () => {
         await page.locator('.search-input').fill('test');
 
         // Wait for results (debounced search + network)
-        await page.waitForSelector('.search-results, .search-empty', { timeout: 10000 });
+        await page.waitForSelector('.search-results, .empty-state', { timeout: 10000 });
 
         // Should show match count in footer
         await expect(page.locator('.search-footer .match-count')).toBeVisible();

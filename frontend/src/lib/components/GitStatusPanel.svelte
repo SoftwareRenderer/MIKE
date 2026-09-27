@@ -14,10 +14,12 @@
     import FileContextMenu, { type FileMenuItem } from './FileContextMenu.svelte';
     import SelectionActionBar from './SelectionActionBar.svelte';
     import Icon from './Icon.svelte';
+    import EmptyState from './EmptyState.svelte';
     import Spinner from './Spinner.svelte';
     import stageIcon from '$lib/assets/icons/stage.svg?raw';
     import unstageIcon from '$lib/assets/icons/unstage.svg?raw';
     import discardIcon from '$lib/assets/icons/discard.svg?raw';
+    import fileTextIcon from '$lib/assets/icons/file-text.svg?raw';
     import ResizeHandle from './ResizeHandle.svelte';
 
     const diffViewer = useLazyComponent(() => import('./DiffViewer.svelte'));
@@ -1114,13 +1116,7 @@
             <span>{t('diff.loadingChanges')}</span>
         </div>
     {:else if !hasContent}
-        <div class="panel-empty">
-            <svg width="28" height="28" viewBox="0 0 16 16" fill="none">
-                <path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
-                <path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
-            </svg>
-            <p>{t('diff.noChanges')}</p>
-        </div>
+        <EmptyState class="pane-fill" title={t('diff.noChanges')} icon={fileTextIcon} />
     {:else}
         <div class="panel-body">
             <!-- Left: Changes file list sidebar -->
@@ -1560,9 +1556,8 @@
         line-height: 1;
     }
 
-    /* Loading / Empty */
-    .panel-loading,
-    .panel-empty {
+    /* Loading */
+    .panel-loading {
         display: flex;
         flex-direction: column;
         align-items: center;

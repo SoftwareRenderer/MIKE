@@ -268,6 +268,19 @@ a:hover {
     background: transparent;
 }
 
+/* Layout hooks for a component's root element, handed to it through its own `class` prop — for
+   the geometry a site needs and the component must not carry. A parent's scoped stylesheet cannot
+   style a child component's root element (the compiler drops the selector as unused), so this
+   geometry has no local home. `pane-fill` takes what is left of a flex column; `parent-height`
+   takes the height of the box the pane scrolls inside, which is not a flex parent. */
+.pane-fill {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+.parent-height {
+    height: 100%;
+}
+
 /* Screen reader only text */
 .sr-only {
     position: absolute;

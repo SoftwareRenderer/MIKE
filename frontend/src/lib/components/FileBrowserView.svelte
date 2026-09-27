@@ -10,6 +10,7 @@
     import { useFileSelection } from '$lib/composables/use-file-selection.svelte';
     import FileContextMenu, { type FileMenuItem } from '$lib/components/FileContextMenu.svelte';
     import FileDropProgress from '$lib/components/FileDropProgress.svelte';
+    import EmptyState from '$lib/components/EmptyState.svelte';
     import Icon from '$lib/components/Icon.svelte';
     import SelectionActionBar from '$lib/components/SelectionActionBar.svelte';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
@@ -723,7 +724,7 @@
         {#if loading && entries.length === 0}
             <div class="file-browser-loading">{firstLoadComplete ? t('explorer.shared.loading') : pendingMessage}</div>
         {:else if !error && entries.length === 0}
-            <div class="file-browser-empty">{emptyMessage}</div>
+            <EmptyState compact title={emptyMessage} />
         {/if}
         {#each entries as entry, i}
             {@const badge = extraEntryInfo ? extraEntryInfo(entry) : null}

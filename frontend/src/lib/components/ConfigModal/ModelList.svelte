@@ -1,6 +1,7 @@
 <script lang="ts">
     import { reasoningEffortOptions } from '$lib/types';
     import { t } from '$lib/i18n';
+    import EmptyState from '../EmptyState.svelte';
     import type { ModelEntry } from './drafts';
 
     let { models, onAdd, onRemove, currencySymbol = '$', index = 0, onDirty }: {
@@ -226,7 +227,7 @@
         {/each}
     </div>
     {#if models.length === 0}
-        <div class="models-empty">{t('settings.models.empty')}</div>
+        <EmptyState compact title={t('settings.models.empty')} />
     {/if}
 </div>
 
@@ -557,12 +558,5 @@
     .mp-note {
         font-size: var(--text-2xs);
         color: var(--color-text-tertiary);
-    }
-    .models-empty {
-        font-size: var(--text-sm);
-        color: var(--color-text-secondary);
-        text-align: center;
-        padding: 12px;
-        font-style: italic;
     }
 </style>

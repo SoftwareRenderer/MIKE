@@ -19,6 +19,7 @@
     import SessionsSection from './ConfigModal/SessionsSection.svelte';
     import ApiTokensSection from './ConfigModal/ApiTokensSection.svelte';
     import UpdatesSection from './ConfigModal/UpdatesSection.svelte';
+    import EmptyState from './EmptyState.svelte';
     import mikeLogo from '$lib/assets/icons/mike.svg?raw';
     import { checkNow, type UpdateOutcome } from '$lib/services/app-update';
     import { updateCheck } from '$lib/services/update-check.svelte';
@@ -801,17 +802,7 @@
                     </div>
                 {/if}
                 {#if providers.length === 0}
-                    <div class="providers-empty">
-                        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" class="empty-icon">
-                            <rect x="4" y="8" width="32" height="24" rx="3" stroke="currentColor" stroke-width="1.5"/>
-                            <path d="M4 16h32" stroke="currentColor" stroke-width="1.5"/>
-                            <circle cx="10" cy="12" r="1" fill="currentColor"/>
-                            <circle cx="15" cy="12" r="1" fill="currentColor"/>
-                            <circle cx="20" cy="12" r="1" fill="currentColor"/>
-                        </svg>
-                        <p>{t('settings.noProviders')}</p>
-                        <span>{t('settings.providersEmptyHint')}</span>
-                    </div>
+                    <EmptyState title={t('settings.noProviders')} hint={t('settings.providersEmptyHint')} />
                 {/if}
             </div>
         {/if}
@@ -1158,28 +1149,6 @@
         display: flex;
         flex-direction: column;
         gap: 8px;
-    }
-    .providers-empty {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 8px;
-        padding: 32px 16px;
-        text-align: center;
-        color: var(--color-text-secondary);
-    }
-    .providers-empty p {
-        font-size: var(--text-base);
-        font-weight: 500;
-        color: var(--color-text-primary);
-    }
-    .providers-empty span {
-        font-size: var(--text-base);
-        max-width: 280px;
-    }
-    .empty-icon {
-        color: var(--color-text-tertiary);
-        margin-bottom: 4px;
     }
     .no-llm-warning {
         display: flex;

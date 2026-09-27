@@ -22,6 +22,7 @@
     import ExtensionEditModal from './ExtensionEditModal.svelte';
     import ExtensionInstallConfirmModal from './ExtensionInstallConfirmModal.svelte';
     import ExtensionUpdatesPanel from './ExtensionUpdatesPanel.svelte';
+    import EmptyState from '../EmptyState.svelte';
     import type { OperationProgress } from './ExtensionBuildProgress.svelte';
     import { ExtensionDraft } from './extensions-draft.svelte';
     import { agentMountDeclaration, needsAgentMountGrant, needsDependencyGrant, requiresInstallReview } from '$lib/utils/extension-permissions';
@@ -520,13 +521,13 @@
             {#if loading}
                 <div class="loading">{t('settings.extensions.loadingExtensions')}</div>
             {:else if filteredExtensions.length === 0}
-                <div class="empty-state">
-                    <p>{t('settings.extensions.noneInstalled')}</p>
-                    <p class="help">{t('settings.extensions.noneInstalledHelp')}</p>
-                    <button class="btn btn-primary" onclick={openBrowse}>
-                        {t('settings.extensions.browse')}
-                    </button>
-                </div>
+                <EmptyState title={t('settings.extensions.noneInstalled')} hint={t('settings.extensions.noneInstalledHelp')}>
+                    {#snippet action()}
+                        <button class="btn btn-primary" onclick={openBrowse}>
+                            {t('settings.extensions.browse')}
+                        </button>
+                    {/snippet}
+                </EmptyState>
             {:else}
                 <div class="extension-list">
                     {#each filteredExtensions as ext}
@@ -584,10 +585,7 @@
             {#if loadingRegistry}
                 <div class="loading">{t('settings.extensions.loadingRegistry')}</div>
             {:else if browseList.length === 0}
-                <div class="empty-state">
-                    <p>{t('settings.extensions.registryEmpty')}</p>
-                    <p class="help">{t('settings.extensions.registryEmptyHelp')}</p>
-                </div>
+                <EmptyState title={t('settings.extensions.registryEmpty')} hint={t('settings.extensions.registryEmptyHelp')} />
             {:else}
                 <div class="extension-list">
                     {#each browseList as entry}
@@ -672,25 +670,6 @@
 
     .btn-primary:hover:not(:disabled) {
         background: var(--color-btn-primary-hover);
-    }
-
-    /* Empty state */
-    .empty-state {
-        text-align: center;
-        padding: 3rem 1rem;
-        color: var(--color-text-tertiary);
-    }
-
-    .empty-state p {
-        margin: 0.5rem 0;
-    }
-
-    .empty-state .help {
-        font-size: var(--text-base);
-    }
-
-    .empty-state .btn {
-        margin-top: 1rem;
     }
 
     .loading {
