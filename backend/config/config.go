@@ -135,11 +135,8 @@ func (cs *ConfigStore) SetMemoryBudget(capacityMB, totalMB int64, pct int) {
 	cs.memoryBudgetPct = pct
 }
 
-// WorkspaceDir returns the effective worktrees directory: the startup override
-// (--worktrees-dir / MIKE_WORKTREES_DIR) else the default, made absolute.
-// GetConfig computes the same value, but reading the config row costs a dozen
-// SQLite reads plus a provider JSON parse, so callers that only need this
-// directory (fs-API containment, preview resolution) use this instead.
+// WorkspaceDir returns the worktrees directory, made absolute. GetConfig carries the same value; ask
+// here when only the directory is needed.
 func (cs *ConfigStore) WorkspaceDir() string {
 	dir := cs.workspaceDirOverride
 	if dir == "" {

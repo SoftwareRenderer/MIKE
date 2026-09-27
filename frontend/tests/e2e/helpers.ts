@@ -514,7 +514,11 @@ export async function navigateToTask(page: Page, taskId: string, projectId?: str
   // project, which is not this file's project once a spec is isolated — so pass ours.
   const pid = projectId || ownProject?.id;
   const path = pid ? `/?project=${pid}&task=${taskId}` : `/?task=${taskId}`;
-  await page.evaluate((u) => { window.location.href = u; }, path);
+  // A page that has not navigated yet is `about:blank`, where a relative href resolves to nothing. The first
+  // test of a file navigates through the board, so only a test that shares its worker with another of the
+  // same file lands here directly.
+  if (page.url() === 'about:blank') await page.goto(path);
+  else await page.evaluate((u) => { window.location.href = u; }, path);
   await expect(page.locator('.task-detail-page')).toBeVisible();
 }
 

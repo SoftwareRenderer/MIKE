@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"mike/backend/startup"
 )
 
 // clientBucket tracks the request count for a single client IP within
@@ -129,9 +131,7 @@ func lastForwardedIP(xff string) string {
 	return ip.String()
 }
 
-// defaultLoginRateLimit is the login budget per client IP per minute, used when
-// MIKE_LOGIN_RATE_LIMIT is unset, unparsable or non-positive.
-const defaultLoginRateLimit = 5
+const defaultLoginRateLimit = startup.DefaultLoginRateLimit
 
 // newLoginRateLimiter builds the login rate limiter from the resolved budget (requests per minute
 // per IP). The budget is always positive — startup refuses 0, negative and unparsable values by

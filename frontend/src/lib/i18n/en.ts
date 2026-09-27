@@ -924,6 +924,7 @@ const catalog = {
     'api.testConnection': 'Failed to test connection',
     'api.testExtensionUrl': 'Failed to test the address',
     'api.fetchModels': 'Failed to fetch models',
+    'api.fetchTaskSync': 'Failed to retrieve task',
     'api.fetchExtensions': 'Failed to fetch extensions',
     'api.updateExtension': 'Failed to update extension',
     'api.deleteExtension': 'Failed to delete extension',

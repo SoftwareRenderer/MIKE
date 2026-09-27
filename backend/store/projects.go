@@ -14,9 +14,8 @@ import (
 func (s *Store) CreateProject(p *types.Project) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	memoryLimit := p.SandboxMemoryLimit
-	if memoryLimit == 0 {
-		memoryLimit = 1024 // default 1 GB
+	if p.SandboxMemoryLimit == 0 {
+		p.SandboxMemoryLimit = types.DefaultSandboxMemoryLimitMB
 	}
 	forwardPortsJSON := ""
 	if len(p.ForwardPorts) > 0 {
@@ -48,7 +47,7 @@ func (s *Store) CreateProject(p *types.Project) error {
 	}
 	_, err := s.db.Exec(
 		`INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, p.Path, ptrStr(p.OriginBranch), B2I(p.SandboxEnabled), B2I(p.SandboxNetworkIsolation), ptrStr(p.SandboxImage), ptrStr(p.SandboxDockerfilePath), memoryLimit, forwardPortsJSON, mountsJSON, envsJSON, capsJSON, assistedBy, p.CreatedAt.Format(time.RFC3339), p.UpdatedAt.Format(time.RFC3339),
+		p.ID, p.Name, p.Path, ptrStr(p.OriginBranch), B2I(p.SandboxEnabled), B2I(p.SandboxNetworkIsolation), ptrStr(p.SandboxImage), ptrStr(p.SandboxDockerfilePath), p.SandboxMemoryLimit, forwardPortsJSON, mountsJSON, envsJSON, capsJSON, assistedBy, p.CreatedAt.Format(time.RFC3339), p.UpdatedAt.Format(time.RFC3339),
 	)
 	return err
 }

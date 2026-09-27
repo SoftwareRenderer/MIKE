@@ -1,5 +1,27 @@
 import { describe, it, expect } from 'vitest';
-import { SaveController, SaveRequestGuard } from '$lib/utils/save-state';
+import { SaveController, SaveRequestGuard, saveRetryDelayMs } from '$lib/utils/save-state';
+import { SAVE_RETRY_BASE_DELAY_MS, SAVE_RETRY_MAX_DELAY_MS } from '$lib/constants';
+
+describe('saveRetryDelayMs', () => {
+    it('waits the base delay after the first failure', () => {
+        expect(saveRetryDelayMs(0)).toBe(SAVE_RETRY_BASE_DELAY_MS);
+    });
+
+    it('doubles for each failure after that', () => {
+        expect(saveRetryDelayMs(1)).toBe(SAVE_RETRY_BASE_DELAY_MS * 2);
+        expect(saveRetryDelayMs(2)).toBe(SAVE_RETRY_BASE_DELAY_MS * 4);
+    });
+
+    it('holds at the ceiling rather than waiting absurdly long', () => {
+        expect(saveRetryDelayMs(3)).toBe(SAVE_RETRY_MAX_DELAY_MS);
+        expect(saveRetryDelayMs(200)).toBe(SAVE_RETRY_MAX_DELAY_MS);
+    });
+
+    it('treats a nonsense attempt count as the first failure', () => {
+        expect(saveRetryDelayMs(-1)).toBe(SAVE_RETRY_BASE_DELAY_MS);
+        expect(saveRetryDelayMs(NaN)).toBe(SAVE_RETRY_BASE_DELAY_MS);
+    });
+});
 
 describe('SaveController.begin', () => {
     it('starts a save when there is something to write', () => {

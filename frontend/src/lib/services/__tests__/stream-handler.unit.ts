@@ -16,6 +16,7 @@ function makeCallbacks(overrides: Partial<StreamHandlerCallbacks> = {}): StreamH
         updateActiveThread: vi.fn(),
         updateThreadUrl: vi.fn(),
         onNewError: vi.fn(),
+        onDiverged: vi.fn(),
         ...overrides,
     };
 }
@@ -686,6 +687,21 @@ describe('createStreamHandler', () => {
             handleEvent({ type: 'status', data: { state: 'running' } }, false);
 
             expect(ids()).toEqual(['tc1']);
+        });
+
+        it('reports through onDiverged the card it discarded, which no later frame can redraw', () => {
+            const { cb, handleEvent } = setup();
+            handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'bash', args: {} } }, false);
+            handleEvent({ type: 'status', data: { state: 'running' } }, false);
+            expect(cb.onDiverged).toHaveBeenCalledTimes(1);
+        });
+
+        it('reports nothing to a running frame that discarded no card', () => {
+            const { cb, handleEvent } = setup();
+            handleEvent({ type: 'token', data: { text: 'Working on it.' } }, false);
+            handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'bash', args: {} } }, false);
+            handleEvent({ type: 'status', data: { state: 'running' } }, false);
+            expect(cb.onDiverged).not.toHaveBeenCalled();
         });
     });
 

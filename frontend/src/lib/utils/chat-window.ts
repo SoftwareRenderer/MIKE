@@ -44,27 +44,40 @@ export function applyWindowRead<T extends PagedRow>(held: T[], fresh: T[]): Wind
     return { rows: fresh, keepsEarlier: false };
 }
 
-/** How a window read ended, as far as the transcript on screen is concerned. */
-export type WindowRead = 'answered' | 'cached' | 'failed';
+/** How a window read ended, as far as the transcript on screen is concerned. `'provisional'` is not a read's
+ * ending at all: it names what this browser already held, painted while its read is still out. */
+export type WindowRead = 'answered' | 'cached' | 'failed' | 'provisional';
 
 /** Why what is on screen may not be the whole conversation, and whether anything can still arrive. */
-export type WindowReadNotice = 'cached' | 'failed' | 'owing' | null;
+export type WindowReadNotice = 'cached' | 'failed' | 'owing' | 'pending' | null;
 
 /**
  * What to tell the reader about the transcript on screen. `'owing'` means a read failed on a running task
- * this browser holds a key for: the turn still arriving on the stream is all that will come.
+ * this browser holds a key for: the turn still arriving on the stream is all that will come. `'pending'`
+ * means a read is still out and what is drawn is this browser's own copy — a wait, not a fault, so it gets
+ * no band and no Retry.
  */
 export function noticeForWindowRead(read: WindowRead, seen: { holdsTaskKey: boolean; taskInFlight: boolean }): WindowReadNotice {
     if (read === 'answered') return null;
+    if (read === 'provisional') return 'pending';
     if (read === 'cached') return 'cached';
     return seen.holdsTaskKey && seen.taskInFlight ? 'owing' : 'failed';
 }
 
-/** Whether a window read may redraw the transcript. A mirror copy is this browser's last answered read,
- * so it is older than what the screen has been sent: it paints only a screen holding no rows. */
+/** Whether a window read may redraw the transcript. A mirror copy is this browser's last answered read, and a
+ * provisional paint is what it holds right now: both are older than what the screen has been sent, so either
+ * paints only a screen holding no rows. */
 export function windowIsReading(read: WindowRead, hasRows: boolean): boolean {
     if (read === 'answered') return true;
-    return read === 'cached' && !hasRows;
+    return (read === 'cached' || read === 'provisional') && !hasRows;
+}
+
+/**
+ * Whether the server must keep this screen's replay buffer. A screen holding no answered rows, or holding
+ * only the rows its own cache gave it, has no other source for a turn that has already been written.
+ */
+export function replayBufferOwed(notice: WindowReadNotice): boolean {
+    return notice === 'owing' || notice === 'pending';
 }
 
 /** The fewest rows one task keeps in the cache. A window is five answers, which can be fewer rows than an
@@ -125,6 +138,15 @@ export function readerScrolledUp(writtenTop: number, topNow: number, slack = 2):
 /** True when a newest-window response matches the revision already on screen. */
 export function newestWindowUnchanged(revision: string, windowRevision?: string, unchanged?: boolean): boolean {
     return unchanged === true || (!!revision && !!windowRevision && windowRevision === revision);
+}
+
+/**
+ * The revision this screen may call its baseline once a read has finished. A read that was not applied must
+ * leave it alone, or every later `304` confirms a transcript nobody drew.
+ */
+export function appliedRevision(read: WindowRead, applied: boolean, seen: { windowRevision?: string; held: string }): string {
+    if (!applied || read !== 'answered') return seen.held;
+    return seen.windowRevision ?? '';
 }
 
 /** True when a read belongs to an older request or to a screen that no longer exists. */

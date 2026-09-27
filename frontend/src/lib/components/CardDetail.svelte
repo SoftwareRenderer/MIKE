@@ -5,17 +5,19 @@
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { streamingTaskStore } from '$lib/stores/streaming-tasks.svelte';
     import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
-    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile, toDiffFiles } from '$lib/api';
+    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile, toDiffFiles, getTask } from '$lib/api';
+    import { fetchTaskSync } from '$lib/services/task-sync';
+    import { resyncPlan, type HeldRow } from '$lib/utils/task-sync';
+    import { diffBaseMoved, diffHeadRef } from '$lib/utils/diff-base';
     import { enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
     import { shouldAutoFullscreenDiffEditor } from '$lib/utils/diff-editor-layout';
     import { chatBlurState, chatCollapseState, chatFocusState, chatManualToggleState, chatSendState, type ChatAutoMaximizeRules, type ChatMaximizeState } from '$lib/utils/chat-auto-maximize';
-    import { filterTopLevelTaskIds, willConsolidateIntoParent, taskIsInFlight } from '$lib/utils/task-utils';
+    import { filterTopLevelTaskIds, willConsolidateIntoParent } from '$lib/utils/task-utils';
     import { createStatusLabel } from '$lib/utils/subtask-status';
     import { sandboxMountPath } from '$lib/utils/path';
     import { isVimSwapFile } from '$lib/utils/file-suffix';
     import { isAnyModalOpen } from '$lib/utils/modal-state';
     import { clearHighlightCache } from '$lib/highlighter';
-    import { getAppStreamRef } from '$lib/stream-ref';
     import { createTabReturn } from '$lib/composables/use-tab-return';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { loadAppSetting, saveAppSetting, loadCollapsedSections, saveCollapsedSections } from '$lib/storage';
@@ -723,13 +725,11 @@
         }
         window.addEventListener('keydown', handleKey);
 
-        // The diff is mirrored by `task_diff_stats` on the project channel, so this screen can answer for
-        // itself. A reload is not free either: it closes the open file and the checkpoint overlay.
+        // `task_diff_stats` mirrors the diff only while this window keeps running and reading, so a return
+        // asks the server what moved.
         const returnWatcher = createTabReturn({
-            mayBeBehind: () => taskIsInFlight(task.execution_state) || streamingTaskStore.has(task.id),
-            msSinceFrame: () => getAppStreamRef()?.msSinceFrame() ?? null,
-            msSinceUnpainted: () => getAppStreamRef()?.msSinceUnpainted() ?? null,
-            onReturn: () => { void loadDiff(); },
+            revalidateOnReturn: true,
+            onReturn: () => { void reconcileDiff(); },
         });
 
         return () => {
@@ -791,6 +791,9 @@
     // load finishes, then a reload runs so a thread switch during a slow diff load is
     // not dropped (otherwise the panel stays stale until a manual refresh).
     let diffReloadQueued = $state(false);
+    /** The base the diff on screen was drawn against, '' for the working tree. Two bases cannot share one
+     * view, so a moved base resets the panel. */
+    let loadedHeadRef = '';
 
     /** Reload the full diff. Aborts in-flight delta fetches and resets overlay state.
      * Used after thread switch or task change to ensure a clean slate.
@@ -815,11 +818,11 @@
         // Preload the diff viewer chunk while fetching diff data
         diffViewer.load();
         try {
-            // For done tasks, fetch the diff of committed changes.
-            // Use branch_tip (captured at commit time) if available, otherwise fall back to branch name.
-            const diffOptions = task.status === 'done' && (task.branch_tip || task.branch)
-                ? { headRef: task.branch_tip || task.branch }
-                : {};
+            // For done tasks, fetch the diff of committed changes: branch_tip (captured at commit time) if
+            // there is one, else the branch. `diffHeadRef` owns that rule, and the return path compares
+            // against the value written here.
+            loadedHeadRef = diffHeadRef(task);
+            const diffOptions = loadedHeadRef ? { headRef: loadedHeadRef } : {};
             await Promise.all([loadCommits(), diffCache.loadDiff(() => {}, diffOptions)]);
         } finally {
             diffLoading = false;
@@ -835,6 +838,50 @@
                 diffReloadQueued = false;
                 void loadDiff();
             }
+        }
+    }
+
+    /**
+     * What this window does about having been elsewhere: ask which part of the view moved, then bring back
+     * that part. `taskIsInFlight` read at return time answers "no" in exactly the case that matters — a run
+     * that started and finished while the window was elsewhere.
+     */
+    async function reconcileDiff(): Promise<void> {
+        const digest = await fetchTaskSync(task.project_id, task.id);
+        // No answer says nothing; the project channel still carries the stats frames.
+        if (!digest) return;
+        const heldRow: HeldRow = {
+            status: task.status,
+            executionState: task.execution_state,
+            updatedAt: task.updated_at,
+            branchTip: task.branch_tip ?? '',
+            summarizing: task.summarizing,
+            mergeConflict: task.has_merge_conflict,
+        };
+        const verdict = resyncPlan({
+            row: heldRow,
+            diff: {
+                hash: diffCache.tracker.hash ?? '',
+                staged: diffStatsStore.get(task.id)?.staged_paths?.length ?? 0,
+            },
+        }, digest);
+        if (!verdict.row && !verdict.diff) return;
+        let current = task;
+        if (verdict.row) {
+            try {
+                current = await getTask(task.project_id, task.id);
+                updateTaskInBoard(appStore, current.id, current);
+            } catch {
+                // Unreachable: compare against the row this screen already holds.
+            }
+        }
+        if (diffBaseMoved(loadedHeadRef, current)) {
+            void loadDiff();
+            return;
+        }
+        if (verdict.diff) {
+            const headRef = diffHeadRef(current);
+            await diffCache.refreshManifest(headRef ? { headRef } : {});
         }
     }
 

@@ -391,6 +391,17 @@ func memSlotFixture(t *testing.T, sandboxed bool, limitMB int) (*TaskExecutor, *
 	if err := s.CreateProject(project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
+	if limitMB == 0 {
+		// A fresh row is capped; setting the limit to 0 afterwards is the only way it runs uncapped.
+		if err := s.UpdateProjectSandboxMemoryLimit(project.ID, 0); err != nil {
+			t.Fatalf("clear the memory limit: %v", err)
+		}
+	}
+	// The executor reads the row, so the setup works from it.
+	project, err := s.GetProject(project.ID)
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
 	task := &types.Task{
 		ID: "memslot-task", ProjectID: project.ID, Title: "memslot", Prompt: "p",
 		Status: types.StatusInProgress, ExecutionState: types.ExecStateRunning,

@@ -440,6 +440,19 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 	})
 }
 
+// CountTaskMessages counts a task's conversation rows. A write no durability seam sees — a fork copying a
+// thread's rows — moves this count and no revision.
+func (s *Store) CountTaskMessages(taskID string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM task_messages WHERE task_id = ?`, taskID).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // GetTaskMessageByID retrieves a single message by its ID.
 func (s *Store) GetTaskMessageByID(messageID string) (*types.TaskMessage, error) {
 	s.mu.RLock()

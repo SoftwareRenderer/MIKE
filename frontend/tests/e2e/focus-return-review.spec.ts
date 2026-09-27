@@ -8,10 +8,9 @@ import {
 isolatedProject();
 
 /**
- * The chat is on screen when the window stops being read, and the turn finishes while its frames are being
- * dropped, so nothing reaches the app. On return the transcript comes back through the message window's
- * ETag: a `tool_result` is written into the row the call already owns, whose `created_at` does not move, so
- * no row timestamp can report the change.
+ * The chat is on screen when the window stops being read, and the turn finishes while its frames are dropped.
+ * The return reads the message window unconditionally, because the digest says the conversation moved and the
+ * held baseline cannot answer for it; the following return is the one the ETag answers.
  * `docs/reconnection.md → The tab that comes back`
  */
 
@@ -37,6 +36,7 @@ async function watchTheReturn(page: Page): Promise<void> {
     w.__swallowed = 0;
     w.__signals = { visibilitychange: 0, focus: 0, pageshow: 0 };
     w.__revisions = [] as Array<string | null>;
+    w.__sync = 0;
     w.__mutations = 0;
     w.__observer = null as MutationObserver | null;
     for (const type of Object.keys(w.__signals)) {
@@ -50,6 +50,7 @@ async function watchTheReturn(page: Page): Promise<void> {
     window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input
         : input instanceof URL ? input.href : (input as Request).url;
+      if (url.includes('/sync')) w.__sync++;
       if (url.includes('/messages')) {
         w.__revisions.push(new Headers(init?.headers).get('If-None-Match'));
       }
@@ -99,8 +100,13 @@ const seen = (page: Page) => page.evaluate(() => ({
   swallowed: (window as any).__swallowed as number,
   signals: (window as any).__signals as Record<string, number>,
   revisions: (window as any).__revisions as Array<string | null>,
+  sync: (window as any).__sync as number,
   mutations: (window as any).__mutations as number,
 }));
+
+/** Whether a read after the ones already counted went out without a baseline. */
+const unconditionalAfter = (revisions: Array<string | null>, from: number): boolean =>
+  revisions.slice(from).some(v => v === null);
 
 /** The conditional reads that went out after the ones already counted. */
 const conditionalAfter = (revisions: Array<string | null>, from: number): number =>
@@ -196,11 +202,12 @@ test.describe('A mounted chat returned to by the window focus event', () => {
       expect(returned.signals.pageshow).toBe(before.signals.pageshow);
       expect(returned.signals.focus, 'the gesture never reached the window').toBeGreaterThan(
         before.signals.focus);
-      // The read that brought the transcript back named the revision it held instead of assuming the rows.
-      annotate(`first return: conditional reads=${conditionalAfter(returned.revisions,
-        before.revisions.length)} of ${returned.revisions.length - before.revisions.length}`);
-      expect(conditionalAfter(returned.revisions, before.revisions.length),
-        'no conditional read ran on return').toBeGreaterThan(0);
+      // The return asked the digest, and the read that followed it named no baseline.
+      annotate(`first return: sync calls ${before.sync} -> ${returned.sync}, ` +
+        `reads=${returned.revisions.length - before.revisions.length}`);
+      expect(returned.sync, 'the return asked nothing of the server').toBeGreaterThan(before.sync);
+      expect(unconditionalAfter(returned.revisions, before.revisions.length),
+        'the return revalidated a baseline instead of reading the rows').toBe(true);
 
       // Nothing on screen lacks a stored row, nothing is drawn twice, and the newest rows sit at the bottom.
       const newest = await rowPage(page, projectId, taskId, '');

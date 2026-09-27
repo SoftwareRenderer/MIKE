@@ -62,9 +62,10 @@ describe('sessions API', () => {
         expect(calls[0][0]).toBe('/api/sessions');
         const init = calls[0][1] || {};
         expect(init.method ?? 'GET').not.toBe('POST');
-        // Credentials ride apiFetch, and the CSRF header is attached.
+        // Credentials ride apiFetch. The CSRF header does not: the middleware guards unsafe methods only,
+        // so a read carries the cookie and nothing else (`docs/api-contract.md → Route verbs`).
         expect(init.credentials).toBe('include');
-        expect(headerOf(calls[0], 'X-CSRF-Token')).toBe('test-token');
+        expect(headerOf(calls[0], 'X-CSRF-Token')).toBeNull();
     });
 
     it('revokeSession DELETEs /api/sessions/{id} with the CSRF header', async () => {

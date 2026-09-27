@@ -64,7 +64,7 @@ func TaskCommitsIn(dir, baseRef, headRef string) (*TaskCommitsResult, error) {
 	// The divergence point is display metadata: an unresolvable baseRef still leaves a
 	// commit list worth showing.
 	if baseRef != "" {
-		if baseOut, err := runGitInDir(dir, "log", taskCommitFormat, "-1", "--end-of-options", baseRef); err == nil {
+		if baseOut, err := Run(dir, "log", taskCommitFormat, "-1", "--end-of-options", baseRef); err == nil {
 			if base := ParseTaskCommits(baseOut); len(base) > 0 {
 				result.BaseCommit = &base[0]
 			}
@@ -75,17 +75,10 @@ func TaskCommitsIn(dir, baseRef, headRef string) (*TaskCommitsResult, error) {
 	if baseRef != "" {
 		ref = baseRef + ".." + headRef
 	}
-	out, err := runGitInDir(dir, "log", taskCommitFormat, "--end-of-options", ref)
+	out, err := Run(dir, "log", taskCommitFormat, "--end-of-options", ref)
 	if err != nil {
 		return nil, fmt.Errorf("git log: %w", err)
 	}
 	result.Commits = ParseTaskCommits(out)
 	return result, nil
-}
-
-// runGitInDir runs git in dir and returns what it printed.
-func runGitInDir(dir string, args ...string) (string, error) {
-	cmd := Command("", append([]string{"-C", dir}, args...)...)
-	out, err := cmd.CombinedOutput()
-	return string(out), err
 }

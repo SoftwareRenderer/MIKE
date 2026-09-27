@@ -112,9 +112,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if h.configStore != nil {
-			if cfg, err := h.configStore.GetConfig(); err == nil {
-				EnrichWorktreeExists(tasks, cfg.WorkspaceDir)
-			}
+			EnrichWorktreeExists(tasks, h.configStore.WorkspaceDir())
 		}
 		// Refresh assigned ports from live sandbox containers
 		for i := range tasks {
@@ -307,9 +305,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if h.configStore != nil {
-			if cfg, err := h.configStore.GetConfig(); err == nil {
-				enrichTaskWorktree(task, cfg.WorkspaceDir)
-			}
+			enrichTaskWorktree(task, h.configStore.WorkspaceDir())
 		}
 		h.refreshTaskPorts(task)
 		httputil.JSONResponse(w, http.StatusOK, task)
@@ -377,9 +373,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			h.propagateSubtasksAutoMerge(projectID, taskID, task.SubtasksAutoMerge)
 		}
 		if h.configStore != nil {
-			if cfg, err := h.configStore.GetConfig(); err == nil {
-				enrichTaskWorktree(task, cfg.WorkspaceDir)
-			}
+			enrichTaskWorktree(task, h.configStore.WorkspaceDir())
 		}
 		h.refreshTaskPorts(task)
 		h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -394,6 +388,26 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		httputil.MethodNotAllowed(w)
 	}
+}
+
+// HandleSync answers the digest a window asks when it comes back; `syncDigest` builds the body. The answer must
+// not be kept, and the handler sets no ETag so CompressMiddleware can supply one.
+func (h *TaskHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
+	if err := types.ValidateTaskID(r.PathValue("taskID")); err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	task, ok := resolveTask(w, r, h.store)
+	if !ok {
+		return
+	}
+	digest, err := h.syncDigest(task)
+	if err != nil {
+		httputil.Fault(w, "count task messages", err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	httputil.JSONResponse(w, http.StatusOK, digest)
 }
 
 // HandleClearDone deletes all tasks with status 'done' for a project.
@@ -1230,11 +1244,8 @@ func (h *TaskHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
 	}
 	logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("worktree ready")
 	// Enrich with worktree existence so the frontend knows the terminal is available
-	if h.worktreeMgr != nil {
-		cfg, _ := h.configStore.GetConfig()
-		if cfg != nil {
-			enrichTaskWorktree(task, cfg.WorkspaceDir)
-		}
+	if h.worktreeMgr != nil && h.configStore != nil {
+		enrichTaskWorktree(task, h.configStore.WorkspaceDir())
 	}
 	h.refreshTaskPorts(task)
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)

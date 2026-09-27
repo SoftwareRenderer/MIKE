@@ -5,7 +5,7 @@
     import { computeStickyHeader, turnLabel, type StickyTurn } from '$lib/utils/chat-sticky-header';
     import { scrollToLine } from '$lib/utils/settle-scroll';
     import { isAtBottom, type ChatFollow } from '$lib/composables/use-chat-follow.svelte';
-    import { atTopOfList } from '$lib/utils/chat-window';
+    import { atTopOfList, type WindowReadNotice } from '$lib/utils/chat-window';
     import ChatMessage from './ChatMessage.svelte';
     import CheckpointDivider from './CheckpointDivider.svelte';
     import QueueIndicator from './QueueIndicator.svelte';
@@ -91,8 +91,9 @@
         /** Older rows exist beyond the window on screen; scrolling to the top edge asks for them. */
         hasEarlier?: boolean;
         loadingEarlier?: boolean;
-        /** Why what is on screen may not be the newest copy of the conversation. */
-        historyNotice?: 'cached' | 'failed' | 'owing' | null;
+        /** Why what is on screen may not be the newest copy of the conversation. `'pending'` is not a fault:
+         * the rows are this browser's own and the read that replaces them is still out. */
+        historyNotice?: WindowReadNotice;
         /** Ask the server again — what the notice offers beside the fact it reports. */
         onRetryHistory?: () => void;
         /** Fetch the next-older window, called when the reader reaches the top edge. Whether rows
@@ -364,7 +365,7 @@
         </div>
     {/if}
 
-    {#if historyNotice}
+    {#if historyNotice === 'cached' || historyNotice === 'failed' || historyNotice === 'owing'}
         <p class="history-notice" role="status">
             {historyNotice === 'cached'
                 ? t('chat.entries.historyCached')
@@ -549,6 +550,16 @@
                 </svg>
                 <span class="chat-jump-latest-label">{t('chat.entries.latest')}</span>
             </button>
+        {/if}
+
+        {#if historyNotice === 'pending'}
+            <!-- The rows on screen are this browser's own copy and the read that replaces them is still out.
+                 Out of the scroll region's flow, and only its opacity animates: a row must not move because
+                 this appeared or went. It floats at the opposite corner from the jump button, so a reader who
+                 scrolls away while the read is out gets both. -->
+            <div class="chat-pending" role="status" aria-label={t('chat.entries.loading')}>
+                <span class="chat-pending-spinner" aria-hidden="true"></span>
+            </div>
         {/if}
 
         <!-- The wait line. Without a lock wait it shows on the provider's request/task slots, which is what
@@ -916,6 +927,35 @@
         from { opacity: 0; transform: translateY(8px); }
         to { opacity: 1; transform: translateY(0); }
     }
+
+    /* The wait for a window read, floating over a transcript this browser drew from its own cache.
+       Absolute rather than in the flex column: the rows above it keep their offsets while it is on screen.
+       Bottom-left, where the jump button never reaches — it owns bottom-right, and it appears only once the
+       reader has scrolled away from the bottom this paint pins to. */
+    .chat-pending {
+        position: absolute;
+        bottom: 12px;
+        left: 12px;
+        z-index: 3;
+        display: flex;
+        padding: 7px 9px;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+        pointer-events: none;
+        animation: chat-pending-in 0.2s ease-out;
+    }
+    .chat-pending-spinner {
+        display: block;
+        width: 14px;
+        height: 14px;
+        border: 2px solid var(--color-text-secondary);
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+    }
+    @keyframes chat-pending-in { from { opacity: 0; } to { opacity: 1; } }
 
     /* Sandbox build/pull progress box — mirrors the Sandbox config modal's build log */
     .build-box {

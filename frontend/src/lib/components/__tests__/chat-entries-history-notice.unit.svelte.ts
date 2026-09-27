@@ -55,6 +55,22 @@ function noticeLine(container: HTMLElement): HTMLElement | null {
     return container.querySelector('.history-notice');
 }
 
+/** The rows a pending paint floats over: an empty transcript gets the loading screen instead. */
+function heldRows(n = 2) {
+    const entries = Array.from({ length: n }, (_, i) => ({
+        id: `row-${i}`, role: 'assistant', content: `answer ${i}`, isStreaming: false,
+        createdAt: new Date().toISOString(),
+    }));
+    return {
+        entries,
+        entryMetas: entries.map(() => ({
+            cpState: null, cpThread: null, checkpointIndex: -1,
+            isLastUserMessage: false, isFirstUserMessage: false,
+        })),
+        lastEntryIdx: n - 1,
+    };
+}
+
 describe('ChatEntries — what the transcript says about itself', () => {
     it('says the running turn is all it has when the server still owes this client', () => {
         const { container } = render(ChatEntries, props({ historyNotice: 'owing' }));
@@ -89,5 +105,20 @@ describe('ChatEntries — what the transcript says about itself', () => {
         const { container } = render(ChatEntries, props({ historyNotice: 'failed', onRetryHistory }));
         await fireEvent.click(container.querySelector('.history-notice-retry') as Element);
         expect(onRetryHistory).toHaveBeenCalledTimes(1);
+    });
+
+    it('wears no fault vocabulary while a read is still out', () => {
+        const { container } = render(ChatEntries, props({ historyNotice: 'pending', ...heldRows() }));
+        expect(noticeLine(container)).toBeNull();
+        // The fact is still said, just as a wait: the spinner carries the loading string as its name.
+        const pending = container.querySelector('.chat-pending');
+        expect(pending?.getAttribute('role')).toBe('status');
+        expect(pending?.getAttribute('aria-label')).toContain('Loading conversation');
+    });
+
+    it('gives the band back when the read a pending paint floated over does not answer', () => {
+        const { container } = render(ChatEntries, props({ historyNotice: 'failed', ...heldRows() }));
+        expect(container.querySelector('.chat-pending')).toBeNull();
+        expect(noticeLine(container)?.textContent).toContain('Could not read this conversation');
     });
 });

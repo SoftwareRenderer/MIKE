@@ -37,6 +37,8 @@ export interface StreamHandlerCallbacks {
     updateThreadUrl: (threadId: string) => void;
     /** Reports a failure the client has not shown yet — never called for a replayed frame. */
     onNewError?: () => void;
+    /** Reports that this screen threw away content no later read can redraw, so its transcript is behind. */
+    onDiverged?: () => void;
 }
 
 /**
@@ -49,7 +51,7 @@ export interface StreamHandlerCallbacks {
  *   // In WebSocket onmessage: handleEvent(event);
  */
 export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallbacks) {
-    const { genId, scroll, markStreaming, markNotStreaming, onRefreshDiff, onThreadSwitch, loadHistory, updateActiveThread, updateThreadUrl, onNewError } = cb;
+    const { genId, scroll, markStreaming, markNotStreaming, onRefreshDiff, onThreadSwitch, loadHistory, updateActiveThread, updateThreadUrl, onNewError, onDiverged } = cb;
     const s = stream.state;
 
     // rAF batching for scroll — coalesces rapid calls during token bursts
@@ -356,6 +358,8 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     if (discarded.length > 0) {
                         const gone = new Set(discarded);
                         s.processedToolIds = new Set([...s.processedToolIds].filter(id => !gone.has(id)));
+                        // A card this screen threw may never be answered by a row, so nothing else redraws it.
+                        onDiverged?.();
                     }
                     s.queuePosition = 0;
                     s.queueEstimatedWait = 0;

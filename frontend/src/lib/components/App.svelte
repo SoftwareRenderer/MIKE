@@ -534,6 +534,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 sessionBoot.servingFromCache = false;
                 reportRefusedWrites();
             });
+            // Config answers for the server and counts for every project, so neither queues behind a board
+            // it has nothing to do with. Both are *delivered* where they were delivered before, after the
+            // board landed: the Review ledger reads counts in the order it is told about them, and the
+            // board on screen is what makes a rise on this project explainable
+            // (`docs/notifications.md → The ledger`).
+            const configRead = getConfig().catch(() => null);
+            const countsRead = getProjectCounts().catch(() => null);
             const projs = await getProjects();
             appStore.projects = projs || [];
             if (appStore.projects.length > 0) {
@@ -547,20 +554,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 // Check if data was served from cache
                 sessionBoot.servingFromCache = isFromCache(projs);
             }
-            // Load config (best-effort — cache fallback inside getConfig)
-            try {
-                const c = await getConfig();
-                appStore.config = c;
-            } catch {
-                // No cached config — proceed without it
-            }
-            // Fetch initial project counts (best-effort, no cache fallback)
-            try {
-                const counts = await getProjectCounts();
-                applyProjectCounts(counts);
-            } catch {
-                // Use defaults — counts are non-critical
-            }
+            // Best-effort each: a server that answers one and not the other still paints what it can.
+            const c = await configRead;
+            if (c) appStore.config = c;
+            const counts = await countsRead;
+            if (counts) applyProjectCounts(counts);
         } catch (e) {
             console.error('Failed to load:', e);
         }

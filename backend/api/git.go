@@ -753,7 +753,7 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	taskDiff, err := h.worktreeMgr.GetTaskDiff(taskID, baseRef, headRef, fullDiff)
 	if err != nil {
 		if task.Branch != "" && errors.Is(err, git.ErrWorktreeNotFound) {
-			taskDiff, err = h.getTaskDiffFromProject(projectID, task, baseRef, headRef)
+			taskDiff, err = h.getTaskDiffFromProject(projectID, task, baseRef, headRef, fullDiff)
 		}
 		if code, ok := git.GitExitCode(err); ok && code == 128 {
 			httputil.JSONError(w, http.StatusNotFound, "worktree not found")
@@ -1011,9 +1011,8 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 	httputil.JSONError(w, http.StatusNotFound, "file not found in diff")
 }
 
-// getTaskDiffFromProject runs git diff in the project repo for a task whose worktree is gone, diffing
-// baseRef against BranchTip when it was captured at commit time, else Branch.
-func (h *GitHandler) getTaskDiffFromProject(projectID string, task *types.Task, baseRef, headRef string) (*git.TaskDiff, error) {
+// getTaskDiffFromProject answers the diff of a task whose worktree is gone.
+func (h *GitHandler) getTaskDiffFromProject(projectID string, task *types.Task, baseRef, headRef string, fullDiff bool) (*git.TaskDiff, error) {
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
 		return nil, err
@@ -1024,30 +1023,14 @@ func (h *GitHandler) getTaskDiffFromProject(projectID string, task *types.Task, 
 		baseRef = task.BaseCommit
 	}
 
-	var refSpec string
-	if headRef != "" {
-		refSpec = fmt.Sprintf("%s..%s", baseRef, headRef)
-	} else {
-		target := task.BranchTip
-		if target == "" {
-			target = task.Branch
-		}
-		refSpec = fmt.Sprintf("%s..%s", baseRef, target)
+	target := headRef
+	if target == "" {
+		target = task.BranchTip
 	}
-
-	c := git.Command("", "-C", project.Path, "diff", refSpec)
-	out, err := c.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("git diff from project: %s: %w", string(out), err)
+	if target == "" {
+		target = task.Branch
 	}
-
-	shortStatOut, _ := git.Command("", "-C", project.Path, "diff", "--shortstat", refSpec).CombinedOutput()
-
-	return &git.TaskDiff{
-		Diff:      string(out),
-		Untracked: []git.UntrackedFile{},
-		ShortStat: string(shortStatOut),
-	}, nil
+	return h.worktreeMgr.TaskDiffFromRepo(project.Path, baseRef, target, fullDiff)
 }
 
 // stageOrUnstage applies one file's staged state in dir, with every path after `--` so a path like "-f"

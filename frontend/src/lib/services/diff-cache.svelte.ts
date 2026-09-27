@@ -210,6 +210,27 @@ export class DiffCache {
         }
     }
 
+    /** Reconcile with the server's current manifest, keeping the open file, the checkpoint overlay and the
+     * from/to comparison. A full `loadDiff` closes those, and a failed refresh leaves the panel as it was. */
+    async refreshManifest(options?: { headRef?: string; baseRef?: string }): Promise<void> {
+        if (this.state.loading) return; // a full load is already under way and answers the same question
+        const gen = this.loadGen;
+        const oldHashes = { ...this.fileHashes };
+        this.state.loading = true;
+        try {
+            const result = await this._apis.getTaskDiff(this._getProjectId(), this._getTaskId(), { ...options, parsed: true });
+            if (gen !== this.loadGen) return; // a full load started underneath this one and owns the state now
+            if (result.diff) {
+                this.updateDiffFromFiles(toDiffFiles(result.parsed_files ?? []));
+                return;
+            }
+            this.updateDiff(result);
+            if (result.files) await this.fetchChangedFiles(result.files, oldHashes);
+        } finally {
+            if (gen === this.loadGen) this.state.loading = false;
+        }
+    }
+
     /** Update cache from a full diff manifest response or a raw diff string.
      * When data.diff is present (e.g., commit-to-commit diff for done tasks),
      * the diff rows are already parsed by the caller and passed via data.files.

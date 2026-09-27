@@ -18,6 +18,7 @@
     import { explorerPathHref } from '$lib/utils/app-link';
     import { confirmList, pasteTarget, rowIsSelectable } from '$lib/utils/file-selection';
     import { baseName, folderName } from '$lib/utils/path';
+    import { errorText } from '$lib/utils/error-text';
     import type { FsEvent } from '$lib/utils/fs-event';
 
     /** A row's extra badge — the project explorer's git status letter and nothing else. */
@@ -177,7 +178,7 @@
                 retrying = true;
             }
             if (!retrying) {
-                error = String(e);
+                error = errorText(e, t('explorer.shared.errReadDir'));
                 entries = [];
             }
         } finally {
@@ -219,7 +220,7 @@
             loadDir(currentPath);
             onMutated?.();
         } catch (e) {
-            createError = String(e);
+            createError = errorText(e, t('explorer.shared.errCreateFile'));
         } finally {
             creating = false;
         }
@@ -238,7 +239,7 @@
             await loadDir(newPath); // a new folder is opened into
             onMutated?.();
         } catch (e) {
-            createFolderError = String(e);
+            createFolderError = errorText(e, t('explorer.shared.errCreateFolder'));
         } finally {
             creatingFolder = false;
         }

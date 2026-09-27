@@ -155,6 +155,46 @@ export function pendingToolIds(entries: ChatEntry[]): Set<string> {
     return ids;
 }
 
+/** A stored conversation row, as far as the Review predicate reads it. */
+export interface WindowRow {
+    role: string;
+    tool_calls?: string;
+    tool_result?: string;
+    /** Sub-classification within a role: an advisory row, not a turn doing work. */
+    kind?: string;
+}
+
+/** A tool-call row the server has answered: no `tool_result` is a call still in flight, which is the same
+ * reading `buildEntriesFromMessages` takes. Payload that will not read is not evidence of anything. */
+function isAnsweredToolCall(row: WindowRow, toolName: string): boolean {
+    if (row.role !== 'tool_call' || !row.tool_result) return false;
+    try {
+        return JSON.parse(String(row.tool_calls))?.tool_name === toolName;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * True when a conversation window ends on a `request_review` result — the shape of a turn that finished and
+ * asked for its reader.
+ *
+ * This is what lets an open draw the rows this browser already holds while its newest-window read is still
+ * out: a window that ends on a Review result holds nothing that can still move, so nothing is lost by
+ * showing it a round trip early. Any other newest row means the opposite — a user row is a send nothing has
+ * answered, a `tool_call` without its result is work in flight — and then the browser's copy stays in the
+ * cache. Advisory rows (`kind`) are walked past: a diagnostics or merge-conflict row after the card is still
+ * a screen that ended in Review.
+ */
+export function endsOnReviewResult(rows: WindowRow[]): boolean {
+    for (let i = rows.length - 1; i >= 0; i--) {
+        const row = rows[i]!;
+        if (row.role === 'title' || row.kind) continue;
+        return isAnsweredToolCall(row, 'request_review');
+    }
+    return false;
+}
+
 /** The user messages with nothing after them — the ones whose edit offers "Send" rather than "New Thread". */
 export function computeLastUserMessageIds(entries: ChatEntry[]): Set<string> {
     const ids = new Set<string>();
@@ -451,6 +491,24 @@ export function mergeLoadedHistory(
         seenIds.add(e.id);
         return true;
     });
+}
+
+/** True when no stored row could hold this entry yet: the turn streaming now, an unanswered call, a send the
+ * server has not accepted, a build still running. */
+function awaitsRow(entry: ChatEntry): boolean {
+    return !!entry.isStreaming || !!entry.queued
+        || !!entry.buildLog && entry.buildLog.done !== true
+        || (entry.toolCalls?.some(tc => tc.isPending) ?? false);
+}
+
+/**
+ * The tail of the transcript from the first entry that has no stored row yet, oldest first. A merge can only
+ * append, so an older entry kept through a replaced window lands below the newest answers.
+ * `docs/reconnection.md → The tab that comes back`.
+ */
+export function entriesAwaitingRows(entries: ChatEntry[]): ChatEntry[] {
+    const from = entries.findIndex(awaitsRow);
+    return from === -1 ? [] : entries.slice(from);
 }
 
 /**
