@@ -158,10 +158,9 @@ export class UIInjector {
     private channels = new Map<HTMLElement, Map<string, ExtensionHostChannel>>();
     private version = $state(0);
     private activeCSSUrl = $state<string | null>(null);
-    /** The installed set this registration was built from, and the drop its change started. */
+    /** The installed set this registration was built from. */
     private extensionsFingerprint = '';
     private hasBaseline = false;
-    assetCacheDropped: Promise<void> = Promise.resolve();
 
     registerFromExtensions(extensions: Extension[]) {
         this.destroyAll();
@@ -173,7 +172,7 @@ export class UIInjector {
         // compare against and deleting would cost the offline fallback for free.
         const fingerprint = extensionSetFingerprint(extensions);
         if (this.hasBaseline && fingerprint !== this.extensionsFingerprint) {
-            this.assetCacheDropped = dropExtensionAssetCache();
+            void dropExtensionAssetCache();
         }
         this.extensionsFingerprint = fingerprint;
         this.hasBaseline = true;

@@ -30,6 +30,10 @@ function stubCaches(): { delete: ReturnType<typeof vi.fn> } {
     return { delete: del };
 }
 
+/** The drop is fire-and-forget — nothing in the app awaits it — so a test of it waits for
+ *  the queue to drain instead of holding a handle on the promise. */
+const drained = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 afterEach(() => {
     vi.unstubAllGlobals();
     uiInjector.clearCache();
@@ -96,24 +100,24 @@ describe('the injector drops the asset cache when the installed set moved', () =
         const one = [ext({})];
 
         uiInjector.registerFromExtensions(one);
-        await uiInjector.assetCacheDropped;
+        await drained();
         expect(caches.delete).not.toHaveBeenCalled(); // the first list is the baseline
 
         uiInjector.registerFromExtensions(one);
-        await uiInjector.assetCacheDropped;
+        await drained();
         expect(caches.delete).not.toHaveBeenCalled();
 
         uiInjector.registerFromExtensions([ext({ commit: 'deadbeef' })]);
-        await uiInjector.assetCacheDropped;
+        await drained();
         expect(caches.delete).toHaveBeenCalledTimes(1);
     });
 
     it('drops when an extension is gone, which is the case that matters most', async () => {
         const caches = stubCaches();
         uiInjector.registerFromExtensions([ext({})]);
-        await uiInjector.assetCacheDropped;
+        await drained();
         uiInjector.registerFromExtensions([]);
-        await uiInjector.assetCacheDropped;
+        await drained();
         expect(caches.delete).toHaveBeenCalledWith(EXTENSION_ASSET_CACHE);
     });
 });

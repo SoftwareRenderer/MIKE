@@ -88,7 +88,3 @@ function rowBehind(held: HeldRow, digest: TaskSyncDigest): boolean {
     if (held.mergeConflict !== undefined && held.mergeConflict !== digest.has_merge_conflict) return true;
     return false;
 }
-
-export function needsResync(verdict: SyncVerdict): boolean {
-    return verdict.conversation || verdict.diff || verdict.row;
-}

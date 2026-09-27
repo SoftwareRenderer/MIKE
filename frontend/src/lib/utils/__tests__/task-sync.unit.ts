@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { heldFromDigest, needsResync, resyncPlan, type HeldView } from '../task-sync';
+import { heldFromDigest, resyncPlan, type HeldView } from '../task-sync';
 import type { TaskSyncDigest } from '$lib/types';
 
 // The verdict a returning window acts on: which part of the task view the server says has moved.
@@ -26,7 +26,6 @@ describe('resyncPlan', () => {
     it('owes nothing when the server matches what this screen applied', () => {
         const verdict = resyncPlan(held(), digest());
         expect(verdict).toEqual({ conversation: false, diff: false, row: false });
-        expect(needsResync(verdict)).toBe(false);
     });
 
     it('names the conversation for each way it can have moved', () => {
@@ -57,8 +56,7 @@ describe('resyncPlan', () => {
 
     it('treats an unknown diff as nothing, never as changed', () => {
         const verdict = resyncPlan(held(), digest({ diff: { known: false, staged: 0 } }));
-        expect(verdict.diff).toBe(false);
-        expect(needsResync(verdict)).toBe(false);
+        expect(verdict).toEqual({ conversation: false, diff: false, row: false });
     });
 
     it('names the diff for a panel that has drawn nothing while the server holds a manifest', () => {

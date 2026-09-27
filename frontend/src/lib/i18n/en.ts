@@ -955,7 +955,6 @@ const catalog = {
     'api.fetchCommits': 'Failed to fetch commits',
     'api.fetchFileContent': 'Failed to fetch file content',
     'api.fetchTaskGitLog': 'Failed to fetch task git log',
-    'api.fetchTaskCommitDiff': 'Failed to fetch task commit diff',
     'api.createProject': 'Failed to create project',
     'api.updateProject': 'Failed to update project',
     'api.buildSandboxImage': 'Failed to build sandbox image',

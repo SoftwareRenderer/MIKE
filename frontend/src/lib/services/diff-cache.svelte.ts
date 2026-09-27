@@ -57,9 +57,6 @@ export class DiffCache {
     /** Per-file hash tracker for incremental updates. */
     fileHashes: Record<string, string> = {};
 
-    /** Gate: delta processing only starts after initial load completes. */
-    initialLoaded = false;
-
     /** Generation counter — incremented on each full loadDiff(). */
     loadGen = 0;
 
@@ -175,7 +172,6 @@ export class DiffCache {
                 this.state.files = {};
                 this.state.untracked = {};
                 this.fileHashes = {};
-                this.initialLoaded = false;
                 this.tracker.stagedPathsKey = '';
                 return;
             }
@@ -326,7 +322,6 @@ export class DiffCache {
         this.state.files = {};
         this.state.untracked = {};
         this.fileHashes = {};
-        this.initialLoaded = false;
         // Bump generation
         this.loadGen++;
         // Reset tracker
@@ -359,7 +354,6 @@ export class DiffCache {
             this.fileHashes = {};
         } finally {
             this.state.loading = false;
-            this.initialLoaded = true;
         }
     }
 
@@ -638,7 +632,6 @@ export class DiffCache {
         this.state.untracked = {};
         this.state.baseRef = '';
         this.fileHashes = {};
-        this.initialLoaded = false;
     }
 
 }
