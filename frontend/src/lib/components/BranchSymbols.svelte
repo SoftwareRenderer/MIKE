@@ -78,23 +78,29 @@
         }
     }
 
+    /**
+     * A symbol glyph wears the colour the editor gives that syntax, so the two never disagree: these are
+     * the `--cm-*` tokens a theme paints syntax with, referenced rather than copied, and resolved by the
+     * `style` attribute that reads them.
+     */
     function getSymbolColor(kind: string): string {
         switch (kind) {
-            case 'function': return '#D2A8FF';
-            case 'method': return '#D2A8FF';
-            case 'class': return '#FFA657';
-            case 'struct': return '#FFA657';
-            case 'enum': return '#FFA657';
-            case 'interface': return '#FFA657';
-            case 'constant': return '#79C0FF';
-            case 'property': return '#79C0FF';
-            case 'field': return '#79C0FF';
-            case 'variable': return '#FFA657';
-            case 'module': return '#7EE787';
-            case 'namespace': return '#7EE787';
-            case 'package': return '#7EE787';
-            case 'heading': return '#7EE787';
-            default: return '#AEB2B8';
+            case 'function': return 'var(--cm-function)';
+            case 'method': return 'var(--cm-function)';
+            case 'class': return 'var(--cm-class)';
+            case 'struct': return 'var(--cm-class)';
+            case 'enum': return 'var(--cm-class)';
+            case 'interface': return 'var(--cm-class)';
+            case 'constant': return 'var(--cm-keyword-const)';
+            case 'property': return 'var(--cm-keyword-const)';
+            case 'field': return 'var(--cm-keyword-const)';
+            case 'variable': return 'var(--cm-class)';
+            case 'module': return 'var(--cm-tag)';
+            case 'namespace': return 'var(--cm-tag)';
+            case 'package': return 'var(--cm-tag)';
+            case 'heading': return 'var(--cm-tag)';
+            // A kind with no syntax of its own is ordinary text.
+            default: return 'var(--color-text-secondary)';
         }
     }
 

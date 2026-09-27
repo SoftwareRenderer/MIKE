@@ -322,7 +322,7 @@
         background: var(--color-surface-3);
     }
     .editor-tab.unsaved .btn-close-tab {
-        color: var(--color-status-yellow, #f0c000);
+        color: var(--color-status-yellow);
     }
 
     .editor-tab-actions {

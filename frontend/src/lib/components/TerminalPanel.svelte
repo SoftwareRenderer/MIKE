@@ -1,5 +1,6 @@
 <script lang="ts">
     import { Z } from '$lib/constants/z-layers';
+    import { terminalTheme } from '$lib/constants/terminal-theme';
     import { onMount } from 'svelte';
     import { Terminal } from '@xterm/xterm';
     import { FitAddon } from '@xterm/addon-fit';
@@ -281,12 +282,7 @@
             fontSize: 13,
             lineHeight: 1.4,
             fontFamily: '"Noto Sans Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-            theme: {
-                background: getComputedStyle(document.documentElement).getPropertyValue('--color-terminal-bg').trim() || '#1F2428',
-                foreground: getComputedStyle(document.documentElement).getPropertyValue('--color-terminal-fg').trim() || '#E6EDF3',
-                cursor: getComputedStyle(document.documentElement).getPropertyValue('--color-terminal-cursor').trim() || '#0084FF',
-                selectionBackground: getComputedStyle(document.documentElement).getPropertyValue('--color-terminal-selection').trim() || '#3E464E',
-            },
+            theme: terminalTheme(),
         });
 
         // Local non-null references for closures (term is Terminal | null at module level).
@@ -537,12 +533,12 @@
             overlayEl.style.cssText = `position:fixed;inset:0;z-index:${Z.max};background:transparent;pointer-events:none;`;
 
             startHandleEl = document.createElement('div');
-            startHandleEl.style.cssText = `position:fixed;z-index:${Z.max};width:28px;height:28px;cursor:grab;touch-action:none;filter:drop-shadow(0 1px 3px rgba(0,0,0,0.3));`;
+            startHandleEl.style.cssText = `position:fixed;z-index:${Z.max};width:28px;height:28px;cursor:grab;touch-action:none;filter:drop-shadow(var(--shadow-raised));`;
             const sSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
             sSvg.setAttribute('width', '28');
             sSvg.setAttribute('height', '28');
             sSvg.setAttribute('viewBox', '0 0 28 28');
-            sSvg.innerHTML = '<path d="M28,0 L14,0 A14,14 0 0,0 14,28 A14,14 0 0,0 28,14 L28,0 Z" fill="#0084FF"/>';
+            sSvg.innerHTML = '<path d="M28,0 L14,0 A14,14 0 0,0 14,28 A14,14 0 0,0 28,14 L28,0 Z" style="fill: var(--color-accent)"/>';
             startHandleEl.appendChild(sSvg);
 
             endHandleEl = document.createElement('div');
@@ -551,23 +547,23 @@
             eSvg.setAttribute('width', '28');
             eSvg.setAttribute('height', '28');
             eSvg.setAttribute('viewBox', '0 0 28 28');
-            eSvg.innerHTML = '<path d="M0,0 L14,0 A14,14 0 0,1 14,28 A14,14 0 0,1 0,14 L0,0 Z" fill="#0084FF"/>';
+            eSvg.innerHTML = '<path d="M0,0 L14,0 A14,14 0 0,1 14,28 A14,14 0 0,1 0,14 L0,0 Z" style="fill: var(--color-accent)"/>';
             endHandleEl.appendChild(eSvg);
 
             // Pill container.
             btnBarEl = document.createElement('div');
-            btnBarEl.style.cssText = `position:fixed;z-index:${Z.max};display:flex;align-items:center;background:#0084FF;border-radius:var(--radius-pill);box-shadow:0 2px 12px rgba(0,0,0,0.4);overflow:hidden;`;
+            btnBarEl.style.cssText = `position:fixed;z-index:${Z.max};display:flex;align-items:center;background:var(--color-accent);border-radius:var(--radius-pill);box-shadow:var(--shadow-popover);overflow:hidden;`;
 
             copyBtnEl = document.createElement('button');
             copyBtnEl.textContent = t('terminal.copy');
-            copyBtnEl.style.cssText = 'padding:7px 16px;border:none;background:transparent;color:#fff;font-size:var(--text-base);font-weight:600;font-family:system-ui,sans-serif;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
+            copyBtnEl.style.cssText = 'padding:7px 16px;border:none;background:transparent;color:var(--color-btn-text);font-size:var(--text-base);font-weight:600;font-family:system-ui,sans-serif;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
 
             const divider = document.createElement('div');
-            divider.style.cssText = 'width:1px;height:20px;background:rgba(255,255,255,0.3);';
+            divider.style.cssText = 'width:1px;height:20px;background:var(--color-border-bright);';
 
             pasteBtnEl = document.createElement('button');
             pasteBtnEl.textContent = t('terminal.paste');
-            pasteBtnEl.style.cssText = 'padding:7px 16px;border:none;background:transparent;color:#fff;font-size:var(--text-base);font-weight:600;font-family:system-ui,sans-serif;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
+            pasteBtnEl.style.cssText = 'padding:7px 16px;border:none;background:transparent;color:var(--color-btn-text);font-size:var(--text-base);font-weight:600;font-family:system-ui,sans-serif;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
             pasteBtnEl.addEventListener('mousedown', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -906,7 +902,7 @@
     .terminal-overlay {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.3);
+        background: rgb(from var(--color-backdrop) r g b / 0.3);
         z-index: var(--z-overlay);
         border: none;
         padding: 0;
@@ -979,8 +975,8 @@
         gap: 4px;
         padding: 2px 8px;
         border-radius: var(--radius-pill);
-        background: rgba(80, 140, 255, 0.12);
-        border: 1px solid rgba(80, 140, 255, 0.25);
+        background: rgb(from var(--color-accent-light) r g b / 0.12);
+        border: 1px solid rgb(from var(--color-accent-light) r g b / 0.25);
         color: var(--color-accent-light);
         font-size: var(--text-xs);
         font-family: var(--font-mono, monospace);

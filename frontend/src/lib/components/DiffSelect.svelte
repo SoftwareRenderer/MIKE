@@ -125,7 +125,7 @@
         max-height: 240px;
         overflow-y: auto;
         z-index: var(--z-dropdown);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        box-shadow: var(--shadow-popover);
         padding: 2px;
     }
     .sel-option {

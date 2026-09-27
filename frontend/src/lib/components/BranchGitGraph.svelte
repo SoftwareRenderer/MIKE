@@ -290,11 +290,11 @@
         transform: translateX(-50%);
         width: 1.5px;
         height: calc(100% + 6px);
-        background: rgba(163, 113, 247, 0.3);
+        background: rgb(from var(--color-status-purple) r g b / 0.3);
     }
     /* Blue timeline line for unpushed rows */
     .git-commit-row.unpushed .git-timeline::before {
-        background: rgba(76, 154, 255, 0.3);
+        background: rgb(from var(--color-status-blue) r g b / 0.3);
     }
 
     .git-dot {

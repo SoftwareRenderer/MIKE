@@ -206,7 +206,7 @@
                 <div class="path-bar">
                 <div class="path-bar-row">
                     <button class="home-btn" onclick={goHome} aria-label={t('explorer.shared.goHome')} title={t('explorer.shared.goHome')}>
-                        <Icon src={homeIcon} color="#8B949E" width={18} height={18} />
+                        <Icon src={homeIcon} color="var(--color-text-tertiary)" width={18} height={18} />
                     </button>
                     <input
                         type="text"
@@ -281,9 +281,9 @@
                             >
                                 <span class="icon" aria-hidden="true">
                                     {#if entry.isDir}
-                                        <Icon src={folderIcon} color="#6E7681" width={16} height={16} />
+                                        <Icon src={folderIcon} color="var(--color-text-muted)" width={16} height={16} />
                                     {:else}
-                                        <Icon src={fileIcon} color="#6E7681" width={16} height={16} />
+                                        <Icon src={fileIcon} color="var(--color-text-muted)" width={16} height={16} />
                                     {/if}
                                 </span>
                                 <span class="name">{entry.name}</span>
@@ -567,6 +567,6 @@
     }
     .sandbox-toggle input[type="checkbox"] {
         cursor: pointer;
-        accent-color: var(--color-primary);
+        accent-color: var(--color-accent);
     }
 </style>

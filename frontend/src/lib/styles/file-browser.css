@@ -199,7 +199,7 @@
 :global(.file-browser .file-browser-item.selected),
 :global(.file-browser .file-browser-item.selected:hover) {
     background: var(--color-accent-dark);
-    color: #fff;
+    color: var(--color-btn-text);
     opacity: 1;
 }
 
@@ -250,13 +250,15 @@
 
 :global(.file-browser .unsaved-dot) {
     flex-shrink: 0;
-    color: var(--color-status-yellow, #f0c000);
+    color: var(--color-status-yellow);
     display: inline-flex;
     align-items: center;
     margin-left: 2px;
 }
 
-/* The one-letter git status of a path, colored by `gitStatusClass`. */
+/* The one-letter git status of a path, colored by `gitStatusClass`. These are the same `--color-git-*`
+   tokens `gitStatusColor` hands to the changes panel and the diff file badge, which is what keeps one
+   letter meaning one colour across the three surfaces. */
 :global(.file-browser .git-status-badge) {
     flex-shrink: 0;
     font-size: var(--text-2xs);
@@ -265,13 +267,13 @@
     line-height: 1;
     margin-left: 2px;
 }
-:global(.file-browser .git-status-modified) { color: var(--color-status-green, #3fb950); }
-:global(.file-browser .git-status-added) { color: var(--color-status-green, #3fb950); }
-:global(.file-browser .git-status-deleted) { color: var(--color-status-red, #f85149); }
-:global(.file-browser .git-status-untracked) { color: var(--color-text-tertiary, #8b949e); }
-:global(.file-browser .git-status-renamed) { color: var(--color-status-purple, #a371f7); }
-:global(.file-browser .git-status-unmerged) { color: var(--color-status-orange, #d29922); }
-:global(.file-browser .git-status-copied) { color: var(--color-status-blue, #58a6ff); }
+:global(.file-browser .git-status-modified) { color: var(--color-git-modified); }
+:global(.file-browser .git-status-added) { color: var(--color-git-added); }
+:global(.file-browser .git-status-deleted) { color: var(--color-git-deleted); }
+:global(.file-browser .git-status-untracked) { color: var(--color-git-untracked); }
+:global(.file-browser .git-status-renamed) { color: var(--color-git-renamed); }
+:global(.file-browser .git-status-unmerged) { color: var(--color-git-unmerged); }
+:global(.file-browser .git-status-copied) { color: var(--color-git-copied); }
 
 /* The selection action bar and its buttons belong to SelectionActionBar.svelte, which the file
    listing and the Review Changes sidebar both render. */

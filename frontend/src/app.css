@@ -39,6 +39,8 @@ input[type="number"] {
     --color-surface-2: #262626;
     --color-surface-3: #313131;
     --color-surface-4: #3C3C3C;
+    /* The lift above `--color-surface-4`: a control that is already active and being pointed at. */
+    --color-surface-5: #484848;
 
     /* Semantic backgrounds */
     --color-bg-page: #0d1117;
@@ -81,6 +83,17 @@ input[type="number"] {
     --color-status-amber: #f0c040;
     --color-warning: #d29922;
 
+    /* Git status — the one letter a changed path carries, painted the same way in the file tree, the
+       changes panel and the diff file badge. `gitStatusColor` and the `.git-status-*` classes are the
+       two readers. Modified keeps a blue of its own: green is already the colour of an added path. */
+    --color-git-added: var(--color-status-green);
+    --color-git-modified: #569CD6;
+    --color-git-deleted: var(--color-status-red);
+    --color-git-untracked: var(--color-text-tertiary);
+    --color-git-renamed: var(--color-status-purple);
+    --color-git-unmerged: var(--color-status-orange);
+    --color-git-copied: var(--color-status-blue);
+
     /* Column colors */
     --color-column-backlog: #99AAB5;
     --color-column-in-progress: #4C9AFF;
@@ -114,6 +127,24 @@ input[type="number"] {
     --cm-class: #FFA657;
     --cm-tag: #7EE787;
     --cm-attr-name: #79C0FF;
+
+    /* Shadows — one black at one alpha over three blurs. Which tier a surface takes is its rank, not a
+       measurement: `--shadow-raised` is a control lifted off the panel it sits on, `--shadow-popover` a
+       menu or tooltip that floats over content, `--shadow-modal` a dialog or full-screen panel. Where
+       black is a fill rather than a shadow (a scrim behind an open panel) take
+       `rgb(from var(--color-backdrop) r g b / a)` at the use site. */
+    --color-shadow: #000000;
+    --shadow-raised: 0 1px 3px rgb(from var(--color-shadow) r g b / 0.3);
+    --shadow-popover: 0 4px 12px rgb(from var(--color-shadow) r g b / 0.3);
+    --shadow-modal: 0 8px 32px rgb(from var(--color-shadow) r g b / 0.3);
+
+    /* The checkerboard a transparent image is shown against, and the text that sits on it. Fixed
+       regardless of theme on purpose: the pattern has to sit between a light app and a dark one so the
+       transparent parts of the image read as transparent, not as black or white — and text over it is
+       legible against the pattern, not against the theme. */
+    --color-checker-base: #6a6a6a;
+    --color-checker-square: #5a5a5a;
+    --color-checker-text: #ffffff;
 
     /* Misc */
     --color-backdrop: rgba(0, 0, 0, 0.4);

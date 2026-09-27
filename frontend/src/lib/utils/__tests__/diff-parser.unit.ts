@@ -303,19 +303,19 @@ describe('getStatusBadge', () => {
     it('shows R (Renamed) when origPath is set', () => {
         const badge = getStatusBadge(makeDiffFile({ origPath: 'old.ts' }));
         expect(badge.letter).toBe('R');
-        expect(badge.color).toBe('#d29922');
+        expect(badge.color).toBe('var(--color-git-renamed)');
     });
 
     it('shows D (Deleted) when isDeleted is true', () => {
         const badge = getStatusBadge(makeDiffFile({ isDeleted: true, removed: 5, added: 0 }));
         expect(badge.letter).toBe('D');
-        expect(badge.color).toBe('#f85149');
+        expect(badge.color).toBe('var(--color-git-deleted)');
     });
 
     it('shows A (Added) when isNewFile is true', () => {
         const badge = getStatusBadge(makeDiffFile({ isNewFile: true, added: 10, removed: 0 }));
         expect(badge.letter).toBe('A');
-        expect(badge.color).toBe('#3fb950');
+        expect(badge.color).toBe('var(--color-git-added)');
     });
 
     it('shows M (Modified) for a file with only removals but NOT actually deleted', () => {
@@ -323,25 +323,25 @@ describe('getStatusBadge', () => {
         // should NOT show "D" unless isDeleted is explicitly true
         const badge = getStatusBadge(makeDiffFile({ removed: 5, added: 0 }));
         expect(badge.letter).toBe('M');
-        expect(badge.color).toBe('#569cd6');
+        expect(badge.color).toBe('var(--color-git-modified)');
     });
 
     it('shows M (Modified) for a normal modified file', () => {
         const badge = getStatusBadge(makeDiffFile({ added: 3, removed: 2 }));
         expect(badge.letter).toBe('M');
-        expect(badge.color).toBe('#569cd6');
+        expect(badge.color).toBe('var(--color-git-modified)');
     });
 
     it('shows M (Modified) for binary files', () => {
         const badge = getStatusBadge(makeDiffFile({ isBinary: true, added: 0, removed: 0 }));
         expect(badge.letter).toBe('M');
-        expect(badge.color).toBe('#569cd6');
+        expect(badge.color).toBe('var(--color-git-modified)');
     });
 
     it('shows M (Modified) for files with only additions but not marked as new', () => {
         const badge = getStatusBadge(makeDiffFile({ added: 10, removed: 0 }));
         expect(badge.letter).toBe('M');
-        expect(badge.color).toBe('#569cd6');
+        expect(badge.color).toBe('var(--color-git-modified)');
     });
 
     it('priority: origPath (R) takes precedence over isDeleted', () => {

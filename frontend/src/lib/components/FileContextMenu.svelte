@@ -194,7 +194,7 @@
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        box-shadow: var(--shadow-popover);
     }
     .menu-item {
         display: flex;

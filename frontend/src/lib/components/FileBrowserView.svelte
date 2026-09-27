@@ -734,7 +734,7 @@
                     {#if entry.isDir}
                         <Icon src={folderIcon} color="currentColor" width={14} height={14} class="file-icon folder-icon" />
                     {:else}
-                        <Icon src={fileIcon} color="#6E7681" width={14} height={14} class="file-icon" />
+                        <Icon src={fileIcon} color="var(--color-text-muted)" width={14} height={14} class="file-icon" />
                     {/if}
                     <input
                         type="text"
@@ -769,7 +769,7 @@
                     {#if entry.isDir}
                         <Icon src={folderIcon} color="currentColor" width={14} height={14} class="file-icon folder-icon" />
                     {:else}
-                        <Icon src={fileIcon} color="#6E7681" width={14} height={14} class="file-icon" />
+                        <Icon src={fileIcon} color="var(--color-text-muted)" width={14} height={14} class="file-icon" />
                     {/if}
                     <span class="file-name">{entry.name}</span>
                     {#if badge}

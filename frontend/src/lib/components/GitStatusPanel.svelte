@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import type { DiffFile } from '$lib/types/diff';
-    import { gitStatusLabel, gitStatusAbsentFromHead } from '$lib/utils/git-status';
+    import { gitStatusLabel, gitStatusAbsentFromHead, gitStatusColor } from '$lib/utils/git-status';
     import { confirmList } from '$lib/utils/file-selection';
     import { sortPathsRootLast } from '$lib/utils/sort-paths';
     import { t } from '$lib/i18n';
@@ -687,19 +687,6 @@
         collapsedSections = next;
     }
 
-    function getStatusBadge(entry: StatusEntry): { letter: string; color: string } {
-        switch (entry.status) {
-            case 'M': return { letter: 'M', color: '#569cd6' };
-            case 'A': return { letter: 'A', color: '#3fb950' };
-            case 'D': return { letter: 'D', color: '#f85149' };
-            case '?': return { letter: '??', color: '#8b949e' };
-            case 'R': return { letter: 'R', color: '#d29922' };
-            case 'U': return { letter: 'U', color: '#d29922' };
-            case 'C': return { letter: 'C', color: '#58a6ff' };
-            default: return { letter: entry.status, color: '#8b949e' };
-        }
-    }
-
     /** Split path into { folder, name } — folder is the parent dirs, name is the basename. */
     function splitPath(path: string): { folder: string; name: string } {
         const idx = path.lastIndexOf('/');
@@ -1168,7 +1155,7 @@
                                         >
                                             <span class="changes-file-basename">{name}</span>
                                             {#if folder}<span class="changes-file-folder">{folder}</span>{/if}
-                                            <span class="changes-file-badge" style="color: {getStatusBadge(row).color}" title={gitStatusLabel(row.status)}>
+                                            <span class="changes-file-badge" style="color: {gitStatusColor(row.status)}" title={gitStatusLabel(row.status)}>
                                                 {row.status === '?' ? '??' : row.status}
                                             </span>
                                         </button>
@@ -1447,7 +1434,7 @@
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        box-shadow: var(--shadow-popover);
         margin-top: 2px;
     }
     .commit-dropdown-item {
@@ -1499,7 +1486,7 @@
         padding: 8px 12px;
         color: var(--color-status-red);
         font-size: var(--text-xs);
-        background: rgba(248, 81, 73, 0.1);
+        background: rgb(from var(--color-git-deleted) r g b / 0.1);
         border-top: 1px solid var(--color-border);
         display: flex;
         align-items: center;

@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { gitStatusLabel, gitStatusClass, gitStatusPriority, gitStatusAbsentFromHead } from '../git-status';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { gitStatusLabel, gitStatusClass, gitStatusColor, gitStatusPriority, gitStatusAbsentFromHead } from '../git-status';
+
+/** vitest runs with cwd=frontend. The palette this module hands out is declared there. */
+const APP_CSS = join(process.cwd(), 'src', 'app.css');
+
+/** Every `--color-git-*` name app.css declares. */
+function declaredGitTokens(): Set<string> {
+    return new Set(Array.from(readFileSync(APP_CSS, 'utf8').matchAll(/(--color-git-[a-z]+):/g), (m) => m[1]));
+}
 
 describe('gitStatusLabel', () => {
     it('names every letter git reports for a changed path', () => {
@@ -41,6 +51,32 @@ describe('gitStatusClass', () => {
         for (const c of known) {
             expect(gitStatusClass(c), c).not.toBe('');
             expect(gitStatusLabel(c), c).not.toBe(c);
+        }
+    });
+});
+
+describe('gitStatusColor', () => {
+    it('colours every letter its class map styles, each differently', () => {
+        // A letter with a class but no colour renders as an unstyled badge, which is how a
+        // newly-handled status slips in unnoticed; two letters sharing a colour is the other half of
+        // the same accident — the panel can no longer tell an added path from a modified one.
+        const classed = ['M', 'A', 'D', 'R', 'U', 'C'];
+        for (const c of classed) {
+            expect(gitStatusColor(c), c).toMatch(/^var\(--color-git-[a-z]+\)$/);
+            expect(gitStatusClass(c), c).not.toBe('');
+        }
+        expect(new Set(classed.map(gitStatusColor)).size).toBe(classed.length);
+    });
+
+    it('colors an unknown letter the quiet way, so an unexpected status does not shout', () => {
+        expect(gitStatusColor('?')).toBe(gitStatusColor('T'));
+    });
+
+    it('names only tokens app.css declares, since an undeclared one paints nothing', () => {
+        const declared = declaredGitTokens();
+        for (const c of ['M', 'A', 'D', '?', 'R', 'U', 'C']) {
+            const token = gitStatusColor(c).slice(4, -1);
+            expect(declared.has(token), `${c} → ${token} has no declaration in app.css`).toBe(true);
         }
     });
 });

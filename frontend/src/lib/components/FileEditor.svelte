@@ -1802,7 +1802,7 @@
         display: none;
     }
     .file-editor.diff .btn-back.unsaved {
-        color: var(--color-status-yellow, #f0c000);
+        color: var(--color-status-yellow);
     }
     .file-editor.diff .btn-back.unsaved:hover .unsaved-circle {
         display: none;
@@ -1864,7 +1864,7 @@
     .file-editor.diff .confirm-overlay {
         position: absolute;
         inset: 0;
-        background: rgba(0, 0, 0, 0.3);
+        background: rgb(from var(--color-backdrop) r g b / 0.3);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -1878,7 +1878,7 @@
         padding: 20px;
         width: 320px;
         max-width: 90%;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        box-shadow: var(--shadow-modal);
     }
     .file-editor.diff .confirm-dialog h3 {
         margin: 0 0 6px;

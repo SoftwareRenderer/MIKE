@@ -148,10 +148,10 @@
     flex-shrink: 0;
 }
 .diff-added {
-    color: var(--color-status-green);
+    color: var(--color-git-added);
 }
 .diff-removed {
-    color: var(--color-status-red);
+    color: var(--color-git-deleted);
 }
 
 /* File content — column: gutter+scroll body + expand button */
@@ -277,24 +277,24 @@
     white-space: inherit;
 }
 .diff-segment-added {
-    background: rgba(63,185,80,0.4);
+    background: rgb(from var(--color-git-added) r g b / 0.4);
 }
 .diff-segment-removed {
-    background: rgba(248,81,73,0.4);
+    background: rgb(from var(--color-git-deleted) r g b / 0.4);
 }
 
 /* Row variants */
 .diff-row-added {
-    background: rgba(63,185,80,0.15);
+    background: rgb(from var(--color-git-added) r g b / 0.15);
 }
 .diff-row-added .diff-prefix {
-    color: var(--color-status-green);
+    color: var(--color-git-added);
 }
 .diff-row-removed {
-    background: rgba(248,81,73,0.15);
+    background: rgb(from var(--color-git-deleted) r g b / 0.15);
 }
 .diff-row-removed .diff-prefix {
-    color: var(--color-status-red);
+    color: var(--color-git-deleted);
 }
 .diff-row-context .diff-prefix {
     color: var(--color-text-tertiary);
@@ -302,10 +302,10 @@
 
 /* Gutter row variants */
 .diff-row-added .diff-line-num {
-    background: rgba(63,185,80,0.08);
+    background: rgb(from var(--color-git-added) r g b / 0.08);
 }
 .diff-row-removed .diff-line-num {
-    background: rgba(248,81,73,0.08);
+    background: rgb(from var(--color-git-deleted) r g b / 0.08);
 }
 
 /* Clickable rows */
@@ -375,7 +375,7 @@
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--color-text-secondary);
-    font-family: var(--font-ui);
+    font-family: var(--font-sans);
     font-size: var(--text-2xs);
     cursor: pointer;
 }
@@ -413,8 +413,8 @@
     font-size: var(--text-2xs);
     padding: 1px 8px;
     border-radius: 0;
-    background: rgba(250,204,21,0.1);
-    color: rgba(250,204,21,0.9);
+    background: rgb(from var(--color-status-yellow) r g b / 0.1);
+    color: rgb(from var(--color-status-yellow) r g b / 0.9);
     font-weight: 600;
     font-family: var(--font-mono);
     flex-shrink: 0;
@@ -510,7 +510,7 @@
     margin-top: 8px;
 }
 .diff-section-unstaged {
-    border-left-color: var(--color-status-yellow, #f0c040);
+    border-left-color: var(--color-status-yellow);
 }
 .diff-section-header:hover {
     background: var(--color-surface-3);

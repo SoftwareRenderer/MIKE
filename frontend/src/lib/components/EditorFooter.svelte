@@ -172,7 +172,7 @@
         border-radius: var(--radius-md);
         padding: 6px 12px;
         z-index: var(--z-dropdown);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        box-shadow: var(--shadow-popover);
         font-size: var(--text-xs);
         min-width: 180px;
     }
@@ -238,7 +238,7 @@
     }
     .footer-btn.active:hover,
     :global(.ext-footer-btn.active:hover) {
-        background: #484848;
+        background: var(--color-surface-5);
         color: var(--color-text-primary);
     }
     .footer-btn.footer-toggle.active,

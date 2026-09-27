@@ -608,7 +608,7 @@
         background: var(--color-surface-3);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
-        box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        box-shadow: var(--shadow-popover);
     }
     .diff-commit-body-tooltip::before {
         content: '';
@@ -924,11 +924,11 @@
     }
     /* Colored lines: background on content, expands to text width */
     .diff-sbs-line.added .diff-line-content {
-        background: rgba(63, 185, 80, 0.15);
+        background: rgb(from var(--color-git-added) r g b / 0.15);
         min-width: max-content;
     }
     .diff-sbs-line.removed .diff-line-content {
-        background: rgba(248, 81, 73, 0.15);
+        background: rgb(from var(--color-git-deleted) r g b / 0.15);
         min-width: max-content;
     }
 
@@ -1041,22 +1041,22 @@
         flex: 1;
     }
     .diff-row-added {
-        background: rgba(63, 185, 80, 0.15);
+        background: rgb(from var(--color-git-added) r g b / 0.15);
     }
     .diff-row-added .diff-line-num {
-        background: rgba(63, 185, 80, 0.08);
+        background: rgb(from var(--color-git-added) r g b / 0.08);
     }
     .diff-row-added .diff-prefix {
-        color: var(--color-status-green);
+        color: var(--color-git-added);
     }
     .diff-row-removed {
-        background: rgba(248, 81, 73, 0.15);
+        background: rgb(from var(--color-git-deleted) r g b / 0.15);
     }
     .diff-row-removed .diff-line-num {
-        background: rgba(248, 81, 73, 0.08);
+        background: rgb(from var(--color-git-deleted) r g b / 0.08);
     }
     .diff-row-removed .diff-prefix {
-        color: var(--color-status-red);
+        color: var(--color-git-deleted);
     }
     .diff-row-context .diff-prefix {
         color: var(--color-text-tertiary);
@@ -1068,10 +1068,10 @@
         white-space: inherit;
     }
     .diff-segment-added {
-        background: rgba(63, 185, 80, 0.4);
+        background: rgb(from var(--color-git-added) r g b / 0.4);
     }
     .diff-segment-removed {
-        background: rgba(248, 81, 73, 0.4);
+        background: rgb(from var(--color-git-deleted) r g b / 0.4);
     }
     /* Token and bracket-pair colors: styles/token-colors.css, imported above — the same table the
        diff viewer paints from. */

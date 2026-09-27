@@ -1,11 +1,10 @@
 /**
  * The vocabulary of git's one-letter status codes (`M`, `A`, `D`, `?`, `R`, `U`, `C`).
  *
- * Both file trees surface the same letter — a badge in the tree, a badge in the changes
- * panel — so the letter's *meaning* lives here once. Their colors deliberately do not:
- * the tree colors itself through CSS classes (see `gitStatusClass`), while the changes
- * panel paints inline hex values for its own badge design (see `getStatusBadge` in
- * GitStatusPanel.svelte), and diff-file badges come from `getStatusBadge` in diff-parser.
+ * Three surfaces show the same letter — a badge in the file tree, a badge in the changes panel, a badge
+ * on a diff file — so the letter's meaning lives here once: its word (`gitStatusLabel`), its class
+ * (`gitStatusClass`) and its colour (`gitStatusColor`). All three answer for the same alphabet, and
+ * `__tests__/git-status.unit.ts` fails when one map learns a letter the others do not.
  */
 
 import { t } from '$lib/i18n';
@@ -43,6 +42,24 @@ export function gitStatusClass(char: string): string {
         case 'U': return 'git-status-unmerged';
         case 'C': return 'git-status-copied';
         default: return '';
+    }
+}
+
+/**
+ * The colour a status letter is painted with, as a CSS value — a `var()` reference rather than a
+ * resolved colour, so a badge written from JS and a tree row styled by `gitStatusClass` follow the same
+ * `--color-git-*` token in `app.css` when a theme retokenizes it.
+ */
+export function gitStatusColor(char: string): string {
+    switch (char) {
+        case 'M': return 'var(--color-git-modified)';
+        case 'A': return 'var(--color-git-added)';
+        case 'D': return 'var(--color-git-deleted)';
+        case 'R': return 'var(--color-git-renamed)';
+        case 'U': return 'var(--color-git-unmerged)';
+        case 'C': return 'var(--color-git-copied)';
+        // A letter we do not style is a quiet letter: untracked is the palette's de-emphasized one.
+        default: return 'var(--color-git-untracked)';
     }
 }
 

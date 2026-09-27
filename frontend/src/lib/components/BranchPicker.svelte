@@ -103,7 +103,7 @@
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        box-shadow: var(--shadow-popover);
         margin: 0;
         padding: 0;
         list-style: none;

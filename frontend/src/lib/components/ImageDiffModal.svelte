@@ -96,9 +96,10 @@
         overflow: hidden;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
-        /* Transparency needs a background that is neither the app's light nor its dark. */
-        background-color: #6a6a6a;
-        background-image: linear-gradient(45deg, #5a5a5a 25%, transparent 25%), linear-gradient(-45deg, #5a5a5a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #5a5a5a 75%), linear-gradient(-45deg, transparent 75%, #5a5a5a 75%);
+        /* Transparency needs a background that is neither the app's light nor its dark — the checker
+           tokens are fixed values, not theme aliases, on purpose. */
+        background-color: var(--color-checker-base);
+        background-image: linear-gradient(45deg, var(--color-checker-square) 25%, transparent 25%), linear-gradient(-45deg, var(--color-checker-square) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--color-checker-square) 75%), linear-gradient(-45deg, transparent 75%, var(--color-checker-square) 75%);
         background-size: 16px 16px;
         background-position: 0 0, 0 8px, 8px -8px, -8px 0;
     }
@@ -115,7 +116,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        color: rgba(255, 255, 255, 0.85);
+        color: rgb(from var(--color-checker-text) r g b / 0.85);
         font-size: var(--text-xs);
     }
 </style>
