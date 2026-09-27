@@ -263,10 +263,6 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 	}
 
 	now := time.Now().UTC()
-	memoryLimit := req.SandboxMemoryLimit
-	if memoryLimit == 0 {
-		memoryLimit = 1024 // default 1 GB
-	}
 	// Block creating a project with sandbox disabled unless DANGER_ZONE=1
 	if !req.SandboxEnabled && !h.dangerZone.Allows() {
 		return nil, http.StatusForbidden, "cannot create project with sandbox disabled — set DANGER_ZONE=1 to allow"
@@ -287,7 +283,7 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 		SandboxNetworkIsolation: networkIsolation,
 		SandboxImage:            req.SandboxImage,
 		SandboxDockerfilePath:   req.SandboxDockerfilePath,
-		SandboxMemoryLimit:      memoryLimit,
+		SandboxMemoryLimit:      req.SandboxMemoryLimit,
 		ForwardPorts:            forwardPorts,
 		SandboxMounts:           req.SandboxMounts,
 		SandboxEnvs:             req.SandboxEnvs,

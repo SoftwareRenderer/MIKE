@@ -271,6 +271,9 @@ create and `PUT` (400 naming the field).
 
 - `ApplyMemoryLimit` writes `memory.max` and `memory.swap.max = 0`, and leaves `memory.high` at `max`
   (clearing one an older build may have left). Nothing bounds the overshoot between samples except admission.
+- `types.DefaultSandboxMemoryLimitMB` is the cap `Store.CreateProject` gives a row that arrives without
+  one, and it resolves it onto the caller's struct too, so the created project answers with what was
+  stored. A stored 0 means no cap; `frontend/src/lib/utils/memory-stats.ts` mirrors the number.
 - A cap set far below 128 MB does not mean "the runaway process dies"; it gets a dead sandbox. A project
   configured that low is answered by the container's exit, and `TestMemoryLimitEnforced` holds the floor.
 - Tests: `TestMemoryLimitEnforced` (asserts the process-dies-not-the-sandbox behaviour at 128 MB),

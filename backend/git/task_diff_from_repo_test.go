@@ -63,7 +63,7 @@ func TestTaskDiffFromRepo_NormalDiff(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "change")
 	tip := head()
 
-	res, err := wm.TaskDiffFromRepo(repoDir, base, tip)
+	res, err := wm.TaskDiffFromRepo(repoDir, base, tip, false)
 	if err != nil {
 		t.Fatalf("TaskDiffFromRepo: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestTaskDiffFromRepo_EmptyDiff(t *testing.T) {
 	repoDir, wm, head := newBareDiffTestRepo(t)
 	sha := head()
 
-	res, err := wm.TaskDiffFromRepo(repoDir, sha, sha)
+	res, err := wm.TaskDiffFromRepo(repoDir, sha, sha, false)
 	if err != nil {
 		t.Fatalf("TaskDiffFromRepo: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestTaskDiffFromRepo_BinaryFile(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "add binary")
 	tip := head()
 
-	res, err := wm.TaskDiffFromRepo(repoDir, base, tip)
+	res, err := wm.TaskDiffFromRepo(repoDir, base, tip, false)
 	if err != nil {
 		t.Fatalf("TaskDiffFromRepo: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestTaskDiffFromRepo_TruncatesLargeDiff(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "add big file")
 	tip := head()
 
-	res, err := wm.TaskDiffFromRepo(repoDir, base, tip)
+	res, err := wm.TaskDiffFromRepo(repoDir, base, tip, false)
 	if err != nil {
 		t.Fatalf("TaskDiffFromRepo: %v", err)
 	}
@@ -179,10 +179,10 @@ func TestTaskDiffFromRepo_TruncatesLargeDiff(t *testing.T) {
 
 func TestTaskDiffFromRepo_InvalidArgs(t *testing.T) {
 	repoDir, wm, _ := newBareDiffTestRepo(t)
-	if _, err := wm.TaskDiffFromRepo("", "abc", "def"); err == nil {
+	if _, err := wm.TaskDiffFromRepo("", "abc", "def", false); err == nil {
 		t.Fatal("expected error for empty repoPath")
 	}
-	if _, err := wm.TaskDiffFromRepo(repoDir, "abc", ""); err == nil {
+	if _, err := wm.TaskDiffFromRepo(repoDir, "abc", "", false); err == nil {
 		t.Fatal("expected error for empty headRef")
 	}
 }

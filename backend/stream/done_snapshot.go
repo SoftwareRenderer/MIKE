@@ -158,7 +158,7 @@ func computeDoneTaskDiff(wm *git.WorktreeManager, st *store.Store, projectID str
 	if perr != nil || project == nil || project.Path == "" {
 		return nil, err
 	}
-	return wm.TaskDiffFromRepo(project.Path, baseRef, headRef)
+	return wm.TaskDiffFromRepo(project.Path, baseRef, headRef, false)
 }
 
 // doneDiffResponseFromTaskDiff builds the REST response body for a

@@ -112,9 +112,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if h.configStore != nil {
-			if cfg, err := h.configStore.GetConfig(); err == nil {
-				EnrichWorktreeExists(tasks, cfg.WorkspaceDir)
-			}
+			EnrichWorktreeExists(tasks, h.configStore.WorkspaceDir())
 		}
 		// Refresh assigned ports from live sandbox containers
 		for i := range tasks {
@@ -307,9 +305,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if h.configStore != nil {
-			if cfg, err := h.configStore.GetConfig(); err == nil {
-				enrichTaskWorktree(task, cfg.WorkspaceDir)
-			}
+			enrichTaskWorktree(task, h.configStore.WorkspaceDir())
 		}
 		h.refreshTaskPorts(task)
 		httputil.JSONResponse(w, http.StatusOK, task)
@@ -377,9 +373,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			h.propagateSubtasksAutoMerge(projectID, taskID, task.SubtasksAutoMerge)
 		}
 		if h.configStore != nil {
-			if cfg, err := h.configStore.GetConfig(); err == nil {
-				enrichTaskWorktree(task, cfg.WorkspaceDir)
-			}
+			enrichTaskWorktree(task, h.configStore.WorkspaceDir())
 		}
 		h.refreshTaskPorts(task)
 		h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -1250,11 +1244,8 @@ func (h *TaskHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
 	}
 	logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("worktree ready")
 	// Enrich with worktree existence so the frontend knows the terminal is available
-	if h.worktreeMgr != nil {
-		cfg, _ := h.configStore.GetConfig()
-		if cfg != nil {
-			enrichTaskWorktree(task, cfg.WorkspaceDir)
-		}
+	if h.worktreeMgr != nil && h.configStore != nil {
+		enrichTaskWorktree(task, h.configStore.WorkspaceDir())
 	}
 	h.refreshTaskPorts(task)
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)

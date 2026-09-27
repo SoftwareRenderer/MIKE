@@ -330,7 +330,7 @@ func EnsureExcluded(projectRoot, pattern, header string) error {
 // made by `git worktree add` has a gitdir of its own and git reads exclude from the shared one, so a
 // pattern written under the per-checkout gitdir is a silent no-op.
 func repoExcludeFile(projectRoot string) (string, error) {
-	out, err := runGitInDir(projectRoot, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	out, err := Run(projectRoot, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return "", fmt.Errorf("find the git dir of %s: %w (%s)", projectRoot, err, strings.TrimSpace(out))
 	}

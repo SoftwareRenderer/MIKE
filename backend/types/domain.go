@@ -271,6 +271,10 @@ type SandboxEnv struct {
 	Value string `json:"value"`
 }
 
+// DefaultSandboxMemoryLimitMB is the cap Store.CreateProject gives a row that arrives without one;
+// a stored 0 means no cap. frontend/src/lib/utils/memory-stats.ts mirrors this number.
+const DefaultSandboxMemoryLimitMB = 1024
+
 // Project represents a workspace project.
 type Project struct {
 	ID                      string         `json:"id"`
@@ -350,7 +354,7 @@ type TaskMessage struct {
 	PredictedMs      int       `json:"predicted_ms,omitempty"`
 	Duration         int64     `json:"duration,omitempty"`
 	GitCommitHash    string    `json:"git_commit_hash,omitempty"`
-	IsLoopHint       bool      `json:"is_loop_hint,omitempty"` // true for injected loop-detection hints (shown in UI, excluded from LLM context)
+	IsLoopHint       bool      `json:"is_loop_hint,omitempty"` // injected loop hint: kept out of the rebuilt LLM context
 	AssistantMsgID   string    `json:"-"`                      // assistant row a tool_call row belongs to; rebuild-internal (groupTaskMessages), never sent to the client
 	Kind             string    `json:"kind,omitempty"`         // sub-classifies a row within its role; advisory rows: "diagnostics" | "merge_conflict" | "auto_answer" (titles the note)
 	CreatedAt        time.Time `json:"created_at"`

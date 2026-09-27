@@ -4,7 +4,8 @@ import type { MemoryAlertAckPayload, Project, SandboxMemoryStats, Task } from '$
 /** Fraction of the memory limit at which the sandbox is considered "close". */
 const MEMORY_WARNING_RATIO = 0.8;
 
-/** The limit a project predating the field runs with, which is what its settings show. */
+/** The limit a project predating the field runs with, which is what its settings show.
+ *  Mirrors backend/types.DefaultSandboxMemoryLimitMB. */
 export const DEFAULT_MEMORY_LIMIT_MB = 1024;
 
 /** The limit a task is measured against: its project's, 0 for unlimited, null when the project is unknown. */

@@ -353,7 +353,9 @@ product. `GET /api/projects/{id}/git/diff` answers that grammar unconditionally 
 reads no `parsed` flag — while `/tasks/{id}/diff` still branches on `?parsed=1`, because its manifest and
 `TaskDiff` answers carry per-file data rather than patch text. The immutable done-task snapshot stores its
 body *as the parsed body* (`doneDiffResponse.ParsedFiles`) and stays a byte-for-byte write: a response
-missing that key renders "No changes since last commit" over a diff it still carries. Tests:
+missing that key renders "No changes since last commit" over a diff it still carries. A task whose worktree
+is gone is diffed from the project repo, and that fallback calls `git.WorktreeManager.TaskDiffFromRepo`
+as well, so no path can answer with patch text alone. Tests:
 `backend/stream/done_snapshot_test.go`, `backend/api/git_diff_parsed_test.go`.
 
 **One comparison per task in the file cache.** `GET /api/projects/{id}/tasks/{taskID}/diff/file` names a

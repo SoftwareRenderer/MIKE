@@ -19,6 +19,22 @@ import (
 // size annotation, because the panel cannot show a megabyte of text and the model cannot read one.
 const maxDiffSize = 1 << 20
 
+// commitToCommitDiff runs git diff baseRef..headRef in dir; an empty baseRef means HEAD. The shortstat
+// comes off the unfiltered patch, so it still counts files the binary filter strips.
+func (wm *WorktreeManager) commitToCommitDiff(dir, baseRef, headRef string) (diff string, shortStat string, annotations map[string]*fileAnnotation, err error) {
+	target := baseRef
+	if target == "" {
+		target = "HEAD"
+	}
+	diff, err = Run(dir, "diff", fmt.Sprintf("%s..%s", target, headRef))
+	if err != nil {
+		return "", "", nil, fmt.Errorf("git diff: %w", err)
+	}
+	shortStat = shortStatFromDiff(diff)
+	diff, annotations = wm.filterLargeBinaryDiffs(dir, diff)
+	return diff, shortStat, annotations, nil
+}
+
 // GetTaskDiff returns the git diff for a task's worktree.
 // baseRef is the branch/ref to diff against (e.g., "master"). If empty, uses HEAD.
 // headRef is an optional second ref for comparing two commits (git diff baseRef..headRef).
@@ -41,16 +57,10 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 
 	if headRef != "" {
 		// Two-ref diff: compare baseRef..headRef (commit-to-commit)
-		target := baseRef
-		if target == "" {
-			target = "HEAD"
-		}
-		diffOut, err = Run(worktreePath, "diff", fmt.Sprintf("%s..%s", target, headRef))
+		diffOut, shortStat, annotations, err = wm.commitToCommitDiff(worktreePath, baseRef, headRef)
 		if err != nil {
-			return nil, fmt.Errorf("git diff: %w", err)
+			return nil, err
 		}
-		shortStat = shortStatFromDiff(diffOut)
-		diffOut, annotations = wm.filterLargeBinaryDiffs(worktreePath, diffOut)
 		// No untracked files for commit-to-commit diff
 	} else {
 		// Working tree vs HEAD: only uncommitted changes, since committed ones are handled
@@ -693,25 +703,20 @@ func walkUntrackedEntries(worktreePath, path string) []string {
 	return files
 }
 
-// TaskDiffFromRepo computes a commit-to-commit TaskDiff
-func (wm *WorktreeManager) TaskDiffFromRepo(repoPath, baseRef, headRef string, skipTruncate ...bool) (*TaskDiff, error) {
+// TaskDiffFromRepo computes the commit-to-commit TaskDiff of a repository directory, for a task whose
+// worktree is gone.
+func (wm *WorktreeManager) TaskDiffFromRepo(repoPath, baseRef, headRef string, skipTruncate bool) (*TaskDiff, error) {
 	if repoPath == "" || headRef == "" {
 		return nil, fmt.Errorf("TaskDiffFromRepo: repoPath and headRef are required")
 	}
-	target := baseRef
-	if target == "" {
-		target = "HEAD"
-	}
-	diffOut, err := Run(repoPath, "diff", fmt.Sprintf("%s..%s", target, headRef))
+	diffOut, shortStat, annotations, err := wm.commitToCommitDiff(repoPath, baseRef, headRef)
 	if err != nil {
-		return nil, fmt.Errorf("git diff: %w", err)
+		return nil, err
 	}
-	shortStat := shortStatFromDiff(diffOut)
-	diffOut, annotations := wm.filterLargeBinaryDiffs(repoPath, diffOut)
 
 	var truncatedFiles []string
 	var originalStats map[string]FileChangeStats
-	if doTruncate := len(skipTruncate) == 0 || !skipTruncate[0]; doTruncate {
+	if !skipTruncate {
 		originalStats = countFileChanges(diffOut)
 		diffOut, truncatedFiles = truncateDiffLines(diffOut, defaultMaxChangeLines)
 	}
