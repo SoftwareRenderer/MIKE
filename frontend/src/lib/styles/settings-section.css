@@ -79,11 +79,6 @@
     background: var(--color-surface-4);
 }
 
-:global(.settings-btn-small:disabled) {
-    opacity: 0.55;
-    cursor: default;
-}
-
 :global(.settings-btn-danger) {
     color: var(--color-status-red);
     border-color: var(--color-status-red);

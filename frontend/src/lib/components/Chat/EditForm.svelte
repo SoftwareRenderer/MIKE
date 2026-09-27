@@ -284,11 +284,7 @@
         color: white;
         cursor: pointer;
     }
-    .btn-edit-submit:hover {
+    .btn-edit-submit:hover:not(:disabled) {
         opacity: 0.85;
-    }
-    .btn-edit-submit:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
     }
 </style>

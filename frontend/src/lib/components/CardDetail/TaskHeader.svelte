@@ -413,10 +413,6 @@
     .icon-btn:hover:not(:disabled) {
         background: var(--color-accent-dark);
     }
-    .icon-btn:disabled {
-        opacity: 0.35;
-        cursor: not-allowed;
-    }
     /* Mobile full-path tooltip — fixed so it escapes the label's overflow:
        hidden truncation; pointer-events off so taps pass through (an outside
        tap dismisses it). */

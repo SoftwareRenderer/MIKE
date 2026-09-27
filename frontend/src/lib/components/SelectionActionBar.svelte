@@ -75,11 +75,6 @@
     :global(.file-selection-bar .selection-btn.destructive) {
         color: var(--color-status-red, #f85149);
     }
-    :global(.file-selection-bar .selection-btn:disabled) {
-        opacity: 0.4;
-        cursor: default;
-    }
-
     @media (max-width: 768px) {
         :global(.file-selection-bar .selection-btn) {
             width: 36px;

@@ -523,10 +523,6 @@
     .btn-mini:hover:not(:disabled) {
         background: var(--color-accent-hover);
     }
-    .btn-mini:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-    }
     .btn-mini-cancel {
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
@@ -547,10 +543,6 @@
     .icon-btn-sm:hover:not(:disabled) {
         background: var(--color-surface-4);
         color: var(--color-text-primary);
-    }
-    .icon-btn-sm:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
     }
     .file-entry.git-repo:hover {
         background: var(--color-status-green)11;

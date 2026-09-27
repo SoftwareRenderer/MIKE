@@ -1066,7 +1066,10 @@
 
         <!-- Pull / Push / Commit — pinned to the right edge of the header -->
         <div class="panel-actions">
-            <button class="panel-icon-btn" onclick={handlePull} disabled={pulling || pushing} title={pulling ? 'Pulling…' : pullLabel} aria-label={pullLabel}>
+            <!-- Each of the two sync buttons is dead because the other one is running, and a button's name
+                 says only what it would do. The wait lives here so it is read, not hovered. -->
+            <span id="git-sync-busy" class="sr-only">{pulling ? t('git.pullBusy') : pushing ? t('git.pushBusy') : ''}</span>
+            <button class="panel-icon-btn" onclick={handlePull} disabled={pulling || pushing} title={pulling ? t('git.pullBusy') : pullLabel} aria-label={pullLabel} aria-describedby={pulling || pushing ? 'git-sync-busy' : undefined}>
                 {#if pulling}
                     <span class="mini-spinner" aria-hidden="true"></span>
                 {:else}
@@ -1077,7 +1080,7 @@
                 {/if}
                 <span class="panel-count" aria-hidden="true">{behindCommits}</span>
             </button>
-            <button class="panel-icon-btn" onclick={handlePush} disabled={pulling || pushing} title={pushing ? 'Pushing…' : pushLabel} aria-label={pushLabel}>
+            <button class="panel-icon-btn" onclick={handlePush} disabled={pulling || pushing} title={pushing ? t('git.pushBusy') : pushLabel} aria-label={pushLabel} aria-describedby={pulling || pushing ? 'git-sync-busy' : undefined}>
                 {#if pushing}
                     <span class="mini-spinner" aria-hidden="true"></span>
                 {:else}
@@ -1527,8 +1530,6 @@
     }
     .panel-icon-btn:disabled,
     .panel-icon-btn:disabled:hover {
-        opacity: 0.5;
-        cursor: not-allowed;
         background: transparent;
         color: var(--color-text-secondary);
     }
@@ -1548,13 +1549,8 @@
         border-radius: var(--radius-sm);
         white-space: nowrap;
     }
-    .panel-commit-btn:hover {
+    .panel-commit-btn:hover:not(:disabled) {
         opacity: 0.9;
-    }
-    .panel-commit-btn:disabled,
-    .panel-commit-btn:disabled:hover {
-        opacity: 0.45;
-        cursor: not-allowed;
     }
 
     /* Busy indicator for Pull/Push */

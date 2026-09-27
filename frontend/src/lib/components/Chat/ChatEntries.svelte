@@ -944,6 +944,7 @@
         border: 1px solid var(--color-border);
         background: var(--color-surface-1);
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+        /* Nothing to click here, and it floats over the transcript: a click must reach the entry under it. */
         pointer-events: none;
         animation: chat-pending-in 0.2s ease-out;
     }

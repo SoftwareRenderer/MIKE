@@ -72,6 +72,8 @@ and the grant as it stands. Quieter than a warning — this is a setting, not a 
     border-color: var(--color-border-hover);
 }
 
+/* A disabled extension is an inactive row, not a dead control — its Enable button and text stay usable, so
+   it dims less than `--opacity-disabled` would allow a control to. */
 :global(.extension-card.disabled) {
     opacity: 0.6;
 }

@@ -24,6 +24,9 @@
         onDirty: () => void;
     } = $props();
 
+    /** Both actions wait on this field, so the reason is said once, beside them, not twice in a tooltip. */
+    let needsUrl = $derived(!provider.url.trim());
+
     function handleToggle() {
         provider.expanded = !provider.expanded;
     }
@@ -116,7 +119,7 @@
                 </div>
 
                 <div class="details-actions">
-                    <button type="button" class="btn-fetch" onclick={onFetchModels} disabled={provider.fetchingModels || !provider.url.trim()} title={t('settings.provider.fetchHint')}>
+                    <button type="button" class="btn-fetch" onclick={onFetchModels} disabled={provider.fetchingModels || needsUrl} title={t('settings.provider.fetchHint')} aria-describedby={needsUrl ? `provider-url-required-${index}` : undefined}>
                         {#if provider.fetchingModels}
                             <svg class="spin-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
                                 <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" stroke-dasharray="28" stroke-dashoffset="8"/>
@@ -129,7 +132,7 @@
                             {t('settings.provider.fetchModels')}
                         {/if}
                     </button>
-                    <button type="button" class="btn-test" onclick={onTestConnection} disabled={provider.testingConnection || !provider.url.trim()} title={t('settings.provider.testHint')}>
+                    <button type="button" class="btn-test" onclick={onTestConnection} disabled={provider.testingConnection || needsUrl} title={t('settings.provider.testHint')} aria-describedby={needsUrl ? `provider-url-required-${index}` : undefined}>
                         {#if provider.testingConnection}
                             <svg class="spin-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
                                 <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" stroke-dasharray="28" stroke-dashoffset="8"/>
@@ -142,6 +145,9 @@
                             {t('settings.provider.testConnection')}
                         {/if}
                     </button>
+                    {#if needsUrl}
+                        <span id={`provider-url-required-${index}`} class="actions-hint">{t('settings.provider.urlRequiredHint')}</span>
+                    {/if}
                 </div>
                 {#if provider.fetchError}
                     <div class="fetch-error">
@@ -364,6 +370,13 @@
         gap: 6px;
         margin-top: 10px;
         flex-wrap: wrap;
+        align-items: center;
+    }
+    /* The reason the two actions are dead, next to them: a tooltip there would need a hover, and a disabled
+       control is exactly what the pointer is not meant to reach. */
+    .actions-hint {
+        font-size: var(--text-xs);
+        color: var(--color-text-tertiary);
     }
     .btn-fetch,
     .btn-test {
@@ -381,11 +394,6 @@
     .btn-fetch:hover:not(:disabled),
     .btn-test:hover:not(:disabled) {
         border-color: var(--color-text-secondary);
-    }
-    .btn-fetch:disabled,
-    .btn-test:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
     }
     .spin-icon {
         animation: spin 1s linear infinite;

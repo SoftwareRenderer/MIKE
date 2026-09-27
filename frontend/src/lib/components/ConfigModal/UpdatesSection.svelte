@@ -286,11 +286,4 @@
         background: var(--color-surface-3);
     }
 
-    .btn-update-check:disabled,
-    .btn-update-prepare:disabled,
-    .btn-update-apply:disabled,
-    .btn-update-restart:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
 </style>

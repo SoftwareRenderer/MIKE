@@ -188,7 +188,7 @@
     }
 
     .cache-toggle.disabled {
-        opacity: 0.5;
+        opacity: var(--opacity-disabled);
         cursor: not-allowed;
     }
 
@@ -236,13 +236,6 @@
 
     .btn-build:hover:not(:disabled) {
         background: var(--color-accent);
-    }
-
-    .btn-build:disabled,
-    .btn-rebuild:disabled,
-    .btn-browse:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
     }
 
     .dockerfile-path-row {

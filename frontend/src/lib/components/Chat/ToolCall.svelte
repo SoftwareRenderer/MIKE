@@ -708,8 +708,8 @@
     .tool-result-expand:hover {
         color: var(--color-text-primary);
     }
+    /* Disabled while its own result is still arriving, so the cursor says wait, not the global not-allowed. */
     .tool-result-expand:disabled {
-        opacity: 0.5;
         cursor: wait;
     }
     .tool-result-summary,

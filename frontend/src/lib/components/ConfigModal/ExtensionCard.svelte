@@ -283,11 +283,6 @@
         transition: all 0.15s;
     }
 
-    .btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-
     .btn-secondary {
         background: var(--color-btn-secondary-bg);
         border-color: var(--color-border-subtle);

@@ -371,9 +371,8 @@
         opacity: 0.85;
     }
     .editor-save-btn:disabled {
+        /* Greyed, not just dimmed: the icon is the only label, so its colour is what says "nothing to save". */
         filter: grayscale(1);
-        opacity: 0.35;
-        cursor: not-allowed;
     }
 
     .editor-panels {

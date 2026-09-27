@@ -175,7 +175,7 @@
 :global(.sandbox-config .port-input:disabled),
 :global(.sandbox-config .mount-input:disabled),
 :global(.sandbox-config .env-input:disabled) {
-    opacity: 0.5;
+    opacity: var(--opacity-disabled);
 }
 
 /* The two number fields keep no spinners. */
@@ -350,20 +350,12 @@
     color: var(--color-status-green);
 }
 
-:global(.sandbox-config .btn-add-port:disabled),
-:global(.sandbox-config .btn-add-mount:disabled),
-:global(.sandbox-config .btn-browse-mount:disabled),
-:global(.sandbox-config .btn-cancel-edit:disabled) {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
 :global(.sandbox-config .btn-cancel-edit) {
     color: var(--color-text-secondary);
     transition: background 0.15s, color 0.15s;
 }
 
-:global(.sandbox-config .btn-cancel-edit:hover) {
+:global(.sandbox-config .btn-cancel-edit:hover:not(:disabled)) {
     background: var(--color-surface-3);
     color: var(--color-text-primary);
 }
@@ -391,13 +383,6 @@
 :global(.sandbox-config .btn-remove-env:hover:not(:disabled)) {
     background: var(--color-status-red-dark);
     color: white;
-}
-
-:global(.sandbox-config .btn-remove-port:disabled),
-:global(.sandbox-config .btn-remove-mount:disabled),
-:global(.sandbox-config .btn-remove-env:disabled) {
-    opacity: 0.4;
-    cursor: not-allowed;
 }
 
 :global(.sandbox-config .port-error),
@@ -452,8 +437,10 @@
     display: none;
 }
 
-:global(.sandbox-config .radio-label:disabled) {
-    opacity: 0.5;
+/* The radio itself is display:none, so the label is the control: without `:has` nothing here would ever
+   see the disabled state. */
+:global(.sandbox-config .radio-label:has(input:disabled)) {
+    opacity: var(--opacity-disabled);
     cursor: not-allowed;
 }
 

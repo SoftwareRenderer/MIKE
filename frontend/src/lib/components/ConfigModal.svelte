@@ -1149,7 +1149,7 @@
         border-color: var(--color-accent);
     }
     .primary-provider-select:disabled {
-        opacity: 0.5;
+        opacity: var(--opacity-disabled);
         cursor: not-allowed;
     }
 
@@ -1284,10 +1284,6 @@
     .btn-check-updates:hover {
         background: var(--color-accent-dark);
         color: white;
-    }
-    .btn-check-updates:disabled {
-        opacity: 0.6;
-        cursor: default;
     }
     .about-update {
         display: flex;

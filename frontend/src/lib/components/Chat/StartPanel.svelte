@@ -99,10 +99,6 @@
     .btn-start-task:hover:not(:disabled) {
         background: var(--color-accent-hover);
     }
-    .btn-start-task:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
     .btn-start-task .key-hint {
         color: rgba(255, 255, 255, 0.85);
         border-color: rgba(255, 255, 255, 0.3);

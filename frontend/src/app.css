@@ -207,6 +207,28 @@ button:hover {
     opacity: 0.85;
 }
 
+/* One home for a dead button: dim by the token, refuse the click cursor, and do not react to hover — a
+   control that changes appearance under the pointer is not claiming to be dead. A component adds only what
+   is specific to one control (a background; `cursor: wait` while that control loads its own result), and a
+   control that is not a button — input, select, textarea, a label wrapper — keeps its own `:disabled` rule
+   with the same token. `aria-disabled` is here so a control kept focusable so it can be asked why it is
+   dead looks dead too.
+
+   The `:hover` twin is load-bearing: a component's `.foo { cursor: pointer }` outranks the rule above, and a
+   cursor is only seen with the pointer over it. Same reason a component's hover rule that changes opacity on
+   a disable-able control carries `:not(:disabled)` itself. */
+button:disabled,
+button[aria-disabled='true'] {
+    cursor: not-allowed;
+    opacity: var(--opacity-disabled);
+}
+
+button:disabled:hover,
+button[aria-disabled='true']:hover {
+    cursor: not-allowed;
+    opacity: var(--opacity-disabled);
+}
+
 a {
     color: var(--color-accent);
     text-decoration: none;

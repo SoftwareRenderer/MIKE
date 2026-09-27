@@ -168,14 +168,10 @@
 :global(.explorer-view .explorer-dropdown-btn svg) {
     flex-shrink: 0;
 }
-:global(.explorer-view .explorer-dropdown-btn:hover) {
+:global(.explorer-view .explorer-dropdown-btn:hover:not(:disabled)) {
     background: var(--color-surface-4);
     color: var(--color-text-primary);
     opacity: 1;
-}
-:global(.explorer-view .explorer-dropdown-btn:disabled) {
-    opacity: 0.5;
-    cursor: not-allowed;
 }
 
 :global(.explorer-view .explorer-name) {

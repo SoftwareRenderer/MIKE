@@ -1563,6 +1563,7 @@
                     onclick={handleSave}
                     disabled={!hasChanges || saving || fileTooLarge}
                     title="Save (Ctrl+S)"
+                    aria-describedby={fileTooLarge ? 'file-editor-too-large' : undefined}
                 >
                 {#if saving}
                     <svg class="save-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -1589,7 +1590,7 @@
                     <p style="margin:0;font-size:var(--text-xs);color:var(--color-text-tertiary)">{filePath}</p>
                 </div>
             {:else if fileTooLarge}
-                <div class="editor-placeholder">{t('editor.fileTooLarge')}</div>
+                <div id="file-editor-too-large" class="editor-placeholder">{t('editor.fileTooLarge')}</div>
             {:else}
                 <div class="editor-wrapper" bind:this={editorEl}></div>
                 <div class="ext-anchor" bind:this={extAnchorEl}></div>
@@ -1712,6 +1713,8 @@
         left: 0;
         right: 0;
         z-index: var(--z-dropdown);
+        /* Click-through by default: CustomSearchPanel re-enables its own panel, one class deeper and in
+           that component's stylesheet. */
         pointer-events: none;
     }
 
@@ -1858,7 +1861,6 @@
     .file-editor.diff .btn-save:disabled {
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
-        cursor: not-allowed;
     }
     .file-editor.diff .save-spinner {
         animation: spin 0.8s linear infinite;

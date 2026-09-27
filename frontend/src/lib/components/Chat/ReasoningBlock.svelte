@@ -94,8 +94,8 @@
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
+    /* Disabled while its own reasoning is loading, so the cursor says wait, not the global not-allowed. */
     .reasoning-toggle:disabled {
-        opacity: 0.5;
         cursor: wait;
     }
     .reasoning-content {

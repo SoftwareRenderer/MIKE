@@ -128,10 +128,6 @@
         background: color-mix(in srgb, var(--color-accent) 18%, transparent);
         color: var(--color-accent);
     }
-    .thread-menu-item:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
     .thread-name {
         font-weight: 500;
     }

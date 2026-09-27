@@ -791,7 +791,7 @@
                         <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><circle cx="4" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="12" cy="8" r="1.5"/></svg>
                     </button>
                     {#if isIdle}
-                        <span class="action-idle" aria-label="Idle" title="Idle">{t('board.card.idle')}</span>
+                        <span class="action-idle" aria-label="Idle">{t('board.card.idle')}</span>
                     {/if}
                 {:else}
                     {#if canCreateSubtask}
@@ -837,7 +837,7 @@
                             <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
                         </button>
                     {:else if thirdAction === 'idle'}
-                        <span class="action-idle" aria-label="Idle" title="Idle">{t('board.card.idle')}</span>
+                        <span class="action-idle" aria-label="Idle">{t('board.card.idle')}</span>
                     {:else if thirdAction === 'delete'}
                         <button
                             type="button"
@@ -1122,6 +1122,8 @@
         align-items: center;
         gap: var(--action-gap);
         opacity: 0;
+        /* The card body is a link, so an unseen row takes no click; the rules below hand hit-testing back
+           with the row's own opacity, and every button's tooltip fires only once the row is reachable. */
         pointer-events: none;
         transition: opacity 0.15s ease;
     }
@@ -1172,6 +1174,7 @@
         text-transform: uppercase;
         letter-spacing: 0.3px;
         color: var(--color-text-tertiary);
+        /* A status, not a target: shown with the row, but its click belongs to the card's own link. */
         pointer-events: none;
     }
     .action-overflow.is-open {

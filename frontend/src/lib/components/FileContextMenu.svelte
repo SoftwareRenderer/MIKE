@@ -217,7 +217,6 @@
     }
     .menu-item:disabled {
         color: var(--color-text-tertiary);
-        cursor: default;
     }
     .menu-item.destructive {
         color: var(--color-status-red);

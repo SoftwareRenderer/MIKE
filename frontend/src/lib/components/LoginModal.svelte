@@ -143,8 +143,4 @@
         background: var(--color-accent-hover);
     }
 
-    .login-btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
 </style>

@@ -54,11 +54,6 @@
         transform: translateX(18px);
     }
 
-    .toggle-switch:disabled {
-        cursor: not-allowed;
-        opacity: 0.5;
-    }
-
     .toggle-switch:focus-visible {
         outline: 2px solid var(--color-accent);
         outline-offset: 2px;

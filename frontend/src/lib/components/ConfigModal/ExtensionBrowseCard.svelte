@@ -176,11 +176,6 @@
         transition: all 0.15s;
     }
 
-    .btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-
     .btn-primary {
         background: var(--color-btn-primary-bg);
         color: var(--color-btn-text);

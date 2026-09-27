@@ -177,7 +177,7 @@
     }
 
     .caps-input:disabled {
-        opacity: 0.5;
+        opacity: var(--opacity-disabled);
         cursor: not-allowed;
     }
 

@@ -223,12 +223,6 @@
     .modal-footer :global(.btn-primary):hover:not(:disabled) {
         opacity: 0.85;
     }
-    .modal-footer :global(.btn-secondary):disabled,
-    .modal-footer :global(.btn-primary):disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-
     @media (max-width: 768px) {
         .modal {
             width: 100vw !important;

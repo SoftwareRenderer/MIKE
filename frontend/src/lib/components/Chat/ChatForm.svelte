@@ -372,10 +372,6 @@
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
-    .btn-attach:disabled {
-        opacity: 0.3;
-        cursor: not-allowed;
-    }
     .file-input-hidden {
         display: none;
     }
@@ -411,7 +407,7 @@
     }
     .btn-send { background: var(--color-accent-dark); color: white; }
     .btn-send:hover:not(:disabled) { opacity: 0.85; transform: scale(1.05); }
-    .btn-send:disabled { background: var(--color-surface-3); color: var(--color-text-tertiary); cursor: not-allowed; }
+    .btn-send:disabled { background: var(--color-surface-3); color: var(--color-text-tertiary); }
     .btn-stop {
         background: var(--color-status-red-dark);
         color: white;

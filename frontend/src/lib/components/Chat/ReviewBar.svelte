@@ -206,10 +206,6 @@
         background: var(--color-surface-3);
         opacity: 0.9;
     }
-    .btn-commit-done:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
     .restart-model-row {
         display: flex;
         align-items: center;
@@ -231,9 +227,5 @@
     }
     .btn-restart-task:hover:not(:disabled) {
         opacity: 0.85;
-    }
-    .btn-restart-task:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
     }
 </style>
