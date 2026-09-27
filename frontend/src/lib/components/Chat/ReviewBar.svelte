@@ -175,7 +175,7 @@
         font-size: var(--text-sm);
         font-weight: 500;
         background: var(--color-surface-2);
-        color: var(--color-text);
+        color: var(--color-text-primary);
         border: 1px solid var(--color-border);
         cursor: pointer;
         transition: all 0.15s ease;

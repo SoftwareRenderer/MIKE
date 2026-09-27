@@ -193,18 +193,18 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
 
     .status-notice {
         padding: 10px 14px;
-        background: rgba(80, 140, 255, 0.08);
-        border: 1px solid rgba(80, 140, 255, 0.2);
+        background: rgb(from var(--color-status-blue) r g b / 0.08);
+        border: 1px solid rgb(from var(--color-status-blue) r g b / 0.2);
         border-radius: var(--radius-md);
-        color: var(--color-primary);
+        color: var(--color-accent);
         font-size: var(--text-sm);
         line-height: 1.4;
     }
 
     .server-tool-notice {
         padding: 6px 10px;
-        background: rgba(210, 153, 34, 0.08);
-        border: 1px solid rgba(210, 153, 34, 0.3);
+        background: rgb(from var(--color-warning) r g b / 0.08);
+        border: 1px solid rgb(from var(--color-warning) r g b / 0.3);
         border-radius: var(--radius-sm);
         color: var(--color-text-secondary);
         font-size: var(--text-xs);
@@ -279,8 +279,8 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
 
     .oom-warning {
         padding: 8px 10px;
-        background: rgba(248, 81, 73, 0.1);
-        border: 1px solid rgba(248, 81, 73, 0.3);
+        background: rgb(from var(--color-status-red) r g b / 0.1);
+        border: 1px solid rgb(from var(--color-status-red) r g b / 0.3);
         border-radius: var(--radius-md);
         color: var(--color-status-red);
         font-size: var(--text-sm);
@@ -295,8 +295,8 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
         flex-direction: column;
         gap: 4px;
         padding: 10px 12px;
-        background: rgba(248, 81, 73, 0.1);
-        border: 1px solid rgba(248, 81, 73, 0.3);
+        background: rgb(from var(--color-status-red) r g b / 0.1);
+        border: 1px solid rgb(from var(--color-status-red) r g b / 0.3);
         border-radius: var(--radius-md);
     }
 
@@ -336,8 +336,8 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
 
     .error {
         padding: 8px 12px;
-        background: rgba(248, 81, 73, 0.1);
-        border: 1px solid rgba(248, 81, 73, 0.3);
+        background: rgb(from var(--color-status-red) r g b / 0.1);
+        border: 1px solid rgb(from var(--color-status-red) r g b / 0.3);
         border-radius: var(--radius-md);
         color: var(--color-status-red);
         font-size: var(--text-sm);

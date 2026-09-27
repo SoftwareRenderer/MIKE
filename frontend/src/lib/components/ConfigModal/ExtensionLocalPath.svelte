@@ -33,7 +33,7 @@
         text-transform: uppercase;
         letter-spacing: 0.04em;
         font-size: var(--text-2xs);
-        color: color-mix(in srgb, var(--color-text) 70%, transparent);
+        color: color-mix(in srgb, var(--color-text-primary) 70%, transparent);
         flex-shrink: 0;
     }
 
@@ -43,11 +43,11 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        color: var(--color-text);
+        color: var(--color-text-primary);
     }
 
     .local-path-unknown {
-        color: color-mix(in srgb, var(--color-text) 55%, transparent);
+        color: color-mix(in srgb, var(--color-text-primary) 55%, transparent);
         font-style: italic;
     }
 </style>

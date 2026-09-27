@@ -232,7 +232,7 @@
         padding: 2px 6px;
         border-radius: var(--radius-sm);
         background: var(--color-accent);
-        color: white;
+        color: var(--color-btn-text);
     }
     .sessions-status {
         font-size: var(--text-sm);

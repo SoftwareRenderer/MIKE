@@ -224,7 +224,7 @@
     .btn-build {
         border: 1px solid var(--color-accent);
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
 
     .btn-build:hover:not(:disabled),
@@ -305,8 +305,8 @@
 
     .build-error {
         padding: 6px 10px;
-        background: rgba(248, 81, 73, 0.1);
-        border: 1px solid rgba(248, 81, 73, 0.3);
+        background: rgb(from var(--color-status-red) r g b / 0.1);
+        border: 1px solid rgb(from var(--color-status-red) r g b / 0.3);
         border-radius: var(--radius-sm);
         color: var(--color-status-red);
         font-size: var(--text-xs);
@@ -339,8 +339,8 @@
     .build-notice {
         padding: 6px 10px;
         margin-bottom: 6px;
-        background: rgba(80, 140, 255, 0.08);
-        border: 1px solid rgba(80, 140, 255, 0.2);
+        background: rgb(from var(--color-status-blue) r g b / 0.08);
+        border: 1px solid rgb(from var(--color-status-blue) r g b / 0.2);
         border-radius: var(--radius-sm);
         color: var(--color-text-secondary);
         font-size: var(--text-xs);

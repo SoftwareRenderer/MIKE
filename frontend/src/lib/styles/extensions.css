@@ -16,8 +16,8 @@ is installed there yet. Same attention color as .unpublished-badge. */
     padding: 0.12rem 0.5rem;
     border-radius: var(--radius-sm);
     background: var(--color-status-yellow);
-    color: #111;
-    border: 1px solid #111;
+    color: var(--color-text-inverse);
+    border: 1px solid var(--color-text-inverse);
     white-space: nowrap;
     flex-shrink: 0;
 }
@@ -51,7 +51,7 @@ and the grant as it stands. Quieter than a warning — this is a setting, not a 
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--color-text);
+    color: var(--color-text-primary);
 }
 
 :global(.ext-dep-none) {
@@ -97,7 +97,7 @@ and the grant as it stands. Quieter than a warning — this is a setting, not a 
     background: repeating-linear-gradient(
         45deg,
         var(--color-status-yellow) 0 8px,
-        #111 8px 16px
+        var(--color-bg-card) 8px 16px
     );
     -webkit-mask:
         linear-gradient(#fff 0 0) content-box,
@@ -122,8 +122,8 @@ and the grant as it stands. Quieter than a warning — this is a setting, not a 
     padding: 0.12rem 0.5rem;
     border-radius: var(--radius-sm);
     background: var(--color-status-yellow);
-    color: #111;
-    border: 1px solid #111;
+    color: var(--color-text-inverse);
+    border: 1px solid var(--color-text-inverse);
     white-space: nowrap;
     flex-shrink: 0;
 }
@@ -136,7 +136,7 @@ and the grant as it stands. Quieter than a warning — this is a setting, not a 
     padding: 0.12rem 0.5rem;
     border-radius: var(--radius-sm);
     background: var(--color-accent);
-    color: #fff;
+    color: var(--color-btn-text);
     border: 1px solid var(--color-accent);
     white-space: nowrap;
     flex-shrink: 0;
@@ -170,22 +170,22 @@ and the grant as it stands. Quieter than a warning — this is a setting, not a 
 }
 
 :global(.ext-lsp) {
-    background: rgba(63, 185, 80, 0.15);
+    background: rgb(from var(--color-status-green) r g b / 0.15);
     color: var(--color-status-green);
 }
 
 :global(.ext-ui) {
-    background: rgba(76, 154, 255, 0.15);
+    background: rgb(from var(--color-status-blue) r g b / 0.15);
     color: var(--color-status-blue);
 }
 
 :global(.ext-css) {
-    background: rgba(227, 179, 65, 0.15);
+    background: rgb(from var(--color-status-yellow) r g b / 0.15);
     color: var(--color-status-yellow);
 }
 
 :global(.ext-agent) {
-    background: rgba(163, 113, 247, 0.15);
+    background: rgb(from var(--color-status-purple) r g b / 0.15);
     color: var(--color-status-purple);
 }
 
@@ -197,8 +197,8 @@ and the grant as it stands. Quieter than a warning — this is a setting, not a 
 /* A translation pack: its own accent, so an installed pack is not mistaken
 for a UI plugin. */
 :global(.ext-i18n) {
-        background: rgba(210, 153, 34, 0.15);
-        color: var(--color-status-orange);    
+    background: rgb(from var(--color-status-orange) r g b / 0.15);
+    color: var(--color-status-orange);
 }
 
 :global(.ext-info) {
@@ -312,45 +312,45 @@ for a UI plugin. */
 }
 
 :global(.cap-lsp) {
-    background: rgba(63, 185, 80, 0.15);
+    background: rgb(from var(--color-status-green) r g b / 0.15);
     color: var(--color-status-green);
-    border-color: rgba(63, 185, 80, 0.3);
+    border-color: rgb(from var(--color-status-green) r g b / 0.3);
 }
 
 :global(.cap-ui) {
-    background: rgba(76, 154, 255, 0.15);
+    background: rgb(from var(--color-status-blue) r g b / 0.15);
     color: var(--color-status-blue);
-    border-color: rgba(76, 154, 255, 0.3);
+    border-color: rgb(from var(--color-status-blue) r g b / 0.3);
 }
 
 :global(.cap-css) {
-    background: rgba(227, 179, 65, 0.15);
+    background: rgb(from var(--color-status-yellow) r g b / 0.15);
     color: var(--color-status-yellow);
-    border-color: rgba(227, 179, 65, 0.3);
+    border-color: rgb(from var(--color-status-yellow) r g b / 0.3);
 }
 
 :global(.cap-agent) {
-    background: rgba(163, 113, 247, 0.15);
+    background: rgb(from var(--color-status-purple) r g b / 0.15);
     color: var(--color-status-purple);
-    border-color: rgba(163, 113, 247, 0.3);
+    border-color: rgb(from var(--color-status-purple) r g b / 0.3);
 }
 
 :global(.cap-network) {
-    background: rgba(236, 72, 153, 0.15);
-    color: #ec4899;
-    border-color: rgba(236, 72, 153, 0.3);
+    background: rgb(from var(--color-status-purple) r g b / 0.15);
+    color: var(--color-status-purple);
+    border-color: rgb(from var(--color-status-purple) r g b / 0.3);
 }
 
 :global(.cap-llm) {
     background: var(--color-text-inverse);
     color: var(--color-text-secondary);
-    border-color: rgba(222, 222, 222, 0.3);
+    border-color: rgb(from var(--color-text-secondary) r g b / 0.3);
 }
 
 :global(.cap-i18n) {
-        background: rgba(210, 153, 34, 0.15);
-        color: var(--color-status-orange);
-        border-color: rgba(210, 153, 34, 0.3);    
+    background: rgb(from var(--color-status-orange) r g b / 0.15);
+    color: var(--color-status-orange);
+    border-color: rgb(from var(--color-status-orange) r g b / 0.3);
 }
 
 :global(.cap-detail-tags) {

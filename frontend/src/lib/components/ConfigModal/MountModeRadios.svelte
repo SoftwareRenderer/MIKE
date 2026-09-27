@@ -51,12 +51,12 @@
     }
 
     .radio-label.active {
-        background: var(--color-accent-dark, rgba(88, 166, 255, 0.25));
-        color: white;
+        background: var(--color-accent-dark);
+        color: var(--color-btn-text);
     }
 
     .radio-label:hover:not(.active) {
-        background: var(--color-surface-3, rgba(139, 148, 158, 0.1));
+        background: var(--color-surface-3);
     }
 
     .radio-label input[type="radio"] {

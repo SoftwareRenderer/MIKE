@@ -289,7 +289,7 @@
         margin: 0.3rem 0 0;
         font-size: var(--text-xs);
         line-height: 1.45;
-        color: var(--color-status-red, #f85149);
+        color: var(--color-status-red);
     }
 
     .field-label {

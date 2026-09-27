@@ -30,7 +30,7 @@
 
     .ext-build-bar {
         height: 6px;
-        background: rgba(88, 166, 255, 0.15);
+        background: var(--color-accent-bg);
         border-radius: var(--radius-sm);
         overflow: hidden;
     }

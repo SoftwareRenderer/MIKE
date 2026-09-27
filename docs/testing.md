@@ -194,7 +194,7 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
 
 ## Frontend cleanliness gates (run by `make check`)
 
-`make test-frontend` ends with three gates over `frontend/src`:
+`make test-frontend` ends with four gates over `frontend/src`:
 
 - **`npm run check:dead`** — knip over the **production view**: unused files, exports, exported types,
   duplicate exports, unlisted imports, unused dependencies. `ignore` in the config excludes every test
@@ -213,6 +213,9 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
   path that has stopped fetching fails too, so the exemption list cannot rot. The pattern wants a call
   position, so prose naming `fetch()` — one capability description does — is not a request. A scan that
   finds no file to scan is a failure, not a clean run.
+- **`npm run check:colors`** — `frontend/scripts/check-colors.sh` fails on a hex colour literal in a
+  component or a stylesheet under `src/`, because every chrome colour comes from the palette in
+  `src/app.css`; its header holds the exceptions.
 
 **Names starting with `_` are exempt, deliberately.** `$effect(() => { const _v = uiInjector.getPointVersion(); … })`
 subscribes by *reading*; the value is never used and the read is the whole point. TypeScript exempts

@@ -111,12 +111,12 @@
         align-items: center;
         gap: 4px;
         padding: 2px 4px 2px 8px;
-        background: rgba(136, 192, 208, 0.12);
-        border: 1px solid rgba(136, 192, 208, 0.25);
+        background: rgb(from var(--color-accent-light) r g b / 0.12);
+        border: 1px solid rgb(from var(--color-accent-light) r g b / 0.25);
         border-radius: var(--radius-sm);
         font-size: var(--text-xs);
         font-family: var(--font-mono, monospace);
-        color: var(--color-accent-light, #88c0d0);
+        color: var(--color-accent-light);
     }
 
     .caps-tag-text {
@@ -144,7 +144,7 @@
 
     .caps-tag-remove:hover {
         opacity: 1;
-        background: rgba(136, 192, 208, 0.2);
+        background: rgb(from var(--color-accent-light) r g b / 0.2);
     }
 
     /* Input field */
@@ -173,7 +173,7 @@
 
     .caps-input:focus,
     .caps-input-field:focus .caps-input {
-        border-color: var(--color-accent, #88c0d0);
+        border-color: var(--color-accent);
     }
 
     .caps-input:disabled {
@@ -193,7 +193,7 @@
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        box-shadow: var(--shadow-popover);
         z-index: var(--z-dropdown);
     }
 

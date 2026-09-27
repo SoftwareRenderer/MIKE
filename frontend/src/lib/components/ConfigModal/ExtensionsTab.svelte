@@ -625,7 +625,7 @@
         top: 0;
         z-index: var(--z-dropdown);
         background: var(--color-surface-1);
-        border: 1px solid rgba(248, 81, 73, 0.4);
+        border: 1px solid rgb(from var(--color-status-red) r g b / 0.4);
         border-left: 4px solid var(--color-status-red);
         border-radius: var(--radius-md);
         padding: 0.75rem 1rem;
@@ -634,7 +634,7 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        box-shadow: 0 2px 8px rgb(from var(--color-shadow) r g b / 0.15);
     }
 
     .dismiss {

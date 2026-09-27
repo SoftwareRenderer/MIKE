@@ -142,12 +142,12 @@
     }
 
     .view-tab:hover {
-        background: rgba(139, 148, 158, 0.1);
+        background: rgb(from var(--color-text-tertiary) r g b / 0.1);
         color: var(--color-text-primary);
     }
 
     .view-tab.active {
-        background: rgba(88, 166, 255, 0.15);
+        background: var(--color-accent-bg);
         color: var(--color-accent);
     }
 
@@ -204,7 +204,7 @@
     }
 
     .category-badge.active {
-        background: rgba(88, 166, 255, 0.15);
+        background: var(--color-accent-bg);
         border-color: var(--color-accent);
         color: var(--color-accent);
     }

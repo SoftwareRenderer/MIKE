@@ -199,7 +199,7 @@
         font-size: var(--text-sm);
         color: var(--color-status-green);
         padding: 0.4rem 0.75rem;
-        background: rgba(63, 185, 80, 0.1);
+        background: rgb(from var(--color-status-green) r g b / 0.1);
         border-radius: var(--radius-md);
     }
 </style>

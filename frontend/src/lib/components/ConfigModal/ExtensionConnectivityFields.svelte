@@ -77,14 +77,14 @@
     }
 
     .probe-ok {
-        background: rgba(34, 197, 94, 0.08);
-        border: 1px solid rgba(34, 197, 94, 0.3);
+        background: rgb(from var(--color-status-green) r g b / 0.08);
+        border: 1px solid rgb(from var(--color-status-green) r g b / 0.3);
         color: var(--color-status-green);
     }
 
     .probe-fail {
-        background: rgba(248, 81, 73, 0.1);
-        border: 1px solid rgba(248, 81, 73, 0.3);
+        background: rgb(from var(--color-status-red) r g b / 0.1);
+        border: 1px solid rgb(from var(--color-status-red) r g b / 0.3);
         color: var(--color-text-secondary);
     }
 

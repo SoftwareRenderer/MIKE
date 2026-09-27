@@ -374,13 +374,13 @@
         animation: capture-pulse 1.2s ease-in-out infinite;
     }
     .key-chip.invalid {
-        border-color: var(--color-status-orange, #d29922);
-        color: var(--color-status-orange, #d29922);
+        border-color: var(--color-warning);
+        color: var(--color-warning);
     }
     .invalid-hint {
         margin: -6px 0 0;
         font-size: var(--text-xs);
-        color: var(--color-status-orange, #d29922);
+        color: var(--color-warning);
     }
     @keyframes capture-pulse {
         0%, 100% { opacity: 1; }

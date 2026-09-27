@@ -299,7 +299,7 @@
     }
     .btn-remove-provider:hover {
         background: var(--color-status-red-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     .btn-expand {
         display: flex;
@@ -405,8 +405,8 @@
         margin-top: 8px;
         padding: 6px 8px;
         font-size: var(--text-xs);
-        color: var(--color-danger);
-        background: rgba(248, 81, 73, 0.1);
+        color: var(--color-status-red);
+        background: rgb(from var(--color-status-red) r g b / 0.1);
         border-radius: var(--radius-sm);
     }
     .test-result {
@@ -419,12 +419,12 @@
         border-radius: var(--radius-sm);
     }
     .test-result.test-success {
-        color: var(--color-success);
-        background: rgba(63, 185, 80, 0.1);
+        color: var(--color-status-green);
+        background: rgb(from var(--color-status-green) r g b / 0.1);
     }
     .test-result.test-failure {
-        color: var(--color-danger);
-        background: rgba(248, 81, 73, 0.1);
+        color: var(--color-status-red);
+        background: rgb(from var(--color-status-red) r g b / 0.1);
     }
     .provider-options {
         margin-top: 10px;

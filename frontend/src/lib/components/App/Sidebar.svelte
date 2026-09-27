@@ -384,7 +384,7 @@
         flex-shrink: 0;
         display: flex;
         align-items: center;
-        color: var(--color-primary);
+        color: var(--color-accent);
     }
     .sandbox-badge-off {
         color: var(--color-status-red);

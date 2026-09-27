@@ -152,7 +152,7 @@
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+        box-shadow: var(--shadow-popover);
     }
     .help-tooltip.visible {
         visibility: visible;

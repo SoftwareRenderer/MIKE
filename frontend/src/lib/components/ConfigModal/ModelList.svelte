@@ -413,7 +413,7 @@
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        box-shadow: var(--shadow-popover);
         overflow: hidden;
     }
     .reasoning-effort-option {
@@ -462,7 +462,7 @@
     }
     .btn-remove-model:hover {
         background: var(--color-status-red-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     .model-details {
         padding: 8px;

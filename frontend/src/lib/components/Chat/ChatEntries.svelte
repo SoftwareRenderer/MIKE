@@ -815,7 +815,7 @@
         line-height: 1.45;
         white-space: pre-wrap;
         word-break: break-word;
-        color: var(--color-text);
+        color: var(--color-text-primary);
     }
 
     .merge-resolution-entry {

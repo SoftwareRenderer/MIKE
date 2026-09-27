@@ -95,8 +95,8 @@
 <style>
     /* Updates section */
     .updates-section {
-        background: rgba(88, 166, 255, 0.08);
-        border: 1px solid rgba(88, 166, 255, 0.2);
+        background: rgb(from var(--color-accent-light) r g b / 0.08);
+        border: 1px solid rgb(from var(--color-accent-light) r g b / 0.2);
         border-radius: var(--radius-lg);
         padding: 1rem;
     }
@@ -131,14 +131,14 @@
     }
 
     .update-item:not(:last-child) {
-        border-bottom: 1px solid rgba(88, 166, 255, 0.15);
+        border-bottom: 1px solid var(--color-accent-bg);
     }
 
     .update-item.has-new-perms {
         padding: 0.75rem;
         margin: 0.5rem 0;
-        background: rgba(255, 166, 0, 0.1);
-        border: 1px solid rgba(255, 166, 0, 0.4);
+        background: rgb(from var(--color-warning) r g b / 0.1);
+        border: 1px solid rgb(from var(--color-warning) r g b / 0.4);
         border-radius: var(--radius-lg);
     }
 
@@ -174,15 +174,15 @@
         flex-basis: 100%;
         margin: 0.25rem 0 0.5rem;
         padding: 0.6rem 0.75rem;
-        background: rgba(255, 166, 0, 0.12);
-        border: 1px solid rgba(255, 166, 0, 0.35);
+        background: rgb(from var(--color-warning) r g b / 0.12);
+        border: 1px solid rgb(from var(--color-warning) r g b / 0.35);
         border-radius: var(--radius-md);
     }
 
     .update-new-perms-title {
         font-size: var(--text-sm);
         font-weight: 700;
-        color: var(--color-warning, #e0a030);
+        color: var(--color-warning);
         margin-bottom: 0.4rem;
     }
 
@@ -220,8 +220,8 @@
         flex-basis: 100%;
         margin: 0.25rem 0 0.5rem;
         padding: 0.6rem 0.75rem;
-        background: rgba(88, 166, 255, 0.08);
-        border: 1px solid rgba(88, 166, 255, 0.25);
+        background: rgb(from var(--color-accent-light) r g b / 0.08);
+        border: 1px solid rgb(from var(--color-accent-light) r g b / 0.25);
         border-radius: var(--radius-md);
     }
 
@@ -256,7 +256,7 @@
     .update-changelog-hash {
         font-size: var(--text-xs);
         color: var(--color-text-tertiary);
-        background: rgba(88, 166, 255, 0.12);
+        background: rgb(from var(--color-accent-light) r g b / 0.12);
         padding: 0.05rem 0.3rem;
         border-radius: var(--radius-sm);
         white-space: nowrap;

@@ -1157,11 +1157,11 @@
         gap: 6px;
         margin-top: 10px;
         padding: 8px 10px;
-        background: rgba(210, 153, 34, 0.08);
-        border: 1px solid rgba(210, 153, 34, 0.25);
+        background: rgb(from var(--color-warning) r g b / 0.08);
+        border: 1px solid rgb(from var(--color-warning) r g b / 0.25);
         border-radius: var(--radius-sm);
         font-size: var(--text-sm);
-        color: var(--color-status-orange);
+        color: var(--color-warning);
         line-height: 1.4;
     }
     .no-llm-warning svg {
@@ -1198,7 +1198,7 @@
     }
     .btn-pwa-install:hover {
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
 
     .btn-ca-download {
@@ -1219,7 +1219,7 @@
     }
     .btn-ca-download:hover {
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
 
     .btn-check-updates {
@@ -1238,7 +1238,7 @@
     }
     .btn-check-updates:hover {
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     .about-update {
         display: flex;

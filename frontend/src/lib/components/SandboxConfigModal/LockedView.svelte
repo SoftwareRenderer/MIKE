@@ -90,10 +90,10 @@
         align-items: flex-start;
         gap: 10px;
         padding: 10px 14px;
-        background: rgba(210, 153, 34, 0.1);
-        border: 1px solid rgba(210, 153, 34, 0.3);
+        background: rgb(from var(--color-warning) r g b / 0.1);
+        border: 1px solid rgb(from var(--color-warning) r g b / 0.3);
         border-radius: var(--radius-md);
-        color: var(--color-status-yellow, #d29922);
+        color: var(--color-warning);
         font-size: var(--text-sm);
     }
 
