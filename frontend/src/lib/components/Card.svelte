@@ -595,6 +595,13 @@
 
     let nextStatus = $derived(getNextStatus());
 
+    // The move control's name and tooltip: entering Done commits first when there is something to commit.
+    const cardMoveLabel = $derived(
+        nextStatus === 'done' && hasChanges
+            ? t('board.card.commitAndDone')
+            : t('board.card.moveToAria', { status: statusWord(nextStatus) })
+    );
+
     function handleCardKeydown(e: KeyboardEvent) {
         if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
             e.preventDefault();
@@ -761,7 +768,7 @@
     ontouchmove={handleTouchMove}
     role="button"
     tabindex="0"
-    aria-label={`Open task: ${task.title || '(untitled)'}, Status: ${statusWord(task.status)}`}
+    aria-label={t('board.card.openTaskAria', { title: task.title || t('board.untitled'), status: statusWord(task.status) })}
     aria-keyshortcuts="Alt+ArrowLeft, Alt+ArrowRight"
     aria-current={isSelected ? 'page' : undefined}
     style={`--actions: ${actionCount}; --idle: ${thirdAction === 'idle' ? 1 : 0}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}${parentSelected && inline && task.parent_task_id ? `; border-left: 3px solid ${statusColor}` : ""}`}
@@ -780,13 +787,13 @@
                         class:is-open={overflowOpen}
                         onclick={toggleOverflow}
                         bind:this={overflowRef}
-                        aria-label="Actions"
+                        aria-label={t('board.card.actionsAria')}
                         aria-expanded={overflowOpen}
                     >
                         <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><circle cx="4" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="12" cy="8" r="1.5"/></svg>
                     </button>
                     {#if isIdle}
-                        <span class="action-idle" aria-label="Idle">{t('board.card.idle')}</span>
+                        <span class="action-idle">{t('board.card.idle')}</span>
                     {/if}
                 {:else}
                     {#if canCreateSubtask}
@@ -794,8 +801,8 @@
                             type="button"
                             class="action-icon action-add"
                             onclick={handleCreateChild}
-                            aria-label="Create subtask"
-                            title="Create subtask"
+                            aria-label={t('board.card.createSubtask')}
+                            title={t('board.card.createSubtask')}
                         >
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                         </button>
@@ -805,8 +812,8 @@
                         type="button"
                         class="action-icon"
                         onclick={startEdit}
-                        aria-label="Edit task"
-                        title="Edit Task"
+                        aria-label={t('board.card.editTaskAria')}
+                        title={t('board.card.editTaskAria')}
                     >
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
                     </button>
@@ -816,8 +823,8 @@
                             type="button"
                             class="action-icon"
                             onclick={handlePause}
-                            aria-label="Pause task"
-                            title="Pause task"
+                            aria-label={t('board.card.pauseTaskAria')}
+                            title={t('board.card.pauseTaskAria')}
                         >
                             <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><rect x="2.5" y="1.5" width="1.5" height="7" fill="currentColor"/><rect x="6" y="1.5" width="1.5" height="7" fill="currentColor"/></svg>
                         </button>
@@ -826,20 +833,20 @@
                             type="button"
                             class="action-icon"
                             onclick={handleResume}
-                            aria-label="Resume task"
-                            title="Resume task"
+                            aria-label={t('board.card.resumeTaskAria')}
+                            title={t('board.card.resumeTaskAria')}
                         >
                             <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
                         </button>
                     {:else if thirdAction === 'idle'}
-                        <span class="action-idle" aria-label="Idle">{t('board.card.idle')}</span>
+                        <span class="action-idle">{t('board.card.idle')}</span>
                     {:else if thirdAction === 'delete'}
                         <button
                             type="button"
                             class="action-icon action-delete"
                             onclick={handleDelete}
-                            aria-label="Delete task"
-                            title="Delete task"
+                            aria-label={t('board.deleteTask.aria')}
+                            title={t('board.deleteTask.aria')}
                         >
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                 <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -851,8 +858,8 @@
                             type="button"
                             class="action-icon action-move"
                             onclick={cycleStatus}
-                            aria-label={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusWord(nextStatus)}`) : `Move to ${statusWord(nextStatus)}`}
-                            title={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusWord(nextStatus)}`) : `Move to ${statusWord(nextStatus)}`}
+                            aria-label={cardMoveLabel}
+                            title={cardMoveLabel}
                             style="color: {nextStatus === 'done' && hasChanges ? 'var(--color-status-amber)' : statusColors[nextStatus]}"
                         >
                             {#if nextStatus === 'backlog'}

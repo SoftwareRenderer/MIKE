@@ -43,6 +43,7 @@
     {/if}
 
     <div class="mount-add-row">
+        <!-- The two placeholders are path shapes to type, not copy; the names are the aria-labels. -->
         {#if draft.editingMountIndex !== null}
             <CancelEditButton onclick={() => draft.cancelMountEdit()} />
         {/if}

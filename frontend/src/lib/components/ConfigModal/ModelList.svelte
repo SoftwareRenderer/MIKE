@@ -138,7 +138,7 @@
                             oninput={(e) => { model.reasoning_effort = (e.target as HTMLInputElement).value; effortActive = 0; effortQuery = (e.target as HTMLInputElement).value; onDirty?.(); }}
                             onblur={closeEffortList}
                             onkeydown={(e) => handleEffortKeydown(e, mi)}
-                            placeholder="default"
+                            placeholder={t('settings.models.defaultPlaceholder')}
                             role="combobox"
                             aria-expanded={effortOpen === mi && visibleEffortOptions().length > 0}
                             aria-controls={`reasoning-effort-list-${index}-${mi}`}
@@ -189,33 +189,33 @@
                                 <label for={`model-input-price-${index}-${mi}`}>{t('settings.pricing.input')}</label>
                                 <div class="mp-input-wrap">
                                     <span class="mp-prefix">{currencySymbol}</span>
-                                    <input id={`model-input-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder="default" value={model.input_price ?? ''} oninput={(e) => { model.input_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
+                                    <input id={`model-input-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder={t('settings.models.defaultPlaceholder')} value={model.input_price ?? ''} oninput={(e) => { model.input_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
                                 </div>
                             </div>
                             <div class="mp-field">
                                 <label for={`model-output-price-${index}-${mi}`}>{t('settings.pricing.output')}</label>
                                 <div class="mp-input-wrap">
                                     <span class="mp-prefix">{currencySymbol}</span>
-                                    <input id={`model-output-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder="default" value={model.output_price ?? ''} oninput={(e) => { model.output_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
+                                    <input id={`model-output-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder={t('settings.models.defaultPlaceholder')} value={model.output_price ?? ''} oninput={(e) => { model.output_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
                                 </div>
                             </div>
                             <div class="mp-field">
                                 <label for={`model-cache-read-price-${index}-${mi}`}>{t('settings.pricing.cacheRead')}</label>
                                 <div class="mp-input-wrap">
                                     <span class="mp-prefix">{currencySymbol}</span>
-                                    <input id={`model-cache-read-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder="default" value={model.cache_read_price ?? ''} oninput={(e) => { model.cache_read_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
+                                    <input id={`model-cache-read-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder={t('settings.models.defaultPlaceholder')} value={model.cache_read_price ?? ''} oninput={(e) => { model.cache_read_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
                                 </div>
                             </div>
                             <div class="mp-field">
                                 <label for={`model-cache-write-price-${index}-${mi}`}>{t('settings.pricing.cacheWrite')}</label>
                                 <div class="mp-input-wrap">
                                     <span class="mp-prefix">{currencySymbol}</span>
-                                    <input id={`model-cache-write-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder="default" value={model.cache_write_price ?? ''} oninput={(e) => { model.cache_write_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
+                                    <input id={`model-cache-write-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder={t('settings.models.defaultPlaceholder')} value={model.cache_write_price ?? ''} oninput={(e) => { model.cache_write_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
                                 </div>
                             </div>
                             <div class="mp-field">
                                 <label for={`model-power-w-${index}-${mi}`}>{t('settings.models.power')}</label>
-                                <input id={`model-power-w-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input mp-power-input" placeholder="default" value={model.power_consumption_w ?? ''} oninput={(e) => { model.power_consumption_w = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} title={t('settings.models.powerHint')} />
+                                <input id={`model-power-w-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input mp-power-input" placeholder={t('settings.models.defaultPlaceholder')} value={model.power_consumption_w ?? ''} oninput={(e) => { model.power_consumption_w = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} title={t('settings.models.powerHint')} />
                             </div>
                             <div class="mp-field mp-note-field">
                                 <span class="mp-note">{t('settings.models.note')}</span>

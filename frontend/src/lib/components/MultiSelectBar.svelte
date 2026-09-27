@@ -142,14 +142,14 @@
         class:has-running={hasRunning}
         transition:fade={{ duration: 150 }}
         role="toolbar"
-        aria-label="Multi-select actions"
+        aria-label={t('board.multiSelect.toolbarAria')}
     >
         {#if allInBacklog}
             <button
                 type="button"
                 class="bar-btn bar-btn-model"
                 onclick={openModelModal}
-                aria-label="Change model for {multiSelect.count} tasks"
+                aria-label={t('board.multiSelect.modelAria', { count: multiSelect.count })}
             >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M2 5l6-3 6 3v6l-6 3-6-3V5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
@@ -163,7 +163,7 @@
                 type="button"
                 class="bar-btn bar-btn-start"
                 onclick={handleStart}
-                aria-label="Start {multiSelect.count} tasks"
+                aria-label={t('board.multiSelect.startCount', { count: multiSelect.count })}
             >
                 <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true">
                     <polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/>
@@ -178,7 +178,7 @@
                 class="bar-btn bar-btn-move"
                 onclick={() => { moveMenuOpen = !moveMenuOpen; }}
                 onkeydown={handleMenuKey}
-                aria-label="Move {multiSelect.count} tasks"
+                aria-label={t('board.multiSelect.moveAria', { count: multiSelect.count })}
                 aria-haspopup="menu"
                 aria-expanded={moveMenuOpen}
             >
@@ -208,7 +208,7 @@
             type="button"
             class="bar-btn bar-btn-delete"
             onclick={handleDelete}
-            aria-label="Delete {multiSelect.count} tasks"
+            aria-label={t('board.multiSelect.deleteCount', { count: multiSelect.count })}
         >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -221,7 +221,8 @@
             type="button"
             class="bar-btn bar-btn-clear"
             onclick={onClear}
-            aria-label="Clear selection"
+            aria-label={t('explorer.shared.selectionClear')}
+            title={t('explorer.shared.selectionClear')}
         >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>

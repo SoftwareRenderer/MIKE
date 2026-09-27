@@ -1101,12 +1101,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 <!-- Login gate -->
 {#if sessionBoot.isLoadingAuth}
     <div class="loading-screen">
-        <img class="loading-icon" src={mikeIcon} width="96" height="96" alt="Loading" />
+        <img class="loading-icon" src={mikeIcon} width="96" height="96" alt={t('app.alt.loading')} />
         {#if sessionBoot.bootSlow}<p class="loading-slow">{t('app.bootSlow.title')}</p>{/if}
     </div>
 {:else if sessionBoot.hasLocalCache}
     <div class="offline-screen">
-        <img class="offline-icon" src={mikeIcon} width="96" height="96" alt="Offline" />
+        <img class="offline-icon" src={mikeIcon} width="96" height="96" alt={t('app.alt.offline')} />
         <p class="offline-text">{sessionBoot.bootSlow ? t('app.bootSlow.title') : t('app.offline.title')}</p>
         <button class="offline-btn" onclick={() => void sessionBoot.useLocalCache()}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="6,3 20,12 6,21"/></svg>
@@ -1123,7 +1123,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         <Spinner size={12} decorative />
         {reconnectBanner.status}
         {#if reconnectBanner.staleTimeText}<span class="reconnecting-stale">{t('app.reconnect.dataFrom', { time: reconnectBanner.staleTimeText })}</span>{/if}
-        <button class="reconnecting-btn" onclick={() => reconnectBanner.reconnectNow()} type="button" aria-label="Try connecting now">{t('app.reconnect.connect')}</button>
+        <button class="reconnecting-btn" onclick={() => reconnectBanner.reconnectNow()} type="button" aria-label={t('app.reconnect.connectAria')}>{t('app.reconnect.connect')}</button>
     </div>
 {/if}
 <div class="sr-only" role="status" aria-live="polite">
@@ -1135,7 +1135,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         {t('app.cache.banner')}
         {#if connectionStore.connected}
-            <button class="reconnecting-btn" onclick={() => reconnectBanner.retryLive()} type="button" aria-label="Try connecting now">{t('app.reconnect.connect')}</button>
+            <button class="reconnecting-btn" onclick={() => reconnectBanner.retryLive()} type="button" aria-label={t('app.reconnect.connectAria')}>{t('app.reconnect.connect')}</button>
         {/if}
     </div>
 {/if}
@@ -1145,7 +1145,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     <!-- Mobile sidebar backdrop -->
     {#if isMobileCtx.isMobile && mobileMenuOpen}
-        <button type="button" class="sidebar-backdrop" onclick={() => mobileMenuOpen = false} aria-label="Close menu" title="Close menu"></button>
+        <button type="button" class="sidebar-backdrop" onclick={() => mobileMenuOpen = false} aria-label={t('app.sidebar.closeMenuAria')} title={t('app.sidebar.closeMenuAria')}></button>
     {/if}
 
     <!-- Sidebar -->
@@ -1189,7 +1189,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 </div>
             {:else}
                 <div class="loading-screen">
-                    <img class="loading-icon" src={mikeIcon} width="96" height="96" alt="Loading" />
+                    <img class="loading-icon" src={mikeIcon} width="96" height="96" alt={t('app.alt.loading')} />
                 </div>
             {/if}
         {:else if appStore.selectedProject}
@@ -1206,7 +1206,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 onShowConfig={openSettings}
             />
             {/if}
-            <section class="board-container" aria-label="Kanban board">
+            <section class="board-container" aria-label={t('app.boardRegionAria')}>
                 {#if urlRouter.explorerOpen && appStore.selectedProject}
                     <ExplorerView
                         projectId={appStore.selectedProject.id}
@@ -1267,7 +1267,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             </section>
         {:else}
             <div class="start-pane">
-                <button class="icon-btn" onclick={openSettings} aria-label="Settings" title="Settings">
+                <button class="icon-btn" onclick={openSettings} aria-label={t('settings.title')} title={t('settings.title')}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <circle cx="12" cy="12" r="3"/>
                         <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
@@ -1277,13 +1277,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 {#if !hasProviders}
                     <EmptyState title={t('app.empty.welcomeTitle')} hint={t('app.empty.welcomeBody')}>
                         {#snippet action()}
-                            <button class="btn btn-primary" onclick={() => uiStore.openSettings()} title="Configure an LLM provider">{t('app.empty.configureProvider')}</button>
+                            <button class="btn btn-primary" onclick={() => uiStore.openSettings()}>{t('app.empty.configureProvider')}</button>
                         {/snippet}
                     </EmptyState>
                 {:else}
                     <EmptyState title={t('app.empty.noProjectsTitle')} hint={t('app.empty.noProjectsBody')}>
                         {#snippet action()}
-                            <button class="btn btn-primary" onclick={openAddProject} title="Add a project">{t('app.empty.addProject')}</button>
+                            <button class="btn btn-primary" onclick={openAddProject}>{t('app.empty.addProject')}</button>
                         {/snippet}
                     </EmptyState>
                 {/if}

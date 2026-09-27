@@ -412,7 +412,9 @@ import { slide } from 'svelte/transition';
                                 onclick={() => toggleBlock(item.block.id)}
                                 onmouseenter={() => { hoveredRowKey = `${path}:${i}`; }}
                                 onmouseleave={() => { hoveredRowKey = ''; }}
-                                title={expandedBlocks[item.block.id] ? `Hide ${item.block.count} lines` : `Show ${item.block.count} lines`}
+                                title={expandedBlocks[item.block.id]
+                                    ? t('diff.hideLines', { count: item.block.count })
+                                    : t('diff.showLines', { count: item.block.count })}
                             >
                                 {#if expandedBlocks[item.block.id]}
                                     <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
@@ -441,7 +443,7 @@ import { slide } from 'svelte/transition';
                 type="button"
                 class="diff-expand-btn"
                 onclick={() => onExpand(path)}
-                title="Load full diff for this file"
+                title={t('diff.loadFullTitle')}
             >
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                     <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -481,9 +483,9 @@ import { slide } from 'svelte/transition';
                     </span>
                 {/if}
             </button>
-            <span class="diff-status-badge" style="color: {badge.color}" title={badge.letter === 'M' ? 'Modified' : badge.letter === 'R' ? 'Renamed' : badge.letter === 'D' ? 'Deleted' : badge.letter === 'A' ? 'Added' : 'Modified'}>{badge.letter}</span>
+            <span class="diff-status-badge" style="color: {badge.color}" title={badge.letter === 'M' ? t('git.status.modified') : badge.letter === 'R' ? t('git.status.renamed') : badge.letter === 'D' ? t('git.status.deleted') : badge.letter === 'A' ? t('git.status.added') : t('git.status.modified')}>{badge.letter}</span>
             {#if onStageFile && showStageBtn}
-                <button type="button" class="diff-stage-btn" onclick={() => onStageFile(file.path, !isStaged)} title={isStaged ? 'Unstage changes' : 'Stage changes'}>
+                <button type="button" class="diff-stage-btn" onclick={() => onStageFile(file.path, !isStaged)} title={isStaged ? t('diff.unstageChangesTitle') : t('diff.stageChangesTitle')}>
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d={isStaged ? "M4 8h8" : "M8 4v8M4 8h8"} stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                 </button>
             {/if}
@@ -563,9 +565,9 @@ import { slide } from 'svelte/transition';
                 {/if}
             </button>
             <span class="diff-untracked-badge">{t('diff.untracked')}</span>
-            <span class="diff-status-badge diff-status-added" title="Added">{t('diff.badgeAdded')}</span>
+            <span class="diff-status-badge diff-status-added" title={t('git.status.added')}>{t('diff.badgeAdded')}</span>
             {#if onStageFile}
-                <button type="button" class="diff-stage-btn" onclick={() => onStageFile(entry.path, !isStaged)} title={isStaged ? 'Unstage file' : 'Stage file'}>
+                <button type="button" class="diff-stage-btn" onclick={() => onStageFile(entry.path, !isStaged)} title={isStaged ? t('diff.unstageFileTitle') : t('diff.stageFileTitle')}>
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d={isStaged ? "M4 8h8" : "M8 4v8M4 8h8"} stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                 </button>
             {/if}
@@ -668,7 +670,7 @@ import { slide } from 'svelte/transition';
         <!-- Staged section -->
         {#if stagedCount > 0}
         <div class="diff-section">
-            <button class="diff-section-header diff-section-staged" type="button" aria-expanded={!isSectionCollapsed('staged')} onclick={() => toggleSection('staged')} title={isSectionCollapsed('staged') ? 'Expand all staged files' : 'Collapse all staged files'}>
+            <button class="diff-section-header diff-section-staged" type="button" aria-expanded={!isSectionCollapsed('staged')} onclick={() => toggleSection('staged')} title={isSectionCollapsed('staged') ? t('diff.expandStagedTitle') : t('diff.collapseStagedTitle')}>
                 <svg class="diff-section-chevron" class:expanded={!isSectionCollapsed('staged')} width="12" height="12" viewBox="0 0 16 16" fill="none">
                     <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
@@ -679,7 +681,7 @@ import { slide } from 'svelte/transition';
                 </span>
                 <span class="diff-section-count">{t('diff.shared.file', { count: stagedCount })}</span>
                 {#if onUnstageAll}
-                <span class="diff-section-action" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); onUnstageAll(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onUnstageAll(); } }} title="Unstage all changes" aria-label="Unstage all changes">
+                <span class="diff-section-action" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); onUnstageAll(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onUnstageAll(); } }} title={t('diff.unstageAllAria')} aria-label={t('diff.unstageAllAria')}>
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                 </span>
                 {/if}
@@ -696,7 +698,7 @@ import { slide } from 'svelte/transition';
         <!-- Unstaged section -->
         {#if unstagedCount > 0}
         <div class="diff-section">
-            <button class="diff-section-header diff-section-unstaged" type="button" aria-expanded={!isSectionCollapsed('unstaged')} onclick={() => toggleSection('unstaged')} title={isSectionCollapsed('unstaged') ? 'Expand all unstaged files' : 'Collapse all unstaged files'}>
+            <button class="diff-section-header diff-section-unstaged" type="button" aria-expanded={!isSectionCollapsed('unstaged')} onclick={() => toggleSection('unstaged')} title={isSectionCollapsed('unstaged') ? t('diff.expandUnstagedTitle') : t('diff.collapseUnstagedTitle')}>
                 <svg class="diff-section-chevron" class:expanded={!isSectionCollapsed('unstaged')} width="12" height="12" viewBox="0 0 16 16" fill="none">
                     <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
@@ -707,7 +709,7 @@ import { slide } from 'svelte/transition';
                 </span>
                 <span class="diff-section-count">{t('diff.shared.file', { count: unstagedCount })}</span>
                 {#if onStageAll}
-                <span class="diff-section-action" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); onStageAll(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onStageAll(); } }} title="Stage all changes" aria-label="Stage all changes">
+                <span class="diff-section-action" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); onStageAll(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onStageAll(); } }} title={t('diff.stageAllAria')} aria-label={t('diff.stageAllAria')}>
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                 </span>
                 {/if}
@@ -729,7 +731,7 @@ import { slide } from 'svelte/transition';
         <!-- Merged from Subtasks section -->
         {#if sortedCommittedFiles.length > 0}
         <div class="diff-section">
-            <button class="diff-section-header diff-section-merged" type="button" aria-expanded={!isSectionCollapsed('committed')} onclick={() => toggleSection('committed')} title={isSectionCollapsed('committed') ? 'Expand all merged files' : 'Collapse all merged files'}>
+            <button class="diff-section-header diff-section-merged" type="button" aria-expanded={!isSectionCollapsed('committed')} onclick={() => toggleSection('committed')} title={isSectionCollapsed('committed') ? t('diff.expandMergedTitle') : t('diff.collapseMergedTitle')}>
                 <svg class="diff-section-chevron" class:expanded={!isSectionCollapsed('committed')} width="12" height="12" viewBox="0 0 16 16" fill="none">
                     <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>

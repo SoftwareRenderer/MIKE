@@ -65,10 +65,10 @@
             class="context-usage"
             class:clickable={!!onSummarize}
             class:summarizing={isSummarizing}
-            title="{tooltip}{onSummarize ? (isSummarizing ? t('chat.context.clickToCancel') : t('chat.context.clickToSummarize')) : ''}"
+            title={tooltip + (onSummarize ? (isSummarizing ? t('chat.context.clickToCancel') : t('chat.context.clickToSummarize')) : '')}
             onclick={handleClick}
             onkeydown={handleKeyDown}
-            aria-label="{tooltip}"
+            aria-label={tooltip}
         >
             {#if isSummarizing}
                 <Spinner size={20} decorative />

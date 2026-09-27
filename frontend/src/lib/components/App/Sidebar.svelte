@@ -105,21 +105,31 @@
         e.preventDefault();
         onSelectProject(p);
     }
+
+    /** What the row's own name cannot say: a clone in flight, or a Review count waiting. */
+    function projectTitle(p: Project): string {
+        if (p.cloning) return t('app.sidebar.cloningTitle', { progress: p.cloneProgress ?? 0 });
+        const review = projectCounts[p.id]?.review ?? 0;
+        if (review > 0) return t('app.sidebar.reviewTitle', { name: p.name, count: review });
+        return p.sandbox_enabled
+            ? t('app.sidebar.openProjectSandboxedTitle', { name: p.name })
+            : t('app.sidebar.openProjectTitle', { name: p.name });
+    }
 </script>
 
-<aside id="sidebar" class="sidebar" class:collapsed={collapsed && !isMobile} class:mobile-open={isMobile && mobileMenuOpen} aria-label="Sidebar">
+<aside id="sidebar" class="sidebar" class:collapsed={collapsed && !isMobile} class:mobile-open={isMobile && mobileMenuOpen} aria-label={t('app.sidebar.navAria')}>
     <div class="sidebar-header">
         <h2 class:collapsed={!isMobile && collapsed}>{t('app.sidebar.projects')}</h2>
         <!-- Mobile close button (hidden on desktop via CSS) -->
-        <button class="toggle-btn mobile-close-btn" onclick={() => mobileMenuOpen = false} aria-label="Close menu" title="Close menu">✕</button>
+        <button class="toggle-btn mobile-close-btn" onclick={() => mobileMenuOpen = false} aria-label={t('app.sidebar.closeMenuAria')} title={t('app.sidebar.closeMenuAria')}>✕</button>
         <!-- Desktop collapse toggle (hidden on mobile via CSS) -->
-        <button class="toggle-btn desktop-collapse-btn" class:collapsed={collapsed} onclick={onToggleSidebar} aria-expanded={collapsed ? 'false' : 'true'} aria-controls="sidebar" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+        <button class="toggle-btn desktop-collapse-btn" class:collapsed={collapsed} onclick={onToggleSidebar} aria-expanded={collapsed ? 'false' : 'true'} aria-controls="sidebar" aria-label={collapsed ? t('app.sidebar.expandAria') : t('app.sidebar.collapseAria')} title={collapsed ? t('app.sidebar.expandAria') : t('app.sidebar.collapseAria')}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
         </button>
     </div>
-    <nav class="project-list" aria-label="Projects">
+    <nav class="project-list" aria-label={t('app.sidebar.projects')}>
         {#each sortedProjects as p, i (p.id)}
             <div class="project-item-wrapper" class:active={currentProject?.id === p.id} class:has-review={projectCounts[p.id]?.review > 0}>
                 <div class="project-item-content">
@@ -132,15 +142,15 @@
                         onkeydown={(e) => handleProjectItemKeydown(e, i, p)}
                         onclick={(e) => handleProjectClick(e, p)}
                         aria-busy={p.cloning ? 'true' : undefined}
-                        title={p.cloning ? `Cloning repository… (${p.cloneProgress ?? 0}%)` : projectCounts[p.id]?.review > 0 ? `${p.name} - ${projectCounts[p.id].review} task${projectCounts[p.id].review === 1 ? '' : 's'} available for review` : `Open project: ${p.name}${p.sandbox_enabled ? ' (sandboxed)' : ''}`}
+                        title={projectTitle(p)}
                     >
                         {#if isMobile || !collapsed}
                             {#if p.sandbox_enabled}
-                                <span class="sandbox-badge" aria-label="Sandbox enabled (gVisor)" title="Sandbox enabled (gVisor)">
+                                <span class="sandbox-badge" aria-label={t('sandbox.enabledGVisorAria')} title={t('sandbox.enabledGVisorAria')}>
                                     <Icon src={shieldIcon} width={14} height={14} />
                                 </span>
                             {:else}
-                                <span class="sandbox-badge sandbox-badge-off" aria-label="Sandbox disabled" title="Sandbox disabled">
+                                <span class="sandbox-badge sandbox-badge-off" aria-label={t('sandbox.disabledAria')} title={t('sandbox.disabledAria')}>
                                     <Icon src={shieldOffIcon} color="var(--color-status-red)" width={14} height={14} />
                                 </span>
                             {/if}
@@ -151,20 +161,20 @@
                         </span>
                         {#if p.cloning && (isMobile || !collapsed)}
                             <!-- Determinate clone progress (streamed from the server) -->
-                            <span class="clone-progress" role="progressbar" aria-label="Clone progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={p.cloneProgress ?? 0}>
+                            <span class="clone-progress" role="progressbar" aria-label={t('app.sidebar.cloneProgressAria')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={p.cloneProgress ?? 0}>
                                 <span class="clone-progress-bar" style={`width: ${p.cloneProgress ?? 0}%`}></span>
                             </span>
                         {:else if (isMobile || !collapsed) && hasActiveStats(p.id)}
                             <!-- Backlog is intentionally not shown; a badge appears only when its count is > 0 -->
                             <span class="project-stats">
                                 {#if projectCounts[p.id].in_progress > 0}
-                                    <span class="stat-badge" style="color: var(--color-column-in-progress)" title="In Progress">
+                                    <span class="stat-badge" style="color: var(--color-column-in-progress)" aria-label={t('board.column.inProgress')} title={t('board.column.inProgress')}>
                                         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
                                         {projectCounts[p.id].in_progress}
                                     </span>
                                 {/if}
                                 {#if projectCounts[p.id].review > 0}
-                                    <span class="stat-badge" style="color: var(--color-column-review)" title="Review">
+                                    <span class="stat-badge" style="color: var(--color-column-review)" aria-label={t('board.column.review')} title={t('board.column.review')}>
                                         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
                                         {projectCounts[p.id].review}
                                     </span>
@@ -177,8 +187,8 @@
                 <button
                     class="project-remove-btn"
                     onclick={(e) => { e.stopPropagation(); onRemoveProject(p); }}
-                    aria-label={`Remove project ${p.name}`}
-                    title={`Remove project ${p.name}`}
+                    aria-label={t('app.sidebar.removeProjectAria', { name: p.name })}
+                    title={t('app.sidebar.removeProjectAria', { name: p.name })}
                 >
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -189,21 +199,21 @@
             </div>
         {/each}
         {#if isMobile || !collapsed}
-            <button class="add-project-btn" onclick={onAddProject} aria-label="Add Project" title="Add Project">{t('app.sidebar.addProject')}</button>
+            <button class="add-project-btn" onclick={onAddProject}>{t('app.sidebar.addProject')}</button>
         {/if}
     </nav>
     <!-- Mobile sidebar menu (hidden on desktop via CSS) -->
     <div class="sidebar-menu">
         {#if !(isMobile && standaloneCtx.standalone)}
         <!-- An installed window has no browser chrome left to hide. -->
-        <button class="sidebar-menu-item" onclick={onToggleFullScreen} aria-label="Toggle full screen" title="Toggle full screen">
+        <button class="sidebar-menu-item" onclick={onToggleFullScreen} aria-label={t('app.shortcut.toggleFullscreen')} title={t('app.shortcut.toggleFullscreen')}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
             </svg>
             {t('app.sidebar.fullScreen')}
         </button>
         {/if}
-        <button class="sidebar-menu-item" onclick={onShowStats} aria-label="Token usage stats" title="Token usage stats">
+        <button class="sidebar-menu-item" onclick={onShowStats} aria-label={t('app.sidebar.tokenUsageAria')} title={t('app.sidebar.tokenUsageAria')}>
             <svg width="20" height="20" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <rect x="1" y="8" width="3" height="6" rx="0.5" fill="currentColor"/>
                 <rect x="6.5" y="4" width="3" height="10" rx="0.5" fill="currentColor"/>
@@ -211,7 +221,7 @@
             </svg>
             {t('app.sidebar.tokenUsage')}
         </button>
-        <button class="sidebar-menu-item" onclick={onShowConfig} aria-label="Settings" title="Settings">
+        <button class="sidebar-menu-item" onclick={onShowConfig}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <circle cx="12" cy="12" r="3"/>
                 <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>

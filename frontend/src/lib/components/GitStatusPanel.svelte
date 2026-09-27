@@ -901,14 +901,14 @@
 <div class="git-status-panel">
     <!-- Header -->
     <div class="panel-header">
-        <button class="close-btn" onclick={onClose} aria-label="Close changes panel" title="Close (Escape)">
+        <button class="close-btn" onclick={onClose} aria-label={t('git.closePanelAria')} title={t('explorer.shared.closeEscape')}>
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
         </button>
         <span class="panel-title">{t('git.changes')}</span>
         <!-- Commit comparison dropdowns -->
-        <div class="commit-selectors" role="group" aria-label="Compare commits">
+        <div class="commit-selectors" role="group" aria-label={t('git.compareAria')}>
             {#snippet commitList(commits: GitCommit[], selected: string, idBase: string, query: string, onPick: (commit: GitCommit) => void, onKeydown: (e: KeyboardEvent) => void, onFocusItem: (index: number) => void)}
                 {#each commits as commit, i}
                     <button
@@ -947,13 +947,13 @@
                         bind:this={fromInputEl}
                         type="text"
                         class="commit-combobox-input"
-                        placeholder="commit hash or subject"
+                        placeholder={t('git.commitQueryPlaceholder')}
                         value={fromInputValue}
                         oninput={handleFromInput}
                         onkeydown={handleFromKeydown}
                         onblur={handleFromInputBlur}
                         onfocus={handleFromInputFocus}
-                        aria-label="From commit"
+                        aria-label={t('git.fromCommitAria')}
                         aria-expanded={showFromDropdown}
                         aria-controls="compare-from-listbox"
                         aria-autocomplete="list"
@@ -964,7 +964,7 @@
                         type="button"
                         class="commit-combobox-toggle"
                         onclick={toggleFromDropdown}
-                        aria-label={showFromDropdown ? 'Hide suggestions' : 'Show suggestions'}
+                        aria-label={showFromDropdown ? t('git.hideSuggestionsAria') : t('git.showSuggestionsAria')}
                     >
                         <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
                             <polyline points="1.5,2.5 4,5.5 6.5,2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1015,13 +1015,13 @@
                         bind:this={toInputEl}
                         type="text"
                         class="commit-combobox-input"
-                        placeholder="commit hash or subject"
+                        placeholder={t('git.commitQueryPlaceholder')}
                         value={toInputValue}
                         oninput={handleToInput}
                         onkeydown={handleToKeydown}
                         onblur={handleToInputBlur}
                         onfocus={handleToInputFocus}
-                        aria-label="To commit"
+                        aria-label={t('git.toCommitAria')}
                         aria-expanded={showToDropdown}
                         aria-controls="compare-to-listbox"
                         aria-autocomplete="list"
@@ -1032,7 +1032,7 @@
                         type="button"
                         class="commit-combobox-toggle"
                         onclick={toggleToDropdown}
-                        aria-label={showToDropdown ? 'Hide suggestions' : 'Show suggestions'}
+                        aria-label={showToDropdown ? t('git.hideSuggestionsAria') : t('git.showSuggestionsAria')}
                     >
                         <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
                             <polyline points="1.5,2.5 4,5.5 6.5,2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1085,8 +1085,8 @@
                 class="panel-commit-btn"
                 disabled={stagedEntries.length === 0}
                 onclick={openCommitDialog}
-                title={stagedEntries.length > 0 ? 'Commit staged changes' : 'Nothing staged to commit'}
-                aria-label={stagedEntries.length > 0 ? 'Commit staged changes' : 'Nothing staged to commit'}
+                title={stagedEntries.length > 0 ? t('git.commitStagedAria') : t('git.nothingStagedAria')}
+                aria-label={stagedEntries.length > 0 ? t('git.commitStagedAria') : t('git.nothingStagedAria')}
             >
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                     <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2"/>
@@ -1242,7 +1242,7 @@
             <!-- Resize handle: sidebar ↔ diff -->
             {#if !isMobile}
             <ResizeHandle
-                ariaLabel="Resize changes sidebar"
+                ariaLabel={t('git.resizeSidebarAria')}
                 onDragStart={handleDragStart}
                 onDragMove={handleDragMove}
                 onDragEnd={handleDragEnd}

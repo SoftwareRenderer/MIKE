@@ -194,18 +194,19 @@
             <input
                 class="search-input"
                 type="text"
-                placeholder={searchContent ? 'Search...' : 'Find filename...'}
+                placeholder={searchContent ? t('editor.searchPlaceholder') : t('editor.findFilenamePlaceholder')}
                 bind:value={query}
                 bind:this={inputEl}
                 oninput={handleInput}
                 onkeydown={handleKeydown}
-                aria-label="Search files"
+                aria-label={t('editor.searchFilesAria')}
             />
             <div class="search-toggles">
                 <button
                     class="toggle-btn"
                     class:active={matchCase}
-                    title="Match Case"
+                    title={t('editor.matchCaseAria')}
+                    aria-label={t('editor.matchCaseAria')}
                     aria-pressed={matchCase}
                     onclick={() => { matchCase = !matchCase; handleInput(); }}
                 >
@@ -216,7 +217,8 @@
                 <button
                     class="toggle-btn"
                     class:active={wholeWord}
-                    title="Whole Word"
+                    title={t('editor.wholeWordAria')}
+                    aria-label={t('editor.wholeWordAria')}
                     aria-pressed={wholeWord}
                     onclick={() => { wholeWord = !wholeWord; handleInput(); }}
                 >
@@ -228,7 +230,8 @@
                 <button
                     class="toggle-btn"
                     class:active={useRegex}
-                    title="Use Regex"
+                    title={t('editor.useRegexAria')}
+                    aria-label={t('editor.useRegexAria')}
                     aria-pressed={useRegex}
                     onclick={() => { useRegex = !useRegex; handleInput(); }}
                 >
@@ -239,7 +242,8 @@
                 <button
                     class="toggle-btn"
                     class:active={!searchContent}
-                    title="Search Filenames Only"
+                    title={t('editor.filenamesOnlyAria')}
+                    aria-label={t('editor.filenamesOnlyAria')}
                     aria-pressed={!searchContent}
                     onclick={() => { searchContent = !searchContent; handleInput(); }}
                 >
@@ -252,14 +256,14 @@
                 </button>
             </div>
             {#if query}
-                <button class="clear-btn" onclick={() => { query = ''; results = []; searched = false; error = ''; inputEl?.focus(); }} aria-label="Clear search">
+                <button class="clear-btn" onclick={() => { query = ''; results = []; searched = false; error = ''; inputEl?.focus(); }} aria-label={t('editor.clearSearchAria')}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
                         <line x1="18" y1="6" x2="6" y2="18"/>
                         <line x1="6" y1="6" x2="18" y2="18"/>
                     </svg>
                 </button>
             {:else}
-                <button class="clear-btn" onclick={onClose} aria-label="Close search" title="Close (Escape)">
+                <button class="clear-btn" onclick={onClose} aria-label={t('editor.closeSearchAria')} title={t('explorer.shared.closeEscape')}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
                         <line x1="18" y1="6" x2="6" y2="18"/>
                         <line x1="6" y1="6" x2="18" y2="18"/>
@@ -277,7 +281,7 @@
     {:else if searched && results.length === 0}
         <EmptyState compact title={t('editor.noResultsFound')} />
     {:else if results.length > 0}
-        <div class="search-results" role="list" aria-label="Search results">
+        <div class="search-results" role="list" aria-label={t('editor.resultsAria')}>
             {#each groupedResults as group}
                 <!-- File header -->
                 <div class="result-file-header" title={group.path}>

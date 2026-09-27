@@ -193,10 +193,13 @@ export interface GitGutterState {
  *   state.baselineContent = fileContent;  // content from disk
  *   // after a save, re-fetch the file and assign both again
  *
- * @param options.title - native hover tooltip on every gutter row; empty = none
+ * @param options.title - native hover tooltip on every gutter row; empty = none. A function is
+ *   read per row build, so a consumer whose copy comes from the translation catalog is not frozen
+ *   at the moment the editor was created.
  */
-export function gitGutter(options?: { title?: string }) {
-    const title = options?.title ?? '';
+export function gitGutter(options?: { title?: string | (() => string) }) {
+    const declared = options?.title;
+    const titleOf = () => (typeof declared === 'function' ? declared() : declared ?? '');
     const state: GitGutterState = { initialMarkers: null, baselineContent: '', current: '', map: new Map(), mapVersion: 0 };
 
     const gutterDef = gutter({
@@ -234,9 +237,9 @@ export function gitGutter(options?: { title?: string }) {
                         indicators.push({ color: colorMap[t], shape: 'stripe', pattern });
                     }
                 }
-                return new GitLineMarker(ln, indicators, title);
+                return new GitLineMarker(ln, indicators, titleOf());
             }
-            return new PlainLineMarker(ln, title);
+            return new PlainLineMarker(ln, titleOf());
         },
     });
 

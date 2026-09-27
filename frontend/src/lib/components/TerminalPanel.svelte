@@ -820,9 +820,9 @@
 </script>
 
 {#if !standalone}
-<button type="button" class="terminal-overlay" onclick={close} aria-label="Close terminal" title="Close terminal"></button>
+<button type="button" class="terminal-overlay" onclick={close} aria-label={t('terminal.close')} title={t('terminal.close')}></button>
 {/if}
-<div class="terminal-panel" class:fullscreen={fullscreen || standalone} bind:this={panelEl} role={standalone ? undefined : 'dialog'} aria-modal={standalone ? undefined : 'true'} aria-label="Terminal" style:height={fullscreen || standalone ? undefined : panelHeight + 'px'}>
+<div class="terminal-panel" class:fullscreen={fullscreen || standalone} bind:this={panelEl} role={standalone ? undefined : 'dialog'} aria-modal={standalone ? undefined : 'true'} aria-label={t('terminal.title')} style:height={fullscreen || standalone ? undefined : panelHeight + 'px'}>
     <div class="terminal-header">
         {#if !standalone}
         <ResizeHandle
@@ -859,7 +859,7 @@
                 {/if}
             </button>
             {/if}
-            <button class="close-btn" onclick={close} aria-label="Close terminal" title={closeButtonTitle}>✕</button>
+            <button class="close-btn" onclick={close} aria-label={t('terminal.close')} title={closeButtonTitle}>✕</button>
         </div>
         {/if}
     </div>
@@ -870,7 +870,7 @@
             <button type="button" class="kb-btn" onclick={() => handleKey('/')}>/</button>
             <button type="button" class="kb-btn" onclick={() => handleKey('-')}>-</button>
             <button type="button" class="kb-btn" onclick={() => handleKey('Home')}>home</button>
-            <button type="button" class="kb-btn" onclick={() => handleKey('ArrowUp')} aria-label="Arrow up">
+            <button type="button" class="kb-btn" onclick={() => handleKey('ArrowUp')} aria-label={t('terminal.arrowUpAria')}>
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 4l4 5H4l4-5z" fill="currentColor"/></svg>
             </button>
             <button type="button" class="kb-btn" onclick={() => handleKey('End')}>end</button>
@@ -880,13 +880,13 @@
             <button type="button" class="kb-btn" onclick={() => handleKey('Tab')}>tab</button>
             <button type="button" class="kb-btn kb-mod" class:kb-mod-active={!!modCtrl} onclick={() => toggleModifier('ctrl')}>ctrl</button>
             <button type="button" class="kb-btn kb-mod" class:kb-mod-active={!!modAlt} onclick={() => toggleModifier('alt')}>alt</button>
-            <button type="button" class="kb-btn" onclick={() => handleKey('ArrowLeft')} aria-label="Arrow left">
+            <button type="button" class="kb-btn" onclick={() => handleKey('ArrowLeft')} aria-label={t('terminal.arrowLeftAria')}>
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 8l5-4v8l-5-4z" fill="currentColor"/></svg>
             </button>
-            <button type="button" class="kb-btn" onclick={() => handleKey('ArrowDown')} aria-label="Arrow down">
+            <button type="button" class="kb-btn" onclick={() => handleKey('ArrowDown')} aria-label={t('terminal.arrowDownAria')}>
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 12l-4-5h8l-4 5z" fill="currentColor"/></svg>
             </button>
-            <button type="button" class="kb-btn" onclick={() => handleKey('ArrowRight')} aria-label="Arrow right">
+            <button type="button" class="kb-btn" onclick={() => handleKey('ArrowRight')} aria-label={t('terminal.arrowRightAria')}>
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M12 8l-5 4V4l5 4z" fill="currentColor"/></svg>
             </button>
             <button type="button" class="kb-btn" onclick={() => handleKey('PageDown')}>pgdn</button>

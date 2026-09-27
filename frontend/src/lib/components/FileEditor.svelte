@@ -458,11 +458,13 @@
         const langSupport = getLanguageSupport(filePath);
         // Use base content so delta replay starts from the saved state.
         const initialDoc = historyBase || content;
-        // Hover tooltip on the gutter rows
-        const gutterTitle = mode === 'explorer' && onLinesSelected
-            ? (taskId ? t('editor.createSubtaskFromLines') : t('editor.createTaskFromLines'))
-            : undefined;
-        const gitGutterExt = gitGutter(gutterTitle ? { title: gutterTitle } : undefined);
+        // Hover tooltip on the gutter rows. Read per row build, so an editor that outlives a
+        // language switch shows the current one.
+        const gutterTitle = () =>
+            mode === 'explorer' && onLinesSelected
+                ? (taskId ? t('editor.createSubtaskFromLines') : t('editor.createTaskFromLines'))
+                : '';
+        const gitGutterExt = gitGutter({ title: gutterTitle });
         gitGutterState = gitGutterExt.state;
         // Explorer mode uses server-precomputed gutter markers; diff mode computes
         // the gutter vs the baseline ref (initialMarkers stays null).
@@ -1537,7 +1539,7 @@
         <!-- Diff-mode header -->
         <div class="editor-header">
             <div class="header-left">
-                <button class="btn-back" class:unsaved={hasChanges} onclick={requestClose} aria-label="Close editor" title="Close editor">
+                <button class="btn-back" class:unsaved={hasChanges} onclick={requestClose} aria-label={t('editor.closeEditorAria')} title={t('editor.closeEditorAria')}>
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <circle class="unsaved-circle" cx="8" cy="8" r="6" fill="currentColor"/>
                         <path class="close-x" d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -1563,7 +1565,7 @@
                     class="btn-save"
                     onclick={handleSave}
                     disabled={!hasChanges || saving || fileTooLarge}
-                    title="Save (Ctrl+S)"
+                    title={t('editor.saveTitle')}
                     aria-describedby={fileTooLarge ? 'file-editor-too-large' : undefined}
                 >
                 {#if saving}

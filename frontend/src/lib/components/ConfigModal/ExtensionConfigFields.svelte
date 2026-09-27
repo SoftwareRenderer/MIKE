@@ -37,11 +37,13 @@
                     <div class="mount-editor">
                         {#if mounts.length > 0}
                             <div class="mount-list">
+                                <!-- A placeholder here is the path shape to type, not copy to translate; the
+                                     accessible name is the aria-label. -->
                                 {#each mounts as mount, i}
                                     <div class="mount-row">
-                                        <input type="text" class="mount-input" value={mount.host_path} placeholder="/host/path" oninput={(e) => { const updated = [...mounts]; updated[i] = { ...mount, host_path: (e.target as HTMLInputElement).value }; config[field.key] = updated; }} />
+                                        <input type="text" class="mount-input" value={mount.host_path} placeholder="/host/path" aria-label={t('sandbox.hostPath')} oninput={(e) => { const updated = [...mounts]; updated[i] = { ...mount, host_path: (e.target as HTMLInputElement).value }; config[field.key] = updated; }} />
                                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" class="mount-arrow"><path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                        <input type="text" class="mount-input" value={mount.container_path} placeholder="/container/path" oninput={(e) => { const updated = [...mounts]; updated[i] = { ...mount, container_path: (e.target as HTMLInputElement).value }; config[field.key] = updated; }} />
+                                        <input type="text" class="mount-input" value={mount.container_path} placeholder="/container/path" aria-label={t('sandbox.containerPath')} oninput={(e) => { const updated = [...mounts]; updated[i] = { ...mount, container_path: (e.target as HTMLInputElement).value }; config[field.key] = updated; }} />
                                         <MountModeRadios name={`mount-mode-${i}`} mode={mount.mode} onselect={(mode) => { const updated = [...mounts]; updated[i] = { ...mount, mode }; config[field.key] = updated; }} />
                                         <button type="button" class="btn-remove" onclick={() => { config[field.key] = mounts.filter((_, j) => j !== i); }} title={t('settings.extensions.remove')}><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
                                     </div>
@@ -57,9 +59,9 @@
                             <div class="env-list">
                                 {#each envs as env, i}
                                     <div class="env-row">
-                                        <input type="text" class="env-input env-input-key" value={env.key} placeholder="KEY" oninput={(e) => { const updated = [...envs]; updated[i] = { ...env, key: (e.target as HTMLInputElement).value }; config[field.key] = updated; }} />
+                                        <input type="text" class="env-input env-input-key" value={env.key} placeholder={t('sandbox.envKeyPlaceholder')} oninput={(e) => { const updated = [...envs]; updated[i] = { ...env, key: (e.target as HTMLInputElement).value }; config[field.key] = updated; }} />
                                         <span class="env-equals">=</span>
-                                        <input type="text" class="env-input" value={env.value ?? ''} placeholder="value" oninput={(e) => { const updated = [...envs]; updated[i] = { ...env, value: (e.target as HTMLInputElement).value }; config[field.key] = updated; }} />
+                                        <input type="text" class="env-input" value={env.value ?? ''} placeholder={t('sandbox.envValueInputPlaceholder')} oninput={(e) => { const updated = [...envs]; updated[i] = { ...env, value: (e.target as HTMLInputElement).value }; config[field.key] = updated; }} />
                                         <button type="button" class="btn-remove" onclick={() => { config[field.key] = envs.filter((_, j) => j !== i); }} title={t('settings.extensions.remove')}><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
                                     </div>
                                 {/each}

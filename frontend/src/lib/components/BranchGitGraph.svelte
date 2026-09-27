@@ -120,7 +120,7 @@
         <span class="git-graph-label">{t('task.graph.history')}</span>
     </div>
 
-    <div class="git-graph-list" role="list" aria-label="Commit history">
+    <div class="git-graph-list" role="list" aria-label={t('task.graph.historyAria')}>
         {#if loading && commitDisplays.length === 0}
             <div class="git-graph-loading">{t('task.graph.loading')}</div>
         {:else if commitDisplays.length === 0}
@@ -158,7 +158,7 @@
 
                                 <!-- Origin tip badge — shown before branch badge -->
                                 {#if d.isOriginTip}
-                                    <span class="git-badge origin-badge" title={d.rowTitle ? undefined : 'Pushed to origin'}>
+                                    <span class="git-badge origin-badge" title={d.rowTitle ? undefined : t('task.graph.pushedToOrigin')}>
                                         <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                             <circle cx="6" cy="6" r="2"/>
                                             <circle cx="10" cy="10" r="2"/>
@@ -172,7 +172,7 @@
 
                                 <!-- Branch badge -->
                                 {#if d.primaryBranch}
-                                    <span class="git-badge branch-badge" class:current={d.isCurrentBranch} title={d.rowTitle ? undefined : 'Branch'}>
+                                    <span class="git-badge branch-badge" class:current={d.isCurrentBranch} title={d.rowTitle ? undefined : t('task.graph.branchTitle')}>
                                         <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                             <circle cx="6" cy="6" r="2"/>
                                             <circle cx="10" cy="10" r="2"/>

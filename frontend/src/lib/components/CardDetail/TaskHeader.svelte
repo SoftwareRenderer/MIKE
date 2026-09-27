@@ -56,7 +56,7 @@
 
     // Sandbox button tooltip — live usage, and what this task's run cost it.
     const sandboxTitle = $derived.by(() => {
-        let title = 'Sandbox enabled';
+        let title = t('task.header.sandboxEnabled');
         if (stats?.running) {
             title += stats.memory_limit_mb > 0
                 ? ` · ${stats.memory_current_mb} / ${stats.memory_limit_mb} MB`
@@ -197,7 +197,7 @@
 
 <div class="header">
     <div class="header-left">
-        <button class="btn-back" onclick={() => onClose(task.status)} aria-label={floating ? 'Close (Esc)' : 'Back to board (Esc)'} title={floating ? 'Close (Esc)' : 'Back to board (Esc)'}>
+        <button class="btn-back" onclick={() => onClose(task.status)} aria-label={floating ? t('task.closeEscAria') : t('task.header.backAria')} title={floating ? t('task.closeEscAria') : t('task.header.backAria')}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 {#if floating}
                     <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -216,7 +216,7 @@
                         {/if}
                     </button>
                 {:else}
-                    <span class="sandbox-badge" title="Sandbox disabled">
+                    <span class="sandbox-badge" aria-label={t('sandbox.disabledAria')} title={t('sandbox.disabledAria')}>
                         <Icon src={shieldOffIcon} color="var(--color-status-red)" width={14} height={14} />
                     </span>
                 {/if}
@@ -239,7 +239,7 @@
                 draggable="false"
                 onclick={(e) => handleLinkClick(e, () => onOpenExplorer?.())}
                 onkeydown={(e) => handleLinkKeydown(e, () => onOpenExplorer?.())}
-                aria-label="Open explorer" title="Open explorer"
+                aria-label={t('app.openExplorerAria')} title={t('app.openExplorerAria')}
             >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M2 3h4l1.5 2H13l1.5 2.5V13a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
@@ -253,7 +253,7 @@
                 draggable="false"
                 onclick={(e) => handleLinkClick(e, () => onOpenTerminal?.())}
                 onkeydown={(e) => handleLinkKeydown(e, () => onOpenTerminal?.())}
-                aria-label="Open terminal" title={terminalButtonTitle}
+                aria-label={t('app.shortcut.openTerminal')} title={terminalButtonTitle}
             >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
@@ -261,14 +261,14 @@
                 </svg>
             </a>
         {/if}
-        <button class="icon-btn" onclick={onDelete} aria-label="Delete task" title="Delete task">
+        <button class="icon-btn" onclick={onDelete} aria-label={t('board.deleteTask.aria')} title={t('board.deleteTask.aria')}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                 <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
         </button>
         {#if floating}
-            <button class="icon-btn" onclick={onOpenTask} aria-label="Open task" title="Open task">
+            <button class="icon-btn" onclick={onOpenTask} aria-label={t('chat.tool.openTask')} title={t('chat.tool.openTask')}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M6.5 6.5L2 2M2 2h4M2 2v4M9.5 9.5L14 14M14 14h-4M14 14v-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
@@ -288,8 +288,8 @@
             type="button"
             class="path-tooltip-copy"
             class:copied={pathCopied}
-            title={pathCopied ? 'Copied' : 'Copy path'}
-            aria-label={pathCopied ? 'Path copied' : 'Copy path'}
+            title={pathCopied ? t('task.header.copied') : t('task.header.copyPathAria')}
+            aria-label={pathCopied ? t('task.header.pathCopiedAria') : t('task.header.copyPathAria')}
             onclick={handleCopyPath}
         >
             {#if pathCopied}

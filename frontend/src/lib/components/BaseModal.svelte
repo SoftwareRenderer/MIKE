@@ -3,6 +3,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { createFocusTrap } from '$lib/a11y';
     import { Z } from '$lib/constants/z-layers';
+    import { t } from '$lib/i18n';
 
     let {
         title = '',
@@ -21,7 +22,7 @@
         footerStyle,
         modalClass,
     }: {
-        title: string;
+        title?: string;
         width?: string;
         zIndex?: number;
         closeOnOverlayClick?: boolean;
@@ -112,7 +113,7 @@
             {:else}
                 <h2 id="modal-title">{title}</h2>
             {/if}
-            <button class="close-btn" onclick={handleClose} aria-label="Close" title="Close">✕</button>
+            <button class="close-btn" onclick={handleClose} aria-label={t('app.close')} title={t('app.close')}>✕</button>
         </div>
         {#if toolbar}
             <div class="modal-toolbar">

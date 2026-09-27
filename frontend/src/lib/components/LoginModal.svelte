@@ -38,7 +38,7 @@
     </button>
 {/snippet}
 
-<BaseModal title="" width="360px" closeOnOverlayClick={false} footer={footer} onClose={() => {}} header={header}>
+<BaseModal width="360px" closeOnOverlayClick={false} footer={footer} onClose={() => {}} header={header}>
     {#if error}
         <div class="login-error" role="alert">{error}</div>
     {/if}
@@ -48,9 +48,9 @@
         bind:this={passwordInput}
         type="password"
         bind:value={password}
-        placeholder="Password"
+        placeholder={t('app.login.passwordAria')}
         autocomplete="current-password"
-        aria-label="Password"
+        aria-label={t('app.login.passwordAria')}
         onkeydown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
     />
 </BaseModal>

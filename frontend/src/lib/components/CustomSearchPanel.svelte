@@ -241,7 +241,7 @@
                 <input
                     class="search-input"
                     type="text"
-                    placeholder="Find"
+                    placeholder={t('editor.find')}
                     bind:this={inputEl}
                     oninput={onInput}
                     onkeydown={handleKeydown}
@@ -250,7 +250,8 @@
                     <button
                         class="toggle-btn"
                         class:active={matchCase}
-                        title="Match Case (Alt+C)"
+                        title={t('editor.matchCaseTitle')}
+                        aria-label={t('editor.matchCaseAria')}
                         aria-pressed={matchCase}
                         onclick={() => { matchCase = !matchCase; onInput(); }}
                     >
@@ -261,7 +262,8 @@
                     <button
                         class="toggle-btn"
                         class:active={wholeWord}
-                        title="Whole Word (Alt+W)"
+                        title={t('editor.wholeWordTitle')}
+                        aria-label={t('editor.wholeWordAria')}
                         aria-pressed={wholeWord}
                         onclick={() => { wholeWord = !wholeWord; onInput(); }}
                     >
@@ -273,7 +275,8 @@
                     <button
                         class="toggle-btn"
                         class:active={regex}
-                        title="Use Regex (Alt+R)"
+                        title={t('editor.useRegexTitle')}
+                        aria-label={t('editor.useRegexAria')}
                         aria-pressed={regex}
                         onclick={() => { regex = !regex; onInput(); }}
                     >
@@ -285,17 +288,17 @@
                 <span class="match-count">{matchCount}</span>
             </div>
             <div class="search-nav">
-                <button class="nav-btn" title="Previous match (Shift+F3 / Shift+Enter)" aria-label="Previous match" onclick={() => selectNext(false)}>
+                <button class="nav-btn" title={t('editor.prevMatchTitle')} aria-label={t('editor.prevMatchAria')} onclick={() => selectNext(false)}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="18,15 12,9 6,15"/>
                     </svg>
                 </button>
-                <button class="nav-btn" title="Next match (F3 / Enter)" aria-label="Next match" onclick={() => selectNext(true)}>
+                <button class="nav-btn" title={t('editor.nextMatchTitle')} aria-label={t('editor.nextMatchAria')} onclick={() => selectNext(true)}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="6,9 12,15 18,9"/>
                     </svg>
                 </button>
-                <button class="nav-btn" title="Close (Escape)" aria-label="Close search" onclick={onClose}>
+                <button class="nav-btn" title={t('explorer.shared.closeEscape')} aria-label={t('editor.closeSearchAria')} onclick={onClose}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <line x1="18" y1="6" x2="6" y2="18"/>
                         <line x1="6" y1="6" x2="18" y2="18"/>
@@ -311,14 +314,14 @@
                     <input
                         class="search-input replace-input"
                         type="text"
-                        placeholder="Replace"
+                        placeholder={t('editor.replace')}
                         bind:this={replaceEl}
                         onkeydown={handleKeydown}
                     />
                 </div>
                 <div class="replace-actions">
-                    <button class="action-btn" title="Replace" onclick={doReplace}>{t('editor.replace')}</button>
-                    <button class="action-btn" title="Replace All (Ctrl+Enter)" onclick={doReplaceAll}>{t('editor.replaceAll')}</button>
+                    <button class="action-btn" onclick={doReplace}>{t('editor.replace')}</button>
+                    <button class="action-btn" title={t('editor.replaceAllTitle')} onclick={doReplaceAll}>{t('editor.replaceAll')}</button>
                 </div>
             </div>
         {:else}

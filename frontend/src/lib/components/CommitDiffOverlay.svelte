@@ -291,7 +291,7 @@
     <!-- Header bar -->
     <div class="diff-header">
         <div class="diff-header-left">
-            <button class="close-btn" onclick={onClose} title="Close diff" aria-label="Close diff">
+            <button class="close-btn" onclick={onClose} title={t('diff.closeDiffAria')} aria-label={t('diff.closeDiffAria')}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                     <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                 </svg>
@@ -304,7 +304,7 @@
                         class:expanded={showFullMessage}
                         bind:this={subjectBtnEl}
                         onclick={() => { showFullMessage = !showFullMessage; }}
-                        title="Click to view full commit message"
+                        title={t('diff.fullMessageTitle')}
                     >
                         <span class="diff-commit-subject" title={commit.subject}>{commit.subject}</span>
                         <svg class="diff-subject-caret" width="12" height="12" viewBox="0 0 16 16" fill="none">
@@ -321,7 +321,7 @@
                 {/if}
                 <span class="diff-commit-hash-wrapper">
                     <span class="diff-commit-hash" title={commit.hash}>{commit.short}</span>
-                    <button class="diff-hash-copy-btn" class:copied={copiedHash} onclick={handleCopyHash} aria-label="Copy commit hash" title="Copy full hash">
+                    <button class="diff-hash-copy-btn" class:copied={copiedHash} onclick={handleCopyHash} aria-label={t('diff.copyHashAria')} title={t('diff.copyHashTitle')}>
                         <svg class="icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
@@ -346,7 +346,7 @@
             {/if}
         </div>
         {#if !isMobile}
-            <button class="diff-mode-toggle" onclick={toggleDiffMode} title={diffMode === 'split' ? 'Switch to unified diff' : 'Switch to split diff'} aria-label={diffMode === 'split' ? 'Switch to unified diff' : 'Switch to split diff'}>
+            <button class="diff-mode-toggle" onclick={toggleDiffMode} title={diffMode === 'split' ? t('diff.toUnifiedAria') : t('diff.toSplitAria')} aria-label={diffMode === 'split' ? t('diff.toUnifiedAria') : t('diff.toSplitAria')}>
                 {#if diffMode === 'split'}
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <line x1="2" y1="4" x2="14" y2="4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>

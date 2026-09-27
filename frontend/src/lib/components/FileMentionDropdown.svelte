@@ -1,5 +1,6 @@
 <script lang="ts">
     import { Z } from '$lib/constants/z-layers';
+    import { t } from '$lib/i18n';
     import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
 
     interface Props {
@@ -86,7 +87,7 @@
         bind:this={dropdownEl}
         style="position:fixed; bottom:{dropdownBottom}px; left:{dropdownLeft}px; width:{dropdownWidth}px; z-index:{Z.overlay};"
         role="listbox"
-        aria-label="File suggestions"
+        aria-label={t('chat.mention.suggestionsAria')}
         onclick={(e) => e.stopPropagation()}
         onkeydown={(e) => { if (e.key === 'Escape') onClose(); }}
     >

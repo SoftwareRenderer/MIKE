@@ -16,10 +16,10 @@ const ABOUT_TAB = 'button.tab-btn:has-text("About")';
 const TOKENS_SECTION = '.tokens-section';
 const TOKEN_ROW = '.tokens-section .settings-row';
 const TOKEN_LABEL_INPUT = '.tokens-section input[type="text"]';
-const CREATE_BTN = 'button[aria-label="create-api-token"]';
-const REFRESH_BTN = 'button[aria-label="refresh-tokens"]';
+const CREATE_BTN = '.tokens-section button.btn-primary';
+const REFRESH_BTN = '.tokens-section button[aria-label="Reload the token list"]';
 const SECRET = '.tokens-secret';
-const ROW_REVOKE = 'button[aria-label^="revoke-token-"]';
+const ROW_REVOKE = 'button[aria-label^="Revoke token "]';
 const CONFIRM_BTN = '.btn-confirm';
 
 /** Open Settings, switch to the About tab and scroll the API tokens section into view. */
@@ -57,7 +57,7 @@ async function callWithToken(page: Page, method: string, path: string, token: st
 /** Revoke through the UI and wait for the row to go. */
 async function revokeToken(page: Page, id: string) {
   await page.locator(TOKENS_SECTION).scrollIntoViewIfNeeded();
-  await page.locator(`button[aria-label="revoke-token-${id}"]`).click();
+  await page.locator(`button[aria-label="Revoke token ${id}"]`).click();
   await page.locator(CONFIRM_BTN).click();
   await expect(page.locator(`${TOKEN_ROW}[data-token-id="${id}"]`)).toHaveCount(0, { timeout: 10000 });
 }

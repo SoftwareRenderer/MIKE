@@ -140,16 +140,15 @@
     }
 
     /**
-     * A column is three things at once: `id` is **data** (compared, persisted, sent to the
-     * API — never translated), `title` is the English a11y name behind
-     * `aria-label="… column"` (aria text is never translated in this app, and
-     * {@link getColumnEl} finds a column by it), and `labelKey` is the visible label.
+     * A column is two things at once: `id` is **data** (compared, persisted, sent to the
+     * API — never translated, and what {@link getColumnEl} finds a column by), and
+     * `labelKey` is both its visible label and the word in its accessible name.
      */
-    const columns: { id: string; title: string; labelKey: MessageKey; color: string }[] = [
-        { id: 'backlog', title: 'Backlog', labelKey: 'board.column.backlog', color: 'var(--color-column-backlog)' },
-        { id: 'in_progress', title: 'In Progress', labelKey: 'board.column.inProgress', color: 'var(--color-column-in-progress)' },
-        { id: 'review', title: 'Review', labelKey: 'board.column.review', color: 'var(--color-column-review)' },
-        { id: 'done', title: 'Done', labelKey: 'board.column.done', color: 'var(--color-column-done)' },
+    const columns: { id: string; labelKey: MessageKey; color: string }[] = [
+        { id: 'backlog', labelKey: 'board.column.backlog', color: 'var(--color-column-backlog)' },
+        { id: 'in_progress', labelKey: 'board.column.inProgress', color: 'var(--color-column-in-progress)' },
+        { id: 'review', labelKey: 'board.column.review', color: 'var(--color-column-review)' },
+        { id: 'done', labelKey: 'board.column.done', color: 'var(--color-column-done)' },
     ];
 
     /** Visible label for a status id (ids themselves are data — see {@link columns}). */
@@ -249,10 +248,8 @@
 
     /** Column element for a status id, e.g. 'review' -> the Review column. */
     function getColumnEl(status: string): HTMLElement | null {
-        if (!boardEl) return null;
-        const title = columns.find(c => c.id === status)?.title;
-        if (!title) return null;
-        const el = boardEl.querySelector(`.column[aria-label="${title} column"]`);
+        if (!boardEl || !columns.some(c => c.id === status)) return null;
+        const el = boardEl.querySelector(`.column[data-column-id="${status}"]`);
         return el instanceof HTMLElement ? el : null;
     }
 
@@ -332,12 +329,11 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<div class="board" bind:this={boardEl} role="region" aria-label="Task board" onclick={(e) => { if (e.target === e.currentTarget) multiSelect.clear(); }} onkeydown={(e) => { if (e.key === 'Escape' && multiSelect.hasSelection) multiSelect.clear(); }}>
+<div class="board" bind:this={boardEl} role="region" aria-label={t('board.regionAria')} onclick={(e) => { if (e.target === e.currentTarget) multiSelect.clear(); }} onkeydown={(e) => { if (e.key === 'Escape' && multiSelect.hasSelection) multiSelect.clear(); }}>
     <div class="sr-only" aria-live="polite" aria-atomic="true">{liveAnnouncement}</div>
     {#each columns as col}
         <Column
             columnId={col.id}
-            title={col.title}
             label={t(col.labelKey)}
             color={col.color}
             tasks={getTasksForColumn(col.id)}

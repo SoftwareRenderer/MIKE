@@ -127,7 +127,7 @@
                 class="settings-btn-small"
                 onclick={loadSessions}
                 disabled={loading || revokingOthers}
-                aria-label="refresh-sessions"
+                aria-label={t('settings.sessions.reloadTitle')}
                 title={t('settings.sessions.reloadTitle')}
             >{loading ? t('settings.sessions.loading') : t('settings.sessions.refresh')}</button>
             <button
@@ -135,7 +135,6 @@
                 class="settings-btn-small settings-btn-danger"
                 onclick={handleRevokeOthers}
                 disabled={loading || revokingOthers || otherCount === 0}
-                aria-label="revoke-all-other-sessions"
                 title={t('settings.sessions.revokeAllHint')}
             >{revokingOthers ? t('settings.sessions.revoking') : t('settings.sessions.revokeAllOther')}</button>
         </div>
@@ -178,7 +177,7 @@
                     class="settings-btn-small settings-btn-danger session-revoke"
                     onclick={() => handleRevoke(session)}
                     disabled={revokingId === session.id || revokingOthers}
-                    aria-label={`revoke-session-${session.id}`}
+                    aria-label={t('settings.sessions.revokeSessionAria', { id: session.id })}
                     title={session.current ? t('settings.sessions.revokeDeviceHint') : t('settings.sessions.revokeSessionHint')}
                 >{revokingId === session.id ? t('settings.sessions.revoking') : t('settings.sessions.revoke')}</button>
             </div>

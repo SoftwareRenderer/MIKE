@@ -55,7 +55,9 @@ function renderSidebar(isMobile: boolean) {
     });
 }
 
-const FULL_SCREEN_ROW = '[aria-label="Toggle full screen"]';
+// The row shares its accessible name with the top bar's fullscreen control, so the
+// catalog's one spelling ('Toggle fullscreen') is what the DOM carries.
+const FULL_SCREEN_ROW = '[aria-label="Toggle fullscreen"]';
 
 describe('Sidebar full screen row', () => {
     afterEach(() => clearDisplayMode());

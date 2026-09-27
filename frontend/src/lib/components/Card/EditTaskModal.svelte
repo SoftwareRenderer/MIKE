@@ -163,7 +163,7 @@
                     type="text"
                     bind:value={titleDraft}
                     onkeydown={(e) => { if (e.key === 'Enter') handleSave(); }}
-                    placeholder="Task title"
+                    placeholder={t('board.editTask.titlePlaceholder')}
                 />
             </label>
             {#if editProviders.length > 0}

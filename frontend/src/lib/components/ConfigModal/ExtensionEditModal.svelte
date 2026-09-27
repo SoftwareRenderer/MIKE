@@ -130,6 +130,7 @@
             <div class="config-fields">
                 <h4>{t('settings.extensions.dependencies')}</h4>
                 <div class="config-field">
+                    <!-- The placeholder is the directory shape to type, not copy; the name is the aria-label. -->
                     <label class="field-label" for="edit-dep-path">{t('settings.extensions.depDirLabel')}</label>
                     <p class="field-desc">
                         {t('settings.extensions.depDirDesc.before')} <code class="ext-dep-env">{dep.env}={dep.container_path}</code> {t('settings.extensions.depDirDesc.after')}
@@ -173,6 +174,7 @@
                         {t('settings.extensions.agentMountDesc.before')} <code>{draft.mounts[0].container_path}</code> {t('settings.extensions.agentMountDesc.after')}
                     </p>
                     {#each draft.mounts as row, i}
+                        <!-- An extension may suggest a folder; the fallback is a path shape to type, not copy. -->
                         <input
                             id={`edit-agent-mount-${i}`}
                             type="text"

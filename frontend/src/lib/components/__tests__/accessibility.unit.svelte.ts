@@ -220,7 +220,7 @@ describe('Accessibility (Section 508 / WCAG 2.1 AA)', () => {
         it('has ARIA roles for drag targets', () => {
             const { container } = render(Column, {
                 columnId: 'backlog',
-                title: 'Backlog',
+                label: 'Backlog',
                 color: 'blue',
                 tasks: [],
                 projectId: 'test-project',

@@ -57,15 +57,14 @@
     const memAlertAction = $derived(memAlert ? memoryAlertAction(memAlert.alert) : null);
 
     /**
-     * Section `id`s are status data (compared, sent to the API); `title` is the English
-     * name behind the `Expand/Collapse …` tooltip (`title` text is never translated) and
-     * `labelKey` is the visible, translatable section label.
+     * Section `id`s are status data (compared, sent to the API); `labelKey` is both the visible
+     * section label and the name in the `Expand/Collapse …` tooltip.
      */
-    const overviewSections: { id: string; title: string; labelKey: MessageKey }[] = [
-        { id: 'backlog', title: 'Backlog', labelKey: 'board.column.backlog' },
-        { id: 'in_progress', title: 'In Progress', labelKey: 'board.column.inProgress' },
-        { id: 'review', title: 'Review', labelKey: 'board.column.review' },
-        { id: 'done', title: 'Done', labelKey: 'board.column.done' },
+    const overviewSections: { id: string; labelKey: MessageKey }[] = [
+        { id: 'backlog', labelKey: 'board.column.backlog' },
+        { id: 'in_progress', labelKey: 'board.column.inProgress' },
+        { id: 'review', labelKey: 'board.column.review' },
+        { id: 'done', labelKey: 'board.column.done' },
     ];
 
     // Collapsible sections
@@ -969,7 +968,7 @@
 
 </script>
 
-    <div class="task-detail-page" class:floating={floating} class:fullscreen={editorFullscreen || diffFullscreen} class:chat-fullscreen={chatMaximize.fullscreen} bind:this={detailEl} tabindex="-1" aria-label="Task detail">
+    <div class="task-detail-page" class:floating={floating} class:fullscreen={editorFullscreen || diffFullscreen} class:chat-fullscreen={chatMaximize.fullscreen} bind:this={detailEl} tabindex="-1" aria-label={t('task.detailAria')}>
         <!-- Header -->
         <TaskHeader
             {workspaceDir}
@@ -1006,11 +1005,11 @@
         {/if}
 
         <!-- 3-Column Layout -->
-        <div bind:this={columnsRef} class="columns"  role="region" aria-label="Task detail panels">
+        <div bind:this={columnsRef} class="columns"  role="region" aria-label={t('task.detailPanelsAria')}>
             <!-- Column 1: Board Overview -->
             <div class="column column-context" tabindex="-1" class:hidden={floating || (mobile && activeTab !== 'context')} style:width={boardWidth}>
                 <BoardOverview
-                    sections={overviewSections.map(section => ({ ...section, label: t(section.labelKey) }))}
+                    sections={overviewSections.map(section => ({ id: section.id, label: t(section.labelKey) }))}
                     {allTasks}
                     consolidatedSubtaskIds={hierarchy.consolidatedSubtaskIds}
                     sectionDragState={dnd.sectionDragState}
@@ -1036,7 +1035,7 @@
             <!-- Resize handle: Board ↔ Chat -->
             {#if !mobile}
                 <ResizeHandle
-                    ariaLabel="Resize board and agent panels"
+                    ariaLabel={t('task.resizeBoardAgentAria')}
                     onDragStart={handleBoardDragStart}
                     onDragMove={handleBoardDragMove}
                     onDragEnd={handleBoardDragEnd}
@@ -1087,7 +1086,7 @@
             <!-- Resize handle: Chat ↔ Diff -->
             {#if !mobile}
                 <ResizeHandle
-                    ariaLabel="Resize agent and changes panels"
+                    ariaLabel={t('task.resizeAgentChangesAria')}
                     onDragStart={handleChatDragStart}
                     onDragMove={handleChatDragMove}
                     onDragEnd={handleChatDragEnd}

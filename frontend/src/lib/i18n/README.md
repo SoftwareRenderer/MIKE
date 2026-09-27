@@ -161,63 +161,62 @@ Related facts the gate keeps honest:
 - Nothing in core spells the fallback locale: the runtime compares against `DEFAULT_LOCALE`
   (imported from `en.ts`), so rule 4 flags even `=== 'en'`.
 
-## `aria-label` / `title` / `placeholder`: this batch keeps them literal
+## `aria-label` / `title` / `placeholder`: attribute copy converts
 
-In the app shell and shared primitives, text in an `aria-label`, `aria-labelledby`,
-`aria-describedby`, `title` or `placeholder` attribute stays a **literal English string in the
-component**. Visible text — text nodes, and the script/template expressions that produce them —
-converts.
+Every literal in an `aria-label`, `aria-labelledby`, `aria-describedby`, `title`, `placeholder` or
+`alt` attribute resolves through `t()`. The accessible name is the only copy a person using a screen
+reader gets, so an untranslated attribute is a half-translated app whatever the label beside it
+says. (`alt=""` stays — it is how markup says *decorative*.)
 
-Other batches made the opposite call and put their labelling copy in the catalog
-(`settings.pair.providerAria`, `explorer.symbols.treeAria`, …). Both work, and the reason they
-work is the invariant worth keeping: **a `t()` call and the key it names must land in the same
-tree, and one component's copy converts in one pass.**
+Three kinds of string stay out of the catalog, each for its own reason:
 
-**The reason this side stays literal is measured, not stylistic.** The a11y spec
-(`src/lib/components/__tests__/accessibility.unit.svelte.ts`) walks the rendered DOM and
-compares a control's labelled-by / `aria-label` text set against the *rendered text* of every
-button in it. A missing key does not fail loudly: the runtime answers with the key itself
-(`settings.extensions.addMount`) so a hole in the catalog is visible instead of blank. That is
-the right call for visible copy, and it is fatal for that invariant — the moment a `<button>`
-gained `t()` text whose keys had not landed yet, the comparison broke for ~27 components,
-including files whose keys lived in another batch. Leaving the labelling attributes literal
-keeps the invariant true **by construction**: the two sides of the comparison can never
-disagree, in any locale, for any catalog state.
+- **Text this app did not write.** A filename, branch, host path or mount mode in a `title` is
+  data, as are git's status letters and `rw` / `ro`. So is a `placeholder` that is a format example
+  (`/host/path`, `docker.io/ubuntu:latest`, `http://localhost:8080/v1`) — the example *is* the
+  answer, and translating it teaches the wrong shape. These are the only literals still allowed at
+  these attributes.
+- **A `title` repeating visible text.** Drop it. Two names for one control is one too many, and the
+  visible text is already the accessible name. On an icon-only control the tooltip is the only hover
+  affordance, so there `title` and `aria-label` both stay, fed by **one** key.
+- **A name already spelled elsewhere.** Where an attribute prints a word that is a visible label in
+  another component — a card's `Move to {status}` naming a column header (`Card.svelte`) — it uses
+  that key. A second table of the same words is how one state ends up with two translations.
 
-The same argument covers the 48 e2e locators of the shape
-`getByRole('button', { name })`: the accessible name is the `aria-label`, so those locators
-never move.
+Reactivity is the same rule as visible text: `t()` inline at the attribute, so a language switch
+re-renders it. Never a `$state` snapshot of a `t()` result. A name that leaves the render path — a
+prop default (`ResizeHandle`'s fallback is a `$derived`), an imperative `el.title`, a CodeMirror
+gutter row — becomes a getter read at build time, recomputed through `onLocaleChange`
+(`runtime.svelte.ts`) when nothing else redraws it. `utils/git-gutter.ts`'s title getter is that
+case, and `utils/keyboard.ts`'s `openTerminalTitle()` / `fullscreenToggleTitle()` are the same shape
+arrived at from the other side.
 
-**One exception, and it is a different kind of string.** When a labelling attribute prints a
-word that is *already* a visible label elsewhere, it resolves through that key rather than
-carrying a second table of the same words: a card's `Move to {status}` names the status with
-the `board.column.*` keys the column header above it uses (`Card.svelte`). Duplicating that
-vocabulary is how a translation ends up with two names for one state, and a pack that
-translates the heading then leaves the card's copy behind. The safety argument is
-unaffected — the key is typed (`MessageKey`), so it cannot be missing, and English renders
-byte-identical, so no locator moves.
+Two invariants keep the batch honest:
 
-Consequences, accepted deliberately:
+- **English renders byte-identical** to the string the attribute held before its conversion, so the
+  ~48 e2e `getByRole(name)` locators and the `[aria-label=…]` selectors `docs/testing.md` names do
+  not move. A deliberate rename — a slug like `refresh-tokens` becoming a real sentence, or an
+  icon-only control that used to announce nothing — moves its locator in the same change.
+- `accessibility.unit.svelte.ts` compares a control's labelled-by / `aria-label` text against the
+  rendered text of the buttons it names. Both sides read the same catalog now, so a key that has not
+  landed shows its key text on both sides instead of breaking the comparison.
 
-- A tooltip (`title`) can be a different language from the sentence next to it.
-- **The line is drawn at the tag, not at the computation.** A string built in `<script>` and
-  *passed* to a `title` converts (`openTerminalTitle()` and `fullscreenToggleTitle()` in
-  `utils/keyboard.ts` are the case, and they are visible shortcut-hint text too); a string
-  interpolated inside the tag attribute itself does not (`title={`Branch: ${branch}`}`,
-  `title={`Create the task${hint}`}` in `CreateTaskModal.svelte`). One rule, easy to check in
-  review, and the English value is byte-identical either way so no locator moves.
-- A script-level `title:` **object property** is different text: `showConfirm({ title })`
-  renders an `<h2>`, so it is visible copy and it converts.
-- Inside **this batch's files**, adding a `t()` call to a labelling attribute is a review
-  error: it half-converts a component. Copying the `…Aria` key style from the settings/explorer
-  batches into them is the same mistake — pick one shape per component, not one per repository.
+`i18n-count.py` excludes these attributes from its count — it measures visible copy — so the
+measure here is a grep:
+
+```bash
+cd frontend && grep -rn --include=*.svelte -E 'aria-label="' src/lib/components | wc -l   # 0
+```
+
+…with the same command for `title="` (0) and `placeholder="` (the format examples above, and only
+those).
 
 ## Measuring the tree: `i18n-count.py`
 
 `cd frontend && python3 i18n-count.py [-v]` counts candidate strings per file over **all of
 `src/`** — template text nodes, plus quoted literals in `<script>`, in `.ts` modules, and
 inside template mustache expressions. It excludes by **context, never by string identity**
-(so a real hole still measures): the labelling attributes above, comments, `<style>`,
+(so a real hole still measures): the labelling attributes the section above measures by grep
+instead, comments, `<style>`,
 `console.*` arguments, property-key position, key-comparison context
 (`e.key === 'ArrowDown'`), technical APIs (`addEventListener`, `querySelector<T>(`,
 IndexedDB key helpers), non-prose tokens (identifiers, paths, selectors, dotted message
