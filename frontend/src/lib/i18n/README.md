@@ -163,10 +163,10 @@ Related facts the gate keeps honest:
 
 ## `aria-label` / `title` / `placeholder`: attribute copy converts
 
-Every literal in an `aria-label`, `aria-labelledby`, `aria-describedby`, `title`, `placeholder` or
-`alt` attribute resolves through `t()`. The accessible name is the only copy a person using a screen
-reader gets, so an untranslated attribute is a half-translated app whatever the label beside it
-says. (`alt=""` stays — it is how markup says *decorative*.)
+Every literal in an `aria-label`, `title`, `placeholder` or `alt` attribute resolves through `t()`. The
+accessible name is the only copy a person using a screen reader gets, so an untranslated attribute is a
+half-translated app whatever the label beside it says. (`alt=""` stays — it is how markup says *decorative*;
+`aria-labelledby` and `aria-describedby` hold an element id, and no copy is due in one.)
 
 Three kinds of string stay out of the catalog, each for its own reason:
 
@@ -200,15 +200,17 @@ Two invariants keep the batch honest:
   rendered text of the buttons it names. Both sides read the same catalog now, so a key that has not
   landed shows its key text on both sides instead of breaking the comparison.
 
-`i18n-count.py` excludes these attributes from its count — it measures visible copy — so the
-measure here is a grep:
+`i18n-count.py` measures these attributes, so the batch is one command rather than a grep:
 
 ```bash
-cd frontend && grep -rn --include=*.svelte -E 'aria-label="' src/lib/components | wc -l   # 0
+cd frontend && python3 i18n-count.py    # 0 findings; a literal names its file:line and its attribute
 ```
 
-…with the same command for `title="` (0) and `placeholder="` (the format examples above, and only
-those).
+A literal in an `aria-label`, `title`, `placeholder` or `alt` fails it. The format examples above are the
+only sites the script permits, each listed in its `TEXT_ATTR_ALLOW` with the reason beside it. An
+IDREF (`aria-labelledby`, `aria-describedby`), a flag (`aria-hidden`, `aria-expanded`) and a key inside
+`t(…)` are not text, so the script asks nothing of them. `docs/i18n.md → Attribute text is a catalog key`
+holds the rule, the blind spots and the ratchet.
 
 ## Measuring the tree: `i18n-count.py`
 
