@@ -147,8 +147,8 @@
 
 {#snippet footer()}
     <div class="footer-wrapper">
-        <button type="button" class="btn-secondary" onclick={onClose} disabled={saving}>{t('sandbox.cancel')}</button>
-        <button type="button" class="btn-primary" onclick={handleSave} disabled={saving || isLocked}>
+        <button type="button" class="btn" onclick={onClose} disabled={saving}>{t('sandbox.cancel')}</button>
+        <button type="button" class="btn btn-primary" onclick={handleSave} disabled={saving || isLocked}>
             {saving ? t('sandbox.saving') : t('sandbox.save')}
         </button>
     </div>

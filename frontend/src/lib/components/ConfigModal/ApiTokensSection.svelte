@@ -147,7 +147,7 @@
         />
         <button
             type="button"
-            class="settings-btn-small btn-primary"
+            class="btn btn-primary"
             onclick={handleCreate}
             disabled={creating || loading}
             aria-label="create-api-token"
@@ -279,12 +279,6 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-    }
-
-    .btn-primary {
-        border-color: var(--color-accent);
-        background: var(--color-accent);
-        color: white;
     }
 
     .tokens-status {

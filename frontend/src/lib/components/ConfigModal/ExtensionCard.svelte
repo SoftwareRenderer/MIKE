@@ -120,7 +120,7 @@
             </span>
         </div>
         <div class="card-actions">
-            <button class="btn btn-icon btn-danger" title={t('settings.extensions.delete')} onclick={() => ondelete(ext.id, ext.name)}>
+            <button class="btn btn-icon btn-delete" title={t('settings.extensions.delete')} onclick={() => ondelete(ext.id, ext.name)}>
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                     <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -310,7 +310,7 @@
         color: var(--color-text-primary);
     }
 
-    .btn-danger:hover {
+    .btn-delete:hover {
         color: var(--color-status-red);
     }
 

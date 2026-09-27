@@ -1277,13 +1277,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 {#if !hasProviders}
                     <EmptyState title={t('app.empty.welcomeTitle')} hint={t('app.empty.welcomeBody')}>
                         {#snippet action()}
-                            <button class="btn-primary" onclick={() => uiStore.openSettings()} title="Configure an LLM provider">{t('app.empty.configureProvider')}</button>
+                            <button class="btn btn-primary" onclick={() => uiStore.openSettings()} title="Configure an LLM provider">{t('app.empty.configureProvider')}</button>
                         {/snippet}
                     </EmptyState>
                 {:else}
                     <EmptyState title={t('app.empty.noProjectsTitle')} hint={t('app.empty.noProjectsBody')}>
                         {#snippet action()}
-                            <button class="btn-primary" onclick={openAddProject} title="Add a project">{t('app.empty.addProject')}</button>
+                            <button class="btn btn-primary" onclick={openAddProject} title="Add a project">{t('app.empty.addProject')}</button>
                         {/snippet}
                     </EmptyState>
                 {/if}
@@ -1413,6 +1413,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 </svelte:head>
 
 <style>
+    @import '$lib/styles/shared.css';
+
     /* -- Loading screen -- */
     .loading-screen {
         position: fixed;
@@ -1650,16 +1652,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         position: absolute;
         top: 12px;
         right: 12px;
-    }
-    .btn-primary {
-        padding: 8px 20px;
-        border-radius: var(--radius-md);
-        background: var(--color-accent-dark);
-        color: white;
-        font-weight: 500;
-    }
-    .btn-primary:hover {
-        background: var(--color-accent-hover);
     }
     /* Same tier as Toast.svelte: a failed add/clone has to stay readable above the picker dialog
        it came from. */

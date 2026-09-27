@@ -1210,7 +1210,7 @@
                         {#snippet actions()}
                             <button
                                 type="button"
-                                class="selection-btn"
+                                class="selection-btn btn-ghost"
                                 disabled={selectedBySection.unstaged.length === 0}
                                 title={t('git.stage')}
                                 aria-label={t('git.stage')}
@@ -1220,7 +1220,7 @@
                             </button>
                             <button
                                 type="button"
-                                class="selection-btn"
+                                class="selection-btn btn-ghost"
                                 disabled={selectedBySection.staged.length === 0}
                                 title={t('git.unstage')}
                                 aria-label={t('git.unstage')}
@@ -1230,7 +1230,7 @@
                             </button>
                             <button
                                 type="button"
-                                class="selection-btn destructive"
+                                class="selection-btn btn-ghost destructive"
                                 title={t('explorer.shared.discard')}
                                 aria-label={t('explorer.shared.discard')}
                                 onclick={() => handleDiscardRows(selectedRows)}

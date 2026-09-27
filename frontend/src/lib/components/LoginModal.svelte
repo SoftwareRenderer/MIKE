@@ -33,7 +33,7 @@
 </script>
 
 {#snippet footer()}
-    <button type="button" class="login-btn" disabled={loading || !password.trim()} onclick={handleSubmit}>
+    <button type="button" class="login-btn btn btn-primary" disabled={loading || !password.trim()} onclick={handleSubmit}>
         {loading ? t('app.login.signingIn') : t('app.login.signIn')}
     </button>
 {/snippet}
@@ -126,21 +126,9 @@
     }
 
     .login-btn {
+        /* The footer asks for a full-width submit; the chip itself is `.btn .btn-primary`. */
         width: 100%;
         padding: 10px;
-        border: none;
-        border-radius: var(--radius-md);
-        background: var(--color-accent-dark);
-        color: white;
-        font-size: var(--text-base);
-        font-weight: 500;
-        cursor: pointer;
-        transition: background 0.15s;
-        font-family: inherit;
-    }
-
-    .login-btn:hover:not(:disabled) {
-        background: var(--color-accent-hover);
     }
 
 </style>

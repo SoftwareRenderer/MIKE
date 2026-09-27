@@ -192,10 +192,10 @@
 
 {#if open}
     {#snippet footer()}
-        <button type="button" class="btn-secondary" onclick={handleCancel}>{cancelText}</button>
+        <button type="button" class="btn" onclick={handleCancel}>{cancelText}</button>
         <button
             type="button"
-            class="btn-primary"
+            class="btn btn-primary"
             onclick={handleConfirm}
             disabled={!editedMessage.trim() || streaming}
         >

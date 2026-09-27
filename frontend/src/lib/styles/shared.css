@@ -21,3 +21,80 @@
     color: var(--color-text-primary);
     background: var(--color-surface-3);
 }
+
+/* Buttons — one idiom for a control that does something.
+
+   `.btn` is the chip every variant sits on, and the three variants answer only what colour the answer
+   is, so the two are written together: `class="btn btn-primary"`. A component adds what is specific to
+   one control — a square icon button, a full-width submit, a denser padding — and never a second
+   colour scheme.
+
+   `opacity: 1` in the hover rule is load-bearing, not decoration: `app.css` dims every button on hover,
+   so a button that also changes its background would do both at once. It is on the plain `:hover` so it
+   is settled before the variant rules are read, and it holds while the control is dead because
+   `app.css`'s `button:disabled:hover` outranks it.
+
+   The colour changes carry `:not(:disabled)`: a control that reacts under the pointer is not claiming to
+   be dead, which is the invariant `app.css` states for the disabled dim. */
+:global(.btn) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+    color: var(--color-text-primary);
+    font-family: inherit;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    line-height: 1.5;
+    white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+:global(.btn:hover) {
+    opacity: 1;
+}
+:global(.btn:hover:not(:disabled)) {
+    background: var(--color-surface-3);
+    border-color: var(--color-border-bright);
+}
+
+/* The affirmative answer — the Save, Create and Confirm button of every dialog footer. Each variant
+   pins its own border colour on hover, because `.btn`'s hover brightens a border a filled variant has
+   none of. */
+:global(.btn-primary) {
+    border-color: transparent;
+    background: var(--color-btn-primary-bg);
+    color: var(--color-btn-text);
+}
+:global(.btn-primary:hover:not(:disabled)) {
+    border-color: transparent;
+    background: var(--color-btn-primary-hover);
+}
+
+/* The answer that undoes something: the red fill the stop/remove controls already use, brightening
+   rather than dimming under the pointer. */
+:global(.btn-danger) {
+    border-color: transparent;
+    background: var(--color-status-red-dark);
+    color: var(--color-btn-text);
+}
+:global(.btn-danger:hover:not(:disabled)) {
+    border-color: transparent;
+    background: var(--color-status-red);
+}
+
+/* No box of its own — the same hover `.close-btn` has, for a control that sits in a row rather than
+   opening a dialog. Combines with `.btn` when that colouring is wanted on a bordered chip. */
+:global(.btn-ghost) {
+    border-color: transparent;
+    background: none;
+    color: var(--color-text-secondary);
+}
+:global(.btn-ghost:hover:not(:disabled)) {
+    border-color: transparent;
+    background: var(--color-surface-3);
+    color: var(--color-text-primary);
+}

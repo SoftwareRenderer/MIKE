@@ -54,7 +54,7 @@
 
 <header class="top-bar">
     <!-- Hamburger menu button (hidden on desktop via CSS) -->
-    <button class="icon-btn hamburger" onclick={onOpenMenu} aria-label="Open menu" title="Open menu">
+    <button class="icon-btn btn hamburger" onclick={onOpenMenu} aria-label="Open menu" title="Open menu">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="3" y1="6" x2="21" y2="6"/>
             <line x1="3" y1="12" x2="21" y2="12"/>
@@ -64,7 +64,7 @@
             <span class="review-dot" aria-hidden="true"></span>
         {/if}
     </button>
-    <button class="icon-btn sandbox-config-btn" onclick={onOpenSandboxConfig} aria-label="Sandbox configuration" title="Sandbox configuration">
+    <button class="icon-btn btn sandbox-config-btn" onclick={onOpenSandboxConfig} aria-label="Sandbox configuration" title="Sandbox configuration">
         {#if currentProject.sandbox_enabled}
             <Icon src={shieldIcon} width={14} height={14} />
         {:else}
@@ -73,7 +73,7 @@
     </button>
     <span class="project-title">
         <a
-            class="icon-btn explorer-btn"
+            class="icon-btn btn explorer-btn"
             href={explorerHref}
             role="button"
             tabindex="0"
@@ -102,7 +102,7 @@
     </span>
     <div class="actions">
         <a
-            class="icon-btn terminal-btn"
+            class="icon-btn btn terminal-btn"
             href={terminalHref}
             role="button"
             tabindex="0"
@@ -117,14 +117,14 @@
             </svg>
         </a>
         <!-- Desktop-only buttons (hidden on mobile via CSS) -->
-        <button class="icon-btn desktop-only-btn" onclick={onShowStats} aria-label="Token usage stats" title="Token usage stats">
+        <button class="icon-btn btn desktop-only-btn" onclick={onShowStats} aria-label="Token usage stats" title="Token usage stats">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <rect x="1" y="8" width="3" height="6" rx="0.5" fill="currentColor"/>
                 <rect x="6.5" y="4" width="3" height="10" rx="0.5" fill="currentColor"/>
                 <rect x="12" y="1" width="3" height="13" rx="0.5" fill="currentColor"/>
             </svg>
         </button>
-        <button class="icon-btn desktop-only-btn" onclick={onShowConfig} aria-label="Settings" title="Settings">
+        <button class="icon-btn btn desktop-only-btn" onclick={onShowConfig} aria-label="Settings" title="Settings">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <circle cx="12" cy="12" r="3"/>
                 <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
@@ -135,6 +135,8 @@
 </header>
 
 <style>
+    @import '$lib/styles/shared.css';
+
     .top-bar {
         display: flex;
         align-items: center;
@@ -205,28 +207,17 @@
         gap: 8px;
         flex-shrink: 0;
     }
+    /* Geometry and type size only: the chip, its colours and its hover are `.btn`'s. `cursor` stays
+       because two of these are anchors, and `app.css` gives a pointer to buttons alone. */
     .icon-btn {
         padding: 6px 12px;
-        border-radius: var(--radius-md);
-        background: var(--color-surface-3);
         font-size: var(--text-base);
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        border: none;
         cursor: pointer;
-        transition: all 0.15s ease;
         position: relative;
-    }
-    .icon-btn:hover {
-        background: var(--color-accent-dark);
     }
     .icon-btn.terminal-btn {
         /* Anchors take the global link colour; buttons do not. */
         color: inherit;
-    }
-    .icon-btn.sandbox-config-btn {
-        color: var(--color-primary);
     }
     .hamburger {
         display: flex;

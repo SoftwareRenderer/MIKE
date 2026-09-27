@@ -150,8 +150,8 @@
 </script>
 
 {#snippet footer()}
-            <button type="button" class="btn-secondary" onclick={handleClose}>{t('board.confirm.cancel')}</button>
-            <button type="button" class="btn-primary" onclick={handleSave} disabled={!titleDraft.trim()}>{t('board.editTask.save')}</button>
+            <button type="button" class="btn" onclick={handleClose}>{t('board.confirm.cancel')}</button>
+            <button type="button" class="btn btn-primary" onclick={handleSave} disabled={!titleDraft.trim()}>{t('board.editTask.save')}</button>
         {/snippet}
 
         <BaseModal title={t('board.editTask.title')} width="440px" footer={footer} onClose={handleClose} closeOnOverlayClick={false}>

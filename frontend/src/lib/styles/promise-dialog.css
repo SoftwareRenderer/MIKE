@@ -6,10 +6,8 @@
  * They are unscoped below `.overlay` / `.modal` on purpose: CommitDialog and LoginModal declare the
  * same two rules for their own modals today, so this pair's copies are app-wide already.
  *
- * The button rules hang off the shell's `promise-dialog` modal class, the way explorer.css hangs its
- * rules off `.explorer-view`: `.btn-cancel` / `.btn-confirm` must stay on the buttons for the specs
- * that click them by name, and a bare global copy of those names would restyle any other markup —
- * including an extension's — that uses them. */
+ * The footer's buttons carry no rule here: they are `shared.css`'s `.btn` family, and `.btn-cancel` /
+ * `.btn-confirm` / `.destructive` on them are names the specs select by, not style hooks. */
 
 :global(.overlay) {
     animation: fade-in 0.15s ease-out;
@@ -17,41 +15,4 @@
 :global(.modal) {
     animation: scale-in 0.15s ease-out;
     padding: 4px;
-}
-
-:global(.promise-dialog .btn-cancel) {
-    padding: 6px 14px;
-    border-radius: var(--radius-md);
-    border: none;
-    background: var(--color-surface-3);
-    color: var(--color-text-primary);
-    font-size: var(--text-base);
-    font-weight: 500;
-    font-family: inherit;
-    cursor: pointer;
-    transition: background 0.15s, opacity 0.15s;
-}
-:global(.promise-dialog .btn-cancel:hover) {
-    background: var(--color-surface-4);
-}
-
-/* The ordinary yes is the Save button's blue (`BaseModal`'s `.modal-footer .btn-primary`): the same
- * answer should not be blue in one dialog and sky-blue in another. */
-:global(.promise-dialog .btn-confirm) {
-    padding: 6px 14px;
-    border-radius: var(--radius-md);
-    border: none;
-    background: var(--color-accent-dark);
-    color: white;
-    font-size: var(--text-base);
-    font-weight: 500;
-    font-family: inherit;
-    cursor: pointer;
-    transition: background 0.15s, opacity 0.15s;
-}
-:global(.promise-dialog .btn-confirm:hover) {
-    opacity: 0.85;
-}
-:global(.promise-dialog .btn-confirm.destructive) {
-    background: var(--color-status-red-dark);
 }

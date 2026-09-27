@@ -532,6 +532,7 @@ const catalog = {
     'settings.stats.model': 'Model',
     'settings.stats.resetHint': 'Reset stats for this model',
     'settings.stats.resetAria': 'Reset stats for {model}',
+    'settings.stats.resetTitle': 'Reset token stats',
     'settings.stats.resetConfirm': 'Reset token stats for {model}?',
     'settings.stats.reset': 'Reset',
 

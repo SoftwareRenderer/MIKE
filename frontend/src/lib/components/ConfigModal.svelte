@@ -942,12 +942,13 @@
 
 {#snippet footer()}
     {#if onSignOut}
-        <button type="button" class="btn-signout" onclick={handleSignOut} title={t('settings.signOutHint')}>{t('settings.signOut')}</button>
+        <!-- `btn-signout` carries no style of its own; the e2e sign-out spec names the button. -->
+        <button type="button" class="btn btn-signout" onclick={handleSignOut} title={t('settings.signOutHint')}>{t('settings.signOut')}</button>
     {/if}
     <div class="modal-footer-right">
         {#if activeTab !== 'extensions'}
-            <button type="button" class="btn-secondary" onclick={handleClose} title={t('settings.cancelHint')}>{t('settings.cancel')}</button>
-            <button type="button" class="btn-primary" disabled={loading} onclick={handleSave} title={t('settings.saveHint')}>
+            <button type="button" class="btn" onclick={handleClose} title={t('settings.cancelHint')}>{t('settings.cancel')}</button>
+            <button type="button" class="btn btn-primary" disabled={loading} onclick={handleSave} title={t('settings.saveHint')}>
                 {loading ? t('settings.saving') : t('settings.save')}
             </button>
         {/if}
@@ -1180,21 +1181,6 @@
         display: flex;
         gap: 8px;
         margin-left: auto;
-    }
-    .btn-signout {
-        padding: 8px 16px;
-        border-radius: var(--radius-md);
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        font-size: var(--text-base);
-        font-weight: 500;
-        font-family: inherit;
-        cursor: pointer;
-        border: none;
-        transition: background 0.15s;
-    }
-    .btn-signout:hover {
-        background: var(--color-surface-4);
     }
     .btn-pwa-install {
         display: inline-flex;

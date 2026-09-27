@@ -4,9 +4,9 @@ import { t } from '$lib/i18n';
 
 /**
  * How a promise-backed dialog colours its own answer. `destructive` is the thing being undone; `default`
- * is the ordinary yes, in the blue the Save button uses. `showConfirm` answers with `destructive` when a
- * caller names no variant, because most of what gets confirmed here destroys something — a question that
- * asks permission is the exception and says so.
+ * is the ordinary yes, in the primary green every dialog's confirm button wears. `showConfirm` answers
+ * with `destructive` when a caller names no variant, because most of what gets confirmed here destroys
+ * something — a question that asks permission is the exception and says so.
  */
 export type DialogVariant = 'default' | 'destructive';
 

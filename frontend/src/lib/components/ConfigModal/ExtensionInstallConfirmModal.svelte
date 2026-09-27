@@ -32,12 +32,12 @@
 </script>
 
 {#snippet installConfirmFooter()}
-    <button type="button" class="btn-secondary" onclick={onclose}>{t('settings.cancel')}</button>
+    <button type="button" class="btn" onclick={onclose}>{t('settings.cancel')}</button>
     {#if agentMounts.length > 0}
-        <button type="button" class="btn-secondary" onclick={() => onconfirm(false)}>{t('settings.extensions.agentMountDecline')}</button>
-        <button type="button" class="btn-primary" onclick={() => onconfirm(true)}>{t('settings.extensions.agentMountGrant')}</button>
+        <button type="button" class="btn" onclick={() => onconfirm(false)}>{t('settings.extensions.agentMountDecline')}</button>
+        <button type="button" class="btn btn-primary" onclick={() => onconfirm(true)}>{t('settings.extensions.agentMountGrant')}</button>
     {:else}
-        <button type="button" class="btn-primary" onclick={() => onconfirm(false)}>{t('settings.extensions.install')}</button>
+        <button type="button" class="btn btn-primary" onclick={() => onconfirm(false)}>{t('settings.extensions.install')}</button>
     {/if}
 {/snippet}
 
@@ -103,25 +103,6 @@
         margin: 0 0 0.6rem;
         font-size: var(--text-base);
         color: var(--color-text-secondary);
-    }
-
-    .btn-primary {
-        background: var(--color-btn-primary-bg);
-        color: var(--color-btn-text);
-    }
-
-    .btn-primary:hover:not(:disabled) {
-        background: var(--color-btn-primary-hover);
-    }
-
-    .btn-secondary {
-        background: var(--color-btn-secondary-bg);
-        border-color: var(--color-border-subtle);
-        color: var(--color-text-primary);
-    }
-
-    .btn-secondary:hover:not(:disabled) {
-        background: var(--color-border-subtle);
     }
 
     .field-desc {

@@ -3,7 +3,7 @@
     import { isAgentProvider } from '$lib/types';
     import type { ProjectStats, ModelStats, Provider } from '$lib/types';
     import { getProjectStats, resetProjectStats } from '$lib/api';
-    import { uiStore, appStore } from '$lib/stores';
+    import { uiStore, appStore, dialogStore } from '$lib/stores';
     import { getProviderDisplayName } from '$lib/utils/providers';
     import { formatCost } from '$lib/utils/format';
     import { t } from '$lib/i18n';
@@ -80,7 +80,14 @@
     });
 
     async function resetModel(model: ModelStats) {
-        if (!confirm(t('settings.stats.resetConfirm', { model: getTokenLabel(model) }))) return;
+        const confirmed = await dialogStore.showConfirm({
+            title: t('settings.stats.resetTitle'),
+            message: t('settings.stats.resetConfirm', { model: getTokenLabel(model) }),
+            confirmText: t('settings.stats.reset'),
+            cancelText: t('app.cancel'),
+            variant: 'destructive',
+        });
+        if (!confirmed) return;
         try {
             await resetProjectStats(projectId, model.model_name, model.provider_name || undefined);
             loading = true;

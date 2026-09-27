@@ -115,8 +115,8 @@
 </script>
 
 {#snippet editFooter()}
-    <button type="button" class="btn-secondary" onclick={() => onclose()}>{t('settings.cancel')}</button>
-    <button type="button" class="btn-primary" onclick={() => save()} disabled={draft.saving}>
+    <button type="button" class="btn" onclick={() => onclose()}>{t('settings.cancel')}</button>
+    <button type="button" class="btn btn-primary" onclick={() => save()} disabled={draft.saving}>
         {draft.saving ? t('settings.saving') : t('settings.save')}
     </button>
 {/snippet}
@@ -147,7 +147,7 @@
                         {#if storedDep}
                             <span class="ext-dep-state-label">{t('settings.extensions.depMounted')}</span>
                             <code class="ext-dep-path" title={t('settings.extensions.depMountedTitle', { host: storedDep, container: dep.container_path })}>{storedDep}</code>
-                            <button type="button" class="btn-secondary btn-small" onclick={() => { draft.dependency = ''; }} disabled={draft.saving}
+                            <button type="button" class="btn btn-small" onclick={() => { draft.dependency = ''; }} disabled={draft.saving}
                                 title={t('settings.extensions.depUnmountHint')}>{t('settings.extensions.depUnmount')}</button>
                         {:else}
                             <span class="ext-dep-none">{t('settings.extensions.depNone')}</span>
@@ -183,7 +183,7 @@
                             disabled={draft.saving}
                         />
                         {#if row.suggestion && !row.host_path.trim()}
-                            <button type="button" class="btn-secondary btn-small" disabled={draft.saving}
+                            <button type="button" class="btn btn-small" disabled={draft.saving}
                                 onclick={() => { row.host_path = row.suggestion; }}
                             >{t('settings.extensions.agentMountUse', { host: row.suggestion })}</button>
                         {/if}
@@ -195,7 +195,7 @@
                             {#if savedRow}
                                 <span class="ext-dep-state-label">{t('settings.extensions.agentMounted', { mode: savedRow.mode || 'ro' })}</span>
                                 <code class="ext-dep-path" title={t('settings.extensions.agentMountedTitle', { host: savedRow.host_path, container: savedRow.container_path })}>{savedRow.host_path}</code>
-                                <button type="button" class="btn-secondary btn-small" onclick={() => { row.host_path = ''; }} disabled={draft.saving}
+                                <button type="button" class="btn btn-small" onclick={() => { row.host_path = ''; }} disabled={draft.saving}
                                     title={t('settings.extensions.agentCardUnmountHint')}>{t('settings.extensions.depUnmount')}</button>
                             {:else if !row.host_path.trim()}
                                 <span class="ext-dep-none">{t('settings.extensions.agentMountNone')}</span>
@@ -338,25 +338,6 @@
         color: var(--color-text-tertiary);
         font-size: var(--text-xs);
         margin: 0;
-    }
-
-    .btn-primary {
-        background: var(--color-btn-primary-bg);
-        color: var(--color-btn-text);
-    }
-
-    .btn-primary:hover:not(:disabled) {
-        background: var(--color-btn-primary-hover);
-    }
-
-    .btn-secondary {
-        background: var(--color-btn-secondary-bg);
-        border-color: var(--color-border-subtle);
-        color: var(--color-text-primary);
-    }
-
-    .btn-secondary:hover:not(:disabled) {
-        background: var(--color-border-subtle);
     }
 
     .btn-small {

@@ -793,7 +793,7 @@
             {#snippet actions()}
                 <button
                     type="button"
-                    class="selection-btn"
+                    class="selection-btn btn-ghost"
                     disabled={mutating}
                     title={t('explorer.shared.menuCut')}
                     aria-label={t('explorer.shared.menuCut')}
@@ -806,7 +806,7 @@
                 </button>
                 <button
                     type="button"
-                    class="selection-btn"
+                    class="selection-btn btn-ghost"
                     disabled={mutating}
                     title={t('explorer.shared.menuCopy')}
                     aria-label={t('explorer.shared.menuCopy')}
@@ -818,7 +818,7 @@
                 </button>
                 <button
                     type="button"
-                    class="selection-btn destructive"
+                    class="selection-btn btn-ghost destructive"
                     disabled={mutating}
                     title={t('explorer.shared.menuDelete')}
                     aria-label={t('explorer.shared.menuDelete')}

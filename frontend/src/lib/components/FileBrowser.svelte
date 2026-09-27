@@ -329,19 +329,19 @@
                     <input type="checkbox" checked={sandboxEnabled} onchange={(e) => sandboxEnabled = e.currentTarget.checked} />
                     <span>{t('explorer.fileBrowser.useSandbox')}</span>
                 </label>
-                <button type="button" class="btn-secondary" onclick={handleClose} title={t('explorer.shared.cancel')}>{t('explorer.shared.cancel')}</button>
+                <button type="button" class="btn" onclick={handleClose} title={t('explorer.shared.cancel')}>{t('explorer.shared.cancel')}</button>
                 {#if activeTab === 'browse'}
                     {#if isGitRepo}
-                        <button type="button" class="btn-primary" onclick={handleSelect} title={t('explorer.fileBrowser.selectTitle')}>
+                        <button type="button" class="btn btn-primary" onclick={handleSelect} title={t('explorer.fileBrowser.selectTitle')}>
                             {t('explorer.fileBrowser.select')}
                         </button>
                     {:else}
-                        <button type="button" class="btn-primary" onclick={handleInitGit} disabled={initGitLoading} title={t('explorer.fileBrowser.initGitTitle')}>
+                        <button type="button" class="btn btn-primary" onclick={handleInitGit} disabled={initGitLoading} title={t('explorer.fileBrowser.initGitTitle')}>
                             {initGitLoading ? t('explorer.fileBrowser.initializing') : t('explorer.fileBrowser.initGit')}
                         </button>
                     {/if}
                 {:else}
-                    <button type="button" class="btn-primary" onclick={handleClone} disabled={cloneLoading || !cloneUrl.trim()} title={t('explorer.fileBrowser.cloneIntoDirTitle')}>
+                    <button type="button" class="btn btn-primary" onclick={handleClone} disabled={cloneLoading || !cloneUrl.trim()} title={t('explorer.fileBrowser.cloneIntoDirTitle')}>
                         {cloneLoading ? t('explorer.fileBrowser.cloning') : t('explorer.fileBrowser.clone')}
                     </button>
                 {/if}

@@ -63,8 +63,8 @@
 </script>
 
 {#snippet footer()}
-    <button type="button" class="btn-secondary" onclick={handleClose} title={t('chat.common.cancel')}>{t('chat.common.cancel')}</button>
-    <button type="button" class="btn-primary" disabled={!selectedModel} onclick={handleChange} title={t('chat.changeModel.confirmTip')}>
+    <button type="button" class="btn" onclick={handleClose} title={t('chat.common.cancel')}>{t('chat.common.cancel')}</button>
+    <button type="button" class="btn btn-primary" disabled={!selectedModel} onclick={handleChange} title={t('chat.changeModel.confirmTip')}>
         {t('chat.changeModel.confirm')}
     </button>
 {/snippet}

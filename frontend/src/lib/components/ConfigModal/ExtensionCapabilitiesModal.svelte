@@ -25,7 +25,7 @@
 </script>
 
 {#snippet capsFooter()}
-    <button type="button" class="btn-secondary" onclick={onclose}>{t('settings.close')}</button>
+    <button type="button" class="btn" onclick={onclose}>{t('settings.close')}</button>
 {/snippet}
 
 <BaseModal title={t('settings.extensions.capsTitle')} width="520px" footer={capsFooter} onClose={onclose}>
@@ -239,15 +239,5 @@
     .cap-detail-extra-block {
         flex-direction: column;
         align-items: stretch;
-    }
-
-    .btn-secondary {
-        background: var(--color-btn-secondary-bg);
-        border-color: var(--color-border-subtle);
-        color: var(--color-text-primary);
-    }
-
-    .btn-secondary:hover:not(:disabled) {
-        background: var(--color-border-subtle);
     }
 </style>

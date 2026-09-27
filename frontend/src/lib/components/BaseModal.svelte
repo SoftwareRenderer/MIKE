@@ -198,31 +198,8 @@
         bottom: 0;
         z-index: var(--z-sticky);
     }
-    .modal-footer :global(.btn-secondary),
-    .modal-footer :global(.btn-primary) {
-        padding: 8px 16px;
-        border-radius: var(--radius-md);
-        font-size: var(--text-base);
-        font-weight: 500;
-        font-family: inherit;
-        cursor: pointer;
-        border: none;
-        transition: background 0.15s, opacity 0.15s;
-    }
-    .modal-footer :global(.btn-secondary) {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-    }
-    .modal-footer :global(.btn-secondary):hover:not(:disabled) {
-        background: var(--color-surface-4);
-    }
-    .modal-footer :global(.btn-primary) {
-        background: var(--color-accent-dark);
-        color: white;
-    }
-    .modal-footer :global(.btn-primary):hover:not(:disabled) {
-        opacity: 0.85;
-    }
+    /* The footer's buttons are styled by `shared.css`'s `.btn` family, which every footer passes in;
+       this shell owns the row, not the controls in it. */
     @media (max-width: 768px) {
         .modal {
             width: 100vw !important;

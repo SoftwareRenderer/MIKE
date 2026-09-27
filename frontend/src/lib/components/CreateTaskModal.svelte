@@ -344,14 +344,14 @@
 </script>
 
 {#snippet footer()}
-    <button type="button" class="btn-secondary" onclick={handleCancel} title="Cancel">{t('app.cancel')}</button>
+    <button type="button" class="btn" onclick={handleCancel} title="Cancel">{t('app.cancel')}</button>
     {#if lineTask}
         <span class="auto-start-option" role="button" tabindex="-1" title="Start the task immediately after creating it" onclick={() => { autoStart = !autoStart; }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); autoStart = !autoStart; } }}>
             <span class="auto-start-label">{t('app.task.autoStart')}</span>
             <ToggleSwitch bind:checked={autoStart} ariaLabel="Auto start after creating" />
         </span>
     {/if}
-    <button type="button" class="btn-primary" disabled={!canSubmit} onclick={() => handleSubmit()} title={`Create the task${submitHintLabel ? ` (${submitHintLabel})` : ''}`}>
+    <button type="button" class="btn btn-primary" disabled={!canSubmit} onclick={() => handleSubmit()} title={`Create the task${submitHintLabel ? ` (${submitHintLabel})` : ''}`}>
         {loading ? t('app.task.creating') : t('app.task.create')}{#if submitHintLabel && !hintsHidden}<kbd class="key-hint">{submitHintLabel}</kbd>{/if}
     </button>
 {/snippet}
@@ -464,10 +464,6 @@
         display: flex;
         flex-direction: column;
         gap: 16px;
-    }
-    .btn-primary {
-        display: inline-flex;
-        align-items: center;
     }
     .btn-primary .key-hint {
         color: rgba(255, 255, 255, 0.85);
