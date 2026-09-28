@@ -72,6 +72,8 @@ export const sectionHeadersField = StateField.define<SectionHeader[]>({
 
 /**
  * The line number at the top of the visible viewport
+ *
+ * @knipignore The coordinate probe and the viewport estimate are each answered by a view stand-in.
  */
 export function getViewportTopLine(view: EditorView): number {
     try {
@@ -108,6 +110,8 @@ export function getViewportTopLine(view: EditorView): number {
  * The stack is capped at MAX_STICKY_DEPTH bars (outermost dropped first).
  *
  * `headers` must be sorted by `line` (see buildSectionHeaders).
+ *
+ * @knipignore The stack at a scroll position is measured on a view stand-in; the plugin reaches it through a scroll.
  */
 export function findStickyStack(
     view: EditorView,
@@ -159,7 +163,11 @@ function getScrollbarWidth(editor: HTMLElement): number {
     return scroller ? scroller.offsetWidth - scroller.clientWidth : 0;
 }
 
-/** Find the nearest ancestor with .cm-line class. */
+/**
+ * Find the nearest ancestor with .cm-line class.
+ *
+ * @knipignore The climb from a node to its line is asserted on hand-built DOM.
+ */
 export function findLineElement(start: Node | null): Element | null {
     let el: Node | null = start;
     let depth = 0;

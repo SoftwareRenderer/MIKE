@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveGutterClickRange, toProjectRelative, formatLineSelection, buildLineSelectionPrompt } from '$lib/utils/line-selection';
+import { resolveGutterClickRange, toProjectRelative, buildLineSelectionPrompt } from '$lib/utils/line-selection';
 
 describe('resolveGutterClickRange', () => {
     it('clicks without a text selection select exactly the clicked line', () => {
@@ -29,10 +29,33 @@ describe('resolveGutterClickRange', () => {
 });
 
 describe('buildLineSelectionPrompt', () => {
+    const select = (relativePath: string, startLine: number, lines: string[]) =>
+        buildLineSelectionPrompt({ relativePath, startLine, lines });
+
     it('prepends two newlines above the reference block', () => {
-        const prompt = buildLineSelectionPrompt({ relativePath: 'src/main.go', startLine: 10, lines: ['a', 'b'] });
-        expect(prompt).toBe('\n\n' + formatLineSelection('src/main.go', 10, ['a', 'b']));
-        expect(prompt).toBe('\n\nsrc/main.go:10-11\n10: a\n11: b');
+        expect(select('src/main.go', 10, ['a', 'b'])).toBe('\n\nsrc/main.go:10-11\n10: a\n11: b');
+    });
+
+    it('formats a single line without a range', () => {
+        expect(select('src/main.go', 10, ['func main() {'])).toBe('\n\nsrc/main.go:10\n10: func main() {');
+    });
+
+    it('numbers lines sequentially from startLine (reversed drags pre-normalized)', () => {
+        expect(select('a.txt', 1, ['x', 'y'])).toBe('\n\na.txt:1-2\n1: x\n2: y');
+    });
+
+    it('keeps empty lines intact', () => {
+        expect(select('a.txt', 2, ['', 'z'])).toBe('\n\na.txt:2-3\n2: \n3: z');
+    });
+
+    it('uses a fallback name when the relative path is empty', () => {
+        expect(select('', 1, ['only'])).toBe('\n\nunknown-file:1\n1: only');
+    });
+
+    it('formats a multi-line range with a start-end header', () => {
+        expect(select('src/main.go', 10, ['func main() {', '\tfmt.Println("hi")', '}'])).toBe(
+            '\n\nsrc/main.go:10-12\n10: func main() {\n11: \tfmt.Println("hi")\n12: }',
+        );
     });
 });
 
@@ -61,31 +84,5 @@ describe('toProjectRelative', () => {
 
     it('returns empty string for an empty file path', () => {
         expect(toProjectRelative('', '/home/u/proj')).toBe('');
-    });
-});
-
-describe('formatLineSelection', () => {
-    it('formats a single line without a range', () => {
-        expect(formatLineSelection('src/main.go', 10, ['func main() {'])).toBe(
-            'src/main.go:10\n10: func main() {',
-        );
-    });
-
-    it('formats a multi-line range with a start-end header', () => {
-        expect(formatLineSelection('src/main.go', 10, ['func main() {', '\tfmt.Println("hi")', '}'])).toBe(
-            'src/main.go:10-12\n10: func main() {\n11: \tfmt.Println("hi")\n12: }',
-        );
-    });
-
-    it('numbers lines sequentially from startLine (reversed drags pre-normalized)', () => {
-        expect(formatLineSelection('a.txt', 1, ['x', 'y'])).toBe('a.txt:1-2\n1: x\n2: y');
-    });
-
-    it('keeps empty lines intact', () => {
-        expect(formatLineSelection('a.txt', 2, ['', 'z'])).toBe('a.txt:2-3\n2: \n3: z');
-    });
-
-    it('uses a fallback name when the relative path is empty', () => {
-        expect(formatLineSelection('', 1, ['only'])).toBe('unknown-file:1\n1: only');
     });
 });

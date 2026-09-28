@@ -5,7 +5,7 @@
  */
 
 /** Minimal tool-call shape the layout computation needs. */
-export interface LayoutToolCall {
+interface LayoutToolCall {
     toolId: string;
     toolName: string;
     contentIndex?: number;
@@ -28,6 +28,8 @@ export interface InterleavedLayout<T extends LayoutToolCall = LayoutToolCall> {
  * Turn-ending tools that carry user-facing content (a question or a review
  * summary). They are always displayed AFTER the assistant's content message,
  * never interleaved inside the reasoning region.
+ *
+ * @knipignore Which tools end a turn is asserted by name; the layout reads the set.
  */
 export const TURN_ENDING_TOOLS: ReadonlySet<string> = new Set(['ask_question', 'request_review']);
 

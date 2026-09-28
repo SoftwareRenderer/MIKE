@@ -11,6 +11,7 @@
  */
 import { t } from '$lib/i18n';
 
+/** @knipignore The catalog cross-check reads this set as a whole, not one permission at a time. */
 export const DANGEROUS_PERMISSIONS: ReadonlySet<string> = new Set([
     'network.proxy',
     'preview.serveScripts',
@@ -25,6 +26,8 @@ export function isDangerousPermission(perm: string): boolean {
  * True when a permission list contains at least one sandbox-escaping
  * permission. Used to decide whether an install warrants a permission
  * review before it starts.
+ *
+ * @knipignore A list's answer is asserted per list; `requiresInstallReview` ORs three conditions.
  */
 export function hasDangerousPermissions(permissions: readonly string[]): boolean {
     return permissions.some(isDangerousPermission);
@@ -33,6 +36,8 @@ export function hasDangerousPermissions(permissions: readonly string[]): boolean
 /**
  * True when a registry/local entry declares the manifest-level `network`
  * capability (server-side egress to the extension's allowed domains).
+ *
+ * @knipignore The capability is asserted on the record alone; `requiresInstallReview` ORs it with two others.
  */
 export function hasNetworkCapability(capabilities?: Record<string, any> | null): boolean {
     return !!capabilities?.network;
@@ -145,7 +150,7 @@ export function needsDependencyGrant(ext: DependencyGrantView): boolean {
  * declaration and one path the server already reports at /api/home, never a probe — and for the
  * common case it lands on the directory the toolchain already uses.
  */
-export function suggestedDependencyPath(ext: DependencyGrantView, homeDir: string): string {
+function suggestedDependencyPath(ext: DependencyGrantView, homeDir: string): string {
     const declared = ext.sandbox_config?.dependency_cache;
     return declared && homeDir ? homeDir + declared.container_path : '';
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { subtaskStatusFor, subtaskExecutionStateFor, createStatusLabel, type StatusColumn } from '$lib/utils/subtask-status';
+import { subtaskStatusFor, subtaskExecutionStateFor, createStatusLabel } from '$lib/utils/subtask-status';
 import { t, type MessageKey } from '$lib/i18n';
 
 // These mirror types.SubtaskStatusFor (Go), which decides the real thing. The frontend
@@ -39,12 +39,12 @@ describe('subtaskExecutionStateFor — the badge that goes with it', () => {
 });
 
 /** The board's four columns, as the board itself declares them. */
-const boardColumns: StatusColumn[] = [
+const boardColumns = [
     { id: 'backlog', labelKey: 'board.column.backlog' },
     { id: 'in_progress', labelKey: 'board.column.inProgress' },
     { id: 'review', labelKey: 'board.column.review' },
     { id: 'done', labelKey: 'board.column.done' },
-];
+] as const;
 
 describe('createStatusLabel — the word a status is shown with', () => {
     it('names a known id with its own column heading', () => {

@@ -38,6 +38,8 @@ export function providerRef(p: { id?: number; name?: string; kind?: string; url?
  * The reference is the provider's stable integer ID (as a string) for LLM providers,
  * or the provider name for agent providers. For agent providers the model is the
  * agent's own name and always valid. Returns null provider when the pair cannot be resolved.
+ *
+ * @knipignore A pair is resolved per config shape; `resolveWorker` reads only the worker fields of one.
  */
 export function resolvePair(cfg: Config | null, ref: string, modelName: string): ResolvedPair {
     if (!cfg || !ref) {
@@ -113,7 +115,11 @@ export interface DisplayableProvider {
     display_name?: string;
 }
 
-/** Extract the registrable domain from a hostname, dropping the subdomain (e.g. api.example.com → example.com). */
+/**
+ * Extract the registrable domain from a hostname, dropping the subdomain (e.g. api.example.com → example.com).
+ *
+ * @knipignore The rule is asserted per host, including the hosts with no subdomain to drop.
+ */
 export function extractDomain(host: string): string {
     // IP addresses, localhost, and bare hosts have no subdomain to strip.
     if (host === 'localhost' || host.includes(':') || /^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return host;
